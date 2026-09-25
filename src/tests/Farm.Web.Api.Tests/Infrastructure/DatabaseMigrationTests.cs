@@ -71,7 +71,8 @@ public sealed class DatabaseMigrationTests
             "20260912193436_FenceMotionEmergencyStops",
             "20260912202053_TrackEmergencyStopSenders",
             "20260914014156_AddUserPrinterControlMode",
-            "20260915042413_RetireTrackedPrinterMotion");
+            "20260915042413_RetireTrackedPrinterMotion",
+            "20260925012135_AddDispatchOperatorRecovery");
         second.LegacySchemaBaselined.Should().BeFalse();
         second.AppliedMigrations.Should().BeEquivalentTo(first.AppliedMigrations);
         (await context.Database.GetPendingMigrationsAsync()).Should().BeEmpty();
@@ -720,7 +721,8 @@ public sealed class DatabaseMigrationTests
             "20260912193436_FenceMotionEmergencyStops",
             "20260912202053_TrackEmergencyStopSenders",
             "20260914014156_AddUserPrinterControlMode",
-            "20260915042413_RetireTrackedPrinterMotion");
+            "20260915042413_RetireTrackedPrinterMotion",
+            "20260925012135_AddDispatchOperatorRecovery");
         startupStatus.IsDatabaseSchemaReady.Should().BeTrue();
         startupStatus.Phase.Should().Be(StartupPhase.Ready);
     }
@@ -1270,6 +1272,7 @@ public sealed class DatabaseMigrationTests
                 "20260912202024_TrackEmergencyStopSenders",
                 "20260913232205_AddUserPrinterControlMode",
                 "20260915042301_RetireTrackedPrinterMotion",
+                "20260925010702_AddDispatchOperatorRecovery",
             ]
             :
             [
@@ -1306,6 +1309,7 @@ public sealed class DatabaseMigrationTests
                 "20260912202039_TrackEmergencyStopSenders",
                 "20260913232205_AddUserPrinterControlMode",
                 "20260915042335_RetireTrackedPrinterMotion",
+                "20260925010706_AddDispatchOperatorRecovery",
             ];
         _ = coreMigrations.Should().Equal(expectedCoreMigrations,
             $"the {provider} core migration set must apply in the exact recorded order, including provider-specific schema guarantees");

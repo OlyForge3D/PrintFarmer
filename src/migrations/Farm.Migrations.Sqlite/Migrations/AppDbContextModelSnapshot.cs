@@ -1611,6 +1611,44 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.ToTable("CustomFieldValues");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.DispatchEscalationMarker", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("ClaimAgeSeconds")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("DispatchAttemptId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("PolicyRevision")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid?>("PrintJobId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("PrinterId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("RaisedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Threshold")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DispatchAttemptId", "PolicyRevision", "Threshold")
+                        .IsUnique()
+                        .HasDatabaseName("UX_DispatchEscalationMarkers_Attempt_Policy_Threshold");
+
+                    b.ToTable("DispatchEscalationMarkers");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.DispatchLog", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1684,6 +1722,109 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.HasIndex("PrinterId");
 
                     b.ToTable("DispatchLogs");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.DispatchRecoveryJournalEntry", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("ActorRecordedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ActorSubject")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("AssertionVersion")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("ClaimRevision")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("ClientReportedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CorrelationId")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("DispatchAttemptId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("EvidenceJson")
+                        .HasMaxLength(4000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("PhysicalCheckConfirmed")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid?>("PrintJobId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("PrinterId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PriorOutcome")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ReplayScopeHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RequestFingerprint")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ResponseBodyJson")
+                        .IsRequired()
+                        .HasMaxLength(8000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ResponseETag")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("ResponseStatusCode")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("SenderIsolationConfirmed")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("SenderSettledAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("ServerRecordedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Transition")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DispatchAttemptId")
+                        .HasDatabaseName("IX_DispatchRecoveryJournal_Attempt");
+
+                    b.HasIndex("ReplayScopeHash")
+                        .IsUnique()
+                        .HasDatabaseName("UX_DispatchRecoveryJournal_ReplayScope");
+
+                    b.HasIndex("PrinterId", "ServerRecordedAtUtc")
+                        .HasDatabaseName("IX_DispatchRecoveryJournal_Printer_Recorded");
+
+                    b.ToTable("DispatchRecoveryJournalEntries");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.DispatchSettings", b =>
@@ -6763,6 +6904,9 @@ namespace Farm.Migrations.Sqlite.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime?>("BackendResponseAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("BackendSenderSettledAtUtc")
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime>("ClaimedAtUtc")

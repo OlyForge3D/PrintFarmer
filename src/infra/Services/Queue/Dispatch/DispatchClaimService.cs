@@ -174,6 +174,18 @@ public sealed class DispatchClaimService(
             return notDispatchable;
         }
 
+        // Issue #2859: a job released through the indeterminate-claim escape hatch may already
+        // be printing physically. It is never dispatchable (any job kind, any caller) until an
+        // operator deliberately clears the block.
+        if (job.BlockedReasonCode == JobBlockedReasonCode.OperatorRecoveryRequired)
+        {
+            DispatchClaimResult recoveryRequired = DispatchClaimResult.Fail(
+                "operator_recovery_required",
+                $"Job {request.JobId} was released by operator recovery and must be deliberately cleared or cancelled before dispatch.");
+            await WriteDeniedAuditAsync(request, recoveryRequired, job, dispatchState, ct);
+            return recoveryRequired;
+        }
+
         if (job.AssignedPrinterId != request.PrinterId)
         {
             DispatchClaimResult mismatch = DispatchClaimResult.Fail(
@@ -1314,6 +1326,10 @@ public sealed class DispatchClaimService(
         attempt.RequiresReconciliation = true;
         attempt.BackendCallPhase = DispatchBackendCallPhase.AwaitingReconciliation;
         attempt.UpdatedAtUtc = _timeProvider.GetUtcNow().UtcDateTime;
+
+        // Issue #2859: only the start sender reaches this method, after its backend I/O ended.
+        // This is the durable sender-cessation evidence the recovery escape hatch requires.
+        attempt.BackendSenderSettledAtUtc ??= attempt.UpdatedAtUtc;
         if (dispatchState.PhysicalControlCommandId == attemptId)
         {
             dispatchState.PhysicalControlRequiresReconciliation = true;
@@ -2080,6 +2096,21 @@ public sealed class DispatchClaimService(
 
     /// <summary>Event type emitted when a job's current print attempt is aborted (job returns to queued).</summary>
     internal const string EventTypeJobAborted = "PrintFarmer.Queue.JobAborted.v1";
+
+    /// <summary>
+    /// Event type emitted when an operator releases an indeterminate pre-start claim through the
+    /// recovery escape hatch (issue #2859). Not a rejection, cancellation or acceptance.
+    /// </summary>
+    internal const string EventTypeDispatchOperatorRecovered = "PrintFarmer.Queue.DispatchOperatorRecovered.v1";
+
+    /// <summary>Event type emitted when an operator deliberately clears a recovery block (issue #2859).</summary>
+    internal const string EventTypeDispatchRecoveryCleared = "PrintFarmer.Queue.DispatchRecoveryCleared.v1";
+
+    /// <summary>
+    /// Event type emitted once per (attempt, policy revision, threshold) when an indeterminate
+    /// claim crosses an escalation threshold (issue #2859). Never releases the claim.
+    /// </summary>
+    internal const string EventTypeDispatchIndeterminateEscalated = "PrintFarmer.Queue.DispatchIndeterminateEscalated.v1";
 
     // ===== Shared outbox helper =====
 
