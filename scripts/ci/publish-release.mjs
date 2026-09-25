@@ -21,6 +21,8 @@ import { hostUpdateCliAssets, hostUpdateCliSumsBundleName, hostUpdateCliSumsName
 import { infrastructureImagesDocument, infrastructureImagesName, infrastructureImagesSignatureName,
   infrastructureLockPath, validateInfrastructureImages, validateInfrastructureLock,
   verifyInfrastructureLockAgainstRegistry } from './offline-bundle-images.mjs';
+import { recoveryInstructionsDocument, recoveryInstructionsName, recoveryInstructionsSignatureName,
+  validateRecoveryInstructions } from './offline-recovery-instructions.mjs';
 
 // Issue #3061: the identity the signed infrastructure image list is bound to; it matches the
 // release fields of update-manifest.json so an offline bundle can prove both belong together.
@@ -144,6 +146,8 @@ export function buildImages(release, source, assets, run = command, rejectImages
     { ...release, sequence: deriveSequence(release.version) }, imageDetails));
   writeFileSync(join(assets, infrastructureImagesName),
     infrastructureImagesDocument(infrastructureIdentity(release), infrastructureLock));
+  // Issue #3063: host-local recovery instructions derived from the same release identity.
+  writeFileSync(join(assets, recoveryInstructionsName), recoveryInstructionsDocument(infrastructureIdentity(release)));
   writeFileSync(join(assets, 'digests.json'), JSON.stringify(digests));
   return digests;
 }
@@ -161,6 +165,7 @@ export function releaseAssets(release) {
     'LICENSE', 'THIRD-PARTY-NOTICES.md', 'license-inventory.json', 'container-images.json', 'release-notes.md',
     'update-manifest.json', 'update-manifest.sigstore.json',
     infrastructureImagesName, infrastructureImagesSignatureName,
+    recoveryInstructionsName, recoveryInstructionsSignatureName,
     `printfarmer-${release.tag}.spdx.json`,
     ...Object.keys(components).map(name => `printfarmer-${name}-${release.tag}.spdx.json`),
     ...hostUpdateCliAssets(release.version),
@@ -210,6 +215,19 @@ function verifyInfrastructureImagesBeforeUpload(assets, run, release) {
     '--certificate-identity', manifestSignatureIdentity(release.channel), listPath]);
 }
 
+// Issue #3063: the recovery instructions are signed by the same workflow identity and must still
+// be the exact instructions generated for this release before they are uploaded.
+function verifyRecoveryInstructionsBeforeUpload(assets, run, release) {
+  const path = join(assets, recoveryInstructionsName);
+  const bundlePath = join(assets, recoveryInstructionsSignatureName);
+  validateRecoveryInstructions(readFileSync(path), infrastructureIdentity(release));
+  requireThat(readFileSync(bundlePath).length > 0,
+    'Missing recovery instructions signature bundle immediately before upload');
+  run('cosign', ['verify-blob', '--bundle', bundlePath,
+    '--certificate-oidc-issuer', 'https://token.actions.githubusercontent.com',
+    '--certificate-identity', manifestSignatureIdentity(release.channel), path]);
+}
+
 function verifyManifestSignatureBeforeUpload(assets, run, channel) {
   const manifestPath = join(assets, 'update-manifest.json');
   const bundlePath = join(assets, 'update-manifest.sigstore.json');
@@ -238,6 +256,7 @@ export async function publishRelease(release, assets, api, {
   // fallible draft-release operations.
   verifyHostUpdateCliBeforeUpload(assets, run, release);
   verifyInfrastructureImagesBeforeUpload(assets, run, release);
+  verifyRecoveryInstructionsBeforeUpload(assets, run, release);
   verifyManifestSignatureBeforeUpload(assets, run, release.channel);
   const notes = await releaseNotes(api, release, digests);
   writeFileSync(join(assets, 'release-notes.md'), notes);
@@ -255,6 +274,7 @@ export async function publishRelease(release, assets, api, {
   requireThat(Number.isSafeInteger(draft?.id), 'GitHub did not return a draft release ID');
   verifyHostUpdateCliBeforeUpload(assets, run, release);
   verifyInfrastructureImagesBeforeUpload(assets, run, release);
+  verifyRecoveryInstructionsBeforeUpload(assets, run, release);
   verifyManifestSignatureBeforeUpload(assets, run, release.channel);
   run('gh', ['release', 'upload', release.tag, ...files.map(name => join(assets, name)), '--repo', repository]);
   const uploaded = await api(`releases/${draft.id}/assets?per_page=100`);

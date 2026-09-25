@@ -11,7 +11,13 @@
       printfarmer-host-update.ps1 -Config C:\abs\host-update.json status [-Release <id>] [-Json]
       printfarmer-host-update.ps1 -Config C:\abs\host-update.json recover -Release <id> [-RequestId <id>] -Preview [-Json]
       printfarmer-host-update.ps1 -Config C:\abs\host-update.json recover -Release <id> [-RequestId <id>] -Confirm <id> [-ReapproveDrift <token>] [-PrintersReconciled <token>] [-Json]
+      printfarmer-host-update.ps1 import -Bundle C:\abs\bundle.tar -Channel <stable|insider> -Version <v> -TrustedRoot C:\abs\trusted_root.json -Staging C:\abs\new-dir -Records C:\abs\records-dir -Operator <id> [-PriorRecoverySet C:\abs\dir] [-ProtectedBackup C:\abs\reference.json]
       printfarmer-host-update.ps1 help
+
+    `import` (issue #3063) verifies a signed offline update bundle without network access, loads
+    only its verified images into the local Docker engine and writes one durable, redacted
+    decision record under -Records. It needs no -Config and never installs, activates or
+    authorizes a rollout.
 
     Environment:
       PRINTFARMER_HOST_UPDATE_CLI_DIR  absolute directory containing the CLI (default: cli\ beside an
@@ -20,6 +26,11 @@
                                        Farm.HostUpdate.Cli.dll runs on the dotnet host.
       PRINTFARMER_DOTNET               absolute path to the dotnet host (optional; default: dotnet on PATH;
                                        refused for a self-contained package)
+      PRINTFARMER_NODE                 import only: absolute path to node (optional; default: node on PATH)
+      PRINTFARMER_OFFLINE_BUNDLE_TOOL  import only: absolute path to offline-update-bundle.mjs (default:
+                                       ci\offline-update-bundle.mjs beside this wrapper in a repository checkout)
+      PRINTFARMER_COSIGN               import only: absolute path to cosign (optional; default: cosign on PATH)
+      PRINTFARMER_DOCKER               import only: absolute path to docker (optional; default: docker on PATH)
 
     Exit codes are the CLI's (see docs/HOST_UPDATE_RUNBOOK.md); the wrapper itself only returns 2
     for a usage or setup error, before the CLI runs. Arguments are parsed by the wrapper rather
@@ -34,11 +45,15 @@ $ReleasePattern = '^(stable|insider):[0-9A-Za-z.+-]{1,128}$'
 $RequestPattern = '^[A-Za-z0-9._:-]{1,128}$'
 $DriftTokenPattern = '^drift-[0-9a-f]{32}$'
 $PhysicalTokenPattern = '^physical-[0-9a-f]{32}$'
+$ChannelPattern = '^(stable|insider)$'
+$VersionPattern = '^[0-9A-Za-z.+-]{1,128}$'
+$OperatorPattern = '^[A-Za-z0-9][A-Za-z0-9._@-]{0,63}$'
 $UsageText = @'
 usage:
   printfarmer-host-update.ps1 -Config C:\abs\host-update.json status [-Release <id>] [-Json]
   printfarmer-host-update.ps1 -Config C:\abs\host-update.json recover -Release <id> [-RequestId <id>] -Preview [-Json]
   printfarmer-host-update.ps1 -Config C:\abs\host-update.json recover -Release <id> [-RequestId <id>] -Confirm <id> [-ReapproveDrift <token>] [-PrintersReconciled <token>] [-Json]
+  printfarmer-host-update.ps1 import -Bundle C:\abs\bundle.tar -Channel <stable|insider> -Version <v> -TrustedRoot C:\abs\trusted_root.json -Staging C:\abs\new-dir -Records C:\abs\records-dir -Operator <id> [-PriorRecoverySet C:\abs\dir] [-ProtectedBackup C:\abs\reference.json]
   printfarmer-host-update.ps1 help
 '@
 
@@ -57,6 +72,76 @@ $rawArgs = @($args | ForEach-Object { [string] $_ })
 if ($rawArgs.Count -ge 1 -and @('help', '-help', '--help', '-h', '-?') -contains $rawArgs[0].ToLowerInvariant()) {
     [Console]::Out.WriteLine($UsageText)
     exit 0
+}
+
+function Resolve-OptionalExecutable([string] $Variable, [string] $Default) {
+    $value = [Environment]::GetEnvironmentVariable($Variable)
+    if ([string]::IsNullOrEmpty($value)) { return $Default }
+    if (-not (Test-FullyQualified $value) -or -not (Test-Path -LiteralPath $value -PathType Leaf)) {
+        Exit-Usage "$Variable must be an absolute executable path"
+    }
+    return $value
+}
+
+if ($rawArgs.Count -ge 1 -and $rawArgs[0] -ceq 'import') {
+    # Issue #3063: host-local offline bundle import. Needs no -Config and never authorizes a rollout.
+    $importOptions = [ordered]@{
+        '-bundle' = @{ Flag = '--bundle'; Kind = 'path' }
+        '-channel' = @{ Flag = '--channel'; Kind = 'channel' }
+        '-version' = @{ Flag = '--version'; Kind = 'version' }
+        '-trustedroot' = @{ Flag = '--trusted-root'; Kind = 'path' }
+        '-staging' = @{ Flag = '--staging'; Kind = 'path' }
+        '-records' = @{ Flag = '--records'; Kind = 'path' }
+        '-operator' = @{ Flag = '--operator'; Kind = 'operator' }
+        '-priorrecoveryset' = @{ Flag = '--prior-recovery-set'; Kind = 'path' }
+        '-protectedbackup' = @{ Flag = '--protected-backup'; Kind = 'path' }
+    }
+    $importValues = @{}
+    $index = 1
+    while ($index -lt $rawArgs.Count) {
+        $token = $rawArgs[$index]
+        $name = $token.ToLowerInvariant()
+        if (-not $importOptions.Contains($name)) { Exit-Usage "unsupported argument: $token" }
+        $spec = $importOptions[$name]
+        if ($importValues.ContainsKey($name)) { Exit-Usage "$token may only be given once" }
+        if (($index + 1) -ge $rawArgs.Count -or [string]::IsNullOrEmpty($rawArgs[$index + 1])) { Exit-Usage "$token requires a value" }
+        $value = $rawArgs[$index + 1]
+        switch ($spec.Kind) {
+            'channel' { if ($value -cnotmatch $ChannelPattern) { Exit-Usage '-Channel must be stable or insider' } }
+            'version' { if ($value -cnotmatch $VersionPattern) { Exit-Usage '-Version requires [0-9A-Za-z.+-]{1,128}' } }
+            'operator' { if ($value -cnotmatch $OperatorPattern) { Exit-Usage '-Operator requires [A-Za-z0-9][A-Za-z0-9._@-]{0,63}' } }
+            'path' { if (-not (Test-FullyQualified $value)) { Exit-Usage "$token must be an absolute path" } }
+        }
+        $importValues[$name] = $value
+        $index += 2
+    }
+    foreach ($requiredName in @('-bundle', '-channel', '-version', '-trustedroot', '-staging', '-records', '-operator')) {
+        if (-not $importValues.ContainsKey($requiredName)) {
+            $display = @{ '-bundle' = '-Bundle'; '-channel' = '-Channel'; '-version' = '-Version'; '-trustedroot' = '-TrustedRoot'
+                '-staging' = '-Staging'; '-records' = '-Records'; '-operator' = '-Operator' }[$requiredName]
+            Exit-Usage "import requires $display"
+        }
+    }
+
+    $nodeHost = Resolve-OptionalExecutable 'PRINTFARMER_NODE' 'node'
+    $cosignHost = Resolve-OptionalExecutable 'PRINTFARMER_COSIGN' 'cosign'
+    $dockerHost = Resolve-OptionalExecutable 'PRINTFARMER_DOCKER' 'docker'
+    $tool = $env:PRINTFARMER_OFFLINE_BUNDLE_TOOL
+    if ([string]::IsNullOrEmpty($tool)) { $tool = Join-Path $PSScriptRoot 'ci' 'offline-update-bundle.mjs' }
+    if (-not (Test-FullyQualified $tool) -or -not (Test-Path -LiteralPath $tool -PathType Leaf)) {
+        Exit-Usage 'PRINTFARMER_OFFLINE_BUNDLE_TOOL must be an absolute path to offline-update-bundle.mjs'
+    }
+
+    $toolArgs = [System.Collections.Generic.List[string]]::new()
+    $toolArgs.Add('import')
+    foreach ($key in $importOptions.Keys) {
+        if ($importValues.ContainsKey($key)) { $toolArgs.Add($importOptions[$key].Flag); $toolArgs.Add($importValues[$key]) }
+    }
+    if ($env:PRINTFARMER_COSIGN) { $toolArgs.Add('--cosign'); $toolArgs.Add($cosignHost) }
+    if ($env:PRINTFARMER_DOCKER) { $toolArgs.Add('--docker'); $toolArgs.Add($dockerHost) }
+
+    & $nodeHost $tool @toolArgs
+    exit $LASTEXITCODE
 }
 
 $config = $null

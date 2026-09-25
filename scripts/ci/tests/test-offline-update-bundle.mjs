@@ -13,9 +13,11 @@ import { canonicalImageIndex, imageArchiveLimits, imageTarHeader, infrastructure
   writeImageArchive } from '../offline-bundle-images.mjs';
 import { formatSums, hostUpdateCliArchiveName, hostUpdateCliRuntimes, hostUpdateCliSbomName, hostUpdateCliSumsBundleName,
   hostUpdateCliSumsName } from '../host-update-cli-package.mjs';
-import { assembleOfflineBundle, loadVerifiedImages, offlineBundleIndexName, offlineBundleLimits, offlineBundleName,
-  offlineBundleVerificationName, parseArguments, readOfflineBundleEntries, releaseSigningIdentity, tarHeader,
-  verifyOfflineBundle } from '../offline-update-bundle.mjs';
+import { assembleOfflineBundle, importOfflineBundle, loadVerifiedImages, offlineBundleIndexName, offlineBundleLimits,
+  offlineBundleName, offlineBundleVerificationName, offlineImportDecisionKind, parseArguments, readOfflineBundleEntries,
+  redactReason, releaseSigningIdentity, tarHeader, verifyOfflineBundle } from '../offline-update-bundle.mjs';
+import { recoveryInstructionsDocument, recoveryInstructionsName, recoveryInstructionsSignatureName,
+  validateRecoveryInstructions } from '../offline-recovery-instructions.mjs';
 
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 const imageDetails = Object.fromEntries(Object.entries(components).map(([name, component], index) => [name, {
@@ -1420,5 +1422,350 @@ test('the command line exposes image assembly and a load-only import without byp
     ['load', '--staging', 'a', '--staging', 'b'],
   ]) {
     assert.throws(() => parseArguments(argv), /usage|Duplicate option/, argv.join(' '));
+  }
+});
+
+// ---------------------------------------------------------------------------------------------
+// Issue #3063: release-bound recovery instructions and the host-local import decision path
+// ---------------------------------------------------------------------------------------------
+function withInstructions(context, { boundTo = context.identity, signedBy = context.release.channel } = {}) {
+  const bytes = recoveryInstructionsDocument(boundTo);
+  writeFileSync(join(context.assets, recoveryInstructionsName), bytes);
+  writeFileSync(join(context.assets, recoveryInstructionsSignatureName), sign(bytes, signedBy));
+  return bytes;
+}
+
+function completeFixture(channel = 'stable') {
+  const context = imageFixture(channel);
+  withInstructions(context);
+  assemble(context, { images: context.layout });
+  context.records = join(context.root, 'records');
+  mkdirSync(context.records);
+  return context;
+}
+
+function importRunner() {
+  const signatures = cosign({ requireOffline: true });
+  const loads = [];
+  const run = (name, args, options) => {
+    if (name === 'cosign') return signatures.run(name, args);
+    assert.equal(name, 'docker');
+    assert.deepEqual(args, ['load']);
+    assert.equal(typeof options?.stdin, 'number');
+    loads.push(fstatSync(options.stdin).size);
+    return '';
+  };
+  return { run, loads, calls: signatures.calls };
+}
+
+function runImport(context, overrides = {}) {
+  return importOfflineBundle({ bundle: context.bundle, channel: context.release.channel, version: context.release.version,
+    trustedRoot: context.trustedRoot, staging: context.staging, records: context.records, operator: 'ops.alice',
+    run: importRunner().run, now: () => new Date('2026-09-25T20:00:00Z'), ...overrides });
+}
+
+function decisionFiles(context) {
+  return readdirSync(context.records).sort();
+}
+
+test('recovery instructions are derived only from the signed release identity', () => {
+  const identity = { ...releases.stable, sequence: deriveSequence(releases.stable.version) };
+  const bytes = recoveryInstructionsDocument(identity);
+  assert.deepEqual(recoveryInstructionsDocument({ ...identity }), bytes, 'generation is deterministic');
+  const document = validateRecoveryInstructions(bytes, identity);
+  assert.equal(document.kind, 'printfarmer-offline-recovery-instructions');
+  assert.equal(document.rolloutAuthorization, false);
+  assert.deepEqual(document.operations.map(operation => operation.id), ['offline-bundle-import', 'host-update-status',
+    'host-update-recover-preview', 'host-update-recover-confirm']);
+  for (const operation of document.operations) {
+    assert.equal(operation.bash[0], 'printfarmer-host-update.sh');
+    assert.deepEqual(operation.powershell.slice(0, 3), ['pwsh', '-File', 'printfarmer-host-update.ps1']);
+    assert.ok(!operation.bash.some(arg => /force|skip|reset|rollout/i.test(arg)), 'no bypass or rollout operation');
+  }
+  const confirm = document.operations.at(-1);
+  assert.deepEqual(confirm.bash.slice(-4), ['--release', 'stable:1.4.0', '--confirm', 'stable:1.4.0']);
+  for (const other of [{ ...identity, buildId: '99' }, { ...identity, sourceCommit: 'c'.repeat(40) }]) {
+    assert.throws(() => validateRecoveryInstructions(bytes, other), /not the exact release-bound instructions/);
+  }
+  assert.throws(() => validateRecoveryInstructions(Buffer.from(`${bytes.toString('utf8')} `), identity),
+    /not the exact release-bound instructions/);
+  assert.throws(() => recoveryInstructionsDocument({ ...identity, extra: 1 }), /complete release identity/);
+  assert.throws(() => recoveryInstructionsDocument({ version: '1.4.0' }), /complete release identity/);
+});
+
+test('signed recovery instructions round-trip and set contents.recoveryInstructions only when complete', () => {
+  const context = imageFixture('insider');
+  try {
+    const bytes = withInstructions(context);
+    const { index } = assemble(context, { images: context.layout });
+    assert.equal(index.contents.recoveryInstructions, true);
+    assert.equal(index.installable, false);
+    assert.ok(index.files.some(file => file.name === recoveryInstructionsName && file.role === 'recovery-instructions'));
+    const { run, calls } = cosign({ requireOffline: true });
+    const record = verify(context, { run });
+    assert.equal(calls.length, 4, 'manifest, CLI checksums, infrastructure list and recovery instructions are each verified');
+    assert.ok(calls.some(call => call.at(-1).endsWith(recoveryInstructionsName)));
+    assert.deepEqual(record.recoveryInstructions, { sha256: sha256(bytes), operations: ['offline-bundle-import',
+      'host-update-status', 'host-update-recover-preview', 'host-update-recover-confirm'] });
+    assert.deepEqual(readFileSync(join(context.staging, recoveryInstructionsName)), bytes);
+  } finally {
+    context.cleanup();
+  }
+  const plain = fixture('stable');
+  try {
+    assert.equal(assemble(plain).index.contents.recoveryInstructions, false);
+    assert.equal(verify(plain).recoveryInstructions, false);
+  } finally {
+    plain.cleanup();
+  }
+});
+
+test('recovery instructions and their signature are both-or-neither at assembly', () => {
+  for (const drop of [recoveryInstructionsName, recoveryInstructionsSignatureName]) {
+    const context = imageFixture('stable');
+    try {
+      withInstructions(context);
+      rmSync(join(context.assets, drop));
+      assert.throws(() => assemble(context, { images: context.layout }), /must be present together/);
+      assert.equal(existsSync(context.bundle), false);
+    } finally {
+      context.cleanup();
+    }
+  }
+  const context = imageFixture('stable');
+  try {
+    withInstructions(context, { boundTo: { ...context.identity, buildId: '99' } });
+    assert.throws(() => assemble(context, { images: context.layout }), /not the exact release-bound instructions/);
+  } finally {
+    context.cleanup();
+  }
+});
+
+test('forged, re-signed, wrong-identity or unflagged recovery instructions are rejected before import', () => {
+  const context = imageFixture('stable');
+  try {
+    withInstructions(context);
+    assemble(context, { images: context.layout });
+    const original = readFileSync(context.bundle);
+    const restore = () => writeFileSync(context.bundle, original);
+    rewriteBundle(context, ({ members }) => {
+      members.set(recoveryInstructionsName, Buffer.from(members.get(recoveryInstructionsName).toString('utf8')
+        .replace('"rolloutAuthorization": false', '"rolloutAuthorization": true')));
+    });
+    rejectsWithoutStaging(context, /signature verification failed for offline-recovery-instructions\.json/);
+    restore();
+    rewriteBundle(context, ({ members }) => {
+      const bytes = recoveryInstructionsDocument({ ...context.identity, buildId: '99' });
+      members.set(recoveryInstructionsName, bytes);
+      members.set(recoveryInstructionsSignatureName, Buffer.from(sign(bytes, 'stable')));
+    });
+    rejectsWithoutStaging(context, /not the exact release-bound instructions/);
+    restore();
+    rewriteBundle(context, ({ members }) => {
+      members.set(recoveryInstructionsSignatureName, Buffer.from(sign(members.get(recoveryInstructionsName), 'insider')));
+    });
+    rejectsWithoutStaging(context, /signature verification failed for offline-recovery-instructions\.json/);
+    restore();
+    rewriteBundle(context, ({ index }) => { index.contents.recoveryInstructions = false; });
+    rejectsWithoutStaging(context, /do not match its recovery instructions flag/);
+    restore();
+    rewriteBundle(context, ({ members }) => { members.delete(recoveryInstructionsSignatureName); });
+    rejectsWithoutStaging(context, /do not match its recovery instructions flag/);
+    restore();
+    assert.ok(verify(context).recoveryInstructions);
+  } finally {
+    context.cleanup();
+  }
+  const plain = fixture('stable');
+  try {
+    assemble(plain);
+    rewriteBundle(plain, ({ index }) => { index.contents.recoveryInstructions = true; });
+    rejectsWithoutStaging(plain, /do not match its recovery instructions flag/);
+  } finally {
+    plain.cleanup();
+  }
+});
+
+test('import verifies, loads only verified images and writes one durable redacted decision record', () => {
+  const context = completeFixture('stable');
+  try {
+    const runner = importRunner();
+    const { record, path } = runImport(context, { run: runner.run, newId: () => '00000000-0000-4000-8000-000000000001' });
+    assert.equal(record.outcome, 'imported');
+    assert.equal(record.reason, null);
+    assert.equal(record.kind, offlineImportDecisionKind);
+    assert.equal(record.operator, 'ops.alice');
+    assert.equal(record.decidedAt, '2026-09-25T20:00:00.000Z');
+    assert.equal(record.installable, false);
+    assert.equal(record.rolloutAuthorization, false);
+    assert.equal(record.bundleSha256, sha256(readFileSync(context.bundle)));
+    assert.deepEqual(record.release, { ...context.identity, sequence: context.identity.sequence });
+    assert.deepEqual(record.verifiedDigests.images.map(image => image.member).sort(), allImageMembers);
+    assert.equal(record.verifiedDigests.recoveryInstructions,
+      sha256(readFileSync(join(context.assets, recoveryInstructionsName))));
+    assert.deepEqual(record.loadedImages.map(image => image.member).sort(), allImageMembers);
+    assert.equal(runner.loads.length, allImageMembers.length);
+    assert.deepEqual(decisionFiles(context), ['2026-09-25T20-00-00-000Z-00000000-0000-4000-8000-000000000001.json']);
+    assert.equal(path, join(context.records, decisionFiles(context)[0]));
+    const text = readFileSync(path, 'utf8');
+    assert.deepEqual(JSON.parse(text), record);
+    assert.ok(!text.includes(context.root), 'the record names the bundle by digest, never by host path');
+    if (process.platform !== 'win32') assert.equal(fstatSync(openSync(path, 'r')).mode & 0o777, 0o600);
+    assert.ok(existsSync(join(context.staging, offlineBundleVerificationName)), 'a verified import keeps its staging');
+  } finally {
+    context.cleanup();
+  }
+});
+
+test('import refuses a verified but incomplete bundle, removes its staging and records the refusal', () => {
+  for (const [label, prepare, pattern] of [
+    ['no recovery instructions', context => assemble(context, { images: context.layout }), /lacks signed recovery instructions/],
+    ['no images', context => { withInstructions(context); assemble(context); },
+      /lacks release-selected images and the infrastructure image list/],
+  ]) {
+    const context = imageFixture('stable');
+    try {
+      prepare(context);
+      context.records = join(context.root, 'records');
+      mkdirSync(context.records);
+      const runner = importRunner();
+      const { record } = runImport(context, { run: runner.run });
+      assert.equal(record.outcome, 'refused', label);
+      assert.match(record.reason, pattern);
+      assert.equal(runner.loads.length, 0, 'nothing is loaded from an incomplete bundle');
+      assert.deepEqual(record.loadedImages, []);
+      assert.equal(existsSync(context.staging), false, 'a refused import leaves no staging directory');
+      assert.equal(decisionFiles(context).length, 1);
+      assert.equal(record.bundleSha256, sha256(readFileSync(context.bundle)));
+    } finally {
+      context.cleanup();
+    }
+  }
+});
+
+test('import refuses unverified bundles with a redacted reason and never loads', () => {
+  const context = completeFixture('stable');
+  try {
+    rewriteBundle(context, ({ members }) => {
+      const name = hostUpdateCliSumsName(context.release.version);
+      members.set(name, Buffer.concat([members.get(name), Buffer.from(' ')]));
+    });
+    const runner = importRunner();
+    const { record } = runImport(context, { run: runner.run });
+    assert.equal(record.outcome, 'refused');
+    assert.equal(record.release, null);
+    assert.equal(record.verifiedDigests, null);
+    assert.equal(record.bundleSha256, sha256(readFileSync(context.bundle)));
+    assert.equal(runner.loads.length, 0);
+    assert.equal(existsSync(context.staging), false);
+    const missing = runImport(context, { bundle: join(context.root, 'missing.tar'), staging: join(context.root, 's2') });
+    assert.equal(missing.record.outcome, 'refused');
+    assert.equal(missing.record.bundleSha256, null);
+    assert.match(missing.record.reason, /<bundle>/);
+    for (const { record: refused } of [{ record }, missing]) {
+      const text = readFileSync(join(context.records, decisionFiles(context).find(name =>
+        name.includes(refused.decisionId))), 'utf8');
+      assert.ok(!text.includes(context.root), 'no host path is written to a decision record');
+      assert.ok(refused.reason.length <= 512);
+    }
+    assert.equal(decisionFiles(context).length, 2);
+    assert.ok(!decisionFiles(context).some(name => name.endsWith('.partial')));
+  } finally {
+    context.cleanup();
+  }
+});
+
+test('an in-progress record is durable before the first load and a partial load is recorded accurately', () => {
+  const context = completeFixture('stable');
+  try {
+    const decisionId = '00000000-0000-4000-8000-000000000002';
+    const target = join(context.records, `2026-09-25T20-00-00-000Z-${decisionId}.json`);
+    const base = importRunner();
+    let loads = 0;
+    const observed = [];
+    const run = (name, args, options) => {
+      if (name !== 'docker') return base.run(name, args, options);
+      observed.push(JSON.parse(readFileSync(target, 'utf8')).outcome);
+      loads += 1;
+      if (loads === 2) throw new Error(`docker load failed for ${context.staging}`);
+      return base.run(name, args, options);
+    };
+    const { record } = runImport(context, { run, newId: () => decisionId });
+    assert.deepEqual(observed, ['in-progress', 'in-progress'], 'durable evidence precedes every docker load');
+    assert.equal(record.outcome, 'refused');
+    assert.match(record.reason, /docker load failed for <staging>/);
+    assert.equal(record.loadedImages.length, 1, 'the image loaded before the failure is recorded');
+    assert.equal(typeof record.failedLoad, 'string');
+    assert.ok(!record.loadedImages.some(image => image.member === record.failedLoad));
+    assert.deepEqual(JSON.parse(readFileSync(target, 'utf8')), record);
+    assert.deepEqual(decisionFiles(context), [`2026-09-25T20-00-00-000Z-${decisionId}.json`]);
+    assert.equal(existsSync(context.staging), false, 'a refused import leaves no staging directory');
+  } finally {
+    context.cleanup();
+  }
+});
+
+test('a finalization failure after loading leaves the durable in-progress record', () => {
+  const context = completeFixture('stable');
+  try {
+    const decisionId = '00000000-0000-4000-8000-000000000003';
+    const name = `2026-09-25T20-00-00-000Z-${decisionId}.json`;
+    const base = importRunner();
+    const run = (command, args, options) => {
+      // Block the final record's partial file so finalization fails after images were loaded.
+      if (command === 'docker') mkdirSync(join(context.records, `.${name}.1.partial`), { recursive: true });
+      return base.run(command, args, options);
+    };
+    assert.throws(() => runImport(context, { run, newId: () => decisionId }), /EEXIST/);
+    assert.ok(base.loads.length > 0);
+    const record = JSON.parse(readFileSync(join(context.records, name), 'utf8'));
+    assert.equal(record.outcome, 'in-progress');
+    assert.equal(record.decisionId, decisionId);
+    assert.deepEqual(record.verifiedDigests.images.map(image => image.member).sort(), allImageMembers);
+    assert.equal(record.rolloutAuthorization, false);
+  } finally {
+    context.cleanup();
+  }
+});
+
+test('import refuses to run without an operator, version or durable records directory', () => {
+  const context = completeFixture('stable');
+  try {
+    for (const [overrides, pattern] of [
+      [{ operator: undefined }, /operator identifier/],
+      [{ operator: 'alice smith' }, /operator identifier/],
+      [{ operator: 'x'.repeat(65) }, /operator identifier/],
+      [{ version: undefined }, /explicit expected version/],
+      [{ channel: undefined }, /explicit expected channel/],
+      [{ records: 'relative/records' }, /absolute path/],
+      [{ records: join(context.root, 'absent') }, /existing directory/],
+    ]) {
+      assert.throws(() => runImport(context, overrides), pattern);
+    }
+    assert.deepEqual(decisionFiles(context), []);
+    assert.equal(existsSync(context.staging), false);
+  } finally {
+    context.cleanup();
+  }
+});
+
+test('decision reasons replace known and unknown host paths and stay bounded', () => {
+  const reason = redactReason('Offline bundle must be a regular file (not a link): /srv/x/b.tar; root C:\\keys\\r.json and '
+    + '/home/op/secret\u0007', { bundle: '/srv/x/b.tar' });
+  assert.equal(reason, 'Offline bundle must be a regular file (not a link): <bundle>; root <path> and <path>');
+  assert.equal(redactReason('failed [C:\\tmp\\a.tar],/var/b <\\\\srv\\c>', {}), 'failed [<path>],<path> <<path>>');
+  assert.equal(redactReason('x'.repeat(2000), {}).length, 512);
+  assert.equal(redactReason('arm64 linux/arm64 stable:1.2.3 sha256:abc', {}), 'arm64 linux/arm64 stable:1.2.3 sha256:abc');
+});
+
+test('the import command line requires every binding option and offers no bypass', () => {
+  const full = ['import', '--bundle', 'b', '--channel', 'stable', '--version', '1.4.0', '--trusted-root', 'r',
+    '--staging', 's', '--records', 'd', '--operator', 'ops'];
+  assert.equal(parseArguments(full).options.operator, 'ops');
+  for (let index = 1; index < full.length; index += 2) {
+    assert.throws(() => parseArguments([...full.slice(0, index), ...full.slice(index + 2)]), /usage/, full[index]);
+  }
+  for (const extra of [['--force', 'true'], ['--skip-verification', 'true'], ['--images', 'x'], ['--runtime', 'linux-x64']]) {
+    assert.throws(() => parseArguments([...full, ...extra]), /usage/, extra[0]);
   }
 });

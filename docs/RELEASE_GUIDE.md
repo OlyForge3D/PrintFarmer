@@ -35,7 +35,11 @@ post_date: "2026-09-16"
    list covering the archives and SBOMs (see [Host-update runbook](HOST_UPDATE_RUNBOOK.md#install-the-signed-cli-package)),
    and a signed `infrastructure-images.json` plus its `infrastructure-images.sigstore.json`
    bundle naming the pinned infrastructure images for offline bundles (see
-   [Offline update recovery](OFFLINE_UPDATE_RECOVERY.md#application-and-infrastructure-images-3061)).
+   [Offline update recovery](OFFLINE_UPDATE_RECOVERY.md#application-and-infrastructure-images-3061)),
+   and a signed `offline-recovery-instructions.json` plus its
+   `offline-recovery-instructions.sigstore.json` bundle naming the fixed host-local
+   import and recovery operations for that release (see
+   [Offline update recovery](OFFLINE_UPDATE_RECOVERY.md#recovery-instructions-and-host-local-import-3063)).
 
 There is no release ledger, reservation, signing ceremony, qualification receipt,
 counter recovery or abandonment step. The explicit version and permanent Git tag
