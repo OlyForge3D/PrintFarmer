@@ -26,8 +26,10 @@ public sealed class AutoDispatchBackgroundService(
     DispatchConcurrencyCoordinator concurrencyCoordinator,
     IHubContext<PrinterHub> hub,
     ILogger<AutoDispatchBackgroundService> logger,
-    Farm.Infrastructure.Services.HostUpdates.AutoDispatchFenceFlag? hostUpdateFence = null) : BackgroundService
+    Farm.Infrastructure.Services.HostUpdates.AutoDispatchFenceFlag? hostUpdateFence = null,
+    TimeProvider? timeProvider = null) : BackgroundService
 {
+    private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
     private readonly SemaphoreSlim _selectionLock = new(1, 1);
     private readonly object _workerSync = new();
     private readonly object _claimSync = new();
@@ -59,7 +61,7 @@ public sealed class AutoDispatchBackgroundService(
                     CancellationTokenSource.CreateLinkedTokenSource(stoppingToken))
                 {
                     Task<DispatchTriggerEvent> readTask = trigger.ReadAsync(readCts.Token).AsTask();
-                    Task scanDelay = Task.Delay(DurableScanInterval, stoppingToken);
+                    Task scanDelay = Task.Delay(DurableScanInterval, _timeProvider, stoppingToken);
                     Task completed = await Task.WhenAny(readTask, scanDelay);
 
                     if (completed == scanDelay)
@@ -67,14 +69,25 @@ public sealed class AutoDispatchBackgroundService(
                         await readCts.CancelAsync();
                         try
                         {
-                            _ = await readTask;
+                            // A trigger can arrive before cancellation wins. No worker owns
+                            // this read, so release it for the next durable reconciliation.
+                            DispatchTriggerEvent abandonedEvent = await readTask;
+                            _ = trigger.TryCompleteProcessing(abandonedEvent, allowRerun: false, out _);
                         }
                         catch (OperationCanceledException)
                         {
                             // Expected: the periodic durable scan won this wait.
                         }
 
-                        await ReconcileStartupEligiblePrintersAsync(stoppingToken);
+                        await scanDelay;
+
+                        // Idle channels must also observe the fence, even when no queued
+                        // work exists to generate a trigger during reconciliation (#2848).
+                        if (!await PauseForHostUpdateAsync(stoppingToken))
+                        {
+                            await ReconcileStartupEligiblePrintersAsync(stoppingToken);
+                        }
+
                         continue;
                     }
 
@@ -102,13 +115,9 @@ public sealed class AutoDispatchBackgroundService(
                 // Acknowledge quiescence only once no dispatch worker is still in flight, so the
                 // fence coordinator cannot observe "paused" while a printer command is still
                 // physically executing.
-                if (hostUpdateFence is not null && await hostUpdateFence.IsPauseRequestedAsync(stoppingToken))
+                if (await PauseForHostUpdateAsync(stoppingToken))
                 {
-                    if (TrackedWorkerCount == 0)
-                    {
-                        await hostUpdateFence.AcknowledgePausedAsync(stoppingToken);
-                    }
-
+                    _ = trigger.TryCompleteProcessing(triggerEvent, allowRerun: false, out _);
                     continue;
                 }
 
@@ -125,6 +134,21 @@ public sealed class AutoDispatchBackgroundService(
             await DrainWorkersAsync();
             logger.LogInformation("[AutoDispatch] Background service stopped");
         }
+    }
+
+    private async Task<bool> PauseForHostUpdateAsync(CancellationToken stoppingToken)
+    {
+        if (hostUpdateFence is null || !await hostUpdateFence.IsPauseRequestedAsync(stoppingToken))
+        {
+            return false;
+        }
+
+        if (TrackedWorkerCount == 0)
+        {
+            await hostUpdateFence.AcknowledgePausedAsync(stoppingToken);
+        }
+
+        return true;
     }
 
     private void StartTrackedWorker(
