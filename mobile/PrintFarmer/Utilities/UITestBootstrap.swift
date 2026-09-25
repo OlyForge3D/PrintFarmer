@@ -1,4 +1,5 @@
 import Foundation
+import notify
 #if canImport(UserNotifications)
 import UserNotifications
 #endif
@@ -896,5 +897,149 @@ enum UITestBootstrap {
         func hydrateActive() async -> FarmSnapshotHydration { hydration }
         func commit(_ envelope: FarmSnapshotEnvelope, capturedSession: FarmSnapshotSession) async -> FarmSnapshotCommitResult { .committed }
         func purge(serverID: UUID) async -> FarmSnapshotPurgeResult { .purged }
+    }
+}
+
+/// UI-test-only main-run-loop liveness signal and watchdog (#3013).
+///
+/// Publishes the process uptime, in milliseconds, as Darwin notification
+/// state from a main-run-loop timer. `PrintFarmerUITests` reads that state
+/// with `notify_get_state`, which needs no accessibility query, so a stalled
+/// shell snapshot can be attributed to the app's main thread or to XCTest.
+///
+/// A background watchdog aborts the app once the main run loop has not
+/// turned for `stallLimit` seconds. XCTest otherwise waits 60 seconds for a
+/// blocked snapshot; the abort fails the test sooner and its crash report
+/// retains the blocked main-thread backtrace. Started only when
+/// `UITestBootstrap.isEnabled`; the notification name is duplicated in the
+/// UI-test target, which cannot import the app.
+@MainActor
+enum UITestMainThreadHeartbeat {
+    static let notificationName = "com.olyforge3d.printfarmer.uitesting.main-heartbeat"
+    static let interval: TimeInterval = 0.5
+    static let stallLimit: TimeInterval = 20
+
+    private static var token: Int32 = NOTIFY_TOKEN_INVALID
+    private static var timer: Timer?
+    private static let beats = UITestMainThreadBeatCounter()
+
+    static func start() {
+        guard timer == nil,
+              notify_register_check(notificationName, &token) == NOTIFY_STATUS_OK else { return }
+        publish()
+        let timer = Timer(timeInterval: interval, repeats: true) { _ in
+            MainActor.assumeIsolated { beat() }
+        }
+        // Common modes keep beating while UIKit tracks touches or scrolling.
+        RunLoop.main.add(timer, forMode: .common)
+        self.timer = timer
+    }
+
+    /// Uptime in whole milliseconds in the low 42 bits and the publishing
+    /// process ID above them, so the UI-test runner can tell which app
+    /// instance was running while XCTest launched or terminated one.
+    nonisolated static func state(forUptime uptime: TimeInterval, pid: Int32) -> UInt64 {
+        let millis = UInt64(max(0, uptime) * 1000) & uptimeMask
+        return (UInt64(UInt32(bitPattern: pid)) << uptimeBits) | millis
+    }
+
+    nonisolated static let uptimeBits: UInt64 = 42
+    nonisolated static let uptimeMask: UInt64 = (1 << uptimeBits) - 1
+
+    private static func beat() {
+        publish()
+        // Arm only once the run loop turns, so slow initial rendering before
+        // the first timer fire is never reported as a stall.
+        if beats.increment() == 1 {
+            UITestMainThreadWatchdog(beats: beats, limit: stallLimit).start()
+        }
+    }
+
+    private static func publish() {
+        notify_set_state(
+            token,
+            state(
+                forUptime: ProcessInfo.processInfo.systemUptime,
+                pid: ProcessInfo.processInfo.processIdentifier
+            )
+        )
+    }
+}
+
+final class UITestMainThreadBeatCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count: UInt64 = 0
+
+    var value: UInt64 { lock.withLock { count } }
+
+    @discardableResult
+    func increment() -> UInt64 {
+        lock.withLock {
+            count += 1
+            return count
+        }
+    }
+}
+
+/// Accumulates stall time only across contiguous watchdog ticks. A gap longer
+/// than `maxTickGap` means the whole process was suspended or starved, which
+/// is not evidence that the main thread alone stopped, so it restarts timing.
+struct UITestMainThreadStallMeter {
+    let limit: TimeInterval
+    let maxTickGap: TimeInterval
+    private var lastBeat: UInt64?
+    private var lastTick: TimeInterval?
+    private(set) var stalled: TimeInterval = 0
+
+    init(limit: TimeInterval, maxTickGap: TimeInterval = 3) {
+        self.limit = limit
+        self.maxTickGap = maxTickGap
+    }
+
+    mutating func tick(beat: UInt64, at now: TimeInterval) -> Bool {
+        defer {
+            lastBeat = beat
+            lastTick = now
+        }
+        guard let lastBeat, let lastTick, beat == lastBeat else {
+            stalled = 0
+            return false
+        }
+        let gap = now - lastTick
+        guard gap >= 0, gap <= maxTickGap else {
+            stalled = 0
+            return false
+        }
+        stalled += gap
+        return stalled >= limit
+    }
+}
+
+private final class UITestMainThreadWatchdog: @unchecked Sendable {
+    private let beats: UITestMainThreadBeatCounter
+    private let queue = DispatchQueue(label: "com.olyforge3d.printfarmer.uitesting.watchdog")
+    private var meter: UITestMainThreadStallMeter
+    private var timer: DispatchSourceTimer?
+
+    init(beats: UITestMainThreadBeatCounter, limit: TimeInterval) {
+        self.beats = beats
+        meter = UITestMainThreadStallMeter(limit: limit)
+    }
+
+    func start() {
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(deadline: .now() + 1, repeating: 1, leeway: .milliseconds(100))
+        // The source retains this watchdog for the life of the process.
+        timer.setEventHandler { [self] in check() }
+        self.timer = timer
+        timer.resume()
+    }
+
+    private func check() {
+        guard meter.tick(beat: beats.value, at: ProcessInfo.processInfo.systemUptime) else { return }
+        fatalError(
+            "UI-test main run loop stalled for \(Int(meter.stalled))s; "
+                + "aborting to retain the main-thread backtrace (#3013)"
+        )
     }
 }

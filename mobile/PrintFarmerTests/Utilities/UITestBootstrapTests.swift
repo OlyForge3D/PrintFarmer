@@ -68,6 +68,59 @@ final class UITestBootstrapTests: XCTestCase {
         )
     }
 
+    // MARK: - Main-thread heartbeat (#3013)
+
+    func test_mainThreadHeartbeatName_matchesUITestsHarness() {
+        // Contract with PrintFarmerUITests.AppMainThreadHeartbeat.notificationName.
+        XCTAssertEqual(
+            UITestMainThreadHeartbeat.notificationName,
+            "com.olyforge3d.printfarmer.uitesting.main-heartbeat"
+        )
+    }
+
+    func test_mainThreadHeartbeatState_packsPidAboveWholeMillisecondsOfUptime() {
+        // Contract with PrintFarmerUITests.AppMainThreadHeartbeat.decode(_:).
+        XCTAssertEqual(UITestMainThreadHeartbeat.uptimeBits, 42)
+        XCTAssertEqual(UITestMainThreadHeartbeat.state(forUptime: 107.5, pid: 0), 107_500)
+        XCTAssertEqual(UITestMainThreadHeartbeat.state(forUptime: -1, pid: 0), 0)
+        let state = UITestMainThreadHeartbeat.state(forUptime: 107.5, pid: 30_978)
+        XCTAssertEqual(state >> 42, 30_978)
+        XCTAssertEqual(state & UITestMainThreadHeartbeat.uptimeMask, 107_500)
+    }
+
+    func test_stallMeter_firesOnlyAfterContiguousTicksWithoutABeat() {
+        var meter = UITestMainThreadStallMeter(limit: 20)
+        XCTAssertFalse(meter.tick(beat: 1, at: 0))
+        for second in 1..<20 {
+            XCTAssertFalse(meter.tick(beat: 1, at: TimeInterval(second)))
+        }
+        XCTAssertTrue(meter.tick(beat: 1, at: 20))
+        XCTAssertEqual(meter.stalled, 20)
+    }
+
+    func test_stallMeter_resetsWhenTheMainRunLoopBeats() {
+        var meter = UITestMainThreadStallMeter(limit: 20)
+        for second in 0...15 {
+            XCTAssertFalse(meter.tick(beat: 1, at: TimeInterval(second)))
+        }
+        XCTAssertEqual(meter.stalled, 15)
+        XCTAssertFalse(meter.tick(beat: 2, at: 16))
+        XCTAssertEqual(meter.stalled, 0)
+        XCTAssertFalse(meter.tick(beat: 2, at: 17))
+        XCTAssertEqual(meter.stalled, 1)
+    }
+
+    func test_stallMeter_ignoresProcessSuspensionGaps() {
+        // A suspended app stops the watchdog too; the gap is not main-thread stall.
+        var meter = UITestMainThreadStallMeter(limit: 20)
+        XCTAssertFalse(meter.tick(beat: 1, at: 0))
+        XCTAssertFalse(meter.tick(beat: 1, at: 1))
+        XCTAssertFalse(meter.tick(beat: 1, at: 301))
+        XCTAssertEqual(meter.stalled, 0)
+        XCTAssertFalse(meter.tick(beat: 1, at: 302))
+        XCTAssertEqual(meter.stalled, 1)
+    }
+
     // MARK: - Launch mode
 
     func test_mode_defaultsToAuthenticated() {

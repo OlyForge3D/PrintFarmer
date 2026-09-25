@@ -18,6 +18,7 @@ struct PFarmApp: App {
             )
         )
         if UITestBootstrap.isEnabled {
+            UITestMainThreadHeartbeat.start()
             // Deterministic UI-test bootstrap (#706): seed an ephemeral
             // registry with an active server and wire demo services. The
             // launch mode decides auth state — `.authenticated` renders the

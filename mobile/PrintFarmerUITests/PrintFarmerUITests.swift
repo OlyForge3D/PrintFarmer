@@ -1,4 +1,5 @@
 import XCTest
+import notify
 
 /// Stops starting remote work after one monotonic deadline. An in-flight XCUI
 /// query still needs XCTest's enabled per-test watchdog to interrupt a stall.
@@ -178,6 +179,179 @@ final class UIWaitBudget {
             RunLoop.current.run(until: Date().addingTimeInterval(delay))
         }
     }
+}
+
+/// Reads the app's UI-test main-run-loop heartbeat (#3013) from Darwin
+/// notification state. Reading performs no accessibility query, so it can gate
+/// and explain shell snapshots without adding XCTest remote work.
+@MainActor
+final class AppMainThreadHeartbeat {
+    /// Matches `UITestMainThreadHeartbeat.notificationName` in the app target.
+    nonisolated static let notificationName = "com.olyforge3d.printfarmer.uitesting.main-heartbeat"
+    /// The app beats every 0.5s; an older beat means its main run loop is not turning.
+    nonisolated static let staleAfter: TimeInterval = 5
+    static let launchGrace: TimeInterval = 5
+
+    /// One published beat: the app's uptime and process ID.
+    struct Beat: Equatable, Sendable {
+        let uptime: TimeInterval
+        let pid: Int32
+    }
+
+    /// Inverse of `UITestMainThreadHeartbeat.state(forUptime:pid:)` in the app target.
+    nonisolated static func decode(_ state: UInt64) -> Beat? {
+        guard state > 0 else { return nil }
+        let uptimeBits: UInt64 = 42
+        return Beat(
+            uptime: TimeInterval(state & ((1 << uptimeBits) - 1)) / 1000,
+            pid: Int32(truncatingIfNeeded: state >> uptimeBits)
+        )
+    }
+
+    nonisolated private static let liveToken: Int32? = {
+        var token: Int32 = NOTIFY_TOKEN_INVALID
+        return notify_register_check(notificationName, &token) == NOTIFY_STATUS_OK ? token : nil
+    }()
+
+    /// Newest raw state from any app instance. Thread-safe; performs no XCUI work.
+    nonisolated static func liveState() -> UInt64? {
+        guard let token = liveToken else { return nil }
+        var state: UInt64 = 0
+        return notify_get_state(token, &state) == NOTIFY_STATUS_OK ? state : nil
+    }
+
+    private let launchFloor: TimeInterval
+    private let now: () -> TimeInterval
+    private let readState: () -> UInt64?
+
+    init(
+        launchedAt: TimeInterval,
+        now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
+        readState: @escaping () -> UInt64?
+    ) {
+        // The app publishes whole milliseconds of the same host uptime clock.
+        launchFloor = (launchedAt * 1000).rounded(.down) / 1000
+        self.now = now
+        self.readState = readState
+    }
+
+    static func live(launchedAt: TimeInterval) -> AppMainThreadHeartbeat {
+        AppMainThreadHeartbeat(launchedAt: launchedAt, readState: liveState)
+    }
+
+    /// Newest beat from this launch; beats published before it are ignored.
+    var newestBeat: Beat? {
+        guard let beat = readState().flatMap(Self.decode), beat.uptime >= launchFloor else { return nil }
+        return beat
+    }
+
+    var lastBeat: TimeInterval? { newestBeat?.uptime }
+
+    var age: TimeInterval? { lastBeat.map { max(0, now() - $0) } }
+
+    var diagnostic: String {
+        guard let beat = newestBeat, let age else { return "app main-thread heartbeat: none since launch" }
+        return "app main-thread heartbeat: last beat \(Self.seconds(age)) ago from pid \(beat.pid)"
+    }
+
+    /// Polls local notification state, never XCUI, for a beat no older than
+    /// `staleAfter`. Returns nil when responsive, otherwise the failure reason.
+    func awaitResponsive(
+        budget: UIWaitBudget,
+        grace: TimeInterval = launchGrace,
+        pause: (() -> Void)? = nil
+    ) -> String? {
+        let deadline = now() + min(grace, budget.remaining)
+        while true {
+            if let age, age <= Self.staleAfter { return nil }
+            guard now() < deadline else { break }
+            if let pause { pause() } else { budget.pause(upTo: min(0.1, deadline - now())) }
+        }
+        guard let age else {
+            return "app published no main-run-loop heartbeat since launch; \(budget.diagnostic)"
+        }
+        return "app main run loop has not turned for \(Self.seconds(age)); \(budget.diagnostic)"
+    }
+
+    /// Classifies a failed snapshot using only locally read heartbeat state.
+    func snapshotAttribution(startedAt: TimeInterval) -> String {
+        let elapsed = Self.seconds(max(0, now() - startedAt))
+        guard let beat = lastBeat, let age else {
+            return "\(diagnostic) (snapshot ran \(elapsed))"
+        }
+        if age <= Self.staleAfter {
+            return "\(diagnostic); the app main run loop kept turning during the \(elapsed) snapshot, "
+                + "so XCTest automation stalled rather than the app main thread"
+        }
+        let offset = beat - startedAt
+        let relation = offset >= 0
+            ? "\(Self.seconds(offset)) after the snapshot started"
+            : "\(Self.seconds(-offset)) before the snapshot started"
+        return "\(diagnostic); the app main run loop stopped \(relation) and did not resume "
+            + "during the \(elapsed) snapshot, so the app main thread was blocked"
+    }
+
+    private static func seconds(_ value: TimeInterval) -> String {
+        String(format: "%.2fs", value)
+    }
+}
+
+/// Brackets `XCUIApplication.launch()` so failures XCTest records inside it,
+/// such as a missing process ID after a stalled terminate or launch (#3013),
+/// say which app instance, if any, had a running main thread meanwhile.
+/// Nonisolated because XCTest may record issues from any thread.
+final class AppLaunchHeartbeatWindow: @unchecked Sendable {
+    private let lock = NSLock()
+    private var startedAt: TimeInterval?
+    private let now: @Sendable () -> TimeInterval
+    private let readState: @Sendable () -> UInt64?
+
+    init(
+        now: @escaping @Sendable () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
+        readState: @escaping @Sendable () -> UInt64? = AppMainThreadHeartbeat.liveState
+    ) {
+        self.now = now
+        self.readState = readState
+    }
+
+    func begin() { lock.withLock { startedAt = now() } }
+
+    func end() { lock.withLock { startedAt = nil } }
+
+    /// Nil outside a launch; otherwise how the newest beat relates to it.
+    func attribution() -> String? {
+        guard let startedAt = lock.withLock({ startedAt }) else { return nil }
+        let current = now()
+        let elapsed = Self.seconds(max(0, current - startedAt))
+        // Beats arrive every 0.5s, so silence is only evidence once it outlasts staleness.
+        let silenceIsEvidence = current - startedAt > AppMainThreadHeartbeat.staleAfter
+        guard let beat = readState().flatMap(AppMainThreadHeartbeat.decode) else {
+            let quiet = "app main-thread heartbeat: none from any instance during the \(elapsed) launch"
+            return silenceIsEvidence ? quiet + ", so no app main thread ran while XCTest launched the app" : quiet
+        }
+        let offset = beat.uptime - startedAt
+        guard offset >= 0 else {
+            let quiet = "app main-thread heartbeat: pid \(beat.pid) last beat \(Self.seconds(-offset)) before "
+                + "launch began and no instance beat during the \(elapsed) launch"
+            guard silenceIsEvidence else { return quiet }
+            return quiet + ", so XCTest or the simulator stalled while no app main thread was running"
+        }
+        return "app main-thread heartbeat: pid \(beat.pid) beat \(Self.seconds(offset)) after launch began "
+            + "(\(Self.seconds(max(0, current - beat.uptime))) ago, \(elapsed) into the launch); "
+            + "an app main thread was running while XCTest launched the app"
+    }
+
+    private static func seconds(_ value: TimeInterval) -> String {
+        String(format: "%.2fs", value)
+    }
+}
+
+/// A shell snapshot error annotated with the app heartbeat at failure time.
+struct ShellSnapshotFailure: Error, CustomStringConvertible {
+    let underlying: Error
+    let attribution: String
+
+    var description: String { "\(underlying); \(attribution)" }
 }
 
     /// Values copied from XCTest's public snapshot API. All tree traversal below
@@ -1130,6 +1304,165 @@ final class UIWaitBudgetTests: XCTestCase {
         XCTAssertFalse(called)
         XCTAssertEqual(budget.lastOperation, "none")
     }
+
+    // MARK: - App main-thread heartbeat (#3013)
+
+    private func heartbeat(
+        launchedAt: TimeInterval = 100, clock: @escaping () -> TimeInterval, beat: @escaping () -> TimeInterval?
+    ) -> AppMainThreadHeartbeat {
+        AppMainThreadHeartbeat(launchedAt: launchedAt, now: clock) {
+            beat().map { UInt64($0 * 1000) }
+        }
+    }
+
+    func testFreshHeartbeatAdmitsLaunchSnapshotWithoutWaiting() {
+        var clock: TimeInterval = 105
+        let budget = UIWaitBudget(timeout: 60, now: { clock })
+        let probe = heartbeat(clock: { clock }, beat: { 104.7 })
+        XCTAssertNil(probe.awaitResponsive(budget: budget, pause: { XCTFail("No wait"); clock += 1 }))
+        XCTAssertEqual(budget.lastOperation, "none", "The heartbeat gate performs no XCUI work")
+    }
+
+    func testBeatFromAnEarlierProcessIsNotLaunchReadiness() {
+        var clock: TimeInterval = 100.5
+        let budget = UIWaitBudget(timeout: 60, now: { clock })
+        let probe = heartbeat(clock: { clock }, beat: { 99.9 })
+        var pauses = 0
+        let failure = probe.awaitResponsive(budget: budget, pause: { pauses += 1; clock += 1 })
+        XCTAssertEqual(pauses, 5)
+        XCTAssertEqual(clock, 105.5, "Launch grace bounds the wait, not XCTest's 60s snapshot timeout")
+        XCTAssertTrue(failure?.contains("no main-run-loop heartbeat since launch") == true, failure ?? "nil")
+        XCTAssertEqual(probe.diagnostic, "app main-thread heartbeat: none since launch")
+    }
+
+    func testStalledMainRunLoopFailsLaunchReadinessWithinGrace() {
+        var clock: TimeInterval = 120
+        let budget = UIWaitBudget(timeout: 60, now: { clock })
+        let probe = heartbeat(clock: { clock }, beat: { 110 })
+        let failure = probe.awaitResponsive(budget: budget, pause: { clock += 0.5 })
+        XCTAssertEqual(clock, 125)
+        XCTAssertTrue(failure?.contains("has not turned for 15.00s") == true, failure ?? "nil")
+    }
+
+    func testResumedMainRunLoopWithinGraceIsResponsive() {
+        var clock: TimeInterval = 120
+        var beat: TimeInterval = 110
+        let budget = UIWaitBudget(timeout: 60, now: { clock })
+        let probe = heartbeat(clock: { clock }, beat: { beat })
+        XCTAssertNil(probe.awaitResponsive(budget: budget, pause: { clock += 0.5; beat = clock }))
+        XCTAssertEqual(clock, 120.5)
+    }
+
+    func testHeartbeatGraceNeverExceedsTheRemainingTestBudget() {
+        var clock: TimeInterval = 100
+        let budget = UIWaitBudget(timeout: 2, now: { clock })
+        let probe = heartbeat(clock: { clock }, beat: { nil })
+        XCTAssertNotNil(probe.awaitResponsive(budget: budget, pause: { clock += 0.5 }))
+        XCTAssertEqual(clock, 102)
+    }
+
+    func testSnapshotStallIsAttributedToTheAppWhenItsMainRunLoopStopped() {
+        var clock: TimeInterval = 107
+        let probe = heartbeat(clock: { clock }, beat: { 107.5 })
+        clock = 167.5
+        let attribution = probe.snapshotAttribution(startedAt: 107)
+        XCTAssertTrue(attribution.contains("stopped 0.50s after the snapshot started"), attribution)
+        XCTAssertTrue(attribution.contains("app main thread was blocked"), attribution)
+        XCTAssertTrue(attribution.contains("60.50s snapshot"), attribution)
+    }
+
+    func testSnapshotStallIsAttributedToXCTestWhenTheAppKeptBeating() {
+        var clock: TimeInterval = 107
+        let probe = heartbeat(clock: { clock }, beat: { clock - 0.25 })
+        clock = 167
+        let attribution = probe.snapshotAttribution(startedAt: 107)
+        XCTAssertTrue(attribution.contains("last beat 0.25s ago"), attribution)
+        XCTAssertTrue(attribution.contains("XCTest automation stalled"), attribution)
+    }
+
+    func testSnapshotFailureKeepsTheUnderlyingErrorAndAttribution() {
+        struct Stall: Error, CustomStringConvertible { var description: String { "timed out" } }
+        let failure = ShellSnapshotFailure(underlying: Stall(), attribution: "app main thread was blocked")
+        XCTAssertEqual("\(failure)", "timed out; app main thread was blocked")
+    }
+
+    func testHeartbeatStateDecodesPidAndUptimeAndNamesThePidInDiagnostics() {
+        let state = (UInt64(30_978) << 42) | 104_700
+        XCTAssertEqual(AppMainThreadHeartbeat.decode(state), .init(uptime: 104.7, pid: 30_978))
+        XCTAssertNil(AppMainThreadHeartbeat.decode(0))
+        let probe = AppMainThreadHeartbeat(launchedAt: 100, now: { 105 }) { state }
+        XCTAssertEqual(probe.diagnostic, "app main-thread heartbeat: last beat 0.30s ago from pid 30978")
+    }
+
+    private final class LaunchClock: @unchecked Sendable {
+        var now: TimeInterval = 100
+        var state: UInt64?
+    }
+
+    private func launchWindow(_ clock: LaunchClock) -> AppLaunchHeartbeatWindow {
+        AppLaunchHeartbeatWindow(now: { clock.now }, readState: { clock.state })
+    }
+
+    func testLaunchWindowOnlyAnnotatesIssuesRecordedDuringLaunch() {
+        let clock = LaunchClock()
+        let window = launchWindow(clock)
+        XCTAssertNil(window.attribution())
+        window.begin()
+        XCTAssertNotNil(window.attribution())
+        window.end()
+        XCTAssertNil(window.attribution())
+    }
+
+    func testLaunchStallWithNoRunningAppIsAttributedToXCTestOrTheSimulator() {
+        let clock = LaunchClock()
+        clock.state = (UInt64(30_978) << 42) | 99_000
+        let window = launchWindow(clock)
+        window.begin()
+        clock.now = 203
+        let attribution = window.attribution() ?? "nil"
+        XCTAssertTrue(attribution.contains("pid 30978 last beat 1.00s before launch began"), attribution)
+        XCTAssertTrue(attribution.contains("during the 103.00s launch"), attribution)
+        XCTAssertTrue(attribution.contains("XCTest or the simulator stalled"), attribution)
+    }
+
+    func testLaunchStallWhileAnAppKeepsBeatingNamesThatInstance() {
+        let clock = LaunchClock()
+        let window = launchWindow(clock)
+        window.begin()
+        clock.now = 203
+        clock.state = (UInt64(30_978) << 42) | 202_500
+        let attribution = window.attribution() ?? "nil"
+        XCTAssertTrue(attribution.contains("pid 30978 beat 102.50s after launch began"), attribution)
+        XCTAssertTrue(attribution.contains("0.50s ago"), attribution)
+        XCTAssertTrue(attribution.contains("an app main thread was running"), attribution)
+    }
+
+    func testLaunchStallWithoutAnyHeartbeatSaysNoAppRan() {
+        let clock = LaunchClock()
+        let window = launchWindow(clock)
+        window.begin()
+        clock.now = 110
+        let attribution = window.attribution() ?? "nil"
+        XCTAssertTrue(attribution.contains("none from any instance during the 10.00s launch"), attribution)
+        XCTAssertTrue(attribution.contains("so no app main thread ran"), attribution)
+    }
+
+    func testBriefLaunchSilenceIsReportedWithoutAConclusion() {
+        let clock = LaunchClock()
+        clock.state = (UInt64(97_582) << 42) | 99_970
+        let window = launchWindow(clock)
+        window.begin()
+        clock.now = 101
+        XCTAssertEqual(
+            window.attribution(),
+            "app main-thread heartbeat: pid 97582 last beat 0.03s before launch began "
+                + "and no instance beat during the 1.00s launch"
+        )
+        clock.state = nil
+        XCTAssertEqual(
+            window.attribution(), "app main-thread heartbeat: none from any instance during the 1.00s launch"
+        )
+    }
 }
 
 struct RenderedShellRoot {
@@ -1191,6 +1524,8 @@ class PrintFarmerUITestCase: XCTestCase {
 
     var app: XCUIApplication!
     private var testBudget: UIWaitBudget?
+    private var appHeartbeat: AppMainThreadHeartbeat?
+    nonisolated private let launchWindow = AppLaunchHeartbeatWindow()
 
     /// Extra launch arguments contributed by a subclass, applied before the
     /// app launches. Base tests run in the authenticated operator-shell
@@ -1209,7 +1544,10 @@ class PrintFarmerUITestCase: XCTestCase {
         app.launchEnvironment["PFARM_UI_TESTING"] = "1"
         app.launchArguments.append("--uitesting")
         app.launchArguments.append(contentsOf: additionalLaunchArguments)
+        appHeartbeat = .live(launchedAt: ProcessInfo.processInfo.systemUptime)
+        launchWindow.begin()
         app.launch()
+        launchWindow.end()
         if waitsForNavigationReadiness {
             waitForAuthenticatedShell()
         }
@@ -1218,7 +1556,17 @@ class PrintFarmerUITestCase: XCTestCase {
     override func tearDown() async throws {
         app = nil
         testBudget = nil
+        appHeartbeat = nil
+        launchWindow.end()
         try await super.tearDown()
+    }
+
+    /// Annotates failures XCTest records inside `app.launch()` (#3013).
+    nonisolated override func record(_ issue: XCTIssue) {
+        guard let attribution = launchWindow.attribution() else { return super.record(issue) }
+        var issue = issue
+        issue.compactDescription += "; \(attribution)"
+        super.record(issue)
     }
 
     // MARK: - Helpers
@@ -1231,6 +1579,11 @@ class PrintFarmerUITestCase: XCTestCase {
             return XCTFail("Shell readiness requires the existing test allowance", file: file, line: line)
         }
         let budget = testBudget.child(timeout: navigationReadinessTimeout)
+        // A blocked main thread would otherwise hold the first snapshot for
+        // XCTest's full 60s accessibility timeout (#3013).
+        if let appHeartbeat, let failure = appHeartbeat.awaitResponsive(budget: budget) {
+            return recordQueryFailure("App launch is not ready: \(failure)", file: file, line: line)
+        }
         let ready = waitForObservedShell(budget: budget, file: file, line: line) {
             $0.isLaunchReady ? true : nil
         }
@@ -1350,7 +1703,17 @@ class PrintFarmerUITestCase: XCTestCase {
                 }
                 return nil
             },
-            observeApplication: { ShellObservation(ShellNode(try self.app.snapshot())) },
+            observeApplication: {
+                let started = ProcessInfo.processInfo.systemUptime
+                do {
+                    return ShellObservation(ShellNode(try self.app.snapshot()))
+                } catch {
+                    guard let heartbeat = self.appHeartbeat else { throw error }
+                    throw ShellSnapshotFailure(
+                        underlying: error, attribution: heartbeat.snapshotAttribution(startedAt: started)
+                    )
+                }
+            },
             reveal: { node in
                 let toggle = self.observedToggle(node)
                 guard budget.perform("hittable observed sidebar toggle", {
