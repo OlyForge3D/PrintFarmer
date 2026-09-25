@@ -94,18 +94,21 @@ final class LoginFlowUITests: PrintFarmerUITestCase {
         ]))
         let loading = ShellObservation(ShellNode(.application))
         let embedded = ShellObservation(ShellNode(.application, children: [alert]))
-        let scenarios: [(String, [ShellNode?], [ShellObservation], Bool, Bool, Int)] = [
-            ("no interruption", [nil], [ready], true, true, 0),
-            ("separate alert root", [alert, nil], [loading, ready], true, true, 1),
-            ("late alert", [nil, alert, nil], [loading, loading, ready], true, true, 1),
-            ("application-only alert", [nil, nil], [embedded, ready], true, true, 1),
-            ("unknown alert", [unknown], [ready], true, false, 0),
-            ("non-hittable dismissal", [alert], [ready], false, false, 0),
-            ("unchanged retry", [alert, alert, nil], [loading, loading, ready], true, true, 2),
-            ("persistent alert", [alert], [ready], true, false, 2),
-            ("changed alert", [alert, unknown], [ready, ready], true, false, 1)
+        let embeddedUnknown = ShellObservation(ShellNode(.application, children: [unknown]))
+        let scenarios: [(String, [ShellNode?], [ShellObservation], Bool, String, Int)] = [
+            ("no interruption", [nil], [ready], true, "none", 0),
+            ("separate alert root", [alert, nil], [loading, ready], true, "none", 1),
+            ("late alert", [nil, alert, nil], [loading, loading, ready], true, "none", 1),
+            ("application-only alert", [nil, nil], [embedded, ready], true, "none", 1),
+            ("unknown alert", [nil], [embeddedUnknown], true, "interruption rejected by dismissal allowlist", 0),
+            ("non-hittable dismissal", [alert], [ready], false, "interruption dismissal is not hittable", 0),
+            ("unchanged retry", [alert, alert, nil], [loading, loading, ready], true, "none", 2),
+            ("persistent alert", [alert], [ready], true, "interruption did not disappear after dismissal", 2),
+            ("changed alert", [alert, nil], [loading, embeddedUnknown], true, "interruption changed after dismissal", 1),
+            ("reappearing alert", [alert, nil, alert], [loading, loading, ready], true,
+             "interruption reappeared after disappearance", 1)
         ]
-        for (name, interruptions, applications, hittable, succeeds, expectedTaps) in scenarios {
+        for (name, interruptions, applications, hittable, failure, expectedTaps) in scenarios {
             var clock: TimeInterval = 0
             let budget = UIWaitBudget(timeout: 60, now: { clock })
             var index = -1
@@ -114,7 +117,9 @@ final class LoginFlowUITests: PrintFarmerUITestCase {
                 observeInterruption: { titles in
                     XCTAssertEqual(titles, ["Save Password?"], name)
                     index = min(index + 1, interruptions.count - 1)
-                    return interruptions[index]
+                    let interruption = interruptions[index]
+                    XCTAssertTrue(interruption == nil || titles.contains(interruption!.label), name)
+                    return interruption
                 },
                 observeApplication: { applications[index] },
                 reveal: { _ in XCTFail("Unexpected sidebar reveal: \(name)"); return false },
@@ -128,10 +133,10 @@ final class LoginFlowUITests: PrintFarmerUITestCase {
             let result = waitForObservedShell(budget: budget, driver: driver, pause: { clock += 0.2 }) {
                 $0.isLaunchReady ? true : nil
             }
-            XCTAssertEqual(result == true, succeeds, "\(name): \(budget.shellDiagnostic)")
+            XCTAssertEqual(result == true, failure == "none", "\(name): \(budget.shellDiagnostic)")
             XCTAssertEqual(taps, Array(repeating: "Not Now", count: expectedTaps), name)
             XCTAssertLessThan(clock, 4, "\(name) must not consume the navigation or test allowance")
-            if !succeeds { XCTAssertNotEqual(budget.shellFailure, "none", name) }
+            XCTAssertEqual(budget.shellFailure, failure, name)
         }
     }
 

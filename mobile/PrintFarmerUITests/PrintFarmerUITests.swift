@@ -40,6 +40,11 @@ final class UIWaitBudget {
     private(set) var shellFailure = "none"
     private(set) var interruptionDismissalAttempts = 0
 
+    func rejectInterruption(_ reason: String) -> Bool {
+        shellFailure = reason
+        return false
+    }
+
     var shellDiagnostic: String {
         "\(diagnostic); failure=\(shellFailure); dismissal attempts=\(interruptionDismissalAttempts); "
             + "last snapshot: \(lastShellObservation)"
@@ -95,6 +100,10 @@ final class UIWaitBudget {
             }
             if let alert = observation.blockingAlert {
                 if let previous = dismissedAlert {
+                    guard dismissalDeadline != nil else {
+                        shellFailure = "interruption reappeared after disappearance"
+                        return nil
+                    }
                     guard alert.identifier == previous.identifier, alert.label == previous.label,
                           alert.frame == previous.frame else {
                         shellFailure = "interruption changed after dismissal"
@@ -112,7 +121,11 @@ final class UIWaitBudget {
                     guard perform("dismiss observed alert: \(alert.label)", {
                         dismissInterruption(alert)
                     }) == true else {
-                        shellFailure = "interruption dismissal rejected or exceeded deadline"
+                        if remaining == 0 {
+                            shellFailure = "interruption dismissal exceeded navigation deadline"
+                        } else if shellFailure == "none" {
+                            shellFailure = "interruption dismissal rejected"
+                        }
                         return nil
                     }
                     // Neither the optional retry nor repeated observations can
@@ -120,6 +133,7 @@ final class UIWaitBudget {
                     if dismissalDeadline == nil { dismissalDeadline = min(deadline, now() + 3) }
                 }
             } else {
+                dismissalDeadline = nil
                 if let result = perform("resolve observed shell", { resolve(observation) }) ?? nil {
                     return result
                 }
@@ -251,6 +265,7 @@ final class UIWaitBudget {
         let state: State
         let blockingAlert: ShellNode?
         private let readinessAnchors: [String]
+        private let rootDiagnostic: String
         init(_ root: ShellNode) {
             let visible = root.descendants.filter {
                 !$0.frame.isEmpty && $0.frame.intersects(root.frame)
@@ -258,6 +273,7 @@ final class UIWaitBudget {
             readinessAnchors = visible.map(\.identifier).filter {
                 $0 == "launchSplash" || $0 == "loginView" || $0.hasPrefix("navigation.")
             }
+            rootDiagnostic = "root=\(root.frame); tab bars=\(root.descendants.filter { $0.type == .tabBar }.map(\.frame))"
             blockingAlert = visible.first { $0.type == .alert }
             if blockingAlert != nil || visible.contains(where: {
                 $0.identifier == "launchSplash" || $0.identifier == "navigation.shellLoading"
@@ -346,7 +362,7 @@ final class UIWaitBudget {
         var diagnostic: String {
             if let blockingAlert { return "alert; title=\(blockingAlert.label)" }
             return switch state {
-            case .notReady: "not ready; anchors=\(readinessAnchors)"
+            case .notReady: "not ready; anchors=\(readinessAnchors); \(rootDiagnostic)"
             case .collapsed(let toggle): "collapsed; toggle=\(toggle.label)"
             case .compact: "compact; roots=\(roots.map(\.key))"
             case .sidebar: "sidebar; roots=\(roots.map(\.key))"
@@ -676,6 +692,30 @@ final class UIWaitBudgetTests: XCTestCase {
         XCTAssertEqual(observations, 3)
         XCTAssertEqual(budget.interruptionDismissalAttempts, 2)
         XCTAssertEqual(budget.shellFailure, "interruption did not disappear after dismissal")
+    }
+
+    func testDismissedAlertDoesNotLimitSubsequentShellReadinessToDisappearanceGrace() {
+        var clock: TimeInterval = 0
+        let budget = UIWaitBudget(timeout: 60, now: { clock })
+        let result = budget.waitForShell(
+            observe: {
+                if clock == 0 {
+                    return ShellObservation(ShellNode(.application, children: [self.passwordAlert()]))
+                }
+                return clock < 10 ? ShellObservation(ShellNode(.application)) : self.sidebar()
+            },
+            resolve: { $0.isLaunchReady ? true : nil },
+            reveal: { _ in XCTFail("No collapsed sidebar"); return false },
+            leadingEdge: { _ in XCTFail("No collapsed sidebar"); return false },
+            dismissInterruption: { _ in true },
+            retryUnchangedInterruption: true,
+            pause: { clock += 1 }
+        )
+        XCTAssertEqual(result, true)
+        XCTAssertEqual(clock, 10)
+        XCTAssertEqual(budget.interruptionDismissalAttempts, 1)
+        XCTAssertEqual(budget.remaining, 50)
+        XCTAssertEqual(budget.shellFailure, "none")
     }
 
     func testNavigationReadinessIncludesSidebarRevealBeforeDestinationBudgetStarts() {
@@ -1364,11 +1404,13 @@ class PrintFarmerUITestCase: XCTestCase {
                 leadingEdge: driver.leadingEdge,
                 dismissInterruption: { alert in
                     guard let button = alert.dismissalButton(allowedTitles: self.navigationAlertDismissals) else {
-                        return false
+                        return budget.rejectInterruption("interruption rejected by dismissal allowlist")
                     }
                     guard budget.perform("hittable observed alert dismissal", {
                         driver.isDismissalHittable(alert, button)
-                    }) == true else { return false }
+                    }) == true else {
+                        return budget.rejectInterruption("interruption dismissal is not hittable")
+                    }
                     return budget.perform("tap observed alert dismissal", {
                         driver.tapDismissal(alert, button)
                     }) == true
