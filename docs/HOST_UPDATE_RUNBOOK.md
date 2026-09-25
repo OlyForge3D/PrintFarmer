@@ -363,6 +363,16 @@ recorded in the journal.
     recovery does to the fence.
   - `drift`: the drift items since authorization, a configuration fingerprint,
     and, when drift exists, the `reapprovalToken`.
+  - `physicalReconciliation` (#2999): the printer command inventory read
+    (read-only) from the application database, one entry per printer with
+    its uncertain outcomes (`print_job_active`, `physical_command_in_flight`
+    for pending/processing dispatch outbox rows, `dispatch_outcome_uncertain`
+    for in-progress, unknown or reconciliation-required dispatch attempts),
+    the `state` (`ready_to_record`, `recorded`, `complete`, `after_rollback`,
+    `operator_required`, `inventory_unavailable` or `record_unreadable`) and,
+    only when the rollback is already done and just the fence is pending, the
+    `reconciliationToken`. `replayPolicy` is always
+    `recovery_never_replays_or_issues_printer_commands`.
 - `recover --confirm <release>` requires the release retyped exactly. It first
   proves that the configured root, compose files, owned directories, database
   and host tools are visible in this namespace (existence only; nothing is
@@ -370,6 +380,34 @@ recorded in the journal.
   authorization and `--reapprove-drift <token>` does not carry the token the
   current `--preview` printed. Only then does it run the shared coordinator under
   the execution lock.
+
+Physical printer command reconciliation (#2999) gates the writer fence release,
+not the rollback itself. Once a rollback has completed, the coordinator keeps
+admission fenced with a `FenceReleasePending` outcome (CLI exit 13, detail
+suffix `|physical_reconciliation_pending`) until a reconciliation record for
+that release and request exists. The gate is registered in the shared recovery
+engine, so the API recover path stays fenced too until the CLI records it. An
+unreadable record also keeps the fence closed
+(`|physical_reconciliation_unreadable:<type>`). To record it:
+
+1. Run `recover --preview` and review every printer listed under
+   `physicalReconciliation`. Physically inspect each one and reconcile its
+   state with the listed job, outbox and dispatch-attempt outcomes by hand. A
+   restored database cannot undo a physical print.
+2. Re-run `recover --confirm <release> --printers-reconciled <token>` (PowerShell:
+   `-PrintersReconciled <token>`) with the `physical-<32 hex>` token that
+   preview printed. The token binds the release, the request and a SHA-256 of
+   the canonical inventory. Any change to the inventory invalidates it
+   (`physical_reconciliation_mismatch`, exit 13), so preview again.
+3. The CLI writes a hashed record to
+   `<StateDirectory>/physical-reconciliation/` and then runs the coordinator,
+   which releases the fence. A token given before the rollback has completed
+   is refused with exit 6 (`physical_reconciliation_not_ready`).
+
+Neither the CLI nor the coordinator ever replays, cancels, retries or issues a
+printer command, or clears a dispatch lease. The inventory is only ever read,
+through a read-only, no-tracking database context, and the CLI has no printer
+backend client in its service graph.
 
 Drift reapproval (#2998) compares the journaled authorization with the host
 now. Since #3047 the executor also journals an authorization baseline on the
@@ -418,6 +456,7 @@ nothing to reapprove.
 | 10 | Needs operator (including no restorable backup, or canceled) | Follow the coordinated restoration procedure below. |
 | 11 | Fence release pending | Writers stay fenced. Re-run `recover --confirm` once the fence adapter is reachable. |
 | 12 | Drift not reapproved, or the installed state changed after evaluation (`drift_reapproval_stale`) | Run `--preview`, review every drift item with the deployment owner, then re-run `--confirm` with `--reapprove-drift <token>` only if recovery toward the recorded prior state is still correct. |
+| 13 | Physical printer reconciliation not recorded, or the token no longer matches the inventory | Writers stay fenced. Run `--preview`, physically reconcile every listed printer, then re-run `--confirm` with `--printers-reconciled <token>`. Never send printer commands to test recovery. |
 
 Known limits of this slice:
 
@@ -465,8 +504,11 @@ Known limits of this slice:
   which builds the archive with the release packaging code, verifies it
   against its checksum list, extracts it and runs the CLI with `dotnet` poisoned
   on `PATH`.
+- The physical reconciliation inventory is proven against SQLite only; the
+  PostgreSQL and SQL Server inventory readers are built but not yet exercised
+  by tests (#3000).
 - There is no manifest-binding (database) drift
-  detection (#3050), physical command reconciliation gate or PostgreSQL/SQL Server and
+  detection (#3050) or PostgreSQL/SQL Server and
   split-topology proof yet; those remain follow-up work under #2658. The
   installer does not yet place the package or generate its configuration
   (#3045), and macOS has no package (see
@@ -503,7 +545,9 @@ For coordinated restoration, the approved recovery procedure must:
 5. Reconcile every affected printer's physical state with queue/start/control
    outcomes before allowing new dispatch. A DB restore cannot undo a physical
    print. Never replay uncertain starts, moves or control commands, clear
-   leases blindly, or use real printer commands as recovery smoke tests.
+   leases blindly, or use real printer commands as recovery smoke tests. The
+   CLI enforces this step for the writer fence: it stays closed until
+   `--printers-reconciled` records the reconciliation (exit 13).
 6. Reconcile selected versus observed channel and refresh trusted metadata and
    installed observations on reconnect before new eligibility. Retain both
    channels' replay records and failure history; do not let recovery artifacts

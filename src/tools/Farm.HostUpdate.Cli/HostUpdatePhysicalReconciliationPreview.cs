@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Data;
+﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Services.HostUpdates;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;

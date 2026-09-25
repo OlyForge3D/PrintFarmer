@@ -10,7 +10,7 @@
 
       printfarmer-host-update.ps1 -Config C:\abs\host-update.json status [-Release <id>] [-Json]
       printfarmer-host-update.ps1 -Config C:\abs\host-update.json recover -Release <id> [-RequestId <id>] -Preview [-Json]
-      printfarmer-host-update.ps1 -Config C:\abs\host-update.json recover -Release <id> [-RequestId <id>] -Confirm <id> [-ReapproveDrift <token>] [-Json]
+      printfarmer-host-update.ps1 -Config C:\abs\host-update.json recover -Release <id> [-RequestId <id>] -Confirm <id> [-ReapproveDrift <token>] [-PrintersReconciled <token>] [-Json]
       printfarmer-host-update.ps1 help
 
     Environment:
@@ -33,11 +33,12 @@ $ErrorActionPreference = 'Stop'
 $ReleasePattern = '^(stable|insider):[0-9A-Za-z.+-]{1,128}$'
 $RequestPattern = '^[A-Za-z0-9._:-]{1,128}$'
 $DriftTokenPattern = '^drift-[0-9a-f]{32}$'
+$PhysicalTokenPattern = '^physical-[0-9a-f]{32}$'
 $UsageText = @'
 usage:
   printfarmer-host-update.ps1 -Config C:\abs\host-update.json status [-Release <id>] [-Json]
   printfarmer-host-update.ps1 -Config C:\abs\host-update.json recover -Release <id> [-RequestId <id>] -Preview [-Json]
-  printfarmer-host-update.ps1 -Config C:\abs\host-update.json recover -Release <id> [-RequestId <id>] -Confirm <id> [-ReapproveDrift <token>] [-Json]
+  printfarmer-host-update.ps1 -Config C:\abs\host-update.json recover -Release <id> [-RequestId <id>] -Confirm <id> [-ReapproveDrift <token>] [-PrintersReconciled <token>] [-Json]
   printfarmer-host-update.ps1 help
 '@
 
@@ -64,6 +65,7 @@ $release = $null
 $requestId = $null
 $confirm = $null
 $reapproveDrift = $null
+$printersReconciled = $null
 $preview = $false
 $json = $false
 
@@ -97,6 +99,11 @@ while ($index -lt $rawArgs.Count) {
             if ($null -ne $reapproveDrift) { Exit-Usage '-ReapproveDrift may only be given once' }
             if (-not $hasValue -or $rawArgs[$index + 1] -cnotmatch $DriftTokenPattern) { Exit-Usage '-ReapproveDrift requires the drift-<32 hex> token printed by -Preview' }
             $reapproveDrift = $rawArgs[$index + 1]; $index += 2; continue
+        }
+        '-printersreconciled' {
+            if ($null -ne $printersReconciled) { Exit-Usage '-PrintersReconciled may only be given once' }
+            if (-not $hasValue -or $rawArgs[$index + 1] -cnotmatch $PhysicalTokenPattern) { Exit-Usage '-PrintersReconciled requires the physical-<32 hex> token printed by -Preview' }
+            $printersReconciled = $rawArgs[$index + 1]; $index += 2; continue
         }
         '-preview' {
             if ($preview) { Exit-Usage '-Preview may only be given once' }
@@ -170,6 +177,7 @@ if ($null -ne $requestId) { $cliArgs.Add('--request-id'); $cliArgs.Add($requestI
 if ($preview) { $cliArgs.Add('--preview') }
 if ($null -ne $confirm) { $cliArgs.Add('--confirm'); $cliArgs.Add($confirm) }
 if ($null -ne $reapproveDrift) { $cliArgs.Add('--reapprove-drift'); $cliArgs.Add($reapproveDrift) }
+if ($null -ne $printersReconciled) { $cliArgs.Add('--printers-reconciled'); $cliArgs.Add($printersReconciled) }
 if ($json) { $cliArgs.Add('--json') }
 
 & $launcher @launcherArgs --config $config @cliArgs
