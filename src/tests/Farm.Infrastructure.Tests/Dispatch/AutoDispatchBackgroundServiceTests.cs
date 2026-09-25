@@ -491,9 +491,12 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
         }
     }
 
-    [Fact]
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     [Trait("Category", "Dispatch")]
-    public async Task ExecuteAsync_FenceResumed_DurableScanDispatchesQueuedJobWithoutExternalTrigger()
+    public async Task ExecuteAsync_FenceResumed_DurableScanDispatchesQueuedJobWithoutNewTrigger(
+        bool triggerWhilePaused)
     {
         SeedSettings();
         (Printer printer, Guid printerId) = SeedPrinter();
@@ -526,7 +529,15 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
                     },
                 });
 
-            elapseScanInterval();
+            if (triggerWhilePaused)
+            {
+                _trigger.NotifyJobQueued(printerId);
+            }
+            else
+            {
+                elapseScanInterval();
+            }
+
             Action elapseNextScanInterval = await scanIntervals.Reader.ReadAsync(timeout.Token);
             (await fenceFlag.IsPausedAsync(timeout.Token)).Should().BeTrue();
             _trigger.IntentStateCount.Should().Be(0);
@@ -535,7 +546,12 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
             await fenceFlag.ResumeAsync(timeout.Token);
             elapseNextScanInterval();
             await dispatchEntered.Task.WaitAsync(timeout.Token);
+            while (service.TrackedWorkerCount != 0 || _trigger.IntentStateCount != 0)
+            {
+                await Task.Delay(10, timeout.Token);
+            }
 
+            _trigger.IntentStateCount.Should().Be(0);
             _dispatchServiceMock.Verify(value => value.DispatchJobAsync(
                     job.Id, printerId, "system:auto-dispatch", It.IsAny<DispatchScore>(), It.IsAny<CancellationToken>()),
                 Times.Once);

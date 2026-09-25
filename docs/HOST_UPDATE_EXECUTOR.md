@@ -73,8 +73,11 @@ The `auto-dispatch` loop checks the same fence on trigger arrivals and on its
 dispatch is disabled. A scan tick acknowledges only after all tracked workers have
 finished; it neither cancels in-flight dispatches nor starts new ones while paused.
 Periodic reconciliation is skipped while paused and resumes after fence release,
-so queued jobs can be rediscovered without an external trigger. Allow up to the
-next scan tick after worker drain for an otherwise idle loop to acknowledge.
+so queued jobs can be rediscovered without an external trigger. Trigger ownership
+is retired when a consumed event is suppressed by the fence or abandoned after
+a scan wins the wait; otherwise its in-flight marker would prevent rediscovery.
+Allow up to the next scan tick after worker drain for an otherwise idle loop to
+acknowledge.
 
 ## Availability contract
 

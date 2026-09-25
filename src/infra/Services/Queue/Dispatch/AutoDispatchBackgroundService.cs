@@ -66,16 +66,20 @@ public sealed class AutoDispatchBackgroundService(
 
                     if (completed == scanDelay)
                     {
-                        await scanDelay;
                         await readCts.CancelAsync();
                         try
                         {
-                            _ = await readTask;
+                            // A trigger can arrive before cancellation wins. No worker owns
+                            // this read, so release it for the next durable reconciliation.
+                            DispatchTriggerEvent abandonedEvent = await readTask;
+                            _ = trigger.TryCompleteProcessing(abandonedEvent, allowRerun: false, out _);
                         }
                         catch (OperationCanceledException)
                         {
                             // Expected: the periodic durable scan won this wait.
                         }
+
+                        await scanDelay;
 
                         // Idle channels must also observe the fence, even when no queued
                         // work exists to generate a trigger during reconciliation (#2848).
@@ -113,6 +117,7 @@ public sealed class AutoDispatchBackgroundService(
                 // physically executing.
                 if (await PauseForHostUpdateAsync(stoppingToken))
                 {
+                    _ = trigger.TryCompleteProcessing(triggerEvent, allowRerun: false, out _);
                     continue;
                 }
 
