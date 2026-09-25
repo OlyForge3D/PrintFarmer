@@ -695,8 +695,173 @@ public sealed class HostUpdateCliTests : IDisposable, IAsyncLifetime
         ]).Should().BeNull("a baseline journaled after execution started does not describe the authorization");
         HostUpdateRecoveryDrift.AuthorizationBaseline(
         [
-            Activity(HostUpdateExecutionState.Accepted, "accepted", baseline with { SchemaVersion = 2 }),
+            Activity(HostUpdateExecutionState.Accepted, "accepted", baseline with { SchemaVersion = 2, ManifestBinding = "sha256:d" }),
+        ]).Should().NotBeNull("schema 2 carries the manifest binding");
+        HostUpdateRecoveryDrift.AuthorizationBaseline(
+        [
+            Activity(HostUpdateExecutionState.Accepted, "accepted", baseline with { SchemaVersion = 3 }),
         ]).Should().BeNull("an unknown schema is treated as unrecorded");
+    }
+
+    [HostStateFact]
+    public async Task Manifest_binding_is_journaled_and_unchanged_binding_is_not_drift()
+    {
+        _host.SeedRecoveryRequired();
+        _host.SeedOutcome(HostUpdateRecoveryOutcome.FenceReleasePending, "coordinated_restore");
+        IReadOnlyDictionary<string, string> before = _host.Snapshot();
+
+        CliRun run = await RunAsync(["recover", "--release", CliHostFixture.ReleaseId, "--preview", "--json"]);
+
+        _host.CurrentBaseline().ManifestBinding.Should().Be(CliHostFixture.TargetManifestDigest);
+        DriftCodes(Envelope(run).GetProperty("result").GetProperty("drift")).Should().BeEmpty();
+        _host.Snapshot().Should().BeEquivalentTo(before, "the binding is read without writing the database");
+    }
+
+    [HostStateFact]
+    public async Task Changed_manifest_binding_is_drift_and_rebinds_the_token()
+    {
+        _host.SeedRecoveryRequired();
+        _host.SeedOutcome(HostUpdateRecoveryOutcome.FenceReleasePending, "coordinated_restore");
+        string changedDigest = "sha256:" + new string('c', 64);
+        _host.SeedManifestBinding(changedDigest);
+
+        CliRun first = await RunAsync(["recover", "--release", CliHostFixture.ReleaseId, "--preview", "--json"]);
+        _host.SeedManifestBinding("sha256:" + new string('e', 64));
+        CliRun second = await RunAsync(["recover", "--release", CliHostFixture.ReleaseId, "--preview", "--json"]);
+
+        JsonElement drift = Envelope(first).GetProperty("result").GetProperty("drift");
+        DriftCodes(drift).Should().Equal("manifest_binding_drift");
+        drift.GetProperty("items")[0].GetProperty("recorded").GetString().Should().Be(CliHostFixture.TargetManifestDigest);
+        drift.GetProperty("items")[0].GetProperty("observed").GetString().Should().Be(changedDigest);
+        Envelope(second).GetProperty("result").GetProperty("drift").GetProperty("reapprovalToken").GetString()
+            .Should().NotBe(drift.GetProperty("reapprovalToken").GetString(), "the token binds the observed manifest binding");
+    }
+
+    [HostStateFact]
+    public async Task Deleted_manifest_binding_is_drift()
+    {
+        _host.SeedRecoveryRequired();
+        _host.SeedOutcome(HostUpdateRecoveryOutcome.FenceReleasePending, "coordinated_restore");
+        _host.SeedManifestBinding(null);
+
+        CliRun run = await RunAsync(["recover", "--release", CliHostFixture.ReleaseId, "--preview", "--json"]);
+
+        JsonElement item = Envelope(run).GetProperty("result").GetProperty("drift").GetProperty("items")[0];
+        item.GetProperty("code").GetString().Should().Be("manifest_binding_drift");
+        item.GetProperty("observed").GetString().Should().Be(ReadOnlyHostUpdateManifestBindingReader.NoBinding);
+    }
+
+    [HostStateFact]
+    public Task Corrupt_manifest_binding_is_drift_never_no_drift() => AssertUnreadableBindingIsDriftAsync("corrupt");
+
+    [HostStateFact]
+    public Task Missing_database_is_manifest_binding_drift_never_no_drift() => AssertUnreadableBindingIsDriftAsync("missing-database");
+
+    private async Task AssertUnreadableBindingIsDriftAsync(string failure)
+    {
+        _host.SeedRecoveryRequired();
+        _host.SeedOutcome(HostUpdateRecoveryOutcome.FenceReleasePending, "coordinated_restore");
+        if (failure == "corrupt")
+        {
+            _host.SeedManifestBinding(null, rawJson: "{not json");
+        }
+        else
+        {
+            File.Delete(_host.DatabasePath);
+        }
+
+        CliRun run = await RunAsync(["recover", "--release", CliHostFixture.ReleaseId, "--preview", "--json"]);
+
+        JsonElement item = Envelope(run).GetProperty("result").GetProperty("drift").GetProperty("items")[0];
+        item.GetProperty("code").GetString().Should().Be("manifest_binding_drift");
+        item.GetProperty("observed").GetString().Should().StartWith("unreadable:");
+        run.Output.Should().NotContain(_host.DatabasePath, "provider errors are reduced to their type");
+    }
+
+    [HostStateTheory]
+    [InlineData("none")]
+    [InlineData("sha256:abc")]
+    [InlineData("SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")]
+    [InlineData("Password=hunter2-secret-like-text")]
+    public async Task Non_canonical_persisted_digest_is_unreadable_drift_and_never_emitted(string persisted)
+    {
+        _host.SeedRecoveryRequired();
+        _host.SeedOutcome(HostUpdateRecoveryOutcome.FenceReleasePending, "coordinated_restore");
+        _host.SeedManifestBinding(persisted);
+
+        CliRun json = await RunAsync(["recover", "--release", CliHostFixture.ReleaseId, "--preview", "--json"]);
+        CliRun text = await RunAsync(["recover", "--release", CliHostFixture.ReleaseId, "--preview"]);
+
+        JsonElement item = Envelope(json).GetProperty("result").GetProperty("drift").GetProperty("items")[0];
+        item.GetProperty("code").GetString().Should().Be("manifest_binding_drift");
+        item.GetProperty("observed").GetString().Should().Be("unreadable:InvalidDataException");
+        if (persisted != ReadOnlyHostUpdateManifestBindingReader.NoBinding)
+        {
+            json.Output.Should().NotContain(persisted);
+            text.Output.Should().NotContain(persisted);
+        }
+    }
+
+    [HostStateTheory]
+    [InlineData("corrupt")]
+    [InlineData("missing-database")]
+    public async Task Unreadable_binding_after_rollback_is_reported_and_confirm_stays_a_durable_no_op(string failure)
+    {
+        _host.SeedRecoveryRequired();
+        _host.SeedOutcome(HostUpdateRecoveryOutcome.RolledBack, "coordinated_restore");
+        if (failure == "corrupt")
+        {
+            _host.SeedManifestBinding(null, rawJson: "{not json");
+        }
+        else
+        {
+            File.Delete(_host.DatabasePath);
+        }
+
+        CliRun preview = await RunAsync(["recover", "--release", CliHostFixture.ReleaseId, "--preview", "--json"]);
+        CliRun confirm = await RunAsync(["recover", "--release", CliHostFixture.ReleaseId, "--confirm", CliHostFixture.ReleaseId, "--json"]);
+
+        JsonElement drift = Envelope(preview).GetProperty("result").GetProperty("drift");
+        DriftCodes(drift).Should().Equal("manifest_binding_drift");
+        drift.GetProperty("items")[0].GetProperty("observed").GetString().Should().StartWith("unreadable:");
+        drift.GetProperty("reapprovalRequired").GetBoolean().Should().BeFalse("confirm is a durable no-op after rollback");
+        (drift.TryGetProperty("reapprovalToken", out JsonElement token) && token.ValueKind != JsonValueKind.Null).Should().BeFalse("no token is issued after rollback");
+        if (failure == "corrupt")
+        {
+            confirm.ExitCode.Should().Be(HostUpdateCliExitCodes.Success);
+            Envelope(confirm).GetProperty("result").GetProperty("outcome").GetString().Should().Be("RolledBack");
+        }
+        else
+        {
+            // Confirm independently proves the database path exists before acting.
+            confirm.ExitCode.Should().Be(HostUpdateCliExitCodes.ConfigurationUnproven);
+        }
+    }
+
+    [HostStateFact]
+    public async Task Unchanged_binding_after_rollback_is_not_drift()
+    {
+        _host.SeedRecoveryRequired();
+        _host.SeedOutcome(HostUpdateRecoveryOutcome.RolledBack, "coordinated_restore");
+
+        CliRun preview = await RunAsync(["recover", "--release", CliHostFixture.ReleaseId, "--preview", "--json"]);
+
+        DriftCodes(Envelope(preview).GetProperty("result").GetProperty("drift")).Should().BeEmpty();
+    }
+
+    [HostStateFact]
+    public async Task Schema_1_baseline_reports_the_manifest_binding_as_unrecorded_drift()
+    {
+        HostUpdateAuthorizationBaseline current = _host.CurrentBaseline();
+        _host.SeedRecoveryRequired(baseline: current with { SchemaVersion = 1, ManifestBinding = null });
+        _host.SeedOutcome(HostUpdateRecoveryOutcome.FenceReleasePending, "coordinated_restore");
+
+        CliRun run = await RunAsync(["recover", "--release", CliHostFixture.ReleaseId, "--preview", "--json"]);
+
+        JsonElement item = Envelope(run).GetProperty("result").GetProperty("drift").GetProperty("items")[0];
+        item.GetProperty("code").GetString().Should().Be("manifest_binding_drift");
+        item.GetProperty("recorded").GetString().Should().Be("unrecorded");
+        item.GetProperty("observed").GetString().Should().Be(CliHostFixture.TargetManifestDigest);
     }
 
     [HostStateFact]
