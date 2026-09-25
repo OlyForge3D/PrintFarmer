@@ -351,6 +351,34 @@ public class HostUpdateExecutionOptionsValidatorTests
         result.FailureMessage.Should().Contain("ComposeFiles entries must not be empty");
     }
 
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void Validate_BlankActiveServiceIdEntry_Fails(string entry)
+    {
+        string root = Path.Combine(Path.GetPathRoot(Path.GetTempPath()) ?? "C:\\", "printfarmer-host-updates-test-root");
+        HostUpdateExecutionOptions options = ValidOptions(root);
+        options.ActiveServiceIds = ["monolith", entry];
+
+        ValidateOptionsResult result = Validator.Validate(null, options);
+
+        result.Failed.Should().BeTrue();
+        result.FailureMessage.Should().Contain("ActiveServiceIds entries must not be empty");
+    }
+
+    [Fact]
+    public void Validate_EmptyActiveServiceIds_Fails()
+    {
+        string root = Path.Combine(Path.GetPathRoot(Path.GetTempPath()) ?? "C:\\", "printfarmer-host-updates-test-root");
+        HostUpdateExecutionOptions options = ValidOptions(root);
+        options.ActiveServiceIds = [];
+
+        ValidateOptionsResult result = Validator.Validate(null, options);
+
+        result.Failed.Should().BeTrue();
+        result.FailureMessage.Should().Contain("ActiveServiceIds must list at least one active service");
+    }
+
     [Fact]
     public void Validate_ServiceMappingMissingField_Fails()
     {

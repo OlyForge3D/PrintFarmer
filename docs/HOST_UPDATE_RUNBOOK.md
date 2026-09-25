@@ -279,6 +279,13 @@ Known limits of this slice:
   (#2997); list every compose file the installation applies, in `-f` order.
   The built-in default applies only when no `ComposeFiles` entry is configured;
   a blank entry fails startup validation.
+- `ActiveServiceIds` follows the same rule (#3042): a non-empty configured
+  list replaces the built-in split-topology service set for both the API and
+  the CLI, so a monolith host lists only its actual services. A blank entry
+  fails startup validation. The safety lists `SupportedProviderNames`,
+  `RequiredAggregateHealthResultNames` and `RequiredFencedWriterNames` stay
+  additive: configured entries extend the built-in set and can never drop a
+  code-owned provider check, health result or fenced writer.
 - Wrapper parity is regression-tested in CI (`deployment-tests.yml`,
   `host-update-wrapper-tests`): `tests/test-host-update-cli-wrapper.sh` and
   `tests/test-host-update-cli-wrapper.ps1` both run on Ubuntu, macOS and

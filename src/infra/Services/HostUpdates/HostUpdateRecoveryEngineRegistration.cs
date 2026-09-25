@@ -22,7 +22,7 @@ public static class HostUpdateRecoveryEngineRegistration
         IConfigurationSection section = configuration.GetSection(HostUpdateExecutionOptions.SectionName);
         services.AddOptions<HostUpdateExecutionOptions>()
             .Bind(section)
-            .Configure(options => ReplaceConfiguredComposeFiles(options, section))
+            .Configure(options => ReplaceConfiguredTopologyLists(options, section))
             .ValidateOnStart();
         services.AddSingleton<IValidateOptions<HostUpdateExecutionOptions>, HostUpdateExecutionOptionsValidator>();
         services.AddSingleton(sp => sp.GetRequiredService<IOptions<HostUpdateExecutionOptions>>().Value);
@@ -143,17 +143,30 @@ public static class HostUpdateRecoveryEngineRegistration
 
     /// <summary>
     /// The configuration binder appends bound array entries to an initialised default instead of
-    /// replacing it, so a configured compose set would silently keep the built-in template path
-    /// too (issue #2997). A non-empty configured <c>ComposeFiles</c> list is authoritative; the
-    /// built-in default applies only when no entry is configured.
+    /// replacing it, so a configured topology would silently keep the built-in split-topology
+    /// entries too (issues #2997 and #3042). A non-empty configured <c>ComposeFiles</c> or
+    /// <c>ActiveServiceIds</c> list is authoritative; the built-in default applies only when no
+    /// entry is configured. Safety allowlists/requirements (<c>SupportedProviderNames</c>,
+    /// <c>RequiredAggregateHealthResultNames</c>, <c>RequiredFencedWriterNames</c>) deliberately
+    /// stay additive so configuration can never drop a code-owned requirement.
     /// </summary>
-    private static void ReplaceConfiguredComposeFiles(HostUpdateExecutionOptions options, IConfiguration section)
+    private static void ReplaceConfiguredTopologyLists(HostUpdateExecutionOptions options, IConfiguration section)
     {
-        string[]? configured = section.GetSection(nameof(HostUpdateExecutionOptions.ComposeFiles)).Get<string[]>();
-        if (configured is { Length: > 0 })
+        if (ConfiguredList(section, nameof(HostUpdateExecutionOptions.ComposeFiles)) is { } composeFiles)
         {
-            options.ComposeFiles = configured;
+            options.ComposeFiles = composeFiles;
         }
+
+        if (ConfiguredList(section, nameof(HostUpdateExecutionOptions.ActiveServiceIds)) is { } activeServiceIds)
+        {
+            options.ActiveServiceIds = activeServiceIds;
+        }
+    }
+
+    private static string[]? ConfiguredList(IConfiguration section, string key)
+    {
+        string[]? configured = section.GetSection(key).Get<string[]>();
+        return configured is { Length: > 0 } ? configured : null;
     }
 
     private static HostUpdateImageApplier CreateImageApplier(IServiceProvider sp, HostUpdateExecutionOptions options)

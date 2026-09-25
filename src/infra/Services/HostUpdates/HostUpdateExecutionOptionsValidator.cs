@@ -108,6 +108,15 @@ public sealed class HostUpdateExecutionOptionsValidator : IValidateOptions<HostU
             failures.Add("HostUpdateExecution:ComposeFiles entries must not be empty.");
         }
 
+        if (options.ActiveServiceIds is null || options.ActiveServiceIds.Length == 0)
+        {
+            failures.Add("HostUpdateExecution:ActiveServiceIds must list at least one active service.");
+        }
+        else if (options.ActiveServiceIds.Any(string.IsNullOrWhiteSpace))
+        {
+            failures.Add("HostUpdateExecution:ActiveServiceIds entries must not be empty.");
+        }
+
         if (options.ServiceMappings is null || options.ServiceMappings.Length == 0)
         {
             failures.Add("HostUpdateExecution:ServiceMappings must map at least one service.");

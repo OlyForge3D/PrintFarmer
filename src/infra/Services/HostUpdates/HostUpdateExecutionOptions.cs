@@ -51,6 +51,9 @@ public sealed class HostUpdateExecutionOptions
     /// <summary>
     /// EF Core provider names (<c>DbContext.Database.ProviderName</c>) this executor is allowed
     /// to migrate. Any installed provider outside this allowlist fails preflight closed.
+    /// Configured entries are appended to (never replace) this default; preflight additionally
+    /// requires the provider to be supported by the target-image migration runner, so
+    /// configuration cannot enable an unsupported provider.
     /// </summary>
     public string[] SupportedProviderNames { get; set; } =
     [
@@ -104,6 +107,8 @@ public sealed class HostUpdateExecutionOptions
     /// <summary>
     /// Active compose services for this host topology. The resolver authenticates the full staged
     /// artifact set, but apply/verify only target services actually running in this topology.
+    /// A non-empty configured list replaces this split-topology default (issue #3042), so a
+    /// monolith host can narrow it to its actual services; blank entries fail startup validation.
     /// </summary>
     public string[] ActiveServiceIds { get; set; } =
     [
@@ -157,7 +162,8 @@ public sealed class HostUpdateExecutionOptions
 
     /// <summary>Compose files (in <c>-f</c> order) applied for the currently configured topology. Must
     /// define every compose service named in <see cref="ServiceMappings"/> that this deployment
-    /// actually runs; an unmapped or file-absent service fails the apply step closed.
+    /// actually runs; an unmapped or file-absent service fails the apply step closed. A non-empty
+    /// configured list replaces this default (issue #2997).
     /// </summary>
     public string[] ComposeFiles { get; set; } = ["scripts/docker/compose-templates/docker-compose.daily-registry.yml"];
 
@@ -166,7 +172,8 @@ public sealed class HostUpdateExecutionOptions
     /// <summary>
     /// Required entries inside the API <c>/health</c> aggregate result. Missing or non-Healthy
     /// entries fail verification closed so a top-level healthy-looking response cannot hide a
-    /// skipped subsystem probe.
+    /// skipped subsystem probe. Configured entries are appended to (never replace) this default,
+    /// so configuration can add required results but never drop a code-owned one.
     /// </summary>
     public string[] RequiredAggregateHealthResultNames { get; set; } = ["comprehensive", "signalr", "spoolman"];
 

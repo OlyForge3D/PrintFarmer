@@ -50,6 +50,67 @@ public class HostUpdateExecutionOptionsDefaultsTests
         options.ComposeFiles.Should().Equal(new HostUpdateExecutionOptions().ComposeFiles);
     }
 
+    [Fact]
+    public void ConfiguredActiveServiceIds_ReplaceBuiltInDefault()
+    {
+        HostUpdateExecutionOptions options = BindThroughRegistration(new Dictionary<string, string?>
+        {
+            ["HostUpdateExecution:ActiveServiceIds:0"] = "monolith",
+        });
+
+        options.ActiveServiceIds.Should().Equal("monolith");
+    }
+
+    [Fact]
+    public void UnconfiguredActiveServiceIds_KeepBuiltInDefault()
+    {
+        HostUpdateExecutionOptions options = BindThroughRegistration(new Dictionary<string, string?>
+        {
+            ["HostUpdateExecution:ComposeProjectName"] = "printfarmer",
+        });
+
+        options.ActiveServiceIds.Should().Equal(new HostUpdateExecutionOptions().ActiveServiceIds);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void ConfiguredBlankActiveServiceId_FailsValidationThroughRegistration(string entry)
+    {
+        string root = Path.Combine(Path.GetPathRoot(Path.GetTempPath()) ?? "C:\\", "printfarmer-host-updates-test-root");
+        HostUpdateExecutionOptions options = BindThroughRegistration(new Dictionary<string, string?>
+        {
+            ["HostUpdateExecution:RootDirectory"] = root,
+            ["HostUpdateExecution:ActiveServiceIds:0"] = "monolith",
+            ["HostUpdateExecution:ActiveServiceIds:1"] = entry,
+        });
+
+        options.ActiveServiceIds.Should().HaveCount(2);
+        ValidateOptionsResult result = new HostUpdateExecutionOptionsValidator().Validate(null, options);
+
+        result.Failed.Should().BeTrue();
+        result.FailureMessage.Should().Contain("ActiveServiceIds entries must not be empty");
+    }
+
+    [Fact]
+    public void ConfiguredSafetyLists_StayAdditiveToBuiltInDefaults()
+    {
+        var defaults = new HostUpdateExecutionOptions();
+        HostUpdateExecutionOptions options = BindThroughRegistration(new Dictionary<string, string?>
+        {
+            ["HostUpdateExecution:SupportedProviderNames:0"] = "Extra.Provider",
+            ["HostUpdateExecution:RequiredAggregateHealthResultNames:0"] = "extra-health",
+            ["HostUpdateExecution:RequiredFencedWriterNames:0"] = "extra-writer",
+        });
+
+        string[] expectedProviders = [.. defaults.SupportedProviderNames, "Extra.Provider"];
+        string[] expectedHealth = [.. defaults.RequiredAggregateHealthResultNames, "extra-health"];
+        string[] expectedWriters = [.. defaults.RequiredFencedWriterNames, "extra-writer"];
+        options.SupportedProviderNames.Should().Equal(expectedProviders.AsEnumerable());
+        options.RequiredAggregateHealthResultNames.Should().Equal(expectedHealth.AsEnumerable());
+        options.RequiredFencedWriterNames.Should().Equal(expectedWriters.AsEnumerable());
+    }
+
     private static HostUpdateExecutionOptions BindThroughRegistration(Dictionary<string, string?> values)
     {
         IConfiguration configuration = new ConfigurationBuilder().AddInMemoryCollection(values).Build();
