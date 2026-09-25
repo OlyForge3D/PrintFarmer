@@ -277,11 +277,13 @@ SHA-256, its members and `host-update-cli-package.json`, proves the CLI
 launches, and only then places it at `<install-root>/<version>` (default
 `/opt/printfarmer/host-update-cli` or `C:\Program Files\PrintFarmer\HostUpdateCli`).
 A failure places nothing. Versions are immutable: if `<install-root>/<version>`
-already exists it is accepted only when identical to the verified archive;
-otherwise it is refused and left untouched (remove it once no update or recovery
-needs it, then rerun). The install root must not be group- or world-writable
-on Linux, or writable by anyone other than `SYSTEM`, `Administrators`,
-`TrustedInstaller` and the installing account on Windows.
+already exists it is accepted only when its bytes, modes (Linux) or ACLs
+(Windows) match the verified archive and its own launcher runs; otherwise it is
+refused and left untouched (remove it once no update or recovery needs it, then
+rerun). The install root must be owned by root or the installing account and
+not be group- or world-writable on Linux; on Windows it must not be owned by or
+writable by anyone other than `SYSTEM`, `Administrators`, `TrustedInstaller`
+and the installing account.
 The runtime is detected from the host; musl/Alpine and macOS are refused.
 
 `write-config` writes `host-update.json` from only the deployment `.env`'s

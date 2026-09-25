@@ -69,14 +69,17 @@ function Test-Link([string] $Path) {
     return $null -ne $item -and ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint)
 }
 
-# True when both trees hold the same relative paths, no reparse points, and identical file bytes.
+# True when both trees hold the same relative paths, no reparse points, identical file bytes and
+# (off Windows) identical Unix modes.
 function Test-TreeEqual([string] $Expected, [string] $Actual) {
     function Get-Tree([string] $Root) {
         $tree = [System.Collections.Generic.SortedDictionary[string, string]]::new([System.StringComparer]::Ordinal)
         foreach ($item in Get-ChildItem -LiteralPath $Root -Recurse -Force) {
             if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { return $null }
             $relative = [System.IO.Path]::GetRelativePath($Root, $item.FullName)
-            $tree[$relative] = if ($item.PSIsContainer) { '<dir>' } else { (Get-FileHash -LiteralPath $item.FullName -Algorithm SHA256).Hash }
+            $value = if ($item.PSIsContainer) { '<dir>' } else { (Get-FileHash -LiteralPath $item.FullName -Algorithm SHA256).Hash }
+            if (-not $IsWindows) { $value += " $([int] $item.UnixFileMode)" }
+            $tree[$relative] = $value
         }
         return , $tree
     }
@@ -87,13 +90,18 @@ function Test-TreeEqual([string] $Expected, [string] $Actual) {
         $value = $null
         if (-not $right.TryGetValue($entry.Key, [ref] $value) -or $value -cne $entry.Value) { return $false }
     }
+    if (-not $IsWindows) {
+        $owners = foreach ($root in $Expected, $Actual) { (& find $root -printf '%u:%g %P\n' | Sort-Object -CaseSensitive) -join "`n" }
+        if ($owners[0] -cne $owners[1]) { return $false }
+    }
     return $true
 }
 
-# Windows counterpart of the Unix group/world-writable check: only SYSTEM, Administrators,
-# TrustedInstaller, the creator-owner placeholder and the installing account may be able to
-# modify the install root or anything that inherits from it.
-function Assert-InstallRootAcl([string] $Path) {
+# Windows counterpart of the Unix ownership and group/world-writable checks: only SYSTEM,
+# Administrators, TrustedInstaller, the creator-owner placeholder and the installing account may
+# own the path or be able to modify it or anything that inherits from it. Returns the first
+# untrusted SID, or $null.
+function Get-UntrustedWriter([string] $Path) {
     $trusted = @('S-1-5-18', 'S-1-5-32-544', 'S-1-3-0',
         'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464',
         [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value)
@@ -101,13 +109,19 @@ function Assert-InstallRootAcl([string] $Path) {
     # WriteAttributes, Delete, ChangePermissions, TakeOwnership, GENERIC_ALL, GENERIC_WRITE.
     $writeMask = 0x2 -bor 0x4 -bor 0x10 -bor 0x40 -bor 0x100 -bor 0x10000 -bor 0x40000 -bor 0x80000 -bor 0x10000000 -bor 0x40000000
     $acl = Get-Acl -LiteralPath $Path
+    $owner = $acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value
+    if ($owner -notin $trusted) { return $owner }
     foreach ($rule in $acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])) {
         if ($rule.AccessControlType -ne [System.Security.AccessControl.AccessControlType]::Allow) { continue }
         if (([int64] $rule.FileSystemRights -band $writeMask) -eq 0) { continue }
-        if ($rule.IdentityReference.Value -notin $trusted) {
-            Stop-Install "Install root is writable by $($rule.IdentityReference.Value): $Path"
-        }
+        if ($rule.IdentityReference.Value -notin $trusted) { return $rule.IdentityReference.Value }
     }
+    return $null
+}
+
+function Assert-InstallRootAcl([string] $Path) {
+    $untrusted = Get-UntrustedWriter $Path
+    if ($untrusted) { Stop-Install "Install root is owned or writable by ${untrusted}: $Path" }
 }
 
 function Get-Options([string[]] $Arguments, [string[]] $Names) {
@@ -257,6 +271,10 @@ function Invoke-Install([string[]] $Arguments) {
             if ($mode -band ([System.IO.UnixFileMode]::GroupWrite -bor [System.IO.UnixFileMode]::OtherWrite)) {
                 Stop-Install "Install root is group- or world-writable: $installRoot"
             }
+            $rootUid = [string] (& stat -c %u -- $installRoot)
+            if ($LASTEXITCODE -ne 0 -or ($rootUid -ne '0' -and $rootUid -ne [string] (& id -u))) {
+                Stop-Install "Install root is owned by another account (uid $rootUid): $installRoot"
+            }
         }
 
         # Staged on the install root's volume so placement is a rename.
@@ -284,11 +302,22 @@ function Invoke-Install([string[]] $Arguments) {
         }
 
         # Release versions are immutable, and replacing a directory is never atomic, so an
-        # existing placement is only accepted when it is identical to the verified archive.
+        # existing placement is only accepted when it matches the verified archive, no entry is
+        # owned or writable by an untrusted account, and its own launcher runs.
         $target = Join-Path $installRoot $version
         if (Test-Path -LiteralPath $target) {
-            if (-not (Test-Path -LiteralPath $target -PathType Container) -or (Test-Link $target) -or
-                -not (Test-TreeEqual $stage $target)) {
+            $accepted = (Test-Path -LiteralPath $target -PathType Container) -and -not (Test-Link $target) -and
+                (Test-TreeEqual $stage $target)
+            if ($accepted -and $IsWindows) {
+                foreach ($entry in @(Get-Item -LiteralPath $target -Force) + @(Get-ChildItem -LiteralPath $target -Recurse -Force)) {
+                    if (Get-UntrustedWriter $entry.FullName) { $accepted = $false; break }
+                }
+            }
+            if ($accepted) {
+                $targetHelp = try { (& (Join-Path $target "cli/$launcherName") help 2>&1 | Out-String) } catch { '' }
+                $accepted = $LASTEXITCODE -eq 0 -and $targetHelp.Contains('printfarmer-host-update status')
+            }
+            if (-not $accepted) {
                 Stop-Install "$target already exists and differs from the verified release; nothing was changed. Remove it (once no update or recovery needs it) and rerun"
             }
             [Console]::Error.WriteLine("The verified host-update CLI $version ($runtime) is already installed at $target")
@@ -439,9 +468,7 @@ function Invoke-WriteConfig([string[]] $Arguments) {
             -not (Test-Link $rootDirectory)) {
             $owner = Get-ItemOwner $rootDirectory
         } else {
-            if (Test-Path -LiteralPath $rootDirectory) {
-                [Console]::Error.WriteLine('HostUpdateExecution__RootDirectory is not an absolute, non-link directory; host-update.json is owned by the current account')
-            }
+            [Console]::Error.WriteLine('HostUpdateExecution__RootDirectory is not an existing absolute, non-link directory; host-update.json is owned by the current account')
             $owner = if ($IsWindows) { [System.Security.Principal.WindowsIdentity]::GetCurrent().Name } else { [string] (& id -un) }
         }
     }

@@ -136,6 +136,15 @@ check "a differing same-version placement is refused and left untouched" \
 rm -rf -- "${ROOT:?}/$STABLE"
 check "a removed placement can be reinstalled" \
     "[[ \$(run_install --version $STABLE --asset-dir '$ASSETS' --install-root '$ROOT') == 0 && -d '$ROOT/$STABLE/cli' ]]"
+chmod a-x "$ROOT/$STABLE/cli/Farm.HostUpdate.Cli"
+check "a same-version placement with a non-executable launcher is refused and left untouched" \
+    "[[ \$(run_install --version $STABLE --asset-dir '$ASSETS' --install-root '$ROOT') == 1 && ! -x '$ROOT/$STABLE/cli/Farm.HostUpdate.Cli' ]] && grep -q 'differs from the verified release' '$TEST_ROOT/out.log'"
+chmod a+x "$ROOT/$STABLE/cli/Farm.HostUpdate.Cli"
+if [[ "$(id -u)" == "0" ]] && id nobody >/dev/null 2>&1; then
+    mkdir -p "$TEST_ROOT/foreign-root" && chown nobody "$TEST_ROOT/foreign-root" && chmod 0755 "$TEST_ROOT/foreign-root"
+    check "an install root owned by another account is refused" \
+        "[[ \$(run_install --version $STABLE --asset-dir '$ASSETS' --install-root '$TEST_ROOT/foreign-root') == 1 && -z \$(ls -A '$TEST_ROOT/foreign-root') ]] && grep -q 'owned by another account' '$TEST_ROOT/out.log'"
+fi
 
 make_release 2.0.0 "$TEST_ROOT/v2"
 check "signature failure exits 1 and places nothing" \
@@ -230,7 +239,13 @@ check "a relative env file is a usage error" "[[ \$(write_config --env-file depl
 ln -s "$STATE_ROOT" "$TEST_ROOT/state-link"
 printf 'HostUpdateExecution__RootDirectory=%s\n' "$TEST_ROOT/state-link" >"$ENV"
 check "a symlinked state root is not trusted as the config owner" \
-    "[[ \$(write_config --env-file '$ENV' --output '$CONFIG') == 0 && \$(ls -ld '$CONFIG' | awk '{print \$3}') == \$(id -un) ]] && grep -q 'not an absolute, non-link directory' '$TEST_ROOT/out.log'"
+    "[[ \$(write_config --env-file '$ENV' --output '$CONFIG') == 0 && \$(ls -ld '$CONFIG' | awk '{print \$3}') == \$(id -un) ]] && grep -q 'non-link directory' '$TEST_ROOT/out.log'"
+printf 'HostUpdateExecution__RootDirectory=%s\n' "$TEST_ROOT/not-created-yet" >"$ENV"
+check "a missing state root warns that the current user owns the config" \
+    "[[ \$(write_config --env-file '$ENV' --output '$CONFIG') == 0 ]] && grep -q 'non-link directory' '$TEST_ROOT/out.log'"
+printf 'HostUpdateExecution__RootDirectory=relative/state\n' >"$ENV"
+check "a relative state root warns that the current user owns the config" \
+    "[[ \$(write_config --env-file '$ENV' --output '$CONFIG') == 0 ]] && grep -q 'non-link directory' '$TEST_ROOT/out.log'"
 
 # deploy-docker.sh opt-in hook: run the real function against a recording stub installer.
 HOOK_DIR="$TEST_ROOT/hook"

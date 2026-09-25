@@ -128,6 +128,17 @@ verify_manifest() {
     done
 }
 
+# True when an existing placement matches the verified staging tree in bytes, entry types,
+# modes and ownership, and its own launcher runs.
+placement_matches() {
+    local expected="$1" actual="$2" help_text
+    diff -r --no-dereference -- "$expected" "$actual" >/dev/null 2>&1 || return 1
+    [[ "$(cd -- "$expected" && find . -printf '%y %m %u:%g %p\n' | LC_ALL=C sort)" == \
+        "$(cd -- "$actual" && find . -printf '%y %m %u:%g %p\n' | LC_ALL=C sort)" ]] || return 1
+    help_text="$("$actual/cli/Farm.HostUpdate.Cli" help 2>&1)" || return 1
+    [[ "$help_text" == *"printfarmer-host-update status"* ]]
+}
+
 cmd_install() {
     local version="" asset_dir="" install_root="$DEFAULT_INSTALL_ROOT" runtime=""
     while [[ $# -gt 0 ]]; do
@@ -192,6 +203,10 @@ cmd_install() {
     if [[ -n "$(find "$install_root" -maxdepth 0 \( -perm -002 -o -perm -020 \) -print)" ]]; then
         fail "Install root is group- or world-writable: $install_root"
     fi
+    local root_uid
+    root_uid="$(stat -c %u -- "$install_root")" || fail "Could not read the owner of $install_root"
+    [[ "$root_uid" == "0" || "$root_uid" == "$(id -u)" ]] ||
+        fail "Install root is owned by another account (uid $root_uid): $install_root"
 
     # Staged on the install root's filesystem so placement is a rename.
     stage_dir="$(mktemp -d "$install_root/.staging.XXXXXX")"
@@ -210,12 +225,12 @@ cmd_install() {
         fail "The host-update CLI does not run on this host ($runtime)"
 
     # Release versions are immutable, and replacing a directory is never atomic, so an existing
-    # placement is only accepted when it is byte-identical to the verified archive.
+    # placement is only accepted when its bytes, types, modes and ownership match the verified
+    # archive and its own launcher runs.
     local target="$install_root/$version"
     if [[ -e "$target" || -L "$target" ]]; then
         [[ -d "$target" && ! -L "$target" ]] || fail "$target exists and is not a directory; nothing was changed"
-        if ! diff -r --no-dereference -- "$stage_dir" "$target" >/dev/null 2>&1 ||
-            [[ -n "$(find "$target" \( -perm -002 -o -perm -020 -o -type l \) -print -quit)" ]]; then
+        if ! placement_matches "$stage_dir" "$target"; then
             fail "$target already exists and differs from the verified release; nothing was changed. Remove it (once no update or recovery needs it) and rerun"
         fi
         log_success "The verified host-update CLI $version ($runtime) is already installed at $target"
@@ -339,8 +354,7 @@ cmd_write_config() {
         if [[ "$root" == /* && -d "$root" && ! -L "$root" ]]; then
             owner="$(owner_of "$root")" || fail "Could not read the owner of $root"
         else
-            [[ ! -e "$root" && ! -L "$root" ]] ||
-                log_warn "HostUpdateExecution__RootDirectory is not an absolute, non-link directory; host-update.json is owned by the current user" >&2
+            log_warn "HostUpdateExecution__RootDirectory is not an existing absolute, non-link directory; host-update.json is owned by the current user" >&2
             owner="$(id -un)"
         fi
     fi

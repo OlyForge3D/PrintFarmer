@@ -154,6 +154,27 @@ exit 0
     Remove-Item -LiteralPath (Join-Path $root '1.2.3') -Recurse -Force
     $result = Invoke-Installer @('install', '-Version', '1.2.3', '-Runtime', $runtime, '-AssetDir', $assets, '-InstallRoot', $root)
     Check 'a removed placement can be reinstalled' ($result.ExitCode -eq 0 -and (Test-Path (Join-Path $root "1.2.3/$launcherName")))
+    $placedLauncher = Join-Path $root "1.2.3/$launcherName"
+    if ($IsWindows) {
+        $placedAcl = Get-Acl -LiteralPath $placedLauncher
+        $placedAcl.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new(
+            [System.Security.Principal.SecurityIdentifier]::new('S-1-5-32-545'), 'Modify', 'Allow'))
+        Set-Acl -LiteralPath $placedLauncher -AclObject $placedAcl
+        $result = Invoke-Installer @('install', '-Version', '1.2.3', '-Runtime', $runtime, '-AssetDir', $assets, '-InstallRoot', $root)
+        Check 'a same-version placement with an untrusted writable entry is refused' ($result.ExitCode -eq 1 -and
+            $result.Output.Contains('differs from the verified release'))
+        $placedAcl.RemoveAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new(
+            [System.Security.Principal.SecurityIdentifier]::new('S-1-5-32-545'), 'Modify', 'Allow')) | Out-Null
+        Set-Acl -LiteralPath $placedLauncher -AclObject $placedAcl
+    } else {
+        & chmod a-x -- $placedLauncher
+        $result = Invoke-Installer @('install', '-Version', '1.2.3', '-Runtime', $runtime, '-AssetDir', $assets, '-InstallRoot', $root)
+        Check 'a same-version placement with a non-executable launcher is refused' ($result.ExitCode -eq 1 -and
+            $result.Output.Contains('differs from the verified release'))
+        & chmod a+x -- $placedLauncher
+    }
+    $result = Invoke-Installer @('install', '-Version', '1.2.3', '-Runtime', $runtime, '-AssetDir', $assets, '-InstallRoot', $root)
+    Check 'a restored placement is accepted again' ($result.ExitCode -eq 0)
 
     if ($IsWindows) {
         $openRoot = Join-Path $testRoot 'OpenRoot'
@@ -165,6 +186,19 @@ exit 0
         $result = Invoke-Installer @('install', '-Version', '1.2.3', '-Runtime', $runtime, '-AssetDir', $assets, '-InstallRoot', $openRoot)
         Check 'an install root writable by Users is refused and nothing is placed' ($result.ExitCode -eq 1 -and
             $result.Output.Contains('writable by S-1-5-32-545') -and @(Get-ChildItem -LiteralPath $openRoot -Force).Count -eq 0)
+
+        $foreignRoot = Join-Path $testRoot 'ForeignRoot'
+        New-Item -ItemType Directory -Path $foreignRoot | Out-Null
+        $foreignAcl = Get-Acl -LiteralPath $foreignRoot
+        $foreignAcl.SetOwner([System.Security.Principal.SecurityIdentifier]::new('S-1-5-32-545'))
+        $ownerSet = try { Set-Acl -LiteralPath $foreignRoot -AclObject $foreignAcl -ErrorAction Stop; $true } catch { $false }
+        if ($ownerSet) {
+            $result = Invoke-Installer @('install', '-Version', '1.2.3', '-Runtime', $runtime, '-AssetDir', $assets, '-InstallRoot', $foreignRoot)
+            Check 'an install root owned by Users is refused and nothing is placed' ($result.ExitCode -eq 1 -and
+                $result.Output.Contains('owned or writable by S-1-5-32-545') -and @(Get-ChildItem -LiteralPath $foreignRoot -Force).Count -eq 0)
+        } else {
+            Write-Host '[SKIP] an install root owned by Users is refused (setting another owner needs elevation)'
+        }
     }
 
     New-Release '2.0.0' (Join-Path $testRoot 'v2')
@@ -267,7 +301,13 @@ exit 0
             ((@('S-1-5-18', 'S-1-5-32-544', [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value) | Sort-Object -Unique) -join ',')
     } else { $true }
     Check 'a linked state root is not trusted as the config owner' ($result.ExitCode -eq 0 -and $linkOwnerSafe -and
-        $result.Output.Contains('not an absolute, non-link directory'))
+        $result.Output.Contains('non-link directory'))
+    foreach ($missingRoot in (Join-Path $testRoot 'not-created-yet'), 'relative/state') {
+        [System.IO.File]::WriteAllText($envFile, "HostUpdateExecution__RootDirectory=$missingRoot`n")
+        $result = Invoke-Installer @('write-config', '-EnvFile', $envFile, '-Output', $config)
+        Check "state root '$missingRoot' warns that the current account owns the config" ($result.ExitCode -eq 0 -and
+            $result.Output.Contains('non-link directory'))
+    }
 
     # deploy-docker.ps1 opt-in hook: run the real function against a recording stub installer.
     $hookDir = Join-Path $testRoot 'hook'
