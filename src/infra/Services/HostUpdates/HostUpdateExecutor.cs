@@ -160,6 +160,10 @@ public sealed class HostUpdateExecutor(
     IHostUpdateSideEffectReconciler? sideEffectReconciler = null,
     IHostUpdateAuthorizationBaselineProvider? baselineProvider = null) : IHostUpdateExecutor
 {
+    internal const string PolicyDriftedFailureCode = "policy_drifted";
+
+    internal const string PolicyDriftedFailurePhase = "failure:" + PolicyDriftedFailureCode;
+
     private static readonly (HostUpdateExecutionState State, string Phase, bool Safe)[] Plan =
     [
         (HostUpdateExecutionState.Preflight, "preflight", true),
@@ -189,7 +193,7 @@ public sealed class HostUpdateExecutor(
             schedulerPolicy.PolicyRevision != request.PolicyRevision ||
             !string.Equals(schedulerPolicy.Fingerprint, request.PolicyFingerprint, StringComparison.Ordinal))
         {
-            return new(request.ReleaseId, HostUpdateExecutionState.RecoveryRequired, "policy_drifted", []);
+            return PolicyDrifted(request, bindingHash);
         }
 
         List<HostUpdateExecutionActivity> activities = journal.Read(request.ReleaseId).ToList();
@@ -290,6 +294,34 @@ public sealed class HostUpdateExecutor(
             Append(activities, request, HostUpdateExecutionState.RecoveryRequired, "failure:" + ex.GetType().Name);
             return new(request.ReleaseId, HostUpdateExecutionState.RecoveryRequired, ex.GetType().Name, activities);
         }
+    }
+
+    /// <summary>
+    /// A request that has not fenced writers stays resumable after transient policy drift, so no
+    /// journal entry is written. Once this request's journal shows the fence step started and the
+    /// release is still nonterminal, writers may be paused; the drift is then recorded as a durable,
+    /// request-bound <see cref="HostUpdateExecutionState.RecoveryRequired"/> so operator recovery
+    /// can release the fence instead of leaving it held indefinitely (issue #2823).
+    /// </summary>
+    private HostUpdateExecutionResult PolicyDrifted(HostUpdateExecutionRequest request, string bindingHash)
+    {
+        List<HostUpdateExecutionActivity> activities = journal.Read(request.ReleaseId).ToList();
+        HostUpdateExecutionState? last = activities.Count == 0 ? null : activities[^1].State;
+        bool boundToRequest = activities.All(activity => string.Equals(activity.RequestBindingHash, bindingHash, StringComparison.Ordinal));
+        bool fenceMayBeHeld = activities.Any(activity => activity.State is
+            HostUpdateExecutionState.Fenced or
+            HostUpdateExecutionState.BackedUp or
+            HostUpdateExecutionState.Migrating or
+            HostUpdateExecutionState.Applying or
+            HostUpdateExecutionState.Verifying);
+        if (!boundToRequest || !fenceMayBeHeld ||
+            last is HostUpdateExecutionState.Completed or HostUpdateExecutionState.RecoveryRequired)
+        {
+            return new(request.ReleaseId, HostUpdateExecutionState.RecoveryRequired, PolicyDriftedFailureCode, []);
+        }
+
+        Append(activities, request, HostUpdateExecutionState.RecoveryRequired, PolicyDriftedFailurePhase);
+        return new(request.ReleaseId, HostUpdateExecutionState.RecoveryRequired, PolicyDriftedFailureCode, activities);
     }
 
     private Task InvokeAsync(HostUpdateExecutionState state, HostUpdateExecutionRequest request, CancellationToken cancellationToken) => state switch

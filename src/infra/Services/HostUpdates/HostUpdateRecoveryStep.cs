@@ -30,7 +30,10 @@ public enum HostUpdateRecoveryPlanKind
     /// <summary>A terminal <see cref="HostUpdateRecoveryOutcome.RolledBack"/> is already recorded; recovery is a no-op.</summary>
     AlreadyRolledBack,
 
-    /// <summary>The rollback is durable; only the idempotent admission-fence release remains.</summary>
+    /// <summary>
+    /// Only the idempotent admission-fence release remains: either the rollback is already durable,
+    /// or policy drift stopped the release after fencing but before any migration/apply started.
+    /// </summary>
     FenceReleaseOnly,
 
     /// <summary>Re-apply and verify the prior pinned images; no schema change was committed.</summary>
@@ -174,6 +177,8 @@ public sealed class HostUpdateRecoveryCoordinator(
     IHostUpdatePhysicalReconciliationGate? physicalReconciliationGate = null) : IHostUpdateRecoveryCoordinator, IHostUpdateRecoveryPlanner
 {
     private const string FenceReleaseFailureSeparator = "|";
+
+    private const string PolicyDriftedFenceReleaseDetail = "policy_drifted_before_side_effects";
 
     public async Task<HostUpdateRecoveryResult> RecoverAsync(
         HostUpdateExecutionRequest failedRequest,
@@ -359,6 +364,11 @@ public sealed class HostUpdateRecoveryCoordinator(
 
                     return new HostUpdateRecoveryResult(HostUpdateRecoveryOutcome.RolledBack, "coordinated_restore");
 
+                case HostUpdateRecoveryPlanKind.FenceReleaseOnly:
+                    // Nothing to restore or re-apply: RecoverAsync persists FenceReleasePending
+                    // before driving the idempotent release, exactly as after a real rollback.
+                    return new HostUpdateRecoveryResult(HostUpdateRecoveryOutcome.RolledBack, decision.Detail);
+
                 default:
                     return new HostUpdateRecoveryResult(HostUpdateRecoveryOutcome.NeedsOperator, decision.Detail);
             }
@@ -428,6 +438,11 @@ public sealed class HostUpdateRecoveryCoordinator(
             return new(HostUpdateRecoveryPlanKind.NeedsOperator, "completed_installation_requires_fence_release", priorState, null);
         }
 
+        if (PolicyDriftedBeforeUnsafeSideEffects(activities))
+        {
+            return new(HostUpdateRecoveryPlanKind.FenceReleaseOnly, PolicyDriftedFenceReleaseDetail, priorState, null);
+        }
+
         if (priorState is null && ApplyMayHaveStarted(activities))
         {
             return new(HostUpdateRecoveryPlanKind.NeedsOperator, "prior_image_state_missing_after_apply_started", null, null);
@@ -453,6 +468,23 @@ public sealed class HostUpdateRecoveryCoordinator(
 
     private static bool ApplyMayHaveStarted(IReadOnlyList<HostUpdateExecutionActivity> activities) =>
         activities.Any(a => a.State == HostUpdateExecutionState.Applying && a.Phase.StartsWith("apply:before", StringComparison.Ordinal));
+
+    /// <summary>
+    /// Policy drift is the release's only recorded failure and no migration, apply or verify
+    /// activity exists, so the host payload is untouched and only the writer fence needs release.
+    /// </summary>
+    private static bool PolicyDriftedBeforeUnsafeSideEffects(IReadOnlyList<HostUpdateExecutionActivity> activities)
+    {
+        List<HostUpdateExecutionActivity> failures = [.. activities.Where(a => a.Phase.StartsWith("failure:", StringComparison.Ordinal))];
+        return failures.Count > 0 &&
+            failures.All(a => a.State == HostUpdateExecutionState.RecoveryRequired &&
+                string.Equals(a.Phase, HostUpdateExecutor.PolicyDriftedFailurePhase, StringComparison.Ordinal)) &&
+            !activities.Any(a => a.State is
+                HostUpdateExecutionState.Migrating or
+                HostUpdateExecutionState.Applying or
+                HostUpdateExecutionState.Verifying or
+                HostUpdateExecutionState.Completed);
+    }
 }
 
 /// <summary>Attempts recovery for a release left in <see cref="HostUpdateExecutionState.RecoveryRequired"/>.</summary>
