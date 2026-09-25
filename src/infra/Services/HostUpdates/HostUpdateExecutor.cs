@@ -102,6 +102,9 @@ public sealed record HostUpdateExecutionActivity(
     public string? RequestBindingHash { get; init; }
 
     public HostUpdateExecutionRequest? RequestBinding { get; init; }
+
+    /// <summary>Authorization-time baseline, recorded on the <c>accepted</c> activity only (issue #3047).</summary>
+    public HostUpdateAuthorizationBaseline? AuthorizationBaseline { get; init; }
 }
 
 public sealed record HostUpdateExecutionResult(string ReleaseId, HostUpdateExecutionState State, string? FailureCode, IReadOnlyList<HostUpdateExecutionActivity> Activities)
@@ -154,7 +157,8 @@ public sealed class HostUpdateExecutor(
     IHostUpdateExecutionJournal journal,
     IHostUpdateExecutionLock updateLock,
     IHostUpdateAutomationPolicyRepository automationPolicyRepository,
-    IHostUpdateSideEffectReconciler? sideEffectReconciler = null) : IHostUpdateExecutor
+    IHostUpdateSideEffectReconciler? sideEffectReconciler = null,
+    IHostUpdateAuthorizationBaselineProvider? baselineProvider = null) : IHostUpdateExecutor
 {
     private static readonly (HostUpdateExecutionState State, string Phase, bool Safe)[] Plan =
     [
@@ -202,7 +206,21 @@ public sealed class HostUpdateExecutor(
 
         if (current == HostUpdateExecutionState.Accepted)
         {
-            Append(activities, request, current, "accepted");
+            HostUpdateAuthorizationBaseline? baseline = null;
+            if (baselineProvider is not null)
+            {
+                try
+                {
+                    baseline = await baselineProvider.CaptureAsync(cancellationToken).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    // Without a baseline recovery cannot prove what was authorized, so refuse to start.
+                    return new(request.ReleaseId, HostUpdateExecutionState.RecoveryRequired, "authorization_baseline_unavailable", activities);
+                }
+            }
+
+            Append(activities, request, current, "accepted", baseline);
         }
 
         try
@@ -284,12 +302,18 @@ public sealed class HostUpdateExecutor(
     };
 
 
-    private void Append(List<HostUpdateExecutionActivity> activities, HostUpdateExecutionRequest request, HostUpdateExecutionState state, string phase)
+    private void Append(
+        List<HostUpdateExecutionActivity> activities,
+        HostUpdateExecutionRequest request,
+        HostUpdateExecutionState state,
+        string phase,
+        HostUpdateAuthorizationBaseline? baseline = null)
     {
         HostUpdateExecutionActivity activity = new(Guid.NewGuid().ToString("N"), request.ReleaseId, state, phase, DateTimeOffset.UtcNow)
         {
             RequestBindingHash = HostUpdateRequestBinding.Compute(request),
             RequestBinding = request,
+            AuthorizationBaseline = baseline,
         };
         journal.Append(activity);
         activities.Add(activity);

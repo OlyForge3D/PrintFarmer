@@ -197,8 +197,8 @@ endpoints exist.
 
 **The packaged host-local status/recovery CLI is only partially delivered.** The
 first slice of #2980 (below) adds the API-independent engine entry point and
-wrappers, but packaging, host placement, the OS matrix, configuration/trust-root
-drift baselines (#3047) and
+wrappers, but packaging, host placement, the OS matrix, manifest-binding
+drift (#3050) and
 provider/topology coverage are still open. That gap still blocks a claim of
 complete recovery support. Retain protected host evidence for the deployment
 owner; do not invent a recovery command, edit journal JSON, delete locks, or run
@@ -281,8 +281,13 @@ recorded in the journal.
   current `--preview` printed. Only then does it run the shared coordinator under
   the execution lock.
 
-Drift reapproval (#2998, first slice) compares the journaled authorization with
-the host now:
+Drift reapproval (#2998) compares the journaled authorization with the host
+now. Since #3047 the executor also journals an authorization baseline on the
+`accepted` activity, captured under the execution lock before any step runs:
+a content hash of the prior installed state, the configuration fingerprint
+(below) and the fingerprint of the pinned release trust root (Sigstore issuer
+and per-channel release-workflow identities). If the baseline cannot be
+captured, the update refuses to start (`authorization_baseline_unavailable`).
 
 | Drift code | Meaning |
 | --- | --- |
@@ -290,7 +295,10 @@ the host now:
 | `policy_unverifiable` | The standing policy could not be read (host state disabled, root insecure, missing or corrupt). |
 | `policy_revision_drift` / `policy_fingerprint_drift` | The standing automatic-update policy changed since authorization. |
 | `channel_drift` | The policy channel no longer matches the authorized channel. |
-| `prior_state_changed_since_authorization` | The installed state's recorded time is later than the authorization. This is a timestamp heuristic, not content provenance: no authorization-time baseline of the prior state exists yet (#3047), so always review `identity.prior` before confirming. |
+| `authorization_baseline_unrecorded` | The journal carries no baseline this CLI understands (a journal written before #3047, or an unknown baseline schema). Configuration, trust-root and prior-state content cannot be proven unchanged, so review `identity.prior` and the configuration with the deployment owner before reapproving. |
+| `configuration_drift` | The configuration fingerprint differs from the one recorded at authorization (for example a changed compose file, service mapping, owned directory, tool path or database provider). The CLI and the API host must read the same configuration for this to be meaningful. |
+| `trust_root_drift` | The authorization named a trust root this build does not pin, or the pinned trust-root fingerprint changed since authorization (for example the CLI came from a different release). |
+| `prior_state_changed_since_authorization` | The installed state's content differs from the baseline recorded at authorization, including a deleted or backdated record (`observed` is `none` when it was deleted). For a journal without a baseline this falls back to the older timestamp heuristic and is always accompanied by `authorization_baseline_unrecorded`. |
 | `prior_state_matches_target` | The installed state already reports the target release or manifest. |
 
 The CLI reads the policy from `HostUpdates:HostState` (`Enabled`, `RootPath`,
@@ -345,10 +353,8 @@ Known limits of this slice:
   Windows runners against a stub CLI. This proves argument validation and
   exit-code pass-through only; it is not a supported-host declaration.
 - There is no published or signed package, installed host placement,
-  supported OS/distribution matrix, configuration/namespace, trust-root or
-  manifest-binding drift detection (#3047; those baselines are not journaled at
-  authorization, so today the reapproval token only binds the current
-  configuration), physical command reconciliation gate or PostgreSQL/SQL Server and
+  supported OS/distribution matrix, manifest-binding (database) drift
+  detection (#3050), physical command reconciliation gate or PostgreSQL/SQL Server and
   split-topology proof yet; those remain follow-up work under #2658. Until the
   package exists, `PRINTFARMER_HOST_UPDATE_CLI_DIR` must point at a
   `dotnet publish` output of `src/tools/Farm.HostUpdate.Cli` built from the

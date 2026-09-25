@@ -253,6 +253,132 @@ public sealed class HostUpdateExecutorTests
         public Task<HostUpdatePolicyReadResult> ReplaceAsync(HostUpdateAutomationPolicy replacement, long expectedRevision, CancellationToken ct) => Task.FromResult(new HostUpdatePolicyReadResult(true, replacement, null));
     }
 
+    // --- Issue #3047: authorization-time drift baseline ----------------------------------------
+
+    [Fact]
+    public async Task Executor_journals_the_authorization_baseline_on_the_accepted_activity_only()
+    {
+        var baseline = new HostUpdateAuthorizationBaseline(1, "none", "sha256:config", HostUpdateTrustRoot.Fingerprint);
+        var journal = new MemoryJournal();
+        var provider = new StubBaselineProvider(() => baseline);
+
+        HostUpdateExecutionResult result = await new HostUpdateExecutor(
+            new FakeSteps(), journal, new NoopLock(), new InlinePolicyRepository(Policy()), baselineProvider: provider).ExecuteAsync(Request());
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(1, provider.Calls);
+        HostUpdateExecutionActivity accepted = Assert.Single(result.Activities, a => a.Phase == "accepted");
+        Assert.Equal(baseline, accepted.AuthorizationBaseline);
+        Assert.All(result.Activities.Where(a => a.Phase != "accepted"), a => Assert.Null(a.AuthorizationBaseline));
+    }
+
+    [Fact]
+    public async Task Executor_refuses_to_start_when_the_baseline_cannot_be_captured()
+    {
+        var steps = new FakeSteps();
+        var journal = new MemoryJournal();
+
+        HostUpdateExecutionResult result = await new HostUpdateExecutor(
+            steps, journal, new NoopLock(), new InlinePolicyRepository(Policy()),
+            baselineProvider: new StubBaselineProvider(() => throw new InvalidDataException("installed_state_corrupt"))).ExecuteAsync(Request());
+
+        Assert.Equal(HostUpdateExecutionState.RecoveryRequired, result.State);
+        Assert.Equal("authorization_baseline_unavailable", result.FailureCode);
+        Assert.Empty(steps.Calls);
+        Assert.Empty(journal.Read(Request().ReleaseId));
+    }
+
+    [Fact]
+    public async Task Executor_does_not_recapture_the_baseline_once_execution_started()
+    {
+        var journal = new MemoryJournal();
+        await new HostUpdateExecutor(new FailingSteps(), journal, new NoopLock(), new InlinePolicyRepository(Policy())).ExecuteAsync(Request());
+        var provider = new StubBaselineProvider(() => throw new InvalidOperationException("must_not_be_called"));
+
+        HostUpdateExecutionResult restarted = await new HostUpdateExecutor(
+            new FakeSteps(), journal, new NoopLock(), new InlinePolicyRepository(Policy()), baselineProvider: provider).ExecuteAsync(Request());
+
+        Assert.Equal(HostUpdateExecutionState.RecoveryRequired, restarted.State);
+        Assert.Equal(0, provider.Calls);
+    }
+
+    [Fact]
+    public void Journaled_baseline_round_trips_and_is_absent_from_legacy_entries()
+    {
+        string path = Path.Combine(HostStateTestPaths.TempRoot, Guid.NewGuid() + ".journal");
+        try
+        {
+            var baseline = new HostUpdateAuthorizationBaseline(1, "sha256:" + new string('1', 64), "sha256:config", HostUpdateTrustRoot.Fingerprint);
+            var journal = new FileHostUpdateExecutionJournal(path);
+            journal.Append(new("a", "r", HostUpdateExecutionState.Accepted, "accepted", DateTimeOffset.UtcNow) { AuthorizationBaseline = baseline });
+            journal.Append(new("b", "r", HostUpdateExecutionState.Preflight, "preflight:before", DateTimeOffset.UtcNow));
+
+            IReadOnlyList<HostUpdateExecutionActivity> read = new FileHostUpdateExecutionJournal(path).Read("r");
+
+            Assert.Equal(baseline, read[0].AuthorizationBaseline);
+            Assert.Null(read[1].AuthorizationBaseline);
+        }
+        finally
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task Baseline_provider_hashes_installed_state_independent_of_dictionary_order()
+    {
+        var options = new HostUpdateExecutionOptions();
+        var database = new Farm.Infrastructure.Data.DatabaseProviderConfiguration { Provider = "sqlite", ConnectionString = "Data Source=/srv/farm.db" };
+        InstalledHostState ordered = Installed(new() { ["api"] = "sha256:1", ["frontend"] = "sha256:2" });
+        InstalledHostState reversed = Installed(new() { ["frontend"] = "sha256:2", ["api"] = "sha256:1" });
+
+        HostUpdateAuthorizationBaseline first = await new HostUpdateAuthorizationBaselineProvider(new StaticStateStore(ordered), options, database).CaptureAsync(CancellationToken.None);
+        HostUpdateAuthorizationBaseline second = await new HostUpdateAuthorizationBaselineProvider(new StaticStateStore(reversed), options, database).CaptureAsync(CancellationToken.None);
+        HostUpdateAuthorizationBaseline absent = await new HostUpdateAuthorizationBaselineProvider(new StaticStateStore(null), options, database).CaptureAsync(CancellationToken.None);
+
+        Assert.Equal(HostUpdateAuthorizationBaseline.CurrentSchemaVersion, first.SchemaVersion);
+        Assert.Equal(first, second);
+        Assert.Matches("^sha256:[0-9a-f]{64}$", first.InstalledStateHash);
+        Assert.Equal(HostUpdateBaselineHashes.NoInstalledState, absent.InstalledStateHash);
+        Assert.Equal(HostUpdateTrustRoot.Fingerprint, first.TrustRootFingerprint);
+        Assert.NotEqual(first.InstalledStateHash, HostUpdateBaselineHashes.InstalledState(ordered with { ReleaseId = "stable:1.2.1" }));
+    }
+
+    [Fact]
+    public void Trust_root_pins_the_release_workflow_identities()
+    {
+        Assert.Equal("https://token.actions.githubusercontent.com", HostUpdateTrustRoot.CosignIssuer);
+        Assert.EndsWith("consolidated-release.yml@refs/heads/main", HostUpdateTrustRoot.CertificateIdentity("stable"), StringComparison.Ordinal);
+        Assert.EndsWith("consolidated-release.yml@refs/heads/development", HostUpdateTrustRoot.CertificateIdentity("insider"), StringComparison.Ordinal);
+        Assert.True(HostUpdateTrustRoot.IsPinned("default"));
+        Assert.False(HostUpdateTrustRoot.IsPinned("root-1"));
+        Assert.Matches("^sha256:[0-9a-f]{64}$", HostUpdateTrustRoot.Fingerprint);
+    }
+
+    private static InstalledHostState Installed(Dictionary<string, string> digests) =>
+        new("stable:1.2.2", "sha256:" + new string('9', 64), digests, "api+frontend", new DateTimeOffset(2026, 9, 1, 0, 0, 0, TimeSpan.Zero));
+
+    private sealed class StubBaselineProvider(Func<HostUpdateAuthorizationBaseline> capture) : IHostUpdateAuthorizationBaselineProvider
+    {
+        public int Calls { get; private set; }
+
+        public Task<HostUpdateAuthorizationBaseline> CaptureAsync(CancellationToken cancellationToken)
+        {
+            Calls++;
+            return Task.FromResult(capture());
+        }
+    }
+
+    private sealed class StaticStateStore(InstalledHostState? state) : IInstalledHostStateStore
+    {
+        public Task<InstalledHostState?> ReadAsync(CancellationToken cancellationToken) => Task.FromResult(state);
+
+        public Task WriteAsync(InstalledHostState state, CancellationToken cancellationToken) => Task.CompletedTask;
+    }
+
     private sealed class CancellationObservingSteps : IHostUpdateExecutionSteps
     {
         public List<string> Calls { get; } = [];

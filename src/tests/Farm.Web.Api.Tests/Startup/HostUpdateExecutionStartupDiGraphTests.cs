@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Linq;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Services.HostUpdates;
@@ -320,6 +320,44 @@ public sealed class HostUpdateExecutionStartupDiGraphTests
         finally
         {
             if (provisioned && Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void AddHostUpdateExecution_InjectsTheAuthorizationBaselineProviderIntoTheExecutor()
+    {
+        string root = CreateValidRoot();
+        try
+        {
+            ServiceCollection services = new();
+            services.AddLogging();
+            IConfiguration configuration = BuildConfiguration(root);
+            services.AddSingleton(configuration);
+            services.AddHostUpdateExecution(configuration);
+            services.AddScoped<IHostUpdateExecutionSteps, NoopHostUpdateExecutionSteps>();
+
+            using ServiceProvider provider = services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true });
+            using IServiceScope scope = provider.CreateScope();
+
+            Assert.IsType<HostUpdateAuthorizationBaselineProvider>(
+                scope.ServiceProvider.GetRequiredService<IHostUpdateAuthorizationBaselineProvider>());
+            HostUpdateExecutor executor = Assert.IsType<HostUpdateExecutor>(scope.ServiceProvider.GetRequiredService<IHostUpdateExecutor>());
+            object? injected = typeof(HostUpdateExecutor)
+                .GetFields(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+                .Select(field => field.GetValue(executor))
+                .OfType<IHostUpdateAuthorizationBaselineProvider>()
+                .SingleOrDefault();
+
+            // Without the provider the executor would journal no baseline and every recovery
+            // would report authorization_baseline_unrecorded.
+            Assert.NotNull(injected);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
             {
                 Directory.Delete(root, recursive: true);
             }
