@@ -8,8 +8,10 @@ using Microsoft.Data.Sqlite;
 namespace Farm.Infrastructure.Services.HostUpdates;
 
 /// <summary>
-/// What the host looked like when an update was authorized (issue #3047): the prior installed
-/// state, the configuration the recovery engine acts on, and the pinned release trust root.
+/// What the host looked like when an update was authorized (issues #3047, #3050): the prior
+/// installed state, the configuration the recovery engine acts on, the pinned release trust root
+/// and -- from schema 2 -- the database-side manifest binding for the release
+/// (<see cref="ReadOnlyHostUpdateManifestBindingReader.NoBinding"/> when none was bound).
 /// Journaled on the <c>accepted</c> activity, outside the request binding, so recovery can
 /// compare the host against the authorized baseline instead of heuristics.
 /// </summary>
@@ -17,31 +19,39 @@ public sealed record HostUpdateAuthorizationBaseline(
     int SchemaVersion,
     string InstalledStateHash,
     string ConfigurationFingerprint,
-    string TrustRootFingerprint)
+    string TrustRootFingerprint,
+    string? ManifestBinding = null)
 {
-    public const int CurrentSchemaVersion = 1;
+    public const int CurrentSchemaVersion = 2;
+
+    /// <summary>The oldest schema recovery still understands; schema 1 predates <see cref="ManifestBinding"/>.</summary>
+    public const int MinimumSupportedSchemaVersion = 1;
 }
 
 /// <summary>Captures the <see cref="HostUpdateAuthorizationBaseline"/> at authorization time.</summary>
 public interface IHostUpdateAuthorizationBaselineProvider
 {
-    Task<HostUpdateAuthorizationBaseline> CaptureAsync(CancellationToken cancellationToken);
+    Task<HostUpdateAuthorizationBaseline> CaptureAsync(HostUpdateExecutionRequest request, CancellationToken cancellationToken);
 }
 
 /// <summary>Reads the baseline from the same stores and configuration the recovery CLI observes.</summary>
 public sealed class HostUpdateAuthorizationBaselineProvider(
     IInstalledHostStateStore installedStateStore,
     HostUpdateExecutionOptions options,
-    DatabaseProviderConfiguration database) : IHostUpdateAuthorizationBaselineProvider
+    DatabaseProviderConfiguration database,
+    IHostUpdateManifestBindingReader manifestBindingReader) : IHostUpdateAuthorizationBaselineProvider
 {
-    public async Task<HostUpdateAuthorizationBaseline> CaptureAsync(CancellationToken cancellationToken)
+    public async Task<HostUpdateAuthorizationBaseline> CaptureAsync(HostUpdateExecutionRequest request, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(request);
         InstalledHostState? installed = await installedStateStore.ReadAsync(cancellationToken).ConfigureAwait(false);
+        string manifestBinding = await manifestBindingReader.ReadAsync(request.ReleaseId, cancellationToken).ConfigureAwait(false);
         return new(
             HostUpdateAuthorizationBaseline.CurrentSchemaVersion,
             HostUpdateBaselineHashes.InstalledState(installed),
             HostUpdateBaselineHashes.Configuration(options, database),
-            HostUpdateTrustRoot.Fingerprint);
+            HostUpdateTrustRoot.Fingerprint,
+            manifestBinding);
     }
 }
 

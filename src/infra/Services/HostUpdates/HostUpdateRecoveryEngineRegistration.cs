@@ -77,6 +77,8 @@ public static class HostUpdateRecoveryEngineRegistration
         });
 
         services.AddSingleton<IHostUpdateAdmissionGate, FileHostUpdateAdmissionGate>();
+        services.AddSingleton<IHostUpdateManifestBindingReader>(sp => new ReadOnlyHostUpdateManifestBindingReader(
+            DatabaseProviderConfiguration.FromConfiguration(sp.GetRequiredService<IConfiguration>())));
         AddFence(services);
         AddApplyAndVerify(services);
         AddRecovery(services);

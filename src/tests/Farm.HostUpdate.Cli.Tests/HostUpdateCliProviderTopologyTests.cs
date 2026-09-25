@@ -223,7 +223,7 @@ public sealed class HostUpdateCliProviderTopologyTests : IDisposable, IAsyncLife
     {
         IConfiguration configuration = Config("sqlite", topology);
         _host.SeedInstalledState(services: Services(topology));
-        _host.SeedRecoveryRequired(baseline: _host.CurrentBaseline(configuration));
+        _host.SeedRecoveryRequired(baseline: _host.CurrentBaseline(configuration, ReplaceHostBoundaries));
         InstalledHostState prior = ReadInstalledState();
 
         CliRun run = await ConfirmAsync(configuration);
@@ -328,7 +328,7 @@ public sealed class HostUpdateCliProviderTopologyTests : IDisposable, IAsyncLife
     public async Task Missing_prior_state_after_apply_started_stops_before_any_process(string topology)
     {
         IConfiguration configuration = Config("postgres-external", topology);
-        _host.SeedRecoveryRequired(baseline: _host.CurrentBaseline(configuration));
+        _host.SeedRecoveryRequired(baseline: _host.CurrentBaseline(configuration, ReplaceHostBoundaries));
         SeedBackup(Providers["postgres-external"]);
 
         CliRun confirm = await ConfirmAsync(configuration);
@@ -347,7 +347,7 @@ public sealed class HostUpdateCliProviderTopologyTests : IDisposable, IAsyncLife
         CliRun missingJournal = await ConfirmAsync(configuration);
 
         _host.SeedInstalledState(services: Services(topology));
-        _host.SeedRecoveryRequired(baseline: _host.CurrentBaseline(configuration));
+        _host.SeedRecoveryRequired(baseline: _host.CurrentBaseline(configuration, ReplaceHostBoundaries));
         CliRun held;
         using (new FileHostUpdateExecutionLock(_host.LockPath).Acquire(TimeSpan.FromSeconds(5), CancellationToken.None))
         {
@@ -481,7 +481,7 @@ public sealed class HostUpdateCliProviderTopologyTests : IDisposable, IAsyncLife
         _host.SeedJournal(
             CliHostFixture.Request(),
             [(HostUpdateExecutionState.Migrating, "migration:before"), (HostUpdateExecutionState.RecoveryRequired, "failure")],
-            _host.CurrentBaseline(authorizedConfiguration));
+            _host.CurrentBaseline(authorizedConfiguration, ReplaceHostBoundaries));
 
     /// <summary>A completed, checksum-valid backup of the database and one owned directory.</summary>
     private void SeedBackup(ProviderCase database)
@@ -523,6 +523,7 @@ public sealed class HostUpdateCliProviderTopologyTests : IDisposable, IAsyncLife
     private void ReplaceHostBoundaries(IServiceCollection services)
     {
         services.AddSingleton<IHostUpdateProcessRunner>(_processes);
+        services.AddSingleton<IHostUpdateManifestBindingReader>(new UnboundManifestBindingReader());
         services.AddHttpClient(HostUpdateRecoveryEngineRegistration.HealthClientName)
             .ConfigurePrimaryHttpMessageHandler(() => new HealthHandler(_health));
         if (_fence is not null)
@@ -532,6 +533,13 @@ public sealed class HostUpdateCliProviderTopologyTests : IDisposable, IAsyncLife
     }
 
     private sealed record CliRun(int ExitCode, string Output, string Error);
+
+    /// <summary>No provider connection: PostgreSQL and SQL Server bindings are covered by provider tests.</summary>
+    private sealed class UnboundManifestBindingReader : IHostUpdateManifestBindingReader
+    {
+        public Task<string> ReadAsync(string releaseId, CancellationToken cancellationToken) =>
+            Task.FromResult(ReadOnlyHostUpdateManifestBindingReader.NoBinding);
+    }
 
     private sealed record ProviderCase(string DbProvider, string? ConnectionString, string Tool, string DumpFile, string? Password, string? PasswordVariable);
 
