@@ -227,7 +227,7 @@ test("evaluate binds showListFilesOutput to the correct flag for every synchrono
       expectedShow: true,
     },
     {
-      name: "diagnostic-count mismatch alone does not request listing output",
+      name: "diagnostic failure alone does not request listing output",
       overrides: {
         output: `${fileDiagnostic}\n${fileDiagnostic.replace("(1,1)", "(2,1)")}`,
       },
@@ -271,7 +271,6 @@ test("evaluate: file-floor failure alone requests listing output (#2853)", async
     });
     const result = evaluate({
       baseline: {
-        applicationDiagnosticCount: 0,
         applicationNoCheckFileCount: 0,
         minimumAppFileCount: 1,
       },
@@ -315,7 +314,6 @@ test("evaluate: @ts-nocheck-only failure does not request listing output (#2853)
     // list is already in the failure message itself.
     const result = evaluate({
       baseline: {
-        applicationDiagnosticCount: 0,
         applicationNoCheckFileCount: 0,
         minimumAppFileCount: 1,
       },
@@ -337,24 +335,23 @@ test("evaluate: @ts-nocheck-only failure does not request listing output (#2853)
   }
 });
 
-test("evaluate: combined floor + diagnostic-count failure reports both and requests listing (#2853)", async () => {
+test("evaluate: combined floor + diagnostic failure reports both and requests listing (#2853)", async () => {
   const fixtureDirectory = await mkdtemp(
     path.join(tmpdir(), "typecheck-app-combined-"),
   );
 
   try {
     // Zero application files on disk (floor fails) AND the compile output
-    // carries two file diagnostics against a baseline of one (count fails).
+    // carries two file diagnostics under strict-zero (any diagnostic fails).
     // Accumulating both failures in a single evaluate call proves the
     // combined-failures block still reports them together -- and, because
     // the floor participates, still sets showListFilesOutput=true even
-    // though a bare diagnostic-count mismatch on its own does not.
+    // though a bare diagnostic failure on its own does not.
     await mkdir(path.join(fixtureDirectory, "src/services"), {
       recursive: true,
     });
     const result = evaluate({
       baseline: {
-        applicationDiagnosticCount: 1,
         applicationNoCheckFileCount: 0,
         minimumAppFileCount: 2,
       },
@@ -373,7 +370,7 @@ test("evaluate: combined floor + diagnostic-count failure reports both and reque
     );
     assert.match(
       result.message,
-      /measured 2 diagnostic\(s\); expected exact count 1/,
+      /measured 2 diagnostic\(s\); expected zero diagnostics/,
     );
   } finally {
     await rm(fixtureDirectory, { recursive: true, force: true });
@@ -748,7 +745,6 @@ test("CLI omits the list-file output label when the successful listing is empty 
     await writeFile(
       path.join(fixtureDirectory, "scripts/app-typecheck-baseline.json"),
       JSON.stringify({
-        applicationDiagnosticCount: 0,
         applicationNoCheckFileCount: 0,
         minimumAppFileCount: 1,
       }),
