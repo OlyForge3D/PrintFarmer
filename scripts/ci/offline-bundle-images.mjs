@@ -469,13 +469,16 @@ function openBlob(layout, digest) {
   }
   // Checked after opening, on the descriptor: the path must still name this same regular file
   // (not a link to it), so nothing swapped between lookup and use is ever read.
-  const opened = fstatSync(fd);
-  const link = lstatSync(path, { throwIfNoEntry: false });
-  if (!opened.isFile() || !link?.isFile() || opened.dev !== link.dev || opened.ino !== link.ino) {
+  try {
+    const opened = fstatSync(fd);
+    const link = lstatSync(path, { throwIfNoEntry: false });
+    requireThat(opened.isFile() && link?.isFile() && opened.dev === link.dev && opened.ino === link.ino,
+      `Image layout blob is not a regular file or changed while being opened: ${digest}`);
+    return { fd, size: opened.size };
+  } catch (error) {
     closeSync(fd);
-    throw new Error(`Image layout blob is not a regular file or changed while being opened: ${digest}`);
+    throw error;
   }
-  return { fd, size: opened.size };
 }
 
 function layoutSource(layout, limits) {
