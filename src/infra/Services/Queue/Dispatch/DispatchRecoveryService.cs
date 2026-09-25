@@ -460,31 +460,28 @@ public sealed class DispatchRecoveryService(
         PrintJob? job = attempt.PrintJobId is Guid jobId
             ? await db.PrintJobs.FirstOrDefaultAsync(candidate => candidate.Id == jobId, ct)
             : null;
-        if (job is not null)
+        if (job is not null && job.Status == PrintJobStatus.Starting)
         {
-            if (job.Status == PrintJobStatus.Starting)
+            // AssignedPrinterId and QueuePosition are intentionally unchanged (Lead ruling):
+            // calibration jobs keep their immutable printer, and the operator block prevents
+            // any automatic redispatch until an explicit clear.
+            job.Status = PrintJobStatus.Queued;
+            job.ActualStartTime = null;
+            job.BlockedReasonCode = JobBlockedReasonCode.OperatorRecoveryRequired;
+            job.BlockedReasonJson = JsonSerializer.Serialize(
+                new { dispatchAttemptId = attempt.Id, recoveryAuditId = journal.Id },
+                JsonOptions);
+            job.UpdatedAt = now;
+            db.JobStateHistories.Add(new JobStateHistory
             {
-                // AssignedPrinterId and QueuePosition are intentionally unchanged (Lead ruling):
-                // calibration jobs keep their immutable printer, and the operator block prevents
-                // any automatic redispatch until an explicit clear.
-                job.Status = PrintJobStatus.Queued;
-                job.ActualStartTime = null;
-                job.BlockedReasonCode = JobBlockedReasonCode.OperatorRecoveryRequired;
-                job.BlockedReasonJson = JsonSerializer.Serialize(
-                    new { dispatchAttemptId = attempt.Id, recoveryAuditId = journal.Id },
-                    JsonOptions);
-                job.UpdatedAt = now;
-                db.JobStateHistories.Add(new JobStateHistory
-                {
-                    Id = Guid.NewGuid(),
-                    JobId = job.Id,
-                    FromState = nameof(PrintJobStatus.Starting),
-                    ToState = nameof(PrintJobStatus.Queued),
-                    TransitionedAtUtc = now,
-                    CreatedAt = now,
-                    Notes = $"Operator recovery {journal.Id:D}: physical check asserted the dispatch did not start.",
-                });
-            }
+                Id = Guid.NewGuid(),
+                JobId = job.Id,
+                FromState = nameof(PrintJobStatus.Starting),
+                ToState = nameof(PrintJobStatus.Queued),
+                TransitionedAtUtc = now,
+                CreatedAt = now,
+                Notes = $"Operator recovery {journal.Id:D}: physical check asserted the dispatch did not start.",
+            });
         }
 
         state.ActiveJobId = null;
@@ -744,15 +741,15 @@ public sealed class DispatchRecoveryService(
             printerName = printer?.Name,
             hasIndeterminateClaim = true,
             jobId = indeterminate.PrintJobId,
-            dispatchAttemptId = (Guid?)indeterminate.Id,
-            claimRevision = (long?)indeterminate.Revision,
-            claimAgeSeconds = (long?)(long)age.TotalSeconds,
-            claimedAtUtc = (DateTime?)indeterminate.ClaimedAtUtc,
+            dispatchAttemptId = indeterminate.Id,
+            claimRevision = indeterminate.Revision,
+            claimAgeSeconds = (long)age.TotalSeconds,
+            claimedAtUtc = indeterminate.ClaimedAtUtc,
             lastReconciledAtUtc = indeterminate.LastReconciledAtUtc,
             lastEvidence = BuildEvidence(indeterminate),
             outcome = indeterminate.Outcome.ToString(),
             escalationLevel = escalationOptions.Value.Resolve(age).ToString(),
-            senderSettled = (bool?)(indeterminate.BackendSenderSettledAtUtc is not null),
+            senderSettled = indeterminate.BackendSenderSettledAtUtc is not null,
             recoveryPermission,
             recoveryAuditId = (Guid?)null,
         };
