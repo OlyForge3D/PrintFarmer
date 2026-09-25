@@ -30,8 +30,9 @@ post_date: "2026-09-16"
    references, corresponding source, license notices, SBOMs, a signed
    `update-manifest.json` plus its `update-manifest.sigstore.json` bundle, and the
    self-contained host-update recovery CLI archives for `linux-x64`, `linux-arm64`
-   and `win-x64` with a signed `printfarmer-host-update-cli-v<version>-SHA256SUMS`
-   list (see [Host-update runbook](HOST_UPDATE_RUNBOOK.md#install-the-signed-cli-package)).
+   and `win-x64`, one `printfarmer-host-update-cli-v<version>-<runtime>.spdx.json`
+   SBOM per archive, and a signed `printfarmer-host-update-cli-v<version>-SHA256SUMS`
+   list covering the archives and SBOMs (see [Host-update runbook](HOST_UPDATE_RUNBOOK.md#install-the-signed-cli-package)).
 
 There is no release ledger, reservation, signing ceremony, qualification receipt,
 counter recovery or abandonment step. The explicit version and permanent Git tag
