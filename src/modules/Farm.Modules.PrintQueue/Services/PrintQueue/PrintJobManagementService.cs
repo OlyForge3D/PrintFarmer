@@ -4563,7 +4563,8 @@ public class PrintJobManagementService(
                     tu.FilamentColor,
                     tu.MaterialCostUsd))
                 .ToList(),
-            HarvestedAt = job.HarvestedAt
+            HarvestedAt = job.HarvestedAt,
+            BlockedReasonCode = job.BlockedReasonCode,
         };
     }
 

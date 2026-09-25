@@ -2725,7 +2725,23 @@ export interface QueuedPrintJobDto {
   /** Per-toolhead filament usage tracking */
   toolheadUsages?: PrintJobToolheadUsage[];
   dispatchResult?: DispatchAttemptResultDto | null;
+  /** Typed reason the job is held from dispatch (e.g. `OperatorRecoveryRequired`). */
+  blockedReasonCode?: JobBlockedReasonCode | null;
 }
+
+/** Mirrors backend `JobBlockedReasonCode` (serialized as a string enum). */
+export type JobBlockedReasonCode =
+  | 'None'
+  | 'FirmwareFamilyMismatch'
+  | 'GcodeDialectMismatch'
+  | 'SlicerTupleMismatch'
+  | 'ContentHashMismatch'
+  | 'PrinterConfigRevisionStale'
+  | 'HardCompatibilityFailure'
+  | 'CalibrationRecordInvalid'
+  | 'FilamentCheckFailed'
+  | 'MissingRequiredCapability'
+  | 'OperatorRecoveryRequired';
 
 export interface QueueGcodeFileMetaDto {
   id: string;
@@ -2810,6 +2826,132 @@ export type DispatchClientResult =
       errorCode: string;
       detail?: string;
       job?: QueuedPrintJobDto;
+    };
+
+// ---------------------------------------------------------------------------
+// Dispatch recovery (issues #2859 / #2993) — `/api/dispatch/...`
+// ---------------------------------------------------------------------------
+
+export type DispatchEscalationLevel =
+  | 'None'
+  | 'Warning'
+  | 'Operational'
+  | 'Critical'
+  | 'HardLimit';
+
+/** Redacted evidence for the printer's current indeterminate claim. */
+export interface DispatchReconciliationEvidence {
+  backendCallPhase?: string | null;
+  errorCode?: string | null;
+  startPathKind?: string | null;
+  reconciliationCount?: number | null;
+  backendCallStartedAtUtc?: string | null;
+  backendResponseAtUtc?: string | null;
+  senderSettledAtUtc?: string | null;
+  hasBackendJobId?: boolean | null;
+}
+
+/** `GET /api/dispatch/{printerId}/reconciliation`. */
+export interface DispatchReconciliationResource {
+  printerId: string;
+  printerName?: string | null;
+  hasIndeterminateClaim: boolean;
+  jobId?: string | null;
+  dispatchAttemptId?: string | null;
+  claimRevision?: number | null;
+  claimAgeSeconds?: number | null;
+  claimedAtUtc?: string | null;
+  lastReconciledAtUtc?: string | null;
+  lastEvidence?: DispatchReconciliationEvidence | null;
+  outcome?: DispatchAttemptOutcome | null;
+  escalationLevel: DispatchEscalationLevel;
+  /** `null` when no claim; `false` means no evidence the start sender settled. */
+  senderSettled?: boolean | null;
+  /** Server-derived `queue:reconcile`; printer Manage scope is still enforced on submit. */
+  recoveryPermission: boolean;
+  /** Latest accepted recovery journal id for this printer (may be historical). */
+  recoveryAuditId?: string | null;
+}
+
+export interface DispatchReconciliationSnapshot {
+  resource: DispatchReconciliationResource;
+  /** Printer dispatch-state ETag (quoted); `null` when the printer has no dispatch state. */
+  etag: string | null;
+}
+
+/** Body of `POST /api/dispatch/{printerId}/reconciliation/recover`. */
+export interface DispatchRecoveryRequest {
+  dispatchAttemptId: string;
+  claimRevision: number;
+  physicalCheckConfirmed: boolean;
+  senderIsolationConfirmed?: boolean;
+  note?: string | null;
+}
+
+export type DispatchRecoveryErrorCode =
+  | 'rejected_stale'
+  | 'rejected_not_indeterminate'
+  | 'rejected_sender_live'
+  | 'rejected_sender_isolation_required'
+  | 'idempotency_key_reused'
+  | 'invalid_request'
+  | 'physical_check_required'
+  | 'note_too_long'
+  | 'invalid_if_match'
+  | 'precondition_required'
+  | 'idempotency_key_required'
+  | 'printer_not_found'
+  | 'actor_unresolved'
+  | (string & {});
+
+export type DispatchRecoveryResult =
+  | {
+      kind: 'recovered';
+      httpStatus: 200;
+      resource: DispatchReconciliationResource;
+      etag: string | null;
+    }
+  | {
+      kind: 'stale' | 'conflict' | 'invalid' | 'forbidden' | 'not_found';
+      httpStatus: 400 | 403 | 404 | 409 | 412 | 428;
+      errorCode: DispatchRecoveryErrorCode;
+      detail?: string | null;
+      recoveryAuditId?: string | null;
+      liveSender?: string | null;
+    };
+
+/** `GET /api/dispatch/{printerId}/reconciliation/audit/{auditId}`. */
+export interface DispatchRecoveryAudit {
+  auditId: string;
+  printerId: string;
+  jobId?: string | null;
+  dispatchAttemptId: string;
+  claimRevision: number;
+  priorOutcome: string;
+  actorId: string;
+  actorRecordedAtUtc: string;
+  serverRecordedAtUtc: string;
+  assertionVersion: number;
+  physicalCheckConfirmed: boolean;
+  senderIsolationConfirmed: boolean;
+  senderSettledAtUtc?: string | null;
+  note?: string | null;
+  correlationId?: string | null;
+  transition: string;
+}
+
+export type DispatchRecoveryClearResult =
+  | {
+      kind: 'cleared';
+      httpStatus: 200;
+      jobId: string;
+      etag: string | null;
+    }
+  | {
+      kind: 'stale' | 'conflict' | 'invalid' | 'forbidden' | 'not_found';
+      httpStatus: 400 | 403 | 404 | 409 | 412 | 428;
+      errorCode: string;
+      detail?: string | null;
     };
 
 export interface QueueStatsDto {

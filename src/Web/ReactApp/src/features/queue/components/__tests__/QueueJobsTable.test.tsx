@@ -358,6 +358,34 @@ describe("QueueJobsTable Component", () => {
     },
   );
 
+  it("hides Start Print and shows a recovery hold badge for an operator-recovery-blocked job (#2993)", () => {
+    const job = createMockJob({
+      job: { ...createMockJob().job, blockedReasonCode: "OperatorRecoveryRequired" },
+    });
+
+    render(<QueueJobsTable jobs={[job]} onCancel={vi.fn()} />);
+
+    expect(screen.getByText("Recovery hold")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Start print/ })).not.toBeInTheDocument();
+  });
+
+  it("flags an unknown dispatch outcome that needs reconciliation (#2993)", () => {
+    const job = createMockJob({
+      job: {
+        ...createMockJob().job,
+        status: "Assigned",
+        dispatchResult: {
+          outcome: "Unknown",
+          requiresReconciliation: true,
+        } as unknown as NonNullable<QueuedPrintJobWithFileMetaDto["job"]["dispatchResult"]>,
+      },
+    });
+
+    render(<QueueJobsTable jobs={[job]} onCancel={vi.fn()} />);
+
+    expect(screen.getByText("Outcome unknown")).toBeInTheDocument();
+  });
+
   it("qualifies the Schedule accessible name without changing its visible label", () => {
     const job = createMockJob({
       job: { ...createMockJob().job, status: "Queued" },
