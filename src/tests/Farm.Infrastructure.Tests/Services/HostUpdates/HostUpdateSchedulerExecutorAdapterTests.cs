@@ -1,4 +1,4 @@
-#pragma warning disable VSTHRD003
+﻿#pragma warning disable VSTHRD003
 using Farm.Infrastructure.Services.HostUpdates;
 using Xunit;
 
@@ -107,7 +107,7 @@ public sealed class HostUpdateSchedulerExecutorAdapterTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task ExecuteAsync_LifecycleSetupThrows_ReleasesOperationAndAllowsRetry(bool throwFromCancellationCallback)
+    public async Task ExecuteAsync_LifecycleSetupThrows_ReleasesOperationAndAllowsRetryAsync(bool throwFromCancellationCallback)
     {
         CapturingExecutor executor = new(new HostUpdateExecutionResult(Request().ReleaseId, HostUpdateExecutionState.Completed, null, []));
         CancellationTokenSource? capturedCancellation = null;
@@ -159,7 +159,7 @@ public sealed class HostUpdateSchedulerExecutorAdapterTests
     }
 
     [Fact]
-    public async Task ExecuteAsync_DuplicateRequest_RefusesWithoutRemovingActiveOperation()
+    public async Task ExecuteAsync_DuplicateRequest_RefusesWithoutRemovingActiveOperationAsync()
     {
         GatedExecutor executor = new();
         using HostUpdateSchedulerExecutorAdapter adapter = new(executor, "linux-amd64");
