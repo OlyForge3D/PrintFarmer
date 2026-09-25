@@ -110,12 +110,59 @@ staging directory is removed. **Only the presence of the verification record
 marks success;** a staging directory left by an interrupted run (for example
 with `.unverified/` and no record) is untrusted and must be deleted.
 
+### Prior recovery set and protected-backup reference
+
+A bundle may bind the prior release a host returns to on recovery. The prior
+set is that release's original signed metadata: its `update-manifest.json` and
+`.sigstore.json` bundle, and its CLI `SHA256SUMS` and `.sigstore.json` bundle.
+It must be accompanied by a reference to the installation's protected backup
+taken for that prior release; neither is accepted without the other.
+
+```bash
+node scripts/ci/offline-update-bundle.mjs assemble ... \
+  --prior-release-assets ./prior-release-assets \
+  --protected-backup ./protected-backup.json \
+  [--prior-mode packaged|local-reference]
+```
+
+The protected-backup reference is a JSON object with exactly `id`, `sha256`
+(lowercase SHA-256 of the backup), `locationClass` (`host-local`,
+`attached-volume` or `external-storage`) and `releaseVersion` (must equal the
+prior release version). The closed field set leaves no place for backup
+contents, credentials, connection strings or paths; the backup itself stays
+access-controlled and outside the redistributable bundle.
+
+- `packaged` (default) carries the prior files as `prior-*` members.
+- `local-reference` carries no prior members; the index binds each prior file
+  by name, size and SHA-256, and `verify` requires the operator's copy through
+  `--prior-recovery-set <dir>`. Each local file must match its bound digest and
+  is copied into the quarantine before authentication.
+
+Both `assemble` and `verify` fail closed unless the prior set is on the same
+channel, strictly older than the target (by sequence and version), its signed
+CLI checksum list names exactly every supported archive and SBOM, and Cosign
+accepts both prior signature bundles for the channel's release workflow
+identity using the supplied trusted root. A tampered, forged, wrong-channel,
+same-version or newer prior set, a missing packaged member, an index that
+misstates the prior set, a local copy supplied for a packaged set, or a local
+set supplied for a bundle without one is rejected. On success the verification
+record's `priorRecoverySet` names the mode, prior release identity, manifest
+digest and protected-backup reference; it is `false` when the bundle binds no
+prior set.
+
+The prior set does not yet include prior images or effective configuration;
+those follow the image archives (#3061) and host-local import (#3063). A bound
+prior set is recovery-only material and never a new offer or implicit channel
+consent.
+
 The index always states `installable: false` and `rolloutAuthorization: false`;
-`contents.images`, `contents.infrastructure`, `contents.priorRecoverySet` and
-`contents.recoveryInstructions` are `false`. Remaining work under #2658:
+`contents.images`, `contents.infrastructure` and
+`contents.recoveryInstructions` are `false`. `contents.priorRecoverySet` is
+`true` only when the bundle binds a complete prior set with its
+protected-backup reference. Remaining work under #2658:
 
 - #3061: application and infrastructure image archives.
-- #3062: prior recovery set and protected-backup references.
+- #3062 (delivered): prior recovery set and protected-backup references.
 - #3063: host-local import with Bash/PowerShell parity and bound recovery
   instructions.
 - #3064: replay protection, channel continuity and offline trust expiry.

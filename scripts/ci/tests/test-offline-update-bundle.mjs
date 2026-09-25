@@ -328,6 +328,283 @@ test('a carried CLI archive without its SBOM is rejected before import', () => {
   }
 });
 
+// --- Prior recovery set and protected-backup reference (#3062) ----------------------------------
+const priorReleases = {
+  stable: { version: '1.3.2', tag: 'v1.3.2', channel: 'stable', sourceBranch: 'main', sourceCommit: 'c'.repeat(40), buildId: '37' },
+  insider: { version: '1.5.0-insider.2', tag: 'v1.5.0-insider.2', channel: 'insider', sourceBranch: 'development',
+    sourceCommit: 'e'.repeat(40), buildId: '40' },
+};
+
+// Writes a release's signed metadata (manifest + CLI checksum list and their bundles) into `dir`.
+function writePriorRelease(dir, release, { signAs = release.channel, sumsNames } = {}) {
+  mkdirSync(dir, { recursive: true });
+  const manifest = Buffer.from(buildManifest(release, imageDetails));
+  writeFileSync(join(dir, 'update-manifest.json'), manifest);
+  writeFileSync(join(dir, 'update-manifest.sigstore.json'), sign(manifest, signAs));
+  const names = sumsNames ?? hostUpdateCliRuntimes.flatMap(rid =>
+    [hostUpdateCliArchiveName(release.version, rid), hostUpdateCliSbomName(release.version, rid)]);
+  const sums = Buffer.from(formatSums(names.map(name => ({ name, sha256: sha256(Buffer.from(name)) }))));
+  writeFileSync(join(dir, hostUpdateCliSumsName(release.version)), sums);
+  writeFileSync(join(dir, hostUpdateCliSumsBundleName(release.version)), sign(sums, signAs));
+  return dir;
+}
+
+function backupFor(release, overrides = {}) {
+  return { id: 'pf-backup-2026-09-25T2100Z', sha256: 'f'.repeat(64), locationClass: 'host-local',
+    releaseVersion: release.version, ...overrides };
+}
+
+function priorFixture(channel = 'stable', prior = priorReleases[channel], options) {
+  const context = fixture(channel);
+  context.prior = prior;
+  context.priorAssets = writePriorRelease(join(context.root, 'prior-assets'), prior, options);
+  context.withPrior = (overrides = {}) => ({ priorReleaseAssets: context.priorAssets,
+    protectedBackup: backupFor(prior), ...overrides });
+  return context;
+}
+
+const priorNames = version => ['update-manifest.json', 'update-manifest.sigstore.json', hostUpdateCliSumsName(version),
+  hostUpdateCliSumsBundleName(version)];
+
+for (const channel of ['stable', 'insider']) {
+  test(`${channel} bundle packages an authenticated prior recovery set and backup reference`, () => {
+    const context = priorFixture(channel);
+    try {
+      const { index } = assemble(context, context.withPrior());
+      assert.equal(index.contents.priorRecoverySet, true);
+      assert.equal(index.installable, false);
+      assert.equal(index.priorRecoverySet.mode, 'packaged');
+      assert.equal(index.priorRecoverySet.release.version, context.prior.version);
+      const { run, calls } = cosign({ requireOffline: true });
+      const record = verify(context, { run });
+      assert.equal(calls.length, 4, 'target and prior signatures are both authenticated offline');
+      assert.deepEqual(record.priorRecoverySet.release, index.priorRecoverySet.release);
+      assert.deepEqual(record.priorRecoverySet.protectedBackup, backupFor(context.prior));
+      assert.equal(record.priorRecoverySet.mode, 'packaged');
+      for (const name of priorNames(context.prior.version)) {
+        assert.deepEqual(readFileSync(join(context.staging, `prior-${name}`)), readFileSync(join(context.priorAssets, name)),
+          `imported prior ${name} must equal the original signed bytes`);
+      }
+      assert.equal(existsSync(join(context.staging, '.unverified')), false);
+    } finally {
+      context.cleanup();
+    }
+  });
+}
+
+test('a bundle without a prior set records priorRecoverySet false and rejects a supplied local set', () => {
+  const context = priorFixture('stable');
+  try {
+    const { index } = assemble(context);
+    assert.equal(index.contents.priorRecoverySet, false);
+    assert.equal(Object.hasOwn(index, 'priorRecoverySet'), false);
+    rejectsWithoutStaging(context, /carries no prior recovery set/, { priorRecoverySet: context.priorAssets });
+    assert.equal(verify(context).priorRecoverySet, false);
+  } finally {
+    context.cleanup();
+  }
+});
+
+test('a local-reference prior set is bound by digest and authenticated from the operator copy', () => {
+  const context = priorFixture('insider');
+  try {
+    const { index } = assemble(context, context.withPrior({ priorMode: 'local-reference' }));
+    assert.equal(index.contents.priorRecoverySet, true);
+    assert.equal(index.files.some(file => file.name.startsWith('prior-')), false, 'local reference carries no prior bytes');
+    rejectsWithoutStaging(context, /supply it with --prior-recovery-set/);
+    const local = join(context.root, 'local-prior');
+    mkdirSync(local);
+    for (const name of priorNames(context.prior.version)) writeFileSync(join(local, name), readFileSync(join(context.priorAssets, name)));
+    rejectsWithoutStaging(context, /must be a regular file/, { priorRecoverySet: join(context.root, 'missing') });
+    const manifestPath = join(local, 'update-manifest.json');
+    const original = readFileSync(manifestPath);
+    writeFileSync(manifestPath, Buffer.from(original.toString('utf8').replace('"buildId":"40"', '"buildId":"49"')));
+    rejectsWithoutStaging(context, /does not match the bundle's bound digest: update-manifest\.json/, { priorRecoverySet: local });
+    writeFileSync(manifestPath, original);
+    const record = verify(context, { priorRecoverySet: local });
+    assert.equal(record.priorRecoverySet.mode, 'local-reference');
+    assert.equal(record.priorRecoverySet.release.version, context.prior.version);
+    assert.deepEqual(readFileSync(join(context.staging, 'prior-update-manifest.json')), original);
+  } finally {
+    context.cleanup();
+  }
+});
+
+test('a packaged prior set refuses a separately supplied local copy', () => {
+  const context = priorFixture('stable');
+  try {
+    assemble(context, context.withPrior());
+    rejectsWithoutStaging(context, /must not be supplied/, { priorRecoverySet: context.priorAssets });
+  } finally {
+    context.cleanup();
+  }
+});
+
+test('the prior set is incomplete without a protected backup reference, and vice versa', () => {
+  const context = priorFixture('stable');
+  try {
+    assert.throws(() => assemble(context, { priorReleaseAssets: context.priorAssets }), /must be supplied together/);
+    assert.throws(() => assemble(context, { protectedBackup: backupFor(context.prior) }), /must be supplied together/);
+    assert.throws(() => assemble(context, context.withPrior({ priorMode: 'remote' })), /packaged or local-reference/);
+    assert.equal(existsSync(context.bundle), false);
+  } finally {
+    context.cleanup();
+  }
+});
+
+test('protected backup references carry only identity, checksum and location class', () => {
+  const context = priorFixture('stable');
+  try {
+    const cases = [
+      [{ ...backupFor(context.prior), password: 'hunter2' }, /exactly id, sha256, locationClass and releaseVersion/],
+      [{ ...backupFor(context.prior), contents: 'base64...' }, /exactly id, sha256/],
+      [backupFor(context.prior, { id: 'postgres://user:pass@db/backup' }), /id is invalid/],
+      [backupFor(context.prior, { id: '../etc/backup' }), /id is invalid/],
+      [backupFor(context.prior, { sha256: 'F'.repeat(64) }), /lowercase SHA-256/],
+      [backupFor(context.prior, { locationClass: 's3://bucket' }), /location class is not supported/],
+      [backupFor(context.prior, { releaseVersion: '1.4.0' }), /not taken for the prior release 1\.3\.2/],
+      [[], /exactly id, sha256/],
+    ];
+    for (const [protectedBackup, pattern] of cases) {
+      assert.throws(() => assemble(context, context.withPrior({ protectedBackup })), pattern);
+      assert.equal(existsSync(context.bundle), false);
+    }
+  } finally {
+    context.cleanup();
+  }
+});
+
+test('wrong-channel, newer, same-version and wrong-identity prior sets fail closed', () => {
+  const insiderPrior = priorFixture('insider', priorReleases.stable);
+  const newer = priorFixture('stable', { ...priorReleases.stable, version: '1.4.1', tag: 'v1.4.1' });
+  const same = priorFixture('stable', { ...releases.stable, sourceCommit: 'f'.repeat(40), buildId: '43' });
+  const wrongSigner = priorFixture('stable', priorReleases.stable, { signAs: 'insider' });
+  try {
+    assert.throws(() => assemble(insiderPrior, insiderPrior.withPrior()),
+      /Prior recovery set: .*does not match the expected insider channel/);
+    assert.throws(() => assemble(newer, newer.withPrior()), /1\.4\.1 is not strictly older than the target 1\.4\.0/);
+    assert.throws(() => assemble(same, same.withPrior()), /1\.4\.0 is not strictly older than the target 1\.4\.0/);
+    assert.throws(() => assemble(wrongSigner, wrongSigner.withPrior()),
+      /Prior recovery set signature verification failed for update-manifest\.json: certificate identity mismatch/);
+  } finally {
+    for (const context of [insiderPrior, newer, same, wrongSigner]) context.cleanup();
+  }
+});
+
+test('a signed prior checksum list must name exactly the supported assets', () => {
+  const context = priorFixture('stable', priorReleases.stable,
+    { sumsNames: [hostUpdateCliArchiveName(priorReleases.stable.version, 'linux-x64')] });
+  try {
+    assert.throws(() => assemble(context, context.withPrior()),
+      /Prior recovery set CLI checksum list does not name exactly the supported archives and SBOMs/);
+  } finally {
+    context.cleanup();
+  }
+});
+
+test('tampered or forged prior sets are rejected by the network-denied verifier', () => {
+  const context = priorFixture('stable');
+  try {
+    assemble(context, context.withPrior());
+    const bytes = readFileSync(context.bundle);
+    const target = bytes.indexOf(Buffer.from('"buildId":"37"'));
+    assert.ok(target > 0);
+    bytes[target + 12] = '8'.charCodeAt(0);
+    writeFileSync(context.bundle, bytes);
+    rejectsWithoutStaging(context, /member was modified: prior-update-manifest\.json/);
+    rmSync(context.bundle);
+    // A self-consistent forgery from an assembler that skips authentication still fails offline.
+    const manifestPath = join(context.priorAssets, 'update-manifest.json');
+    writeFileSync(manifestPath, readFileSync(manifestPath, 'utf8').replace('"buildId":"37"', '"buildId":"38"'));
+    assemble(context, context.withPrior({ run: () => '' }));
+    rejectsWithoutStaging(context, /Prior recovery set signature verification failed for update-manifest\.json/);
+  } finally {
+    context.cleanup();
+  }
+});
+
+test('index claims about the prior set cannot be forged or left incomplete', () => {
+  const context = priorFixture('stable');
+  try {
+    assemble(context, context.withPrior());
+    const original = readFileSync(context.bundle);
+    const indexSize = Number.parseInt(original.subarray(124, 135).toString('latin1'), 8);
+    const index = JSON.parse(original.subarray(512, 512 + indexSize).toString('utf8'));
+    const rest = original.subarray(512 + Math.ceil(indexSize / 512) * 512);
+    const rewrite = mutate => {
+      const copy = structuredClone(index);
+      mutate(copy);
+      const data = Buffer.from(`${JSON.stringify(copy, undefined, 2)}\n`);
+      writeFileSync(context.bundle, Buffer.concat([tarHeader({ name: offlineBundleIndexName, size: data.length }), data,
+        Buffer.alloc((512 - (data.length % 512)) % 512), rest]));
+    };
+    rewrite(copy => { delete copy.priorRecoverySet; });
+    rejectsWithoutStaging(context, /prior recovery claim does not match|not part of this release/);
+    rewrite(copy => { copy.contents.priorRecoverySet = false; });
+    rejectsWithoutStaging(context, /prior recovery claim does not match/);
+    rewrite(copy => { delete copy.priorRecoverySet.protectedBackup; });
+    rejectsWithoutStaging(context, /prior recovery set fields are invalid/);
+    rewrite(copy => { copy.priorRecoverySet.protectedBackup.connectionString = 'Server=db;Password=x'; });
+    rejectsWithoutStaging(context, /exactly id, sha256, locationClass and releaseVersion/);
+    rewrite(copy => { copy.priorRecoverySet.protectedBackup.releaseVersion = '1.4.0'; });
+    rejectsWithoutStaging(context, /not taken for the prior release/);
+    rewrite(copy => { copy.priorRecoverySet.release.buildId = '99'; });
+    rejectsWithoutStaging(context, /prior recovery identity does not equal the signed prior manifest identity/);
+    rewrite(copy => { copy.priorRecoverySet.manifestDigest = `sha256:${'0'.repeat(64)}`; });
+    rejectsWithoutStaging(context, /prior recovery manifest digest mismatch/);
+    rewrite(copy => { copy.priorRecoverySet.mode = 'remote'; });
+    rejectsWithoutStaging(context, /prior recovery mode is not supported/);
+    rewrite(copy => { copy.priorRecoverySet.files.pop(); });
+    rejectsWithoutStaging(context, /does not list exactly the prior signed metadata/);
+    rewrite(copy => { copy.priorRecoverySet.files[0].sha256 = '0'.repeat(64); });
+    rejectsWithoutStaging(context, /missing or mismatches its packaged prior recovery member/);
+    rewrite(copy => { copy.priorRecoverySet.mode = 'local-reference'; });
+    rejectsWithoutStaging(context, /supply it with --prior-recovery-set/);
+    rejectsWithoutStaging(context, /not part of this release: prior-/, { priorRecoverySet: context.priorAssets });
+  } finally {
+    context.cleanup();
+  }
+});
+
+test('a missing packaged prior member is rejected before import', () => {
+  const context = priorFixture('stable');
+  try {
+    const { index } = assemble(context, context.withPrior({ output: `${context.bundle}.template` }));
+    rmSync(`${context.bundle}.template`);
+    const dropped = 'prior-update-manifest.sigstore.json';
+    index.files = index.files.filter(file => file.name !== dropped);
+    const data = Buffer.from(`${JSON.stringify(index, undefined, 2)}\n`);
+    const source = name => name.startsWith('prior-') ? join(context.priorAssets, name.slice(6)) : join(context.assets, name);
+    writeTar(context.bundle, [{ header: tarHeader({ name: offlineBundleIndexName, size: data.length }), data },
+      ...index.files.map(file => member(file.name, readFileSync(source(file.name))))]);
+    rejectsWithoutStaging(context, /missing or mismatches its packaged prior recovery member: update-manifest\.sigstore\.json/);
+  } finally {
+    context.cleanup();
+  }
+});
+
+test('the command line accepts prior recovery options without adding a bypass', () => {
+  assert.deepEqual(parseArguments(['assemble', '--release-assets', 'a', '--channel', 'stable', '--output', 'o',
+    '--prior-release-assets', 'p', '--protected-backup', 'b.json', '--prior-mode', 'local-reference']).options,
+  { 'release-assets': 'a', channel: 'stable', output: 'o', 'prior-release-assets': 'p', 'protected-backup': 'b.json',
+    'prior-mode': 'local-reference' });
+  assert.equal(parseArguments(['verify', '--bundle', 'b', '--prior-recovery-set', 'p']).options['prior-recovery-set'], 'p');
+  for (const argv of [['verify', '--protected-backup', 'b.json'], ['assemble', '--prior-recovery-set', 'p'],
+    ['verify', '--skip-prior-verification', 'true']]) {
+    assert.throws(() => parseArguments(argv), /usage/, argv.join(' '));
+  }
+});
+
+test('a prior set in a bundle stays within the member bound', () => {
+  const context = priorFixture('stable');
+  try {
+    const { index } = assemble(context, context.withPrior());
+    assert.ok(index.files.length + 1 <= offlineBundleLimits.maxMembers);
+  } finally {
+    context.cleanup();
+  }
+});
+
 test('assembly refuses to overwrite an existing bundle', () => {
   const context = fixture('stable');
   try {
