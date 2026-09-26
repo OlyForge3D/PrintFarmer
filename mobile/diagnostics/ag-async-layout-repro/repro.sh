@@ -44,6 +44,7 @@ if [[ ! "${timeout}" =~ ^[1-9][0-9]*$ ]]; then
   echo "--timeout must be a positive integer: ${timeout}" >&2
   exit 2
 fi
+timeout=$((10#${timeout}))
 if [[ ! "${label}" =~ ^[A-Za-z0-9._-]+$ || "${label}" == "." || "${label}" == ".." ]]; then
   echo "--label must use only letters, digits, '.', '_' and '-': ${label}" >&2
   exit 2
@@ -61,11 +62,16 @@ xcrun simctl boot "${udid}" 2>/dev/null || true
 xcrun simctl bootstatus "${udid}" -b >/dev/null
 xcrun simctl install "${udid}" "${app_dir}"
 
-# app_running — true while launchd in the simulator lists the app with a PID.
-app_running() {
-  xcrun simctl spawn "${udid}" launchctl list |
-    awk -v id="UIKitApplication:${bundle_id}[" \
-      'index($3, id) == 1 && $1 ~ /^[0-9]+$/ { found = 1 } END { exit found ? 0 : 1 }'
+# app_state — prints "running" or "stopped" from launchd in the simulator.
+# Fails when the launchctl query itself fails, so an unknown state is never
+# treated as stopped.
+app_state() {
+  local listing
+  listing="$(xcrun simctl spawn "${udid}" launchctl list)" || return 1
+  printf '%s\n' "${listing}" |
+    awk -v id="UIKitApplication:${bundle_id}[" '
+      index($3, id) == 1 && $1 ~ /^[0-9]+$/ { found = 1 }
+      END { print (found ? "running" : "stopped") }'
 }
 
 # stop_app — terminates the app and fails unless it is confirmed stopped.
@@ -77,9 +83,13 @@ stop_app() {
     echo "simctl terminate failed (exit ${rc})" >&2
     return 1
   fi
-  local attempt
+  local attempt state
   for attempt in 1 2 3 4 5 6 7 8 9 10; do
-    app_running || return 0
+    if ! state="$(app_state)"; then
+      echo "could not query launchd in simulator ${udid}" >&2
+      return 1
+    fi
+    [[ "${state}" == "stopped" ]] && return 0
     sleep 0.5
   done
   echo "${bundle_id} is still running after terminate (${attempt} checks)" >&2
