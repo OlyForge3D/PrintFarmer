@@ -215,6 +215,20 @@ jobs:
           cosign verify-blob --bundle "$BUNDLE" \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \
             --certificate-identity "$EXPECTED_IDENTITY" "$INSTRUCTIONS"
+      - name: Sign exact offline deployment set
+        env:
+          DEPLOYMENT_SET: release-assets/offline-deployment-set.json
+          BUNDLE: signed-release/offline-deployment-set.sigstore.json
+          EXPECTED_IDENTITY_REF: ${{ inputs.channel == 'stable' && 'main' || 'development' }}
+          EXPECTED_IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/consolidated-release.yml@refs/heads/${{ inputs.channel == 'stable' && 'main' || 'development' }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_WORKFLOW_REF" = "${GITHUB_REPOSITORY}/.github/workflows/consolidated-release.yml@refs/heads/${EXPECTED_IDENTITY_REF}"
+          sha256sum "$DEPLOYMENT_SET" > signed-release/offline-deployment-set.sha256
+          cosign sign-blob --yes --bundle "$BUNDLE" "$DEPLOYMENT_SET"
+          cosign verify-blob --bundle "$BUNDLE" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            --certificate-identity "$EXPECTED_IDENTITY" "$DEPLOYMENT_SET"
       - name: Upload immutable signature evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
@@ -266,6 +280,8 @@ jobs:
           cp signed-release/infrastructure-images.sigstore.json release-assets/infrastructure-images.sigstore.json
           sha256sum --check signed-release/offline-recovery-instructions.sha256
           cp signed-release/offline-recovery-instructions.sigstore.json release-assets/offline-recovery-instructions.sigstore.json
+          sha256sum --check signed-release/offline-deployment-set.sha256
+          cp signed-release/offline-deployment-set.sigstore.json release-assets/offline-deployment-set.sigstore.json
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7
         with:
           node-version: 24
