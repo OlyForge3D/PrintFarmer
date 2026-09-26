@@ -864,6 +864,48 @@ public sealed class HostUpdateSchedulerTests
         Assert.Equal(HostUpdateReplayDisposition.Accepted, insider.Disposition);
     }
 
+    [Theory]
+    [InlineData(UpdateChannelSettings.StableChannel, UpdateChannelSettings.InsiderChannel)]
+    [InlineData(UpdateChannelSettings.InsiderChannel, UpdateChannelSettings.StableChannel)]
+    public async Task TickAsync_ChannelRoundTrip_PreservesImportedIdentityAndRejected41(string home, string away)
+    {
+        string root = TempRoot();
+        await SeedEmptyReplayFileAsync(root);
+        InMemoryReplayAnchor anchor = new();
+        VerifiedHostUpdateCandidate c41 = Candidate(home) with { Sequence = 41 };
+        VerifiedHostUpdateCandidate c42 = Candidate(home) with { Sequence = 42 };
+        VerifiedHostUpdateCandidate awayImport = Candidate(away) with { Sequence = 7 };
+        FileHostUpdateReplayStore offline = new(root, anchor);
+        Assert.Equal(HostUpdateReplayDisposition.Imported, (await offline.DecideAsync(c42, HostUpdateReplayIntent.Import, default)).Disposition);
+        Assert.Equal(HostUpdateReplayDisposition.Rejected, (await offline.DecideAsync(c41, HostUpdateReplayIntent.Import, default)).Disposition);
+        Assert.Equal(HostUpdateReplayDisposition.Imported, (await offline.DecideAsync(awayImport, HostUpdateReplayIntent.Import, default)).Disposition);
+
+        // Switch away: the cached home-channel candidate hits the terminal ChannelMismatch path.
+        FakeExecutor awayExecutor = new();
+        HostUpdateScheduler awayScheduler = Create(new HostUpdateSchedulerSettings(true, Channel: away, InsiderAcknowledged: true), c42, awayExecutor,
+            new FileHostUpdateReplayStore(root, anchor));
+        Assert.Equal(HostUpdateSchedulerReason.ChannelMismatch, (await awayScheduler.TickAsync()).Reason);
+        Assert.Empty(awayExecutor.Requests);
+
+        // Switch back after a restart: the imported identity is still eligible for one online admission.
+        FileHostUpdateReplayStore restarted = new(root, anchor);
+        FakeExecutor homeExecutor = new();
+        HostUpdateScheduler homeScheduler = Create(new HostUpdateSchedulerSettings(true, Channel: home, InsiderAcknowledged: true), c42, homeExecutor, restarted);
+        Assert.Equal(HostUpdateSchedulerReason.Admitted, (await homeScheduler.TickAsync()).Reason);
+        Assert.Single(homeExecutor.Requests);
+
+        FileHostUpdateReplayStore afterRoundTrip = new(root, anchor);
+        HostUpdateReplayDecision rejected41 = await afterRoundTrip.DecideAsync(c41, HostUpdateReplayIntent.Admit, default);
+        HostUpdateReplayDecision reimported41 = await afterRoundTrip.DecideAsync(c41, HostUpdateReplayIntent.Import, default);
+        HostUpdateReplayDecision awayStillImported = await afterRoundTrip.DecideAsync(awayImport, HostUpdateReplayIntent.Import, default);
+        HostUpdateReplayDecision awayLower = await afterRoundTrip.DecideAsync(Candidate(away) with { Sequence = 6 }, HostUpdateReplayIntent.Import, default);
+        Assert.Equal(HostUpdateReplayDisposition.Rejected, rejected41.Disposition);
+        Assert.Equal(HostUpdateReplayDisposition.Rejected, reimported41.Disposition);
+        Assert.Equal(HostUpdateReplayDisposition.Imported, awayStillImported.Disposition);
+        Assert.True(awayStillImported.Reused);
+        Assert.Equal(HostUpdateReplayDisposition.Rejected, awayLower.Disposition);
+    }
+
     private static string TempRoot()
     {
         string root = Path.Combine(HostStateTestPaths.TempRoot, "printfarmer-replay-" + Guid.NewGuid().ToString("N"));

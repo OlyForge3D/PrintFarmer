@@ -371,10 +371,13 @@ public sealed class FileHostUpdateReplayStore(string rootPath, IHostUpdateReplay
             HostUpdateReplayFileState state = await LoadAndRecoverAsync(anchorEpoch, anchorStateHash, ct);
             string ns = Namespace(candidate);
             if (state.Identities.TryGetValue(candidate.Identity, out HostUpdateReplayIdentityRecord? existing) &&
-                (existing.Disposition != HostUpdateReplayDisposition.Imported || intent == HostUpdateReplayIntent.Import))
+                (existing.Disposition != HostUpdateReplayDisposition.Imported ||
+                 intent is HostUpdateReplayIntent.Import or HostUpdateReplayIntent.Reject))
             {
                 // An offline import stages a release without installing it; the online path may
-                // still reserve and admit that same identity once, so only Import reuses it here.
+                // still reserve and admit that same identity once. Like an Accepted identity, an
+                // Imported one is never overwritten by a terminal online rejection (for example a
+                // cached candidate from a temporarily unselected channel).
                 return new(existing.Disposition, existing.CorrelationId, true);
             }
 

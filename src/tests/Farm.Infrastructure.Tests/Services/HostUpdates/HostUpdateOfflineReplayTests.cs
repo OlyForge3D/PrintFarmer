@@ -102,6 +102,21 @@ public sealed class HostUpdateOfflineReplayTests
     }
 
     [Fact]
+    public async Task Import_ThenOnlineTerminalReject_KeepsImportedIdentity()
+    {
+        (FileHostUpdateReplayStore store, string root, InMemoryAnchor anchor) = await NewStoreAsync();
+        await store.DecideAsync(Candidate(42), HostUpdateReplayIntent.Import, default);
+
+        HostUpdateReplayDecision reject = await store.DecideAsync(Candidate(42), HostUpdateReplayIntent.Reject, default);
+        HostUpdateReplayDecision admit = await new FileHostUpdateReplayStore(root, anchor).DecideAsync(Candidate(42), HostUpdateReplayIntent.Admit, default);
+
+        Assert.Equal(HostUpdateReplayDisposition.Imported, reject.Disposition);
+        Assert.True(reject.Reused);
+        Assert.Equal(HostUpdateReplayDisposition.Accepted, admit.Disposition);
+        Assert.False(admit.Reused);
+    }
+
+    [Fact]
     public async Task Import_ChannelsAreIndependent()
     {
         (FileHostUpdateReplayStore store, _, _) = await NewStoreAsync();
