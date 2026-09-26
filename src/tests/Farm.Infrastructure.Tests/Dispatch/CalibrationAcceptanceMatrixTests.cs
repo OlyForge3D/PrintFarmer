@@ -856,6 +856,9 @@ public class CalibrationAcceptanceMatrixTests : IAsyncDisposable
         var ds = new PrinterDispatchState { PrinterId = printer.Id };
         seedCtx.PrinterDispatchStates.Add(ds);
 
+        // Same priority, so queue order falls to QueuedAt. Distinct deterministic
+        // timestamps keep job-A the head instead of a random Guid tiebreak (#3088).
+        DateTime seededAt = DateTime.UtcNow;
         var jobA = new PrintJob
         {
             Id = Guid.NewGuid(),
@@ -868,9 +871,9 @@ public class CalibrationAcceptanceMatrixTests : IAsyncDisposable
             // Idempotency-key semantics are job-kind agnostic; a Standard job keeps
             // this test focused on the key contract.
             JobKind = JobKind.Standard,
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow,
-            QueuedAt = DateTime.UtcNow,
+            CreatedAt = seededAt,
+            UpdatedAt = seededAt,
+            QueuedAt = seededAt,
         };
         var jobB = new PrintJob
         {
@@ -884,9 +887,9 @@ public class CalibrationAcceptanceMatrixTests : IAsyncDisposable
             // Idempotency-key semantics are job-kind agnostic; a Standard job keeps
             // this test focused on the key contract.
             JobKind = JobKind.Standard,
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow,
-            QueuedAt = DateTime.UtcNow,
+            CreatedAt = seededAt.AddSeconds(1),
+            UpdatedAt = seededAt.AddSeconds(1),
+            QueuedAt = seededAt.AddSeconds(1),
         };
         seedCtx.PrintJobs.Add(jobA);
         seedCtx.PrintJobs.Add(jobB);
