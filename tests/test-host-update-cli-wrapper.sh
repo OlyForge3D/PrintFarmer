@@ -200,9 +200,10 @@ env -u PRINTFARMER_HOST_UPDATE_CLI_DIR PRINTFARMER_DOTNET="$FAKE_DOTNET" \
 [[ "$code" -eq 2 && ! -f "$ARGS_LOG" ]] && pass "no package marker means no default CLI dir" \
     || fail "no package marker means no default CLI dir (exit $code)"
 
-# Issue #3063: host-local offline bundle import. It needs no --config or CLI directory and runs the
-# offline bundle tool on node with a fixed, pre-validated argument vector. The PowerShell test
-# asserts the identical vector, which is the Bash/PowerShell parity contract.
+# Issue #3063/#3064: host-local offline bundle import. It runs the offline bundle tool on node with a
+# fixed, pre-validated argument vector that names the resolved host-update CLI (for replay admission)
+# and its --config. The PowerShell test asserts the identical vector, which is the Bash/PowerShell
+# parity contract.
 FAKE_NODE="$TEST_ROOT/fake-node"
 FAKE_TOOL="$TEST_ROOT/offline-update-bundle.mjs"
 FAKE_COSIGN="$TEST_ROOT/fake-cosign"
@@ -212,15 +213,17 @@ cp "$FAKE_DOTNET" "$FAKE_COSIGN"
 chmod +x "$FAKE_NODE" "$FAKE_COSIGN"
 BUNDLE="$TEST_ROOT/printfarmer-offline-update.tar"
 ROOT_JSON="$TEST_ROOT/trusted_root.json"
+APPROVAL="$TEST_ROOT/trusted-root-approval.json"
 STAGING="$TEST_ROOT/staging"
 RECORDS="$TEST_ROOT/records"
-import_base=(import --bundle "$BUNDLE" --channel stable --version 1.2.3 --trusted-root "$ROOT_JSON"
-    --staging "$STAGING" --records "$RECORDS" --operator ops.alice@site-1)
+import_base=(import --config "$CONFIG" --bundle "$BUNDLE" --channel stable --version 1.2.3 --trusted-root "$ROOT_JSON"
+    --trusted-root-approval "$APPROVAL" --staging "$STAGING" --records "$RECORDS" --operator ops.alice@site-1)
+import_fixed=(--trusted-root-approval "$APPROVAL" --staging "$STAGING" --records "$RECORDS")
 
 run_import() {
     rm -f "$ARGS_LOG"
     local code=0
-    env -u PRINTFARMER_HOST_UPDATE_CLI_DIR -u PRINTFARMER_DOTNET -u PRINTFARMER_COSIGN -u PRINTFARMER_DOCKER \
+    env -u PRINTFARMER_DOTNET -u PRINTFARMER_COSIGN -u PRINTFARMER_DOCKER PRINTFARMER_HOST_UPDATE_CLI_DIR="$CLI_DIR" \
         PRINTFARMER_NODE="$FAKE_NODE" PRINTFARMER_OFFLINE_BUNDLE_TOOL="$FAKE_TOOL" "$@" \
         > "$TEST_ROOT/stdout.log" 2> "$TEST_ROOT/stderr.log" || code=$?
     return "$code"
@@ -229,8 +232,14 @@ run_import() {
 expect_import() {
     local name="$1" expected="$2"
     shift 2
+    expect_import_command "$name" "$expected" bash "$WRAPPER" "$@"
+}
+
+expect_import_command() {
+    local name="$1" expected="$2"
+    shift 2
     local code=0
-    run_import bash "$WRAPPER" "$@" || code=$?
+    run_import "$@" || code=$?
     if [[ "$code" -eq 0 && -f "$ARGS_LOG" && "$(cat "$ARGS_LOG")" == "$expected" ]]; then
         pass "$name"
     else
@@ -252,18 +261,28 @@ expect_import_usage() {
 
 expect_import "import passes a fixed argument vector to the bundle tool" \
     "$(printf '%s\n' "$FAKE_TOOL" import --bundle "$BUNDLE" --channel stable --version 1.2.3 --trusted-root "$ROOT_JSON" \
-        --staging "$STAGING" --records "$RECORDS" --operator ops.alice@site-1)" \
+        "${import_fixed[@]}" --operator ops.alice@site-1 --config "$CONFIG" --host-update-cli "$dll")" \
     "${import_base[@]}"
 expect_import "import options are normalised to a fixed order" \
     "$(printf '%s\n' "$FAKE_TOOL" import --bundle "$BUNDLE" --channel insider --version 1.2.3-rc.1 --trusted-root "$ROOT_JSON" \
-        --staging "$STAGING" --records "$RECORDS" --operator ops --prior-recovery-set "$TEST_ROOT/prior" \
-        --protected-backup "$TEST_ROOT/backup.json")" \
+        "${import_fixed[@]}" --operator ops --config "$CONFIG" --host-update-cli "$dll" \
+        --prior-recovery-set "$TEST_ROOT/prior" --protected-backup "$TEST_ROOT/backup.json")" \
     import --protected-backup "$TEST_ROOT/backup.json" --operator ops --records "$RECORDS" --prior-recovery-set "$TEST_ROOT/prior" \
-    --staging "$STAGING" --trusted-root "$ROOT_JSON" --version 1.2.3-rc.1 --channel insider --bundle "$BUNDLE"
+    --staging "$STAGING" --trusted-root-approval "$APPROVAL" --trusted-root "$ROOT_JSON" --version 1.2.3-rc.1 \
+    --channel insider --config "$CONFIG" --bundle "$BUNDLE"
+expect_import_command "import forwards an absolute PRINTFARMER_DOTNET for a framework-dependent CLI" \
+    "$(printf '%s\n' "$FAKE_TOOL" import --bundle "$BUNDLE" --channel stable --version 1.2.3 --trusted-root "$ROOT_JSON" \
+        "${import_fixed[@]}" --operator ops.alice@site-1 --config "$CONFIG" --host-update-cli "$dll" --dotnet "$FAKE_DOTNET")" \
+    env PRINTFARMER_DOTNET="$FAKE_DOTNET" bash "$WRAPPER" "${import_base[@]}"
+chmod +x "$APPHOST_DIR/Farm.HostUpdate.Cli"
+expect_import_command "import names a self-contained CLI launcher directly" \
+    "$(printf '%s\n' "$FAKE_TOOL" import --bundle "$BUNDLE" --channel stable --version 1.2.3 --trusted-root "$ROOT_JSON" \
+        "${import_fixed[@]}" --operator ops.alice@site-1 --config "$CONFIG" --host-update-cli "$APPHOST_DIR/Farm.HostUpdate.Cli")" \
+    env PRINTFARMER_HOST_UPDATE_CLI_DIR="$APPHOST_DIR" bash "$WRAPPER" "${import_base[@]}"
 
 rm -f "$ARGS_LOG"
 code=0
-env -u PRINTFARMER_HOST_UPDATE_CLI_DIR -u PRINTFARMER_DOTNET -u PRINTFARMER_DOCKER PRINTFARMER_NODE="$FAKE_NODE" \
+env -u PRINTFARMER_DOTNET -u PRINTFARMER_DOCKER PRINTFARMER_HOST_UPDATE_CLI_DIR="$CLI_DIR" PRINTFARMER_NODE="$FAKE_NODE" \
     PRINTFARMER_OFFLINE_BUNDLE_TOOL="$FAKE_TOOL" PRINTFARMER_COSIGN="$FAKE_COSIGN" \
     bash "$WRAPPER" "${import_base[@]}" > /dev/null 2>&1 || code=$?
 if [[ "$code" -eq 0 && "$(tail -n 2 "$ARGS_LOG" 2>/dev/null)" == "$(printf '%s\n' --cosign "$FAKE_COSIGN")" ]]; then
@@ -276,9 +295,17 @@ code=0
 FAKE_EXIT=1 run_import bash "$WRAPPER" "${import_base[@]}" || code=$?
 [[ "$code" -eq 1 && -f "$ARGS_LOG" ]] && pass "import preserves the refused exit code" || fail "import preserves the refused exit code (exit $code)"
 
-expect_import_usage "import refuses --config" bash "$WRAPPER" "${import_base[@]}" --config "$CONFIG"
+expect_import_usage "import refuses a duplicate --config" bash "$WRAPPER" "${import_base[@]}" --config "$CONFIG"
 expect_import_usage "import refuses a missing required option" bash "$WRAPPER" import --bundle "$BUNDLE" --channel stable \
     --version 1.2.3 --trusted-root "$ROOT_JSON" --staging "$STAGING" --records "$RECORDS"
+expect_import_usage "import requires --config" bash "$WRAPPER" import --bundle "$BUNDLE" --channel stable --version 1.2.3 \
+    --trusted-root "$ROOT_JSON" --trusted-root-approval "$APPROVAL" --staging "$STAGING" --records "$RECORDS" --operator ops
+expect_import_usage "import requires --trusted-root-approval" bash "$WRAPPER" import --config "$CONFIG" --bundle "$BUNDLE" \
+    --channel stable --version 1.2.3 --trusted-root "$ROOT_JSON" --staging "$STAGING" --records "$RECORDS" --operator ops
+expect_import_usage "import refuses a relative --config" bash "$WRAPPER" import --config host-update.json --bundle "$BUNDLE" \
+    --channel stable --version 1.2.3 --trusted-root "$ROOT_JSON" --trusted-root-approval "$APPROVAL" --staging "$STAGING" \
+    --records "$RECORDS" --operator ops
+expect_import_usage "import refuses a missing CLI directory" env -u PRINTFARMER_HOST_UPDATE_CLI_DIR bash "$WRAPPER" "${import_base[@]}"
 expect_import_usage "import refuses a duplicate option" bash "$WRAPPER" "${import_base[@]}" --channel stable
 expect_import_usage "import refuses a relative bundle path" bash "$WRAPPER" import --bundle bundle.tar --channel stable \
     --version 1.2.3 --trusted-root "$ROOT_JSON" --staging "$STAGING" --records "$RECORDS" --operator ops

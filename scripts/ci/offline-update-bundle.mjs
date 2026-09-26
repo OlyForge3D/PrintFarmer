@@ -27,8 +27,13 @@
 // complete bundle (images, infrastructure and recovery instructions), verifies it, loads only
 // verified images and always writes a durable, redacted decision record.
 //
-// Bundles are still NOT installable: they do not carry replay state, and never enable rollout.
-// docs/OFFLINE_UPDATE_RECOVERY.md tracks the remaining delivery.
+// Issue #3064: `import` also enforces the offline trust expiry policy (an operator approval that
+// binds the exact trusted root and expires, and a root whose CA and transparency-log keys are still
+// valid) and records the release in the host's durable replay store through the host-update CLI
+// (`offline-admit`), so replays, downgrades and cross-channel imports fail closed. The bundle index
+// and verification record stay not-installable; only the final import decision record reports
+// `installable: true`, and only after replay admission and a complete load. Nothing here ever
+// authorizes a rollout. docs/OFFLINE_UPDATE_RECOVERY.md tracks the remaining delivery.
 import { createHash, randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import {
@@ -1065,6 +1070,121 @@ export function redactReason(message, paths) {
   return text.length > maxReasonLength ? `${text.slice(0, maxReasonLength - 3)}...` : text;
 }
 
+// ---------------------------------------------------------------------------------------------
+// Trust expiry policy (#3064). A network-denied host cannot fetch a fresh Sigstore trusted root, so
+// the operator's root is only trusted while (a) an operator approval record binds its exact bytes
+// and is younger than `maxApprovalAgeDays`, and (b) the root itself still lists at least one
+// certificate authority and one transparency log whose validity window covers now. Revocation is
+// expressed only through those validity windows and the durable replay store; there is no offline
+// revocation list (documented residual in docs/OFFLINE_UPDATE_RECOVERY.md).
+// ---------------------------------------------------------------------------------------------
+export const trustedRootApprovalKind = 'printfarmer-trusted-root-approval';
+export const offlineTrustPolicy = Object.freeze({
+  maxApprovalAgeDays: 90,
+  maxClockSkewMinutes: 10,
+  maxTrustedRootBytes: 4 * 1024 * 1024,
+  maxApprovalBytes: 64 * 1024,
+});
+const dayMs = 24 * 60 * 60 * 1000;
+
+function validWindowCovers(window, at) {
+  if (!window || typeof window !== 'object' || typeof window.start !== 'string') return false;
+  const start = Date.parse(window.start);
+  if (!Number.isFinite(start) || start > at) return false;
+  if (window.end === undefined || window.end === null) return true;
+  const end = Date.parse(window.end);
+  return typeof window.end === 'string' && Number.isFinite(end) && end > at;
+}
+
+export function evaluateTrustPolicy({ trustedRoot, trustedRootApproval, now = () => new Date(),
+  policy = offlineTrustPolicy }) {
+  requireThat(typeof trustedRoot === 'string' && trustedRoot.length > 0,
+    'Network-denied import requires an operator-supplied Sigstore trusted root (--trusted-root)');
+  requireThat(typeof trustedRootApproval === 'string' && isAbsolute(trustedRootApproval),
+    'Network-denied import requires an absolute trusted-root approval record (--trusted-root-approval)');
+  const rootBytes = readSmallFile(resolve(trustedRoot), 'Sigstore trusted root', policy.maxTrustedRootBytes);
+  const rootSha256 = createHash('sha256').update(rootBytes).digest('hex');
+  let approval;
+  try {
+    approval = JSON.parse(readSmallFile(trustedRootApproval, 'Trusted-root approval record', policy.maxApprovalBytes)
+      .toString('utf8'));
+  } catch (error) {
+    throw new Error(`Trusted-root approval record is unreadable: ${error.message}`);
+  }
+  const fields = ['approvedAt', 'approvedBy', 'kind', 'schema', 'trustedRootSha256'];
+  requireThat(approval && typeof approval === 'object' && !Array.isArray(approval) &&
+    Object.keys(approval).sort().join(',') === fields.join(',') && approval.schema === 1 &&
+    approval.kind === trustedRootApprovalKind && typeof approval.trustedRootSha256 === 'string' &&
+    /^[0-9a-f]{64}$/.test(approval.trustedRootSha256) && typeof approval.approvedBy === 'string' &&
+    operatorPattern.test(approval.approvedBy) && typeof approval.approvedAt === 'string',
+  'Trusted-root approval record is malformed');
+  requireThat(approval.trustedRootSha256 === rootSha256,
+    'Trusted-root approval record does not bind the supplied trusted root');
+  const at = now().getTime();
+  const approvedAt = Date.parse(approval.approvedAt);
+  requireThat(Number.isFinite(approvedAt) && new Date(approvedAt).toISOString() === approval.approvedAt,
+    'Trusted-root approval time must be a canonical UTC timestamp');
+  requireThat(approvedAt <= at + policy.maxClockSkewMinutes * 60 * 1000,
+    'Trusted-root approval is dated in the future; check the host clock');
+  const expiresAt = approvedAt + policy.maxApprovalAgeDays * dayMs;
+  requireThat(at < expiresAt,
+    `Trusted-root approval expired (older than ${policy.maxApprovalAgeDays} days); re-approve a current trusted root`);
+  let root;
+  try {
+    root = JSON.parse(rootBytes.toString('utf8'));
+  } catch {
+    throw new Error('Sigstore trusted root is not valid JSON');
+  }
+  const authorities = Array.isArray(root?.certificateAuthorities) ? root.certificateAuthorities : [];
+  const tlogs = Array.isArray(root?.tlogs) ? root.tlogs : [];
+  requireThat(authorities.some(authority => validWindowCovers(authority?.validFor, at)),
+    'Sigstore trusted root has no certificate authority valid now');
+  requireThat(tlogs.some(tlog => validWindowCovers(tlog?.publicKey?.validFor, at)),
+    'Sigstore trusted root has no transparency log key valid now');
+  return { trustedRootSha256: rootSha256, approvedAt: approval.approvedAt, approvedBy: approval.approvedBy,
+    approvalExpiresAt: new Date(expiresAt).toISOString() };
+}
+
+// Replay admission (#3064): the host-update CLI records the verified release in the same durable
+// replay store the online scheduler uses, and refuses replays, downgrades and channel mismatches.
+export const hostUpdateCliRunnerName = 'host-update-cli';
+
+export function admitOfflineReplay({ run, staging, channel, verification }) {
+  let stdout;
+  let status = 0;
+  try {
+    stdout = run(hostUpdateCliRunnerName, ['offline-admit', '--staging', staging, '--channel', channel, '--json']);
+  } catch (error) {
+    stdout = error?.stdout;
+    status = error?.status ?? null;
+  }
+  let envelope;
+  try {
+    envelope = JSON.parse(typeof stdout === 'string' ? stdout : String(stdout ?? ''));
+  } catch {
+    throw new Error(`Offline replay admission returned no decision (host update CLI exit ${status ?? 'unknown'})`);
+  }
+  const result = envelope?.result ?? {};
+  if (envelope?.exitCode !== 0 || result.decision !== 'admitted') {
+    const code = typeof result.reason === 'string' ? result.reason
+      : typeof result.code === 'string' ? result.code : `exit_${envelope?.exitCode ?? status ?? 'unknown'}`;
+    const error = new Error(`Offline replay admission refused: ${code}`);
+    if (typeof result.disposition === 'string') {
+      error.replay = { disposition: result.disposition, correlationId: result.correlationId ?? null,
+        reused: result.reused === true, sequence: result.sequence ?? null };
+    }
+    throw error;
+  }
+  requireThat(result.manifestDigest === verification.manifestDigest &&
+    result.sequence === verification.release.sequence &&
+    String(result.channel).toLowerCase() === channel &&
+    ['Imported', 'Accepted'].includes(result.disposition) && typeof result.correlationId === 'string' &&
+    typeof result.reused === 'boolean',
+  'Offline replay admission decision does not match the verified release');
+  return { disposition: result.disposition, correlationId: result.correlationId, reused: result.reused,
+    sequence: result.sequence };
+}
+
 function bundleDigest(bundle) {
   try {
     return hashFile(resolve(bundle), 'Offline bundle').sha256;
@@ -1073,9 +1193,9 @@ function bundleDigest(bundle) {
   }
 }
 
-export function importOfflineBundle({ bundle, channel, version, trustedRoot, staging, records, operator, priorRecoverySet,
-  protectedBackup, run, limits = offlineBundleLimits, imageLimits = imageArchiveLimits, now = () => new Date(),
-  newId = randomUUID }) {
+export function importOfflineBundle({ bundle, channel, version, trustedRoot, trustedRootApproval, staging, records, operator,
+  priorRecoverySet, protectedBackup, run, limits = offlineBundleLimits, imageLimits = imageArchiveLimits,
+  now = () => new Date(), newId = randomUUID }) {
   requireThat(typeof operator === 'string' && operatorPattern.test(operator),
     'An operator identifier (--operator) matching [A-Za-z0-9][A-Za-z0-9._@-]{0,63} is required');
   requireChannel(channel);
@@ -1147,12 +1267,14 @@ export function importOfflineBundle({ bundle, channel, version, trustedRoot, sta
     throw error;
   }
   let verification;
+  let trust = null;
+  let replay = null;
   let loaded = [];
   let attempted = null;
   let outcome = 'refused';
   let reason = null;
-  const redact = error => redactReason(error?.message ?? error, { bundle, 'trusted-root': trustedRoot, staging,
-    records: directory, 'prior-recovery-set': priorRecoverySet });
+  const redact = error => redactReason(error?.message ?? error, { bundle, 'trusted-root': trustedRoot,
+    'trusted-root-approval': trustedRootApproval, staging, records: directory, 'prior-recovery-set': priorRecoverySet });
   const recordOf = () => ({
     schema: 1,
     kind: offlineImportDecisionKind,
@@ -1173,11 +1295,16 @@ export function importOfflineBundle({ bundle, channel, version, trustedRoot, sta
     } : null,
     loadedImages: loaded.map(image => ({ member: image.member, digest: image.digest })),
     failedLoad: attempted,
-    installable: false,
+    trust,
+    replay,
+    // Installable only once the release was verified, complete, admitted by the durable replay store
+    // and every verified image loaded. Rollout enablement stays out of scope: never authorized here.
+    installable: outcome === 'imported' && replay?.admitted === true,
     rolloutAuthorization: false,
   });
   let pending = reservation;
   try {
+    trust = evaluateTrustPolicy({ trustedRoot, trustedRootApproval, now });
     verification = verifyOfflineBundle({ bundle, channel, version, trustedRoot, staging, run, priorRecoverySet,
       protectedBackup, limits, imageLimits, now });
     const missing = [
@@ -1185,6 +1312,13 @@ export function importOfflineBundle({ bundle, channel, version, trustedRoot, sta
       ...(verification.recoveryInstructions ? [] : ['signed recovery instructions']),
     ];
     requireThat(missing.length === 0, `Offline bundle is incomplete and cannot be imported; it lacks ${missing.join(' and ')}`);
+    try {
+      replay = { ...admitOfflineReplay({ run, staging: stagingPath, channel, verification }), admitted: true };
+    } catch (error) {
+      // A refused admission is recorded for audit but never counts as admitted.
+      if (error?.replay) replay = { ...error.replay, admitted: false };
+      throw error;
+    }
   } catch (error) {
     reason = redact(error);
     // verifyOfflineBundle removes its own staging on failure; a refusal after it succeeded removes it here.
@@ -1230,7 +1364,9 @@ const usage = `usage:
   node scripts/ci/offline-update-bundle.mjs load --staging <verified-dir> --channel <stable|insider>
     --trusted-root <trusted_root.json> [--cosign <path>] [--docker <path>]
   node scripts/ci/offline-update-bundle.mjs import --bundle <bundle.tar> --channel <stable|insider> --version <v>
-    --trusted-root <trusted_root.json> --staging <new-dir> --records <decision-records-dir> --operator <id>
+    --trusted-root <trusted_root.json> --trusted-root-approval <approval.json> --staging <new-dir>
+    --records <decision-records-dir> --operator <id> --config <host-update.json>
+    --host-update-cli <Farm.HostUpdate.Cli|Farm.HostUpdate.Cli.dll> [--dotnet <path>]
     [--prior-recovery-set <dir>] [--protected-backup <reference.json>] [--cosign <path>] [--docker <path>]`;
 
 export function parseArguments(argv) {
@@ -1241,11 +1377,12 @@ export function parseArguments(argv) {
     verify: ['bundle', 'channel', 'trusted-root', 'staging', 'version', 'prior-recovery-set', 'protected-backup',
       'cosign'],
     load: ['staging', 'channel', 'trusted-root', 'cosign', 'docker'],
-    import: ['bundle', 'channel', 'version', 'trusted-root', 'staging', 'records', 'operator', 'prior-recovery-set',
-      'protected-backup', 'cosign', 'docker'],
+    import: ['bundle', 'channel', 'version', 'trusted-root', 'trusted-root-approval', 'staging', 'records', 'operator',
+      'config', 'host-update-cli', 'dotnet', 'prior-recovery-set', 'protected-backup', 'cosign', 'docker'],
   };
   const required = {
-    import: ['bundle', 'channel', 'version', 'trusted-root', 'staging', 'records', 'operator'],
+    import: ['bundle', 'channel', 'version', 'trusted-root', 'trusted-root-approval', 'staging', 'records', 'operator',
+      'config', 'host-update-cli'],
   };
   requireThat(Object.hasOwn(allowed, command ?? ''), usage);
   const options = {};
@@ -1263,12 +1400,33 @@ export function parseArguments(argv) {
   return { command, options };
 }
 
+// The host-update CLI is invoked directly (self-contained launcher) or through the dotnet host
+// (framework-dependent Farm.HostUpdate.Cli.dll); --config is passed first, as the CLI requires.
+export function hostUpdateCliInvocation(options) {
+  const config = options.config;
+  const cli = options['host-update-cli'];
+  requireThat(typeof config === 'string' && isAbsolute(config), 'The host-update configuration (--config) must be an absolute path');
+  requireThat(typeof cli === 'string' && isAbsolute(cli), 'The host-update CLI (--host-update-cli) must be an absolute path');
+  if (cli.toLowerCase().endsWith('.dll')) {
+    const dotnet = options.dotnet ?? 'dotnet';
+    requireThat(options.dotnet === undefined || isAbsolute(options.dotnet), 'The dotnet host (--dotnet) must be an absolute path');
+    return { file: dotnet, prefix: [cli, '--config', config] };
+  }
+  requireThat(options.dotnet === undefined, 'The dotnet host (--dotnet) must not be given for a self-contained CLI');
+  return { file: cli, prefix: ['--config', config] };
+}
+
 async function main(argv) {
   const { command, options } = parseArguments(argv);
   const cosign = options.cosign ?? 'cosign';
   const executables = { cosign, docker: options.docker ?? 'docker' };
-  const run = (name, args, { stdin } = {}) => execFileSync(executables[name] ?? name, args,
-    { encoding: 'utf8', stdio: [stdin ?? 'ignore', 'pipe', 'pipe'] });
+  const invocations = {};
+  if (command === 'import') invocations[hostUpdateCliRunnerName] = hostUpdateCliInvocation(options);
+  const run = (name, args, { stdin } = {}) => {
+    const invocation = invocations[name] ?? { file: executables[name] ?? name, prefix: [] };
+    return execFileSync(invocation.file, [...invocation.prefix, ...args],
+      { encoding: 'utf8', stdio: [stdin ?? 'ignore', 'pipe', 'pipe'] });
+  };
   let protectedBackup;
   if (options['protected-backup'] !== undefined) {
     try {
@@ -1293,7 +1451,8 @@ async function main(argv) {
       trustedRoot: options['trusted-root'], run }), undefined, 2));
   } else if (command === 'import') {
     const { record, path } = importOfflineBundle({ bundle: options.bundle, channel: options.channel,
-      version: options.version, trustedRoot: options['trusted-root'], staging: options.staging, records: options.records,
+      version: options.version, trustedRoot: options['trusted-root'],
+      trustedRootApproval: resolve(options['trusted-root-approval']), staging: options.staging, records: options.records,
       operator: options.operator, priorRecoverySet: options['prior-recovery-set'], protectedBackup, run });
     console.log(JSON.stringify({ ...record, recordFile: path }, undefined, 2));
     if (record.outcome !== 'imported') {
