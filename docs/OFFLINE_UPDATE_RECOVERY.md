@@ -483,12 +483,19 @@ json`) and allows only absent, exited, dead, removed or not-created services; a
 running, restarting, paused, created/starting, unknown or unparseable state fails
 closed. Activation repeats the replay and writer-absence checks inside the
 executor's own lock immediately before executor steps begin, closing the gap
-between preflight validation and mutation. With writers stopped, there are no
-live API/slicer/monolith in-memory writer flags to prove, while the durable
-admission gate, database active-work checks, backups, migrations, health gates
-and installed-state records remain the single engine source of truth. Failures
-preserve the prior installed state and leave recovery to the existing
-journal/recovery workflow.
+between preflight validation and mutation. After health/digest verification
+persists the installed state, the executor consumes the `Imported` replay record
+as `Accepted` before releasing that same lock. A crash in that finalization
+window is recoverable: a later `activate` for the same release, manifest digest
+and completed journal finalizes the still-`Imported` replay record only if the
+installed state already matches the signed target, and it does not rerun
+migration or apply steps. With writers stopped, there are no live
+API/slicer/monolith in-memory writer flags to prove, while the durable admission
+gate, database active-work checks, backups, migrations, health gates and
+installed-state records remain the single engine source of truth. Failures before
+verification preserve the prior installed state and leave recovery to the
+existing journal/recovery workflow; once the installed state has changed, the CLI
+reports the completed activation state rather than a refused activation.
 
 ## Replay admission, channel continuity and trust expiry (#3064)
 

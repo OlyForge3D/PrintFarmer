@@ -128,14 +128,19 @@ internal static class HostUpdateOfflineActivation
         {
             using IServiceScope executionScope = provider.CreateScope();
             result = await executionScope.ServiceProvider.GetRequiredService<IHostUpdateExecutor>().ExecuteAsync(request, cancellationToken).ConfigureAwait(false);
+            IInstalledHostStateStore installedStore = executionScope.ServiceProvider.GetRequiredService<IInstalledHostStateStore>();
+            InstalledHostState? installed = await installedStore.ReadAsync(cancellationToken).ConfigureAwait(false);
+            bool installedMatches = InstalledStateMatches(request, installed);
             if (result.State == HostUpdateExecutionState.Completed)
             {
-                IInstalledHostStateStore installedStore = executionScope.ServiceProvider.GetRequiredService<IInstalledHostStateStore>();
-                InstalledHostState? installed = await installedStore.ReadAsync(cancellationToken).ConfigureAwait(false);
-                if (!InstalledStateMatches(request, installed))
+                if (!installedMatches)
                 {
-                    return await FailAsync(output, args, HostUpdateCliExitCodes.Refused, "activation_not_applied").ConfigureAwait(false);
+                    result = result with { FailureCode = "activation_not_applied" };
                 }
+            }
+            else if (installedMatches)
+            {
+                result = result with { State = HostUpdateExecutionState.Completed };
             }
         }
         catch (TimeoutException)
@@ -146,23 +151,6 @@ internal static class HostUpdateOfflineActivation
         {
             return await HostUpdateCli.EmitAsync(output, args.Json, HostUpdateCliExitCodes.StateUnreadable,
                 new HostUpdateCli.CliFailure(HostUpdateCli.StateFailureCode(exception), [])).ConfigureAwait(false);
-        }
-
-        if (result.State == HostUpdateExecutionState.Completed)
-        {
-            try
-            {
-                HostUpdateReplayDecision recorded = await MarkActivatedAsync(configuration, candidate, cancellationToken).ConfigureAwait(false);
-                if (recorded.Disposition != HostUpdateReplayDisposition.Accepted)
-                {
-                    return await FailAsync(output, args, HostUpdateCliExitCodes.Refused, "activation_replay_record_failed").ConfigureAwait(false);
-                }
-            }
-            catch (Exception exception) when (HostUpdateCli.IsStateFailure(exception))
-            {
-                return await HostUpdateCli.EmitAsync(output, args.Json, HostUpdateCliExitCodes.StateUnreadable,
-                    new HostUpdateCli.CliFailure(HostUpdateCli.StateFailureCode(exception), [])).ConfigureAwait(false);
-            }
         }
 
         int exitCode = result.State == HostUpdateExecutionState.Completed
@@ -290,7 +278,7 @@ internal static class HostUpdateOfflineActivation
         return new FileHostUpdateReplayStore(paths.Root, anchor);
     }
 
-    private static bool InstalledStateMatches(HostUpdateExecutionRequest request, InstalledHostState? installed)
+    internal static bool InstalledStateMatches(HostUpdateExecutionRequest request, InstalledHostState? installed)
     {
         if (installed is null ||
             !string.Equals(installed.ReleaseId, request.ReleaseId, StringComparison.Ordinal) ||
@@ -329,7 +317,8 @@ internal interface IHostUpdateOfflineActivationSafetyProbe
 internal sealed class HostUpdateOfflineActivationStartGuard(
     IConfiguration configuration,
     IHostUpdateExecutionJournal journal,
-    IHostUpdateOfflineActivationSafetyProbe safetyProbe) : IHostUpdateExecutionStartGuard
+    IHostUpdateOfflineActivationSafetyProbe safetyProbe,
+    IInstalledHostStateStore installedStateStore) : IHostUpdateExecutionStartGuard
 {
     public async Task<string?> ValidateAsync(HostUpdateExecutionRequest request, CancellationToken cancellationToken)
     {
@@ -337,6 +326,25 @@ internal sealed class HostUpdateOfflineActivationStartGuard(
         HostUpdateExecutionState? current = activities.Count == 0 ? null : activities[^1].State;
         if (current == HostUpdateExecutionState.Completed)
         {
+            HostUpdateReplayDecision completedReplay = await HostUpdateOfflineActivation.ReadReplayDecisionAsync(
+                configuration,
+                HostUpdateOfflineActivation.CandidateFromRequest(request),
+                cancellationToken).ConfigureAwait(false);
+            if (completedReplay.Disposition == HostUpdateReplayDisposition.Imported)
+            {
+                InstalledHostState? installed = await installedStateStore.ReadAsync(cancellationToken).ConfigureAwait(false);
+                if (HostUpdateOfflineActivation.InstalledStateMatches(request, installed))
+                {
+                    HostUpdateReplayDecision recorded = await HostUpdateOfflineActivation.MarkActivatedAsync(
+                        configuration,
+                        HostUpdateOfflineActivation.CandidateFromRequest(request),
+                        cancellationToken).ConfigureAwait(false);
+                    return recorded.Disposition == HostUpdateReplayDisposition.Accepted
+                        ? null
+                        : "activation_replay_record_failed";
+                }
+            }
+
             return "activation_already_completed";
         }
 
@@ -355,6 +363,28 @@ internal sealed class HostUpdateOfflineActivationStartGuard(
         }
 
         return await safetyProbe.ValidateSafeToExecuteAsync(request, cancellationToken).ConfigureAwait(false);
+    }
+}
+
+internal sealed class HostUpdateOfflineActivationCompletionHook(
+    IConfiguration configuration,
+    IInstalledHostStateStore installedStateStore) : IHostUpdateExecutionCompletionHook
+{
+    public async Task<string?> CompleteAsync(HostUpdateExecutionRequest request, CancellationToken cancellationToken)
+    {
+        InstalledHostState? installed = await installedStateStore.ReadAsync(cancellationToken).ConfigureAwait(false);
+        if (!HostUpdateOfflineActivation.InstalledStateMatches(request, installed))
+        {
+            return "activation_not_applied";
+        }
+
+        HostUpdateReplayDecision recorded = await HostUpdateOfflineActivation.MarkActivatedAsync(
+            configuration,
+            HostUpdateOfflineActivation.CandidateFromRequest(request),
+            cancellationToken).ConfigureAwait(false);
+        return recorded.Disposition == HostUpdateReplayDisposition.Accepted
+            ? null
+            : "activation_replay_record_failed";
     }
 }
 

@@ -214,6 +214,7 @@ public static partial class HostUpdateCli
         });
         services.AddSingleton<IHostUpdateAutomationPolicyRepository>(sp => sp.GetRequiredService<FileHostUpdateAutomationPolicyRepository>());
         services.AddScoped<IHostUpdateExecutionStartGuard, HostUpdateOfflineActivationStartGuard>();
+        services.AddScoped<IHostUpdateExecutionCompletionHook, HostUpdateOfflineActivationCompletionHook>();
         services.AddScoped<IHostUpdateJournal>(sp =>
         {
             HostUpdateExecutionOptions options = sp.GetRequiredService<HostUpdateExecutionOptions>();

@@ -1,4 +1,5 @@
 ﻿using System.Security.Cryptography;
+using System.Net;
 using System.Text;
 using System.Text.Json;
 using Farm.Infrastructure.Services.HostUpdates;
@@ -124,6 +125,56 @@ public sealed class HostUpdateCliOfflineActivateTests : IDisposable, IAsyncLifet
             CurrentCandidate(),
             CancellationToken.None);
         replay.Disposition.Should().Be(HostUpdateReplayDisposition.Accepted);
+    }
+
+    [HostStateFact]
+    public async Task Integrated_activation_uses_real_executor_steps_without_pull_build_or_remote_health()
+    {
+        await ImportAsync();
+        var runner = new IntegratedActivationProcessRunner(healthSucceeds: true);
+        var http = new RecordingHealthHttpClientFactory(_host.Configuration()["HostUpdateExecution:HealthCheckBaseUrl"] ?? "http://localhost:5245", succeeds: true);
+
+        JsonElement activated = Envelope(await RunAsync(Activate(), IntegratedConfiguration(), services =>
+        {
+            UseIntegratedBoundaries(services, runner, http);
+        }));
+
+        activated.GetProperty("exitCode").GetInt32().Should().Be(HostUpdateCliExitCodes.Success, activated.ToString());
+        InstalledHostState? state = await new FileInstalledHostStateStore(Path.Combine(_host.StateDirectory, "installed-state.json"))
+            .ReadAsync(CancellationToken.None);
+        state!.ReleaseId.Should().Be("insider:1.2.3-insider.42");
+        runner.ContainsDockerCommand("image", "pull").Should().BeFalse();
+        runner.ContainsDockerCommand("build").Should().BeFalse();
+        runner.ContainsDockerCommand("buildx").Should().BeFalse();
+        runner.ComposeUpCalls.Should().ContainSingle(call =>
+            call.Arguments.Contains("--no-build") &&
+            PullNever(call.Arguments));
+        runner.MigrationRunCalls.Should().NotBeEmpty();
+        runner.MigrationRunCalls.Should().OnlyContain(call => PullNever(call.Arguments));
+        http.Requests.Should().NotBeEmpty();
+        http.Requests.Should().OnlyContain(uri => string.Equals(uri.Host, "localhost", StringComparison.Ordinal));
+    }
+
+    [HostStateFact]
+    public async Task Integrated_activation_failed_verify_enters_recovery_required_without_pull_and_preserves_prior_state()
+    {
+        await ImportAsync();
+        HostUpdateExecutionRequest request = RequestFromCurrentStaging();
+        await WriteInstalledStateAsync(request with { ReleaseId = "stable:1.2.2", ManifestDigest = "sha256:" + new string('9', 64) });
+        string before = File.ReadAllText(Path.Combine(_host.StateDirectory, "installed-state.json"));
+        var runner = new IntegratedActivationProcessRunner(healthSucceeds: true);
+        var http = new RecordingHealthHttpClientFactory(_host.Configuration()["HostUpdateExecution:HealthCheckBaseUrl"] ?? "http://localhost:5245", succeeds: false);
+
+        JsonElement refused = Envelope(await RunAsync(Activate(), IntegratedConfiguration(), services =>
+        {
+            UseIntegratedBoundaries(services, runner, http);
+        }));
+
+        refused.GetProperty("exitCode").GetInt32().Should().Be(HostUpdateCliExitCodes.Refused, refused.ToString());
+        refused.GetProperty("result").GetProperty("state").GetString().Should().Be(nameof(HostUpdateExecutionState.RecoveryRequired));
+        File.ReadAllText(Path.Combine(_host.StateDirectory, "installed-state.json")).Should().Be(before);
+        runner.ContainsDockerCommand("image", "pull").Should().BeFalse();
+        runner.ContainsDockerCommand("build").Should().BeFalse();
     }
 
     [HostStateFact]
@@ -364,6 +415,95 @@ public sealed class HostUpdateCliOfflineActivateTests : IDisposable, IAsyncLifet
     }
 
     [HostStateFact]
+    public async Task Activation_consumes_replay_under_executor_lock_before_competing_import_can_supersede()
+    {
+        await ImportAsync();
+        var steps = new RecordingExecutionSteps(new FileInstalledHostStateStore(Path.Combine(_host.StateDirectory, "installed-state.json")));
+        RacingCompletionHook? hook = null;
+
+        JsonElement activated = Envelope(await RunAsync(Activate(), services =>
+        {
+            services.RemoveAll<IHostUpdateLocalImageVerifier>();
+            services.AddSingleton(_imageVerifier);
+            services.AddSingleton<IHostUpdateLocalImageVerifier>(sp => sp.GetRequiredService<FakeLocalImageVerifier>());
+            services.RemoveAll<IHostUpdateOfflineActivationSafetyProbe>();
+            services.AddSingleton<IHostUpdateOfflineActivationSafetyProbe>(_safetyProbe);
+            services.RemoveAll<IHostUpdateExecutionSteps>();
+            services.AddScoped<IHostUpdateExecutionSteps>(_ => steps);
+            services.RemoveAll<IHostUpdateExecutionCompletionHook>();
+            services.AddScoped<IHostUpdateExecutionCompletionHook>(sp =>
+            {
+                hook = new RacingCompletionHook(sp);
+                return hook;
+            });
+        }));
+
+        activated.GetProperty("exitCode").GetInt32().Should().Be(HostUpdateCliExitCodes.Success, activated.ToString());
+        hook.Should().NotBeNull();
+        hook!.CompetingLockWasBlocked.Should().BeTrue();
+        HostUpdateReplayDecision replay = await HostUpdateOfflineActivation.ReadReplayDecisionAsync(
+            _host.Configuration(),
+            CurrentCandidate(),
+            CancellationToken.None);
+        replay.Disposition.Should().Be(HostUpdateReplayDisposition.Accepted);
+    }
+
+    [HostStateFact]
+    public async Task Activation_rerun_after_completed_journal_finalizes_imported_replay_without_second_execution()
+    {
+        await ImportAsync();
+        HostUpdateExecutionRequest request = RequestFromCurrentStaging();
+        await WriteInstalledStateAsync(request);
+        _host.SeedJournal(request, [(HostUpdateExecutionState.Completed, "completed")], withBaseline: false);
+        var steps = new RecordingExecutionSteps(null);
+
+        JsonElement activated = Envelope(await RunAsync(Activate(), services =>
+        {
+            services.RemoveAll<IHostUpdateLocalImageVerifier>();
+            services.AddSingleton(_imageVerifier);
+            services.AddSingleton<IHostUpdateLocalImageVerifier>(sp => sp.GetRequiredService<FakeLocalImageVerifier>());
+            services.RemoveAll<IHostUpdateOfflineActivationSafetyProbe>();
+            services.AddSingleton<IHostUpdateOfflineActivationSafetyProbe>(_safetyProbe);
+            services.RemoveAll<IHostUpdateExecutionSteps>();
+            services.AddScoped<IHostUpdateExecutionSteps>(_ => steps);
+        }));
+
+        activated.GetProperty("exitCode").GetInt32().Should().Be(HostUpdateCliExitCodes.Success, activated.ToString());
+        steps.Calls.Should().BeEmpty();
+        HostUpdateReplayDecision replay = await HostUpdateOfflineActivation.ReadReplayDecisionAsync(
+            _host.Configuration(),
+            CurrentCandidate(),
+            CancellationToken.None);
+        replay.Disposition.Should().Be(HostUpdateReplayDisposition.Accepted);
+    }
+
+    [HostStateFact]
+    public async Task Activation_reports_completed_when_late_replay_consumption_fails_after_install()
+    {
+        await ImportAsync();
+        var steps = new RecordingExecutionSteps(new FileInstalledHostStateStore(Path.Combine(_host.StateDirectory, "installed-state.json")));
+
+        JsonElement activated = Envelope(await RunAsync(Activate(), services =>
+        {
+            services.RemoveAll<IHostUpdateLocalImageVerifier>();
+            services.AddSingleton(_imageVerifier);
+            services.AddSingleton<IHostUpdateLocalImageVerifier>(sp => sp.GetRequiredService<FakeLocalImageVerifier>());
+            services.RemoveAll<IHostUpdateOfflineActivationSafetyProbe>();
+            services.AddSingleton<IHostUpdateOfflineActivationSafetyProbe>(_safetyProbe);
+            services.RemoveAll<IHostUpdateExecutionSteps>();
+            services.AddScoped<IHostUpdateExecutionSteps>(_ => steps);
+            services.RemoveAll<IHostUpdateExecutionCompletionHook>();
+            services.AddScoped<IHostUpdateExecutionCompletionHook, FailingCompletionHook>();
+        }));
+
+        activated.GetProperty("exitCode").GetInt32().Should().Be(HostUpdateCliExitCodes.Success, activated.ToString());
+        JsonElement result = activated.GetProperty("result");
+        result.GetProperty("decision").GetString().Should().Be("activated");
+        result.GetProperty("reason").GetString().Should().Be("activation_replay_record_failed");
+        result.GetProperty("state").GetString().Should().Be(nameof(HostUpdateExecutionState.Completed));
+    }
+
+    [HostStateFact]
     public async Task Activation_refuses_completed_journal_before_reactivating()
     {
         await ImportAsync();
@@ -415,6 +555,82 @@ public sealed class HostUpdateCliOfflineActivateTests : IDisposable, IAsyncLifet
     }
 
     private string[] Activate() => ["offline-activate", "--staging", _staging, "--channel", "insider", "--trusted-root", _trustedRoot, "--json"];
+
+    private Microsoft.Extensions.Configuration.IConfiguration IntegratedConfiguration() =>
+        _host.Configuration(values =>
+        {
+            string[] services = ["api", "frontend", "slicer-host", "printer-discovery", "orcaslicer-worker", "monolith"];
+            for (int i = 0; i < services.Length; i++)
+            {
+                values[$"HostUpdateExecution:ActiveServiceIds:{i}"] = services[i];
+            }
+
+            values["HostUpdateExecution:MinimumFreeBytes"] = "1";
+            values["HostUpdateExecution:DrainTimeoutSeconds"] = "1";
+            values["HostUpdateExecution:DrainPollIntervalSeconds"] = "1";
+            values["HostUpdateExecution:FencePollIntervalSeconds"] = "1";
+            values["HostUpdateExecution:VerifyTimeoutSeconds"] = "1";
+            values["HostUpdateExecution:VerifyPollIntervalSeconds"] = "1";
+            values["Jwt:Key"] = new string('k', 32);
+            values["Jwt:Issuer"] = "issuer";
+            values["Jwt:Audience"] = "audience";
+        });
+
+    private static void UseIntegratedBoundaries(
+        IServiceCollection services,
+        IntegratedActivationProcessRunner runner,
+        RecordingHealthHttpClientFactory http)
+    {
+        services.RemoveAll<IHostUpdateProcessRunner>();
+        services.AddSingleton<IHostUpdateProcessRunner>(runner);
+        services.RemoveAll<IHttpClientFactory>();
+        services.AddSingleton<IHttpClientFactory>(http);
+        services.RemoveAll<IReadOnlyList<IFenceableWriter>>();
+        services.AddSingleton<IReadOnlyList<IFenceableWriter>>(_ => Array.Empty<IFenceableWriter>());
+        services.RemoveAll<IActiveWorkObservationPort>();
+        services.AddScoped<IActiveWorkObservationPort, NoActiveWorkObservationPort>();
+        services.RemoveAll<IHostUpdateBackupTarget>();
+        services.RemoveAll<IReadOnlyList<IHostUpdateBackupTarget>>();
+        services.AddScoped<IHostUpdateBackupTarget, TinyBackupTarget>();
+        services.AddScoped<IReadOnlyList<IHostUpdateBackupTarget>>(sp => [.. sp.GetServices<IHostUpdateBackupTarget>()]);
+        services.RemoveAll<IHostUpdateMigrationTarget>();
+        services.RemoveAll<IReadOnlyList<IHostUpdateMigrationTarget>>();
+        services.AddScoped<IHostUpdateMigrationTarget>(sp => new DockerBackedMigrationTarget(
+            "AppDbContext",
+            "Npgsql.EntityFrameworkCore.PostgreSQL",
+            sp.GetRequiredService<HostUpdateTargetImageMigrationRunner>()));
+        services.AddScoped<IHostUpdateMigrationTarget>(sp => new DockerBackedMigrationTarget(
+            "SlicerDbContext",
+            "Npgsql.EntityFrameworkCore.PostgreSQL",
+            sp.GetRequiredService<HostUpdateTargetImageMigrationRunner>()));
+        services.AddScoped<IReadOnlyList<IHostUpdateMigrationTarget>>(sp => [.. sp.GetServices<IHostUpdateMigrationTarget>()]);
+    }
+
+    private async Task WriteInstalledStateAsync(HostUpdateExecutionRequest request)
+    {
+        await new FileInstalledHostStateStore(Path.Combine(_host.StateDirectory, "installed-state.json"))
+            .WriteAsync(new InstalledHostState(
+                request.ReleaseId,
+                request.ManifestDigest,
+                request.Targets.ToDictionary(t => t.ServiceId, t => t.ChildDigest, StringComparer.Ordinal),
+                string.Join('+', request.Targets.Select(t => t.ServiceId).Order(StringComparer.Ordinal)),
+                DateTimeOffset.UtcNow,
+                request.Targets.ToDictionary(t => t.ServiceId, t => t.Platform, StringComparer.Ordinal)),
+                CancellationToken.None);
+    }
+
+    private static bool PullNever(IReadOnlyList<string> arguments)
+    {
+        for (int index = 0; index < arguments.Count - 1; index++)
+        {
+            if (string.Equals(arguments[index], "--pull", StringComparison.Ordinal))
+            {
+                return string.Equals(arguments[index + 1], "never", StringComparison.Ordinal);
+            }
+        }
+
+        return false;
+    }
 
     private void StageManifest(Func<string, string> edit)
     {
@@ -650,6 +866,276 @@ public sealed class HostUpdateCliOfflineActivateTests : IDisposable, IAsyncLifet
             }
         }
     }
+
+    private sealed class FailingCompletionHook : IHostUpdateExecutionCompletionHook
+    {
+        public Task<string?> CompleteAsync(HostUpdateExecutionRequest request, CancellationToken cancellationToken) =>
+            Task.FromResult<string?>("activation_replay_record_failed");
+    }
+
+    private sealed class RacingCompletionHook(IServiceProvider provider) : IHostUpdateExecutionCompletionHook
+    {
+        public bool CompetingLockWasBlocked { get; private set; }
+
+        public async Task<string?> CompleteAsync(HostUpdateExecutionRequest request, CancellationToken cancellationToken)
+        {
+            using IHostUpdateExecutionLease? competing = HostUpdateCli.TryAcquireLock(provider);
+            CompetingLockWasBlocked = competing is null;
+            InstalledHostState? installed = await provider.GetRequiredService<IInstalledHostStateStore>()
+                .ReadAsync(cancellationToken).ConfigureAwait(false);
+            if (!HostUpdateOfflineActivation.InstalledStateMatches(request, installed))
+            {
+                return "activation_not_applied";
+            }
+
+            HostUpdateReplayDecision recorded = await HostUpdateOfflineActivation.MarkActivatedAsync(
+                provider.GetRequiredService<Microsoft.Extensions.Configuration.IConfiguration>(),
+                HostUpdateOfflineActivation.CandidateFromRequest(request),
+                cancellationToken).ConfigureAwait(false);
+            return recorded.Disposition == HostUpdateReplayDisposition.Accepted
+                ? null
+                : "activation_replay_record_failed";
+        }
+    }
+
+    private sealed class DockerBackedMigrationTarget(
+        string contextName,
+        string providerName,
+        HostUpdateTargetImageMigrationRunner runner) : IHostUpdateMigrationTarget
+    {
+        public string ContextName { get; } = contextName;
+
+        public Task<string> GetProviderNameAsync(CancellationToken cancellationToken) => Task.FromResult(providerName);
+
+        public Task<bool> HasPendingMigrationsAsync(HostUpdateExecutionRequest request, CancellationToken cancellationToken) =>
+            runner.HasPendingMigrationsAsync(request, ContextName, GetProviderNameAsync, cancellationToken);
+
+        public Task<Farm.Infrastructure.Data.Migrations.DatabaseMigrationResult> MigrateAsync(HostUpdateExecutionRequest request, CancellationToken cancellationToken) =>
+            runner.MigrateAsync(request, ContextName, GetProviderNameAsync, cancellationToken);
+
+        public Task<string> GetConnectionStringFingerprintAsync(CancellationToken cancellationToken) =>
+            Task.FromResult("same-database");
+    }
+
+    private sealed class NoActiveWorkObservationPort : IActiveWorkObservationPort
+    {
+        public Task<int> CountActiveAsync(CancellationToken cancellationToken) => Task.FromResult(0);
+    }
+
+    private sealed class TinyBackupTarget : IHostUpdateBackupTarget
+    {
+        public string Name => "integrated-test";
+
+        public bool IsExternallyOwned => false;
+
+        public Task BackupAsync(string destinationDirectory, CancellationToken cancellationToken)
+        {
+            File.WriteAllText(Path.Combine(destinationDirectory, "backup.txt"), "ok");
+            return Task.CompletedTask;
+        }
+    }
+
+        private sealed class RecordingHealthHttpClientFactory(string expectedBaseUrl, bool succeeds) : IHttpClientFactory
+        {
+            public List<Uri> Requests { get; } = [];
+
+            public HttpClient CreateClient(string name)
+            {
+                var client = new HttpClient(new Handler(Requests, new Uri(expectedBaseUrl), succeeds));
+                client.BaseAddress = new Uri(expectedBaseUrl);
+                return client;
+            }
+
+            private sealed class Handler(List<Uri> requests, Uri expectedBase, bool succeeds) : HttpMessageHandler
+            {
+                protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+                {
+                    request.RequestUri.Should().NotBeNull();
+                    Uri uri = request.RequestUri!;
+                    requests.Add(uri);
+                    uri.Host.Should().Be(expectedBase.Host);
+                    string body = succeeds
+                        ? """{"status":"Healthy","results":{"comprehensive":{"status":"Healthy"},"signalr":{"status":"Healthy"},"spoolman":{"status":"Healthy"}}}"""
+                        : """{"status":"Unhealthy","results":{"comprehensive":{"status":"Unhealthy"},"signalr":{"status":"Healthy"},"spoolman":{"status":"Healthy"}}}""";
+                    return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent(body, Encoding.UTF8, "application/json"),
+                    });
+                }
+            }
+        }
+
+        private sealed class IntegratedActivationProcessRunner(bool healthSucceeds) : IHostUpdateProcessRunner
+        {
+            private static readonly Dictionary<string, (string Compose, string Repository, string Digest)> Services = new(StringComparer.Ordinal)
+            {
+                ["api"] = ("api", "ghcr.io/olyforge3d/printfarmer-api", "sha256:" + new string('a', 64)),
+                ["frontend"] = ("frontend", "ghcr.io/olyforge3d/printfarmer-frontend", "sha256:" + new string('b', 64)),
+                ["slicer-host"] = ("slicer-host", "ghcr.io/olyforge3d/printfarmer-slicer-host", "sha256:" + new string('c', 64)),
+                ["printer-discovery"] = ("printer-discovery", "ghcr.io/olyforge3d/printfarmer-printer-discovery", "sha256:" + new string('d', 64)),
+                ["orcaslicer-worker"] = ("orcaslicer-worker", "ghcr.io/olyforge3d/printfarmer-orcaslicer-worker", "sha256:" + new string('e', 64)),
+                ["monolith"] = ("printfarmer", "ghcr.io/olyforge3d/printfarmer-monolith", "sha256:" + new string('f', 64)),
+            };
+
+            public List<ProcessCall> Calls { get; } = [];
+
+            private readonly Dictionary<string, string> _digestsByService = new(StringComparer.Ordinal);
+
+            public IEnumerable<ProcessCall> ComposeUpCalls => Calls.Where(call =>
+                call.Arguments.Count >= 3 &&
+                string.Equals(call.Arguments[0], "compose", StringComparison.Ordinal) &&
+                call.Arguments.Contains("up"));
+
+            public IEnumerable<ProcessCall> MigrationRunCalls => Calls.Where(call =>
+                call.Arguments.Count > 0 &&
+                string.Equals(call.Arguments[0], "run", StringComparison.Ordinal) &&
+                call.Arguments.Contains("--host-update-migration"));
+
+            public bool ContainsDockerCommand(params string[] tokens) =>
+                Calls.Any(call => tokens.All(token => call.Arguments.Contains(token, StringComparer.Ordinal)));
+
+            Task<HostUpdateProcessResult> IHostUpdateProcessRunner.RunAsync(
+                string fileName,
+                IReadOnlyList<string> arguments,
+                TimeSpan timeout,
+                CancellationToken cancellationToken,
+                IReadOnlyDictionary<string, string>? environment)
+            {
+                var call = new ProcessCall(fileName, [.. arguments], environment is null ? new Dictionary<string, string>() : new Dictionary<string, string>(environment, StringComparer.Ordinal));
+                Calls.Add(call);
+                FailOnForbidden(arguments);
+
+                if (!fileName.EndsWith("docker", StringComparison.OrdinalIgnoreCase) &&
+                    !fileName.EndsWith("sqlite3", StringComparison.OrdinalIgnoreCase))
+                {
+                    return Task.FromResult(new HostUpdateProcessResult(1, string.Empty, "unexpected executable"));
+                }
+
+                if (fileName.EndsWith("sqlite3", StringComparison.OrdinalIgnoreCase))
+                {
+                    return Task.FromResult(new HostUpdateProcessResult(0, string.Empty, string.Empty));
+                }
+
+                if (arguments is ["version", "--format", "{{.Server.Version}}"])
+                {
+                    return Task.FromResult(new HostUpdateProcessResult(0, "25.0.0", string.Empty));
+                }
+
+                if (arguments.Count > 0 && string.Equals(arguments[0], "compose", StringComparison.Ordinal) && arguments.Contains("ps"))
+                {
+                    string output = string.Join('\n', Services.Values.Select(service => $$"""{"Service":"{{service.Compose}}","State":"exited"}"""));
+                    return Task.FromResult(new HostUpdateProcessResult(0, output, string.Empty));
+                }
+
+                if (arguments.Count > 0 && string.Equals(arguments[0], "compose", StringComparison.Ordinal) && arguments.Contains("up"))
+                {
+                    arguments.Should().Contain("--no-build");
+                    PullNever(arguments).Should().BeTrue();
+                    return Task.FromResult(new HostUpdateProcessResult(0, string.Empty, string.Empty));
+                }
+
+                if (arguments.Count >= 5 &&
+                    string.Equals(arguments[0], "image", StringComparison.Ordinal) &&
+                    string.Equals(arguments[1], "inspect", StringComparison.Ordinal) &&
+                    string.Equals(arguments[^1], "{{json .}}", StringComparison.Ordinal))
+                {
+                    return Task.FromResult(LocalImageInspectJson(arguments[2]));
+                }
+
+                if (arguments.Count >= 5 &&
+                    string.Equals(arguments[0], "image", StringComparison.Ordinal) &&
+                    string.Equals(arguments[1], "inspect", StringComparison.Ordinal) &&
+                    string.Equals(arguments[^2], "{{index .RepoDigests 0}}", StringComparison.Ordinal))
+                {
+                    string imageRef = arguments[^1];
+                    string? serviceId = Services.Keys.FirstOrDefault(id => imageRef.EndsWith(id, StringComparison.Ordinal));
+                    if (serviceId is not null)
+                    {
+                        (string _, string repository, string fallbackDigest) = Services[serviceId];
+                        string digest = _digestsByService.TryGetValue(serviceId, out string? learned) ? learned : fallbackDigest;
+                        return Task.FromResult(new HostUpdateProcessResult(0, repository + "@" + digest, string.Empty));
+                    }
+                }
+
+                if (arguments.Count >= 5 &&
+                    string.Equals(arguments[0], "container", StringComparison.Ordinal) &&
+                    string.Equals(arguments[1], "inspect", StringComparison.Ordinal))
+                {
+                    string container = arguments[^1];
+                    string? serviceId = Services.Keys.FirstOrDefault(id => container.Contains(Services[id].Compose, StringComparison.Ordinal));
+                    return Task.FromResult(serviceId is null
+                        ? new HostUpdateProcessResult(1, string.Empty, "missing")
+                        : new HostUpdateProcessResult(0, "image-ref-" + serviceId, string.Empty));
+                }
+
+                if (arguments.Count > 0 && string.Equals(arguments[0], "run", StringComparison.Ordinal))
+                {
+                    PullNever(arguments).Should().BeTrue();
+                    int marker = -1;
+                    for (int i = 0; i < arguments.Count; i++)
+                    {
+                        if (string.Equals(arguments[i], "--host-update-migration", StringComparison.Ordinal))
+                        {
+                            marker = i;
+                            break;
+                        }
+                    }
+
+                    if (marker >= 0 && marker + 3 < arguments.Count)
+                    {
+                        string context = arguments[marker + 1];
+                        string operation = arguments[marker + 2];
+                        string output = operation == "probe"
+                            ? $"HOST_UPDATE_MIGRATION_PENDING:{context}:1"
+                            : $"HOST_UPDATE_MIGRATION_APPLIED:{context}:202609250001";
+                        return Task.FromResult(new HostUpdateProcessResult(0, output, string.Empty));
+                    }
+                }
+
+                return Task.FromResult(healthSucceeds
+                    ? new HostUpdateProcessResult(0, string.Empty, string.Empty)
+                    : new HostUpdateProcessResult(1, string.Empty, "scripted failure"));
+            }
+
+            private HostUpdateProcessResult LocalImageInspectJson(string imageReference)
+            {
+                string? serviceId = null;
+                foreach ((string id, (string _, string repository, string _)) in Services)
+                {
+                    string prefix = repository + "@";
+                    if (imageReference.StartsWith(prefix, StringComparison.Ordinal))
+                    {
+                        serviceId = id;
+                        _digestsByService[id] = imageReference[prefix.Length..];
+                        break;
+                    }
+                }
+
+                if (serviceId is null)
+                {
+                    return new HostUpdateProcessResult(1, string.Empty, "missing");
+                }
+
+                string json = JsonSerializer.Serialize(new
+                {
+                    RepoDigests = new[] { imageReference },
+                    Os = "linux",
+                    Architecture = "amd64",
+                });
+                return new HostUpdateProcessResult(0, json, string.Empty);
+            }
+
+            private static void FailOnForbidden(IReadOnlyList<string> arguments)
+            {
+                if ((arguments.Count >= 2 && string.Equals(arguments[0], "image", StringComparison.Ordinal) && string.Equals(arguments[1], "pull", StringComparison.Ordinal)) ||
+                    arguments.Any(argument => argument is "build" or "login" or "push" or "buildx"))
+                {
+                    throw new InvalidOperationException("forbidden docker operation: " + string.Join(' ', arguments));
+                }
+            }
+
+            public sealed record ProcessCall(string FileName, IReadOnlyList<string> Arguments, IReadOnlyDictionary<string, string> Environment);
+        }
 }
 
 [CollectionDefinition("HostUpdateOfflineVerifier", DisableParallelization = true)]

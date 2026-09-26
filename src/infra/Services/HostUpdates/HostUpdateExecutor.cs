@@ -165,6 +165,11 @@ public interface IHostUpdateExecutionStartGuard
     Task<string?> ValidateAsync(HostUpdateExecutionRequest request, CancellationToken cancellationToken);
 }
 
+public interface IHostUpdateExecutionCompletionHook
+{
+    Task<string?> CompleteAsync(HostUpdateExecutionRequest request, CancellationToken cancellationToken);
+}
+
 public sealed class HostUpdateExecutor(
     IHostUpdateExecutionSteps steps,
     IHostUpdateExecutionJournal journal,
@@ -172,7 +177,8 @@ public sealed class HostUpdateExecutor(
     IHostUpdateAutomationPolicyRepository automationPolicyRepository,
     IHostUpdateSideEffectReconciler? sideEffectReconciler = null,
     IHostUpdateAuthorizationBaselineProvider? baselineProvider = null,
-    IHostUpdateExecutionStartGuard? startGuard = null) : IHostUpdateExecutor
+    IHostUpdateExecutionStartGuard? startGuard = null,
+    IHostUpdateExecutionCompletionHook? completionHook = null) : IHostUpdateExecutor
 {
     internal const string PolicyDriftedFailureCode = "policy_drifted";
 
@@ -304,9 +310,12 @@ public sealed class HostUpdateExecutor(
                 }
             }
 
+            string? completionFailure = completionHook is null
+                ? null
+                : await completionHook.CompleteAsync(request, cancellationToken).ConfigureAwait(false);
             Append(activities, request, HostUpdateExecutionState.Completed, "fence-release:after");
-            Append(activities, request, HostUpdateExecutionState.Completed, "completed");
-            return new(request.ReleaseId, HostUpdateExecutionState.Completed, null, activities);
+            Append(activities, request, HostUpdateExecutionState.Completed, completionFailure is null ? "completed" : "completed:" + completionFailure);
+            return new(request.ReleaseId, HostUpdateExecutionState.Completed, completionFailure, activities);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
