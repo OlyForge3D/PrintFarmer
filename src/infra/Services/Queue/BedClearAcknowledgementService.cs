@@ -871,6 +871,7 @@ public sealed class BedClearAcknowledgementService(
             bedClearExpiresAtUtc: command.ExpiresAtUtc,
             failureRetryable: false,
             failureRequiresReconciliation: false,
+            timeProvider: _timeProvider,
             ct: ct);
         await _db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);

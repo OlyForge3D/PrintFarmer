@@ -89,6 +89,7 @@ public sealed class JobDispatchServiceTests : IDisposable
         persisted.AssignedPrinterId.Should().Be(_printerId);
         persisted.SpoolmanSpoolId.Should().Be(41);
         persisted.SpoolmanFilamentId.Should().Be(73);
+        persisted.DispatchedAt.Should().Be(now.UtcDateTime);
         persisted.Status.Should().Be(PrintJobStatus.Assigned);
         result.Status.Should().Be(nameof(PrintJobStatus.Assigned));
         broadcaster.Verify(
