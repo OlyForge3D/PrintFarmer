@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Services.HostUpdates;
+﻿using Farm.Infrastructure.Services.HostUpdates;
 using Farm.Slicer.Module.Data;
 using Farm.Slicer.Module.Domain;
 using FluentAssertions;
