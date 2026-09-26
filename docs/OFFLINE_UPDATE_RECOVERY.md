@@ -388,13 +388,18 @@ documented residuals.
 ### Replay admission and channel continuity
 
 After a complete bundle verifies, `import` runs
-`Farm.HostUpdate.Cli offline-admit --staging <dir> --channel <c> --json` with
-the host's `--config`. The CLI (see the
+`Farm.HostUpdate.Cli offline-admit --staging <dir> --channel <c> --trusted-root <abs> [--cosign <abs>] --json`
+with the host's `--config`, passing the same absolute trusted root and Cosign
+executable used for verification. The CLI (see the
 [runbook](HOST_UPDATE_RUNBOOK.md#offline-replay-admission)) requires host state to
 be enabled, holds the host-update execution lock, re-parses and validates the
 staged manifest, checks that its digest, channel and release identity match the
 verification record, and that the manifest channel equals both `--channel` and
-the host's durable automation policy channel. It then records the release in the
+the host's durable automation policy channel. Because the staging directory and
+its verification record are mutable, neither is trusted for authenticity: the CLI
+re-verifies the exact staged manifest bytes and `update-manifest.sigstore.json`
+with Cosign against `--trusted-root` (a regular, non-link file outside staging)
+and the channel's pinned release identity, and refuses on failure. It then records the release in the
 same durable replay store (trust root `default`, per-channel high-water mark,
 hash-chained anchor) that online updates use, with a new `Imported`
 disposition:
@@ -414,8 +419,12 @@ An `Imported` identity never authorizes installation by itself: the online
 scheduler still applies every current gate and admits it normally. Replay state
 lives in the host-state directory, outside restored application databases and
 replaced containers; missing or tampered anchor state fails closed (exit 4).
-Because the store's gate is in-process, `offline-admit` refuses while another
-host-update process holds the execution lock (exit 7). Refused admissions are
+`offline-admit` refuses while another host-update process holds the execution
+lock (exit 7). Every replay decision, from the API scheduler or the CLI, also
+takes an exclusive cross-process lock on `host-update-replay.lock` in the
+host-state directory, so concurrent writers cannot interleave or delete each
+other's staged state; if it cannot be acquired within 30 seconds the decision
+fails closed with `host_update_replay_lock_unavailable` (exit 4). Refused admissions are
 recorded with their disposition and the staging directory is removed.
 
 ### Retention

@@ -1149,11 +1149,17 @@ export function evaluateTrustPolicy({ trustedRoot, trustedRootApproval, now = ()
 // replay store the online scheduler uses, and refuses replays, downgrades and channel mismatches.
 export const hostUpdateCliRunnerName = 'host-update-cli';
 
-export function admitOfflineReplay({ run, staging, channel, verification }) {
+export function admitOfflineReplay({ run, staging, channel, verification, trustedRoot, cosign }) {
+  // The CLI never trusts the mutable staging directory: it re-verifies the staged signed manifest
+  // offline against the same operator-supplied trusted root, with the same Cosign executable.
+  requireThat(typeof trustedRoot === 'string' && isAbsolute(trustedRoot),
+    'Offline replay admission requires the absolute Sigstore trusted root');
+  requireThat(cosign === undefined || isAbsolute(cosign), 'Offline replay admission requires an absolute Cosign path');
   let stdout;
   let status = 0;
   try {
-    stdout = run(hostUpdateCliRunnerName, ['offline-admit', '--staging', staging, '--channel', channel, '--json']);
+    stdout = run(hostUpdateCliRunnerName, ['offline-admit', '--staging', staging, '--channel', channel,
+      '--trusted-root', trustedRoot, ...(cosign === undefined ? [] : ['--cosign', cosign]), '--json']);
   } catch (error) {
     stdout = error?.stdout;
     status = error?.status ?? null;
@@ -1194,7 +1200,7 @@ function bundleDigest(bundle) {
 }
 
 export function importOfflineBundle({ bundle, channel, version, trustedRoot, trustedRootApproval, staging, records, operator,
-  priorRecoverySet, protectedBackup, run, limits = offlineBundleLimits, imageLimits = imageArchiveLimits,
+  priorRecoverySet, protectedBackup, run, cosign, limits = offlineBundleLimits, imageLimits = imageArchiveLimits,
   now = () => new Date(), newId = randomUUID }) {
   requireThat(typeof operator === 'string' && operatorPattern.test(operator),
     'An operator identifier (--operator) matching [A-Za-z0-9][A-Za-z0-9._@-]{0,63} is required');
@@ -1313,7 +1319,8 @@ export function importOfflineBundle({ bundle, channel, version, trustedRoot, tru
     ];
     requireThat(missing.length === 0, `Offline bundle is incomplete and cannot be imported; it lacks ${missing.join(' and ')}`);
     try {
-      replay = { ...admitOfflineReplay({ run, staging: stagingPath, channel, verification }), admitted: true };
+      replay = { ...admitOfflineReplay({ run, staging: stagingPath, channel, verification,
+        trustedRoot: realpathSync(resolve(trustedRoot)), cosign }), admitted: true };
     } catch (error) {
       // A refused admission is recorded for audit but never counts as admitted.
       if (error?.replay) replay = { ...error.replay, admitted: false };
@@ -1453,7 +1460,8 @@ async function main(argv) {
     const { record, path } = importOfflineBundle({ bundle: options.bundle, channel: options.channel,
       version: options.version, trustedRoot: options['trusted-root'],
       trustedRootApproval: resolve(options['trusted-root-approval']), staging: options.staging, records: options.records,
-      operator: options.operator, priorRecoverySet: options['prior-recovery-set'], protectedBackup, run });
+      operator: options.operator, priorRecoverySet: options['prior-recovery-set'], protectedBackup, run,
+      cosign: options.cosign === undefined ? undefined : resolve(options.cosign) });
     console.log(JSON.stringify({ ...record, recordFile: path }, undefined, 2));
     if (record.outcome !== 'imported') {
       console.error(`Offline bundle import refused: ${record.reason}`);

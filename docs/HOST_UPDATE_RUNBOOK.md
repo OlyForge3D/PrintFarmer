@@ -416,18 +416,26 @@ diagnose a refusal:
 
 ```bash
 Farm.HostUpdate.Cli --config /etc/printfarmer/host-update.json \
-  offline-admit --staging /srv/offline/staging-1 --channel stable --json
+  offline-admit --staging /srv/offline/staging-1 --channel stable \
+  --trusted-root /srv/offline/trusted_root.json [--cosign /usr/local/bin/cosign] --json
 ```
 
-It reads the verified staging directory (`update-manifest.json` and
-`offline-bundle-verification.json`), requires `HostUpdates:HostState` to be
-enabled, requires `--channel` to match both the signed manifest and the host's
-durable automation policy, holds the host-update execution lock and records
-the release in the durable replay store with an `Imported` disposition. Exit
-codes: 0 admitted (new `Imported`, or the identical `Imported`/`Accepted`
-identity reused), 2 usage error, 3 host state disabled or policy unavailable,
-4 replay state unreadable or tampered, 6 refused (`channel_mismatch_policy`,
-`channel_mismatch_manifest`, `staging_*`, or `replay_rejected`/`replay_superseded` for a downgrade,
+It reads the verified staging directory (`update-manifest.json`,
+`update-manifest.sigstore.json` and `offline-bundle-verification.json`),
+requires `HostUpdates:HostState` to be enabled, requires `--channel` to match
+both the signed manifest and the host's durable automation policy, and
+re-verifies the staged manifest signature with Cosign against the absolute
+`--trusted-root` (never trusting the mutable verification record). It then holds
+the host-update execution lock plus the replay store's cross-process
+`host-update-replay.lock` and records the release in the durable replay store
+with an `Imported` disposition. Exit codes: 0 admitted (new `Imported`, or the
+identical `Imported`/`Accepted` identity reused), 2 usage error (including
+`missing_option:--trusted-root`, `trusted_root_not_absolute`,
+`cosign_not_absolute`), 3 host state disabled or policy unavailable, 4 replay
+state unreadable or tampered, or `host_update_replay_lock_unavailable`, 6
+refused (`channel_mismatch_policy`, `channel_mismatch_manifest`, `staging_*`
+including `staging_signature_unverified`, `trusted_root_invalid`,
+`trusted_root_inside_staging`, or `replay_rejected`/`replay_superseded` for a downgrade,
 replay or equal-sequence substitution, which is persisted), 7 lock held. An
 admission never authorizes installation. See
 [replay admission and trust expiry](OFFLINE_UPDATE_RECOVERY.md#replay-admission-channel-continuity-and-trust-expiry-3064).

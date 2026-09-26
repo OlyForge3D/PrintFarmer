@@ -15,6 +15,10 @@ public sealed class HostUpdateCliOfflineAdmitTests : IDisposable, IAsyncLifetime
     private readonly CliHostFixture _host = new();
     private readonly string _staging;
     private readonly byte[] _manifest;
+    private readonly byte[] _signature = "{\"mediaType\":\"application/vnd.dev.sigstore.bundle.v0.3+json\"}"u8.ToArray();
+    private readonly string _trustedRoot;
+    private readonly Func<CosignVerifierOptions, ISignedReleaseVerifier> _originalVerifierFactory = HostUpdateOfflineAdmission.VerifierFactory;
+    private readonly FakeVerifier _verifier = new();
 
     public HostUpdateCliOfflineAdmitTests()
     {
@@ -22,10 +26,22 @@ public sealed class HostUpdateCliOfflineAdmitTests : IDisposable, IAsyncLifetime
         _staging = Path.Combine(_host.Root, "staging");
         Directory.CreateDirectory(_staging);
         File.WriteAllBytes(Path.Combine(_staging, HostUpdateOfflineAdmission.ManifestName), _manifest);
+        File.WriteAllBytes(Path.Combine(_staging, HostUpdateOfflineAdmission.SignatureName), _signature);
+        _trustedRoot = Path.Combine(_host.Root, "trusted_root.json");
+        File.WriteAllText(_trustedRoot, "{}");
         WriteRecord(Digest(_manifest));
+        HostUpdateOfflineAdmission.VerifierFactory = options =>
+        {
+            _verifier.Options.Add(options);
+            return _verifier;
+        };
     }
 
-    public void Dispose() => _host.Dispose();
+    public void Dispose()
+    {
+        HostUpdateOfflineAdmission.VerifierFactory = _originalVerifierFactory;
+        _host.Dispose();
+    }
 
     public async Task InitializeAsync()
     {
@@ -57,6 +73,69 @@ public sealed class HostUpdateCliOfflineAdmitTests : IDisposable, IAsyncLifetime
     {
         (await RunAsync(["offline-admit", "--staging", _staging])).Error.Should().Contain("missing_option:--channel");
         (await RunAsync(["offline-admit", "--staging", _staging, "--channel", "beta"])).Error.Should().Contain("invalid_channel");
+    }
+
+    [Fact]
+    public async Task Missing_or_relative_trusted_root_or_relative_cosign_is_a_usage_error()
+    {
+        (await RunAsync(["offline-admit", "--staging", _staging, "--channel", "insider"]))
+            .Error.Should().Contain("missing_option:--trusted-root");
+        (await RunAsync(["offline-admit", "--staging", _staging, "--channel", "insider", "--trusted-root", "root.json"]))
+            .Error.Should().Contain("trusted_root_not_absolute");
+        (await RunAsync([.. Admit("insider"), "--cosign", "cosign"])).Error.Should().Contain("cosign_not_absolute");
+    }
+
+    [HostStateFact]
+    public async Task Staged_manifest_is_reverified_offline_against_the_trusted_root_and_channel_identity()
+    {
+        string cosign = Path.Combine(_host.Root, "bin", "cosign");
+
+        JsonElement admitted = Envelope(await RunAsync([.. Admit("insider"), "--cosign", cosign]));
+
+        admitted.GetProperty("exitCode").GetInt32().Should().Be(HostUpdateCliExitCodes.Success, admitted.ToString());
+        CosignVerifierOptions options = _verifier.Options.Should().ContainSingle().Subject;
+        options.ExecutablePath.Should().Be(cosign);
+        options.TrustedRootPath.Should().Be(Path.GetFullPath(_trustedRoot));
+        FakeVerifier.Call call = _verifier.Calls.Should().ContainSingle().Subject;
+        call.Manifest.Should().Equal(_manifest);
+        call.Bundle.Should().Equal(_signature);
+        call.Identity.Should().Be(HostUpdateTrustRoot.InsiderCertificateIdentity);
+    }
+
+    [HostStateFact]
+    public async Task Forged_staging_whose_signature_does_not_verify_is_refused_before_the_replay_store()
+    {
+        _verifier.Result = false;
+
+        JsonElement refused = Envelope(await RunAsync(Admit("insider")));
+
+        refused.GetProperty("exitCode").GetInt32().Should().Be(HostUpdateCliExitCodes.Refused);
+        refused.GetProperty("result").GetProperty("code").GetString().Should().Be("staging_signature_unverified");
+        _verifier.Result = true;
+        JsonElement admitted = Envelope(await RunAsync(Admit("insider")));
+        admitted.GetProperty("result").GetProperty("reused").GetBoolean().Should().BeFalse("the forged attempt recorded nothing");
+    }
+
+    [HostStateFact]
+    public async Task Trusted_root_inside_the_mutable_staging_directory_is_refused()
+    {
+        string inside = Path.Combine(_staging, "trusted_root.json");
+        File.WriteAllText(inside, "{}");
+
+        JsonElement refused = Envelope(await RunAsync(["offline-admit", "--staging", _staging, "--channel", "insider", "--trusted-root", inside, "--json"]));
+
+        refused.GetProperty("result").GetProperty("code").GetString().Should().Be("trusted_root_inside_staging");
+        _verifier.Calls.Should().BeEmpty();
+    }
+
+    [HostStateFact]
+    public async Task Missing_signature_bundle_is_refused()
+    {
+        File.Delete(Path.Combine(_staging, HostUpdateOfflineAdmission.SignatureName));
+
+        JsonElement refused = Envelope(await RunAsync(Admit("insider")));
+
+        refused.GetProperty("result").GetProperty("code").GetString().Should().Be("staging_missing:" + HostUpdateOfflineAdmission.SignatureName);
     }
 
     [HostStateFact]
@@ -152,7 +231,7 @@ public sealed class HostUpdateCliOfflineAdmitTests : IDisposable, IAsyncLifetime
         Envelope(run).GetProperty("result").GetProperty("code").GetString().Should().Be("host_state_not_enabled");
     }
 
-    private string[] Admit(string channel) => ["offline-admit", "--staging", _staging, "--channel", channel, "--json"];
+    private string[] Admit(string channel) => ["offline-admit", "--staging", _staging, "--channel", channel, "--trusted-root", _trustedRoot, "--json"];
 
     private void WriteRecord(string manifestDigest)
     {
@@ -204,4 +283,21 @@ public sealed class HostUpdateCliOfflineAdmitTests : IDisposable, IAsyncLifetime
     }
 
     private sealed record CliRun(int ExitCode, string Output, string Error);
+
+    private sealed class FakeVerifier : ISignedReleaseVerifier
+    {
+        public bool Result { get; set; } = true;
+
+        public List<CosignVerifierOptions> Options { get; } = [];
+
+        public List<Call> Calls { get; } = [];
+
+        public Task<bool> VerifyAsync(ReadOnlyMemory<byte> manifest, ReadOnlyMemory<byte> bundle, string certificateIdentity, CancellationToken cancellationToken)
+        {
+            Calls.Add(new Call(manifest.ToArray(), bundle.ToArray(), certificateIdentity));
+            return Task.FromResult(Result);
+        }
+
+        public sealed record Call(byte[] Manifest, byte[] Bundle, string Identity);
+    }
 }

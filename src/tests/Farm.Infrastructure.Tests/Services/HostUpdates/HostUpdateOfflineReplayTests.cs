@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using System.Text.Json;
 using Farm.Infrastructure.Services.HostUpdates;
 using Farm.Infrastructure.Settings;
@@ -139,13 +139,53 @@ public sealed class HostUpdateOfflineReplayTests
         Assert.Equal(HostUpdateReplayDisposition.Imported, real.Disposition);
     }
 
-    private static async Task<(FileHostUpdateReplayStore Store, string Root, InMemoryAnchor Anchor)> NewStoreAsync()
+    [Fact]
+    public async Task ConcurrentStores_SharingOneRoot_SerializeCommitsWithoutLosingStageOrAnchor()
+    {
+        // Separate store instances model the API scheduler and offline-admit CLI processes: each has
+        // its own in-process gate, so only the cross-process lock file can serialize them (#3077).
+        (_, string root, InMemoryAnchor anchor) = await NewStoreAsync(TimeSpan.FromMilliseconds(5));
+        using FileHostUpdateReplayStore scheduler = new(root, anchor);
+        using FileHostUpdateReplayStore cli = new(root, anchor);
+
+        HostUpdateReplayDecision[] decisions = await Task.WhenAll(Enumerable.Range(1, 20).Select(i => Task.Run(() =>
+            (i % 2 == 0 ? scheduler : cli).DecideAsync(
+                Candidate(i, i % 2 == 0 ? UpdateChannelSettings.StableChannel : UpdateChannelSettings.InsiderChannel),
+                i % 2 == 0 ? HostUpdateReplayIntent.Admit : HostUpdateReplayIntent.Import, default))));
+
+        Assert.All(decisions, decision => Assert.False(decision.Reused));
+        Assert.False(File.Exists(Path.Combine(root, "host-update-replay.json.staged")));
+        using FileHostUpdateReplayStore restarted = new(root, anchor);
+        HostUpdateReplayDecision replay = await restarted.DecideAsync(Candidate(20), HostUpdateReplayIntent.Admit, default);
+        Assert.True(replay.Reused);
+        Assert.Equal(HostUpdateReplayDisposition.Accepted, replay.Disposition);
+    }
+
+    [Fact]
+    public async Task HeldCrossProcessLock_FailsClosedWithoutTouchingState_ThenProceedsOnceReleased()
+    {
+        (_, string root, InMemoryAnchor anchor) = await NewStoreAsync();
+        string snapshot = await File.ReadAllTextAsync(Path.Combine(root, "host-update-replay.json"));
+        using FileHostUpdateReplayStore store = new(root, anchor, crossProcessLockTimeout: TimeSpan.FromMilliseconds(200));
+
+        using (new FileStream(Path.Combine(root, "host-update-replay.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None))
+        {
+            InvalidDataException busy = await Assert.ThrowsAsync<InvalidDataException>(() => store.DecideAsync(Candidate(42), HostUpdateReplayIntent.Import, default));
+            Assert.Equal("host_update_replay_lock_unavailable", busy.Message);
+        }
+
+        Assert.Equal(snapshot, await File.ReadAllTextAsync(Path.Combine(root, "host-update-replay.json")));
+        Assert.Equal(0, await anchor.ReadEpochAsync(default));
+        Assert.Equal(HostUpdateReplayDisposition.Imported, (await store.DecideAsync(Candidate(42), HostUpdateReplayIntent.Import, default)).Disposition);
+    }
+
+    private static async Task<(FileHostUpdateReplayStore Store, string Root, InMemoryAnchor Anchor)> NewStoreAsync(TimeSpan? anchorDelay = null)
     {
         string root = Path.Combine(HostStateTestPaths.TempRoot, "printfarmer-offline-replay-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
         string json = EmptyStateJson();
         await File.WriteAllTextAsync(Path.Combine(root, "host-update-replay.json"), json);
-        InMemoryAnchor anchor = new(Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(json))));
+        InMemoryAnchor anchor = new(Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(json))), anchorDelay ?? TimeSpan.Zero);
         return (new FileHostUpdateReplayStore(root, anchor), root, anchor);
     }
 
@@ -172,12 +212,21 @@ public sealed class HostUpdateOfflineReplayTests
         new(channel + ":1.0." + sequence, "commit-" + sequence, sequence, "sha256:manifest-" + sequence, channel, true, true, true, true, true, true,
             new("sha256:" + new string('a', 64), "sha256:" + new string('b', 64), "sha256:" + new string('c', 64), "sha256:" + new string('d', 64), "sha256:" + new string('e', 64), "sha256:" + new string('f', 64)));
 
-    private sealed class InMemoryAnchor(string initialHash) : IHostUpdateReplayAnchor
+    private sealed class InMemoryAnchor(string initialHash, TimeSpan delay = default) : IHostUpdateReplayAnchor
     {
         private long _epoch;
         private string _stateHash = initialHash;
-        public Task<long> ReadEpochAsync(CancellationToken ct) => Task.FromResult(_epoch);
-        public Task<string> ReadStateHashAsync(CancellationToken ct) => Task.FromResult(_stateHash);
-        public Task AdvanceEpochAsync(long epoch, string stateHash, CancellationToken ct) { _epoch = epoch; _stateHash = stateHash; return Task.CompletedTask; }
+        public Task<long> ReadEpochAsync(CancellationToken ct) => Task.FromResult(Volatile.Read(ref _epoch));
+        public Task<string> ReadStateHashAsync(CancellationToken ct) => Task.FromResult(Volatile.Read(ref _stateHash));
+        public async Task AdvanceEpochAsync(long epoch, string stateHash, CancellationToken ct)
+        {
+            // A non-zero delay widens the stage-to-promote window a racing writer could exploit.
+            if (delay > TimeSpan.Zero)
+            {
+                await Task.Delay(delay, ct);
+            }
+            Volatile.Write(ref _stateHash, stateHash);
+            Volatile.Write(ref _epoch, epoch);
+        }
     }
 }

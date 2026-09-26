@@ -8,17 +8,25 @@ namespace Farm.HostUpdate.Cli;
 
 /// <summary>
 /// Records an offline bundle that <c>offline-update-bundle.mjs import</c> has already verified in
-/// the same durable, anchored replay store the online scheduler uses (issue #3064). It binds the
-/// staged manifest bytes to the verification record by digest, requires the requested channel to
+/// the same durable, anchored replay store the online scheduler uses (issue #3064). It never
+/// trusts the mutable staging directory: it re-verifies the exact staged manifest bytes offline
+/// with Cosign against the operator's trusted root and the channel's pinned release identity,
+/// binds them to the verification record by digest, requires the requested channel to
 /// equal both the signed manifest and the host's standing policy, and takes the execution lock so
 /// it never races a live executor. It installs nothing and never authorizes rollout.
 /// </summary>
 internal static class HostUpdateOfflineAdmission
 {
     internal const string ManifestName = "update-manifest.json";
+    internal const string SignatureName = "update-manifest.sigstore.json";
     internal const string VerificationName = "offline-bundle-verification.json";
     internal const string VerifiedDecision = "verified-not-installable";
     private const long MaxStagedFileBytes = 1024 * 1024;
+    private static readonly TimeSpan SignatureTimeout = TimeSpan.FromSeconds(60);
+
+    /// <summary>Creates the Cosign verifier; tests substitute a fake to avoid a real Sigstore bundle.</summary>
+    internal static Func<CosignVerifierOptions, ISignedReleaseVerifier> VerifierFactory { get; set; } =
+        options => new ProcessCosignVerifier(options);
 
     public static async Task<int> RunAsync(
         IServiceProvider provider,
@@ -53,10 +61,21 @@ internal static class HostUpdateOfflineAdmission
             return await FailAsync(output, args, HostUpdateCliExitCodes.Refused, "channel_mismatch_policy").ConfigureAwait(false);
         }
 
-        if (!TryReadStaged(args.Staging!, args.Channel!, out VerifiedHostUpdateCandidate? candidate, out string? stagingError))
+        if (!TryReadStaged(args.Staging!, args.Channel!, out StagedRelease? staged, out string? stagingError))
         {
             return await FailAsync(output, args, HostUpdateCliExitCodes.Refused, stagingError!).ConfigureAwait(false);
         }
+
+        // The staging directory and its verification record are mutable, so they never vouch for
+        // authenticity: the exact staged manifest bytes are re-verified here against the
+        // operator's trusted root and the channel's pinned release identity (#3077).
+        string? signatureError = await VerifySignatureAsync(args, staged!, cancellationToken).ConfigureAwait(false);
+        if (signatureError is not null)
+        {
+            return await FailAsync(output, args, HostUpdateCliExitCodes.Refused, signatureError).ConfigureAwait(false);
+        }
+
+        VerifiedHostUpdateCandidate candidate = staged!.Candidate;
 
         IHostUpdateExecutionLease? lease = HostUpdateCli.TryAcquireLock(provider);
         if (lease is null)
@@ -82,7 +101,7 @@ internal static class HostUpdateOfflineAdmission
             {
                 using var anchor = new FileHostUpdateReplayAnchor(paths);
                 using var store = new FileHostUpdateReplayStore(paths.Root, anchor);
-                decision = await store.DecideAsync(candidate!, HostUpdateReplayIntent.Import, cancellationToken).ConfigureAwait(false);
+                decision = await store.DecideAsync(candidate, HostUpdateReplayIntent.Import, cancellationToken).ConfigureAwait(false);
             }
             catch (Exception exception) when (HostUpdateCli.IsStateFailure(exception))
             {
@@ -96,7 +115,7 @@ internal static class HostUpdateOfflineAdmission
             var report = new OfflineAdmissionReport(
                 admitted ? "admitted" : "refused",
                 reason,
-                candidate!.ReleaseId,
+                candidate.ReleaseId,
                 candidate.Channel,
                 candidate.Sequence,
                 candidate.ManifestDigest,
@@ -107,10 +126,11 @@ internal static class HostUpdateOfflineAdmission
         }
     }
 
-    internal static bool TryReadStaged(string staging, string channel, out VerifiedHostUpdateCandidate? candidate, out string? error)
+    internal static bool TryReadStaged(string staging, string channel, out StagedRelease? staged, out string? error)
     {
-        candidate = null;
+        staged = null;
         if (!TryReadFile(staging, ManifestName, out byte[]? manifestBytes, out error) ||
+            !TryReadFile(staging, SignatureName, out byte[]? signatureBytes, out error) ||
             !TryReadFile(staging, VerificationName, out byte[]? recordBytes, out error))
         {
             return false;
@@ -163,7 +183,7 @@ internal static class HostUpdateOfflineAdmission
         }
 
         IReadOnlyDictionary<string, string> platforms = manifest.PlatformDigests;
-        candidate = new VerifiedHostUpdateCandidate(
+        var candidate = new VerifiedHostUpdateCandidate(
             $"{manifest.Channel}:{manifest.Version}",
             manifest.SourceCommit,
             manifest.Sequence,
@@ -182,8 +202,39 @@ internal static class HostUpdateOfflineAdmission
                 platforms.GetValueOrDefault("printer-discovery", string.Empty),
                 platforms.GetValueOrDefault("orcaslicer-worker", string.Empty),
                 platforms.GetValueOrDefault("monolith", string.Empty)));
+        staged = new StagedRelease(candidate, manifestBytes!, signatureBytes!, Path.GetFullPath(staging));
         error = null;
         return true;
+    }
+
+    internal static async Task<string?> VerifySignatureAsync(HostUpdateCliArguments args, StagedRelease staged, CancellationToken cancellationToken)
+    {
+        string trustedRoot;
+        try
+        {
+            var root = new FileInfo(args.TrustedRoot!);
+            if (!root.Exists || root.LinkTarget is not null || root.Attributes.HasFlag(FileAttributes.ReparsePoint))
+            {
+                return "trusted_root_invalid";
+            }
+
+            trustedRoot = root.FullName;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or System.Security.SecurityException or ArgumentException)
+        {
+            return "trusted_root_invalid";
+        }
+
+        string inside = Path.GetRelativePath(staged.StagingPath, trustedRoot);
+        if (!inside.StartsWith("..", StringComparison.Ordinal) && !Path.IsPathRooted(inside))
+        {
+            return "trusted_root_inside_staging";
+        }
+
+        ISignedReleaseVerifier verifier = VerifierFactory(new CosignVerifierOptions(args.Cosign ?? "cosign", SignatureTimeout, TrustedRootPath: trustedRoot));
+        bool verified = await verifier.VerifyAsync(staged.ManifestBytes, staged.SignatureBytes,
+            HostUpdateTrustRoot.CertificateIdentity(staged.Candidate.Channel), cancellationToken).ConfigureAwait(false);
+        return verified ? null : "staging_signature_unverified";
     }
 
     private static bool IsString(JsonElement element, string name, string expected) =>
@@ -226,6 +277,8 @@ internal static class HostUpdateOfflineAdmission
 
     private static Task<int> FailAsync(TextWriter output, HostUpdateCliArguments args, int exitCode, string code) =>
         HostUpdateCli.EmitAsync(output, args.Json, exitCode, new HostUpdateCli.CliFailure(code, []));
+
+    internal sealed record StagedRelease(VerifiedHostUpdateCandidate Candidate, byte[] ManifestBytes, byte[] SignatureBytes, string StagingPath);
 
     private sealed record OfflineAdmissionReport(
         string Decision,

@@ -36,6 +36,10 @@ internal sealed partial class HostUpdateCliArguments
 
     public string? Channel { get; private set; }
 
+    public string? TrustedRoot { get; private set; }
+
+    public string? Cosign { get; private set; }
+
     public static bool TryParse(IReadOnlyList<string> args, out HostUpdateCliArguments? parsed, out string? error)
     {
         parsed = null;
@@ -106,6 +110,24 @@ internal sealed partial class HostUpdateCliArguments
                     }
 
                     result.Channel = channel;
+                    break;
+                case "--trusted-root" when command == HostUpdateCliCommand.OfflineAdmit:
+                    if (!TryValue(args, ref i, out string? trustedRoot))
+                    {
+                        error = "missing_value:--trusted-root";
+                        return false;
+                    }
+
+                    result.TrustedRoot = trustedRoot;
+                    break;
+                case "--cosign" when command == HostUpdateCliCommand.OfflineAdmit:
+                    if (!TryValue(args, ref i, out string? cosign))
+                    {
+                        error = "missing_value:--cosign";
+                        return false;
+                    }
+
+                    result.Cosign = cosign;
                     break;
                 case "--release" when command != HostUpdateCliCommand.OfflineAdmit:
                     if (!TryValue(args, ref i, out string? release))
@@ -184,6 +206,18 @@ internal sealed partial class HostUpdateCliArguments
             if (result.Channel is not ("stable" or "insider"))
             {
                 error = result.Channel is null ? "missing_option:--channel" : "invalid_channel";
+                return false;
+            }
+
+            if (result.TrustedRoot is null || !Path.IsPathFullyQualified(result.TrustedRoot))
+            {
+                error = result.TrustedRoot is null ? "missing_option:--trusted-root" : "trusted_root_not_absolute";
+                return false;
+            }
+
+            if (result.Cosign is not null && !Path.IsPathFullyQualified(result.Cosign))
+            {
+                error = "cosign_not_absolute";
                 return false;
             }
         }

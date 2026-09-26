@@ -23,7 +23,7 @@ public static partial class HostUpdateCli
           printfarmer-host-update status [--release <releaseId>] [--json]
           printfarmer-host-update recover --release <releaseId> [--request-id <requestId>] --preview [--json]
           printfarmer-host-update recover --release <releaseId> [--request-id <requestId>] --confirm <releaseId> [--reapprove-drift <token>] [--printers-reconciled <token>] [--json]
-          printfarmer-host-update offline-admit --staging <absolute-verified-staging-dir> --channel <stable|insider> [--json]
+          printfarmer-host-update offline-admit --staging <absolute-verified-staging-dir> --channel <stable|insider> --trusted-root <absolute-trusted_root.json> [--cosign <absolute-path>] [--json]
 
         Configuration comes from --config <absolute-json-path> and environment variables
         (HostUpdateExecution__*, HostUpdates__HostState__*, DB_PROVIDER, ConnectionStrings__Default).
@@ -37,8 +37,8 @@ public static partial class HostUpdateCli
         and that is recorded with the exact --printers-reconciled token printed by --preview.
         Recovery never replays, cancels or issues a printer command.
 
-        offline-admit records an offline bundle that the import tool already verified in the
-        durable replay store (issue #3064). It refuses a replayed, downgraded or cross-channel
+        offline-admit re-verifies the staged signed manifest offline against --trusted-root and
+        records it in the durable replay store (issue #3064). It refuses a replayed, downgraded or cross-channel
         release; it installs nothing and is not rollout authorization.
 
         Exit codes: 0 ok, 2 usage, 3 configuration/namespace unproven, 4 state unreadable,

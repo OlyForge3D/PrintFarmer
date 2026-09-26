@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { closeSync, existsSync, fstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, rmSync,
   writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { isAbsolute, join } from 'node:path';
+import { isAbsolute, join, relative } from 'node:path';
 import test from 'node:test';
 import { components } from '../release-policy.mjs';
 import { buildManifest, deriveSequence } from '../release-manifest.mjs';
@@ -13,7 +13,7 @@ import { canonicalImageIndex, imageArchiveLimits, imageTarHeader, infrastructure
   writeImageArchive } from '../offline-bundle-images.mjs';
 import { formatSums, hostUpdateCliArchiveName, hostUpdateCliRuntimes, hostUpdateCliSbomName, hostUpdateCliSumsBundleName,
   hostUpdateCliSumsName } from '../host-update-cli-package.mjs';
-import { assembleOfflineBundle, evaluateTrustPolicy, hostUpdateCliInvocation, hostUpdateCliRunnerName,
+import { admitOfflineReplay, assembleOfflineBundle, evaluateTrustPolicy, hostUpdateCliInvocation, hostUpdateCliRunnerName,
   importOfflineBundle, loadVerifiedImages, offlineBundleIndexName, offlineBundleLimits, offlineBundleName,
   offlineBundleVerificationName, offlineImportDecisionKind, offlineTrustPolicy, parseArguments, readOfflineBundleEntries,
   redactReason, releaseSigningIdentity, tarHeader, trustedRootApprovalKind, verifyOfflineBundle } from '../offline-update-bundle.mjs';
@@ -1463,9 +1463,13 @@ function replayStore({ policyChannel, highWater = {} } = {}) {
   const calls = [];
   const admit = args => {
     calls.push(args);
-    assert.deepEqual([args.length, args[0], args[1], args[3], args[5]], [6, 'offline-admit', '--staging', '--channel',
-      '--json']);
+    assert.deepEqual([args.length, args[0], args[1], args[3], args[5], args[7]],
+      [8, 'offline-admit', '--staging', '--channel', '--trusted-root', '--json']);
     assert.ok(isAbsolute(args[2]), 'offline-admit receives the absolute verified staging directory');
+    assert.ok(isAbsolute(args[6]), 'offline-admit re-verifies against the absolute trusted root');
+    const inside = relative(args[2], args[6]);
+    assert.ok(inside.startsWith('..') || isAbsolute(inside),
+      'the trusted root offline-admit verifies against lies outside the mutable staging directory');
     const staging = args[2];
     const record = JSON.parse(readFileSync(join(staging, offlineBundleVerificationName), 'utf8'));
     const digest = `sha256:${sha256(readFileSync(join(staging, 'update-manifest.json')))}`;
@@ -2000,4 +2004,24 @@ test('the host-update CLI is invoked with its config, directly or through the do
   assert.throws(() => hostUpdateCliInvocation({ config: 'c.json', 'host-update-cli': cli }), /--config/);
   assert.throws(() => hostUpdateCliInvocation({ config, 'host-update-cli': 'cli' }), /--host-update-cli/);
   assert.throws(() => hostUpdateCliInvocation({ config, 'host-update-cli': `${cli}.dll`, dotnet: 'dotnet' }), /--dotnet/);
+});
+
+test('offline-admit re-verifies against the absolute trusted root with the same Cosign executable', () => {
+  const abs = process.platform === 'win32' ? 'C:\\pf' : '/pf';
+  const trustedRoot = join(abs, 'trusted_root.json');
+  const cosignPath = join(abs, 'bin', 'cosign');
+  const verification = { manifestDigest: `sha256:${'a'.repeat(64)}`, release: { sequence: 7, version: '1.2.3' } };
+  const seen = [];
+  const run = (name, args) => {
+    seen.push([name, args]);
+    return JSON.stringify({ exitCode: 0, result: { decision: 'admitted', manifestDigest: verification.manifestDigest,
+      sequence: 7, channel: 'Insider', releaseId: 'insider:1.2.3', disposition: 'Imported', correlationId: 'c', reused: false } });
+  };
+  admitOfflineReplay({ run, staging: join(abs, 's'), channel: 'insider', verification, trustedRoot, cosign: cosignPath });
+  assert.deepEqual(seen, [[hostUpdateCliRunnerName, ['offline-admit', '--staging', join(abs, 's'), '--channel', 'insider',
+    '--trusted-root', trustedRoot, '--cosign', cosignPath, '--json']]]);
+  assert.throws(() => admitOfflineReplay({ run, staging: join(abs, 's'), channel: 'insider', verification,
+    trustedRoot: 'trusted_root.json' }), /absolute Sigstore trusted root/);
+  assert.throws(() => admitOfflineReplay({ run, staging: join(abs, 's'), channel: 'insider', verification, trustedRoot,
+    cosign: 'cosign' }), /absolute Cosign path/);
 });

@@ -348,12 +348,16 @@ public sealed class UnavailableHostUpdateReplayAnchor : IHostUpdateReplayAnchor,
     public Task AdvanceEpochAsync(long epoch, string stateHash, CancellationToken ct) => throw new NotSupportedException("host_update_replay_anchor_not_available");
 }
 
-public sealed class FileHostUpdateReplayStore(string rootPath, IHostUpdateReplayAnchor anchor, Action<string>? commitBoundary = null) : IHostUpdateReplayStore, IDisposable
+public sealed class FileHostUpdateReplayStore(string rootPath, IHostUpdateReplayAnchor anchor, Action<string>? commitBoundary = null,
+    TimeSpan? crossProcessLockTimeout = null) : IHostUpdateReplayStore, IDisposable
 {
     private readonly string _path = Path.Combine(rootPath ?? throw new ArgumentNullException(nameof(rootPath)), "host-update-replay.json");
     private readonly string _stagedPath = Path.Combine(rootPath, "host-update-replay.json.staged");
+    private readonly string _lockPath = Path.Combine(rootPath, "host-update-replay.lock");
     private readonly IHostUpdateReplayAnchor _anchor = anchor ?? throw new ArgumentNullException(nameof(anchor));
     private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly TimeSpan _crossProcessLockTimeout = crossProcessLockTimeout ?? TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan CrossProcessLockRetryDelay = TimeSpan.FromMilliseconds(25);
 
     public async Task<HostUpdateReplayDecision> DecideAsync(VerifiedHostUpdateCandidate candidate, HostUpdateReplayIntent intent, CancellationToken ct)
     {
@@ -366,6 +370,9 @@ public sealed class FileHostUpdateReplayStore(string rootPath, IHostUpdateReplay
         await _gate.WaitAsync(ct);
         try
         {
+            // The API scheduler and the offline-admit CLI are separate processes sharing this
+            // store; the in-process gate alone cannot stop one deleting the other's stage (#3077).
+            using FileStream crossProcessLock = await AcquireCrossProcessLockAsync(ct);
             long anchorEpoch = await ReadAnchorEpochAsync(ct);
             string anchorStateHash = await ReadAnchorStateHashAsync(ct);
             HostUpdateReplayFileState state = await LoadAndRecoverAsync(anchorEpoch, anchorStateHash, ct);
@@ -429,6 +436,30 @@ public sealed class FileHostUpdateReplayStore(string rootPath, IHostUpdateReplay
     }
 
     private static string Namespace(VerifiedHostUpdateCandidate candidate) => candidate.TrustRoot + "::" + candidate.Channel;
+
+    // FileShare.None is a mandatory share lock on Windows and an exclusive flock on Unix, so it
+    // excludes every other process that opens the same lock file; the OS releases it on exit.
+    private async Task<FileStream> AcquireCrossProcessLockAsync(CancellationToken ct)
+    {
+        System.Diagnostics.Stopwatch elapsed = System.Diagnostics.Stopwatch.StartNew();
+        while (true)
+        {
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(_lockPath)!);
+                HostStateFileSecurity.RejectReparseTarget(_lockPath);
+                return new FileStream(_lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None, 1, FileOptions.None);
+            }
+            catch (IOException) when (elapsed.Elapsed < _crossProcessLockTimeout)
+            {
+                await Task.Delay(CrossProcessLockRetryDelay, ct);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                throw new InvalidDataException("host_update_replay_lock_unavailable", ex);
+            }
+        }
+    }
 
     private async Task<long> ReadAnchorEpochAsync(CancellationToken ct)
     {
