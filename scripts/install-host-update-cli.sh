@@ -3,7 +3,7 @@
 # configuration (issue #3045). It never builds the CLI and never falls back to an unverified
 # source. It is NOT rollout authorization: it neither enables nor starts an update.
 #
-#   install-host-update-cli.sh install --version <X.Y.Z[-insider.N]> [--asset-dir <abs-dir>] [--install-root <abs-dir>] [--runtime <linux-x64|linux-arm64>]
+#   install-host-update-cli.sh install --version <X.Y.Z[-insider.N]> [--asset-dir <abs-dir>] [--install-root <abs-dir>] [--runtime <linux-x64|linux-arm64>] [--trusted-root <abs-file>]
 #   install-host-update-cli.sh write-config --env-file <abs-file> [--output <abs-file>] [--owner <user>]
 #
 # install       Downloads (or reads from --asset-dir) the runtime's archive, the checksum list and
@@ -13,6 +13,10 @@
 #               /opt/printfarmer/host-update-cli). Versions are immutable: an existing placement
 #               identical to the verified archive is accepted, a differing one is refused and left
 #               untouched. The install root must not be group- or world-writable. Requires cosign.
+#               --trusted-root verifies offline against an operator-supplied Sigstore trusted
+#               root (an absolute path to a regular, readable file). It is only ever taken
+#               from this option, never from the environment or configuration, and is never
+#               defaulted; without it cosign verifies against the public-good root.
 # write-config  Writes an owner-only (0600) host-update.json (default /etc/printfarmer/host-update.json)
 #               from the deployment .env's HostUpdateExecution__*, HostUpdates__HostState__*,
 #               DB_PROVIDER and ConnectionStrings__Default. The owner defaults to the owner of
@@ -140,7 +144,7 @@ placement_matches() {
 }
 
 cmd_install() {
-    local version="" asset_dir="" install_root="$DEFAULT_INSTALL_ROOT" runtime=""
+    local version="" asset_dir="" install_root="$DEFAULT_INSTALL_ROOT" runtime="" trusted_root="" trusted_root_set=0
     while [[ $# -gt 0 ]]; do
         [[ $# -ge 2 ]] || fail_usage "$1 requires a value"
         case "$1" in
@@ -148,12 +152,26 @@ cmd_install() {
             --asset-dir) asset_dir="$2" ;;
             --install-root) install_root="$2" ;;
             --runtime) runtime="$2" ;;
+            --trusted-root)
+                [[ "$trusted_root_set" == 0 ]] || fail_usage "--trusted-root may be given only once"
+                trusted_root="$2"
+                trusted_root_set=1
+                ;;
             *) fail_usage "Unknown install option: $1" ;;
         esac
         shift 2
     done
     [[ "$version" =~ $VERSION_RE ]] || fail_usage "--version must be X.Y.Z or X.Y.Z-insider.N"
     [[ -z "$asset_dir" ]] || is_absolute "$asset_dir" || fail_usage "--asset-dir must be an absolute path"
+    local -a offline_trust=()
+    if [[ "$trusted_root_set" == 1 ]]; then
+        is_absolute "$trusted_root" || fail_usage "--trusted-root must be an absolute path"
+        [[ -f "$trusted_root" && ! -L "$trusted_root" ]] ||
+            fail "Sigstore trusted root is not a regular file: $trusted_root"
+        [[ -r "$trusted_root" && -s "$trusted_root" ]] ||
+            fail "Sigstore trusted root is unreadable or empty: $trusted_root"
+        offline_trust=(--trusted-root "$trusted_root")
+    fi
     is_absolute "$install_root" || fail_usage "--install-root must be an absolute path"
     if [[ -n "$runtime" ]]; then
         [[ "$runtime" == "linux-x64" || "$runtime" == "linux-arm64" ]] ||
@@ -176,7 +194,7 @@ cmd_install() {
         fetch_asset "$name" "$asset_dir" "$version"
     done
 
-    cosign verify-blob --bundle "$work_dir/$bundle" \
+    cosign verify-blob ${offline_trust[@]+"${offline_trust[@]}"} --bundle "$work_dir/$bundle" \
         --certificate-oidc-issuer "$OIDC_ISSUER" \
         --certificate-identity "https://github.com/$RELEASE_REPOSITORY/.github/workflows/consolidated-release.yml@refs/heads/$branch" \
         "$work_dir/$sums" >/dev/null ||

@@ -8,7 +8,7 @@
     It never builds the CLI and never falls back to an unverified source. It is NOT rollout
     authorization: it neither enables nor starts an update.
 
-      install-host-update-cli.ps1 install -Version <X.Y.Z[-insider.N]> [-AssetDir <abs-dir>] [-InstallRoot <abs-dir>] [-Runtime <win-x64|linux-x64|linux-arm64>]
+      install-host-update-cli.ps1 install -Version <X.Y.Z[-insider.N]> [-AssetDir <abs-dir>] [-InstallRoot <abs-dir>] [-Runtime <win-x64|linux-x64|linux-arm64>] [-TrustedRoot <abs-file>]
       install-host-update-cli.ps1 write-config -EnvFile <abs-file> [-Output <abs-file>] [-Owner <account>]
 
     install       Downloads (or reads from -AssetDir) the runtime's archive, the checksum list and
@@ -20,6 +20,10 @@
                   is accepted, a differing one is refused and left untouched. The install root must
                   not be writable by anyone but SYSTEM, Administrators, TrustedInstaller and the
                   installing account (group/world-writable elsewhere). Requires cosign on PATH.
+                  -TrustedRoot verifies offline against an operator-supplied Sigstore trusted
+                  root (an absolute path to a regular, readable file). It is only ever taken from
+                  this option, never from the environment or configuration, and is never
+                  defaulted; without it cosign verifies against the public-good root.
     write-config  Writes host-update.json (default C:\ProgramData\PrintFarmer\host-update.json, or
                   /etc/printfarmer/host-update.json) from the deployment .env's
                   HostUpdateExecution__*, HostUpdates__HostState__*, DB_PROVIDER and
@@ -43,7 +47,7 @@ $OidcIssuer = 'https://token.actions.githubusercontent.com'
 $Runtimes = @('win-x64', 'linux-x64', 'linux-arm64')
 $UsageText = @'
 usage:
-  install-host-update-cli.ps1 install -Version <X.Y.Z[-insider.N]> [-AssetDir <abs-dir>] [-InstallRoot <abs-dir>] [-Runtime <win-x64|linux-x64|linux-arm64>]
+  install-host-update-cli.ps1 install -Version <X.Y.Z[-insider.N]> [-AssetDir <abs-dir>] [-InstallRoot <abs-dir>] [-Runtime <win-x64|linux-x64|linux-arm64>] [-TrustedRoot <abs-file>]
   install-host-update-cli.ps1 write-config -EnvFile <abs-file> [-Output <abs-file>] [-Owner <account>]
 '@
 
@@ -132,6 +136,7 @@ function Get-Options([string[]] $Arguments, [string[]] $Names) {
         $match = $Names | Where-Object { $_ -ieq $name }
         if (-not $match) { Stop-Usage "Unknown option: $($Arguments[$index])" }
         if ($index + 1 -ge $Arguments.Count) { Stop-Usage "$($Arguments[$index]) requires a value" }
+        if ($options.ContainsKey($match)) { Stop-Usage "-$match may be given only once" }
         $options[$match] = $Arguments[$index + 1]
     }
     return $options
@@ -210,11 +215,28 @@ function Assert-Manifest([string] $Path, [string] $Version, [string] $Runtime) {
 }
 
 function Invoke-Install([string[]] $Arguments) {
-    $options = Get-Options $Arguments @('Version', 'AssetDir', 'InstallRoot', 'Runtime')
+    $options = Get-Options $Arguments @('Version', 'AssetDir', 'InstallRoot', 'Runtime', 'TrustedRoot')
     $version = [string] $options['Version']
     if ($version -cnotmatch $VersionPattern) { Stop-Usage '-Version must be X.Y.Z or X.Y.Z-insider.N' }
     $assetDir = [string] $options['AssetDir']
     if ($assetDir -and -not (Test-FullyQualified $assetDir)) { Stop-Usage '-AssetDir must be an absolute path' }
+    $offlineTrust = @()
+    if ($options.ContainsKey('TrustedRoot')) {
+        $trustedRoot = [string] $options['TrustedRoot']
+        if (-not (Test-FullyQualified $trustedRoot)) { Stop-Usage '-TrustedRoot must be an absolute path' }
+        if (-not (Test-Path -LiteralPath $trustedRoot -PathType Leaf) -or (Test-Link $trustedRoot)) {
+            Stop-Install "Sigstore trusted root is not a regular file: $trustedRoot"
+        }
+        try {
+            $stream = [System.IO.File]::OpenRead($trustedRoot)
+            $trustedRootLength = $stream.Length
+            $stream.Dispose()
+        } catch {
+            Stop-Install "Sigstore trusted root is unreadable or empty: $trustedRoot"
+        }
+        if ($trustedRootLength -le 0) { Stop-Install "Sigstore trusted root is unreadable or empty: $trustedRoot" }
+        $offlineTrust = @('--trusted-root', $trustedRoot)
+    }
     $defaultRoot = if ($IsWindows) { Join-Path $env:ProgramFiles 'PrintFarmer\HostUpdateCli' } else { '/opt/printfarmer/host-update-cli' }
     $installRoot = if ($options.ContainsKey('InstallRoot')) { [string] $options['InstallRoot'] } else { $defaultRoot }
     if (-not (Test-FullyQualified $installRoot)) { Stop-Usage '-InstallRoot must be an absolute path' }
@@ -241,7 +263,7 @@ function Invoke-Install([string[]] $Arguments) {
         $sums = Copy-Asset $sumsName $assetDir $version $workDir
         $bundle = Copy-Asset "$sumsName.sigstore.json" $assetDir $version $workDir
 
-        & $cosign.Source verify-blob --bundle $bundle --certificate-oidc-issuer $OidcIssuer `
+        & $cosign.Source verify-blob @offlineTrust --bundle $bundle --certificate-oidc-issuer $OidcIssuer `
             --certificate-identity "https://github.com/$ReleaseRepository/.github/workflows/consolidated-release.yml@refs/heads/$branch" `
             $sums *> $null
         if ($LASTEXITCODE -ne 0) { Stop-Install "The host-update CLI checksum list is not signed by the $branch release workflow" }
