@@ -26,6 +26,33 @@ public sealed class HostUpdateExecutorTests
     [Fact] public void Request_requires_exact_unique_six_targets() { var request = Request() with { Targets = Request().Targets.Take(5).ToArray() }; Assert.False(request.IsValid(out var error)); Assert.Equal("target_invalid", error); }
     [Fact] public void Request_rejects_duplicate_service_ids() { var request = Request() with { Targets = Request().Targets.Select((t, i) => i == 5 ? t with { ServiceId = "svc-1" } : t).ToArray() }; Assert.False(request.IsValid(out var error)); Assert.Equal("target_set_invalid", error); }
     [Fact] public void Request_rejects_noncanonical_platform() { var request = Request() with { HostPlatform = "linux-armv8" }; Assert.False(request.IsValid(out var error)); Assert.Equal("release_binding_invalid", error); }
+    [Fact]
+    public void Request_binding_preserves_legacy_registry_hash_and_protects_preloaded_mode()
+    {
+        HostUpdateExecutionRequest registry = Request();
+        string legacy = HostUpdateCanonical.Hash(new
+        {
+            registry.TrustRoot,
+            registry.PolicyRevision,
+            registry.PolicyFingerprint,
+            registry.ReleaseId,
+            registry.Channel,
+            registry.RequestId,
+            registry.AuthenticatedSequence,
+            registry.ManifestDigest,
+            registry.SourceCommit,
+            registry.HostPlatform,
+            registry.AuthorizationKind,
+            Targets = registry.Targets.OrderBy(target => target.ServiceId, StringComparer.Ordinal),
+        });
+
+        string registryHash = HostUpdateRequestBinding.Compute(registry);
+        string preloadedHash = HostUpdateRequestBinding.Compute(registry with { ImageSourceMode = HostUpdateImageSourceMode.PreloadedLocal });
+
+        Assert.Equal(legacy, registryHash);
+        Assert.NotEqual(registryHash, preloadedHash);
+    }
+
     [Fact] public void Journal_reconstructs_and_rejects_truncation() { string path = Path.Combine(HostStateTestPaths.TempRoot, Guid.NewGuid() + ".journal"); try { var journal = new FileHostUpdateExecutionJournal(path); journal.Append(new("a", "r", HostUpdateExecutionState.Accepted, "accepted", DateTimeOffset.UtcNow)); Assert.Single(journal.Read("r")); File.WriteAllText(path, File.ReadAllText(path)[..^3]); Assert.Throws<InvalidDataException>(() => journal.Read("r")); } finally { if (File.Exists(path)) { File.Delete(path); } } }
     [Fact] public async Task Executor_persists_transition_order_and_completion_async() { var steps = new FakeSteps(); var journal = new MemoryJournal(); var executor = new HostUpdateExecutor(steps, journal, new NoopLock(), automationPolicyRepository: new InlinePolicyRepository(Policy())); var result = await executor.ExecuteAsync(Request()); Assert.True(result.Succeeded); Assert.Equal(new[] { "preflight", "drain", "fence", "backup", "migration", "apply", "verify" }, steps.Calls); }
     [Fact]

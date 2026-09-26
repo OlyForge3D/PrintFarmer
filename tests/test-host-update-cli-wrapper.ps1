@@ -92,6 +92,18 @@ exit [int](`$env:FAKE_EXIT ?? '0')
     Expect-Usage 'shell metacharacters refused' @('-Config', $config, 'recover', '-Release', 'stable:1;rm', '-Preview')
     Expect-Usage 'invalid request id refused' @('-Config', $config, 'recover', '-Release', 'stable:1.2.3', '-RequestId', 'a b', '-Preview')
     Expect-Usage 'missing option value refused' @('-Config', $config, 'recover', '-Release')
+    $activationStaging = Join-Path $testRoot 'activation-staging'
+    $activationRoot = Join-Path $testRoot 'activation-trusted_root.json'
+    $activationCosign = Join-Path $testRoot 'activation-cosign.ps1'
+    Set-Content -LiteralPath $activationRoot -Value '{}'
+    Copy-Item -LiteralPath $fakeDotnet -Destination $activationCosign
+    Expect-Passthrough 'activate passes through to offline-activate' @($dll, '--config', $config, 'offline-activate', '--staging', $activationStaging, '--channel', 'stable', '--trusted-root', $activationRoot, '--json') @('activate', '-Config', $config, '-Staging', $activationStaging, '-Channel', 'stable', '-TrustedRoot', $activationRoot, '-Json')
+    Expect-Passthrough 'activate forwards cosign path' @($dll, '--config', $config, 'offline-activate', '--staging', $activationStaging, '--channel', 'insider', '--trusted-root', $activationRoot, '--cosign', $activationCosign) @('activate', '-Config', $config, '-Staging', $activationStaging, '-Channel', 'insider', '-TrustedRoot', $activationRoot, '-Cosign', $activationCosign)
+    Expect-Usage 'activate requires -Config' @('activate', '-Staging', $activationStaging, '-Channel', 'stable', '-TrustedRoot', $activationRoot)
+    Expect-Usage 'activate refuses relative -Staging' @('activate', '-Config', $config, '-Staging', 'staging', '-Channel', 'stable', '-TrustedRoot', $activationRoot)
+    Expect-Usage 'activate refuses invalid channel' @('activate', '-Config', $config, '-Staging', $activationStaging, '-Channel', 'Stable', '-TrustedRoot', $activationRoot)
+    $activateExit = Invoke-Wrapper @('activate', '-Config', $config, '-Staging', $activationStaging, '-Channel', 'stable', '-TrustedRoot', $activationRoot) @{ FAKE_EXIT = '6' }
+    if ($activateExit.ExitCode -eq 6) { Pass 'activate preserves CLI refused exit code' } else { Fail "activate preserves CLI refused exit code (exit $($activateExit.ExitCode))" }
     Expect-Usage 'missing CLI dir refused' @('-Config', $config, 'status') @{ PRINTFARMER_HOST_UPDATE_CLI_DIR = $null }
     Expect-Usage 'relative PRINTFARMER_DOTNET refused' @('-Config', $config, 'status') @{ PRINTFARMER_DOTNET = 'fake-dotnet.ps1' }
 

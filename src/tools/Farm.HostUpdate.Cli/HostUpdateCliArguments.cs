@@ -9,6 +9,7 @@ internal enum HostUpdateCliCommand
     Status,
     Recover,
     OfflineAdmit,
+    OfflineActivate,
 }
 
 /// <summary>Strict, fixed-grammar argument parser: unknown or repeated options are usage errors.</summary>
@@ -55,6 +56,7 @@ internal sealed partial class HostUpdateCliArguments
             "status" => HostUpdateCliCommand.Status,
             "recover" => HostUpdateCliCommand.Recover,
             "offline-admit" => HostUpdateCliCommand.OfflineAdmit,
+            "offline-activate" => HostUpdateCliCommand.OfflineActivate,
             "help" or "--help" or "-h" => HostUpdateCliCommand.Help,
             _ => null,
         };
@@ -93,7 +95,7 @@ internal sealed partial class HostUpdateCliArguments
                 case "--json":
                     result.Json = true;
                     break;
-                case "--staging" when command == HostUpdateCliCommand.OfflineAdmit:
+                case "--staging" when command is HostUpdateCliCommand.OfflineAdmit or HostUpdateCliCommand.OfflineActivate:
                     if (!TryValue(args, ref i, out string? staging))
                     {
                         error = "missing_value:--staging";
@@ -102,7 +104,7 @@ internal sealed partial class HostUpdateCliArguments
 
                     result.Staging = staging;
                     break;
-                case "--channel" when command == HostUpdateCliCommand.OfflineAdmit:
+                case "--channel" when command is HostUpdateCliCommand.OfflineAdmit or HostUpdateCliCommand.OfflineActivate:
                     if (!TryValue(args, ref i, out string? channel))
                     {
                         error = "missing_value:--channel";
@@ -111,7 +113,7 @@ internal sealed partial class HostUpdateCliArguments
 
                     result.Channel = channel;
                     break;
-                case "--trusted-root" when command == HostUpdateCliCommand.OfflineAdmit:
+                case "--trusted-root" when command is HostUpdateCliCommand.OfflineAdmit or HostUpdateCliCommand.OfflineActivate:
                     if (!TryValue(args, ref i, out string? trustedRoot))
                     {
                         error = "missing_value:--trusted-root";
@@ -120,7 +122,7 @@ internal sealed partial class HostUpdateCliArguments
 
                     result.TrustedRoot = trustedRoot;
                     break;
-                case "--cosign" when command == HostUpdateCliCommand.OfflineAdmit:
+                case "--cosign" when command is HostUpdateCliCommand.OfflineAdmit or HostUpdateCliCommand.OfflineActivate:
                     if (!TryValue(args, ref i, out string? cosign))
                     {
                         error = "missing_value:--cosign";
@@ -129,7 +131,7 @@ internal sealed partial class HostUpdateCliArguments
 
                     result.Cosign = cosign;
                     break;
-                case "--release" when command != HostUpdateCliCommand.OfflineAdmit:
+                case "--release" when command is not HostUpdateCliCommand.OfflineAdmit and not HostUpdateCliCommand.OfflineActivate:
                     if (!TryValue(args, ref i, out string? release))
                     {
                         error = "missing_value:--release";
@@ -195,7 +197,7 @@ internal sealed partial class HostUpdateCliArguments
             return false;
         }
 
-        if (command == HostUpdateCliCommand.OfflineAdmit)
+        if (command is HostUpdateCliCommand.OfflineAdmit or HostUpdateCliCommand.OfflineActivate)
         {
             if (result.Staging is null || !Path.IsPathFullyQualified(result.Staging))
             {

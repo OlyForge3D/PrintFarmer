@@ -113,6 +113,25 @@ expect_usage "shell metacharacters refused" --config "$CONFIG" recover --release
 expect_usage "invalid request id refused" --config "$CONFIG" recover --release stable:1.2.3 --request-id 'a b' --preview
 expect_usage "missing option value refused" --config "$CONFIG" recover --release
 
+ACT_STAGING="$TEST_ROOT/activation-staging"
+ACT_ROOT="$TEST_ROOT/activation-trusted_root.json"
+ACT_COSIGN="$TEST_ROOT/activation-cosign"
+: > "$ACT_ROOT"
+cp "$FAKE_DOTNET" "$ACT_COSIGN"
+chmod +x "$ACT_COSIGN"
+expect_passthrough "activate passes through to offline-activate" \
+    "$(printf '%s\n' "$dll" --config "$CONFIG" offline-activate --staging "$ACT_STAGING" --channel stable --trusted-root "$ACT_ROOT" --json)" \
+    activate --config "$CONFIG" --staging "$ACT_STAGING" --channel stable --trusted-root "$ACT_ROOT" --json
+expect_passthrough "activate forwards cosign path" \
+    "$(printf '%s\n' "$dll" --config "$CONFIG" offline-activate --staging "$ACT_STAGING" --channel insider --trusted-root "$ACT_ROOT" --cosign "$ACT_COSIGN")" \
+    activate --config "$CONFIG" --staging "$ACT_STAGING" --channel insider --trusted-root "$ACT_ROOT" --cosign "$ACT_COSIGN"
+expect_usage "activate requires config" activate --staging "$ACT_STAGING" --channel stable --trusted-root "$ACT_ROOT"
+expect_usage "activate refuses relative staging" activate --config "$CONFIG" --staging staging --channel stable --trusted-root "$ACT_ROOT"
+expect_usage "activate refuses invalid channel" activate --config "$CONFIG" --staging "$ACT_STAGING" --channel Stable --trusted-root "$ACT_ROOT"
+code=0
+FAKE_EXIT=6 run_wrapper activate --config "$CONFIG" --staging "$ACT_STAGING" --channel stable --trusted-root "$ACT_ROOT" || code=$?
+[[ "$code" -eq 6 ]] && pass "activate preserves CLI refused exit code" || fail "activate preserves CLI refused exit code (exit $code)"
+
 code=0
 PRINTFARMER_DOTNET="$FAKE_DOTNET" bash "$WRAPPER" --config "$CONFIG" status > /dev/null 2>&1 || code=$?
 [[ "$code" -eq 2 ]] && pass "missing CLI dir refused" || fail "missing CLI dir refused (exit $code)"

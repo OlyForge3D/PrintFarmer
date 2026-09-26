@@ -316,7 +316,8 @@ public enum HostUpdateReplayIntent
     Admit,
     Reject,
     Reserve,
-    Import
+    Import,
+    Activate
 }
 
 public sealed record HostUpdateReplayDecision(HostUpdateReplayDisposition Disposition, string CorrelationId, bool Reused);
@@ -359,6 +360,60 @@ public sealed class FileHostUpdateReplayStore(string rootPath, IHostUpdateReplay
     private readonly TimeSpan _crossProcessLockTimeout = crossProcessLockTimeout ?? TimeSpan.FromSeconds(30);
     private static readonly TimeSpan CrossProcessLockRetryDelay = TimeSpan.FromMilliseconds(25);
 
+    public async Task<HostUpdateReplayDecision> ReadIdentityAsync(VerifiedHostUpdateCandidate candidate, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(candidate);
+        if (!candidate.CryptographicallyVerified || string.IsNullOrWhiteSpace(candidate.TrustRoot))
+        {
+            return new(HostUpdateReplayDisposition.Rejected, "unauthenticated:" + candidate.Identity, false);
+        }
+
+        await _gate.WaitAsync(ct);
+        try
+        {
+            using FileStream crossProcessLock = await AcquireCrossProcessLockAsync(ct);
+            long anchorEpoch = await ReadAnchorEpochAsync(ct);
+            string anchorStateHash = await ReadAnchorStateHashAsync(ct);
+            HostUpdateReplayFileState state = await LoadReadOnlyAsync(anchorEpoch, anchorStateHash, ct);
+            return state.Identities.TryGetValue(candidate.Identity, out HostUpdateReplayIdentityRecord? existing)
+                ? new(existing.Disposition, existing.CorrelationId, true)
+                : new(HostUpdateReplayDisposition.Rejected, "missing:" + candidate.Identity, false);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async Task<HostUpdateReplayDecision> MarkActivatedAsync(VerifiedHostUpdateCandidate candidate, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(candidate);
+        await _gate.WaitAsync(ct);
+        try
+        {
+            using FileStream crossProcessLock = await AcquireCrossProcessLockAsync(ct);
+            long anchorEpoch = await ReadAnchorEpochAsync(ct);
+            string anchorStateHash = await ReadAnchorStateHashAsync(ct);
+            HostUpdateReplayFileState state = await LoadAndRecoverAsync(anchorEpoch, anchorStateHash, ct);
+            if (!state.Identities.TryGetValue(candidate.Identity, out HostUpdateReplayIdentityRecord? existing) ||
+                existing.Disposition != HostUpdateReplayDisposition.Imported)
+            {
+                return existing is null
+                    ? new(HostUpdateReplayDisposition.Rejected, "missing:" + candidate.Identity, false)
+                    : new(existing.Disposition, existing.CorrelationId, true);
+            }
+
+            HostUpdateReplayIdentityRecord activated = existing with { Disposition = HostUpdateReplayDisposition.Accepted };
+            state.Identities[candidate.Identity] = activated;
+            await SaveAsync(state, anchorEpoch, ct);
+            return new(HostUpdateReplayDisposition.Accepted, activated.CorrelationId, false);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
     public async Task<HostUpdateReplayDecision> DecideAsync(VerifiedHostUpdateCandidate candidate, HostUpdateReplayIntent intent, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(candidate);
@@ -378,6 +433,12 @@ public sealed class FileHostUpdateReplayStore(string rootPath, IHostUpdateReplay
             HostUpdateReplayFileState state = await LoadAndRecoverAsync(anchorEpoch, anchorStateHash, ct);
             string ns = Namespace(candidate);
             if (state.Identities.TryGetValue(candidate.Identity, out HostUpdateReplayIdentityRecord? existing) &&
+                intent == HostUpdateReplayIntent.Activate)
+            {
+                return new(existing.Disposition, existing.CorrelationId, true);
+            }
+
+            if (state.Identities.TryGetValue(candidate.Identity, out existing) &&
                 (existing.Disposition != HostUpdateReplayDisposition.Imported ||
                  intent is HostUpdateReplayIntent.Import or HostUpdateReplayIntent.Reject))
             {
@@ -487,6 +548,35 @@ public sealed class FileHostUpdateReplayStore(string rootPath, IHostUpdateReplay
 
     private static string StateHash(string path) =>
         Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(path)));
+
+    private async Task<HostUpdateReplayFileState> LoadReadOnlyAsync(long anchorEpoch, string anchorStateHash, CancellationToken ct)
+    {
+        HostUpdateReplayFileState? current = File.Exists(_path) ? await ReadStateAsync(_path, ct) : null;
+        if (current is null)
+        {
+            if (anchorEpoch == 0)
+            {
+                return HostUpdateReplayPersistenceCodec.Empty();
+            }
+
+            throw new InvalidDataException("host_update_replay_state_missing");
+        }
+
+        if (current.Epoch != anchorEpoch)
+        {
+            throw new InvalidDataException(current.Epoch > anchorEpoch
+                ? "host_update_replay_anchor_rollback"
+                : "host_update_replay_state_rollback");
+        }
+
+        if (!string.Equals(StateHash(_path), anchorStateHash, StringComparison.Ordinal))
+        {
+            throw new InvalidDataException("host_update_replay_state_anchor_hash_mismatch");
+        }
+
+        return current;
+    }
+
     private async Task<HostUpdateReplayFileState> LoadAndRecoverAsync(long anchorEpoch, string anchorStateHash, CancellationToken ct)
     {
         HostUpdateReplayFileState? current = File.Exists(_path) ? await ReadStateAsync(_path, ct) : null;
