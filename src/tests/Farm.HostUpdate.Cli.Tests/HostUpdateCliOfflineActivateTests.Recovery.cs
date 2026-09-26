@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Farm.Infrastructure.Services.HostUpdates;
@@ -257,7 +257,8 @@ public sealed partial class HostUpdateCliOfflineActivateTests
     }
 
     [HostStateFact]
-    public async Task Offline_recovery_refuses_release_that_is_not_the_staged_target()    {
+    public async Task Offline_recovery_refuses_release_that_is_not_the_staged_target()
+    {
         string protectedBackup = StagePriorRecoverySet();
         string[] args = OfflineRecover(protectedBackup, confirm: false);
         args[Array.IndexOf(args, "--release") + 1] = PriorReleaseId;

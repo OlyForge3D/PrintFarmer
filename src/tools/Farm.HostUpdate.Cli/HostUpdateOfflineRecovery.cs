@@ -1,4 +1,4 @@
-using System.Security.Cryptography;
+﻿using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Farm.Infrastructure.Services.HostUpdates;
