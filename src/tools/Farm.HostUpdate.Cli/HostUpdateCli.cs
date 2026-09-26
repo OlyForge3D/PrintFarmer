@@ -2,7 +2,11 @@
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Data.Migrations;
 using Farm.Infrastructure.Services.HostUpdates;
+using Farm.Slicer.Module.Data;
+using Farm.Slicer.Module.Services;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -24,6 +28,7 @@ public static partial class HostUpdateCli
           printfarmer-host-update recover --release <releaseId> [--request-id <requestId>] --preview [--json]
           printfarmer-host-update recover --release <releaseId> [--request-id <requestId>] --confirm <releaseId> [--reapprove-drift <token>] [--printers-reconciled <token>] [--json]
           printfarmer-host-update offline-admit --staging <absolute-verified-staging-dir> --channel <stable|insider> --trusted-root <absolute-trusted_root.json> [--cosign <absolute-path>] [--json]
+          printfarmer-host-update offline-activate --staging <absolute-verified-staging-dir> --channel <stable|insider> --trusted-root <absolute-trusted_root.json> [--cosign <absolute-path>] [--json]
 
         Configuration comes from --config <absolute-json-path> and environment variables
         (HostUpdateExecution__*, HostUpdates__HostState__*, DB_PROVIDER, ConnectionStrings__Default).
@@ -40,6 +45,10 @@ public static partial class HostUpdateCli
         offline-admit re-verifies the staged signed manifest offline against --trusted-root and
         records it in the durable replay store (issue #3064). It refuses a replayed, downgraded or cross-channel
         release; it installs nothing and is not rollout authorization.
+
+        offline-activate re-verifies the same staged signed manifest, requires matching imported
+        replay evidence, verifies every target image locally, and then asks the existing host-update
+        executor to run in preloaded-image mode with no registry fallback or local build.
 
         Exit codes: 0 ok, 2 usage, 3 configuration/namespace unproven, 4 state unreadable,
         5 no history, 6 refused, 7 lock held, 10 needs operator, 11 fence release pending,
@@ -147,6 +156,7 @@ public static partial class HostUpdateCli
             {
                 HostUpdateCliCommand.Status => await StatusAsync(provider, parsed, output, cancellationToken).ConfigureAwait(false),
                 HostUpdateCliCommand.OfflineAdmit => await HostUpdateOfflineAdmission.RunAsync(provider, configuration, parsed, output, cancellationToken).ConfigureAwait(false),
+                HostUpdateCliCommand.OfflineActivate => await HostUpdateOfflineActivation.RunAsync(provider, configuration, parsed, output, cancellationToken).ConfigureAwait(false),
                 _ => await RecoverAsync(provider, configuration, options, parsed, output, cancellationToken).ConfigureAwait(false),
             };
         }
@@ -180,7 +190,186 @@ public static partial class HostUpdateCli
         services.AddSingleton<IInstalledHostStateStore>(sp => sp.GetRequiredService<ApprovalBoundInstalledHostStateStore>());
         services.AddSingleton<IHostUpdatePrinterCommandInventoryReader>(sp =>
             new HostUpdateCliPrinterCommandInventoryReader(DatabaseProviderConfiguration.FromConfiguration(sp.GetRequiredService<IConfiguration>())));
+        services.AddSingleton<IHostUpdateOfflineActivationSafetyProbe, DockerComposeApiAbsenceProbe>();
+        AddOfflineActivationExecution(services, configuration);
         return services;
+    }
+
+    private static void AddOfflineActivationExecution(IServiceCollection services, IConfiguration configuration)
+    {
+        DatabaseProviderConfiguration dbConfig = DatabaseProviderConfiguration.FromConfiguration(configuration);
+        services.AddDbContext<AppDbContext>(options => ConfigureMainDbProvider(options, dbConfig));
+        services.AddDbContext<SlicerDbContext>(options => ConfigureSlicerDbProvider(options, dbConfig));
+        services.AddScoped<DbActiveWorkObservationPort>();
+        services.AddScoped<IActiveWorkObservationPort>(sp => sp.GetRequiredService<DbActiveWorkObservationPort>());
+        services.AddScoped<IActiveWorkObservationPort, SlicerActiveWorkObservationPort>();
+        services.AddSingleton<IHostUpdateAutomationPolicyRepository, UnavailableHostUpdateAutomationPolicyRepository>();
+        services.AddScoped<IHostUpdateJournal>(sp =>
+        {
+            HostUpdateExecutionOptions options = sp.GetRequiredService<HostUpdateExecutionOptions>();
+            return string.IsNullOrWhiteSpace(options.RootDirectory)
+                ? new UnconfiguredHostUpdateJournal()
+                : new FileHostUpdateJournal(options.StateDirectory);
+        });
+        services.AddScoped<IHostUpdateDrainCoordinator>(sp =>
+        {
+            HostUpdateExecutionOptions options = sp.GetRequiredService<HostUpdateExecutionOptions>();
+            return new HostUpdateDrainCoordinator(
+                sp.GetRequiredService<IHostUpdateAdmissionGate>(),
+                [.. sp.GetServices<IActiveWorkObservationPort>()],
+                TimeSpan.FromSeconds(options.DrainTimeoutSeconds),
+                TimeSpan.FromSeconds(options.DrainPollIntervalSeconds));
+        });
+        AddBackupAndMigration(services);
+        services.AddScoped<IHostUpdatePreflightCheck>(sp =>
+        {
+            HostUpdateExecutionOptions options = sp.GetRequiredService<HostUpdateExecutionOptions>();
+            return new HostUpdatePreflightCheck(
+                sp.GetRequiredService<IInstalledHostStateStore>(),
+                sp.GetRequiredService<IReadOnlyList<IHostUpdateMigrationTarget>>(),
+                sp.GetRequiredService<IHostUpdateProcessRunner>(),
+                sp.GetRequiredService<IHostUpdateExecutableResolver>(),
+                options.DiskWatchPath,
+                options.MinimumFreeBytes,
+                options.SupportedProviderNames.ToHashSet(StringComparer.Ordinal),
+                options.ActiveServiceIds.ToHashSet(StringComparer.Ordinal));
+        });
+        services.AddScoped<IHostUpdateExecutionSteps, HostUpdateExecutionStepsAdapter>();
+        services.AddScoped<IHostUpdateSideEffectReconciler, HostUpdateSideEffectReconciler>();
+        services.AddScoped<IHostUpdateAuthorizationBaselineProvider>(sp => new HostUpdateAuthorizationBaselineProvider(
+            sp.GetRequiredService<IInstalledHostStateStore>(),
+            sp.GetRequiredService<HostUpdateExecutionOptions>(),
+            DatabaseProviderConfiguration.FromConfiguration(sp.GetRequiredService<IConfiguration>()),
+            sp.GetRequiredService<IHostUpdateManifestBindingReader>()));
+        services.AddScoped<IHostUpdateExecutor>(sp =>
+        {
+            HostUpdateExecutionOptions options = sp.GetRequiredService<HostUpdateExecutionOptions>();
+            return string.IsNullOrWhiteSpace(options.RootDirectory)
+                ? new UnavailableHostUpdateExecutor()
+                : ActivatorUtilities.CreateInstance<HostUpdateExecutor>(sp);
+        });
+    }
+
+    private static void ConfigureMainDbProvider(DbContextOptionsBuilder options, DatabaseProviderConfiguration dbConfig)
+    {
+        if (dbConfig.IsSqlServer)
+        {
+            _ = options.UseSqlServer(dbConfig.ConnectionString, x => x.MigrationsAssembly("Farm.Migrations.SqlServer"));
+        }
+        else if (dbConfig.IsPostgres)
+        {
+            _ = options.UseNpgsql(dbConfig.ConnectionString, x => x.MigrationsAssembly("Farm.Migrations.PostgreSQL"));
+        }
+        else
+        {
+            _ = options.UseSqlite(dbConfig.ConnectionString, x => x.MigrationsAssembly("Farm.Migrations.Sqlite"));
+        }
+    }
+
+    private static void ConfigureSlicerDbProvider(DbContextOptionsBuilder options, DatabaseProviderConfiguration dbConfig)
+    {
+        if (dbConfig.IsSqlServer)
+        {
+            _ = options.UseSqlServer(dbConfig.ConnectionString, x => x.MigrationsAssembly("Farm.Slicer.Migrations.SqlServer"));
+        }
+        else if (dbConfig.IsPostgres)
+        {
+            _ = options.UseNpgsql(dbConfig.ConnectionString, x => x.MigrationsAssembly("Farm.Slicer.Migrations.PostgreSQL"));
+        }
+        else
+        {
+            _ = options.UseSqlite(dbConfig.ConnectionString, x => x.MigrationsAssembly("Farm.Slicer.Migrations.Sqlite"));
+        }
+    }
+
+    private static void AddBackupAndMigration(IServiceCollection services)
+    {
+        services.AddScoped<HostUpdateTargetImageMigrationRunner>(sp =>
+        {
+            HostUpdateExecutionOptions options = sp.GetRequiredService<HostUpdateExecutionOptions>();
+            return new HostUpdateTargetImageMigrationRunner(
+                sp.GetRequiredService<IHostUpdateProcessRunner>(),
+                sp.GetRequiredService<IHostUpdateExecutableResolver>(),
+                options.ServiceMappings.ToDictionary(
+                    mapping => mapping.ServiceId,
+                    mapping => new HostUpdateApplyServiceMapping(mapping.ServiceId, mapping.ComposeServiceName, mapping.ImageEnvironmentVariable, mapping.ImageRepository),
+                    StringComparer.Ordinal),
+                () => CreateMigrationEnvironment(sp.GetRequiredService<IConfiguration>()),
+                options.ComposeProjectName + "-network",
+                TimeSpan.FromSeconds(options.MigrationTimeoutSeconds));
+        });
+        services.AddScoped<IHostUpdateMigrationTarget>(sp => new TargetImageMigrationTarget<AppDbContext>(
+            "AppDbContext",
+            () => sp.GetRequiredService<AppDbContext>(),
+            sp.GetRequiredService<HostUpdateTargetImageMigrationRunner>()));
+        services.AddScoped<IHostUpdateMigrationTarget>(sp => new TargetImageMigrationTarget<SlicerDbContext>(
+            "SlicerDbContext",
+            () => sp.GetRequiredService<SlicerDbContext>(),
+            sp.GetRequiredService<HostUpdateTargetImageMigrationRunner>()));
+        services.AddScoped<IReadOnlyList<IHostUpdateMigrationTarget>>(sp => [.. sp.GetServices<IHostUpdateMigrationTarget>()]);
+        services.AddScoped<HostUpdateMigrationCoordinator>(sp =>
+            new HostUpdateMigrationCoordinator(sp.GetRequiredService<IReadOnlyList<IHostUpdateMigrationTarget>>()));
+        services.AddScoped<IHostUpdateMigrationCoordinator>(sp => sp.GetRequiredService<HostUpdateMigrationCoordinator>());
+        services.AddScoped<IHostUpdateMigrationReconciler>(sp => sp.GetRequiredService<HostUpdateMigrationCoordinator>());
+
+        services.AddScoped<IHostUpdateBackupTarget>(sp =>
+        {
+            HostUpdateExecutionOptions options = sp.GetRequiredService<HostUpdateExecutionOptions>();
+            DatabaseProviderConfiguration dbConfig = DatabaseProviderConfiguration.FromConfiguration(sp.GetRequiredService<IConfiguration>());
+            string backupRootDirectory = string.IsNullOrWhiteSpace(options.RootDirectory) ? string.Empty : options.BackupRootDirectory;
+            return HostUpdateDatabaseBackupTargetFactory.CreateBackupTarget(
+                "database",
+                dbConfig,
+                sp.GetRequiredService<IHostUpdateProcessRunner>(),
+                sp.GetRequiredService<IHostUpdateExecutableResolver>(),
+                TimeSpan.FromSeconds(options.BackupTimeoutSeconds),
+                options.DatabaseExternallyOwned,
+                backupRootDirectory);
+        });
+        services.AddScoped<IReadOnlyList<IHostUpdateBackupTarget>>(sp =>
+        {
+            HostUpdateExecutionOptions options = sp.GetRequiredService<HostUpdateExecutionOptions>();
+            List<IHostUpdateBackupTarget> targets = [.. sp.GetServices<IHostUpdateBackupTarget>()];
+            var optionalDirectoryNames = new HashSet<string>(options.OptionalOwnedDirectories, StringComparer.Ordinal);
+            targets.AddRange(options.OwnedDirectories.Select(pair =>
+                new DirectoryCopyBackupTarget(pair.Key, pair.Value, isRequired: !optionalDirectoryNames.Contains(pair.Key))));
+            return targets;
+        });
+        services.AddScoped<IHostUpdateBackupCoordinator>(sp =>
+        {
+            HostUpdateExecutionOptions options = sp.GetRequiredService<HostUpdateExecutionOptions>();
+            return string.IsNullOrWhiteSpace(options.RootDirectory)
+                ? new UnconfiguredHostUpdateBackupCoordinator()
+                : new HostUpdateBackupCoordinator(sp.GetRequiredService<IReadOnlyList<IHostUpdateBackupTarget>>(), options.BackupRootDirectory);
+        });
+    }
+
+    private static Dictionary<string, string> CreateMigrationEnvironment(IConfiguration configuration)
+    {
+        (string ConfigurationKey, string EnvironmentKey)[] requiredKeys =
+        [
+            ("DB_PROVIDER", "DB_PROVIDER"),
+            ("ConnectionStrings:Default", "ConnectionStrings__Default"),
+            ("Jwt:Key", "Jwt__Key"),
+            ("Jwt:Issuer", "Jwt__Issuer"),
+            ("Jwt:Audience", "Jwt__Audience"),
+        ];
+        var environment = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach ((string configurationKey, string environmentKey) in requiredKeys)
+        {
+            string? value = configuration[configurationKey];
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                throw new InvalidOperationException($"target_image_migration_configuration_missing:{configurationKey}");
+            }
+
+            environment[environmentKey] = value;
+        }
+
+#pragma warning disable S5443 // The target image receives a private tmpfs at /tmp.
+        environment["DATAPROTECTION_KEYS_PATH"] = "/tmp/dp-keys";
+#pragma warning restore S5443
+        return environment;
     }
 
     private static async Task<int> StatusAsync(IServiceProvider provider, HostUpdateCliArguments args, TextWriter output, CancellationToken cancellationToken)

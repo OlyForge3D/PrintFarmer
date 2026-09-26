@@ -4,7 +4,7 @@
     Host-local PrintFarmer host-update status/recovery wrapper (issue #2980, first slice).
 
 .DESCRIPTION
-    Runs the packaged Farm.HostUpdate.Cli without the API. Only three fixed operations are
+    Runs the packaged Farm.HostUpdate.Cli without the API. Only fixed operations are
     exposed; no arbitrary shell text, compose files, or credentials are accepted. This is NOT
     rollout authorization: it never starts a forward update.
 
@@ -12,6 +12,7 @@
       printfarmer-host-update.ps1 -Config C:\abs\host-update.json recover -Release <id> [-RequestId <id>] -Preview [-Json]
       printfarmer-host-update.ps1 -Config C:\abs\host-update.json recover -Release <id> [-RequestId <id>] -Confirm <id> [-ReapproveDrift <token>] [-PrintersReconciled <token>] [-Json]
       printfarmer-host-update.ps1 import -Config C:\abs\host-update.json -Bundle C:\abs\bundle.tar -Channel <stable|insider> -Version <v> -TrustedRoot C:\abs\trusted_root.json -TrustedRootApproval C:\abs\approval.json -Staging C:\abs\new-dir -Records C:\abs\records-dir -Operator <id> [-PriorRecoverySet C:\abs\dir] [-ProtectedBackup C:\abs\reference.json]
+      printfarmer-host-update.ps1 activate -Config C:\abs\host-update.json -Staging C:\abs\verified-staging -Channel <stable|insider> -TrustedRoot C:\abs\trusted_root.json [-Cosign C:\abs\cosign.exe] [-Json]
       printfarmer-host-update.ps1 help
 
     `import` (issue #3063) verifies a signed offline update bundle without network access, loads
@@ -56,6 +57,7 @@ usage:
   printfarmer-host-update.ps1 -Config C:\abs\host-update.json recover -Release <id> [-RequestId <id>] -Preview [-Json]
   printfarmer-host-update.ps1 -Config C:\abs\host-update.json recover -Release <id> [-RequestId <id>] -Confirm <id> [-ReapproveDrift <token>] [-PrintersReconciled <token>] [-Json]
   printfarmer-host-update.ps1 import -Config C:\abs\host-update.json -Bundle C:\abs\bundle.tar -Channel <stable|insider> -Version <v> -TrustedRoot C:\abs\trusted_root.json -TrustedRootApproval C:\abs\approval.json -Staging C:\abs\new-dir -Records C:\abs\records-dir -Operator <id> [-PriorRecoverySet C:\abs\dir] [-ProtectedBackup C:\abs\reference.json]
+  printfarmer-host-update.ps1 activate -Config C:\abs\host-update.json -Staging C:\abs\verified-staging -Channel <stable|insider> -TrustedRoot C:\abs\trusted_root.json [-Cosign C:\abs\cosign.exe] [-Json]
   printfarmer-host-update.ps1 help
 '@
 
@@ -191,6 +193,59 @@ if ($rawArgs.Count -ge 1 -and $rawArgs[0] -ceq 'import') {    # Issues #3063/#30
     if ($env:PRINTFARMER_DOCKER) { $toolArgs.Add('--docker'); $toolArgs.Add($dockerHost) }
 
     & $nodeHost $tool @toolArgs
+    exit $LASTEXITCODE
+}
+
+if ($rawArgs.Count -ge 1 -and $rawArgs[0] -ceq 'activate') {
+    $activateOptions = [ordered]@{
+        '-config' = @{ Flag = '--config'; Kind = 'path' }
+        '-staging' = @{ Flag = '--staging'; Kind = 'path' }
+        '-channel' = @{ Flag = '--channel'; Kind = 'channel' }
+        '-trustedroot' = @{ Flag = '--trusted-root'; Kind = 'path' }
+        '-cosign' = @{ Flag = '--cosign'; Kind = 'path' }
+    }
+    $activateValues = @{}
+    $activateJson = $false
+    $index = 1
+    while ($index -lt $rawArgs.Count) {
+        $token = $rawArgs[$index]
+        $name = $token.ToLowerInvariant()
+        if ($name -eq '-json') {
+            if ($activateJson) { Exit-Usage '-Json may only be given once' }
+            $activateJson = $true; $index += 1; continue
+        }
+
+        if (-not $activateOptions.Contains($name)) { Exit-Usage "unsupported argument: $token" }
+        $spec = $activateOptions[$name]
+        if ($activateValues.ContainsKey($name)) { Exit-Usage "$token may only be given once" }
+        if (($index + 1) -ge $rawArgs.Count -or [string]::IsNullOrEmpty($rawArgs[$index + 1])) { Exit-Usage "$token requires a value" }
+        $value = $rawArgs[$index + 1]
+        switch ($spec.Kind) {
+            'channel' { if ($value -cnotmatch $ChannelPattern) { Exit-Usage '-Channel must be stable or insider' } }
+            'path' { if (-not (Test-FullyQualified $value)) { Exit-Usage "$token must be an absolute path" } }
+        }
+        $activateValues[$name] = $value
+        $index += 2
+    }
+    foreach ($requiredName in @('-config', '-staging', '-channel', '-trustedroot')) {
+        if (-not $activateValues.ContainsKey($requiredName)) {
+            $display = @{ '-config' = '-Config'; '-staging' = '-Staging'; '-channel' = '-Channel'; '-trustedroot' = '-TrustedRoot' }[$requiredName]
+            Exit-Usage "activate requires $display"
+        }
+    }
+
+    $resolved = Resolve-Launcher
+    $launcher = $resolved.Launcher
+    $launcherArgs = [System.Collections.Generic.List[string]]::new()
+    if ($null -ne $resolved.Dll) { $launcherArgs.Add($resolved.Dll) }
+    $cliArgs = [System.Collections.Generic.List[string]]::new()
+    $cliArgs.Add('offline-activate')
+    foreach ($key in @('-staging', '-channel', '-trustedroot', '-cosign')) {
+        if ($activateValues.ContainsKey($key)) { $cliArgs.Add($activateOptions[$key].Flag); $cliArgs.Add($activateValues[$key]) }
+    }
+    if ($activateJson) { $cliArgs.Add('--json') }
+
+    & $launcher @launcherArgs --config $activateValues['-config'] @cliArgs
     exit $LASTEXITCODE
 }
 

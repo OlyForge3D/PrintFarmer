@@ -138,6 +138,7 @@ public static class HostUpdateRecoveryEngineRegistration
             return CreateImageApplier(sp, options);
         });
         services.AddSingleton<IHostUpdateDigestApplier>(sp => (IHostUpdateDigestApplier)sp.GetRequiredService<IHostUpdateApplyCoordinator>());
+        services.AddSingleton<IHostUpdateLocalImageVerifier>(sp => (IHostUpdateLocalImageVerifier)sp.GetRequiredService<IHostUpdateApplyCoordinator>());
 
         services.AddScoped<IHostUpdateHealthVerifier>(sp => CreateHealthVerifier(sp));
         services.AddScoped<IHostUpdateDigestVerifier>(sp => (IHostUpdateDigestVerifier)sp.GetRequiredService<IHostUpdateHealthVerifier>());

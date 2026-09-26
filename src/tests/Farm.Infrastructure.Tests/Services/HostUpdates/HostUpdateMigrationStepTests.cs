@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Services.HostUpdates;
+﻿using Farm.Infrastructure.Services.HostUpdates;
 using FluentAssertions;
 using Xunit;
 
@@ -49,6 +49,33 @@ public sealed class HostUpdateMigrationStepTests
             assembly, "--host-update-migration", contextName, "probe", providerName);
         processRunner.Calls[1].Environment.Should().ContainKey("ConnectionStrings__Default");
         processRunner.Calls[1].Environment.Should().ContainKey("DATAPROTECTION_KEYS_PATH");
+    }
+
+    [Fact]
+    public async Task HasPendingMigrationsAsync_PreloadedMode_InspectsLocalImageAndNeverPulls()
+    {
+        var processRunner = new RecordingProcessRunner(
+            new HostUpdateProcessResult(
+                0,
+                $$"""{"RepoDigests":["ghcr.io/olyforge3d/printfarmer-api@sha256:{{new string('a', 64)}}"],"Os":"linux","Architecture":"amd64"}""",
+                string.Empty),
+            new HostUpdateProcessResult(0, "HOST_UPDATE_MIGRATION_PENDING:AppDbContext:1", string.Empty));
+        var runner = CreateRunner(processRunner);
+
+        bool pending = await runner.HasPendingMigrationsAsync(
+            CreateRequest(HostUpdateImageSourceMode.PreloadedLocal),
+            "AppDbContext",
+            _ => Task.FromResult("Npgsql.EntityFrameworkCore.PostgreSQL"),
+            CancellationToken.None);
+
+        pending.Should().BeTrue();
+        processRunner.Calls.Should().HaveCount(2);
+        processRunner.Calls[0].Arguments.Should().Equal(
+            "image", "inspect",
+            $"ghcr.io/olyforge3d/printfarmer-api@sha256:{new string('a', 64)}",
+            "--format", "{{json .}}");
+        processRunner.Calls[1].Arguments.Should().StartWith("run", "--rm", "--pull", "never");
+        processRunner.Calls.SelectMany(call => call.Arguments).Should().NotContain("pull");
     }
 
     [Fact]
@@ -205,7 +232,8 @@ public sealed class HostUpdateMigrationStepTests
             "printfarmer-network",
             TimeSpan.FromSeconds(30));
 
-    private static HostUpdateExecutionRequest CreateRequest() =>
+    private static HostUpdateExecutionRequest CreateRequest(
+        HostUpdateImageSourceMode imageSourceMode = HostUpdateImageSourceMode.Registry) =>
         new(
             "release-1",
             1,
@@ -215,7 +243,10 @@ public sealed class HostUpdateMigrationStepTests
             [
                 new("api", "linux-amd64", "sha256:" + new string('a', 64)),
                 new("slicer-host", "linux-amd64", "sha256:" + new string('a', 64)),
-            ]);
+            ])
+        {
+            ImageSourceMode = imageSourceMode,
+        };
 
     private sealed class DockerResolver : IHostUpdateExecutableResolver
     {

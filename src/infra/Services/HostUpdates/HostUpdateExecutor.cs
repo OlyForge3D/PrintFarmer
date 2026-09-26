@@ -31,6 +31,12 @@ public enum HostUpdateExecutionChannel
     Insider,
 }
 
+public enum HostUpdateImageSourceMode
+{
+    Registry,
+    PreloadedLocal,
+}
+
 public sealed record HostUpdateExecutionTarget(string ServiceId, string Platform, string ChildDigest);
 
 public sealed record HostUpdateExecutionRequest(string ReleaseId, long AuthenticatedSequence, string ManifestDigest, string SourceCommit, HostUpdateExecutionChannel Channel, IReadOnlyList<HostUpdateExecutionTarget> Targets)
@@ -53,6 +59,8 @@ public sealed record HostUpdateExecutionRequest(string ReleaseId, long Authentic
     public string HostPlatform { get; init; } = string.Empty;
 
     public HostUpdateAuthorizationKind AuthorizationKind { get; init; } = HostUpdateAuthorizationKind.StandingPolicy;
+
+    public HostUpdateImageSourceMode ImageSourceMode { get; init; } = HostUpdateImageSourceMode.Registry;
 
     public bool IsValid(out string error)
     {
@@ -479,6 +487,7 @@ public static class HostUpdateRequestBinding
             request.SourceCommit,
             request.HostPlatform,
             request.AuthorizationKind,
+            request.ImageSourceMode,
             Targets = request.Targets.OrderBy(target => target.ServiceId, StringComparer.Ordinal),
         });
     }

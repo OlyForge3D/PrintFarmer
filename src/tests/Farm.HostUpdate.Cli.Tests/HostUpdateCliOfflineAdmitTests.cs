@@ -10,6 +10,7 @@ namespace Farm.HostUpdate.Cli.Tests;
 /// Issue #3064: <c>offline-admit</c> records a verified offline bundle in the durable replay store
 /// and refuses replays, downgrades and cross-channel imports without an API process.
 /// </summary>
+[Collection("HostUpdateOfflineVerifier")]
 public sealed class HostUpdateCliOfflineAdmitTests : IDisposable, IAsyncLifetime
 {
     private readonly CliHostFixture _host = new();

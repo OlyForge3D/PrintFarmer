@@ -357,7 +357,11 @@ public sealed class HostUpdateRecoveryCoordinator(
             switch (decision.Kind)
             {
                 case HostUpdateRecoveryPlanKind.ImageOnlyRollback:
-                    await digestApplier.ApplyByDigestsAsync(priorState!.ServiceDigests, cancellationToken, priorState.ServicePlatforms).ConfigureAwait(false);
+                    await ApplyByDigestsAsync(
+                        priorState!.ServiceDigests,
+                        priorState.ServicePlatforms,
+                        failedRequest.ImageSourceMode,
+                        cancellationToken).ConfigureAwait(false);
                     await digestVerifier.VerifyDigestsAsync(priorState.ServiceDigests, cancellationToken).ConfigureAwait(false);
                     await installedStateStore.WriteAsync(priorState with { RecordedAt = DateTimeOffset.UtcNow }, cancellationToken).ConfigureAwait(false);
                     return new HostUpdateRecoveryResult(HostUpdateRecoveryOutcome.RolledBack, "image_only_rollback");
@@ -366,7 +370,11 @@ public sealed class HostUpdateRecoveryCoordinator(
                     await restoreExecutor.RestoreAsync(decision.Backup!.Value.Manifest, decision.Backup.Value.RunDirectory, cancellationToken).ConfigureAwait(false);
                     if (priorState is not null)
                     {
-                        await digestApplier.ApplyByDigestsAsync(priorState.ServiceDigests, cancellationToken, priorState.ServicePlatforms).ConfigureAwait(false);
+                        await ApplyByDigestsAsync(
+                            priorState.ServiceDigests,
+                            priorState.ServicePlatforms,
+                            failedRequest.ImageSourceMode,
+                            cancellationToken).ConfigureAwait(false);
                         await digestVerifier.VerifyDigestsAsync(priorState.ServiceDigests, cancellationToken).ConfigureAwait(false);
                         await installedStateStore.WriteAsync(priorState with { RecordedAt = DateTimeOffset.UtcNow }, cancellationToken).ConfigureAwait(false);
                     }
@@ -389,6 +397,15 @@ public sealed class HostUpdateRecoveryCoordinator(
             return new HostUpdateRecoveryResult(HostUpdateRecoveryOutcome.NeedsOperator, exception.GetType().Name);
         }
     }
+
+    private Task ApplyByDigestsAsync(
+        IReadOnlyDictionary<string, string> serviceDigests,
+        IReadOnlyDictionary<string, string>? servicePlatforms,
+        HostUpdateImageSourceMode imageSourceMode,
+        CancellationToken cancellationToken) =>
+        digestApplier is IHostUpdateImageSourceDigestApplier sourceModeApplier
+            ? sourceModeApplier.ApplyByDigestsAsync(serviceDigests, servicePlatforms, imageSourceMode, cancellationToken)
+            : digestApplier.ApplyByDigestsAsync(serviceDigests, cancellationToken, servicePlatforms);
 
     /// <summary>
     /// Read-only preview of the path <see cref="RecoverAsync"/> would take. It uses the same

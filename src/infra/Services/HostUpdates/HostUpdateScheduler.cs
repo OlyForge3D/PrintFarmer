@@ -316,7 +316,8 @@ public enum HostUpdateReplayIntent
     Admit,
     Reject,
     Reserve,
-    Import
+    Import,
+    Activate
 }
 
 public sealed record HostUpdateReplayDecision(HostUpdateReplayDisposition Disposition, string CorrelationId, bool Reused);
@@ -378,6 +379,12 @@ public sealed class FileHostUpdateReplayStore(string rootPath, IHostUpdateReplay
             HostUpdateReplayFileState state = await LoadAndRecoverAsync(anchorEpoch, anchorStateHash, ct);
             string ns = Namespace(candidate);
             if (state.Identities.TryGetValue(candidate.Identity, out HostUpdateReplayIdentityRecord? existing) &&
+                intent == HostUpdateReplayIntent.Activate)
+            {
+                return new(existing.Disposition, existing.CorrelationId, true);
+            }
+
+            if (state.Identities.TryGetValue(candidate.Identity, out existing) &&
                 (existing.Disposition != HostUpdateReplayDisposition.Imported ||
                  intent is HostUpdateReplayIntent.Import or HostUpdateReplayIntent.Reject))
             {
