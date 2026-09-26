@@ -1,6 +1,5 @@
 ﻿using System.Collections.Concurrent;
 using System.ComponentModel.DataAnnotations;
-using System.Diagnostics;
 using System.Text.Json;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
@@ -1436,7 +1435,7 @@ public class PrintJobManagementService(
                     }
 
                     long lastReportedBytes = 0;
-                    long lastReportAt = Stopwatch.GetTimestamp();
+                    long lastReportAt = _timeProvider.GetTimestamp();
                     var reportInterval = TimeSpan.FromMilliseconds(500);
                     const long ReportEveryBytes = 512 * 1024; // 512KB
 
@@ -1455,8 +1454,8 @@ public class PrintJobManagementService(
                             return;
                         }
 
-                        long now = Stopwatch.GetTimestamp();
-                        TimeSpan sinceLastReport = Stopwatch.GetElapsedTime(lastReportAt, now);
+                        long now = _timeProvider.GetTimestamp();
+                        TimeSpan sinceLastReport = _timeProvider.GetElapsedTime(lastReportAt, now);
                         bool hasMeaningfulDelta = bytesSent - lastReportedBytes >= ReportEveryBytes;
                         bool intervalElapsed = sinceLastReport >= reportInterval;
 
@@ -2340,7 +2339,8 @@ public class PrintJobManagementService(
                         PrintJobStatus.Cancelled.ToString(),
                         job.JobKind?.ToString() ?? nameof(JobKind.Standard),
                         failureCode: "job_cancelled"),
-                    cancellationToken);
+                    ct: cancellationToken,
+                    timeProvider: _timeProvider);
             }
 
             await _repository.SaveChangesAsync(cancellationToken);
@@ -2471,7 +2471,8 @@ public class PrintJobManagementService(
                     PrintJobStatus.Queued.ToString(), // returned to Queued
                     job.JobKind?.ToString() ?? nameof(JobKind.Standard),
                     failureCode: null),
-                cancellationToken);
+                ct: cancellationToken,
+                timeProvider: _timeProvider);
         }
 
         await _repository.SaveChangesAsync(cancellationToken);

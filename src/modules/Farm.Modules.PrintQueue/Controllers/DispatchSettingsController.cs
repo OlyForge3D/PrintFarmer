@@ -18,8 +18,11 @@ namespace Farm.Modules.PrintQueue.Controllers;
 [RequirePermission(PrintFarmerPermissions.DispatchSettings.Manage)]
 public class DispatchSettingsController(
     AppDbContext db,
-    ILogger<DispatchSettingsController> logger) : ControllerBase
+    ILogger<DispatchSettingsController> logger,
+    TimeProvider? timeProvider = null) : ControllerBase
 {
+    private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
+
     /// <summary>
     /// Gets current auto-dispatch settings.
     /// </summary>
@@ -30,7 +33,7 @@ public class DispatchSettingsController(
         DispatchSettings settings = await db.DispatchSettings.FirstAsync(ct);
         if (settings.RowVersion is not { Length: > 0 })
         {
-            settings.UpdatedAt = DateTime.UtcNow;
+            settings.UpdatedAt = _timeProvider.GetUtcNow().UtcDateTime;
             await db.SaveChangesAsync(ct);
         }
 
@@ -78,7 +81,7 @@ public class DispatchSettingsController(
         settings.MinimumScoreThreshold = request.MinimumScoreThreshold;
         settings.MaxConcurrentDispatches = request.MaxConcurrentDispatches;
         settings.LoadBalancingStrategy = request.LoadBalancingStrategy;
-        settings.UpdatedAt = DateTime.UtcNow;
+        settings.UpdatedAt = _timeProvider.GetUtcNow().UtcDateTime;
 
         try
         {

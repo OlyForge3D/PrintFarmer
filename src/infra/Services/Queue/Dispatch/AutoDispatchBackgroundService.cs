@@ -246,7 +246,7 @@ public sealed class AutoDispatchBackgroundService(
 
     internal async Task ReconcileStartupEligiblePrintersAsync(CancellationToken ct)
     {
-        DateTime startupAt = DateTime.UtcNow;
+        DateTime startupAt = _timeProvider.GetUtcNow().UtcDateTime;
         await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
@@ -345,6 +345,7 @@ public sealed class AutoDispatchBackgroundService(
                         settings.IdleThresholdSeconds);
                     await Task.Delay(
                         TimeSpan.FromSeconds(settings.IdleThresholdSeconds),
+                        _timeProvider,
                         pendingLease.Token);
                 }
                 catch (OperationCanceledException) when (!serviceCt.IsCancellationRequested)

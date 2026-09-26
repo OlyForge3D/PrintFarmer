@@ -221,7 +221,10 @@ public class JobQueueService : IJobQueueService
                 QueuedJobsCount = queuedCount,
                 CurrentJobId = currentJob?.Id,
                 CurrentJobName = currentJob?.Name,
-                EstimatedCompletionTime = CalculateEstimatedCompletionTime(allJobs, currentJob),
+                EstimatedCompletionTime = CalculateEstimatedCompletionTime(
+                    allJobs,
+                    currentJob,
+                    _timeProvider.GetUtcNow().UtcDateTime),
                 NozzleDiameter = primaryToolhead?.NozzleModel?.Diameter,
                 SupportedMaterials = supportedMaterials
             });
@@ -461,8 +464,8 @@ public class JobQueueService : IJobQueueService
         }
 
         QueuePlanningSettings queuePlanningSettings = GetQueuePlanningSettings();
-        DateTime? resolvedDeadline = ResolveEnqueueDeadline(request.DeadlineAtUtc, queuePlanningSettings);
-        DateTime utcNow = DateTime.UtcNow;
+        DateTime utcNow = _timeProvider.GetUtcNow().UtcDateTime;
+        DateTime? resolvedDeadline = ResolveEnqueueDeadline(request.DeadlineAtUtc, queuePlanningSettings, utcNow);
         string idempotencyScope = isCalibrationJob
             ? $"calibration-project:{canonicalCalibration!.CalibrationProjectId:N}"
             : string.Empty;
@@ -1015,7 +1018,7 @@ public class JobQueueService : IJobQueueService
         }
 
         job.Priority = (int)request.Priority;
-        job.UpdatedAt = DateTime.UtcNow;
+        job.UpdatedAt = _timeProvider.GetUtcNow().UtcDateTime;
         await _repo.SaveChangesAsync(ct);
 
         JobQueuePrintJobDto dto = MapToJobQueuePrintJobDto(
@@ -1228,7 +1231,10 @@ public class JobQueueService : IJobQueueService
 
         if (request.DeadlineAtUtc.HasValue)
         {
-            job.DeadlineAtUtc = ValidateProvidedDeadline(request.DeadlineAtUtc, GetQueuePlanningSettings());
+            job.DeadlineAtUtc = ValidateProvidedDeadline(
+                request.DeadlineAtUtc,
+                GetQueuePlanningSettings(),
+                _timeProvider.GetUtcNow().UtcDateTime);
         }
 
         if (!string.IsNullOrEmpty(request.Name))
@@ -1255,7 +1261,7 @@ public class JobQueueService : IJobQueueService
             }
         }
 
-        job.UpdatedAt = DateTime.UtcNow;
+        job.UpdatedAt = _timeProvider.GetUtcNow().UtcDateTime;
 
         if (queueShapeChanged)
         {
@@ -1425,13 +1431,16 @@ public class JobQueueService : IJobQueueService
         }
     }
 
-    private static DateTime? CalculateEstimatedCompletionTime(List<PrintJob> queuedJobs, PrintJob? currentJob)
+    private static DateTime? CalculateEstimatedCompletionTime(
+        List<PrintJob> queuedJobs,
+        PrintJob? currentJob,
+        DateTime nowUtc)
     {
         double totalMinutes = 0.0;
 
         if (currentJob?.EstimatedPrintTime.HasValue == true)
         {
-            TimeSpan elapsed = currentJob.ActualStartTime.HasValue ? DateTime.UtcNow - currentJob.ActualStartTime.Value : TimeSpan.Zero;
+            TimeSpan elapsed = currentJob.ActualStartTime.HasValue ? nowUtc - currentJob.ActualStartTime.Value : TimeSpan.Zero;
             TimeSpan remaining = currentJob.EstimatedPrintTime.Value - elapsed;
             totalMinutes += Math.Max(0, remaining.TotalMinutes);
         }
@@ -1440,7 +1449,7 @@ public class JobQueueService : IJobQueueService
             .Where(j => j.EstimatedPrintTime.HasValue && j != currentJob)
             .Sum(j => j.EstimatedPrintTime!.Value.TotalMinutes);
 
-        return totalMinutes > 0 ? DateTime.UtcNow.AddMinutes(totalMinutes) : null;
+        return totalMinutes > 0 ? nowUtc.AddMinutes(totalMinutes) : null;
     }
 
     private static List<PrintJobToolheadUsageDto> MapToolheadUsages(PrintJob job) =>
@@ -1805,7 +1814,7 @@ public class JobQueueService : IJobQueueService
             commandDispatchState,
             currentQueueHeadId,
             currentPrinterConfigRevision,
-            DateTime.UtcNow)
+            _timeProvider.GetUtcNow().UtcDateTime)
                 ? BedClearState.Acknowledged
                 : BedClearState.Invalidated;
     }
@@ -1862,9 +1871,11 @@ public class JobQueueService : IJobQueueService
         }
     }
 
-    private static DateTime? ResolveEnqueueDeadline(DateTime? requestedDeadlineAtUtc, QueuePlanningSettings settings)
+    private static DateTime? ResolveEnqueueDeadline(
+        DateTime? requestedDeadlineAtUtc,
+        QueuePlanningSettings settings,
+        DateTime nowUtc)
     {
-        DateTime nowUtc = DateTime.UtcNow;
         DateTime? normalizedDeadline = NormalizeUtcDeadline(requestedDeadlineAtUtc);
         if (!normalizedDeadline.HasValue)
         {
@@ -1883,7 +1894,10 @@ public class JobQueueService : IJobQueueService
         return normalizedDeadline;
     }
 
-    private static DateTime ValidateProvidedDeadline(DateTime? requestedDeadlineAtUtc, QueuePlanningSettings settings)
+    private static DateTime ValidateProvidedDeadline(
+        DateTime? requestedDeadlineAtUtc,
+        QueuePlanningSettings settings,
+        DateTime nowUtc)
     {
         DateTime? normalized = NormalizeUtcDeadline(requestedDeadlineAtUtc);
         if (!normalized.HasValue)
@@ -1891,7 +1905,7 @@ public class JobQueueService : IJobQueueService
             throw new ValidationException("Deadline is required by queue policy.");
         }
 
-        ValidateDeadlineLeadTime(normalized, settings.MinimumLeadHours, DateTime.UtcNow);
+        ValidateDeadlineLeadTime(normalized, settings.MinimumLeadHours, nowUtc);
         return normalized.Value;
     }
 

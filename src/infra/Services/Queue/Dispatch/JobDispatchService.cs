@@ -283,7 +283,7 @@ public class JobDispatchService(
         }
 
         job.AssignedPrinterId = printerId;
-        job.DispatchedAt ??= DateTime.UtcNow;
+        job.DispatchedAt ??= _timeProvider.GetUtcNow().UtcDateTime;
         job.DispatchScore = printerScore?.TotalScore;
         job.DispatchMode = (int)DispatchMode.Suggested;
 

@@ -156,6 +156,7 @@ public static class QueueLifecycleEventWriter
         DateTime? bedClearExpiresAtUtc = null,
         bool? failureRetryable = null,
         bool? failureRequiresReconciliation = null,
+        TimeProvider? timeProvider = null,
         CancellationToken ct = default) =>
         Dispatch.DispatchClaimService.AddLifecycleOutboxEventAsync(
             db,
@@ -172,7 +173,8 @@ public static class QueueLifecycleEventWriter
             bedClearCommandId: bedClearCommandId,
             bedClearExpiresAtUtc: bedClearExpiresAtUtc,
             failureRetryable: failureRetryable,
-            failureRequiresReconciliation: failureRequiresReconciliation);
+            failureRequiresReconciliation: failureRequiresReconciliation,
+            timeProvider: timeProvider);
 
     /// <summary>
     /// Builds a minimal canonical lifecycle payload JSON string.

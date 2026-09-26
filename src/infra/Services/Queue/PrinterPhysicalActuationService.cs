@@ -85,7 +85,8 @@ public sealed class PrinterPhysicalActuationService(
     AppDbContext db,
     IDbOutboxSequenceAllocator sequenceAllocator,
     IQueueResourceAuthorizationService resourceAuthorization,
-    ILogger<PrinterPhysicalActuationService> logger)
+    ILogger<PrinterPhysicalActuationService> logger,
+    TimeProvider? timeProvider = null)
     : IPrinterPhysicalActuationService
 {
     public const string EventTypeStarted = "PrintFarmer.Queue.PhysicalControlStarted.v1";
@@ -97,6 +98,7 @@ public sealed class PrinterPhysicalActuationService(
     private readonly IDbOutboxSequenceAllocator _sequenceAllocator = sequenceAllocator;
     private readonly IQueueResourceAuthorizationService _resourceAuthorization = resourceAuthorization;
     private readonly ILogger<PrinterPhysicalActuationService> _logger = logger;
+    private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
 
     /// <inheritdoc />
     public async Task<PrinterActuationResult> AcquireDirectAsync(
@@ -153,7 +155,7 @@ public sealed class PrinterPhysicalActuationService(
             state.PhysicalControlAttemptId is null &&
             PrinterDirectControl.IsManualMotion(state.PhysicalControlOperation) &&
             state.PhysicalControlStartedAtUtc is DateTime started &&
-            started <= DateTime.UtcNow - PrinterDirectControl.CommandTimeout - TimeSpan.FromSeconds(45))
+            started <= _timeProvider.GetUtcNow().UtcDateTime - PrinterDirectControl.CommandTimeout - TimeSpan.FromSeconds(45))
         {
             // The direct sender's bounded lifetime has elapsed (including shutdown grace).
             // Reclaim coordination only, never replay or report the old command as successful.
@@ -163,7 +165,8 @@ public sealed class PrinterPhysicalActuationService(
             _ = QueueAuditWriter.Add(_db, actorSubject, AuditOperation(state.PhysicalControlOperation),
                 QueueAuditOutcomes.Unknown, nameof(Printer), resourceId: printerId, printerId: printerId,
                 reasonCode: "direct_manual_command_expired",
-                detail: new { commandId = state.PhysicalControlCommandId });
+                detail: new { commandId = state.PhysicalControlCommandId },
+                timeProvider: _timeProvider);
             ClearBarrier(state);
         }
 
@@ -182,7 +185,7 @@ public sealed class PrinterPhysicalActuationService(
         }
 
         Guid commandId = Guid.NewGuid();
-        DateTime now = DateTime.UtcNow;
+        DateTime now = _timeProvider.GetUtcNow().UtcDateTime;
         state.PhysicalControlCommandId = commandId;
         state.PhysicalControlAttemptId = null;
         state.PhysicalControlOperation = operation;
@@ -201,7 +204,8 @@ public sealed class PrinterPhysicalActuationService(
             resourceId: printerId,
             printerId: printerId,
             dispatchStateRowVersion: state.RowVersion,
-            detail: new { commandId, operation, barrierAcquired = true });
+            detail: new { commandId, operation, barrierAcquired = true },
+            timeProvider: _timeProvider);
         await AddPrinterEventAsync(
             EventTypeStarted,
             commandId,
@@ -294,7 +298,7 @@ public sealed class PrinterPhysicalActuationService(
 
         Guid attemptId = attempt.Id;
         Guid commandId = Guid.NewGuid();
-        DateTime now = DateTime.UtcNow;
+        DateTime now = _timeProvider.GetUtcNow().UtcDateTime;
         state.PhysicalControlCommandId = commandId;
         state.PhysicalControlAttemptId = attemptId;
         state.PhysicalControlOperation = operation;
@@ -315,7 +319,8 @@ public sealed class PrinterPhysicalActuationService(
             printJobId: state.ActiveJobId,
             dispatchAttemptId: attemptId,
             dispatchStateRowVersion: state.RowVersion,
-            detail: new { commandId, operation, barrierAcquired = true });
+            detail: new { commandId, operation, barrierAcquired = true },
+            timeProvider: _timeProvider);
         await AddPrinterEventAsync(
             EventTypeStarted,
             commandId,
@@ -364,7 +369,7 @@ public sealed class PrinterPhysicalActuationService(
         if (state?.PhysicalControlCommandId != lease.CommandId ||
             state.PhysicalControlAttemptId is not null ||
             (PrinterDirectControl.IsManualMotion(lease.Operation) &&
-             state.PhysicalControlStartedAtUtc <= DateTime.UtcNow - PrinterDirectControl.CommandTimeout) ||
+             state.PhysicalControlStartedAtUtc <= _timeProvider.GetUtcNow().UtcDateTime - PrinterDirectControl.CommandTimeout) ||
             !string.Equals(
                 state.PhysicalControlOperation,
                 lease.Operation,
@@ -527,7 +532,7 @@ public sealed class PrinterPhysicalActuationService(
         }
 
         Guid commandId = Guid.NewGuid();
-        DateTime now = DateTime.UtcNow;
+        DateTime now = _timeProvider.GetUtcNow().UtcDateTime;
         await using QueueOutboxTransactionScope transaction =
             await QueueOutboxTransactionScope.BeginAsync(_db, ct);
         var command = new QueueDispatchOutbox
@@ -584,7 +589,8 @@ public sealed class PrinterPhysicalActuationService(
             dispatchAttemptId: attempt.Id,
             jobRowVersion: activeJob.RowVersion,
             dispatchStateRowVersion: state.RowVersion,
-            detail: new { commandId, operation, commandQueued = true });
+            detail: new { commandId, operation, commandQueued = true },
+            timeProvider: _timeProvider);
 
         try
         {
@@ -655,7 +661,8 @@ public sealed class PrinterPhysicalActuationService(
             dispatchAttemptId: lease.AttemptId,
             reasonCode: failureCode,
             dispatchStateRowVersion: state.RowVersion,
-            detail: new { lease.CommandId, lease.Operation, barrierRetained = retainBarrier });
+            detail: new { lease.CommandId, lease.Operation, barrierRetained = retainBarrier },
+            timeProvider: _timeProvider);
         await AddPrinterEventAsync(
             eventType,
             lease.CommandId,
@@ -679,6 +686,7 @@ public sealed class PrinterPhysicalActuationService(
         int attemptNumber = await _db.QueueDispatchAttempts
             .CountAsync(candidate => candidate.PrintJobId == job.Id, ct) + 1;
         Guid attemptId = Guid.NewGuid();
+        DateTime now = _timeProvider.GetUtcNow().UtcDateTime;
         var attempt = new QueueDispatchAttempt
         {
             Id = attemptId,
@@ -691,8 +699,8 @@ public sealed class PrinterPhysicalActuationService(
             AttemptNumber = attemptNumber,
             ActorSubject = actorSubject,
             StartPathKind = "ExternalControlOwnership",
-            ClaimedAtUtc = job.ActualStartTime ?? DateTime.UtcNow,
-            BackendAcceptedAtUtc = job.ActualStartTime ?? DateTime.UtcNow,
+            ClaimedAtUtc = job.ActualStartTime ?? now,
+            BackendAcceptedAtUtc = job.ActualStartTime ?? now,
             Outcome = DispatchAttemptOutcome.Accepted,
             BackendJobId = job.WasSeededFromHistory ? job.ExternalJobId : null,
             BackendFileIdentity = job.Name,
@@ -701,7 +709,7 @@ public sealed class PrinterPhysicalActuationService(
             BackendCallPhase = DispatchBackendCallPhase.PostAccept,
             JobRowVersionAtClaim = job.RowVersion,
             DispatchStateRowVersionAtClaim = state.RowVersion,
-            UpdatedAtUtc = DateTime.UtcNow,
+            UpdatedAtUtc = now,
         };
         _db.QueueDispatchAttempts.Add(attempt);
         state.ActiveJobId = job.Id;
@@ -764,7 +772,7 @@ public sealed class PrinterPhysicalActuationService(
                 failureCode,
             }),
             Status = QueueOutboxEventStatus.Pending,
-            CreatedAtUtc = DateTime.UtcNow,
+            CreatedAtUtc = _timeProvider.GetUtcNow().UtcDateTime,
         });
     }
 
@@ -787,7 +795,8 @@ public sealed class PrinterPhysicalActuationService(
             dispatchAttemptId: state?.ActiveDispatchAttemptId,
             reasonCode: reasonCode,
             dispatchStateRowVersion: state?.RowVersion,
-            detail: new { operation });
+            detail: new { operation },
+            timeProvider: _timeProvider);
         await _db.SaveChangesAsync(ct);
     }
 

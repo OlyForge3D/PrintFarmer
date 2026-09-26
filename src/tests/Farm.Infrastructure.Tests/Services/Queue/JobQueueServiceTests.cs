@@ -892,6 +892,74 @@ public class JobQueueServiceTests
     }
 
     [Fact]
+    public async Task AddJobToQueueAsync_WithFakeClock_DefaultDeadlineIsAnchoredToInjectedClock()
+    {
+        DateTimeOffset now = new(2031, 4, 5, 6, 7, 8, TimeSpan.Zero);
+        (JobQueueService sut, QueuePrintJobDto request) = CreateDeadlineClockScenario(
+            now,
+            new QueuePlanningSettings { DefaultDeadlineHours = 2, RequireDeadline = false, MinimumLeadHours = 0 });
+
+        JobQueuePrintJobDto? result = await sut.AddJobToQueueAsync(request, null, CancellationToken.None);
+
+        result.Should().NotBeNull();
+        result!.DeadlineAtUtc.Should().Be(now.UtcDateTime.AddHours(2));
+    }
+
+    [Fact]
+    public async Task AddJobToQueueAsync_WithFakeClock_MinimumLeadTimeIsMeasuredFromInjectedClock()
+    {
+        DateTimeOffset now = new(2031, 4, 5, 6, 7, 8, TimeSpan.Zero);
+        (JobQueueService sut, QueuePrintJobDto request) = CreateDeadlineClockScenario(
+            now,
+            new QueuePlanningSettings { RequireDeadline = false, MinimumLeadHours = 2 });
+
+        // Far in the future on the wall clock, but inside the lead window on the injected clock.
+        request.DeadlineAtUtc = now.UtcDateTime.AddHours(1);
+
+        Func<Task> act = () => sut.AddJobToQueueAsync(request, null, CancellationToken.None);
+
+        await act.Should().ThrowAsync<ValidationException>();
+        _mockRepo.Verify(x => x.AddAsync(It.IsAny<PrintJob>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    private (JobQueueService Sut, QueuePrintJobDto Request) CreateDeadlineClockScenario(
+        DateTimeOffset now,
+        QueuePlanningSettings planningSettings)
+    {
+        Guid printerId = Guid.NewGuid();
+        var gcodeFile = new GcodeFile
+        {
+            Id = Guid.NewGuid(),
+            Name = "clock-deadline.gcode",
+            FileName = "clock-deadline.gcode",
+        };
+        Printer printer = new PrinterBuilder().WithId(printerId).AsOnlineAndReady().Build();
+        var request = new QueuePrintJobDto
+        {
+            GcodeFileId = gcodeFile.Id,
+            AssignedPrinterId = printerId,
+            Priority = PrintJobPriority.Normal,
+        };
+
+        Mock<ISettingsService> settingsService = new();
+        settingsService.Setup(x => x.Get<QueuePlanningSettings>()).Returns(planningSettings);
+        _mockDataService.Setup(x => x.GetGcodeFileAsync(request.GcodeFileId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(gcodeFile);
+        _mockDataService.Setup(x => x.GetNextQueuePositionAsync(printerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(1);
+        _mockDataService.Setup(x => x.GetAvailablePrintersAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<Printer> { printer });
+
+        var sut = new JobQueueService(
+            _mockRepo.Object,
+            _mockDataService.Object,
+            _mockLogger.Object,
+            settingsService: settingsService.Object,
+            timeProvider: new ManualTimeProvider(now));
+        return (sut, request);
+    }
+
+    [Fact]
     public async Task AddJobToQueueAsync_WithMinimumLeadHoursAndDeadlineTooSoon_ThrowsValidationException()
     {
         // Arrange
@@ -1466,6 +1534,33 @@ public class JobQueueServiceTests
         job.Priority.Should().Be((int)PrintJobPriority.High);
         job.UpdatedAt.Should().BeCloseTo(DateTime.UtcNow, TimeSpan.FromSeconds(5));
         _mockRepo.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task UpdateJobPriorityAsync_WithFakeClock_StampsUpdatedAtFromInjectedClock()
+    {
+        DateTimeOffset now = new(2031, 4, 5, 6, 7, 8, TimeSpan.Zero);
+        PrintJob job = new PrintJobBuilder()
+            .WithPriority(0)
+            .AsQueued()
+            .Build();
+        _mockDataService.Setup(x => x.GetPrintJobByIdAsync(job.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(job);
+        _mockRepo.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        var sut = new JobQueueService(
+            _mockRepo.Object,
+            _mockDataService.Object,
+            _mockLogger.Object,
+            timeProvider: new ManualTimeProvider(now));
+
+        JobQueuePrintJobDto? result = await sut.UpdateJobPriorityAsync(
+            job.Id,
+            new UpdateJobPriorityDto { Priority = PrintJobPriority.High },
+            CancellationToken.None);
+
+        result.Should().NotBeNull();
+        job.UpdatedAt.Should().Be(now.UtcDateTime);
     }
 
     #endregion
