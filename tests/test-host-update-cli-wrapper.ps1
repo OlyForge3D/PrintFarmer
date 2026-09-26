@@ -140,9 +140,10 @@ exit [int](`$env:FAKE_EXIT ?? '0')
         $wrapper = $savedWrapper
     }
 
-    # Issue #3063: host-local offline bundle import. It needs no -Config or CLI directory and runs the
-    # offline bundle tool on node with a fixed, pre-validated argument vector identical to the Bash
-    # wrapper's (asserted by tests/test-host-update-cli-wrapper.sh) — the parity contract.
+    # Issues #3063/#3064: host-local offline bundle import. It runs the offline bundle tool on node with
+    # a fixed, pre-validated argument vector identical to the Bash wrapper's (asserted by
+    # tests/test-host-update-cli-wrapper.sh) — the parity contract. -Config and the CLI are forwarded
+    # so the tool can record the release in the durable replay store (offline-admit).
     $fakeNode = Join-Path $testRoot 'fake-node.ps1'
     Copy-Item -LiteralPath $fakeDotnet -Destination $fakeNode
     $fakeCosign = Join-Path $testRoot 'fake-cosign.ps1'
@@ -151,11 +152,12 @@ exit [int](`$env:FAKE_EXIT ?? '0')
     Set-Content -LiteralPath $fakeTool -Value '' -NoNewline
     $bundle = Join-Path $testRoot 'printfarmer-offline-update.tar'
     $rootJson = Join-Path $testRoot 'trusted_root.json'
+    $approval = Join-Path $testRoot 'trusted-root-approval.json'
     $staging = Join-Path $testRoot 'staging'
     $records = Join-Path $testRoot 'records'
     $prior = Join-Path $testRoot 'prior'
     $backup = Join-Path $testRoot 'backup.json'
-    $importEnv = @{ PRINTFARMER_HOST_UPDATE_CLI_DIR = $null; PRINTFARMER_DOTNET = $null; PRINTFARMER_NODE = $fakeNode
+    $importEnv = @{ PRINTFARMER_HOST_UPDATE_CLI_DIR = $cliDir; PRINTFARMER_DOTNET = $null; PRINTFARMER_NODE = $fakeNode
         PRINTFARMER_OFFLINE_BUNDLE_TOOL = $fakeTool; PRINTFARMER_COSIGN = $null; PRINTFARMER_DOCKER = $null }
     function With-Env([hashtable] $Overrides) {
         $merged = @{}
@@ -163,21 +165,24 @@ exit [int](`$env:FAKE_EXIT ?? '0')
         foreach ($key in $Overrides.Keys) { $merged[$key] = $Overrides[$key] }
         return $merged
     }
-    $importBase = @('import', '-Bundle', $bundle, '-Channel', 'stable', '-Version', '1.2.3', '-TrustedRoot', $rootJson,
-        '-Staging', $staging, '-Records', $records, '-Operator', 'ops.alice@site-1')
+    $importBase = @('import', '-Config', $config, '-Bundle', $bundle, '-Channel', 'stable', '-Version', '1.2.3', '-TrustedRoot', $rootJson,
+        '-TrustedRootApproval', $approval, '-Staging', $staging, '-Records', $records, '-Operator', 'ops.alice@site-1')
+    function Import-Vector([string] $Channel, [string] $Version, [string] $Operator, [string[]] $Tail = @()) {
+        return @($fakeTool, 'import', '--bundle', $bundle, '--channel', $Channel, '--version', $Version, '--trusted-root', $rootJson,
+            '--trusted-root-approval', $approval, '--staging', $staging, '--records', $records, '--operator', $Operator,
+            '--config', $config, '--host-update-cli', $dll) + $Tail
+    }
 
-    Expect-Passthrough 'import passes a fixed argument vector to the bundle tool' @($fakeTool, 'import', '--bundle', $bundle,
-        '--channel', 'stable', '--version', '1.2.3', '--trusted-root', $rootJson, '--staging', $staging, '--records', $records,
-        '--operator', 'ops.alice@site-1') $importBase $importEnv
-    Expect-Passthrough 'import options are normalised to a fixed order' @($fakeTool, 'import', '--bundle', $bundle,
-        '--channel', 'insider', '--version', '1.2.3-rc.1', '--trusted-root', $rootJson, '--staging', $staging, '--records', $records,
-        '--operator', 'ops', '--prior-recovery-set', $prior, '--protected-backup', $backup) @('import', '-ProtectedBackup', $backup,
+    Expect-Passthrough 'import passes a fixed argument vector to the bundle tool' (Import-Vector 'stable' '1.2.3' 'ops.alice@site-1') $importBase $importEnv
+    Expect-Passthrough 'import options are normalised to a fixed order' (Import-Vector 'insider' '1.2.3-rc.1' 'ops' @('--prior-recovery-set', $prior,
+        '--protected-backup', $backup)) @('import', '-ProtectedBackup', $backup, '-TrustedRootApproval', $approval,
         '-Operator', 'ops', '-Records', $records, '-PriorRecoverySet', $prior, '-Staging', $staging, '-TrustedRoot', $rootJson,
-        '-Version', '1.2.3-rc.1', '-Channel', 'insider', '-Bundle', $bundle) $importEnv
-    Expect-Passthrough 'import parameter names are case-insensitive' @($fakeTool, 'import', '--bundle', $bundle,
-        '--channel', 'stable', '--version', '1.2.3', '--trusted-root', $rootJson, '--staging', $staging, '--records', $records,
-        '--operator', 'ops') @('import', '-bundle', $bundle, '-CHANNEL', 'stable', '-version', '1.2.3', '-trustedroot', $rootJson,
+        '-Version', '1.2.3-rc.1', '-Channel', 'insider', '-Bundle', $bundle, '-Config', $config) $importEnv
+    Expect-Passthrough 'import parameter names are case-insensitive' (Import-Vector 'stable' '1.2.3' 'ops') @('import', '-config', $config,
+        '-bundle', $bundle, '-CHANNEL', 'stable', '-version', '1.2.3', '-trustedroot', $rootJson, '-TRUSTEDROOTAPPROVAL', $approval,
         '-staging', $staging, '-records', $records, '-operator', 'ops') $importEnv
+    Expect-Passthrough 'import forwards an explicit dotnet host for a framework-dependent CLI' (Import-Vector 'stable' '1.2.3' 'ops.alice@site-1' @('--dotnet',
+        $fakeDotnet)) $importBase (With-Env @{ PRINTFARMER_DOTNET = $fakeDotnet })
 
     $cosignRun = Invoke-Wrapper $importBase (With-Env @{ PRINTFARMER_COSIGN = $fakeCosign })
     $cosignArgs = if ($cosignRun.Invoked) { @((Get-Content -LiteralPath $argsLog -Raw) -split "`n") } else { @() }
@@ -189,20 +194,30 @@ exit [int](`$env:FAKE_EXIT ?? '0')
     if ($refusedRun.ExitCode -eq 1 -and $refusedRun.Invoked) { Pass 'import preserves the refused exit code' }
     else { Fail "import preserves the refused exit code (exit $($refusedRun.ExitCode))" }
 
-    Expect-Usage 'import refuses -Config' ($importBase + @('-Config', $config)) $importEnv
-    Expect-Usage 'import refuses a missing required option' @('import', '-Bundle', $bundle, '-Channel', 'stable', '-Version', '1.2.3',
-        '-TrustedRoot', $rootJson, '-Staging', $staging, '-Records', $records) $importEnv
+    $withoutConfig = @($importBase | Select-Object -Skip 3); $withoutConfig = @('import') + $withoutConfig
+    Expect-Usage 'import requires -Config' $withoutConfig $importEnv
+    Expect-Usage 'import refuses a relative -Config' (@('import', '-Config', 'host-update.json') + $withoutConfig[1..($withoutConfig.Count - 1)]) $importEnv
+    Expect-Usage 'import refuses a duplicate -Config' ($importBase + @('-Config', $config)) $importEnv
+    Expect-Usage 'import requires -TrustedRootApproval' @('import', '-Config', $config, '-Bundle', $bundle, '-Channel', 'stable', '-Version', '1.2.3',
+        '-TrustedRoot', $rootJson, '-Staging', $staging, '-Records', $records, '-Operator', 'ops') $importEnv
+    Expect-Usage 'import refuses a relative trusted-root approval' @('import', '-Config', $config, '-Bundle', $bundle, '-Channel', 'stable', '-Version', '1.2.3',
+        '-TrustedRoot', $rootJson, '-TrustedRootApproval', 'approval.json', '-Staging', $staging, '-Records', $records, '-Operator', 'ops') $importEnv
+    Expect-Usage 'import refuses a missing CLI dir' $importBase (With-Env @{ PRINTFARMER_HOST_UPDATE_CLI_DIR = $null })
+    Expect-Usage 'import refuses PRINTFARMER_DOTNET for a self-contained CLI' $importBase (With-Env @{ PRINTFARMER_HOST_UPDATE_CLI_DIR = $appHostDir; PRINTFARMER_DOTNET = $fakeDotnet })
+    $importTail = @('-TrustedRootApproval', $approval, '-Config', $config)
+    Expect-Usage 'import refuses a missing required option' (@('import', '-Bundle', $bundle, '-Channel', 'stable', '-Version', '1.2.3',
+        '-TrustedRoot', $rootJson, '-Staging', $staging, '-Records', $records) + $importTail) $importEnv
     Expect-Usage 'import refuses a duplicate option' ($importBase + @('-Channel', 'stable')) $importEnv
-    Expect-Usage 'import refuses a relative bundle path' @('import', '-Bundle', 'bundle.tar', '-Channel', 'stable', '-Version', '1.2.3',
-        '-TrustedRoot', $rootJson, '-Staging', $staging, '-Records', $records, '-Operator', 'ops') $importEnv
-    Expect-Usage 'import refuses a relative records path' @('import', '-Bundle', $bundle, '-Channel', 'stable', '-Version', '1.2.3',
-        '-TrustedRoot', $rootJson, '-Staging', $staging, '-Records', 'records', '-Operator', 'ops') $importEnv
-    Expect-Usage 'import refuses an unknown channel' @('import', '-Bundle', $bundle, '-Channel', 'Stable', '-Version', '1.2.3',
-        '-TrustedRoot', $rootJson, '-Staging', $staging, '-Records', $records, '-Operator', 'ops') $importEnv
-    Expect-Usage 'import refuses shell metacharacters in the version' @('import', '-Bundle', $bundle, '-Channel', 'stable', '-Version', '1;rm',
-        '-TrustedRoot', $rootJson, '-Staging', $staging, '-Records', $records, '-Operator', 'ops') $importEnv
-    Expect-Usage 'import refuses a malformed operator' @('import', '-Bundle', $bundle, '-Channel', 'stable', '-Version', '1.2.3',
-        '-TrustedRoot', $rootJson, '-Staging', $staging, '-Records', $records, '-Operator', '-ops') $importEnv
+    Expect-Usage 'import refuses a relative bundle path' (@('import', '-Bundle', 'bundle.tar', '-Channel', 'stable', '-Version', '1.2.3',
+        '-TrustedRoot', $rootJson, '-Staging', $staging, '-Records', $records, '-Operator', 'ops') + $importTail) $importEnv
+    Expect-Usage 'import refuses a relative records path' (@('import', '-Bundle', $bundle, '-Channel', 'stable', '-Version', '1.2.3',
+        '-TrustedRoot', $rootJson, '-Staging', $staging, '-Records', 'records', '-Operator', 'ops') + $importTail) $importEnv
+    Expect-Usage 'import refuses an unknown channel' (@('import', '-Bundle', $bundle, '-Channel', 'Stable', '-Version', '1.2.3',
+        '-TrustedRoot', $rootJson, '-Staging', $staging, '-Records', $records, '-Operator', 'ops') + $importTail) $importEnv
+    Expect-Usage 'import refuses shell metacharacters in the version' (@('import', '-Bundle', $bundle, '-Channel', 'stable', '-Version', '1;rm',
+        '-TrustedRoot', $rootJson, '-Staging', $staging, '-Records', $records, '-Operator', 'ops') + $importTail) $importEnv
+    Expect-Usage 'import refuses a malformed operator' (@('import', '-Bundle', $bundle, '-Channel', 'stable', '-Version', '1.2.3',
+        '-TrustedRoot', $rootJson, '-Staging', $staging, '-Records', $records, '-Operator', '-ops') + $importTail) $importEnv
     Expect-Usage 'import refuses a verification bypass option' ($importBase + @('-SkipVerification', 'true')) $importEnv
     Expect-Usage 'import refuses a bash-style option' ($importBase + @('--prior-recovery-set', $prior)) $importEnv
     Expect-Usage 'import refuses a missing option value' ($importBase + @('-PriorRecoverySet')) $importEnv

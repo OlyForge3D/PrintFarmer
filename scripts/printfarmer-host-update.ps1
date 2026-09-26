@@ -11,12 +11,14 @@
       printfarmer-host-update.ps1 -Config C:\abs\host-update.json status [-Release <id>] [-Json]
       printfarmer-host-update.ps1 -Config C:\abs\host-update.json recover -Release <id> [-RequestId <id>] -Preview [-Json]
       printfarmer-host-update.ps1 -Config C:\abs\host-update.json recover -Release <id> [-RequestId <id>] -Confirm <id> [-ReapproveDrift <token>] [-PrintersReconciled <token>] [-Json]
-      printfarmer-host-update.ps1 import -Bundle C:\abs\bundle.tar -Channel <stable|insider> -Version <v> -TrustedRoot C:\abs\trusted_root.json -Staging C:\abs\new-dir -Records C:\abs\records-dir -Operator <id> [-PriorRecoverySet C:\abs\dir] [-ProtectedBackup C:\abs\reference.json]
+      printfarmer-host-update.ps1 import -Config C:\abs\host-update.json -Bundle C:\abs\bundle.tar -Channel <stable|insider> -Version <v> -TrustedRoot C:\abs\trusted_root.json -TrustedRootApproval C:\abs\approval.json -Staging C:\abs\new-dir -Records C:\abs\records-dir -Operator <id> [-PriorRecoverySet C:\abs\dir] [-ProtectedBackup C:\abs\reference.json]
       printfarmer-host-update.ps1 help
 
     `import` (issue #3063) verifies a signed offline update bundle without network access, loads
     only its verified images into the local Docker engine and writes one durable, redacted
-    decision record under -Records. It needs no -Config and never installs, activates or
+    decision record under -Records. Issue #3064: it also enforces the offline trust expiry policy
+    (-TrustedRootApproval) and records the release in the host's durable replay store through the CLI
+    (offline-admit, using -Config), refusing replays, downgrades and cross-channel imports. It never
     authorizes a rollout.
 
     Environment:
@@ -53,7 +55,7 @@ usage:
   printfarmer-host-update.ps1 -Config C:\abs\host-update.json status [-Release <id>] [-Json]
   printfarmer-host-update.ps1 -Config C:\abs\host-update.json recover -Release <id> [-RequestId <id>] -Preview [-Json]
   printfarmer-host-update.ps1 -Config C:\abs\host-update.json recover -Release <id> [-RequestId <id>] -Confirm <id> [-ReapproveDrift <token>] [-PrintersReconciled <token>] [-Json]
-  printfarmer-host-update.ps1 import -Bundle C:\abs\bundle.tar -Channel <stable|insider> -Version <v> -TrustedRoot C:\abs\trusted_root.json -Staging C:\abs\new-dir -Records C:\abs\records-dir -Operator <id> [-PriorRecoverySet C:\abs\dir] [-ProtectedBackup C:\abs\reference.json]
+  printfarmer-host-update.ps1 import -Config C:\abs\host-update.json -Bundle C:\abs\bundle.tar -Channel <stable|insider> -Version <v> -TrustedRoot C:\abs\trusted_root.json -TrustedRootApproval C:\abs\approval.json -Staging C:\abs\new-dir -Records C:\abs\records-dir -Operator <id> [-PriorRecoverySet C:\abs\dir] [-ProtectedBackup C:\abs\reference.json]
   printfarmer-host-update.ps1 help
 '@
 
@@ -83,16 +85,56 @@ function Resolve-OptionalExecutable([string] $Variable, [string] $Default) {
     return $value
 }
 
-if ($rawArgs.Count -ge 1 -and $rawArgs[0] -ceq 'import') {
-    # Issue #3063: host-local offline bundle import. Needs no -Config and never authorizes a rollout.
+# Resolves the CLI: the self-contained apphost alone (Dll = $null), or the dotnet host plus
+# Farm.HostUpdate.Cli.dll.
+function Resolve-Launcher {
+    $cliDir = $env:PRINTFARMER_HOST_UPDATE_CLI_DIR
+    # An installed package (issue #3041) carries its self-contained CLI in cli\ beside this wrapper.
+    if ([string]::IsNullOrEmpty($cliDir) -and (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'host-update-cli-package.json') -PathType Leaf)) {
+        $cliDir = Join-Path $PSScriptRoot 'cli'
+    }
+    if (-not (Test-FullyQualified $cliDir)) {
+        Exit-Usage 'PRINTFARMER_HOST_UPDATE_CLI_DIR must be an absolute directory'
+    }
+
+    $cliAppHost = Join-Path $cliDir ($IsWindows ? 'Farm.HostUpdate.Cli.exe' : 'Farm.HostUpdate.Cli')
+    if (Test-Path -LiteralPath $cliAppHost -PathType Leaf) {
+        # Self-contained package: the launcher carries its own runtime, so no dotnet host is used.
+        if ($env:PRINTFARMER_DOTNET) {
+            Exit-Usage 'PRINTFARMER_DOTNET must not be set for a self-contained CLI package'
+        }
+
+        return @{ Launcher = $cliAppHost; Dll = $null }
+    }
+
+    $cliDll = Join-Path $cliDir 'Farm.HostUpdate.Cli.dll'
+    if (-not (Test-Path -LiteralPath $cliDll -PathType Leaf)) {
+        Exit-Usage 'Farm.HostUpdate.Cli.dll not found in PRINTFARMER_HOST_UPDATE_CLI_DIR'
+    }
+
+    $dotnetHost = 'dotnet'
+    if ($env:PRINTFARMER_DOTNET) {
+        if (-not (Test-FullyQualified $env:PRINTFARMER_DOTNET) -or -not (Test-Path -LiteralPath $env:PRINTFARMER_DOTNET -PathType Leaf)) {
+            Exit-Usage 'PRINTFARMER_DOTNET must be an absolute executable path'
+        }
+
+        $dotnetHost = $env:PRINTFARMER_DOTNET
+    }
+
+    return @{ Launcher = $dotnetHost; Dll = $cliDll }
+}
+
+if ($rawArgs.Count -ge 1 -and $rawArgs[0] -ceq 'import') {    # Issues #3063/#3064: host-local offline bundle import with replay admission. Never authorizes a rollout.
     $importOptions = [ordered]@{
         '-bundle' = @{ Flag = '--bundle'; Kind = 'path' }
         '-channel' = @{ Flag = '--channel'; Kind = 'channel' }
         '-version' = @{ Flag = '--version'; Kind = 'version' }
         '-trustedroot' = @{ Flag = '--trusted-root'; Kind = 'path' }
+        '-trustedrootapproval' = @{ Flag = '--trusted-root-approval'; Kind = 'path' }
         '-staging' = @{ Flag = '--staging'; Kind = 'path' }
         '-records' = @{ Flag = '--records'; Kind = 'path' }
         '-operator' = @{ Flag = '--operator'; Kind = 'operator' }
+        '-config' = @{ Flag = '--config'; Kind = 'path' }
         '-priorrecoveryset' = @{ Flag = '--prior-recovery-set'; Kind = 'path' }
         '-protectedbackup' = @{ Flag = '--protected-backup'; Kind = 'path' }
     }
@@ -115,9 +157,10 @@ if ($rawArgs.Count -ge 1 -and $rawArgs[0] -ceq 'import') {
         $importValues[$name] = $value
         $index += 2
     }
-    foreach ($requiredName in @('-bundle', '-channel', '-version', '-trustedroot', '-staging', '-records', '-operator')) {
+    foreach ($requiredName in @('-config', '-bundle', '-channel', '-version', '-trustedroot', '-trustedrootapproval', '-staging', '-records', '-operator')) {
         if (-not $importValues.ContainsKey($requiredName)) {
             $display = @{ '-bundle' = '-Bundle'; '-channel' = '-Channel'; '-version' = '-Version'; '-trustedroot' = '-TrustedRoot'
+                '-trustedrootapproval' = '-TrustedRootApproval'; '-config' = '-Config'
                 '-staging' = '-Staging'; '-records' = '-Records'; '-operator' = '-Operator' }[$requiredName]
             Exit-Usage "import requires $display"
         }
@@ -132,9 +175,16 @@ if ($rawArgs.Count -ge 1 -and $rawArgs[0] -ceq 'import') {
         Exit-Usage 'PRINTFARMER_OFFLINE_BUNDLE_TOOL must be an absolute path to offline-update-bundle.mjs'
     }
 
+    $resolved = Resolve-Launcher
     $toolArgs = [System.Collections.Generic.List[string]]::new()
     $toolArgs.Add('import')
     foreach ($key in $importOptions.Keys) {
+        if ($key -in @('-priorrecoveryset', '-protectedbackup')) { continue }
+        $toolArgs.Add($importOptions[$key].Flag); $toolArgs.Add($importValues[$key])
+    }
+    $toolArgs.Add('--host-update-cli'); $toolArgs.Add(($null -ne $resolved.Dll) ? $resolved.Dll : $resolved.Launcher)
+    if ($null -ne $resolved.Dll -and $env:PRINTFARMER_DOTNET) { $toolArgs.Add('--dotnet'); $toolArgs.Add($resolved.Launcher) }
+    foreach ($key in @('-priorrecoveryset', '-protectedbackup')) {
         if ($importValues.ContainsKey($key)) { $toolArgs.Add($importOptions[$key].Flag); $toolArgs.Add($importValues[$key]) }
     }
     if ($env:PRINTFARMER_COSIGN) { $toolArgs.Add('--cosign'); $toolArgs.Add($cosignHost) }
@@ -218,41 +268,10 @@ if (-not (Test-FullyQualified $config)) {
     Exit-Usage '-Config must be an absolute JSON file path'
 }
 
-$cliDir = $env:PRINTFARMER_HOST_UPDATE_CLI_DIR
-# An installed package (issue #3041) carries its self-contained CLI in cli\ beside this wrapper.
-if ([string]::IsNullOrEmpty($cliDir) -and (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'host-update-cli-package.json') -PathType Leaf)) {
-    $cliDir = Join-Path $PSScriptRoot 'cli'
-}
-if (-not (Test-FullyQualified $cliDir)) {
-    Exit-Usage 'PRINTFARMER_HOST_UPDATE_CLI_DIR must be an absolute directory'
-}
-
-$cliAppHost = Join-Path $cliDir ($IsWindows ? 'Farm.HostUpdate.Cli.exe' : 'Farm.HostUpdate.Cli')
+$resolved = Resolve-Launcher
+$launcher = $resolved.Launcher
 $launcherArgs = [System.Collections.Generic.List[string]]::new()
-if (Test-Path -LiteralPath $cliAppHost -PathType Leaf) {
-    # Self-contained package: the launcher carries its own runtime, so no dotnet host is used.
-    if ($env:PRINTFARMER_DOTNET) {
-        Exit-Usage 'PRINTFARMER_DOTNET must not be set for a self-contained CLI package'
-    }
-
-    $launcher = $cliAppHost
-} else {
-    $cliDll = Join-Path $cliDir 'Farm.HostUpdate.Cli.dll'
-    if (-not (Test-Path -LiteralPath $cliDll -PathType Leaf)) {
-        Exit-Usage 'Farm.HostUpdate.Cli.dll not found in PRINTFARMER_HOST_UPDATE_CLI_DIR'
-    }
-
-    $launcher = 'dotnet'
-    if ($env:PRINTFARMER_DOTNET) {
-        if (-not (Test-FullyQualified $env:PRINTFARMER_DOTNET) -or -not (Test-Path -LiteralPath $env:PRINTFARMER_DOTNET -PathType Leaf)) {
-            Exit-Usage 'PRINTFARMER_DOTNET must be an absolute executable path'
-        }
-
-        $launcher = $env:PRINTFARMER_DOTNET
-    }
-
-    $launcherArgs.Add($cliDll)
-}
+if ($null -ne $resolved.Dll) { $launcherArgs.Add($resolved.Dll) }
 
 # The CLI re-validates everything, including the canonical release grammar and option combinations.
 $cliArgs = [System.Collections.Generic.List[string]]::new()
