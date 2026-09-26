@@ -166,11 +166,43 @@ record's `priorRecoverySet` names the mode, prior release identity, manifest
 digest and protected-backup reference; it is `false` when the bundle binds no
 prior set.
 
-The prior set does not carry prior images or effective configuration; those
-remain future work under #2981. [Offline recovery](#offline-recovery-3082)
-therefore relies on the prior images still being present in the local Docker
-engine (they were running before the failed activation) and verifies each one
-locally by digest before any change. A bound
+A bundle with a prior set may also carry the prior release's application images
+(#3094):
+
+```bash
+node scripts/ci/offline-update-bundle.mjs assemble ... \
+  --prior-release-assets ./prior-release-assets \
+  --protected-backup ./protected-backup.json \
+  --prior-images ./prior-oci-layout
+```
+
+`--prior-images` requires a prior set. The authenticated prior manifest alone
+decides the required set: one `prior-image-<service>.oci.tar` member per prior
+application service, each bound by digest and platform exactly like the
+[target images](#application-and-infrastructure-images-3061), and every service
+in the target manifest must exist in the prior manifest. `contents.priorImages`
+is `true` only when every required prior image is present, and it implies
+`contents.priorRecoverySet`; bundles assembled before #3094 have no claim and
+are treated as `false`. `verify` checks the prior images only after the prior set
+authenticates, and rejects a missing, tampered, wrong-platform, extra or mixed
+prior image before anything is loaded. On success the record's `priorImages`
+lists the verified prior images, or is `false`.
+
+`load-prior` hands those images to the local engine without network access:
+
+```bash
+node scripts/ci/offline-update-bundle.mjs load-prior --staging /srv/offline/staging-1 \
+  --channel stable --trusted-root /srv/offline/trusted_root.json \
+  [--missing refuse|skip] [--cosign /abs/cosign] [--docker /abs/docker]
+```
+
+Like `load`, it never trusts the mutable record for expectations: it
+re-authenticates the staged target and prior manifests, derives the required
+prior images from the prior manifest, requires the record to name exactly that
+set, and re-hashes and verifies every archive before loading any of them.
+`--missing skip` returns `no_packaged_prior_images` without loading only when the
+record claims no prior images; any other shape is refused. The prior set does not
+carry effective configuration; that remains future work under #2981. A bound
 prior set is recovery-only material and never a new offer or implicit channel
 consent.
 
@@ -208,6 +240,8 @@ incomplete. Remaining work under #2658:
 - #3082 (delivered): network-denied recovery to the prior artifact set with
   provider and remote-owner requirements failing closed (see
   [offline recovery](#offline-recovery-3082)).
+- #3094 (delivered): packaged prior recovery images and fail-closed handling of
+  remote pinned workers.
 
 ### Application and infrastructure images (#3061)
 
@@ -583,7 +617,22 @@ unchanged since evaluation; otherwise it exits 12 (`drift_reapproval_stale`).
 The recovery engine applies the prior digests in preloaded mode: it inspects each
 prior image locally, and applies templates with
 `docker compose up -d --no-build --pull never`; it never runs `docker pull` or
-`docker login`, and a missing local prior image fails closed. A coordinated
+`docker login`, and a missing local prior image fails closed. With `--confirm`,
+both wrappers first run `offline-update-bundle.mjs load-prior --missing skip`
+against the staging directory (resolving `PRINTFARMER_NODE`,
+`PRINTFARMER_OFFLINE_BUNDLE_TOOL`, `PRINTFARMER_COSIGN` and `PRINTFARMER_DOCKER`
+as for `import`), so packaged prior images are verified and loaded even when the
+engine cache has pruned them; a load failure exits 6 before the CLI runs. A
+bundle without packaged prior images still recovers from the engine cache, which
+is verified by digest and platform as above; with neither, recovery fails closed.
+
+Offline activation and offline recovery also refuse (exit 6) when any registered
+slicer worker is outside this host's compose set: every registered worker host
+must be an `http(s)` URL naming the compose service of an active mapped service.
+A remote or out-of-compose worker refuses with `remote_worker_unsupported`
+(detail `restore_remote_workers_through_owner`); unreadable registrations refuse
+with `remote_worker_evidence_unavailable`. Restore or update remote workers
+through their owner. A coordinated
 database restore owned by an external provider (`DatabaseExternallyOwned`) stops
 as needs-operator with `database_externally_owned` before any restore or apply,
 so the external owner must restore it. Integration tests exercise a
