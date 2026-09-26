@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Security;
+﻿using Farm.Infrastructure.Security;
 
 namespace Farm.Infrastructure.Authorization;
 

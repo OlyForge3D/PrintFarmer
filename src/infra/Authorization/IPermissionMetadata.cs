@@ -1,4 +1,4 @@
-namespace Farm.Infrastructure.Authorization;
+﻿namespace Farm.Infrastructure.Authorization;
 
 /// <summary>
 /// Describes a resource-action permission for discovery without implying authorization enforcement.

@@ -1,4 +1,4 @@
-using Xunit;
+﻿using Xunit;
 
 namespace Farm.Modules.Printers.Tests.Controllers;
 

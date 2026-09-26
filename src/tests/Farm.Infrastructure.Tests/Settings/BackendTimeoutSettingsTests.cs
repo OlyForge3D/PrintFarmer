@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Settings;
+﻿using Farm.Infrastructure.Settings;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
 using Xunit;

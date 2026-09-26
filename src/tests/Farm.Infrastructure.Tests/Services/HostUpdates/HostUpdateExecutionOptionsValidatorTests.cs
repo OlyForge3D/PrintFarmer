@@ -1,10 +1,10 @@
-﻿using Farm.Infrastructure.Services.HostUpdates;
+﻿using System.Text;
+using System.Text.Json;
+using Farm.Infrastructure.Services.HostUpdates;
 using Farm.Infrastructure.Services.Queue;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
-using System.Text;
-using System.Text.Json;
 using Xunit;
 
 namespace Farm.Infrastructure.Tests.Services.HostUpdates;

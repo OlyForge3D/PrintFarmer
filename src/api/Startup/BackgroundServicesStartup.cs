@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Services.Assets;
+﻿using Farm.Infrastructure.Services.Assets;
 using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Startup;
 

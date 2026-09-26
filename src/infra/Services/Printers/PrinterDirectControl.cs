@@ -1,4 +1,4 @@
-namespace Farm.Infrastructure.Services.Printers;
+﻿namespace Farm.Infrastructure.Services.Printers;
 
 /// <summary>Bounds ordinary manual commands without retaining operation receipts.</summary>
 public static class PrinterDirectControl

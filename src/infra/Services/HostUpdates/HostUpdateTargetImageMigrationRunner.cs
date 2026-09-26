@@ -1,4 +1,4 @@
-using System.Collections.Frozen;
+﻿using System.Collections.Frozen;
 using Farm.Infrastructure.Data.Migrations;
 
 namespace Farm.Infrastructure.Services.HostUpdates;
