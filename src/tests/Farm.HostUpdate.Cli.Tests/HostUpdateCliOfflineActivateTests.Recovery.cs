@@ -69,7 +69,7 @@ public sealed partial class HostUpdateCliOfflineActivateTests
         InstalledHostState? state = await new FileInstalledHostStateStore(InstalledStatePath()).ReadAsync(CancellationToken.None);
         state!.ReleaseId.Should().Be(PriorReleaseId);
         state.ServiceDigests.Should().Equal(PriorAmd64Digests);
-        File.ReadAllText(Path.Combine(RestoredTestTargetPath(), "backup.txt")).Should().Be("ok", "the protected backup is restored locally");
+        File.ReadAllText(Path.Combine(RestoredTestTargetPath(), "backup.txt")).Should().Be("ok", "the engine activation-time backup is restored locally, never the operator-held protected backup");
         runner.ContainsDockerCommand("image", "pull").Should().BeFalse();
         runner.ContainsDockerCommand("pull").Should().BeFalse();
         runner.ContainsDockerCommand("login").Should().BeFalse();

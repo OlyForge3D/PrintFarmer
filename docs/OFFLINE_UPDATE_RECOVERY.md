@@ -588,8 +588,8 @@ database restore owned by an external provider (`DatabaseExternallyOwned`) stops
 as needs-operator with `database_externally_owned` before any restore or apply,
 so the external owner must restore it. Integration tests exercise a
 real failed offline activation followed by preview and confirm with a
-network-denied HTTP factory, asserting the prior set and backup are restored with
-no non-loopback request and no pull.
+network-denied HTTP factory, asserting the prior set is restored through the
+engine activation-time backup, with no non-loopback request and no pull.
 
 ## Replay admission, channel continuity and trust expiry (#3064)
 
