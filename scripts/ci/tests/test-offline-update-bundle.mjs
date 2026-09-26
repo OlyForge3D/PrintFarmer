@@ -14,7 +14,7 @@ import { canonicalImageIndex, imageArchiveLimits, imageTarHeader, infrastructure
 import { formatSums, hostUpdateCliArchiveName, hostUpdateCliRuntimes, hostUpdateCliSbomName, hostUpdateCliSumsBundleName,
   hostUpdateCliSumsName } from '../host-update-cli-package.mjs';
 import { admitOfflineReplay, assembleOfflineBundle, evaluateTrustPolicy, hostUpdateCliInvocation, hostUpdateCliRunnerName,
-  importOfflineBundle, loadVerifiedImages, offlineBundleIndexName, offlineBundleLimits, offlineBundleName,
+  importOfflineBundle, loadPriorImages, loadVerifiedImages, offlineBundleIndexName, offlineBundleLimits, offlineBundleName,
   offlineBundleVerificationName, offlineImportDecisionKind, offlineTrustPolicy, parseArguments, readOfflineBundleEntries,
   redactReason, releaseSigningIdentity, tarHeader, trustedRootApprovalKind, verifyOfflineBundle } from '../offline-update-bundle.mjs';
 import { recoveryInstructionsDocument, recoveryInstructionsName, recoveryInstructionsSignatureName,
@@ -2266,5 +2266,207 @@ test('pre-#3081 bundles without a deploymentSet claim still verify as carrying n
     rejectsWithoutStaging(context, /deployment set flag|approved tools/);
   } finally {
     context.cleanup();
+  }
+});
+
+// ---------------------------------------------------------------------------------------------
+// Issue #3094: prior recovery images, bound to the authenticated prior recovery set.
+// ---------------------------------------------------------------------------------------------
+const priorImageMembers = Object.keys(components).map(id => `prior-image-${id}.oci.tar`).sort();
+
+function priorImageFixture(channel = 'stable') {
+  const context = priorFixture(channel);
+  const layout = join(context.root, 'prior-layout');
+  const writeBlob = layoutWriter(layout);
+  const application = Object.fromEntries(Object.entries(components).map(([id, component]) =>
+    [id, indexImage(writeBlob, `prior-${id}`, component.platforms)]));
+  const manifest = Buffer.from(buildManifest(context.prior, Object.fromEntries(Object.entries(application).map(([id, image]) =>
+    [id, { indexDigest: image.digest, platforms: components[id].platforms, platformDigests: image.platforms }]))));
+  writeFileSync(join(context.priorAssets, 'update-manifest.json'), manifest);
+  writeFileSync(join(context.priorAssets, 'update-manifest.sigstore.json'), sign(manifest, channel));
+  return Object.assign(context, { priorLayout: layout, priorApplication: application });
+}
+
+function loadPrior(context, docker, overrides = {}) {
+  const signatures = cosign({ requireOffline: true });
+  const run = (name, args, options) => (name === 'cosign' ? signatures.run(name, args) : docker(name, args, options));
+  return loadPriorImages({ staging: context.staging, channel: context.release.channel,
+    trustedRoot: context.trustedRoot, run, ...overrides });
+}
+
+const recordingDocker = loads => (name, args, options) => {
+  assert.equal(name, 'docker', 'prior load never invokes anything but the local engine');
+  assert.deepEqual(args, ['load'], 'prior load never pulls, builds or tags');
+  assert.equal(typeof options?.stdin, 'number', 'the verified descriptor itself is handed to docker load');
+  loads.push(fstatSync(options.stdin).size);
+  return '';
+};
+
+for (const [channel, mode] of [['stable', 'packaged'], ['insider', 'local-reference']]) {
+  test(`${channel} ${mode} prior images are packaged, verified by digest and platform and loadable offline`, () => {
+    const context = priorImageFixture(channel);
+    try {
+      const { index } = assemble(context, context.withPrior({ priorImages: context.priorLayout, priorMode: mode }));
+      assert.equal(index.contents.priorImages, true);
+      assert.equal(index.contents.images, false, 'prior images do not claim the target image set');
+      assert.deepEqual(index.files.filter(file => file.role === 'prior-application-image').map(file => file.name),
+        priorImageMembers);
+      const record = verify(context, mode === 'local-reference' ? { priorRecoverySet: context.priorAssets } : {});
+      assert.equal(record.installable, false);
+      assert.deepEqual(record.priorImages.map(image => image.member).sort(), priorImageMembers);
+      for (const image of record.priorImages) {
+        assert.equal(image.reference.endsWith(`:${context.prior.version}`), true, 'prior images carry the prior version');
+        assert.equal(image.digest, context.priorApplication[image.id].digest);
+        assert.deepEqual(image.platforms, context.priorApplication[image.id].platforms);
+        assert.equal(image.sha256, sha256(readFileSync(join(context.staging, image.member))));
+      }
+      const loads = [];
+      const { loaded } = loadPrior(context, recordingDocker(loads));
+      assert.equal(loads.length, priorImageMembers.length);
+      assert.deepEqual(loaded.map(image => image.member).sort(), priorImageMembers);
+    } finally {
+      context.cleanup();
+    }
+  });
+}
+
+test('a bundle without prior images records priorImages false and prior load refuses it', () => {
+  const context = priorImageFixture('stable');
+  try {
+    const { index } = assemble(context, context.withPrior());
+    assert.equal(index.contents.priorImages, false);
+    const record = verify(context);
+    assert.equal(record.priorImages, false);
+    assert.throws(() => loadPrior(context, () => assert.fail('nothing may be loaded')),
+      /holds no verified prior recovery image set/);
+  } finally {
+    context.cleanup();
+  }
+});
+
+test('prior images require the verified prior set and fail closed at assembly', () => {
+  const context = priorImageFixture('stable');
+  try {
+    assert.throws(() => assemble(context, { priorImages: context.priorLayout }),
+      /bound to the verified prior recovery set/);
+    // A prior manifest service whose image is not in the layout.
+    rmSync(join(context.priorLayout, 'blobs', 'sha256', context.priorApplication.api.digest.slice('sha256:'.length)));
+    assert.throws(() => assemble(context, context.withPrior({ priorImages: context.priorLayout })));
+    assert.equal(existsSync(context.bundle), false, 'a failed assembly leaves no bundle');
+    assert.equal(existsSync(`${context.bundle}.partial`), false);
+  } finally {
+    context.cleanup();
+  }
+});
+
+test('a prior image for the wrong platform is refused at assembly', () => {
+  const context = priorImageFixture('stable');
+  try {
+    // The signed prior manifest pins linux/amd64 for the worker, but the only child is arm64.
+    const writeBlob = layoutWriter(context.priorLayout);
+    const wrong = indexImage(writeBlob, 'prior-wrong', ['linux/arm64']);
+    const application = { ...context.priorApplication,
+      'orcaslicer-worker': { ...wrong, platforms: { 'linux/amd64': wrong.platforms['linux/arm64'] } } };
+    const manifest = Buffer.from(buildManifest(context.prior, Object.fromEntries(Object.entries(application).map(([id, image]) =>
+      [id, { indexDigest: image.digest, platforms: components[id].platforms, platformDigests: image.platforms }]))));
+    writeFileSync(join(context.priorAssets, 'update-manifest.json'), manifest);
+    writeFileSync(join(context.priorAssets, 'update-manifest.sigstore.json'), sign(manifest, 'stable'));
+    assert.throws(() => assemble(context, context.withPrior({ priorImages: context.priorLayout })));
+    assert.equal(existsSync(context.bundle), false);
+  } finally {
+    context.cleanup();
+  }
+});
+
+test('missing, tampered, mixed, extra or unflagged prior images are rejected before import', () => {
+  const cases = [
+    [({ members, roles }) => { members.delete('prior-image-api.oci.tar'); roles.delete('prior-image-api.oci.tar'); },
+      /does not carry exactly the signed prior recovery image set/],
+    [({ members }) => editNested(members, 'prior-image-api.oci.tar', entries => entries.map(entry =>
+      (entry.data.includes('layer prior-api') ? { ...entry, data: Buffer.from(entry.data.toString().replace('z', 'y')) } : entry))),
+    /prior image prior-image-api\.oci\.tar failed verification/],
+    [({ members }) => members.set('prior-image-api.oci.tar', members.get('prior-image-frontend.oci.tar')),
+      /prior image prior-image-api\.oci\.tar failed verification/],
+    [({ members, roles }) => { members.set('prior-image-api.oci.tar', members.get('prior-image-api.oci.tar'));
+      members.set('prior-image-bogus.oci.tar', Buffer.from('x')); roles.set('prior-image-bogus.oci.tar', 'prior-application-image'); },
+    /not part of this release/],
+    [({ index }) => { index.contents.priorImages = false; }, /prior image members do not match its prior images flag/],
+    [({ index }) => { index.contents.priorImages = 'yes'; }, /contents claim material/],
+  ];
+  for (const [edit, pattern] of cases) {
+    const context = priorImageFixture('stable');
+    try {
+      assemble(context, context.withPrior({ priorImages: context.priorLayout }));
+      rewriteBundle(context, edit);
+      rejectsWithoutStaging(context, pattern);
+    } finally {
+      context.cleanup();
+    }
+  }
+});
+
+test('prior images cannot be claimed without a prior recovery set, and legacy indexes default to none', () => {
+  const context = priorImageFixture('stable');
+  try {
+    assemble(context);
+    rewriteBundle(context, ({ index }) => { index.contents.priorImages = true; });
+    rejectsWithoutStaging(context, /contents claim material/);
+  } finally {
+    context.cleanup();
+  }
+  const legacy = priorImageFixture('stable');
+  try {
+    assemble(legacy, legacy.withPrior());
+    rewriteBundle(legacy, ({ index }) => { delete index.contents.priorImages; });
+    assert.equal(verify(legacy).priorImages, false, 'a pre-#3094 index carries no prior images');
+  } finally {
+    legacy.cleanup();
+  }
+});
+
+test('prior load re-authenticates the staged manifests and loads only unchanged, exactly recorded images', () => {
+  const tamper = [
+    [context => writeFileSync(join(context.staging, 'prior-image-api.oci.tar'), Buffer.from('swapped')),
+      /changed after verification/],
+    [context => {
+      const path = join(context.staging, offlineBundleVerificationName);
+      const record = JSON.parse(readFileSync(path, 'utf8'));
+      record.priorImages = record.priorImages.slice(1);
+      writeFileSync(path, JSON.stringify(record));
+    }, /does not name exactly the signed prior recovery image set/],
+    [context => {
+      const path = join(context.staging, 'prior-update-manifest.json');
+      writeFileSync(path, Buffer.concat([readFileSync(path), Buffer.from(' ')]));
+    }, /does not match the staged signed prior manifest|signature verification failed/],
+    [context => writeFileSync(join(context.staging, 'prior-update-manifest.sigstore.json'), sign(Buffer.from('other'), 'stable')),
+      /signature verification failed for prior-update-manifest\.json/],
+    [context => {
+      const path = join(context.staging, offlineBundleVerificationName);
+      const record = JSON.parse(readFileSync(path, 'utf8'));
+      record.priorRecoverySet.manifestDigest = `sha256:${'0'.repeat(64)}`;
+      writeFileSync(path, JSON.stringify(record));
+    }, /does not match the staged signed prior manifest/],
+  ];
+  for (const [edit, pattern] of tamper) {
+    const context = priorImageFixture('stable');
+    try {
+      assemble(context, context.withPrior({ priorImages: context.priorLayout }));
+      verify(context);
+      edit(context);
+      assert.throws(() => loadPrior(context, () => assert.fail('nothing may be loaded after a failed check')), pattern);
+    } finally {
+      context.cleanup();
+    }
+  }
+});
+
+test('the command line exposes prior images and prior load without bypasses', () => {
+  assert.equal(parseArguments(['assemble', '--release-assets', 'a', '--channel', 'stable', '--output', 'o',
+    '--prior-images', 'p']).options['prior-images'], 'p');
+  assert.deepEqual(parseArguments(['load-prior', '--staging', 's', '--channel', 'stable', '--trusted-root', 't']).options,
+    { staging: 's', channel: 'stable', 'trusted-root': 't' });
+  for (const argv of [['load-prior', '--staging', 's', '--skip-verify', 'x'], ['load-prior', '--staging', 's', '--force', 'x'],
+    ['load-prior', '--prior-images', 'p'], ['verify', '--prior-images', 'p']]) {
+    assert.throws(() => parseArguments(argv), /usage/, argv.join(' '));
   }
 });
