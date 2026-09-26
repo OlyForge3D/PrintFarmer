@@ -65,10 +65,11 @@ public sealed class HostUpdateCliOfflineActivateTests : IDisposable, IAsyncLifet
     [Theory]
     [InlineData(new[] { "offline-activate", "--channel", "insider" }, "missing_option:--staging")]
     [InlineData(new[] { "offline-activate", "--staging", "relative", "--channel", "insider" }, "staging_not_absolute")]
-    [InlineData(new[] { "offline-activate", "--staging", "C:\\abs", "--channel", "beta" }, "invalid_channel")]
+    [InlineData(new[] { "offline-activate", "--staging", "{abs}", "--channel", "beta" }, "invalid_channel")]
     public async Task Invalid_arguments_are_usage_errors(string[] args, string expected)
     {
-        CliRun run = await RunAsync(args);
+        string absolutePath = Path.GetFullPath(Path.GetTempPath());
+        CliRun run = await RunAsync(args.Select(arg => arg == "{abs}" ? absolutePath : arg).ToArray());
 
         run.ExitCode.Should().Be(HostUpdateCliExitCodes.Usage);
         run.Error.Should().Contain(expected);
