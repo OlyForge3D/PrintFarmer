@@ -441,6 +441,54 @@ jobs:
         run: node scripts/compliance/validate-compliance.mjs
 
   # ---------------------------------------------------------------------------
+  # dotnet-format — server-side `dotnet format --verify-no-changes` guard
+  # (#2978). The optional `.githooks/pre-push` hook alone let 140 diagnostics
+  # accumulate on `development` because agent worktrees and host checkouts
+  # without `.githooks/setup.sh` never ran it. This job runs in parallel with
+  # `dotnet-build` (it needs only a restore, not build output), so it adds
+  # runner time but not wall-clock time to the test fan-out. The SDK check
+  # fails closed on the 10.0.1xx band, whose formatter ignores
+  # DiagnosticSuppressors and reports thousands of false VSTHRD200 errors on
+  # xUnit test methods (dotnet/sdk#48512, backported to 10.0.2xx only).
+  # ---------------------------------------------------------------------------
+  dotnet-format:
+    name: .NET format verification
+    needs: [select, ci-tools]
+    if: ${{ needs.select.outputs.want_dotnet_build == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.CI_SOURCE_SHA }}
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Require a suppressor-aware formatter (SDK >= 10.0.200)
+        working-directory: src
+        run: |
+          set -euo pipefail
+          sdk="$(dotnet --version)"
+          echo "SDK: $sdk; dotnet format: $(dotnet format --version)"
+          IFS=. read -r major minor patch <<<"${sdk%%-*}"
+          if (( major == 10 && minor == 0 && patch < 200 )); then
+            echo "::error::SDK $sdk formatter ignores DiagnosticSuppressors; need >= 10.0.200"
+            exit 1
+          fi
+
+      - name: Restore .NET
+        working-directory: src
+        run: dotnet restore ./farm-web.sln
+
+      - name: Verify formatting
+        working-directory: src
+        run: dotnet format ./farm-web.sln --verify-no-changes --no-restore
+
+  # ---------------------------------------------------------------------------
   # frontend — React build + tests. Runs only when the selector wants it.
   # ---------------------------------------------------------------------------
   frontend:
@@ -1318,6 +1366,7 @@ jobs:
       - select
       - ci-tools
       - dependency-compliance
+      - dotnet-format
       - frontend
       - dotnet-build
       - migration-drift
@@ -1355,6 +1404,7 @@ jobs:
           SELECT_RESULT: ${{ needs.select.result }}
           CI_TOOLS_RESULT: ${{ needs.ci-tools.result }}
           DEPENDENCY_COMPLIANCE_RESULT: ${{ needs.dependency-compliance.result }}
+          DOTNET_FORMAT_RESULT: ${{ needs.dotnet-format.result }}
           FRONTEND_RESULT: ${{ needs.frontend.result }}
           DOTNET_BUILD_RESULT: ${{ needs.dotnet-build.result }}
           MIG_RESULT: ${{ needs.migration-drift.result }}
@@ -1376,6 +1426,7 @@ jobs:
             printf -- '- select: `%s`\n' "$SELECT_RESULT"
             printf -- '- ci-tools: `%s`\n' "$CI_TOOLS_RESULT"
             printf -- '- dependency-compliance: `%s` (wanted=`%s`)\n' "$DEPENDENCY_COMPLIANCE_RESULT" "$WANT_DOTNET_BUILD"
+            printf -- '- dotnet-format: `%s` (wanted=`%s`)\n' "$DOTNET_FORMAT_RESULT" "$WANT_DOTNET_BUILD"
             printf -- '- frontend: `%s` (wanted=`%s`)\n' "$FRONTEND_RESULT" "$WANT_FRONTEND"
             printf -- '- dotnet-build: `%s` (wanted=`%s`)\n' "$DOTNET_BUILD_RESULT" "$WANT_DOTNET_BUILD"
             printf -- '- migration-drift: `%s` (wanted=`%s`)\n' "$MIG_RESULT" "$WANT_MIG_DRIFT"
@@ -1388,6 +1439,7 @@ jobs:
           SELECT_RESULT: ${{ needs.select.result }}
           CI_TOOLS_RESULT: ${{ needs.ci-tools.result }}
           DEPENDENCY_COMPLIANCE_RESULT: ${{ needs.dependency-compliance.result }}
+          DOTNET_FORMAT_RESULT: ${{ needs.dotnet-format.result }}
           FRONTEND_RESULT: ${{ needs.frontend.result }}
           DOTNET_BUILD_RESULT: ${{ needs.dotnet-build.result }}
           MIG_RESULT: ${{ needs.migration-drift.result }}
@@ -1425,6 +1477,7 @@ jobs:
             fi
           }
           check_conditional dependency-compliance "$DEPENDENCY_COMPLIANCE_RESULT" "$WANT_DOTNET_BUILD"
+          check_conditional dotnet-format "$DOTNET_FORMAT_RESULT" "$WANT_DOTNET_BUILD"
           check_conditional frontend "$FRONTEND_RESULT" "$WANT_FRONTEND"
           check_conditional dotnet-build "$DOTNET_BUILD_RESULT" "$WANT_DOTNET_BUILD"
           check_conditional migration-drift "$MIG_RESULT" "$WANT_MIG_DRIFT"

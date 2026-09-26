@@ -1,3 +1,4 @@
+﻿using System.Runtime.InteropServices;
 using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Services.Background;
 using Farm.Infrastructure.Services.HostUpdates;
@@ -8,7 +9,6 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
-using System.Runtime.InteropServices;
 using Xunit;
 
 namespace Farm.Infrastructure.Tests.Services.HostUpdates;

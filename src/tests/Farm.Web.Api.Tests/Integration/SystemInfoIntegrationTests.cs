@@ -9,14 +9,14 @@ using Farm.Infrastructure.Services.Background;
 using Farm.Infrastructure.Services.HostUpdates;
 using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Services.SystemStatus;
+using Farm.Slicer.Module.Data;
+using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Services.SystemInfo;
 using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
-using Farm.Slicer.Module.Data;
-using Farm.Slicer.Module.Domain;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
@@ -312,8 +312,17 @@ public class SystemInfoIntegrationTests : IClassFixture<SystemInfoIntegrationTes
         {
             SlicerDbContext db = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
             db.SlicerServices.AddRange(
-                new SlicerService { Id = first, Name = "first", Version = "2.4.2", Host = "http://private-worker.invalid", ApiKey = "never-return-registry-key", Status = "Online", LastSeen = DateTime.UtcNow,
-                    CapabilitiesJson = "{\"applicationBuild\":\"1.2.3\",\"slicerContainerDigest\":\"not-attestation\"}" },
+                new SlicerService
+                {
+                    Id = first,
+                    Name = "first",
+                    Version = "2.4.2",
+                    Host = "http://private-worker.invalid",
+                    ApiKey = "never-return-registry-key",
+                    Status = "Online",
+                    LastSeen = DateTime.UtcNow,
+                    CapabilitiesJson = "{\"applicationBuild\":\"1.2.3\",\"slicerContainerDigest\":\"not-attestation\"}"
+                },
                 new SlicerService { Id = second, Name = "second", Version = "2.4.2", Host = "http://private-worker.invalid", Status = "Offline", LastSeen = DateTime.UtcNow.AddHours(-1) });
             await db.SaveChangesAsync();
         }

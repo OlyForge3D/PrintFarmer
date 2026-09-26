@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Data;
+﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Services.HostUpdates;
 using FluentAssertions;
 using Microsoft.Data.SqlClient;

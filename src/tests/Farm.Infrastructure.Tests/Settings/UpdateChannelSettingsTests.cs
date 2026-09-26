@@ -1,4 +1,4 @@
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
 using Farm.Infrastructure.Settings;
 using FluentAssertions;
 using Xunit;

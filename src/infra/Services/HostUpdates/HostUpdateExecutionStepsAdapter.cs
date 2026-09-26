@@ -1,4 +1,4 @@
-namespace Farm.Infrastructure.Services.HostUpdates;
+﻿namespace Farm.Infrastructure.Services.HostUpdates;
 
 /// <summary>
 /// Composes the concrete preflight/drain/fence/backup/migrate/apply/verify adapters into the

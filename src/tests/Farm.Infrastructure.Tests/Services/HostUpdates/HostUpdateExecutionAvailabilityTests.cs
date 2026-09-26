@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Data.Migrations;
+﻿using Farm.Infrastructure.Data.Migrations;
 using Farm.Infrastructure.Services.HostUpdates;
 using FluentAssertions;
 using Xunit;

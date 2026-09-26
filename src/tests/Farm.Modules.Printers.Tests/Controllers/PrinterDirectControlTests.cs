@@ -1,4 +1,4 @@
-using System.Security.Claims;
+﻿using System.Security.Claims;
 using System.Text.Json;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
@@ -782,7 +782,9 @@ public sealed class PrinterDirectControlTests : IAsyncLifetime, IAsyncDisposable
         {
             db.PrintJobs.Add(new PrintJob
             {
-                Id = Guid.NewGuid(), Name = "Active job", AssignedPrinterId = printerId,
+                Id = Guid.NewGuid(),
+                Name = "Active job",
+                AssignedPrinterId = printerId,
                 Status = PrintJobStatus.Printing,
             });
         }

@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Services.HostUpdates;
+﻿using Farm.Infrastructure.Services.HostUpdates;
 using Moq;
 using Xunit;
 
@@ -206,14 +206,14 @@ public sealed class HostUpdateExecutionStepsAdapterTests : IDisposable
         HostUpdateExecutionRequest.RequiredServiceIds.OrderByDescending(id => id, StringComparer.Ordinal)
             .Select((id, index) => new HostUpdateExecutionTarget(id, platform, "sha256:" + new string((char)('0' + index), 64)))
             .ToArray())
-        {
-            RequestId = "request-1",
-            TrustRoot = "default",
-            PolicyRevision = 1,
-            PolicyFingerprint = "policy-1",
-            HostPlatform = platform,
-            AuthorizationKind = HostUpdateAuthorizationKind.Manual,
-        };
+    {
+        RequestId = "request-1",
+        TrustRoot = "default",
+        PolicyRevision = 1,
+        PolicyFingerprint = "policy-1",
+        HostPlatform = platform,
+        AuthorizationKind = HostUpdateAuthorizationKind.Manual,
+    };
 
     private static Task WritePriorStateAsync(FileInstalledHostStateStore store) => store.WriteAsync(
         new InstalledHostState(

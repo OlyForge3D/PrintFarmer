@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Authorization;
+﻿using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Settings;
 using Farm.Modules.Devices.Authentication;

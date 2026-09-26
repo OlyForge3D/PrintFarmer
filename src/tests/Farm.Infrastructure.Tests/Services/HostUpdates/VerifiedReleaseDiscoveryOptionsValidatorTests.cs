@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Services.HostUpdates;
+﻿using Farm.Infrastructure.Services.HostUpdates;
 using FluentAssertions;
 using Microsoft.Extensions.Options;
 using Xunit;

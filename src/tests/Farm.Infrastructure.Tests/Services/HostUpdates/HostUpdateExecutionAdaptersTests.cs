@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Services.HostUpdates;
+﻿using Farm.Infrastructure.Services.HostUpdates;
 using Xunit;
 
 namespace Farm.Infrastructure.Tests.Services.HostUpdates;

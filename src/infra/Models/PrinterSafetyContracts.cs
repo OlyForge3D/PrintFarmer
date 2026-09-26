@@ -1,4 +1,4 @@
-namespace Farm.Infrastructure;
+﻿namespace Farm.Infrastructure;
 
 /// <summary>Completeness of the latest per-printer safety discovery.</summary>
 public enum VerifiedSafetyDiscoveryState

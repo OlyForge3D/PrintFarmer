@@ -1,4 +1,4 @@
-using System.Reflection;
+﻿using System.Reflection;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using Farm.Infrastructure.Settings;
