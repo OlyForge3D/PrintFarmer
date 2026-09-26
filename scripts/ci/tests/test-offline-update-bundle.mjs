@@ -19,6 +19,9 @@ import { admitOfflineReplay, assembleOfflineBundle, evaluateTrustPolicy, hostUpd
   redactReason, releaseSigningIdentity, tarHeader, trustedRootApprovalKind, verifyOfflineBundle } from '../offline-update-bundle.mjs';
 import { recoveryInstructionsDocument, recoveryInstructionsName, recoveryInstructionsSignatureName,
   validateRecoveryInstructions } from '../offline-recovery-instructions.mjs';
+import { bindDeploymentSetToImages, deploymentSetDocument, deploymentSetName, deploymentSetSignatureName,
+  deploymentTemplatePaths, deploymentTopologies, offlineToolsLockPath, readDeploymentTemplates, toolMember,
+  validateDeploymentSet, validateOfflineToolsLock } from '../offline-deployment-set.mjs';
 
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 const imageDetails = Object.fromEntries(Object.entries(components).map(([name, component], index) => [name, {
@@ -711,7 +714,7 @@ test('missing required members and unexpected members are rejected', () => {
   try {
     const manifest = readFileSync(join(context.assets, 'update-manifest.json'));
     const index = files => Buffer.from(JSON.stringify({ schema: 1, kind: 'printfarmer-offline-bundle',
-      release: {}, manifestDigest: '', contents: { cliRuntimes: [], images: false, infrastructure: false,
+      release: {}, manifestDigest: '', contents: { cliRuntimes: [], deploymentSet: false, images: false, infrastructure: false,
         priorRecoverySet: false, recoveryInstructions: false }, installable: false, rolloutAuthorization: false, files }));
     const file = (name, role, bytes) => ({ name, role, size: bytes.length, sha256: sha256(bytes) });
     const indexWith = (release, files) => {
@@ -1441,11 +1444,40 @@ function withInstructions(context, { boundTo = context.identity, signedBy = cont
 function completeFixture(channel = 'stable') {
   const context = imageFixture(channel);
   withInstructions(context);
-  assemble(context, { images: context.layout });
+  withDeploymentSet(context);
+  assemble(context, { images: context.layout, tools: context.tools });
   context.records = join(context.root, 'records');
   mkdirSync(context.records);
   approveTrustedRoot(context);
   return context;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Issue #3081: the signed deployment set (real repository templates) and approved tool bytes
+// ---------------------------------------------------------------------------------------------
+const repositoryRoot = join(import.meta.dirname, '..', '..', '..');
+const deploymentTemplates = readDeploymentTemplates(repositoryRoot);
+
+function fakeToolLock(tools) {
+  mkdirSync(tools, { recursive: true });
+  const artifacts = [['linux/amd64', 'cosign-linux-amd64'], ['linux/arm64', 'cosign-linux-arm64'],
+    ['windows/amd64', 'cosign-windows-amd64.exe']].map(([platform, name]) => {
+    const bytes = Buffer.from(`fake ${name} ${'c'.repeat(900)}`);
+    writeFileSync(join(tools, name), bytes);
+    return { tool: 'cosign', version: '3.0.6', platform, name,
+      url: `https://github.com/sigstore/cosign/releases/download/v3.0.6/${name}`, size: bytes.length, sha256: sha256(bytes) };
+  });
+  const lock = validateOfflineToolsLock(readFileSync(join(repositoryRoot, ...offlineToolsLockPath.split('/'))));
+  return { artifacts, imageTools: lock.imageTools };
+}
+
+function withDeploymentSet(context, { boundTo = context.identity, signedBy = context.release.channel, lock } = {}) {
+  context.tools = join(context.root, 'tools');
+  context.toolLock = lock ?? fakeToolLock(context.tools);
+  const bytes = deploymentSetDocument(boundTo, { templates: deploymentTemplates, lock: context.toolLock });
+  writeFileSync(join(context.assets, deploymentSetName), bytes);
+  writeFileSync(join(context.assets, deploymentSetSignatureName), sign(bytes, signedBy));
+  return bytes;
 }
 
 function approveTrustedRoot(context, overrides = {}) {
@@ -1666,6 +1698,7 @@ test('import verifies, loads only verified images and writes one durable redacte
     assert.deepEqual(record.verifiedDigests.images.map(image => image.member).sort(), allImageMembers);
     assert.equal(record.verifiedDigests.recoveryInstructions,
       sha256(readFileSync(join(context.assets, recoveryInstructionsName))));
+    assert.equal(record.verifiedDigests.deploymentSet, sha256(readFileSync(join(context.assets, deploymentSetName))));
     assert.deepEqual(record.loadedImages.map(image => image.member).sort(), allImageMembers);
     assert.equal(runner.loads.length, allImageMembers.length);
     assert.deepEqual(decisionFiles(context), ['2026-09-25T20-00-00-000Z-00000000-0000-4000-8000-000000000001.json']);
@@ -1685,6 +1718,13 @@ test('import refuses a verified but incomplete bundle, removes its staging and r
     ['no recovery instructions', context => assemble(context, { images: context.layout }), /lacks signed recovery instructions/],
     ['no images', context => { withInstructions(context); assemble(context); },
       /lacks release-selected images and the infrastructure image list/],
+    ['no deployment set', context => { withInstructions(context); assemble(context, { images: context.layout }); },
+      /lacks the signed deployment set and its approved tools/],
+    ['pre-#3081 index', context => {
+      withInstructions(context);
+      assemble(context, { images: context.layout });
+      rewriteBundle(context, ({ index }) => { delete index.contents.deploymentSet; });
+    }, /lacks the signed deployment set and its approved tools/],
   ]) {
     const context = imageFixture('stable');
     try {
@@ -2024,4 +2064,207 @@ test('offline-admit re-verifies against the absolute trusted root with the same 
     trustedRoot: 'trusted_root.json' }), /absolute Sigstore trusted root/);
   assert.throws(() => admitOfflineReplay({ run, staging: join(abs, 's'), channel: 'insider', verification, trustedRoot,
     cosign: 'cosign' }), /absolute Cosign path/);
+});
+// ---------------------------------------------------------------------------------------------
+// Issue #3081: complete offline set — deployment templates, config schema and approved tools
+// ---------------------------------------------------------------------------------------------
+test('the repository tools lock is valid and pins the Cosign version the release workflow installs', () => {
+  const lock = validateOfflineToolsLock(readFileSync(join(repositoryRoot, ...offlineToolsLockPath.split('/'))));
+  const workflow = readFileSync(join(repositoryRoot, '.github', 'workflows', 'consolidated-release.yml'), 'utf8');
+  const pinned = [...workflow.matchAll(/cosign-release: '(v[0-9.]+)'/g)].map(match => match[1]);
+  assert.ok(pinned.length > 0);
+  for (const artifact of lock.artifacts.filter(entry => entry.tool === 'cosign')) {
+    assert.ok(pinned.every(version => version === `v${artifact.version}`), 'lock and workflow pin the same Cosign');
+  }
+  assert.deepEqual(lock.artifacts.map(artifact => artifact.platform), ['linux/amd64', 'linux/arm64', 'windows/amd64']);
+  assert.deepEqual(lock.imageTools.map(entry => `${entry.tool}@${entry.image}`),
+    ['pg_dump@postgres', 'pg_restore@postgres', 'sqlcmd@mssql']);
+  const bytes = Buffer.from(JSON.stringify(lock));
+  const edit = change => { const copy = JSON.parse(bytes.toString()); change(copy); return Buffer.from(JSON.stringify(copy)); };
+  assert.throws(() => validateOfflineToolsLock(edit(copy => { copy.artifacts[0].url = 'https://example.com/cosign'; })),
+    /not the pinned upstream release asset/);
+  assert.throws(() => validateOfflineToolsLock(edit(copy => { copy.artifacts.reverse(); })), /invalid or unsorted/);
+  assert.throws(() => validateOfflineToolsLock(edit(copy => { copy.imageTools.pop(); })), /exactly the tools|sqlcmd/);
+  assert.throws(() => validateOfflineToolsLock(edit(copy => { copy.imageTools[2].image = 'postgres'; })), /sqlcmd/);
+  assert.throws(() => validateOfflineToolsLock(edit(copy => { copy.extra = 1; })), /schema is not supported/);
+});
+
+test('the deployment set carries exactly the supported templates and a schema derived from them', () => {
+  const identity = { ...releases.stable, sequence: deriveSequence(releases.stable.version) };
+  const lock = fakeToolLock(mkdtempSync(join(tmpdir(), 'offline-tools-')));
+  const bytes = deploymentSetDocument(identity, { templates: deploymentTemplates, lock });
+  assert.deepEqual(deploymentSetDocument({ ...identity }, { templates: new Map(deploymentTemplates), lock }), bytes,
+    'generation is deterministic');
+  const document = validateDeploymentSet(bytes, identity);
+  assert.equal(document.kind, 'printfarmer-offline-deployment-set');
+  assert.equal(document.rolloutAuthorization, false);
+  assert.deepEqual(document.templates.map(file => file.path), deploymentTemplatePaths);
+  assert.ok(!document.templates.some(file => /monitoring|registry|emulator|pgadmin|spoolman|go2rtc|obico|telemetry/i
+    .test(file.path)), 'optional add-ons are outside offline support');
+  for (const file of document.templates) {
+    assert.deepEqual(Buffer.from(file.content, 'base64'), deploymentTemplates.get(file.path));
+  }
+  assert.ok(document.configSchema.variables.includes('DB_PROVIDER') || document.configSchema.variables.length > 0);
+  assert.deepEqual(document.configSchema.variables, [...document.configSchema.variables].sort());
+  assert.deepEqual(Object.keys(document.topologies), Object.keys(deploymentTopologies));
+  assert.deepEqual(document.hostPrerequisites, ['docker']);
+  for (const other of [{ ...identity, buildId: '99' }, { ...identity, channel: 'insider' }]) {
+    assert.throws(() => validateDeploymentSet(bytes, other), /not the exact release-bound deployment set/);
+  }
+  const text = bytes.toString('utf8');
+  const forge = replace => Buffer.from(replace(JSON.parse(text)));
+  const reencode = value => `${JSON.stringify(value, undefined, 2)}\n`;
+  assert.throws(() => validateDeploymentSet(Buffer.from(`${text} `), identity), /not the exact release-bound/);
+  assert.throws(() => validateDeploymentSet(forge(value => {
+    value.templates[0].content = Buffer.from('tampered').toString('base64'); return reencode(value);
+  }), identity), /not the exact release-bound/);
+  assert.throws(() => validateDeploymentSet(forge(value => {
+    value.configSchema.variables.push('ZZZ_EXTRA'); return reencode(value);
+  }), identity), /not the exact release-bound/);
+  assert.throws(() => validateDeploymentSet(forge(value => {
+    value.templates.pop(); return reencode(value);
+  }), identity), /exactly the supported deployment templates/);
+  assert.throws(() => validateDeploymentSet(forge(value => {
+    value.topologies['split-postgres'].images.push('grafana'); return reencode(value);
+  }), identity), /not the exact release-bound/);
+  const partial = new Map(deploymentTemplates);
+  partial.delete(deploymentTemplatePaths[0]);
+  assert.throws(() => deploymentSetDocument(identity, { templates: partial, lock }), /exactly the supported deployment templates/);
+  const required = [...Object.keys(components), 'mssql', 'nginx', 'postgres'];
+  assert.equal(bindDeploymentSetToImages(document, required, ['mssql', 'nginx', 'postgres']), document);
+  assert.throws(() => bindDeploymentSetToImages(document, required.filter(id => id !== 'mssql'), ['nginx', 'postgres']),
+    /names an image the release does not select: mssql/);
+  assert.throws(() => bindDeploymentSetToImages(document, [...required, 'redis'], ['mssql', 'nginx', 'postgres', 'redis']),
+    /do not cover exactly the release-selected image set/);
+});
+
+test('a complete set round-trips and every image, template and tool is bound to the signed release', () => {
+  const context = completeFixture('insider');
+  try {
+    const { index } = readBundle(context.bundle);
+    assert.equal(index.contents.deploymentSet, true);
+    const toolNames = context.toolLock.artifacts.map(artifact => toolMember(artifact.name)).sort();
+    assert.deepEqual(index.files.filter(file => file.role === 'deployment-tool').map(file => file.name).sort(), toolNames);
+    const { run, calls } = cosign({ requireOffline: true });
+    const record = verify(context, { run });
+    assert.equal(calls.length, 5, 'manifest, CLI checksums, infrastructure, recovery instructions and deployment set');
+    assert.ok(calls.some(call => call.at(-1).endsWith(deploymentSetName)));
+    assert.deepEqual(record.deploymentSet, {
+      sha256: sha256(readFileSync(join(context.assets, deploymentSetName))), configSchemaVersion: 1,
+      topologies: Object.keys(deploymentTopologies),
+      tools: context.toolLock.artifacts.map(artifact => ({ name: artifact.name, sha256: artifact.sha256 })) });
+    for (const artifact of context.toolLock.artifacts) {
+      assert.deepEqual(readFileSync(join(context.staging, toolMember(artifact.name))), readFileSync(join(context.tools, artifact.name)));
+    }
+  } finally {
+    context.cleanup();
+  }
+});
+
+test('the deployment set is all or nothing at assembly', () => {
+  const cases = [
+    ['tools without images', context => assemble(context, { tools: context.tools }), /require an image layout too/],
+    ['signature missing', context => { rmSync(join(context.assets, deploymentSetSignatureName));
+      assemble(context, { images: context.layout, tools: context.tools }); }, /must be present together/],
+    ['tool missing', context => { rmSync(join(context.tools, 'cosign-linux-arm64'));
+      assemble(context, { images: context.layout, tools: context.tools }); }, /Approved tool cosign-linux-arm64/],
+    ['tool tampered', context => { writeFileSync(join(context.tools, 'cosign-linux-amd64'), 'evil');
+      assemble(context, { images: context.layout, tools: context.tools }); }, /does not match its signed pin: cosign-linux-amd64/],
+    ['unbound identity', context => { withDeploymentSet(context, { boundTo: { ...context.identity, buildId: '99' },
+      lock: context.toolLock }); assemble(context, { images: context.layout, tools: context.tools }); },
+    /not the exact release-bound deployment set/],
+    ['wrong signer', context => { withDeploymentSet(context, { signedBy: 'insider', lock: context.toolLock });
+      assemble(context, { images: context.layout, tools: context.tools }); },
+    /signature verification failed for offline-deployment-set\.json/],
+  ];
+  for (const [label, act, pattern] of cases) {
+    const context = imageFixture('stable');
+    try {
+      withDeploymentSet(context);
+      assert.throws(() => act(context), pattern, label);
+      assert.equal(existsSync(context.bundle), false, label);
+    } finally {
+      context.cleanup();
+    }
+  }
+  const context = imageFixture('stable');
+  try {
+    assert.throws(() => assemble(context, { images: context.layout, tools: join(context.root, 'tools') }),
+      /publishes no signed deployment set/);
+    withDeploymentSet(context);
+    const { index } = assemble(context, { images: context.layout });
+    assert.equal(index.contents.deploymentSet, false, 'without approved tools the set is omitted, never partial');
+    assert.ok(!index.files.some(file => file.role.startsWith('deployment')));
+  } finally {
+    context.cleanup();
+  }
+});
+
+test('partial, extra, tampered, re-signed or unbound deployment members are rejected before import', () => {
+  const context = completeFixture('stable');
+  try {
+    const original = readFileSync(context.bundle);
+    const restore = () => writeFileSync(context.bundle, original);
+    const forge = (edit, pattern) => { rewriteBundle(context, edit); rejectsWithoutStaging(context, pattern); restore(); };
+    forge(({ members }) => { members.delete(toolMember('cosign-linux-arm64')); },
+      /does not carry exactly the approved tools/);
+    forge(({ members, roles }) => { members.set(toolMember('extra-tool'), Buffer.from('x')); roles.set(toolMember('extra-tool'),
+      'deployment-tool'); }, /does not carry exactly the approved tools/);
+    forge(({ members }) => { members.set(toolMember('cosign-linux-amd64'), Buffer.from('evil')); },
+      /approved tool does not match its signed pin: cosign-linux-amd64/);
+    forge(({ members }) => { members.set(deploymentSetName, Buffer.concat([members.get(deploymentSetName), Buffer.from(' ')])); },
+      /signature verification failed for offline-deployment-set\.json/);
+    forge(({ members }) => {
+      const bytes = deploymentSetDocument({ ...context.identity, buildId: '99' }, { templates: deploymentTemplates,
+        lock: context.toolLock });
+      members.set(deploymentSetName, bytes);
+      members.set(deploymentSetSignatureName, Buffer.from(sign(bytes, 'stable')));
+    }, /not the exact release-bound deployment set/);
+    forge(({ members }) => {
+      const document = JSON.parse(members.get(deploymentSetName).toString('utf8'));
+      document.tools[0].sha256 = sha256(Buffer.from('evil'));
+      const bytes = Buffer.from(`${JSON.stringify(document, undefined, 2)}\n`);
+      members.set(deploymentSetName, bytes);
+      members.set(deploymentSetSignatureName, Buffer.from(sign(bytes, 'insider')));
+    }, /signature verification failed for offline-deployment-set\.json/);
+    forge(({ members }) => { members.delete(deploymentSetSignatureName); }, /missing required member: offline-deployment-set\.sigstore/);
+    forge(({ index }) => { index.contents.deploymentSet = false; }, /do not match its deployment set flag/);
+    forge(({ index, members }) => {
+      for (const name of [...members.keys()]) if (/^image-|^infrastructure-/.test(name)) members.delete(name);
+      index.contents.images = false; index.contents.infrastructure = false;
+    }, /contents claim material this format does not carry/);
+    assert.ok(verify(context).deploymentSet);
+  } finally {
+    context.cleanup();
+  }
+});
+
+test('pre-#3081 bundles without a deploymentSet claim still verify as carrying no deployment set', () => {
+  const legacy = imageFixture('stable');
+  try {
+    withInstructions(legacy);
+    assemble(legacy, { images: legacy.layout });
+    rewriteBundle(legacy, ({ index }) => { delete index.contents.deploymentSet; });
+    const record = verify(legacy);
+    assert.equal(record.deploymentSet, false);
+  } finally {
+    legacy.cleanup();
+  }
+  const context = completeFixture('stable');
+  try {
+    const original = readFileSync(context.bundle);
+    rewriteBundle(context, ({ index }) => { delete index.contents.deploymentSet; });
+    rejectsWithoutStaging(context, /do not match its deployment set flag/);
+    writeFileSync(context.bundle, original);
+    rewriteBundle(context, ({ index }) => { index.contents.unknownClaim = false; });
+    rejectsWithoutStaging(context, /contents claim material this format does not carry/);
+    writeFileSync(context.bundle, original);
+    rewriteBundle(context, ({ index, members }) => {
+      delete index.contents.deploymentSet;
+      members.delete(toolMember('cosign-linux-arm64'));
+    });
+    rejectsWithoutStaging(context, /deployment set flag|approved tools/);
+  } finally {
+    context.cleanup();
+  }
 });
