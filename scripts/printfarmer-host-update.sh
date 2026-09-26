@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Host-local PrintFarmer host-update status/recovery wrapper (issue #2980, first slice).
 #
-# Runs the packaged Farm.HostUpdate.Cli without the API. Only three fixed operations are exposed;
+# Runs the packaged Farm.HostUpdate.Cli without the API. Only fixed operations are exposed;
 # no arbitrary shell text, compose files, or credentials are accepted on the command line. This
 # is NOT rollout authorization: it never starts a forward update.
 #
@@ -9,6 +9,7 @@
 #   printfarmer-host-update.sh --config /abs/host-update.json recover --release <id> [--request-id <id>] --preview [--json]
 #   printfarmer-host-update.sh --config /abs/host-update.json recover --release <id> [--request-id <id>] --confirm <id> [--reapprove-drift <token>] [--printers-reconciled <token>] [--json]
 #   printfarmer-host-update.sh import --config /abs/host-update.json --bundle /abs/bundle.tar --channel <stable|insider> --version <v> --trusted-root /abs/trusted_root.json --trusted-root-approval /abs/approval.json --staging /abs/new-dir --records /abs/records-dir --operator <id> [--prior-recovery-set /abs/dir] [--protected-backup /abs/reference.json]
+#   printfarmer-host-update.sh activate --config /abs/host-update.json --staging /abs/verified-staging --channel <stable|insider> --trusted-root /abs/trusted_root.json [--cosign /abs/cosign] [--json]
 #
 # `import` (issue #3063) verifies a signed offline update bundle without network access, loads only
 # its verified images into the local Docker engine and writes one durable, redacted decision record
@@ -50,7 +51,7 @@ readonly VERSION_RE='^[0-9A-Za-z.+-]{1,128}$'
 readonly OPERATOR_RE='^[A-Za-z0-9][A-Za-z0-9._@-]{0,63}$'
 
 usage() {
-    sed -n '8,11p' "${BASH_SOURCE[0]}" | sed 's/^#   //' >&2
+    sed -n '8,12p' "${BASH_SOURCE[0]}" | sed 's/^#   //' >&2
 }
 
 fail_usage() {
@@ -138,6 +139,52 @@ run_import() {
     exec "$node_host" "$tool" "${tool_args[@]}"
 }
 
+run_activate() {
+    local seen=" "
+    local activate_config="" staging="" channel="" trusted_root="" cosign="" json=""
+    while [[ $# -gt 0 ]]; do
+        local option="$1"
+        case "$option" in
+            --config|--staging|--channel|--trusted-root|--cosign) ;;
+            --json)
+                [[ "$seen" != *" $option "* ]] || fail_usage "$option may be given only once"
+                seen+="$option "
+                json="--json"
+                shift
+                continue ;;
+            *) fail_usage "unsupported argument: $option" ;;
+        esac
+        [[ "$seen" != *" $option "* ]] || fail_usage "$option may be given only once"
+        [[ $# -ge 2 && -n "$2" ]] || fail_usage "$option requires a value"
+        seen+="$option "
+        local value="$2"
+        shift 2
+        case "$option" in
+            --channel)
+                [[ "$value" =~ $CHANNEL_RE ]] || fail_usage "--channel must be stable or insider"
+                channel="$value" ;;
+            *)
+                is_absolute "$value" || fail_usage "$option must be an absolute path"
+                case "$option" in
+                    --config) activate_config="$value" ;;
+                    --staging) staging="$value" ;;
+                    --trusted-root) trusted_root="$value" ;;
+                    --cosign) cosign="$value" ;;
+                esac ;;
+        esac
+    done
+    local option
+    for option in --config --staging --channel --trusted-root; do
+        [[ "$seen" == *" $option "* ]] || fail_usage "activate requires $option"
+    done
+
+    resolve_launcher
+    local -a cli_args=(offline-activate --staging "$staging" --channel "$channel" --trusted-root "$trusted_root")
+    if [[ -n "$cosign" ]]; then cli_args+=(--cosign "$cosign"); fi
+    if [[ -n "$json" ]]; then cli_args+=(--json); fi
+    exec "${launcher[@]}" --config "$activate_config" "${cli_args[@]}"
+}
+
 # Resolves the CLI launcher into the global `launcher` array: the self-contained apphost alone, or
 # the dotnet host followed by Farm.HostUpdate.Cli.dll.
 resolve_launcher() {
@@ -169,6 +216,7 @@ config=""
 case "${1:-}" in
     help|--help|-h) usage; exit 0 ;;
     import) shift; run_import "$@" ;;
+    activate) shift; run_activate "$@" ;;
 esac
 if [[ "${1:-}" == "--config" ]]; then
     [[ $# -ge 2 ]] || fail_usage "--config requires a value"

@@ -1,4 +1,5 @@
-using System.Collections.Frozen;
+﻿using System.Collections.Frozen;
+using System.Text.Json;
 using Farm.Infrastructure.Data.Migrations;
 
 namespace Farm.Infrastructure.Services.HostUpdates;
@@ -135,26 +136,44 @@ public sealed class HostUpdateTargetImageMigrationRunner(
             throw new HostUpdateTargetImageMigrationException(exception.Message);
         }
 
-        HostUpdateProcessResult pullResult;
         string dockerPath;
         try
         {
             dockerPath = executableResolver.Resolve("docker");
-            var pullArguments = new List<string> { "image", "pull", "--platform", dockerPlatform, image };
-            pullResult = await processRunner.RunAsync(
-                dockerPath,
-                pullArguments,
-                timeout,
-                cancellationToken).ConfigureAwait(false);
+            if (request.ImageSourceMode == HostUpdateImageSourceMode.PreloadedLocal)
+            {
+                HostUpdateProcessResult inspectResult = await processRunner.RunAsync(
+                    dockerPath,
+                    ["image", "inspect", image, "--format", "{{json .}}"],
+                    timeout,
+                    cancellationToken).ConfigureAwait(false);
+                if (!inspectResult.Succeeded || !IsExpectedLocalImage(inspectResult.StandardOutput, image, target.Platform))
+                {
+                    throw new HostUpdateTargetImageMigrationException($"target_image_migration_stage_failed:{contextName}:preloaded_unverified");
+                }
+            }
+            else
+            {
+                var pullArguments = new List<string> { "image", "pull", "--platform", dockerPlatform, image };
+                HostUpdateProcessResult pullResult = await processRunner.RunAsync(
+                    dockerPath,
+                    pullArguments,
+                    timeout,
+                    cancellationToken).ConfigureAwait(false);
+                if (!pullResult.Succeeded)
+                {
+                    throw new HostUpdateTargetImageMigrationException($"target_image_migration_stage_failed:{contextName}:exit={pullResult.ExitCode}");
+                }
+            }
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            throw new HostUpdateTargetImageMigrationException($"target_image_migration_stage_failed:{contextName}:{exception.GetType().Name}");
-        }
+            if (exception is HostUpdateTargetImageMigrationException)
+            {
+                throw;
+            }
 
-        if (!pullResult.Succeeded)
-        {
-            throw new HostUpdateTargetImageMigrationException($"target_image_migration_stage_failed:{contextName}:exit={pullResult.ExitCode}");
+            throw new HostUpdateTargetImageMigrationException($"target_image_migration_stage_failed:{contextName}:{exception.GetType().Name}");
         }
 
         var arguments = new List<string>
@@ -209,5 +228,44 @@ public sealed class HostUpdateTargetImageMigrationRunner(
         }
 
         return result;
+    }
+
+    private static bool IsExpectedLocalImage(string standardOutput, string imageReference, string platform)
+    {
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(standardOutput);
+            JsonElement root = document.RootElement;
+            if (root.ValueKind == JsonValueKind.Array)
+            {
+                root = root.GetArrayLength() == 1 ? root[0] : default;
+            }
+
+            if (root.ValueKind != JsonValueKind.Object ||
+                !root.TryGetProperty("RepoDigests", out JsonElement repoDigests) ||
+                repoDigests.ValueKind != JsonValueKind.Array ||
+                !repoDigests.EnumerateArray().Any(value => value.ValueKind == JsonValueKind.String &&
+                    string.Equals(value.GetString(), imageReference, StringComparison.Ordinal)))
+            {
+                return false;
+            }
+
+            string[] platformParts = platform.Split('-', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            string expectedVariant = platformParts.Length == 3 ? platformParts[2] : string.Empty;
+            string actualVariant = root.TryGetProperty("Variant", out JsonElement variant) ? variant.GetString() ?? string.Empty : string.Empty;
+            return platformParts.Length is 2 or 3 &&
+                root.TryGetProperty("Os", out JsonElement os) &&
+                root.TryGetProperty("Architecture", out JsonElement architecture) &&
+                string.Equals(os.GetString(), platformParts[0], StringComparison.Ordinal) &&
+                string.Equals(architecture.GetString(), platformParts[1], StringComparison.Ordinal) &&
+                (string.Equals(actualVariant, expectedVariant, StringComparison.Ordinal) ||
+                 (string.Equals(platformParts[1], "arm64", StringComparison.Ordinal) &&
+                  string.IsNullOrEmpty(expectedVariant) &&
+                  string.Equals(actualVariant, "v8", StringComparison.Ordinal)));
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
     }
 }

@@ -107,6 +107,141 @@ public sealed class HostUpdateImageApplierTests
         runner.Calls[0].Arguments.Should().Equal("image", "pull", "--platform", "linux-arm64", $"ghcr.io/olyforge3d/printfarmer-api@{digest}");
         runner.Calls[1].Arguments.Should().ContainInOrder("--pull", "never");
     }
+
+    [Fact]
+    public async Task RunAsync_PreloadedMode_InspectsLocalImageAndNeverPullsBeforeCompose()
+    {
+        string digest = "sha256:" + new string('a', 64);
+        string image = $"ghcr.io/olyforge3d/printfarmer-api@{digest}";
+        var runner = new RecordingProcessRunner(call =>
+            call.Arguments.Contains("inspect")
+                ? new HostUpdateProcessResult(0, InspectJson(image, "linux", "amd64"), string.Empty)
+                : new HostUpdateProcessResult(0, "ok", string.Empty));
+        var applier = new HostUpdateImageApplier(
+            runner,
+            new BareNameResolver(),
+            ["compose.yml"],
+            "printfarmer",
+            new Dictionary<string, HostUpdateApplyServiceMapping>(StringComparer.Ordinal) { ["api"] = ApiMapping },
+            TimeSpan.FromSeconds(30));
+        var request = new HostUpdateExecutionRequest(
+            "release-1",
+            1,
+            "sha256:" + new string('b', 64),
+            new string('c', 40),
+            HostUpdateExecutionChannel.Stable,
+            [new HostUpdateExecutionTarget("api", "linux-amd64", digest)])
+        {
+            ImageSourceMode = HostUpdateImageSourceMode.PreloadedLocal,
+        };
+
+        await applier.RunAsync(request, CancellationToken.None);
+
+        runner.Calls.Should().HaveCount(2);
+        runner.Calls[0].Arguments.Should().Equal("image", "inspect", image, "--format", "{{json .}}");
+        runner.Calls.Should().NotContain(call => call.Arguments.Contains("pull"));
+        runner.Calls[1].Arguments.Should().ContainInOrder("up", "-d", "--no-build", "--pull", "never");
+    }
+
+    [Fact]
+    public async Task RunAsync_PreloadedMode_MissingImageFailsBeforeCompose()
+    {
+        string digest = "sha256:" + new string('a', 64);
+        var runner = new RecordingProcessRunner(_ => new HostUpdateProcessResult(1, string.Empty, "missing"));
+        var applier = new HostUpdateImageApplier(
+            runner,
+            new BareNameResolver(),
+            ["compose.yml"],
+            "printfarmer",
+            new Dictionary<string, HostUpdateApplyServiceMapping>(StringComparer.Ordinal) { ["api"] = ApiMapping },
+            TimeSpan.FromSeconds(30));
+        var request = new HostUpdateExecutionRequest(
+            "release-1",
+            1,
+            "sha256:" + new string('b', 64),
+            new string('c', 40),
+            HostUpdateExecutionChannel.Stable,
+            [new HostUpdateExecutionTarget("api", "linux-amd64", digest)])
+        {
+            ImageSourceMode = HostUpdateImageSourceMode.PreloadedLocal,
+        };
+
+        Func<Task> act = () => applier.RunAsync(request, CancellationToken.None);
+
+        await act.Should().ThrowAsync<HostUpdatePreloadedImageVerificationException>()
+            .Where(ex => ex.ServiceId == "api" && ex.Code == "missing");
+        runner.Calls.Should().ContainSingle();
+        runner.Calls[0].Arguments.Should().Contain("inspect");
+    }
+
+    [Fact]
+    public async Task RunAsync_PreloadedMode_WrongPlatformFailsBeforeCompose()
+    {
+        string digest = "sha256:" + new string('a', 64);
+        string image = $"ghcr.io/olyforge3d/printfarmer-api@{digest}";
+        var runner = new RecordingProcessRunner(_ => new HostUpdateProcessResult(0, InspectJson(image, "linux", "arm64"), string.Empty));
+        var applier = new HostUpdateImageApplier(
+            runner,
+            new BareNameResolver(),
+            ["compose.yml"],
+            "printfarmer",
+            new Dictionary<string, HostUpdateApplyServiceMapping>(StringComparer.Ordinal) { ["api"] = ApiMapping },
+            TimeSpan.FromSeconds(30));
+        var request = new HostUpdateExecutionRequest(
+            "release-1",
+            1,
+            "sha256:" + new string('b', 64),
+            new string('c', 40),
+            HostUpdateExecutionChannel.Stable,
+            [new HostUpdateExecutionTarget("api", "linux-amd64", digest)])
+        {
+            ImageSourceMode = HostUpdateImageSourceMode.PreloadedLocal,
+        };
+
+        Func<Task> act = () => applier.RunAsync(request, CancellationToken.None);
+
+        await act.Should().ThrowAsync<HostUpdatePreloadedImageVerificationException>()
+            .Where(ex => ex.ServiceId == "api" && ex.Code == "platform_mismatch");
+        runner.Calls.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task RunAsync_PreloadedMode_AcceptsArm64V8VariantWhenManifestOmitsVariant()
+    {
+        string digest = "sha256:" + new string('a', 64);
+        string image = $"ghcr.io/olyforge3d/printfarmer-api@{digest}";
+        var runner = new RecordingProcessRunner(call =>
+            call.Arguments.Contains("inspect")
+                ? new HostUpdateProcessResult(0, InspectJson(image, "linux", "arm64", "v8"), string.Empty)
+                : new HostUpdateProcessResult(0, "ok", string.Empty));
+        var applier = new HostUpdateImageApplier(
+            runner,
+            new BareNameResolver(),
+            ["compose.yml"],
+            "printfarmer",
+            new Dictionary<string, HostUpdateApplyServiceMapping>(StringComparer.Ordinal) { ["api"] = ApiMapping },
+            TimeSpan.FromSeconds(30));
+        var request = new HostUpdateExecutionRequest(
+            "release-1",
+            1,
+            "sha256:" + new string('b', 64),
+            new string('c', 40),
+            HostUpdateExecutionChannel.Stable,
+            [new HostUpdateExecutionTarget("api", "linux-arm64", digest)])
+        {
+            ImageSourceMode = HostUpdateImageSourceMode.PreloadedLocal,
+        };
+
+        await applier.RunAsync(request, CancellationToken.None);
+
+        runner.Calls.Should().HaveCount(2);
+    }
+
+    private static string InspectJson(string image, string os, string architecture, string? variant = null) =>
+        variant is null
+            ? $$"""{"RepoDigests":["{{image}}"],"Os":"{{os}}","Architecture":"{{architecture}}"}"""
+            : $$"""{"RepoDigests":["{{image}}"],"Os":"{{os}}","Architecture":"{{architecture}}","Variant":"{{variant}}"}""";
+
     private sealed record ProcessCall(string FileName, IReadOnlyList<string> Arguments, IReadOnlyDictionary<string, string> Environment);
 
     private sealed class BareNameResolver : IHostUpdateExecutableResolver

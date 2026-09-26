@@ -182,6 +182,7 @@ internal static class HostUpdateOfflineAdmission
             return false;
         }
 
+        string manifestPlatform = manifest.Platforms.Count > 0 ? manifest.Platforms[0] : string.Empty;
         IReadOnlyDictionary<string, string> platforms = manifest.PlatformDigests;
         var candidate = new VerifiedHostUpdateCandidate(
             $"{manifest.Channel}:{manifest.Version}",
@@ -196,13 +197,14 @@ internal static class HostUpdateOfflineAdmission
             MaintenanceWindowOpen: true,
             IsNewer: true,
             new HostUpdatePlatformDigests(
-                platforms.GetValueOrDefault("api", string.Empty),
-                platforms.GetValueOrDefault("frontend", string.Empty),
-                platforms.GetValueOrDefault("slicer-host", string.Empty),
-                platforms.GetValueOrDefault("printer-discovery", string.Empty),
-                platforms.GetValueOrDefault("orcaslicer-worker", string.Empty),
-                platforms.GetValueOrDefault("monolith", string.Empty)));
-        staged = new StagedRelease(candidate, manifestBytes!, signatureBytes!, Path.GetFullPath(staging));
+                platforms.GetValueOrDefault(PlatformKey("api", manifestPlatform), string.Empty),
+                platforms.GetValueOrDefault(PlatformKey("frontend", manifestPlatform), string.Empty),
+                platforms.GetValueOrDefault(PlatformKey("slicer-host", manifestPlatform), string.Empty),
+                platforms.GetValueOrDefault(PlatformKey("printer-discovery", manifestPlatform), string.Empty),
+                platforms.GetValueOrDefault(PlatformKey("orcaslicer-worker", manifestPlatform), string.Empty),
+                platforms.GetValueOrDefault(PlatformKey("monolith", manifestPlatform), string.Empty)),
+            HostPlatform: manifestPlatform);
+        staged = new StagedRelease(candidate, manifest, manifestBytes!, signatureBytes!, Path.GetFullPath(staging));
         error = null;
         return true;
     }
@@ -322,7 +324,9 @@ internal static class HostUpdateOfflineAdmission
     private static Task<int> FailAsync(TextWriter output, HostUpdateCliArguments args, int exitCode, string code) =>
         HostUpdateCli.EmitAsync(output, args.Json, exitCode, new HostUpdateCli.CliFailure(code, []));
 
-    internal sealed record StagedRelease(VerifiedHostUpdateCandidate Candidate, byte[] ManifestBytes, byte[] SignatureBytes, string StagingPath);
+    internal static string PlatformKey(string serviceId, string platform) => $"{serviceId}/{platform}";
+
+    internal sealed record StagedRelease(VerifiedHostUpdateCandidate Candidate, SignedUpdateManifest Manifest, byte[] ManifestBytes, byte[] SignatureBytes, string StagingPath);
 
     private sealed record OfflineAdmissionReport(
         string Decision,

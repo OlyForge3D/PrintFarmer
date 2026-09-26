@@ -6,8 +6,8 @@ microsoft_alias: ""
 featured_image: ""
 categories: []
 tags: ["deployment", "offline", "recovery"]
-ai_note: "AI-assisted delivery contract; no complete offline bundle is claimed."
-summary: "Separate legacy image caching from the required verified, network-denied recovery bundle."
+ai_note: "AI-assisted delivery contract; offline activation requires prior verified import evidence."
+summary: "Document verified offline import, activation and recovery requirements for network-denied hosts."
 post_date: "2026-09-24"
 ---
 
@@ -35,7 +35,8 @@ every decision durably. It also enforces the offline trust expiry policy and
 admits the release through the host's durable replay store, refusing replays,
 downgrades and cross-channel imports (#3064, see
 [replay admission and trust expiry](#replay-admission-channel-continuity-and-trust-expiry-3064)).
-It still installs, activates and authorizes nothing.
+It authorizes no rollout by itself; activation is a separate operator step that
+reuses the same signed bytes, replay evidence and shared host-update executor.
 
 Connected installations need a proven minimum host-local recovery path but do
 not need to hand-carry a bundle. Disconnected installations additionally need
@@ -198,8 +199,9 @@ incomplete. Remaining work under #2658:
   expiry.
 - #3081 (delivered): complete offline set — deployment templates, configuration
   schema and approved tools bound to the signed release.
-- #3080 (open, after #3081): offline install/activation with Bash/PowerShell
-  wrapper parity. Until it lands, `import` installs nothing.
+- #3080 (delivered): offline activation with Bash/PowerShell wrapper parity.
+  Activation re-verifies the imported release, proves preloaded images locally and
+  executes the existing host-update engine without registry or build fallback.
 - #3082 (open, after #3080): network-denied recovery to the prior artifact set
   with provider and remote-owner requirements failing closed.
 
@@ -423,6 +425,82 @@ directory) are rejected before a record can be written.
 An imported record is evidence that the bytes were verified and loaded. It is
 not an update offer, an installation or channel consent; applying a release
 still follows the [operator runbook](HOST_UPDATE_RUNBOOK.md).
+
+## Offline activation (#3080)
+
+Activate a previously imported release only after the host is prepared for a
+managed update and the API service is stopped. The wrappers expose the same
+fixed operation on both platforms:
+
+```bash
+scripts/printfarmer-host-update.sh activate --config /etc/printfarmer/host-update.json \
+  --staging /srv/offline/staging-1 --channel stable \
+  --trusted-root /srv/offline/trusted_root.json [--cosign /abs/cosign] [--json]
+```
+
+```powershell
+pwsh -File scripts\printfarmer-host-update.ps1 activate -Config D:\PrintFarmer\host-update.json `
+  -Staging D:\offline\staging-1 -Channel stable `
+  -TrustedRoot D:\offline\trusted_root.json [-Cosign D:\abs\cosign.exe] [-Json]
+```
+
+`activate` invokes `Farm.HostUpdate.Cli offline-activate` with the same absolute
+argument vector and preserves the CLI exit code. Usage/setup errors return 2;
+refusals return 6; a held host-update execution lock returns 7; unreadable
+configuration or state returns the existing configuration/state codes. There is
+no registry fallback, no local build and no verification bypass option.
+
+Activation re-parses the staged `update-manifest.json`, re-verifies
+`update-manifest.sigstore.json` with the supplied trusted root and requires the
+manifest channel to equal both `--channel` and the standing policy channel. It
+then performs a read-only check of the durable replay store for the exact
+imported release identity (release ID, sequence and manifest digest). Only a
+strict `Imported` disposition is accepted. Missing evidence, an already accepted
+or completed activation, a rejected, superseded or replayed identity, or
+evidence from another channel fails closed before images or compose state are
+touched. A successful activation records the imported evidence as consumed, so a
+second activation requires a fresh import/admission.
+
+Before any mutation, activation constructs the configured topology from the
+signed manifest and verifies every required image locally by exact
+`repository@sha256:<digest>` and platform (`os/architecture[/variant]`). Missing
+images, wrong platforms, incomplete platform digest sets or mixed-release
+digests are refused before `docker compose` runs. The apply and target-image
+migration steps use preloaded image mode: they inspect local images, run
+migrations with `docker run --pull never`, and apply templates with
+`docker compose up -d --no-build --pull never`; they never run `docker pull`.
+
+Execution still goes through the existing `HostUpdateExecutor` state machine
+(preflight, drain, fence, backup, migration, apply, verify), journal and
+installed-state writer. The CLI wires the same concrete adapters used by the API
+for backup, target-image migrations, apply, health/digest verification and
+recovery semantics. To avoid a false in-process writer fence, the CLI proves
+every active database-writing compose service is inactive: monolith topologies
+check `monolith`, split topologies check `api` and `slicer-host`, and any other
+active writer service listed by configuration must have a known compose service
+mapping. The proof uses all container states (`docker compose ps -a --format
+json`) and allows only absent, exited, dead, removed or not-created services; a
+running, restarting, paused, created/starting, unknown or unparseable state fails
+closed. Activation repeats the replay and writer-absence checks inside the
+executor's own lock immediately before executor steps begin, closing the gap
+between preflight validation and mutation. After health/digest verification
+persists the installed state, the executor consumes the `Imported` replay record
+as `Accepted` before releasing that same lock. A crash in that finalization
+window is recoverable in either order: a later `activate` for the same release
+and manifest digest finalizes a completed journal whose replay record is still
+`Imported`, or finalizes the completion journal when replay is already `Accepted`
+and the request-bound journal proves `verify:after`. The completed-journal path
+requires both `verify:after` and `completed` records to carry the exact binding
+for the current preloaded activation request; registry-mode, legacy-unbound, or
+otherwise mismatched journals are refused and left unchanged. Both paths
+additionally require the installed state to already match the signed target, and
+neither reruns migration or apply steps. With writers stopped, there are no live
+API/slicer/monolith in-memory writer flags to prove, while the durable admission
+gate, database active-work checks, backups, migrations, health gates and
+installed-state records remain the single engine source of truth. Failures before
+verification preserve the prior installed state and leave recovery to the
+existing journal/recovery workflow; once the installed state has changed, the CLI
+reports the completed activation state rather than a refused activation.
 
 ## Replay admission, channel continuity and trust expiry (#3064)
 
