@@ -353,7 +353,7 @@ public sealed class FileHostUpdateReplayStore(string rootPath, IHostUpdateReplay
 {
     private readonly string _path = Path.Combine(rootPath ?? throw new ArgumentNullException(nameof(rootPath)), "host-update-replay.json");
     private readonly string _stagedPath = Path.Combine(rootPath, "host-update-replay.json.staged");
-    private readonly string _lockPath = Path.Combine(rootPath, "host-update-replay.lock");
+    private readonly string _lockPath = Path.Join(rootPath, "host-update-replay.lock");
     private readonly IHostUpdateReplayAnchor _anchor = anchor ?? throw new ArgumentNullException(nameof(anchor));
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly TimeSpan _crossProcessLockTimeout = crossProcessLockTimeout ?? TimeSpan.FromSeconds(30);

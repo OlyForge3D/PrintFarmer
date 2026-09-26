@@ -253,7 +253,7 @@ internal static class HostUpdateOfflineAdmission
             [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries);
         foreach (string segment in segments)
         {
-            current = Path.Combine(current, segment);
+            current = Path.Join(current, segment);
             FileSystemInfo info = Directory.Exists(current) ? new DirectoryInfo(current) : new FileInfo(current);
             if (info.LinkTarget is null)
             {
