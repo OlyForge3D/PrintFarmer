@@ -201,7 +201,8 @@ re-authenticates the staged target and prior manifests, derives the required
 prior images from the prior manifest, requires the record to name exactly that
 set, and re-hashes and verifies every archive before loading any of them.
 `--missing skip` returns `no_packaged_prior_images` without loading only when the
-record claims no prior images; any other shape is refused. The prior set does not
+record claims no prior images and no prior image archive is staged; any other
+shape is refused. The prior set does not
 carry effective configuration; that remains future work under #2981. A bound
 prior set is recovery-only material and never a new offer or implicit channel
 consent.

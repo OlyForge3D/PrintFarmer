@@ -2358,6 +2358,21 @@ test('skipping absent prior images never skips a claimed prior image set', () =>
     writeFileSync(recordPath, JSON.stringify({ ...record, priorImages: [] }));
     assert.throws(() => loadPrior(context, () => assert.fail('nothing may be loaded'), { missing: 'skip' }),
       /holds no verified prior recovery image set/);
+    // A mutable record cannot suppress checks on staged prior archives by disclaiming them (HICKS-3095-001).
+    const { priorImages: _omitted, ...withoutClaim } = record;
+    const tampered = join(context.staging, priorImageMembers[0]);
+    const original = readFileSync(tampered);
+    const removed = join(context.staging, priorImageMembers[1]);
+    const removedBytes = readFileSync(removed);
+    for (const disclaimed of [{ ...record, priorImages: false }, withoutClaim]) {
+      writeFileSync(recordPath, JSON.stringify(disclaimed));
+      writeFileSync(tampered, Buffer.concat([original, Buffer.from('tampered')]));
+      rmSync(removed);
+      assert.throws(() => loadPrior(context, () => assert.fail('nothing may be loaded'), { missing: 'skip' }),
+        /holds no verified prior recovery image set/);
+      writeFileSync(tampered, original);
+      writeFileSync(removed, removedBytes);
+    }
     writeFileSync(recordPath, JSON.stringify(record));
     const loads = [];
     assert.equal(loadPrior(context, recordingDocker(loads), { missing: 'skip' }).loaded.length, priorImageMembers.length);

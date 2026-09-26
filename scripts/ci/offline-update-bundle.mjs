@@ -50,7 +50,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import {
-  closeSync, constants, fstatSync, fsyncSync, lstatSync, mkdirSync, mkdtempSync, openSync, readSync, realpathSync, renameSync,
+  closeSync, constants, fstatSync, fsyncSync, lstatSync, mkdirSync, mkdtempSync, openSync, readdirSync, readSync, realpathSync, renameSync,
   rmdirSync, rmSync, writeSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -182,6 +182,7 @@ const backupIdPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 
 export const priorMemberName = name => `${priorMemberPrefix}${name}`;
 export const priorImageMember = id => priorMemberName(applicationImageMember(id));
+const priorImagePrefix = priorMemberName('image-');
 
 // Issue #3094: the prior set's application images. Only the authenticated prior manifest decides
 // which images, digests and platforms are required; the member names are fixed per service id.
@@ -1235,14 +1236,18 @@ export function loadVerifiedImages({ staging, channel, trustedRoot, run, limits 
 // and the required images, digests and platforms come from the prior manifest alone.
 // ---------------------------------------------------------------------------------------------
 // `missing: 'skip'` (the host-update wrapper's recover-offline path) returns without loading when the
-// verification record claims no packaged prior images, so recovery falls back to the engine cache,
+// verification record claims no packaged prior images and no prior image archive is staged, so
+// recovery falls back to the engine cache,
 // which the CLI still verifies by digest and platform before rolling back; any other record shape
 // is refused as usual.
 export function loadPriorImages({ staging, channel, trustedRoot, run, limits = offlineBundleLimits,
   imageLimits = imageArchiveLimits, missing = 'refuse' }) {
   requireThat(missing === 'refuse' || missing === 'skip', '--missing must be refuse or skip');
   const { directory, root, record } = openLoadStaging({ staging, channel, trustedRoot, run, limits });
-  if (missing === 'skip' && (record.priorImages === false || record.priorImages === undefined)) {
+  // The record is mutable, so its absence claim alone cannot suppress checks: any staged prior image
+  // archive (even one the record no longer names) routes to the refusing path below.
+  if (missing === 'skip' && (record.priorImages === false || record.priorImages === undefined) &&
+    !readdirSync(directory).some(name => name.startsWith(priorImagePrefix))) {
     return { loaded: [], skipped: 'no_packaged_prior_images' };
   }
   requireThat(Array.isArray(record.priorImages) && record.priorImages.length > 0 && record.priorRecoverySet,
