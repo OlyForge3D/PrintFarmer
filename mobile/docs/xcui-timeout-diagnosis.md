@@ -366,6 +366,31 @@ is undocumented, so the production app does not set it. Production exposure,
 an Apple Feedback report and any app-side mitigation are tracked in
 [#3067](https://github.com/OlyForge3D/PrintFarmer/issues/3067).
 
+**Standalone repro and exposure (#3067).** The dependency-free app in
+[`mobile/diagnostics/ag-async-layout-repro`](../diagnostics/ag-async-layout-repro/README.md)
+reproduces the stall without PrintFarmer code. Measured on iOS 26.5 (23F77),
+iPad Pro 13-inch (M5):
+
+- A bare `NavigationSplitView { Text } detail: { Text }` stalls the main
+  thread 7.5s under 8s of starvation, and not at all with
+  `AG_ASYNC_LAYOUTS=0`. App value types are not the trigger, so no app-side
+  reduction of them can remove the stall. No app-side mitigation was adopted.
+- It needs an expanded split view mounting for the first time in the process.
+  A `NavigationStack` shell, the collapsed split view on iPhone, and starvation
+  that begins after the shell has settled (including mounting a new detail
+  type) do not stall.
+- It needs the utility layout queue kept off the CPU for the whole mount: at
+  least one saturating block per core at utility, default or user-initiated
+  QoS. Fewer spinners than cores, or background-QoS spinners, do not stall.
+  The stall ends when the starvation ends.
+- The iOS 27.0 (24A434) simulator runtime does not reproduce it under the same
+  load.
+
+A source search found no parallel CPU-bound work in PrintFarmer's launch path,
+so a real-device stall would need the rest of the system to saturate every
+core during the iPad shell mount. Owner-only follow-up (TestFlight/App Store hang reports in the
+Xcode Organizer and the Apple Feedback filing) is recorded on #3067.
+
 **Recognizing the signature.** In a watchdog crash report or a `sample`:
 
 - the main thread is in one `CA::Transaction::commit` →
