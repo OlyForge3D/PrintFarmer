@@ -551,7 +551,12 @@ public static partial class HostUpdateCli
         {
             if (args.Confirm)
             {
-                provider.GetRequiredService<ApprovalBoundInstalledHostStateStore>().Bind(HostUpdateRecoveryDrift.InstalledStateHash(installed));
+                // A gated (offline) recovery also re-proves, under the coordinator's own lock, that the
+                // journal it resolved and gated the request from has not changed since evaluation.
+                Func<bool>? journalUnchanged = bindingGate is null
+                    ? null
+                    : () => SameActivities(activities, provider.GetRequiredService<IHostUpdateExecutionJournal>().Read(args.ReleaseId!));
+                provider.GetRequiredService<ApprovalBoundInstalledHostStateStore>().Bind(HostUpdateRecoveryDrift.InstalledStateHash(installed), journalUnchanged);
             }
 
             if (!args.Confirm)
@@ -670,6 +675,16 @@ public static partial class HostUpdateCli
 
         return null;
     }
+
+    private static bool SameActivities(IReadOnlyList<HostUpdateExecutionActivity> evaluated, IReadOnlyList<HostUpdateExecutionActivity> current) =>
+        evaluated.Count == current.Count &&
+        evaluated.Zip(current).All(pair =>
+            string.Equals(pair.First.ActivityId, pair.Second.ActivityId, StringComparison.Ordinal) &&
+            pair.First.State == pair.Second.State &&
+            string.Equals(pair.First.Phase, pair.Second.Phase, StringComparison.Ordinal) &&
+            pair.First.RecordedAt == pair.Second.RecordedAt &&
+            string.Equals(pair.First.RequestFingerprint, pair.Second.RequestFingerprint, StringComparison.Ordinal) &&
+            string.Equals(pair.First.RequestBindingHash, pair.Second.RequestBindingHash, StringComparison.Ordinal));
 
     private static string? DriftRefusal(HostUpdateDriftReport drift, string? token)
     {

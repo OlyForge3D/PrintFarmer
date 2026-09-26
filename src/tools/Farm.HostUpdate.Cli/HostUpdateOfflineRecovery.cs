@@ -109,10 +109,25 @@ internal static partial class HostUpdateOfflineRecovery
             return "prior_installed_state_mismatch";
         }
 
+        // The installed state must be exactly the prior set for the same services and platforms the
+        // failed target deploys: a missing, extra or re-platformed service is not the prior set.
+        Dictionary<string, string> targetPlatforms = request.Targets.ToDictionary(t => t.ServiceId, t => t.Platform, StringComparer.Ordinal);
+        if (installed.ServiceDigests.Count != targetPlatforms.Count ||
+            (installed.ServicePlatforms is not null && installed.ServicePlatforms.Count != targetPlatforms.Count))
+        {
+            return "prior_installed_state_mismatch";
+        }
+
         foreach ((string service, string digest) in installed.ServiceDigests)
         {
-            string platform = installed.ServicePlatforms?.GetValueOrDefault(service) ?? request.HostPlatform;
-            if (!manifest.PlatformDigests.TryGetValue(HostUpdateOfflineAdmission.PlatformKey(service, platform), out string? expected) ||
+            if (!targetPlatforms.TryGetValue(service, out string? targetPlatform))
+            {
+                return "prior_installed_state_mismatch";
+            }
+
+            string platform = installed.ServicePlatforms is null ? targetPlatform : installed.ServicePlatforms.GetValueOrDefault(service) ?? string.Empty;
+            if (!string.Equals(platform, targetPlatform, StringComparison.Ordinal) ||
+                !manifest.PlatformDigests.TryGetValue(HostUpdateOfflineAdmission.PlatformKey(service, platform), out string? expected) ||
                 !string.Equals(expected, digest, StringComparison.Ordinal))
             {
                 return "prior_installed_state_mismatch";

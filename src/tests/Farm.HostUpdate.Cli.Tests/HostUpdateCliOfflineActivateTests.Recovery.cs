@@ -108,6 +108,43 @@ public sealed partial class HostUpdateCliOfflineActivateTests
         File.ReadAllText(InstalledStatePath()).Should().Be(before);
     }
 
+    [HostStateTheory]
+    [InlineData("missing-service")]
+    [InlineData("extra-service")]
+    [InlineData("mismatched-platform")]
+    public async Task Offline_recovery_refuses_installed_state_that_is_not_the_complete_prior_set(string variant)
+    {
+        string protectedBackup = StagePriorRecoverySet();
+        HostUpdateExecutionRequest request = RequestFromCurrentStaging();
+        WriteFailedJournal(request);
+        Dictionary<string, string> digests = request.Targets.ToDictionary(t => t.ServiceId, t => PriorAmd64Digests[t.ServiceId], StringComparer.Ordinal);
+        Dictionary<string, string> platforms = request.Targets.ToDictionary(t => t.ServiceId, t => t.Platform, StringComparer.Ordinal);
+        string first = request.Targets[0].ServiceId;
+        switch (variant)
+        {
+            case "missing-service":
+                digests.Remove(first);
+                platforms.Remove(first);
+                break;
+            case "extra-service":
+                digests["unexpected"] = PriorAmd64Digests[first];
+                platforms["unexpected"] = platforms[first];
+                break;
+            case "mismatched-platform":
+                platforms[first] = platforms[first] == "linux-arm64" ? "linux-amd64" : "linux-arm64";
+                break;
+        }
+
+        await new FileInstalledHostStateStore(InstalledStatePath()).WriteAsync(
+            new InstalledHostState(PriorReleaseId, PriorDigest(), digests, string.Join('+', digests.Keys.Order(StringComparer.Ordinal)), DateTimeOffset.UtcNow, platforms),
+            CancellationToken.None);
+        string before = File.ReadAllText(InstalledStatePath());
+
+        AssertRefused(Envelope(await RunAsync(OfflineRecover(protectedBackup, confirm: false))), "prior_installed_state_mismatch");
+        AssertRefused(Envelope(await RunAsync(OfflineRecover(protectedBackup, confirm: true))), "prior_installed_state_mismatch");
+        File.ReadAllText(InstalledStatePath()).Should().Be(before);
+    }
+
     [HostStateFact]
     public async Task Offline_recovery_refuses_failed_request_for_a_different_target()
     {

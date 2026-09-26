@@ -1091,6 +1091,23 @@ public sealed class HostUpdateCliTests : IDisposable, IAsyncLifetime
     }
 
     [Fact]
+    public async Task Approval_bound_store_refuses_when_bound_evidence_changed_after_evaluation()
+    {
+        var inner = new MutableInstalledStateStore(Installed("stable:1.2.2"));
+        var store = new ApprovalBoundInstalledHostStateStore(inner);
+        bool journalUnchanged = true;
+        store.Bind(HostUpdateRecoveryDrift.InstalledStateHash(await inner.ReadAsync(CancellationToken.None)), () => journalUnchanged);
+        journalUnchanged = false;
+
+        Func<Task> read = () => store.ReadAsync(CancellationToken.None);
+
+        await read.Should().ThrowAsync<HostUpdateRecoveryApprovalStaleException>();
+
+        store.Bind(HostUpdateRecoveryDrift.InstalledStateHash(await inner.ReadAsync(CancellationToken.None)), () => true);
+        (await store.ReadAsync(CancellationToken.None))!.ReleaseId.Should().Be("stable:1.2.2");
+    }
+
+    [Fact]
     public async Task Approval_bound_store_passes_the_evaluated_state_and_absence()
     {
         var inner = new MutableInstalledStateStore(Installed("stable:1.2.2"));

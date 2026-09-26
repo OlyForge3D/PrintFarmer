@@ -553,18 +553,26 @@ requires, in order (every refusal exits 6 and changes nothing):
 5. The operator's `--protected-backup` reference — a regular file of at most
    64 KiB with exactly `id`, `sha256`, `locationClass` and `releaseVersion` — is
    well formed (`protected_backup_invalid`) and equal to the recorded reference
-   (`protected_backup_mismatch`). The operator's own copy, not the record, is the
-   authority for which backup may be restored.
+   (`protected_backup_mismatch`). The operator's own copy, not the unauthenticated
+   record, is the authority for the reference. The reference is an operator-held
+   precondition only: the engine never contacts, reads or restores the protected
+   backup (whatever its `locationClass`). A coordinated restore uses only the
+   engine's own activation-time backup manifest under host state, whose per-file
+   checksums are re-verified before restore.
 
 Recovery then runs through the ordinary recovery resolver, drift and physical
-reconciliation gates, lease and approval-bound installed-state snapshot. Inside
-that lease, and before planning or confirming, the failed request must be the
+reconciliation gates, lease and approval-bound installed-state snapshot. The
+gate below is evaluated on that locked snapshot, before planning or confirming:
+the failed request must be the
 staged target (`offline_recovery_target_mismatch`) in preloaded-image mode
 (`offline_recovery_requires_preloaded_request`; a registry-mode request would
 re-apply the prior set by pulling), and the installed state must be exactly the
-authenticated prior set: its release ID, manifest digest and every service digest
-for its recorded platform must match the prior manifest
-(`prior_installed_state_mismatch`).
+authenticated prior set: its release ID and manifest digest, and exactly the
+target's service set with each service on the target's platform and at the prior
+manifest's digest for that platform (`prior_installed_state_mismatch`). On
+confirm, the coordinator re-proves under its own execution lock, before any
+restore or apply, that both the installed state and the execution journal are
+unchanged since evaluation; otherwise it exits 12 (`drift_reapproval_stale`).
 
 The recovery engine applies the prior digests in preloaded mode: it inspects each
 prior image locally, and applies templates with
