@@ -489,9 +489,12 @@ as `Accepted` before releasing that same lock. A crash in that finalization
 window is recoverable in either order: a later `activate` for the same release
 and manifest digest finalizes a completed journal whose replay record is still
 `Imported`, or finalizes the completion journal when replay is already `Accepted`
-and the request-bound journal proves `verify:after`. Both paths additionally
-require the installed state to already match the signed target, and neither reruns
-migration or apply steps. With writers stopped, there are no live
+and the request-bound journal proves `verify:after`. The completed-journal path
+requires both `verify:after` and `completed` records to carry the exact binding
+for the current preloaded activation request; registry-mode, legacy-unbound, or
+otherwise mismatched journals are refused and left unchanged. Both paths
+additionally require the installed state to already match the signed target, and
+neither reruns migration or apply steps. With writers stopped, there are no live
 API/slicer/monolith in-memory writer flags to prove, while the durable admission
 gate, database active-work checks, backups, migrations, health gates and
 installed-state records remain the single engine source of truth. Failures before

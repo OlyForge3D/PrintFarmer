@@ -454,7 +454,13 @@ public sealed class HostUpdateCliOfflineActivateTests : IDisposable, IAsyncLifet
         await ImportAsync();
         HostUpdateExecutionRequest request = RequestFromCurrentStaging();
         await WriteInstalledStateAsync(request);
-        _host.SeedJournal(request, [(HostUpdateExecutionState.Completed, "completed")], withBaseline: false);
+        _host.SeedJournal(
+            request,
+            [
+                (HostUpdateExecutionState.Verifying, "verify:after"),
+                (HostUpdateExecutionState.Completed, "completed"),
+            ],
+            withBaseline: false);
         var steps = new RecordingExecutionSteps(null);
 
         JsonElement activated = Envelope(await RunAsync(Activate(), services =>
@@ -540,6 +546,43 @@ public sealed class HostUpdateCliOfflineActivateTests : IDisposable, IAsyncLifet
 
         refused.GetProperty("exitCode").GetInt32().Should().Be(HostUpdateCliExitCodes.Refused, refused.ToString());
         refused.GetProperty("result").GetProperty("code").GetString().Should().Be("replay_accepted");
+    }
+
+    [HostStateFact]
+    public async Task Activation_refuses_accepted_replay_with_completed_journal_for_different_binding()
+    {
+        await ImportAsync();
+        HostUpdateExecutionRequest request = RequestFromCurrentStaging();
+        await WriteInstalledStateAsync(request);
+        await HostUpdateOfflineActivation.MarkActivatedAsync(_host.Configuration(), CurrentCandidate(), CancellationToken.None);
+        HostUpdateExecutionRequest registryRequest = request with { ImageSourceMode = HostUpdateImageSourceMode.Registry };
+        _host.SeedJournal(
+            registryRequest,
+            [
+                (HostUpdateExecutionState.Verifying, "verify:after"),
+                (HostUpdateExecutionState.Completed, "completed"),
+            ],
+            withBaseline: false);
+        string journalBefore = File.ReadAllText(_host.JournalPath);
+        IReadOnlyDictionary<string, string> replayBefore = ReplaySnapshot();
+        var steps = new RecordingExecutionSteps(null);
+
+        JsonElement refused = Envelope(await RunAsync(Activate(), services =>
+        {
+            services.RemoveAll<IHostUpdateLocalImageVerifier>();
+            services.AddSingleton(_imageVerifier);
+            services.AddSingleton<IHostUpdateLocalImageVerifier>(sp => sp.GetRequiredService<FakeLocalImageVerifier>());
+            services.RemoveAll<IHostUpdateOfflineActivationSafetyProbe>();
+            services.AddSingleton<IHostUpdateOfflineActivationSafetyProbe>(_safetyProbe);
+            services.RemoveAll<IHostUpdateExecutionSteps>();
+            services.AddScoped<IHostUpdateExecutionSteps>(_ => steps);
+        }));
+
+        refused.GetProperty("exitCode").GetInt32().Should().Be(HostUpdateCliExitCodes.Refused, refused.ToString());
+        refused.GetProperty("result").GetProperty("code").GetString().Should().Be("replay_accepted");
+        steps.Calls.Should().BeEmpty();
+        File.ReadAllText(_host.JournalPath).Should().Be(journalBefore);
+        ReplaySnapshot().Should().Equal(replayBefore);
     }
 
     [HostStateFact]

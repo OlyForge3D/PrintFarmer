@@ -155,6 +155,9 @@ internal static class HostUpdateOfflineActivation
             IInstalledHostStateStore installedStore = executionScope.ServiceProvider.GetRequiredService<IInstalledHostStateStore>();
             InstalledHostState? installed = await installedStore.ReadAsync(cancellationToken).ConfigureAwait(false);
             bool installedMatches = InstalledStateMatches(request, installed);
+            bool bindingProvenCompleted = HostUpdateOfflineActivationStartGuard.CompletedJournalMatchesRequest(
+                executionScope.ServiceProvider.GetRequiredService<IHostUpdateExecutionJournal>().Read(request.ReleaseId),
+                request);
             if (result.State == HostUpdateExecutionState.Completed)
             {
                 if (!installedMatches)
@@ -162,7 +165,7 @@ internal static class HostUpdateOfflineActivation
                     result = result with { FailureCode = "activation_not_applied" };
                 }
             }
-            else if (installedMatches)
+            else if (installedMatches && bindingProvenCompleted)
             {
                 result = result with { State = HostUpdateExecutionState.Completed };
             }
@@ -350,6 +353,11 @@ internal sealed class HostUpdateOfflineActivationStartGuard(
         HostUpdateExecutionState? current = activities.Count == 0 ? null : activities[^1].State;
         if (current == HostUpdateExecutionState.Completed)
         {
+            if (!CompletedJournalMatchesRequest(activities, request))
+            {
+                return "activation_already_completed";
+            }
+
             HostUpdateReplayDecision completedReplay = await HostUpdateOfflineActivation.ReadReplayDecisionAsync(
                 configuration,
                 HostUpdateOfflineActivation.CandidateFromRequest(request),
@@ -416,7 +424,7 @@ internal sealed class HostUpdateOfflineActivationStartGuard(
 
         if (current == HostUpdateExecutionState.Completed)
         {
-            return true;
+            return CompletedJournalMatchesRequest(activities, request);
         }
 
         if (current == HostUpdateExecutionState.RecoveryRequired || !VerifiedJournalMatchesRequest(activities, request))
@@ -432,15 +440,28 @@ internal sealed class HostUpdateOfflineActivationStartGuard(
         return true;
     }
 
+    internal static bool CompletedJournalMatchesRequest(IReadOnlyList<HostUpdateExecutionActivity> activities, HostUpdateExecutionRequest request) =>
+        VerifiedJournalMatchesRequest(activities, request) &&
+        ExactBoundActivityExists(activities, request, HostUpdateExecutionState.Completed, "completed");
+
     private static bool VerifiedJournalMatchesRequest(IReadOnlyList<HostUpdateExecutionActivity> activities, HostUpdateExecutionRequest request)
     {
-        string bindingHash = HostUpdateRequestBinding.Compute(request);
         return activities.Count > 0 &&
-            activities.All(activity => activity.RequestBindingHash is null || string.Equals(activity.RequestBindingHash, bindingHash, StringComparison.Ordinal)) &&
-            activities.Any(activity =>
-                activity.State == HostUpdateExecutionState.Verifying &&
-                string.Equals(activity.Phase, "verify:after", StringComparison.Ordinal) &&
-                string.Equals(activity.RequestBindingHash, bindingHash, StringComparison.Ordinal));
+            activities.All(activity => activity.RequestBindingHash is null || string.Equals(activity.RequestBindingHash, HostUpdateRequestBinding.Compute(request), StringComparison.Ordinal)) &&
+            ExactBoundActivityExists(activities, request, HostUpdateExecutionState.Verifying, "verify:after");
+    }
+
+    private static bool ExactBoundActivityExists(
+        IReadOnlyList<HostUpdateExecutionActivity> activities,
+        HostUpdateExecutionRequest request,
+        HostUpdateExecutionState state,
+        string phase)
+    {
+        string bindingHash = HostUpdateRequestBinding.Compute(request);
+        return activities.Any(activity =>
+            activity.State == state &&
+            string.Equals(activity.Phase, phase, StringComparison.Ordinal) &&
+            string.Equals(activity.RequestBindingHash, bindingHash, StringComparison.Ordinal));
     }
 
     private static void AppendCompletedJournal(IHostUpdateExecutionJournal journal, HostUpdateExecutionRequest request)
