@@ -1,7 +1,8 @@
-# CI: Affected .NET Test Selection & Pre-Push Format Gate
+# CI: Affected .NET Test Selection & Format Gates
 
-This document describes PrintFarmer's CI strategy and the local pre-push
-formatting hook that replaced the `dotnet format` step in CI.
+This document describes PrintFarmer's CI strategy, the `dotnet-format` CI
+job, and the local pre-push formatting hook that gives the same feedback
+before a push.
 
 Related:
 
@@ -26,12 +27,14 @@ flowchart LR
   D -->|API test + App migration tarballs| J[dotnet-test-providers]
   B --> G[ci-tools]
   B -->|dotnet inputs or full-safe| I[dependency-compliance]
+  B -->|dotnet inputs or full-safe| K[dotnet-format]
   C --> H[summary]
   E --> H
   F --> H
   J --> H
   G --> H
   I --> H
+  K --> H
 ```
 
 Every PR triggers `select` and `ci-tools`. The selector classifies changed
@@ -46,6 +49,7 @@ docs-only PR.
 | `select`                | always                                                       | Classifies changed paths; emits `want_*`, `matrix`, `mig_matrix`.     |
 | `ci-tools`              | always                                                       | Runs `bash -n` + selector + hook tests + `node --test` compliance/squad-tooling suites; no .NET restore. |
 | `dependency-compliance` | any .NET input changed OR full-safe (same as `want_dotnet_build`) | `dotnet restore` + `node scripts/compliance/validate-compliance.mjs` — dependency-license/provenance inventory. See #1395. |
+| `dotnet-format`         | any .NET input changed OR full-safe (same as `want_dotnet_build`) | Asserts SDK >= 10.0.200, restores, then runs `dotnet format ./farm-web.sln --verify-no-changes --no-restore`. Runs in parallel with `dotnet-build`. See #2978. |
 | `frontend`              | React inputs changed OR full-safe                            | `npm ci`, lint, build, `npm run test:coverage` in `src/Web/ReactApp/`; coverage first runs the zero-diagnostic test gate, application typecheck, and source-coverage guards through `pretest:coverage`. |
 | `dotnet-build`          | any .NET input changed OR full-safe                          | Restores/builds once, explicitly builds IntegrationTests when selected, and uploads one compressed tarball per selected project. |
 | `migration-drift`       | App or Slicer schema-relevant inputs changed OR full-safe    | Restores runner-local project metadata, downloads its compiled project, then runs `has-pending-model-changes --no-build`. |
@@ -356,9 +360,42 @@ permissions without paying for a second artifact compression pass.
   categories on the same ordinary .NET PR runs whenever
   `want_dotnet_test=true`.
 
+## `dotnet-format` CI gate (#2978)
+
+CI originally dropped its `dotnet format` step and relied on the pre-push
+hook below. Because that hook is local and opt-in, it never ran in agent
+worktrees or in host checkouts that skipped `.githooks/setup.sh`. As a
+result, 140 real diagnostics (missing BOMs, whitespace, import ordering, and
+braces) accumulated on `development`. The `dotnet-format` job now enforces
+the documented command on the server. It has the same `want_dotnet_build`
+gating as `dependency-compliance` and needs only a restore, so it runs in
+parallel with `dotnet-build`. It adds runner minutes but no wall-clock time
+before the test fan-out.
+
+### Formatter SDK requirement
+
+Run format verification with **.NET SDK 10.0.200 or newer**. In the 10.0.1xx
+feature band (10.0.100 through 10.0.1xx, including the
+`mcr.microsoft.com/dotnet/sdk:10.0` images), `dotnet format` ignores
+`DiagnosticSuppressor`s. `xunit.analyzers` suppresses `VSTHRD200` (the
+`Async` suffix rule) on test methods, and the build honors that suppressor,
+so the build is clean. The old formatter does not honor it and reports
+thousands of false `VSTHRD200` errors on xUnit test methods. That produced
+the roughly 6,353-line output reported in #2978. Upstream fixed this in
+[dotnet/sdk#48512](https://github.com/dotnet/sdk/pull/48512) and backported
+it to 10.0.2xx only. The 10.0.1xx backport,
+[dotnet/sdk#51997](https://github.com/dotnet/sdk/pull/51997), is still
+unmerged. The CI job fails closed on a 10.0.1xx SDK.
+
+`global.json` still pins `10.0.100` with `latestMinor` roll-forward, so it
+picks the newest installed 10.0 SDK. Do not raise that pin to fix the
+formatter: the Docker build images use the 1xx band. If `dotnet format`
+reports `VSTHRD200` on `[Fact]`/`[Theory]` methods, check
+`dotnet --version` from `src/` before renaming anything.
+
 ## Pre-push format gate
 
-`.githooks/pre-push` replaces the CI `dotnet format` step. It runs
+`.githooks/pre-push` runs the same check locally before a push. It runs
 `dotnet format ./farm-web.sln --verify-no-changes` against the **exact
 outgoing Git tree** — not your working directory — so local dirty state cannot
 poison the check.
@@ -435,8 +472,8 @@ This skips all local pre-push hooks (including this one) exactly once, per
 Git's design. Use it in genuine emergencies only.
 
 **Local hooks are not server-enforceable.** Anyone can bypass or delete their
-copy. CI no longer reruns `dotnet format`, so branch protection enforces the
-build/test/drift checks but does not independently enforce formatting.
+copy. The `dotnet-format` CI job is the server-side enforcement; the hook
+exists to give the same feedback before a push.
 
 ## Install the hooks
 
@@ -474,9 +511,9 @@ wall-clock** by running its three partitions concurrently. Narrow .NET
 selections can see a smaller version of the shared-build tradeoff. React-only
 and docs-only runs are unchanged because `dotnet-build` remains selector-gated.
 
-The pre-push hook shifts ~15-90 s of `dotnet format` out of CI onto the
-committer's machine — cached after the first successful verification of any
-given tree.
+The pre-push hook gives local `dotnet format` feedback before a push. It is
+cached after the first successful verification of each tree. The
+`dotnet-format` CI job re-runs the check in parallel with `dotnet-build`.
 
 ## Failure diagnosis
 
@@ -491,6 +528,12 @@ given tree.
   `cd src && dotnet restore ./farm-web.sln && cd .. && node scripts/compliance/validate-compliance.mjs`.
   If it unexpectedly ran (or was skipped) for a given PR, check
   `want_dotnet_build` in the `select` job summary — it mirrors `dotnet-build`.
+- `dotnet-format` failed → the job log lists each file, line, and diagnostic
+  ID. Reproduce with `cd src && dotnet restore ./farm-web.sln && dotnet format
+  ./farm-web.sln --verify-no-changes --no-restore`. Fix with the same command
+  without `--verify-no-changes`, using SDK >= 10.0.200 (see
+  [Formatter SDK requirement](#formatter-sdk-requirement)). If the SDK
+  assertion step failed, the runner resolved a 10.0.1xx SDK.
 - `dotnet-test` matrix leg failed → per-leg `TestResults/*.trx` is uploaded
   as `dotnet-test-results-<leg>` artifact. Download and inspect. The
   workflow also asserts that the TRX reports non-zero executed tests, so an

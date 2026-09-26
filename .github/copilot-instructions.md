@@ -55,6 +55,11 @@ leases, unprovisioned PostgreSQL/SQL Server env vars, a SQLite collation
 quirk); do not try to force those to pass locally, see the same doc section
 for the rationale.
 
+The CI `dotnet-format` job enforces `dotnet format --verify-no-changes`. Run it
+locally with .NET SDK 10.0.200 or newer: 10.0.1xx formatters ignore diagnostic
+suppressors and report false `VSTHRD200` errors on xUnit test methods. See
+`docs/CI.md#formatter-sdk-requirement`.
+
 Frontend:
 
 ```bash
