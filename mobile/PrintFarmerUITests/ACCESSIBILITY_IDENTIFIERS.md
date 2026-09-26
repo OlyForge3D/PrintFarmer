@@ -26,6 +26,11 @@ post_date: 2026-09-04
   runtimes that expose tab-bar buttons by label only, it falls back to the
   title mapped by this document while keeping identifier-based call sites and
   records an XCTest warning activity so identifier regressions are not silent.
+- SwiftUI can publish a compact tab by title before it attaches `tab.*`.
+  Tests whose identity contract needs the stable identifier use
+  `identifiedShellDestination(tabIdentifier:)`, which never accepts the title
+  fallback and keeps observing within its bounded budget until the identifier
+  is exposed (#3033).
 - Screen-specific identifiers remain the same in Simple and Two Modes.
 - Scanner identifiers describe the scanner flow, not its former navigation
   location.
