@@ -368,28 +368,33 @@ an Apple Feedback report and any app-side mitigation are tracked in
 
 **Standalone repro and exposure (#3067).** The dependency-free app in
 [`mobile/diagnostics/ag-async-layout-repro`](../diagnostics/ag-async-layout-repro/README.md)
-reproduces the stall without PrintFarmer code. Measured on iOS 26.5 (23F77),
-iPad Pro 13-inch (M5):
+reproduces the stall without PrintFarmer code. These results come from
+simulators on one 10-core host, mostly iOS 26.5 (23F77) on iPad Pro 13-inch
+(M5). Real devices were not tested.
 
-- A bare `NavigationSplitView { Text } detail: { Text }` stalls the main
+- A bare `NavigationSplitView { Text } detail: { Text }` stalled the main
   thread 7.5s under 8s of starvation, and not at all with
-  `AG_ASYNC_LAYOUTS=0`. App value types are not the trigger, so no app-side
-  reduction of them can remove the stall. No app-side mitigation was adopted.
-- It needs an expanded split view mounting for the first time in the process.
-  A `NavigationStack` shell, the collapsed split view on iPhone, and starvation
-  that begins after the shell has settled (including mounting a new detail
-  type) do not stall.
-- It needs the utility layout queue kept off the CPU for the whole mount: at
-  least one saturating block per core at utility, default or user-initiated
-  QoS. Fewer spinners than cores, or background-QoS spinners, do not stall.
-  The stall ends when the starvation ends.
-- The iOS 27.0 (24A434) simulator runtime does not reproduce it under the same
+  `AG_ASYNC_LAYOUTS=0`. App value types are not the trigger, so reducing them
+  would not have removed these stalls. On current evidence, no app-side
+  mitigation is adopted.
+- Every stall came from an expanded split view mounting for the first time in
+  the process. These cases did not stall: a `NavigationStack` shell, the
+  collapsed split view on iPhone, and starvation that began after the shell
+  had settled (including mounting a new detail type).
+- Every stall also had the utility layout queue kept off the CPU for the whole
+  mount: at least one saturating block per core at utility, default or
+  user-initiated QoS. Fewer spinners than cores, or background-QoS spinners,
+  did not stall. In every stalled run, the main thread recovered when the
+  starvation ended.
+- The iOS 27.0 (24A434) simulator runtime did not reproduce it under the same
   load.
 
-A source search found no parallel CPU-bound work in PrintFarmer's launch path,
-so a real-device stall would need the rest of the system to saturate every
-core during the iPad shell mount. Owner-only follow-up (TestFlight/App Store hang reports in the
-Xcode Organizer and the Apple Feedback filing) is recorded on #3067.
+A source search found no parallel CPU-bound work in PrintFarmer's launch path.
+These runs do not rule out other real-device triggers or longer stalls, so
+PrintFarmer's production exposure is **unknown** until the TestFlight/App Store
+hang reports in the Xcode Organizer are checked. That check and the Apple
+Feedback filing are owner actions, recorded on #3067. Revisit the mitigation
+decision if the hang reports show the signature below.
 
 **Recognizing the signature.** In a watchdog crash report or a `sample`:
 

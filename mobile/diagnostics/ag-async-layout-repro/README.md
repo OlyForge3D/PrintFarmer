@@ -2,9 +2,9 @@
 
 A dependency-free SwiftUI app that reproduces the iOS 26 launch-time render
 livelock found in [#3035](https://github.com/OlyForge3D/PrintFarmer/issues/3035).
-A regular-width `NavigationSplitView` that mounts while the CPU is saturated
-keeps the main thread inside one `CA::Transaction::commit` until the
-saturation ends. It is the sample project for the Apple Feedback report and a
+On the iOS 26.5 simulator, a regular-width `NavigationSplitView` that mounts
+while the CPU is saturated keeps the main thread inside one
+`CA::Transaction::commit` until the saturation ends. It is the sample project for the Apple Feedback report and a
 quick recheck on new runtimes. It is not part of the PrintFarmer app, its Xcode
 project or its tests.
 
@@ -32,7 +32,9 @@ configuration, pass launch environment pairs:
 ```
 
 `ReproApp.swift` documents every `REPRO_*` knob. Logs are written to
-`build/runs/` (ignored by git).
+`build/runs/` (ignored by git). Each run must start with the app stopped and
+end with the app's `RESULT` line within `--timeout` seconds (default 40).
+Otherwise `repro.sh` exits nonzero.
 
 ## What it does
 
@@ -72,13 +74,19 @@ signature as the CI crash reports in #3035.
 
 ## Conclusions
 
-- The livelock needs three things: an expanded (regular-width)
-  `NavigationSplitView` mounting for the first time in the process, async
-  layouts, and enough work at utility QoS or higher to keep the utility layout
-  queue off the CPU for the whole mount. With a thread and a core left for that
-  queue, it does not happen.
-- The stall ends when the starvation ends. It is bounded by the starvation, not
-  permanent.
-- A bare split view with no app state reproduces it, so app-side value types
-  are not the trigger. Reducing them cannot remove the stall.
-- The iOS 27.0 simulator runtime does not reproduce it under the same load.
+These describe the simulator runs above: one 10-core host, iOS 26.5 and 27.0
+simulator runtimes. Real devices were not tested.
+
+- Every stall in these runs had three things in common: an expanded
+  (regular-width) `NavigationSplitView` mounting for the first time in the
+  process, async layouts, and enough work at utility QoS or higher to keep the
+  utility layout queue off the CPU for the whole mount. Runs that left that
+  queue a thread and a core did not stall. Other triggers on real devices are
+  not ruled out.
+- In every stalled run, the main thread recovered when the starvation ended.
+  Recovery paths on other hardware or loads were not tested.
+- A bare split view with no app state reproduces it, so app value types are
+  not the trigger here, and reducing them would not have removed these stalls.
+- The iOS 27.0 simulator runtime did not reproduce it under the same load.
+- PrintFarmer's production exposure is unknown until the TestFlight/App Store
+  hang reports are checked (#3067).
