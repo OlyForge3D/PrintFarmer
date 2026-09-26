@@ -51,7 +51,9 @@ function validRecord() {
       target: identity('v0.2.4', 4),
       prior: identity('v0.2.2', 2),
       bundleSha256: 'c'.repeat(64),
-      signingRoot: 'fixture',
+      signingRoot: 'fixture-ephemeral',
+      signingRootFingerprint: 'e'.repeat(64),
+      schemaDelta: 'identical',
     },
     tools: {
       cli: '0.2.4',
@@ -289,7 +291,31 @@ test('matrix cells must use the fixture signing root', () => {
   record.identities.signingRoot = 'published-insider';
   hasError(
     validateRecoveryEvidence(record),
-    'identities.signingRoot: matrix cells must use the fixture root',
+    'identities.signingRoot: matrix cells must use the fixture-ephemeral root',
+  );
+  const stale = validRecord();
+  stale.identities.signingRoot = 'fixture';
+  hasError(validateRecoveryEvidence(stale), 'identities.signingRoot');
+});
+
+test('cells record the ephemeral root fingerprint and the prior schema delta', () => {
+  const noFingerprint = validRecord();
+  delete noFingerprint.identities.signingRootFingerprint;
+  hasError(validateRecoveryEvidence(noFingerprint), 'identities.signingRootFingerprint: missing field');
+  const badFingerprint = validRecord();
+  badFingerprint.identities.signingRootFingerprint = 'not-a-digest';
+  hasError(validateRecoveryEvidence(badFingerprint), 'identities.signingRootFingerprint');
+  const badDelta = validRecord();
+  badDelta.identities.schemaDelta = 'unknown';
+  hasError(validateRecoveryEvidence(badDelta), 'identities.schemaDelta: must be one of');
+});
+
+test('a cell root is never accepted as published-bundle verification evidence', () => {
+  const record = validRecord();
+  record.identities.signingRoot = 'published-insider';
+  hasError(
+    validateRecoveryEvidence(record),
+    'identities.signingRoot: matrix cells must use the fixture-ephemeral root',
   );
 });
 
@@ -306,7 +332,7 @@ test('the published-bundle verification record is read-only and insider-signed',
   }
 
   const fixtureRoot = validVerification();
-  fixtureRoot.identities.signingRoot = 'fixture';
+  fixtureRoot.identities.signingRoot = 'fixture-ephemeral';
   hasError(validatePublishedBundleVerification(fixtureRoot), 'identities.signingRoot');
 
   const stable = validVerification();

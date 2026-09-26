@@ -22,10 +22,13 @@ export const workerModes = Object.freeze(['managed', 'none', 'remote']);
 // PowerShell is documented and link-checked only, so it can never be a live
 // matrix entry point.
 export const entryPoints = Object.freeze(['bash']);
-// Matrix cells are signed only by the test-only fixture root; the published
-// insider root appears only in the read-only verification record.
-export const cellSigningRoot = 'fixture';
+// Matrix cells are signed only by a per-run ephemeral fixture root whose keys
+// never leave memory; the published insider root appears only in the
+// read-only verification record.
+export const cellSigningRoot = 'fixture-ephemeral';
 export const verificationSigningRoot = 'published-insider';
+// C2 fixtures build N-1 and N from one schema; later cells may change it.
+export const schemaDeltas = Object.freeze(['identical', 'changed']);
 export const channels = Object.freeze(['stable', 'insider']);
 export const faultInjectionCheckpoint = 'fault-injected';
 export const outcomes = Object.freeze([
@@ -157,6 +160,8 @@ const shape = {
     prior: identityShape,
     bundleSha256: 'sha256',
     signingRoot: 'string',
+    signingRootFingerprint: 'sha256',
+    schemaDelta: 'string',
   },
   tools: toolsShape,
   networkDenial: networkDenialShape,
@@ -436,6 +441,9 @@ export function validateRecoveryEvidence(record) {
 
   if (isPlainObject(identities) && identities.signingRoot !== cellSigningRoot) {
     errors.push(`identities.signingRoot: matrix cells must use the ${cellSigningRoot} root`);
+  }
+  if (isPlainObject(identities)) {
+    checkEnum(identities.schemaDelta, schemaDeltas, 'identities.schemaDelta', errors);
   }
 
   const faultInjected =

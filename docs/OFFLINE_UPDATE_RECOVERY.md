@@ -871,10 +871,19 @@ only reachable peer is a default-deny egress sink that logs each attempt. The
 evidence mechanism value is `docker-internal-network+default-deny-egress-sink`.
 Any recorded outbound attempt fails the run, whatever its recovery outcome.
 
-**Signing.** Matrix cells are signed only by a test-only trust root with an
-isolated fixture identity (`signingRoot` `fixture`). The release workflow's
-signing identity is never used, and fixture trust is never installed on a real
-host. Separately, each run contains exactly one read-only verification of a
+**Signing.** Matrix cells are signed only by a per-run **ephemeral** fixture
+Sigstore root (`signingRoot` `fixture-ephemeral`), created by
+[`scripts/ci/recovery-matrix/fixture-sigstore.mjs`](../scripts/ci/recovery-matrix/fixture-sigstore.mjs).
+Its CA, certificate-transparency and transparency-log keys exist only in memory
+for the run and are never written to disk, artifacts, caches or logs, so nothing
+survives that could sign again. Because the product pins the release workflow's
+certificate identity and issuer, fixture certificates carry that identity
+string, but the release workflow's signing credentials and the public-good
+Sigstore root are never used: fixture material verifies only against its own
+discarded root and is rejected by the public-good root. Each cell records the
+root's fingerprint (`signingRootFingerprint`, the SHA-256 of its canonical
+trusted-root JSON), and fixture trust is never installed on a real host.
+Separately, each run contains exactly one read-only verification of a
 real published insider bundle (`signingRoot` `published-insider`), recorded as
 its own `printfarmer-published-bundle-verification` record. It proves the
 harness accepts production signatures; the record must show that nothing was
@@ -887,8 +896,10 @@ recovery outcome.
 the run identity and harness commit, entry point, host distribution, version,
 architecture and kernel, the cell, the source/target/prior release identities
 (tag `v<version>`, version, `stable` or `insider` channel, 40-character source
-commit, build and non-negative integer sequence), bundle SHA-256 and
-signing root, tool versions, the network-denial mechanism and every attempt,
+commit, build and non-negative integer sequence), bundle SHA-256,
+signing root and its fingerprint, whether the prior and target schemas are
+`identical` or `changed` (`schemaDelta`; C2 fixtures are `identical`), tool
+versions, the network-denial mechanism and every attempt,
 operation checkpoints, expected and actual outcome with reason, exit code and
 journal phase, timings and the verdict. The validator rejects missing or
 unexpected fields, malformed identities, unsupported hosts or entry points, a
