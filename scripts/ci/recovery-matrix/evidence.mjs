@@ -1,9 +1,11 @@
 // Evidence contract for the isolated offline update recovery matrix (#3098).
-// Every matrix run emits one record per cell; this module is the single
-// source of truth for the record shape, approved host, fail-closed cells, and
-// the redaction rules the record must satisfy before it is uploaded.
+// Every matrix run emits one cell record per cell plus exactly one read-only
+// published-bundle verification record; this module is the single source of
+// truth for both record shapes, the approved host, fail-closed cells, and the
+// redaction rules each record must satisfy before it is uploaded.
 
 export const evidenceKind = 'printfarmer-recovery-matrix-evidence';
+export const verificationKind = 'printfarmer-published-bundle-verification';
 export const evidenceSchema = 1;
 
 export const approvedHost = Object.freeze({
@@ -17,8 +19,15 @@ export const providers = Object.freeze(['postgres', 'sqlserver']);
 export const databaseLayouts = Object.freeze(['shared', 'split']);
 export const owners = Object.freeze(['host', 'external']);
 export const workerModes = Object.freeze(['managed', 'none', 'remote']);
-export const entryPoints = Object.freeze(['bash', 'powershell']);
-export const signingRoots = Object.freeze(['fixture', 'published-insider']);
+// PowerShell is documented and link-checked only, so it can never be a live
+// matrix entry point.
+export const entryPoints = Object.freeze(['bash']);
+// Matrix cells are signed only by the test-only fixture root; the published
+// insider root appears only in the read-only verification record.
+export const cellSigningRoot = 'fixture';
+export const verificationSigningRoot = 'published-insider';
+export const channels = Object.freeze(['stable', 'insider']);
+export const faultInjectionCheckpoint = 'fault-injected';
 export const outcomes = Object.freeze([
   'Activated',
   'RolledBack',
@@ -69,31 +78,71 @@ export function expectedCellOutcome(cell) {
   return { failClosed: false, outcome: null, reason: null };
 }
 
-const identityKeys = [
-  'tag',
-  'version',
-  'channel',
-  'sourceCommit',
-  'buildId',
-  'sequence',
-];
+const identityShape = {
+  tag: 'releaseTag',
+  version: 'releaseVersion',
+  channel: 'string',
+  sourceCommit: 'sha',
+  buildId: 'string',
+  sequence: 'nonNegativeInteger',
+};
+
+const runShape = {
+  id: 'string',
+  startedAt: 'timestamp',
+  finishedAt: 'timestamp',
+  harnessCommit: 'sha',
+  entryPoint: 'string',
+};
+
+const hostShape = {
+  distribution: 'string',
+  distributionVersion: 'string',
+  arch: 'string',
+  kernel: 'string',
+};
+
+const toolsShape = {
+  cli: 'string',
+  docker: 'string',
+  compose: 'string',
+  cosign: 'string',
+  node: 'string',
+  shell: 'string',
+};
+
+const networkDenialShape = {
+  mechanism: 'string',
+  egressSinkActive: 'boolean',
+  attempts: 'attempts',
+};
+
+const verificationShape = {
+  schema: 'number',
+  kind: 'string',
+  run: runShape,
+  host: hostShape,
+  identities: {
+    target: identityShape,
+    bundleSha256: 'sha256',
+    signingRoot: 'string',
+  },
+  tools: toolsShape,
+  networkDenial: networkDenialShape,
+  verification: {
+    signatureVerified: 'boolean',
+    imported: 'boolean',
+    activated: 'boolean',
+    hostModified: 'boolean',
+  },
+  verdict: 'string',
+};
 
 const shape = {
   schema: 'number',
   kind: 'string',
-  run: {
-    id: 'string',
-    startedAt: 'timestamp',
-    finishedAt: 'timestamp',
-    harnessCommit: 'sha',
-    entryPoint: 'string',
-  },
-  host: {
-    distribution: 'string',
-    distributionVersion: 'string',
-    arch: 'string',
-    kernel: 'string',
-  },
+  run: runShape,
+  host: hostShape,
   cell: {
     topology: 'string',
     provider: 'string',
@@ -103,25 +152,14 @@ const shape = {
     workers: 'string',
   },
   identities: {
-    source: Object.fromEntries(identityKeys.map((key) => [key, 'identity'])),
-    target: Object.fromEntries(identityKeys.map((key) => [key, 'identity'])),
-    prior: Object.fromEntries(identityKeys.map((key) => [key, 'identity'])),
+    source: identityShape,
+    target: identityShape,
+    prior: identityShape,
     bundleSha256: 'sha256',
     signingRoot: 'string',
   },
-  tools: {
-    cli: 'string',
-    docker: 'string',
-    compose: 'string',
-    cosign: 'string',
-    node: 'string',
-    shell: 'string',
-  },
-  networkDenial: {
-    mechanism: 'string',
-    egressSinkActive: 'boolean',
-    attempts: 'attempts',
-  },
+  tools: toolsShape,
+  networkDenial: networkDenialShape,
   checkpoints: 'checkpoints',
   outcome: {
     expected: 'string',
@@ -184,12 +222,23 @@ function checkScalar(kind, value, path, errors) {
         fail('64-character lowercase SHA-256');
       }
       break;
-    case 'identity':
+    case 'nonNegativeInteger':
+      if (!Number.isInteger(value) || value < 0) fail('non-negative integer');
+      break;
+    case 'releaseTag':
       if (
-        !(typeof value === 'string' && value.length > 0) &&
-        !(Number.isInteger(value) && value >= 0)
+        typeof value !== 'string' ||
+        !/^v\d+\.\d+\.\d+(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?$/.test(value)
       ) {
-        fail('non-empty string or non-negative integer');
+        fail('release tag such as v1.2.3 or v1.2.3-insider.4');
+      }
+      break;
+    case 'releaseVersion':
+      if (
+        typeof value !== 'string' ||
+        !/^\d+\.\d+\.\d+(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?$/.test(value)
+      ) {
+        fail('release version such as 1.2.3 or 1.2.3-insider.4');
       }
       break;
     case 'attempts':
@@ -251,7 +300,7 @@ function checkShape(expected, value, path, errors) {
 }
 
 const redactionRules = [
-  { name: 'URL userinfo', pattern: /[a-z][a-z0-9+.-]*:\/\/[^\s/@:]+:[^\s/@]*@/i },
+  { name: 'URL userinfo', pattern: /[a-z][a-z0-9+.-]*:\/\/[^\s/?#@]+@/i },
   { name: 'PEM block', pattern: /-----BEGIN [A-Z0-9 ]+-----/ },
   { name: 'GitHub token', pattern: /\b(gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})\b/ },
   { name: 'JWT', pattern: /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/ },
@@ -295,20 +344,15 @@ function checkEnum(value, allowed, path, errors) {
   }
 }
 
-export function validateRecoveryEvidence(record) {
-  const errors = [];
-  scanForSecrets(record, '', errors);
-  checkShape(shape, record, '', errors);
-  if (!isPlainObject(record)) return errors;
-
+function checkCommon(record, expectedKind, errors) {
   if (record.schema !== evidenceSchema) {
     errors.push(`schema: expected ${evidenceSchema}`);
   }
-  if (record.kind !== evidenceKind) {
-    errors.push(`kind: expected ${evidenceKind}`);
+  if (record.kind !== expectedKind) {
+    errors.push(`kind: expected ${expectedKind}`);
   }
 
-  const { run, host, cell, identities, networkDenial, outcome } = record;
+  const { run, host, networkDenial } = record;
   if (isPlainObject(run)) {
     checkEnum(run.entryPoint, entryPoints, 'run.entryPoint', errors);
     if (
@@ -335,17 +379,19 @@ export function validateRecoveryEvidence(record) {
     }
   }
 
-  if (isPlainObject(cell)) {
-    checkEnum(cell.topology, topologies, 'cell.topology', errors);
-    checkEnum(cell.provider, providers, 'cell.provider', errors);
-    checkEnum(cell.databaseLayout, databaseLayouts, 'cell.databaseLayout', errors);
-    checkEnum(cell.databaseOwner, owners, 'cell.databaseOwner', errors);
-    checkEnum(cell.storageOwner, owners, 'cell.storageOwner', errors);
-    checkEnum(cell.workers, workerModes, 'cell.workers', errors);
-  }
-
-  if (isPlainObject(identities)) {
-    checkEnum(identities.signingRoot, signingRoots, 'identities.signingRoot', errors);
+  if (isPlainObject(record.identities)) {
+    for (const role of ['source', 'target', 'prior']) {
+      const identity = record.identities[role];
+      if (!isPlainObject(identity)) continue;
+      checkEnum(identity.channel, channels, `identities.${role}.channel`, errors);
+      if (
+        typeof identity.tag === 'string' &&
+        typeof identity.version === 'string' &&
+        identity.tag !== `v${identity.version}`
+      ) {
+        errors.push(`identities.${role}.tag: must equal v<version>`);
+      }
+    }
   }
 
   if (isPlainObject(networkDenial)) {
@@ -356,6 +402,48 @@ export function validateRecoveryEvidence(record) {
       errors.push('networkDenial.egressSinkActive: the egress sink must be active');
     }
   }
+
+  if (record.verdict !== undefined) {
+    checkEnum(record.verdict, verdicts, 'verdict', errors);
+  }
+  if (
+    record.verdict === 'pass' &&
+    Array.isArray(networkDenial?.attempts) &&
+    networkDenial.attempts.length > 0
+  ) {
+    errors.push('verdict: a run with outbound network attempts cannot pass');
+  }
+}
+
+const failClosedReasons = new Set(failClosedCells.map((rule) => rule.reason));
+
+export function validateRecoveryEvidence(record) {
+  const errors = [];
+  scanForSecrets(record, '', errors);
+  checkShape(shape, record, '', errors);
+  if (!isPlainObject(record)) return errors;
+  checkCommon(record, evidenceKind, errors);
+
+  const { cell, identities, outcome, checkpoints } = record;
+  if (isPlainObject(cell)) {
+    checkEnum(cell.topology, topologies, 'cell.topology', errors);
+    checkEnum(cell.provider, providers, 'cell.provider', errors);
+    checkEnum(cell.databaseLayout, databaseLayouts, 'cell.databaseLayout', errors);
+    checkEnum(cell.databaseOwner, owners, 'cell.databaseOwner', errors);
+    checkEnum(cell.storageOwner, owners, 'cell.storageOwner', errors);
+    checkEnum(cell.workers, workerModes, 'cell.workers', errors);
+  }
+
+  if (isPlainObject(identities) && identities.signingRoot !== cellSigningRoot) {
+    errors.push(`identities.signingRoot: matrix cells must use the ${cellSigningRoot} root`);
+  }
+
+  const faultInjected =
+    Array.isArray(checkpoints) &&
+    checkpoints.some(
+      (checkpoint) =>
+        checkpoint?.name === faultInjectionCheckpoint && checkpoint?.result === 'ok',
+    );
 
   if (isPlainObject(outcome)) {
     checkEnum(outcome.expected, outcomes, 'outcome.expected', errors);
@@ -370,28 +458,114 @@ export function validateRecoveryEvidence(record) {
       if (outcome.reason !== expectation.reason) {
         errors.push(`outcome.reason: unsupported cell must report ${expectation.reason}`);
       }
-    } else if (outcome.expected === 'Refused') {
-      errors.push('outcome.expected: supported cell must not expect Refused');
+    } else {
+      if (outcome.expected === 'Refused') {
+        errors.push('outcome.expected: supported cell must not expect Refused');
+      }
+      if (failClosedReasons.has(outcome.reason)) {
+        errors.push('outcome.reason: supported cell must not report a fail-closed reason');
+      }
+      if (typeof outcome.expected === 'string' && outcome.expected !== 'Activated') {
+        // A supported cell only stops short of activation because the harness
+        // injected a fault; otherwise a halt awaiting an operator would pass.
+        if (!faultInjected) {
+          errors.push(
+            `outcome.expected: supported cell may expect ${outcome.expected} only after a successful ${faultInjectionCheckpoint} checkpoint`,
+          );
+        }
+        if (outcome.expected !== 'RolledBack' && outcome.reason === null) {
+          errors.push(`outcome.reason: ${outcome.expected} requires a stable reason`);
+        }
+      }
     }
   }
 
-  if (record.verdict !== undefined) {
-    checkEnum(record.verdict, verdicts, 'verdict', errors);
-  }
   if (record.verdict === 'pass') {
-    if (Array.isArray(networkDenial?.attempts) && networkDenial.attempts.length > 0) {
-      errors.push('verdict: a run with outbound network attempts cannot pass');
-    }
     if (isPlainObject(outcome) && outcome.actual !== outcome.expected) {
       errors.push('verdict: a run whose actual outcome differs from expected cannot pass');
     }
     if (
-      Array.isArray(record.checkpoints) &&
-      record.checkpoints.some((checkpoint) => checkpoint?.result === 'failed')
+      Array.isArray(checkpoints) &&
+      checkpoints.some((checkpoint) => checkpoint?.result === 'failed')
     ) {
       errors.push('verdict: a run with a failed checkpoint cannot pass');
     }
   }
 
+  return errors;
+}
+
+export function validatePublishedBundleVerification(record) {
+  const errors = [];
+  scanForSecrets(record, '', errors);
+  checkShape(verificationShape, record, '', errors);
+  if (!isPlainObject(record)) return errors;
+  checkCommon(record, verificationKind, errors);
+
+  const { identities, verification } = record;
+  if (isPlainObject(identities)) {
+    if (identities.signingRoot !== verificationSigningRoot) {
+      errors.push(
+        `identities.signingRoot: published-bundle verification must use the ${verificationSigningRoot} root`,
+      );
+    }
+    if (isPlainObject(identities.target) && identities.target.channel !== 'insider') {
+      errors.push('identities.target.channel: the published bundle must be an insider release');
+    }
+  }
+
+  if (isPlainObject(verification)) {
+    for (const field of ['imported', 'activated', 'hostModified']) {
+      if (verification[field] !== false) {
+        errors.push(`verification.${field}: the published-bundle check must be read-only`);
+      }
+    }
+    if (record.verdict === 'pass' && verification.signatureVerified !== true) {
+      errors.push('verdict: an unverified published bundle cannot pass');
+    }
+  }
+
+  return errors;
+}
+
+// Validates a whole matrix run: every record, exactly one read-only
+// published-bundle verification, at least one cell, one run identity, and no
+// duplicated cell.
+export function validateMatrixRun(records) {
+  if (!Array.isArray(records) || records.length === 0) {
+    return ['run: expected a non-empty array of evidence records'];
+  }
+  const errors = [];
+  const cellKeys = new Set();
+  const runIds = new Set();
+  let cellCount = 0;
+  let verificationCount = 0;
+
+  records.forEach((record, index) => {
+    const prefix = `records[${index}]`;
+    let recordErrors;
+    if (record?.kind === verificationKind) {
+      verificationCount += 1;
+      recordErrors = validatePublishedBundleVerification(record);
+    } else {
+      cellCount += 1;
+      recordErrors = validateRecoveryEvidence(record);
+      if (isPlainObject(record?.cell)) {
+        const key = JSON.stringify(Object.entries(record.cell).sort());
+        if (cellKeys.has(key)) errors.push(`${prefix}.cell: duplicate matrix cell`);
+        cellKeys.add(key);
+      }
+    }
+    for (const error of recordErrors) errors.push(`${prefix}.${error}`);
+    if (typeof record?.run?.id === 'string') runIds.add(record.run.id);
+  });
+
+  if (verificationCount !== 1) {
+    errors.push(
+      `run: expected exactly one published-bundle verification record, found ${verificationCount}`,
+    );
+  }
+  if (cellCount === 0) errors.push('run: expected at least one matrix cell record');
+  if (runIds.size > 1) errors.push('run: all records must share one run.id');
   return errors;
 }

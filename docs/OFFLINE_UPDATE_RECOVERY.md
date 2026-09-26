@@ -791,9 +791,10 @@ Fixtures must not read or modify a real deployment's credentials or storage.
 
 The acceptance matrix includes network-denied monolith and split Compose with
 PostgreSQL and SQL Server, required infrastructure, external-storage/DB-owner
-evidence and optional/remote pinned-worker cases. Exercise Bash and PowerShell
-entry points using the same bundle contract; a Windows documentation/link check
-does not prove Linux restore or runtime parity.
+evidence and optional/remote pinned-worker cases. Live cells use the Bash
+entry point; the PowerShell entry point shares the same bundle contract but is
+checked for documentation and links only, which does not prove Linux restore or
+runtime parity (see the [matrix scope](#isolated-recovery-matrix-scope-3098)).
 
 Positive cases require stable and insider original/imported identity equality,
 fresh-host import without trust self-enrollment, install and coordinated
@@ -842,14 +843,17 @@ for the harness, not evidence that any cell has run.
 
 **Supported host.** The matrix runs only on **Ubuntu LTS x64** (22.04, 24.04
 or 26.04). Linux arm64 and Windows hosts are **unsupported** for host-update
-recovery; the Windows PowerShell entry point is documented and link-checked
-only and proves no Linux restore or runtime parity. SQLite is component-tested
+recovery. Live cells run only through the Bash entry point; the PowerShell
+entry point is documented and link-checked only, proves no Linux restore or
+runtime parity, and cannot produce matrix evidence. SQLite is component-tested
 only and is not a live matrix provider.
 
 **Supported cells.** Monolith and split Compose topologies, each with
 PostgreSQL and SQL Server, a shared application/slicer database, and database
 and storage owned by the host. Workers are either managed on the host or
-absent.
+absent. A supported cell may expect anything other than `Activated` only after
+a successful `fault-injected` checkpoint, never with a fail-closed reason, and
+with a stable reason unless it expects `RolledBack`.
 
 **Fail-closed cells.** These cells are run to prove the refusal, never to
 prove recovery. The first matching row decides the expected result, and the
@@ -867,25 +871,34 @@ only reachable peer is a default-deny egress sink that logs each attempt. The
 evidence mechanism value is `docker-internal-network+default-deny-egress-sink`.
 Any recorded outbound attempt fails the run, whatever its recovery outcome.
 
-**Signing.** Matrix bundles are signed by a test-only trust root with an
-isolated fixture identity. The release workflow's signing identity is never
-used, and fixture trust is never installed on a real host. Separately, one
-read-only verification of a real published insider bundle proves the harness
-accepts production signatures; it imports nothing and changes no host.
+**Signing.** Matrix cells are signed only by a test-only trust root with an
+isolated fixture identity (`signingRoot` `fixture`). The release workflow's
+signing identity is never used, and fixture trust is never installed on a real
+host. Separately, each run contains exactly one read-only verification of a
+real published insider bundle (`signingRoot` `published-insider`), recorded as
+its own `printfarmer-published-bundle-verification` record. It proves the
+harness accepts production signatures; the record must show that nothing was
+imported or activated and the host was not modified, and it carries no
+recovery outcome.
 
 **Evidence record.** Each cell emits one JSON record validated by
 [`scripts/ci/recovery-matrix/evidence.mjs`](../scripts/ci/recovery-matrix/evidence.mjs)
 (`kind` `printfarmer-recovery-matrix-evidence`, `schema` 1). The record carries
 the run identity and harness commit, entry point, host distribution, version,
 architecture and kernel, the cell, the source/target/prior release identities
-(tag, version, channel, source commit, build and sequence), bundle SHA-256 and
+(tag `v<version>`, version, `stable` or `insider` channel, 40-character source
+commit, build and non-negative integer sequence), bundle SHA-256 and
 signing root, tool versions, the network-denial mechanism and every attempt,
 operation checkpoints, expected and actual outcome with reason, exit code and
 journal phase, timings and the verdict. The validator rejects missing or
-unexpected fields, unsupported hosts, a wrong fail-closed expectation, a pass
+unexpected fields, malformed identities, unsupported hosts or entry points, a
+non-fixture cell signing root, a wrong fail-closed expectation, a pass
 with outbound attempts, a failed checkpoint or a mismatched outcome, and any
-unredacted credential: URL user information, PEM blocks, GitHub tokens, JWTs,
-secret assignments and secret-bearing field names.
+unredacted credential: URL user information (with or without a password), PEM
+blocks, GitHub tokens, JWTs, secret assignments and secret-bearing field names.
+`validateMatrixRun` validates a whole run: every record, one shared run
+identity, no duplicated cell, at least one cell and exactly one published-bundle
+verification.
 
 **Cadence.** The matrix runs on `workflow_dispatch` and nightly. It is never
 part of a release publication workflow and never targets a real deployment.
