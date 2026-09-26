@@ -1,5 +1,5 @@
-﻿using System.Security.Cryptography;
-using System.Net;
+﻿using System.Net;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Farm.Infrastructure.Services.HostUpdates;
@@ -1044,207 +1044,207 @@ public sealed class HostUpdateCliOfflineActivateTests : IDisposable, IAsyncLifet
         }
     }
 
-        private sealed class RecordingHealthHttpClientFactory(string expectedBaseUrl, bool succeeds) : IHttpClientFactory
+    private sealed class RecordingHealthHttpClientFactory(string expectedBaseUrl, bool succeeds) : IHttpClientFactory
+    {
+        public List<Uri> Requests { get; } = [];
+
+        public HttpClient CreateClient(string name)
         {
-            public List<Uri> Requests { get; } = [];
-
-            public HttpClient CreateClient(string name)
-            {
-                var client = new HttpClient(new Handler(Requests, new Uri(expectedBaseUrl), succeeds));
-                client.BaseAddress = new Uri(expectedBaseUrl);
-                return client;
-            }
-
-            private sealed class Handler(List<Uri> requests, Uri expectedBase, bool succeeds) : HttpMessageHandler
-            {
-                protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-                {
-                    request.RequestUri.Should().NotBeNull();
-                    Uri uri = request.RequestUri!;
-                    requests.Add(uri);
-                    uri.Host.Should().Be(expectedBase.Host);
-                    string body = succeeds
-                        ? """{"status":"Healthy","results":{"comprehensive":{"status":"Healthy"},"signalr":{"status":"Healthy"},"spoolman":{"status":"Healthy"}}}"""
-                        : """{"status":"Unhealthy","results":{"comprehensive":{"status":"Unhealthy"},"signalr":{"status":"Healthy"},"spoolman":{"status":"Healthy"}}}""";
-                    return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
-                    {
-                        Content = new StringContent(body, Encoding.UTF8, "application/json"),
-                    });
-                }
-            }
+            var client = new HttpClient(new Handler(Requests, new Uri(expectedBaseUrl), succeeds));
+            client.BaseAddress = new Uri(expectedBaseUrl);
+            return client;
         }
 
-        private sealed class IntegratedActivationProcessRunner(bool healthSucceeds) : IHostUpdateProcessRunner
+        private sealed class Handler(List<Uri> requests, Uri expectedBase, bool succeeds) : HttpMessageHandler
         {
-            private static readonly Dictionary<string, (string Compose, string Repository, string Digest)> Services = new(StringComparer.Ordinal)
+            protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
             {
-                ["api"] = ("api", "ghcr.io/olyforge3d/printfarmer-api", "sha256:" + new string('a', 64)),
-                ["frontend"] = ("frontend", "ghcr.io/olyforge3d/printfarmer-frontend", "sha256:" + new string('b', 64)),
-                ["slicer-host"] = ("slicer-host", "ghcr.io/olyforge3d/printfarmer-slicer-host", "sha256:" + new string('c', 64)),
-                ["printer-discovery"] = ("printer-discovery", "ghcr.io/olyforge3d/printfarmer-printer-discovery", "sha256:" + new string('d', 64)),
-                ["orcaslicer-worker"] = ("orcaslicer-worker", "ghcr.io/olyforge3d/printfarmer-orcaslicer-worker", "sha256:" + new string('e', 64)),
-                ["monolith"] = ("printfarmer", "ghcr.io/olyforge3d/printfarmer-monolith", "sha256:" + new string('f', 64)),
-            };
+                request.RequestUri.Should().NotBeNull();
+                Uri uri = request.RequestUri!;
+                requests.Add(uri);
+                uri.Host.Should().Be(expectedBase.Host);
+                string body = succeeds
+                    ? """{"status":"Healthy","results":{"comprehensive":{"status":"Healthy"},"signalr":{"status":"Healthy"},"spoolman":{"status":"Healthy"}}}"""
+                    : """{"status":"Unhealthy","results":{"comprehensive":{"status":"Unhealthy"},"signalr":{"status":"Healthy"},"spoolman":{"status":"Healthy"}}}""";
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(body, Encoding.UTF8, "application/json"),
+                });
+            }
+        }
+    }
 
-            public List<ProcessCall> Calls { get; } = [];
+    private sealed class IntegratedActivationProcessRunner(bool healthSucceeds) : IHostUpdateProcessRunner
+    {
+        private static readonly Dictionary<string, (string Compose, string Repository, string Digest)> Services = new(StringComparer.Ordinal)
+        {
+            ["api"] = ("api", "ghcr.io/olyforge3d/printfarmer-api", "sha256:" + new string('a', 64)),
+            ["frontend"] = ("frontend", "ghcr.io/olyforge3d/printfarmer-frontend", "sha256:" + new string('b', 64)),
+            ["slicer-host"] = ("slicer-host", "ghcr.io/olyforge3d/printfarmer-slicer-host", "sha256:" + new string('c', 64)),
+            ["printer-discovery"] = ("printer-discovery", "ghcr.io/olyforge3d/printfarmer-printer-discovery", "sha256:" + new string('d', 64)),
+            ["orcaslicer-worker"] = ("orcaslicer-worker", "ghcr.io/olyforge3d/printfarmer-orcaslicer-worker", "sha256:" + new string('e', 64)),
+            ["monolith"] = ("printfarmer", "ghcr.io/olyforge3d/printfarmer-monolith", "sha256:" + new string('f', 64)),
+        };
 
-            private readonly Dictionary<string, string> _digestsByService = new(StringComparer.Ordinal);
+        public List<ProcessCall> Calls { get; } = [];
 
-            public IEnumerable<ProcessCall> ComposeUpCalls => Calls.Where(call =>
-                call.Arguments.Count >= 3 &&
-                string.Equals(call.Arguments[0], "compose", StringComparison.Ordinal) &&
-                call.Arguments.Contains("up"));
+        private readonly Dictionary<string, string> _digestsByService = new(StringComparer.Ordinal);
 
-            public IEnumerable<ProcessCall> MigrationRunCalls => Calls.Where(call =>
-                call.Arguments.Count > 0 &&
-                string.Equals(call.Arguments[0], "run", StringComparison.Ordinal) &&
-                call.Arguments.Contains("--host-update-migration"));
+        public IEnumerable<ProcessCall> ComposeUpCalls => Calls.Where(call =>
+            call.Arguments.Count >= 3 &&
+            string.Equals(call.Arguments[0], "compose", StringComparison.Ordinal) &&
+            call.Arguments.Contains("up"));
 
-            public bool ContainsDockerCommand(params string[] tokens) =>
-                Calls.Any(call => tokens.All(token => call.Arguments.Contains(token, StringComparer.Ordinal)));
+        public IEnumerable<ProcessCall> MigrationRunCalls => Calls.Where(call =>
+            call.Arguments.Count > 0 &&
+            string.Equals(call.Arguments[0], "run", StringComparison.Ordinal) &&
+            call.Arguments.Contains("--host-update-migration"));
 
-            Task<HostUpdateProcessResult> IHostUpdateProcessRunner.RunAsync(
-                string fileName,
-                IReadOnlyList<string> arguments,
-                TimeSpan timeout,
-                CancellationToken cancellationToken,
-                IReadOnlyDictionary<string, string>? environment)
+        public bool ContainsDockerCommand(params string[] tokens) =>
+            Calls.Any(call => tokens.All(token => call.Arguments.Contains(token, StringComparer.Ordinal)));
+
+        Task<HostUpdateProcessResult> IHostUpdateProcessRunner.RunAsync(
+            string fileName,
+            IReadOnlyList<string> arguments,
+            TimeSpan timeout,
+            CancellationToken cancellationToken,
+            IReadOnlyDictionary<string, string>? environment)
+        {
+            var call = new ProcessCall(fileName, [.. arguments], environment is null ? new Dictionary<string, string>() : new Dictionary<string, string>(environment, StringComparer.Ordinal));
+            Calls.Add(call);
+            FailOnForbidden(arguments);
+
+            if (!fileName.EndsWith("docker", StringComparison.OrdinalIgnoreCase) &&
+                !fileName.EndsWith("sqlite3", StringComparison.OrdinalIgnoreCase))
             {
-                var call = new ProcessCall(fileName, [.. arguments], environment is null ? new Dictionary<string, string>() : new Dictionary<string, string>(environment, StringComparer.Ordinal));
-                Calls.Add(call);
-                FailOnForbidden(arguments);
-
-                if (!fileName.EndsWith("docker", StringComparison.OrdinalIgnoreCase) &&
-                    !fileName.EndsWith("sqlite3", StringComparison.OrdinalIgnoreCase))
-                {
-                    return Task.FromResult(new HostUpdateProcessResult(1, string.Empty, "unexpected executable"));
-                }
-
-                if (fileName.EndsWith("sqlite3", StringComparison.OrdinalIgnoreCase))
-                {
-                    return Task.FromResult(new HostUpdateProcessResult(0, string.Empty, string.Empty));
-                }
-
-                if (arguments is ["version", "--format", "{{.Server.Version}}"])
-                {
-                    return Task.FromResult(new HostUpdateProcessResult(0, "25.0.0", string.Empty));
-                }
-
-                if (arguments.Count > 0 && string.Equals(arguments[0], "compose", StringComparison.Ordinal) && arguments.Contains("ps"))
-                {
-                    string output = string.Join('\n', Services.Values.Select(service => $$"""{"Service":"{{service.Compose}}","State":"exited"}"""));
-                    return Task.FromResult(new HostUpdateProcessResult(0, output, string.Empty));
-                }
-
-                if (arguments.Count > 0 && string.Equals(arguments[0], "compose", StringComparison.Ordinal) && arguments.Contains("up"))
-                {
-                    arguments.Should().Contain("--no-build");
-                    PullNever(arguments).Should().BeTrue();
-                    return Task.FromResult(new HostUpdateProcessResult(0, string.Empty, string.Empty));
-                }
-
-                if (arguments.Count >= 5 &&
-                    string.Equals(arguments[0], "image", StringComparison.Ordinal) &&
-                    string.Equals(arguments[1], "inspect", StringComparison.Ordinal) &&
-                    string.Equals(arguments[^1], "{{json .}}", StringComparison.Ordinal))
-                {
-                    return Task.FromResult(LocalImageInspectJson(arguments[2]));
-                }
-
-                if (arguments.Count >= 5 &&
-                    string.Equals(arguments[0], "image", StringComparison.Ordinal) &&
-                    string.Equals(arguments[1], "inspect", StringComparison.Ordinal) &&
-                    string.Equals(arguments[^2], "{{index .RepoDigests 0}}", StringComparison.Ordinal))
-                {
-                    string imageRef = arguments[^1];
-                    string? serviceId = Services.Keys.FirstOrDefault(id => imageRef.EndsWith(id, StringComparison.Ordinal));
-                    if (serviceId is not null)
-                    {
-                        (string _, string repository, string fallbackDigest) = Services[serviceId];
-                        string digest = _digestsByService.TryGetValue(serviceId, out string? learned) ? learned : fallbackDigest;
-                        return Task.FromResult(new HostUpdateProcessResult(0, repository + "@" + digest, string.Empty));
-                    }
-                }
-
-                if (arguments.Count >= 5 &&
-                    string.Equals(arguments[0], "container", StringComparison.Ordinal) &&
-                    string.Equals(arguments[1], "inspect", StringComparison.Ordinal))
-                {
-                    string container = arguments[^1];
-                    string? serviceId = Services.Keys.FirstOrDefault(id => container.Contains(Services[id].Compose, StringComparison.Ordinal));
-                    return Task.FromResult(serviceId is null
-                        ? new HostUpdateProcessResult(1, string.Empty, "missing")
-                        : new HostUpdateProcessResult(0, "image-ref-" + serviceId, string.Empty));
-                }
-
-                if (arguments.Count > 0 && string.Equals(arguments[0], "run", StringComparison.Ordinal))
-                {
-                    PullNever(arguments).Should().BeTrue();
-                    int marker = -1;
-                    for (int i = 0; i < arguments.Count; i++)
-                    {
-                        if (string.Equals(arguments[i], "--host-update-migration", StringComparison.Ordinal))
-                        {
-                            marker = i;
-                            break;
-                        }
-                    }
-
-                    if (marker >= 0 && marker + 3 < arguments.Count)
-                    {
-                        string context = arguments[marker + 1];
-                        string operation = arguments[marker + 2];
-                        string output = operation == "probe"
-                            ? $"HOST_UPDATE_MIGRATION_PENDING:{context}:1"
-                            : $"HOST_UPDATE_MIGRATION_APPLIED:{context}:202609250001";
-                        return Task.FromResult(new HostUpdateProcessResult(0, output, string.Empty));
-                    }
-                }
-
-                return Task.FromResult(healthSucceeds
-                    ? new HostUpdateProcessResult(0, string.Empty, string.Empty)
-                    : new HostUpdateProcessResult(1, string.Empty, "scripted failure"));
+                return Task.FromResult(new HostUpdateProcessResult(1, string.Empty, "unexpected executable"));
             }
 
-            private HostUpdateProcessResult LocalImageInspectJson(string imageReference)
+            if (fileName.EndsWith("sqlite3", StringComparison.OrdinalIgnoreCase))
             {
-                string? serviceId = null;
-                foreach ((string id, (string _, string repository, string _)) in Services)
+                return Task.FromResult(new HostUpdateProcessResult(0, string.Empty, string.Empty));
+            }
+
+            if (arguments is ["version", "--format", "{{.Server.Version}}"])
+            {
+                return Task.FromResult(new HostUpdateProcessResult(0, "25.0.0", string.Empty));
+            }
+
+            if (arguments.Count > 0 && string.Equals(arguments[0], "compose", StringComparison.Ordinal) && arguments.Contains("ps"))
+            {
+                string output = string.Join('\n', Services.Values.Select(service => $$"""{"Service":"{{service.Compose}}","State":"exited"}"""));
+                return Task.FromResult(new HostUpdateProcessResult(0, output, string.Empty));
+            }
+
+            if (arguments.Count > 0 && string.Equals(arguments[0], "compose", StringComparison.Ordinal) && arguments.Contains("up"))
+            {
+                arguments.Should().Contain("--no-build");
+                PullNever(arguments).Should().BeTrue();
+                return Task.FromResult(new HostUpdateProcessResult(0, string.Empty, string.Empty));
+            }
+
+            if (arguments.Count >= 5 &&
+                string.Equals(arguments[0], "image", StringComparison.Ordinal) &&
+                string.Equals(arguments[1], "inspect", StringComparison.Ordinal) &&
+                string.Equals(arguments[^1], "{{json .}}", StringComparison.Ordinal))
+            {
+                return Task.FromResult(LocalImageInspectJson(arguments[2]));
+            }
+
+            if (arguments.Count >= 5 &&
+                string.Equals(arguments[0], "image", StringComparison.Ordinal) &&
+                string.Equals(arguments[1], "inspect", StringComparison.Ordinal) &&
+                string.Equals(arguments[^2], "{{index .RepoDigests 0}}", StringComparison.Ordinal))
+            {
+                string imageRef = arguments[^1];
+                string? serviceId = Services.Keys.FirstOrDefault(id => imageRef.EndsWith(id, StringComparison.Ordinal));
+                if (serviceId is not null)
                 {
-                    string prefix = repository + "@";
-                    if (imageReference.StartsWith(prefix, StringComparison.Ordinal))
+                    (string _, string repository, string fallbackDigest) = Services[serviceId];
+                    string digest = _digestsByService.TryGetValue(serviceId, out string? learned) ? learned : fallbackDigest;
+                    return Task.FromResult(new HostUpdateProcessResult(0, repository + "@" + digest, string.Empty));
+                }
+            }
+
+            if (arguments.Count >= 5 &&
+                string.Equals(arguments[0], "container", StringComparison.Ordinal) &&
+                string.Equals(arguments[1], "inspect", StringComparison.Ordinal))
+            {
+                string container = arguments[^1];
+                string? serviceId = Services.Keys.FirstOrDefault(id => container.Contains(Services[id].Compose, StringComparison.Ordinal));
+                return Task.FromResult(serviceId is null
+                    ? new HostUpdateProcessResult(1, string.Empty, "missing")
+                    : new HostUpdateProcessResult(0, "image-ref-" + serviceId, string.Empty));
+            }
+
+            if (arguments.Count > 0 && string.Equals(arguments[0], "run", StringComparison.Ordinal))
+            {
+                PullNever(arguments).Should().BeTrue();
+                int marker = -1;
+                for (int i = 0; i < arguments.Count; i++)
+                {
+                    if (string.Equals(arguments[i], "--host-update-migration", StringComparison.Ordinal))
                     {
-                        serviceId = id;
-                        _digestsByService[id] = imageReference[prefix.Length..];
+                        marker = i;
                         break;
                     }
                 }
 
-                if (serviceId is null)
+                if (marker >= 0 && marker + 3 < arguments.Count)
                 {
-                    return new HostUpdateProcessResult(1, string.Empty, "missing");
-                }
-
-                string json = JsonSerializer.Serialize(new
-                {
-                    RepoDigests = new[] { imageReference },
-                    Os = "linux",
-                    Architecture = "amd64",
-                });
-                return new HostUpdateProcessResult(0, json, string.Empty);
-            }
-
-            private static void FailOnForbidden(IReadOnlyList<string> arguments)
-            {
-                if ((arguments.Count >= 2 && string.Equals(arguments[0], "image", StringComparison.Ordinal) && string.Equals(arguments[1], "pull", StringComparison.Ordinal)) ||
-                    arguments.Any(argument => argument is "build" or "login" or "push" or "buildx"))
-                {
-                    throw new InvalidOperationException("forbidden docker operation: " + string.Join(' ', arguments));
+                    string context = arguments[marker + 1];
+                    string operation = arguments[marker + 2];
+                    string output = operation == "probe"
+                        ? $"HOST_UPDATE_MIGRATION_PENDING:{context}:1"
+                        : $"HOST_UPDATE_MIGRATION_APPLIED:{context}:202609250001";
+                    return Task.FromResult(new HostUpdateProcessResult(0, output, string.Empty));
                 }
             }
 
-            public sealed record ProcessCall(string FileName, IReadOnlyList<string> Arguments, IReadOnlyDictionary<string, string> Environment);
+            return Task.FromResult(healthSucceeds
+                ? new HostUpdateProcessResult(0, string.Empty, string.Empty)
+                : new HostUpdateProcessResult(1, string.Empty, "scripted failure"));
         }
+
+        private HostUpdateProcessResult LocalImageInspectJson(string imageReference)
+        {
+            string? serviceId = null;
+            foreach ((string id, (string _, string repository, string _)) in Services)
+            {
+                string prefix = repository + "@";
+                if (imageReference.StartsWith(prefix, StringComparison.Ordinal))
+                {
+                    serviceId = id;
+                    _digestsByService[id] = imageReference[prefix.Length..];
+                    break;
+                }
+            }
+
+            if (serviceId is null)
+            {
+                return new HostUpdateProcessResult(1, string.Empty, "missing");
+            }
+
+            string json = JsonSerializer.Serialize(new
+            {
+                RepoDigests = new[] { imageReference },
+                Os = "linux",
+                Architecture = "amd64",
+            });
+            return new HostUpdateProcessResult(0, json, string.Empty);
+        }
+
+        private static void FailOnForbidden(IReadOnlyList<string> arguments)
+        {
+            if ((arguments.Count >= 2 && string.Equals(arguments[0], "image", StringComparison.Ordinal) && string.Equals(arguments[1], "pull", StringComparison.Ordinal)) ||
+                arguments.Any(argument => argument is "build" or "login" or "push" or "buildx"))
+            {
+                throw new InvalidOperationException("forbidden docker operation: " + string.Join(' ', arguments));
+            }
+        }
+
+        public sealed record ProcessCall(string FileName, IReadOnlyList<string> Arguments, IReadOnlyDictionary<string, string> Environment);
+    }
 }
 
 [CollectionDefinition("HostUpdateOfflineVerifier", DisableParallelization = true)]
