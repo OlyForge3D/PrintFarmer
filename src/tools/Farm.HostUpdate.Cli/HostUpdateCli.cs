@@ -591,7 +591,9 @@ public static partial class HostUpdateCli
         }
     }
 
-    [GeneratedRegex("^journal_[a-z_]+$", RegexOptions.CultureInvariant)]
+    // Only fixed snake_case journal and replay-store codes pass through; any other message
+    // (which could embed paths or detail) falls back to the exception type.
+    [GeneratedRegex("^(journal|host_update_replay)_[a-z_]+$", RegexOptions.CultureInvariant)]
     private static partial Regex JournalCode();
 
     internal sealed record CliFailure(string Code, string[] Details);
