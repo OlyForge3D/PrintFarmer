@@ -371,6 +371,33 @@ public sealed partial class HostUpdateCliOfflineActivateTests : IDisposable, IAs
         File.ReadAllText(Path.Combine(_host.StateDirectory, "installed-state.json")).Should().Be(before);
     }
 
+    [HostStateTheory]
+    [InlineData(SlicerRegistrationRemoteWorkerGuard.Unsupported, true)]
+    [InlineData(SlicerRegistrationRemoteWorkerGuard.EvidenceUnavailable, false)]
+    public async Task Activation_refuses_remote_workers_before_any_change(string code, bool ownerDetail)
+    {
+        await ImportAsync();
+        _host.SeedInstalledState();
+        string before = File.ReadAllText(Path.Combine(_host.StateDirectory, "installed-state.json"));
+        var guard = new FakeRemoteWorkerGuard(code);
+
+        JsonElement refused = Envelope(await RunAsync(Activate(), services =>
+        {
+            services.AddSingleton(_imageVerifier);
+            services.AddSingleton<IHostUpdateLocalImageVerifier>(sp => sp.GetRequiredService<FakeLocalImageVerifier>());
+            services.AddSingleton<IHostUpdateOfflineActivationSafetyProbe>(_safetyProbe);
+            services.AddSingleton<IHostUpdateExecutor, ThrowingExecutor>();
+            services.RemoveAll<IHostUpdateRemoteWorkerGuard>();
+            services.AddScoped<IHostUpdateRemoteWorkerGuard>(_ => guard);
+        }));
+
+        refused.GetProperty("exitCode").GetInt32().Should().Be(HostUpdateCliExitCodes.Refused, refused.ToString());
+        refused.GetProperty("result").GetProperty("code").GetString().Should().Be(code);
+        refused.ToString().Contains(SlicerRegistrationRemoteWorkerGuard.OwnerDetail, StringComparison.Ordinal).Should().Be(ownerDetail);
+        guard.Calls.Should().Be(1);
+        File.ReadAllText(Path.Combine(_host.StateDirectory, "installed-state.json")).Should().Be(before);
+    }
+
     [HostStateFact]
     public async Task Activation_reports_lock_held()
     {
@@ -853,8 +880,26 @@ public sealed partial class HostUpdateCliOfflineActivateTests : IDisposable, IAs
     {
         using var output = new StringWriter();
         using var error = new StringWriter();
-        int exitCode = await HostUpdateCli.RunAsync(args, () => configuration, output, error, configure, CancellationToken.None);
+        void Configure(IServiceCollection services)
+        {
+            services.RemoveAll<IHostUpdateRemoteWorkerGuard>();
+            services.AddScoped<IHostUpdateRemoteWorkerGuard>(_ => new FakeRemoteWorkerGuard(null));
+            configure?.Invoke(services);
+        }
+
+        int exitCode = await HostUpdateCli.RunAsync(args, () => configuration, output, error, Configure, CancellationToken.None);
         return new CliRun(exitCode, output.ToString(), error.ToString());
+    }
+
+    private sealed class FakeRemoteWorkerGuard(string? result) : IHostUpdateRemoteWorkerGuard
+    {
+        public int Calls { get; private set; }
+
+        public Task<string?> ValidateAsync(CancellationToken cancellationToken)
+        {
+            Calls++;
+            return Task.FromResult(result);
+        }
     }
 
     private static JsonElement Envelope(CliRun run)

@@ -136,6 +136,13 @@ internal static class HostUpdateOfflineActivation
                 {
                     return await FailAsync(output, args, HostUpdateCliExitCodes.Refused, safetyError).ConfigureAwait(false);
                 }
+
+                string? workerError = await scoped.GetRequiredService<IHostUpdateRemoteWorkerGuard>()
+                    .ValidateAsync(cancellationToken).ConfigureAwait(false);
+                if (workerError is not null)
+                {
+                    return await HostUpdateOfflineRecovery.EmitRemoteWorkerRefusalAsync(output, args, workerError).ConfigureAwait(false);
+                }
             }
         }
         catch (Exception exception) when (exception is HostUpdatePreloadedImageVerificationException or HostUpdateApplyUnsupportedServiceException)

@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Farm.Infrastructure.Services.HostUpdates;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Farm.HostUpdate.Cli;
 
@@ -83,6 +84,12 @@ internal static partial class HostUpdateOfflineRecovery
                 args.Json,
                 HostUpdateCliExitCodes.Refused,
                 new HostUpdateCli.CliFailure("protected_backup_owner_required", ["restore_through_backup_owner"])).ConfigureAwait(false);
+        }
+
+        string? workerError = await CheckRemoteWorkersAsync(provider, cancellationToken).ConfigureAwait(false);
+        if (workerError is not null)
+        {
+            return await EmitRemoteWorkerRefusalAsync(output, args, workerError).ConfigureAwait(false);
         }
 
         return await HostUpdateCli.RecoverAsync(
@@ -290,6 +297,24 @@ internal static partial class HostUpdateOfflineRecovery
 
     private static Task<int> FailAsync(TextWriter output, HostUpdateCliArguments args, string code) =>
         HostUpdateCli.EmitAsync(output, args.Json, HostUpdateCliExitCodes.Refused, new HostUpdateCli.CliFailure(code, []));
+
+    // Offline recovery only restores this host's compose services, so a remote or separately pinned
+    // worker would stay on a release this host cannot roll back (#3094).
+    internal static async Task<string?> CheckRemoteWorkersAsync(IServiceProvider provider, CancellationToken cancellationToken)
+    {
+        using IServiceScope scope = provider.CreateScope();
+        return await scope.ServiceProvider.GetRequiredService<IHostUpdateRemoteWorkerGuard>()
+            .ValidateAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    internal static Task<int> EmitRemoteWorkerRefusalAsync(TextWriter output, HostUpdateCliArguments args, string code) =>
+        HostUpdateCli.EmitAsync(
+            output,
+            args.Json,
+            HostUpdateCliExitCodes.Refused,
+            new HostUpdateCli.CliFailure(
+                code,
+                code == SlicerRegistrationRemoteWorkerGuard.Unsupported ? [SlicerRegistrationRemoteWorkerGuard.OwnerDetail] : []));
 
     [GeneratedRegex("^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$", RegexOptions.CultureInvariant)]
     private static partial Regex BackupIdPattern();
