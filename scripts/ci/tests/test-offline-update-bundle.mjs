@@ -1720,6 +1720,11 @@ test('import refuses a verified but incomplete bundle, removes its staging and r
       /lacks release-selected images and the infrastructure image list/],
     ['no deployment set', context => { withInstructions(context); assemble(context, { images: context.layout }); },
       /lacks the signed deployment set and its approved tools/],
+    ['pre-#3081 index', context => {
+      withInstructions(context);
+      assemble(context, { images: context.layout });
+      rewriteBundle(context, ({ index }) => { delete index.contents.deploymentSet; });
+    }, /lacks the signed deployment set and its approved tools/],
   ]) {
     const context = imageFixture('stable');
     try {
@@ -2229,6 +2234,36 @@ test('partial, extra, tampered, re-signed or unbound deployment members are reje
       index.contents.images = false; index.contents.infrastructure = false;
     }, /contents claim material this format does not carry/);
     assert.ok(verify(context).deploymentSet);
+  } finally {
+    context.cleanup();
+  }
+});
+
+test('pre-#3081 bundles without a deploymentSet claim still verify as carrying no deployment set', () => {
+  const legacy = imageFixture('stable');
+  try {
+    withInstructions(legacy);
+    assemble(legacy, { images: legacy.layout });
+    rewriteBundle(legacy, ({ index }) => { delete index.contents.deploymentSet; });
+    const record = verify(legacy);
+    assert.equal(record.deploymentSet, false);
+  } finally {
+    legacy.cleanup();
+  }
+  const context = completeFixture('stable');
+  try {
+    const original = readFileSync(context.bundle);
+    rewriteBundle(context, ({ index }) => { delete index.contents.deploymentSet; });
+    rejectsWithoutStaging(context, /do not match its deployment set flag/);
+    writeFileSync(context.bundle, original);
+    rewriteBundle(context, ({ index }) => { index.contents.unknownClaim = false; });
+    rejectsWithoutStaging(context, /contents claim material this format does not carry/);
+    writeFileSync(context.bundle, original);
+    rewriteBundle(context, ({ index, members }) => {
+      delete index.contents.deploymentSet;
+      members.delete(toolMember('cosign-linux-arm64'));
+    });
+    rejectsWithoutStaging(context, /deployment set flag|approved tools/);
   } finally {
     context.cleanup();
   }

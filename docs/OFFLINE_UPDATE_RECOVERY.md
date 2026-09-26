@@ -186,7 +186,9 @@ part of the set, is rejected. `contents.deploymentSet` is `true` only when the
 bundle carries the signed
 [deployment set](#deployment-set-and-approved-tools-3081) together with its
 signature bundle, every approved tool it pins and the image set; a partial set is
-rejected. Remaining work under #2658:
+rejected. Bundles assembled before #3081 have no `deploymentSet` claim; they still
+verify and are treated as carrying no deployment set, so import refuses them as
+incomplete. Remaining work under #2658:
 
 - #3061 (delivered): application and infrastructure image archives.
 - #3062 (delivered): prior recovery set and protected-backup references.

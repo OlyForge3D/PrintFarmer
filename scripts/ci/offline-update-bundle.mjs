@@ -744,8 +744,12 @@ function validateIndex(bytes, entries, limits) {
   }
   requireThat(members.size === 0, 'Offline bundle index does not list exactly the bundle members');
   const contents = index.contents;
-  requireThat(contents && typeof contents === 'object' && Object.keys(contents).sort().join() ===
-    'cliRuntimes,deploymentSet,images,infrastructure,priorRecoverySet,recoveryInstructions' &&
+  // Bundles assembled before #3081 carry no deploymentSet claim; an absent claim means no deployment set.
+  const contentKeys = contents && typeof contents === 'object' ? Object.keys(contents).sort().join() : '';
+  const legacyContents = contentKeys === 'cliRuntimes,images,infrastructure,priorRecoverySet,recoveryInstructions';
+  if (legacyContents) contents.deploymentSet = false;
+  requireThat((legacyContents ||
+    contentKeys === 'cliRuntimes,deploymentSet,images,infrastructure,priorRecoverySet,recoveryInstructions') &&
     ['deploymentSet', 'priorRecoverySet', 'recoveryInstructions'].every(key => typeof contents[key] === 'boolean') &&
     typeof contents.images === 'boolean' && contents.infrastructure === contents.images &&
     (!contents.deploymentSet || contents.images) &&
