@@ -356,6 +356,7 @@ jobs:
           node --test scripts/ci/tests/test-publish-release.mjs
           scripts/ci/tests/test-release-evidence.mjs
           scripts/ci/tests/test-offline-update-bundle.mjs
+          scripts/ci/tests/test-recovery-matrix-evidence.mjs
 
       - name: Test daily development image-set policy
         run: node --test scripts/ci/tests/test-daily-development-images.mjs
