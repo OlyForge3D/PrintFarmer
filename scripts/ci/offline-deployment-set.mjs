@@ -16,7 +16,7 @@
 // manifest and infrastructure image list and every tool member to its signed pin. The document is
 // never rollout authorization.
 import { createHash } from 'node:crypto';
-import { lstatSync, readFileSync } from 'node:fs';
+import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { components, requireThat } from './release-policy.mjs';
 
@@ -177,15 +177,29 @@ export function configSchemaVariables(templates) {
   return [...names].sort(byString);
 }
 
-// Release time only: reads the allowlisted templates as regular files from the source checkout.
+// Release time only: reads the allowlisted templates as regular files from the source checkout. The file is
+// opened once and checked through its descriptor, so the bytes read are the bytes that were checked.
 export function readDeploymentTemplates(source) {
   return new Map(deploymentTemplatePaths.map(path => {
     const full = join(source, ...path.split('/'));
-    const stat = lstatSync(full, { throwIfNoEntry: false });
-    requireThat(stat?.isFile() && !stat.isSymbolicLink(), `Deployment template is missing or not a regular file: ${path}`);
-    const bytes = readFileSync(full);
-    requireThat(bytes.length > 0 && bytes.length <= maxTemplateBytes, `Deployment template size is invalid: ${path}`);
-    return [path, bytes];
+    let fd;
+    try {
+      fd = openSync(full, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    } catch {
+      throw new Error(`Deployment template is missing or not a regular file: ${path}`);
+    }
+    try {
+      const stat = fstatSync(fd);
+      const link = lstatSync(full, { throwIfNoEntry: false });
+      requireThat(stat.isFile() && link?.isFile() && !link.isSymbolicLink() && link.ino === stat.ino && link.dev === stat.dev,
+        `Deployment template is missing or not a regular file: ${path}`);
+      requireThat(stat.size > 0 && stat.size <= maxTemplateBytes, `Deployment template size is invalid: ${path}`);
+      const bytes = readFileSync(fd);
+      requireThat(bytes.length === stat.size, `Deployment template changed while it was read: ${path}`);
+      return [path, bytes];
+    } finally {
+      closeSync(fd);
+    }
   }));
 }
 
