@@ -13,6 +13,7 @@
       printfarmer-host-update.ps1 -Config C:\abs\host-update.json recover -Release <id> [-RequestId <id>] -Confirm <id> [-ReapproveDrift <token>] [-PrintersReconciled <token>] [-Json]
       printfarmer-host-update.ps1 import -Config C:\abs\host-update.json -Bundle C:\abs\bundle.tar -Channel <stable|insider> -Version <v> -TrustedRoot C:\abs\trusted_root.json -TrustedRootApproval C:\abs\approval.json -Staging C:\abs\new-dir -Records C:\abs\records-dir -Operator <id> [-PriorRecoverySet C:\abs\dir] [-ProtectedBackup C:\abs\reference.json]
       printfarmer-host-update.ps1 activate -Config C:\abs\host-update.json -Staging C:\abs\verified-staging -Channel <stable|insider> -TrustedRoot C:\abs\trusted_root.json [-Cosign C:\abs\cosign.exe] [-Json]
+      printfarmer-host-update.ps1 recover-offline -Config C:\abs\host-update.json -Staging C:\abs\verified-staging -Channel <stable|insider> -TrustedRoot C:\abs\trusted_root.json -ProtectedBackup C:\abs\reference.json -Release <id> [-RequestId <id>] (-Preview | -Confirm <id> [-ReapproveDrift <token>] [-PrintersReconciled <token>]) [-Cosign C:\abs\cosign.exe] [-Json]
       printfarmer-host-update.ps1 help
 
     `import` (issue #3063) verifies a signed offline update bundle without network access, loads
@@ -21,6 +22,10 @@
     (-TrustedRootApproval) and records the release in the host's durable replay store through the CLI
     (offline-admit, using -Config), refusing replays, downgrades and cross-channel imports. It never
     authorizes a rollout.
+
+    `recover-offline` (issue #3082) recovers a failed offline activation to the staged bundle's
+    signature-verified prior recovery set with no network access; -ProtectedBackup must equal the
+    reference bound at import. It refuses registry-mode requests and mismatched host state.
 
     Environment:
       PRINTFARMER_HOST_UPDATE_CLI_DIR  absolute directory containing the CLI (default: cli\ beside an
@@ -58,6 +63,7 @@ usage:
   printfarmer-host-update.ps1 -Config C:\abs\host-update.json recover -Release <id> [-RequestId <id>] -Confirm <id> [-ReapproveDrift <token>] [-PrintersReconciled <token>] [-Json]
   printfarmer-host-update.ps1 import -Config C:\abs\host-update.json -Bundle C:\abs\bundle.tar -Channel <stable|insider> -Version <v> -TrustedRoot C:\abs\trusted_root.json -TrustedRootApproval C:\abs\approval.json -Staging C:\abs\new-dir -Records C:\abs\records-dir -Operator <id> [-PriorRecoverySet C:\abs\dir] [-ProtectedBackup C:\abs\reference.json]
   printfarmer-host-update.ps1 activate -Config C:\abs\host-update.json -Staging C:\abs\verified-staging -Channel <stable|insider> -TrustedRoot C:\abs\trusted_root.json [-Cosign C:\abs\cosign.exe] [-Json]
+  printfarmer-host-update.ps1 recover-offline -Config C:\abs\host-update.json -Staging C:\abs\verified-staging -Channel <stable|insider> -TrustedRoot C:\abs\trusted_root.json -ProtectedBackup C:\abs\reference.json -Release <id> [-RequestId <id>] (-Preview | -Confirm <id> [-ReapproveDrift <token>] [-PrintersReconciled <token>]) [-Cosign C:\abs\cosign.exe] [-Json]
   printfarmer-host-update.ps1 help
 '@
 
@@ -246,6 +252,82 @@ if ($rawArgs.Count -ge 1 -and $rawArgs[0] -ceq 'activate') {
     if ($activateJson) { $cliArgs.Add('--json') }
 
     & $launcher @launcherArgs --config $activateValues['-config'] @cliArgs
+    exit $LASTEXITCODE
+}
+
+if ($rawArgs.Count -ge 1 -and $rawArgs[0] -ceq 'recover-offline') {
+    # Issue #3082: recover a failed offline activation to the staged, verified prior recovery set.
+    $recoverOptions = [ordered]@{
+        '-config' = @{ Flag = '--config'; Kind = 'path' }
+        '-staging' = @{ Flag = '--staging'; Kind = 'path' }
+        '-channel' = @{ Flag = '--channel'; Kind = 'channel' }
+        '-trustedroot' = @{ Flag = '--trusted-root'; Kind = 'path' }
+        '-cosign' = @{ Flag = '--cosign'; Kind = 'path' }
+        '-protectedbackup' = @{ Flag = '--protected-backup'; Kind = 'path' }
+        '-release' = @{ Flag = '--release'; Kind = 'release' }
+        '-requestid' = @{ Flag = '--request-id'; Kind = 'request' }
+        '-confirm' = @{ Flag = '--confirm'; Kind = 'release' }
+        '-reapprovedrift' = @{ Flag = '--reapprove-drift'; Kind = 'drift' }
+        '-printersreconciled' = @{ Flag = '--printers-reconciled'; Kind = 'physical' }
+    }
+    $recoverValues = @{}
+    $recoverPreview = $false
+    $recoverJson = $false
+    $index = 1
+    while ($index -lt $rawArgs.Count) {
+        $token = $rawArgs[$index]
+        $name = $token.ToLowerInvariant()
+        if ($name -eq '-json') {
+            if ($recoverJson) { Exit-Usage '-Json may only be given once' }
+            $recoverJson = $true; $index += 1; continue
+        }
+
+        if ($name -eq '-preview') {
+            if ($recoverPreview) { Exit-Usage '-Preview may only be given once' }
+            $recoverPreview = $true; $index += 1; continue
+        }
+
+        if (-not $recoverOptions.Contains($name)) { Exit-Usage "unsupported argument: $token" }
+        $spec = $recoverOptions[$name]
+        if ($recoverValues.ContainsKey($name)) { Exit-Usage "$token may only be given once" }
+        if (($index + 1) -ge $rawArgs.Count -or [string]::IsNullOrEmpty($rawArgs[$index + 1])) { Exit-Usage "$token requires a value" }
+        $value = $rawArgs[$index + 1]
+        switch ($spec.Kind) {
+            'channel' { if ($value -cnotmatch $ChannelPattern) { Exit-Usage '-Channel must be stable or insider' } }
+            'release' { if ($value -cnotmatch $ReleasePattern) { Exit-Usage "$token requires a release id like stable:1.2.3" } }
+            'request' { if ($value -cnotmatch $RequestPattern) { Exit-Usage '-RequestId requires [A-Za-z0-9._:-]{1,128}' } }
+            'drift' { if ($value -cnotmatch $DriftTokenPattern) { Exit-Usage '-ReapproveDrift requires the drift-<32 hex> token printed by -Preview' } }
+            'physical' { if ($value -cnotmatch $PhysicalTokenPattern) { Exit-Usage '-PrintersReconciled requires the physical-<32 hex> token printed by -Preview' } }
+            'path' { if (-not (Test-FullyQualified $value)) { Exit-Usage "$token must be an absolute path" } }
+        }
+        $recoverValues[$name] = $value
+        $index += 2
+    }
+    foreach ($requiredName in @('-config', '-staging', '-channel', '-trustedroot', '-protectedbackup', '-release')) {
+        if (-not $recoverValues.ContainsKey($requiredName)) {
+            $display = @{ '-config' = '-Config'; '-staging' = '-Staging'; '-channel' = '-Channel'; '-trustedroot' = '-TrustedRoot'
+                '-protectedbackup' = '-ProtectedBackup'; '-release' = '-Release' }[$requiredName]
+            Exit-Usage "recover-offline requires $display"
+        }
+    }
+
+    $resolved = Resolve-Launcher
+    $launcher = $resolved.Launcher
+    $launcherArgs = [System.Collections.Generic.List[string]]::new()
+    if ($null -ne $resolved.Dll) { $launcherArgs.Add($resolved.Dll) }
+    # Canonical argument order, identical to the bash wrapper.
+    $cliArgs = [System.Collections.Generic.List[string]]::new()
+    $cliArgs.Add('offline-recover')
+    foreach ($key in @('-staging', '-channel', '-trustedroot', '-cosign', '-protectedbackup', '-release', '-requestid')) {
+        if ($recoverValues.ContainsKey($key)) { $cliArgs.Add($recoverOptions[$key].Flag); $cliArgs.Add($recoverValues[$key]) }
+    }
+    if ($recoverPreview) { $cliArgs.Add('--preview') }
+    foreach ($key in @('-confirm', '-reapprovedrift', '-printersreconciled')) {
+        if ($recoverValues.ContainsKey($key)) { $cliArgs.Add($recoverOptions[$key].Flag); $cliArgs.Add($recoverValues[$key]) }
+    }
+    if ($recoverJson) { $cliArgs.Add('--json') }
+
+    & $launcher @launcherArgs --config $recoverValues['-config'] @cliArgs
     exit $LASTEXITCODE
 }
 

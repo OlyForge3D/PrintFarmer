@@ -283,11 +283,11 @@ internal static class HostUpdateOfflineAdmission
             Path.IsPathRooted(relative));
     }
 
-    private static bool IsString(JsonElement element, string name, string expected) =>
+    internal static bool IsString(JsonElement element, string name, string expected) =>
         element.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.String &&
         string.Equals(value.GetString(), expected, StringComparison.Ordinal);
 
-    private static bool TryReadFile(string staging, string name, out byte[]? bytes, out string? error)
+    internal static bool TryReadFile(string staging, string name, out byte[]? bytes, out string? error)
     {
         bytes = null;
         error = "staging_unreadable";

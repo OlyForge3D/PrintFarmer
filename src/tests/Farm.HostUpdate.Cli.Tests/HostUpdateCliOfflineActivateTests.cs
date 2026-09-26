@@ -11,7 +11,7 @@ using Microsoft.Extensions.Options;
 namespace Farm.HostUpdate.Cli.Tests;
 
 [Collection("HostUpdateOfflineVerifier")]
-public sealed class HostUpdateCliOfflineActivateTests : IDisposable, IAsyncLifetime
+public sealed partial class HostUpdateCliOfflineActivateTests : IDisposable, IAsyncLifetime
 {
     private readonly CliHostFixture _host = new();
     private readonly string _staging;
@@ -665,7 +665,7 @@ public sealed class HostUpdateCliOfflineActivateTests : IDisposable, IAsyncLifet
 
     private string[] Activate() => ["offline-activate", "--staging", _staging, "--channel", "insider", "--trusted-root", _trustedRoot, "--json"];
 
-    private Microsoft.Extensions.Configuration.IConfiguration IntegratedConfiguration() =>
+    private Microsoft.Extensions.Configuration.IConfiguration IntegratedConfiguration(Action<Dictionary<string, string?>>? mutate = null) =>
         _host.Configuration(values =>
         {
             string[] services = ["api", "frontend", "slicer-host", "printer-discovery", "orcaslicer-worker", "monolith"];
@@ -683,6 +683,7 @@ public sealed class HostUpdateCliOfflineActivateTests : IDisposable, IAsyncLifet
             values["Jwt:Key"] = new string('k', 32);
             values["Jwt:Issuer"] = "issuer";
             values["Jwt:Audience"] = "audience";
+            mutate?.Invoke(values);
         });
 
     private static void UseIntegratedBoundaries(
@@ -870,6 +871,8 @@ public sealed class HostUpdateCliOfflineActivateTests : IDisposable, IAsyncLifet
     {
         public bool Result { get; set; } = true;
 
+        public Func<byte[], bool>? Reject { get; set; }
+
         public List<CosignVerifierOptions> Options { get; } = [];
 
         public List<Call> Calls { get; } = [];
@@ -877,7 +880,7 @@ public sealed class HostUpdateCliOfflineActivateTests : IDisposable, IAsyncLifet
         public Task<bool> VerifyAsync(ReadOnlyMemory<byte> manifest, ReadOnlyMemory<byte> bundle, string certificateIdentity, CancellationToken cancellationToken)
         {
             Calls.Add(new Call(manifest.ToArray(), bundle.ToArray(), certificateIdentity));
-            return Task.FromResult(Result);
+            return Task.FromResult(Result && Reject?.Invoke(manifest.ToArray()) != true);
         }
 
         public sealed record Call(byte[] Manifest, byte[] Bundle, string Identity);

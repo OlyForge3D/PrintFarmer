@@ -24,16 +24,25 @@ internal sealed class HostUpdateRecoveryApprovalStaleException : InvalidOperatio
 /// </summary>
 internal sealed class ApprovalBoundInstalledHostStateStore(IInstalledHostStateStore inner) : IInstalledHostStateStore
 {
-    private string? _expectedHash;
+    private Binding? _binding;
 
-    public void Bind(string expectedInstalledStateHash) =>
-        _expectedHash = expectedInstalledStateHash ?? throw new ArgumentNullException(nameof(expectedInstalledStateHash));
+    /// <summary>
+    /// Binds the next installed-state read to <paramref name="expectedInstalledStateHash"/>. When
+    /// <paramref name="evidenceUnchanged"/> is supplied it is also evaluated at that read (under the
+    /// coordinator's lock) and must return true, so other evaluated evidence cannot change unseen.
+    /// </summary>
+    public void Bind(string expectedInstalledStateHash, Func<bool>? evidenceUnchanged = null) =>
+        _binding = new Binding(
+            expectedInstalledStateHash ?? throw new ArgumentNullException(nameof(expectedInstalledStateHash)),
+            evidenceUnchanged);
 
     public async Task<InstalledHostState?> ReadAsync(CancellationToken cancellationToken)
     {
         InstalledHostState? state = await inner.ReadAsync(cancellationToken).ConfigureAwait(false);
-        string? expected = Interlocked.Exchange(ref _expectedHash, null);
-        if (expected is not null && !string.Equals(expected, HostUpdateRecoveryDrift.InstalledStateHash(state), StringComparison.Ordinal))
+        Binding? binding = Interlocked.Exchange(ref _binding, null);
+        if (binding is not null &&
+            (!string.Equals(binding.ExpectedHash, HostUpdateRecoveryDrift.InstalledStateHash(state), StringComparison.Ordinal) ||
+             (binding.EvidenceUnchanged is not null && !binding.EvidenceUnchanged())))
         {
             throw new HostUpdateRecoveryApprovalStaleException();
         }
@@ -43,4 +52,6 @@ internal sealed class ApprovalBoundInstalledHostStateStore(IInstalledHostStateSt
 
     public Task WriteAsync(InstalledHostState state, CancellationToken cancellationToken) =>
         inner.WriteAsync(state, cancellationToken);
+
+    private sealed record Binding(string ExpectedHash, Func<bool>? EvidenceUnchanged);
 }

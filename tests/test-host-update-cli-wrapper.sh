@@ -132,6 +132,24 @@ code=0
 FAKE_EXIT=6 run_wrapper activate --config "$CONFIG" --staging "$ACT_STAGING" --channel stable --trusted-root "$ACT_ROOT" || code=$?
 [[ "$code" -eq 6 ]] && pass "activate preserves CLI refused exit code" || fail "activate preserves CLI refused exit code (exit $code)"
 
+REC_BACKUP="$TEST_ROOT/protected-backup.json"
+REC_DRIFT="drift-0123456789abcdef0123456789abcdef"
+expect_passthrough "recover-offline passes through to offline-recover in canonical order" \
+    "$(printf '%s\n' "$dll" --config "$CONFIG" offline-recover --staging "$ACT_STAGING" --channel stable --trusted-root "$ACT_ROOT" --protected-backup "$REC_BACKUP" --release stable:1.2.3 --preview --json)" \
+    recover-offline --json --preview --release stable:1.2.3 --protected-backup "$REC_BACKUP" --config "$CONFIG" --staging "$ACT_STAGING" --channel stable --trusted-root "$ACT_ROOT"
+expect_passthrough "recover-offline forwards confirm, request id, drift token and cosign" \
+    "$(printf '%s\n' "$dll" --config "$CONFIG" offline-recover --staging "$ACT_STAGING" --channel insider --trusted-root "$ACT_ROOT" --cosign "$ACT_COSIGN" --protected-backup "$REC_BACKUP" --release insider:1.2.3 --request-id req-1 --confirm insider:1.2.3 --reapprove-drift "$REC_DRIFT")" \
+    recover-offline --config "$CONFIG" --staging "$ACT_STAGING" --channel insider --trusted-root "$ACT_ROOT" --cosign "$ACT_COSIGN" --protected-backup "$REC_BACKUP" --release insider:1.2.3 --request-id req-1 --confirm insider:1.2.3 --reapprove-drift "$REC_DRIFT"
+expect_usage "recover-offline requires protected backup" recover-offline --config "$CONFIG" --staging "$ACT_STAGING" --channel stable --trusted-root "$ACT_ROOT" --release stable:1.2.3 --preview
+expect_usage "recover-offline refuses relative protected backup" recover-offline --config "$CONFIG" --staging "$ACT_STAGING" --channel stable --trusted-root "$ACT_ROOT" --protected-backup backup.json --release stable:1.2.3 --preview
+expect_usage "recover-offline refuses invalid release" recover-offline --config "$CONFIG" --staging "$ACT_STAGING" --channel stable --trusted-root "$ACT_ROOT" --protected-backup "$REC_BACKUP" --release 'stable:1;rm' --preview
+expect_usage "recover-offline refuses invalid drift token" recover-offline --config "$CONFIG" --staging "$ACT_STAGING" --channel stable --trusted-root "$ACT_ROOT" --protected-backup "$REC_BACKUP" --release stable:1.2.3 --confirm stable:1.2.3 --reapprove-drift drift-x
+expect_usage "recover-offline refuses repeated preview" recover-offline --config "$CONFIG" --staging "$ACT_STAGING" --channel stable --trusted-root "$ACT_ROOT" --protected-backup "$REC_BACKUP" --release stable:1.2.3 --preview --preview
+expect_usage "recover-offline refuses unsupported argument" recover-offline --config "$CONFIG" --staging "$ACT_STAGING" --channel stable --trusted-root "$ACT_ROOT" --protected-backup "$REC_BACKUP" --release stable:1.2.3 --preview --bundle "$ACT_ROOT"
+code=0
+FAKE_EXIT=6 run_wrapper recover-offline --config "$CONFIG" --staging "$ACT_STAGING" --channel stable --trusted-root "$ACT_ROOT" --protected-backup "$REC_BACKUP" --release stable:1.2.3 --preview || code=$?
+[[ "$code" -eq 6 ]] && pass "recover-offline preserves CLI refused exit code" || fail "recover-offline preserves CLI refused exit code (exit $code)"
+
 code=0
 PRINTFARMER_DOTNET="$FAKE_DOTNET" bash "$WRAPPER" --config "$CONFIG" status > /dev/null 2>&1 || code=$?
 [[ "$code" -eq 2 ]] && pass "missing CLI dir refused" || fail "missing CLI dir refused (exit $code)"

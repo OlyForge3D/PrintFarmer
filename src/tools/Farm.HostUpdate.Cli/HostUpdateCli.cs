@@ -29,6 +29,7 @@ public static partial class HostUpdateCli
           printfarmer-host-update recover --release <releaseId> [--request-id <requestId>] --confirm <releaseId> [--reapprove-drift <token>] [--printers-reconciled <token>] [--json]
           printfarmer-host-update offline-admit --staging <absolute-verified-staging-dir> --channel <stable|insider> --trusted-root <absolute-trusted_root.json> [--cosign <absolute-path>] [--json]
           printfarmer-host-update offline-activate --staging <absolute-verified-staging-dir> --channel <stable|insider> --trusted-root <absolute-trusted_root.json> [--cosign <absolute-path>] [--json]
+          printfarmer-host-update offline-recover --staging <absolute-verified-staging-dir> --channel <stable|insider> --trusted-root <absolute-trusted_root.json> [--cosign <absolute-path>] --protected-backup <absolute-reference.json> --release <releaseId> [--request-id <requestId>] (--preview | --confirm <releaseId> [--reapprove-drift <token>] [--printers-reconciled <token>]) [--json]
 
         Configuration comes from --config <absolute-json-path> and environment variables
         (HostUpdateExecution__*, HostUpdates__HostState__*, DB_PROVIDER, ConnectionStrings__Default).
@@ -49,6 +50,14 @@ public static partial class HostUpdateCli
         offline-activate re-verifies the same staged signed manifest, requires matching imported
         replay evidence, verifies every target image locally, and then asks the existing host-update
         executor to run in preloaded-image mode with no registry fallback or local build.
+
+        offline-recover recovers a failed offline activation to the prior release bundled with the
+        same staged, re-verified bundle. It re-verifies the staged target and the staged prior signed
+        manifest offline, requires the operator's protected-backup reference to equal the recorded one,
+        requires the failed request to be preloaded-image mode for the staged target and the installed
+        state to be exactly the prior set, and then runs the same recovery as recover (no image pull,
+        no registry fallback). A database restore that an external provider owns stops as
+        needs-operator before any change.
 
         Exit codes: 0 ok, 2 usage, 3 configuration/namespace unproven, 4 state unreadable,
         5 no history, 6 refused, 7 lock held, 10 needs operator, 11 fence release pending,
@@ -157,6 +166,7 @@ public static partial class HostUpdateCli
                 HostUpdateCliCommand.Status => await StatusAsync(provider, parsed, output, cancellationToken).ConfigureAwait(false),
                 HostUpdateCliCommand.OfflineAdmit => await HostUpdateOfflineAdmission.RunAsync(provider, configuration, parsed, output, cancellationToken).ConfigureAwait(false),
                 HostUpdateCliCommand.OfflineActivate => await HostUpdateOfflineActivation.RunAsync(provider, configuration, parsed, output, cancellationToken).ConfigureAwait(false),
+                HostUpdateCliCommand.OfflineRecover => await HostUpdateOfflineRecovery.RunAsync(provider, configuration, options, parsed, output, cancellationToken).ConfigureAwait(false),
                 _ => await RecoverAsync(provider, configuration, options, parsed, output, cancellationToken).ConfigureAwait(false),
             };
         }
@@ -438,13 +448,17 @@ public static partial class HostUpdateCli
         }
     }
 
-    private static async Task<int> RecoverAsync(
+    // bindingGate: optional extra refusal evaluated against the resolved failed request and the
+    // installed state read under the execution lock, before any plan, drift decision or mutation.
+    // A confirm binds that same installed snapshot, so a state that changes afterwards is stale.
+    internal static async Task<int> RecoverAsync(
         IServiceProvider provider,
         IConfiguration configuration,
         HostUpdateExecutionOptions options,
         HostUpdateCliArguments args,
         TextWriter output,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<HostUpdateExecutionRequest, InstalledHostState?, string?>? bindingGate = null)
     {
         IReadOnlyList<string> proofFailures = HostUpdateNamespaceProof.Check(
             options,
@@ -487,6 +501,12 @@ public static partial class HostUpdateCli
         }
 
         HostUpdateExecutionRequest request = resolution.Request!;
+        string? gateRefusal = bindingGate?.Invoke(request, installed);
+        if (gateRefusal is not null)
+        {
+            return await EmitAsync(output, args.Json, HostUpdateCliExitCodes.Refused, new CliFailure(gateRefusal, [])).ConfigureAwait(false);
+        }
+
         DatabaseProviderConfiguration database = DatabaseProviderConfiguration.FromConfiguration(configuration);
         string configurationFingerprint = HostUpdateRecoveryDrift.ConfigurationFingerprint(options, database);
         string? currentPlatform = HostUpdateRecoveryDrift.CurrentPlatform();
@@ -531,7 +551,12 @@ public static partial class HostUpdateCli
         {
             if (args.Confirm)
             {
-                provider.GetRequiredService<ApprovalBoundInstalledHostStateStore>().Bind(HostUpdateRecoveryDrift.InstalledStateHash(installed));
+                // A gated (offline) recovery also re-proves, under the coordinator's own lock, that the
+                // journal it resolved and gated the request from has not changed since evaluation.
+                Func<bool>? journalUnchanged = bindingGate is null
+                    ? null
+                    : () => SameActivities(activities, provider.GetRequiredService<IHostUpdateExecutionJournal>().Read(args.ReleaseId!));
+                provider.GetRequiredService<ApprovalBoundInstalledHostStateStore>().Bind(HostUpdateRecoveryDrift.InstalledStateHash(installed), journalUnchanged);
             }
 
             if (!args.Confirm)
@@ -650,6 +675,16 @@ public static partial class HostUpdateCli
 
         return null;
     }
+
+    private static bool SameActivities(IReadOnlyList<HostUpdateExecutionActivity> evaluated, IReadOnlyList<HostUpdateExecutionActivity> current) =>
+        evaluated.Count == current.Count &&
+        evaluated.Zip(current).All(pair =>
+            string.Equals(pair.First.ActivityId, pair.Second.ActivityId, StringComparison.Ordinal) &&
+            pair.First.State == pair.Second.State &&
+            string.Equals(pair.First.Phase, pair.Second.Phase, StringComparison.Ordinal) &&
+            pair.First.RecordedAt == pair.Second.RecordedAt &&
+            string.Equals(pair.First.RequestFingerprint, pair.Second.RequestFingerprint, StringComparison.Ordinal) &&
+            string.Equals(pair.First.RequestBindingHash, pair.Second.RequestBindingHash, StringComparison.Ordinal));
 
     private static string? DriftRefusal(HostUpdateDriftReport drift, string? token)
     {
