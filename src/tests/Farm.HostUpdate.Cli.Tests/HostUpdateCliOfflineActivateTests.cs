@@ -478,6 +478,71 @@ public sealed class HostUpdateCliOfflineActivateTests : IDisposable, IAsyncLifet
     }
 
     [HostStateFact]
+    public async Task Activation_rerun_after_replay_consumed_and_verified_journal_finalizes_without_second_execution()
+    {
+        await ImportAsync();
+        HostUpdateExecutionRequest request = RequestFromCurrentStaging();
+        await WriteInstalledStateAsync(request);
+        await HostUpdateOfflineActivation.MarkActivatedAsync(_host.Configuration(), CurrentCandidate(), CancellationToken.None);
+        _host.SeedJournal(
+            request,
+            [
+                (HostUpdateExecutionState.Preflight, "preflight:after"),
+                (HostUpdateExecutionState.Draining, "drain:after"),
+                (HostUpdateExecutionState.Fenced, "fence:after"),
+                (HostUpdateExecutionState.BackedUp, "backup:after"),
+                (HostUpdateExecutionState.Migrating, "migration:after"),
+                (HostUpdateExecutionState.Applying, "apply:after"),
+                (HostUpdateExecutionState.Verifying, "verify:after"),
+            ],
+            withBaseline: false);
+        var steps = new RecordingExecutionSteps(null);
+
+        JsonElement activated = Envelope(await RunAsync(Activate(), services =>
+        {
+            services.RemoveAll<IHostUpdateLocalImageVerifier>();
+            services.AddSingleton(_imageVerifier);
+            services.AddSingleton<IHostUpdateLocalImageVerifier>(sp => sp.GetRequiredService<FakeLocalImageVerifier>());
+            services.RemoveAll<IHostUpdateOfflineActivationSafetyProbe>();
+            services.AddSingleton<IHostUpdateOfflineActivationSafetyProbe>(_safetyProbe);
+            services.RemoveAll<IHostUpdateExecutionSteps>();
+            services.AddScoped<IHostUpdateExecutionSteps>(_ => steps);
+        }));
+
+        activated.GetProperty("exitCode").GetInt32().Should().Be(HostUpdateCliExitCodes.Success, activated.ToString());
+        steps.Calls.Should().BeEmpty();
+        IReadOnlyList<HostUpdateExecutionActivity> activities = new FileHostUpdateExecutionJournal(_host.JournalPath).Read(request.ReleaseId);
+        activities.Should().Contain(activity => activity.State == HostUpdateExecutionState.Completed && activity.Phase == "completed");
+    }
+
+    [HostStateFact]
+    public async Task Activation_refuses_accepted_replay_without_verified_journal_proof()
+    {
+        await ImportAsync();
+        HostUpdateExecutionRequest request = RequestFromCurrentStaging();
+        await WriteInstalledStateAsync(request);
+        await HostUpdateOfflineActivation.MarkActivatedAsync(_host.Configuration(), CurrentCandidate(), CancellationToken.None);
+        _host.SeedJournal(
+            request,
+            [(HostUpdateExecutionState.Applying, "apply:after")],
+            withBaseline: false);
+
+        JsonElement refused = Envelope(await RunAsync(Activate(), services =>
+        {
+            services.RemoveAll<IHostUpdateLocalImageVerifier>();
+            services.AddSingleton(_imageVerifier);
+            services.AddSingleton<IHostUpdateLocalImageVerifier>(sp => sp.GetRequiredService<FakeLocalImageVerifier>());
+            services.RemoveAll<IHostUpdateOfflineActivationSafetyProbe>();
+            services.AddSingleton<IHostUpdateOfflineActivationSafetyProbe>(_safetyProbe);
+            services.RemoveAll<IHostUpdateExecutionSteps>();
+            services.AddScoped<IHostUpdateExecutionSteps>(_ => new RecordingExecutionSteps(null));
+        }));
+
+        refused.GetProperty("exitCode").GetInt32().Should().Be(HostUpdateCliExitCodes.Refused, refused.ToString());
+        refused.GetProperty("result").GetProperty("code").GetString().Should().Be("replay_accepted");
+    }
+
+    [HostStateFact]
     public async Task Activation_reports_completed_when_late_replay_consumption_fails_after_install()
     {
         await ImportAsync();

@@ -87,10 +87,31 @@ internal static class HostUpdateOfflineActivation
                 new HostUpdateCli.CliFailure(HostUpdateCli.StateFailureCode(exception), [])).ConfigureAwait(false);
         }
 
+        bool skipReadinessChecks = false;
         if (replay.Disposition != HostUpdateReplayDisposition.Imported)
         {
-            return await FailAsync(output, args, HostUpdateCliExitCodes.Refused,
-                "replay_" + replay.Disposition.ToString().ToLowerInvariant()).ConfigureAwait(false);
+            if (replay.Disposition == HostUpdateReplayDisposition.Accepted)
+            {
+                using IServiceScope recoveryScope = provider.CreateScope();
+                if (await HostUpdateOfflineActivationStartGuard.TryFinalizeAcceptedActivationAsync(
+                        recoveryScope.ServiceProvider.GetRequiredService<IHostUpdateExecutionJournal>(),
+                        recoveryScope.ServiceProvider.GetRequiredService<IInstalledHostStateStore>(),
+                        request,
+                        appendCompletion: false,
+                        cancellationToken).ConfigureAwait(false))
+                {
+                    skipReadinessChecks = true;
+                }
+                else
+                {
+                    return await FailAsync(output, args, HostUpdateCliExitCodes.Refused, "replay_accepted").ConfigureAwait(false);
+                }
+            }
+            else
+            {
+                return await FailAsync(output, args, HostUpdateCliExitCodes.Refused,
+                    "replay_" + replay.Disposition.ToString().ToLowerInvariant()).ConfigureAwait(false);
+            }
         }
 
         using (IHostUpdateExecutionLease? readinessLease = HostUpdateCli.TryAcquireLock(provider))
@@ -103,15 +124,18 @@ internal static class HostUpdateOfflineActivation
 
         try
         {
-            using IServiceScope preflightScope = provider.CreateScope();
-            IServiceProvider scoped = preflightScope.ServiceProvider;
-            await scoped.GetRequiredService<IHostUpdateLocalImageVerifier>()
-                .VerifyTargetsAsync(request, cancellationToken).ConfigureAwait(false);
-            string? safetyError = await scoped.GetRequiredService<IHostUpdateOfflineActivationSafetyProbe>()
-                .ValidateSafeToExecuteAsync(request, cancellationToken).ConfigureAwait(false);
-            if (safetyError is not null)
+            if (!skipReadinessChecks)
             {
-                return await FailAsync(output, args, HostUpdateCliExitCodes.Refused, safetyError).ConfigureAwait(false);
+                using IServiceScope preflightScope = provider.CreateScope();
+                IServiceProvider scoped = preflightScope.ServiceProvider;
+                await scoped.GetRequiredService<IHostUpdateLocalImageVerifier>()
+                    .VerifyTargetsAsync(request, cancellationToken).ConfigureAwait(false);
+                string? safetyError = await scoped.GetRequiredService<IHostUpdateOfflineActivationSafetyProbe>()
+                    .ValidateSafeToExecuteAsync(request, cancellationToken).ConfigureAwait(false);
+                if (safetyError is not null)
+                {
+                    return await FailAsync(output, args, HostUpdateCliExitCodes.Refused, safetyError).ConfigureAwait(false);
+                }
             }
         }
         catch (Exception exception) when (exception is HostUpdatePreloadedImageVerificationException or HostUpdateApplyUnsupportedServiceException)
@@ -344,6 +368,11 @@ internal sealed class HostUpdateOfflineActivationStartGuard(
                         : "activation_replay_record_failed";
                 }
             }
+            else if (completedReplay.Disposition == HostUpdateReplayDisposition.Accepted &&
+                HostUpdateOfflineActivation.InstalledStateMatches(request, await installedStateStore.ReadAsync(cancellationToken).ConfigureAwait(false)))
+            {
+                return null;
+            }
 
             return "activation_already_completed";
         }
@@ -357,12 +386,76 @@ internal sealed class HostUpdateOfflineActivationStartGuard(
             configuration,
             HostUpdateOfflineActivation.CandidateFromRequest(request),
             cancellationToken).ConfigureAwait(false);
+        if (replay.Disposition == HostUpdateReplayDisposition.Accepted &&
+            await TryFinalizeAcceptedActivationAsync(journal, installedStateStore, request, appendCompletion: true, cancellationToken).ConfigureAwait(false))
+        {
+            return null;
+        }
+
         if (replay.Disposition != HostUpdateReplayDisposition.Imported)
         {
             return "replay_" + replay.Disposition.ToString().ToLowerInvariant();
         }
 
         return await safetyProbe.ValidateSafeToExecuteAsync(request, cancellationToken).ConfigureAwait(false);
+    }
+
+    internal static async Task<bool> TryFinalizeAcceptedActivationAsync(
+        IHostUpdateExecutionJournal journal,
+        IInstalledHostStateStore installedStateStore,
+        HostUpdateExecutionRequest request,
+        bool appendCompletion,
+        CancellationToken cancellationToken)
+    {
+        IReadOnlyList<HostUpdateExecutionActivity> activities = journal.Read(request.ReleaseId);
+        HostUpdateExecutionState? current = activities.Count == 0 ? null : activities[^1].State;
+        if (!HostUpdateOfflineActivation.InstalledStateMatches(request, await installedStateStore.ReadAsync(cancellationToken).ConfigureAwait(false)))
+        {
+            return false;
+        }
+
+        if (current == HostUpdateExecutionState.Completed)
+        {
+            return true;
+        }
+
+        if (current == HostUpdateExecutionState.RecoveryRequired || !VerifiedJournalMatchesRequest(activities, request))
+        {
+            return false;
+        }
+
+        if (appendCompletion)
+        {
+            AppendCompletedJournal(journal, request);
+        }
+
+        return true;
+    }
+
+    private static bool VerifiedJournalMatchesRequest(IReadOnlyList<HostUpdateExecutionActivity> activities, HostUpdateExecutionRequest request)
+    {
+        string bindingHash = HostUpdateRequestBinding.Compute(request);
+        return activities.Count > 0 &&
+            activities.All(activity => activity.RequestBindingHash is null || string.Equals(activity.RequestBindingHash, bindingHash, StringComparison.Ordinal)) &&
+            activities.Any(activity =>
+                activity.State == HostUpdateExecutionState.Verifying &&
+                string.Equals(activity.Phase, "verify:after", StringComparison.Ordinal) &&
+                string.Equals(activity.RequestBindingHash, bindingHash, StringComparison.Ordinal));
+    }
+
+    private static void AppendCompletedJournal(IHostUpdateExecutionJournal journal, HostUpdateExecutionRequest request)
+    {
+        string bindingHash = HostUpdateRequestBinding.Compute(request);
+        journal.Append(new HostUpdateExecutionActivity(Guid.NewGuid().ToString("N"), request.ReleaseId, HostUpdateExecutionState.Completed, "fence-release:after", DateTimeOffset.UtcNow)
+        {
+            RequestBindingHash = bindingHash,
+            RequestBinding = request,
+        });
+        journal.Append(new HostUpdateExecutionActivity(Guid.NewGuid().ToString("N"), request.ReleaseId, HostUpdateExecutionState.Completed, "completed", DateTimeOffset.UtcNow)
+        {
+            RequestBindingHash = bindingHash,
+            RequestBinding = request,
+        });
     }
 }
 

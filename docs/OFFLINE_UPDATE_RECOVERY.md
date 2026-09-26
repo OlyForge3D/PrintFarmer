@@ -486,9 +486,11 @@ executor's own lock immediately before executor steps begin, closing the gap
 between preflight validation and mutation. After health/digest verification
 persists the installed state, the executor consumes the `Imported` replay record
 as `Accepted` before releasing that same lock. A crash in that finalization
-window is recoverable: a later `activate` for the same release, manifest digest
-and completed journal finalizes the still-`Imported` replay record only if the
-installed state already matches the signed target, and it does not rerun
+window is recoverable in either order: a later `activate` for the same release
+and manifest digest finalizes a completed journal whose replay record is still
+`Imported`, or finalizes the completion journal when replay is already `Accepted`
+and the request-bound journal proves `verify:after`. Both paths additionally
+require the installed state to already match the signed target, and neither reruns
 migration or apply steps. With writers stopped, there are no live
 API/slicer/monolith in-memory writer flags to prove, while the durable admission
 gate, database active-work checks, backups, migrations, health gates and
