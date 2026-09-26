@@ -1,4 +1,4 @@
-﻿using Farm.Infrastructure.Services.HostUpdates;
+using Farm.Infrastructure.Services.HostUpdates;
 using Farm.Slicer.Module.Data;
 using Farm.Slicer.Module.Domain;
 using FluentAssertions;
@@ -33,7 +33,7 @@ public sealed class HostUpdateRemoteWorkerGuardTests
     [InlineData("http://10.0.0.12:8080")]
     [InlineData("http://[::1]:8080")]
     [InlineData("http://localhost:8080")]
-    [InlineData("http://user:secret@orcaslicer-worker:8080")]
+    [InlineData("http://operator@orcaslicer-worker:8080")]
     [InlineData("ftp://orcaslicer-worker:8080")]
     [InlineData("http://printfarmer:8080")]
     public void Remote_or_unmanaged_worker_hosts_are_refused(string? host)
