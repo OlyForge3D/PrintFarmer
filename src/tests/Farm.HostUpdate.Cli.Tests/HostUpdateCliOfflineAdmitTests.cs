@@ -388,6 +388,8 @@ public sealed class HostUpdateCliOfflineAdmitTests : IDisposable, IAsyncLifetime
     [InlineData("host_update_replay_state_rollback at C:\\state", "state_unreadable:InvalidDataException")]
     [InlineData("host_update_policy_fence_invalid", "state_unreadable:InvalidDataException")]
     [InlineData("Journal record is invalid.", "state_unreadable:InvalidDataException")]
+    [InlineData("host_update_replay_state_rollback\n", "state_unreadable:InvalidDataException")]
+    [InlineData("journal_corrupt\n", "state_unreadable:InvalidDataException")]
     public void State_failure_code_passes_only_fixed_journal_and_replay_codes(string message, string expected)
     {
         HostUpdateCli.StateFailureCode(new InvalidDataException(message)).Should().Be(expected);
