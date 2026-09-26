@@ -190,6 +190,12 @@ part of the set, is rejected. Remaining work under #2658:
   recovery instructions.
 - #3064 (delivered): replay protection, channel continuity and offline trust
   expiry.
+- #3081 (open): complete offline set — remaining worker/infrastructure images,
+  templates and config schema, approved host tools.
+- #3080 (open, after #3081): offline install/activation with Bash/PowerShell
+  wrapper parity. Until it lands, `import` installs nothing.
+- #3082 (open, after #3080): network-denied recovery to the prior artifact set
+  with provider and remote-owner requirements failing closed.
 
 ### Application and infrastructure images (#3061)
 
@@ -502,6 +508,19 @@ separately supersede 41 with 42 without installing either. Reimported 41 must
 remain rejected after policy edits, both channel round trips, restart and older
 app DB/policy/cache restoration. Intact independent-channel records and current
 allowed metadata must still work.
+
+Unit-level replay evidence already exists; it does not replace the isolated
+matrix above. `HostUpdateOfflineReplayTests` (replay store) covers sequence 41
+rejected above an installed 40, 42 imported without installing, reused
+decisions across stable-insider-stable round trips and a restart, a moved alias
+or other-branch commit at the imported sequence, and fail-closed restore of an
+older replay snapshot, an older anchor, an edited snapshot or a foreign
+same-epoch snapshot. `HostUpdateCliOfflineAdmitTests` (`offline-admit`) covers a
+forged source branch, a moved release alias, evidence staged under a prior
+policy after a policy round trip, and a restored older replay state
+(`state_unreadable`, exit 4). `scripts/ci/tests/test-offline-update-bundle.mjs`
+covers traversal, absolute, nested, duplicate and case-conflicting members,
+extended headers, links, and member/bundle/nested-blob size bounds.
 
 No fallback network request, local build, fabricated recovery success or
 physical printer command is acceptable. Retain full failure evidence, prove

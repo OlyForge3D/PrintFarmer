@@ -179,6 +179,116 @@ public sealed class HostUpdateOfflineReplayTests
         Assert.Equal(HostUpdateReplayDisposition.Imported, (await store.DecideAsync(Candidate(42), HostUpdateReplayIntent.Import, default)).Disposition);
     }
 
+    [Fact]
+    public async Task Seq41RejectedAboveInstalled_Then42ImportedWithoutInstall_StayReplayProtectedAcrossChannelRoundTripsAndRestart()
+    {
+        (FileHostUpdateReplayStore store, string root, InMemoryAnchor anchor) = await NewStoreAsync();
+        Assert.Equal(HostUpdateReplayDisposition.Accepted, (await store.DecideAsync(Candidate(40), HostUpdateReplayIntent.Admit, default)).Disposition);
+        HostUpdateReplayDecision rejected41 = await store.DecideAsync(Candidate(41), HostUpdateReplayIntent.Reject, default);
+        HostUpdateReplayDecision imported42 = await store.DecideAsync(Candidate(42), HostUpdateReplayIntent.Import, default);
+        Assert.Equal(HostUpdateReplayDisposition.Rejected, rejected41.Disposition);
+        Assert.False(rejected41.Reused);
+        Assert.Equal(HostUpdateReplayDisposition.Imported, imported42.Disposition);
+
+        // Stable -> insider -> stable, then insider again after a restart: the independent channel
+        // accepts its own equal sequence while the stable decisions never move.
+        Assert.Equal(HostUpdateReplayDisposition.Imported,
+            (await store.DecideAsync(Candidate(41, UpdateChannelSettings.InsiderChannel), HostUpdateReplayIntent.Import, default)).Disposition);
+        await AssertStableReplayProtectedAsync(store, imported42.CorrelationId);
+        using FileHostUpdateReplayStore restarted = new(root, anchor);
+        HostUpdateReplayDecision insiderAgain = await restarted.DecideAsync(Candidate(41, UpdateChannelSettings.InsiderChannel), HostUpdateReplayIntent.Import, default);
+        Assert.Equal(HostUpdateReplayDisposition.Imported, insiderAgain.Disposition);
+        Assert.True(insiderAgain.Reused);
+        await AssertStableReplayProtectedAsync(restarted, imported42.CorrelationId);
+
+        HostUpdateReplayDecision admit42 = await restarted.DecideAsync(Candidate(42), HostUpdateReplayIntent.Admit, default);
+        Assert.Equal(HostUpdateReplayDisposition.Accepted, admit42.Disposition);
+        Assert.False(admit42.Reused);
+    }
+
+    [Fact]
+    public async Task MovedAliasOrForgedPromotion_AtTheImportedSequence_IsRejectedWithoutDisturbingTheImport()
+    {
+        (FileHostUpdateReplayStore store, _, _) = await NewStoreAsync();
+        HostUpdateReplayDecision imported = await store.DecideAsync(Candidate(42), HostUpdateReplayIntent.Import, default);
+
+        // Same release id and sequence re-pointed at another commit/manifest (a moved tag or a
+        // promoted build from another branch) is a different identity at the high-water sequence.
+        HostUpdateReplayDecision moved = await store.DecideAsync(
+            Candidate(42) with { SourceCommit = "commit-other-branch", ManifestDigest = "sha256:moved" }, HostUpdateReplayIntent.Import, default);
+        HostUpdateReplayDecision original = await store.DecideAsync(Candidate(42), HostUpdateReplayIntent.Import, default);
+
+        Assert.Equal(HostUpdateReplayDisposition.Rejected, moved.Disposition);
+        Assert.Equal(HostUpdateReplayDisposition.Imported, original.Disposition);
+        Assert.True(original.Reused);
+        Assert.Equal(imported.CorrelationId, original.CorrelationId);
+        Assert.Equal(HostUpdateReplayDisposition.Rejected, (await store.DecideAsync(Candidate(41), HostUpdateReplayIntent.Import, default)).Disposition);
+    }
+
+    [Fact]
+    public async Task RestoredOlderReplaySnapshot_FailsClosedUntilTheCommittedStateReturns()
+    {
+        (FileHostUpdateReplayStore store, string root, _) = await NewStoreAsync();
+        string statePath = Path.Combine(root, "host-update-replay.json");
+        await store.DecideAsync(Candidate(41), HostUpdateReplayIntent.Import, default);
+        byte[] older = await File.ReadAllBytesAsync(statePath);
+        await store.DecideAsync(Candidate(42), HostUpdateReplayIntent.Import, default);
+        byte[] committed = await File.ReadAllBytesAsync(statePath);
+
+        await File.WriteAllBytesAsync(statePath, older);
+        InvalidDataException rollback = await Assert.ThrowsAsync<InvalidDataException>(() => store.DecideAsync(Candidate(41), HostUpdateReplayIntent.Import, default));
+
+        Assert.Equal("host_update_replay_state_rollback", rollback.Message);
+        Assert.Equal(older, await File.ReadAllBytesAsync(statePath));
+        await File.WriteAllBytesAsync(statePath, committed);
+        Assert.Equal(HostUpdateReplayDisposition.Superseded, (await store.DecideAsync(Candidate(41), HostUpdateReplayIntent.Import, default)).Disposition);
+    }
+
+    [Fact]
+    public async Task RestoredOlderAnchor_EditedSnapshot_OrForeignSameEpochSnapshot_FailsClosed()
+    {
+        (FileHostUpdateReplayStore store, string root, InMemoryAnchor anchor) = await NewStoreAsync();
+        string statePath = Path.Combine(root, "host-update-replay.json");
+        string initialHash = await anchor.ReadStateHashAsync(default);
+        await store.DecideAsync(Candidate(42), HostUpdateReplayIntent.Import, default);
+
+        using FileHostUpdateReplayStore restoredAnchor = new(root, new InMemoryAnchor(initialHash));
+        InvalidDataException anchorRollback = await Assert.ThrowsAsync<InvalidDataException>(() =>
+            restoredAnchor.DecideAsync(Candidate(41), HostUpdateReplayIntent.Import, default));
+        Assert.Equal("host_update_replay_anchor_rollback", anchorRollback.Message);
+
+        string current = await File.ReadAllTextAsync(statePath);
+        string edited = current.Replace("\"Sequence\":42", "\"Sequence\":40", StringComparison.Ordinal);
+        Assert.NotEqual(current, edited);
+        await File.WriteAllTextAsync(statePath, edited);
+        InvalidDataException corrupt = await Assert.ThrowsAsync<InvalidDataException>(() => store.DecideAsync(Candidate(41), HostUpdateReplayIntent.Import, default));
+        Assert.Equal("host_update_replay_state_corrupt", corrupt.Message);
+
+        // A well-formed snapshot from another backup at the same epoch still fails the anchor hash.
+        (FileHostUpdateReplayStore other, string otherRoot, _) = await NewStoreAsync();
+        await other.DecideAsync(Candidate(41), HostUpdateReplayIntent.Import, default);
+        File.Copy(Path.Combine(otherRoot, "host-update-replay.json"), statePath, true);
+        InvalidDataException mismatch = await Assert.ThrowsAsync<InvalidDataException>(() => store.DecideAsync(Candidate(41), HostUpdateReplayIntent.Import, default));
+        Assert.Equal("host_update_replay_state_anchor_hash_mismatch", mismatch.Message);
+    }
+
+    private static async Task AssertStableReplayProtectedAsync(FileHostUpdateReplayStore store, string imported42CorrelationId)
+    {
+        HostUpdateReplayDecision import41 = await store.DecideAsync(Candidate(41), HostUpdateReplayIntent.Import, default);
+        HostUpdateReplayDecision admit41 = await store.DecideAsync(Candidate(41), HostUpdateReplayIntent.Admit, default);
+        HostUpdateReplayDecision admit40 = await store.DecideAsync(Candidate(40), HostUpdateReplayIntent.Admit, default);
+        HostUpdateReplayDecision import42 = await store.DecideAsync(Candidate(42), HostUpdateReplayIntent.Import, default);
+
+        Assert.Equal(HostUpdateReplayDisposition.Rejected, import41.Disposition);
+        Assert.True(import41.Reused);
+        Assert.Equal(HostUpdateReplayDisposition.Rejected, admit41.Disposition);
+        Assert.True(admit41.Reused);
+        Assert.Equal(HostUpdateReplayDisposition.Superseded, admit40.Disposition);
+        Assert.Equal(HostUpdateReplayDisposition.Imported, import42.Disposition);
+        Assert.True(import42.Reused);
+        Assert.Equal(imported42CorrelationId, import42.CorrelationId);
+    }
+
     private static async Task<(FileHostUpdateReplayStore Store, string Root, InMemoryAnchor Anchor)> NewStoreAsync(TimeSpan? anchorDelay = null)
     {
         string root = Path.Combine(HostStateTestPaths.TempRoot, "printfarmer-offline-replay-" + Guid.NewGuid().ToString("N"));

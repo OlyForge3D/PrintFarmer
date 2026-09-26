@@ -316,16 +316,94 @@ public sealed class HostUpdateCliOfflineAdmitTests : IDisposable, IAsyncLifetime
         Envelope(run).GetProperty("result").GetProperty("code").GetString().Should().Be("host_state_not_enabled");
     }
 
+    [HostStateFact]
+    public async Task Manifest_from_a_forged_source_branch_is_refused_before_the_replay_store()
+    {
+        StageManifest(json => json.Replace("\"sourceBranch\":\"development\"", "\"sourceBranch\":\"feature/forged\"", StringComparison.Ordinal));
+
+        JsonElement refused = Envelope(await RunAsync(Admit("insider")));
+
+        refused.GetProperty("exitCode").GetInt32().Should().Be(HostUpdateCliExitCodes.Refused);
+        refused.GetProperty("result").GetProperty("code").GetString().Should().Be("staging_manifest_invalid");
+        _verifier.Calls.Should().BeEmpty();
+        StageManifest(json => json);
+        JsonElement genuine = Envelope(await RunAsync(Admit("insider")));
+        genuine.GetProperty("result").GetProperty("disposition").GetString().Should().Be("Imported");
+        genuine.GetProperty("result").GetProperty("reused").GetBoolean().Should().BeFalse();
+    }
+
+    [HostStateFact]
+    public async Task Moved_release_alias_at_the_imported_sequence_is_refused_and_the_original_import_survives()
+    {
+        JsonElement first = Envelope(await RunAsync(Admit("insider")));
+
+        StageManifest(json => json.Replace("\"sourceCommit\":\"" + new string('a', 40) + "\"", "\"sourceCommit\":\"" + new string('b', 40) + "\"", StringComparison.Ordinal));
+        JsonElement moved = Envelope(await RunAsync(Admit("insider")));
+        StageManifest(json => json);
+        JsonElement original = Envelope(await RunAsync(Admit("insider")));
+
+        moved.GetProperty("exitCode").GetInt32().Should().Be(HostUpdateCliExitCodes.Refused, moved.ToString());
+        moved.GetProperty("result").GetProperty("reason").GetString().Should().Be("replay_rejected");
+        original.GetProperty("exitCode").GetInt32().Should().Be(HostUpdateCliExitCodes.Success);
+        original.GetProperty("result").GetProperty("reused").GetBoolean().Should().BeTrue();
+        original.GetProperty("result").GetProperty("correlationId").GetString().Should().Be(first.GetProperty("result").GetProperty("correlationId").GetString());
+    }
+
+    [HostStateFact]
+    public async Task Evidence_staged_under_the_prior_policy_is_refused_after_a_policy_edit_and_reused_after_the_round_trip()
+    {
+        JsonElement imported = Envelope(await RunAsync(Admit("insider")));
+        await _host.ChangePolicyAsync("stable");
+
+        JsonElement late = Envelope(await RunAsync(Admit("insider")));
+        await _host.ChangePolicyAsync("insider");
+        JsonElement back = Envelope(await RunAsync(Admit("insider")));
+
+        late.GetProperty("exitCode").GetInt32().Should().Be(HostUpdateCliExitCodes.Refused);
+        late.GetProperty("result").GetProperty("code").GetString().Should().Be("channel_mismatch_policy");
+        back.GetProperty("exitCode").GetInt32().Should().Be(HostUpdateCliExitCodes.Success);
+        back.GetProperty("result").GetProperty("reused").GetBoolean().Should().BeTrue();
+        back.GetProperty("result").GetProperty("correlationId").GetString().Should().Be(imported.GetProperty("result").GetProperty("correlationId").GetString());
+    }
+
+    [HostStateFact]
+    public async Task Restored_older_replay_state_fails_closed_instead_of_readmitting()
+    {
+        string statePath = Path.Combine(Paths().Root, "host-update-replay.json");
+        byte[] beforeImport = await File.ReadAllBytesAsync(statePath);
+        Envelope(await RunAsync(Admit("insider"))).GetProperty("exitCode").GetInt32().Should().Be(HostUpdateCliExitCodes.Success);
+
+        await File.WriteAllBytesAsync(statePath, beforeImport);
+        CliRun run = await RunAsync(Admit("insider"));
+
+        run.ExitCode.Should().Be(HostUpdateCliExitCodes.StateUnreadable, run.Output);
+        Envelope(run).GetProperty("result").GetProperty("code").GetString().Should().Be("state_unreadable:InvalidDataException");
+        (await File.ReadAllBytesAsync(statePath)).Should().Equal(beforeImport);
+    }
+
     private string[] Admit(string channel) => ["offline-admit", "--staging", _staging, "--channel", channel, "--trusted-root", _trustedRoot, "--json"];
+
+    private void StageManifest(Func<string, string> edit)
+    {
+        byte[] bytes = System.Text.Encoding.UTF8.GetBytes(edit(System.Text.Encoding.UTF8.GetString(_manifest)));
+        File.WriteAllBytes(Path.Combine(_staging, HostUpdateOfflineAdmission.ManifestName), bytes);
+        SignedUpdateManifest manifest = SignedUpdateManifestValidator.Parse(System.Text.Encoding.UTF8.GetString(bytes));
+        WriteRecord(Digest(bytes), manifest.Channel, manifest.Version);
+    }
 
     private void WriteRecord(string manifestDigest)
     {
         SignedUpdateManifest manifest = SignedUpdateManifestValidator.Parse(System.Text.Encoding.UTF8.GetString(_manifest));
+        WriteRecord(manifestDigest, manifest.Channel, manifest.Version);
+    }
+
+    private void WriteRecord(string manifestDigest, string channel, string version)
+    {
         string json = JsonSerializer.Serialize(new
         {
             schema = 1,
             decision = HostUpdateOfflineAdmission.VerifiedDecision,
-            release = new { channel = manifest.Channel, version = manifest.Version },
+            release = new { channel, version },
             manifestDigest,
         });
         File.WriteAllText(Path.Combine(_staging, HostUpdateOfflineAdmission.VerificationName), json);
