@@ -32,7 +32,8 @@ public sealed class BedClearAcknowledgementService(
     ILogger<BedClearAcknowledgementService> logger,
     IPrinterTelemetryFreshnessPolicy telemetryFreshnessPolicy,
     IStoredGcodeIntegrityVerifier? integrityVerifier = null,
-    IQueueResourceAuthorizationService? resourceAuthorization = null) : IBedClearAcknowledgementService
+    IQueueResourceAuthorizationService? resourceAuthorization = null,
+    TimeProvider? timeProvider = null) : IBedClearAcknowledgementService
 {
     /// <summary>
     /// Default acknowledgement validity window.
@@ -56,6 +57,8 @@ public sealed class BedClearAcknowledgementService(
     private readonly IStoredGcodeIntegrityVerifier? _integrityVerifier = integrityVerifier;
     private readonly IQueueResourceAuthorizationService? _resourceAuthorization =
         resourceAuthorization;
+
+    private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
 
     /// <inheritdoc />
     public async Task<AcknowledgeBedClearResult> AcknowledgeAsync(
@@ -331,7 +334,7 @@ public sealed class BedClearAcknowledgementService(
 
         DateTime? observedAtUtc = snapshot.ObservedAtUtc ?? snapshot.LastSeenAtUtc;
         if (!observedAtUtc.HasValue ||
-            (DateTime.UtcNow - observedAtUtc.Value) > telemetryFreshnessLimit)
+            (_timeProvider.GetUtcNow().UtcDateTime - observedAtUtc.Value) > telemetryFreshnessLimit)
         {
             return new AcknowledgeBedClearResult(
                 BedClearAckOutcome.PrinterOfflineOrStale,
@@ -559,7 +562,7 @@ public sealed class BedClearAcknowledgementService(
         // row (sequence allocation contention), we reload the counter and retry up to
         // MaxSequenceRetries times so every legitimate producer persists its own event.
         // =========================================================================
-        DateTime now = DateTime.UtcNow;
+        DateTime now = _timeProvider.GetUtcNow().UtcDateTime;
 
         // Persist the acknowledgement on dispatch state.
         dispatchState.AcknowledgedJobId = request.JobId;
@@ -642,7 +645,8 @@ public sealed class BedClearAcknowledgementService(
                 jobKind = job.JobKind?.ToString() ?? nameof(JobKind.Standard),
                 expectedPrinterConfigRevision = request.ExpectedPrinterConfigRevision,
                 commandId = startCommand.Id,
-            });
+            },
+            timeProvider: _timeProvider);
 
         try
         {
@@ -669,7 +673,8 @@ public sealed class BedClearAcknowledgementService(
                 bedClearState: "Acknowledged",
                 bedClearCommandId: commandRecord.Id,
                 bedClearExpiresAtUtc: commandRecord.ExpiresAtUtc,
-                ct: ct);
+                ct: ct,
+                timeProvider: _timeProvider);
             await _db.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);
         }
@@ -773,7 +778,7 @@ public sealed class BedClearAcknowledgementService(
             !dispatchState.AcknowledgedJobRowVersion.SequenceEqual(frontJob.RowVersion ?? []);
         bool isExpired =
             dispatchState.AcknowledgementExpiresAtUtc.HasValue &&
-            dispatchState.AcknowledgementExpiresAtUtc <= DateTime.UtcNow;
+            dispatchState.AcknowledgementExpiresAtUtc <= _timeProvider.GetUtcNow().UtcDateTime;
 
         if (isStale || isExpired)
         {
@@ -816,7 +821,7 @@ public sealed class BedClearAcknowledgementService(
         string reasonCode,
         CancellationToken ct)
     {
-        DateTime now = DateTime.UtcNow;
+        DateTime now = _timeProvider.GetUtcNow().UtcDateTime;
         command.Status = expired
             ? BedClearCommandStatus.Expired
             : BedClearCommandStatus.Rejected;
@@ -931,7 +936,8 @@ public sealed class BedClearAcknowledgementService(
                 jobRowVersion: job.RowVersion,
                 dispatchStateRowVersion: dispatchState.RowVersion,
                 idempotencyKey: request.IdempotencyKey,
-                detail: new { blockedReason = job.BlockedReasonCode?.ToString() });
+                detail: new { blockedReason = job.BlockedReasonCode?.ToString() },
+                timeProvider: _timeProvider);
             await _db.SaveChangesAsync(ct);
         }
 
@@ -987,7 +993,7 @@ public sealed class BedClearAcknowledgementService(
                 .Where(printer => printer.Id == command.PrinterId)
                 .Select(printer => (long?)printer.ConfigurationRevision)
                 .SingleOrDefaultAsync(ct);
-            DateTime utcNow = DateTime.UtcNow;
+            DateTime utcNow = _timeProvider.GetUtcNow().UtcDateTime;
             bool pendingIsStale = !BedClearCommandValidity.IsCurrent(
                 command,
                 job,

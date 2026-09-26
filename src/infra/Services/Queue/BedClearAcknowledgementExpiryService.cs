@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // </copyright>
 
-using System.Diagnostics;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Services.HostUpdates;
 using Microsoft.EntityFrameworkCore;
@@ -20,9 +19,12 @@ public sealed class BedClearAcknowledgementExpiryService(
     IServiceScopeFactory scopeFactory,
     ILogger<BedClearAcknowledgementExpiryService> logger,
     BedClearAcknowledgementExpiryMetrics metrics,
-    BedClearAcknowledgementExpiryFenceFlag? hostUpdateFence = null) : BackgroundService
+    BedClearAcknowledgementExpiryFenceFlag? hostUpdateFence = null,
+    TimeProvider? timeProvider = null) : BackgroundService
 {
     private static readonly TimeSpan ScanInterval = TimeSpan.FromSeconds(15);
+
+    private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -34,7 +36,7 @@ public sealed class BedClearAcknowledgementExpiryService(
                     await hostUpdateFence.IsPauseRequestedAsync(stoppingToken).ConfigureAwait(false))
                 {
                     await hostUpdateFence.AcknowledgePausedAsync(stoppingToken).ConfigureAwait(false);
-                    await Task.Delay(TimeSpan.FromMilliseconds(250), stoppingToken).ConfigureAwait(false);
+                    await Task.Delay(TimeSpan.FromMilliseconds(250), _timeProvider, stoppingToken).ConfigureAwait(false);
                     continue;
                 }
 
@@ -60,8 +62,8 @@ public sealed class BedClearAcknowledgementExpiryService(
 
     private async Task<bool> WaitForIntervalOrPauseAsync(CancellationToken stoppingToken)
     {
-        DateTimeOffset until = DateTimeOffset.UtcNow + ScanInterval;
-        while (DateTimeOffset.UtcNow < until)
+        DateTimeOffset until = _timeProvider.GetUtcNow() + ScanInterval;
+        while (_timeProvider.GetUtcNow() < until)
         {
             if (hostUpdateFence is not null &&
                 await hostUpdateFence.IsPauseRequestedAsync(stoppingToken).ConfigureAwait(false))
@@ -69,7 +71,7 @@ public sealed class BedClearAcknowledgementExpiryService(
                 return true;
             }
 
-            await Task.Delay(TimeSpan.FromMilliseconds(250), stoppingToken).ConfigureAwait(false);
+            await Task.Delay(TimeSpan.FromMilliseconds(250), _timeProvider, stoppingToken).ConfigureAwait(false);
         }
 
         return false;
@@ -77,7 +79,7 @@ public sealed class BedClearAcknowledgementExpiryService(
 
     internal async Task ScanAsync(CancellationToken ct)
     {
-        var stopwatch = Stopwatch.StartNew();
+        long scanStarted = _timeProvider.GetTimestamp();
         await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         IBedClearAcknowledgementService service =
@@ -94,11 +96,11 @@ public sealed class BedClearAcknowledgementExpiryService(
             await service.InvalidateStaleAcknowledgementsAsync(printerId, ct);
         }
 
-        stopwatch.Stop();
-        metrics.RecordScan(printerIds.Count, stopwatch.Elapsed.TotalMilliseconds);
+        double elapsedMs = _timeProvider.GetElapsedTime(scanStarted).TotalMilliseconds;
+        metrics.RecordScan(printerIds.Count, elapsedMs);
         logger.LogInformation(
             "Bed-clear acknowledgement scan pass: {ScannedCount} acknowledged printers, {ElapsedMs}ms.",
             printerIds.Count,
-            stopwatch.Elapsed.TotalMilliseconds);
+            elapsedMs);
     }
 }
