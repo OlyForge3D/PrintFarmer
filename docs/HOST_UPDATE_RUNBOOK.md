@@ -374,23 +374,30 @@ release bytes for transfer; see the
 Such a bundle is not installable and grants no rollout authority.
 
 To bring a complete offline bundle onto a disconnected host, use the wrapper's
-`import` subcommand (#3063). It needs no `--config`, verifies the bundle
-against the operator-supplied `trusted_root.json`, refuses any bundle without
-its images, signed infrastructure list and signed recovery instructions, loads
-only verified images and writes one durable, redacted decision record per
-attempt (exit 0 imported, 1 refused, 2 usage error):
+`import` subcommand (#3063, #3064). It takes the host's `--config`, enforces the
+offline trust expiry policy on the operator-supplied `trusted_root.json` and its
+approval record, verifies the bundle, refuses any bundle without its images,
+signed infrastructure list and signed recovery instructions, admits the release
+through the durable replay store with
+[`offline-admit`](#offline-replay-admission), loads only verified images and
+writes one durable, redacted decision record per attempt (exit 0 imported, 1
+refused, 2 usage error):
 
 ```bash
 /opt/printfarmer/host-update-cli/1.2.3/printfarmer-host-update.sh import \
+  --config /etc/printfarmer/host-update.json \
   --bundle /srv/offline/printfarmer-offline.tar --channel stable --version 1.2.3 \
-  --trusted-root /srv/offline/trusted_root.json --staging /srv/offline/staging-1 \
+  --trusted-root /srv/offline/trusted_root.json \
+  --trusted-root-approval /srv/offline/trusted-root-approval.json --staging /srv/offline/staging-1 \
   --records /var/lib/printfarmer/offline-decisions --operator ops.alice
 ```
 
 ```powershell
 & 'C:\Program Files\PrintFarmer\HostUpdateCli\1.2.3\printfarmer-host-update.ps1' import `
+  -Config C:\ProgramData\PrintFarmer\host-update.json `
   -Bundle D:\offline\printfarmer-offline.tar -Channel stable -Version 1.2.3 `
-  -TrustedRoot D:\offline\trusted_root.json -Staging D:\offline\staging-1 `
+  -TrustedRoot D:\offline\trusted_root.json `
+  -TrustedRootApproval D:\offline\trusted-root-approval.json -Staging D:\offline\staging-1 `
   -Records D:\PrintFarmer\offline-decisions -Operator ops.alice
 ```
 
@@ -401,6 +408,29 @@ An installed CLI package does not carry the Node.js bundle tool, so set
 update offer or installation; see
 [recovery instructions and host-local import](OFFLINE_UPDATE_RECOVERY.md#recovery-instructions-and-host-local-import-3063)
 for the complete contract and record format.
+
+#### Offline replay admission
+
+`import` calls the CLI's `offline-admit` command itself; run it directly only to
+diagnose a refusal:
+
+```bash
+Farm.HostUpdate.Cli --config /etc/printfarmer/host-update.json \
+  offline-admit --staging /srv/offline/staging-1 --channel stable --json
+```
+
+It reads the verified staging directory (`update-manifest.json` and
+`offline-bundle-verification.json`), requires `HostUpdates:HostState` to be
+enabled, requires `--channel` to match both the signed manifest and the host's
+durable automation policy, holds the host-update execution lock and records
+the release in the durable replay store with an `Imported` disposition. Exit
+codes: 0 admitted (new `Imported`, or the identical `Imported`/`Accepted`
+identity reused), 2 usage error, 3 host state disabled or policy unavailable,
+4 replay state unreadable or tampered, 6 refused (`channel_mismatch_policy`,
+`channel_mismatch_manifest`, `staging_*`, or `replay_rejected`/`replay_superseded` for a downgrade,
+replay or equal-sequence substitution, which is persisted), 7 lock held. An
+admission never authorizes installation. See
+[replay admission and trust expiry](OFFLINE_UPDATE_RECOVERY.md#replay-admission-channel-continuity-and-trust-expiry-3064).
 
 ### Host-local status and recovery CLI
 

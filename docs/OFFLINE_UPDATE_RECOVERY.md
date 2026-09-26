@@ -31,7 +31,11 @@ network-denied host and verifies them with bounded extraction. It is explicitly
 **not installable** and grants no rollout authority. A
 [host-local import command](#recovery-instructions-and-host-local-import-3063)
 (#3063) verifies a complete bundle, loads only its verified images and records
-every decision durably; it still installs, activates and authorizes nothing.
+every decision durably. It also enforces the offline trust expiry policy and
+admits the release through the host's durable replay store, refusing replays,
+downgrades and cross-channel imports (#3064, see
+[replay admission and trust expiry](#replay-admission-channel-continuity-and-trust-expiry-3064)).
+It still installs, activates and authorizes nothing.
 
 Connected installations need a proven minimum host-local recovery path but do
 not need to hand-carry a bundle. Disconnected installations additionally need
@@ -60,7 +64,8 @@ bundle complete; this table is not an archive layout or an implementation.
 the bounded-verification part of the offline verification row, and the
 host-update CLI archives. It does not package Node.js, Cosign or trust-root
 continuity/expiry/revocation evidence: the operator provisions a pinned Cosign
-and an approved `trusted_root.json` out of band, and trust continuity is #3064.
+and an approved `trusted_root.json` out of band; `import` applies the
+[offline trust expiry policy](#replay-admission-channel-continuity-and-trust-expiry-3064).
 It reuses the existing signed release outputs; it does not create a new
 manifest format, signer or publisher.
 
@@ -165,8 +170,10 @@ those remain future work under #2981. A bound
 prior set is recovery-only material and never a new offer or implicit channel
 consent.
 
-The index always states `installable: false` and `rolloutAuthorization: false`;
-replay protection and rollout eligibility are #3064.
+The index always states `installable: false` and `rolloutAuthorization: false`:
+a bundle by itself is never installable. Only an `import` decision record can
+state `installable: true`, after replay admission (#3064); rollout enablement
+remains out of scope.
 `contents.recoveryInstructions` is `true` only when the bundle carries the
 signed, release-bound
 [recovery instructions](#recovery-instructions-and-host-local-import-3063)
@@ -181,7 +188,8 @@ part of the set, is rejected. Remaining work under #2658:
 - #3062 (delivered): prior recovery set and protected-backup references.
 - #3063 (delivered): host-local import with Bash/PowerShell parity and bound
   recovery instructions.
-- #3064: replay protection, channel continuity and offline trust expiry.
+- #3064 (delivered): replay protection, channel continuity and offline trust
+  expiry.
 
 ### Application and infrastructure images (#3061)
 
@@ -278,17 +286,19 @@ platform (the paths must be absolute; `--staging` must not exist yet and
 restored application databases):
 
 ```bash
-scripts/printfarmer-host-update.sh import \
+scripts/printfarmer-host-update.sh import --config /etc/printfarmer/host-update.json \
   --bundle /srv/offline/printfarmer-offline.tar --channel stable --version 1.2.3 \
-  --trusted-root /srv/offline/trusted_root.json --staging /srv/offline/staging-1 \
+  --trusted-root /srv/offline/trusted_root.json \
+  --trusted-root-approval /srv/offline/trusted-root-approval.json --staging /srv/offline/staging-1 \
   --records /var/lib/printfarmer/offline-decisions --operator ops.alice \
   [--prior-recovery-set /abs/dir] [--protected-backup /abs/reference.json]
 ```
 
 ```powershell
-pwsh -File scripts\printfarmer-host-update.ps1 import `
+pwsh -File scripts\printfarmer-host-update.ps1 import -Config D:\PrintFarmer\host-update.json `
   -Bundle D:\offline\printfarmer-offline.tar -Channel stable -Version 1.2.3 `
-  -TrustedRoot D:\offline\trusted_root.json -Staging D:\offline\staging-1 `
+  -TrustedRoot D:\offline\trusted_root.json `
+  -TrustedRootApproval D:\offline\trusted-root-approval.json -Staging D:\offline\staging-1 `
   -Records D:\PrintFarmer\offline-decisions -Operator ops.alice `
   [-PriorRecoverySet D:\abs\dir] [-ProtectedBackup D:\abs\reference.json]
 ```
@@ -297,18 +307,22 @@ Both wrappers accept exactly the same options, validate them the same way
 (absolute paths, `stable`/`insider`, `[0-9A-Za-z.+-]{1,128}` versions and
 `[A-Za-z0-9][A-Za-z0-9._@-]{0,63}` operators), refuse a usage error with exit 2
 before anything runs, and run `node offline-update-bundle.mjs import` with an
-identical argument vector; the wrapper tests assert that parity. `import` needs
-Node.js, a pinned Cosign and Docker Engine 25 or later on the host. Set
+identical argument vector; the wrapper tests assert that parity. Both resolve the
+host-update CLI exactly as for `status`/`recover` (`PRINTFARMER_HOST_UPDATE_CLI_DIR`,
+or `cli/` beside an installed package's wrapper) and pass it with `--config` to the
+tool, which runs `offline-admit`. `import` needs Node.js, a pinned Cosign and Docker
+Engine 25 or later on the host. Set
 `PRINTFARMER_NODE`, `PRINTFARMER_COSIGN` and `PRINTFARMER_DOCKER` to absolute
 executables to avoid `PATH` lookup. In a repository checkout the tool is
 `scripts/ci/offline-update-bundle.mjs`; an installed CLI package does not carry
 it, so point `PRINTFARMER_OFFLINE_BUNDLE_TOOL` at an approved copy.
 
-`import` runs `verify` into the new staging directory, then requires a complete
-bundle: the release-selected application images, the signed infrastructure
+`import` first applies the trust expiry policy, then runs `verify` into the new
+staging directory, then requires a complete bundle: the release-selected application images, the signed infrastructure
 image list with its images, and the signed recovery instructions. A bundle that
 verifies but lacks any of them is **not installable for import** and is
-refused. It then runs `load`, which re-authenticates the staged metadata and
+refused. It then asks the host-update CLI to admit the verified release into the
+durable replay store (below) and only then runs `load`, which re-authenticates the staged metadata and
 loads only verified archives. It exits 0 when imported and 1 when refused. A
 refusal after verification succeeded removes the staging directory.
 
@@ -329,8 +343,11 @@ so a leftover `.<name>.partial` file is never a decision. A record holds the dec
 ID and time, operator, outcome (`imported`, `refused` or `in-progress`), a bounded reason,
 the expected channel and version, the bundle SHA-256, the signed release
 identity, the verified manifest, image, recovery-instruction and prior-set
-digests, the loaded image digests, `installable: false` and
-`rolloutAuthorization: false`. Reasons are redacted: supplied paths are replaced
+digests, the loaded image digests, the `trust` evaluation (trusted-root SHA-256,
+approval time, approver and approval expiry), the `replay` decision
+(`disposition`, `correlationId`, `reused`, `sequence` and `admitted`, also kept for a
+refused admission), `installable` and `rolloutAuthorization: false`. `installable` is
+`true` only on an `imported` record whose replay admission succeeded. Reasons are redacted: supplied paths are replaced
 by placeholders such as `<bundle>`, any other host path by `<path>`, control
 characters are removed and the text is capped at 512 characters. Usage errors
 (a malformed operator, version or channel, or a missing or linked records
@@ -338,8 +355,75 @@ directory) are rejected before a record can be written.
 
 An imported record is evidence that the bytes were verified and loaded. It is
 not an update offer, an installation or channel consent; applying a release
-still follows the [operator runbook](HOST_UPDATE_RUNBOOK.md), and replay
-high-water marks and trust expiry are #3064.
+still follows the [operator runbook](HOST_UPDATE_RUNBOOK.md).
+
+## Replay admission, channel continuity and trust expiry (#3064)
+
+### Trust expiry policy
+
+A network-denied host cannot refresh the Sigstore trusted root, so `import`
+trusts the operator's `trusted_root.json` only while both hold:
+
+- An operator approval record (`--trusted-root-approval`) binds its exact bytes
+  and is younger than **90 days**. The record is exactly
+  `{"schema":1,"kind":"printfarmer-trusted-root-approval","trustedRootSha256":"<64 hex>","approvedAt":"<canonical UTC ISO-8601>","approvedBy":"<operator>"}`.
+  Unknown fields, a SHA-256 of different bytes, a non-canonical timestamp, an
+  approval dated more than 10 minutes in the future or one older than 90 days is
+  refused. Re-approve a current trusted root from a connected, trusted host to
+  continue.
+- The root still lists at least one certificate authority and one
+  transparency-log key whose `validFor` window covers the current time.
+
+The policy is fixed in `offlineTrustPolicy`; there is no override option. It is
+evaluated before anything is extracted, and the result is kept in the record.
+
+**Revocation** is expressed only through those validity windows and the replay
+store's rejected/superseded identities. There is no offline revocation list:
+a key compromised after approval stays accepted until its window ends or the
+approval expires (at most 90 days). The age of the manifest signature itself
+(its Rekor integration time) is not bounded; rollback to an older signed
+release is prevented by the replay high-water mark instead. Both are
+documented residuals.
+
+### Replay admission and channel continuity
+
+After a complete bundle verifies, `import` runs
+`Farm.HostUpdate.Cli offline-admit --staging <dir> --channel <c> --json` with
+the host's `--config`. The CLI (see the
+[runbook](HOST_UPDATE_RUNBOOK.md#offline-replay-admission)) requires host state to
+be enabled, holds the host-update execution lock, re-parses and validates the
+staged manifest, checks that its digest, channel and release identity match the
+verification record, and that the manifest channel equals both `--channel` and
+the host's durable automation policy channel. It then records the release in the
+same durable replay store (trust root `default`, per-channel high-water mark,
+hash-chained anchor) that online updates use, with a new `Imported`
+disposition:
+
+- A new identity above the channel high-water mark is recorded `Imported`,
+  supersedes the previous high-water identity and advances the mark.
+- The identical identity is reused (idempotent re-import of an `Imported` or
+  `Accepted` release).
+- A lower sequence (downgrade/replay), an equal sequence with a different
+  identity (substitution) or a rejected/superseded identity is persisted as
+  `Rejected` and refused, so reimported sequence 41 stays rejected after 42,
+  after restart and after channel round trips.
+- A channel that differs from the manifest or the policy is refused without
+  touching replay state; each channel keeps an independent high-water mark.
+
+An `Imported` identity never authorizes installation by itself: the online
+scheduler still applies every current gate and admits it normally. Replay state
+lives in the host-state directory, outside restored application databases and
+replaced containers; missing or tampered anchor state fails closed (exit 4).
+Because the store's gate is in-process, `offline-admit` refuses while another
+host-update process holds the execution lock (exit 7). Refused admissions are
+recorded with their disposition and the staging directory is removed.
+
+### Retention
+
+Neither `import` nor the CLI ever deletes decision records, replay state or its
+anchor journal; keep them for the life of the installation. Staging is removed
+on refusal. Keep each imported bundle and its approval record while the release
+is installed or is the prior recovery release.
 
 ## Import and continuity rules
 
@@ -348,8 +432,9 @@ absolute paths, links/reparse escapes, duplicate/conflicting entries, oversized
 or incomplete archives and expansion bombs. A failure must leave no
 success-shaped import or partially activated set. The importer must fail
 closed on untrusted, expired, revoked, wrong-platform or mixed-channel evidence.
-Approved offline trust expiry/revocation and retention policy remain explicit
-delivery decisions, not defaults an operator may invent.
+The approved offline trust expiry/revocation and retention policy is the fixed
+policy in [the #3064 section](#replay-admission-channel-continuity-and-trust-expiry-3064);
+an operator cannot relax it.
 
 Authenticate sequence/channel/identity before advancing durable replay state.
 Persist authenticated decisions atomically before offer or action, including
