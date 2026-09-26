@@ -10,6 +10,7 @@ internal enum HostUpdateCliCommand
     Recover,
     OfflineAdmit,
     OfflineActivate,
+    OfflineRecover,
 }
 
 /// <summary>Strict, fixed-grammar argument parser: unknown or repeated options are usage errors.</summary>
@@ -41,6 +42,8 @@ internal sealed partial class HostUpdateCliArguments
 
     public string? Cosign { get; private set; }
 
+    public string? ProtectedBackup { get; private set; }
+
     public static bool TryParse(IReadOnlyList<string> args, out HostUpdateCliArguments? parsed, out string? error)
     {
         parsed = null;
@@ -57,6 +60,7 @@ internal sealed partial class HostUpdateCliArguments
             "recover" => HostUpdateCliCommand.Recover,
             "offline-admit" => HostUpdateCliCommand.OfflineAdmit,
             "offline-activate" => HostUpdateCliCommand.OfflineActivate,
+            "offline-recover" => HostUpdateCliCommand.OfflineRecover,
             "help" or "--help" or "-h" => HostUpdateCliCommand.Help,
             _ => null,
         };
@@ -95,7 +99,7 @@ internal sealed partial class HostUpdateCliArguments
                 case "--json":
                     result.Json = true;
                     break;
-                case "--staging" when command is HostUpdateCliCommand.OfflineAdmit or HostUpdateCliCommand.OfflineActivate:
+                case "--staging" when IsOffline(command.Value):
                     if (!TryValue(args, ref i, out string? staging))
                     {
                         error = "missing_value:--staging";
@@ -104,7 +108,7 @@ internal sealed partial class HostUpdateCliArguments
 
                     result.Staging = staging;
                     break;
-                case "--channel" when command is HostUpdateCliCommand.OfflineAdmit or HostUpdateCliCommand.OfflineActivate:
+                case "--channel" when IsOffline(command.Value):
                     if (!TryValue(args, ref i, out string? channel))
                     {
                         error = "missing_value:--channel";
@@ -113,7 +117,7 @@ internal sealed partial class HostUpdateCliArguments
 
                     result.Channel = channel;
                     break;
-                case "--trusted-root" when command is HostUpdateCliCommand.OfflineAdmit or HostUpdateCliCommand.OfflineActivate:
+                case "--trusted-root" when IsOffline(command.Value):
                     if (!TryValue(args, ref i, out string? trustedRoot))
                     {
                         error = "missing_value:--trusted-root";
@@ -122,7 +126,7 @@ internal sealed partial class HostUpdateCliArguments
 
                     result.TrustedRoot = trustedRoot;
                     break;
-                case "--cosign" when command is HostUpdateCliCommand.OfflineAdmit or HostUpdateCliCommand.OfflineActivate:
+                case "--cosign" when IsOffline(command.Value):
                     if (!TryValue(args, ref i, out string? cosign))
                     {
                         error = "missing_value:--cosign";
@@ -130,6 +134,15 @@ internal sealed partial class HostUpdateCliArguments
                     }
 
                     result.Cosign = cosign;
+                    break;
+                case "--protected-backup" when command == HostUpdateCliCommand.OfflineRecover:
+                    if (!TryValue(args, ref i, out string? protectedBackup))
+                    {
+                        error = "missing_value:--protected-backup";
+                        return false;
+                    }
+
+                    result.ProtectedBackup = protectedBackup;
                     break;
                 case "--release" when command is not HostUpdateCliCommand.OfflineAdmit and not HostUpdateCliCommand.OfflineActivate:
                     if (!TryValue(args, ref i, out string? release))
@@ -140,7 +153,7 @@ internal sealed partial class HostUpdateCliArguments
 
                     result.ReleaseId = release;
                     break;
-                case "--request-id" when command == HostUpdateCliCommand.Recover:
+                case "--request-id" when IsRecover(command.Value):
                     if (!TryValue(args, ref i, out string? requestId))
                     {
                         error = "missing_value:--request-id";
@@ -149,10 +162,10 @@ internal sealed partial class HostUpdateCliArguments
 
                     result.RequestId = requestId;
                     break;
-                case "--preview" when command == HostUpdateCliCommand.Recover:
+                case "--preview" when IsRecover(command.Value):
                     result.Preview = true;
                     break;
-                case "--confirm" when command == HostUpdateCliCommand.Recover:
+                case "--confirm" when IsRecover(command.Value):
                     if (!TryValue(args, ref i, out confirmValue))
                     {
                         error = "missing_value:--confirm";
@@ -161,7 +174,7 @@ internal sealed partial class HostUpdateCliArguments
 
                     result.Confirm = true;
                     break;
-                case "--reapprove-drift" when command == HostUpdateCliCommand.Recover:
+                case "--reapprove-drift" when IsRecover(command.Value):
                     if (!TryValue(args, ref i, out string? token))
                     {
                         error = "missing_value:--reapprove-drift";
@@ -170,7 +183,7 @@ internal sealed partial class HostUpdateCliArguments
 
                     result.ReapprovalToken = token;
                     break;
-                case "--printers-reconciled" when command == HostUpdateCliCommand.Recover:
+                case "--printers-reconciled" when IsRecover(command.Value):
                     if (!TryValue(args, ref i, out string? physicalToken))
                     {
                         error = "missing_value:--printers-reconciled";
@@ -197,7 +210,7 @@ internal sealed partial class HostUpdateCliArguments
             return false;
         }
 
-        if (command is HostUpdateCliCommand.OfflineAdmit or HostUpdateCliCommand.OfflineActivate)
+        if (IsOffline(command.Value))
         {
             if (result.Staging is null || !Path.IsPathFullyQualified(result.Staging))
             {
@@ -224,7 +237,14 @@ internal sealed partial class HostUpdateCliArguments
             }
         }
 
-        if (command == HostUpdateCliCommand.Recover)
+        if (command == HostUpdateCliCommand.OfflineRecover &&
+            (result.ProtectedBackup is null || !Path.IsPathFullyQualified(result.ProtectedBackup)))
+        {
+            error = result.ProtectedBackup is null ? "missing_option:--protected-backup" : "protected_backup_not_absolute";
+            return false;
+        }
+
+        if (IsRecover(command.Value))
         {
             if (result.ReleaseId is null)
             {
@@ -280,6 +300,12 @@ internal sealed partial class HostUpdateCliArguments
         parsed = result;
         return true;
     }
+
+    private static bool IsOffline(HostUpdateCliCommand command) =>
+        command is HostUpdateCliCommand.OfflineAdmit or HostUpdateCliCommand.OfflineActivate or HostUpdateCliCommand.OfflineRecover;
+
+    private static bool IsRecover(HostUpdateCliCommand command) =>
+        command is HostUpdateCliCommand.Recover or HostUpdateCliCommand.OfflineRecover;
 
     private static bool TryValue(IReadOnlyList<string> args, ref int index, out string? value)
     {
