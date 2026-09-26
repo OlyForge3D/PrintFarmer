@@ -225,6 +225,17 @@ public sealed partial class HostUpdateCliOfflineActivateTests
         File.ReadAllText(InstalledStatePath()).Should().Be(before);
         runner.Calls.Should().BeEmpty("no restore, apply or pull may start");
         network.Refused.Should().BeEmpty();
+
+        JsonElement confirmed = Envelope(await RunAsync(
+            [.. OfflineRecover(protectedBackup, confirm: true), .. ReapprovalArguments(preview)],
+            configuration,
+            services => UseNetworkDeniedBoundaries(services, runner, network)));
+
+        confirmed.GetProperty("exitCode").GetInt32().Should().Be(HostUpdateCliExitCodes.NeedsOperator, confirmed.ToString());
+        confirmed.ToString().Should().Contain(HostUpdateRecoveryCoordinator.DatabaseExternallyOwnedStop);
+        File.ReadAllText(InstalledStatePath()).Should().Be(before);
+        runner.Calls.Should().BeEmpty("confirm must also stop before any restore, apply or pull");
+        network.Refused.Should().BeEmpty();
     }
 
     private static void AssertRefused(JsonElement envelope, string code)

@@ -166,8 +166,11 @@ record's `priorRecoverySet` names the mode, prior release identity, manifest
 digest and protected-backup reference; it is `false` when the bundle binds no
 prior set.
 
-The prior set does not yet include prior images or effective configuration;
-those remain future work under #2981. A bound
+The prior set does not carry prior images or effective configuration; those
+remain future work under #2981. [Offline recovery](#offline-recovery-3082)
+therefore relies on the prior images still being present in the local Docker
+engine (they were running before the failed activation) and verifies each one
+locally by digest before any change. A bound
 prior set is recovery-only material and never a new offer or implicit channel
 consent.
 
@@ -202,8 +205,9 @@ incomplete. Remaining work under #2658:
 - #3080 (delivered): offline activation with Bash/PowerShell wrapper parity.
   Activation re-verifies the imported release, proves preloaded images locally and
   executes the existing host-update engine without registry or build fallback.
-- #3082 (open, after #3080): network-denied recovery to the prior artifact set
-  with provider and remote-owner requirements failing closed.
+- #3082 (delivered): network-denied recovery to the prior artifact set with
+  provider and remote-owner requirements failing closed (see
+  [offline recovery](#offline-recovery-3082)).
 
 ### Application and infrastructure images (#3061)
 
@@ -501,6 +505,77 @@ installed-state records remain the single engine source of truth. Failures befor
 verification preserve the prior installed state and leave recovery to the
 existing journal/recovery workflow; once the installed state has changed, the CLI
 reports the completed activation state rather than a refused activation.
+
+## Offline recovery (#3082)
+
+When an offline activation fails after mutation and the journal reports
+`RecoveryRequired`, recover to the prior release bound in the same staged bundle
+with `recover-offline`. Preview first, then confirm by retyping the release ID:
+
+```bash
+scripts/printfarmer-host-update.sh recover-offline --config /etc/printfarmer/host-update.json \
+  --staging /srv/offline/staging-1 --channel stable \
+  --trusted-root /srv/offline/trusted_root.json \
+  --protected-backup /srv/offline/protected-backup.json \
+  --release stable:1.4.0 --preview [--json]
+scripts/printfarmer-host-update.sh recover-offline ... --release stable:1.4.0 \
+  --confirm stable:1.4.0 [--reapprove-drift <token>] [--printers-reconciled <token>]
+```
+
+```powershell
+pwsh -File scripts\printfarmer-host-update.ps1 recover-offline -Config D:\PrintFarmer\host-update.json `
+  -Staging D:\offline\staging-1 -Channel stable -TrustedRoot D:\offline\trusted_root.json `
+  -ProtectedBackup D:\offline\protected-backup.json -Release stable:1.4.0 -Preview [-Json]
+```
+
+Both wrappers validate the same fixed options, forward them in one canonical
+order to `Farm.HostUpdate.Cli offline-recover` and preserve the CLI exit code;
+`--release` names the failed target, and `--request-id`, `--reapprove-drift` and
+`--printers-reconciled` behave exactly as for `recover`. Plain `recover` is
+unchanged.
+
+The staging directory and its `offline-bundle-verification.json` record are
+mutable and are never trusted on their own. Before reading host state the command
+requires, in order (every refusal exits 6 and changes nothing):
+
+1. The staged target manifest re-parses and its signature re-verifies against
+   `--trusted-root` for `--channel`, and its release ID equals `--release`
+   (`offline_recovery_release_mismatch`).
+2. The record binds a prior set (`prior_recovery_set_missing` when it is
+   `false`; `prior_recovery_set_invalid` when malformed).
+3. `prior-update-manifest.json` hashes to the recorded manifest digest, validates,
+   matches the recorded channel and version, is on the same channel as the
+   target with a strictly lower sequence, and matches the recorded backup's
+   `releaseVersion` (`prior_recovery_set_mismatch`).
+4. `prior-update-manifest.sigstore.json` verifies the prior manifest bytes
+   against the same trusted root and channel identity
+   (`prior_recovery_set_unverified`).
+5. The operator's `--protected-backup` reference — a regular file of at most
+   64 KiB with exactly `id`, `sha256`, `locationClass` and `releaseVersion` — is
+   well formed (`protected_backup_invalid`) and equal to the recorded reference
+   (`protected_backup_mismatch`). The operator's own copy, not the record, is the
+   authority for which backup may be restored.
+
+Recovery then runs through the ordinary recovery resolver, drift and physical
+reconciliation gates, lease and approval-bound installed-state snapshot. Inside
+that lease, and before planning or confirming, the failed request must be the
+staged target (`offline_recovery_target_mismatch`) in preloaded-image mode
+(`offline_recovery_requires_preloaded_request`; a registry-mode request would
+re-apply the prior set by pulling), and the installed state must be exactly the
+authenticated prior set: its release ID, manifest digest and every service digest
+for its recorded platform must match the prior manifest
+(`prior_installed_state_mismatch`).
+
+The recovery engine applies the prior digests in preloaded mode: it inspects each
+prior image locally, and applies templates with
+`docker compose up -d --no-build --pull never`; it never runs `docker pull` or
+`docker login`, and a missing local prior image fails closed. A coordinated
+database restore owned by an external provider (`DatabaseExternallyOwned`) stops
+as needs-operator with `database_externally_owned` before any restore or apply,
+so the external owner must restore it. Integration tests exercise a
+real failed offline activation followed by preview and confirm with a
+network-denied HTTP factory, asserting the prior set and backup are restored with
+no non-loopback request and no pull.
 
 ## Replay admission, channel continuity and trust expiry (#3064)
 
