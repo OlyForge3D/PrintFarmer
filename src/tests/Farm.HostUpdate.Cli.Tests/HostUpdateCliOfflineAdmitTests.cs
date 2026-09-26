@@ -95,7 +95,7 @@ public sealed class HostUpdateCliOfflineAdmitTests : IDisposable, IAsyncLifetime
         admitted.GetProperty("exitCode").GetInt32().Should().Be(HostUpdateCliExitCodes.Success, admitted.ToString());
         CosignVerifierOptions options = _verifier.Options.Should().ContainSingle().Subject;
         options.ExecutablePath.Should().Be(cosign);
-        options.TrustedRootPath.Should().Be(Path.GetFullPath(_trustedRoot));
+        options.TrustedRootPath.Should().Be(HostUpdateOfflineAdmission.ResolvePhysicalPath(_trustedRoot));
         FakeVerifier.Call call = _verifier.Calls.Should().ContainSingle().Subject;
         call.Manifest.Should().Equal(_manifest);
         call.Bundle.Should().Equal(_signature);
@@ -126,6 +126,91 @@ public sealed class HostUpdateCliOfflineAdmitTests : IDisposable, IAsyncLifetime
 
         refused.GetProperty("result").GetProperty("code").GetString().Should().Be("trusted_root_inside_staging");
         _verifier.Calls.Should().BeEmpty();
+    }
+
+    [HostStateTheory]
+    [InlineData(LinkKind.Symlink)]
+    [InlineData(LinkKind.Junction)]
+    public async Task Trusted_root_reached_through_a_linked_parent_that_aliases_staging_is_refused(LinkKind kind)
+    {
+        File.WriteAllText(Path.Combine(_staging, "trusted_root.json"), "{}");
+        string alias = Path.Combine(_host.Root, "root-alias");
+        if (!TryCreateDirectoryLink(alias, _staging, kind))
+        {
+            return;
+        }
+
+        JsonElement refused = Envelope(await RunAsync(["offline-admit", "--staging", _staging, "--channel", "insider",
+            "--trusted-root", Path.Combine(alias, "trusted_root.json"), "--json"]));
+
+        refused.GetProperty("exitCode").GetInt32().Should().Be(HostUpdateCliExitCodes.Refused);
+        refused.GetProperty("result").GetProperty("code").GetString().Should().Be("trusted_root_inside_staging");
+        _verifier.Calls.Should().BeEmpty("the aliased trust material is refused before Cosign runs");
+        JsonElement admitted = Envelope(await RunAsync(Admit("insider")));
+        admitted.GetProperty("result").GetProperty("reused").GetBoolean().Should().BeFalse("the refusal touched no replay state");
+    }
+
+    [HostStateTheory]
+    [InlineData(LinkKind.Symlink)]
+    [InlineData(LinkKind.Junction)]
+    public async Task External_trusted_root_reached_through_a_linked_parent_is_verified_at_its_physical_path(LinkKind kind)
+    {
+        string external = Path.Combine(_host.Root, "external-trust");
+        Directory.CreateDirectory(external);
+        string physical = Path.Combine(external, "trusted_root.json");
+        File.WriteAllText(physical, "{}");
+        string alias = Path.Combine(_host.Root, "trust-alias");
+        if (!TryCreateDirectoryLink(alias, external, kind))
+        {
+            return;
+        }
+
+        JsonElement admitted = Envelope(await RunAsync(["offline-admit", "--staging", _staging, "--channel", "insider",
+            "--trusted-root", Path.Combine(alias, "trusted_root.json"), "--json"]));
+
+        admitted.GetProperty("exitCode").GetInt32().Should().Be(HostUpdateCliExitCodes.Success, admitted.ToString());
+        _verifier.Options.Should().ContainSingle().Which.TrustedRootPath
+            .Should().Be(HostUpdateOfflineAdmission.ResolvePhysicalPath(physical));
+    }
+
+    public enum LinkKind
+    {
+        Symlink,
+        Junction,
+    }
+
+    // Symbolic links need privilege on Windows and junctions exist only there, so an unsupported
+    // combination returns false and the case is exercised on the platform that supports it.
+    private static bool TryCreateDirectoryLink(string link, string target, LinkKind kind)
+    {
+        if (kind == LinkKind.Junction)
+        {
+            if (!OperatingSystem.IsWindows())
+            {
+                return false;
+            }
+
+            using var process = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("cmd.exe")
+            {
+                ArgumentList = { "/c", "mklink", "/J", link, target },
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+            })!;
+            process.WaitForExit();
+            process.ExitCode.Should().Be(0, "junctions need no privilege on Windows");
+            return true;
+        }
+
+        try
+        {
+            Directory.CreateSymbolicLink(link, target);
+            return true;
+        }
+        catch (Exception exception) when (OperatingSystem.IsWindows() && exception is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 
     [HostStateFact]

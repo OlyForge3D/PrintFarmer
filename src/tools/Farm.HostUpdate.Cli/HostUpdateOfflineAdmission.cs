@@ -210,6 +210,7 @@ internal static class HostUpdateOfflineAdmission
     internal static async Task<string?> VerifySignatureAsync(HostUpdateCliArguments args, StagedRelease staged, CancellationToken cancellationToken)
     {
         string trustedRoot;
+        string stagingPath;
         try
         {
             var root = new FileInfo(args.TrustedRoot!);
@@ -218,15 +219,17 @@ internal static class HostUpdateOfflineAdmission
                 return "trusted_root_invalid";
             }
 
-            trustedRoot = root.FullName;
+            // Compare physical locations: a linked or junctioned parent could otherwise alias the
+            // mutable staging directory under an unrelated-looking path (#3077).
+            trustedRoot = ResolvePhysicalPath(root.FullName);
+            stagingPath = ResolvePhysicalPath(staged.StagingPath);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or System.Security.SecurityException or ArgumentException)
         {
             return "trusted_root_invalid";
         }
 
-        string inside = Path.GetRelativePath(staged.StagingPath, trustedRoot);
-        if (!inside.StartsWith("..", StringComparison.Ordinal) && !Path.IsPathRooted(inside))
+        if (IsWithin(stagingPath, trustedRoot))
         {
             return "trusted_root_inside_staging";
         }
@@ -235,6 +238,47 @@ internal static class HostUpdateOfflineAdmission
         bool verified = await verifier.VerifyAsync(staged.ManifestBytes, staged.SignatureBytes,
             HostUpdateTrustRoot.CertificateIdentity(staged.Candidate.Channel), cancellationToken).ConfigureAwait(false);
         return verified ? null : "staging_signature_unverified";
+    }
+
+    private const int MaxLinkHops = 40;
+
+    /// <summary>Returns <paramref name="path"/> with every symbolic link and junction component resolved.</summary>
+    internal static string ResolvePhysicalPath(string path) => ResolvePhysicalPath(Path.GetFullPath(path), 0);
+
+    private static string ResolvePhysicalPath(string fullPath, int hops)
+    {
+        string root = Path.GetPathRoot(fullPath) ?? throw new IOException("path_has_no_root");
+        string current = root;
+        string[] segments = fullPath[root.Length..].Split(
+            [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries);
+        foreach (string segment in segments)
+        {
+            current = Path.Combine(current, segment);
+            FileSystemInfo info = Directory.Exists(current) ? new DirectoryInfo(current) : new FileInfo(current);
+            if (info.LinkTarget is null)
+            {
+                continue;
+            }
+
+            if (++hops > MaxLinkHops)
+            {
+                throw new IOException("too_many_links");
+            }
+
+            string target = Path.GetFullPath(info.LinkTarget, Path.GetDirectoryName(current) ?? root);
+            current = ResolvePhysicalPath(target, hops);
+        }
+
+        return current;
+    }
+
+    private static bool IsWithin(string directory, string path)
+    {
+        string relative = Path.GetRelativePath(directory, path);
+        return relative == "." || !(relative == ".." ||
+            relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal) ||
+            relative.StartsWith(".." + Path.AltDirectorySeparatorChar, StringComparison.Ordinal) ||
+            Path.IsPathRooted(relative));
     }
 
     private static bool IsString(JsonElement element, string name, string expected) =>

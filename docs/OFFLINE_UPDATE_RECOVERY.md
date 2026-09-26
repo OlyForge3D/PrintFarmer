@@ -398,7 +398,8 @@ verification record, and that the manifest channel equals both `--channel` and
 the host's durable automation policy channel. Because the staging directory and
 its verification record are mutable, neither is trusted for authenticity: the CLI
 re-verifies the exact staged manifest bytes and `update-manifest.sigstore.json`
-with Cosign against `--trusted-root` (a regular, non-link file outside staging)
+with Cosign against `--trusted-root` (a regular, non-link file whose physical
+location, with every linked or junctioned parent resolved, lies outside staging)
 and the channel's pinned release identity, and refuses on failure. It then records the release in the
 same durable replay store (trust root `default`, per-channel high-water mark,
 hash-chained anchor) that online updates use, with a new `Imported`
