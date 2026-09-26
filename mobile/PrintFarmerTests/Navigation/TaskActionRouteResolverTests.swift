@@ -46,7 +46,7 @@ final class TaskActionRouteResolverTests: XCTestCase {
 
         XCTAssertEqual(
             resolve(task),
-            .success(.filamentSwap(printerID: printerA, toolheadID: "T0"))
+            .success(.filamentSwap(printerID: printerA))
         )
     }
 
@@ -95,8 +95,8 @@ final class TaskActionRouteResolverTests: XCTestCase {
             title: "Filament runout — Voron A" // identical display name
         )
 
-        XCTAssertEqual(resolve(first), .success(.filamentSwap(printerID: printerA, toolheadID: nil)))
-        XCTAssertEqual(resolve(second), .success(.filamentSwap(printerID: printerB, toolheadID: nil)))
+        XCTAssertEqual(resolve(first), .success(.filamentSwap(printerID: printerA)))
+        XCTAssertEqual(resolve(second), .success(.filamentSwap(printerID: printerB)))
     }
 
     // MARK: - Fail-safe (no navigation)

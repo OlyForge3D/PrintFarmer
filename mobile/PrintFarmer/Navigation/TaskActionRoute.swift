@@ -36,9 +36,8 @@ enum TaskActionDestination: Equatable, Sendable {
     /// Hands off to the shipped #714 harvest flow for the exact print job /
     /// output snapshot.
     case harvest(jobID: UUID)
-    /// Hands off to the mobile #710 guided-swap flow for the exact printer /
-    /// toolhead.
-    case filamentSwap(printerID: UUID, toolheadID: String?)
+    /// Hands off to the mobile #710 guided-swap flow for the exact printer.
+    case filamentSwap(printerID: UUID)
     /// Hands off to the existing maintenance ack/log flow for the exact
     /// printer / component / toolhead / alert.
     case maintenance(
@@ -228,7 +227,7 @@ enum TaskActionRouteResolver {
         guard let printerID = resolvePrinterID(task: task, metadata: metadata) else {
             return failurePrinter(task: task, metadata: metadata)
         }
-        return .success(.filamentSwap(printerID: printerID, toolheadID: metadata.toolheadID.nonEmpty))
+        return .success(.filamentSwap(printerID: printerID))
     }
 
     private static func resolveMaintenance(

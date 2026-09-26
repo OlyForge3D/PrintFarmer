@@ -1910,7 +1910,7 @@ final class AppRouterTests: XCTestCase {
         )
         router.selectTab(.farm, capabilities: capabilities)
 
-        router.routeToFilamentSwap(printerID: printerId, toolheadID: nil)
+        router.routeToFilamentSwap(printerID: printerId)
 
         XCTAssertEqual(router.activeMode, .oversight)
         XCTAssertEqual(router.selectedTab, .farm)
