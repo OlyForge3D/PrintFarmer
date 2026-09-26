@@ -514,29 +514,31 @@ struct ShellSnapshotFailure: Error, CustomStringConvertible {
         }
 
         func destination(tab: String, sidebar: String, title: String) -> Destination? {
+            if let identified = identifiedDestination(tab: tab, sidebar: sidebar) { return identified }
+            guard case .compact(let nodes) = state, let node = nodes.first(where: {
+                $0.enabled && $0.type == .button && $0.label == title
+                    && ($0.identifier.isEmpty || $0.identifier == title)
+            }) else { return nil }
+            return Destination(
+                node: node, surface: .tabBar, titleFallback: true,
+                promotionIdentifier: node.identifier.isEmpty ? tab : nil
+            )
+        }
+
+        /// The destination only when it carries its stable identifier. SwiftUI can
+        /// publish a compact tab by title before it attaches `tab.*` (#3033).
+        func identifiedDestination(tab: String, sidebar: String) -> Destination? {
             switch state {
             case .compact(let nodes):
-                if let node = nodes.first(where: { $0.enabled && $0.type == .button && $0.identifier == tab })
-                    ?? nodes.first(where: { $0.enabled && $0.identifier == tab }) {
-                    return Destination(node: node, surface: .tabBar)
-                }
-                if let node = nodes.first(where: {
-                    $0.enabled && $0.type == .button && $0.label == title
-                        && ($0.identifier.isEmpty || $0.identifier == title)
-                }) {
-                    return Destination(
-                        node: node, surface: .tabBar, titleFallback: true,
-                        promotionIdentifier: node.identifier.isEmpty ? tab : nil
-                    )
-                }
+                (nodes.first(where: { $0.enabled && $0.type == .button && $0.identifier == tab })
+                    ?? nodes.first(where: { $0.enabled && $0.identifier == tab }))
+                    .map { Destination(node: $0, surface: .tabBar) }
             case .sidebar(let nodes):
-                if let node = nodes.first(where: { $0.identifier == sidebar && $0.enabled }) {
-                    return Destination(node: node, surface: .sidebar)
-                }
+                nodes.first(where: { $0.identifier == sidebar && $0.enabled })
+                    .map { Destination(node: $0, surface: .sidebar) }
             case .notReady, .collapsed:
-                break
+                nil
             }
-            return nil
         }
 
         var isLaunchReady: Bool {
@@ -1163,6 +1165,58 @@ final class UIWaitBudgetTests: XCTestCase {
         XCTAssertEqual(oversight?.node.label, "Oversight")
         XCTAssertEqual(oversight?.surface, .tabBar)
         XCTAssertEqual(oversight?.titleFallback, true)
+    }
+
+    func testIdentifiedDestinationNeverAcceptsTheTitleFallback() {
+        let titleOnly = compact([ShellNode(.button, label: "Farm")])
+        XCTAssertEqual(titleOnly.destination(
+            tab: "tab.farm", sidebar: "sidebar.farm", title: "Farm"
+        )?.titleFallback, true)
+        XCTAssertNil(titleOnly.identifiedDestination(tab: "tab.farm", sidebar: "sidebar.farm"))
+        let identified = compact([
+            ShellNode(.button, label: "Farm"),
+            ShellNode(.button, identifier: "tab.farm", label: "Farm")
+        ]).identifiedDestination(tab: "tab.farm", sidebar: "sidebar.farm")
+        XCTAssertEqual(identified?.node.identifier, "tab.farm")
+        XCTAssertEqual(identified?.titleFallback, false)
+        XCTAssertEqual(sidebar().identifiedDestination(
+            tab: "tab.overview", sidebar: "sidebar.overview"
+        )?.node.identifier, "sidebar.overview")
+    }
+
+    /// #3033: SwiftUI can publish the Farm tab by title before attaching
+    /// `tab.farm`; the stable-ID capture keeps observing until it is attached.
+    func testIdentifiedCaptureWaitsForLateStableIdentifierWithinTheBudget() {
+        var clock: TimeInterval = 0
+        let budget = UIWaitBudget(timeout: 5, now: { clock })
+        var observations = [
+            compact([ShellNode(.button, label: "Farm")]),
+            compact([ShellNode(.button, label: "Farm")]),
+            compact([ShellNode(.button, identifier: "tab.farm", label: "Farm")])
+        ]
+        var snapshots = 0
+        let captured = budget.waitForShell(
+            observe: { snapshots += 1; clock += 0.5; return observations.removeFirst() },
+            resolve: { $0.identifiedDestination(tab: "tab.farm", sidebar: "sidebar.farm")?.node },
+            reveal: { _ in XCTFail("No collapsed sidebar was observed"); return false },
+            leadingEdge: { _ in XCTFail("No collapsed sidebar was observed"); return false },
+            pause: { clock += 0.2 }
+        )
+        XCTAssertEqual(captured?.identifier, "tab.farm")
+        XCTAssertEqual(snapshots, 3)
+
+        clock = 0
+        let expiring = UIWaitBudget(timeout: 5, now: { clock })
+        let missing = expiring.waitForShell(
+            observe: { clock += 0.5; return compact([ShellNode(.button, label: "Farm")]) },
+            resolve: { $0.identifiedDestination(tab: "tab.farm", sidebar: "sidebar.farm")?.node },
+            reveal: { _ in XCTFail("No collapsed sidebar was observed"); return false },
+            leadingEdge: { _ in XCTFail("No collapsed sidebar was observed"); return false },
+            pause: { clock += 0.2 }
+        )
+        XCTAssertNil(missing, "An identifier-less title node must never be captured as the stable identity")
+        XCTAssertEqual(expiring.shellFailure, "snapshot exceeded navigation deadline")
+        XCTAssertEqual(expiring.remaining, 0)
     }
 
     func testAnyTypeIdentifierIsPreservedAndWrongIdentifiedTitleIsNotAFallback() {
@@ -2154,6 +2208,35 @@ class PrintFarmerUITestCase: XCTestCase {
             line: line
         )
         return app.tabBars.buttons[tabIdentifier]
+    }
+
+    /// Snapshot of a shell destination that carries its stable identifier.
+    /// Unlike `shellDestinationButton`, this never accepts the title fallback:
+    /// SwiftUI can publish a compact tab by title before it attaches `tab.*`
+    /// (#3033), so callers whose identity contract needs the stable ID keep
+    /// observing within the same bounded shell loop until it is exposed.
+    func identifiedShellDestination(
+        tabIdentifier: String,
+        sidebarIdentifier: String? = nil,
+        timeout: TimeInterval = 5,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) -> ShellNode? {
+        let budget = testBudget?.child(timeout: timeout) ?? UIWaitBudget(timeout: timeout)
+        let sidebarIdentifier = sidebarIdentifier ?? tabIdentifier.replacingOccurrences(
+            of: "tab.",
+            with: "sidebar."
+        )
+        if let node = waitForObservedShell(budget: budget, file: file, line: line, resolve: {
+            $0.identifiedDestination(tab: tabIdentifier, sidebar: sidebarIdentifier)?.node
+        }) { return node }
+        recordQueryFailure(
+            "\(tabIdentifier) or \(sidebarIdentifier) never exposed its stable identifier; "
+                + budget.shellDiagnostic,
+            file: file,
+            line: line
+        )
+        return nil
     }
 
     private func recordQueryFailure(

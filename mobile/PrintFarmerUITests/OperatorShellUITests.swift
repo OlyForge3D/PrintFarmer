@@ -65,8 +65,8 @@ final class OperatorShellUITests: PrintFarmerUITestCase {
     }
 
     func testObservedDestinationResolvesWithStaleCapturedBadgeLabel() throws {
-        let farm = shellDestinationButton(tabIdentifier: "tab.farm", timeout: 5)
-        var captured = ShellNode(try farm.snapshot())
+        // Identity must come from the stable ID, so never capture the title fallback (#3033).
+        var captured = try XCTUnwrap(identifiedShellDestination(tabIdentifier: "tab.farm", timeout: 5))
         XCTAssertFalse(captured.identifier.isEmpty)
         // Inject an old badge label into the captured value, not the product UI.
         captured.label += ", stale badge count"
