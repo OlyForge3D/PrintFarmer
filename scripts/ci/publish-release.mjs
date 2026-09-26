@@ -23,6 +23,8 @@ import { infrastructureImagesDocument, infrastructureImagesName, infrastructureI
   verifyInfrastructureLockAgainstRegistry } from './offline-bundle-images.mjs';
 import { recoveryInstructionsDocument, recoveryInstructionsName, recoveryInstructionsSignatureName,
   validateRecoveryInstructions } from './offline-recovery-instructions.mjs';
+import { deploymentSetDocument, deploymentSetName, deploymentSetSignatureName, offlineToolsLockPath,
+  readDeploymentTemplates, validateDeploymentSet, validateOfflineToolsLock } from './offline-deployment-set.mjs';
 
 // Issue #3061: the identity the signed infrastructure image list is bound to; it matches the
 // release fields of update-manifest.json so an offline bundle can prove both belong together.
@@ -148,6 +150,12 @@ export function buildImages(release, source, assets, run = command, rejectImages
     infrastructureImagesDocument(infrastructureIdentity(release), infrastructureLock));
   // Issue #3063: host-local recovery instructions derived from the same release identity.
   writeFileSync(join(assets, recoveryInstructionsName), recoveryInstructionsDocument(infrastructureIdentity(release)));
+  // Issue #3081: the supported deployment templates, their config schema and the approved tool
+  // pins, bound to the same release identity so an offline bundle carries a complete set.
+  writeFileSync(join(assets, deploymentSetName), deploymentSetDocument(infrastructureIdentity(release), {
+    templates: readDeploymentTemplates(source),
+    lock: validateOfflineToolsLock(readFileSync(join(source, ...offlineToolsLockPath.split('/')))),
+  }));
   writeFileSync(join(assets, 'digests.json'), JSON.stringify(digests));
   return digests;
 }
@@ -166,6 +174,7 @@ export function releaseAssets(release) {
     'update-manifest.json', 'update-manifest.sigstore.json',
     infrastructureImagesName, infrastructureImagesSignatureName,
     recoveryInstructionsName, recoveryInstructionsSignatureName,
+    deploymentSetName, deploymentSetSignatureName,
     `printfarmer-${release.tag}.spdx.json`,
     ...Object.keys(components).map(name => `printfarmer-${name}-${release.tag}.spdx.json`),
     ...hostUpdateCliAssets(release.version),
@@ -228,6 +237,19 @@ function verifyRecoveryInstructionsBeforeUpload(assets, run, release) {
     '--certificate-identity', manifestSignatureIdentity(release.channel), path]);
 }
 
+// Issue #3081: the deployment set is signed by the same workflow identity and must still be the
+// exact set generated for this release before it is uploaded.
+function verifyDeploymentSetBeforeUpload(assets, run, release) {
+  const path = join(assets, deploymentSetName);
+  const bundlePath = join(assets, deploymentSetSignatureName);
+  validateDeploymentSet(readFileSync(path), infrastructureIdentity(release));
+  requireThat(readFileSync(bundlePath).length > 0,
+    'Missing deployment set signature bundle immediately before upload');
+  run('cosign', ['verify-blob', '--bundle', bundlePath,
+    '--certificate-oidc-issuer', 'https://token.actions.githubusercontent.com',
+    '--certificate-identity', manifestSignatureIdentity(release.channel), path]);
+}
+
 function verifyManifestSignatureBeforeUpload(assets, run, channel) {
   const manifestPath = join(assets, 'update-manifest.json');
   const bundlePath = join(assets, 'update-manifest.sigstore.json');
@@ -257,6 +279,7 @@ export async function publishRelease(release, assets, api, {
   verifyHostUpdateCliBeforeUpload(assets, run, release);
   verifyInfrastructureImagesBeforeUpload(assets, run, release);
   verifyRecoveryInstructionsBeforeUpload(assets, run, release);
+  verifyDeploymentSetBeforeUpload(assets, run, release);
   verifyManifestSignatureBeforeUpload(assets, run, release.channel);
   const notes = await releaseNotes(api, release, digests);
   writeFileSync(join(assets, 'release-notes.md'), notes);
@@ -275,6 +298,7 @@ export async function publishRelease(release, assets, api, {
   verifyHostUpdateCliBeforeUpload(assets, run, release);
   verifyInfrastructureImagesBeforeUpload(assets, run, release);
   verifyRecoveryInstructionsBeforeUpload(assets, run, release);
+  verifyDeploymentSetBeforeUpload(assets, run, release);
   verifyManifestSignatureBeforeUpload(assets, run, release.channel);
   run('gh', ['release', 'upload', release.tag, ...files.map(name => join(assets, name)), '--repo', repository]);
   const uploaded = await api(`releases/${draft.id}/assets?per_page=100`);

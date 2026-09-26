@@ -20,6 +20,14 @@ import { infrastructureImagesDocument, infrastructureImagesName, infrastructureI
   infrastructureLockPath, mediaTypes, validateInfrastructureImages } from '../offline-bundle-images.mjs';
 import { recoveryInstructionsDocument, recoveryInstructionsName, recoveryInstructionsSignatureName }
   from '../offline-recovery-instructions.mjs';
+import { deploymentSetDocument, deploymentSetName, deploymentSetSignatureName, deploymentTemplatePaths,
+  offlineToolsLockPath, readDeploymentTemplates, validateOfflineToolsLock } from '../offline-deployment-set.mjs';
+
+// Issue #3081: the real repository templates and tool lock back the deployment set fixtures.
+const repositoryRoot = join(import.meta.dirname, '..', '..', '..');
+const repositoryToolsLock = () => validateOfflineToolsLock(readFileSync(join(repositoryRoot, offlineToolsLockPath)));
+const deploymentSetFor = identity => deploymentSetDocument(identity,
+  { templates: readDeploymentTemplates(repositoryRoot), lock: repositoryToolsLock() });
 
 // Issue #3061: a synthetic registry for the pinned infrastructure lock -- one multi-platform index
 // and one single-manifest image -- whose raw bytes hash to the pinned digests.
@@ -511,6 +519,10 @@ test('actual build loop passes the six targets/platforms and source metadata, st
   const registry = infrastructureRegistry();
   mkdirSync(join(source, 'scripts', 'docker'));
   writeFileSync(join(source, infrastructureLockPath), `${JSON.stringify(registry.lock, undefined, 2)}\n`);
+  for (const path of [...deploymentTemplatePaths, offlineToolsLockPath]) {
+    mkdirSync(join(source, ...path.split('/').slice(0, -1)), { recursive: true });
+    writeFileSync(join(source, ...path.split('/')), readFileSync(join(repositoryRoot, ...path.split('/'))));
+  }
   const builds = [];
   const smokes = [];
   const cliPublishes = [];
@@ -623,6 +635,8 @@ test('actual build loop passes the six targets/platforms and source metadata, st
   // Issue #3063: the recovery instructions are generated from the same release identity.
   assert.deepEqual(readFileSync(join(assets, recoveryInstructionsName)),
     recoveryInstructionsDocument(infrastructureIdentity(release)));
+  // Issue #3081: the deployment set is generated from the checked-out templates and tool lock.
+  assert.deepEqual(readFileSync(join(assets, deploymentSetName)), deploymentSetFor(infrastructureIdentity(release)));
   const movedPin = infrastructureRegistry();
   const buildsBeforeMovedPin = builds.length;
   assert.throws(() => buildImages(release, source, assets, (name, args) => {
@@ -678,6 +692,12 @@ function publishFixture(t, channel = 'insider') {
   writeFileSync(join(assets, recoveryInstructionsName), recoveryInstructionsDocument(infrastructureIdentity(chosen)));
   writeFileSync(join(assets, recoveryInstructionsSignatureName), JSON.stringify({
     sha256: createHash('sha256').update(readFileSync(join(assets, recoveryInstructionsName))).digest('hex'),
+    issuer: manifestIssuer,
+    identity: manifestIdentityFor(chosen.channel),
+  }));
+  writeFileSync(join(assets, deploymentSetName), deploymentSetFor(infrastructureIdentity(chosen)));
+  writeFileSync(join(assets, deploymentSetSignatureName), JSON.stringify({
+    sha256: createHash('sha256').update(readFileSync(join(assets, deploymentSetName))).digest('hex'),
     issuer: manifestIssuer,
     identity: manifestIdentityFor(chosen.channel),
   }));
@@ -818,6 +838,28 @@ test('the signed recovery instructions are uploaded and verified before tagging 
   assert.ok(!calls.some(call => call.endpoint === 'git/refs'), 'instructions for another build must stop before tagging');
 });
 
+test('the signed deployment set is uploaded and verified before tagging and before upload', async t => {
+  for (const channel of ['stable', 'insider']) {
+    const { chosen, assets, api, deps, calls, files } = publishFixture(t, channel);
+    assert.ok(files.includes(deploymentSetName) && files.includes(deploymentSetSignatureName));
+    await publishRelease(chosen, assets, api, deps);
+    const checks = calls.flatMap((call, index) =>
+      call.command === 'cosign' && call.args[7].endsWith(deploymentSetName) ? [index] : []);
+    assert.equal(checks.length, 2);
+    for (const index of checks) {
+      assert.match(calls[index].args[2], /offline-deployment-set\.sigstore\.json$/);
+      assert.equal(calls[index].args[6], manifestIdentityFor(channel));
+    }
+    assert.ok(checks[0] < calls.findIndex(call => call.endpoint === 'git/refs'));
+    assert.ok(checks[1] > calls.findIndex(call => call.endpoint === 'releases'));
+    assert.ok(checks[1] < calls.findIndex(call => call.command === 'gh'));
+  }
+  const { chosen, assets, api, deps, calls } = publishFixture(t);
+  writeFileSync(join(assets, deploymentSetName), deploymentSetFor({ ...infrastructureIdentity(chosen), buildId: '999' }));
+  await assert.rejects(publishRelease(chosen, assets, api, deps), /deployment set/i);
+  assert.ok(!calls.some(call => call.endpoint === 'git/refs'), 'a set for another build must stop before tagging');
+});
+
 test('host-update CLI checksum list is canonical and names exactly the supported archives and SBOMs', t => {
   assert.deepEqual([...hostUpdateCliRuntimes], ['linux-x64', 'linux-arm64', 'win-x64']);
   assert.throws(() => hostUpdateCliArchiveName('1.2.3', 'osx-arm64'), /Unsupported host-update CLI runtime/);
@@ -945,6 +987,16 @@ test('missing, tampered or wrong-identity signing evidence blocks publication be
         '"rolloutAuthorization": true'))],
     ['recovery instructions signed by another identity', (assets) => {
       const path = join(assets, recoveryInstructionsSignatureName);
+      writeFileSync(path, JSON.stringify({ ...JSON.parse(readFileSync(path, 'utf8')),
+        identity: manifestIdentity.replace('@refs/heads/development', '@refs/heads/feature') }));
+    }],
+    ['missing deployment set bundle', (assets) => rmSync(join(assets, deploymentSetSignatureName))],
+    ['empty deployment set bundle', (assets) => writeFileSync(join(assets, deploymentSetSignatureName), '')],
+    ['tampered deployment set', (assets) => writeFileSync(join(assets, deploymentSetName),
+      readFileSync(join(assets, deploymentSetName), 'utf8').replace('"rolloutAuthorization": false',
+        '"rolloutAuthorization": true'))],
+    ['deployment set signed by another identity', (assets) => {
+      const path = join(assets, deploymentSetSignatureName);
       writeFileSync(path, JSON.stringify({ ...JSON.parse(readFileSync(path, 'utf8')),
         identity: manifestIdentity.replace('@refs/heads/development', '@refs/heads/feature') }));
     }],

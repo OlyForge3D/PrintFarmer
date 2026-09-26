@@ -55,7 +55,7 @@ bundle complete; this table is not an archive layout or an implementation.
 | Offline verification evidence and tooling | Preserve provenance and approved trust-root continuity, expiry/revocation evidence and pinned verification tools. Bundle-supplied signer material cannot enroll itself. Verification must work after source branch movement without live ancestry lookup. |
 | Target application and infrastructure images | Include every selected platform/service image, database/runtime/proxy/add-on dependency and required worker under the supported topology contract. Six published application images alone are not every installation's infrastructure. Verify archive content against immutable identity; no missing-image downloads or builds. |
 | Prior recovery set | Retain complete compatible prior manifests/images and effective configuration, schema/format compatibility and backup references. Prior-channel artifacts are recovery-only under explicit verified authorization, not new offers or implicit channel consent. |
-| Deployment and recovery tools | Package the approved host-local updater/status/recovery tool, matching templates, configuration schema, provider-native tooling and these operator instructions. The signed CLI archive, its checksum list, the Cosign bundle (#3041), per-archive SBOMs and the verifying installer (#3045) are the status/recovery tool. No reliance on the API, package manager, registry or internet being available during recovery. |
+| Deployment and recovery tools | Package the approved host-local updater/status/recovery tool, matching templates, configuration schema, provider-native tooling and these operator instructions. The signed CLI archive, its checksum list, the Cosign bundle (#3041), per-archive SBOMs and the verifying installer (#3045) are the status/recovery tool. The signed [deployment set](#deployment-set-and-approved-tools-3081) (#3081) carries the templates, configuration schema and approved tool pins. No reliance on the API, package manager, registry or internet being available during recovery. |
 | Installation-specific protected backup | Coordinated databases, models/G-code/profiles/artifacts, keys, certificates and config at the same consistency point. Keep private material access-controlled and separate from the redistributable release bundle. Never include publisher credentials. |
 
 ## Verified release-metadata bundle (first slice)
@@ -182,7 +182,11 @@ together with their signature bundle. `contents.priorRecoverySet` is
 protected-backup reference. `contents.images` and `contents.infrastructure` are
 both `true` when the bundle carries the image set described below and both
 `false` otherwise; a bundle that claims one without the other, or carries only
-part of the set, is rejected. Remaining work under #2658:
+part of the set, is rejected. `contents.deploymentSet` is `true` only when the
+bundle carries the signed
+[deployment set](#deployment-set-and-approved-tools-3081) together with its
+signature bundle, every approved tool it pins and the image set; a partial set is
+rejected. Remaining work under #2658:
 
 - #3061 (delivered): application and infrastructure image archives.
 - #3062 (delivered): prior recovery set and protected-backup references.
@@ -190,6 +194,9 @@ part of the set, is rejected. Remaining work under #2658:
   recovery instructions.
 - #3064 (delivered): replay protection, channel continuity and offline trust
   expiry.
+- #3081 (delivered): complete offline set — deployment templates, configuration
+  schema and approved tools bound to the signed release.
+- #3080: installation and activation from a complete imported set.
 
 ### Application and infrastructure images (#3061)
 
@@ -259,6 +266,60 @@ re-verifies every archive before loading any of them, and streams the same open 
 OCI archive support). It never pulls, builds or fetches anything; a changed
 archive or a staging directory without a verified image set is rejected.
 
+### Deployment set and approved tools (#3081)
+
+Every release publishes `offline-deployment-set.json` and its
+`offline-deployment-set.sigstore.json` bundle, signed with the same workflow
+identity as the manifest and bound to the same release identity. The release
+build generates it from the source checkout; it contains:
+
+- **Templates.** The exact bytes (with size and SHA-256) of every deployment
+  template a supported topology needs: the common, split, monolith, discovery,
+  slicer-host, OrcaSlicer worker and PostgreSQL/SQL Server Compose templates, the
+  container entrypoint and security configuration, and the nginx configurations.
+  Optional add-ons (monitoring, registry, emulators, pgAdmin, Spoolman, go2rtc,
+  Obico ML and telemetry) are outside offline support and are never carried.
+- **Configuration schema.** Version 1: the sorted set of `${NAME}` variables the
+  carried templates consume. It is derived from the template bytes, so it always
+  describes exactly those templates.
+- **Approved tools.** The host tools pinned by upstream URL, SHA-256 and size in
+  the repository lock `scripts/docker/offline-tools.lock.json` (currently Cosign
+  v3.0.6 for linux/amd64, linux/arm64 and windows/amd64, matching the version the
+  release workflow pins), plus the database tools that ship inside pinned
+  infrastructure images (`pg_dump` and `pg_restore` in `postgres`, `sqlcmd` in
+  `mssql`). Docker Engine 25 or later is a host prerequisite and is not bundled.
+- **Topologies.** `monolith-postgres`, `monolith-sqlserver`, `split-postgres` and
+  `split-sqlserver`, each naming its images, templates and tools. The document
+  states `rolloutAuthorization: false`.
+
+To change a tool pin, update the lock (artifacts sorted by name) in a reviewed PR.
+To include the set, download every pinned tool artifact into one directory on
+the connected host, verify it against the lock and pass the directory with the
+image layout:
+
+```bash
+node scripts/ci/offline-update-bundle.mjs assemble ... --images ./images --tools ./tools
+```
+
+`assemble` requires `--images` with `--tools`, checks each tool file against its
+signed size and SHA-256 and packages it as `tool-<artifact name>` beside the
+signed pair. Without `--tools` the set is omitted and `contents.deploymentSet`
+is `false`. With the set present, `verify` additionally requires that:
+
+- Cosign accepts `offline-deployment-set.sigstore.json` for the same channel
+  identity, and the document is **byte-for-byte** the document regenerated from
+  its own carried templates and tool pins for the manifest's release identity,
+  so an edited, reordered, re-signed or wrong-release copy is rejected.
+- Every topology image is a release-selected application image or signed
+  infrastructure pin, the topologies together cover exactly the carried image
+  set, and every image tool comes from a pinned infrastructure image.
+- The bundle carries exactly the pinned tool members, no missing or extra tool,
+  each matching its signed size and SHA-256.
+
+The verification record's `deploymentSet` then names the document SHA-256, the
+configuration schema version, the topologies and each tool's SHA-256; it is
+`false` when the bundle carries no set.
+
 ## Recovery instructions and host-local import (#3063)
 
 Every release publishes `offline-recovery-instructions.json` and its
@@ -319,7 +380,8 @@ it, so point `PRINTFARMER_OFFLINE_BUNDLE_TOOL` at an approved copy.
 
 `import` first applies the trust expiry policy, then runs `verify` into the new
 staging directory, then requires a complete bundle: the release-selected application images, the signed infrastructure
-image list with its images, and the signed recovery instructions. A bundle that
+image list with its images, the signed recovery instructions, and the signed
+deployment set with every approved tool it pins. A bundle that
 verifies but lacks any of them is **not installable for import** and is
 refused. It then asks the host-update CLI to admit the verified release into the
 durable replay store (below) and only then runs `load`, which re-authenticates the staged metadata and

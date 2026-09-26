@@ -1,0 +1,38 @@
+{
+  "schema": 1,
+  "kind": "printfarmer-offline-tools-lock",
+  "artifacts": [
+    {
+      "tool": "cosign",
+      "version": "3.0.6",
+      "platform": "linux/amd64",
+      "name": "cosign-linux-amd64",
+      "url": "https://github.com/sigstore/cosign/releases/download/v3.0.6/cosign-linux-amd64",
+      "size": 135178161,
+      "sha256": "c956e5dfcac53d52bcf058360d579472f0c1d2d9b69f55209e256fe7783f4c74"
+    },
+    {
+      "tool": "cosign",
+      "version": "3.0.6",
+      "platform": "linux/arm64",
+      "name": "cosign-linux-arm64",
+      "url": "https://github.com/sigstore/cosign/releases/download/v3.0.6/cosign-linux-arm64",
+      "size": 127697847,
+      "sha256": "bedac92e8c3729864e13d4a17048007cfafa79d5deca993a43a90ffe018ef2b8"
+    },
+    {
+      "tool": "cosign",
+      "version": "3.0.6",
+      "platform": "windows/amd64",
+      "name": "cosign-windows-amd64.exe",
+      "url": "https://github.com/sigstore/cosign/releases/download/v3.0.6/cosign-windows-amd64.exe",
+      "size": 189718867,
+      "sha256": "9b85a88ebff2d9dd30ff4984a6f61f2cedc232dd87d81fa7f2ff3c0ed96c241c"
+    }
+  ],
+  "imageTools": [
+    { "tool": "pg_dump", "image": "postgres", "path": "/usr/local/bin/pg_dump" },
+    { "tool": "pg_restore", "image": "postgres", "path": "/usr/local/bin/pg_restore" },
+    { "tool": "sqlcmd", "image": "mssql", "path": "/opt/mssql-tools18/bin/sqlcmd" }
+  ]
+}
