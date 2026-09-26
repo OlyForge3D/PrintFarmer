@@ -19,12 +19,15 @@ this guide.** The host-local status/recovery CLI (#2980) now ships as a signed
 package with a verifying installer and generated host configuration (#3045);
 see [Failure and recovery](#failure-and-recovery). After a rollback it keeps
 writers fenced until the operator records a physical printer command
-reconciliation (#2999). The following delivery gates are still open:
+reconciliation (#2999). Complete offline bundles are delivered (#2981). The
+following delivery gate is still open:
 
-- complete offline bundles (#2981)
 - isolated recovery and rollout evidence (#2982)
 
-See the [offline recovery requirements](OFFLINE_UPDATE_RECOVERY.md).
+See the [offline recovery requirements](OFFLINE_UPDATE_RECOVERY.md) and the
+[isolated recovery matrix scope](OFFLINE_UPDATE_RECOVERY.md#isolated-recovery-matrix-scope-3098),
+which fixes the only supported host platform, the fail-closed cells and the
+evidence each run must retain.
 
 The API has constrained executor adapters and a manual authorization path.
 The scheduler is registered when protected host state is enabled, but production
@@ -744,7 +747,7 @@ For coordinated restoration, the approved recovery procedure must:
 This checklist is a safety boundary, **not a tested provider-specific restore
 script**. Remaining delivery is tracked by:
 
-- #2981: complete bundles
+- #2981: complete bundles (delivered)
 - #2982: isolated recovery and authorized rollout evidence
 
 #2664 remains open. Keep managed update execution disabled until those gates

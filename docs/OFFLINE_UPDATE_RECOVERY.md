@@ -834,3 +834,71 @@ conditions are covered with fake adapters (#3000); see
 Complete bundles are delivered in #2981. #2982 owns this matrix and separately
 authorized staging/pilot evidence. #2664 remains open until its full retained
 acceptance is complete.
+
+### Isolated recovery matrix scope (#3098)
+
+This section fixes the scope of the isolated matrix above. It is a contract
+for the harness, not evidence that any cell has run.
+
+**Supported host.** The matrix runs only on **Ubuntu LTS x64** (22.04, 24.04
+or 26.04). Linux arm64 and Windows hosts are **unsupported** for host-update
+recovery; the Windows PowerShell entry point is documented and link-checked
+only and proves no Linux restore or runtime parity. SQLite is component-tested
+only and is not a live matrix provider.
+
+**Supported cells.** Monolith and split Compose topologies, each with
+PostgreSQL and SQL Server, a shared application/slicer database, and database
+and storage owned by the host. Workers are either managed on the host or
+absent.
+
+**Fail-closed cells.** These cells are run to prove the refusal, never to
+prove recovery. The first matching row decides the expected result, and the
+stable reason must match exactly.
+
+| Cell | Expected outcome | Stable reason |
+| --- | --- | --- |
+| Split application/slicer databases | `Refused` | `split_database_not_supported` |
+| Remote (off-host) pinned workers | `Refused` | `remote_worker_unsupported` |
+| Externally owned database | `NeedsOperator` | `database_externally_owned` |
+| Externally owned storage | `NeedsOperator` | `storage_externally_owned` |
+
+**Network denial.** Every service runs on a Docker `--internal` network whose
+only reachable peer is a default-deny egress sink that logs each attempt. The
+evidence mechanism value is `docker-internal-network+default-deny-egress-sink`.
+Any recorded outbound attempt fails the run, whatever its recovery outcome.
+
+**Signing.** Matrix bundles are signed by a test-only trust root with an
+isolated fixture identity. The release workflow's signing identity is never
+used, and fixture trust is never installed on a real host. Separately, one
+read-only verification of a real published insider bundle proves the harness
+accepts production signatures; it imports nothing and changes no host.
+
+**Evidence record.** Each cell emits one JSON record validated by
+[`scripts/ci/recovery-matrix/evidence.mjs`](../scripts/ci/recovery-matrix/evidence.mjs)
+(`kind` `printfarmer-recovery-matrix-evidence`, `schema` 1). The record carries
+the run identity and harness commit, entry point, host distribution, version,
+architecture and kernel, the cell, the source/target/prior release identities
+(tag, version, channel, source commit, build and sequence), bundle SHA-256 and
+signing root, tool versions, the network-denial mechanism and every attempt,
+operation checkpoints, expected and actual outcome with reason, exit code and
+journal phase, timings and the verdict. The validator rejects missing or
+unexpected fields, unsupported hosts, a wrong fail-closed expectation, a pass
+with outbound attempts, a failed checkpoint or a mismatched outcome, and any
+unredacted credential: URL user information, PEM blocks, GitHub tokens, JWTs,
+secret assignments and secret-bearing field names.
+
+**Cadence.** The matrix runs on `workflow_dispatch` and nightly. It is never
+part of a release publication workflow and never targets a real deployment.
+
+**Recovery objectives (proposed defaults, pending jpapiez agreement).** These
+values are proposals for the harness to measure against. They are **not agreed
+targets** and must not be quoted as commitments until the deployment owner
+accepts them.
+
+| Objective | Proposed default |
+| --- | --- |
+| RTO, image-only rollback | 10 minutes on the reference host |
+| RTO, coordinated restore | 30 minutes on the reference host |
+| RPO | The activation-time protected-backup consistency point; writers are fenced before backup, so no committed write after that point is expected |
+| Evidence retention | CI evidence artifacts for 90 days, plus a retained summary comment on the tracking issue |
+| Protected-backup retention | Until the next successful release activation (N-1) |
