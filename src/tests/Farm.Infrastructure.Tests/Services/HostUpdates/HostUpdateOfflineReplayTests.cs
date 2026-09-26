@@ -266,7 +266,10 @@ public sealed class HostUpdateOfflineReplayTests
 
         // A well-formed snapshot from another backup at the same epoch still fails the anchor hash.
         (FileHostUpdateReplayStore other, string otherRoot, _) = await NewStoreAsync();
-        await other.DecideAsync(Candidate(41), HostUpdateReplayIntent.Import, default);
+        using (other)
+        {
+            await other.DecideAsync(Candidate(41), HostUpdateReplayIntent.Import, default);
+        }
         File.Copy(Path.Combine(otherRoot, "host-update-replay.json"), statePath, true);
         InvalidDataException mismatch = await Assert.ThrowsAsync<InvalidDataException>(() => store.DecideAsync(Candidate(41), HostUpdateReplayIntent.Import, default));
         Assert.Equal("host_update_replay_state_anchor_hash_mismatch", mismatch.Message);

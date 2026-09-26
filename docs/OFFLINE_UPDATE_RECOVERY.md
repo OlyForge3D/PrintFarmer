@@ -486,7 +486,9 @@ disposition:
 An `Imported` identity never authorizes installation by itself: the online
 scheduler still applies every current gate and admits it normally. Replay state
 lives in the host-state directory, outside restored application databases and
-replaced containers; missing or tampered anchor state fails closed (exit 4).
+replaced containers; missing or tampered anchor state fails closed (exit 4)
+and the CLI reports the store's fixed `host_update_replay_*` code (for example
+`host_update_replay_state_rollback`), never a path or free-form message.
 `offline-admit` refuses while another host-update process holds the execution
 lock (exit 7). Every replay decision, from the API scheduler or the CLI, also
 takes an exclusive cross-process lock on `host-update-replay.lock` in the
@@ -579,7 +581,7 @@ older replay snapshot, an older anchor, an edited snapshot or a foreign
 same-epoch snapshot. `HostUpdateCliOfflineAdmitTests` (`offline-admit`) covers a
 forged source branch, a moved release alias, evidence staged under a prior
 policy after a policy round trip, and a restored older replay state
-(`state_unreadable`, exit 4). `scripts/ci/tests/test-offline-update-bundle.mjs`
+(`host_update_replay_state_rollback`, exit 4). `scripts/ci/tests/test-offline-update-bundle.mjs`
 covers traversal, absolute, nested, duplicate and case-conflicting members,
 extended headers, links, and member/bundle/nested-blob size bounds.
 
