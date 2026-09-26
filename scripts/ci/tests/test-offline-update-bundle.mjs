@@ -1564,12 +1564,27 @@ test('recovery instructions are derived only from the signed release identity', 
   assert.equal(document.kind, 'printfarmer-offline-recovery-instructions');
   assert.equal(document.rolloutAuthorization, false);
   assert.deepEqual(document.operations.map(operation => operation.id), ['offline-bundle-import', 'host-update-status',
-    'host-update-recover-preview', 'host-update-recover-confirm']);
+    'host-update-recover-preview', 'host-update-recover-confirm', 'offline-bundle-import-with-prior',
+    'offline-bundle-import-with-local-prior', 'offline-activate', 'offline-recover-preview', 'offline-recover-confirm']);
+  assert.equal(document.schema, 2);
   for (const operation of document.operations) {
     assert.equal(operation.bash[0], 'printfarmer-host-update.sh');
     assert.deepEqual(operation.powershell.slice(0, 3), ['pwsh', '-File', 'printfarmer-host-update.ps1']);
     assert.ok(!operation.bash.some(arg => /force|skip|reset|rollout/i.test(arg)), 'no bypass or rollout operation');
+    assert.equal(operation.bash.length, operation.powershell.length - 2, `${operation.id} has Bash/PowerShell parity`);
   }
+  const byId = Object.fromEntries(document.operations.map(operation => [operation.id, operation]));
+  assert.deepEqual(byId['offline-recover-preview'].bash.slice(1, 2), ['recover-offline']);
+  assert.ok(byId['offline-recover-confirm'].bash.includes('--protected-backup'), 'offline recovery names the operator backup');
+  assert.ok(byId['offline-bundle-import-with-prior'].powershell.includes('-ProtectedBackup'));
+  assert.deepEqual(byId['offline-activate'].bash.slice(1, 2), ['activate']);
+  // Schema 1 documents published before #2981 stay verifiable, byte for byte.
+  const legacy = recoveryInstructionsDocument(identity, 1);
+  assert.deepEqual(validateRecoveryInstructions(legacy, identity).operations.map(operation => operation.id),
+    ['offline-bundle-import', 'host-update-status', 'host-update-recover-preview', 'host-update-recover-confirm']);
+  assert.throws(() => validateRecoveryInstructions(Buffer.from(legacy.toString('utf8').replace('"schema": 1', '"schema": 2')),
+    identity), /not the exact release-bound instructions/);
+  assert.throws(() => recoveryInstructionsDocument(identity, 3), /Unsupported recovery instructions schema/);
   const confirm = document.operations.at(-1);
   assert.deepEqual(confirm.bash.slice(-4), ['--release', 'stable:1.4.0', '--confirm', 'stable:1.4.0']);
   for (const other of [{ ...identity, buildId: '99' }, { ...identity, sourceCommit: 'c'.repeat(40) }]) {
@@ -1594,7 +1609,8 @@ test('signed recovery instructions round-trip and set contents.recoveryInstructi
     assert.equal(calls.length, 4, 'manifest, CLI checksums, infrastructure list and recovery instructions are each verified');
     assert.ok(calls.some(call => call.at(-1).endsWith(recoveryInstructionsName)));
     assert.deepEqual(record.recoveryInstructions, { sha256: sha256(bytes), operations: ['offline-bundle-import',
-      'host-update-status', 'host-update-recover-preview', 'host-update-recover-confirm'] });
+      'host-update-status', 'host-update-recover-preview', 'host-update-recover-confirm', 'offline-bundle-import-with-prior',
+      'offline-bundle-import-with-local-prior', 'offline-activate', 'offline-recover-preview', 'offline-recover-confirm'] });
     assert.deepEqual(readFileSync(join(context.staging, recoveryInstructionsName)), bytes);
   } finally {
     context.cleanup();

@@ -13,18 +13,29 @@ post_date: "2026-09-24"
 
 ## Current support
 
-**A complete managed-update/offline recovery bundle is not shipped yet** (#2981).
-`deploy-docker.sh --prepare-offline` prepares legacy deployment materials and
-image caches. It is not a signed complete release, a bounded trusted importer,
-or proof of coordinated restore. Do not use it to update an installation that
-needs #2664's recovery guarantees. The signed host-local status/recovery CLI
-package (#2980, #3041) is a separate release asset. It can be carried to a
-disconnected host as described in the
+**Complete verified network-denied update and recovery bundles are delivered**
+(#2981). A complete bundle carries the original signed release bytes, every
+release-selected application and infrastructure image, the signed deployment
+set with its approved tools, the signed recovery instructions and, for
+recovery, the prior recovery set with its images and protected-backup
+reference. The host-local [import](#recovery-instructions-and-host-local-import-3063),
+[activation](#offline-activation-3080) and
+[recovery](#offline-recovery-3082) commands verify all of it offline and fail
+closed. The isolated host-update acceptance matrix and any owner-authorized
+staging or pilot rollout remain separate acceptance under #2982 and are not
+inferred from the unit and integration fixtures below.
+
+`deploy-docker.sh --prepare-offline` still only prepares legacy deployment
+materials and image caches. It is not a signed complete release, a bounded
+trusted importer, or proof of coordinated restore. Do not use it to update an
+installation that needs #2664's recovery guarantees. The signed host-local
+status/recovery CLI package (#2980, #3041) is a separate release asset. It can
+be carried to a disconnected host as described in the
 [runbook](HOST_UPDATE_RUNBOOK.md#install-the-signed-cli-package), but it is only
 one item in the bundle below. There is no supported skip-verification,
 force-import or replay-reset option.
 
-The first delivered slice (#2981) is a
+The first delivered slice (#2981) was a
 [verified release-metadata bundle](#verified-release-metadata-bundle-first-slice):
 it carries the original signed release bytes and the host-update CLI to a
 network-denied host and verifies them with bounded extraction. It is explicitly
@@ -47,15 +58,15 @@ the [release guide](RELEASE_GUIDE.md) owns original signed release identity.
 
 ## Required bundle contents
 
-The future exporter/importer must account for every item before calling a
-bundle complete; this table is not an archive layout or an implementation.
+A complete bundle accounts for every item below; the sections that follow
+describe how each is carried and verified. This table is not an archive layout.
 
 | Material | Required checks |
 | --- | --- |
 | Original manifest and signature bundle | Preserve exact signed bytes and canonical source/tag/version/channel/build identity, manifest digest, promotion/branch authorization where required by the canonical contract, and all selected index/platform digests. No mutable-only identities or same-version byte substitutions. |
 | Offline verification evidence and tooling | Preserve provenance and approved trust-root continuity, expiry/revocation evidence and pinned verification tools. Bundle-supplied signer material cannot enroll itself. Verification must work after source branch movement without live ancestry lookup. |
 | Target application and infrastructure images | Include every selected platform/service image, database/runtime/proxy/add-on dependency and required worker under the supported topology contract. Six published application images alone are not every installation's infrastructure. Verify archive content against immutable identity; no missing-image downloads or builds. |
-| Prior recovery set | Retain complete compatible prior manifests/images and effective configuration, schema/format compatibility and backup references. Prior-channel artifacts are recovery-only under explicit verified authorization, not new offers or implicit channel consent. |
+| Prior recovery set | Retain complete compatible prior manifests/images and effective configuration, schema/format compatibility and backup references. Prior-channel artifacts are recovery-only under explicit verified authorization, not new offers or implicit channel consent. The bundle carries the signed prior manifest and its images (#3062, #3094); effective configuration is installation-specific and is retained in the engine's activation-time backup, never in the redistributable bundle (see [offline recovery](#offline-recovery-3082)). |
 | Deployment and recovery tools | Package the approved host-local updater/status/recovery tool, matching templates, configuration schema, provider-native tooling and these operator instructions. The signed CLI archive, its checksum list, the Cosign bundle (#3041), per-archive SBOMs and the verifying installer (#3045) are the status/recovery tool. The signed [deployment set](#deployment-set-and-approved-tools-3081) (#3081) carries the templates, configuration schema and approved tool pins. No reliance on the API, package manager, registry or internet being available during recovery. |
 | Installation-specific protected backup | Coordinated databases, models/G-code/profiles/artifacts, keys, certificates and config at the same consistency point. Keep private material access-controlled and separate from the redistributable release bundle. Never include publisher credentials. |
 
@@ -202,8 +213,10 @@ prior images from the prior manifest, requires the record to name exactly that
 set, and re-hashes and verifies every archive before loading any of them.
 `--missing skip` returns `no_packaged_prior_images` without loading only when the
 record claims no prior images and no prior image archive is staged; any other
-shape is refused. The prior set does not
-carry effective configuration; that remains future work under #2981. A bound
+shape is refused. The prior set deliberately does not carry effective
+configuration: it is installation-specific, so it is retained by the engine's
+activation-time backup and restored by coordinated recovery (#3082), never
+shipped in the redistributable bundle. A bound
 prior set is recovery-only material and never a new offer or implicit channel
 consent.
 
@@ -225,7 +238,7 @@ bundle carries the signed
 signature bundle, every approved tool it pins and the image set; a partial set is
 rejected. Bundles assembled before #3081 have no `deploymentSet` claim; they still
 verify and are treated as carrying no deployment set, so import refuses them as
-incomplete. Remaining work under #2658:
+incomplete. Delivered slices under #2658:
 
 - #3061 (delivered): application and infrastructure image archives.
 - #3062 (delivered): prior recovery set and protected-backup references.
@@ -243,6 +256,10 @@ incomplete. Remaining work under #2658:
   [offline recovery](#offline-recovery-3082)).
 - #3094 (delivered): packaged prior recovery images and fail-closed handling of
   remote pinned workers.
+- #2981 (delivered): complete-bundle acceptance audit and schema 2 signed
+  recovery instructions covering prior-bound import, activation and
+  network-denied recovery. The isolated staging matrix and owner rollout
+  evidence remain with #2982.
 
 ### Application and infrastructure images (#3061)
 
@@ -372,10 +389,14 @@ Every release publishes `offline-recovery-instructions.json` and its
 `offline-recovery-instructions.sigstore.json` bundle, signed with the same
 workflow identity as the manifest. The document is generated from the release
 identity alone (tag, version, channel, source branch and commit, build ID and
-sequence) and names only four fixed wrapper operations for that one release,
-each with its exact Bash and PowerShell argument vector: `offline-bundle-import`,
-`host-update-status`, `host-update-recover-preview` and
-`host-update-recover-confirm`. Host paths and the operator are placeholders such
+sequence) and names only fixed wrapper operations for that one release, each
+with its exact Bash and PowerShell argument vector. Schema 1 names four:
+`offline-bundle-import`, `host-update-status`, `host-update-recover-preview` and
+`host-update-recover-confirm`. Schema 2 (#2981, the current default) adds the
+network-denied path end to end: `offline-bundle-import-with-prior`,
+`offline-bundle-import-with-local-prior`, `offline-activate`,
+`offline-recover-preview` and `offline-recover-confirm`. Published schema 1
+documents still verify. Host paths and the operator are placeholders such
 as `<bundle.tar>`; there is no shell text, URL, credential or caller-chosen
 command. It states `rolloutAuthorization: false`.
 
@@ -810,6 +831,6 @@ recorded physical printer reconciliation (#2999). Provider and topology stop
 conditions are covered with fake adapters (#3000); see
 [the runbook](HOST_UPDATE_RUNBOOK.md#provider-and-topology-stop-conditions).
 
-Complete bundles are tracked in #2981. #2982 owns this matrix and separately
+Complete bundles are delivered in #2981. #2982 owns this matrix and separately
 authorized staging/pilot evidence. #2664 remains open until its full retained
 acceptance is complete.
