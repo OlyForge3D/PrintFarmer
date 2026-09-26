@@ -20,8 +20,11 @@ public class BatchDispatchService(
     IServiceScopeFactory scopeFactory,
     DispatchConcurrencyCoordinator concurrencyCoordinator,
     IHubContext<PrinterHub> hub,
-    ILogger<BatchDispatchService> logger) : IBatchDispatchService
+    ILogger<BatchDispatchService> logger,
+    TimeProvider? timeProvider = null) : IBatchDispatchService
 {
+    private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
+
     public async Task<BatchDispatchResult> BatchDispatchAsync(
         BatchDispatchRequest request, string userId, CancellationToken ct = default)
     {
@@ -447,7 +450,7 @@ public class BatchDispatchService(
         int busy = printingPrinterIds.Count;
 
         // Dispatch stats (last 24 hours)
-        DateTime cutoff = DateTime.UtcNow.AddHours(-24);
+        DateTime cutoff = _timeProvider.GetUtcNow().UtcDateTime.AddHours(-24);
 
         List<DispatchLog> recentLogs = await db.DispatchLogs
             .AsNoTracking()

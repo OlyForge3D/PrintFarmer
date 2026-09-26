@@ -18,9 +18,17 @@ completion sampled after delivery. Advance fake timers for polling rather than
 sleeping. `QueueProductionCallChainTests` contains the reconciliation/publisher
 clock cases, including timer cancellation.
 
-This first wave (#2880) does not make every queue service deterministic:
-second-wave service clocks, upload-progress timing, retention, and settings
-timestamps are tracked separately in #2972.
+The second wave (#2972) extends this to backend control-command consumption,
+bed-clear acknowledgement and expiry, physical actuation, auto/batch dispatch,
+job dispatch and queue deadlines, dispatch settings timestamps, and the
+manual-dispatch upload-progress throttle (which uses `GetTimestamp`/`GetElapsedTime`,
+not `Stopwatch`). Each service takes a trailing optional `TimeProvider? timeProvider = null`
+constructor parameter; production DI supplies `TimeProvider.System`.
+
+For polling loops, use the thread-safe `Farm.Testing.Shared.ManualTimeProvider`:
+`WaitForActiveTimersAsync` waits until the service has armed its timer, then
+`Advance` fires due callbacks outside the clock lock. `QueueSecondWaveClockTests`
+covers the second-wave boundary cases.
 
 ## React printer response contracts
 

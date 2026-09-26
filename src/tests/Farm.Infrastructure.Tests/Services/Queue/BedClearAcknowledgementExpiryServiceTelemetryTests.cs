@@ -35,6 +35,8 @@ public class BedClearAcknowledgementExpiryServiceTelemetryTests : IDisposable
     {
         public List<Guid> InvalidatedPrinterIds { get; } = new();
 
+        public Action? OnInvalidate { get; set; }
+
         public Task<AcknowledgeBedClearResult> AcknowledgeAsync(
             AcknowledgeBedClearRequest request, CancellationToken ct = default) =>
             throw new NotSupportedException("Not exercised by these telemetry tests.");
@@ -42,6 +44,7 @@ public class BedClearAcknowledgementExpiryServiceTelemetryTests : IDisposable
         public Task InvalidateStaleAcknowledgementsAsync(Guid printerId, CancellationToken ct = default)
         {
             InvalidatedPrinterIds.Add(printerId);
+            OnInvalidate?.Invoke();
             return Task.CompletedTask;
         }
     }
@@ -89,11 +92,12 @@ public class BedClearAcknowledgementExpiryServiceTelemetryTests : IDisposable
         GC.SuppressFinalize(this);
     }
 
-    private BedClearAcknowledgementExpiryService CreateSut() =>
+    private BedClearAcknowledgementExpiryService CreateSut(TimeProvider? timeProvider = null) =>
         new(
             _sp.GetRequiredService<IServiceScopeFactory>(),
             NullLogger<BedClearAcknowledgementExpiryService>.Instance,
-            _metrics);
+            _metrics,
+            timeProvider: timeProvider);
 
     private Guid SeedAcknowledgedPrinter(int index)
     {
@@ -227,5 +231,23 @@ public class BedClearAcknowledgementExpiryServiceTelemetryTests : IDisposable
 
         _ = counts.Should().ContainSingle().Which.Should().Be(1);
         _ = _fakeAckService.InvalidatedPrinterIds.Should().BeEquivalentTo(new[] { acknowledged });
+    }
+
+    [Fact(DisplayName = "ScanAsync measures pass duration on the injected TimeProvider")]
+    public async Task ScanAsync_MeasuresDurationOnInjectedTimeProvider()
+    {
+        _ = SeedAcknowledgedPrinter(1);
+        _ = SeedAcknowledgedPrinter(2);
+        var clock = new ManualTimeProvider(new DateTimeOffset(2031, 4, 5, 6, 7, 8, TimeSpan.Zero));
+        _fakeAckService.OnInvalidate = () => clock.Advance(TimeSpan.FromMilliseconds(1234));
+
+        BedClearAcknowledgementExpiryService sut = CreateSut(clock);
+
+        (_, List<double> durations) = await ListenForScanMetricsAsync(() =>
+            sut.ScanAsync(CancellationToken.None));
+
+        _ = durations.Should().ContainSingle().Which.Should().Be(
+            2468,
+            "the scan duration is the injected monotonic clock's elapsed time, not wall time");
     }
 }

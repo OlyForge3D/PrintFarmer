@@ -306,8 +306,11 @@ public class AutoDispatchService(
     Queue.Dispatch.IAutoDispatchTrigger? dispatchTrigger = null,
     IDispatchScorer? dispatchScorer = null,
     IFilamentCoverageBroadcaster? coverageBroadcaster = null,
-    IJobDispatchService? jobDispatchService = null) : IAutoDispatchService
+    IJobDispatchService? jobDispatchService = null,
+    TimeProvider? timeProvider = null) : IAutoDispatchService
 {
+    private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
+
     private const string ReadyGateLogPrefix = "[AutoDispatchReadyGate]";
     private const string AutoDispatchStateChangedEventName = "autodispatchstatechanged";
     private const string AutoDispatchReadyWebhookEventName = "printer.autodispatch_ready";
@@ -894,7 +897,7 @@ public class AutoDispatchService(
         {
             BindJobVersion(nextJob, expectedJobVersion);
             nextJob.Status = PrintJobStatus.Cancelled;
-            nextJob.UpdatedAt = DateTime.UtcNow;
+            nextJob.UpdatedAt = _timeProvider.GetUtcNow().UtcDateTime;
             logger.LogInformation(
                 ReadyGateLogPrefix + " Skipped (cancelled) job {JobId} ({JobName}) for printer {PrinterId}",
                 nextJob.Id, nextJob.Name, printerId);
@@ -1064,7 +1067,8 @@ public class AutoDispatchService(
                 printerId: printerId,
                 reasonCode: "bed_pre_confirmed",
                 dispatchStateRowVersion: preClearState.RowVersion,
-                detail: new { queueDepth = queuedJobs.QueueDepth });
+                detail: new { queueDepth = queuedJobs.QueueDepth },
+                timeProvider: _timeProvider);
         }
 
         await db.SaveChangesAsync(ct);
@@ -1303,13 +1307,13 @@ public class AutoDispatchService(
         }
     }
 
-    private static AutoDispatchStatusDto BuildStatusDto(
+    private AutoDispatchStatusDto BuildStatusDto(
         Printer printer,
         int queuedJobCount,
         OccupyingJobSelection? currentJob = null,
         PrintJob? nextJob = null)
     {
-        string now = DateTime.UtcNow.ToString("o");
+        string now = _timeProvider.GetUtcNow().UtcDateTime.ToString("o");
         EffectiveAutoDispatchState effectiveState = ResolveEffectiveState(
             printer,
             queuedJobCount,
