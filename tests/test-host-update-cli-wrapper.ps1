@@ -104,6 +104,19 @@ exit [int](`$env:FAKE_EXIT ?? '0')
     Expect-Usage 'activate refuses invalid channel' @('activate', '-Config', $config, '-Staging', $activationStaging, '-Channel', 'Stable', '-TrustedRoot', $activationRoot)
     $activateExit = Invoke-Wrapper @('activate', '-Config', $config, '-Staging', $activationStaging, '-Channel', 'stable', '-TrustedRoot', $activationRoot) @{ FAKE_EXIT = '6' }
     if ($activateExit.ExitCode -eq 6) { Pass 'activate preserves CLI refused exit code' } else { Fail "activate preserves CLI refused exit code (exit $($activateExit.ExitCode))" }
+    $recoverBackup = Join-Path $testRoot 'protected-backup.json'
+    $recoverDrift = 'drift-0123456789abcdef0123456789abcdef'
+    $recoverBase = @('recover-offline', '-Config', $config, '-Staging', $activationStaging, '-Channel', 'stable', '-TrustedRoot', $activationRoot, '-ProtectedBackup', $recoverBackup, '-Release', 'stable:1.2.3')
+    Expect-Passthrough 'recover-offline passes through to offline-recover in canonical order' @($dll, '--config', $config, 'offline-recover', '--staging', $activationStaging, '--channel', 'stable', '--trusted-root', $activationRoot, '--protected-backup', $recoverBackup, '--release', 'stable:1.2.3', '--preview', '--json') @('recover-offline', '-Json', '-Preview', '-Release', 'stable:1.2.3', '-ProtectedBackup', $recoverBackup, '-Config', $config, '-Staging', $activationStaging, '-Channel', 'stable', '-TrustedRoot', $activationRoot)
+    Expect-Passthrough 'recover-offline forwards confirm, request id, drift token and cosign' @($dll, '--config', $config, 'offline-recover', '--staging', $activationStaging, '--channel', 'insider', '--trusted-root', $activationRoot, '--cosign', $activationCosign, '--protected-backup', $recoverBackup, '--release', 'insider:1.2.3', '--request-id', 'req-1', '--confirm', 'insider:1.2.3', '--reapprove-drift', $recoverDrift) @('recover-offline', '-Config', $config, '-Staging', $activationStaging, '-Channel', 'insider', '-TrustedRoot', $activationRoot, '-Cosign', $activationCosign, '-ProtectedBackup', $recoverBackup, '-Release', 'insider:1.2.3', '-RequestId', 'req-1', '-Confirm', 'insider:1.2.3', '-ReapproveDrift', $recoverDrift)
+    Expect-Usage 'recover-offline requires -ProtectedBackup' @('recover-offline', '-Config', $config, '-Staging', $activationStaging, '-Channel', 'stable', '-TrustedRoot', $activationRoot, '-Release', 'stable:1.2.3', '-Preview')
+    Expect-Usage 'recover-offline refuses relative -ProtectedBackup' @('recover-offline', '-Config', $config, '-Staging', $activationStaging, '-Channel', 'stable', '-TrustedRoot', $activationRoot, '-ProtectedBackup', 'backup.json', '-Release', 'stable:1.2.3', '-Preview')
+    Expect-Usage 'recover-offline refuses invalid release' @('recover-offline', '-Config', $config, '-Staging', $activationStaging, '-Channel', 'stable', '-TrustedRoot', $activationRoot, '-ProtectedBackup', $recoverBackup, '-Release', 'stable:1;rm', '-Preview')
+    Expect-Usage 'recover-offline refuses invalid drift token' ($recoverBase + @('-Confirm', 'stable:1.2.3', '-ReapproveDrift', 'drift-x'))
+    Expect-Usage 'recover-offline refuses repeated -Preview' ($recoverBase + @('-Preview', '-Preview'))
+    Expect-Usage 'recover-offline refuses unsupported argument' ($recoverBase + @('-Preview', '-Bundle', $activationRoot))
+    $recoverExit = Invoke-Wrapper ($recoverBase + @('-Preview')) @{ FAKE_EXIT = '6' }
+    if ($recoverExit.ExitCode -eq 6) { Pass 'recover-offline preserves CLI refused exit code' } else { Fail "recover-offline preserves CLI refused exit code (exit $($recoverExit.ExitCode))" }
     Expect-Usage 'missing CLI dir refused' @('-Config', $config, 'status') @{ PRINTFARMER_HOST_UPDATE_CLI_DIR = $null }
     Expect-Usage 'relative PRINTFARMER_DOTNET refused' @('-Config', $config, 'status') @{ PRINTFARMER_DOTNET = 'fake-dotnet.ps1' }
 

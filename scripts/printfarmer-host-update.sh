@@ -10,6 +10,11 @@
 #   printfarmer-host-update.sh --config /abs/host-update.json recover --release <id> [--request-id <id>] --confirm <id> [--reapprove-drift <token>] [--printers-reconciled <token>] [--json]
 #   printfarmer-host-update.sh import --config /abs/host-update.json --bundle /abs/bundle.tar --channel <stable|insider> --version <v> --trusted-root /abs/trusted_root.json --trusted-root-approval /abs/approval.json --staging /abs/new-dir --records /abs/records-dir --operator <id> [--prior-recovery-set /abs/dir] [--protected-backup /abs/reference.json]
 #   printfarmer-host-update.sh activate --config /abs/host-update.json --staging /abs/verified-staging --channel <stable|insider> --trusted-root /abs/trusted_root.json [--cosign /abs/cosign] [--json]
+#   printfarmer-host-update.sh recover-offline --config /abs/host-update.json --staging /abs/verified-staging --channel <stable|insider> --trusted-root /abs/trusted_root.json --protected-backup /abs/reference.json --release <id> [--request-id <id>] (--preview | --confirm <id> [--reapprove-drift <token>] [--printers-reconciled <token>]) [--cosign /abs/cosign] [--json]
+#
+# `recover-offline` (issue #3082) recovers a failed offline activation to the staged bundle's
+# signature-verified prior recovery set with no network access; the --protected-backup reference
+# must equal the one bound at import. It refuses registry-mode requests and mismatched host state.
 #
 # `import` (issue #3063) verifies a signed offline update bundle without network access, loads only
 # its verified images into the local Docker engine and writes one durable, redacted decision record
@@ -51,7 +56,7 @@ readonly VERSION_RE='^[0-9A-Za-z.+-]{1,128}$'
 readonly OPERATOR_RE='^[A-Za-z0-9][A-Za-z0-9._@-]{0,63}$'
 
 usage() {
-    sed -n '8,12p' "${BASH_SOURCE[0]}" | sed 's/^#   //' >&2
+    sed -n '8,13p' "${BASH_SOURCE[0]}" | sed 's/^#   //' >&2
 }
 
 fail_usage() {
@@ -185,6 +190,73 @@ run_activate() {
     exec "${launcher[@]}" --config "$activate_config" "${cli_args[@]}"
 }
 
+run_recover_offline() {
+    local seen=" "
+    local recover_config="" staging="" channel="" trusted_root="" cosign="" backup="" release=""
+    local request_id="" confirm="" drift="" physical=""
+    while [[ $# -gt 0 ]]; do
+        local option="$1"
+        [[ "$seen" != *" $option "* ]] || fail_usage "$option may be given only once"
+        case "$option" in
+            --json|--preview)
+                seen+="$option "
+                shift
+                continue ;;
+            --config|--staging|--channel|--trusted-root|--cosign|--protected-backup|--release|--confirm|--request-id|--reapprove-drift|--printers-reconciled) ;;
+            *) fail_usage "unsupported argument: $option" ;;
+        esac
+        [[ $# -ge 2 && -n "$2" ]] || fail_usage "$option requires a value"
+        seen+="$option "
+        local value="$2"
+        shift 2
+        case "$option" in
+            --channel)
+                [[ "$value" =~ $CHANNEL_RE ]] || fail_usage "--channel must be stable or insider" ;;
+            --release|--confirm)
+                [[ "$value" =~ $RELEASE_RE ]] || fail_usage "$option requires a release id like stable:1.2.3" ;;
+            --request-id)
+                [[ "$value" =~ $REQUEST_RE ]] || fail_usage "--request-id requires [A-Za-z0-9._:-]{1,128}" ;;
+            --reapprove-drift)
+                [[ "$value" =~ $DRIFT_TOKEN_RE ]] || fail_usage "--reapprove-drift requires the drift-<32 hex> token printed by --preview" ;;
+            --printers-reconciled)
+                [[ "$value" =~ $PHYSICAL_TOKEN_RE ]] || fail_usage "--printers-reconciled requires the physical-<32 hex> token printed by --preview" ;;
+            *)
+                is_absolute "$value" || fail_usage "$option must be an absolute path" ;;
+        esac
+        case "$option" in
+            --config) recover_config="$value" ;;
+            --staging) staging="$value" ;;
+            --channel) channel="$value" ;;
+            --trusted-root) trusted_root="$value" ;;
+            --cosign) cosign="$value" ;;
+            --protected-backup) backup="$value" ;;
+            --release) release="$value" ;;
+            --request-id) request_id="$value" ;;
+            --confirm) confirm="$value" ;;
+            --reapprove-drift) drift="$value" ;;
+            --printers-reconciled) physical="$value" ;;
+        esac
+    done
+    local option
+    for option in --config --staging --channel --trusted-root --protected-backup --release; do
+        [[ "$seen" == *" $option "* ]] || fail_usage "recover-offline requires $option"
+    done
+
+    # Canonical argument order, identical to the PowerShell wrapper.
+    local -a cli_args=(offline-recover --staging "$staging" --channel "$channel" --trusted-root "$trusted_root")
+    if [[ -n "$cosign" ]]; then cli_args+=(--cosign "$cosign"); fi
+    cli_args+=(--protected-backup "$backup" --release "$release")
+    if [[ -n "$request_id" ]]; then cli_args+=(--request-id "$request_id"); fi
+    if [[ "$seen" == *" --preview "* ]]; then cli_args+=(--preview); fi
+    if [[ -n "$confirm" ]]; then cli_args+=(--confirm "$confirm"); fi
+    if [[ -n "$drift" ]]; then cli_args+=(--reapprove-drift "$drift"); fi
+    if [[ -n "$physical" ]]; then cli_args+=(--printers-reconciled "$physical"); fi
+    if [[ "$seen" == *" --json "* ]]; then cli_args+=(--json); fi
+
+    resolve_launcher
+    exec "${launcher[@]}" --config "$recover_config" "${cli_args[@]}"
+}
+
 # Resolves the CLI launcher into the global `launcher` array: the self-contained apphost alone, or
 # the dotnet host followed by Farm.HostUpdate.Cli.dll.
 resolve_launcher() {
@@ -217,6 +289,7 @@ case "${1:-}" in
     help|--help|-h) usage; exit 0 ;;
     import) shift; run_import "$@" ;;
     activate) shift; run_activate "$@" ;;
+    recover-offline) shift; run_recover_offline "$@" ;;
 esac
 if [[ "${1:-}" == "--config" ]]; then
     [[ $# -ge 2 ]] || fail_usage "--config requires a value"
