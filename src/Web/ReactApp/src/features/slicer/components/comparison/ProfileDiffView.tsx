@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import clsx from 'clsx';
 import { Toggle, EmptyState, Badge, Spinner } from '@/common/components/ui';
-import type { ProfileTypeSchemaDto, ProfileFieldMetadata } from '@/types/api';
+import type { ProfileTypeSchema, ProfileFieldMetadata } from '@/types/api';
 
 export interface ProfileDiffViewProps {
   profileType: 'process' | 'machine' | 'filament';
@@ -9,7 +9,7 @@ export interface ProfileDiffViewProps {
   rightProfile: Record<string, unknown>;
   leftLabel?: string;
   rightLabel?: string;
-  schema?: ProfileTypeSchemaDto;
+  schema?: ProfileTypeSchema;
   showOnlyDifferences?: boolean;
   className?: string;
 }
