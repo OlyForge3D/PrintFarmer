@@ -40,8 +40,7 @@ final class TaskActionRouteResolverTests: XCTestCase {
         let task = makeTask(
             taskType: .filamentRunout,
             entityType: "Printer",
-            entityId: printerA.uuidString,
-            metadataJson: #"{"toolheadId":"T0"}"#
+            entityId: printerA.uuidString
         )
 
         XCTAssertEqual(
