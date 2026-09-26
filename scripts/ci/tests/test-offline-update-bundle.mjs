@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { closeSync, existsSync, fstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, rmSync,
   writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { isAbsolute, join, relative } from 'node:path';
 import test from 'node:test';
 import { components } from '../release-policy.mjs';
 import { buildManifest, deriveSequence } from '../release-manifest.mjs';
@@ -13,9 +13,10 @@ import { canonicalImageIndex, imageArchiveLimits, imageTarHeader, infrastructure
   writeImageArchive } from '../offline-bundle-images.mjs';
 import { formatSums, hostUpdateCliArchiveName, hostUpdateCliRuntimes, hostUpdateCliSbomName, hostUpdateCliSumsBundleName,
   hostUpdateCliSumsName } from '../host-update-cli-package.mjs';
-import { assembleOfflineBundle, importOfflineBundle, loadVerifiedImages, offlineBundleIndexName, offlineBundleLimits,
-  offlineBundleName, offlineBundleVerificationName, offlineImportDecisionKind, parseArguments, readOfflineBundleEntries,
-  redactReason, releaseSigningIdentity, tarHeader, verifyOfflineBundle } from '../offline-update-bundle.mjs';
+import { admitOfflineReplay, assembleOfflineBundle, evaluateTrustPolicy, hostUpdateCliInvocation, hostUpdateCliRunnerName,
+  importOfflineBundle, loadVerifiedImages, offlineBundleIndexName, offlineBundleLimits, offlineBundleName,
+  offlineBundleVerificationName, offlineImportDecisionKind, offlineTrustPolicy, parseArguments, readOfflineBundleEntries,
+  redactReason, releaseSigningIdentity, tarHeader, trustedRootApprovalKind, verifyOfflineBundle } from '../offline-update-bundle.mjs';
 import { recoveryInstructionsDocument, recoveryInstructionsName, recoveryInstructionsSignatureName,
   validateRecoveryInstructions } from '../offline-recovery-instructions.mjs';
 
@@ -84,7 +85,9 @@ function fixture(channel = 'stable') {
   writeFileSync(join(assets, hostUpdateCliSumsName(release.version)), sums);
   writeFileSync(join(assets, hostUpdateCliSumsBundleName(release.version)), sign(sums, channel));
   const trustedRoot = join(root, 'trusted_root.json');
-  writeFileSync(trustedRoot, '{"mediaType":"application/vnd.dev.sigstore.trustedroot+json;version=0.1"}\n');
+  writeFileSync(trustedRoot, `${JSON.stringify({ mediaType: 'application/vnd.dev.sigstore.trustedroot+json;version=0.1',
+    certificateAuthorities: [{ uri: 'https://fulcio.sigstore.dev', validFor: { start: '2026-01-01T00:00:00Z' } }],
+    tlogs: [{ baseUrl: 'https://rekor.sigstore.dev', publicKey: { validFor: { start: '2026-01-01T00:00:00Z' } } }] })}\n`);
   return { root, assets, release, trustedRoot, bundle: join(root, offlineBundleName(release.version)),
     staging: join(root, 'staging'), cleanup: () => rmSync(root, { force: true, recursive: true }) };
 }
@@ -1441,27 +1444,80 @@ function completeFixture(channel = 'stable') {
   assemble(context, { images: context.layout });
   context.records = join(context.root, 'records');
   mkdirSync(context.records);
+  approveTrustedRoot(context);
   return context;
 }
 
-function importRunner() {
+function approveTrustedRoot(context, overrides = {}) {
+  context.approval = join(context.root, 'trusted-root-approval.json');
+  writeFileSync(context.approval, `${JSON.stringify({ schema: 1, kind: trustedRootApprovalKind,
+    trustedRootSha256: sha256(readFileSync(context.trustedRoot)), approvedAt: '2026-09-01T00:00:00.000Z',
+    approvedBy: 'ops.bob', ...overrides })}\n`);
+  return context.approval;
+}
+
+// Fake host-update CLI `offline-admit`: a durable per-channel replay store keyed by manifest digest,
+// with a strictly increasing sequence high-water mark, bound to a standing policy channel.
+function replayStore({ policyChannel, highWater = {} } = {}) {
+  const decisions = new Map();
+  const calls = [];
+  const admit = args => {
+    calls.push(args);
+    assert.deepEqual([args.length, args[0], args[1], args[3], args[5], args[7]],
+      [8, 'offline-admit', '--staging', '--channel', '--trusted-root', '--json']);
+    assert.ok(isAbsolute(args[2]), 'offline-admit receives the absolute verified staging directory');
+    assert.ok(isAbsolute(args[6]), 'offline-admit re-verifies against the absolute trusted root');
+    const inside = relative(args[2], args[6]);
+    assert.ok(inside.startsWith('..') || isAbsolute(inside),
+      'the trusted root offline-admit verifies against lies outside the mutable staging directory');
+    const staging = args[2];
+    const record = JSON.parse(readFileSync(join(staging, offlineBundleVerificationName), 'utf8'));
+    const digest = `sha256:${sha256(readFileSync(join(staging, 'update-manifest.json')))}`;
+    assert.equal(record.manifestDigest, digest, 'offline-admit reads the verified staging');
+    const channel = args[4];
+    const fail = (exitCode, result) => {
+      const error = new Error(`host update CLI exited ${exitCode}`);
+      error.status = exitCode;
+      error.stdout = `${JSON.stringify({ exitCode, result })}\n`;
+      throw error;
+    };
+    if ((policyChannel ?? channel) !== channel) fail(6, { code: 'channel_mismatch_policy', details: [] });
+    const sequence = record.release.sequence;
+    const report = (disposition, reused, correlationId) => ({ decision: ['Imported', 'Accepted'].includes(disposition)
+      ? 'admitted' : 'refused', reason: disposition === 'Imported' ? null : `replay_${disposition.toLowerCase()}`,
+    releaseId: `${channel}:${record.release.version}`, channel: channel.toUpperCase(), sequence, manifestDigest: digest,
+    disposition, correlationId, reused });
+    const existing = decisions.get(digest);
+    if (existing) return `${JSON.stringify({ exitCode: 0, result: report(existing.disposition, true, existing.id) })}\n`;
+    if ((highWater[channel] ?? 0) >= sequence) fail(6, report('Rejected', false, `r-${calls.length}`));
+    highWater[channel] = sequence;
+    const id = `c-${calls.length}`;
+    decisions.set(digest, { disposition: 'Imported', id });
+    return `${JSON.stringify({ exitCode: 0, result: report('Imported', false, id) })}\n`;
+  };
+  return { admit, calls, decisions, highWater };
+}
+
+function importRunner(store = replayStore()) {
   const signatures = cosign({ requireOffline: true });
   const loads = [];
   const run = (name, args, options) => {
     if (name === 'cosign') return signatures.run(name, args);
+    if (name === hostUpdateCliRunnerName) return store.admit(args);
     assert.equal(name, 'docker');
     assert.deepEqual(args, ['load']);
     assert.equal(typeof options?.stdin, 'number');
     loads.push(fstatSync(options.stdin).size);
     return '';
   };
-  return { run, loads, calls: signatures.calls };
+  return { run, loads, calls: signatures.calls, store };
 }
 
 function runImport(context, overrides = {}) {
   return importOfflineBundle({ bundle: context.bundle, channel: context.release.channel, version: context.release.version,
-    trustedRoot: context.trustedRoot, staging: context.staging, records: context.records, operator: 'ops.alice',
-    run: importRunner().run, now: () => new Date('2026-09-25T20:00:00Z'), ...overrides });
+    trustedRoot: context.trustedRoot, trustedRootApproval: context.approval, staging: context.staging,
+    records: context.records, operator: 'ops.alice', run: importRunner().run, now: () => new Date('2026-09-25T20:00:00Z'),
+    ...overrides });
 }
 
 function decisionFiles(context) {
@@ -1596,8 +1652,15 @@ test('import verifies, loads only verified images and writes one durable redacte
     assert.equal(record.kind, offlineImportDecisionKind);
     assert.equal(record.operator, 'ops.alice');
     assert.equal(record.decidedAt, '2026-09-25T20:00:00.000Z');
-    assert.equal(record.installable, false);
-    assert.equal(record.rolloutAuthorization, false);
+    assert.equal(record.installable, true, 'a complete, replay-admitted import is installable');
+    assert.equal(record.rolloutAuthorization, false, 'import never authorizes a rollout');
+    assert.deepEqual(record.replay, { disposition: 'Imported', correlationId: 'c-1', reused: false,
+      sequence: context.identity.sequence, admitted: true });
+    assert.deepEqual(record.trust, { trustedRootSha256: sha256(readFileSync(context.trustedRoot)),
+      approvedAt: '2026-09-01T00:00:00.000Z', approvedBy: 'ops.bob', approvalExpiresAt: '2026-11-30T00:00:00.000Z' });
+    assert.equal(runner.store.calls.length, 1);
+    assert.equal(JSON.parse(readFileSync(join(context.staging, offlineBundleVerificationName), 'utf8')).installable, false,
+      'the verification record itself stays not-installable');
     assert.equal(record.bundleSha256, sha256(readFileSync(context.bundle)));
     assert.deepEqual(record.release, { ...context.identity, sequence: context.identity.sequence });
     assert.deepEqual(record.verifiedDigests.images.map(image => image.member).sort(), allImageMembers);
@@ -1628,11 +1691,14 @@ test('import refuses a verified but incomplete bundle, removes its staging and r
       prepare(context);
       context.records = join(context.root, 'records');
       mkdirSync(context.records);
+      approveTrustedRoot(context);
       const runner = importRunner();
       const { record } = runImport(context, { run: runner.run });
       assert.equal(record.outcome, 'refused', label);
       assert.match(record.reason, pattern);
       assert.equal(runner.loads.length, 0, 'nothing is loaded from an incomplete bundle');
+      assert.equal(runner.store.calls.length, 0, 'an incomplete bundle is never offered to the replay store');
+      assert.equal(record.installable, false);
       assert.deepEqual(record.loadedImages, []);
       assert.equal(existsSync(context.staging), false, 'a refused import leaves no staging directory');
       assert.equal(decisionFiles(context).length, 1);
@@ -1760,7 +1826,8 @@ test('decision reasons replace known and unknown host paths and stay bounded', (
 
 test('the import command line requires every binding option and offers no bypass', () => {
   const full = ['import', '--bundle', 'b', '--channel', 'stable', '--version', '1.4.0', '--trusted-root', 'r',
-    '--staging', 's', '--records', 'd', '--operator', 'ops'];
+    '--trusted-root-approval', 'a', '--staging', 's', '--records', 'd', '--operator', 'ops', '--config', 'c',
+    '--host-update-cli', 'h'];
   assert.equal(parseArguments(full).options.operator, 'ops');
   for (let index = 1; index < full.length; index += 2) {
     assert.throws(() => parseArguments([...full.slice(0, index), ...full.slice(index + 2)]), /usage/, full[index]);
@@ -1768,4 +1835,193 @@ test('the import command line requires every binding option and offers no bypass
   for (const extra of [['--force', 'true'], ['--skip-verification', 'true'], ['--images', 'x'], ['--runtime', 'linux-x64']]) {
     assert.throws(() => parseArguments([...full, ...extra]), /usage/, extra[0]);
   }
+});
+// ---------------------------------------------------------------------------------------------
+// Issue #3064: replay protection, channel continuity and the offline trust expiry policy
+// ---------------------------------------------------------------------------------------------
+test('re-importing the same release reuses its replay decision and stays installable', () => {
+  const context = completeFixture('insider');
+  try {
+    const store = replayStore();
+    const first = runImport(context, { run: importRunner(store).run, newId: () => '00000000-0000-4000-8000-000000000011' });
+    const second = runImport(context, { run: importRunner(store).run, staging: join(context.root, 'staging-2'),
+      newId: () => '00000000-0000-4000-8000-000000000012' });
+    assert.equal(first.record.outcome, 'imported');
+    assert.equal(second.record.outcome, 'imported');
+    assert.equal(second.record.replay.reused, true);
+    assert.equal(second.record.replay.correlationId, first.record.replay.correlationId);
+    assert.equal(second.record.installable, true);
+    assert.equal(store.highWater.insider, context.identity.sequence);
+    assert.equal(decisionFiles(context).length, 2);
+  } finally {
+    context.cleanup();
+  }
+});
+
+test('a replayed older or equal-sequence release is refused before any image is loaded', () => {
+  for (const offset of [1, 0]) {
+    const context = completeFixture('stable');
+    try {
+      // Sequence 42 is already durable; the bundle carries 41 (offset 1) or a different release at 42 (offset 0).
+      const store = replayStore({ highWater: { stable: context.identity.sequence + offset } });
+      const runner = importRunner(store);
+      const { record } = runImport(context, { run: runner.run });
+      assert.equal(record.outcome, 'refused');
+      assert.match(record.reason, /Offline replay admission refused: replay_rejected/);
+      assert.equal(record.replay.admitted, false);
+      assert.equal(record.replay.disposition, 'Rejected');
+      assert.equal(record.installable, false);
+      assert.equal(record.rolloutAuthorization, false);
+      assert.equal(runner.loads.length, 0, 'a replay is refused before docker load');
+      assert.equal(existsSync(context.staging), false, 'a refused import leaves no staging directory');
+      assert.equal(store.highWater.stable, context.identity.sequence + offset, 'the high-water mark never moves back');
+    } finally {
+      context.cleanup();
+    }
+  }
+});
+
+test('a cross-channel import is refused by the standing policy channel', () => {
+  const context = completeFixture('stable');
+  try {
+    const runner = importRunner(replayStore({ policyChannel: 'insider' }));
+    const { record } = runImport(context, { run: runner.run });
+    assert.equal(record.outcome, 'refused');
+    assert.match(record.reason, /channel_mismatch_policy/);
+    assert.equal(record.replay, null);
+    assert.equal(runner.loads.length, 0);
+    assert.equal(record.installable, false);
+  } finally {
+    context.cleanup();
+  }
+});
+
+test('an unreadable or mismatched replay admission fails closed', () => {
+  for (const [label, answer, pattern] of [
+    ['no output', () => { const error = new Error('spawn failed'); error.status = 3; throw error; },
+      /returned no decision \(host update CLI exit 3\)/],
+    ['state unreadable', () => { const error = new Error('exit 4'); error.status = 4;
+      error.stdout = JSON.stringify({ exitCode: 4, result: { code: 'state_unreadable', details: [] } }); throw error; },
+    /refused: state_unreadable/],
+    ['wrong digest', () => JSON.stringify({ exitCode: 0, result: { decision: 'admitted', manifestDigest: `sha256:${'0'.repeat(64)}`,
+      sequence: 1, channel: 'stable', disposition: 'Imported', correlationId: 'x', reused: false } }),
+    /does not match the verified release/],
+  ]) {
+    const context = completeFixture('stable');
+    try {
+      const base = importRunner();
+      const run = (name, args, options) => (name === hostUpdateCliRunnerName ? answer() : base.run(name, args, options));
+      const { record } = runImport(context, { run });
+      assert.equal(record.outcome, 'refused', label);
+      assert.match(record.reason, pattern, label);
+      assert.equal(base.loads.length, 0, label);
+      assert.equal(record.installable, false, label);
+      assert.equal(existsSync(context.staging), false, label);
+    } finally {
+      context.cleanup();
+    }
+  }
+});
+
+test('the trust expiry policy refuses stale, future, unbound or unusable trusted roots before verification', () => {
+  const at = new Date('2026-09-25T20:00:00Z');
+  for (const [label, prepare, pattern] of [
+    ['expired approval', context => approveTrustedRoot(context, { approvedAt: '2026-06-26T00:00:00.000Z' }),
+      /approval expired \(older than 90 days\)/],
+    ['future approval', context => approveTrustedRoot(context, { approvedAt: '2026-09-25T20:11:00.000Z' }),
+      /dated in the future/],
+    ['non-canonical time', context => approveTrustedRoot(context, { approvedAt: '2026-09-01' }), /canonical UTC timestamp/],
+    ['unbound root', context => approveTrustedRoot(context, { trustedRootSha256: '0'.repeat(64) }),
+      /does not bind the supplied trusted root/],
+    ['extra field', context => approveTrustedRoot(context, { force: true }), /approval record is malformed/],
+    ['bad approver', context => approveTrustedRoot(context, { approvedBy: 'alice smith' }), /approval record is malformed/],
+    ['missing approval', context => rmSync(context.approval), /approval record is unreadable/],
+    ['expired CA', context => {
+      const root = JSON.parse(readFileSync(context.trustedRoot, 'utf8'));
+      root.certificateAuthorities[0].validFor.end = '2026-09-01T00:00:00Z';
+      writeFileSync(context.trustedRoot, JSON.stringify(root));
+      approveTrustedRoot(context);
+    }, /no certificate authority valid now/],
+    ['no tlog', context => {
+      const root = JSON.parse(readFileSync(context.trustedRoot, 'utf8'));
+      root.tlogs = [];
+      writeFileSync(context.trustedRoot, JSON.stringify(root));
+      approveTrustedRoot(context);
+    }, /no transparency log key valid now/],
+    ['not yet valid tlog', context => {
+      const root = JSON.parse(readFileSync(context.trustedRoot, 'utf8'));
+      root.tlogs[0].publicKey.validFor.start = '2026-12-01T00:00:00Z';
+      writeFileSync(context.trustedRoot, JSON.stringify(root));
+      approveTrustedRoot(context);
+    }, /no transparency log key valid now/],
+  ]) {
+    const context = completeFixture('stable');
+    try {
+      prepare(context);
+      const runner = importRunner();
+      const { record } = runImport(context, { run: runner.run, now: () => at });
+      assert.equal(record.outcome, 'refused', label);
+      assert.match(record.reason, pattern, label);
+      assert.equal(record.trust, null, label);
+      assert.equal(record.verifiedDigests, null, `${label}: nothing is verified under an untrusted root`);
+      assert.equal(runner.calls.length, 0, `${label}: cosign never runs`);
+      assert.equal(runner.store.calls.length, 0, label);
+      assert.equal(runner.loads.length, 0, label);
+      assert.equal(existsSync(context.staging), false, label);
+      assert.ok(!readFileSync(join(context.records, decisionFiles(context)[0]), 'utf8').includes(context.root), label);
+    } finally {
+      context.cleanup();
+    }
+  }
+});
+
+test('the trust approval is honoured up to its 90-day expiry and not after', () => {
+  const context = completeFixture('stable');
+  try {
+    assert.equal(offlineTrustPolicy.maxApprovalAgeDays, 90);
+    const args = { trustedRoot: context.trustedRoot, trustedRootApproval: context.approval };
+    assert.equal(evaluateTrustPolicy({ ...args, now: () => new Date('2026-11-29T23:59:59Z') }).approvalExpiresAt,
+      '2026-11-30T00:00:00.000Z');
+    assert.throws(() => evaluateTrustPolicy({ ...args, now: () => new Date('2026-11-30T00:00:00Z') }), /approval expired/);
+    assert.ok(evaluateTrustPolicy({ ...args, now: () => new Date('2026-08-31T23:55:00Z') }), 'bounded clock skew');
+    assert.throws(() => evaluateTrustPolicy({ ...args, trustedRootApproval: 'relative.json' }), /absolute trusted-root/);
+    assert.equal(trustedRootApprovalKind, 'printfarmer-trusted-root-approval');
+  } finally {
+    context.cleanup();
+  }
+});
+
+test('the host-update CLI is invoked with its config, directly or through the dotnet host', () => {
+  const abs = process.platform === 'win32' ? 'C:\\pf' : '/pf';
+  const cli = join(abs, 'cli', 'Farm.HostUpdate.Cli');
+  const config = join(abs, 'host-update.json');
+  assert.deepEqual(hostUpdateCliInvocation({ config, 'host-update-cli': cli }), { file: cli, prefix: ['--config', config] });
+  assert.deepEqual(hostUpdateCliInvocation({ config, 'host-update-cli': `${cli}.dll` }),
+    { file: 'dotnet', prefix: [`${cli}.dll`, '--config', config] });
+  const dotnet = join(abs, 'dotnet');
+  assert.equal(hostUpdateCliInvocation({ config, 'host-update-cli': `${cli}.dll`, dotnet }).file, dotnet);
+  assert.throws(() => hostUpdateCliInvocation({ config, 'host-update-cli': cli, dotnet }), /must not be given/);
+  assert.throws(() => hostUpdateCliInvocation({ config: 'c.json', 'host-update-cli': cli }), /--config/);
+  assert.throws(() => hostUpdateCliInvocation({ config, 'host-update-cli': 'cli' }), /--host-update-cli/);
+  assert.throws(() => hostUpdateCliInvocation({ config, 'host-update-cli': `${cli}.dll`, dotnet: 'dotnet' }), /--dotnet/);
+});
+
+test('offline-admit re-verifies against the absolute trusted root with the same Cosign executable', () => {
+  const abs = process.platform === 'win32' ? 'C:\\pf' : '/pf';
+  const trustedRoot = join(abs, 'trusted_root.json');
+  const cosignPath = join(abs, 'bin', 'cosign');
+  const verification = { manifestDigest: `sha256:${'a'.repeat(64)}`, release: { sequence: 7, version: '1.2.3' } };
+  const seen = [];
+  const run = (name, args) => {
+    seen.push([name, args]);
+    return JSON.stringify({ exitCode: 0, result: { decision: 'admitted', manifestDigest: verification.manifestDigest,
+      sequence: 7, channel: 'Insider', releaseId: 'insider:1.2.3', disposition: 'Imported', correlationId: 'c', reused: false } });
+  };
+  admitOfflineReplay({ run, staging: join(abs, 's'), channel: 'insider', verification, trustedRoot, cosign: cosignPath });
+  assert.deepEqual(seen, [[hostUpdateCliRunnerName, ['offline-admit', '--staging', join(abs, 's'), '--channel', 'insider',
+    '--trusted-root', trustedRoot, '--cosign', cosignPath, '--json']]]);
+  assert.throws(() => admitOfflineReplay({ run, staging: join(abs, 's'), channel: 'insider', verification,
+    trustedRoot: 'trusted_root.json' }), /absolute Sigstore trusted root/);
+  assert.throws(() => admitOfflineReplay({ run, staging: join(abs, 's'), channel: 'insider', verification, trustedRoot,
+    cosign: 'cosign' }), /absolute Cosign path/);
 });

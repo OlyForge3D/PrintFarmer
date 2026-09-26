@@ -567,7 +567,7 @@ public sealed class GitHubSignedReleaseDiscovery(HttpClient httpClient, ISignedR
     private sealed record ReleaseCandidate(SignedUpdateManifest Manifest, byte[] ManifestBytes, long BundleAssetId);
 }
 
-public sealed record CosignVerifierOptions(string ExecutablePath, TimeSpan Timeout, int MaxDiagnostics = 8192);
+public sealed record CosignVerifierOptions(string ExecutablePath, TimeSpan Timeout, int MaxDiagnostics = 8192, string? TrustedRootPath = null);
 
 internal sealed record CosignProcessCommand(string ExecutablePath, IReadOnlyList<string> Arguments);
 internal sealed record CosignProcessResult(int ExitCode, string Diagnostics);
@@ -726,9 +726,12 @@ public sealed class ProcessCosignVerifier : ISignedReleaseVerifier
         {
             await File.WriteAllBytesAsync(manifestPath, manifest.ToArray(), cancellationToken);
             await File.WriteAllBytesAsync(bundlePath, bundle.ToArray(), cancellationToken);
+
+            // An operator-supplied Sigstore trusted root makes verification network-free (#3064).
+            string[] offline = options.TrustedRootPath is { } trustedRoot ? ["--trusted-root", trustedRoot] : [];
             CosignProcessCommand command = new(
                 options.ExecutablePath,
-                ["verify-blob", "--bundle", bundlePath, "--certificate-oidc-issuer", Issuer, "--certificate-identity", certificateIdentity, manifestPath]);
+                ["verify-blob", .. offline, "--bundle", bundlePath, "--certificate-oidc-issuer", Issuer, "--certificate-identity", certificateIdentity, manifestPath]);
             return (await runner.RunAsync(command, options.Timeout, options.MaxDiagnostics, cancellationToken)).ExitCode == 0;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }

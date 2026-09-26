@@ -8,11 +8,13 @@
 #   printfarmer-host-update.sh --config /abs/host-update.json status [--release <id>] [--json]
 #   printfarmer-host-update.sh --config /abs/host-update.json recover --release <id> [--request-id <id>] --preview [--json]
 #   printfarmer-host-update.sh --config /abs/host-update.json recover --release <id> [--request-id <id>] --confirm <id> [--reapprove-drift <token>] [--printers-reconciled <token>] [--json]
-#   printfarmer-host-update.sh import --bundle /abs/bundle.tar --channel <stable|insider> --version <v> --trusted-root /abs/trusted_root.json --staging /abs/new-dir --records /abs/records-dir --operator <id> [--prior-recovery-set /abs/dir] [--protected-backup /abs/reference.json]
+#   printfarmer-host-update.sh import --config /abs/host-update.json --bundle /abs/bundle.tar --channel <stable|insider> --version <v> --trusted-root /abs/trusted_root.json --trusted-root-approval /abs/approval.json --staging /abs/new-dir --records /abs/records-dir --operator <id> [--prior-recovery-set /abs/dir] [--protected-backup /abs/reference.json]
 #
 # `import` (issue #3063) verifies a signed offline update bundle without network access, loads only
 # its verified images into the local Docker engine and writes one durable, redacted decision record
-# under --records. It needs no --config and never installs, activates or authorizes a rollout.
+# under --records. Issue #3064: it also enforces the offline trust expiry policy (--trusted-root-approval)
+# and records the release in the host's durable replay store through the CLI (`offline-admit`, using
+# --config), refusing replays, downgrades and cross-channel imports. It never authorizes a rollout.
 #
 # --reapprove-drift takes the token printed by `recover --preview` when the host drifted since the
 # recorded authorization (CLI exit 12). --printers-reconciled takes the physical-<32 hex> token
@@ -74,12 +76,12 @@ optional_executable() {
 
 run_import() {
     local seen=" "
-    local bundle="" channel="" version="" trusted_root="" staging="" records="" operator=""
+    local import_config="" bundle="" channel="" version="" trusted_root="" approval="" staging="" records="" operator=""
     local prior="" backup=""
     while [[ $# -gt 0 ]]; do
         local option="$1"
         case "$option" in
-            --bundle|--channel|--version|--trusted-root|--staging|--records|--operator|--prior-recovery-set|--protected-backup) ;;
+            --config|--bundle|--channel|--version|--trusted-root|--trusted-root-approval|--staging|--records|--operator|--prior-recovery-set|--protected-backup) ;;
             *) fail_usage "unsupported argument: $option" ;;
         esac
         [[ "$seen" != *" $option "* ]] || fail_usage "$option may be given only once"
@@ -100,8 +102,10 @@ run_import() {
             *)
                 is_absolute "$value" || fail_usage "$option must be an absolute path"
                 case "$option" in
+                    --config) import_config="$value" ;;
                     --bundle) bundle="$value" ;;
                     --trusted-root) trusted_root="$value" ;;
+                    --trusted-root-approval) approval="$value" ;;
                     --staging) staging="$value" ;;
                     --records) records="$value" ;;
                     --prior-recovery-set) prior="$value" ;;
@@ -110,7 +114,7 @@ run_import() {
         esac
     done
     local option
-    for option in --bundle --channel --version --trusted-root --staging --records --operator; do
+    for option in --config --bundle --channel --version --trusted-root --trusted-root-approval --staging --records --operator; do
         [[ "$seen" == *" $option "* ]] || fail_usage "import requires $option"
     done
 
@@ -121,14 +125,44 @@ run_import() {
     tool="${PRINTFARMER_OFFLINE_BUNDLE_TOOL:-$SCRIPT_DIR/ci/offline-update-bundle.mjs}"
     is_absolute "$tool" && [[ -f "$tool" ]] || fail_usage "PRINTFARMER_OFFLINE_BUNDLE_TOOL must be an absolute path to offline-update-bundle.mjs"
 
+    resolve_launcher
     local -a tool_args=(import --bundle "$bundle" --channel "$channel" --version "$version"
-        --trusted-root "$trusted_root" --staging "$staging" --records "$records" --operator "$operator")
+        --trusted-root "$trusted_root" --trusted-root-approval "$approval" --staging "$staging" --records "$records"
+        --operator "$operator" --config "$import_config" --host-update-cli "${launcher[${#launcher[@]}-1]}")
+    if [[ ${#launcher[@]} -eq 2 && -n "${PRINTFARMER_DOTNET:-}" ]]; then tool_args+=(--dotnet "${launcher[0]}"); fi
     if [[ -n "$prior" ]]; then tool_args+=(--prior-recovery-set "$prior"); fi
     if [[ -n "$backup" ]]; then tool_args+=(--protected-backup "$backup"); fi
     if [[ -n "${PRINTFARMER_COSIGN:-}" ]]; then tool_args+=(--cosign "$cosign_host"); fi
     if [[ -n "${PRINTFARMER_DOCKER:-}" ]]; then tool_args+=(--docker "$docker_host"); fi
 
     exec "$node_host" "$tool" "${tool_args[@]}"
+}
+
+# Resolves the CLI launcher into the global `launcher` array: the self-contained apphost alone, or
+# the dotnet host followed by Farm.HostUpdate.Cli.dll.
+resolve_launcher() {
+    local cli_dir="${PRINTFARMER_HOST_UPDATE_CLI_DIR:-}"
+    # An installed package (issue #3041) carries its self-contained CLI in cli/ beside this wrapper.
+    if [[ -z "$cli_dir" && -f "$SCRIPT_DIR/host-update-cli-package.json" ]]; then
+        cli_dir="$SCRIPT_DIR/cli"
+    fi
+    [[ -n "$cli_dir" ]] && is_absolute "$cli_dir" || fail_usage "PRINTFARMER_HOST_UPDATE_CLI_DIR must be an absolute directory"
+    local cli_apphost="$cli_dir/Farm.HostUpdate.Cli"
+    if [[ -f "$cli_apphost" ]]; then
+        # Self-contained package: the launcher carries its own runtime, so no dotnet host is used.
+        [[ -x "$cli_apphost" ]] || fail_usage "Farm.HostUpdate.Cli in PRINTFARMER_HOST_UPDATE_CLI_DIR is not executable"
+        [[ -z "${PRINTFARMER_DOTNET:-}" ]] || fail_usage "PRINTFARMER_DOTNET must not be set for a self-contained CLI package"
+        launcher=("$cli_apphost")
+    else
+        local cli_dll="$cli_dir/Farm.HostUpdate.Cli.dll"
+        [[ -f "$cli_dll" ]] || fail_usage "Farm.HostUpdate.Cli.dll not found in PRINTFARMER_HOST_UPDATE_CLI_DIR"
+
+        local dotnet_host="${PRINTFARMER_DOTNET:-dotnet}"
+        if [[ -n "${PRINTFARMER_DOTNET:-}" ]]; then
+            is_absolute "$dotnet_host" && [[ -x "$dotnet_host" ]] || fail_usage "PRINTFARMER_DOTNET must be an absolute executable path"
+        fi
+        launcher=("$dotnet_host" "$cli_dll")
+    fi
 }
 
 config=""
@@ -145,28 +179,7 @@ fi
 is_absolute "$config" || fail_usage "--config must be an absolute path"
 # Existence/readability is proven by the CLI (exit 3): a test here cannot tell denied from absent.
 
-cli_dir="${PRINTFARMER_HOST_UPDATE_CLI_DIR:-}"
-# An installed package (issue #3041) carries its self-contained CLI in cli/ beside this wrapper.
-if [[ -z "$cli_dir" && -f "$SCRIPT_DIR/host-update-cli-package.json" ]]; then
-    cli_dir="$SCRIPT_DIR/cli"
-fi
-[[ -n "$cli_dir" ]] && is_absolute "$cli_dir" || fail_usage "PRINTFARMER_HOST_UPDATE_CLI_DIR must be an absolute directory"
-cli_apphost="$cli_dir/Farm.HostUpdate.Cli"
-if [[ -f "$cli_apphost" ]]; then
-    # Self-contained package: the launcher carries its own runtime, so no dotnet host is used.
-    [[ -x "$cli_apphost" ]] || fail_usage "Farm.HostUpdate.Cli in PRINTFARMER_HOST_UPDATE_CLI_DIR is not executable"
-    [[ -z "${PRINTFARMER_DOTNET:-}" ]] || fail_usage "PRINTFARMER_DOTNET must not be set for a self-contained CLI package"
-    launcher=("$cli_apphost")
-else
-    cli_dll="$cli_dir/Farm.HostUpdate.Cli.dll"
-    [[ -f "$cli_dll" ]] || fail_usage "Farm.HostUpdate.Cli.dll not found in PRINTFARMER_HOST_UPDATE_CLI_DIR"
-
-    dotnet_host="${PRINTFARMER_DOTNET:-dotnet}"
-    if [[ -n "${PRINTFARMER_DOTNET:-}" ]]; then
-        is_absolute "$dotnet_host" && [[ -x "$dotnet_host" ]] || fail_usage "PRINTFARMER_DOTNET must be an absolute executable path"
-    fi
-    launcher=("$dotnet_host" "$cli_dll")
-fi
+resolve_launcher
 
 [[ $# -ge 1 ]] || fail_usage "missing command"
 command="$1"

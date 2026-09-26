@@ -29,13 +29,15 @@ export function recoveryInstructionsDocument(identity) {
   const operations = [
     {
       id: 'offline-bundle-import',
-      description: 'Verify the offline bundle against the operator-supplied trusted root, load its verified images, and record the decision.',
-      bash: bash('import', '--bundle', '<bundle.tar>', '--channel', identity.channel, '--version', identity.version,
-        '--trusted-root', '<trusted_root.json>', '--staging', '<new-staging-dir>', '--records', '<decision-records-dir>',
+      description: 'Verify the offline bundle against the operator-approved trusted root, admit it through the host replay store, load its verified images, and record the decision.',
+      bash: bash('import', '--config', '<host-update.json>', '--bundle', '<bundle.tar>', '--channel', identity.channel,
+        '--version', identity.version, '--trusted-root', '<trusted_root.json>', '--trusted-root-approval',
+        '<trusted-root-approval.json>', '--staging', '<new-staging-dir>', '--records', '<decision-records-dir>',
         '--operator', '<operator>'),
-      powershell: powershell('import', '-Bundle', '<bundle.tar>', '-Channel', identity.channel, '-Version',
-        identity.version, '-TrustedRoot', '<trusted_root.json>', '-Staging', '<new-staging-dir>', '-Records',
-        '<decision-records-dir>', '-Operator', '<operator>'),
+      powershell: powershell('import', '-Config', '<host-update.json>', '-Bundle', '<bundle.tar>', '-Channel',
+        identity.channel, '-Version', identity.version, '-TrustedRoot', '<trusted_root.json>', '-TrustedRootApproval',
+        '<trusted-root-approval.json>', '-Staging', '<new-staging-dir>', '-Records', '<decision-records-dir>',
+        '-Operator', '<operator>'),
     },
     {
       id: 'host-update-status',
