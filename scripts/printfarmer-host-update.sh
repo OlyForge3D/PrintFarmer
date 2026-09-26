@@ -15,6 +15,9 @@
 # `recover-offline` (issue #3082) recovers a failed offline activation to the staged bundle's
 # signature-verified prior recovery set with no network access; the --protected-backup reference
 # must equal the one bound at import. It refuses registry-mode requests and mismatched host state.
+# Issue #3094: a --confirm run first verifies and loads the staged prior recovery images (the
+# bundle tool's `load-prior`, skipped only when the bundle packaged none) and returns 6 without
+# starting recovery if that fails. The CLI refuses remote or out-of-compose slicer workers.
 #
 # `import` (issue #3063) verifies a signed offline update bundle without network access, loads only
 # its verified images into the local Docker engine and writes one durable, redacted decision record
@@ -33,14 +36,19 @@
 #                                    Farm.HostUpdate.Cli.dll runs on the dotnet host.
 #   PRINTFARMER_DOTNET               absolute path to the dotnet host (optional; default: dotnet on PATH;
 #                                    refused for a self-contained package)
-#   PRINTFARMER_NODE                 import only: absolute path to node (optional; default: node on PATH)
-#   PRINTFARMER_OFFLINE_BUNDLE_TOOL  import only: absolute path to offline-update-bundle.mjs (default:
-#                                    ci/offline-update-bundle.mjs beside this wrapper in a repository checkout)
-#   PRINTFARMER_COSIGN               import only: absolute path to cosign (optional; default: cosign on PATH)
-#   PRINTFARMER_DOCKER               import only: absolute path to docker (optional; default: docker on PATH)
+#   PRINTFARMER_NODE                 import and recover-offline --confirm: absolute path to node (optional;
+#                                    default: node on PATH)
+#   PRINTFARMER_OFFLINE_BUNDLE_TOOL  import and recover-offline --confirm: absolute path to
+#                                    offline-update-bundle.mjs (default: ci/offline-update-bundle.mjs
+#                                    beside this wrapper in a repository checkout)
+#   PRINTFARMER_COSIGN               import and recover-offline --confirm: absolute path to cosign
+#                                    (optional; default: cosign on PATH; recover-offline --cosign wins)
+#   PRINTFARMER_DOCKER               import and recover-offline --confirm: absolute path to docker
+#                                    (optional; default: docker on PATH)
 #
 # Exit codes are the CLI's (see docs/HOST_UPDATE_RUNBOOK.md); the wrapper itself only ever
-# returns 2 for a usage or setup error, before the CLI runs.
+# returns 2 for a usage or setup error, before the CLI runs, and 6 when recover-offline cannot
+# verify and load the prior recovery images.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -254,7 +262,34 @@ run_recover_offline() {
     if [[ "$seen" == *" --json "* ]]; then cli_args+=(--json); fi
 
     resolve_launcher
+    if [[ -n "$confirm" ]]; then
+        load_prior_images "$staging" "$channel" "$trusted_root" "$cosign"
+    fi
     exec "${launcher[@]}" --config "$recover_config" "${cli_args[@]}"
+}
+
+# Issue #3094: before a confirmed offline recovery, verify and load the staged prior recovery images
+# so rollback never depends on the engine cache. The tool skips only when the verification record
+# claims no packaged prior images; the CLI still verifies the local images before rolling back.
+# Its report goes to stderr so --json output stays the CLI's single envelope.
+load_prior_images() {
+    local node_host tool docker_host cosign_host
+    node_host="$(optional_executable PRINTFARMER_NODE node)"
+    docker_host="$(optional_executable PRINTFARMER_DOCKER docker)"
+    cosign_host="$(optional_executable PRINTFARMER_COSIGN cosign)"
+    tool="${PRINTFARMER_OFFLINE_BUNDLE_TOOL:-$SCRIPT_DIR/ci/offline-update-bundle.mjs}"
+    is_absolute "$tool" && [[ -f "$tool" ]] || fail_usage "PRINTFARMER_OFFLINE_BUNDLE_TOOL must be an absolute path to offline-update-bundle.mjs"
+    local -a tool_args=(load-prior --staging "$1" --channel "$2" --trusted-root "$3" --missing skip)
+    if [[ -n "$4" ]]; then
+        tool_args+=(--cosign "$4")
+    elif [[ -n "${PRINTFARMER_COSIGN:-}" ]]; then
+        tool_args+=(--cosign "$cosign_host")
+    fi
+    if [[ -n "${PRINTFARMER_DOCKER:-}" ]]; then tool_args+=(--docker "$docker_host"); fi
+    if ! "$node_host" "$tool" "${tool_args[@]}" >&2; then
+        log_error "prior recovery images could not be verified and loaded; recovery was not started" >&2
+        exit 6
+    fi
 }
 
 # Resolves the CLI launcher into the global `launcher` array: the self-contained apphost alone, or

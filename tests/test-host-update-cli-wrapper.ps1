@@ -107,8 +107,30 @@ exit [int](`$env:FAKE_EXIT ?? '0')
     $recoverBackup = Join-Path $testRoot 'protected-backup.json'
     $recoverDrift = 'drift-0123456789abcdef0123456789abcdef'
     $recoverBase = @('recover-offline', '-Config', $config, '-Staging', $activationStaging, '-Channel', 'stable', '-TrustedRoot', $activationRoot, '-ProtectedBackup', $recoverBackup, '-Release', 'stable:1.2.3')
-    Expect-Passthrough 'recover-offline passes through to offline-recover in canonical order' @($dll, '--config', $config, 'offline-recover', '--staging', $activationStaging, '--channel', 'stable', '--trusted-root', $activationRoot, '--protected-backup', $recoverBackup, '--release', 'stable:1.2.3', '--preview', '--json') @('recover-offline', '-Json', '-Preview', '-Release', 'stable:1.2.3', '-ProtectedBackup', $recoverBackup, '-Config', $config, '-Staging', $activationStaging, '-Channel', 'stable', '-TrustedRoot', $activationRoot)
-    Expect-Passthrough 'recover-offline forwards confirm, request id, drift token and cosign' @($dll, '--config', $config, 'offline-recover', '--staging', $activationStaging, '--channel', 'insider', '--trusted-root', $activationRoot, '--cosign', $activationCosign, '--protected-backup', $recoverBackup, '--release', 'insider:1.2.3', '--request-id', 'req-1', '--confirm', 'insider:1.2.3', '--reapprove-drift', $recoverDrift) @('recover-offline', '-Config', $config, '-Staging', $activationStaging, '-Channel', 'insider', '-TrustedRoot', $activationRoot, '-Cosign', $activationCosign, '-ProtectedBackup', $recoverBackup, '-Release', 'insider:1.2.3', '-RequestId', 'req-1', '-Confirm', 'insider:1.2.3', '-ReapproveDrift', $recoverDrift)
+    # Issue #3094: a confirmed recover-offline first runs the bundle tool's load-prior with a fixed vector
+    # identical to the Bash wrapper's.
+    $recoverNodeLog = Join-Path $testRoot 'recover-node.log'
+    $recoverNode = Join-Path $testRoot 'recover-fake-node.ps1'
+    Set-Content -LiteralPath $recoverNode -Value @"
+Set-Content -LiteralPath '$recoverNodeLog' -Value (`$args -join "``n") -NoNewline
+exit [int](`$env:FAKE_NODE_EXIT ?? '0')
+"@
+    $recoverTool = Join-Path $testRoot 'recover-offline-update-bundle.mjs'
+    Set-Content -LiteralPath $recoverTool -Value '' -NoNewline
+    $recoverEnv = @{ PRINTFARMER_NODE = $recoverNode; PRINTFARMER_OFFLINE_BUNDLE_TOOL = $recoverTool; PRINTFARMER_COSIGN = $null; PRINTFARMER_DOCKER = $null; FAKE_NODE_EXIT = $null }
+    Remove-Item -LiteralPath $recoverNodeLog -ErrorAction SilentlyContinue
+    Expect-Passthrough 'recover-offline passes through to offline-recover in canonical order' @($dll, '--config', $config, 'offline-recover', '--staging', $activationStaging, '--channel', 'stable', '--trusted-root', $activationRoot, '--protected-backup', $recoverBackup, '--release', 'stable:1.2.3', '--preview', '--json') @('recover-offline', '-Json', '-Preview', '-Release', 'stable:1.2.3', '-ProtectedBackup', $recoverBackup, '-Config', $config, '-Staging', $activationStaging, '-Channel', 'stable', '-TrustedRoot', $activationRoot) $recoverEnv
+    if (-not (Test-Path -LiteralPath $recoverNodeLog)) { Pass 'recover-offline preview never loads prior images' } else { Fail 'recover-offline preview never loads prior images' }
+    Expect-Passthrough 'recover-offline forwards confirm, request id, drift token and cosign' @($dll, '--config', $config, 'offline-recover', '--staging', $activationStaging, '--channel', 'insider', '--trusted-root', $activationRoot, '--cosign', $activationCosign, '--protected-backup', $recoverBackup, '--release', 'insider:1.2.3', '--request-id', 'req-1', '--confirm', 'insider:1.2.3', '--reapprove-drift', $recoverDrift) @('recover-offline', '-Config', $config, '-Staging', $activationStaging, '-Channel', 'insider', '-TrustedRoot', $activationRoot, '-Cosign', $activationCosign, '-ProtectedBackup', $recoverBackup, '-Release', 'insider:1.2.3', '-RequestId', 'req-1', '-Confirm', 'insider:1.2.3', '-ReapproveDrift', $recoverDrift) $recoverEnv
+    $loadVector = @($recoverTool, 'load-prior', '--staging', $activationStaging, '--channel', 'insider', '--trusted-root', $activationRoot, '--missing', 'skip', '--cosign', $activationCosign) -join "`n"
+    $loadActual = if (Test-Path -LiteralPath $recoverNodeLog) { Get-Content -LiteralPath $recoverNodeLog -Raw } else { '' }
+    if ($loadActual -ceq $loadVector) { Pass 'recover-offline confirm loads prior images with a fixed argument vector' }
+    else { Fail "recover-offline confirm loads prior images with a fixed argument vector (args: $loadActual)" }
+    $loadFailEnv = @{}; foreach ($key in $recoverEnv.Keys) { $loadFailEnv[$key] = $recoverEnv[$key] }; $loadFailEnv['FAKE_NODE_EXIT'] = '1'
+    $loadFail = Invoke-Wrapper ($recoverBase + @('-Confirm', 'stable:1.2.3')) $loadFailEnv
+    if ($loadFail.ExitCode -eq 6 -and -not $loadFail.Invoked) { Pass 'recover-offline refuses (6) before the CLI when prior images cannot be loaded' }
+    else { Fail "recover-offline refuses (6) before the CLI when prior images cannot be loaded (exit $($loadFail.ExitCode), cli invoked: $($loadFail.Invoked))" }
+    Expect-Usage 'recover-offline confirm refuses a relative PRINTFARMER_NODE' ($recoverBase + @('-Confirm', 'stable:1.2.3')) @{ PRINTFARMER_NODE = 'node'; PRINTFARMER_OFFLINE_BUNDLE_TOOL = $recoverTool }
     Expect-Usage 'recover-offline requires -ProtectedBackup' @('recover-offline', '-Config', $config, '-Staging', $activationStaging, '-Channel', 'stable', '-TrustedRoot', $activationRoot, '-Release', 'stable:1.2.3', '-Preview')
     Expect-Usage 'recover-offline refuses relative -ProtectedBackup' @('recover-offline', '-Config', $config, '-Staging', $activationStaging, '-Channel', 'stable', '-TrustedRoot', $activationRoot, '-ProtectedBackup', 'backup.json', '-Release', 'stable:1.2.3', '-Preview')
     Expect-Usage 'recover-offline refuses invalid release' @('recover-offline', '-Config', $config, '-Staging', $activationStaging, '-Channel', 'stable', '-TrustedRoot', $activationRoot, '-ProtectedBackup', $recoverBackup, '-Release', 'stable:1;rm', '-Preview')

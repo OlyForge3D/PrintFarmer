@@ -41,10 +41,16 @@
 // all-or-nothing: contents.deploymentSet is true only when the signed set, all of its tools and the
 // image set are present, the set is byte-bound to the release identity and every topology image is
 // in the verified image set. `import` requires it.
+//
+// Issue #3094: a bundle with a prior recovery set may also carry the prior release's application
+// images (`--prior-images`). The authenticated prior manifest alone decides the required set,
+// digests and platforms; contents.priorImages is true only when every one is present, and
+// `load-prior` re-authenticates both staged manifests before loading any of them, so an offline
+// recovery never depends on the engine cache still holding the prior images.
 import { createHash, randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import {
-  closeSync, constants, fstatSync, fsyncSync, lstatSync, mkdirSync, mkdtempSync, openSync, readSync, realpathSync, renameSync,
+  closeSync, constants, fstatSync, fsyncSync, lstatSync, mkdirSync, mkdtempSync, openSync, readdirSync, readSync, realpathSync, renameSync,
   rmdirSync, rmSync, writeSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -116,7 +122,7 @@ function requireMemberName(name) {
 }
 
 function roleLimit(role, limits) {
-  if (isImageArchive(role)) return limits.maxImageArchiveBytes;
+  if (isImageArchive(role) || role === 'prior-application-image') return limits.maxImageArchiveBytes;
   return role === 'cli-archive' || role === 'deployment-tool' ? limits.maxArchiveBytes : limits.maxMetadataBytes;
 }
 
@@ -140,7 +146,10 @@ export function expectedMembers(version) {
   members.set(recoveryInstructionsSignatureName, 'recovery-instructions-signature');
   members.set(deploymentSetName, 'deployment-set');
   members.set(deploymentSetSignatureName, 'deployment-set-signature');
-  for (const id of Object.keys(components)) members.set(applicationImageMember(id), 'application-image');
+  for (const id of Object.keys(components)) {
+    members.set(applicationImageMember(id), 'application-image');
+    members.set(priorImageMember(id), 'prior-application-image');
+  }
   return members;
 }
 
@@ -158,8 +167,9 @@ const isImageMember = role => isImageArchive(role) || role === 'infrastructure-l
 const isRecoveryMember = role => role === 'recovery-instructions' || role === 'recovery-instructions-signature';
 const isDeploymentMember = role => role === 'deployment-set' || role === 'deployment-set-signature' ||
   role === 'deployment-tool';
+const isPriorImage = role => role === 'prior-application-image';
 const isOptionalMember = role => isRuntimeMember(role) || isImageMember(role) || isRecoveryMember(role) ||
-  isDeploymentMember(role);
+  isDeploymentMember(role) || isPriorImage(role);
 
 // ---------------------------------------------------------------------------------------------
 // Prior recovery set and protected-backup reference (#3062).
@@ -171,6 +181,15 @@ const protectedBackupFields = 'id,locationClass,releaseVersion,sha256';
 const backupIdPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 
 export const priorMemberName = name => `${priorMemberPrefix}${name}`;
+export const priorImageMember = id => priorMemberName(applicationImageMember(id));
+const priorImagePrefix = priorMemberName('image-');
+
+// Issue #3094: the prior set's application images. Only the authenticated prior manifest decides
+// which images, digests and platforms are required; the member names are fixed per service id.
+function requiredPriorImages(priorManifestBytes) {
+  return requiredImages(validateManifest(priorManifestBytes.toString('utf8')), [])
+    .map(image => ({ ...image, member: priorImageMember(image.id) }));
+}
 
 // The prior set is the prior release's original signed metadata; its names are fixed by its version.
 export function priorRecoveryFiles(version) {
@@ -534,8 +553,8 @@ function indexBytes(index) {
 // Assembly (connected host): reads only local, already-downloaded release assets. Never fetches.
 // ---------------------------------------------------------------------------------------------
 export function assembleOfflineBundle({ releaseAssets, channel, version, runtimes = hostUpdateCliRuntimes, output,
-  run, trustedRoot, images, tools, priorReleaseAssets, priorMode = 'packaged', protectedBackup, limits = offlineBundleLimits,
-  imageLimits = imageArchiveLimits }) {
+  run, trustedRoot, images, tools, priorReleaseAssets, priorMode = 'packaged', protectedBackup, priorImages,
+  limits = offlineBundleLimits, imageLimits = imageArchiveLimits }) {
   requireChannel(channel);
   requireThat(typeof run === 'function', 'A command runner is required');
   requireThat(typeof output === 'string' && output.length > 0, 'An output bundle path is required');
@@ -549,6 +568,10 @@ export function assembleOfflineBundle({ releaseAssets, channel, version, runtime
     'The deployment set binds topologies to the image set; approved tools require an image layout too');
   requireThat((priorReleaseAssets === undefined) === (protectedBackup === undefined),
     'A prior recovery set and a protected backup reference must be supplied together; neither is complete alone');
+  requireThat(priorImages === undefined || (typeof priorImages === 'string' && priorImages.length > 0),
+    'The prior image layout directory must be a path');
+  requireThat(priorImages === undefined || priorReleaseAssets !== undefined,
+    'Prior recovery images are bound to the verified prior recovery set; supply --prior-release-assets too');
   const assets = resolve(releaseAssets);
   const manifestBytes = readSmallFile(join(assets, manifestName), 'Release manifest', limits.maxMetadataBytes);
   const identity = manifestIdentity(manifestBytes, channel, version);
@@ -605,6 +628,7 @@ export function assembleOfflineBundle({ releaseAssets, channel, version, runtime
     }
   }
   let prior;
+  let priorRequired = [];
   if (priorReleaseAssets !== undefined) {
     requireThat(priorRecoveryModes.includes(priorMode), 'Prior recovery mode must be packaged or local-reference');
     const priorAssets = resolve(priorReleaseAssets);
@@ -621,6 +645,13 @@ export function assembleOfflineBundle({ releaseAssets, channel, version, runtime
     });
     prior = { mode: priorMode, release: verified.identity, manifestDigest: verified.manifestDigest, files: priorFiles,
       protectedBackup: validateProtectedBackupReference(protectedBackup, verified.identity.version) };
+    if (priorImages !== undefined) {
+      const priorManifestBytes = readSmallFile(join(priorAssets, manifestName), 'Prior recovery manifest',
+        limits.maxMetadataBytes);
+      requireThat(manifestDigest(priorManifestBytes) === verified.manifestDigest,
+        'Prior recovery manifest changed during assembly');
+      priorRequired = requiredPriorImages(priorManifestBytes);
+    }
   }
   const target = resolve(output);
   requireThat(!lstatSync(target, { throwIfNoEntry: false }), `Offline bundle output already exists: ${target}`);
@@ -651,6 +682,22 @@ export function assembleOfflineBundle({ releaseAssets, channel, version, runtime
           size, sha256 });
       }
     }
+    if (priorImages !== undefined) {
+      if (!staged) {
+        mkdirSync(imageStage, { mode: 0o700 });
+        staged = true;
+      }
+      // The prior layout supplies bytes only; the authenticated prior manifest decides every digest.
+      for (const expected of priorRequired) {
+        const path = join(imageStage, expected.member);
+        writeImageArchive({ layout: resolve(priorImages), expected, output: path, limits: imageLimits });
+        const { size, sha256 } = hashFile(path, `Prior image archive ${expected.member}`);
+        requireThat(size <= roleLimit('prior-application-image', limits),
+          `Prior image archive exceeds its size limit: ${expected.member}`);
+        sources.set(expected.member, path);
+        files.push({ name: expected.member, role: 'prior-application-image', size, sha256 });
+      }
+    }
     files.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
     const index = {
       schema: 1,
@@ -660,7 +707,8 @@ export function assembleOfflineBundle({ releaseAssets, channel, version, runtime
       contents: {
         cliRuntimes: hostUpdateCliRuntimes.filter(rid => runtimes.includes(rid)),
         deploymentSet,
-        images: images !== undefined, infrastructure: images !== undefined, priorRecoverySet: prior !== undefined,
+        images: images !== undefined, infrastructure: images !== undefined, priorImages: priorImages !== undefined,
+        priorRecoverySet: prior !== undefined,
         recoveryInstructions: instructions,
       },
       installable: false,
@@ -744,21 +792,46 @@ function validateIndex(bytes, entries, limits) {
   }
   requireThat(members.size === 0, 'Offline bundle index does not list exactly the bundle members');
   const contents = index.contents;
-  // Bundles assembled before #3081 carry no deploymentSet claim; an absent claim means no deployment set.
-  const contentKeys = contents && typeof contents === 'object' ? Object.keys(contents).sort().join() : '';
-  const legacyContents = contentKeys === 'cliRuntimes,images,infrastructure,priorRecoverySet,recoveryInstructions';
-  if (legacyContents) contents.deploymentSet = false;
-  requireThat((legacyContents ||
-    contentKeys === 'cliRuntimes,deploymentSet,images,infrastructure,priorRecoverySet,recoveryInstructions') &&
-    ['deploymentSet', 'priorRecoverySet', 'recoveryInstructions'].every(key => typeof contents[key] === 'boolean') &&
+  // Bundles assembled before #3081 carry no deploymentSet claim and bundles before #3094 no
+  // priorImages claim; an absent claim means the bundle carries no such material.
+  const contentKeys = contents && typeof contents === 'object' && !Array.isArray(contents)
+    ? Object.keys(contents).sort() : [];
+  const allowedKeys = new Set(['cliRuntimes', 'deploymentSet', 'images', 'infrastructure', 'priorImages',
+    'priorRecoverySet', 'recoveryInstructions']);
+  const requiredKeys = ['cliRuntimes', 'images', 'infrastructure', 'priorRecoverySet', 'recoveryInstructions'];
+  const knownShape = contentKeys.every(key => allowedKeys.has(key)) && requiredKeys.every(key => contentKeys.includes(key));
+  if (knownShape) {
+    for (const key of ['deploymentSet', 'priorImages']) if (!Object.hasOwn(contents, key)) contents[key] = false;
+  }
+  requireThat(knownShape &&
+    ['deploymentSet', 'priorImages', 'priorRecoverySet', 'recoveryInstructions'].every(key => typeof contents[key] === 'boolean') &&
     typeof contents.images === 'boolean' && contents.infrastructure === contents.images &&
-    (!contents.deploymentSet || contents.images) &&
+    (!contents.deploymentSet || contents.images) && (!contents.priorImages || contents.priorRecoverySet) &&
     Array.isArray(contents.cliRuntimes), 'Offline bundle index contents claim material this format does not carry');
   // contents.priorRecoverySet is true only when the complete prior set and backup reference are present.
   requireThat(contents.priorRecoverySet === hasPrior,
     'Offline bundle index prior recovery claim does not match its prior recovery set');
   if (hasPrior) validatePriorIndex(index.priorRecoverySet, limits);
   return index;
+}
+
+// The carried prior image members must be exactly the authenticated prior manifest's services, each
+// proven by digest and every declared platform.
+function verifyPriorImages({ directory, required, carried, hashes, imageLimits }) {
+  requireThat(carried.map(file => file.name).sort().join() === required.map(image => image.member).sort().join(),
+    'Offline bundle does not carry exactly the signed prior recovery image set');
+  return required.map(expected => {
+    const image = openRegularFile(join(directory, expected.member), `Offline bundle member ${expected.member}`);
+    try {
+      const verified = verifyImageArchive(image.fd, 0, image.size, expected, imageLimits);
+      return { member: expected.member, id: expected.id, reference: expected.reference, mediaType: verified.mediaType,
+        digest: verified.digest, platforms: expected.platforms, size: image.size, sha256: hashes.get(expected.member) };
+    } catch (error) {
+      throw new Error(`Offline bundle prior image ${expected.member} failed verification: ${error.message}`);
+    } finally {
+      closeSync(image.fd);
+    }
+  });
 }
 
 export function verifyOfflineBundle({ bundle, channel, version, trustedRoot, staging, run, priorRecoverySet,
@@ -833,6 +906,9 @@ export function verifyOfflineBundle({ bundle, channel, version, trustedRoot, sta
     const deploymentFiles = index.files.filter(file => isDeploymentMember(file.role));
     requireThat(index.contents.deploymentSet === (deploymentFiles.length > 0),
       'Offline bundle deployment members do not match its deployment set flag');
+    const priorImageFiles = index.files.filter(file => isPriorImage(file.role));
+    requireThat(index.contents.priorImages === (priorImageFiles.length > 0),
+      'Offline bundle prior image members do not match its prior images flag');
     if (index.contents.deploymentSet) {
       for (const name of [deploymentSetName, deploymentSetSignatureName]) {
         requireThat(deploymentFiles.some(file => file.name === name), `Offline bundle is missing required member: ${name}`);
@@ -941,6 +1017,7 @@ export function verifyOfflineBundle({ bundle, channel, version, trustedRoot, sta
     }
     const imported = entries.slice(1).map(entry => entry.name);
     let priorRecord = false;
+    let priorImagesRecord = false;
     if (prior) {
       if (!packagedPrior) {
         // Bind the operator's local copy by the digests recorded at assembly, copying it into quarantine
@@ -971,6 +1048,14 @@ export function verifyOfflineBundle({ bundle, channel, version, trustedRoot, sta
       requireThat(prior.manifestDigest === verified.manifestDigest, 'Offline bundle prior recovery manifest digest mismatch');
       priorRecord = { mode: prior.mode, release: verified.identity, manifestDigest: verified.manifestDigest,
         protectedBackup: validateProtectedBackupReference(prior.protectedBackup, verified.identity.version) };
+      if (index.contents.priorImages) {
+        const priorManifestBytes = readSmallFile(join(quarantine, priorMemberName(manifestName)),
+          'Offline bundle prior recovery manifest', limits.maxMetadataBytes);
+        requireThat(manifestDigest(priorManifestBytes) === verified.manifestDigest,
+          'Offline bundle prior recovery manifest changed during verification');
+        priorImagesRecord = verifyPriorImages({ directory: quarantine, required: requiredPriorImages(priorManifestBytes),
+          carried: priorImageFiles, hashes, imageLimits });
+      }
     }
     const record = {
       schema: 1,
@@ -981,6 +1066,7 @@ export function verifyOfflineBundle({ bundle, channel, version, trustedRoot, sta
       cliRuntimes: index.contents.cliRuntimes,
       deploymentSet: deploymentRecord,
       images,
+      priorImages: priorImagesRecord,
       priorRecoverySet: priorRecord,
       recoveryInstructions: recoveryRecord,
       signatureIdentity: releaseSigningIdentity(identity.channel),
@@ -1019,8 +1105,7 @@ export function verifyOfflineBundle({ bundle, channel, version, trustedRoot, sta
 // is passed to `docker load` as stdin, so a path swapped after verification is never read.
 // Nothing is pulled, built or fetched.
 // ---------------------------------------------------------------------------------------------
-export function loadVerifiedImages({ staging, channel, trustedRoot, run, limits = offlineBundleLimits,
-  imageLimits = imageArchiveLimits }) {
+function openLoadStaging({ staging, channel, trustedRoot, run, limits }) {
   requireChannel(channel);
   requireThat(typeof run === 'function', 'A command runner is required');
   requireThat(typeof trustedRoot === 'string' && trustedRoot.length > 0,
@@ -1038,15 +1123,20 @@ export function loadVerifiedImages({ staging, channel, trustedRoot, run, limits 
   } catch (error) {
     throw new Error(`Offline bundle verification record is unusable: ${error.message}`);
   }
-  requireThat(record?.schema === 1 && record.decision === 'verified-not-installable' && Array.isArray(record.images) &&
-    record.images.length > 0, 'Staging directory holds no verified image set');
+  requireThat(record?.schema === 1 && record.decision === 'verified-not-installable',
+    'Staging directory holds no verification record');
+  return { directory, root, record };
+}
+
+// Reads each staged signed file once, then verifies the private copy, so the verified bytes are the parsed bytes.
+function reauthenticateStaged({ directory, root, run, pairs, channelOf, limits }) {
   const signed = {};
-  for (const name of [manifestName, manifestSignatureName, infrastructureImagesName, infrastructureImagesSignatureName]) {
-    signed[name] = readSmallFile(join(directory, name), `Staged signed file ${name}`, limits.maxMetadataBytes);
+  for (const [file, bundle] of pairs) {
+    for (const name of [file, bundle]) {
+      signed[name] = readSmallFile(join(directory, name), `Staged signed file ${name}`, limits.maxMetadataBytes);
+    }
   }
-  const identity = manifestIdentity(signed[manifestName], channel);
-  requireThat(JSON.stringify(record.release) === JSON.stringify(identity),
-    'Offline bundle verification record does not match the staged signed manifest');
+  const channel = channelOf(signed);
   const copies = mkdtempSync(join(tmpdir(), 'printfarmer-offline-load-'));
   try {
     for (const [name, bytes] of Object.entries(signed)) {
@@ -1057,11 +1147,10 @@ export function loadVerifiedImages({ staging, channel, trustedRoot, run, limits 
         closeSync(out);
       }
     }
-    for (const [file, bundle] of [[manifestName, manifestSignatureName],
-      [infrastructureImagesName, infrastructureImagesSignatureName]]) {
+    for (const [file, bundle] of pairs) {
       try {
         run('cosign', ['verify-blob', '--trusted-root', root, '--bundle', join(copies, bundle),
-          '--certificate-oidc-issuer', oidcIssuer, '--certificate-identity', releaseSigningIdentity(identity.channel),
+          '--certificate-oidc-issuer', oidcIssuer, '--certificate-identity', releaseSigningIdentity(channel),
           join(copies, file)]);
       } catch (error) {
         throw new Error(`Offline bundle signature verification failed for ${file}: ${error.message}`);
@@ -1070,18 +1159,22 @@ export function loadVerifiedImages({ staging, channel, trustedRoot, run, limits 
   } finally {
     rmSync(copies, { force: true, recursive: true });
   }
-  const required = requiredImages(validateManifest(signed[manifestName].toString('utf8')),
-    validateInfrastructureImages(signed[infrastructureImagesName], identity));
+  return signed;
+}
+
+// Opens every archive once, re-hashes and re-verifies it on that descriptor before anything is
+// loaded, then passes the same descriptor to `docker load` as stdin.
+function loadArchives({ directory, required, recordedImages, run, imageLimits, label }) {
   const recorded = new Map();
-  for (const image of record.images) {
+  for (const image of recordedImages) {
     requireThat(image && typeof image.member === 'string' && sha256Pattern.test(image.sha256 ?? '') &&
       Number.isSafeInteger(image.size) && !recorded.has(image.member),
-    'Offline bundle verification record image entry is invalid');
+    `Offline bundle verification record ${label} entry is invalid`);
     requireMemberName(image.member);
     recorded.set(image.member, image);
   }
   requireThat([...recorded.keys()].sort().join() === required.map(image => image.member).sort().join(),
-    'Offline bundle verification record does not name exactly the signed release-selected image set');
+    `Offline bundle verification record does not name exactly the signed ${label} set`);
   const opened = [];
   try {
     for (const expected of required) {
@@ -1113,6 +1206,80 @@ export function loadVerifiedImages({ staging, channel, trustedRoot, run, limits 
   } finally {
     for (const { fd } of opened) closeSync(fd);
   }
+}
+
+export function loadVerifiedImages({ staging, channel, trustedRoot, run, limits = offlineBundleLimits,
+  imageLimits = imageArchiveLimits }) {
+  const { directory, root, record } = openLoadStaging({ staging, channel, trustedRoot, run, limits });
+  requireThat(Array.isArray(record.images) && record.images.length > 0, 'Staging directory holds no verified image set');
+  let identity;
+  const signed = reauthenticateStaged({ directory, root, run, limits,
+    pairs: [[manifestName, manifestSignatureName], [infrastructureImagesName, infrastructureImagesSignatureName]],
+    channelOf: files => {
+      identity = manifestIdentity(files[manifestName], channel);
+      requireThat(JSON.stringify(record.release) === JSON.stringify(identity),
+        'Offline bundle verification record does not match the staged signed manifest');
+      return identity.channel;
+    } });
+  const required = requiredImages(validateManifest(signed[manifestName].toString('utf8')),
+    validateInfrastructureImages(signed[infrastructureImagesName], identity));
+  return loadArchives({ directory, required, recordedImages: record.images, run, imageLimits,
+    label: 'release-selected image' });
+}
+
+// ---------------------------------------------------------------------------------------------
+// Load prior recovery images (network-denied host, #3094): before an offline recovery rolls back,
+// hands the verified prior set's application images to the local engine so recovery never depends
+// on the engine cache still holding them. Like `load`, the mutable verification record never
+// supplies expectations: the staged target manifest and the staged prior manifest are both
+// re-authenticated offline, the prior set must be same-channel and strictly older than the target,
+// and the required images, digests and platforms come from the prior manifest alone.
+// ---------------------------------------------------------------------------------------------
+// `missing: 'skip'` (the host-update wrapper's recover-offline path) returns without loading when the
+// verification record claims no packaged prior images and no prior image archive is staged, so
+// recovery falls back to the engine cache,
+// which the CLI still verifies by digest and platform before rolling back; any other record shape
+// is refused as usual.
+export function loadPriorImages({ staging, channel, trustedRoot, run, limits = offlineBundleLimits,
+  imageLimits = imageArchiveLimits, missing = 'refuse' }) {
+  requireThat(missing === 'refuse' || missing === 'skip', '--missing must be refuse or skip');
+  const { directory, root, record } = openLoadStaging({ staging, channel, trustedRoot, run, limits });
+  // The record is mutable, so its absence claim alone cannot suppress checks: any staged prior image
+  // archive (even one the record no longer names) routes to the refusing path below.
+  if (missing === 'skip' && (record.priorImages === false || record.priorImages === undefined) &&
+    !readdirSync(directory).some(name => name.startsWith(priorImagePrefix))) {
+    return { loaded: [], skipped: 'no_packaged_prior_images' };
+  }
+  requireThat(Array.isArray(record.priorImages) && record.priorImages.length > 0 && record.priorRecoverySet,
+    'Staging directory holds no verified prior recovery image set');
+  let target;
+  reauthenticateStaged({ directory, root, run, limits, pairs: [[manifestName, manifestSignatureName]],
+    channelOf: files => {
+      target = manifestIdentity(files[manifestName], channel);
+      requireThat(JSON.stringify(record.release) === JSON.stringify(target),
+        'Offline bundle verification record does not match the staged signed manifest');
+      return target.channel;
+    } });
+  let priorBytes;
+  reauthenticateStaged({ directory, root, run, limits,
+    pairs: [[priorMemberName(manifestName), priorMemberName(manifestSignatureName)]],
+    channelOf: files => {
+      priorBytes = files[priorMemberName(manifestName)];
+      let prior;
+      try {
+        prior = manifestIdentity(priorBytes, channel);
+      } catch (error) {
+        throw new Error(`Prior recovery set: ${error.message}`);
+      }
+      requireThat(prior.sequence < target.sequence && compareVersions(prior.version, target.version) < 0,
+        `Prior recovery set ${prior.version} is not strictly older than the target ${target.version}`);
+      requireThat(JSON.stringify(record.priorRecoverySet.release) === JSON.stringify(prior) &&
+        record.priorRecoverySet.manifestDigest === manifestDigest(priorBytes),
+      'Offline bundle verification record does not match the staged signed prior manifest');
+      return prior.channel;
+    } });
+  return loadArchives({ directory, required: requiredPriorImages(priorBytes), recordedImages: record.priorImages, run,
+    imageLimits, label: 'prior recovery image' });
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1457,12 +1624,15 @@ const usage = `usage:
   node scripts/ci/offline-update-bundle.mjs assemble --release-assets <dir> --channel <stable|insider>
     --output <bundle.tar> [--version <v>] [--runtime <rid>]... [--images <oci-layout-dir>] [--tools <approved-tools-dir>]
     [--trusted-root <trusted_root.json>] [--cosign <path>]
-    [--prior-release-assets <dir> --protected-backup <reference.json> [--prior-mode <packaged|local-reference>]]
+    [--prior-release-assets <dir> --protected-backup <reference.json> [--prior-mode <packaged|local-reference>]
+     [--prior-images <prior-oci-layout-dir>]]
   node scripts/ci/offline-update-bundle.mjs verify --bundle <bundle.tar> --channel <stable|insider>
     --trusted-root <trusted_root.json> --staging <new-dir> [--version <v>] [--prior-recovery-set <dir>]
     [--protected-backup <reference.json>] [--cosign <path>]
   node scripts/ci/offline-update-bundle.mjs load --staging <verified-dir> --channel <stable|insider>
     --trusted-root <trusted_root.json> [--cosign <path>] [--docker <path>]
+  node scripts/ci/offline-update-bundle.mjs load-prior --staging <verified-dir> --channel <stable|insider>
+    --trusted-root <trusted_root.json> [--missing <refuse|skip>] [--cosign <path>] [--docker <path>]
   node scripts/ci/offline-update-bundle.mjs import --bundle <bundle.tar> --channel <stable|insider> --version <v>
     --trusted-root <trusted_root.json> --trusted-root-approval <approval.json> --staging <new-dir>
     --records <decision-records-dir> --operator <id> --config <host-update.json>
@@ -1473,10 +1643,11 @@ export function parseArguments(argv) {
   const [command, ...rest] = argv;
   const allowed = {
     assemble: ['release-assets', 'channel', 'output', 'version', 'runtime', 'images', 'tools', 'trusted-root', 'cosign',
-      'prior-release-assets', 'prior-mode', 'protected-backup'],
+      'prior-release-assets', 'prior-mode', 'protected-backup', 'prior-images'],
     verify: ['bundle', 'channel', 'trusted-root', 'staging', 'version', 'prior-recovery-set', 'protected-backup',
       'cosign'],
     load: ['staging', 'channel', 'trusted-root', 'cosign', 'docker'],
+    'load-prior': ['staging', 'channel', 'trusted-root', 'missing', 'cosign', 'docker'],
     import: ['bundle', 'channel', 'version', 'trusted-root', 'trusted-root-approval', 'staging', 'records', 'operator',
       'config', 'host-update-cli', 'dotnet', 'prior-recovery-set', 'protected-backup', 'cosign', 'docker'],
   };
@@ -1543,13 +1714,18 @@ async function main(argv) {
       tools: options.tools,
       trustedRoot: options['trusted-root'] ? resolve(options['trusted-root']) : undefined,
       priorReleaseAssets: options['prior-release-assets'], priorMode: options['prior-mode'], protectedBackup,
+      priorImages: options['prior-images'],
     });
     console.log(JSON.stringify({ bundle, release: index.release, manifestDigest: index.manifestDigest,
       cliRuntimes: index.contents.cliRuntimes, images: index.contents.images, deploymentSet: index.contents.deploymentSet,
-      priorRecoverySet: index.priorRecoverySet?.release ?? false, installable: false }, undefined, 2));
+      priorRecoverySet: index.priorRecoverySet?.release ?? false, priorImages: index.contents.priorImages,
+      installable: false }, undefined, 2));
   } else if (command === 'load') {
     console.log(JSON.stringify(loadVerifiedImages({ staging: options.staging, channel: options.channel,
       trustedRoot: options['trusted-root'], run }), undefined, 2));
+  } else if (command === 'load-prior') {
+    console.log(JSON.stringify(loadPriorImages({ staging: options.staging, channel: options.channel,
+      trustedRoot: options['trusted-root'], run, missing: options.missing ?? 'refuse' }), undefined, 2));
   } else if (command === 'import') {
     const { record, path } = importOfflineBundle({ bundle: options.bundle, channel: options.channel,
       version: options.version, trustedRoot: options['trusted-root'],

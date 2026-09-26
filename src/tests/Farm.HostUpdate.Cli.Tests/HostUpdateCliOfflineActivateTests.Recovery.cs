@@ -257,6 +257,39 @@ public sealed partial class HostUpdateCliOfflineActivateTests
     }
 
     [HostStateFact]
+    public async Task Offline_recovery_refuses_remote_or_out_of_compose_workers_before_any_change()
+    {
+        string protectedBackup = StagePriorRecoverySet();
+        await WritePriorInstalledStateAsync();
+        HostUpdateExecutionRequest request = RequestFromCurrentStaging();
+        WriteFailedJournal(request, migrated: true);
+        string before = File.ReadAllText(InstalledStatePath());
+        string journalBefore = File.ReadAllText(_host.JournalPath);
+        var runner = new IntegratedActivationProcessRunner(healthSucceeds: true);
+        var network = new NetworkDeniedHttpClientFactory();
+        var guard = new FakeRemoteWorkerGuard(SlicerRegistrationRemoteWorkerGuard.Unsupported);
+
+        foreach (bool confirm in new[] { false, true })
+        {
+            JsonElement refused = Envelope(await RunAsync(OfflineRecover(protectedBackup, confirm), IntegratedConfiguration(), services =>
+            {
+                UseNetworkDeniedBoundaries(services, runner, network);
+                services.RemoveAll<IHostUpdateRemoteWorkerGuard>();
+                services.AddScoped<IHostUpdateRemoteWorkerGuard>(_ => guard);
+            }));
+
+            AssertRefused(refused, SlicerRegistrationRemoteWorkerGuard.Unsupported);
+            refused.ToString().Should().Contain(SlicerRegistrationRemoteWorkerGuard.OwnerDetail);
+        }
+
+        guard.Calls.Should().Be(2);
+        File.ReadAllText(InstalledStatePath()).Should().Be(before);
+        File.ReadAllText(_host.JournalPath).Should().Be(journalBefore);
+        runner.Calls.Should().BeEmpty("no restore, apply or pull may start");
+        network.Refused.Should().BeEmpty();
+    }
+
+    [HostStateFact]
     public async Task Offline_recovery_refuses_release_that_is_not_the_staged_target()
     {
         string protectedBackup = StagePriorRecoverySet();

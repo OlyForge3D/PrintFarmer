@@ -214,6 +214,7 @@ public static partial class HostUpdateCli
         DatabaseProviderConfiguration dbConfig = DatabaseProviderConfiguration.FromConfiguration(configuration);
         services.AddDbContext<AppDbContext>(options => ConfigureMainDbProvider(options, dbConfig));
         services.AddDbContext<SlicerDbContext>(options => ConfigureSlicerDbProvider(options, dbConfig));
+        services.AddScoped<IHostUpdateRemoteWorkerGuard, SlicerRegistrationRemoteWorkerGuard>();
         services.AddScoped<DbActiveWorkObservationPort>();
         services.AddScoped<IActiveWorkObservationPort>(sp => sp.GetRequiredService<DbActiveWorkObservationPort>());
         services.AddScoped<IActiveWorkObservationPort, SlicerActiveWorkObservationPort>();

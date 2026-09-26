@@ -26,6 +26,9 @@
     `recover-offline` (issue #3082) recovers a failed offline activation to the staged bundle's
     signature-verified prior recovery set with no network access; -ProtectedBackup must equal the
     reference bound at import. It refuses registry-mode requests and mismatched host state.
+    Issue #3094: a -Confirm run first verifies and loads the staged prior recovery images (the
+    bundle tool's load-prior, skipped only when the bundle packaged none) and returns 6 without
+    starting recovery if that fails. The CLI refuses remote or out-of-compose slicer workers.
 
     Environment:
       PRINTFARMER_HOST_UPDATE_CLI_DIR  absolute directory containing the CLI (default: cli\ beside an
@@ -34,14 +37,19 @@
                                        Farm.HostUpdate.Cli.dll runs on the dotnet host.
       PRINTFARMER_DOTNET               absolute path to the dotnet host (optional; default: dotnet on PATH;
                                        refused for a self-contained package)
-      PRINTFARMER_NODE                 import only: absolute path to node (optional; default: node on PATH)
-      PRINTFARMER_OFFLINE_BUNDLE_TOOL  import only: absolute path to offline-update-bundle.mjs (default:
-                                       ci\offline-update-bundle.mjs beside this wrapper in a repository checkout)
-      PRINTFARMER_COSIGN               import only: absolute path to cosign (optional; default: cosign on PATH)
-      PRINTFARMER_DOCKER               import only: absolute path to docker (optional; default: docker on PATH)
+      PRINTFARMER_NODE                 import and recover-offline -Confirm: absolute path to node (optional;
+                                       default: node on PATH)
+      PRINTFARMER_OFFLINE_BUNDLE_TOOL  import and recover-offline -Confirm: absolute path to
+                                       offline-update-bundle.mjs (default: ci\offline-update-bundle.mjs
+                                       beside this wrapper in a repository checkout)
+      PRINTFARMER_COSIGN               import and recover-offline -Confirm: absolute path to cosign
+                                       (optional; default: cosign on PATH; recover-offline -Cosign wins)
+      PRINTFARMER_DOCKER               import and recover-offline -Confirm: absolute path to docker
+                                       (optional; default: docker on PATH)
 
     Exit codes are the CLI's (see docs/HOST_UPDATE_RUNBOOK.md); the wrapper itself only returns 2
-    for a usage or setup error, before the CLI runs. Arguments are parsed by the wrapper rather
+    for a usage or setup error, before the CLI runs, and 6 when recover-offline cannot verify and
+    load the prior recovery images. Arguments are parsed by the wrapper rather
     than by PowerShell parameter binding, so a usage error never prompts and always exits 2.
     Parameter names are case-insensitive; identifier values are case-sensitive.
 #>
@@ -326,6 +334,41 @@ if ($rawArgs.Count -ge 1 -and $rawArgs[0] -ceq 'recover-offline') {
         if ($recoverValues.ContainsKey($key)) { $cliArgs.Add($recoverOptions[$key].Flag); $cliArgs.Add($recoverValues[$key]) }
     }
     if ($recoverJson) { $cliArgs.Add('--json') }
+
+    if ($recoverValues.ContainsKey('-confirm')) {
+        # Issue #3094: before a confirmed recovery, verify and load the staged prior recovery images so
+        # rollback never depends on the engine cache. The tool skips only when the verification record
+        # claims no packaged prior images; the CLI still verifies the local images before rolling back.
+        $nodeHost = Resolve-OptionalExecutable 'PRINTFARMER_NODE' 'node'
+        $dockerHost = Resolve-OptionalExecutable 'PRINTFARMER_DOCKER' 'docker'
+        $cosignHost = Resolve-OptionalExecutable 'PRINTFARMER_COSIGN' 'cosign'
+        $tool = $env:PRINTFARMER_OFFLINE_BUNDLE_TOOL
+        if ([string]::IsNullOrEmpty($tool)) { $tool = Join-Path $PSScriptRoot 'ci' 'offline-update-bundle.mjs' }
+        if (-not (Test-FullyQualified $tool) -or -not (Test-Path -LiteralPath $tool -PathType Leaf)) {
+            Exit-Usage 'PRINTFARMER_OFFLINE_BUNDLE_TOOL must be an absolute path to offline-update-bundle.mjs'
+        }
+
+        $loadArgs = [System.Collections.Generic.List[string]]::new()
+        foreach ($item in @('load-prior', '--staging', $recoverValues['-staging'], '--channel', $recoverValues['-channel'],
+                '--trusted-root', $recoverValues['-trustedroot'], '--missing', 'skip')) { $loadArgs.Add($item) }
+        if ($recoverValues.ContainsKey('-cosign')) { $loadArgs.Add('--cosign'); $loadArgs.Add($recoverValues['-cosign']) }
+        elseif ($env:PRINTFARMER_COSIGN) { $loadArgs.Add('--cosign'); $loadArgs.Add($cosignHost) }
+        if ($env:PRINTFARMER_DOCKER) { $loadArgs.Add('--docker'); $loadArgs.Add($dockerHost) }
+
+        # The tool's report goes to stderr so -Json output stays the CLI's single envelope.
+        $loadExit = 1
+        try {
+            & $nodeHost $tool @loadArgs | ForEach-Object { [Console]::Error.WriteLine($_) }
+            $loadExit = $LASTEXITCODE
+        }
+        catch {
+            [Console]::Error.WriteLine("printfarmer-host-update: $($_.Exception.Message)")
+        }
+        if ($loadExit -ne 0) {
+            [Console]::Error.WriteLine('printfarmer-host-update: prior recovery images could not be verified and loaded; recovery was not started')
+            exit 6
+        }
+    }
 
     & $launcher @launcherArgs --config $recoverValues['-config'] @cliArgs
     exit $LASTEXITCODE
