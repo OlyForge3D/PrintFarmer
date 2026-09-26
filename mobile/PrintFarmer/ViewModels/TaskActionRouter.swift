@@ -13,7 +13,7 @@ struct TaskActionRoutingEnvironment {
     var awaitPresentationDismissal: @MainActor () async -> Void
     /// Applies the guided-swap destination (tab + navigation path) via the
     /// shared router.
-    var navigateToSwap: @MainActor (_ printerID: UUID, _ toolheadID: String?) -> Void
+    var navigateToSwap: @MainActor (_ printerID: UUID) -> Void
     /// A monotonic token identifying the current server/authority. A change
     /// mid-handoff (server switch / teardown) aborts destination application.
     var authoritySnapshot: @MainActor () -> Int
@@ -26,7 +26,7 @@ struct TaskActionRoutingEnvironment {
 
     init(
         awaitPresentationDismissal: @escaping @MainActor () async -> Void,
-        navigateToSwap: @escaping @MainActor (_ printerID: UUID, _ toolheadID: String?) -> Void,
+        navigateToSwap: @escaping @MainActor (_ printerID: UUID) -> Void,
         authoritySnapshot: @escaping @MainActor () -> Int,
         loadHarvestJob: @escaping @MainActor (_ jobID: UUID) async -> Result<PrintJob, TaskActionRouteError>,
         refreshTasks: @escaping @MainActor () async -> Void
@@ -140,8 +140,8 @@ final class TaskActionRouter {
         guard isCurrent(gen: gen, authority: authority, environment: environment) else { return }
 
         switch destination {
-        case .filamentSwap(let printerID, let toolheadID):
-            environment.navigateToSwap(printerID, toolheadID)
+        case .filamentSwap(let printerID):
+            environment.navigateToSwap(printerID)
             finishRouting(gen: gen)
 
         case .maintenance(let printerID, let alertID, let componentID, let toolheadID):

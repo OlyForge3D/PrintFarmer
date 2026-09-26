@@ -488,7 +488,7 @@ final class AppRouter {
     /// `navigate(to:)`, this appends synchronously because the sheet has already
     /// been dismissed and the stack is mounted — no timing delay is needed, so
     /// the destination is testable without waiting on elapsed time.
-    func routeToFilamentSwap(printerID: UUID, toolheadID: String?) {
+    func routeToFilamentSwap(printerID: UUID) {
         let tab = printerDestinationTab
         selectedTab = tab
         resetPrinterPath(for: tab)
