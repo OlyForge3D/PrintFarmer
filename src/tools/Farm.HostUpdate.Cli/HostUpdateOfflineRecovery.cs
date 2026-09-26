@@ -23,7 +23,8 @@ internal static partial class HostUpdateOfflineRecovery
     internal const string PriorSignatureName = "prior-" + HostUpdateOfflineAdmission.SignatureName;
     private const long MaxProtectedBackupBytes = 64 * 1024;
     private static readonly string[] ProtectedBackupFields = ["id", "locationClass", "releaseVersion", "sha256"];
-    private static readonly string[] LocationClasses = ["host-local", "attached-volume", "external-storage"];
+    private const string HostLocalLocationClass = "host-local";
+    private static readonly string[] LocationClasses = [HostLocalLocationClass, "attached-volume", "external-storage"];
 
     public static async Task<int> RunAsync(
         IServiceProvider provider,
@@ -70,6 +71,18 @@ internal static partial class HostUpdateOfflineRecovery
         if (backupError is not null)
         {
             return await FailAsync(output, args, backupError).ConfigureAwait(false);
+        }
+
+        // A protected backup held on an attached volume or external storage belongs to an owner this
+        // host has no configured, authenticated provider for, so recovery stops before reading host
+        // state instead of proceeding without it or reaching out to that owner.
+        if (!string.Equals(prior!.ProtectedBackup.LocationClass, HostLocalLocationClass, StringComparison.Ordinal))
+        {
+            return await HostUpdateCli.EmitAsync(
+                output,
+                args.Json,
+                HostUpdateCliExitCodes.Refused,
+                new HostUpdateCli.CliFailure("protected_backup_owner_required", ["restore_through_backup_owner"])).ConfigureAwait(false);
         }
 
         return await HostUpdateCli.RecoverAsync(

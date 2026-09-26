@@ -559,6 +559,12 @@ requires, in order (every refusal exits 6 and changes nothing):
    backup (whatever its `locationClass`). A coordinated restore uses only the
    engine's own activation-time backup manifest under host state, whose per-file
    checksums are re-verified before restore.
+6. The reference's `locationClass` is `host-local`. An `attached-volume` or
+   `external-storage` backup belongs to an owner this host has no configured,
+   authenticated provider for, so recovery refuses with
+   `protected_backup_owner_required` (detail `restore_through_backup_owner`)
+   before reading host state and without contacting that owner; restore through
+   the backup's owner instead.
 
 Recovery then runs through the ordinary recovery resolver, drift and physical
 reconciliation gates, lease and approval-bound installed-state snapshot. The

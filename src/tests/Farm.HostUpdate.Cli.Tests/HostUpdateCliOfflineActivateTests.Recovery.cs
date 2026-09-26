@@ -227,9 +227,37 @@ public sealed partial class HostUpdateCliOfflineActivateTests
         AssertRefused(refused, "protected_backup_invalid");
     }
 
-    [HostStateFact]
-    public async Task Offline_recovery_refuses_release_that_is_not_the_staged_target()
+    [HostStateTheory]
+    [InlineData("attached-volume")]
+    [InlineData("external-storage")]
+    public async Task Offline_recovery_refuses_protected_backup_held_by_an_external_owner(string locationClass)
     {
+        string protectedBackup = StagePriorRecoverySet(locationClass);
+        await WritePriorInstalledStateAsync();
+        HostUpdateExecutionRequest request = RequestFromCurrentStaging();
+        WriteFailedJournal(request, migrated: true);
+        string before = File.ReadAllText(InstalledStatePath());
+        string journalBefore = File.ReadAllText(_host.JournalPath);
+        var runner = new IntegratedActivationProcessRunner(healthSucceeds: true);
+        var network = new NetworkDeniedHttpClientFactory();
+
+        foreach (bool confirm in new[] { false, true })
+        {
+            JsonElement refused = Envelope(await RunAsync(OfflineRecover(protectedBackup, confirm), IntegratedConfiguration(), services =>
+                UseNetworkDeniedBoundaries(services, runner, network)));
+
+            AssertRefused(refused, "protected_backup_owner_required");
+            refused.ToString().Should().Contain("restore_through_backup_owner");
+        }
+
+        File.ReadAllText(InstalledStatePath()).Should().Be(before);
+        File.ReadAllText(_host.JournalPath).Should().Be(journalBefore);
+        runner.Calls.Should().BeEmpty("no restore, apply or pull may start");
+        network.Refused.Should().BeEmpty("the external owner is never contacted");
+    }
+
+    [HostStateFact]
+    public async Task Offline_recovery_refuses_release_that_is_not_the_staged_target()    {
         string protectedBackup = StagePriorRecoverySet();
         string[] args = OfflineRecover(protectedBackup, confirm: false);
         args[Array.IndexOf(args, "--release") + 1] = PriorReleaseId;
@@ -347,7 +375,7 @@ public sealed partial class HostUpdateCliOfflineActivateTests
     private string PriorDigest() => Digest(File.ReadAllBytes(Path.Combine(_staging, HostUpdateOfflineRecovery.PriorManifestName)));
 
     /// <summary>Stages the prior signed manifest and a verification record binding it, returning the operator's backup reference.</summary>
-    private string StagePriorRecoverySet()
+    private string StagePriorRecoverySet(string locationClass = "host-local")
     {
         JsonNode prior = JsonNode.Parse(_manifest)!;
         prior["tag"] = "v" + PriorVersion;
@@ -362,7 +390,7 @@ public sealed partial class HostUpdateCliOfflineActivateTests
         byte[] priorBytes = Encoding.UTF8.GetBytes(prior.ToJsonString());
         File.WriteAllBytes(Path.Combine(_staging, HostUpdateOfflineRecovery.PriorManifestName), priorBytes);
         File.WriteAllBytes(Path.Combine(_staging, HostUpdateOfflineRecovery.PriorSignatureName), _signature);
-        var backup = new { id = "backup-41", sha256 = new string('a', 64), locationClass = "host-local", releaseVersion = PriorVersion };
+        var backup = new { id = "backup-41", sha256 = new string('a', 64), locationClass, releaseVersion = PriorVersion };
         SignedUpdateManifest target = SignedUpdateManifestValidator.Parse(Encoding.UTF8.GetString(_manifest));
         string json = JsonSerializer.Serialize(new
         {
