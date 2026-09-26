@@ -366,9 +366,11 @@ is undocumented, so the production app does not set it. Production exposure,
 an Apple Feedback report and any app-side mitigation are tracked in
 [#3067](https://github.com/OlyForge3D/PrintFarmer/issues/3067).
 
-**Standalone repro and exposure (#3067).** The dependency-free app in
-[`mobile/diagnostics/ag-async-layout-repro`](../diagnostics/ag-async-layout-repro/README.md)
-reproduces the stall without PrintFarmer code. These results come from
+**Standalone repro and exposure (#3067).** A dependency-free SwiftUI app
+reproduces the stall without PrintFarmer code. It is one-off diagnostic code,
+so its source is kept on
+[#3067](https://github.com/OlyForge3D/PrintFarmer/issues/3067#issuecomment-5842679863)
+rather than in the repository. These results come from
 simulators on one 10-core host, mostly iOS 26.5 (23F77) on iPad Pro 13-inch
 (M5). Real devices were not tested.
 
