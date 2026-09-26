@@ -969,6 +969,78 @@ final class DashboardViewModelSnapshotTests: XCTestCase {
         XCTAssertNotEqual(durable.payload.map(\.id), [stale.id])
     }
 
+    /// #3074 regression: the device clock steps backward between two successful
+    /// refreshes. The durable snapshot must follow the confirmed-live fleet on
+    /// screen (so the next cold offline launch hydrates it), not stay on the older
+    /// one. The old wall-clock rule refused the second commit as `.notNewer` and
+    /// the view model discarded the result silently.
+    func testBackwardClockRefreshPersistsConfirmedLiveFleet() async throws {
+        let root = FarmSnapshotFixtures.tempRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let authority = FarmSnapshotFixtures.makeAuthority(
+            tombstoneDefaults: UserDefaults(
+                suiteName: trackedSuiteName("dashboard-backward-clock")
+            )!
+        )
+        let realStore = FarmSnapshotStore(authority: authority, rootURL: root)
+        let session = try XCTUnwrap(authority.mint(namespace: namespace, generation: 1))
+        XAssertTrue(await realStore.activate(session: session))
+
+        let clock = SteppedClock([fixedNow, fixedNow.addingTimeInterval(-3600)])
+        let reports = CommitReportRecorder()
+        let vm = DashboardViewModel()
+        vm.configure(
+            printerService: mockPrinterService,
+            jobService: mockJobService,
+            statisticsService: mockStatsService,
+            jobAnalyticsService: mockJobAnalyticsService
+        )
+        vm.configureSnapshot(
+            store: realStore,
+            autoPrintService: mockAutoDispatch,
+            now: { clock.next() },
+            reportCommit: { reports.record($0) }
+        )
+
+        let before = try TestData.decodePrinter()
+        mockPrinterService.printersToReturn = [before]
+        await vm.loadDashboard()
+
+        let after = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        mockPrinterService.printersToReturn = [after]
+        await vm.loadDashboard()
+
+        XCTAssertEqual(vm.printers.map(\.id), [after.id])
+        XCTAssertEqual(reports.results, [.committed, .committed])
+        guard case .snapshot(let durable) = await realStore.hydrateActive() else {
+            return XCTFail("expected the confirmed-live snapshot on disk")
+        }
+        XCTAssertEqual(durable.payload.map(\.id), [after.id])
+        XCTAssertEqual(
+            durable.lastUpdatedAtMillis,
+            Int64((fixedNow.addingTimeInterval(-3600).timeIntervalSince1970 * 1000).rounded()),
+            "the display instant is still the honest (stepped-back) wall clock"
+        )
+    }
+
+    /// #3074: a refused confirmed-live commit is reported, never discarded silently.
+    func testRefusedCanonicalCommitIsReported() async throws {
+        let reports = CommitReportRecorder()
+        store.commitResult = .notNewer(cleanupFailed: false)
+        viewModel.configureSnapshot(
+            store: store,
+            autoPrintService: mockAutoDispatch,
+            now: { [fixedNow] in fixedNow },
+            reportCommit: { reports.record($0) }
+        )
+        mockPrinterService.printersToReturn = [try TestData.decodePrinter()]
+
+        await viewModel.loadDashboard()
+
+        XCTAssertEqual(store.committedEnvelopes.count, 1)
+        XCTAssertEqual(reports.results, [.notNewer(cleanupFailed: false)])
+    }
+
     func testOfflineLoadPreservesCachedShellWithoutError() async throws {
         let cached = try TestData.decodePrinter()
         store.hydration = .snapshot(cachedEnvelope(printers: [cached], millis: 1_699_000_000_000))
@@ -1148,5 +1220,34 @@ final class ConnectionStatusPresentationTests: XCTestCase {
         // Older-same-day uses "at <time>"; different-day uses "on <date> <time>".
         XCTAssertTrue(ConnectionStatusPresentation.formatConfirmed(now.addingTimeInterval(-7200), now: now, calendar: cal).hasPrefix("at "))
         XCTAssertTrue(ConnectionStatusPresentation.formatConfirmed(now.addingTimeInterval(-172800), now: now, calendar: cal).hasPrefix("on "))
+    }
+}
+
+/// Returns the scripted instants in order, then repeats the last one.
+private final class SteppedClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var instants: [Date]
+
+    init(_ instants: [Date]) {
+        self.instants = instants
+    }
+
+    func next() -> Date {
+        lock.withLock {
+            instants.count > 1 ? instants.removeFirst() : instants[0]
+        }
+    }
+}
+
+private final class CommitReportRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var recorded: [FarmSnapshotCommitResult] = []
+
+    func record(_ result: FarmSnapshotCommitResult) {
+        lock.withLock { recorded.append(result) }
+    }
+
+    var results: [FarmSnapshotCommitResult] {
+        lock.withLock { recorded }
     }
 }

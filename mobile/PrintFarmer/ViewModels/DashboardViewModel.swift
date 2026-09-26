@@ -117,6 +117,7 @@ final class DashboardViewModel {
     // Snapshot lifecycle authority (#816), consumed unchanged.
     @ObservationIgnored private var snapshotStore: (any FarmSnapshotStoring)?
     @ObservationIgnored private var now: @Sendable () -> Date = { Date() }
+    @ObservationIgnored private var reportCommit: FarmSnapshotCommitReporter = FarmSnapshotCommitLog.report
 
     init(
         callbackEnqueuer: @escaping CallbackEnqueuer = { operation in
@@ -155,11 +156,13 @@ final class DashboardViewModel {
 
     /// Wire the published #816 snapshot store plus the auto-dispatch source
     /// used for the H6-compliant pending-ready projection, and an injectable
-    /// clock so hydrate/commit ordering is deterministic under test.
+    /// clock for the "last updated" instant. `reportCommit` receives every
+    /// canonical commit outcome so a refused write is never silent (#3074).
     func configureSnapshot(
         store: any FarmSnapshotStoring,
         autoPrintService: (any AutoDispatchServiceProtocol)? = nil,
-        now: @escaping @Sendable () -> Date = { Date() }
+        now: @escaping @Sendable () -> Date = { Date() },
+        reportCommit: @escaping FarmSnapshotCommitReporter = FarmSnapshotCommitLog.report
     ) {
         let changed = !Self.identical(self.snapshotStore, store)
             || !Self.identical(self.autoPrintService, autoPrintService)
@@ -171,6 +174,7 @@ final class DashboardViewModel {
         self.snapshotStore = store
         self.autoPrintService = autoPrintService
         self.now = now
+        self.reportCommit = reportCommit
     }
 
     func configureSignalR(_ service: any SignalRServiceProtocol) {
@@ -339,6 +343,7 @@ final class DashboardViewModel {
             modelStats: modelStats,
             upcomingJobs: upcomingJobs,
             now: now,
+            reportCommit: reportCommit,
             logger: logger
         )
         let installAuthorization: @MainActor @Sendable (
@@ -482,17 +487,22 @@ final class DashboardViewModel {
             if let store = input.snapshotStore,
                let session = capturedSession,
                let commitAuthorization {
+                // #3074: the store orders by `writeOrder`, minted here at the
+                // confirmation point; the wall-clock millis are display-only, so a
+                // backward clock step cannot make it refuse this confirmed-live write.
                 let envelope = FarmSnapshotEnvelope(
                     namespace: session.namespace,
                     printers: loadedPrinters,
                     pendingReadyPrinterIDs: loadedPendingReady,
-                    lastUpdatedAtMillis: Int64((instant.timeIntervalSince1970 * 1000).rounded())
+                    lastUpdatedAtMillis: Int64((instant.timeIntervalSince1970 * 1000).rounded()),
+                    writeOrder: .next()
                 )
-                _ = await store.commit(
+                let commitResult = await store.commit(
                     envelope,
                     capturedSession: session,
                     authorization: commitAuthorization
                 )
+                input.reportCommit(commitResult)
                 guard !Task.isCancelled,
                       commitAuthorization.withAuthorization({ true }) == true else {
                     return .superseded
@@ -672,6 +682,7 @@ final class DashboardViewModel {
         let modelStats: [QueuePrinterModelStats]
         let upcomingJobs: [QueuedJobWithMeta]
         let now: @Sendable () -> Date
+        let reportCommit: FarmSnapshotCommitReporter
         let logger: Logger
     }
 

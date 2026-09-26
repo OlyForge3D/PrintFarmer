@@ -14,6 +14,10 @@ All notable changes to PrintFarmer iOS will be documented in this file.
 
 ### Fixed
 
+- Stop the offline farm snapshot from silently keeping an older fleet after the
+  device clock steps backward or two writes land in the same millisecond. Farm
+  snapshot writes now use the same launch-scoped logical order as the feature
+  caches, and refused dashboard commits are logged (#3074).
 - Stop the Attention and filament-coverage offline caches from silently
   keeping an older snapshot when two refreshes land in the same millisecond or
   the device clock steps backward. Cache writes are now ordered by a

@@ -180,6 +180,21 @@ final class FarmSnapshotEnvelopeTests: XCTestCase {
         XCTAssertTrue(decoded.isSupportedSchema)
     }
 
+    /// #3074: a record written before the logical write order decodes as legacy
+    /// (`writeOrder == nil`) without a schema bump, and a stamped order round-trips.
+    func testWriteOrderIsOptionalAndRoundTrips() throws {
+        let legacy = try FarmSnapshotEnvelope.makeDecoder().decode(FarmSnapshotEnvelope.self, from: handAuthoredV1())
+        XCTAssertNil(legacy.writeOrder)
+        XCTAssertTrue(legacy.isSupportedSchema)
+
+        let stamped = FarmSnapshotEnvelope(namespace: FarmSnapshotFixtures.namespace(), payload: [], lastUpdatedAtMillis: 1)
+        XCTAssertNotNil(stamped.writeOrder)
+        let data = try FarmSnapshotEnvelope.makeEncoder().encode(stamped)
+        let decoded = try FarmSnapshotEnvelope.makeDecoder().decode(FarmSnapshotEnvelope.self, from: data)
+        XCTAssertEqual(decoded.writeOrder, stamped.writeOrder)
+        XCTAssertEqual(decoded.schemaVersion, FarmSnapshotEnvelope.currentSchemaVersion)
+    }
+
     func testHandAuthoredV1MissingEachRequiredFieldFailsToDecode() {
         // Every previously-required v1 field must remain REQUIRED; a fixture missing any
         // one must fail to decode (so the store quarantines a truncated/corrupt record).

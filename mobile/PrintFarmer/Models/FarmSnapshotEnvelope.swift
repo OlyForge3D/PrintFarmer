@@ -164,10 +164,20 @@ struct FarmSnapshotPrinter: Codable, Sendable, Equatable, Identifiable {
     }
 }
 
-/// Versioned, self-describing at-rest record. `lastUpdatedAtMillis` is the
-/// immutable UTC instant of the successful canonical response, encoded as an
-/// `Int64` epoch-millisecond so sub-second ordering survives store/process
-/// recreation with exact integer comparison.
+/// Versioned, self-describing at-rest record.
+///
+/// `lastUpdatedAtMillis` is the wall-clock UTC instant (epoch-millis) of the
+/// successful canonical response, shown as "last updated". It is display-only and
+/// never an ordering key: two passes can land in the same millisecond and an NTP
+/// step or manual change can move the clock backward, either of which made the
+/// store silently refuse a confirmed-live write (#3074).
+///
+/// `writeOrder` is the clock-independent ordering key, the same launch-scoped
+/// logical order the feature read cache uses (#3007). It shares that process-wide
+/// source, so every offline-cache write in one launch draws from one monotonic
+/// sequence. See `FeatureReadCacheWriteOrder` for why it is sound across relaunch
+/// and reboot: the snapshot root lives in the app's own Application Support
+/// sandbox and only the app process writes it.
 struct FarmSnapshotEnvelope: Codable, Sendable, Equatable {
     /// Bump only when the on-disk layout changes incompatibly. A record whose
     /// `schemaVersion` differs from `currentSchemaVersion` is treated as
@@ -178,17 +188,26 @@ struct FarmSnapshotEnvelope: Codable, Sendable, Equatable {
     let namespace: FarmSnapshotNamespace
     let payload: [FarmSnapshotPrinter]
     let lastUpdatedAtMillis: Int64
+    /// `nil` only on records written before #3074, which any stamped write
+    /// supersedes. Optional so the on-disk layout stays schema-compatible in both
+    /// directions: older builds ignore the key.
+    let writeOrder: FeatureReadCacheWriteOrder?
 
+    /// `writeOrder` defaults to `.next()`, which Swift evaluates at the CALL SITE
+    /// before the initializer runs, so constructing the envelope at the caller's
+    /// confirmation point stamps it in confirmation order.
     init(
         schemaVersion: Int = FarmSnapshotEnvelope.currentSchemaVersion,
         namespace: FarmSnapshotNamespace,
         payload: [FarmSnapshotPrinter],
-        lastUpdatedAtMillis: Int64
+        lastUpdatedAtMillis: Int64,
+        writeOrder: FeatureReadCacheWriteOrder? = .next()
     ) {
         self.schemaVersion = schemaVersion
         self.namespace = namespace
         self.payload = payload
         self.lastUpdatedAtMillis = lastUpdatedAtMillis
+        self.writeOrder = writeOrder
     }
 
     /// The ONLY live projection from `Printer` values — every caller must supply the
@@ -198,13 +217,29 @@ struct FarmSnapshotEnvelope: Codable, Sendable, Equatable {
         namespace: FarmSnapshotNamespace,
         printers: [Printer],
         pendingReadyPrinterIDs: Set<UUID>,
-        lastUpdatedAtMillis: Int64
+        lastUpdatedAtMillis: Int64,
+        writeOrder: FeatureReadCacheWriteOrder? = .next()
     ) {
         self.init(
             namespace: namespace,
             payload: printers.map { FarmSnapshotPrinter($0, isPendingReady: pendingReadyPrinterIDs.contains($0.id)) },
-            lastUpdatedAtMillis: lastUpdatedAtMillis
+            lastUpdatedAtMillis: lastUpdatedAtMillis,
+            writeOrder: writeOrder
         )
+    }
+
+    /// Whether this candidate may replace the durable record `existing` (#3074).
+    ///
+    /// A record from a different launch, or a legacy record without an order, is
+    /// always replaced. Within one launch the candidate must have been confirmed
+    /// strictly later; `allowingEqual` also admits the identical order, which only
+    /// a re-commit of the same envelope can carry (the authorized path accepted
+    /// equal stamps before #3074 and still does). A candidate without an order
+    /// never replaces an existing record.
+    func supersedes(_ existing: FarmSnapshotEnvelope, allowingEqual: Bool) -> Bool {
+        guard let writeOrder else { return false }
+        if writeOrder.supersedes(existing.writeOrder) { return true }
+        return allowingEqual && writeOrder == existing.writeOrder
     }
 
     var isSupportedSchema: Bool {

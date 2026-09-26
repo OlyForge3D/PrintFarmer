@@ -94,23 +94,47 @@ final class FarmSnapshotStoreTests: XCTestCase {
         }
     }
 
-    // MARK: Monotonic guard
+    // MARK: Monotonic guard (logical write order, #3074)
 
-    func testCommitOlderIsPreserved() async throws {
+    /// The real in-launch race: a pass confirmed EARLIER (lower write order) whose
+    /// commit reaches the store after a later-confirmed one must still lose. No
+    /// clock is consulted.
+    func testEarlierConfirmedCommitArrivingLateIsPreserved() async throws {
         let root = newRoot()
         let namespace = FarmSnapshotFixtures.namespace()
         let (store, authority) = makeStore(root: root)
         let session = try await activate(store, authority, namespace)
 
+        let older = FarmSnapshotFixtures.envelope(namespace: namespace, millis: 1000)
         let newer = FarmSnapshotFixtures.envelope(namespace: namespace, millis: 2000)
         XAssertEqual(await store.commit(newer, capturedSession: session), .committed)
-        let older = FarmSnapshotFixtures.envelope(namespace: namespace, millis: 1000)
         XAssertEqual(await store.commit(older, capturedSession: session), .notNewer(cleanupFailed: false))
 
         XAssertEqual(await store.hydrateActive(), .snapshot(newer))
     }
 
-    func testCommitEqualTimestampIsPreserved() async throws {
+    /// #3074 regression (unauthorized path): the clock stepped backward between two
+    /// confirmed-live commits. The later-confirmed write must land even though its
+    /// wall-clock millis are lower; the old rule refused it as `.notNewer`.
+    func testBackwardClockConfirmedLiveCommitReplaces() async throws {
+        let root = newRoot()
+        let namespace = FarmSnapshotFixtures.namespace()
+        let (store, authority) = makeStore(root: root)
+        let session = try await activate(store, authority, namespace)
+
+        let first = FarmSnapshotFixtures.envelope(namespace: namespace, millis: 1_700_000_500_000)
+        XAssertEqual(await store.commit(first, capturedSession: session), .committed)
+        let printer = FarmSnapshotPrinter(FarmSnapshotFixtures.printerWithSecrets(), isPendingReady: false)
+        let afterStep = FarmSnapshotFixtures.envelope(namespace: namespace, millis: 1_700_000_400_000, printers: [printer])
+        XAssertEqual(await store.commit(afterStep, capturedSession: session), .committed)
+
+        XAssertEqual(await store.hydrateActive(), .snapshot(afterStep))
+    }
+
+    /// #3074 regression (unauthorized path): two confirmed-live commits in the same
+    /// millisecond. The later-confirmed one must land; the old legacy-equal rule
+    /// refused it.
+    func testSameMillisecondConfirmedLiveCommitReplaces() async throws {
         let root = newRoot()
         let namespace = FarmSnapshotFixtures.namespace()
         let (store, authority) = makeStore(root: root)
@@ -118,31 +142,131 @@ final class FarmSnapshotStoreTests: XCTestCase {
 
         let first = FarmSnapshotFixtures.envelope(namespace: namespace, millis: 2000, printers: [FarmSnapshotPrinter(FarmSnapshotFixtures.printerWithSecrets(), isPendingReady: false)])
         XAssertEqual(await store.commit(first, capturedSession: session), .committed)
-        let equalStamp = FarmSnapshotFixtures.envelope(namespace: namespace, millis: 2000, printers: [])
-        XAssertEqual(await store.commit(equalStamp, capturedSession: session), .notNewer(cleanupFailed: false))
+        let sameMillis = FarmSnapshotFixtures.envelope(namespace: namespace, millis: 2000, printers: [])
+        XAssertEqual(await store.commit(sameMillis, capturedSession: session), .committed)
 
-        XAssertEqual(await store.hydrateActive(), .snapshot(first))
+        XAssertEqual(await store.hydrateActive(), .snapshot(sameMillis))
     }
 
-    func testMonotonicOrderingSurvivesStoreAndAuthorityRecreation() async throws {
+    /// The unauthorized path still refuses an identical order (a re-commit of the
+    /// same envelope), preserving the pre-#3074 legacy-equal rule; a valid permit
+    /// still admits it.
+    func testIdenticalWriteOrderRefusedWithoutPermitAdmittedWithPermit() async throws {
+        let root = newRoot()
+        let namespace = FarmSnapshotFixtures.namespace()
+        let (store, authority) = makeStore(root: root)
+        let session = try await activate(store, authority, namespace)
+
+        let envelope = FarmSnapshotFixtures.envelope(namespace: namespace, millis: 2000)
+        XAssertEqual(await store.commit(envelope, capturedSession: session), .committed)
+        XAssertEqual(await store.commit(envelope, capturedSession: session), .notNewer(cleanupFailed: false))
+
+        let permitCandidate = await store.authorizeCommit(capturedSession: session)
+        let permit = try XCTUnwrap(permitCandidate)
+        XAssertEqual(await store.commit(envelope, capturedSession: session, authorization: permit), .committed)
+    }
+
+    /// #3074 regression (authorized path): a backward clock step no longer refuses
+    /// a permitted confirmed-live commit, and an earlier-confirmed order still loses.
+    func testAuthorizedCommitOrdersByWriteOrderNotClock() async throws {
+        let root = newRoot()
+        let namespace = FarmSnapshotFixtures.namespace()
+        let (store, authority) = makeStore(root: root)
+        let session = try await activate(store, authority, namespace)
+
+        let earlier = FarmSnapshotFixtures.envelope(namespace: namespace, millis: 1_700_000_600_000)
+        let first = FarmSnapshotFixtures.envelope(namespace: namespace, millis: 1_700_000_500_000)
+        let firstPermitCandidate = await store.authorizeCommit(capturedSession: session)
+        let firstPermit = try XCTUnwrap(firstPermitCandidate)
+        XAssertEqual(await store.commit(first, capturedSession: session, authorization: firstPermit), .committed)
+
+        let afterStep = FarmSnapshotFixtures.envelope(namespace: namespace, millis: 1_700_000_400_000, printers: [])
+        let secondPermitCandidate = await store.authorizeCommit(capturedSession: session)
+        let secondPermit = try XCTUnwrap(secondPermitCandidate)
+        XAssertEqual(await store.commit(afterStep, capturedSession: session, authorization: secondPermit), .committed)
+        XAssertEqual(await store.hydrateActive(), .snapshot(afterStep))
+
+        let thirdPermitCandidate = await store.authorizeCommit(capturedSession: session)
+        let thirdPermit = try XCTUnwrap(thirdPermitCandidate)
+        XAssertEqual(
+            await store.commit(earlier, capturedSession: session, authorization: thirdPermit),
+            .notNewer(cleanupFailed: false),
+            "an earlier-confirmed order loses even with a later wall clock and a valid permit"
+        )
+        XAssertEqual(await store.hydrateActive(), .snapshot(afterStep))
+    }
+
+    /// A record from a prior launch (different `launchID`) is superseded by any
+    /// write confirmed in this launch, even when the prior launch's sequence and
+    /// clock are both higher; within the new launch, ordering stays monotonic and
+    /// the order is durable on disk. Sound across relaunch AND reboot.
+    func testNewLaunchSupersedesPriorLaunchRecordAndOrderIsDurable() async throws {
         let root = newRoot()
         let namespace = FarmSnapshotFixtures.namespace()
 
+        let priorLaunch = FeatureReadCacheWriteOrderSource()
+        for _ in 0..<50 { _ = priorLaunch.next() }
         let (store1, authority1) = makeStore(root: root)
         let session1 = try await activate(store1, authority1, namespace)
-        let committed = FarmSnapshotFixtures.envelope(namespace: namespace, millis: 100_900)
-        XAssertEqual(await store1.commit(committed, capturedSession: session1), .committed)
+        let prior = FarmSnapshotEnvelope(
+            namespace: namespace,
+            payload: [],
+            lastUpdatedAtMillis: 1_800_000_000_000,
+            writeOrder: priorLaunch.next()
+        )
+        XAssertEqual(await store1.commit(prior, capturedSession: session1), .committed)
 
-        // Recreate store + authority on the same disk (models a process relaunch).
+        // Recreate store + authority on the same disk (models a relaunch or reboot).
+        let thisLaunch = FeatureReadCacheWriteOrderSource()
         let (store2, authority2) = makeStore(root: root)
         let session2 = try await activate(store2, authority2, namespace)
-        let stale = FarmSnapshotFixtures.envelope(namespace: namespace, millis: 100_500)
-        XAssertEqual(await store2.commit(stale, capturedSession: session2), .notNewer(cleanupFailed: false))
-        XAssertEqual(await store2.hydrateActive(), .snapshot(committed))
-
-        let fresh = FarmSnapshotFixtures.envelope(namespace: namespace, millis: 100_901)
+        let staleInLaunch = FarmSnapshotEnvelope(
+            namespace: namespace,
+            payload: [],
+            lastUpdatedAtMillis: 1_700_000_000_000,
+            writeOrder: thisLaunch.next()
+        )
+        let fresh = FarmSnapshotEnvelope(
+            namespace: namespace,
+            payload: [FarmSnapshotPrinter(FarmSnapshotFixtures.printerWithSecrets(), isPendingReady: false)],
+            lastUpdatedAtMillis: 1_700_000_000_000,
+            writeOrder: thisLaunch.next()
+        )
         XAssertEqual(await store2.commit(fresh, capturedSession: session2), .committed)
+        XAssertEqual(await store2.commit(staleInLaunch, capturedSession: session2), .notNewer(cleanupFailed: false))
         XAssertEqual(await store2.hydrateActive(), .snapshot(fresh))
+
+        let onDisk = try FarmSnapshotEnvelope.makeDecoder().decode(
+            FarmSnapshotEnvelope.self,
+            from: Data(contentsOf: liveURL(root: root, namespace))
+        )
+        XCTAssertEqual(onDisk.writeOrder, fresh.writeOrder)
+    }
+
+    /// A record written before #3074 carries no `writeOrder`; any stamped write
+    /// supersedes it regardless of clock.
+    func testLegacyRecordWithoutWriteOrderIsSuperseded() async throws {
+        let root = newRoot()
+        let namespace = FarmSnapshotFixtures.namespace()
+        let (store, authority) = makeStore(root: root)
+        let session = try await activate(store, authority, namespace)
+
+        let legacy = FarmSnapshotEnvelope(
+            namespace: namespace,
+            payload: [],
+            lastUpdatedAtMillis: 1_900_000_000_000,
+            writeOrder: nil
+        )
+        let live = liveURL(root: root, namespace)
+        try FileManager.default.createDirectory(at: live.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let legacyBytes = try FarmSnapshotEnvelope.makeEncoder().encode(legacy)
+        XCTAssertFalse(String(decoding: legacyBytes, as: UTF8.self).contains("writeOrder"))
+        try legacyBytes.write(to: live)
+        XAssertEqual(await store.hydrateActive(), .snapshot(legacy))
+
+        let fresh = FarmSnapshotFixtures.envelope(namespace: namespace, millis: 1_700_000_000_000)
+        XAssertEqual(await store.commit(fresh, capturedSession: session), .committed)
+        XAssertEqual(await store.hydrateActive(), .snapshot(fresh))
     }
 
     // MARK: Schema + namespace + integrity

@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 // MARK: - Farm Snapshot Store & Lifecycle Authority (F10-C1a, #816)
 //
@@ -208,6 +209,31 @@ final class FarmSnapshotAuthority: @unchecked Sendable {
         try coordinator.withPromotion(session, cancelled: cancelled, body)
     }
 }
+
+// MARK: Commit reporting (#3074)
+
+/// Default sink for confirmed-live farm snapshot commit outcomes. `.committed` is
+/// the normal path; every other outcome means the durable record did NOT take the
+/// write and is logged so a refused confirmed-live commit is never silent.
+enum FarmSnapshotCommitLog {
+    private static let logger = Logger(subsystem: "com.printfarmer.ios", category: "FarmSnapshot")
+
+    @Sendable
+    static func report(_ result: FarmSnapshotCommitResult) {
+        switch result {
+        case .committed:
+            return
+        case .notNewer:
+            logger.notice("Farm snapshot write refused as notNewer; a later-confirmed write already holds the record: \(String(describing: result), privacy: .public)")
+        case .superseded:
+            logger.info("Farm snapshot write superseded by a session or pass change")
+        case .namespaceMismatch, .schemaUnsupported, .integrityFailure, .persistenceFailure:
+            logger.error("Farm snapshot write failed: \(String(describing: result), privacy: .public)")
+        }
+    }
+}
+
+typealias FarmSnapshotCommitReporter = @Sendable (_ result: FarmSnapshotCommitResult) -> Void
 
 // MARK: Store
 
@@ -501,13 +527,11 @@ actor FarmSnapshotStore: FarmSnapshotStoring {
         } catch {
             return .integrityFailure(cleanupFailed: false) // no candidate written yet
         }
-        if let existing {
-            let isOlder = existing.lastUpdatedAtMillis > envelope.lastUpdatedAtMillis
-            let isLegacyEqual = authorization == nil
-                && existing.lastUpdatedAtMillis == envelope.lastUpdatedAtMillis
-            if isOlder || isLegacyEqual {
-                return .notNewer(cleanupFailed: false) // no candidate written yet
-            }
+        // #3074: ordered by the launch-scoped logical `writeOrder`, never the wall
+        // clock, so a same-millisecond or backward-stepped clock cannot refuse a
+        // confirmed-live write. A valid permit still admits an identical order.
+        if let existing, !envelope.supersedes(existing, allowingEqual: authorization != nil) {
+            return .notNewer(cleanupFailed: false) // no candidate written yet
         }
 
         guard authority.isCurrent(capturedSession) else { return .superseded }
@@ -544,10 +568,7 @@ actor FarmSnapshotStore: FarmSnapshotStoring {
                               decoded.namespace == capturedSession.namespace else {
                             return .integrityFailure
                         }
-                        let isOlder = decoded.lastUpdatedAtMillis > envelope.lastUpdatedAtMillis
-                        let isLegacyEqual = authorization == nil
-                            && decoded.lastUpdatedAtMillis == envelope.lastUpdatedAtMillis
-                        if isOlder || isLegacyEqual {
+                        if !envelope.supersedes(decoded, allowingEqual: authorization != nil) {
                             return .notNewer
                         }
                     }
