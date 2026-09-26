@@ -160,13 +160,19 @@ public interface IHostUpdateExecutionLock
     IHostUpdateExecutionLease Acquire(TimeSpan timeout, CancellationToken cancellationToken);
 }
 
+public interface IHostUpdateExecutionStartGuard
+{
+    Task<string?> ValidateAsync(HostUpdateExecutionRequest request, CancellationToken cancellationToken);
+}
+
 public sealed class HostUpdateExecutor(
     IHostUpdateExecutionSteps steps,
     IHostUpdateExecutionJournal journal,
     IHostUpdateExecutionLock updateLock,
     IHostUpdateAutomationPolicyRepository automationPolicyRepository,
     IHostUpdateSideEffectReconciler? sideEffectReconciler = null,
-    IHostUpdateAuthorizationBaselineProvider? baselineProvider = null) : IHostUpdateExecutor
+    IHostUpdateAuthorizationBaselineProvider? baselineProvider = null,
+    IHostUpdateExecutionStartGuard? startGuard = null) : IHostUpdateExecutor
 {
     internal const string PolicyDriftedFailureCode = "policy_drifted";
 
@@ -202,6 +208,15 @@ public sealed class HostUpdateExecutor(
             !string.Equals(schedulerPolicy.Fingerprint, request.PolicyFingerprint, StringComparison.Ordinal))
         {
             return PolicyDrifted(request, bindingHash);
+        }
+
+        if (startGuard is not null)
+        {
+            string? startGuardFailure = await startGuard.ValidateAsync(request, cancellationToken).ConfigureAwait(false);
+            if (startGuardFailure is not null)
+            {
+                return new(request.ReleaseId, HostUpdateExecutionState.RecoveryRequired, startGuardFailure, []);
+            }
         }
 
         List<HostUpdateExecutionActivity> activities = journal.Read(request.ReleaseId).ToList();
@@ -474,22 +489,39 @@ public static class HostUpdateRequestBinding
     public static string Compute(HostUpdateExecutionRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
-        return HostUpdateCanonical.Hash(new
-        {
-            request.TrustRoot,
-            request.PolicyRevision,
-            request.PolicyFingerprint,
-            request.ReleaseId,
-            request.Channel,
-            request.RequestId,
-            request.AuthenticatedSequence,
-            request.ManifestDigest,
-            request.SourceCommit,
-            request.HostPlatform,
-            request.AuthorizationKind,
-            request.ImageSourceMode,
-            Targets = request.Targets.OrderBy(target => target.ServiceId, StringComparer.Ordinal),
-        });
+        object binding = request.ImageSourceMode == HostUpdateImageSourceMode.Registry
+            ? new
+            {
+                request.TrustRoot,
+                request.PolicyRevision,
+                request.PolicyFingerprint,
+                request.ReleaseId,
+                request.Channel,
+                request.RequestId,
+                request.AuthenticatedSequence,
+                request.ManifestDigest,
+                request.SourceCommit,
+                request.HostPlatform,
+                request.AuthorizationKind,
+                Targets = request.Targets.OrderBy(target => target.ServiceId, StringComparer.Ordinal),
+            }
+            : new
+            {
+                request.TrustRoot,
+                request.PolicyRevision,
+                request.PolicyFingerprint,
+                request.ReleaseId,
+                request.Channel,
+                request.RequestId,
+                request.AuthenticatedSequence,
+                request.ManifestDigest,
+                request.SourceCommit,
+                request.HostPlatform,
+                request.AuthorizationKind,
+                request.ImageSourceMode,
+                Targets = request.Targets.OrderBy(target => target.ServiceId, StringComparer.Ordinal),
+            };
+        return HostUpdateCanonical.Hash(binding);
     }
 }
 

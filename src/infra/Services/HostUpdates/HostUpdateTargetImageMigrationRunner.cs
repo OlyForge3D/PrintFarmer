@@ -252,12 +252,16 @@ public sealed class HostUpdateTargetImageMigrationRunner(
 
             string[] platformParts = platform.Split('-', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
             string expectedVariant = platformParts.Length == 3 ? platformParts[2] : string.Empty;
+            string actualVariant = root.TryGetProperty("Variant", out JsonElement variant) ? variant.GetString() ?? string.Empty : string.Empty;
             return platformParts.Length is 2 or 3 &&
                 root.TryGetProperty("Os", out JsonElement os) &&
                 root.TryGetProperty("Architecture", out JsonElement architecture) &&
                 string.Equals(os.GetString(), platformParts[0], StringComparison.Ordinal) &&
                 string.Equals(architecture.GetString(), platformParts[1], StringComparison.Ordinal) &&
-                string.Equals(root.TryGetProperty("Variant", out JsonElement variant) ? variant.GetString() ?? string.Empty : string.Empty, expectedVariant, StringComparison.Ordinal);
+                (string.Equals(actualVariant, expectedVariant, StringComparison.Ordinal) ||
+                 (string.Equals(platformParts[1], "arm64", StringComparison.Ordinal) &&
+                  string.IsNullOrEmpty(expectedVariant) &&
+                  string.Equals(actualVariant, "v8", StringComparison.Ordinal)));
         }
         catch (JsonException)
         {

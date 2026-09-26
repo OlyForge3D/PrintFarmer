@@ -453,10 +453,13 @@ no registry fallback, no local build and no verification bypass option.
 Activation re-parses the staged `update-manifest.json`, re-verifies
 `update-manifest.sigstore.json` with the supplied trusted root and requires the
 manifest channel to equal both `--channel` and the standing policy channel. It
-then checks the durable replay store for the exact imported release identity
-(release ID, sequence and manifest digest). Missing evidence, a rejected,
-superseded or replayed identity, or evidence from another channel fails closed
-before images or compose state are touched.
+then performs a read-only check of the durable replay store for the exact
+imported release identity (release ID, sequence and manifest digest). Only a
+strict `Imported` disposition is accepted. Missing evidence, an already accepted
+or completed activation, a rejected, superseded or replayed identity, or
+evidence from another channel fails closed before images or compose state are
+touched. A successful activation records the imported evidence as consumed, so a
+second activation requires a fresh import/admission.
 
 Before any mutation, activation constructs the configured topology from the
 signed manifest and verifies every required image locally by exact
@@ -471,14 +474,20 @@ Execution still goes through the existing `HostUpdateExecutor` state machine
 (preflight, drain, fence, backup, migration, apply, verify), journal and
 installed-state writer. The CLI wires the same concrete adapters used by the API
 for backup, target-image migrations, apply, health/digest verification and
-recovery semantics. To avoid a false in-process writer fence, the CLI first
-proves the configured API compose service is not running with
-`docker compose ps --services --filter status=running`; if that proof is
-unavailable or the service is running, activation fails closed. With the API
-stopped, there are no live API in-memory writer flags to prove, while the
-durable admission gate, database active-work checks, backups, migrations, health
-gates and installed-state records remain the single engine source of truth.
-Failures preserve the prior installed state and leave recovery to the existing
+recovery semantics. To avoid a false in-process writer fence, the CLI proves
+every active database-writing compose service is inactive: monolith topologies
+check `monolith`, split topologies check `api` and `slicer-host`, and any other
+active writer service listed by configuration must have a known compose service
+mapping. The proof uses all container states (`docker compose ps -a --format
+json`) and allows only absent, exited, dead, removed or not-created services; a
+running, restarting, paused, created/starting, unknown or unparseable state fails
+closed. Activation repeats the replay and writer-absence checks inside the
+executor's own lock immediately before executor steps begin, closing the gap
+between preflight validation and mutation. With writers stopped, there are no
+live API/slicer/monolith in-memory writer flags to prove, while the durable
+admission gate, database active-work checks, backups, migrations, health gates
+and installed-state records remain the single engine source of truth. Failures
+preserve the prior installed state and leave recovery to the existing
 journal/recovery workflow.
 
 ## Replay admission, channel continuity and trust expiry (#3064)

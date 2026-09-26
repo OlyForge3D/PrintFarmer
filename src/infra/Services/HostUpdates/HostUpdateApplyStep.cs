@@ -208,7 +208,7 @@ public sealed class HostUpdateImageApplier(
             string? actualVariant = root.TryGetProperty("Variant", out JsonElement variantElement) ? variantElement.GetString() : null;
             if (!string.Equals(actualOs, os, StringComparison.Ordinal) ||
                 !string.Equals(actualArchitecture, architecture, StringComparison.Ordinal) ||
-                !string.Equals(actualVariant ?? string.Empty, variant ?? string.Empty, StringComparison.Ordinal))
+                !VariantMatches(architecture, variant, actualVariant))
             {
                 throw new HostUpdatePreloadedImageVerificationException(serviceId, "platform_mismatch");
             }
@@ -228,6 +228,16 @@ public sealed class HostUpdateImageApplier(
             3 => (parts[0], parts[1], parts[2]),
             _ => throw new HostUpdatePreloadedImageVerificationException(serviceId, "platform_invalid"),
         };
+    }
+
+    private static bool VariantMatches(string architecture, string? expectedVariant, string? actualVariant)
+    {
+        string actual = actualVariant ?? string.Empty;
+        string expected = expectedVariant ?? string.Empty;
+        return string.Equals(actual, expected, StringComparison.Ordinal) ||
+            (string.Equals(architecture, "arm64", StringComparison.Ordinal) &&
+             string.IsNullOrEmpty(expected) &&
+             string.Equals(actual, "v8", StringComparison.Ordinal));
     }
 
     private void ValidateMappings(IReadOnlyDictionary<string, HostUpdateExecutionTarget> targetsByService)

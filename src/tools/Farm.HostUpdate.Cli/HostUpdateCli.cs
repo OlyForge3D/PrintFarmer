@@ -181,6 +181,10 @@ public static partial class HostUpdateCli
             .SetMinimumLevel(LogLevel.Warning)
             .AddProvider(new HostUpdateCliLoggerProvider(error)));
         services.AddHostUpdateRecoveryEngine(configuration);
+        services.AddOptions<HostStateOptions>()
+            .Bind(configuration.GetSection(HostStateOptions.SectionName))
+            .ValidateOnStart();
+        services.AddSingleton<IValidateOptions<HostStateOptions>, HostStateOptionsValidator>();
 
         // Decorate the installed-state store so a confirm is bound to the state it evaluated.
         ServiceDescriptor installedStore = services.Last(d => d.ServiceType == typeof(IInstalledHostStateStore));
@@ -203,7 +207,13 @@ public static partial class HostUpdateCli
         services.AddScoped<DbActiveWorkObservationPort>();
         services.AddScoped<IActiveWorkObservationPort>(sp => sp.GetRequiredService<DbActiveWorkObservationPort>());
         services.AddScoped<IActiveWorkObservationPort, SlicerActiveWorkObservationPort>();
-        services.AddSingleton<IHostUpdateAutomationPolicyRepository, UnavailableHostUpdateAutomationPolicyRepository>();
+        services.AddSingleton<FileHostUpdateAutomationPolicyRepository>(sp =>
+        {
+            HostStateOptions hostState = sp.GetRequiredService<IOptions<HostStateOptions>>().Value;
+            return new FileHostUpdateAutomationPolicyRepository(HostStatePath.OpenReadOnly(hostState));
+        });
+        services.AddSingleton<IHostUpdateAutomationPolicyRepository>(sp => sp.GetRequiredService<FileHostUpdateAutomationPolicyRepository>());
+        services.AddScoped<IHostUpdateExecutionStartGuard, HostUpdateOfflineActivationStartGuard>();
         services.AddScoped<IHostUpdateJournal>(sp =>
         {
             HostUpdateExecutionOptions options = sp.GetRequiredService<HostUpdateExecutionOptions>();

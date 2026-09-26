@@ -4,6 +4,7 @@ using System.Text.Json;
 using Farm.Infrastructure.Services.HostUpdates;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 
 namespace Farm.HostUpdate.Cli.Tests;
@@ -95,16 +96,76 @@ public sealed class HostUpdateCliOfflineActivateTests : IDisposable, IAsyncLifet
     }
 
     [HostStateFact]
+    public async Task Imported_bundle_reaches_real_scoped_executor_with_durable_policy_repository()
+    {
+        await ImportAsync();
+        RecordingExecutionSteps? steps = null;
+
+        JsonElement activated = Envelope(await RunAsync(Activate(), services =>
+        {
+            services.RemoveAll<IHostUpdateLocalImageVerifier>();
+            services.AddSingleton(_imageVerifier);
+            services.AddSingleton<IHostUpdateLocalImageVerifier>(sp => sp.GetRequiredService<FakeLocalImageVerifier>());
+            services.RemoveAll<IHostUpdateOfflineActivationSafetyProbe>();
+            services.AddSingleton<IHostUpdateOfflineActivationSafetyProbe>(_safetyProbe);
+            services.RemoveAll<IHostUpdateExecutionSteps>();
+            services.AddScoped<IHostUpdateExecutionSteps>(sp =>
+            {
+                steps = new RecordingExecutionSteps(sp.GetRequiredService<IInstalledHostStateStore>());
+                return steps;
+            });
+        }));
+
+        activated.GetProperty("exitCode").GetInt32().Should().Be(HostUpdateCliExitCodes.Success, activated.ToString());
+        steps.Should().NotBeNull();
+        steps!.Calls.Should().Equal("preflight", "drain", "fence", "backup", "migration", "apply", "verify");
+        HostUpdateReplayDecision replay = await HostUpdateOfflineActivation.ReadReplayDecisionAsync(
+            _host.Configuration(),
+            CurrentCandidate(),
+            CancellationToken.None);
+        replay.Disposition.Should().Be(HostUpdateReplayDisposition.Accepted);
+    }
+
+    [HostStateFact]
     public async Task Activation_refuses_without_imported_replay_evidence_and_preserves_prior_install()
     {
         _host.SeedInstalledState();
         string before = File.ReadAllText(Path.Combine(_host.StateDirectory, "installed-state.json"));
+        IReadOnlyDictionary<string, string> snapshot = ReplaySnapshot();
 
         JsonElement refused = Envelope(await RunAsync(Activate()));
 
         refused.GetProperty("exitCode").GetInt32().Should().Be(HostUpdateCliExitCodes.Refused, refused.ToString());
         refused.GetProperty("result").GetProperty("code").GetString().Should().Be("replay_rejected");
         File.ReadAllText(Path.Combine(_host.StateDirectory, "installed-state.json")).Should().Be(before);
+        ReplaySnapshot().Should().Equal(snapshot);
+    }
+
+    [HostStateFact]
+    public async Task Activation_refuses_accepted_replay_evidence_and_preserves_replay_bytes()
+    {
+        await ImportAsync();
+        await HostUpdateOfflineActivation.MarkActivatedAsync(_host.Configuration(), CurrentCandidate(), CancellationToken.None);
+        IReadOnlyDictionary<string, string> snapshot = ReplaySnapshot();
+
+        JsonElement refused = Envelope(await RunAsync(Activate()));
+
+        refused.GetProperty("exitCode").GetInt32().Should().Be(HostUpdateCliExitCodes.Refused, refused.ToString());
+        refused.GetProperty("result").GetProperty("code").GetString().Should().Be("replay_accepted");
+        ReplaySnapshot().Should().Equal(snapshot);
+    }
+
+    [HostStateFact]
+    public async Task Activation_refuses_rejected_replay_evidence_without_rewriting_store()
+    {
+        await RejectCurrentCandidateAsync();
+        IReadOnlyDictionary<string, string> snapshot = ReplaySnapshot();
+
+        JsonElement refused = Envelope(await RunAsync(Activate()));
+
+        refused.GetProperty("exitCode").GetInt32().Should().Be(HostUpdateCliExitCodes.Refused, refused.ToString());
+        refused.GetProperty("result").GetProperty("code").GetString().Should().Be("replay_rejected");
+        ReplaySnapshot().Should().Equal(snapshot);
     }
 
     [HostStateFact]
@@ -270,6 +331,81 @@ public sealed class HostUpdateCliOfflineActivateTests : IDisposable, IAsyncLifet
         refused.GetProperty("result").GetProperty("code").GetString().Should().Be("host_update_lock_held");
     }
 
+    [HostStateFact]
+    public async Task Activation_revalidates_replay_under_executor_lock_before_steps()
+    {
+        await ImportAsync();
+        _host.SeedInstalledState(services: [.. CliHostFixture.SplitServices, "monolith"]);
+        var steps = new RecordingExecutionSteps(null);
+        var supersedingSafety = new SupersedingSafetyProbe(async () =>
+        {
+            StageManifest(json => json
+                .Replace("1.2.3-insider.42", "1.2.3-insider.43", StringComparison.Ordinal)
+                .Replace("10020000300042", "10020000300043", StringComparison.Ordinal));
+            await ImportAsync();
+            File.WriteAllBytes(Path.Combine(_staging, HostUpdateOfflineAdmission.ManifestName), _manifest);
+            WriteRecord(Digest(_manifest));
+        });
+
+        JsonElement refused = Envelope(await RunAsync(Activate(), services =>
+        {
+            services.RemoveAll<IHostUpdateLocalImageVerifier>();
+            services.AddSingleton(_imageVerifier);
+            services.AddSingleton<IHostUpdateLocalImageVerifier>(sp => sp.GetRequiredService<FakeLocalImageVerifier>());
+            services.RemoveAll<IHostUpdateOfflineActivationSafetyProbe>();
+            services.AddSingleton<IHostUpdateOfflineActivationSafetyProbe>(supersedingSafety);
+            services.RemoveAll<IHostUpdateExecutionSteps>();
+            services.AddScoped<IHostUpdateExecutionSteps>(_ => steps);
+        }));
+
+        refused.GetProperty("exitCode").GetInt32().Should().Be(HostUpdateCliExitCodes.Refused, refused.ToString());
+        refused.GetProperty("result").GetProperty("reason").GetString().Should().Be("replay_superseded");
+        steps.Calls.Should().BeEmpty();
+    }
+
+    [HostStateFact]
+    public async Task Activation_refuses_completed_journal_before_reactivating()
+    {
+        await ImportAsync();
+        HostUpdateExecutionRequest request = RequestFromCurrentStaging();
+        _host.SeedJournal(request, [(HostUpdateExecutionState.Completed, "completed")], withBaseline: false);
+
+        JsonElement refused = Envelope(await RunAsync(Activate(), services =>
+        {
+            services.RemoveAll<IHostUpdateLocalImageVerifier>();
+            services.AddSingleton(_imageVerifier);
+            services.AddSingleton<IHostUpdateLocalImageVerifier>(sp => sp.GetRequiredService<FakeLocalImageVerifier>());
+            services.RemoveAll<IHostUpdateOfflineActivationSafetyProbe>();
+            services.AddSingleton<IHostUpdateOfflineActivationSafetyProbe>(_safetyProbe);
+            services.RemoveAll<IHostUpdateExecutionSteps>();
+            services.AddScoped<IHostUpdateExecutionSteps>(_ => new RecordingExecutionSteps(null));
+        }));
+
+        refused.GetProperty("exitCode").GetInt32().Should().Be(HostUpdateCliExitCodes.Refused, refused.ToString());
+        refused.GetProperty("result").GetProperty("reason").GetString().Should().Be("activation_already_completed");
+    }
+
+    [Fact]
+    public void Writer_absence_probe_allows_only_absent_exited_or_dead_writer_services()
+    {
+        var mappings = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["api"] = "api",
+            ["slicer-host"] = "slicer-host",
+            ["monolith"] = "printfarmer",
+        };
+        string output = """
+            {"Service":"api","State":"exited"}
+            {"Service":"slicer-host","State":"dead"}
+            """;
+
+        DockerComposeApiAbsenceProbe.ValidateComposeState(output, mappings).Should().BeNull();
+        DockerComposeApiAbsenceProbe.ValidateComposeState("""{"Service":"printfarmer","State":"created"}""", mappings)
+            .Should().Be("writer_service_active:monolith:created");
+        DockerComposeApiAbsenceProbe.ValidateComposeState("not json", mappings)
+            .Should().Be("writer_absence_unproven:compose_ps_unparseable");
+    }
+
     private async Task ImportAsync()
     {
         JsonElement imported = Envelope(await RunAsync(["offline-admit", "--staging", _staging, "--channel", "insider", "--trusted-root", _trustedRoot, "--json"]));
@@ -309,6 +445,68 @@ public sealed class HostUpdateCliOfflineActivateTests : IDisposable, IAsyncLifet
     private HostStatePath Paths() =>
         new(Options.Create(new HostStateOptions { Enabled = true, RootPath = _host.HostStateRoot, WindowsSecurityAttested = true }));
 
+    private Dictionary<string, string> ReplaySnapshot() =>
+        Directory.EnumerateFiles(_host.HostStateRoot, "*", SearchOption.TopDirectoryOnly)
+            .Where(path => Path.GetFileName(path) is "host-update-replay.json" or "replay-anchor.json" or "replay-anchor.journal")
+            .ToDictionary(
+                path => Path.GetFileName(path),
+                path => Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))),
+                StringComparer.Ordinal);
+
+    private VerifiedHostUpdateCandidate CurrentCandidate()
+    {
+        HostUpdateOfflineAdmission.TryReadStaged(_staging, "insider", out HostUpdateOfflineAdmission.StagedRelease? staged, out string? error)
+            .Should().BeTrue(error);
+        string hostPlatform = HostUpdateOfflineActivation.HostPlatformFactory();
+        return staged!.Candidate with
+        {
+            HostPlatform = hostPlatform,
+            PlatformDigests = new HostUpdatePlatformDigests(
+                staged.Manifest.PlatformDigests[HostUpdateOfflineAdmission.PlatformKey("api", hostPlatform)],
+                staged.Manifest.PlatformDigests[HostUpdateOfflineAdmission.PlatformKey("frontend", hostPlatform)],
+                staged.Manifest.PlatformDigests[HostUpdateOfflineAdmission.PlatformKey("slicer-host", hostPlatform)],
+                staged.Manifest.PlatformDigests[HostUpdateOfflineAdmission.PlatformKey("printer-discovery", hostPlatform)],
+                staged.Manifest.PlatformDigests[HostUpdateOfflineAdmission.PlatformKey("orcaslicer-worker", hostPlatform)],
+                staged.Manifest.PlatformDigests[HostUpdateOfflineAdmission.PlatformKey("monolith", hostPlatform)]),
+        };
+    }
+
+    private HostUpdateExecutionRequest RequestFromCurrentStaging()
+    {
+        VerifiedHostUpdateCandidate candidate = CurrentCandidate();
+        return new HostUpdateExecutionRequest(
+            candidate.ReleaseId,
+            candidate.Sequence,
+            candidate.ManifestDigest,
+            candidate.SourceCommit,
+            HostUpdateExecutionChannel.Insider,
+            [
+                new("api", candidate.HostPlatform, candidate.PlatformDigests.Api),
+                new("frontend", candidate.HostPlatform, candidate.PlatformDigests.Frontend),
+                new("slicer-host", candidate.HostPlatform, candidate.PlatformDigests.SlicerHost),
+                new("printer-discovery", candidate.HostPlatform, candidate.PlatformDigests.PrinterDiscovery),
+                new("orcaslicer-worker", candidate.HostPlatform, candidate.PlatformDigests.OrcaslicerWorker),
+                new("monolith", candidate.HostPlatform, candidate.PlatformDigests.Monolith),
+            ])
+        {
+            RequestId = "offline-activate:" + candidate.Identity[7..39],
+            TrustRoot = candidate.TrustRoot,
+            PolicyRevision = CliHostFixture.RecordedPolicy.PolicyRevision + 1,
+            PolicyFingerprint = HostStateHostUpdateSchedulerSettings.ToSchedulerSettings(
+                new HostUpdateAutomationPolicy(Channel: "insider", InsiderAcknowledged: true, Revision: 1)).Fingerprint,
+            HostPlatform = candidate.HostPlatform,
+            AuthorizationKind = HostUpdateAuthorizationKind.StandingPolicy,
+            ImageSourceMode = HostUpdateImageSourceMode.PreloadedLocal,
+        };
+    }
+
+    private async Task RejectCurrentCandidateAsync()
+    {
+        using var anchor = new FileHostUpdateReplayAnchor(Paths());
+        using var store = new FileHostUpdateReplayStore(Paths().Root, anchor);
+        _ = await store.DecideAsync(CurrentCandidate(), HostUpdateReplayIntent.Reject, CancellationToken.None);
+    }
+
     private static string Digest(byte[] bytes) => "sha256:" + Convert.ToHexStringLower(SHA256.HashData(bytes));
 
     private static string RepositoryRoot()
@@ -336,7 +534,9 @@ public sealed class HostUpdateCliOfflineActivateTests : IDisposable, IAsyncLifet
     private static JsonElement Envelope(CliRun run)
     {
         using JsonDocument document = JsonDocument.Parse(run.Output);
-        return document.RootElement.Clone();
+        JsonElement root = document.RootElement.Clone();
+        root.TryGetProperty("exitCode", out _).Should().BeTrue($"CLI output should be enveloped JSON; output: {run.Output}; error: {run.Error}; process exit: {run.ExitCode}");
+        return root;
     }
 
     private sealed record CliRun(int ExitCode, string Output, string Error);
@@ -407,6 +607,47 @@ public sealed class HostUpdateCliOfflineActivateTests : IDisposable, IAsyncLifet
         {
             Requests.Add(request);
             return Task.FromResult(Error);
+        }
+    }
+
+    private sealed class SupersedingSafetyProbe(Func<Task> supersede) : IHostUpdateOfflineActivationSafetyProbe
+    {
+        private int _calls;
+
+        public async Task<string?> ValidateSafeToExecuteAsync(HostUpdateExecutionRequest request, CancellationToken cancellationToken)
+        {
+            if (Interlocked.Increment(ref _calls) == 1)
+            {
+                await supersede().ConfigureAwait(false);
+            }
+
+            return null;
+        }
+    }
+
+    private sealed class RecordingExecutionSteps(IInstalledHostStateStore? store) : IHostUpdateExecutionSteps
+    {
+        public List<string> Calls { get; } = [];
+
+        public Task PreflightAsync(HostUpdateExecutionRequest request, CancellationToken ct) { Calls.Add("preflight"); return Task.CompletedTask; }
+        public Task DrainAsync(HostUpdateExecutionRequest request, CancellationToken ct) { Calls.Add("drain"); return Task.CompletedTask; }
+        public Task FenceAsync(HostUpdateExecutionRequest request, CancellationToken ct) { Calls.Add("fence"); return Task.CompletedTask; }
+        public Task BackupAsync(HostUpdateExecutionRequest request, CancellationToken ct) { Calls.Add("backup"); return Task.CompletedTask; }
+        public Task MigrateAsync(HostUpdateExecutionRequest request, CancellationToken ct) { Calls.Add("migration"); return Task.CompletedTask; }
+        public Task ApplyAsync(HostUpdateExecutionRequest request, CancellationToken ct) { Calls.Add("apply"); return Task.CompletedTask; }
+        public async Task VerifyAsync(HostUpdateExecutionRequest request, CancellationToken ct)
+        {
+            Calls.Add("verify");
+            if (store is not null)
+            {
+                await store.WriteAsync(new InstalledHostState(
+                    request.ReleaseId,
+                    request.ManifestDigest,
+                    request.Targets.ToDictionary(t => t.ServiceId, t => t.ChildDigest, StringComparer.Ordinal),
+                    string.Join('+', request.Targets.Select(t => t.ServiceId).Order(StringComparer.Ordinal)),
+                    DateTimeOffset.UtcNow,
+                    request.Targets.ToDictionary(t => t.ServiceId, t => t.Platform, StringComparer.Ordinal)), ct);
+            }
         }
     }
 }

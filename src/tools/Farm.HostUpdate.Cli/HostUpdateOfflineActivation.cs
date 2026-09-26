@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure.Services.HostUpdates;
+﻿using System.Text.Json;
+using Farm.Infrastructure.Services.HostUpdates;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -75,72 +76,93 @@ internal static class HostUpdateOfflineActivation
             return await FailAsync(output, args, HostUpdateCliExitCodes.Refused, requestError).ConfigureAwait(false);
         }
 
-        IHostUpdateExecutionLease? lease = HostUpdateCli.TryAcquireLock(provider);
-        if (lease is null)
+        HostUpdateReplayDecision replay;
+        try
+        {
+            replay = await ReadReplayDecisionAsync(configuration, candidate, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (HostUpdateCli.IsStateFailure(exception))
+        {
+            return await HostUpdateCli.EmitAsync(output, args.Json, HostUpdateCliExitCodes.StateUnreadable,
+                new HostUpdateCli.CliFailure(HostUpdateCli.StateFailureCode(exception), [])).ConfigureAwait(false);
+        }
+
+        if (replay.Disposition != HostUpdateReplayDisposition.Imported)
+        {
+            return await FailAsync(output, args, HostUpdateCliExitCodes.Refused,
+                "replay_" + replay.Disposition.ToString().ToLowerInvariant()).ConfigureAwait(false);
+        }
+
+        using (IHostUpdateExecutionLease? readinessLease = HostUpdateCli.TryAcquireLock(provider))
+        {
+            if (readinessLease is null)
+            {
+                return await FailAsync(output, args, HostUpdateCliExitCodes.LockHeld, "host_update_lock_held").ConfigureAwait(false);
+            }
+        }
+
+        try
+        {
+            using IServiceScope preflightScope = provider.CreateScope();
+            IServiceProvider scoped = preflightScope.ServiceProvider;
+            await scoped.GetRequiredService<IHostUpdateLocalImageVerifier>()
+                .VerifyTargetsAsync(request, cancellationToken).ConfigureAwait(false);
+            string? safetyError = await scoped.GetRequiredService<IHostUpdateOfflineActivationSafetyProbe>()
+                .ValidateSafeToExecuteAsync(request, cancellationToken).ConfigureAwait(false);
+            if (safetyError is not null)
+            {
+                return await FailAsync(output, args, HostUpdateCliExitCodes.Refused, safetyError).ConfigureAwait(false);
+            }
+        }
+        catch (Exception exception) when (exception is HostUpdatePreloadedImageVerificationException or HostUpdateApplyUnsupportedServiceException)
+        {
+            return await FailAsync(output, args, HostUpdateCliExitCodes.Refused, exception.Message).ConfigureAwait(false);
+        }
+        catch (InvalidOperationException exception)
+        {
+            return await FailAsync(output, args, HostUpdateCliExitCodes.Refused, "activation_prerequisite_unproven:" + exception.GetType().Name).ConfigureAwait(false);
+        }
+
+        HostUpdateExecutionResult result;
+        try
+        {
+            using IServiceScope executionScope = provider.CreateScope();
+            result = await executionScope.ServiceProvider.GetRequiredService<IHostUpdateExecutor>().ExecuteAsync(request, cancellationToken).ConfigureAwait(false);
+            if (result.State == HostUpdateExecutionState.Completed)
+            {
+                IInstalledHostStateStore installedStore = executionScope.ServiceProvider.GetRequiredService<IInstalledHostStateStore>();
+                InstalledHostState? installed = await installedStore.ReadAsync(cancellationToken).ConfigureAwait(false);
+                if (!InstalledStateMatches(request, installed))
+                {
+                    return await FailAsync(output, args, HostUpdateCliExitCodes.Refused, "activation_not_applied").ConfigureAwait(false);
+                }
+            }
+        }
+        catch (TimeoutException)
         {
             return await FailAsync(output, args, HostUpdateCliExitCodes.LockHeld, "host_update_lock_held").ConfigureAwait(false);
         }
-
-        using (lease)
+        catch (Exception exception) when (HostUpdateCli.IsStateFailure(exception))
         {
-            HostUpdateReplayDecision replay;
+            return await HostUpdateCli.EmitAsync(output, args.Json, HostUpdateCliExitCodes.StateUnreadable,
+                new HostUpdateCli.CliFailure(HostUpdateCli.StateFailureCode(exception), [])).ConfigureAwait(false);
+        }
+
+        if (result.State == HostUpdateExecutionState.Completed)
+        {
             try
             {
-                HostStateOptions? hostState = configuration.GetSection(HostStateOptions.SectionName).Get<HostStateOptions>();
-                if (hostState is null || !hostState.Enabled || string.IsNullOrWhiteSpace(hostState.RootPath))
+                HostUpdateReplayDecision recorded = await MarkActivatedAsync(configuration, candidate, cancellationToken).ConfigureAwait(false);
+                if (recorded.Disposition != HostUpdateReplayDisposition.Accepted)
                 {
-                    return await FailAsync(output, args, HostUpdateCliExitCodes.ConfigurationUnproven, "host_state_not_enabled").ConfigureAwait(false);
+                    return await FailAsync(output, args, HostUpdateCliExitCodes.Refused, "activation_replay_record_failed").ConfigureAwait(false);
                 }
-
-                HostStatePath paths = new(Options.Create(hostState));
-                using var anchor = new FileHostUpdateReplayAnchor(paths);
-                using var store = new FileHostUpdateReplayStore(paths.Root, anchor);
-                replay = await store.DecideAsync(candidate, HostUpdateReplayIntent.Activate, cancellationToken).ConfigureAwait(false);
             }
             catch (Exception exception) when (HostUpdateCli.IsStateFailure(exception))
             {
                 return await HostUpdateCli.EmitAsync(output, args.Json, HostUpdateCliExitCodes.StateUnreadable,
                     new HostUpdateCli.CliFailure(HostUpdateCli.StateFailureCode(exception), [])).ConfigureAwait(false);
             }
-
-            bool imported = replay.Disposition == HostUpdateReplayDisposition.Imported ||
-                (replay.Disposition == HostUpdateReplayDisposition.Accepted && replay.Reused);
-            if (!imported)
-            {
-                return await FailAsync(output, args, HostUpdateCliExitCodes.Refused,
-                    "replay_" + replay.Disposition.ToString().ToLowerInvariant()).ConfigureAwait(false);
-            }
-
-            try
-            {
-                await provider.GetRequiredService<IHostUpdateLocalImageVerifier>()
-                    .VerifyTargetsAsync(request, cancellationToken).ConfigureAwait(false);
-                string? safetyError = await provider.GetRequiredService<IHostUpdateOfflineActivationSafetyProbe>()
-                    .ValidateSafeToExecuteAsync(request, cancellationToken).ConfigureAwait(false);
-                if (safetyError is not null)
-                {
-                    return await FailAsync(output, args, HostUpdateCliExitCodes.Refused, safetyError).ConfigureAwait(false);
-                }
-            }
-            catch (Exception exception) when (exception is HostUpdatePreloadedImageVerificationException or HostUpdateApplyUnsupportedServiceException)
-            {
-                return await FailAsync(output, args, HostUpdateCliExitCodes.Refused, exception.Message).ConfigureAwait(false);
-            }
-            catch (InvalidOperationException exception)
-            {
-                return await FailAsync(output, args, HostUpdateCliExitCodes.Refused, "activation_prerequisite_unproven:" + exception.GetType().Name).ConfigureAwait(false);
-            }
-        }
-
-        HostUpdateExecutionResult result;
-        try
-        {
-            result = await provider.GetRequiredService<IHostUpdateExecutor>().ExecuteAsync(request, cancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception exception) when (HostUpdateCli.IsStateFailure(exception))
-        {
-            return await HostUpdateCli.EmitAsync(output, args.Json, HostUpdateCliExitCodes.StateUnreadable,
-                new HostUpdateCli.CliFailure(HostUpdateCli.StateFailureCode(exception), [])).ConfigureAwait(false);
         }
 
         int exitCode = result.State == HostUpdateExecutionState.Completed
@@ -202,6 +224,89 @@ internal static class HostUpdateOfflineActivation
     private static Task<int> FailAsync(TextWriter output, HostUpdateCliArguments args, int exitCode, string code) =>
         HostUpdateCli.EmitAsync(output, args.Json, exitCode, new HostUpdateCli.CliFailure(code, []));
 
+    internal static async Task<HostUpdateReplayDecision> ReadReplayDecisionAsync(
+        IConfiguration configuration,
+        VerifiedHostUpdateCandidate candidate,
+        CancellationToken cancellationToken)
+    {
+        using FileHostUpdateReplayStore store = ReplayStore(configuration, out FileHostUpdateReplayAnchor anchor);
+        using (anchor)
+        {
+            return await store.ReadIdentityAsync(candidate, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    internal static async Task<HostUpdateReplayDecision> MarkActivatedAsync(
+        IConfiguration configuration,
+        VerifiedHostUpdateCandidate candidate,
+        CancellationToken cancellationToken)
+    {
+        using FileHostUpdateReplayStore store = ReplayStore(configuration, out FileHostUpdateReplayAnchor anchor);
+        using (anchor)
+        {
+            return await store.MarkActivatedAsync(candidate, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    internal static VerifiedHostUpdateCandidate CandidateFromRequest(HostUpdateExecutionRequest request)
+    {
+        Dictionary<string, string> digests = request.Targets.ToDictionary(t => t.ServiceId, t => t.ChildDigest, StringComparer.Ordinal);
+        string Digest(string serviceId) => digests.TryGetValue(serviceId, out string? digest) ? digest : string.Empty;
+        return new VerifiedHostUpdateCandidate(
+            request.ReleaseId,
+            request.SourceCommit,
+            request.AuthenticatedSequence,
+            request.ManifestDigest,
+            request.Channel == HostUpdateExecutionChannel.Stable ? "stable" : "insider",
+            CryptographicallyVerified: true,
+            CompatibilityReady: true,
+            InstallationAvailable: true,
+            SafetyPassed: true,
+            MaintenanceWindowOpen: true,
+            IsNewer: true,
+            new HostUpdatePlatformDigests(
+                Digest(ServiceIds[0]),
+                Digest(ServiceIds[1]),
+                Digest(ServiceIds[2]),
+                Digest(ServiceIds[3]),
+                Digest(ServiceIds[4]),
+                Digest(ServiceIds[5])),
+            TrustRoot: request.TrustRoot)
+        {
+            HostPlatform = request.HostPlatform,
+        };
+    }
+
+    private static FileHostUpdateReplayStore ReplayStore(IConfiguration configuration, out FileHostUpdateReplayAnchor anchor)
+    {
+        HostStateOptions? hostState = configuration.GetSection(HostStateOptions.SectionName).Get<HostStateOptions>();
+        if (hostState is null || !hostState.Enabled || string.IsNullOrWhiteSpace(hostState.RootPath))
+        {
+            throw new InvalidDataException("host_state_not_enabled");
+        }
+
+        HostStatePath paths = new(Options.Create(hostState));
+        anchor = new FileHostUpdateReplayAnchor(paths);
+        return new FileHostUpdateReplayStore(paths.Root, anchor);
+    }
+
+    private static bool InstalledStateMatches(HostUpdateExecutionRequest request, InstalledHostState? installed)
+    {
+        if (installed is null ||
+            !string.Equals(installed.ReleaseId, request.ReleaseId, StringComparison.Ordinal) ||
+            !string.Equals(installed.ManifestDigest, request.ManifestDigest, StringComparison.Ordinal) ||
+            installed.ServicePlatforms is null)
+        {
+            return false;
+        }
+
+        Dictionary<string, string> expectedDigests = request.Targets.ToDictionary(t => t.ServiceId, t => t.ChildDigest, StringComparer.Ordinal);
+        Dictionary<string, string> expectedPlatforms = request.Targets.ToDictionary(t => t.ServiceId, t => t.Platform, StringComparer.Ordinal);
+        return expectedDigests.Count == installed.ServiceDigests.Count &&
+            expectedDigests.All(pair => installed.ServiceDigests.TryGetValue(pair.Key, out string? digest) && string.Equals(digest, pair.Value, StringComparison.Ordinal)) &&
+            expectedPlatforms.All(pair => installed.ServicePlatforms.TryGetValue(pair.Key, out string? platform) && string.Equals(platform, pair.Value, StringComparison.Ordinal));
+    }
+
     private static bool IsCanonicalDigest(string value) =>
         value.StartsWith("sha256:", StringComparison.Ordinal) &&
         value.Length == 71 &&
@@ -221,24 +326,78 @@ internal interface IHostUpdateOfflineActivationSafetyProbe
     Task<string?> ValidateSafeToExecuteAsync(HostUpdateExecutionRequest request, CancellationToken cancellationToken);
 }
 
+internal sealed class HostUpdateOfflineActivationStartGuard(
+    IConfiguration configuration,
+    IHostUpdateExecutionJournal journal,
+    IHostUpdateOfflineActivationSafetyProbe safetyProbe) : IHostUpdateExecutionStartGuard
+{
+    public async Task<string?> ValidateAsync(HostUpdateExecutionRequest request, CancellationToken cancellationToken)
+    {
+        IReadOnlyList<HostUpdateExecutionActivity> activities = journal.Read(request.ReleaseId);
+        HostUpdateExecutionState? current = activities.Count == 0 ? null : activities[^1].State;
+        if (current == HostUpdateExecutionState.Completed)
+        {
+            return "activation_already_completed";
+        }
+
+        if (current == HostUpdateExecutionState.RecoveryRequired)
+        {
+            return "activation_recovery_required";
+        }
+
+        HostUpdateReplayDecision replay = await HostUpdateOfflineActivation.ReadReplayDecisionAsync(
+            configuration,
+            HostUpdateOfflineActivation.CandidateFromRequest(request),
+            cancellationToken).ConfigureAwait(false);
+        if (replay.Disposition != HostUpdateReplayDisposition.Imported)
+        {
+            return "replay_" + replay.Disposition.ToString().ToLowerInvariant();
+        }
+
+        return await safetyProbe.ValidateSafeToExecuteAsync(request, cancellationToken).ConfigureAwait(false);
+    }
+}
+
 internal sealed class DockerComposeApiAbsenceProbe(
     IHostUpdateProcessRunner processRunner,
     IHostUpdateExecutableResolver executableResolver,
     HostUpdateExecutionOptions options) : IHostUpdateOfflineActivationSafetyProbe
 {
+    private static readonly IReadOnlySet<string> WriterServiceIds = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "api",
+        "slicer-host",
+        "monolith",
+    };
+
+    private static readonly HashSet<string> AllowedInactiveStates = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "exited",
+        "dead",
+        "removed",
+        "not created",
+    };
+
     public async Task<string?> ValidateSafeToExecuteAsync(HostUpdateExecutionRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
-        if (!options.ActiveServiceIds.Contains("api", StringComparer.Ordinal))
+        string[] activeWriterIds = [.. options.ActiveServiceIds.Where(WriterServiceIds.Contains).Order(StringComparer.Ordinal)];
+        if (activeWriterIds.Length == 0)
         {
             return null;
         }
 
-        HostUpdateServiceMappingOptions? apiMapping = options.ServiceMappings
-            .FirstOrDefault(mapping => string.Equals(mapping.ServiceId, "api", StringComparison.Ordinal));
-        if (apiMapping is null)
+        Dictionary<string, string> composeServicesByServiceId = [];
+        foreach (string serviceId in activeWriterIds)
         {
-            return "api_absence_unproven:service_mapping_missing";
+            HostUpdateServiceMappingOptions? mapping = options.ServiceMappings
+                .FirstOrDefault(candidate => string.Equals(candidate.ServiceId, serviceId, StringComparison.Ordinal));
+            if (mapping is null)
+            {
+                return "writer_absence_unproven:service_mapping_missing:" + serviceId;
+            }
+
+            composeServicesByServiceId[serviceId] = mapping.ComposeServiceName;
         }
 
         List<string> arguments = ["compose"];
@@ -251,10 +410,10 @@ internal sealed class DockerComposeApiAbsenceProbe(
         arguments.Add("-p");
         arguments.Add(options.ComposeProjectName);
         arguments.Add("ps");
-        arguments.Add("--services");
-        arguments.Add("--filter");
-        arguments.Add("status=running");
-        arguments.Add(apiMapping.ComposeServiceName);
+        arguments.Add("-a");
+        arguments.Add("--format");
+        arguments.Add("json");
+        arguments.AddRange(composeServicesByServiceId.Values);
 
         HostUpdateProcessResult result;
         try
@@ -272,13 +431,92 @@ internal sealed class DockerComposeApiAbsenceProbe(
 
         if (!result.Succeeded)
         {
-            return "api_absence_unproven:compose_ps_failed";
+            return "writer_absence_unproven:compose_ps_failed";
         }
 
-        string[] runningServices = result.StandardOutput
-            .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        return runningServices.Any(service => string.Equals(service, apiMapping.ComposeServiceName, StringComparison.Ordinal))
-            ? "api_service_running"
-            : null;
+        return ValidateComposeState(result.StandardOutput, composeServicesByServiceId);
+    }
+
+    internal static string? ValidateComposeState(string standardOutput, IReadOnlyDictionary<string, string> composeServicesByServiceId)
+    {
+        Dictionary<string, string> serviceIdsByComposeName = composeServicesByServiceId.ToDictionary(
+            pair => pair.Value,
+            pair => pair.Key,
+            StringComparer.Ordinal);
+        try
+        {
+            string trimmed = standardOutput.Trim();
+            if (string.IsNullOrWhiteSpace(trimmed))
+            {
+                return null;
+            }
+
+            if (trimmed.StartsWith('['))
+            {
+                using JsonDocument document = JsonDocument.Parse(trimmed);
+                if (document.RootElement.ValueKind != JsonValueKind.Array)
+                {
+                    return "writer_absence_unproven:compose_ps_unparseable";
+                }
+
+                foreach (JsonElement entry in document.RootElement.EnumerateArray())
+                {
+                    string? error = ValidateEntry(entry, serviceIdsByComposeName);
+                    if (error is not null)
+                    {
+                        return error;
+                    }
+                }
+            }
+            else
+            {
+                foreach (string line in standardOutput.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                {
+                    using JsonDocument document = JsonDocument.Parse(line);
+                    string? error = ValidateEntry(document.RootElement, serviceIdsByComposeName);
+                    if (error is not null)
+                    {
+                        return error;
+                    }
+                }
+            }
+
+            return null;
+        }
+        catch (JsonException)
+        {
+            return "writer_absence_unproven:compose_ps_unparseable";
+        }
+    }
+
+    private static string? ValidateEntry(JsonElement entry, Dictionary<string, string> serviceIdsByComposeName)
+    {
+        if (entry.ValueKind != JsonValueKind.Object ||
+            !TryGetString(entry, "Service", out string? composeService) ||
+            !TryGetString(entry, "State", out string? state))
+        {
+            return "writer_absence_unproven:compose_ps_unparseable";
+        }
+
+        if (!serviceIdsByComposeName.TryGetValue(composeService!, out string? serviceId))
+        {
+            return null;
+        }
+
+        return AllowedInactiveStates.Contains(state!)
+            ? null
+            : "writer_service_active:" + serviceId + ":" + state;
+    }
+
+    private static bool TryGetString(JsonElement entry, string propertyName, out string? value)
+    {
+        if (entry.TryGetProperty(propertyName, out JsonElement element) && element.ValueKind == JsonValueKind.String)
+        {
+            value = element.GetString();
+            return !string.IsNullOrWhiteSpace(value);
+        }
+
+        value = null;
+        return false;
     }
 }

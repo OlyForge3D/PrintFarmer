@@ -205,8 +205,42 @@ public sealed class HostUpdateImageApplierTests
         runner.Calls.Should().ContainSingle();
     }
 
-    private static string InspectJson(string image, string os, string architecture) =>
-        $$"""{"RepoDigests":["{{image}}"],"Os":"{{os}}","Architecture":"{{architecture}}"}""";
+    [Fact]
+    public async Task RunAsync_PreloadedMode_AcceptsArm64V8VariantWhenManifestOmitsVariant()
+    {
+        string digest = "sha256:" + new string('a', 64);
+        string image = $"ghcr.io/olyforge3d/printfarmer-api@{digest}";
+        var runner = new RecordingProcessRunner(call =>
+            call.Arguments.Contains("inspect")
+                ? new HostUpdateProcessResult(0, InspectJson(image, "linux", "arm64", "v8"), string.Empty)
+                : new HostUpdateProcessResult(0, "ok", string.Empty));
+        var applier = new HostUpdateImageApplier(
+            runner,
+            new BareNameResolver(),
+            ["compose.yml"],
+            "printfarmer",
+            new Dictionary<string, HostUpdateApplyServiceMapping>(StringComparer.Ordinal) { ["api"] = ApiMapping },
+            TimeSpan.FromSeconds(30));
+        var request = new HostUpdateExecutionRequest(
+            "release-1",
+            1,
+            "sha256:" + new string('b', 64),
+            new string('c', 40),
+            HostUpdateExecutionChannel.Stable,
+            [new HostUpdateExecutionTarget("api", "linux-arm64", digest)])
+        {
+            ImageSourceMode = HostUpdateImageSourceMode.PreloadedLocal,
+        };
+
+        await applier.RunAsync(request, CancellationToken.None);
+
+        runner.Calls.Should().HaveCount(2);
+    }
+
+    private static string InspectJson(string image, string os, string architecture, string? variant = null) =>
+        variant is null
+            ? $$"""{"RepoDigests":["{{image}}"],"Os":"{{os}}","Architecture":"{{architecture}}"}"""
+            : $$"""{"RepoDigests":["{{image}}"],"Os":"{{os}}","Architecture":"{{architecture}}","Variant":"{{variant}}"}""";
 
     private sealed record ProcessCall(string FileName, IReadOnlyList<string> Arguments, IReadOnlyDictionary<string, string> Environment);
 
