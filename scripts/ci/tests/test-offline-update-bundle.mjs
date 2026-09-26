@@ -2339,6 +2339,28 @@ test('a bundle without prior images records priorImages false and prior load ref
     assert.equal(record.priorImages, false);
     assert.throws(() => loadPrior(context, () => assert.fail('nothing may be loaded')),
       /holds no verified prior recovery image set/);
+    assert.deepEqual(loadPrior(context, () => assert.fail('nothing may be loaded'), { missing: 'skip' }),
+      { loaded: [], skipped: 'no_packaged_prior_images' }, 'the recovery wrapper falls back to the engine cache');
+    assert.throws(() => loadPrior(context, () => assert.fail('nothing may be loaded'), { missing: 'ignore' }),
+      /--missing must be refuse or skip/);
+  } finally {
+    context.cleanup();
+  }
+});
+
+test('skipping absent prior images never skips a claimed prior image set', () => {
+  const context = priorImageFixture('stable');
+  try {
+    assemble(context, context.withPrior({ priorImages: context.priorLayout }));
+    verify(context);
+    const recordPath = join(context.staging, 'offline-bundle-verification.json');
+    const record = JSON.parse(readFileSync(recordPath, 'utf8'));
+    writeFileSync(recordPath, JSON.stringify({ ...record, priorImages: [] }));
+    assert.throws(() => loadPrior(context, () => assert.fail('nothing may be loaded'), { missing: 'skip' }),
+      /holds no verified prior recovery image set/);
+    writeFileSync(recordPath, JSON.stringify(record));
+    const loads = [];
+    assert.equal(loadPrior(context, recordingDocker(loads), { missing: 'skip' }).loaded.length, priorImageMembers.length);
   } finally {
     context.cleanup();
   }
@@ -2465,6 +2487,7 @@ test('the command line exposes prior images and prior load without bypasses', ()
     '--prior-images', 'p']).options['prior-images'], 'p');
   assert.deepEqual(parseArguments(['load-prior', '--staging', 's', '--channel', 'stable', '--trusted-root', 't']).options,
     { staging: 's', channel: 'stable', 'trusted-root': 't' });
+  assert.equal(parseArguments(['load-prior', '--staging', 's', '--missing', 'skip']).options.missing, 'skip');
   for (const argv of [['load-prior', '--staging', 's', '--skip-verify', 'x'], ['load-prior', '--staging', 's', '--force', 'x'],
     ['load-prior', '--prior-images', 'p'], ['verify', '--prior-images', 'p']]) {
     assert.throws(() => parseArguments(argv), /usage/, argv.join(' '));

@@ -134,12 +134,36 @@ FAKE_EXIT=6 run_wrapper activate --config "$CONFIG" --staging "$ACT_STAGING" --c
 
 REC_BACKUP="$TEST_ROOT/protected-backup.json"
 REC_DRIFT="drift-0123456789abcdef0123456789abcdef"
+# Issue #3094: a confirmed recover-offline first runs the bundle tool's load-prior with a fixed vector.
+REC_NODE="$TEST_ROOT/recover-fake-node"
+REC_NODE_LOG="$TEST_ROOT/recover-node.log"
+REC_TOOL="$TEST_ROOT/recover-offline-update-bundle.mjs"
+: > "$REC_TOOL"
+cat > "$REC_NODE" <<EOF
+#!/bin/bash
+printf '%s\n' "\$@" > "$REC_NODE_LOG"
+exit "\${FAKE_NODE_EXIT:-0}"
+EOF
+chmod +x "$REC_NODE"
+export PRINTFARMER_NODE="$REC_NODE" PRINTFARMER_OFFLINE_BUNDLE_TOOL="$REC_TOOL"
+rm -f "$REC_NODE_LOG"
 expect_passthrough "recover-offline passes through to offline-recover in canonical order" \
     "$(printf '%s\n' "$dll" --config "$CONFIG" offline-recover --staging "$ACT_STAGING" --channel stable --trusted-root "$ACT_ROOT" --protected-backup "$REC_BACKUP" --release stable:1.2.3 --preview --json)" \
     recover-offline --json --preview --release stable:1.2.3 --protected-backup "$REC_BACKUP" --config "$CONFIG" --staging "$ACT_STAGING" --channel stable --trusted-root "$ACT_ROOT"
+[[ ! -f "$REC_NODE_LOG" ]] && pass "recover-offline preview never loads prior images" || fail "recover-offline preview never loads prior images"
 expect_passthrough "recover-offline forwards confirm, request id, drift token and cosign" \
     "$(printf '%s\n' "$dll" --config "$CONFIG" offline-recover --staging "$ACT_STAGING" --channel insider --trusted-root "$ACT_ROOT" --cosign "$ACT_COSIGN" --protected-backup "$REC_BACKUP" --release insider:1.2.3 --request-id req-1 --confirm insider:1.2.3 --reapprove-drift "$REC_DRIFT")" \
     recover-offline --config "$CONFIG" --staging "$ACT_STAGING" --channel insider --trusted-root "$ACT_ROOT" --cosign "$ACT_COSIGN" --protected-backup "$REC_BACKUP" --release insider:1.2.3 --request-id req-1 --confirm insider:1.2.3 --reapprove-drift "$REC_DRIFT"
+if [[ "$(cat "$REC_NODE_LOG" 2>/dev/null)" == "$(printf '%s\n' "$REC_TOOL" load-prior --staging "$ACT_STAGING" --channel insider --trusted-root "$ACT_ROOT" --missing skip --cosign "$ACT_COSIGN")" ]]; then
+    pass "recover-offline confirm loads prior images with a fixed argument vector"
+else
+    fail "recover-offline confirm loads prior images with a fixed argument vector (args: $(tr '\n' ' ' < "$REC_NODE_LOG" 2>/dev/null || true))"
+fi
+code=0
+FAKE_NODE_EXIT=1 run_wrapper recover-offline --config "$CONFIG" --staging "$ACT_STAGING" --channel stable --trusted-root "$ACT_ROOT" --protected-backup "$REC_BACKUP" --release stable:1.2.3 --confirm stable:1.2.3 || code=$?
+[[ "$code" -eq 6 && ! -f "$ARGS_LOG" ]] && pass "recover-offline refuses (6) before the CLI when prior images cannot be loaded" \
+    || fail "recover-offline refuses (6) before the CLI when prior images cannot be loaded (exit $code)"
+expect_usage "recover-offline confirm refuses a relative PRINTFARMER_NODE" env PRINTFARMER_NODE=node bash "$WRAPPER" recover-offline --config "$CONFIG" --staging "$ACT_STAGING" --channel stable --trusted-root "$ACT_ROOT" --protected-backup "$REC_BACKUP" --release stable:1.2.3 --confirm stable:1.2.3
 expect_usage "recover-offline requires protected backup" recover-offline --config "$CONFIG" --staging "$ACT_STAGING" --channel stable --trusted-root "$ACT_ROOT" --release stable:1.2.3 --preview
 expect_usage "recover-offline refuses relative protected backup" recover-offline --config "$CONFIG" --staging "$ACT_STAGING" --channel stable --trusted-root "$ACT_ROOT" --protected-backup backup.json --release stable:1.2.3 --preview
 expect_usage "recover-offline refuses invalid release" recover-offline --config "$CONFIG" --staging "$ACT_STAGING" --channel stable --trusted-root "$ACT_ROOT" --protected-backup "$REC_BACKUP" --release 'stable:1;rm' --preview
@@ -149,6 +173,7 @@ expect_usage "recover-offline refuses unsupported argument" recover-offline --co
 code=0
 FAKE_EXIT=6 run_wrapper recover-offline --config "$CONFIG" --staging "$ACT_STAGING" --channel stable --trusted-root "$ACT_ROOT" --protected-backup "$REC_BACKUP" --release stable:1.2.3 --preview || code=$?
 [[ "$code" -eq 6 ]] && pass "recover-offline preserves CLI refused exit code" || fail "recover-offline preserves CLI refused exit code (exit $code)"
+unset PRINTFARMER_NODE PRINTFARMER_OFFLINE_BUNDLE_TOOL
 
 code=0
 PRINTFARMER_DOTNET="$FAKE_DOTNET" bash "$WRAPPER" --config "$CONFIG" status > /dev/null 2>&1 || code=$?

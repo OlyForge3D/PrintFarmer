@@ -1234,9 +1234,17 @@ export function loadVerifiedImages({ staging, channel, trustedRoot, run, limits 
 // re-authenticated offline, the prior set must be same-channel and strictly older than the target,
 // and the required images, digests and platforms come from the prior manifest alone.
 // ---------------------------------------------------------------------------------------------
+// `missing: 'skip'` (the host-update wrapper's recover-offline path) returns without loading when the
+// verification record claims no packaged prior images, so recovery falls back to the engine cache,
+// which the CLI still verifies by digest and platform before rolling back; any other record shape
+// is refused as usual.
 export function loadPriorImages({ staging, channel, trustedRoot, run, limits = offlineBundleLimits,
-  imageLimits = imageArchiveLimits }) {
+  imageLimits = imageArchiveLimits, missing = 'refuse' }) {
+  requireThat(missing === 'refuse' || missing === 'skip', '--missing must be refuse or skip');
   const { directory, root, record } = openLoadStaging({ staging, channel, trustedRoot, run, limits });
+  if (missing === 'skip' && (record.priorImages === false || record.priorImages === undefined)) {
+    return { loaded: [], skipped: 'no_packaged_prior_images' };
+  }
   requireThat(Array.isArray(record.priorImages) && record.priorImages.length > 0 && record.priorRecoverySet,
     'Staging directory holds no verified prior recovery image set');
   let target;
@@ -1619,7 +1627,7 @@ const usage = `usage:
   node scripts/ci/offline-update-bundle.mjs load --staging <verified-dir> --channel <stable|insider>
     --trusted-root <trusted_root.json> [--cosign <path>] [--docker <path>]
   node scripts/ci/offline-update-bundle.mjs load-prior --staging <verified-dir> --channel <stable|insider>
-    --trusted-root <trusted_root.json> [--cosign <path>] [--docker <path>]
+    --trusted-root <trusted_root.json> [--missing <refuse|skip>] [--cosign <path>] [--docker <path>]
   node scripts/ci/offline-update-bundle.mjs import --bundle <bundle.tar> --channel <stable|insider> --version <v>
     --trusted-root <trusted_root.json> --trusted-root-approval <approval.json> --staging <new-dir>
     --records <decision-records-dir> --operator <id> --config <host-update.json>
@@ -1634,7 +1642,7 @@ export function parseArguments(argv) {
     verify: ['bundle', 'channel', 'trusted-root', 'staging', 'version', 'prior-recovery-set', 'protected-backup',
       'cosign'],
     load: ['staging', 'channel', 'trusted-root', 'cosign', 'docker'],
-    'load-prior': ['staging', 'channel', 'trusted-root', 'cosign', 'docker'],
+    'load-prior': ['staging', 'channel', 'trusted-root', 'missing', 'cosign', 'docker'],
     import: ['bundle', 'channel', 'version', 'trusted-root', 'trusted-root-approval', 'staging', 'records', 'operator',
       'config', 'host-update-cli', 'dotnet', 'prior-recovery-set', 'protected-backup', 'cosign', 'docker'],
   };
@@ -1712,7 +1720,7 @@ async function main(argv) {
       trustedRoot: options['trusted-root'], run }), undefined, 2));
   } else if (command === 'load-prior') {
     console.log(JSON.stringify(loadPriorImages({ staging: options.staging, channel: options.channel,
-      trustedRoot: options['trusted-root'], run }), undefined, 2));
+      trustedRoot: options['trusted-root'], run, missing: options.missing ?? 'refuse' }), undefined, 2));
   } else if (command === 'import') {
     const { record, path } = importOfflineBundle({ bundle: options.bundle, channel: options.channel,
       version: options.version, trustedRoot: options['trusted-root'],
