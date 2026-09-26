@@ -196,7 +196,7 @@ test('expectedCellOutcome maps every fail-closed cell', () => {
 test('unredacted secrets anywhere in the record are rejected', () => {
   const cases = [
     ['tools.cli', ['https://admin', 'hunter2@registry.local/v2'].join(':'), 'URL userinfo'],
-    ['tools.cosign', '-----BEGIN PRIVATE KEY-----', 'PEM block'],
+    ['tools.cosign', ['-----BEGIN', 'PRIVATE KEY-----'].join(' '), 'PEM block'],
     ['tools.node', `ghp_${'A'.repeat(36)}`, 'GitHub token'],
     ['tools.shell', `eyJ${'a'.repeat(12)}.${'b'.repeat(12)}.${'c'.repeat(12)}`, 'JWT'],
     ['host.kernel', 'Password=s3cret', 'secret assignment'],
