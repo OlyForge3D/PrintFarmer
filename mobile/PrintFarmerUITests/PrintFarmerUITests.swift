@@ -1215,7 +1215,7 @@ final class UIWaitBudgetTests: XCTestCase {
             pause: { clock += 0.2 }
         )
         XCTAssertNil(missing, "An identifier-less title node must never be captured as the stable identity")
-        XCTAssertEqual(expiring.shellFailure, "navigation deadline exhausted")
+        XCTAssertEqual(expiring.shellFailure, "snapshot exceeded navigation deadline")
         XCTAssertEqual(expiring.remaining, 0)
     }
 
