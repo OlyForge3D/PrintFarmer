@@ -1147,6 +1147,9 @@ public sealed partial class HostUpdateCliOfflineActivateTests : IDisposable, IAs
 
         public List<ProcessCall> Calls { get; } = [];
 
+        /// <summary>Writer services reported running (with their image) until the first compose up replaces them.</summary>
+        public Dictionary<string, string> RunningWriterImages { get; } = new(StringComparer.Ordinal);
+
         private readonly Dictionary<string, string> _digestsByService = new(StringComparer.Ordinal);
 
         public IEnumerable<ProcessCall> ComposeUpCalls => Calls.Where(call =>
@@ -1202,7 +1205,10 @@ public sealed partial class HostUpdateCliOfflineActivateTests : IDisposable, IAs
 
             if (arguments.Count > 0 && string.Equals(arguments[0], "compose", StringComparison.Ordinal) && arguments.Contains("ps"))
             {
-                string output = string.Join('\n', Services.Values.Select(service => $$"""{"Service":"{{service.Compose}}","State":"exited"}"""));
+                string output = string.Join('\n', Services.Select(pair =>
+                    RunningWriterImages.TryGetValue(pair.Key, out string? image) && !ComposeUpCalls.Any()
+                        ? $$"""{"Service":"{{pair.Value.Compose}}","State":"running","Image":"{{image}}"}"""
+                        : $$"""{"Service":"{{pair.Value.Compose}}","State":"exited"}"""));
                 return Task.FromResult(new HostUpdateProcessResult(0, output, string.Empty));
             }
 

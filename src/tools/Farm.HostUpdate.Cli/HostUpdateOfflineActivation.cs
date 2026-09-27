@@ -42,6 +42,11 @@ internal static class HostUpdateOfflineActivation
             return await FailAsync(output, args, HostUpdateCliExitCodes.Refused, signatureError).ConfigureAwait(false);
         }
 
+        if (provider.GetService<HostUpdatePriorReleaseContext>() is { } priorContext)
+        {
+            await HostUpdatePriorReleaseContext.AuthenticateAsync(priorContext, args, staged!, cancellationToken).ConfigureAwait(false);
+        }
+
         HostUpdateExecutionRequest request;
         VerifiedHostUpdateCandidate candidate;
         try
@@ -477,7 +482,9 @@ internal sealed class HostUpdateOfflineActivationCompletionHook(
 internal sealed class DockerComposeApiAbsenceProbe(
     IHostUpdateProcessRunner processRunner,
     IHostUpdateExecutableResolver executableResolver,
-    HostUpdateExecutionOptions options) : IHostUpdateOfflineActivationSafetyProbe
+    HostUpdateExecutionOptions options,
+    HostUpdatePriorReleaseContext? priorContext = null,
+    IInstalledHostStateStore? installedStateStore = null) : IHostUpdateOfflineActivationSafetyProbe
 {
     private static readonly IReadOnlySet<string> WriterServiceIds = new HashSet<string>(StringComparer.Ordinal)
     {
@@ -497,24 +504,121 @@ internal sealed class DockerComposeApiAbsenceProbe(
     public async Task<string?> ValidateSafeToExecuteAsync(HostUpdateExecutionRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
-        string[] activeWriterIds = [.. options.ActiveServiceIds.Where(WriterServiceIds.Contains).Order(StringComparer.Ordinal)];
-        if (activeWriterIds.Length == 0)
+        priorContext?.RecordTolerated(new Dictionary<string, string[]>(StringComparer.Ordinal));
+        if (!TryResolveWriterMappings(out Dictionary<string, HostUpdateServiceMappingOptions> mappings, out string? mappingError))
+        {
+            return mappingError;
+        }
+
+        if (mappings.Count == 0)
         {
             return null;
         }
 
-        Dictionary<string, string> composeServicesByServiceId = [];
-        foreach (string serviceId in activeWriterIds)
+        Func<string, string?, bool>? tolerate = await BuildPriorReleaseToleranceAsync(request, mappings, cancellationToken).ConfigureAwait(false);
+        Dictionary<string, List<string>> tolerated = new(StringComparer.Ordinal);
+        string? error = await ObserveWritersAsync(mappings, tolerate, tolerated, cancellationToken).ConfigureAwait(false);
+        if (error is null && priorContext is not null)
+        {
+            priorContext.RecordTolerated(tolerated.ToDictionary(pair => pair.Key, pair => pair.Value.ToArray(), StringComparer.Ordinal));
+        }
+
+        return error;
+    }
+
+    /// <summary>
+    /// Re-observes the writers after the fence closed admission: every running writer must be one
+    /// the absence probe tolerated, still on exactly the image it was tolerated on. Returns null
+    /// only when that is proven; a new, re-imaged or unobservable writer returns a reason.
+    /// </summary>
+    internal async Task<string?> RecheckToleratedWritersAsync(CancellationToken cancellationToken)
+    {
+        if (!TryResolveWriterMappings(out Dictionary<string, HostUpdateServiceMappingOptions> mappings, out string? mappingError))
+        {
+            return mappingError;
+        }
+
+        if (mappings.Count == 0)
+        {
+            return null;
+        }
+
+        IReadOnlyDictionary<string, string[]> known = priorContext?.ToleratedWriters ?? new Dictionary<string, string[]>();
+        return await ObserveWritersAsync(
+            mappings,
+            (serviceId, image) => image is not null && known.TryGetValue(serviceId, out string[]? images) && images.Contains(image, StringComparer.Ordinal),
+            tolerated: null,
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private bool TryResolveWriterMappings(out Dictionary<string, HostUpdateServiceMappingOptions> mappings, out string? error)
+    {
+        mappings = new Dictionary<string, HostUpdateServiceMappingOptions>(StringComparer.Ordinal);
+        foreach (string serviceId in options.ActiveServiceIds.Where(WriterServiceIds.Contains).Order(StringComparer.Ordinal))
         {
             HostUpdateServiceMappingOptions? mapping = options.ServiceMappings
                 .FirstOrDefault(candidate => string.Equals(candidate.ServiceId, serviceId, StringComparison.Ordinal));
             if (mapping is null)
             {
-                return "writer_absence_unproven:service_mapping_missing:" + serviceId;
+                error = "writer_absence_unproven:service_mapping_missing:" + serviceId;
+                return false;
             }
 
-            composeServicesByServiceId[serviceId] = mapping.ComposeServiceName;
+            mappings[serviceId] = mapping;
         }
+
+        error = null;
+        return true;
+    }
+
+    /// <summary>
+    /// A running writer is tolerated only as the exact authenticated prior release: the bundle's
+    /// signed prior set verified offline, the installed host state binds to it exactly, and the
+    /// container runs the installed preloaded pin. Installed state alone is never sufficient.
+    /// </summary>
+    private async Task<Func<string, string?, bool>?> BuildPriorReleaseToleranceAsync(
+        HostUpdateExecutionRequest request,
+        Dictionary<string, HostUpdateServiceMappingOptions> mappings,
+        CancellationToken cancellationToken)
+    {
+        if (priorContext?.Prior is not { } prior || installedStateStore is null)
+        {
+            return null;
+        }
+
+        InstalledHostState? installed;
+        try
+        {
+            installed = await installedStateStore.ReadAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return null;
+        }
+
+        if (HostUpdateOfflineRecovery.CheckBinding(request, installed, prior.Staged, prior.Prior) is not null)
+        {
+            return null;
+        }
+
+        return (serviceId, image) =>
+            image is not null &&
+            mappings.TryGetValue(serviceId, out HostUpdateServiceMappingOptions? mapping) &&
+            !string.IsNullOrWhiteSpace(mapping.ImageRepository) &&
+            installed!.ServiceDigests.TryGetValue(serviceId, out string? digest) &&
+            string.Equals(image, mapping.ImageRepository + "@" + digest, StringComparison.Ordinal);
+    }
+
+    private async Task<string?> ObserveWritersAsync(
+        Dictionary<string, HostUpdateServiceMappingOptions> mappings,
+        Func<string, string?, bool>? tolerate,
+        Dictionary<string, List<string>>? tolerated,
+        CancellationToken cancellationToken)
+    {
+        Dictionary<string, string> composeServicesByServiceId = mappings.ToDictionary(
+            pair => pair.Key,
+            pair => pair.Value.ComposeServiceName,
+            StringComparer.Ordinal);
 
         List<string> arguments = ["compose"];
         foreach (string composeFile in options.ComposeFiles)
@@ -550,10 +654,17 @@ internal sealed class DockerComposeApiAbsenceProbe(
             return "writer_absence_unproven:compose_ps_failed";
         }
 
-        return ValidateComposeState(result.StandardOutput, composeServicesByServiceId);
+        return ValidateComposeState(result.StandardOutput, composeServicesByServiceId, tolerate, tolerated);
     }
 
-    internal static string? ValidateComposeState(string standardOutput, IReadOnlyDictionary<string, string> composeServicesByServiceId)
+    internal static string? ValidateComposeState(string standardOutput, IReadOnlyDictionary<string, string> composeServicesByServiceId) =>
+        ValidateComposeState(standardOutput, composeServicesByServiceId, tolerate: null, tolerated: null);
+
+    internal static string? ValidateComposeState(
+        string standardOutput,
+        IReadOnlyDictionary<string, string> composeServicesByServiceId,
+        Func<string, string?, bool>? tolerate,
+        Dictionary<string, List<string>>? tolerated)
     {
         Dictionary<string, string> serviceIdsByComposeName = composeServicesByServiceId.ToDictionary(
             pair => pair.Value,
@@ -577,7 +688,7 @@ internal sealed class DockerComposeApiAbsenceProbe(
 
                 foreach (JsonElement entry in document.RootElement.EnumerateArray())
                 {
-                    string? error = ValidateEntry(entry, serviceIdsByComposeName);
+                    string? error = ValidateEntry(entry, serviceIdsByComposeName, tolerate, tolerated);
                     if (error is not null)
                     {
                         return error;
@@ -589,7 +700,7 @@ internal sealed class DockerComposeApiAbsenceProbe(
                 foreach (string line in standardOutput.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
                 {
                     using JsonDocument document = JsonDocument.Parse(line);
-                    string? error = ValidateEntry(document.RootElement, serviceIdsByComposeName);
+                    string? error = ValidateEntry(document.RootElement, serviceIdsByComposeName, tolerate, tolerated);
                     if (error is not null)
                     {
                         return error;
@@ -605,7 +716,11 @@ internal sealed class DockerComposeApiAbsenceProbe(
         }
     }
 
-    private static string? ValidateEntry(JsonElement entry, Dictionary<string, string> serviceIdsByComposeName)
+    private static string? ValidateEntry(
+        JsonElement entry,
+        Dictionary<string, string> serviceIdsByComposeName,
+        Func<string, string?, bool>? tolerate,
+        Dictionary<string, List<string>>? tolerated)
     {
         if (entry.ValueKind != JsonValueKind.Object ||
             !TryGetString(entry, "Service", out string? composeService) ||
@@ -619,9 +734,29 @@ internal sealed class DockerComposeApiAbsenceProbe(
             return null;
         }
 
-        return AllowedInactiveStates.Contains(state!)
-            ? null
-            : "writer_service_active:" + serviceId + ":" + state;
+        if (AllowedInactiveStates.Contains(state!))
+        {
+            return null;
+        }
+
+        string? image = TryGetString(entry, "Image", out string? observed) ? observed : null;
+        if (tolerate is not null && tolerate(serviceId, image))
+        {
+            if (tolerated is not null)
+            {
+                if (!tolerated.TryGetValue(serviceId, out List<string>? images))
+                {
+                    images = [];
+                    tolerated[serviceId] = images;
+                }
+
+                images.Add(image!);
+            }
+
+            return null;
+        }
+
+        return "writer_service_active:" + serviceId + ":" + state;
     }
 
     private static bool TryGetString(JsonElement entry, string propertyName, out string? value)
