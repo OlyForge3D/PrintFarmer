@@ -380,6 +380,23 @@ exit 0
         $result = Invoke-Installer @('install-service', '-CliDir', $cliDir, '-Config', $config)
         $service = Get-CimInstance -ClassName Win32_Service -Filter "Name='PrintFarmerHostUpdateDaemon'"
         Check 'install-service is idempotent and keeps the service disabled' ($result.ExitCode -eq 0 -and $service.StartMode -eq 'Disabled')
+        # An update to a CLI the service cannot run is refused before the registration is touched.
+        $blockedCli = Join-Path $root '9.9.9-blocked'
+        Copy-Item -LiteralPath $cliDir -Destination $blockedCli -Recurse
+        $blockedAcl = Get-Acl -LiteralPath $blockedCli
+        $blockedAcl.SetAccessRuleProtection($true, $false)
+        foreach ($rule in @($blockedAcl.Access)) { [void] $blockedAcl.RemoveAccessRuleSpecific($rule) }
+        foreach ($trusted in @([System.Security.Principal.WindowsIdentity]::GetCurrent().User,
+                [System.Security.Principal.SecurityIdentifier]::new('S-1-5-18'), [System.Security.Principal.SecurityIdentifier]::new('S-1-5-32-544'))) {
+            $blockedAcl.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new(
+                $trusted, 'FullControl', 'ContainerInherit, ObjectInherit', 'None', 'Allow'))
+        }
+        Set-Acl -LiteralPath $blockedCli -AclObject $blockedAcl
+        $result = Invoke-Installer @('install-service', '-CliDir', $blockedCli, '-Config', $config)
+        $service = Get-CimInstance -ClassName Win32_Service -Filter "Name='PrintFarmerHostUpdateDaemon'"
+        Check 'an update to an inaccessible CLI is refused and keeps the working registration' ($result.ExitCode -eq 1 -and
+            $result.Output.Contains('nothing was changed') -and $service.PathName.Contains((Join-Path $cliDir 'cli\Farm.HostUpdate.Cli.exe')) -and
+            -not $service.PathName.Contains($blockedCli) -and $service.StartName -eq 'NT SERVICE\PrintFarmerHostUpdateDaemon')
         $result = Invoke-Installer @('uninstall-service')
         Check 'uninstall-service removes the service and keeps the config' ($result.ExitCode -eq 0 -and
             $null -eq (Get-CimInstance -ClassName Win32_Service -Filter "Name='PrintFarmerHostUpdateDaemon'") -and

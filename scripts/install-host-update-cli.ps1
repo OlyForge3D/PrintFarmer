@@ -555,6 +555,15 @@ function Get-DaemonServiceSid {
     return [System.Security.Principal.NTAccount]::new($DaemonServiceAccount).Translate([System.Security.Principal.SecurityIdentifier])
 }
 
+# The per-service SID is derived from the service name, so sc.exe reports it before the service
+# exists; this lets install-service check access before it creates or changes anything.
+function Get-DaemonServiceSidByName {
+    $output = & sc.exe showsid $DaemonServiceName 2>&1 | Out-String
+    $match = [regex]::Match($output, 'S-1-5-80(-\d+){5}')
+    if ($LASTEXITCODE -ne 0 -or -not $match.Success) { Stop-Install "Could not resolve the $DaemonServiceName service SID: $($output.Trim())" }
+    return [System.Security.Principal.SecurityIdentifier]::new($match.Value)
+}
+
 # True when a broad principal (Everyone, Authenticated Users, Users, Guests, Interactive,
 # Anonymous) can read the path: the Windows counterpart of a group/other-readable mode.
 function Test-BroadlyReadable([string] $Path) {
@@ -665,6 +674,15 @@ function Invoke-InstallService([string[]] $Arguments) {
     if (-not (Test-Path -LiteralPath $stateDirectory -PathType Container)) { Stop-Install "The daemon state directory is not a directory: $stateDirectory" }
 
     $binaryPath = "`"$launcher`" --config `"$config`" daemon --windows-service"
+    # The installer grants no ACEs on the CLI tree, so the service identity must already be able to
+    # read and execute it (the default Program Files ACL grants this to Users). Checked before the
+    # service is created or changed, so a refused CLI never replaces a working registration.
+    $candidateSid = Get-DaemonServiceSidByName
+    foreach ($path in $cliDir, (Join-Path $cliDir 'cli'), $launcher) {
+        if (-not (Test-ReadableAndExecutableBy $path $candidateSid)) {
+            Stop-Install "$DaemonServiceAccount cannot read and execute the host-update CLI; nothing was changed: $path"
+        }
+    }
     $description = "Supervises the enrolled PrintFarmer host-update daemon. Installing it grants nothing: daemon execution stays disabled pending #2982. $DaemonServiceMarker"
     $service = Get-DaemonService
     $changed = $true
@@ -696,14 +714,7 @@ function Invoke-InstallService([string[]] $Arguments) {
     }
 
     $sid = Get-DaemonServiceSid
-    # The installer grants no ACEs on the CLI tree, so the service identity must already be able to
-    # read and execute it (the default Program Files ACL grants this to Users).
-    foreach ($path in $cliDir, (Join-Path $cliDir 'cli'), $launcher) {
-        if (-not (Test-ReadableAndExecutableBy $path $sid)) {
-            if (-not $service) { & sc.exe delete $DaemonServiceName *> $null }
-            Stop-Install "$DaemonServiceAccount cannot read and execute the host-update CLI: $path"
-        }
-    }
+    if ($sid.Value -ne $candidateSid.Value) { Stop-Install "The $DaemonServiceName service SID changed during installation" }
     $logDirectory = Get-DaemonLogDirectory
     if (Test-Link $logDirectory) { Stop-Install "Refusing a link as the daemon log directory: $logDirectory" }
     if (-not (Test-Path -LiteralPath $logDirectory)) { New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null }

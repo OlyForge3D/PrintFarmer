@@ -877,15 +877,21 @@ installed, signed package that only root/SYSTEM/Administrators (or the
 installing account) can write, the service account must already be able to
 read and execute it (checked as that account on Linux, and against the ACL on
 Windows, where the default Program Files ACL grants this), and the
-configuration must be owner-only. Reruns
+configuration must be owner-only. A refused rerun leaves an existing unit or
+service pointing at its previous CLI directory. Reruns
 are idempotent and never change whether the service is enabled; a running
 service is restarted only when its definition changed. On Linux, if systemd
 rejects a changed unit (`daemon-reload` or `try-restart` fails), the previous
 unit, or none, is restored and the command fails. Neither command
 overwrites or removes a unit or service it did not create. On Windows, grant
 the virtual account any additional paths (for example a relocated host state
-directory) yourself; the Windows service path is covered by the CI test
-suite, not by the Linux-only [recovery matrix](OFFLINE_UPDATE_RECOVERY.md#isolated-recovery-matrix-scope-3098).
+directory) yourself. The CI package tests exercise the real service
+lifecycle with the packaged CLI on Linux (systemd) and Windows (SCM): a
+disabled install does not start, an enabled service runs a daemon cycle, an
+operator stop exits cleanly without a restart, a crash (Linux) or nonzero
+self-exit (Windows) is restarted, and an invalid configuration (exit `3`) is
+not restarted on Linux. The Windows path is not part of the Linux-only
+[recovery matrix](OFFLINE_UPDATE_RECOVERY.md#isolated-recovery-matrix-scope-3098).
 
 The deploy scripts can install the service in the same run as the CLI; this
 also never enables it:
