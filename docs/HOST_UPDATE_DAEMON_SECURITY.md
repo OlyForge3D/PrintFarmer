@@ -20,8 +20,12 @@ identity and security model of the **enrolled host-update daemon**: a
 host-side pull reconciler that fetches bounded approvals from the PrintFarmer
 API and drives the existing host-update executor. It is **design only**.
 
-- **Not implemented:** the daemon, enrollment endpoints, key storage, installer
-  or service wrappers, and UI. Those belong to #3114 to #3120.
+- **Not implemented:** enrollment endpoints, key generation, installer or
+  service wrappers, and UI. Those belong to #3115 to #3120. The daemon
+  **service core** is implemented by #3114 (see
+  [Daemon service core (#3114)](HOST_UPDATE_RUNBOOK.md#daemon-service-core-3114)):
+  it validates identity storage, reads the existing journal and lock, and
+  publishes redacted status, but its execution gate is hard-wired disabled.
 - **Not enabled:** nothing in this document, a configuration value, an
   environment variable or a saved setting enables enrollment, background
   polling or automatic updates. Auto-update and pilot rollout stay disabled
@@ -264,7 +268,12 @@ enrolled by this design. Topology membership grants nothing.
 | Linux (the only platform currently qualified by the [recovery matrix](OFFLINE_UPDATE_RECOVERY.md#isolated-recovery-matrix-scope-3098)) | A `0600` file owned by the daemon service account, in a `0700` directory under `/etc/printfarmer-host/daemon/`, never world- or group-writable, without symlink traversal. A TPM-backed key is optional best effort, not required | `/var/lib/printfarmer-host/daemon/`, which holds the daemon state (`unenrolled`, `pending`, `active`, `rotating`, `revoked`), key ID, epoch, the last counter the API acknowledged, the last enrollment-state revision seen, the pinned installation ID and response key, and consumed approval IDs |
 | Windows (future, per #3118) | CNG machine key store, marked non-exportable, with the ACL restricted to the daemon service account and Administrators | `%ProgramData%\PrintFarmer\host\daemon\`, restricted to the same principals |
 
-These locations are proposals; #3114 and #3118 finalize them. The following
+These locations are proposals; #3114 and #3118 finalize them. #3114 finalized
+the Linux key path as `/etc/printfarmer-host/daemon/enrollment-key.pem`,
+configured through `HostUpdateDaemon:IdentityDirectory` (an absolute path
+outside `HostUpdateExecution:RootDirectory`). Startup validation fails closed
+with a bounded code on any group/other permission bit, owner mismatch,
+symlink or reparse component, or non-Linux platform. The following
 rules are not optional:
 
 - Host identity paths are never bind-mounted into any container, including
@@ -637,7 +646,9 @@ turn it into tests:
 
 - **#3114:** Key storage permission validation. No daemon secret in canonical
   or generated Compose configurations. Logs and status redacted. Disabled by
-  default.
+  default. Covered by `HostUpdateDaemonIdentityStorageTests`,
+  `HostUpdateDaemonComposeTests`, `HostUpdateDaemonTests` and
+  `HostUpdateCliDaemonTests`.
 - **#3115:** Signed-request verification, nonce, counter and timestamp
   rejection. Signed responses. Revoked and quarantined states. Approvals bound
   to installation and epoch. camelCase and string-enum contracts.

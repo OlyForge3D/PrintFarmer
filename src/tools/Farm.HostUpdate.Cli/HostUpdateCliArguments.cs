@@ -11,6 +11,7 @@ internal enum HostUpdateCliCommand
     OfflineAdmit,
     OfflineActivate,
     OfflineRecover,
+    Daemon,
 }
 
 /// <summary>Strict, fixed-grammar argument parser: unknown or repeated options are usage errors.</summary>
@@ -29,6 +30,8 @@ internal sealed partial class HostUpdateCliArguments
     public bool Confirm { get; private set; }
 
     public bool Json { get; private set; }
+
+    public bool Once { get; private set; }
 
     public string? ReapprovalToken { get; private set; }
 
@@ -61,6 +64,7 @@ internal sealed partial class HostUpdateCliArguments
             "offline-admit" => HostUpdateCliCommand.OfflineAdmit,
             "offline-activate" => HostUpdateCliCommand.OfflineActivate,
             "offline-recover" => HostUpdateCliCommand.OfflineRecover,
+            "daemon" => HostUpdateCliCommand.Daemon,
             "help" or "--help" or "-h" => HostUpdateCliCommand.Help,
             _ => null,
         };
@@ -98,6 +102,9 @@ internal sealed partial class HostUpdateCliArguments
             {
                 case "--json":
                     result.Json = true;
+                    break;
+                case "--once" when command == HostUpdateCliCommand.Daemon:
+                    result.Once = true;
                     break;
                 case "--staging" when IsOffline(command.Value):
                     if (!TryValue(args, ref i, out string? staging))
@@ -144,7 +151,7 @@ internal sealed partial class HostUpdateCliArguments
 
                     result.ProtectedBackup = protectedBackup;
                     break;
-                case "--release" when command is not HostUpdateCliCommand.OfflineAdmit and not HostUpdateCliCommand.OfflineActivate:
+                case "--release" when command is not HostUpdateCliCommand.OfflineAdmit and not HostUpdateCliCommand.OfflineActivate and not HostUpdateCliCommand.Daemon:
                     if (!TryValue(args, ref i, out string? release))
                     {
                         error = "missing_value:--release";

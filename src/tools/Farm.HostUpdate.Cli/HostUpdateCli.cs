@@ -30,7 +30,7 @@ public static partial class HostUpdateCli
           printfarmer-host-update offline-admit --staging <absolute-verified-staging-dir> --channel <stable|insider> --trusted-root <absolute-trusted_root.json> [--cosign <absolute-path>] [--json]
           printfarmer-host-update offline-activate --staging <absolute-verified-staging-dir> --channel <stable|insider> --trusted-root <absolute-trusted_root.json> [--cosign <absolute-path>] [--json]
           printfarmer-host-update offline-recover --staging <absolute-verified-staging-dir> --channel <stable|insider> --trusted-root <absolute-trusted_root.json> [--cosign <absolute-path>] --protected-backup <absolute-reference.json> --release <releaseId> [--request-id <requestId>] (--preview | --confirm <releaseId> [--reapprove-drift <token>] [--printers-reconciled <token>]) [--json]
-
+          printfarmer-host-update daemon [--once] [--json]
         Configuration comes from --config <absolute-json-path> and environment variables
         (HostUpdateExecution__*, HostUpdates__HostState__*, DB_PROVIDER, ConnectionStrings__Default).
         Credentials are never accepted as arguments. This tool is not rollout authorization.
@@ -58,6 +58,13 @@ public static partial class HostUpdateCli
         state to be exactly the prior set, and then runs the same recovery as recover (no image pull,
         no registry fallback). A database restore that an external provider owns stops as
         needs-operator before any change.
+
+        daemon runs the enrolled host-update daemon service core (issue #3114) until stopped, or
+        one cycle with --once, printing one redacted status line per state change. It holds a
+        single-instance lease, reads the shared journal under the shared execution lock, and
+        executes nothing: runtime updates stay disabled until the #2982 recovery evidence passes
+        and the owner authorizes enablement. No setting enables it; unknown HostUpdateDaemon__*
+        settings are rejected.
 
         Exit codes: 0 ok, 2 usage, 3 configuration/namespace unproven, 4 state unreadable,
         5 no history, 6 refused, 7 lock held, 10 needs operator, 11 fence release pending,
@@ -167,6 +174,7 @@ public static partial class HostUpdateCli
                 HostUpdateCliCommand.OfflineAdmit => await HostUpdateOfflineAdmission.RunAsync(provider, configuration, parsed, output, cancellationToken).ConfigureAwait(false),
                 HostUpdateCliCommand.OfflineActivate => await HostUpdateOfflineActivation.RunAsync(provider, configuration, parsed, output, cancellationToken).ConfigureAwait(false),
                 HostUpdateCliCommand.OfflineRecover => await HostUpdateOfflineRecovery.RunAsync(provider, configuration, options, parsed, output, cancellationToken).ConfigureAwait(false),
+                HostUpdateCliCommand.Daemon => await HostUpdateDaemonCommand.RunAsync(provider, configuration, options, parsed, output, cancellationToken).ConfigureAwait(false),
                 _ => await RecoverAsync(provider, configuration, options, parsed, output, cancellationToken).ConfigureAwait(false),
             };
         }
