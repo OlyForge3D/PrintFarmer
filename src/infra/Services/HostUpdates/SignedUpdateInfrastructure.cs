@@ -416,7 +416,7 @@ public interface ISignedReleaseVerifier
     Task<bool> VerifyAsync(ReadOnlyMemory<byte> manifest, ReadOnlyMemory<byte> bundle, string certificateIdentity, CancellationToken cancellationToken);
 }
 
-public sealed class GitHubSignedReleaseDiscovery(HttpClient httpClient, ISignedReleaseVerifier verifier)
+public sealed class GitHubSignedReleaseDiscovery(HttpClient httpClient, ISignedReleaseVerifier verifier) : IHostUpdateDaemonReleaseSource
 {
     private const string Repository = "OlyForge3D/PrintFarmer";
     private const int MaximumCandidates = 25;
@@ -529,6 +529,47 @@ public sealed class GitHubSignedReleaseDiscovery(HttpClient httpClient, ISignedR
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Fetches the untrusted manifest and Sigstore bundle of exactly one published release tag for
+    /// the host daemon (#3116). Nothing is verified here; the daemon verifier does that. Drafts,
+    /// channel-mismatched tags and releases without exactly one of each asset yield <see langword="null"/>.
+    /// </summary>
+    public async Task<HostUpdateDaemonSignedArtifacts?> FetchAsync(string channel, string tag, CancellationToken cancellationToken)
+    {
+        if (channel is not ("stable" or "insider") || !SignedUpdateManifestValidator.IsTagForChannel(tag, channel))
+        {
+            return null;
+        }
+
+        using HttpRequestMessage request = new(HttpMethod.Get, $"https://api.github.com/repos/{Repository}/releases/tags/{Uri.EscapeDataString(tag)}");
+        request.Headers.UserAgent.Add(new ProductInfoHeaderValue("PrintFarmer", "1.0"));
+        using HttpResponseMessage response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        if (response.StatusCode == HttpStatusCode.NotFound)
+        {
+            return null;
+        }
+
+        response.EnsureSuccessStatusCode();
+        byte[] releaseBytes = await ReadBoundedAsync(response.Content, MaximumReleaseListingBytes, "GitHub release", cancellationToken);
+        GitHubRelease? release = JsonSerializer.Deserialize<GitHubRelease>(releaseBytes, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        if (release is null || release.Draft || release.Prerelease != (channel == "insider") ||
+            !string.Equals(release.TagName, tag, StringComparison.Ordinal) || release.Assets is null)
+        {
+            return null;
+        }
+
+        GitHubReleaseAsset[] manifestAssets = release.Assets.Where(asset => asset?.Name == "update-manifest.json").ToArray();
+        GitHubReleaseAsset[] bundleAssets = release.Assets.Where(asset => asset?.Name == "update-manifest.sigstore.json").ToArray();
+        if (manifestAssets.Length != 1 || bundleAssets.Length != 1 || manifestAssets[0].Id <= 0 || bundleAssets[0].Id <= 0)
+        {
+            return null;
+        }
+
+        byte[] manifestBytes = await DownloadAssetAsync(manifestAssets[0].Id, MaximumManifestBytes, cancellationToken);
+        byte[] bundleBytes = await DownloadAssetAsync(bundleAssets[0].Id, MaximumBundleBytes, cancellationToken);
+        return new HostUpdateDaemonSignedArtifacts(manifestBytes, bundleBytes);
     }
 
     private async Task<byte[]> DownloadAssetAsync(long assetId, int maximumBytes, CancellationToken cancellationToken)

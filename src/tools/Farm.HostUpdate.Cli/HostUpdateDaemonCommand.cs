@@ -52,7 +52,9 @@ internal static class HostUpdateDaemonCommand
             new HostUpdateDaemonJournalReader(
                 executionOptions.StateDirectory,
                 provider.GetRequiredService<IHostUpdateExecutionLock>(),
-                provider.GetRequiredService<IHostUpdateExecutionJournal>()),
+                provider.GetRequiredService<IHostUpdateExecutionJournal>(),
+                new FileHostUpdateDaemonVerificationJournal(
+                    Path.Join(executionOptions.StateDirectory, FileHostUpdateDaemonVerificationJournal.FileName))),
             new DisabledHostUpdateDaemonExecutionGate(),
             sink,
             provider.GetRequiredService<ILogger<HostUpdateDaemon>>());

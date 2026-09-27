@@ -102,7 +102,8 @@ public sealed class HostUpdateDaemonTests : IDisposable
         var executor = new Mock<IHostUpdateExecutor>(MockBehavior.Strict);
         var dispatcher = new HostUpdateDaemonExecutionDispatcher(new DisabledHostUpdateDaemonExecutionGate(), executor.Object);
 
-        HostUpdateDaemonDispatchResult result = await dispatcher.DispatchAsync(Request(), CancellationToken.None);
+        HostUpdateExecutionRequest disabledRequest = Request();
+        HostUpdateDaemonDispatchResult result = await dispatcher.DispatchAsync(Verified(disabledRequest), disabledRequest, CancellationToken.None);
 
         result.Dispatched.Should().BeFalse();
         result.RefusalCode.Should().Be(DisabledHostUpdateDaemonExecutionGate.DisabledCode);
@@ -118,11 +119,62 @@ public sealed class HostUpdateDaemonTests : IDisposable
         executor.Setup(e => e.ExecuteAsync(request, It.IsAny<CancellationToken>())).ReturnsAsync(expected);
         var dispatcher = new HostUpdateDaemonExecutionDispatcher(new OpenGate(), executor.Object);
 
-        HostUpdateDaemonDispatchResult result = await dispatcher.DispatchAsync(request, CancellationToken.None);
+        HostUpdateDaemonDispatchResult result = await dispatcher.DispatchAsync(Verified(request), request, CancellationToken.None);
 
         result.Dispatched.Should().BeTrue();
         result.Execution.Should().BeSameAs(expected);
         executor.Verify(e => e.ExecuteAsync(request, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Dispatcher_RefusesExpiredVerification_BeforeExecutor()
+    {
+        var executor = new Mock<IHostUpdateExecutor>(MockBehavior.Strict);
+        var dispatcher = new HostUpdateDaemonExecutionDispatcher(new OpenGate(), executor.Object);
+        HostUpdateExecutionRequest request = Request();
+
+        HostUpdateDaemonDispatchResult result = await dispatcher.DispatchAsync(
+            Verified(request, DateTimeOffset.UtcNow.AddSeconds(-1)), request, CancellationToken.None);
+
+        result.RefusalCode.Should().Be(HostUpdateDaemonExecutionDispatcher.VerificationExpiredCode);
+        executor.VerifyNoOtherCalls();
+    }
+
+    [Theory]
+    [InlineData("release")]
+    [InlineData("sequence")]
+    [InlineData("digest")]
+    [InlineData("commit")]
+    [InlineData("channel")]
+    [InlineData("trust")]
+    [InlineData("platform")]
+    [InlineData("target")]
+    [InlineData("missing-target")]
+    [InlineData("source-mode")]
+    public async Task Dispatcher_RefusesRequestThatDiffersFromVerifiedRelease(string mutation)
+    {
+        var executor = new Mock<IHostUpdateExecutor>(MockBehavior.Strict);
+        var dispatcher = new HostUpdateDaemonExecutionDispatcher(new OpenGate(), executor.Object);
+        HostUpdateExecutionRequest request = Request();
+        HostUpdateDaemonVerifiedRelease verified = Verified(request);
+        HostUpdateExecutionRequest mutated = mutation switch
+        {
+            "release" => request with { ReleaseId = "stable:1.2.4" },
+            "sequence" => request with { AuthenticatedSequence = 2 },
+            "digest" => request with { ManifestDigest = "sha256:" + new string('c', 64) },
+            "commit" => request with { SourceCommit = new string('d', 40) },
+            "channel" => request with { Channel = HostUpdateExecutionChannel.Insider },
+            "trust" => request with { TrustRoot = "other" },
+            "platform" => request with { HostPlatform = "linux-arm64" },
+            "target" => request with { Targets = [.. request.Targets.Skip(1), request.Targets[0] with { ChildDigest = "sha256:" + new string('e', 64) }] },
+            "missing-target" => request with { Targets = [.. request.Targets.Skip(1)] },
+            _ => request with { ImageSourceMode = HostUpdateImageSourceMode.PreloadedLocal },
+        };
+
+        HostUpdateDaemonDispatchResult result = await dispatcher.DispatchAsync(verified, mutated, CancellationToken.None);
+
+        result.RefusalCode.Should().Be(HostUpdateDaemonExecutionDispatcher.VerificationBindingMismatchCode);
+        executor.VerifyNoOtherCalls();
     }
 
     [Fact]
@@ -133,7 +185,8 @@ public sealed class HostUpdateDaemonTests : IDisposable
             .ThrowsAsync(new TimeoutException("host_update_lock_timeout"));
         var dispatcher = new HostUpdateDaemonExecutionDispatcher(new OpenGate(), executor.Object);
 
-        HostUpdateDaemonDispatchResult result = await dispatcher.DispatchAsync(Request(), CancellationToken.None);
+        HostUpdateExecutionRequest lockedRequest = Request();
+        HostUpdateDaemonDispatchResult result = await dispatcher.DispatchAsync(Verified(lockedRequest), lockedRequest, CancellationToken.None);
 
         result.Dispatched.Should().BeFalse();
         result.RefusalCode.Should().Be(HostUpdateDaemonExecutionDispatcher.ExecutionLockHeldCode);
@@ -375,7 +428,27 @@ public sealed class HostUpdateDaemonTests : IDisposable
         new ConfigurationBuilder().AddInMemoryCollection(values).Build();
 
     private static HostUpdateExecutionRequest Request() =>
-        new(ReleaseId, 1, "sha256:" + new string('a', 64), new string('b', 40), HostUpdateExecutionChannel.Stable, []);
+        new(ReleaseId, 1, "sha256:" + new string('a', 64), new string('b', 40), HostUpdateExecutionChannel.Stable,
+            [.. HostUpdateExecutionRequest.RequiredServiceIds.Order(StringComparer.Ordinal)
+                .Select((id, i) => new HostUpdateExecutionTarget(id, "linux-amd64", "sha256:" + new string((char)('0' + i), 64)))])
+        {
+            TrustRoot = HostUpdateTrustRoot.DefaultTrustRoot,
+            HostPlatform = "linux-amd64",
+        };
+
+    private static HostUpdateDaemonVerifiedRelease Verified(HostUpdateExecutionRequest request, DateTimeOffset? expiresAt = null) =>
+        new(
+            "approval-1",
+            request.ReleaseId,
+            "stable",
+            request.AuthenticatedSequence,
+            request.ManifestDigest,
+            request.SourceCommit,
+            request.HostPlatform,
+            request.Targets,
+            "identity",
+            DateTimeOffset.UtcNow,
+            expiresAt ?? DateTimeOffset.UtcNow.AddMinutes(5));
 
     private sealed class OpenGate : IHostUpdateDaemonExecutionGate
     {
