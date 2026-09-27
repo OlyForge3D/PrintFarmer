@@ -71,6 +71,47 @@ public sealed class HostUpdateDaemonWindowsServiceTests : IDisposable
     }
 
     [Fact]
+    public void Log_writer_counts_lines_it_cannot_write_and_reports_them_later()
+    {
+        // A directory at the log path makes every append fail with an I/O error.
+        string path = Path.Combine(_logDirectory, "daemon.log");
+        Directory.CreateDirectory(path);
+        using var log = new HostUpdateDaemonLogWriter(path);
+
+        log.WriteLine("lost one");
+        log.WriteLine("lost two");
+        log.DroppedLines.Should().Be(2);
+
+        Directory.Delete(path);
+        log.WriteLine("kept");
+
+        log.DroppedLines.Should().Be(0);
+        string[] lines = File.ReadAllLines(path);
+        lines.Should().HaveCount(2);
+        lines[0].Should().EndWith(" log: 2 earlier line(s) could not be written");
+        lines[1].Should().EndWith(" kept");
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("relative\\data")]
+    [InlineData("C:relative")]
+    public void Log_path_fails_closed_when_program_data_is_not_absolute(string? commonApplicationData)
+    {
+        HostUpdateDaemonLogWriter.ResolveServiceLogPath(commonApplicationData).Should().BeNull();
+    }
+
+    [Fact]
+    public void Log_path_is_fixed_under_program_data()
+    {
+        string root = Path.GetFullPath(Path.GetTempPath());
+
+        HostUpdateDaemonLogWriter.ResolveServiceLogPath(root).Should()
+            .Be(Path.Join(root, "PrintFarmer", "host", "daemon", "logs", "daemon.log"));
+    }
+
+    [Fact]
     public async Task Service_host_reports_a_self_exit_code_to_the_supervisor()
     {
         using var log = new StringWriter();

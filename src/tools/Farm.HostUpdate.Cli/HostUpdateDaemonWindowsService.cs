@@ -33,16 +33,26 @@ internal sealed class HostUpdateDaemonWindowsService : ServiceBase
         AutoLog = false;
     }
 
-    public static string DefaultLogPath => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-        "PrintFarmer", "host", "daemon", "logs", "daemon.log");
+    /// <summary>
+    /// The fixed service log path under <c>%ProgramData%</c>, or <see langword="null"/> when the
+    /// common application data folder is not an absolute path (the service then fails closed).
+    /// </summary>
+    public static string? DefaultLogPath => HostUpdateDaemonLogWriter.ResolveServiceLogPath(
+        Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData));
 
     public static int Run(IReadOnlyList<string> args, Func<IConfiguration> configurationFactory, TextWriter error)
     {
         ArgumentNullException.ThrowIfNull(args);
         ArgumentNullException.ThrowIfNull(configurationFactory);
         ArgumentNullException.ThrowIfNull(error);
-        using var service = new HostUpdateDaemonWindowsService(args, configurationFactory, DefaultLogPath);
+        string? logPath = DefaultLogPath;
+        if (logPath is null)
+        {
+            error.WriteLine("windows_service_log_path_unavailable: %ProgramData% is not an absolute path");
+            return HostUpdateDaemonServiceHost.ServiceFailed;
+        }
+
+        using var service = new HostUpdateDaemonWindowsService(args, configurationFactory, logPath);
         Run(service);
         if (!service._started)
         {
@@ -152,16 +162,19 @@ internal sealed class HostUpdateDaemonServiceHost : IDisposable
 
     private async Task RunAsync()
     {
+        // Task.Run turns a synchronous throw into a faulted task, and awaiting WhenAny observes the
+        // outcome without rethrowing, so any daemon failure is reported to the SCM, not a crash.
+        Task<int> run = Task.Run(() => _run(_cancellation.Token));
+        await Task.WhenAny(run).ConfigureAwait(false);
         int exitCode;
-        try
+        if (run.IsCompletedSuccessfully)
         {
-            exitCode = await _run(_cancellation.Token).ConfigureAwait(false);
+            exitCode = await run.ConfigureAwait(false);
         }
-#pragma warning disable CA1031 // The service must report any daemon failure to the SCM rather than crash.
-        catch (Exception)
-#pragma warning restore CA1031
+        else
         {
-            await _log.WriteLineAsync("daemon: stopped unexpectedly").ConfigureAwait(false);
+            string reason = run.IsCanceled ? "cancelled" : run.Exception?.GetBaseException().GetType().Name ?? "unknown";
+            await _log.WriteLineAsync($"daemon: stopped unexpectedly ({reason})").ConfigureAwait(false);
             exitCode = HostUpdateDaemonServiceHost.ServiceFailed;
         }
 
@@ -182,6 +195,21 @@ internal sealed class HostUpdateDaemonServiceHost : IDisposable
 internal sealed class HostUpdateDaemonLogWriter : TextWriter
 {
     public const long DefaultMaxBytes = 1024 * 1024;
+
+    /// <summary>
+    /// Resolves the fixed service log path under the common application data folder, or
+    /// <see langword="null"/> when that folder is not an absolute path.
+    /// </summary>
+    internal static string? ResolveServiceLogPath(string? commonApplicationData)
+    {
+        if (string.IsNullOrWhiteSpace(commonApplicationData)
+            || !Path.IsPathFullyQualified(commonApplicationData))
+        {
+            return null;
+        }
+
+        return Path.Join(commonApplicationData, "PrintFarmer", "host", "daemon", "logs", "daemon.log");
+    }
 
     private readonly string _path;
     private readonly long _maxBytes;
@@ -252,8 +280,16 @@ internal sealed class HostUpdateDaemonLogWriter : TextWriter
 
     private void FlushLine()
     {
-        string entry = $"{DateTimeOffset.UtcNow:O} {_line}\n";
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        string entry = $"{now:O} {_line}\n";
         _line.Clear();
+        if (DroppedLines > 0)
+        {
+            entry = $"{now:O} log: {DroppedLines} earlier line(s) could not be written\n{entry}";
+        }
+
+        // A log that cannot be written must never stop the daemon: count the lost lines and report
+        // them with the next line that can be written.
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
@@ -264,13 +300,18 @@ internal sealed class HostUpdateDaemonLogWriter : TextWriter
             }
 
             File.AppendAllText(_path, entry, Encoding);
+            DroppedLines = 0;
         }
         catch (IOException)
         {
-            // A log that cannot be written must never stop the daemon.
+            DroppedLines++;
         }
         catch (UnauthorizedAccessException)
         {
+            DroppedLines++;
         }
     }
+
+    /// <summary>Lines lost since the last successful write.</summary>
+    public long DroppedLines { get; private set; }
 }
