@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using Farm.Infrastructure.Services.HostUpdates;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
