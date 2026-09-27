@@ -1,4 +1,4 @@
-using System.Security.Cryptography;
+﻿using System.Security.Cryptography;
 using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Services.HostUpdates.PullApproval;
 using FluentAssertions;
