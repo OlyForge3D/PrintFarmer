@@ -144,6 +144,12 @@ public interface IHostUpdateExecutionSteps
 
 public interface IHostUpdateExecutionJournal
 {
+    /// <summary>
+    /// Reads and verifies the complete journal once, in append order. Callers hold the execution
+    /// lease. Legacy adapters without snapshot support fail closed rather than scan per release.
+    /// </summary>
+    IReadOnlyList<HostUpdateExecutionActivity> ReadAll() => throw new NotSupportedException("journal_snapshot_unavailable");
+
     IReadOnlyList<HostUpdateExecutionActivity> Read(string releaseId);
 
     IReadOnlyList<string> ListReleaseIds();
@@ -647,6 +653,9 @@ public sealed class FileHostUpdateExecutionJournal(string path) : IHostUpdateExe
     private readonly string stagedPath = path + ".staged";
 
     private sealed record JournalRecord(string PreviousHash, string Payload, string Hash, HostUpdateExecutionActivity Activity);
+
+    public IReadOnlyList<HostUpdateExecutionActivity> ReadAll() =>
+        ReadValidatedRecords().Select(record => record.Activity).ToArray();
 
     public IReadOnlyList<HostUpdateExecutionActivity> Read(string releaseId) =>
         ReadValidatedRecords().Where(record => record.Activity.ReleaseId == releaseId).Select(record => record.Activity).ToArray();

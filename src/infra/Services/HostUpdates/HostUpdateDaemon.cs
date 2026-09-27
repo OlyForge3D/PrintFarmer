@@ -137,16 +137,20 @@ public sealed partial class HostUpdateDaemonJournalReader(
             {
                 int inFlight = 0;
                 int recoveryRequired = 0;
-                IReadOnlyList<string> releases = journal.ListReleaseIds();
-                foreach (string releaseId in releases)
+                IReadOnlyList<HostUpdateExecutionActivity> activities = journal.ReadAll();
+                var latest = new Dictionary<string, HostUpdateExecutionState>(StringComparer.Ordinal);
+                foreach (HostUpdateExecutionActivity activity in activities)
                 {
-                    IReadOnlyList<HostUpdateExecutionActivity> history = journal.Read(releaseId);
-                    if (history.Count == 0)
+                    if (!HostUpdateValidation.IsReleaseId(activity.ReleaseId) || !Enum.IsDefined(activity.State))
                     {
-                        throw new InvalidDataException("journal_release_history_empty");
+                        throw new InvalidDataException("journal_checkpoint_invalid");
                     }
 
-                    HostUpdateExecutionState last = history[^1].State;
+                    latest[activity.ReleaseId] = activity.State;
+                }
+
+                foreach (HostUpdateExecutionState last in latest.Values)
+                {
                     if (last == HostUpdateExecutionState.RecoveryRequired)
                     {
                         recoveryRequired++;
@@ -157,7 +161,7 @@ public sealed partial class HostUpdateDaemonJournalReader(
                     }
                 }
 
-                return new(HostUpdateDaemonJournalSnapshot.OkCode, false, releases.Count, inFlight, recoveryRequired);
+                return new(HostUpdateDaemonJournalSnapshot.OkCode, false, latest.Count, inFlight, recoveryRequired);
             }
             catch (Exception ex) when (IsStateFailure(ex))
             {
