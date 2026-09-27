@@ -871,6 +871,34 @@ only reachable peer is a default-deny egress sink that logs each attempt. The
 evidence mechanism value is `docker-internal-network+default-deny-egress-sink`.
 Any recorded outbound attempt fails the run, whatever its recovery outcome.
 
+**First live cell.** C2 is the first reusable live cell: monolith topology,
+PostgreSQL, shared host-owned database/storage, managed workers and identical
+prior/target schemas. Run it from an Ubuntu LTS x64 host with Docker, Node.js,
+`jq`, Bash, .NET SDK/runtime support for the host-update CLI package and
+Cosign available:
+
+```bash
+scripts/ci/recovery-matrix/run-cell.sh \
+  --cell c2 \
+  --evidence .recovery-matrix-work/c2-evidence.json \
+  --cosign "$HOME/.cache/pf-cosign/cosign"
+```
+
+The script creates only a repo-local scratch deployment root, generates a
+throwaway `.env`, signs fixture releases with the per-run fixture root, installs
+the CLI with the packaged trusted root, and writes schema-validated evidence.
+It gives the monolith container a deterministic address on the Docker
+`--internal` bridge and sets the product `HealthCheckBaseUrl` to that address,
+so the product's own `/health` verifier stays enabled while the host cannot
+egress. After the product verification step, the harness separately records the
+discovered `/health` entries and fails the cell if no queue/dispatch/outbox
+consumer entry is exposed. On a product build that still has the #3122
+offline-recovery defects, this cell is expected to emit valid failing evidence
+with `outcome.expected` `RolledBack`, `outcome.actual` set from the product CLI
+output/journal, and `outcome.reason` naming the refusal.
+Use `--work-dir` to move scratch space to another non-system-temp directory and
+`--keep-work` only for debugging a failed local run.
+
 **Signing.** Matrix cells are signed only by a per-run **ephemeral** fixture
 Sigstore root (`signingRoot` `fixture-ephemeral`), created by
 [`scripts/ci/recovery-matrix/fixture-sigstore.mjs`](../scripts/ci/recovery-matrix/fixture-sigstore.mjs).

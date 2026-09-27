@@ -422,19 +422,20 @@ test('URL userinfo is rejected with or without a password; safe URLs pass', () =
   }
 });
 
-test('supported cells stop short of activation only after an injected fault', () => {
-  const noFault = validRecord();
-  noFault.checkpoints = [
+test('supported recovery cells may expect rollback without an injected fault', () => {
+  const rolledBack = validRecord();
+  rolledBack.checkpoints = [
     { name: 'backup-verified', at: '2026-09-26T10:05:00Z', result: 'ok' },
   ];
-  hasError(validateRecoveryEvidence(noFault), 'only after a successful fault-injected');
+  assert.deepEqual(validateRecoveryEvidence(rolledBack), []);
 
   const activated = validRecord();
-  activated.checkpoints = noFault.checkpoints;
+  activated.checkpoints = rolledBack.checkpoints;
   activated.outcome = { ...activated.outcome, expected: 'Activated', actual: 'Activated' };
   assert.deepEqual(validateRecoveryEvidence(activated), []);
 
   const operator = validRecord();
+  operator.checkpoints = rolledBack.checkpoints;
   operator.outcome = {
     expected: 'NeedsOperator',
     actual: 'NeedsOperator',
@@ -442,6 +443,12 @@ test('supported cells stop short of activation only after an injected fault', ()
     exitCode: 3,
     journalPhase: 'NeedsOperator',
   };
+  hasError(validateRecoveryEvidence(operator), 'only after a successful fault-injected');
+
+  operator.checkpoints = [
+    ...rolledBack.checkpoints,
+    { name: 'fault-injected', at: '2026-09-26T10:06:00Z', result: 'ok' },
+  ];
   assert.deepEqual(validateRecoveryEvidence(operator), []);
 
   const noReason = validRecord();
@@ -456,6 +463,7 @@ test('supported cells stop short of activation only after an injected fault', ()
   );
 
   const failedFault = validRecord();
+  failedFault.outcome = { ...operator.outcome };
   failedFault.checkpoints[1].result = 'failed';
   failedFault.verdict = 'fail';
   hasError(validateRecoveryEvidence(failedFault), 'only after a successful fault-injected');

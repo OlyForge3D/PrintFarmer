@@ -1,0 +1,85 @@
+#!/usr/bin/env python3
+import json
+import socket
+import sys
+import threading
+from datetime import datetime, timezone
+
+
+def dns_query_name(payload):
+    try:
+        if len(payload) < 13:
+            return None
+        index = 12
+        labels = []
+        while index < len(payload):
+            length = payload[index]
+            if length == 0:
+                return ".".join(labels) or "."
+            if length & 0xC0:
+                return "<compressed>"
+            index += 1
+            labels.append(payload[index:index + length].decode("ascii", errors="replace"))
+            index += length
+    except Exception:
+        return None
+    return None
+
+
+def record(path, protocol, destination, **extra):
+    payload = {
+        "at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "destination": destination,
+        "protocol": protocol,
+    }
+    payload.update({key: value for key, value in extra.items() if value is not None})
+    with open(path, "a", encoding="utf-8") as handle:
+        handle.write(json.dumps(payload, separators=(",", ":")) + "\n")
+        handle.flush()
+
+
+def tcp_listener(path, port):
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    server.bind(("0.0.0.0", port))
+    server.listen(128)
+    while True:
+        connection, address = server.accept()
+        query = None
+        if port == 53:
+            try:
+                payload = connection.recv(4096)
+                query = dns_query_name(payload[2:] if len(payload) > 2 else payload)
+            except OSError:
+                query = None
+        record(path, f"tcp/{port}", f"{address[0]}:{address[1]}", query=query)
+        try:
+            connection.close()
+        except OSError:
+            pass
+
+
+def udp_listener(path, port):
+    server = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    server.bind(("0.0.0.0", port))
+    while True:
+        payload, address = server.recvfrom(4096)
+        record(path, f"udp/{port}", f"{address[0]}:{address[1]}", query=dns_query_name(payload))
+
+
+def main():
+    if len(sys.argv) != 2:
+        print("usage: egress-sink.py <attempts.ndjson>", file=sys.stderr)
+        return 2
+    path = sys.argv[1]
+    open(path, "a", encoding="utf-8").close()
+    for port in (53, 80, 443):
+        threading.Thread(target=tcp_listener, args=(path, port), daemon=True).start()
+    threading.Thread(target=udp_listener, args=(path, 53), daemon=True).start()
+    threading.Event().wait()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

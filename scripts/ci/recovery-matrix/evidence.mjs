@@ -444,6 +444,17 @@ export function validateRecoveryEvidence(record) {
   }
   if (isPlainObject(identities)) {
     checkEnum(identities.schemaDelta, schemaDeltas, 'identities.schemaDelta', errors);
+    if (identities.bundleSha256 === '0'.repeat(64)) {
+      errors.push('identities.bundleSha256: must be the real target bundle SHA-256, not a placeholder');
+    }
+    if (
+      isPlainObject(identities.source) &&
+      isPlainObject(identities.prior) &&
+      identities.source.tag === identities.prior.tag &&
+      JSON.stringify(identities.source) !== JSON.stringify(identities.prior)
+    ) {
+      errors.push('identities.source: must match identities.prior when both name the same release tag');
+    }
   }
 
   const faultInjected =
@@ -473,7 +484,11 @@ export function validateRecoveryEvidence(record) {
       if (failClosedReasons.has(outcome.reason)) {
         errors.push('outcome.reason: supported cell must not report a fail-closed reason');
       }
-      if (typeof outcome.expected === 'string' && outcome.expected !== 'Activated') {
+      if (
+        typeof outcome.expected === 'string' &&
+        outcome.expected !== 'Activated' &&
+        outcome.expected !== 'RolledBack'
+      ) {
         // A supported cell only stops short of activation because the harness
         // injected a fault; otherwise a halt awaiting an operator would pass.
         if (!faultInjected) {
