@@ -356,7 +356,7 @@ exit 0
             @((Get-Acl -LiteralPath $Path).GetAccessRules($true, $false, [System.Security.Principal.SecurityIdentifier]) |
                 Where-Object { $_.IdentityReference.Value -eq $serviceSid })
         }
-        Check 'the service account may read the config' ($serviceSid -and (Get-SidRules $config).Count -gt 0)
+        Check 'the service account may read the config' ($serviceSid -and @(Get-SidRules $config).Count -gt 0)
         Check 'the daemon state directory exists' (Test-Path -LiteralPath (Join-Path $stateRoot 'state') -PathType Container)
         $result = Invoke-Installer @('install-service', '-CliDir', $cliDir, '-Config', $config)
         $service = Get-CimInstance -ClassName Win32_Service -Filter "Name='PrintFarmerHostUpdateDaemon'"
@@ -365,8 +365,8 @@ exit 0
         Check 'uninstall-service removes the service and keeps the config' ($result.ExitCode -eq 0 -and
             $null -eq (Get-CimInstance -ClassName Win32_Service -Filter "Name='PrintFarmerHostUpdateDaemon'") -and
             (Test-Path -LiteralPath $config -PathType Leaf))
-        Check 'uninstall-service removes the service account ACEs' ((Get-SidRules $config).Count -eq 0 -and
-            (Get-SidRules (Join-Path $stateRoot 'state')).Count -eq 0)
+        Check 'uninstall-service removes the service account ACEs' (@(Get-SidRules $config).Count -eq 0 -and
+            @(Get-SidRules (Join-Path $stateRoot 'state')).Count -eq 0)
         Check 'uninstall-service without a service is a no-op' ((Invoke-Installer @('uninstall-service')).ExitCode -eq 0)
         & sc.exe create PrintFarmerHostUpdateDaemon binPath= "$env:SystemRoot\System32\svchost.exe" start= disabled *> $null
         $result = Invoke-Installer @('uninstall-service')
