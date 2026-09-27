@@ -1426,6 +1426,9 @@ production validation runs are implied by this design document.
   and the pull-channel threat model are designed in the
   [host-update daemon security model](HOST_UPDATE_DAEMON_SECURITY.md) (#3113);
   the owner accepted its runtime risks in #3124.
+  The readiness, approval, re-confirmation and status contracts are defined,
+  but not served, in the [host-update daemon pull API](HOST_UPDATE_PULL_API.md)
+  (#3115); automatic approvals stay denied at runtime.
   #2666 orders verified canonical versions within the selected channel and
   binds desired state to manifest digest. Alias drift alone never triggers
   apply; an equal-version digest conflict holds for investigation.
