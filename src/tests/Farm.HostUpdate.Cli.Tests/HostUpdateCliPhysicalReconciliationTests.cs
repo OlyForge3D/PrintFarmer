@@ -73,6 +73,28 @@ public sealed class HostUpdateCliPhysicalReconciliationTests : IDisposable, IAsy
     }
 
     [Fact]
+    public async Task An_empty_inventory_needs_no_record_and_confirm_reopens_admission()
+    {
+        _host.SeedRecoveryRequired();
+        _host.SeedOutcome(HostUpdateRecoveryOutcome.FenceReleasePending, "coordinated_restore");
+        File.WriteAllText(_host.AdmissionClosedPath, string.Empty);
+        (string? drift, _) = await TokensAsync(expectPhysicalToken: false);
+
+        JsonElement physical = await PreviewPhysicalAsync();
+        CliRun run = await ConfirmAsync(drift, physical: null);
+
+        physical.GetProperty("state").GetString().Should().Be("not_required");
+        physical.GetProperty("printerCount").GetInt32().Should().Be(0);
+        physical.GetProperty("uncertainOutcomeCount").GetInt32().Should().Be(0);
+        (physical.TryGetProperty("reconciliationToken", out JsonElement token) && token.ValueKind != JsonValueKind.Null)
+            .Should().BeFalse("an empty inventory needs no record, so no token is offered");
+        run.ExitCode.Should().Be(HostUpdateCliExitCodes.Success, "zero printers and zero uncertain outcomes leave nothing to reconcile (issue #3126)");
+        Envelope(run).GetProperty("result").GetProperty("outcome").GetString().Should().Be("RolledBack");
+        File.Exists(_host.AdmissionClosedPath).Should().BeFalse();
+        Directory.Exists(ReconciliationDirectory).Should().BeFalse("an empty inventory is re-read at release, not recorded");
+    }
+
+    [Fact]
     public async Task Confirm_without_a_recorded_reconciliation_keeps_admission_fenced_with_exit_13()
     {
         SeedPendingRelease();

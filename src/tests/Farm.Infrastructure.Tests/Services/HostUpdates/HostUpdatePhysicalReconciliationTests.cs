@@ -39,6 +39,55 @@ public sealed class HostUpdatePhysicalReconciliationTests : IDisposable
     }
 
     [Fact]
+    public async Task An_empty_inventory_clears_the_gate_without_a_record_and_reopens_admission()
+    {
+        var outcomes = new FileHostUpdateRecoveryOutcomeStore(Path.Join(_root, "outcomes"));
+        var fence = new CountingFence();
+        var reader = new FixedInventoryReader(new HostUpdatePrinterCommandInventory([]));
+
+        HostUpdateRecoveryResult result = await Coordinator(outcomes, fence, new FileHostUpdatePhysicalReconciliationStore(Path.Join(_root, "physical")), new FakeDigestApplier(), reader)
+            .RecoverAsync(Request, [], CancellationToken.None);
+
+        result.Outcome.Should().Be(HostUpdateRecoveryOutcome.RolledBack, "zero printers and zero uncertain outcomes leave nothing to reconcile (issue #3126)");
+        result.Detail.Should().Be("image_only_rollback");
+        fence.ReleaseCount.Should().Be(1);
+        reader.Reads.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task A_non_empty_or_unreadable_inventory_keeps_the_gate_pending()
+    {
+        HostUpdatePrinterCommandInventory idle = new([new HostUpdatePrinterReconciliationItem(Guid.NewGuid(), "idle", [])]);
+        foreach (FixedInventoryReader reader in new[] { new FixedInventoryReader(idle), new FixedInventoryReader(Inventory()), new FixedInventoryReader(null) })
+        {
+            var outcomes = new FileHostUpdateRecoveryOutcomeStore(Path.Join(_root, "outcomes-" + Guid.NewGuid().ToString("N")));
+            var fence = new CountingFence();
+
+            HostUpdateRecoveryResult result = await Coordinator(outcomes, fence, new FileHostUpdatePhysicalReconciliationStore(Path.Join(_root, "physical")), new FakeDigestApplier(), reader)
+                .RecoverAsync(Request, [], CancellationToken.None);
+
+            result.Detail.Should().Be("image_only_rollback|" + HostUpdatePhysicalReconciliationCodes.Pending);
+            fence.ReleaseCount.Should().Be(0, "a printer, an uncertain outcome, or an unreadable inventory is never proof of nothing to reconcile");
+        }
+    }
+
+    [Fact]
+    public async Task An_unreadable_record_blocks_even_when_the_inventory_is_empty()
+    {
+        var outcomes = new FileHostUpdateRecoveryOutcomeStore(Path.Join(_root, "outcomes"));
+        var fence = new CountingFence();
+        var reader = new FixedInventoryReader(new HostUpdatePrinterCommandInventory([]));
+
+        HostUpdateRecoveryResult result = await Coordinator(outcomes, fence, new ThrowingGate(), new FakeDigestApplier(), reader)
+            .RecoverAsync(Request, [], CancellationToken.None);
+
+        result.Outcome.Should().Be(HostUpdateRecoveryOutcome.FenceReleasePending);
+        result.Detail.Should().StartWith("image_only_rollback|" + HostUpdatePhysicalReconciliationCodes.Unreadable);
+        fence.ReleaseCount.Should().Be(0);
+        reader.Reads.Should().Be(0, "the recorded reconciliation takes precedence over the inventory");
+    }
+
+    [Fact]
     public async Task Unrecorded_reconciliation_keeps_the_fence_closed_after_rollback()
     {
         var outcomes = new FileHostUpdateRecoveryOutcomeStore(Path.Join(_root, "outcomes"));
@@ -237,7 +286,8 @@ public sealed class HostUpdatePhysicalReconciliationTests : IDisposable
         IHostUpdateRecoveryOutcomeStore outcomes,
         IHostUpdateFenceCoordinator? fence,
         IHostUpdatePhysicalReconciliationGate gate,
-        IHostUpdateDigestApplier applier) =>
+        IHostUpdateDigestApplier applier,
+        IHostUpdatePrinterCommandInventoryReader? inventoryReader = null) =>
         new(
             new FakeInstalledHostStateStore(),
             new AlwaysCompatibleEvaluator(),
@@ -248,7 +298,19 @@ public sealed class HostUpdatePhysicalReconciliationTests : IDisposable
             outcomes,
             fence,
             executionLock: null,
-            physicalReconciliationGate: gate);
+            physicalReconciliationGate: gate,
+            inventoryReader: inventoryReader);
+
+    private sealed class FixedInventoryReader(HostUpdatePrinterCommandInventory? inventory) : IHostUpdatePrinterCommandInventoryReader
+    {
+        public int Reads { get; private set; }
+
+        public Task<HostUpdatePrinterCommandInventory> ReadAsync(CancellationToken cancellationToken)
+        {
+            Reads++;
+            return inventory is null ? throw new IOException("inventory_unreadable") : Task.FromResult(inventory);
+        }
+    }
 
     private sealed class CountingFence : IHostUpdateFenceCoordinator
     {

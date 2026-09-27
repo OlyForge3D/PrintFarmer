@@ -65,13 +65,21 @@ internal sealed class HostUpdateCliWriterStoppedFenceCoordinator(
             {
                 writers.Add(new AdmissionFenceableWriter(admissionGate));
             }
+            else if (registeredWriters.FirstOrDefault(writer => string.Equals(writer.Name, name, StringComparison.Ordinal))
+                is HostUpdatePriorReleaseWriterFence priorReleaseWriter)
+            {
+                // Proves itself from outside the process and stops the tolerated N-1 writer (#3126).
+                writers.Add(priorReleaseWriter);
+            }
             else if (registeredWriters.Any(writer => string.Equals(writer.Name, name, StringComparison.Ordinal)))
             {
                 writers.Add(new WriterHostStoppedFenceableWriter(
                     name,
                     admissionGate,
                     writerHostInTopology,
-                    cancellationToken => writerHostProbe.ValidateSafeToExecuteAsync(request, cancellationToken),
+                    cancellationToken => writerHostProbe is DockerComposeApiAbsenceProbe composeProbe
+                        ? composeProbe.ValidateWriterHostsStoppedAsync(cancellationToken)
+                        : writerHostProbe.ValidateSafeToExecuteAsync(request, cancellationToken),
                     _writerLogger));
             }
             else

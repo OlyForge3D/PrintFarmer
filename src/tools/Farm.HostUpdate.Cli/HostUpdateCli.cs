@@ -215,6 +215,18 @@ public static partial class HostUpdateCli
         services.AddSingleton<IHostUpdatePrinterCommandInventoryReader>(sp =>
             new HostUpdateCliPrinterCommandInventoryReader(DatabaseProviderConfiguration.FromConfiguration(sp.GetRequiredService<IConfiguration>())));
         services.AddSingleton<IHostUpdateOfflineActivationSafetyProbe, DockerComposeApiAbsenceProbe>();
+        services.AddSingleton<HostUpdatePriorReleaseContext>();
+
+        // Append the N-1 writer fence (issue #3126): inert unless the absence probe tolerated a
+        // running authenticated prior-release writer, in which case the fence step must prove it
+        // fenced and drained before backup, migration or apply.
+        ServiceDescriptor writers = services.Last(d => d.ServiceType == typeof(IReadOnlyList<IFenceableWriter>));
+        services.Remove(writers);
+        services.AddSingleton<IReadOnlyList<IFenceableWriter>>(sp =>
+        {
+            var inner = (IReadOnlyList<IFenceableWriter>)writers.ImplementationFactory!(sp);
+            return [.. inner, ActivatorUtilities.CreateInstance<HostUpdatePriorReleaseWriterFence>(sp)];
+        });
         AddOfflineFenceAndHealthContract(services);
         AddOfflineActivationExecution(services, configuration);
         return services;

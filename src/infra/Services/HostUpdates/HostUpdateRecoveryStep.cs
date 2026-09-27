@@ -175,7 +175,8 @@ public sealed class HostUpdateRecoveryCoordinator(
     IHostUpdateFenceCoordinator? fenceCoordinator = null,
     IHostUpdateExecutionLock? executionLock = null,
     IHostUpdatePhysicalReconciliationGate? physicalReconciliationGate = null,
-    HostUpdateExecutionOptions? executionOptions = null) : IHostUpdateRecoveryCoordinator, IHostUpdateRecoveryPlanner
+    HostUpdateExecutionOptions? executionOptions = null,
+    IHostUpdatePrinterCommandInventoryReader? inventoryReader = null) : IHostUpdateRecoveryCoordinator, IHostUpdateRecoveryPlanner
 {
     private const string FenceReleaseFailureSeparator = "|";
 
@@ -334,14 +335,43 @@ public sealed class HostUpdateRecoveryCoordinator(
 
         try
         {
-            return await physicalReconciliationGate.IsRecordedAsync(failedRequest.ReleaseId, failedRequest.RequestId, CancellationToken.None).ConfigureAwait(false)
-                ? null
-                : HostUpdatePhysicalReconciliationCodes.Pending;
+            if (await physicalReconciliationGate.IsRecordedAsync(failedRequest.ReleaseId, failedRequest.RequestId, CancellationToken.None).ConfigureAwait(false))
+            {
+                return null;
+            }
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            // An unreadable or tampered record is never treated as reconciliation.
+            // An unreadable or tampered record is never treated as reconciliation, and an empty
+            // inventory never overrides it (issue #3126: a recorded reconciliation takes precedence).
             return HostUpdatePhysicalReconciliationCodes.Unreadable + ":" + exception.GetType().Name;
+        }
+
+        return await IsInventoryProvablyEmptyAsync().ConfigureAwait(false)
+            ? null
+            : HostUpdatePhysicalReconciliationCodes.Pending;
+    }
+
+    /// <summary>
+    /// Issue #3126: with no recorded reconciliation, the gate clears only on a read-consistent
+    /// inventory with zero printers and zero uncertain outcomes -- there is nothing an operator
+    /// could physically reconcile. Any read failure keeps the gate pending (fail closed).
+    /// </summary>
+    private async Task<bool> IsInventoryProvablyEmptyAsync()
+    {
+        if (inventoryReader is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            HostUpdatePrinterCommandInventory inventory = await inventoryReader.ReadAsync(CancellationToken.None).ConfigureAwait(false);
+            return inventory.Printers.Count == 0 && inventory.UncertainOutcomeCount == 0;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return false;
         }
     }
 

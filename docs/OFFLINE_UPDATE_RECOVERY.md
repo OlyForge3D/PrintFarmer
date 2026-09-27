@@ -552,7 +552,47 @@ active writer service listed by configuration must have a known compose service
 mapping. The proof uses all container states (`docker compose ps -a --format
 json`) and allows only absent, exited, dead, removed or not-created services; a
 running, restarting, paused, created/starting, unknown or unparseable state fails
-closed. Activation repeats the replay and writer-absence checks inside the
+closed.
+
+One running writer is tolerated (#3126): the exact authenticated prior release.
+It is tolerated only when all of the following hold, and never on installed state
+alone:
+
+1. The staged bundle binds a prior set whose `prior-update-manifest.json` hashes
+   to the recorded digest and whose signature re-verifies against the same
+   `--trusted-root`, exactly as [Offline recovery](#offline-recovery-3082)
+   requires.
+2. The installed host state is exactly that prior set, per the same
+   `prior_installed_state_mismatch` rules recovery applies.
+3. The container's compose `State` is exactly `running` and its compose `ID` is
+   observable. A `created`, `restarting`, `paused` or otherwise non-running
+   writer is refused even on the prior image.
+4. The running container's compose `Image` is `<ImageRepository>@<installed
+   pin>` for that service. A child digest, tag, other repository or missing image
+   is refused as `writer_service_active:<service>:<state>`.
+
+A tolerated writer is then fenced before backup, migration or apply by the CLI's
+`prior-release-writer` fence. The fence closes the durable admission gate and
+waits until the gate reads closed, every active-work port reads zero, and a
+fresh `docker compose ps` shows no running writer other than the tolerated
+containers, each with the same container ID and image. Only then does it stop
+exactly those containers with `docker stop <container-id>`, and it is proven
+only once every writer host is observed stopped. The N-1 writer's in-process
+writers cannot acknowledge a pause to the CLI, so stopping it is what makes the
+offline writer-host-stopped proof (#3127) genuine; that proof never counts a
+tolerated writer as stopped. A new, replaced, extra-replica, re-imaged,
+non-running or unobservable writer, or a failed stop, keeps the fence open
+until it times out. A failure after the stop leaves the N-1 writer stopped
+behind the closed gate; recovery rolls back through the normal path. When no
+writer was tolerated, the fence is inert.
+
+A host whose application or slicer schema was provably never migrated has no
+active work to drain (#3126). The proof requires the context's EF migration
+history table and the queried tables to be absent together. A missing work table
+while the history table exists, or any other read failure, still fails the drain
+closed. The manifest binding reader uses the same proof and reports no binding.
+
+Activation repeats the replay and writer-absence checks inside the
 executor's own lock immediately before executor steps begin, closing the gap
 between preflight validation and mutation. After health/digest verification
 persists the installed state, the executor consumes the `Imported` replay record
@@ -670,7 +710,10 @@ slicer worker is outside this host's compose set: every registered worker host
 must be an `http(s)` URL naming the compose service of an active mapped service.
 A remote or out-of-compose worker refuses with `remote_worker_unsupported`
 (detail `restore_remote_workers_through_owner`); unreadable registrations refuse
-with `remote_worker_evidence_unavailable`. Restore or update remote workers
+with `remote_worker_evidence_unavailable`. A slicer schema that was provably never
+migrated (no `__EFMigrationsHistory` and no `SlicerServices` table) has no
+registered workers; a missing registration table while the migration history
+exists is `remote_worker_evidence_unavailable`. Restore or update remote workers
 through their owner. A coordinated
 database restore owned by an external provider (`DatabaseExternallyOwned`) stops
 as needs-operator with `database_externally_owned` before any restore or apply,

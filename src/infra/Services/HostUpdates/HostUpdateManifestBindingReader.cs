@@ -52,6 +52,16 @@ public sealed class ReadOnlyHostUpdateManifestBindingReader(DatabaseProviderConf
         string sql = _database.IsSqlServer
             ? "SELECT [SettingsJson] FROM [AppSettingsEntities] WHERE [Key] = @key"
             : "SELECT \"SettingsJson\" FROM \"AppSettingsEntities\" WHERE \"Key\" = @key";
+
+        // A host whose application schema was provably never migrated has no binding (issue
+        // #3126). The proof runs inside the same read-only transaction and is a positive catalog
+        // check; a failed binding query is never read as an absent binding.
+        if (await HostUpdateSchemaAbsenceProof.IsNeverMigratedAsync(connection, transaction, historySchema: null, [(null, "AppSettingsEntities")], cancellationToken).ConfigureAwait(false))
+        {
+            await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
+            return NoBinding;
+        }
+
         object? value;
         await using (DbCommand command = Command(connection, transaction, sql))
         {
