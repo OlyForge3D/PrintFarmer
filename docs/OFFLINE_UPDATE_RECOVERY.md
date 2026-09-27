@@ -632,6 +632,14 @@ active work to drain (#3126). The proof requires the context's EF migration
 history table and the queried tables to be absent together. A missing work table
 while the history table exists, or any other read failure, still fails the drain
 closed. The manifest binding reader uses the same proof and reports no binding.
+Both absence checks are positive catalog queries on every provider (#3141),
+resolved from the context's configured history table name and schema; the EF
+provider's own history-exists check is not used because Npgsql always reports
+the table present. On PostgreSQL an unqualified table counts as present in any
+schema on the effective `search_path`, and views count as present, so an
+ambiguous catalog never proves absence. PostgreSQL and SQL Server keep one
+default-schema `__EFMigrationsHistory` for both contexts, so once either context
+is migrated neither is treated as never migrated.
 
 Activation repeats the replay and writer-absence checks inside the
 executor's own lock immediately before executor steps begin, closing the gap

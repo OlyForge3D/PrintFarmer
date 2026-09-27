@@ -21,7 +21,7 @@ namespace Farm.Infrastructure.Services.HostUpdates;
 /// </summary>
 public static class HostUpdateSchemaAbsenceProof
 {
-    internal const string DefaultHistoryTableName = "__EFMigrationsHistory";
+    internal const string DefaultHistoryTableName = HistoryRepository.DefaultTableName;
 
     /// <summary>
     /// True only when <paramref name="context"/>'s migration history table and every table mapped
@@ -51,17 +51,24 @@ public static class HostUpdateSchemaAbsenceProof
             tables.Add((entity.GetSchema(), entity.GetTableName() ?? throw new InvalidOperationException("schema_absence_table_unmapped:" + type.Name)));
         }
 
-        IHistoryRepository history = context.GetService<IHistoryRepository>();
-        if (await history.ExistsAsync(cancellationToken).ConfigureAwait(false))
-        {
-            return false;
-        }
+        // IHistoryRepository.ExistsAsync is not a catalog check on every provider: Npgsql's
+        // implementation always returns true (issue #3141). The history table is therefore probed
+        // with the same positive catalog query as the mapped tables, resolved from the context's
+        // configured history table name and schema exactly as EF's HistoryRepository resolves them.
+        RelationalOptionsExtension relationalOptions = RelationalOptionsExtension.Extract(context.GetService<IDbContextOptions>());
+        string historyTable = relationalOptions.MigrationsHistoryTableName ?? DefaultHistoryTableName;
+        string? historySchema = relationalOptions.MigrationsHistoryTableSchema;
 
         DbConnection connection = context.Database.GetDbConnection();
         DbTransaction? transaction = context.Database.CurrentTransaction?.GetDbTransaction();
         await context.Database.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            if (await TableExistsAsync(connection, transaction, historySchema, historyTable, cancellationToken).ConfigureAwait(false))
+            {
+                return false;
+            }
+
             foreach ((string? schema, string table) in tables)
             {
                 if (await TableExistsAsync(connection, transaction, schema, table, cancellationToken).ConfigureAwait(false))
@@ -69,13 +76,13 @@ public static class HostUpdateSchemaAbsenceProof
                     return false;
                 }
             }
+
+            return !await TableExistsAsync(connection, transaction, historySchema, historyTable, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
             await context.Database.CloseConnectionAsync().ConfigureAwait(false);
         }
-
-        return !await history.ExistsAsync(cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -114,8 +121,10 @@ public static class HostUpdateSchemaAbsenceProof
     }
 
     /// <summary>
-    /// Catalog probe for one table. An unqualified name resolves the way an unqualified query does:
-    /// PostgreSQL's <c>current_schema()</c>, SQL Server's default schema, and SQLite's main schema.
+    /// Catalog probe for one relation. An unqualified name is reported present when an unqualified
+    /// query could resolve it: any schema on PostgreSQL's effective <c>search_path</c>, SQL Server's
+    /// default-schema resolution, and SQLite's main schema. Views and other relations that a query
+    /// could resolve count as present, so an ambiguous catalog never proves absence.
     /// </summary>
     internal static async Task<bool> TableExistsAsync(
         DbConnection connection,
@@ -133,17 +142,18 @@ public static class HostUpdateSchemaAbsenceProof
             case NpgsqlConnection:
                 command.CommandText =
                     "SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace " +
-                    "WHERE c.relname = @table AND n.nspname = COALESCE(@schema, current_schema()) AND c.relkind IN ('r', 'p'))";
+                    "WHERE c.relname = @table AND c.relkind IN ('r', 'p', 'v', 'm', 'f') " +
+                    "AND (n.nspname = @schema OR (@schema IS NULL AND n.nspname = ANY (current_schemas(true)))))";
                 AddParameter(command, "@table", table);
                 AddParameter(command, "@schema", schema);
                 break;
             case SqlConnection:
-                command.CommandText = "SELECT CASE WHEN OBJECT_ID(@name, N'U') IS NULL THEN 0 ELSE 1 END";
+                command.CommandText = "SELECT CASE WHEN OBJECT_ID(@name) IS NULL THEN 0 ELSE 1 END";
                 AddParameter(command, "@name", schema is null ? Bracket(table) : Bracket(schema) + "." + Bracket(table));
                 break;
             case SqliteConnection:
                 // SQLite has no schemas; every context maps into the main database.
-                command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = @table";
+                command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type IN ('table', 'view') AND name = @table";
                 AddParameter(command, "@table", table);
                 break;
             default:
