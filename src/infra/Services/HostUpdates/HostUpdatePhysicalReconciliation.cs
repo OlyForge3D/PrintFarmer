@@ -119,7 +119,53 @@ public sealed class DbHostUpdatePrinterCommandInventoryReader(AppDbContext db) :
         PrintJobStatus.Paused,
     ];
 
+    private static readonly Type[] InventoryEntities =
+    [
+        typeof(Printer),
+        typeof(PrintJob),
+        typeof(QueueDispatchOutbox),
+        typeof(QueueDispatchAttempt),
+        typeof(PrinterDispatchState),
+    ];
+
+    /// <summary>
+    /// Reads every inventory source inside one snapshot transaction, so a zero-printer,
+    /// zero-outcome inventory is a read-consistent proof rather than five independent reads. A
+    /// schema that was provably never migrated yields an empty inventory (issue #3126).
+    /// </summary>
     public async Task<HostUpdatePrinterCommandInventory> ReadAsync(CancellationToken cancellationToken)
+    {
+        await using Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction transaction = await BeginSnapshotAsync(cancellationToken).ConfigureAwait(false);
+        HostUpdatePrinterCommandInventory inventory = await HostUpdateSchemaAbsenceProof.IsNeverMigratedAsync(db, InventoryEntities, cancellationToken).ConfigureAwait(false)
+            ? new HostUpdatePrinterCommandInventory([])
+            : await ReadCoreAsync(cancellationToken).ConfigureAwait(false);
+        await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
+        return inventory;
+    }
+
+    private async Task<Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction> BeginSnapshotAsync(CancellationToken cancellationToken)
+    {
+        if (db.Database.GetDbConnection() is Microsoft.Data.Sqlite.SqliteConnection sqlite)
+        {
+            // A deferred transaction takes no write lock (the CLI opens SQLite read-only) and reads
+            // one consistent snapshot from its first statement.
+            await db.Database.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+
+            // Microsoft.Data.Sqlite has no async deferred overload; its async begin is synchronous anyway.
+#pragma warning disable CA1849
+            System.Data.Common.DbTransaction deferred = sqlite.BeginTransaction(deferred: true);
+#pragma warning restore CA1849
+            return await db.Database.UseTransactionAsync(deferred, cancellationToken).ConfigureAwait(false)
+                ?? throw new InvalidOperationException("physical_inventory_snapshot_unavailable");
+        }
+
+        System.Data.IsolationLevel isolation = db.Database.GetDbConnection() is Npgsql.NpgsqlConnection
+            ? System.Data.IsolationLevel.RepeatableRead
+            : System.Data.IsolationLevel.Serializable;
+        return await db.Database.BeginTransactionAsync(isolation, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<HostUpdatePrinterCommandInventory> ReadCoreAsync(CancellationToken cancellationToken)
     {
         var printers = await db.Printers.AsNoTracking()
             .Select(printer => new { printer.Id, printer.Name })
