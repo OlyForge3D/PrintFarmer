@@ -157,8 +157,14 @@ public sealed partial class HostUpdateCliOfflineActivateTests : IDisposable, IAs
             PullNever(call.Arguments));
         runner.MigrationRunCalls.Should().NotBeEmpty();
         runner.MigrationRunCalls.Should().OnlyContain(call => PullNever(call.Arguments));
-        http.Requests.Should().NotBeEmpty();
-        http.Requests.Should().OnlyContain(uri => string.Equals(uri.Host, "localhost", StringComparison.Ordinal));
+        http.Requests.Should().BeEmpty("the CLI reads /health inside the compose network, never over the host network");
+        runner.AggregateHealthExecCalls.Should().NotBeEmpty();
+        runner.AggregateHealthExecCalls.Should().OnlyContain(call =>
+            call.Arguments.Contains("-T") &&
+            call.Arguments.Contains("printfarmer") &&
+            string.Equals(call.Arguments[call.Arguments.Count - 1], "http://127.0.0.1:5000/health", StringComparison.Ordinal));
+        runner.ComposePsCalls.Count().Should().BeGreaterThan(1,
+            "the fence re-proves writer hosts stopped with its own probe instead of trusting the start guard's");
     }
 
     [HostStateFact]
@@ -168,8 +174,8 @@ public sealed partial class HostUpdateCliOfflineActivateTests : IDisposable, IAs
         HostUpdateExecutionRequest request = RequestFromCurrentStaging();
         await WriteInstalledStateAsync(request with { ReleaseId = "stable:1.2.2", ManifestDigest = "sha256:" + new string('9', 64) });
         string before = File.ReadAllText(Path.Combine(_host.StateDirectory, "installed-state.json"));
-        var runner = new IntegratedActivationProcessRunner(healthSucceeds: true);
-        var http = new RecordingHealthHttpClientFactory(_host.Configuration()["HostUpdateExecution:HealthCheckBaseUrl"] ?? "http://localhost:5245", succeeds: false);
+        var runner = new IntegratedActivationProcessRunner(healthSucceeds: true, aggregateHealthy: false);
+        var http = new RecordingHealthHttpClientFactory(_host.Configuration()["HostUpdateExecution:HealthCheckBaseUrl"] ?? "http://localhost:5245", succeeds: true);
 
         JsonElement refused = Envelope(await RunAsync(Activate(), IntegratedConfiguration(), services =>
         {
@@ -727,8 +733,6 @@ public sealed partial class HostUpdateCliOfflineActivateTests : IDisposable, IAs
         services.AddSingleton<IHostUpdateProcessRunner>(runner);
         services.RemoveAll<IHttpClientFactory>();
         services.AddSingleton<IHttpClientFactory>(http);
-        services.RemoveAll<IReadOnlyList<IFenceableWriter>>();
-        services.AddSingleton<IReadOnlyList<IFenceableWriter>>(_ => Array.Empty<IFenceableWriter>());
         services.RemoveAll<IActiveWorkObservationPort>();
         services.AddScoped<IActiveWorkObservationPort, NoActiveWorkObservationPort>();
         services.RemoveAll<IHostUpdateBackupTarget>();
@@ -1091,6 +1095,10 @@ public sealed partial class HostUpdateCliOfflineActivateTests : IDisposable, IAs
         }
     }
 
+    /// <summary>
+    /// Records any host-network health request. The offline CLI must never issue one (issue #3127);
+    /// a healthy response here would otherwise mask a regression back to the unreachable transport.
+    /// </summary>
     private sealed class RecordingHealthHttpClientFactory(string expectedBaseUrl, bool succeeds) : IHttpClientFactory
     {
         public List<Uri> Requests { get; } = [];
@@ -1121,8 +1129,12 @@ public sealed partial class HostUpdateCliOfflineActivateTests : IDisposable, IAs
         }
     }
 
-    private sealed class IntegratedActivationProcessRunner(bool healthSucceeds) : IHostUpdateProcessRunner
+    private sealed class IntegratedActivationProcessRunner(bool healthSucceeds, bool aggregateHealthy = true) : IHostUpdateProcessRunner
     {
+        internal const string HealthyAggregateBody = """{"status":"Healthy","results":{"comprehensive":{"status":"Healthy"},"signalr":{"status":"Healthy"},"spoolman":{"status":"Healthy"}}}""";
+
+        internal const string UnhealthyAggregateBody = """{"status":"Unhealthy","results":{"comprehensive":{"status":"Unhealthy"},"signalr":{"status":"Healthy"},"spoolman":{"status":"Healthy"}}}""";
+
         private static readonly Dictionary<string, (string Compose, string Repository, string Digest)> Services = new(StringComparer.Ordinal)
         {
             ["api"] = ("api", "ghcr.io/olyforge3d/printfarmer-api", "sha256:" + new string('a', 64)),
@@ -1146,6 +1158,17 @@ public sealed partial class HostUpdateCliOfflineActivateTests : IDisposable, IAs
             call.Arguments.Count > 0 &&
             string.Equals(call.Arguments[0], "run", StringComparison.Ordinal) &&
             call.Arguments.Contains("--host-update-migration"));
+
+        public IEnumerable<ProcessCall> ComposePsCalls => Calls.Where(call =>
+            call.Arguments.Count > 0 &&
+            string.Equals(call.Arguments[0], "compose", StringComparison.Ordinal) &&
+            call.Arguments.Contains("ps"));
+
+        public IEnumerable<ProcessCall> AggregateHealthExecCalls => Calls.Where(call =>
+            call.Arguments.Count > 0 &&
+            string.Equals(call.Arguments[0], "compose", StringComparison.Ordinal) &&
+            call.Arguments.Contains("exec") &&
+            call.Arguments.Contains("curl"));
 
         public bool ContainsDockerCommand(params string[] tokens) =>
             Calls.Any(call => tokens.All(token => call.Arguments.Contains(token, StringComparer.Ordinal)));
@@ -1181,6 +1204,13 @@ public sealed partial class HostUpdateCliOfflineActivateTests : IDisposable, IAs
             {
                 string output = string.Join('\n', Services.Values.Select(service => $$"""{"Service":"{{service.Compose}}","State":"exited"}"""));
                 return Task.FromResult(new HostUpdateProcessResult(0, output, string.Empty));
+            }
+
+            if (arguments.Count > 0 && string.Equals(arguments[0], "compose", StringComparison.Ordinal) && arguments.Contains("exec"))
+            {
+                arguments.Should().Contain("curl");
+                arguments[^1].Should().StartWith("http://127.0.0.1:");
+                return Task.FromResult(new HostUpdateProcessResult(0, aggregateHealthy ? HealthyAggregateBody : UnhealthyAggregateBody, string.Empty));
             }
 
             if (arguments.Count > 0 && string.Equals(arguments[0], "compose", StringComparison.Ordinal) && arguments.Contains("up"))

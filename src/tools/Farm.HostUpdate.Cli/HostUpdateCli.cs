@@ -9,6 +9,7 @@ using Farm.Slicer.Module.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -205,8 +206,29 @@ public static partial class HostUpdateCli
         services.AddSingleton<IHostUpdatePrinterCommandInventoryReader>(sp =>
             new HostUpdateCliPrinterCommandInventoryReader(DatabaseProviderConfiguration.FromConfiguration(sp.GetRequiredService<IConfiguration>())));
         services.AddSingleton<IHostUpdateOfflineActivationSafetyProbe, DockerComposeApiAbsenceProbe>();
+        AddOfflineFenceAndHealthContract(services);
         AddOfflineActivationExecution(services, configuration);
         return services;
+    }
+
+    /// <summary>
+    /// Offline fence and health contract (issue #3127). The shared registration proves background
+    /// writers through in-process flags and reaches <c>/health</c> over the host network; neither is
+    /// observable from this separate host-local process. Both are replaced, never relaxed: writers are
+    /// proven fenced by the closed durable admission gate plus stopped writer hosts, and readiness is
+    /// read inside the compose network with the same aggregate report rule.
+    /// </summary>
+    private static void AddOfflineFenceAndHealthContract(IServiceCollection services)
+    {
+        services.RemoveAll<IHostUpdateFenceCoordinator>();
+        services.AddSingleton<IHostUpdateFenceCoordinator>(sp => new HostUpdateCliWriterStoppedFenceCoordinator(
+            sp.GetRequiredService<IHostUpdateAdmissionGate>(),
+            sp.GetRequiredService<IHostUpdateOfflineActivationSafetyProbe>(),
+            sp.GetRequiredService<IReadOnlyList<IFenceableWriter>>(),
+            sp.GetRequiredService<HostUpdateExecutionOptions>(),
+            sp.GetRequiredService<ILoggerFactory>()));
+        services.RemoveAll<IHostUpdateAggregateHealthCheck>();
+        services.AddTransient<IHostUpdateAggregateHealthCheck, ComposeExecAggregateHealthCheck>();
     }
 
     private static void AddOfflineActivationExecution(IServiceCollection services, IConfiguration configuration)

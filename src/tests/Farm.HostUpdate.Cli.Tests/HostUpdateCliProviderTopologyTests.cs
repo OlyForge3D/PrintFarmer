@@ -60,12 +60,13 @@ public sealed class HostUpdateCliProviderTopologyTests : IDisposable, IAsyncLife
     };
 
     private readonly CliHostFixture _host = new();
-    private readonly RecordingProcessRunner _processes = new(ContainerImageVariables());
     private readonly HealthState _health = new();
+    private readonly RecordingProcessRunner _processes;
     private IHostUpdateFenceCoordinator? _fence;
 
     public HostUpdateCliProviderTopologyTests()
     {
+        _processes = new RecordingProcessRunner(ContainerImageVariables(), _health);
         File.WriteAllText(ToolPath("pg_restore"), string.Empty);
         File.WriteAllText(ToolPath("sqlcmd"), string.Empty);
         File.WriteAllText(MonolithComposeFile, "services: {}\n");
@@ -157,6 +158,9 @@ public sealed class HostUpdateCliProviderTopologyTests : IDisposable, IAsyncLife
 
         File.ReadAllText(Path.Combine(_host.Root, "owned", "app-data", "restored.txt")).Should().Be("owned-data");
         _health.Requests.Should().BeGreaterThan(0, "the rollback is verified healthy before it is reported");
+        _health.HostNetworkRequests.Should().Be(0, "the CLI reads /health inside the compose network (issue #3127)");
+        calls.Where(IsAggregateHealthExec).Should().OnlyContain(call =>
+            string.Equals(call.Arguments[call.Arguments.Length - 1], topology == Monolith ? "http://127.0.0.1:5000/health" : "http://127.0.0.1:5245/health", StringComparison.Ordinal));
         File.Exists(_host.AdmissionClosedPath).Should().BeFalse("admission reopens only after a verified rollback");
         _host.ReadOutcome()!.Outcome.Should().Be(HostUpdateRecoveryOutcome.RolledBack);
     }
@@ -393,7 +397,7 @@ public sealed class HostUpdateCliProviderTopologyTests : IDisposable, IAsyncLife
 
     private static bool IsPull(ProcessCall call) => call.Arguments is ["image", "pull", ..];
 
-    private static bool IsComposeUp(ProcessCall call) => call.Arguments is ["compose", ..];
+    private static bool IsComposeUp(ProcessCall call) => call.Arguments is ["compose", ..] && call.Arguments.Contains("up");
 
     private static IEnumerable<string> ComposeServices(ProcessCall composeUp) =>
         composeUp.Arguments.SkipWhile(argument => argument != "never").Skip(1);
@@ -597,7 +601,10 @@ public sealed class HostUpdateCliProviderTopologyTests : IDisposable, IAsyncLife
     /// remembered so a later <c>docker container inspect</c> reports exactly the image the
     /// recorded apply pinned, which is what the real digest verifier checks.
     /// </summary>
-    private sealed class RecordingProcessRunner(IReadOnlyDictionary<string, string> imageVariableByContainer) : IHostUpdateProcessRunner
+    private static bool IsAggregateHealthExec(ProcessCall call) =>
+        call.Arguments is ["compose", ..] && call.Arguments.Contains("exec") && call.Arguments.Contains("curl");
+
+    private sealed class RecordingProcessRunner(IReadOnlyDictionary<string, string> imageVariableByContainer, HealthState health) : IHostUpdateProcessRunner
     {
         private readonly ConcurrentQueue<ProcessCall> _calls = new();
         private readonly ConcurrentDictionary<string, string> _pinnedImages = new(StringComparer.Ordinal);
@@ -622,6 +629,14 @@ public sealed class HostUpdateCliProviderTopologyTests : IDisposable, IAsyncLife
                 }
             }
 
+            if (arguments is ["compose", ..] && arguments.Contains("exec") && arguments.Contains("curl"))
+            {
+                health.Record();
+                return Task.FromResult(health.Available
+                    ? new HostUpdateProcessResult(0, HealthState.HealthyReport, string.Empty)
+                    : new HostUpdateProcessResult(1, string.Empty, "service is not running"));
+            }
+
             return Task.FromResult(arguments switch
             {
                 ["container", "inspect", _, _, string container] =>
@@ -636,30 +651,32 @@ public sealed class HostUpdateCliProviderTopologyTests : IDisposable, IAsyncLife
 
     private sealed class HealthState
     {
+        internal const string HealthyReport = """
+            {"status":"Healthy","results":{"comprehensive":{"status":"Healthy"},"signalr":{"status":"Healthy"},"spoolman":{"status":"Healthy"}}}
+            """;
+
         private int _requests;
+        private int _hostNetworkRequests;
 
         public volatile bool Available = true;
 
         public int Requests => Volatile.Read(ref _requests);
 
+        /// <summary>Host-network /health requests; the offline CLI must never issue one.</summary>
+        public int HostNetworkRequests => Volatile.Read(ref _hostNetworkRequests);
+
         public void Record() => Interlocked.Increment(ref _requests);
+
+        public void RecordHostNetwork() => Interlocked.Increment(ref _hostNetworkRequests);
     }
 
+    /// <summary>Stands in for the unreachable host-network transport and answers healthy, so any use is caught by count, not masked.</summary>
     private sealed class HealthHandler(HealthState state) : HttpMessageHandler
     {
-        private const string HealthyReport = """
-            {"status":"Healthy","results":{"comprehensive":{"status":"Healthy"},"signalr":{"status":"Healthy"},"spoolman":{"status":"Healthy"}}}
-            """;
-
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
-            state.Record();
-            if (!state.Available)
-            {
-                throw new HttpRequestException("connection refused");
-            }
-
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(HealthyReport) });
+            state.RecordHostNetwork();
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(HealthState.HealthyReport) });
         }
     }
 

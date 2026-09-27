@@ -157,6 +157,14 @@ handling must finish before resuming production. A disconnected browser or API
 restart proves neither success nor failure; reacquire status by the same
 release identity before considering another request.
 
+The host-local CLI runs outside the API process, so it cannot observe the API's
+in-memory writer flags or reach `HealthCheckBaseUrl` on an internal-only
+network. It uses the [offline fence and health contract](HOST_UPDATE_EXECUTOR.md#host-local-cli-offline-fence-and-health-contract-3127)
+instead: every required writer is proven by the durable admission gate plus the
+writer hosts being observed stopped, and `/health` is probed from inside the
+compose network with the same `Healthy` rule. Neither gate is relaxed; a failed
+proof keeps the fence closed.
+
 **Later** is intended only to defer a reminder. It does not cancel an operation,
 disable checks or opt out of automation; it is currently disabled in the UI.
 
