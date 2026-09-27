@@ -36,6 +36,13 @@ public static class HostUpdateSchemaAbsenceProof
             throw new ArgumentException("At least one entity type is required.", nameof(entityTypes));
         }
 
+        // A non-relational provider (tests' in-memory store) has no schema or migration history
+        // to prove absent, so it is never "never migrated": the normal query path runs.
+        if (!context.Database.IsRelational())
+        {
+            return false;
+        }
+
         List<(string? Schema, string Table)> tables = [];
         foreach (Type type in entityTypes)
         {

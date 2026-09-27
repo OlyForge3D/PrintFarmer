@@ -25,6 +25,11 @@ public sealed partial class HostUpdateCliOfflineActivateTests
             UsePriorWriterFence(services, runner, http)));
 
         activated.GetProperty("exitCode").GetInt32().Should().Be(HostUpdateCliExitCodes.Success, activated.ToString());
+        runner.StoppedContainerIds.Should().Equal(["monolith-1"], "the fenced N-1 writer is stopped before backup");
+        int stop = runner.Calls.FindIndex(call => call.Arguments is ["stop", ..]);
+        int migrate = runner.Calls.FindIndex(call => call.Arguments.Contains("--host-update-migration"));
+        stop.Should().BeGreaterThanOrEqualTo(0);
+        (migrate < 0 || stop < migrate).Should().BeTrue("the writer is stopped before any migration runs");
         (await new FileInstalledHostStateStore(InstalledStatePath()).ReadAsync(CancellationToken.None))!
             .ReleaseId.Should().Be(TargetReleaseId);
         runner.ComposeUpCalls.Should().ContainSingle();
@@ -191,6 +196,7 @@ public sealed partial class HostUpdateCliOfflineActivateTests
     [InlineData("replaced-container", 0, false)]
     [InlineData("extra-replica", 0, false)]
     [InlineData("restarting", 0, false)]
+    [InlineData("stop-fails", 0, false)]
     public async Task Prior_release_writer_fence_proves_only_closed_drained_and_unchanged_writers(string scenario, int activeWork, bool expected)
     {
         string pin = MonolithRepository + "@" + PriorAmd64Digests["monolith"];
@@ -216,6 +222,8 @@ public sealed partial class HostUpdateCliOfflineActivateTests
             runner.RunningWriterStates["monolith"] = "restarting";
         }
 
+        runner.FailContainerStop = scenario == "stop-fails";
+
         (HostUpdatePriorReleaseWriterFence fence, InMemoryHostUpdateAdmissionGate gate, ServiceProvider provider) =
             CreatePriorWriterFence(runner, activeWork, new Dictionary<string, string[]>(StringComparer.Ordinal) { ["monolith"] = ["monolith-1 " + pin] });
         await using (provider)
@@ -224,6 +232,15 @@ public sealed partial class HostUpdateCliOfflineActivateTests
             await fence.QuiesceAsync(CancellationToken.None);
             (await gate.IsClosedAsync(CancellationToken.None)).Should().BeTrue();
             (await fence.IsQuiescedAsync(CancellationToken.None)).Should().Be(expected);
+            if (scenario == "tolerated" && activeWork == 0)
+            {
+                runner.StoppedContainerIds.Should().Equal(["monolith-1"], "only the proven tolerated container is stopped, by ID");
+                (await fence.IsQuiescedAsync(CancellationToken.None)).Should().BeTrue("a stopped tolerated writer stays proven");
+            }
+            else if (scenario != "stop-fails")
+            {
+                runner.StoppedContainerIds.Should().BeEmpty("an unproven writer set is never stopped");
+            }
         }
     }
 
@@ -240,6 +257,23 @@ public sealed partial class HostUpdateCliOfflineActivateTests
             (await fence.IsQuiescedAsync(CancellationToken.None)).Should().BeTrue();
             runner.Calls.Should().BeEmpty();
         }
+    }
+
+    [Fact]
+    public async Task Strict_writer_host_proof_never_counts_a_tolerated_writer_as_stopped()
+    {
+        string pin = MonolithRepository + "@" + PriorAmd64Digests["monolith"];
+        var runner = new IntegratedActivationProcessRunner(healthSucceeds: true);
+        runner.RunningWriterImages["monolith"] = pin;
+        var context = new HostUpdatePriorReleaseContext();
+        context.RecordTolerated(new Dictionary<string, string[]>(StringComparer.Ordinal) { ["monolith"] = ["monolith-1 " + pin] });
+        var options = new HostUpdateExecutionOptions { ActiveServiceIds = ["api", "frontend", "slicer-host", "monolith"] };
+        var probe = new DockerComposeApiAbsenceProbe(runner, new DockerOnlyResolver(), options, context);
+
+        (await probe.ValidateWriterHostsStoppedAsync(CancellationToken.None))
+            .Should().Be("writer_service_active:monolith:running", "the #3127 writer-host proof must see the N-1 writer running");
+        context.ToleratedWriters.Should().ContainKey("monolith", "the strict proof never rewrites the tolerated set");
+        runner.StoppedContainerIds.Should().BeEmpty();
     }
 
     private static (HostUpdatePriorReleaseWriterFence Fence, InMemoryHostUpdateAdmissionGate Gate, ServiceProvider Provider) CreatePriorWriterFence(
@@ -259,12 +293,8 @@ public sealed partial class HostUpdateCliOfflineActivateTests
         return (fence, gate, provider);
     }
 
-    private static void UsePriorWriterFence(IServiceCollection services, IntegratedActivationProcessRunner runner, RecordingHealthHttpClientFactory http)
-    {
+    private static void UsePriorWriterFence(IServiceCollection services, IntegratedActivationProcessRunner runner, RecordingHealthHttpClientFactory http) =>
         UseIntegratedBoundaries(services, runner, http);
-        services.RemoveAll<IReadOnlyList<IFenceableWriter>>();
-        services.AddSingleton<IReadOnlyList<IFenceableWriter>>(sp => [ActivatorUtilities.CreateInstance<HostUpdatePriorReleaseWriterFence>(sp)]);
-    }
 
     private sealed class FixedActiveWorkObservationPort(int count) : IActiveWorkObservationPort
     {

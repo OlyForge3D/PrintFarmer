@@ -555,6 +555,58 @@ internal sealed class DockerComposeApiAbsenceProbe(
             cancellationToken).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Strict writer-host observation for the offline fence (issues #3126, #3127): every mapped
+    /// writer must be observed stopped. Unlike <see cref="ValidateSafeToExecuteAsync"/> this never
+    /// tolerates a running prior-release writer and never changes the recorded tolerated set.
+    /// </summary>
+    internal async Task<string?> ValidateWriterHostsStoppedAsync(CancellationToken cancellationToken)
+    {
+        if (!TryResolveWriterMappings(out Dictionary<string, HostUpdateServiceMappingOptions> mappings, out string? mappingError))
+        {
+            return mappingError;
+        }
+
+        return mappings.Count == 0
+            ? null
+            : await ObserveWritersAsync(mappings, tolerate: null, tolerated: null, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Stops exactly the tolerated prior-release writer containers by container ID. Callers must
+    /// first prove admission closed, zero active work and an unchanged tolerated set. Returns false
+    /// when nothing is tolerated or the stop did not succeed.
+    /// </summary>
+    internal async Task<bool> StopToleratedWritersAsync(CancellationToken cancellationToken)
+    {
+        string[] containerIds =
+        [
+            .. (priorContext?.ToleratedWriters ?? new Dictionary<string, string[]>())
+                .SelectMany(pair => pair.Value)
+                .Select(identity => identity[..identity.IndexOf(' ', StringComparison.Ordinal)])
+                .Distinct(StringComparer.Ordinal)
+                .Order(StringComparer.Ordinal),
+        ];
+        if (containerIds.Length == 0)
+        {
+            return false;
+        }
+
+        try
+        {
+            HostUpdateProcessResult result = await processRunner.RunAsync(
+                executableResolver.Resolve("docker"),
+                ["stop", "--", .. containerIds],
+                TimeSpan.FromSeconds(options.ProcessDefaultTimeoutSeconds),
+                cancellationToken).ConfigureAwait(false);
+            return result.Succeeded;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return false;
+        }
+    }
+
     private bool TryResolveWriterMappings(out Dictionary<string, HostUpdateServiceMappingOptions> mappings, out string? error)
     {
         mappings = new Dictionary<string, HostUpdateServiceMappingOptions>(StringComparer.Ordinal);

@@ -572,13 +572,19 @@ alone:
    is refused as `writer_service_active:<service>:<state>`.
 
 A tolerated writer is then fenced before backup, migration or apply by the CLI's
-`prior-release-writer` fence. The fence closes the durable admission gate, and
-proves quiescence only when the gate reads closed, every active-work port reads
-zero, and a fresh `docker compose ps` shows no running writer other than the
-tolerated containers, each with the same container ID and image. A new,
-replaced, extra-replica, re-imaged, non-running or unobservable writer keeps
-the fence open until it times out. When no writer was tolerated, the fence is
-inert.
+`prior-release-writer` fence. The fence closes the durable admission gate and
+waits until the gate reads closed, every active-work port reads zero, and a
+fresh `docker compose ps` shows no running writer other than the tolerated
+containers, each with the same container ID and image. Only then does it stop
+exactly those containers with `docker stop <container-id>`, and it is proven
+only once every writer host is observed stopped. The N-1 writer's in-process
+writers cannot acknowledge a pause to the CLI, so stopping it is what makes the
+offline writer-host-stopped proof (#3127) genuine; that proof never counts a
+tolerated writer as stopped. A new, replaced, extra-replica, re-imaged,
+non-running or unobservable writer, or a failed stop, keeps the fence open
+until it times out. A failure after the stop leaves the N-1 writer stopped
+behind the closed gate; recovery rolls back through the normal path. When no
+writer was tolerated, the fence is inert.
 
 A host whose application or slicer schema was provably never migrated has no
 active work to drain (#3126). The proof requires the context's EF migration

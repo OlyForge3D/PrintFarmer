@@ -66,12 +66,14 @@ internal sealed class HostUpdatePriorReleaseContext
 
 /// <summary>
 /// Fences a tolerated N-1 writer before the executor's backup, migration and apply (issue
-/// #3126). The running prior release honours the durable admission fence, so quiescence is
-/// proven from outside the process: the admission gate is closed, every active-work port reads
-/// zero, and a fresh compose observation shows no writer container other than the exact ones
-/// the absence probe tolerated. Anything unproven -- a read failure, a new or re-imaged writer --
-/// keeps this writer unfenced, so the fence step times out instead of proceeding. When the
-/// absence probe tolerated no running writer there is nothing to fence and this writer is inert.
+/// #3126). The running prior release honours the durable admission fence, but its in-process
+/// writers cannot acknowledge a pause to this separate process, so the fence ends by stopping
+/// it: once the admission gate is closed, every active-work port reads zero, and a fresh compose
+/// observation shows no writer container other than the exact ones the absence probe tolerated,
+/// those containers are stopped by ID and the writer is proven only when every writer host is
+/// then observed stopped. Anything unproven -- a read failure, a new, replaced or re-imaged
+/// writer, a failed stop -- keeps this writer unfenced, so the fence step times out instead of
+/// proceeding. When the absence probe tolerated no running writer this writer is inert.
 /// </summary>
 internal sealed class HostUpdatePriorReleaseWriterFence(
     HostUpdatePriorReleaseContext priorContext,
@@ -111,8 +113,21 @@ internal sealed class HostUpdatePriorReleaseWriterFence(
                 }
             }
 
-            return safetyProbe is DockerComposeApiAbsenceProbe probe
-                && await probe.RecheckToleratedWritersAsync(cancellationToken).ConfigureAwait(false) is null;
+            if (safetyProbe is not DockerComposeApiAbsenceProbe probe)
+            {
+                return false;
+            }
+
+            if (await probe.ValidateWriterHostsStoppedAsync(cancellationToken).ConfigureAwait(false) is null)
+            {
+                return true;
+            }
+
+            // Still running: only the exact tolerated containers, drained behind the closed gate,
+            // may be stopped. Stopping them makes the offline writer-host-stopped proof genuine.
+            return await probe.RecheckToleratedWritersAsync(cancellationToken).ConfigureAwait(false) is null
+                && await probe.StopToleratedWritersAsync(cancellationToken).ConfigureAwait(false)
+                && await probe.ValidateWriterHostsStoppedAsync(cancellationToken).ConfigureAwait(false) is null;
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {

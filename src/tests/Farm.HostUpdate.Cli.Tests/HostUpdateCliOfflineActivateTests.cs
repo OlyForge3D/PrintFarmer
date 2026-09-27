@@ -1159,6 +1159,11 @@ public sealed partial class HostUpdateCliOfflineActivateTests : IDisposable, IAs
         private string[] RunningWriterIds(string serviceId) =>
             RunningWriterContainerIds.TryGetValue(serviceId, out string[]? ids) ? ids : [serviceId + "-1"];
 
+        /// <summary>Containers stopped by <c>docker stop</c>; compose ps reports them exited.</summary>
+        public HashSet<string> StoppedContainerIds { get; } = new(StringComparer.Ordinal);
+
+        public bool FailContainerStop { get; set; }
+
         private readonly Dictionary<string, string> _digestsByService = new(StringComparer.Ordinal);
 
         public IEnumerable<ProcessCall> ComposeUpCalls => Calls.Where(call =>
@@ -1216,10 +1221,22 @@ public sealed partial class HostUpdateCliOfflineActivateTests : IDisposable, IAs
             {
                 string output = string.Join('\n', Services.SelectMany(pair =>
                     RunningWriterImages.TryGetValue(pair.Key, out string? image) && !ComposeUpCalls.Any()
-                        ? RunningWriterIds(pair.Key).Select(id =>
-                            $$"""{"ID":"{{id}}","Service":"{{pair.Value.Compose}}","State":"{{RunningWriterStates.GetValueOrDefault(pair.Key, "running")}}","Image":"{{image}}"}""")
+                        ? RunningWriterIds(pair.Key).Select(id => StoppedContainerIds.Contains(id)
+                            ? $$"""{"ID":"{{id}}","Service":"{{pair.Value.Compose}}","State":"exited","Image":"{{image}}"}"""
+                            : $$"""{"ID":"{{id}}","Service":"{{pair.Value.Compose}}","State":"{{RunningWriterStates.GetValueOrDefault(pair.Key, "running")}}","Image":"{{image}}"}""")
                         : [$$"""{"Service":"{{pair.Value.Compose}}","State":"exited"}"""]));
                 return Task.FromResult(new HostUpdateProcessResult(0, output, string.Empty));
+            }
+
+            if (arguments is ["stop", "--", ..])
+            {
+                if (FailContainerStop)
+                {
+                    return Task.FromResult(new HostUpdateProcessResult(1, string.Empty, "stop failed"));
+                }
+
+                StoppedContainerIds.UnionWith(arguments.Skip(2));
+                return Task.FromResult(new HostUpdateProcessResult(0, string.Empty, string.Empty));
             }
 
             if (arguments.Count > 0 && string.Equals(arguments[0], "compose", StringComparison.Ordinal) && arguments.Contains("exec"))
