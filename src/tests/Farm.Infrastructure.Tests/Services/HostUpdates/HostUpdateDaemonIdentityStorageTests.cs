@@ -50,6 +50,47 @@ public sealed class HostUpdateDaemonIdentityStorageTests : IDisposable
         status.Should().Be(new HostUpdateDaemonIdentityStorageStatus(HostUpdateDaemonIdentityStorageState.Invalid, "identity_path_not_absolute"));
     }
 
+    [Fact]
+    public void TraversalSegment_IsRejected_BeforeNormalization()
+    {
+        string directory = Path.Combine(root.FullName, "elsewhere", "..", "identity");
+
+        var status = HostUpdateDaemonIdentityStorage.Inspect(directory, ExecutorRoot, isLinux: true, _ => true);
+
+        status.Should().Be(new HostUpdateDaemonIdentityStorageStatus(HostUpdateDaemonIdentityStorageState.Invalid, "identity_path_traversal_rejected"));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(" ")]
+    [InlineData(".")]
+    [InlineData("..")]
+    [InlineData("nested/key.pem")]
+    [InlineData("nested\\key.pem")]
+    public void TryJoinChild_RejectsNonPlainChildNames(string child)
+    {
+        HostUpdateDaemonIdentityStorage.TryJoinChild(root.FullName, child, out string path).Should().BeFalse();
+        path.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void TryJoinChild_RejectsRootedChild_InsteadOfDroppingTheDirectory()
+    {
+        string rooted = Path.Combine(Path.GetPathRoot(root.FullName)!, "key.pem");
+
+        HostUpdateDaemonIdentityStorage.TryJoinChild(root.FullName, rooted, out string path).Should().BeFalse();
+        path.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void TryJoinChild_JoinsPlainFileNameDirectlyUnderDirectory()
+    {
+        string directory = Path.TrimEndingDirectorySeparator(root.FullName);
+
+        HostUpdateDaemonIdentityStorage.TryJoinChild(directory, HostUpdateDaemonIdentityStorage.KeyFileName, out string path).Should().BeTrue();
+        path.Should().Be(Path.Join(directory, HostUpdateDaemonIdentityStorage.KeyFileName));
+    }
+
     [Theory]
     [InlineData("")]
     [InlineData("keys")]

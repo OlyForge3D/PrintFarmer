@@ -35,6 +35,9 @@ public static class HostUpdateDaemonIdentityStorage
 {
     public const string KeyFileName = "enrollment-key.pem";
 
+    // Both separators are rejected on every platform so a Windows-style path can never smuggle traversal onto Linux.
+    private static readonly char[] PathSeparators = ['/', '\\'];
+
     private const UnixFileMode GroupOrOther =
         UnixFileMode.GroupRead | UnixFileMode.GroupWrite | UnixFileMode.GroupExecute |
         UnixFileMode.OtherRead | UnixFileMode.OtherWrite | UnixFileMode.OtherExecute;
@@ -56,6 +59,11 @@ public static class HostUpdateDaemonIdentityStorage
         if (!Path.IsPathFullyQualified(identityDirectory))
         {
             return Invalid("identity_path_not_absolute");
+        }
+
+        if (HasTraversalSegment(identityDirectory))
+        {
+            return Invalid("identity_path_traversal_rejected");
         }
 
         string directory = Path.TrimEndingDirectorySeparator(Path.GetFullPath(identityDirectory));
@@ -92,7 +100,11 @@ public static class HostUpdateDaemonIdentityStorage
                 return Invalid("identity_directory_owner_mismatch");
             }
 
-            string key = Path.Combine(directory, KeyFileName);
+            if (!TryJoinChild(directory, KeyFileName, out string key))
+            {
+                return Invalid("identity_path_traversal_rejected");
+            }
+
             if (Directory.Exists(key))
             {
                 return Invalid("identity_key_not_regular_file");
@@ -147,6 +159,36 @@ public static class HostUpdateDaemonIdentityStorage
     }
 
     private static HostUpdateDaemonIdentityStorageStatus Invalid(string code) => new(HostUpdateDaemonIdentityStorageState.Invalid, code);
+
+    internal static bool HasTraversalSegment(string path) =>
+        path.Split(PathSeparators).Any(segment => segment == "..");
+
+    /// <summary>
+    /// Joins a single plain file name under <paramref name="directory"/>. Unlike <see cref="Path.Combine(string, string)"/>
+    /// this never lets a rooted child discard the directory: rooted, separator-bearing, <c>.</c>/<c>..</c> or empty
+    /// children are rejected, and the result must still resolve directly under the directory.
+    /// </summary>
+    internal static bool TryJoinChild(string directory, string childName, out string path)
+    {
+        path = string.Empty;
+        if (string.IsNullOrWhiteSpace(childName) ||
+            childName is "." or ".." ||
+            Path.IsPathRooted(childName) ||
+            childName.IndexOfAny(PathSeparators) >= 0)
+        {
+            return false;
+        }
+
+        string joined = Path.Join(directory, childName);
+        StringComparison comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        if (!string.Equals(Path.GetDirectoryName(Path.GetFullPath(joined)), directory, comparison))
+        {
+            return false;
+        }
+
+        path = joined;
+        return true;
+    }
 
     private static bool IsSameOrUnder(string candidate, string root)
     {

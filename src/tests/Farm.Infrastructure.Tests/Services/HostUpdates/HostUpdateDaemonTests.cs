@@ -90,6 +90,13 @@ public sealed class HostUpdateDaemonTests : IDisposable
             .Should().Equal("daemon_identity_directory_not_absolute");
 
     [Fact]
+    public void Options_RejectTraversalInIdentityDirectory() =>
+        HostUpdateDaemonOptions.Validate(
+                Configuration(new()),
+                new HostUpdateDaemonOptions { IdentityDirectory = Path.Combine(Path.GetTempPath(), "a", "..", "daemon") })
+            .Should().Equal("daemon_identity_directory_traversal_rejected");
+
+    [Fact]
     public async Task Dispatcher_WithProductionGate_NeverCallsExecutor()
     {
         var executor = new Mock<IHostUpdateExecutor>(MockBehavior.Strict);

@@ -45,14 +45,10 @@ public sealed class HostUpdateDaemonOptions
     {
         ArgumentNullException.ThrowIfNull(configuration);
         ArgumentNullException.ThrowIfNull(options);
-        List<string> failures = [];
-        foreach (IConfigurationSection child in configuration.GetSection(SectionName).GetChildren())
-        {
-            if (!AllowedKeys.Contains(child.Key))
-            {
-                failures.Add("daemon_setting_unknown:" + child.Key);
-            }
-        }
+        List<string> failures = configuration.GetSection(SectionName).GetChildren()
+            .Where(child => !AllowedKeys.Contains(child.Key))
+            .Select(child => "daemon_setting_unknown:" + child.Key)
+            .ToList();
 
         if (options.PollIntervalSeconds is < MinimumPollIntervalSeconds or > MaximumBackoffCeilingSeconds)
         {
@@ -67,6 +63,10 @@ public sealed class HostUpdateDaemonOptions
         if (!string.IsNullOrWhiteSpace(options.IdentityDirectory) && !Path.IsPathFullyQualified(options.IdentityDirectory))
         {
             failures.Add("daemon_identity_directory_not_absolute");
+        }
+        else if (!string.IsNullOrWhiteSpace(options.IdentityDirectory) && HostUpdateDaemonIdentityStorage.HasTraversalSegment(options.IdentityDirectory))
+        {
+            failures.Add("daemon_identity_directory_traversal_rejected");
         }
 
         return failures;
