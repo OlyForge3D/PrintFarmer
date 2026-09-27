@@ -1,14 +1,16 @@
 #!/usr/bin/env node
 import { execFileSync, spawnSync } from 'node:child_process';
-import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { basename, dirname, join, resolve } from 'node:path';
 
+import { waitForDuringActivationPoint } from './activation-runner.mjs';
 import { createFixtureSigstoreRoot } from './fixture-sigstore.mjs';
 import { buildC2ImageLayout } from './oci-layout-builder.mjs';
 import { writeRecoveryCompose } from './compose-config.mjs';
+import { writeDockerShim } from './docker-shim.mjs';
 import { hasFaultHooks, invokeFaultHook, parseFaultHooks } from './fault-hooks.mjs';
-import { assertHostStateContinuity, readHostStateSnapshot } from './host-state-continuity.mjs';
+import { assertHostStateContinuity, readHostStateSnapshotFromBoundary } from './host-state-continuity.mjs';
 import { canaryDnsName, hasCanaryAttempt } from './network-denial.mjs';
 import {
   baseEvidence,
@@ -194,7 +196,7 @@ try {
   const configPath = join(deploymentRoot, 'host-update.json');
   const hostStateRoot = recoveryHostStateRoot(runRoot, { hostBoundary: true });
   provisionBoundaryHostState(hostContainer, repo, hostStateRoot, { channel: 'insider' });
-  const dockerShim = writeDockerShim(runRoot, deploymentRoot);
+  const dockerShim = writeDockerShim(runRoot, deploymentRoot, networkAttemptsPath);
   writeRecoveryCompose({ deploymentRoot, network, egressSinkIp, databaseHost: 'database', appIp: appStaticIp, runId: run.id });
   checkpoints.ok('deployment-root-prepared');
   execFileSync('/usr/bin/docker', [
@@ -282,7 +284,7 @@ try {
     },
   });
 
-  const beforeRecovery = stateContinuitySnapshot({ env, deploymentRoot, hostStateRoot });
+  const beforeRecovery = stateContinuitySnapshot({ env, deploymentRoot, hostStateRoot, hostContainer });
 
   writeHostUpdateConfig(configPath, {
     rootDirectory: join(runRoot, 'host-update'),
@@ -297,6 +299,7 @@ try {
     pgDump: postgresTools.pgDump,
     pgRestore: postgresTools.pgRestore,
     healthBaseUrl: `http://${appStaticIp}:5000`,
+    createHostStateRoot: false,
   });
 
   executePackagedStep({
@@ -319,7 +322,7 @@ try {
   });
   runFaultHook('before-activate', { runRoot, deploymentRoot, stagingDir: targetStaging, bundlePath });
   const activationStarted = Date.now();
-  const targetActivation = executePackagedStep({
+  const targetActivation = executePackagedStepDuringActivation({
     checkpointName: 'activate-target',
     autoOk: false,
     cli,
@@ -332,6 +335,8 @@ try {
       '<staging-dir>': targetStaging,
       '<trusted_root.json>': trustedRootPath,
     },
+    markerPath: join(runRoot, 'host-update', 'state', 'journal.ndjson'),
+    hookContext: { runRoot, deploymentRoot, stagingDir: targetStaging, bundlePath },
   });
   if (!targetActivation.stdout.includes('Completed') && !targetActivation.stdout.includes('Activated')) {
     checkpoints.failed('activate-target');
@@ -339,7 +344,6 @@ try {
   }
   const activationSeconds = Math.max(1, Math.round((Date.now() - activationStarted) / 1000));
   checkpoints.ok('activate-target');
-  runFaultHook('during-activate', { runRoot, deploymentRoot, stagingDir: targetStaging, bundlePath });
 
   const recoveryStarted = Date.now();
   runFaultHook('before-recover', { runRoot, deploymentRoot, stagingDir: targetStaging, bundlePath });
@@ -365,7 +369,7 @@ try {
   const recoverySeconds = Math.max(1, Math.round((Date.now() - recoveryStarted) / 1000));
   checkpoints.ok('recovery-rolled-back');
 
-  const afterRecovery = stateContinuitySnapshot({ env, deploymentRoot, hostStateRoot });
+  const afterRecovery = stateContinuitySnapshot({ env, deploymentRoot, hostStateRoot, hostContainer });
   assertEqualJson('migration-heads-continuous', beforeRecovery.migrationHeads, afterRecovery.migrationHeads);
   checkpoints.ok(`migration-heads-continuous:${afterRecovery.migrationHeads.join(',') || 'empty'}`);
   assertEqualJson('volume-hashes-continuous', beforeRecovery.volumeHashes, afterRecovery.volumeHashes);
@@ -518,14 +522,18 @@ function provisionBoundaryHostState(container, repo, rootPath, { channel }) {
   });
 }
 
-function runPackagedOperation({ cli, repo, cosign, instructionsPath, operationId, replacements, allowedExitCodes = [0] }) {
+function packagedOperationArgv({ cli, instructionsPath, operationId, replacements }) {
   const instructions = JSON.parse(readFileSync(instructionsPath, 'utf8'));
   const operation = instructions.operations.find(candidate => candidate.id === operationId);
   if (!operation) throw new Error(`missing_packaged_operation:${operationId}`);
-  const argv = operation.bash.map((argument, index) => {
+  return operation.bash.map((argument, index) => {
     const value = replacements[argument] ?? argument;
     return index === 0 ? cli : value;
   });
+}
+
+function runPackagedOperation({ cli, repo, cosign, instructionsPath, operationId, replacements, allowedExitCodes = [0] }) {
+  const argv = packagedOperationArgv({ cli, instructionsPath, operationId, replacements });
   const result = hostSpawnSync(hostContainer, argv, {
     cwd: dirname(cli),
     env: {
@@ -545,6 +553,133 @@ function runPackagedOperation({ cli, repo, cosign, instructionsPath, operationId
     throw error;
   }
   return { exitCode: status, stdout: result.stdout ?? '', stderr: result.stderr ?? '' };
+  return { exitCode: status, stdout: result.stdout ?? '', stderr: result.stderr ?? '' };
+}
+function executePackagedStepDuringActivation({ checkpointName, markerPath, hookContext, autoOk = true, ...operation }) {
+  try {
+    const result = runPackagedOperationDuringActivation({ ...operation, markerPath, hookContext });
+    if (autoOk) {
+      checkpoints.ok(checkpointName);
+    }
+    return result;
+  } catch (error) {
+    checkpoints.failed(checkpointName);
+    error.stepName = checkpointName;
+    throw error;
+  }
+}
+
+function runPackagedOperationDuringActivation({
+  cli,
+  repo,
+  cosign,
+  instructionsPath,
+  operationId,
+  replacements,
+  markerPath,
+  hookContext,
+  allowedExitCodes = [0],
+}) {
+  const argv = packagedOperationArgv({ cli, instructionsPath, operationId, replacements });
+  const workDir = join(dirname(markerPath), `during-${Date.now()}-${process.pid}`);
+  mkdirSync(workDir, { recursive: true });
+  const stdoutPath = join(workDir, 'stdout.log');
+  const stderrPath = join(workDir, 'stderr.log');
+  const exitPath = join(workDir, 'exit-code');
+  const baseline = fileMarker(markerPath);
+  const dockerArgs = [
+    'exec',
+    '-w', dirname(cli),
+    '-e', `PATH=${containerPath(dirname(cosign))}`,
+    '-e', `PRINTFARMER_OFFLINE_BUNDLE_TOOL=${join(repo, 'scripts/ci/offline-update-bundle.mjs')}`,
+    hostContainer,
+    ...argv,
+  ].map(shellQuote).join(' ');
+  const launch = `(${shellQuote('/usr/bin/docker')} ${dockerArgs} >${shellQuote(stdoutPath)} 2>${shellQuote(stderrPath)}; printf '%s' "$?" >${shellQuote(exitPath)}) & echo $!`;
+  const pid = Number(execFileSync('bash', ['-lc', launch], { encoding: 'utf8' }).trim());
+  if (!Number.isInteger(pid) || pid <= 0) {
+    throw new Error('during_activate_spawn_failed');
+  }
+  try {
+    waitForDuringActivationPoint({
+      markerAdvanced: () => fileMarkerAdvanced(markerPath, baseline),
+      isComplete: () => existsSync(exitPath) || !processAlive(pid),
+      runHook: () => runFaultHook('during-activate', hookContext),
+      timeoutMs: 60_000,
+    });
+    const status = waitForBackgroundExit(pid, exitPath);
+    const stdout = existsSync(stdoutPath) ? readFileSync(stdoutPath, 'utf8') : '';
+    const stderr = existsSync(stderrPath) ? readFileSync(stderrPath, 'utf8') : '';
+    if (stdout) process.stdout.write(stdout);
+    if (stderr) process.stderr.write(stderr);
+    if (!allowedExitCodes.includes(status)) {
+      const error = new Error(`Command failed (${status}): ${argv.join(' ')}`);
+      error.stdout = stdout;
+      error.stderr = stderr;
+      error.exitCode = status;
+      error.operationId = operationId;
+      throw error;
+    }
+    return { exitCode: status, stdout, stderr };
+  } catch (error) {
+    try {
+      process.kill(pid, 'SIGTERM');
+    } catch {
+      // Process already exited.
+    }
+    throw error;
+  }
+}
+
+function waitForBackgroundExit(pid, exitPath) {
+  const deadline = Date.now() + 600_000;
+  while (!existsSync(exitPath)) {
+    if (!processAlive(pid)) {
+      break;
+    }
+    if (Date.now() > deadline) {
+      try {
+        process.kill(pid, 'SIGTERM');
+      } catch {
+        // Process already exited.
+      }
+      throw new Error('during_activate_timeout');
+    }
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250);
+  }
+  if (!existsSync(exitPath)) {
+    throw new Error('during_activate_exit_missing');
+  }
+  return Number(readFileSync(exitPath, 'utf8').trim() || '1');
+}
+
+function fileMarker(path) {
+  if (!existsSync(path)) {
+    return { exists: false, size: 0, mtimeMs: 0 };
+  }
+  const stat = statSync(path);
+  return { exists: true, size: stat.size, mtimeMs: stat.mtimeMs };
+}
+
+function fileMarkerAdvanced(path, baseline) {
+  if (!existsSync(path)) {
+    return false;
+  }
+  const stat = statSync(path);
+  return !baseline.exists || stat.size > baseline.size || stat.mtimeMs > baseline.mtimeMs;
+}
+
+function processAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function shellQuote(value) {
+  return `'${String(value).replace(/'/g, `'\\''`)}'`;
 }
 
 function containerPath(prefix) {
@@ -851,32 +986,6 @@ function dockerContainerIp(containerName) {
   throw new Error(`database_container_ip_unavailable:${containerName}`);
 }
 
-function writeDockerShim(runRoot, deploymentRoot) {
-  const shim = join(runRoot, 'docker');
-  const log = join(runRoot, 'docker-commands.ndjson');
-  const envFile = join(deploymentRoot, '.env');
-  writeFileSync(shim, `#!/usr/bin/env bash
-set -euo pipefail
-args=("$@")
-if [[ "\${args[0]:-}" == "compose" ]]; then
-  has_env_file=0
-  for arg in "\${args[@]}"; do
-    if [[ "$arg" == "--env-file" ]]; then
-      has_env_file=1
-      break
-    fi
-  done
-  if [[ "$has_env_file" == 0 ]]; then
-    args=("compose" "--env-file" ${JSON.stringify(envFile)} "\${args[@]:1}")
-  fi
-fi
-printf '{"at":"%s","args":%s}\\n' "$(date -u +%FT%TZ)" "$(node -e 'process.stdout.write(JSON.stringify(process.argv.slice(1)))' "$@")" >> ${JSON.stringify(log)}
-exec /usr/bin/docker "\${args[@]}"
-`);
-  chmodSync(shim, 0o755);
-  return shim;
-}
-
 function writePostgresToolShims(runRoot, databaseContainer) {
   const pgDump = join(runRoot, 'pg_dump');
   const pgRestore = join(runRoot, 'pg_restore');
@@ -916,7 +1025,7 @@ unset "args[$last_index]"
   return { pgDump, pgRestore };
 }
 
-function stateContinuitySnapshot({ env, deploymentRoot, hostStateRoot }) {
+function stateContinuitySnapshot({ env, deploymentRoot, hostStateRoot, hostContainer }) {
   const migrationHeads = psqlQuery(deploymentRoot, env, 'SELECT "MigrationId" FROM "__EFMigrationsHistory" ORDER BY "MigrationId";')
     .split(/\r?\n/)
     .map((line) => line.trim())
@@ -926,7 +1035,9 @@ function stateContinuitySnapshot({ env, deploymentRoot, hostStateRoot }) {
   return {
     migrationHeads,
     volumeHashes,
-    hostState: readHostStateSnapshot(hostStateRoot),
+    hostState: readHostStateSnapshotFromBoundary(hostStateRoot, {
+      exec: (argv) => hostExecFileSync(hostContainer, argv, { cwd: repo }),
+    }),
   };
 }
 

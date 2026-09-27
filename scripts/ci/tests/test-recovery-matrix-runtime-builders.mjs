@@ -1,13 +1,17 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 
+import { waitForDuringActivationPoint } from '../recovery-matrix/activation-runner.mjs';
 import { recoveryHostStateRoot, writeHostUpdateConfig } from '../recovery-matrix/cell-runtime.mjs';
 import { writeRecoveryCompose } from '../recovery-matrix/compose-config.mjs';
+import { writeDockerShim } from '../recovery-matrix/docker-shim.mjs';
+import { validateRecoveryEvidence } from '../recovery-matrix/evidence.mjs';
 import { hasFaultHooks, invokeFaultHook, parseFaultHooks } from '../recovery-matrix/fault-hooks.mjs';
-import { assertHostStateContinuity, readHostStateSnapshot } from '../recovery-matrix/host-state-continuity.mjs';
+import { assertHostStateContinuity, readHostStateSnapshot, readHostStateSnapshotFromBoundary } from '../recovery-matrix/host-state-continuity.mjs';
 import { canaryDnsName, hasCanaryAttempt, withoutCanaryAttempts } from '../recovery-matrix/network-denial.mjs';
 
 const scratchRoot = path.resolve('.recovery-matrix-test-work');
@@ -127,6 +131,83 @@ test('network-denial canary accounting is segregated from real attempts', () => 
   assert.deepEqual(withoutCanaryAttempts(attempts), [attempts[1]]);
 });
 
+test('docker shim denies daemon-mediated pull and records it as egress evidence', () => {
+  const scratch = path.join(scratchRoot, `docker-shim-${process.pid}-${Date.now()}`);
+  const deploymentRoot = path.join(scratch, 'deployment');
+  const attemptsPath = path.join(scratch, 'attempts.ndjson');
+  mkdirSync(deploymentRoot, { recursive: true });
+  writeFileSync(path.join(deploymentRoot, '.env'), 'COMPOSE_PROJECT_NAME=test\n');
+  try {
+    const shim = writeDockerShim(scratch, deploymentRoot, attemptsPath);
+    assert.throws(
+      () => execFileSync('bash', [shim, 'pull', 'alpine:latest'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }),
+      /docker shim denied daemon-mediated network command: pull/,
+    );
+    const attempts = readFileSync(attemptsPath, 'utf8').trim().split(/\r?\n/).map((line) => JSON.parse(line));
+    assert.equal(attempts.length, 1);
+    assert.equal(attempts[0].protocol, 'docker-daemon');
+    assert.equal(attempts[0].destination, 'docker:pull');
+    assert.equal(attempts[0].source, 'docker-shim');
+    const errors = validateRecoveryEvidence(minimalPassingEvidence({ attempts }));
+    assert.match(errors.join('\n'), /networkDenial\.attempts/);
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
+test('boundary host-state snapshot is exported through the host container command', () => {
+  const scratch = path.join(scratchRoot, `boundary-state-${process.pid}-${Date.now()}`);
+  mkdirSync(scratch, { recursive: true });
+  try {
+    writeHostState(scratch, { epoch: 3, highWater: { release: 7 }, identities: { target: { version: '1.0.0-insider.2' } } });
+    const snapshot = readHostStateSnapshotFromBoundary('/root/.cache/printfarmer-recovery-matrix/run/host-state', {
+      exec(argv) {
+        assert.deepEqual(argv.slice(0, 3), ['node', '--input-type=module', '-e']);
+        assert.match(argv[3], /\/root\/\.cache\/printfarmer-recovery-matrix\/run\/host-state/);
+        return JSON.stringify(readHostStateSnapshot(scratch));
+      },
+    });
+    assert.equal(snapshot.replay.Epoch, 3);
+    assert.equal(snapshot.anchorValid, true);
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
+test('during-activate hook runs after marker and before activation completion, and fails closed', () => {
+  const order = [];
+  let polls = 0;
+  waitForDuringActivationPoint({
+    markerAdvanced() {
+      order.push('marker-check');
+      polls += 1;
+      return polls > 1;
+    },
+    isComplete() {
+      order.push('complete-check');
+      return false;
+    },
+    runHook() {
+      order.push('hook');
+    },
+    sleep() {
+      order.push('sleep');
+    },
+  });
+  assert.equal(order.at(-1), 'hook');
+
+  assert.throws(() => waitForDuringActivationPoint({
+    markerAdvanced: () => false,
+    isComplete: () => true,
+    runHook: () => {},
+  }), /during_activate_marker_not_observed/);
+  assert.throws(() => waitForDuringActivationPoint({
+    markerAdvanced: () => true,
+    isComplete: () => false,
+    runHook: () => { throw new Error('hook failed'); },
+  }), /hook failed/);
+});
+
 function writeHostState(root, { epoch, highWater, identities }) {
   const replay = {
     Version: 1,
@@ -150,6 +231,76 @@ function writeHostState(root, { epoch, highWater, identities }) {
     .digest('hex');
   writeFileSync(path.join(root, 'replay-anchor.json'), JSON.stringify(anchor));
   writeFileSync(path.join(root, 'replay-anchor.journal'), `${JSON.stringify(anchor)}\n`);
+}
+
+function minimalPassingEvidence({ attempts }) {
+  const now = '2026-09-27T00:00:00.000Z';
+  const release = {
+    tag: 'v1.0.0-insider.1',
+    version: '1.0.0-insider.1',
+    channel: 'insider',
+    sourceBranch: 'development',
+    sourceCommit: 'a'.repeat(40),
+    buildId: '1',
+    sequence: 1,
+  };
+  return {
+    schema: 2,
+    kind: 'printfarmer-recovery-matrix-evidence',
+    run: {
+      id: 'c2-test',
+      startedAt: now,
+      finishedAt: now,
+      harnessCommit: 'b'.repeat(40),
+      entryPoint: 'bash',
+    },
+    host: {
+      distribution: 'ubuntu',
+      distributionVersion: '24.04',
+      arch: 'x64',
+      kernel: 'test',
+    },
+    cell: {
+      topology: 'monolith',
+      provider: 'postgres',
+      databaseLayout: 'shared',
+      databaseOwner: 'host',
+      storageOwner: 'host',
+      workers: 'managed',
+    },
+    identities: {
+      source: release,
+      prior: release,
+      target: { ...release, tag: 'v1.0.0-insider.2', version: '1.0.0-insider.2', sequence: 2 },
+      signingRoot: 'fixture-ephemeral',
+      signingRootFingerprint: 'c'.repeat(64),
+      schemaDelta: 'identical',
+      bundleSha256: 'd'.repeat(64),
+    },
+    tools: {
+      cli: '1.0.0/linux-x64 sha256:' + 'e'.repeat(64),
+      docker: '29.0.0',
+      compose: '2.40.0',
+      cosign: 'v3.0.6',
+      node: '24.0.0',
+      shell: 'bash',
+    },
+    networkDenial: {
+      mechanism: 'docker-internal-network+default-deny-egress-sink',
+      egressSinkActive: true,
+      attempts,
+    },
+    checkpoints: [{ name: 'ok', at: now, result: 'ok' }],
+    outcome: {
+      expected: 'RolledBack',
+      actual: 'RolledBack',
+      reason: null,
+      exitCode: 0,
+      journalPhase: 'Completed/recovery rolled-back',
+    },
+    timings: { activationSeconds: 1, recoverySeconds: 1 },
+    verdict: 'pass',
+  };
 }
 
 function sha256Json(value) {

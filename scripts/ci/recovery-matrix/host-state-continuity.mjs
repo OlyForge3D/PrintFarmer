@@ -22,6 +22,14 @@ export function readHostStateSnapshot(root) {
   };
 }
 
+export function readHostStateSnapshotFromBoundary(root, { exec }) {
+  const script = [
+    "import { readHostStateSnapshot } from './scripts/ci/recovery-matrix/host-state-continuity.mjs';",
+    `process.stdout.write(JSON.stringify(readHostStateSnapshot(${JSON.stringify(root)})));`,
+  ].join('\n');
+  return JSON.parse(exec(['node', '--input-type=module', '-e', script]));
+}
+
 export function assertHostStateContinuity(before, after, { targetVersion } = {}) {
   if (!after?.replayChecksumValid) {
     throw new Error('host_state_replay_checksum_invalid');
