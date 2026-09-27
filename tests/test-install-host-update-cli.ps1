@@ -343,10 +343,29 @@ exit 0
         [System.IO.File]::WriteAllText($envFile, "HostUpdateExecution__RootDirectory=$stateRoot`n")
         Check 'write-config for the service succeeds' ((Invoke-Installer @('write-config', '-EnvFile', $envFile, '-Output', $config)).ExitCode -eq 0)
         $cliDir = Join-Path $root '1.2.3'
+        # A tree only the installer, SYSTEM and Administrators can read must be refused.
+        $cliAcl = Get-Acl -LiteralPath $cliDir
+        $cliAcl.SetAccessRuleProtection($true, $false)
+        foreach ($rule in @($cliAcl.Access)) { [void] $cliAcl.RemoveAccessRuleSpecific($rule) }
+        foreach ($trusted in @([System.Security.Principal.WindowsIdentity]::GetCurrent().User,
+                [System.Security.Principal.SecurityIdentifier]::new('S-1-5-18'), [System.Security.Principal.SecurityIdentifier]::new('S-1-5-32-544'))) {
+            $cliAcl.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new(
+                $trusted, 'FullControl', 'ContainerInherit, ObjectInherit', 'None', 'Allow'))
+        }
+        Set-Acl -LiteralPath $cliDir -AclObject $cliAcl
+        $result = Invoke-Installer @('install-service', '-CliDir', $cliDir, '-Config', $config)
+        Check 'install-service refuses a CLI the service account cannot execute' ($result.ExitCode -eq 1 -and
+            $result.Output.Contains('cannot read and execute') -and
+            $null -eq (Get-CimInstance -ClassName Win32_Service -Filter "Name='PrintFarmerHostUpdateDaemon'"))
+        $cliAcl = Get-Acl -LiteralPath $cliDir
+        $cliAcl.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new(
+            [System.Security.Principal.SecurityIdentifier]::new('S-1-5-32-545'), 'ReadAndExecute', 'ContainerInherit, ObjectInherit', 'None', 'Allow'))
+        Set-Acl -LiteralPath $cliDir -AclObject $cliAcl
         $result = Invoke-Installer @('install-service', '-CliDir', $cliDir, '-Config', $config)
         $service = Get-CimInstance -ClassName Win32_Service -Filter "Name='PrintFarmerHostUpdateDaemon'"
         Check 'install-service registers the service' ($result.ExitCode -eq 0 -and $null -ne $service)
         Check 'the service is installed disabled and stopped' ($service -and $service.StartMode -eq 'Disabled' -and $service.State -eq 'Stopped')
+        Check 'the service restarts after a nonzero self-exit' ((& sc.exe qfailureflag PrintFarmerHostUpdateDaemon | Out-String) -match 'FAILURE_ACTIONS_ON_NONCRASH_FAILURES\s*:\s*TRUE')
         Check 'the service runs as its virtual account' ($service -and $service.StartName -eq 'NT SERVICE\PrintFarmerHostUpdateDaemon')
         Check 'the service runs the installed daemon' ($service -and $service.PathName.Contains((Join-Path $cliDir 'cli\Farm.HostUpdate.Cli.exe')) -and
             $service.PathName.Contains("--config `"$config`" daemon --windows-service"))

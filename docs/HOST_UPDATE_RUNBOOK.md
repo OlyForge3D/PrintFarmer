@@ -868,15 +868,20 @@ pwsh scripts\install-host-update-cli.ps1 uninstall-service
 | Account | `--service-user`, default the owner of `host-update.json`; `root` is refused unless named explicitly | Virtual account `NT SERVICE\PrintFarmerHostUpdateDaemon` (no password, only `SeChangeNotifyPrivilege`) |
 | Access granted | None beyond the account's own files; the config must be owned by that account with no group/other bits | Read on `host-update.json`, read/execute on `HostUpdateExecution:RootDirectory`, modify on `<RootDirectory>\state` and the log directory |
 | Hardening | `NoNewPrivileges`, empty `CapabilityBoundingSet`, `ProtectSystem=full`, `PrivateTmp` and related sandboxing | Unrestricted service SID, privileges stripped to `SeChangeNotifyPrivilege`, no service environment |
-| Restart | `Restart=on-failure`; exits `2`, `3` and `7` (usage, invalid config, already running) are not restarted | Service recovery restarts after 30 s, at most twice per 24 h |
+| Restart | `Restart=on-failure`; exits `2`, `3` and `7` (usage, invalid config, already running) are not restarted | Service recovery restarts after 30 s, at most twice per 24 h, also when the daemon stops itself with a nonzero exit code |
 | Logs | journald (`journalctl -u printfarmer-host-update-daemon`) | `%ProgramData%\PrintFarmer\host\daemon\logs\daemon.log`, rotated to `daemon.log.1` at 1 MiB |
 | `--enable` / `-Enable` | Runs `systemctl enable --now` | Sets start type `Automatic` and starts it |
 
 Both commands validate before changing anything: the CLI directory must be an
 installed, signed package that only root/SYSTEM/Administrators (or the
-installing account) can write, and the configuration must be owner-only. Reruns
+installing account) can write, the service account must already be able to
+read and execute it (checked as that account on Linux, and against the ACL on
+Windows, where the default Program Files ACL grants this), and the
+configuration must be owner-only. Reruns
 are idempotent and never change whether the service is enabled; a running
-service is restarted only when its definition changed. Neither command
+service is restarted only when its definition changed. On Linux, if systemd
+rejects a changed unit (`daemon-reload` or `try-restart` fails), the previous
+unit, or none, is restored and the command fails. Neither command
 overwrites or removes a unit or service it did not create. On Windows, grant
 the virtual account any additional paths (for example a relocated host state
 directory) yourself; the Windows service path is covered by the CI test

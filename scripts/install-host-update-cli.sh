@@ -468,6 +468,22 @@ systemctl_or_fail() {
     systemctl "$@" || fail "systemctl $* failed"
 }
 
+# Succeeds when the service account can read and execute the CLI launcher and its directory,
+# checked as that account because group membership and ACLs decide it, not the mode bits alone.
+service_can_run_cli() {
+    local user="$1" launcher="$2" cli="$3"
+    local probe='test -r "$1" && test -x "$1" && test -r "$2" && test -x "$2"'
+    if [[ "$(id -u -- "$user")" == "$(id -u)" ]]; then
+        sh -c "$probe" sh "$launcher" "$cli"
+    elif [[ "$(id -u)" == "0" ]] && command -v runuser >/dev/null 2>&1; then
+        runuser -u "$user" -- sh -c "$probe" sh "$launcher" "$cli"
+    elif command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then
+        sudo -n -u "$user" -- sh -c "$probe" sh "$launcher" "$cli"
+    else
+        fail "Could not check that $user can run $launcher; run install-service as root"
+    fi
+}
+
 parse_unit_dir() {
     local unit_dir="$1"
     is_absolute "$unit_dir" || fail_usage "--unit-dir must be an absolute path"
@@ -543,6 +559,8 @@ cmd_install_service() {
     local group
     group="$(id -gn -- "$user")" || fail "Could not read the primary group of $user"
     [[ "$group" =~ $UNIT_USER_RE ]] || fail "The service account's primary group is not a valid name: $group"
+    service_can_run_cli "$user" "$launcher" "$cli_dir/cli" ||
+        fail "The service account $user cannot read and execute the host-update CLI: $launcher"
 
     local unit="$unit_dir/$DAEMON_UNIT" rendered changed=1
     rendered="$(render_daemon_unit "$launcher" "$config" "$user" "$group")"
@@ -553,17 +571,27 @@ cmd_install_service() {
         [[ "$(cat -- "$unit")" != "$rendered" ]] || changed=0
     fi
     if [[ "$changed" == 1 ]]; then
-        local temporary
+        local temporary backup=""
         umask 022
-        temporary="$(mktemp "$unit_dir/.$DAEMON_UNIT.XXXXXX")" || fail "Could not create a file in $unit_dir"
+        if [[ -f "$unit" ]]; then
+            backup="$(mktemp "$unit_dir/.$DAEMON_UNIT.previous.XXXXXX")" || fail "Could not create a file in $unit_dir"
+            cp -p -- "$unit" "$backup" || { rm -f -- "$backup"; fail "Could not back up $unit"; }
+        fi
+        temporary="$(mktemp "$unit_dir/.$DAEMON_UNIT.XXXXXX")" || { [[ -z "$backup" ]] || rm -f -- "$backup"; fail "Could not create a file in $unit_dir"; }
         work_dir="$temporary"
         printf '%s\n' "$rendered" >"$temporary"
         chmod 0644 -- "$temporary"
-        mv -f -- "$temporary" "$unit" || fail "Could not write $unit"
+        mv -f -- "$temporary" "$unit" || { [[ -z "$backup" ]] || rm -f -- "$backup"; fail "Could not write $unit"; }
         work_dir=""
-        systemctl_or_fail daemon-reload
-        # A running daemon picks up the new unit; a stopped one stays stopped.
-        systemctl_or_fail try-restart "$DAEMON_UNIT"
+        # A running daemon picks up the new unit; a stopped one stays stopped. If systemd rejects
+        # the new unit, the previous one (or none) is put back so the host is left as it was.
+        if ! systemctl daemon-reload || ! systemctl try-restart "$DAEMON_UNIT"; then
+            if [[ -n "$backup" ]]; then mv -f -- "$backup" "$unit"; else rm -f -- "$unit"; fi
+            systemctl daemon-reload || true
+            [[ -z "$backup" ]] || systemctl try-restart "$DAEMON_UNIT" || true
+            fail "systemctl could not load or restart $DAEMON_UNIT; the previous unit state was restored"
+        fi
+        [[ -z "$backup" ]] || rm -f -- "$backup"
         log_success "Installed $unit (runs as $user)"
     else
         log_success "$unit is already installed (runs as $user)"

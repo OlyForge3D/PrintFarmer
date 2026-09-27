@@ -15,21 +15,17 @@ internal sealed class HostUpdateDaemonWindowsService : ServiceBase
 {
     public const string WindowsServiceName = "PrintFarmerHostUpdateDaemon";
 
-    private static readonly TimeSpan StopWait = TimeSpan.FromSeconds(25);
-
-    private readonly IReadOnlyList<string> _args;
-    private readonly Func<IConfiguration> _configurationFactory;
     private readonly HostUpdateDaemonLogWriter _log;
-    private readonly CancellationTokenSource _cancellation = new();
-    private readonly ManualResetEventSlim _exited = new();
-    private volatile bool _stopping;
-    private int _daemonExitCode = 1;
+    private readonly HostUpdateDaemonServiceHost _host;
+    private volatile bool _started;
 
     private HostUpdateDaemonWindowsService(IReadOnlyList<string> args, Func<IConfiguration> configurationFactory, string logPath)
     {
-        _args = args;
-        _configurationFactory = configurationFactory;
         _log = new HostUpdateDaemonLogWriter(logPath);
+        _host = new HostUpdateDaemonServiceHost(
+            token => HostUpdateCli.RunAsync(args, configurationFactory, _log, _log, token),
+            _log,
+            OnDaemonExited);
         ServiceName = WindowsServiceName;
         CanStop = true;
         CanShutdown = true;
@@ -41,16 +37,28 @@ internal sealed class HostUpdateDaemonWindowsService : ServiceBase
         Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
         "PrintFarmer", "host", "daemon", "logs", "daemon.log");
 
-    public static int Run(IReadOnlyList<string> args, Func<IConfiguration> configurationFactory)
+    public static int Run(IReadOnlyList<string> args, Func<IConfiguration> configurationFactory, TextWriter error)
     {
         ArgumentNullException.ThrowIfNull(args);
         ArgumentNullException.ThrowIfNull(configurationFactory);
+        ArgumentNullException.ThrowIfNull(error);
         using var service = new HostUpdateDaemonWindowsService(args, configurationFactory, DefaultLogPath);
         Run(service);
+        if (!service._started)
+        {
+            // ServiceBase.Run returns without starting when not launched by the SCM.
+            error.WriteLine("windows_service_not_started: --windows-service must be started by the Service Control Manager");
+            return HostUpdateDaemonServiceHost.ServiceFailed;
+        }
+
         return service.ExitCode;
     }
 
-    protected override void OnStart(string[] args) => _ = Task.Run(RunDaemonAsync);
+    protected override void OnStart(string[] args)
+    {
+        _started = true;
+        _host.Start();
+    }
 
     protected override void OnStop() => StopDaemon();
 
@@ -60,49 +68,109 @@ internal sealed class HostUpdateDaemonWindowsService : ServiceBase
     {
         if (disposing)
         {
-            _cancellation.Dispose();
-            _exited.Dispose();
+            _host.Dispose();
             _log.Dispose();
         }
 
         base.Dispose(disposing);
     }
 
-    private async Task RunDaemonAsync()
+    private void StopDaemon() => ExitCode = _host.Stop(HostUpdateDaemonServiceHost.DefaultStopWait);
+
+    // The daemon ended on its own (configuration invalid, lock held, ...): report its exit code to
+    // the Service Control Manager so the failure is visible and the recovery policy applies.
+    private void OnDaemonExited(int exitCode)
+    {
+        ExitCode = exitCode;
+        Stop();
+    }
+}
+
+/// <summary>
+/// Platform-neutral lifecycle of the service-hosted daemon: one run, cancelled on stop, with a
+/// bounded stop wait and a callback when the daemon exits on its own.
+/// </summary>
+internal sealed class HostUpdateDaemonServiceHost : IDisposable
+{
+    /// <summary>Exit code reported when the daemon failed unexpectedly or did not stop in time.</summary>
+    public const int ServiceFailed = 1;
+
+    public static readonly TimeSpan DefaultStopWait = TimeSpan.FromSeconds(25);
+
+    private readonly Func<CancellationToken, Task<int>> _run;
+#pragma warning disable CA2213 // The log is owned and disposed by the caller.
+    private readonly TextWriter _log;
+#pragma warning restore CA2213
+    private readonly Action<int> _onSelfExit;
+    private readonly CancellationTokenSource _cancellation = new();
+    private readonly ManualResetEventSlim _exited = new();
+    private int _state;
+    private volatile bool _stopping;
+    private int _exitCode = HostUpdateDaemonServiceHost.ServiceFailed;
+
+    public HostUpdateDaemonServiceHost(Func<CancellationToken, Task<int>> run, TextWriter log, Action<int> onSelfExit)
+    {
+        ArgumentNullException.ThrowIfNull(run);
+        ArgumentNullException.ThrowIfNull(log);
+        ArgumentNullException.ThrowIfNull(onSelfExit);
+        _run = run;
+        _log = log;
+        _onSelfExit = onSelfExit;
+    }
+
+    public void Start()
+    {
+        if (Interlocked.CompareExchange(ref _state, 1, 0) != 0)
+        {
+            throw new InvalidOperationException("The daemon has already been started.");
+        }
+
+        _ = Task.Run(RunAsync);
+    }
+
+    /// <summary>
+    /// Cancels the daemon and waits up to <paramref name="wait"/>. Returns the daemon's exit code,
+    /// or <see cref="HostUpdateDaemonServiceHost.ServiceFailed"/> when it did not stop in time.
+    /// </summary>
+    public int Stop(TimeSpan wait)
+    {
+        _stopping = true;
+        _cancellation.Cancel();
+        if (Volatile.Read(ref _state) == 0)
+        {
+            return HostUpdateCliExitCodes.Success;
+        }
+
+        return _exited.Wait(wait) ? _exitCode : HostUpdateDaemonServiceHost.ServiceFailed;
+    }
+
+    public void Dispose()
+    {
+        _cancellation.Dispose();
+        _exited.Dispose();
+    }
+
+    private async Task RunAsync()
     {
         int exitCode;
         try
         {
-            exitCode = await HostUpdateCli.RunAsync(_args, _configurationFactory, _log, _log, _cancellation.Token).ConfigureAwait(false);
+            exitCode = await _run(_cancellation.Token).ConfigureAwait(false);
         }
 #pragma warning disable CA1031 // The service must report any daemon failure to the SCM rather than crash.
         catch (Exception)
 #pragma warning restore CA1031
         {
             await _log.WriteLineAsync("daemon: stopped unexpectedly").ConfigureAwait(false);
-            exitCode = 1;
+            exitCode = HostUpdateDaemonServiceHost.ServiceFailed;
         }
 
-        _daemonExitCode = exitCode;
+        _exitCode = exitCode;
         await _log.FlushAsync().ConfigureAwait(false);
         _exited.Set();
-
-        // The daemon ended on its own (configuration invalid, lock held, ...): report its exit code
-        // to the Service Control Manager so the failure is visible and the recovery policy applies.
         if (!_stopping)
         {
-            ExitCode = exitCode;
-            Stop();
-        }
-    }
-
-    private void StopDaemon()
-    {
-        _stopping = true;
-        _cancellation.Cancel();
-        if (_exited.Wait(StopWait))
-        {
-            ExitCode = _daemonExitCode;
+            _onSelfExit(exitCode);
         }
     }
 }

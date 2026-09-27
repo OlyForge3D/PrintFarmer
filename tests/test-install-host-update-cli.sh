@@ -321,6 +321,7 @@ if [[ "$(uname -s)" == "Linux" ]]; then
     cat >"$BIN/systemctl" <<'STUB'
 #!/bin/sh
 printf '%s\n' "$*" >>"$SYSTEMCTL_LOG"
+[ "$1" != "${SYSTEMCTL_FAIL:-}" ] || exit 1
 exit "${SYSTEMCTL_RC:-0}"
 STUB
     chmod +x "$BIN/systemctl"
@@ -359,6 +360,31 @@ STUB
     cp "$UNIT" "$TEST_ROOT/unit.before"
     check "a rerun is idempotent and does not reload" \
         "[[ \$(svc_install --service-user '$ME') == 0 ]] && cmp -s '$UNIT' '$TEST_ROOT/unit.before' && ! grep -q . '$SYSTEMCTL_LOG'"
+    if command -v systemd-analyze >/dev/null 2>&1; then
+        check "systemd accepts the rendered unit" "systemd-analyze verify --man=no '$UNIT' >'$TEST_ROOT/verify.log' 2>&1"
+    else
+        echo "[SKIP] systemd-analyze is not available to verify the rendered unit"
+    fi
+    printf '# edited\n' >>"$UNIT"
+    cp "$UNIT" "$TEST_ROOT/unit.edited"
+    check "a failed daemon-reload restores the previous unit" \
+        "[[ \$(SYSTEMCTL_FAIL=daemon-reload svc_install --service-user '$ME') == 1 ]] && cmp -s '$UNIT' '$TEST_ROOT/unit.edited' && [[ -z \$(find '$UNITS' -name '.*' -print) ]]"
+    check "a failed try-restart restores the previous unit and reloads" \
+        "[[ \$(SYSTEMCTL_FAIL=try-restart svc_install --service-user '$ME') == 1 ]] && cmp -s '$UNIT' '$TEST_ROOT/unit.edited' && [[ \$(grep -cx 'daemon-reload' '$SYSTEMCTL_LOG') == 2 ]]"
+    check "a rerun after a failure installs the unit" \
+        "[[ \$(svc_install --service-user '$ME') == 0 ]] && cmp -s '$UNIT' '$TEST_ROOT/unit.before'"
+    rm -f "$UNIT"
+    check "a failed first install leaves no unit behind" \
+        "[[ \$(SYSTEMCTL_FAIL=daemon-reload svc_install --service-user '$ME') == 1 && ! -e '$UNIT' ]]"
+    check "install-service reinstalls the unit" "[[ \$(svc_install --service-user '$ME') == 0 && -f '$UNIT' ]]"
+    if [[ "$(id -u)" == "0" ]] && id nobody >/dev/null 2>&1; then
+        NOBODY_CONFIG="$TEST_ROOT/svc/nobody.json"
+        cp "$SVC_CONFIG" "$NOBODY_CONFIG" && chown nobody "$NOBODY_CONFIG" && chmod 0600 "$NOBODY_CONFIG"
+        chmod 0700 "$SVC_CLI/cli"
+        check "a CLI the service account cannot execute is refused" \
+            "[[ \$(service install-service --cli-dir '$SVC_CLI' --config '$NOBODY_CONFIG' --unit-dir '$UNITS' --service-user nobody) == 1 ]] && grep -q 'cannot read and execute' '$TEST_ROOT/out.log'"
+        chmod 0755 "$SVC_CLI/cli"
+    fi
     check "--enable enables and starts the unit" \
         "[[ \$(svc_install --service-user '$ME' --enable) == 0 ]] && grep -qx 'enable --now printfarmer-host-update-daemon.service' '$SYSTEMCTL_LOG'"
     check "an unknown service account is refused" "[[ \$(svc_install --service-user pf-no-such-user) == 1 ]]"

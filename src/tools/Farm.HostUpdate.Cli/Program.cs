@@ -50,9 +50,12 @@ bool daemon = remaining.Count > 0 && string.Equals(remaining[0], "daemon", Strin
 
 // Issue #3118: `daemon --windows-service` runs under the Windows Service Control Manager, which
 // starts and stops it; its redacted status lines go to the fixed daemon log instead of a console.
-if (daemon && OperatingSystem.IsWindows() && remaining.Contains("--windows-service", StringComparer.Ordinal))
+// The whole command is validated first, so an invalid form still exits 2 with the usage text.
+if (daemon && OperatingSystem.IsWindows() &&
+    HostUpdateCliArguments.TryParse(remaining, out HostUpdateCliArguments? serviceArguments, out _) &&
+    serviceArguments!.WindowsService)
 {
-    return HostUpdateDaemonWindowsService.Run(remaining, LoadConfiguration);
+    return HostUpdateDaemonWindowsService.Run(remaining, LoadConfiguration, Console.Error);
 }
 
 // systemd stops the daemon with SIGTERM; stop it cleanly, as Ctrl+C does. Other commands keep the

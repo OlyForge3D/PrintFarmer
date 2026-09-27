@@ -568,6 +568,31 @@ function Test-BroadlyReadable([string] $Path) {
     return $false
 }
 
+# True when an allow ACE for the service SID or a group every service identity belongs to
+# (Everyone, Authenticated Users, Users, SERVICE) grants read and execute on the path, and no
+# deny ACE for those identities removes either right.
+function Test-ReadableAndExecutableBy([string] $Path, $Sid) {
+    $identities = @($Sid.Value, 'S-1-1-0', 'S-1-5-11', 'S-1-5-32-545', 'S-1-5-6')
+    $readBits = 0x1 -bor 0x80000000 -bor 0x10000000
+    $executeBits = 0x20 -bor 0x20000000 -bor 0x10000000
+    $info = if (Test-Path -LiteralPath $Path -PathType Container) { [System.IO.DirectoryInfo]::new($Path) } else { [System.IO.FileInfo]::new($Path) }
+    $acl = [System.IO.FileSystemAclExtensions]::GetAccessControl($info, 'Access')
+    $read = $false
+    $execute = $false
+    foreach ($rule in $acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])) {
+        if ($rule.IdentityReference.Value -notin $identities) { continue }
+        if ($rule.PropagationFlags -band [System.Security.AccessControl.PropagationFlags]::InheritOnly) { continue }
+        $rights = [int64] $rule.FileSystemRights
+        if ($rule.AccessControlType -eq [System.Security.AccessControl.AccessControlType]::Deny) {
+            if (($rights -band ($readBits -bor $executeBits)) -ne 0) { return $false }
+            continue
+        }
+        if (($rights -band $readBits) -ne 0) { $read = $true }
+        if (($rights -band $executeBits) -ne 0) { $execute = $true }
+    }
+    return $read -and $execute
+}
+
 # Replaces (or, with $null rights, removes) the service account's explicit ACE on a path; the
 # rest of the ACL, its owner and its inheritance are left as they are.
 function Set-DaemonAccess([string] $Path, $Sid, $Rights, [bool] $Inherit) {
@@ -663,12 +688,22 @@ function Invoke-InstallService([string[]] $Arguments) {
         Invoke-ServiceControl @('sidtype', $DaemonServiceName, 'unrestricted')
         Invoke-ServiceControl @('privs', $DaemonServiceName, 'SeChangeNotifyPrivilege')
         Invoke-ServiceControl @('failure', $DaemonServiceName, 'reset=', '86400', 'actions=', 'restart/30000/restart/30000//')
+        # Also apply the restart actions when the daemon stops itself with a nonzero exit code.
+        Invoke-ServiceControl @('failureflag', $DaemonServiceName, '1')
     } catch {
         if (-not $service) { & sc.exe delete $DaemonServiceName *> $null }
         throw
     }
 
     $sid = Get-DaemonServiceSid
+    # The installer grants no ACEs on the CLI tree, so the service identity must already be able to
+    # read and execute it (the default Program Files ACL grants this to Users).
+    foreach ($path in $cliDir, (Join-Path $cliDir 'cli'), $launcher) {
+        if (-not (Test-ReadableAndExecutableBy $path $sid)) {
+            if (-not $service) { & sc.exe delete $DaemonServiceName *> $null }
+            Stop-Install "$DaemonServiceAccount cannot read and execute the host-update CLI: $path"
+        }
+    }
     $logDirectory = Get-DaemonLogDirectory
     if (Test-Link $logDirectory) { Stop-Install "Refusing a link as the daemon log directory: $logDirectory" }
     if (-not (Test-Path -LiteralPath $logDirectory)) { New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null }
