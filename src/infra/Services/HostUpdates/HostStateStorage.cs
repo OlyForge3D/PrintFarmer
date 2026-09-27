@@ -262,6 +262,10 @@ public static class HostStateFileSecurity
         private const int AtFdcwd = -100;
         private const uint StatxBasicStats = 0x7ff;
         private const uint StatxUid = 0x0008;
+        private const uint StatxType = 0x0001;
+        private const int AtSymlinkNoFollow = 0x100;
+        private const ushort FileTypeMask = 0xF000;
+        private const ushort RegularFileType = 0x8000;
         private const long SysStatxX64 = 332;
         private const long SysStatxArm64 = 291;
 
@@ -330,6 +334,26 @@ public static class HostStateFileSecurity
             }
 
             return stat.UserId;
+        }
+
+        /// <summary>True when <paramref name="path"/> itself (not a symlink target) is a regular file (<c>S_IFREG</c>).</summary>
+        internal static bool IsLinuxRegularFile(string path)
+        {
+            if (!OperatingSystem.IsLinux())
+            {
+                throw new PlatformNotSupportedException("host_state_owner_validation_unavailable");
+            }
+
+            long syscallNumber = StatxSyscallNumberForArchitecture(RuntimeInformation.ProcessArchitecture);
+
+            LinuxStatx stat = default;
+            long result = Syscall(syscallNumber, AtFdcwd, path, AtSymlinkNoFollow, StatxBasicStats, ref stat);
+            if (result != 0 || (stat.Mask & StatxType) == 0)
+            {
+                throw new IOException("host_state_type_stat_failed");
+            }
+
+            return (stat.Mode & FileTypeMask) == RegularFileType;
         }
 
         internal static long StatxSyscallNumberForArchitecture(Architecture architecture) => architecture switch

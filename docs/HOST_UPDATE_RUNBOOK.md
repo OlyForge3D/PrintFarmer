@@ -770,3 +770,56 @@ script**. Remaining delivery is tracked by:
 
 #2664 remains open. Keep managed update execution disabled until those gates
 and the deployment owner's rollout requirements are satisfied.
+
+## Daemon service core (#3114)
+
+The CLI `daemon` command hosts the enrolled host-update daemon service core
+described in [HOST_UPDATE_DAEMON_SECURITY.md](HOST_UPDATE_DAEMON_SECURITY.md).
+It reuses the CLI's executor, journal and execution-lock registrations; it is
+not a second update engine. **Execution is disabled:** the gate is hard-wired
+to `runtime_updates_disabled_pending_2982`, and no configuration value,
+environment variable or saved setting enables it. Enrollment, signed
+approvals (#3115, #3116), checkpoints (#3117) and service wrappers (#3118) are
+not part of this slice.
+
+Each cycle the daemon:
+
+1. Takes a single-instance `daemon.lock` in the executor state directory.
+   A second instance exits `7` with `daemon_already_running`.
+2. Validates host identity storage. When `HostUpdateDaemon:IdentityDirectory`
+   is empty the daemon runs unenrolled (`identity_not_configured`). Otherwise
+   the directory must be absolute, outside `HostUpdateExecution:RootDirectory`,
+   `0700`, owned by the daemon user, and hold `enrollment-key.pem` as a `0600`
+   regular file with no symlink component. Linux is the only qualified
+   platform; others fail closed with `identity_storage_platform_unsupported`.
+   The key bytes are never read or logged. Configured storage that fails any
+   check (`Invalid`) fails the cycle; the daemon never falls back to running
+   unenrolled over an unsafe key.
+3. Reads the existing journal without writing it. If a manual run holds the
+   execution lock, the cycle reports `execution_lock_held` and waits for the
+   next normal poll; it never waits on or rewrites the lock.
+4. Publishes one redacted status line: lifecycle, fixed codes, counts and
+   timestamps only, never paths, keys, tokens or journal payloads.
+
+With `--json`, output is newline-delimited status objects (one per line), not
+the single `{exitCode,result}` envelope other commands print; the process exit
+code is the outcome. Only configuration failures (exit `3`) use the envelope.
+
+```bash
+# One cycle, machine-readable status lines
+"$CLI" --config /etc/printfarmer/host-update.json daemon --once --json
+
+# Foreground loop (Ctrl+C to stop)
+"$CLI" --config /etc/printfarmer/host-update.json daemon
+```
+
+| Setting | Default | Range |
+| --- | --- | --- |
+| `HostUpdateDaemon:PollIntervalSeconds` | `300` | `60`–`900` |
+| `HostUpdateDaemon:MaxBackoffSeconds` | `900` | `PollIntervalSeconds`–`900` |
+| `HostUpdateDaemon:IdentityDirectory` | empty (unenrolled) | absolute path, e.g. `/etc/printfarmer-host/daemon` |
+
+Any other key under `HostUpdateDaemon` (for example an `Enabled` switch) is
+rejected as `daemon_setting_unknown:<key>` with exit `3`. Failed cycles back
+off exponentially with up to 10% jitter, capped at `MaxBackoffSeconds`; with
+`--once`, a failed cycle exits `4`.
