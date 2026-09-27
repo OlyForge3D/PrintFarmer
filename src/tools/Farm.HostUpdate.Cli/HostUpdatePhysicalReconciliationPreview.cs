@@ -131,7 +131,7 @@ internal static class HostUpdatePhysicalReconciliationPreviewBuilder
             inventory.Printers.Count,
             inventory.UncertainOutcomeCount,
             [.. inventory.Printers],
-            state == ReadyToRecord ? inventory.Token(request.ReleaseId, request.RequestId) : null,
+            state is ReadyToRecord or NotRequired ? inventory.Token(request.ReleaseId, request.RequestId) : null,
             null,
             HostUpdatePhysicalReconciliationCodes.ReplayPolicy);
     }
