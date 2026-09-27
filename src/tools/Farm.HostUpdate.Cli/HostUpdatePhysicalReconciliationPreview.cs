@@ -49,6 +49,7 @@ internal static class HostUpdatePhysicalReconciliationPreviewBuilder
     public const string Complete = "complete";
     public const string Recorded = "recorded";
     public const string ReadyToRecord = "ready_to_record";
+    public const string NotRequired = "not_required";
     public const string AfterRollback = "after_rollback";
     public const string OperatorRequired = "operator_required";
     public const string InventoryUnavailable = "inventory_unavailable";
@@ -116,7 +117,14 @@ internal static class HostUpdatePhysicalReconciliationPreviewBuilder
         }
 
         // A token is offered only once the rollback is durable; before that the inventory is
-        // evidence only, and it is re-read (and re-bound) before anything is recorded.
+        // evidence only, and it is re-read (and re-bound) before anything is recorded. A durable
+        // rollback over an empty inventory needs no record: the coordinator re-reads it and clears
+        // the gate itself (issue #3126).
+        if (state == ReadyToRecord && inventory.Printers.Count == 0 && inventory.UncertainOutcomeCount == 0)
+        {
+            state = NotRequired;
+        }
+
         return new(
             state,
             null,
