@@ -200,38 +200,8 @@ internal static class HostUpdateOfflineActivation
                 result.State)).ConfigureAwait(false);
     }
 
-    private static HostUpdatePlatformDigests PlatformDigestsFor(SignedUpdateManifest manifest, string hostPlatform)
-    {
-        if (!manifest.Platforms.Contains(hostPlatform, StringComparer.Ordinal))
-        {
-            throw new InvalidOperationException("platform_not_in_manifest");
-        }
-
-        string Digest(string serviceId)
-        {
-            string key = HostUpdateOfflineAdmission.PlatformKey(serviceId, hostPlatform);
-            if (!manifest.PlatformDigests.TryGetValue(key, out string? digest) || !IsCanonicalDigest(digest))
-            {
-                throw new InvalidOperationException("image_set_incomplete:" + serviceId);
-            }
-
-            return digest;
-        }
-
-        var digests = new HostUpdatePlatformDigests(
-            Digest(ServiceIds[0]),
-            Digest(ServiceIds[1]),
-            Digest(ServiceIds[2]),
-            Digest(ServiceIds[3]),
-            Digest(ServiceIds[4]),
-            Digest(ServiceIds[5]));
-        if (!digests.IsComplete)
-        {
-            throw new InvalidOperationException("image_set_mixed_or_incomplete");
-        }
-
-        return digests;
-    }
+    private static HostUpdatePlatformDigests PlatformDigestsFor(SignedUpdateManifest manifest, string hostPlatform) =>
+        HostUpdateOfflineAdmission.PreloadedDigests(manifest, hostPlatform);
 
     private static List<HostUpdateExecutionTarget> CreateTargets(HostUpdatePlatformDigests digests, string hostPlatform) =>
     [
@@ -328,11 +298,6 @@ internal static class HostUpdateOfflineActivation
             expectedDigests.All(pair => installed.ServiceDigests.TryGetValue(pair.Key, out string? digest) && string.Equals(digest, pair.Value, StringComparison.Ordinal)) &&
             expectedPlatforms.All(pair => installed.ServicePlatforms.TryGetValue(pair.Key, out string? platform) && string.Equals(platform, pair.Value, StringComparison.Ordinal));
     }
-
-    private static bool IsCanonicalDigest(string value) =>
-        value.StartsWith("sha256:", StringComparison.Ordinal) &&
-        value.Length == 71 &&
-        value[7..].All(Uri.IsHexDigit);
 
     private sealed record OfflineActivationReport(
         string Decision,

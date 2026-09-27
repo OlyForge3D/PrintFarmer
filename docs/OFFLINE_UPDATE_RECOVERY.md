@@ -530,6 +530,17 @@ migration steps use preloaded image mode: they inspect local images, run
 migrations with `docker run --pull never`, and apply templates with
 `docker compose up -d --no-build --pull never`; they never run `docker pull`.
 
+Preloaded images are pinned by their signed service **index** digest (the
+`@sha256:` suffix of `services[].image`), because `docker load` of an OCI layout
+records `RepoDigests` for the layout's root index, not for the platform child.
+The index is signed and content-addresses its platform children, and the local
+inspect still checks the host's `os/architecture`. Each service must also list a
+canonical child digest for the host platform, which proves the platform was
+signed-selected; a missing child or index is `image_set_incomplete:<service>`.
+In this mode the execution target's `ChildDigest` field, and therefore the
+installed state and journal binding, carry the index pin. Registry-mode updates
+still pull and record the platform child digest.
+
 Execution still goes through the existing `HostUpdateExecutor` state machine
 (preflight, drain, fence, backup, migration, apply, verify), journal and
 installed-state writer. The CLI wires the same concrete adapters used by the API
@@ -631,7 +642,9 @@ staged target (`offline_recovery_target_mismatch`) in preloaded-image mode
 re-apply the prior set by pulling), and the installed state must be exactly the
 authenticated prior set: its release ID and manifest digest, and exactly the
 target's service set with each service on the target's platform and at the prior
-manifest's digest for that platform (`prior_installed_state_mismatch`). On
+manifest's preloaded index pin for that platform, as defined in
+[Offline activation](#offline-activation-3080) (`prior_installed_state_mismatch`;
+a recorded platform child digest is refused). On
 confirm, the coordinator re-proves under its own execution lock, before any
 restore or apply, that both the installed state and the execution journal are
 unchanged since evaluation; otherwise it exits 12 (`drift_reapproval_stale`).

@@ -290,6 +290,48 @@ public sealed class HostUpdateHealthVerifierTests
         check.CallCount.Should().Be(0);
     }
 
+    [Fact]
+    public async Task VerifyDigestsAsync_InactiveSignedTargets_AreNotObserved()
+    {
+        var observed = new List<string>();
+        var verifier = new HostUpdateHealthVerifier(
+            [],
+            (serviceId, digest) =>
+            {
+                observed.Add(serviceId);
+                return new RecordingHealthCheck();
+            },
+            TimeSpan.Zero,
+            TimeSpan.Zero,
+            new HashSet<string>(StringComparer.Ordinal) { "monolith" });
+
+        await verifier.VerifyDigestsAsync(
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["api"] = "sha256:" + new string('a', 64),
+                ["monolith"] = "sha256:" + new string('b', 64),
+            },
+            CancellationToken.None);
+
+        observed.Should().Equal("monolith");
+    }
+
+    [Fact]
+    public async Task VerifyDigestsAsync_EmptyDigestMap_ThrowsBeforeHealthChecks()
+    {
+        var check = new RecordingHealthCheck();
+        var verifier = new HostUpdateHealthVerifier(
+            [check],
+            (serviceId, digest) => new RecordingHealthCheck(),
+            TimeSpan.Zero,
+            TimeSpan.Zero);
+
+        Func<Task> act = () => verifier.VerifyDigestsAsync(new Dictionary<string, string>(StringComparer.Ordinal), CancellationToken.None);
+
+        await act.Should().ThrowAsync<HostUpdateVerificationTargetSetException>();
+        check.CallCount.Should().Be(0);
+    }
+
     private sealed class RecordingHealthCheck : IHostUpdateHealthCheck
     {
         public string Name => "recording";

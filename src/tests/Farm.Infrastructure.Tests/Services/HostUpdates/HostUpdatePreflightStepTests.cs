@@ -59,7 +59,8 @@ public sealed class HostUpdatePreflightStepTests
     private static HostUpdatePreflightCheck CreateCheck(
         IReadOnlyList<IHostUpdateMigrationTarget> migrationTargets,
         IReadOnlySet<string>? mappedServiceIds = null,
-        IReadOnlySet<string>? supportedProviderNames = null) => new(
+        IReadOnlySet<string>? supportedProviderNames = null,
+        IReadOnlySet<string>? activeServiceIds = null) => new(
             new NullInstalledHostStateStore(),
             migrationTargets,
             new AlwaysDockerAvailableProcessRunner(),
@@ -67,7 +68,8 @@ public sealed class HostUpdatePreflightStepTests
             Path.GetTempPath(),
             0,
             supportedProviderNames ?? new HashSet<string>(StringComparer.Ordinal) { "Npgsql.EntityFrameworkCore.PostgreSQL", "Microsoft.EntityFrameworkCore.SqlServer" },
-            mappedServiceIds);
+            mappedServiceIds,
+            activeServiceIds);
 
     private sealed class BareNameResolver : IHostUpdateExecutableResolver
     {
@@ -90,6 +92,32 @@ public sealed class HostUpdatePreflightStepTests
     public async Task RunAsync_AllTargetsMapped_DoesNotFailOnServiceMappingCheck()
     {
         HostUpdatePreflightCheck check = CreateCheck([], new HashSet<string>(SixServiceIds, StringComparer.Ordinal));
+
+        Func<Task> act = () => check.RunAsync(Request(SixServiceIds), CancellationToken.None);
+
+        await act.Should().NotThrowAsync();
+    }
+
+    [Fact]
+    public async Task RunAsync_ActiveServiceOutsideSignedTargets_FailsClosed()
+    {
+        HostUpdatePreflightCheck check = CreateCheck(
+            [],
+            activeServiceIds: new HashSet<string>(StringComparer.Ordinal) { SixServiceIds[0], "unsigned-service" });
+
+        Func<Task> act = () => check.RunAsync(Request(SixServiceIds), CancellationToken.None);
+
+        HostUpdatePreflightFailedException exception = (await act.Should().ThrowAsync<HostUpdatePreflightFailedException>()).Which;
+        exception.Code.Should().Be("active_service_not_targeted:unsigned-service");
+    }
+
+    [Fact]
+    public async Task RunAsync_ActiveSubsetOfSignedTargets_Passes()
+    {
+        HostUpdatePreflightCheck check = CreateCheck(
+            [],
+            new HashSet<string>(SixServiceIds, StringComparer.Ordinal),
+            activeServiceIds: new HashSet<string>(StringComparer.Ordinal) { SixServiceIds[^1] });
 
         Func<Task> act = () => check.RunAsync(Request(SixServiceIds), CancellationToken.None);
 

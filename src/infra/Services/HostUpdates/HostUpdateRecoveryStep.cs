@@ -475,10 +475,12 @@ public sealed class HostUpdateRecoveryCoordinator(
         }
 
         // The prior state is re-applied service-for-service and then verified against the
-        // configured topology. A split/monolith mismatch would only surface after images were
-        // pulled and containers recreated, so it stops here before any restore or apply.
-        if (priorState is not null && executionOptions is { ActiveServiceIds.Length: > 0 } &&
-            !priorState.ServiceDigests.Keys.ToHashSet(StringComparer.Ordinal).SetEquals(executionOptions.ActiveServiceIds))
+        // configured topology. Installed state records the full signed service set (as does the
+        // failed request, which carries every release target even when only some run on this
+        // host), so the prior set must equal the failed request's signed set and include every
+        // active service. A split/monolith mismatch would only surface after images were pulled
+        // and containers recreated, so it stops here before any restore or apply.
+        if (priorState is not null && !PriorStateMatchesTopology(priorState, failedRequest))
         {
             return new(HostUpdateRecoveryPlanKind.NeedsOperator, PriorStateTopologyMismatch, priorState, null);
         }
@@ -508,6 +510,19 @@ public sealed class HostUpdateRecoveryCoordinator(
         string Detail,
         InstalledHostState? PriorState,
         (HostUpdateBackupManifest Manifest, string RunDirectory)? Backup);
+
+    private bool PriorStateMatchesTopology(InstalledHostState priorState, HostUpdateExecutionRequest failedRequest)
+    {
+        var priorServiceIds = priorState.ServiceDigests.Keys.ToHashSet(StringComparer.Ordinal);
+        if (priorServiceIds.Count == 0 ||
+            !priorServiceIds.SetEquals(failedRequest.Targets.Select(target => target.ServiceId)))
+        {
+            return false;
+        }
+
+        return executionOptions is not { ActiveServiceIds.Length: > 0 } ||
+            executionOptions.ActiveServiceIds.All(priorServiceIds.Contains);
+    }
 
     private static bool ApplyMayHaveStarted(IReadOnlyList<HostUpdateExecutionActivity> activities) =>
         activities.Any(a => a.State == HostUpdateExecutionState.Applying && a.Phase.StartsWith("apply:before", StringComparison.Ordinal));

@@ -237,6 +237,64 @@ public sealed class HostUpdateImageApplierTests
         runner.Calls.Should().HaveCount(2);
     }
 
+    [Fact]
+    public async Task RunAsync_StagesEveryTargetButComposesOnlyActiveServices()
+    {
+        var runner = new RecordingProcessRunner(_ => new HostUpdateProcessResult(0, "ok", string.Empty));
+        var monolithMapping = new HostUpdateApplyServiceMapping("monolith", "printfarmer", "PRINTFARMER_IMAGE", "ghcr.io/olyforge3d/printfarmer");
+        var applier = new HostUpdateImageApplier(
+            runner,
+            new BareNameResolver(),
+            ["compose.yml"],
+            "printfarmer",
+            new Dictionary<string, HostUpdateApplyServiceMapping>(StringComparer.Ordinal) { ["api"] = ApiMapping, ["monolith"] = monolithMapping },
+            TimeSpan.FromSeconds(30),
+            new HashSet<string>(StringComparer.Ordinal) { "monolith" });
+        string apiDigest = "sha256:" + new string('a', 64);
+        string monolithDigest = "sha256:" + new string('d', 64);
+        var request = new HostUpdateExecutionRequest(
+            "release-1",
+            1,
+            "sha256:" + new string('b', 64),
+            new string('c', 40),
+            HostUpdateExecutionChannel.Stable,
+            [new HostUpdateExecutionTarget("api", "linux-amd64", apiDigest), new HostUpdateExecutionTarget("monolith", "linux-amd64", monolithDigest)]);
+
+        await applier.RunAsync(request, CancellationToken.None);
+
+        runner.Calls.Should().HaveCount(3);
+        runner.Calls.Take(2).Should().OnlyContain(call => call.Arguments[0] == "image" && call.Arguments[1] == "pull");
+        runner.Calls[2].Arguments.Should().Equal("compose", "-f", "compose.yml", "-p", "printfarmer", "up", "-d", "--no-build", "--pull", "never", "printfarmer");
+        runner.Calls[2].Environment.Should().ContainKey("PRINTFARMER_IMAGE").WhoseValue.Should().Be($"ghcr.io/olyforge3d/printfarmer@{monolithDigest}");
+        runner.Calls[2].Environment.Should().NotContainKey("PRINTFARMER_API_IMAGE");
+    }
+
+    [Fact]
+    public async Task RunAsync_NoActiveTargetFailsBeforeComposeMutation()
+    {
+        var runner = new RecordingProcessRunner(_ => new HostUpdateProcessResult(0, "ok", string.Empty));
+        var applier = new HostUpdateImageApplier(
+            runner,
+            new BareNameResolver(),
+            ["compose.yml"],
+            "printfarmer",
+            new Dictionary<string, HostUpdateApplyServiceMapping>(StringComparer.Ordinal) { ["api"] = ApiMapping },
+            TimeSpan.FromSeconds(30),
+            new HashSet<string>(StringComparer.Ordinal) { "monolith" });
+        var request = new HostUpdateExecutionRequest(
+            "release-1",
+            1,
+            "sha256:" + new string('b', 64),
+            new string('c', 40),
+            HostUpdateExecutionChannel.Stable,
+            [new HostUpdateExecutionTarget("api", "linux-amd64", "sha256:" + new string('a', 64))]);
+
+        Func<Task> act = () => applier.RunAsync(request, CancellationToken.None);
+
+        await act.Should().ThrowAsync<HostUpdateApplyUnsupportedServiceException>();
+        runner.Calls.Should().NotContain(call => call.Arguments[0] == "compose");
+    }
+
     private static string InspectJson(string image, string os, string architecture, string? variant = null) =>
         variant is null
             ? $$"""{"RepoDigests":["{{image}}"],"Os":"{{os}}","Architecture":"{{architecture}}"}"""

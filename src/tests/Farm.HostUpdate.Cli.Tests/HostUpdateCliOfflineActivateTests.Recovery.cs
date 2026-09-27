@@ -15,6 +15,7 @@ public sealed partial class HostUpdateCliOfflineActivateTests
     private const string PriorReleaseId = "insider:" + PriorVersion;
     private const string TargetReleaseId = "insider:1.2.3-insider.42";
 
+    /// <summary>The prior release's signed index pins: what an offline host installs and records.</summary>
     private static readonly Dictionary<string, string> PriorAmd64Digests = new(StringComparer.Ordinal)
     {
         ["api"] = "sha256:" + new string('b', 64),
@@ -23,6 +24,17 @@ public sealed partial class HostUpdateCliOfflineActivateTests
         ["printer-discovery"] = "sha256:" + new string('e', 64),
         ["orcaslicer-worker"] = "sha256:" + new string('f', 64),
         ["monolith"] = "sha256:" + new string('1', 64),
+    };
+
+    /// <summary>The prior release's per-platform child digests, never resolvable from a loaded OCI layout.</summary>
+    private static readonly Dictionary<string, string> PriorChildDigests = new(StringComparer.Ordinal)
+    {
+        ["api"] = "sha256:" + new string('2', 64),
+        ["frontend"] = "sha256:" + new string('3', 64),
+        ["slicer-host"] = "sha256:" + new string('4', 64),
+        ["printer-discovery"] = "sha256:" + new string('5', 64),
+        ["orcaslicer-worker"] = "sha256:" + new string('6', 64),
+        ["monolith"] = "sha256:" + new string('7', 64),
     };
 
     [Theory]
@@ -106,6 +118,23 @@ public sealed partial class HostUpdateCliOfflineActivateTests
 
         AssertRefused(refused, "prior_installed_state_mismatch");
         File.ReadAllText(InstalledStatePath()).Should().Be(before);
+    }
+
+    [HostStateFact]
+    public async Task Offline_recovery_refuses_installed_state_recording_platform_child_digests()
+    {
+        string protectedBackup = StagePriorRecoverySet();
+        HostUpdateExecutionRequest request = RequestFromCurrentStaging();
+        await WriteInstalledStateAsync(request with
+        {
+            ReleaseId = PriorReleaseId,
+            ManifestDigest = PriorDigest(),
+            Targets = [.. request.Targets.Select(target => target with { ChildDigest = PriorChildDigests[target.ServiceId] })],
+        });
+        WriteFailedJournal(request);
+
+        // A loaded OCI layout is only addressable by its signed index, so a child pin was never installed offline.
+        AssertRefused(Envelope(await RunAsync(OfflineRecover(protectedBackup, confirm: false))), "prior_installed_state_mismatch");
     }
 
     [HostStateTheory]
@@ -416,9 +445,16 @@ public sealed partial class HostUpdateCliOfflineActivateTests
         prior["version"] = PriorVersion;
         prior["sequence"] = 10020000300041L;
         JsonObject digests = prior["platformDigests"]!.AsObject();
-        foreach ((string service, string digest) in PriorAmd64Digests)
+        foreach ((string service, string digest) in PriorChildDigests)
         {
             digests[service + "/linux-amd64"] = digest;
+        }
+
+        // Offline installed state records the signed index pin, so the prior services pin these.
+        foreach (JsonNode? service in prior["services"]!.AsArray())
+        {
+            string image = service!["image"]!.GetValue<string>();
+            service["image"] = image[..(image.LastIndexOf('@') + 1)] + PriorAmd64Digests[service["id"]!.GetValue<string>()];
         }
 
         byte[] priorBytes = Encoding.UTF8.GetBytes(prior.ToJsonString());

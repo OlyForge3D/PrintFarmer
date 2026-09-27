@@ -254,7 +254,7 @@ public sealed class HostUpdatePolicyDriftFenceRecoveryTests
         IHostUpdatePhysicalReconciliationGate? gate = null) =>
         new(
             new StaticInstalledStateStore(new InstalledHostState(
-                "stable:1.2.2", "sha256:" + new string('9', 64), new Dictionary<string, string> { ["api"] = "sha256:" + new string('8', 64) }, "monolith", DateTimeOffset.UtcNow)),
+                "stable:1.2.2", "sha256:" + new string('9', 64), Request().Targets.ToDictionary(t => t.ServiceId, _ => "sha256:" + new string('8', 64)), "monolith", DateTimeOffset.UtcNow)),
             new DefaultHostUpdateRecoveryCompatibilityEvaluator(),
             sideEffects,
             sideEffects,

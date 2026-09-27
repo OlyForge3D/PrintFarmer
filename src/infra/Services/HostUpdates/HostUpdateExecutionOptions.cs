@@ -105,10 +105,12 @@ public sealed class HostUpdateExecutionOptions
     public string[] RequiredUnavailableFacilities { get; set; } = [];
 
     /// <summary>
-    /// Active compose services for this host topology. The resolver authenticates the full staged
-    /// artifact set, but apply/verify only target services actually running in this topology.
-    /// A configured list replaces this split-topology default (issue #3042), so a monolith host
-    /// can narrow it to its actual services; an empty list or blank entry fails startup validation.
+    /// Active compose services for this host topology. Signed requests always carry all six
+    /// canonical targets; every target is authenticated and staged, but only these services are
+    /// brought up by apply and observed by digest verification, and each must be a request target
+    /// (preflight fails <c>active_service_not_targeted</c> otherwise). A monolith host sets this to
+    /// <c>["monolith"]</c>. A configured list replaces this split-topology default (issue #3042);
+    /// an empty list or blank entry fails startup validation.
     /// </summary>
     public string[] ActiveServiceIds { get; set; } =
     [

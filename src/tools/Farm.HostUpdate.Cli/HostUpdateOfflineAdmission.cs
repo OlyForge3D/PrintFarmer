@@ -183,7 +183,7 @@ internal static class HostUpdateOfflineAdmission
         }
 
         string manifestPlatform = manifest.Platforms.Count > 0 ? manifest.Platforms[0] : string.Empty;
-        IReadOnlyDictionary<string, string> platforms = manifest.PlatformDigests;
+        string Preloaded(string serviceId) => PreloadedDigest(manifest, serviceId, manifestPlatform) ?? string.Empty;
         var candidate = new VerifiedHostUpdateCandidate(
             $"{manifest.Channel}:{manifest.Version}",
             manifest.SourceCommit,
@@ -197,12 +197,12 @@ internal static class HostUpdateOfflineAdmission
             MaintenanceWindowOpen: true,
             IsNewer: true,
             new HostUpdatePlatformDigests(
-                platforms.GetValueOrDefault(PlatformKey("api", manifestPlatform), string.Empty),
-                platforms.GetValueOrDefault(PlatformKey("frontend", manifestPlatform), string.Empty),
-                platforms.GetValueOrDefault(PlatformKey("slicer-host", manifestPlatform), string.Empty),
-                platforms.GetValueOrDefault(PlatformKey("printer-discovery", manifestPlatform), string.Empty),
-                platforms.GetValueOrDefault(PlatformKey("orcaslicer-worker", manifestPlatform), string.Empty),
-                platforms.GetValueOrDefault(PlatformKey("monolith", manifestPlatform), string.Empty)),
+                Preloaded("api"),
+                Preloaded("frontend"),
+                Preloaded("slicer-host"),
+                Preloaded("printer-discovery"),
+                Preloaded("orcaslicer-worker"),
+                Preloaded("monolith")),
             HostPlatform: manifestPlatform);
         staged = new StagedRelease(candidate, manifest, manifestBytes!, signatureBytes!, Path.GetFullPath(staging));
         error = null;
@@ -325,6 +325,69 @@ internal static class HostUpdateOfflineAdmission
         HostUpdateCli.EmitAsync(output, args.Json, exitCode, new HostUpdateCli.CliFailure(code, []));
 
     internal static string PlatformKey(string serviceId, string platform) => $"{serviceId}/{platform}";
+
+    private static readonly string[] PreloadedServiceIds = ["api", "frontend", "slicer-host", "printer-discovery", "orcaslicer-worker", "monolith"];
+
+    private static bool IsCanonicalDigest(string? value) =>
+        value is { Length: 71 } &&
+        value.StartsWith("sha256:", StringComparison.Ordinal) &&
+        value[7..].All(Uri.IsHexDigit);
+
+    /// <summary>
+    /// The signed image pin a preloaded (offline) host can prove locally for one service on one
+    /// platform. Offline bundles are OCI layouts rooted at the signed multi-platform index, so
+    /// <c>docker load</c> records <c>RepoDigests = repo@index</c>; the per-platform child digest is
+    /// never resolvable locally. The index digest is signed (it is the <c>@</c> pin of
+    /// <see cref="SignedUpdateService.Image"/>) and content-addresses its platform children, and
+    /// local inspection separately proves the loaded image's OS/architecture. The signed child for
+    /// <paramref name="platform"/> must still exist, proving the platform was signed for this service.
+    /// In <see cref="HostUpdateImageSourceMode.PreloadedLocal"/> requests,
+    /// <see cref="HostUpdateExecutionTarget.ChildDigest"/> therefore carries this index pin.
+    /// Returns <see langword="null"/> when either signed digest is missing or non-canonical.
+    /// </summary>
+    internal static string? PreloadedDigest(SignedUpdateManifest manifest, string serviceId, string platform)
+    {
+        if (!manifest.PlatformDigests.TryGetValue(PlatformKey(serviceId, platform), out string? child) ||
+            !IsCanonicalDigest(child))
+        {
+            return null;
+        }
+
+        SignedUpdateService? service = manifest.Services.FirstOrDefault(s => string.Equals(s.Id, serviceId, StringComparison.Ordinal));
+        int at = service?.Image.LastIndexOf('@') ?? -1;
+        string index = at < 0 ? string.Empty : service!.Image[(at + 1)..];
+        return IsCanonicalDigest(index) ? index : null;
+    }
+
+    /// <summary>
+    /// The complete preloaded digest set for <paramref name="platform"/>. Throws
+    /// <c>platform_not_in_manifest</c>, <c>image_set_incomplete:{service}</c>, or
+    /// <c>image_set_mixed_or_incomplete</c> as <see cref="InvalidOperationException"/>.
+    /// </summary>
+    internal static HostUpdatePlatformDigests PreloadedDigests(SignedUpdateManifest manifest, string platform)
+    {
+        if (!manifest.Platforms.Contains(platform, StringComparer.Ordinal))
+        {
+            throw new InvalidOperationException("platform_not_in_manifest");
+        }
+
+        string Digest(string serviceId) =>
+            PreloadedDigest(manifest, serviceId, platform) ?? throw new InvalidOperationException("image_set_incomplete:" + serviceId);
+
+        var digests = new HostUpdatePlatformDigests(
+            Digest(PreloadedServiceIds[0]),
+            Digest(PreloadedServiceIds[1]),
+            Digest(PreloadedServiceIds[2]),
+            Digest(PreloadedServiceIds[3]),
+            Digest(PreloadedServiceIds[4]),
+            Digest(PreloadedServiceIds[5]));
+        if (!digests.IsComplete)
+        {
+            throw new InvalidOperationException("image_set_mixed_or_incomplete");
+        }
+
+        return digests;
+    }
 
     internal sealed record StagedRelease(VerifiedHostUpdateCandidate Candidate, SignedUpdateManifest Manifest, byte[] ManifestBytes, byte[] SignatureBytes, string StagingPath);
 

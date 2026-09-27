@@ -104,7 +104,11 @@ internal static class HostUpdateRecoveryPreview
     {
         string[] priorServices = installed is null ? [] : [.. installed.ServiceDigests.Keys.Order(StringComparer.Ordinal)];
 
-        // Apply runs one bounded "docker image pull" per service plus one "compose up"; verify
+        // Installed state records every signed target; only this host's active services restart.
+        HashSet<string> active = new(options.ActiveServiceIds ?? [], StringComparer.Ordinal);
+        string[] affectedServices = [.. priorServices.Where(active.Contains)];
+
+        // Apply runs one bounded "docker image pull" per target plus one "compose up"; verify
         // polls until its deadline, then may finish one more pass plus a poll interval.
         int applyAndVerify = ((priorServices.Length + 1) * options.ApplyTimeoutSeconds)
             + options.VerifyTimeoutSeconds + options.VerifyPollIntervalSeconds;
@@ -127,11 +131,11 @@ internal static class HostUpdateRecoveryPreview
         return plan.Kind switch
         {
             HostUpdateRecoveryPlanKind.ImageOnlyRollback =>
-                new("service_restart", priorServices, [], applyAndVerify, [HealthCheckFinalPass], TimeoutBudgetBasis),
+                new("service_restart", affectedServices, [], applyAndVerify, [HealthCheckFinalPass], TimeoutBudgetBasis),
             HostUpdateRecoveryPlanKind.CoordinatedRestore =>
                 new(
                     "restore_and_service_restart",
-                    priorServices,
+                    affectedServices,
                     restored,
                     (restoreProcesses * options.BackupTimeoutSeconds) + (installed is null ? 0 : applyAndVerify),
                     [.. restoreUnbounded],

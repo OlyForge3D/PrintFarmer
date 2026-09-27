@@ -200,7 +200,8 @@ public static class HostUpdateRecoveryEngineRegistration
             options.ComposeFiles,
             options.ComposeProjectName,
             mappings,
-            TimeSpan.FromSeconds(options.ApplyTimeoutSeconds));
+            TimeSpan.FromSeconds(options.ApplyTimeoutSeconds),
+            options.ActiveServiceIds.ToHashSet(StringComparer.Ordinal));
     }
 
     private static HostUpdateHealthVerifier CreateHealthVerifier(IServiceProvider sp)
