@@ -1162,9 +1162,38 @@ function reauthenticateStaged({ directory, root, run, pairs, channelOf, limits }
   return signed;
 }
 
+// Image store preflight (#3137). Bundle image members are OCI image layouts rooted at the signed
+// index, and activation pins every preloaded service by `repository@<signed index digest>`. Only the
+// containerd image store satisfies both: it imports OCI layouts and records RepoDigests for the
+// layout's index. The classic (graphdriver, e.g. overlay2) store's `docker load` requires a
+// docker-save `manifest.json` and never records RepoDigests, so even a dual-format archive would
+// load unpinnable images. The preflight therefore refuses the classic store before any load.
+export const containerdSnapshotterDriverType = 'io.containerd.snapshotter.v1';
+const imageStoreFormat = '{"driver":{{json .Driver}},"driverStatus":{{json .DriverStatus}}}';
+
+export function requireContainerdImageStore(run) {
+  const remedy = 'Enable the containerd image store (set "features": {"containerd-snapshotter": true} in the Docker ' +
+    'daemon.json and restart dockerd, or turn on "Use containerd for pulling and storing images" in Docker Desktop), ' +
+    'then re-run the command';
+  let info;
+  try {
+    info = JSON.parse(String(run('docker', ['info', '--format', imageStoreFormat])).trim());
+  } catch (error) {
+    throw new Error(`Offline image load refused: the Docker image store could not be determined (${error.message}). ${remedy}`);
+  }
+  const status = Array.isArray(info?.driverStatus) ? info.driverStatus : [];
+  const containerd = status.some(pair => Array.isArray(pair) && pair[0] === 'driver-type' &&
+    pair[1] === containerdSnapshotterDriverType);
+  const driver = typeof info?.driver === 'string' && /^[A-Za-z0-9._-]{1,64}$/.test(info.driver) ? info.driver : 'unknown';
+  requireThat(containerd, `Offline image load refused: the Docker engine uses the classic '${driver}' image store, ` +
+    'which cannot load OCI image-layout archives or record the signed index digest that activation pins. ' + remedy);
+  return { driver, driverType: containerdSnapshotterDriverType };
+}
+
 // Opens every archive once, re-hashes and re-verifies it on that descriptor before anything is
 // loaded, then passes the same descriptor to `docker load` as stdin.
 function loadArchives({ directory, required, recordedImages, run, imageLimits, label }) {
+  requireContainerdImageStore(run);
   const recorded = new Map();
   for (const image of recordedImages) {
     requireThat(image && typeof image.member === 'string' && sha256Pattern.test(image.sha256 ?? '') &&
@@ -1569,6 +1598,8 @@ export function importOfflineBundle({ bundle, channel, version, trustedRoot, tru
   });
   let pending = reservation;
   try {
+    // Refuse an engine that cannot hold pinned OCI images before any staging or replay admission.
+    requireContainerdImageStore(run);
     trust = evaluateTrustPolicy({ trustedRoot, trustedRootApproval, now });
     verification = verifyOfflineBundle({ bundle, channel, version, trustedRoot, staging, run, priorRecoverySet,
       protectedBackup, limits, imageLimits, now });
