@@ -61,7 +61,9 @@ These were decided before this design and are not reopened here:
 
 ## Selected identity mechanism
 
-**Decision (proposed): a host-generated, non-exportable asymmetric key pair,
+**Decision (proposed): a host-generated, host-held asymmetric key pair —
+non-exportable where the platform supports it (TPM or CNG), otherwise a
+file-permission-protected software key —
 registered with the API through an owner-approved enrollment ceremony, with
 every request signed end to end. This is the "signed enrollment key" option.
 Mutual TLS (mTLS) is not selected.**
@@ -390,7 +392,7 @@ Effects:
 | Host stolen, or key material suspected exposed | Revoke immediately in the app. Treat everything the host could reach as compromised, including the database and data-protection keys, under the host-compromise residual risk. Re-enroll only on a rebuilt host. |
 | Host restored from a backup or snapshot | The key should be absent because it is excluded from backups. If it is present, the fork check quarantines it on first use (see [Clone and rollback detection](#clone-and-rollback-detection)). Re-enroll. |
 | Application database restored to an older state | Enrollment records are not in the application database, so this changes nothing about identity. The #2665 replay and continuity rules still apply to update state. |
-| API host-state store restored or rolled back | This is prohibited by the runbook. If it happens anyway, the daemon detects it from the echoed counter and state revision and holds all work as `NeedsOperator`. Recovery is revocation and re-enrollment, never resetting the daemon to match. |
+| API host-state store restored or rolled back | This is prohibited by the runbook. If it happens anyway, the daemon detects it only when the echoed counter or state revision regresses below the state the daemon has already observed, and then holds all work as `NeedsOperator`. A rollback to a point after the daemon's last acknowledged request is undetectable by the daemon; see residual risk R4. Recovery is revocation and re-enrollment, never resetting the daemon to match. |
 | Daemon replaced on the same host | Unenroll the old daemon, then enroll the new one. No key transfer between installations is supported. |
 
 Recovery never uses trust on first use, never copies keys between hosts and
@@ -425,7 +427,9 @@ stays available without an enrolled daemon.
   The daemon compares them with its own records. An echoed counter lower than
   the last one the API acknowledged, or a lower state revision, means the API
   state was rolled back. The daemon then holds all work as `NeedsOperator`.
-  This also detects a rollback within one epoch.
+  This also detects a rollback within one epoch, but only below state the
+  daemon has already observed; a rollback to a point after its last
+  acknowledged request is not detectable this way (R4).
 - **Epoch.** The daemon pins its enrollment epoch. A signed response for a
   different epoch means the API's state changed underneath it, so the daemon
   holds all work as `NeedsOperator`.
@@ -630,5 +634,7 @@ request never advances the counter or triggers quarantine), quarantine only on
 fork evidence, host execution mode `none` blocking every pull operation
 including manual approvals, a missing `installation.id` failing enrollment
 instead of generating a fallback, a response echoing a stale counter or state
-revision after an application-database rollback, and invitation-attempt
+revision after a protected `HostUpdates:HostState` rollback to a point older
+than the daemon's last acknowledged counter and revision, an
+application-database restore that leaves enrollment state unchanged, and invitation-attempt
 exhaustion.
