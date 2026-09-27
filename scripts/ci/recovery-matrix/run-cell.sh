@@ -133,9 +133,16 @@ if [[ -z "$SINK_IP" ]]; then
   echo "Failed to determine egress sink IP" >&2
   exit 1
 fi
+# The packaged CLI runs `docker compose` inside the host container, so it needs the runner's compose plugin.
+COMPOSE_PLUGIN="$(docker info --format '{{range .ClientInfo.Plugins}}{{if eq .Name "compose"}}{{.Path}}{{end}}{{end}}' 2>/dev/null || true)"
+if [[ -z "$COMPOSE_PLUGIN" || ! -x "$COMPOSE_PLUGIN" ]]; then
+  echo "Docker Compose CLI plugin not found on the runner" >&2
+  exit 1
+fi
 docker run -d --name "$HOST" --label "$RUN_LABEL" --network "$NETWORK" --dns "$SINK_IP" \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v /usr/bin/docker:/usr/bin/docker:ro \
+  -v "$COMPOSE_PLUGIN:/usr/libexec/docker/cli-plugins/docker-compose:ro" \
   -v "$REPO_ROOT:$REPO_ROOT" \
   -v "$WORK_DIR:$WORK_DIR" \
   -w "$REPO_ROOT" \
