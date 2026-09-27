@@ -40,6 +40,22 @@ jobs:
         with:
           cosign-release: 'v3.0.6'
 
+      # Offline bundle import requires the containerd image store (#3137); GitHub-hosted
+      # ubuntu-24.04 runners default to the classic overlay2 store, which import refuses.
+      - name: Enable the containerd image store
+        run: |
+          set -euo pipefail
+          config=/etc/docker/daemon.json
+          current='{}'
+          if sudo test -s "$config"; then current="$(sudo cat "$config")"; fi
+          jq '.features = ((.features // {}) + {"containerd-snapshotter": true})' <<<"$current" \
+            | sudo tee "$config" >/dev/null
+          sudo systemctl restart docker
+          for _ in $(seq 1 30); do docker info >/dev/null 2>&1 && break; sleep 2; done
+          docker info --format '{{json .DriverStatus}}' \
+            | jq -e 'any(.[]; .[0] == "driver-type" and .[1] == "io.containerd.snapshotter.v1")' >/dev/null \
+            || { echo "::error::containerd image store is not active"; exit 1; }
+
       - name: Run recovery cell
         env:
           CELL: ${{ inputs.cell || 'c2' }}
