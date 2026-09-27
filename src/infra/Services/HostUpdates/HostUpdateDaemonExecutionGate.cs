@@ -28,19 +28,44 @@ public sealed record HostUpdateDaemonDispatchResult(bool Dispatched, string? Ref
 /// The daemon's single path to execution. It adds no engine: after the gate it calls the existing
 /// <see cref="IHostUpdateExecutor"/>, which takes the shared execution lock and writes the shared
 /// journal, so daemon, CLI and manual attempts are serialized by the same lock. A held lock is
-/// reported as <c>execution_lock_held</c>; the daemon never retries in a tight loop.
+/// reported as <c>execution_lock_held</c>; the daemon never retries in a tight loop. Only a release
+/// produced by <see cref="HostUpdateDaemonReleaseVerifier"/> can be dispatched, and only while that
+/// verification is unexpired and the request names exactly the verified release and image set.
 /// </summary>
-public sealed class HostUpdateDaemonExecutionDispatcher(IHostUpdateDaemonExecutionGate gate, IHostUpdateExecutor executor)
+public sealed class HostUpdateDaemonExecutionDispatcher(
+    IHostUpdateDaemonExecutionGate gate,
+    IHostUpdateExecutor executor,
+    TimeProvider? timeProvider = null)
 {
     public const string ExecutionLockHeldCode = "execution_lock_held";
 
-    public async Task<HostUpdateDaemonDispatchResult> DispatchAsync(HostUpdateExecutionRequest request, CancellationToken cancellationToken)
+    public const string VerificationExpiredCode = "verification_expired";
+
+    public const string VerificationBindingMismatchCode = "verification_binding_mismatch";
+
+    private readonly TimeProvider time = timeProvider ?? TimeProvider.System;
+
+    public async Task<HostUpdateDaemonDispatchResult> DispatchAsync(
+        HostUpdateDaemonVerifiedRelease verified,
+        HostUpdateExecutionRequest request,
+        CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(verified);
         ArgumentNullException.ThrowIfNull(request);
         string? refusal = gate.Evaluate();
         if (refusal is not null)
         {
             return HostUpdateDaemonDispatchResult.Refused(refusal);
+        }
+
+        if (time.GetUtcNow() >= verified.ExpiresAt)
+        {
+            return HostUpdateDaemonDispatchResult.Refused(VerificationExpiredCode);
+        }
+
+        if (!verified.Matches(request))
+        {
+            return HostUpdateDaemonDispatchResult.Refused(VerificationBindingMismatchCode);
         }
 
         try

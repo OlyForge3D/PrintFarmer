@@ -52,7 +52,9 @@ internal static class HostUpdateDaemonCommand
             new HostUpdateDaemonJournalReader(
                 executionOptions.StateDirectory,
                 provider.GetRequiredService<IHostUpdateExecutionLock>(),
-                provider.GetRequiredService<IHostUpdateExecutionJournal>()),
+                provider.GetRequiredService<IHostUpdateExecutionJournal>(),
+                new FileHostUpdateDaemonVerificationJournal(
+                    Path.Join(executionOptions.StateDirectory, FileHostUpdateDaemonVerificationJournal.FileName))),
             new DisabledHostUpdateDaemonExecutionGate(),
             sink,
             provider.GetRequiredService<ILogger<HostUpdateDaemon>>());
@@ -75,7 +77,7 @@ internal static class HostUpdateDaemonCommand
         {
             string line = json
                 ? JsonSerializer.Serialize(status, LineOptions)
-                : $"{status.Lifecycle.ToString().ToLowerInvariant()} {status.Code} gate={status.ExecutionGateCode} identity={status.IdentityStorageCode} journal={status.JournalCode}";
+                : $"{status.Lifecycle.ToString().ToLowerInvariant()} {status.Code} gate={status.ExecutionGateCode} identity={status.IdentityStorageCode} journal={status.JournalCode} verification={status.VerificationCode}";
             lock (gate)
             {
                 output.WriteLine(line);

@@ -350,7 +350,7 @@ public sealed class UnavailableHostUpdateReplayAnchor : IHostUpdateReplayAnchor,
 }
 
 public sealed class FileHostUpdateReplayStore(string rootPath, IHostUpdateReplayAnchor anchor, Action<string>? commitBoundary = null,
-    TimeSpan? crossProcessLockTimeout = null) : IHostUpdateReplayStore, IDisposable
+    TimeSpan? crossProcessLockTimeout = null) : IHostUpdateReplayStore, IHostUpdateReplayAdmissionReader, IDisposable
 {
     private readonly string _path = Path.Combine(rootPath ?? throw new ArgumentNullException(nameof(rootPath)), "host-update-replay.json");
     private readonly string _stagedPath = Path.Combine(rootPath, "host-update-replay.json.staged");
@@ -378,6 +378,61 @@ public sealed class FileHostUpdateReplayStore(string rootPath, IHostUpdateReplay
             return state.Identities.TryGetValue(candidate.Identity, out HostUpdateReplayIdentityRecord? existing)
                 ? new(existing.Disposition, existing.CorrelationId, true)
                 : new(HostUpdateReplayDisposition.Rejected, "missing:" + candidate.Identity, false);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    /// <summary>
+    /// Read-only admission preview for the host daemon (#3116). It applies the same identity and
+    /// high-water rules as <see cref="DecideAsync"/> but never persists, recovers or advances state.
+    /// </summary>
+    public async Task<string?> EvaluateAdmissionAsync(VerifiedHostUpdateCandidate candidate, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(candidate);
+        if (!candidate.CryptographicallyVerified || string.IsNullOrWhiteSpace(candidate.TrustRoot))
+        {
+            return "replay_unauthenticated";
+        }
+
+        await _gate.WaitAsync(ct);
+        try
+        {
+            using FileStream crossProcessLock = await AcquireCrossProcessLockAsync(ct);
+            long anchorEpoch = await ReadAnchorEpochAsync(ct);
+            string anchorStateHash = await ReadAnchorStateHashAsync(ct);
+            HostUpdateReplayFileState state = await LoadReadOnlyAsync(anchorEpoch, anchorStateHash, ct);
+            if (state.Identities.TryGetValue(candidate.Identity, out HostUpdateReplayIdentityRecord? existing))
+            {
+                string? identityCode = existing.Disposition switch
+                {
+                    HostUpdateReplayDisposition.Accepted => "replay_already_admitted",
+                    HostUpdateReplayDisposition.Superseded => "replay_superseded",
+                    HostUpdateReplayDisposition.Rejected => "replay_rejected",
+                    _ => null,
+                };
+                if (identityCode is not null)
+                {
+                    return identityCode;
+                }
+            }
+
+            if (state.HighWaterByNamespace.TryGetValue(Namespace(candidate), out HostUpdateReplayHighWater? highWater))
+            {
+                if (candidate.Sequence < highWater.Sequence)
+                {
+                    return "replay_downgrade";
+                }
+
+                if (candidate.Sequence == highWater.Sequence && !string.Equals(highWater.Identity, candidate.Identity, StringComparison.Ordinal))
+                {
+                    return "replay_sequence_conflict";
+                }
+            }
+
+            return null;
         }
         finally
         {

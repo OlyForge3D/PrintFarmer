@@ -26,6 +26,9 @@ API and drives the existing host-update executor. It is **design only**.
   [Daemon service core (#3114)](HOST_UPDATE_RUNBOOK.md#daemon-service-core-3114)):
   it validates identity storage, reads the existing journal and lock, and
   publishes redacted status, but its execution gate is hard-wired disabled.
+  **Independent signed-release verification** is implemented by #3116 (see
+  [Daemon signed-release verification (#3116)](HOST_UPDATE_RUNBOOK.md#daemon-signed-release-verification-3116)).
+  It runs behind the same disabled gate and enables nothing.
 - **Not enabled:** nothing in this document, a configuration value, an
   environment variable or a saved setting enables enrollment, background
   polling or automatic updates. Auto-update and pilot rollout stay disabled
@@ -655,7 +658,13 @@ turn it into tests:
   and its tests are defined in the
   [host-update daemon pull API](HOST_UPDATE_PULL_API.md).
 - **#3116:** Downgrade, cross-channel and replay rejection independent of the
-  API.
+  API. `HostUpdateDaemonReleaseVerifier` checks the pinned trust root, a
+  bounded approval lifetime, the operator trusted root's validity, the
+  manifest digest and cosign signature, the manifest's binding, channel and
+  complete per-platform image set, and the read-only replay high-water mark.
+  It records hash-chained evidence before accepting, and the dispatcher
+  refuses expired or mismatched verification. Covered by
+  `HostUpdateDaemonReleaseVerifierTests` and `HostUpdateDaemonTests`.
 - **#3117:** Signed re-confirmation before the first side effect.
   API-unavailable and revoked-during-operation cells.
 - **#3118:** Installation grants nothing. Enrollment and automatic permission
