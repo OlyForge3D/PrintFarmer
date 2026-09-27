@@ -917,3 +917,43 @@ also never enables it:
 Either flag fails the deployment when no CLI version is given, when
 `HostUpdateExecution__RootDirectory` is missing from `.env` (so no
 `host-update.json` could be written), or when the service install fails.
+
+## Daemon signed-release verification (#3116)
+
+Before the daemon could hand an approval to the executor, it verifies the
+signed release itself instead of trusting the API. The verifier runs behind
+the disabled execution gate above, so it enables nothing. It refuses, with a
+fixed code, when any of these fail:
+
+- The approval names the pinned trust root and a channel that matches host
+  policy. Its lifetime is at most five minutes and it has not expired.
+- The operator's Sigstore trusted root file is present, well formed and
+  currently valid, and an absolute cosign path is configured.
+- The release for the approved tag is published on that channel with exactly
+  one `update-manifest.json` and one `update-manifest.sigstore.json`. Both
+  are within size limits, and the manifest digest matches the approval.
+- Cosign verifies the signature against the pinned signer identity. The
+  manifest passes the existing manifest validator and matches the approval's
+  version, sequence, channel and trust root.
+- The manifest lists a complete image set for the host platform.
+- The read-only replay check rejects a lower sequence (`replay_downgrade`),
+  a conflicting identity at the same sequence, and any release that was
+  already admitted, superseded or rejected. It never writes replay state.
+
+Every decision is appended to the hash-chained `daemon-verification.ndjson`
+in the executor state directory. That file holds redacted codes and digests
+only; it is separate from the executor journal. Readers and writers share a
+dedicated `daemon-verification.ndjson.lock`. The file holds at most 4096
+records (a refusal repeated each poll is recorded once). An acceptance that
+cannot be recorded is refused (`verification_evidence_unavailable`). The
+dispatcher also refuses a verification that has expired
+(`verification_expired`) or does not match the execution request
+(`verification_binding_mismatch`).
+
+Daemon status lines report the latest decision as `verificationCode` in JSON
+and `verification=` in text (`verification_none` when no decision exists). A
+tampered evidence file fails the cycle with a `journal_verification_*` code.
+A full file fails the cycle with `journal_verification_full`. To archive it,
+stop the daemon, move `daemon-verification.ndjson` out of the state directory
+(keep it as evidence; do not delete it), then start the daemon. The next
+decision starts a new chain.

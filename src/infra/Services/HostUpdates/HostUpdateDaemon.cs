@@ -32,7 +32,8 @@ public sealed record HostUpdateDaemonStatus(
     int? RecoveryRequiredCount,
     DateTimeOffset? LastCycleAt,
     int ConsecutiveFailures,
-    int? NextCycleSeconds);
+    int? NextCycleSeconds,
+    string VerificationCode = "verification_not_read");
 
 /// <summary>Receives each published daemon status (for example the CLI writes one line per status).</summary>
 public interface IHostUpdateDaemonStatusSink
@@ -41,9 +42,17 @@ public interface IHostUpdateDaemonStatusSink
 }
 
 /// <summary>Journal-derived state the daemon loads each cycle, or a fixed failure/lock code.</summary>
-public sealed record HostUpdateDaemonJournalSnapshot(string Code, bool Failed, int? ReleaseCount, int? InFlightCount, int? RecoveryRequiredCount)
+public sealed record HostUpdateDaemonJournalSnapshot(
+    string Code,
+    bool Failed,
+    int? ReleaseCount,
+    int? InFlightCount,
+    int? RecoveryRequiredCount,
+    string? VerificationCode = null)
 {
     public const string OkCode = "journal_ok";
+
+    public const string NoVerificationCode = "verification_none";
 
     public static HostUpdateDaemonJournalSnapshot LockHeld { get; } = new(HostUpdateDaemonExecutionDispatcher.ExecutionLockHeldCode, false, null, null, null);
 }
@@ -58,11 +67,54 @@ public interface IHostUpdateDaemonJournalReader
 /// Reads the shared hash-chained execution journal only while holding the shared execution lock,
 /// exactly as the host-local <c>status</c> command does. A held lock (the executor, CLI or a manual
 /// recovery is running) is reported and never waited on, and an existing lock file is not rewritten.
+/// When a verification journal is supplied, the latest #3116 verification outcome is reported as a
+/// fixed code; an unreadable or tampered verification journal fails the cycle closed. The
+/// verification journal is read outside the execution lease because it serializes its own readers
+/// and writers on a dedicated lock, so a concurrent append is waited on briefly, never observed torn.
 /// </summary>
-public sealed partial class HostUpdateDaemonJournalReader(string stateDirectory, IHostUpdateExecutionLock executionLock, IHostUpdateExecutionJournal journal)
+public sealed partial class HostUpdateDaemonJournalReader(
+    string stateDirectory,
+    IHostUpdateExecutionLock executionLock,
+    IHostUpdateExecutionJournal journal,
+    IHostUpdateDaemonVerificationJournal? verificationJournal = null)
     : IHostUpdateDaemonJournalReader
 {
     public HostUpdateDaemonJournalSnapshot Read()
+    {
+        HostUpdateDaemonJournalSnapshot execution = ReadExecution();
+        if (verificationJournal is null)
+        {
+            return execution;
+        }
+
+        try
+        {
+            IReadOnlyList<HostUpdateDaemonVerificationEvidence> evidence = verificationJournal.ReadAll();
+            if (evidence.Count == 0)
+            {
+                return execution with { VerificationCode = HostUpdateDaemonJournalSnapshot.NoVerificationCode };
+            }
+
+            HostUpdateDaemonVerificationEvidence last = evidence[^1];
+            if (evidence.Count >= FileHostUpdateDaemonVerificationJournal.MaximumRecords)
+            {
+                // A full journal refuses every new verification; surface it instead of the last code.
+                return execution with { Failed = true, VerificationCode = "journal_verification_full" };
+            }
+
+            string code = last.Outcome + ":" + last.Code;
+            return execution with { VerificationCode = VerificationCodePattern().IsMatch(code) ? code : "verification_code_invalid" };
+        }
+        catch (Exception ex) when (IsStateFailure(ex))
+        {
+            string code = ex is InvalidDataException data && data.Message is { } message && JournalCode().IsMatch(message)
+                ? message
+                : "verification_state_unreadable";
+            return execution with { Failed = true, VerificationCode = code };
+        }
+    }
+
+    private HostUpdateDaemonJournalSnapshot ReadExecution()
     {
         IHostUpdateExecutionLease? lease;
         try
@@ -133,6 +185,9 @@ public sealed partial class HostUpdateDaemonJournalReader(string stateDirectory,
 
     [GeneratedRegex(@"\Ajournal_[a-z_]+\z", RegexOptions.CultureInvariant)]
     private static partial Regex JournalCode();
+
+    [GeneratedRegex(@"\A[a-z0-9_:\-]{1,96}\z", RegexOptions.CultureInvariant)]
+    private static partial Regex VerificationCodePattern();
 }
 
 /// <summary>
@@ -263,7 +318,8 @@ public sealed class HostUpdateDaemon(
             journal is null ? Status?.RecoveryRequiredCount : journal.RecoveryRequiredCount,
             journal is null ? Status?.LastCycleAt : time.GetUtcNow(),
             consecutiveFailures,
-            nextDelay is null ? null : (int)Math.Ceiling(nextDelay.Value.TotalSeconds));
+            nextDelay is null ? null : (int)Math.Ceiling(nextDelay.Value.TotalSeconds),
+            journal?.VerificationCode ?? Status?.VerificationCode ?? "verification_not_read");
     }
 
     private void Publish(HostUpdateDaemonStatus status)
