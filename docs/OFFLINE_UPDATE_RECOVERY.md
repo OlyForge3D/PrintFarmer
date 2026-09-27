@@ -564,7 +564,10 @@ alone:
    requires.
 2. The installed host state is exactly that prior set, per the same
    `prior_installed_state_mismatch` rules recovery applies.
-3. The running container's compose `Image` is `<ImageRepository>@<installed
+3. The container's compose `State` is exactly `running` and its compose `ID` is
+   observable. A `created`, `restarting`, `paused` or otherwise non-running
+   writer is refused even on the prior image.
+4. The running container's compose `Image` is `<ImageRepository>@<installed
    pin>` for that service. A child digest, tag, other repository or missing image
    is refused as `writer_service_active:<service>:<state>`.
 
@@ -572,7 +575,8 @@ A tolerated writer is then fenced before backup, migration or apply by the CLI's
 `prior-release-writer` fence. The fence closes the durable admission gate, and
 proves quiescence only when the gate reads closed, every active-work port reads
 zero, and a fresh `docker compose ps` shows no running writer other than the
-tolerated ones on the same images. A new, re-imaged or unobservable writer keeps
+tolerated containers, each with the same container ID and image. A new,
+replaced, extra-replica, re-imaged, non-running or unobservable writer keeps
 the fence open until it times out. When no writer was tolerated, the fence is
 inert.
 

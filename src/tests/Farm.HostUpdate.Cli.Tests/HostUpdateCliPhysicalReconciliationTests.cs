@@ -86,6 +86,8 @@ public sealed class HostUpdateCliPhysicalReconciliationTests : IDisposable, IAsy
         physical.GetProperty("state").GetString().Should().Be("not_required");
         physical.GetProperty("printerCount").GetInt32().Should().Be(0);
         physical.GetProperty("uncertainOutcomeCount").GetInt32().Should().Be(0);
+        (physical.TryGetProperty("reconciliationToken", out JsonElement token) && token.ValueKind != JsonValueKind.Null)
+            .Should().BeFalse("an empty inventory needs no record, so no token is offered");
         run.ExitCode.Should().Be(HostUpdateCliExitCodes.Success, "zero printers and zero uncertain outcomes leave nothing to reconcile (issue #3126)");
         Envelope(run).GetProperty("result").GetProperty("outcome").GetString().Should().Be("RolledBack");
         File.Exists(_host.AdmissionClosedPath).Should().BeFalse();

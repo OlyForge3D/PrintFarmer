@@ -117,18 +117,70 @@ public sealed partial class HostUpdateCliOfflineActivateTests
         };
         string output = """
             {"Service":"api","State":"exited"}
-            {"Service":"printfarmer","State":"running","Image":"repo@sha256:1"}
+            {"ID":"c1","Service":"printfarmer","State":"running","Image":"repo@sha256:1"}
             """;
         var tolerated = new Dictionary<string, List<string>>(StringComparer.Ordinal);
 
-        DockerComposeApiAbsenceProbe.ValidateComposeState(output, mappings, (_, image) => image == "repo@sha256:1", tolerated)
+        DockerComposeApiAbsenceProbe.ValidateComposeState(output, mappings, (_, image, id) => image == "repo@sha256:1" && id is not null, tolerated)
             .Should().BeNull();
-        tolerated.Should().ContainKey("monolith").WhoseValue.Should().Equal("repo@sha256:1");
+        tolerated.Should().ContainKey("monolith").WhoseValue.Should().Equal("c1 repo@sha256:1");
 
-        DockerComposeApiAbsenceProbe.ValidateComposeState(output, mappings, (_, image) => image == "repo@sha256:2", null)
+        DockerComposeApiAbsenceProbe.ValidateComposeState(output, mappings, (_, image, _) => image == "repo@sha256:2", null)
             .Should().Be("writer_service_active:monolith:running");
-        DockerComposeApiAbsenceProbe.ValidateComposeState("""{"Service":"printfarmer","State":"running"}""", mappings, (_, image) => image is not null, null)
+        DockerComposeApiAbsenceProbe.ValidateComposeState("""{"ID":"c1","Service":"printfarmer","State":"running"}""", mappings, (_, image, _) => image is not null, null)
             .Should().Be("writer_service_active:monolith:running", "a running writer with no observable image is never tolerated");
+    }
+
+    [Theory]
+    [InlineData("created")]
+    [InlineData("restarting")]
+    [InlineData("paused")]
+    public void Writer_absence_probe_never_tolerates_a_writer_that_is_not_steadily_running(string state)
+    {
+        var mappings = new Dictionary<string, string>(StringComparer.Ordinal) { ["monolith"] = "printfarmer" };
+        string output = $$"""{"ID":"c1","Service":"printfarmer","State":"{{state}}","Image":"repo@sha256:1"}""";
+
+        DockerComposeApiAbsenceProbe.ValidateComposeState(output, mappings, (_, _, _) => true, null)
+            .Should().Be("writer_service_active:monolith:" + state, "only a running container can be fenced and re-identified");
+    }
+
+    [HostStateTheory]
+    [InlineData("running", true)]
+    [InlineData("restarting", false)]
+    public async Task Activation_tolerates_prior_writer_only_while_it_is_running(string state, bool tolerated)
+    {
+        StagePriorRecoverySet();
+        await ImportAsync();
+        await WritePriorInstalledStateAsync();
+        var runner = new IntegratedActivationProcessRunner(healthSucceeds: true);
+        runner.RunningWriterImages["monolith"] = MonolithRepository + "@" + PriorAmd64Digests["monolith"];
+        runner.RunningWriterStates["monolith"] = state;
+
+        JsonElement envelope = Envelope(await RunAsync(Activate(), IntegratedConfiguration(), services =>
+            UsePriorWriterFence(services, runner, new RecordingHealthHttpClientFactory("http://localhost:5245", succeeds: true))));
+
+        if (tolerated)
+        {
+            envelope.GetProperty("exitCode").GetInt32().Should().Be(HostUpdateCliExitCodes.Success, envelope.ToString());
+        }
+        else
+        {
+            AssertRefused(envelope, "writer_service_active:monolith:restarting");
+            runner.ComposeUpCalls.Should().BeEmpty();
+        }
+    }
+
+    [Fact]
+    public void Writer_absence_probe_refuses_a_running_writer_without_a_container_id()
+    {
+        var mappings = new Dictionary<string, string>(StringComparer.Ordinal) { ["monolith"] = "printfarmer" };
+
+        DockerComposeApiAbsenceProbe.ValidateComposeState(
+                """{"Service":"printfarmer","State":"running","Image":"repo@sha256:1"}""",
+                mappings,
+                (_, image, id) => image is not null && id is not null,
+                null)
+            .Should().Be("writer_service_active:monolith:running");
     }
 
     [Theory]
@@ -136,6 +188,9 @@ public sealed partial class HostUpdateCliOfflineActivateTests
     [InlineData("tolerated", 1, false)]
     [InlineData("new-writer", 0, false)]
     [InlineData("re-imaged", 0, false)]
+    [InlineData("replaced-container", 0, false)]
+    [InlineData("extra-replica", 0, false)]
+    [InlineData("restarting", 0, false)]
     public async Task Prior_release_writer_fence_proves_only_closed_drained_and_unchanged_writers(string scenario, int activeWork, bool expected)
     {
         string pin = MonolithRepository + "@" + PriorAmd64Digests["monolith"];
@@ -146,8 +201,23 @@ public sealed partial class HostUpdateCliOfflineActivateTests
             runner.RunningWriterImages["api"] = "ghcr.io/olyforge3d/printfarmer-api@" + PriorAmd64Digests["api"];
         }
 
+        if (scenario == "replaced-container")
+        {
+            runner.RunningWriterContainerIds["monolith"] = ["monolith-2"];
+        }
+
+        if (scenario == "extra-replica")
+        {
+            runner.RunningWriterContainerIds["monolith"] = ["monolith-1", "monolith-2"];
+        }
+
+        if (scenario == "restarting")
+        {
+            runner.RunningWriterStates["monolith"] = "restarting";
+        }
+
         (HostUpdatePriorReleaseWriterFence fence, InMemoryHostUpdateAdmissionGate gate, ServiceProvider provider) =
-            CreatePriorWriterFence(runner, activeWork, new Dictionary<string, string[]>(StringComparer.Ordinal) { ["monolith"] = [pin] });
+            CreatePriorWriterFence(runner, activeWork, new Dictionary<string, string[]>(StringComparer.Ordinal) { ["monolith"] = ["monolith-1 " + pin] });
         await using (provider)
         {
             (await fence.IsQuiescedAsync(CancellationToken.None)).Should().BeFalse("admission is still open");

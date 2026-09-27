@@ -1150,6 +1150,15 @@ public sealed partial class HostUpdateCliOfflineActivateTests : IDisposable, IAs
         /// <summary>Writer services reported running (with their image) until the first compose up replaces them.</summary>
         public Dictionary<string, string> RunningWriterImages { get; } = new(StringComparer.Ordinal);
 
+        /// <summary>Compose state reported for a running writer; defaults to <c>running</c>.</summary>
+        public Dictionary<string, string> RunningWriterStates { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>Container IDs reported for a writer; defaults to one container <c>{service}-1</c>.</summary>
+        public Dictionary<string, string[]> RunningWriterContainerIds { get; } = new(StringComparer.Ordinal);
+
+        private string[] RunningWriterIds(string serviceId) =>
+            RunningWriterContainerIds.TryGetValue(serviceId, out string[]? ids) ? ids : [serviceId + "-1"];
+
         private readonly Dictionary<string, string> _digestsByService = new(StringComparer.Ordinal);
 
         public IEnumerable<ProcessCall> ComposeUpCalls => Calls.Where(call =>
@@ -1205,10 +1214,11 @@ public sealed partial class HostUpdateCliOfflineActivateTests : IDisposable, IAs
 
             if (arguments.Count > 0 && string.Equals(arguments[0], "compose", StringComparison.Ordinal) && arguments.Contains("ps"))
             {
-                string output = string.Join('\n', Services.Select(pair =>
+                string output = string.Join('\n', Services.SelectMany(pair =>
                     RunningWriterImages.TryGetValue(pair.Key, out string? image) && !ComposeUpCalls.Any()
-                        ? $$"""{"Service":"{{pair.Value.Compose}}","State":"running","Image":"{{image}}"}"""
-                        : $$"""{"Service":"{{pair.Value.Compose}}","State":"exited"}"""));
+                        ? RunningWriterIds(pair.Key).Select(id =>
+                            $$"""{"ID":"{{id}}","Service":"{{pair.Value.Compose}}","State":"{{RunningWriterStates.GetValueOrDefault(pair.Key, "running")}}","Image":"{{image}}"}""")
+                        : [$$"""{"Service":"{{pair.Value.Compose}}","State":"exited"}"""]));
                 return Task.FromResult(new HostUpdateProcessResult(0, output, string.Empty));
             }
 

@@ -515,7 +515,7 @@ internal sealed class DockerComposeApiAbsenceProbe(
             return null;
         }
 
-        Func<string, string?, bool>? tolerate = await BuildPriorReleaseToleranceAsync(request, mappings, cancellationToken).ConfigureAwait(false);
+        Func<string, string?, string?, bool>? tolerate = await BuildPriorReleaseToleranceAsync(request, mappings, cancellationToken).ConfigureAwait(false);
         Dictionary<string, List<string>> tolerated = new(StringComparer.Ordinal);
         string? error = await ObserveWritersAsync(mappings, tolerate, tolerated, cancellationToken).ConfigureAwait(false);
         if (error is null && priorContext is not null)
@@ -528,7 +528,7 @@ internal sealed class DockerComposeApiAbsenceProbe(
 
     /// <summary>
     /// Re-observes the writers after the fence closed admission: every running writer must be one
-    /// the absence probe tolerated, still on exactly the image it was tolerated on. Returns null
+    /// the absence probe tolerated, still the same container on exactly the image it was tolerated on. Returns null
     /// only when that is proven; a new, re-imaged or unobservable writer returns a reason.
     /// </summary>
     internal async Task<string?> RecheckToleratedWritersAsync(CancellationToken cancellationToken)
@@ -546,7 +546,11 @@ internal sealed class DockerComposeApiAbsenceProbe(
         IReadOnlyDictionary<string, string[]> known = priorContext?.ToleratedWriters ?? new Dictionary<string, string[]>();
         return await ObserveWritersAsync(
             mappings,
-            (serviceId, image) => image is not null && known.TryGetValue(serviceId, out string[]? images) && images.Contains(image, StringComparer.Ordinal),
+            (serviceId, image, containerId) =>
+                image is not null &&
+                containerId is not null &&
+                known.TryGetValue(serviceId, out string[]? identities) &&
+                identities.Contains(WriterIdentity(containerId, image), StringComparer.Ordinal),
             tolerated: null,
             cancellationToken).ConfigureAwait(false);
     }
@@ -576,7 +580,7 @@ internal sealed class DockerComposeApiAbsenceProbe(
     /// signed prior set verified offline, the installed host state binds to it exactly, and the
     /// container runs the installed preloaded pin. Installed state alone is never sufficient.
     /// </summary>
-    private async Task<Func<string, string?, bool>?> BuildPriorReleaseToleranceAsync(
+    private async Task<Func<string, string?, string?, bool>?> BuildPriorReleaseToleranceAsync(
         HostUpdateExecutionRequest request,
         Dictionary<string, HostUpdateServiceMappingOptions> mappings,
         CancellationToken cancellationToken)
@@ -601,8 +605,9 @@ internal sealed class DockerComposeApiAbsenceProbe(
             return null;
         }
 
-        return (serviceId, image) =>
+        return (serviceId, image, containerId) =>
             image is not null &&
+            containerId is not null &&
             mappings.TryGetValue(serviceId, out HostUpdateServiceMappingOptions? mapping) &&
             !string.IsNullOrWhiteSpace(mapping.ImageRepository) &&
             installed!.ServiceDigests.TryGetValue(serviceId, out string? digest) &&
@@ -611,7 +616,7 @@ internal sealed class DockerComposeApiAbsenceProbe(
 
     private async Task<string?> ObserveWritersAsync(
         Dictionary<string, HostUpdateServiceMappingOptions> mappings,
-        Func<string, string?, bool>? tolerate,
+        Func<string, string?, string?, bool>? tolerate,
         Dictionary<string, List<string>>? tolerated,
         CancellationToken cancellationToken)
     {
@@ -663,7 +668,7 @@ internal sealed class DockerComposeApiAbsenceProbe(
     internal static string? ValidateComposeState(
         string standardOutput,
         IReadOnlyDictionary<string, string> composeServicesByServiceId,
-        Func<string, string?, bool>? tolerate,
+        Func<string, string?, string?, bool>? tolerate,
         Dictionary<string, List<string>>? tolerated)
     {
         Dictionary<string, string> serviceIdsByComposeName = composeServicesByServiceId.ToDictionary(
@@ -719,7 +724,7 @@ internal sealed class DockerComposeApiAbsenceProbe(
     private static string? ValidateEntry(
         JsonElement entry,
         Dictionary<string, string> serviceIdsByComposeName,
-        Func<string, string?, bool>? tolerate,
+        Func<string, string?, string?, bool>? tolerate,
         Dictionary<string, List<string>>? tolerated)
     {
         if (entry.ValueKind != JsonValueKind.Object ||
@@ -739,18 +744,23 @@ internal sealed class DockerComposeApiAbsenceProbe(
             return null;
         }
 
-        string? image = TryGetString(entry, "Image", out string? observed) ? observed : null;
-        if (tolerate is not null && tolerate(serviceId, image))
+        // Only a steadily running container can be quiesced and re-identified; created,
+        // restarting or paused writers are never tolerated even on the prior release image.
+        string? image = TryGetString(entry, "Image", out string? observedImage) ? observedImage : null;
+        string? containerId = TryGetString(entry, "ID", out string? observedId) ? observedId : null;
+        if (tolerate is not null &&
+            string.Equals(state, "running", StringComparison.OrdinalIgnoreCase) &&
+            tolerate(serviceId, image, containerId))
         {
             if (tolerated is not null)
             {
-                if (!tolerated.TryGetValue(serviceId, out List<string>? images))
+                if (!tolerated.TryGetValue(serviceId, out List<string>? identities))
                 {
-                    images = [];
-                    tolerated[serviceId] = images;
+                    identities = [];
+                    tolerated[serviceId] = identities;
                 }
 
-                images.Add(image!);
+                identities.Add(WriterIdentity(containerId!, image!));
             }
 
             return null;
@@ -758,6 +768,8 @@ internal sealed class DockerComposeApiAbsenceProbe(
 
         return "writer_service_active:" + serviceId + ":" + state;
     }
+
+    private static string WriterIdentity(string containerId, string image) => containerId + " " + image;
 
     private static bool TryGetString(JsonElement entry, string propertyName, out string? value)
     {

@@ -539,7 +539,8 @@ recorded in the journal.
     the `state` (`ready_to_record`, `recorded`, `complete`, `after_rollback`,
     `not_required`, `operator_required`, `inventory_unavailable` or
     `record_unreadable`) and,
-    only when the rollback is already done and just the fence is pending, the
+    only when the rollback is already done, just the fence is pending and the
+    state is `ready_to_record`, the
     `reconciliationToken`. `replayPolicy` is always
     `recovery_never_replays_or_issues_printer_commands`.
 - `recover --confirm <release>` requires the release retyped exactly. It first
@@ -562,7 +563,8 @@ unreadable record also keeps the fence closed
 An empty inventory needs no record (#3126). When the CLI's single read-consistent
 inventory snapshot proves zero printers and zero uncertain outcomes, the
 coordinator releases the fence without a record, and preview reports
-`not_required`. A recorded reconciliation still takes precedence, an unreadable
+`not_required` with no `reconciliationToken`, so confirm takes no
+`--printers-reconciled`. A recorded reconciliation still takes precedence, an unreadable
 record still keeps the fence closed, and an inventory read failure keeps it
 pending. A provably never-migrated application schema is an empty inventory. The
 API recover path has no inventory reader and still requires a record.
