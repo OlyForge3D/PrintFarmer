@@ -51,7 +51,9 @@ function validRecord() {
       target: identity('v0.2.4', 4),
       prior: identity('v0.2.2', 2),
       bundleSha256: 'c'.repeat(64),
-      signingRoot: 'fixture',
+      signingRoot: 'fixture-ephemeral',
+      signingRootFingerprint: 'e'.repeat(64),
+      schemaDelta: 'identical',
     },
     tools: {
       cli: '0.2.4',
@@ -120,6 +122,7 @@ test('any outbound network attempt prevents a passing verdict', () => {
   record.networkDenial.attempts.push({
     at: '2026-09-26T10:07:00Z',
     destination: 'ghcr.io:443',
+    source: '172.30.1.20:49000',
     protocol: 'tcp',
   });
   hasError(validateRecoveryEvidence(record), 'outbound network attempts');
@@ -289,7 +292,40 @@ test('matrix cells must use the fixture signing root', () => {
   record.identities.signingRoot = 'published-insider';
   hasError(
     validateRecoveryEvidence(record),
-    'identities.signingRoot: matrix cells must use the fixture root',
+    'identities.signingRoot: matrix cells must use the fixture-ephemeral root',
+  );
+});
+
+test('legacy schema-1 fixture records remain valid without ephemeral root fields', () => {
+  const legacy = validRecord();
+  legacy.identities = {
+    source: identity('v0.2.3', 3),
+    target: identity('v0.2.4', 4),
+    prior: identity('v0.2.2', 2),
+    bundleSha256: 'c'.repeat(64),
+    signingRoot: 'fixture',
+  };
+  assert.deepEqual(validateRecoveryEvidence(legacy), []);
+});
+
+test('ephemeral fixture cells record the root fingerprint and prior schema delta', () => {
+  const noFingerprint = validRecord();
+  delete noFingerprint.identities.signingRootFingerprint;
+  hasError(validateRecoveryEvidence(noFingerprint), 'identities.signingRootFingerprint: missing field');
+  const badFingerprint = validRecord();
+  badFingerprint.identities.signingRootFingerprint = 'not-a-digest';
+  hasError(validateRecoveryEvidence(badFingerprint), 'identities.signingRootFingerprint');
+  const badDelta = validRecord();
+  badDelta.identities.schemaDelta = 'unknown';
+  hasError(validateRecoveryEvidence(badDelta), 'identities.schemaDelta: must be one of');
+});
+
+test('a cell root is never accepted as published-bundle verification evidence', () => {
+  const record = validRecord();
+  record.identities.signingRoot = 'published-insider';
+  hasError(
+    validateRecoveryEvidence(record),
+    'identities.signingRoot: matrix cells must use the fixture-ephemeral root',
   );
 });
 
@@ -306,7 +342,7 @@ test('the published-bundle verification record is read-only and insider-signed',
   }
 
   const fixtureRoot = validVerification();
-  fixtureRoot.identities.signingRoot = 'fixture';
+  fixtureRoot.identities.signingRoot = 'fixture-ephemeral';
   hasError(validatePublishedBundleVerification(fixtureRoot), 'identities.signingRoot');
 
   const stable = validVerification();
@@ -379,6 +415,28 @@ test('release identities are validated field by field for every role', () => {
   }
 });
 
+test('bundleSha256 may be null only for failed runs before target bundle assembly', () => {
+  const failedBeforeAssembly = validRecord();
+  failedBeforeAssembly.verdict = 'fail';
+  failedBeforeAssembly.identities.bundleSha256 = null;
+  failedBeforeAssembly.checkpoints = [
+    { name: 'trusted-root-created', at: '2026-09-26T10:01:00Z', result: 'ok' },
+    { name: 'e2e-complete', at: '2026-09-26T10:02:00Z', result: 'failed' },
+  ];
+  failedBeforeAssembly.outcome.actual = 'RecoveryRequired';
+  assert.deepEqual(validateRecoveryEvidence(failedBeforeAssembly), []);
+
+  const passed = validRecord();
+  passed.identities.bundleSha256 = null;
+  hasError(validateRecoveryEvidence(passed), 'bundleSha256: null is allowed only');
+
+  const failedAfterAssembly = validRecord();
+  failedAfterAssembly.verdict = 'fail';
+  failedAfterAssembly.identities.bundleSha256 = null;
+  failedAfterAssembly.checkpoints.push({ name: 'offline-bundle-assembled', at: '2026-09-26T10:03:00Z', result: 'ok' });
+  hasError(validateRecoveryEvidence(failedAfterAssembly), 'bundleSha256: null is allowed only');
+});
+
 test('URL userinfo is rejected with or without a password; safe URLs pass', () => {
   const record = validRecord();
   record.tools.cli = ['https://generic-secret', 'registry.local/v2'].join('@');
@@ -396,19 +454,20 @@ test('URL userinfo is rejected with or without a password; safe URLs pass', () =
   }
 });
 
-test('supported cells stop short of activation only after an injected fault', () => {
-  const noFault = validRecord();
-  noFault.checkpoints = [
+test('supported recovery cells may expect rollback without an injected fault', () => {
+  const rolledBack = validRecord();
+  rolledBack.checkpoints = [
     { name: 'backup-verified', at: '2026-09-26T10:05:00Z', result: 'ok' },
   ];
-  hasError(validateRecoveryEvidence(noFault), 'only after a successful fault-injected');
+  assert.deepEqual(validateRecoveryEvidence(rolledBack), []);
 
   const activated = validRecord();
-  activated.checkpoints = noFault.checkpoints;
+  activated.checkpoints = rolledBack.checkpoints;
   activated.outcome = { ...activated.outcome, expected: 'Activated', actual: 'Activated' };
   assert.deepEqual(validateRecoveryEvidence(activated), []);
 
   const operator = validRecord();
+  operator.checkpoints = rolledBack.checkpoints;
   operator.outcome = {
     expected: 'NeedsOperator',
     actual: 'NeedsOperator',
@@ -416,6 +475,12 @@ test('supported cells stop short of activation only after an injected fault', ()
     exitCode: 3,
     journalPhase: 'NeedsOperator',
   };
+  hasError(validateRecoveryEvidence(operator), 'only after a successful fault-injected');
+
+  operator.checkpoints = [
+    ...rolledBack.checkpoints,
+    { name: 'fault-injected', at: '2026-09-26T10:06:00Z', result: 'ok' },
+  ];
   assert.deepEqual(validateRecoveryEvidence(operator), []);
 
   const noReason = validRecord();
@@ -430,6 +495,7 @@ test('supported cells stop short of activation only after an injected fault', ()
   );
 
   const failedFault = validRecord();
+  failedFault.outcome = { ...operator.outcome };
   failedFault.checkpoints[1].result = 'failed';
   failedFault.verdict = 'fail';
   hasError(validateRecoveryEvidence(failedFault), 'only after a successful fault-injected');

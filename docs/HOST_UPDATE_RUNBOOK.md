@@ -371,6 +371,14 @@ bundle unchanged. Verify the bundle on a connected host before transfer (or
 with Cosign's offline trusted-root options), and always re-check the archive
 SHA-256 against the list on the target host before extracting. The installer
 accepts the same three files unchanged through `--asset-dir` / `-AssetDir`.
+To verify the bundle on the disconnected host itself, pass an operator-supplied
+Sigstore trusted root with `--trusted-root <abs-file>` / `-TrustedRoot <abs-file>`
+(#3099): cosign then verifies offline against that root instead of fetching the
+public-good root. The option must name an absolute path to a regular, readable,
+non-empty file; anything else is refused before verification and nothing is
+placed. It is explicit only: it is never read from the environment or
+configuration and never defaulted, and without it verification is unchanged.
+Obtain the trusted root from a connected host and transfer it with the bundle.
 `scripts/ci/offline-update-bundle.mjs` packages and verifies these signed
 release bytes for transfer; see the
 [verified release-metadata bundle](OFFLINE_UPDATE_RECOVERY.md#verified-release-metadata-bundle-first-slice).
