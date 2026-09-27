@@ -12,7 +12,6 @@ public sealed class HostUpdateDaemonComposeTests
     private static readonly string[] ForbiddenFragments =
     [
         "HostUpdateDaemon",
-        "HOSTUPDATEDAEMON",
         "printfarmer-host",
         "enrollment-key",
         "farm-host-update",

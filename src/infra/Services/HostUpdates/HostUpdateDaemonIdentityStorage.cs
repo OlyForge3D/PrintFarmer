@@ -108,6 +108,12 @@ public static class HostUpdateDaemonIdentityStorage
                 return Invalid("identity_reparse_rejected");
             }
 
+            // A FIFO or device node would block or misbehave on open; only a regular file is acceptable.
+            if (OperatingSystem.IsLinux() && !HostStateFileSecurity.NativeMethods.IsLinuxRegularFile(key))
+            {
+                return Invalid("identity_key_not_regular_file");
+            }
+
             if (OperatingSystem.IsLinux() &&
                 (File.GetUnixFileMode(key) & ~(UnixFileMode.UserRead | UnixFileMode.UserWrite)) != 0)
             {

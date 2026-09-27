@@ -784,11 +784,18 @@ Each cycle the daemon:
    `0700`, owned by the daemon user, and hold `enrollment-key.pem` as a `0600`
    regular file with no symlink component. Linux is the only qualified
    platform; others fail closed with `identity_storage_platform_unsupported`.
-   The key bytes are never read or logged.
-3. Reads the existing journal without writing it, and backs off when the
-   execution lock is held by a manual run.
+   The key bytes are never read or logged. Configured storage that fails any
+   check (`Invalid`) fails the cycle; the daemon never falls back to running
+   unenrolled over an unsafe key.
+3. Reads the existing journal without writing it. If a manual run holds the
+   execution lock, the cycle reports `execution_lock_held` and waits for the
+   next normal poll; it never waits on or rewrites the lock.
 4. Publishes one redacted status line: lifecycle, fixed codes, counts and
    timestamps only, never paths, keys, tokens or journal payloads.
+
+With `--json`, output is newline-delimited status objects (one per line), not
+the single `{exitCode,result}` envelope other commands print; the process exit
+code is the outcome. Only configuration failures (exit `3`) use the envelope.
 
 ```bash
 # One cycle, machine-readable status lines

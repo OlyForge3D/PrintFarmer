@@ -51,6 +51,19 @@ public sealed class HostUpdateCliDaemonTests : IDisposable
         run.Output.Should().Contain("gate=" + DisabledHostUpdateDaemonExecutionGate.DisabledCode);
     }
 
+    [Fact]
+    public async Task Once_with_unsafe_identity_storage_fails_the_cycle()
+    {
+        string inside = Path.Combine(_host.Root, "identity");
+
+        CliRun run = await RunAsync(["daemon", "--once", "--json"], _host.Configuration(v => v["HostUpdateDaemon:IdentityDirectory"] = inside));
+
+        run.ExitCode.Should().Be(HostUpdateCliExitCodes.StateUnreadable);
+        Lines(run).Should().Contain(line =>
+            line.GetProperty("code").GetString() == "daemon_cycle_failed" &&
+            line.GetProperty("identityStorageCode").GetString() == "identity_inside_executor_root");
+    }
+
     [Theory]
     [InlineData("HostUpdateDaemon:Enabled", "true", "daemon_setting_unknown:Enabled")]
     [InlineData("HostUpdateDaemon:PollIntervalSeconds", "5", "daemon_poll_interval_out_of_range")]

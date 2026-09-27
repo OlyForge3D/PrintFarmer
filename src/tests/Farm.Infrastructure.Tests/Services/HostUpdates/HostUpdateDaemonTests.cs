@@ -224,6 +224,51 @@ public sealed class HostUpdateDaemonTests : IDisposable
     }
 
     [Fact]
+    public async Task InvalidIdentityStorage_FailsTheCycle_AndBacksOff()
+    {
+        var sink = new ListSink();
+        var options = new HostUpdateDaemonOptions { IdentityDirectory = Path.Combine(root.FullName, "identity") };
+
+        await Daemon(sink, options: options).RunAsync(once: true, CancellationToken.None);
+
+        HostUpdateDaemonStatus running = sink.Statuses.Single(s => s.Lifecycle == HostUpdateDaemonLifecycle.Running);
+        running.IdentityStorage.Should().Be(HostUpdateDaemonIdentityStorageState.Invalid);
+        running.IdentityStorageCode.Should().Be("identity_inside_executor_root");
+        running.Code.Should().Be("daemon_cycle_failed");
+        running.ConsecutiveFailures.Should().Be(1);
+        running.Enrolled.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ReleaseWithEmptyHistory_FailsTheCycleWithAFixedCode()
+    {
+        var journal = new Mock<IHostUpdateExecutionJournal>();
+        journal.Setup(j => j.ListReleaseIds()).Returns([ReleaseId]);
+        journal.Setup(j => j.Read(ReleaseId)).Returns([]);
+        var executionLock = new FileHostUpdateExecutionLock(Path.Combine(StateDirectory, FileHostUpdateExecutionLock.FileName));
+        var sink = new ListSink();
+
+        await Daemon(sink, new HostUpdateDaemonJournalReader(StateDirectory, executionLock, journal.Object)).RunAsync(once: true, CancellationToken.None);
+
+        HostUpdateDaemonStatus running = sink.Statuses.Single(s => s.Lifecycle == HostUpdateDaemonLifecycle.Running);
+        running.JournalCode.Should().Be("journal_release_history_empty");
+        running.Code.Should().Be("daemon_cycle_failed");
+    }
+
+    [Fact]
+    public async Task UnavailableSubsystem_ReportsTheSameStateCodeAsTheCli()
+    {
+        var journal = new Mock<IHostUpdateExecutionJournal>();
+        journal.Setup(j => j.ListReleaseIds()).Throws(new HostUpdateSubsystemUnavailableException("host_update_unavailable", null));
+        var executionLock = new FileHostUpdateExecutionLock(Path.Combine(StateDirectory, FileHostUpdateExecutionLock.FileName));
+        var sink = new ListSink();
+
+        await Daemon(sink, new HostUpdateDaemonJournalReader(StateDirectory, executionLock, journal.Object)).RunAsync(once: true, CancellationToken.None);
+
+        sink.Statuses.Single(s => s.Lifecycle == HostUpdateDaemonLifecycle.Running).JournalCode.Should().Be("state_unavailable");
+    }
+
+    [Fact]
     public void NextDelay_BacksOffExponentially_WithinTheCeiling()
     {
         var options = new HostUpdateDaemonOptions { PollIntervalSeconds = 60, MaxBackoffSeconds = 900 };

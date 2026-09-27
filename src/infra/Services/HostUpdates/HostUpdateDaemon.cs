@@ -88,7 +88,13 @@ public sealed partial class HostUpdateDaemonJournalReader(string stateDirectory,
                 IReadOnlyList<string> releases = journal.ListReleaseIds();
                 foreach (string releaseId in releases)
                 {
-                    HostUpdateExecutionState last = journal.Read(releaseId)[^1].State;
+                    IReadOnlyList<HostUpdateExecutionActivity> history = journal.Read(releaseId);
+                    if (history.Count == 0)
+                    {
+                        throw new InvalidDataException("journal_release_history_empty");
+                    }
+
+                    HostUpdateExecutionState last = history[^1].State;
                     if (last == HostUpdateExecutionState.RecoveryRequired)
                     {
                         recoveryRequired++;
@@ -119,6 +125,7 @@ public sealed partial class HostUpdateDaemonJournalReader(string stateDirectory,
         {
             InvalidDataException data when data.Message is { } message && JournalCode().IsMatch(message) => message,
             UnauthorizedAccessException => "state_access_denied",
+            HostUpdateSubsystemUnavailableException => "state_unavailable",
             _ => "state_unreadable:" + exception.GetType().Name,
         };
         return new(code, true, null, null, null);
@@ -195,9 +202,12 @@ public sealed class HostUpdateDaemon(
                 {
                     identity = HostUpdateDaemonIdentityStorage.Inspect(options.IdentityDirectory, executorRootDirectory);
                     HostUpdateDaemonJournalSnapshot journal = journalReader.Read();
-                    consecutiveFailures = journal.Failed ? consecutiveFailures + 1 : 0;
+
+                    // Configured-but-unsafe identity storage is a failed cycle, not an unenrolled fallback.
+                    bool failed = journal.Failed || identity.State == HostUpdateDaemonIdentityStorageState.Invalid;
+                    consecutiveFailures = failed ? consecutiveFailures + 1 : 0;
                     TimeSpan delay = NextDelay();
-                    Publish(Snapshot(HostUpdateDaemonLifecycle.Running, journal.Failed ? "daemon_cycle_failed" : "daemon_cycle_completed", identity, journal, once ? null : delay));
+                    Publish(Snapshot(HostUpdateDaemonLifecycle.Running, failed ? "daemon_cycle_failed" : "daemon_cycle_completed", identity, journal, once ? null : delay));
                     if (once)
                     {
                         break;

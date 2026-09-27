@@ -199,6 +199,21 @@ public sealed class HostUpdateDaemonIdentityStorageTests : IDisposable
     }
 
     [LinuxOnlyFact]
+    public void Linux_FifoKey_IsRejectedWithoutBlocking()
+    {
+        CreateIdentity(writeKey: false);
+        using (var mkfifo = System.Diagnostics.Process.Start("mkfifo", ["-m", "600", KeyPath]))
+        {
+            mkfifo.WaitForExit();
+            mkfifo.ExitCode.Should().Be(0);
+        }
+
+        var status = HostUpdateDaemonIdentityStorage.Inspect(IdentityDirectory, ExecutorRoot);
+
+        status.Code.Should().Be("identity_key_not_regular_file");
+    }
+
+    [LinuxOnlyFact]
     public void Linux_SymlinkedDirectory_IsRejected()
     {
         string target = Path.Combine(root.FullName, "real-identity");
@@ -230,30 +245,6 @@ public sealed class HostUpdateDaemonIdentityStorageTests : IDisposable
         if (!OperatingSystem.IsWindows())
         {
             File.SetUnixFileMode(KeyPath, OwnerOnlyFile);
-        }
-    }
-}
-
-[AttributeUsage(AttributeTargets.Method, AllowMultiple = false)]
-public sealed class LinuxOnlyFactAttribute : FactAttribute
-{
-    public LinuxOnlyFactAttribute()
-    {
-        if (!OperatingSystem.IsLinux())
-        {
-            Skip = "Linux-only: host identity storage is qualified on Linux only; other platforms fail closed (identity_storage_platform_unsupported).";
-        }
-    }
-}
-
-[AttributeUsage(AttributeTargets.Method, AllowMultiple = false)]
-public sealed class LinuxOnlyTheoryAttribute : TheoryAttribute
-{
-    public LinuxOnlyTheoryAttribute()
-    {
-        if (!OperatingSystem.IsLinux())
-        {
-            Skip = "Linux-only: host identity storage is qualified on Linux only; other platforms fail closed (identity_storage_platform_unsupported).";
         }
     }
 }

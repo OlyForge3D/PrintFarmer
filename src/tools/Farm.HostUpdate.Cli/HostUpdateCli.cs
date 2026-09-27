@@ -31,6 +31,7 @@ public static partial class HostUpdateCli
           printfarmer-host-update offline-activate --staging <absolute-verified-staging-dir> --channel <stable|insider> --trusted-root <absolute-trusted_root.json> [--cosign <absolute-path>] [--json]
           printfarmer-host-update offline-recover --staging <absolute-verified-staging-dir> --channel <stable|insider> --trusted-root <absolute-trusted_root.json> [--cosign <absolute-path>] --protected-backup <absolute-reference.json> --release <releaseId> [--request-id <requestId>] (--preview | --confirm <releaseId> [--reapprove-drift <token>] [--printers-reconciled <token>]) [--json]
           printfarmer-host-update daemon [--once] [--json]
+
         Configuration comes from --config <absolute-json-path> and environment variables
         (HostUpdateExecution__*, HostUpdates__HostState__*, DB_PROVIDER, ConnectionStrings__Default).
         Credentials are never accepted as arguments. This tool is not rollout authorization.
