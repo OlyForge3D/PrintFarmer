@@ -65,7 +65,35 @@ validated fail-closed by `ConfiguredHostUpdateExecutableResolver`. The executor 
   rather than extending it. An explicitly empty list fails validation. `SupportedProviderNames`
   and the required health/writer lists stay additive (see the
   [runbook's CLI limits](HOST_UPDATE_RUNBOOK.md#host-local-status-and-recovery-cli)).
-  `HealthCheckBaseUrl` is used for readiness probes.
+  `HealthCheckBaseUrl` is used for the API host's readiness probes. The host-local CLI does not
+  use it; see the [offline contract](#host-local-cli-offline-fence-and-health-contract-3127).
+
+## Host-local CLI offline fence and health contract (#3127)
+
+The API process fences its background writers through in-memory flags and probes `/health`
+over `HealthCheckBaseUrl`. The host-local CLI (`src/tools/Farm.HostUpdate.Cli/`) is a separate
+process: it cannot acknowledge those flags, and on an internal-only compose network the host
+cannot reach the API's HTTP address. The CLI therefore replaces both registrations
+(`HostUpdateCliOfflineContract.cs`) with equivalent proofs; no gate is skipped or relaxed.
+
+- **Fence** (`HostUpdateCliWriterStoppedFenceCoordinator`). `api-admission` is proven by the
+  durable admission gate. Every other *registered* background writer is proven, on each poll,
+  only when the admission gate is closed, the configured topology contains a writer host
+  (`api` or `monolith`), and the offline writer-absence probe observes every active writer host
+  (`api`, `slicer-host`, `monolith`) stopped through `docker compose ps -a`. A writer that is not
+  running cannot hold a background writer loop, so its stopped container is the acknowledgement.
+  A name in `RequiredFencedWriterNames` with no registration is never provable. The proof uses
+  the normal `FenceProofTimeoutSeconds`/`FencePollIntervalSeconds`; on timeout it throws
+  `HostUpdateFenceProofFailedException` naming the unproven writers and leaves the gate closed.
+  `ReleaseAsync` reopens the gate only after verification, exactly as in the API.
+- **Health** (`ComposeExecAggregateHealthCheck`, name `api-comprehensive-health`). The CLI runs
+  `docker compose -f … -p <project> exec -T <service> curl --silent --show-error --noproxy *
+  --max-time <N> http://127.0.0.1:<port>/health` inside the target container: `monolith`
+  (port 5000) when active, otherwise `api` (port 5245). `<N>` is `ProcessDefaultTimeoutSeconds`.
+  The body is evaluated by the same `HostUpdateAggregateHealthReport` rule the API uses: overall
+  `Healthy` and every `RequiredAggregateHealthResultNames` entry present and `Healthy`. A
+  missing service mapping, non-zero exit, timeout, process-runner refusal or unparseable body
+  fails verification. Per-service digest verification is unchanged.
 
 ## Concrete adapters (`src/infra/Services/HostUpdates/`)
 

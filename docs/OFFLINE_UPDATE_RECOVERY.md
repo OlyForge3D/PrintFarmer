@@ -566,9 +566,13 @@ for the current preloaded activation request; registry-mode, legacy-unbound, or
 otherwise mismatched journals are refused and left unchanged. Both paths
 additionally require the installed state to already match the signed target, and
 neither reruns migration or apply steps. With writers stopped, there are no live
-API/slicer/monolith in-memory writer flags to prove, while the durable admission
-gate, database active-work checks, backups, migrations, health gates and
-installed-state records remain the single engine source of truth. Failures before
+API/slicer/monolith in-memory writer flags to acknowledge, so the CLI proves each
+required background writer by the closed durable admission gate plus the writer
+hosts observed stopped on every fence poll, and verifies `/health` from inside
+the compose network (see the
+[offline fence and health contract](HOST_UPDATE_EXECUTOR.md#host-local-cli-offline-fence-and-health-contract-3127)).
+The durable admission gate, database active-work checks, backups, migrations,
+health gates and installed-state records remain the single engine source of truth. Failures before
 verification preserve the prior installed state and leave recovery to the
 existing journal/recovery workflow; once the installed state has changed, the CLI
 reports the completed activation state rather than a refused activation.
@@ -915,8 +919,9 @@ throwaway `.env`, signs fixture releases with the per-run fixture root, installs
 the CLI with the packaged trusted root inside the denied host container, and
 writes schema-validated evidence. It gives the monolith container (not the
 database) a deterministic address on the Docker `--internal` bridge and sets
-the product `HealthCheckBaseUrl` to that address, so the product's own
-`/health` verifier stays enabled while the host cannot egress. After the
+the product `HealthCheckBaseUrl` to that address for the API host. The CLI's own
+`/health` verifier stays enabled while the host cannot egress because it probes
+from inside the compose network (#3127) rather than over that address. After the
 product verification step, the harness separately records the discovered
 `/health` entries and fails the cell if no queue/dispatch/outbox consumer entry
 is exposed. On a product build that still has the #3122 offline-recovery

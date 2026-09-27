@@ -345,3 +345,30 @@ public sealed class HostUpdateHealthVerifierTests
         }
     }
 }
+
+/// <summary>
+/// Transport-independent aggregate readiness rule shared by the API's HTTP check and the offline
+/// CLI's in-network check (issue #3127).
+/// </summary>
+public sealed class HostUpdateAggregateHealthReportTests
+{
+    private static readonly IReadOnlySet<string> Required = new HashSet<string>(StringComparer.Ordinal) { "comprehensive", "signalr" };
+
+    [Theory]
+    [InlineData("""{"status":"Healthy","results":{"comprehensive":{"status":"Healthy"},"signalr":{"status":"Healthy"}}}""", true)]
+    [InlineData("""{"status":"Degraded","results":{"comprehensive":{"status":"Healthy"},"signalr":{"status":"Healthy"}}}""", false)]
+    [InlineData("""{"status":"Healthy","results":{"comprehensive":{"status":"Healthy"}}}""", false)]
+    [InlineData("""{"status":"Healthy","results":{"comprehensive":{"status":"Degraded"},"signalr":{"status":"Healthy"}}}""", false)]
+    [InlineData("""{"status":"Healthy","results":[]}""", false)]
+    [InlineData("""{"status":"Healthy","results":{"comprehensive":"Healthy","signalr":{"status":"Healthy"}}}""", false)]
+    [InlineData("""{"status":1,"results":{"comprehensive":{"status":"Healthy"},"signalr":{"status":"Healthy"}}}""", false)]
+    [InlineData("""["Healthy"]""", false)]
+    [InlineData("curl: (7) Failed to connect to 127.0.0.1 port 5245", false)]
+    [InlineData("", false)]
+    public void IsHealthy_RequiresHealthyTopLevelAndEveryRequiredResult(string body, bool expected) =>
+        HostUpdateAggregateHealthReport.IsHealthy(body, Required).Should().Be(expected);
+
+    [Fact]
+    public void IsHealthy_NullBody_IsUnhealthy() =>
+        HostUpdateAggregateHealthReport.IsHealthy(null, Required).Should().BeFalse();
+}

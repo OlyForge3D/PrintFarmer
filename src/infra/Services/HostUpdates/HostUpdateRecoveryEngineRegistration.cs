@@ -15,6 +15,9 @@ public static class HostUpdateRecoveryEngineRegistration
 {
     public const string HealthClientName = "HostUpdateHealth";
 
+    /// <summary>Stable name of the aggregate <c>/health</c> readiness check, whatever its transport.</summary>
+    public const string AggregateHealthCheckName = "api-comprehensive-health";
+
     public static IServiceCollection AddHostUpdateRecoveryEngine(this IServiceCollection services, IConfiguration configuration)
     {
         ArgumentNullException.ThrowIfNull(configuration);
@@ -140,6 +143,15 @@ public static class HostUpdateRecoveryEngineRegistration
         services.AddSingleton<IHostUpdateDigestApplier>(sp => (IHostUpdateDigestApplier)sp.GetRequiredService<IHostUpdateApplyCoordinator>());
         services.AddSingleton<IHostUpdateLocalImageVerifier>(sp => (IHostUpdateLocalImageVerifier)sp.GetRequiredService<IHostUpdateApplyCoordinator>());
 
+        services.AddTransient<IHostUpdateAggregateHealthCheck>(sp =>
+        {
+            HostUpdateExecutionOptions options = sp.GetRequiredService<HostUpdateExecutionOptions>();
+            return new AggregateHostUpdateHealthCheck(
+                AggregateHealthCheckName,
+                sp.GetRequiredService<IHttpClientFactory>().CreateClient(HealthClientName),
+                "/health",
+                options.RequiredAggregateHealthResultNames.ToHashSet(StringComparer.Ordinal));
+        });
         services.AddScoped<IHostUpdateHealthVerifier>(sp => CreateHealthVerifier(sp));
         services.AddScoped<IHostUpdateDigestVerifier>(sp => (IHostUpdateDigestVerifier)sp.GetRequiredService<IHostUpdateHealthVerifier>());
     }
@@ -207,17 +219,12 @@ public static class HostUpdateRecoveryEngineRegistration
     private static HostUpdateHealthVerifier CreateHealthVerifier(IServiceProvider sp)
     {
         HostUpdateExecutionOptions options = sp.GetRequiredService<HostUpdateExecutionOptions>();
-        IHttpClientFactory httpClientFactory = sp.GetRequiredService<IHttpClientFactory>();
         IHostUpdateProcessRunner processRunner = sp.GetRequiredService<IHostUpdateProcessRunner>();
 
-        List<IHostUpdateHealthCheck> staticChecks =
-        [
-            new AggregateHostUpdateHealthCheck(
-                "api-comprehensive-health",
-                httpClientFactory.CreateClient(HealthClientName),
-                "/health",
-                options.RequiredAggregateHealthResultNames.ToHashSet(StringComparer.Ordinal)),
-        ];
+        // The aggregate transport is a registration seam: the API host reaches /health over HTTP,
+        // while the offline CLI substitutes an in-network transport (issue #3127). Both apply the
+        // same HostUpdateAggregateHealthReport parser, so neither can weaken the readiness rule.
+        List<IHostUpdateHealthCheck> staticChecks = [sp.GetRequiredService<IHostUpdateAggregateHealthCheck>()];
 
         return new HostUpdateHealthVerifier(
             staticChecks,

@@ -397,8 +397,8 @@ public sealed partial class HostUpdateCliOfflineActivateTests
     {
         await ImportAsync();
         await WritePriorInstalledStateAsync();
-        var runner = new IntegratedActivationProcessRunner(healthSucceeds: true);
-        var http = new RecordingHealthHttpClientFactory(_host.Configuration()["HostUpdateExecution:HealthCheckBaseUrl"] ?? "http://localhost:5245", succeeds: false);
+        var runner = new IntegratedActivationProcessRunner(healthSucceeds: true, aggregateHealthy: false);
+        var http = new RecordingHealthHttpClientFactory(_host.Configuration()["HostUpdateExecution:HealthCheckBaseUrl"] ?? "http://localhost:5245", succeeds: true);
         JsonElement refused = Envelope(await RunAsync(Activate(), IntegratedConfiguration(), services =>
             UseIntegratedBoundaries(services, runner, http)));
         refused.GetProperty("result").GetProperty("state").GetString().Should().Be(nameof(HostUpdateExecutionState.RecoveryRequired), refused.ToString());

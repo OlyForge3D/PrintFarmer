@@ -159,6 +159,18 @@ public class HostUpdateExecutionOptionsDefaultsTests
         options.ServiceMappings.Should().ContainSingle().Which.ServiceId.Should().Be("monolith");
     }
 
+    [Fact]
+    public void SharedRegistration_ResolvesTheHttpAggregateHealthTransport()
+    {
+        // The API host reaches /health over HTTP; only the offline CLI replaces this seam (issue #3127).
+        using ServiceProvider provider = BuildRegistrationProvider([]);
+
+        IHostUpdateAggregateHealthCheck check = provider.GetRequiredService<IHostUpdateAggregateHealthCheck>();
+
+        check.Should().BeOfType<AggregateHostUpdateHealthCheck>();
+        check.Name.Should().Be(HostUpdateRecoveryEngineRegistration.AggregateHealthCheckName);
+    }
+
     private static ServiceProvider BuildRegistrationProvider(Dictionary<string, string?> values)
     {
         IConfiguration configuration = new ConfigurationBuilder().AddInMemoryCollection(values).Build();

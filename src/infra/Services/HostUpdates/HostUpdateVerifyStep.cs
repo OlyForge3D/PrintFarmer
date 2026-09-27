@@ -52,7 +52,7 @@ public sealed class HttpHostUpdateHealthCheck(string name, HttpClient client, st
 /// response that always returns 200 unconditionally and can never detect a broken
 /// database/queue/storage/worker subsystem.
 /// </summary>
-public sealed class AggregateHostUpdateHealthCheck(string name, HttpClient client, string relativeUrl, IReadOnlySet<string>? requiredResultNames = null) : IHostUpdateHealthCheck
+public sealed class AggregateHostUpdateHealthCheck(string name, HttpClient client, string relativeUrl, IReadOnlySet<string>? requiredResultNames = null) : IHostUpdateAggregateHealthCheck
 {
     public string Name { get; } = name;
 
@@ -62,6 +62,41 @@ public sealed class AggregateHostUpdateHealthCheck(string name, HttpClient clien
         {
             using HttpResponseMessage response = await client.GetAsync(relativeUrl, cancellationToken).ConfigureAwait(false);
             string body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            return HostUpdateAggregateHealthReport.IsHealthy(body, requiredResultNames);
+        }
+        catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException)
+        {
+            return false;
+        }
+    }
+}
+
+/// <summary>
+/// The aggregate <c>/health</c> readiness signal consulted by the verify step. The API host reaches it
+/// over HTTP (<see cref="AggregateHostUpdateHealthCheck"/>); the offline CLI replaces it with a
+/// transport that runs inside the compose network, because the host running the CLI cannot reach
+/// the internal-only API port (issue #3127). Every transport must apply
+/// <see cref="HostUpdateAggregateHealthReport.IsHealthy"/> to the response body.
+/// </summary>
+public interface IHostUpdateAggregateHealthCheck : IHostUpdateHealthCheck;
+
+/// <summary>Transport-independent parser for the API's aggregate <c>/health</c> JSON report.</summary>
+public static class HostUpdateAggregateHealthReport
+{
+    /// <summary>
+    /// Returns <see langword="true"/> only when the top-level report status is exactly <c>Healthy</c>
+    /// (never merely a 200 response -- ASP.NET Core also returns 200 for <c>Degraded</c>) and every
+    /// required result entry is present and <c>Healthy</c>. Malformed or empty bodies are unhealthy.
+    /// </summary>
+    public static bool IsHealthy(string? body, IReadOnlySet<string>? requiredResultNames)
+    {
+        if (string.IsNullOrWhiteSpace(body))
+        {
+            return false;
+        }
+
+        try
+        {
             using JsonDocument document = JsonDocument.Parse(body);
 
             // Bishop/Hicks review (issue #2663): the real /health response is serialized with
@@ -70,24 +105,27 @@ public sealed class AggregateHostUpdateHealthCheck(string name, HttpClient clien
             // ordinal/case-sensitive, so looking up the PascalCase name here always missed --
             // this health check silently reported unhealthy for every real response, which was
             // caught only by feeding it an actual serialized fixture instead of a hand-built one.
-            return TryGetStatusProperty(document.RootElement, out JsonElement statusElement) &&
+            return document.RootElement.ValueKind == JsonValueKind.Object &&
+                TryGetStatusProperty(document.RootElement, out JsonElement statusElement) &&
+                statusElement.ValueKind == JsonValueKind.String &&
                 string.Equals(statusElement.GetString(), "Healthy", StringComparison.OrdinalIgnoreCase) &&
-                RequiredResultsAreHealthy(document.RootElement);
+                RequiredResultsAreHealthy(document.RootElement, requiredResultNames);
         }
-        catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or JsonException)
+        catch (JsonException)
         {
             return false;
         }
     }
 
-    private bool RequiredResultsAreHealthy(JsonElement root)
+    private static bool RequiredResultsAreHealthy(JsonElement root, IReadOnlySet<string>? requiredResultNames)
     {
         if (requiredResultNames is null || requiredResultNames.Count == 0)
         {
             return true;
         }
 
-        if (!root.TryGetProperty("results", out JsonElement results) && !root.TryGetProperty("Results", out results))
+        if ((!root.TryGetProperty("results", out JsonElement results) && !root.TryGetProperty("Results", out results)) ||
+            results.ValueKind != JsonValueKind.Object)
         {
             return false;
         }
@@ -95,7 +133,9 @@ public sealed class AggregateHostUpdateHealthCheck(string name, HttpClient clien
         foreach (string resultName in requiredResultNames)
         {
             if (!results.TryGetProperty(resultName, out JsonElement result) ||
+                result.ValueKind != JsonValueKind.Object ||
                 !TryGetStatusProperty(result, out JsonElement resultStatus) ||
+                resultStatus.ValueKind != JsonValueKind.String ||
                 !string.Equals(resultStatus.GetString(), "Healthy", StringComparison.OrdinalIgnoreCase))
             {
                 return false;
