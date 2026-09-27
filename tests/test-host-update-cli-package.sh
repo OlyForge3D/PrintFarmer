@@ -121,7 +121,11 @@ if [[ -d /run/systemd/system ]] && sudo -n true >/dev/null 2>&1 && [[ ! -e "/etc
     unit_inactive() { ! systemctl is-active --quiet "$LIFE_UNIT"; }
     unit_show() { systemctl show -p "$1" --value "$LIFE_UNIT"; }
     restarted_from() { unit_active && [[ "$(unit_show MainPID)" != "$1" && "$(unit_show MainPID)" != 0 ]]; }
-    installer() { sudo -n bash "$REPO_ROOT/scripts/install-host-update-cli.sh" "$@" >"$TEST_ROOT/service.log" 2>&1; }
+    installer() {
+        sudo -n bash "$REPO_ROOT/scripts/install-host-update-cli.sh" "$@" >"$TEST_ROOT/service.log" 2>&1 && return 0
+        cat "$TEST_ROOT/service.log" >&2
+        return 1
+    }
 
     # The unit's CLI must be root-owned, as a real install is; the state root is owned by the
     # service account and lives outside the OS temp directory.
