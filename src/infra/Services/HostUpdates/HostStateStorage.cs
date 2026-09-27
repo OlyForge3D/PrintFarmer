@@ -132,6 +132,38 @@ public static class HostUpdateInstallationIdentity
         }
     }
 
+    /// <summary>
+    /// Strict read for enrollment and approval binding (#3113, #3115). Unlike <see cref="GetOrCreate"/>
+    /// it never creates the file and never returns a transient fallback: a missing, unreadable,
+    /// reparse-point or non-canonical identity yields <c>null</c>, which callers must treat as blocking.
+    /// </summary>
+    public static string? ReadExistingStrict(HostStatePath hostState)
+    {
+        ArgumentNullException.ThrowIfNull(hostState);
+        try
+        {
+            string path = hostState.Resolve(FileName);
+            lock (Gate)
+            {
+                HostStateFileSecurity.RejectReparseTarget(path);
+                if (!File.Exists(path))
+                {
+                    return null;
+                }
+
+                string identity = File.ReadAllText(path).Trim();
+                return IsCanonical(identity) ? identity : null;
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SecurityException or InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
+    private static bool IsCanonical(string identity) =>
+        identity.Length == 32 && identity.All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f');
+
     private static string CreateIdentity() =>
         Convert.ToHexString(RandomNumberGenerator.GetBytes(16)).ToLowerInvariant();
 }
