@@ -38,7 +38,7 @@ container replacement. Current manual installation remains operator-owned.
 | Required recorded decision | Owner / status |
 | --- | --- |
 | Accept socket removal and network-only observation threat model | Repository maintainer; pending explicit issue comment |
-| Accept host-compromise and authorized-signer residual risks | Repository maintainer; pending explicit issue comment |
+| Accept host-compromise and authorized-signer residual risks | Repository owner; accepted in #3124 |
 | Approve initial OS/topology, limits, trust bootstrap/rotation and recovery contract below | Host operator and repository maintainer; proposed, not approved |
 | Name publication ruleset, environment, allocator and bypass owners | #2668 maintainer decision; pending, never inferred from branch ownership |
 | Approve signing identity and offline verification implementation | #2660 plus security reviewer; pending |

@@ -1572,7 +1572,8 @@ does not create issues or mutate graph relationships.
 7. Migration serialization/startup coordination and schema compatibility policy;
    any image-only rollback exception needs explicit proof, not assumption.
 8. Discovery socket replacement and privileged-helper containment before
-   automation; authorized-signer and host-compromise residual risk acceptance.
+   automation. The authorized-signer and host-compromise risks are accepted
+   (#3124); socket replacement and helper containment remain open.
 9. Issue reuse, approved epic scope and first wave. No issue creation,
    deployment, implementation, commit, or push is authorized by this document.
 10. Channel-switch permission/enrollment mechanics, confirmation and audit
