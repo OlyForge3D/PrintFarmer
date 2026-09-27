@@ -135,6 +135,8 @@ if [[ -d /run/systemd/system ]] && sudo -n true >/dev/null 2>&1 && [[ ! -e "/etc
     sudo -n cp -a "$INSTALL" "$LIFE_CLI"
     sudo -n chown -R root:root "$LIFE_CLI_ROOT"
     sudo -n chmod -R go-w "$LIFE_CLI_ROOT"
+    # As the install command does: the archive's root entry does not decide the directory mode.
+    sudo -n chmod 0755 "$LIFE_CLI_ROOT" "$LIFE_CLI"
     LIFE_ROOT="$(mktemp -d "$HOME/pf-lifecycle-XXXXXX")"
     chmod 0755 "$LIFE_ROOT"
     mkdir -p "$LIFE_ROOT/root/state"
