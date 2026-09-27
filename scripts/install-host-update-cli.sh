@@ -434,6 +434,8 @@ StartLimitBurst=5
 Type=exec
 User=$user
 Group=$group
+# The CLI refuses a RootDirectory under its working directory, and systemd's default is /.
+WorkingDirectory=${launcher%/*}
 ExecStart=$launcher --config $config daemon
 Restart=on-failure
 RestartSec=30

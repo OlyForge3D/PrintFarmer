@@ -353,6 +353,8 @@ STUB
         "! grep -qE '^(enable|start)' '$SYSTEMCTL_LOG' && grep -qx 'daemon-reload' '$SYSTEMCTL_LOG'"
     check "the unit runs the daemon from the installed CLI with the config" \
         "grep -qx 'ExecStart=$SVC_CLI/cli/Farm.HostUpdate.Cli --config $SVC_CONFIG daemon' '$UNIT'"
+    check "the unit runs from the CLI directory, not /, so the state root is not under its working directory" \
+        "grep -qx 'WorkingDirectory=$SVC_CLI/cli' '$UNIT'"
     check "the unit carries no environment or credential" "! grep -qiE '^(Environment|EnvironmentFile|LoadCredential|SetCredential)' '$UNIT'"
     check "the unit is hardened" \
         "grep -qx 'NoNewPrivileges=yes' '$UNIT' && grep -qx 'CapabilityBoundingSet=' '$UNIT' && grep -qx 'RestartPreventExitStatus=2 3 7' '$UNIT'"
