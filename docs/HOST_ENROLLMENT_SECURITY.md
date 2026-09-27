@@ -241,8 +241,10 @@ checkpoint and timestamp. Record rejection too, using bounded reason codes.
 Never log tokens, keys, request bodies, printer credentials, environment dumps,
 secret configuration, backup contents or arbitrary remote error text.
 Use secret-safe configuration fingerprints and restricted audit access/export.
-Protected off-host append-only replication detects host-local history tampering;
-a host administrator can compromise local evidence, so do not claim otherwise.
+Exporting or backing up the audit log off the host is optional; it helps
+investigate host-local history tampering after an incident but is not a
+required control. A host administrator can compromise local evidence, so do not
+claim otherwise.
 
 Manual deployment remains available under
 [migration-safe guidance](DEPLOYMENT.md#migration-safe-upgrades), without an
