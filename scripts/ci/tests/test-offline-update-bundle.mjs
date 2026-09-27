@@ -16,7 +16,7 @@ import { formatSums, hostUpdateCliArchiveName, hostUpdateCliRuntimes, hostUpdate
 import { admitOfflineReplay, assembleOfflineBundle, evaluateTrustPolicy, hostUpdateCliInvocation, hostUpdateCliRunnerName,
   importOfflineBundle, loadPriorImages, loadVerifiedImages, offlineBundleIndexName, offlineBundleLimits, offlineBundleName,
   offlineBundleVerificationName, offlineImportDecisionKind, offlineTrustPolicy, parseArguments, readOfflineBundleEntries,
-  redactReason, releaseSigningIdentity, tarHeader, trustedRootApprovalKind, verifyOfflineBundle } from '../offline-update-bundle.mjs';
+  redactReason, releaseSigningIdentity, requireContainerdImageStore, tarHeader, trustedRootApprovalKind, verifyOfflineBundle } from '../offline-update-bundle.mjs';
 import { recoveryInstructionsDocument, recoveryInstructionsName, recoveryInstructionsSignatureName,
   validateRecoveryInstructions } from '../offline-recovery-instructions.mjs';
 import { bindDeploymentSetToImages, deploymentSetDocument, deploymentSetName, deploymentSetSignatureName,
@@ -24,6 +24,13 @@ import { bindDeploymentSetToImages, deploymentSetDocument, deploymentSetName, de
   validateDeploymentSet, validateOfflineToolsLock } from '../offline-deployment-set.mjs';
 
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
+// `docker info` answers for the #3137 image store preflight.
+const storeProbeArgs = ['info', '--format', '{"driver":{{json .Driver}},"driverStatus":{{json .DriverStatus}}}'];
+const isStoreProbe = (name, args) => name === 'docker' && JSON.stringify(args) === JSON.stringify(storeProbeArgs);
+const containerdStoreInfo = `${JSON.stringify({ driver: 'overlayfs',
+  driverStatus: [['driver-type', 'io.containerd.snapshotter.v1']] })}\n`;
+const classicStoreInfo = `${JSON.stringify({ driver: 'overlay2',
+  driverStatus: [['Backing Filesystem', 'extfs'], ['Supports d_type', 'true'], ['Using metacopy', 'false']] })}\n`;
 const imageDetails = Object.fromEntries(Object.entries(components).map(([name, component], index) => [name, {
   indexDigest: `sha256:${String(index).repeat(64)}`,
   platforms: component.platforms,
@@ -111,7 +118,8 @@ function verify(context, overrides = {}) {
 // Load re-authenticates the staged signed bytes offline, so the runner must answer cosign too.
 function load(context, docker, overrides = {}) {
   const signatures = cosign({ requireOffline: true });
-  const run = (name, args, options) => (name === 'cosign' ? signatures.run(name, args) : docker(name, args, options));
+  const run = (name, args, options) => (name === 'cosign' ? signatures.run(name, args) :
+    isStoreProbe(name, args) ? containerdStoreInfo : docker(name, args, options));
   return loadVerifiedImages({ staging: context.staging, channel: context.release.channel,
     trustedRoot: context.trustedRoot, run, ...overrides });
 }
@@ -1536,6 +1544,7 @@ function importRunner(store = replayStore()) {
   const run = (name, args, options) => {
     if (name === 'cosign') return signatures.run(name, args);
     if (name === hostUpdateCliRunnerName) return store.admit(args);
+    if (isStoreProbe(name, args)) return containerdStoreInfo;
     assert.equal(name, 'docker');
     assert.deepEqual(args, ['load']);
     assert.equal(typeof options?.stdin, 'number');
@@ -1760,6 +1769,77 @@ test('import verifies, loads only verified images and writes one durable redacte
   }
 });
 
+test('import refuses the classic image store before staging, replay admission or any docker load (#3137)', () => {
+  for (const [label, answer, pattern] of [
+    ['classic overlay2', () => classicStoreInfo, /classic 'overlay2' image store, which cannot load OCI image-layout archives/],
+    ['probe failure', () => { throw new Error('Cannot connect to the Docker daemon'); },
+      /image store could not be determined \(Cannot connect to the Docker daemon\)/],
+    ['unparseable', () => 'not json', /image store could not be determined/],
+    ['no driver status', () => JSON.stringify({ driver: 'overlay2', driverStatus: null }), /classic 'overlay2' image store/],
+  ]) {
+    const context = completeFixture('stable');
+    try {
+      const base = importRunner();
+      const run = (name, args, options) => (isStoreProbe(name, args) ? answer() : base.run(name, args, options));
+      const { record } = runImport(context, { run });
+      assert.equal(record.outcome, 'refused', label);
+      assert.match(record.reason, pattern, label);
+      assert.match(record.reason, /containerd-snapshotter/, label);
+      assert.equal(base.loads.length, 0, `${label}: nothing is loaded on an unsupported image store`);
+      assert.equal(base.store.calls.length, 0, `${label}: an unsupported engine is never offered to the replay store`);
+      assert.equal(base.calls.length, 0, `${label}: no verification work precedes the preflight`);
+      assert.deepEqual(record.loadedImages, []);
+      assert.equal(record.failedLoad, null);
+      assert.equal(record.installable, false);
+      assert.equal(existsSync(context.staging), false, `${label}: no staging directory is created`);
+      assert.equal(decisionFiles(context).length, 1, `${label}: the refusal is durably recorded`);
+    } finally {
+      context.cleanup();
+    }
+  }
+});
+
+test('load and load-prior refuse the classic image store before any docker load (#3137)', () => {
+  withImages(context => {
+    verify(context);
+    const calls = [];
+    const run = (name, args) => {
+      calls.push([name, ...args]);
+      return isStoreProbe(name, args) ? classicStoreInfo : cosign({ requireOffline: true }).run(name, args);
+    };
+    assert.throws(() => loadVerifiedImages({ staging: context.staging, channel: context.release.channel,
+      trustedRoot: context.trustedRoot, run }), /classic 'overlay2' image store/);
+    assert.ok(!calls.some(([name, arg]) => name === 'docker' && arg === 'load'), 'nothing is loaded');
+  });
+  const context = priorImageFixture('stable');
+  try {
+    assemble(context, context.withPrior({ priorImages: context.priorLayout }));
+    verify(context);
+    const signatures = cosign({ requireOffline: true });
+    const run = (name, args) => (name === 'cosign' ? signatures.run(name, args) :
+      isStoreProbe(name, args) ? classicStoreInfo : assert.fail('nothing may be loaded on the classic store'));
+    assert.throws(() => loadPriorImages({ staging: context.staging, channel: context.release.channel,
+      trustedRoot: context.trustedRoot, run }), /classic 'overlay2' image store/);
+  } finally {
+    context.cleanup();
+  }
+});
+
+test('the image store preflight accepts only the containerd snapshotter driver type', () => {
+  assert.deepEqual(requireContainerdImageStore((name, args) => {
+    assert.equal(name, 'docker');
+    assert.deepEqual(args, storeProbeArgs, 'the probe is read-only docker info');
+    return containerdStoreInfo;
+  }), { driver: 'overlayfs', driverType: 'io.containerd.snapshotter.v1' });
+  for (const status of [[['driver-type', 'io.containerd.snapshotter.v2']], [['Driver-Type', 'io.containerd.snapshotter.v1']],
+    ['driver-type', 'io.containerd.snapshotter.v1'], [['io.containerd.snapshotter.v1', 'driver-type']], {}]) {
+    assert.throws(() => requireContainerdImageStore(() => JSON.stringify({ driver: 'overlay2', driverStatus: status })),
+      /classic 'overlay2' image store/, JSON.stringify(status));
+  }
+  assert.throws(() => requireContainerdImageStore(() => JSON.stringify({ driver: '../../evil path', driverStatus: [] })),
+    /classic 'unknown' image store/, 'an untrusted driver name is never echoed');
+});
+
 test('import refuses a verified but incomplete bundle, removes its staging and records the refusal', () => {
   for (const [label, prepare, pattern] of [
     ['no recovery instructions', context => assemble(context, { images: context.layout }), /lacks signed recovery instructions/],
@@ -1837,7 +1917,7 @@ test('an in-progress record is durable before the first load and a partial load 
     let loads = 0;
     const observed = [];
     const run = (name, args, options) => {
-      if (name !== 'docker') return base.run(name, args, options);
+      if (name !== 'docker' || args[0] !== 'load') return base.run(name, args, options);
       observed.push(JSON.parse(readFileSync(target, 'utf8')).outcome);
       loads += 1;
       if (loads === 2) throw new Error(`docker load failed for ${context.staging}`);
@@ -1866,7 +1946,7 @@ test('a finalization failure after loading leaves the durable in-progress record
     const base = importRunner();
     const run = (command, args, options) => {
       // Block the final record's partial file so finalization fails after images were loaded.
-      if (command === 'docker') mkdirSync(join(context.records, `.${name}.1.partial`), { recursive: true });
+      if (command === 'docker' && args[0] === 'load') mkdirSync(join(context.records, `.${name}.1.partial`), { recursive: true });
       return base.run(command, args, options);
     };
     assert.throws(() => runImport(context, { run, newId: () => decisionId }), /EEXIST/);
@@ -2336,7 +2416,8 @@ function priorImageFixture(channel = 'stable') {
 
 function loadPrior(context, docker, overrides = {}) {
   const signatures = cosign({ requireOffline: true });
-  const run = (name, args, options) => (name === 'cosign' ? signatures.run(name, args) : docker(name, args, options));
+  const run = (name, args, options) => (name === 'cosign' ? signatures.run(name, args) :
+    isStoreProbe(name, args) ? containerdStoreInfo : docker(name, args, options));
   return loadPriorImages({ staging: context.staging, channel: context.release.channel,
     trustedRoot: context.trustedRoot, run, ...overrides });
 }

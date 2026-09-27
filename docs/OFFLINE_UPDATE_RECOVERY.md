@@ -325,9 +325,46 @@ It re-authenticates the staged `update-manifest.json` and
 `infrastructure-images.json` signatures offline against the operator-supplied
 trusted root, derives the required image set, digests and platforms from those
 signed bytes alone, requires the record to name exactly that set, re-hashes and
-re-verifies every archive before loading any of them, and streams the same open file to `docker load` (Docker Engine 25 or later for
-OCI archive support). It never pulls, builds or fetches anything; a changed
+re-verifies every archive before loading any of them, and streams the same open file to `docker load`. It never pulls, builds or fetches anything; a changed
 archive or a staging directory without a verified image set is rejected.
+
+#### Docker image store requirement (#3137)
+
+`load`, `load-prior` and `import` require Docker Engine 25 or later **with the
+containerd image store** (containerd snapshotter) enabled. Engine version alone
+is not enough. Each image member is an OCI image layout (`index.json` and
+`blobs/`, no `docker save` `manifest.json`) rooted at the signed index, and
+`offline-activate` pins every preloaded service by
+`repository@<signed index digest>` with `--pull never`. Only the containerd
+image store meets both needs: it imports OCI layouts and records `RepoDigests`
+for the layout's index. The classic graphdriver store (for example `overlay2`,
+still the default on many Linux hosts and on GitHub-hosted `ubuntu-24.04`
+runners) cannot:
+
+- Its `docker load` requires `manifest.json`, so an OCI-only member fails
+  (`invalid archive: does not contain a manifest.json`, or `open
+  <path>/manifest.json: no such file or directory` on older engines).
+- Its `docker load` sets tags only and never records `RepoDigests`, so a member
+  with an added `manifest.json` would still load images that activation cannot
+  pin.
+
+Before any `docker load` (and, for `import`, before verification, staging or
+replay admission), the tool runs `docker info` and requires a
+`driver-type` of `io.containerd.snapshotter.v1` in the engine's driver status.
+Any other store, or an engine it cannot query, is refused with an explicit
+reason and nothing is loaded. `load-prior --missing skip` with no packaged prior
+images loads nothing, so it does not probe the engine.
+
+Check the store with:
+
+```bash
+docker info --format '{{json .DriverStatus}}'
+```
+
+To enable it on Docker Engine, add `"features": {"containerd-snapshotter": true}`
+to `/etc/docker/daemon.json` and restart `dockerd`; on Docker Desktop, turn on
+**Use containerd for pulling and storing images**. Switching stores hides images
+held in the old store, so do it before importing the bundle.
 
 ### Deployment set and approved tools (#3081)
 
@@ -350,7 +387,9 @@ build generates it from the source checkout; it contains:
   v3.0.6 for linux/amd64, linux/arm64 and windows/amd64, matching the version the
   release workflow pins), plus the database tools that ship inside pinned
   infrastructure images (`pg_dump` and `pg_restore` in `postgres`, `sqlcmd` in
-  `mssql`). Docker Engine 25 or later is a host prerequisite and is not bundled.
+  `mssql`). Docker Engine 25 or later with the containerd image store is a host
+  prerequisite (see [Docker image store requirement](#docker-image-store-requirement-3137))
+  and is not bundled.
 - **Topologies.** `monolith-postgres`, `monolith-sqlserver`, `split-postgres` and
   `split-sqlserver`, each naming its images, templates and tools. The document
   states `rolloutAuthorization: false`.
@@ -439,13 +478,15 @@ identical argument vector; the wrapper tests assert that parity. Both resolve th
 host-update CLI exactly as for `status`/`recover` (`PRINTFARMER_HOST_UPDATE_CLI_DIR`,
 or `cli/` beside an installed package's wrapper) and pass it with `--config` to the
 tool, which runs `offline-admit`. `import` needs Node.js, a pinned Cosign and Docker
-Engine 25 or later on the host. Set
+Engine 25 or later with the containerd image store on the host; it refuses the
+classic image store before verifying anything (see
+[Docker image store requirement](#docker-image-store-requirement-3137)). Set
 `PRINTFARMER_NODE`, `PRINTFARMER_COSIGN` and `PRINTFARMER_DOCKER` to absolute
 executables to avoid `PATH` lookup. In a repository checkout the tool is
 `scripts/ci/offline-update-bundle.mjs`; an installed CLI package does not carry
 it, so point `PRINTFARMER_OFFLINE_BUNDLE_TOOL` at an approved copy.
 
-`import` first applies the trust expiry policy, then runs `verify` into the new
+`import` first requires the containerd image store, then applies the trust expiry policy, then runs `verify` into the new
 staging directory, then requires a complete bundle: the release-selected application images, the signed infrastructure
 image list with its images, the signed recovery instructions, and the signed
 deployment set with every approved tool it pins. A bundle that
@@ -946,7 +987,8 @@ successful activation of N, the packaged `recover-offline` preview/confirm
 sequence rolls back to N-1 and must end `RolledBack`. C2 injects no
 post-activation fault and does not rely on automatic rollback; forced-failure
 variants belong to the fault-injection cells. Run it from an Ubuntu LTS x64
-host with Docker, Node.js,
+host with Docker (containerd image store enabled; see
+[Docker image store requirement](#docker-image-store-requirement-3137)), Node.js,
 `jq`, Bash, .NET SDK/runtime support for the host-update CLI package and
 Cosign available:
 
