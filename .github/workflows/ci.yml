@@ -357,6 +357,11 @@ jobs:
           scripts/ci/tests/test-release-evidence.mjs
           scripts/ci/tests/test-offline-update-bundle.mjs
           scripts/ci/tests/test-recovery-matrix-evidence.mjs
+          scripts/ci/tests/test-recovery-matrix-fixture-sigstore.mjs
+          scripts/ci/tests/test-recovery-matrix-fixture-release-builder.mjs
+          scripts/ci/tests/test-recovery-matrix-cell-runtime.mjs
+          scripts/ci/tests/test-recovery-matrix-runtime-builders.mjs
+          scripts/ci/tests/test-install-host-update-cli-trusted-root.mjs
 
       - name: Test daily development image-set policy
         run: node --test scripts/ci/tests/test-daily-development-images.mjs
