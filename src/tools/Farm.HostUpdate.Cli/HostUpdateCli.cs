@@ -254,6 +254,7 @@ public static partial class HostUpdateCli
                 options.DiskWatchPath,
                 options.MinimumFreeBytes,
                 options.SupportedProviderNames.ToHashSet(StringComparer.Ordinal),
+                options.ServiceMappings.Select(m => m.ServiceId).ToHashSet(StringComparer.Ordinal),
                 options.ActiveServiceIds.ToHashSet(StringComparer.Ordinal));
         });
         services.AddScoped<IHostUpdateExecutionSteps, HostUpdateExecutionStepsAdapter>();

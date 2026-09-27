@@ -653,7 +653,9 @@ Known limits of the current CLI:
   a blank entry fails startup validation.
 - `ActiveServiceIds` follows the same rule (#3042): a configured list replaces
   the built-in split-topology service set for both the API and the CLI, so a
-  monolith host lists only its actual services. A blank entry, or an
+  monolith host lists only its actual services. Installed state still records
+  every signed target (all six IDs); `ActiveServiceIds` selects which of them
+  compose starts, verify probes and preview reports as affected. A blank entry, or an
   explicitly empty list (`[]` or an empty environment variable) for either
   `ActiveServiceIds` or `ComposeFiles`, fails startup validation instead of
   restoring the default. The safety lists `SupportedProviderNames`,
@@ -699,7 +701,7 @@ or compose command, when:
 | --- | --- | --- |
 | Database provider, server (host/port or data source), database name, or `DatabaseExternallyOwned` changed after authorization | Exit 12 `drift_reapproval_required` (`configuration_drift`) | Confirm with the deployment owner that the configured database is the one the backup came from. Never reapprove a retarget to a different server. |
 | `DatabaseExternallyOwned` is `true` and the manifest includes `database` | Exit 10 `NeedsOperator` (`database_externally_owned`) in both `--preview` and `--confirm`; no restore tool is required or run. The executor also leaves the `database` target unmapped, so any other path fails closed with `restore_target_unmapped` | The database owner restores it with their own procedure; this host never restores an externally owned database. |
-| The recorded prior state's services differ from `ActiveServiceIds` (topology changed since the update) | Exit 10 `NeedsOperator` (`prior_state_topology_mismatch`), even after drift reapproval | Do not force a restore onto a different topology. Restore the matching compose configuration or recover manually. |
+| The recorded prior state's services differ from the failed request's signed targets, or omit an `ActiveServiceIds` entry (topology changed since the update) | Exit 10 `NeedsOperator` (`prior_state_topology_mismatch`), even after drift reapproval | Do not force a restore onto a different topology. Restore the matching compose configuration or recover manually. |
 | Aggregate `/health` unreachable or unhealthy after restore | Exit 10 `NeedsOperator`; admission stays closed | Diagnose the API; do not reopen writers by hand. |
 | Fence release fails after a successful restore | Exit 11; a repeat `--confirm` only redrives the release | Re-run `--confirm` once the fence adapter is reachable. It never repeats the restore. |
 

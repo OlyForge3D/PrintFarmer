@@ -146,8 +146,10 @@ internal static partial class HostUpdateOfflineRecovery
             }
 
             string platform = installed.ServicePlatforms is null ? targetPlatform : installed.ServicePlatforms.GetValueOrDefault(service) ?? string.Empty;
+
+            // Offline installed state records the preloaded (signed index) pin; see PreloadedDigest.
             if (!string.Equals(platform, targetPlatform, StringComparison.Ordinal) ||
-                !manifest.PlatformDigests.TryGetValue(HostUpdateOfflineAdmission.PlatformKey(service, platform), out string? expected) ||
+                HostUpdateOfflineAdmission.PreloadedDigest(manifest, service, platform) is not { } expected ||
                 !string.Equals(expected, digest, StringComparison.Ordinal))
             {
                 return "prior_installed_state_mismatch";

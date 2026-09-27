@@ -216,11 +216,24 @@ public sealed class HostUpdatePreflightCheck(
     string diskWatchPath,
     long minimumFreeBytes,
     IReadOnlySet<string> supportedProviderNames,
-    IReadOnlySet<string>? mappedServiceIds = null) : IHostUpdatePreflightCheck
+    IReadOnlySet<string>? mappedServiceIds = null,
+    IReadOnlySet<string>? activeServiceIds = null) : IHostUpdatePreflightCheck
 {
     public async Task RunAsync(HostUpdateExecutionRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
+
+        if (activeServiceIds is not null)
+        {
+            // Every service this host actually runs must be covered by a signed target; an
+            // active service outside the target set could never be applied or verified.
+            var targetIds = request.Targets.Select(t => t.ServiceId).ToHashSet(StringComparer.Ordinal);
+            string[] untargeted = [.. activeServiceIds.Where(id => !targetIds.Contains(id)).OrderBy(id => id, StringComparer.Ordinal)];
+            if (untargeted.Length > 0)
+            {
+                throw new HostUpdatePreflightFailedException($"active_service_not_targeted:{string.Join(',', untargeted)}");
+            }
+        }
 
         if (mappedServiceIds is not null)
         {

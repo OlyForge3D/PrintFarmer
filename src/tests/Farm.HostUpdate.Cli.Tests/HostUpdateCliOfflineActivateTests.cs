@@ -92,6 +92,11 @@ public sealed partial class HostUpdateCliOfflineActivateTests : IDisposable, IAs
         _imageVerifier.Requests.Should().ContainSingle()
             .Which.ImageSourceMode.Should().Be(HostUpdateImageSourceMode.PreloadedLocal);
         _imageVerifier.Requests[0].Targets.Should().HaveCount(6);
+
+        // docker load of an OCI layout records repo@index, so preloaded targets pin the signed index.
+        SignedUpdateManifest manifest = SignedUpdateManifestValidator.Parse(Encoding.UTF8.GetString(_manifest));
+        _imageVerifier.Requests[0].Targets.Should().OnlyContain(target =>
+            manifest.Services.Single(service => service.Id == target.ServiceId).Image.EndsWith("@" + target.ChildDigest, StringComparison.Ordinal));
         InstalledHostState? state = await new FileInstalledHostStateStore(Path.Combine(_host.StateDirectory, "installed-state.json"))
             .ReadAsync(CancellationToken.None);
         state!.ReleaseId.Should().Be("insider:1.2.3-insider.42");
@@ -814,13 +819,7 @@ public sealed partial class HostUpdateCliOfflineActivateTests : IDisposable, IAs
         return staged!.Candidate with
         {
             HostPlatform = hostPlatform,
-            PlatformDigests = new HostUpdatePlatformDigests(
-                staged.Manifest.PlatformDigests[HostUpdateOfflineAdmission.PlatformKey("api", hostPlatform)],
-                staged.Manifest.PlatformDigests[HostUpdateOfflineAdmission.PlatformKey("frontend", hostPlatform)],
-                staged.Manifest.PlatformDigests[HostUpdateOfflineAdmission.PlatformKey("slicer-host", hostPlatform)],
-                staged.Manifest.PlatformDigests[HostUpdateOfflineAdmission.PlatformKey("printer-discovery", hostPlatform)],
-                staged.Manifest.PlatformDigests[HostUpdateOfflineAdmission.PlatformKey("orcaslicer-worker", hostPlatform)],
-                staged.Manifest.PlatformDigests[HostUpdateOfflineAdmission.PlatformKey("monolith", hostPlatform)]),
+            PlatformDigests = HostUpdateOfflineAdmission.PreloadedDigests(staged.Manifest, hostPlatform),
         };
     }
 

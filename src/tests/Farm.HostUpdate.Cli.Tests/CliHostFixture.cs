@@ -162,10 +162,13 @@ internal sealed class CliHostFixture : IDisposable
     /// <summary>The default split topology's active services (<see cref="HostUpdateExecutionOptions.ActiveServiceIds"/>).</summary>
     public static readonly string[] SplitServices = ["api", "frontend", "slicer-host", "printer-discovery", "orcaslicer-worker"];
 
+    /// <summary>Every signed release target. Installed state always records the full signed set.</summary>
+    public static readonly string[] AllServices = [.. SplitServices, "monolith"];
+
     /// <summary>Records the prior verified installation; by default well before the journaled authorization.</summary>
     public void SeedInstalledState(DateTimeOffset? recordedAt = null, string releaseId = "stable:1.2.2", IReadOnlyList<string>? services = null)
     {
-        var digests = (services ?? SplitServices)
+        var digests = (services ?? AllServices)
             .Select((service, index) => (service, digest: "sha256:" + new string((char)('1' + index), 64)))
             .ToDictionary(pair => pair.service, pair => pair.digest, StringComparer.Ordinal);
         var platforms = digests.Keys.ToDictionary(k => k, _ => CurrentPlatform, StringComparer.Ordinal);

@@ -58,7 +58,8 @@ public sealed class HostUpdateImageApplier(
     IReadOnlyList<string> composeFiles,
     string projectName,
     IReadOnlyDictionary<string, HostUpdateApplyServiceMapping> serviceMappings,
-    TimeSpan timeout) : IHostUpdateApplyCoordinator, IHostUpdateImageSourceDigestApplier, IHostUpdateLocalImageVerifier
+    TimeSpan timeout,
+    IReadOnlySet<string>? activeServiceIds = null) : IHostUpdateApplyCoordinator, IHostUpdateImageSourceDigestApplier, IHostUpdateLocalImageVerifier
 {
     public Task RunAsync(HostUpdateExecutionRequest request, CancellationToken cancellationToken)
     {
@@ -134,8 +135,25 @@ public sealed class HostUpdateImageApplier(
                 }
             }
 
+            // Every signed target is staged/verified above, but only services this topology
+            // actually runs are brought up: on a monolith host several service IDs share one
+            // compose service, and starting inactive split services would change the topology.
+            if (activeServiceIds is not null && !activeServiceIds.Contains(serviceId))
+            {
+                continue;
+            }
+
             environment[mapping.ImageEnvironmentVariable] = imageReference;
-            composeServiceNames.Add(mapping.ComposeServiceName);
+            if (!composeServiceNames.Contains(mapping.ComposeServiceName, StringComparer.Ordinal))
+            {
+                composeServiceNames.Add(mapping.ComposeServiceName);
+            }
+        }
+
+        // An empty service list would make "compose up" start every service in the file.
+        if (composeServiceNames.Count == 0)
+        {
+            throw new HostUpdateApplyUnsupportedServiceException([.. targetsByService.Keys]);
         }
 
         var arguments = new List<string> { "compose" };

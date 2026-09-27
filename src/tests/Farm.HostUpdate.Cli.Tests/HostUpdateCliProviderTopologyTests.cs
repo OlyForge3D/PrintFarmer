@@ -223,7 +223,7 @@ public sealed class HostUpdateCliProviderTopologyTests : IDisposable, IAsyncLife
     public async Task Image_only_confirm_applies_only_the_topology_services_without_a_restore(string topology)
     {
         IConfiguration configuration = Config("sqlite", topology);
-        _host.SeedInstalledState(services: Services(topology));
+        _host.SeedInstalledState();
         _host.SeedRecoveryRequired(baseline: _host.CurrentBaseline(configuration, ReplaceHostBoundaries));
         InstalledHostState prior = ReadInstalledState();
 
@@ -351,7 +351,7 @@ public sealed class HostUpdateCliProviderTopologyTests : IDisposable, IAsyncLife
 
         CliRun missingJournal = await ConfirmAsync(configuration);
 
-        _host.SeedInstalledState(services: Services(topology));
+        _host.SeedInstalledState();
         _host.SeedRecoveryRequired(baseline: _host.CurrentBaseline(configuration, ReplaceHostBoundaries));
         CliRun held;
         using (new FileHostUpdateExecutionLock(_host.LockPath).Acquire(TimeSpan.FromSeconds(5), CancellationToken.None))
@@ -475,7 +475,7 @@ public sealed class HostUpdateCliProviderTopologyTests : IDisposable, IAsyncLife
     private IConfiguration SeedCoordinatedRestore(string provider, string topology)
     {
         IConfiguration configuration = Config(provider, topology);
-        _host.SeedInstalledState(services: Services(topology));
+        _host.SeedInstalledState();
         SeedMigrationFailure(configuration);
         SeedBackup(Providers[provider]);
         File.WriteAllText(_host.AdmissionClosedPath, string.Empty);

@@ -43,6 +43,73 @@ public sealed class HostUpdateRecoveryCoordinatorTests
     }
 
     [Fact]
+    public async Task RecoverAsync_PriorServiceSetDiffersFromSignedTargets_NeedsOperatorWithoutApply()
+    {
+        var applier = new FakeDigestApplier();
+        var coordinator = new HostUpdateRecoveryCoordinator(
+            new FakeInstalledHostStateStore(new InstalledHostState(
+                "release-0", "sha256:prior", new Dictionary<string, string> { ["api"] = "sha256:prior-api", ["frontend"] = "sha256:prior-frontend" }, "split", DateTimeOffset.UtcNow)),
+            new AlwaysCompatibleEvaluator(),
+            applier,
+            new NeverInvokedRestoreExecutor(),
+            new NeverFindsManifestLocator(),
+            new FakeDigestVerifier(),
+            new FileHostUpdateRecoveryOutcomeStore(CreateTempDir()));
+
+        HostUpdateRecoveryResult result = await coordinator.RecoverAsync(Request, NoActivities, CancellationToken.None);
+
+        result.Outcome.Should().Be(HostUpdateRecoveryOutcome.NeedsOperator);
+        result.Detail.Should().Be(HostUpdateRecoveryCoordinator.PriorStateTopologyMismatch);
+        applier.CallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task RecoverAsync_ActiveServiceMissingFromPriorState_NeedsOperatorWithoutApply()
+    {
+        var applier = new FakeDigestApplier();
+        var coordinator = new HostUpdateRecoveryCoordinator(
+            new FakeInstalledHostStateStore(new InstalledHostState(
+                "release-0", "sha256:prior", new Dictionary<string, string> { ["api"] = "sha256:prior-api" }, "monolith", DateTimeOffset.UtcNow)),
+            new AlwaysCompatibleEvaluator(),
+            applier,
+            new NeverInvokedRestoreExecutor(),
+            new NeverFindsManifestLocator(),
+            new FakeDigestVerifier(),
+            new FileHostUpdateRecoveryOutcomeStore(CreateTempDir()),
+            executionOptions: new HostUpdateExecutionOptions { ActiveServiceIds = ["monolith"] });
+
+        HostUpdateRecoveryResult result = await coordinator.RecoverAsync(Request, NoActivities, CancellationToken.None);
+
+        result.Outcome.Should().Be(HostUpdateRecoveryOutcome.NeedsOperator);
+        result.Detail.Should().Be(HostUpdateRecoveryCoordinator.PriorStateTopologyMismatch);
+        applier.CallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task RecoverAsync_MonolithActiveWithEverySignedTargetRecorded_RollsBack()
+    {
+        var request = new HostUpdateExecutionRequest(
+            "release-1", 1, "sha256:manifest", "abc123", HostUpdateExecutionChannel.Stable,
+            [new HostUpdateExecutionTarget("api", "linux/amd64", "sha256:api"), new HostUpdateExecutionTarget("monolith", "linux/amd64", "sha256:monolith")]);
+        var applier = new FakeDigestApplier();
+        var coordinator = new HostUpdateRecoveryCoordinator(
+            new FakeInstalledHostStateStore(new InstalledHostState(
+                "release-0", "sha256:prior", new Dictionary<string, string> { ["api"] = "sha256:prior-api", ["monolith"] = "sha256:prior-monolith" }, "monolith", DateTimeOffset.UtcNow)),
+            new AlwaysCompatibleEvaluator(),
+            applier,
+            new NeverInvokedRestoreExecutor(),
+            new NeverFindsManifestLocator(),
+            new FakeDigestVerifier(),
+            new FileHostUpdateRecoveryOutcomeStore(CreateTempDir()),
+            executionOptions: new HostUpdateExecutionOptions { ActiveServiceIds = ["monolith"] });
+
+        HostUpdateRecoveryResult result = await coordinator.RecoverAsync(request, NoActivities, CancellationToken.None);
+
+        result.Outcome.Should().Be(HostUpdateRecoveryOutcome.RolledBack);
+        applier.CallCount.Should().Be(1);
+    }
+
+    [Fact]
     public async Task RecoverAsync_NoBackupAvailable_PersistsNeedsOperatorOutcome()
     {
         string root = CreateTempDir();
@@ -570,7 +637,13 @@ public sealed class HostUpdateRecoveryCoordinatorTests
 
     private sealed class FakeDigestApplier : IHostUpdateDigestApplier
     {
-        public Task ApplyByDigestsAsync(IReadOnlyDictionary<string, string> digestsByService, CancellationToken cancellationToken, IReadOnlyDictionary<string, string>? platformsByService = null) => Task.CompletedTask;
+        public int CallCount { get; private set; }
+
+        public Task ApplyByDigestsAsync(IReadOnlyDictionary<string, string> digestsByService, CancellationToken cancellationToken, IReadOnlyDictionary<string, string>? platformsByService = null)
+        {
+            CallCount++;
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class ThrowingDigestApplier : IHostUpdateDigestApplier

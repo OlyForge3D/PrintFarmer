@@ -188,17 +188,32 @@ public sealed class HostUpdateHealthVerifier(
     /// </summary>
     public async Task VerifyDigestsAsync(IReadOnlyDictionary<string, string> digestsByService, CancellationToken cancellationToken)
     {
-        if (requiredServiceIds is { Count: > 0 } && !digestsByService.Keys.ToHashSet(StringComparer.Ordinal).SetEquals(requiredServiceIds))
+        if (digestsByService.Count == 0)
         {
-            string actual = string.Join(',', digestsByService.Keys.OrderBy(id => id, StringComparer.Ordinal));
-            string expected = string.Join(',', requiredServiceIds.OrderBy(id => id, StringComparer.Ordinal));
-            throw new HostUpdateVerificationTargetSetException(expected, actual);
+            throw new HostUpdateVerificationTargetSetException(
+                requiredServiceIds is null ? string.Empty : string.Join(',', requiredServiceIds.OrderBy(id => id, StringComparer.Ordinal)),
+                string.Empty);
+        }
+
+        // The digest map carries every signed target, but only services this topology actually
+        // runs can be observed. Each active service must be present; inactive targets are skipped.
+        IEnumerable<KeyValuePair<string, string>> observed = digestsByService;
+        if (requiredServiceIds is { Count: > 0 })
+        {
+            if (!requiredServiceIds.All(digestsByService.ContainsKey))
+            {
+                string actual = string.Join(',', digestsByService.Keys.OrderBy(id => id, StringComparer.Ordinal));
+                string expected = string.Join(',', requiredServiceIds.OrderBy(id => id, StringComparer.Ordinal));
+                throw new HostUpdateVerificationTargetSetException(expected, actual);
+            }
+
+            observed = digestsByService.Where(pair => requiredServiceIds.Contains(pair.Key));
         }
 
         List<IHostUpdateHealthCheck> checks =
         [
             .. staticChecks,
-            .. digestsByService.Select(pair => digestCheckFactory(pair.Key, pair.Value)),
+            .. observed.Select(pair => digestCheckFactory(pair.Key, pair.Value)),
         ];
 
         DateTimeOffset deadline = _timeProvider.GetUtcNow() + timeout;
