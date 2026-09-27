@@ -122,6 +122,8 @@ public interface IActiveWorkObservationPort
 /// Observes active print jobs (Assigned/Starting/Printing/Paused) and pending/processing
 /// outbox physical commands via <see cref="AppDbContext"/>. Neither is ever cancelled here;
 /// unresolved work simply blocks the drain until it completes or the bounded timeout expires.
+/// A host whose application schema was provably never migrated has no work (issue #3126); any
+/// other read failure propagates and fails the drain closed.
 /// </summary>
 public sealed class DbActiveWorkObservationPort(AppDbContext db) : IActiveWorkObservationPort
 {
@@ -133,8 +135,15 @@ public sealed class DbActiveWorkObservationPort(AppDbContext db) : IActiveWorkOb
         PrintJobStatus.Paused,
     ];
 
+    private static readonly Type[] ObservedEntities = [typeof(PrintJob), typeof(QueueDispatchOutbox)];
+
     public async Task<int> CountActiveAsync(CancellationToken cancellationToken)
     {
+        if (await HostUpdateSchemaAbsenceProof.IsNeverMigratedAsync(db, ObservedEntities, cancellationToken).ConfigureAwait(false))
+        {
+            return 0;
+        }
+
         int activePrints = await db.PrintJobs
             .CountAsync(job => ActiveStatuses.Contains(job.Status), cancellationToken)
             .ConfigureAwait(false);

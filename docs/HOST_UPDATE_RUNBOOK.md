@@ -542,8 +542,10 @@ recorded in the journal.
     the printer's dispatch state, including one retained for manual review
     after its command row was dead-lettered),
     the `state` (`ready_to_record`, `recorded`, `complete`, `after_rollback`,
-    `operator_required`, `inventory_unavailable` or `record_unreadable`) and,
-    only when the rollback is already done and just the fence is pending, the
+    `not_required`, `operator_required`, `inventory_unavailable` or
+    `record_unreadable`) and,
+    only when the rollback is already done, just the fence is pending and the
+    state is `ready_to_record`, the
     `reconciliationToken`. `replayPolicy` is always
     `recovery_never_replays_or_issues_printer_commands`.
 - `recover --confirm <release>` requires the release retyped exactly. It first
@@ -561,7 +563,18 @@ suffix `|physical_reconciliation_pending`) until a reconciliation record for
 that release and request exists. The gate is registered in the shared recovery
 engine, so the API recover path stays fenced too until the CLI records it. An
 unreadable record also keeps the fence closed
-(`|physical_reconciliation_unreadable:<type>`). To record it:
+(`|physical_reconciliation_unreadable:<type>`).
+
+An empty inventory needs no record (#3126). When the CLI's single read-consistent
+inventory snapshot proves zero printers and zero uncertain outcomes, the
+coordinator releases the fence without a record, and preview reports
+`not_required` with no `reconciliationToken`, so confirm takes no
+`--printers-reconciled`. A recorded reconciliation still takes precedence, an unreadable
+record still keeps the fence closed, and an inventory read failure keeps it
+pending. A provably never-migrated application schema is an empty inventory. The
+API recover path has no inventory reader and still requires a record.
+
+To record it:
 
 1. Run `recover --preview` and review every printer listed under
    `physicalReconciliation`. Physically inspect each one and reconcile its

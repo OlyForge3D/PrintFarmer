@@ -430,7 +430,7 @@ public sealed class HostUpdateCliTests : IDisposable, IAsyncLifetime
         _host.SeedOutcome(HostUpdateRecoveryOutcome.FenceReleasePending, "coordinated_restore|fence_release_failed:IOException");
         File.WriteAllText(_host.AdmissionClosedPath, string.Empty);
 
-        CliRun first = await RunAsync(["recover", "--release", CliHostFixture.ReleaseId, "--confirm", CliHostFixture.ReleaseId, "--printers-reconciled", await PhysicalTokenAsync(), "--json"]);
+        CliRun first = await RunAsync(["recover", "--release", CliHostFixture.ReleaseId, "--confirm", CliHostFixture.ReleaseId, .. await PhysicalReconciliationArgsAsync(), "--json"]);
 
         first.ExitCode.Should().Be(HostUpdateCliExitCodes.Success);
         Envelope(first).GetProperty("result").GetProperty("outcome").GetString().Should().Be("RolledBack");
@@ -621,7 +621,7 @@ public sealed class HostUpdateCliTests : IDisposable, IAsyncLifetime
         Envelope(refused).GetProperty("result").GetProperty("details")[0].GetString().Should().Be("authorization_baseline_unrecorded");
         _host.Snapshot().Should().BeEquivalentTo(before);
 
-        CliRun approved = await RunAsync(["recover", "--release", CliHostFixture.ReleaseId, "--confirm", CliHostFixture.ReleaseId, "--reapprove-drift", await PreviewTokenAsync(), "--printers-reconciled", await PhysicalTokenAsync(), "--json"]);
+        CliRun approved = await RunAsync(["recover", "--release", CliHostFixture.ReleaseId, "--confirm", CliHostFixture.ReleaseId, "--reapprove-drift", await PreviewTokenAsync(), .. await PhysicalReconciliationArgsAsync(), "--json"]);
 
         approved.ExitCode.Should().Be(HostUpdateCliExitCodes.Success);
         _host.ReadOutcome()!.Outcome.Should().Be(HostUpdateRecoveryOutcome.RolledBack);
@@ -925,7 +925,7 @@ public sealed class HostUpdateCliTests : IDisposable, IAsyncLifetime
         await _host.ChangePolicyAsync();
         string token = await PreviewTokenAsync();
 
-        CliRun run = await RunAsync(["recover", "--release", CliHostFixture.ReleaseId, "--confirm", CliHostFixture.ReleaseId, "--reapprove-drift", token, "--printers-reconciled", await PhysicalTokenAsync(), "--json"]);
+        CliRun run = await RunAsync(["recover", "--release", CliHostFixture.ReleaseId, "--confirm", CliHostFixture.ReleaseId, "--reapprove-drift", token, .. await PhysicalReconciliationArgsAsync(), "--json"]);
 
         run.ExitCode.Should().Be(HostUpdateCliExitCodes.Success);
         _host.ReadOutcome()!.Outcome.Should().Be(HostUpdateRecoveryOutcome.RolledBack);
@@ -1153,10 +1153,14 @@ public sealed class HostUpdateCliTests : IDisposable, IAsyncLifetime
     }
 
     // Issue #2999: a fence release after rollback needs the previewed physical reconciliation token.
-    private async Task<string> PhysicalTokenAsync()
+    // An empty inventory (issue #3126) needs no record, so no token is offered or passed.
+    private async Task<string[]> PhysicalReconciliationArgsAsync()
     {
         CliRun preview = await RunAsync(["recover", "--release", CliHostFixture.ReleaseId, "--preview", "--json"]);
-        return Envelope(preview).GetProperty("result").GetProperty("physicalReconciliation").GetProperty("reconciliationToken").GetString()!;
+        JsonElement physical = Envelope(preview).GetProperty("result").GetProperty("physicalReconciliation");
+        return physical.TryGetProperty("reconciliationToken", out JsonElement token) && token.ValueKind == JsonValueKind.String
+            ? ["--printers-reconciled", token.GetString()!]
+            : [];
     }
 
     private static string?[] DriftCodes(JsonElement drift) =>

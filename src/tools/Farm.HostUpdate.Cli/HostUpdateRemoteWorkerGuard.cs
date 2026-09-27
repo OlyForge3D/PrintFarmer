@@ -24,16 +24,23 @@ internal sealed class SlicerRegistrationRemoteWorkerGuard(
     internal const string EvidenceUnavailable = "remote_worker_evidence_unavailable";
     internal const string OwnerDetail = "restore_remote_workers_through_owner";
 
+    private static readonly Type[] RegistrationEntities = [typeof(Farm.Slicer.Module.Domain.SlicerService)];
+
     public async Task<string?> ValidateAsync(CancellationToken cancellationToken)
     {
         List<string?> hosts;
         try
         {
-            hosts = await database.SlicerServices.AsNoTracking().Select(service => service.Host).ToListAsync(cancellationToken).ConfigureAwait(false);
+            // A slicer schema that was provably never migrated has no registrations at all (issue
+            // #3126). This is a positive catalog proof; a failed read never counts as absence.
+            hosts = await HostUpdateSchemaAbsenceProof.IsNeverMigratedAsync(database, RegistrationEntities, cancellationToken).ConfigureAwait(false)
+                ? []
+                : await database.SlicerServices.AsNoTracking().Select(service => service.Host).ToListAsync(cancellationToken).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            // Registrations that cannot be read cannot prove every worker is local.
+            // Registrations that cannot be read, or whose absence cannot be proven, cannot prove
+            // every worker is local.
             return EvidenceUnavailable;
         }
 

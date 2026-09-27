@@ -159,7 +159,7 @@ internal static partial class HostUpdateOfflineRecovery
         return null;
     }
 
-    private static bool TryReadPrior(HostUpdateOfflineAdmission.StagedRelease staged, out PriorSet? prior, out string? error)
+    internal static bool TryReadPrior(HostUpdateOfflineAdmission.StagedRelease staged, out PriorSet? prior, out string? error)
     {
         prior = null;
         if (!HostUpdateOfflineAdmission.TryReadFile(staged.StagingPath, HostUpdateOfflineAdmission.VerificationName, out byte[]? recordBytes, out error))

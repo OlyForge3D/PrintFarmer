@@ -72,10 +72,28 @@ public sealed class HostUpdateRemoteWorkerGuardTests
     }
 
     [Fact]
+    public async Task A_never_migrated_slicer_database_has_no_registered_workers()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using SlicerDbContext database = CreateDatabase(connection);
+        var guard = new SlicerRegistrationRemoteWorkerGuard(database, new HostUpdateExecutionOptions());
+
+        (await guard.ValidateAsync(CancellationToken.None)).Should().BeNull("no history and no registration table proves a fresh host (issue #3126)");
+    }
+
+    [Fact]
     public async Task Unreadable_worker_registrations_fail_closed()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
+        await using (SqliteCommand command = connection.CreateCommand())
+        {
+            // Migration history without the registration table is a damaged schema, never "no workers".
+            command.CommandText = "CREATE TABLE \"__EFMigrationsHistory\" (\"MigrationId\" TEXT NOT NULL PRIMARY KEY, \"ProductVersion\" TEXT NOT NULL);";
+            _ = await command.ExecuteNonQueryAsync();
+        }
+
         await using SlicerDbContext database = CreateDatabase(connection);
         var guard = new SlicerRegistrationRemoteWorkerGuard(database, new HostUpdateExecutionOptions());
 
