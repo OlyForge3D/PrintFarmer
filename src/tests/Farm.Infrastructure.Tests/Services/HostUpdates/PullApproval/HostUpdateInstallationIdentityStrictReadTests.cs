@@ -45,6 +45,77 @@ public sealed class HostUpdateInstallationIdentityStrictReadTests
         });
     }
 
+    [Fact]
+    public void UnreadableIdentity_ReturnsNull_WithoutMutation()
+    {
+        WithRoot(root =>
+        {
+            string path = Path.Combine(root, "installation.id");
+            string identity = new('a', 32);
+            File.WriteAllText(path, identity);
+            HostStatePath paths = HostStatePath.OpenReadOnly(OptionsFor(root));
+
+            if (OperatingSystem.IsWindows())
+            {
+                using (new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+                {
+                    Assert.Null(HostUpdateInstallationIdentity.ReadExistingStrict(paths));
+                }
+            }
+            else
+            {
+                File.SetUnixFileMode(path, UnixFileMode.None);
+                try
+                {
+                    string? result = HostUpdateInstallationIdentity.ReadExistingStrict(paths);
+                    if (Environment.UserName != "root")
+                    {
+                        Assert.Null(result);
+                    }
+                }
+                finally
+                {
+                    File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+                }
+            }
+
+            Assert.Equal(identity, File.ReadAllText(path));
+            Assert.Single(Directory.EnumerateFileSystemEntries(root));
+        });
+    }
+
+    [Fact]
+    public void SymlinkedIdentity_ReturnsNull_WithoutMutation()
+    {
+        string targetRoot = HostStateTestPaths.CreateTempSubdirectory("printfarmer-strict-identity-target-").FullName;
+        try
+        {
+            string target = Path.Combine(targetRoot, "installation.id");
+            string identity = new('b', 32);
+            File.WriteAllText(target, identity);
+            WithRoot(root =>
+            {
+                string link = Path.Combine(root, "installation.id");
+                try
+                {
+                    File.CreateSymbolicLink(link, target);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    // Symlink creation needs developer mode or elevation on Windows; nothing to prove here.
+                    return;
+                }
+
+                Assert.Null(HostUpdateInstallationIdentity.ReadExistingStrict(HostStatePath.OpenReadOnly(OptionsFor(root))));
+                Assert.Equal(identity, File.ReadAllText(target));
+            });
+        }
+        finally
+        {
+            Directory.Delete(targetRoot, true);
+        }
+    }
+
     private static HostStateOptions OptionsFor(string root) => new()
     {
         Enabled = true,

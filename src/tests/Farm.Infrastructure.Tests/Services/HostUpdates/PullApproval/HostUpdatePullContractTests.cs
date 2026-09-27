@@ -119,6 +119,60 @@ public sealed class HostUpdatePullContractTests
         HostUpdateDaemonStatusReportValidator.Validate(Report() with { DaemonState = (HostUpdateDaemonState)99 }, Now).Should().Contain("daemonState");
     }
 
+    public static TheoryData<string> InvalidReportFields() => new(
+    [
+        "daemonState",
+        "executionMode",
+        "hostPolicyRevision",
+        "currentCheckpoint",
+        "deferReasons",
+        "recoveryHints",
+        "reportedAt",
+        "lastResult",
+        "lastResult.outcome",
+        "lastResult.approvalId",
+        "lastResult.releaseId",
+        "lastResult.reasonCode",
+        "lastResult.completedAt"
+    ]);
+
+    [Theory]
+    [MemberData(nameof(InvalidReportFields))]
+    public void StatusReport_EachInvalidBranch_ReportsOnlyThatFieldName(string field)
+    {
+        HostUpdateDaemonStatusReportDto report = Report();
+        HostUpdateDaemonStatusReportDto invalid = field switch
+        {
+            "daemonState" => report with { DaemonState = (HostUpdateDaemonState)99 },
+            "executionMode" => report with { ExecutionMode = (HostUpdateDaemonExecutionMode)99 },
+            "hostPolicyRevision" => report with { HostPolicyRevision = -1 },
+            "currentCheckpoint" => report with { CurrentCheckpoint = "Pre Pull" },
+            "deferReasons" => report with { DeferReasons = null! },
+            "recoveryHints" => report with { RecoveryHints = null! },
+            "reportedAt" => report with { ReportedAt = Now.AddMinutes(2) },
+            "lastResult" => report with { LastResult = null! },
+            "lastResult.outcome" => report with { LastResult = report.LastResult with { Outcome = (HostUpdateDaemonResultOutcome)99 } },
+            "lastResult.approvalId" => report with { LastResult = report.LastResult with { ApprovalId = "short" } },
+            "lastResult.releaseId" => report with { LastResult = report.LastResult with { ReleaseId = "latest" } },
+            "lastResult.reasonCode" => report with { LastResult = report.LastResult with { ReasonCode = "Failed: disk full" } },
+            _ => report with { LastResult = report.LastResult with { CompletedAt = Now.AddMinutes(5) } }
+        };
+
+        HostUpdateDaemonStatusReportValidator.Validate(invalid, Now).Should().Equal(field);
+    }
+
+    [Fact]
+    public void StatusReportAck_SerializesAcceptanceAndFieldNamesOnly()
+    {
+        var ack = new HostUpdateDaemonStatusReportAckDto { ReceivedAt = Now, Accepted = false, RejectedFields = ["deferReasons"] };
+
+        using JsonDocument json = JsonDocument.Parse(JsonSerializer.Serialize(ack, HostUpdateDaemonJson.Options));
+
+        json.RootElement.GetProperty("accepted").GetBoolean().Should().BeFalse();
+        json.RootElement.GetProperty("rejectedFields").EnumerateArray().Select(e => e.GetString()).Should().Equal("deferReasons");
+        AssertCamelCase(json.RootElement);
+    }
+
     [Fact]
     public void Approval_SerializesCamelCase_WithStringEnums()
     {

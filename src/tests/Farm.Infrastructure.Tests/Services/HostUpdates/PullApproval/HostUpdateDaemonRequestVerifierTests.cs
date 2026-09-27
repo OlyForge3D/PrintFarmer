@@ -94,7 +94,11 @@ public sealed class HostUpdateDaemonRequestVerifierTests : IDisposable
     {
         HostUpdateDaemonSignedRequest request = Sign(counter: 11, created: Now.AddSeconds(offsetSeconds), nonce: Nonce(1));
 
-        Verify(request, Record()).Outcome.Should().Be(HostUpdateDaemonRequestOutcome.OutsideTimeWindow);
+        HostUpdateDaemonRequestVerification result = Verify(request, Record());
+
+        result.Outcome.Should().Be(HostUpdateDaemonRequestOutcome.OutsideTimeWindow);
+        result.Authenticated.Should().BeTrue(because: "a key-holder rejection is answered with a signed response");
+        result.Accepted.Should().BeFalse();
     }
 
     [Fact]
@@ -107,6 +111,17 @@ public sealed class HostUpdateDaemonRequestVerifierTests : IDisposable
         HostUpdateDaemonRequestVerification result = Verify(request, Record(highWater: 10, highWaterCreated: Now.AddSeconds(-30)));
 
         result.Outcome.Should().Be(HostUpdateDaemonRequestOutcome.Replay);
+        result.Authenticated.Should().BeTrue(because: "a key-holder rejection is answered with a signed response");
+        result.Accepted.Should().BeFalse();
+    }
+
+    [Fact]
+    public void NonCanonicalBase64Signature_IsUnauthenticated_NotAnException()
+    {
+        HostUpdateDaemonSignedRequest request = Sign(counter: 11, created: Now, nonce: Nonce(10));
+        string malformed = "pf=:" + new string('A', 85) + "B==:";
+
+        Verify(request with { Signature = malformed }, Record()).Outcome.Should().Be(HostUpdateDaemonRequestOutcome.Unauthenticated);
     }
 
     [Fact]

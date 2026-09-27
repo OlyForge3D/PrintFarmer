@@ -155,6 +155,39 @@ public sealed class HostUpdatePullApprovalEvaluatorTests
         AssertDenied(Context(approval with { Authorization = approval.Authorization with { ExecutePermission = false } }), HostUpdatePullReasons.AuthorizationMissing);
     }
 
+    [Theory]
+    [InlineData(HostUpdateApprovalOrigin.ManualOneTime)]
+    [InlineData(HostUpdateApprovalOrigin.Automatic)]
+    public void Approval_WithoutFarmAdmin_IsDenied(HostUpdateApprovalOrigin origin)
+    {
+        HostUpdateStoredApproval approval = Approval() with { Origin = origin };
+
+        AssertDenied(Context(approval with { Authorization = approval.Authorization with { FarmAdmin = false } }), HostUpdatePullReasons.AuthorizationMissing);
+    }
+
+    [Theory]
+    [InlineData(HostUpdateApprovalOrigin.ManualOneTime)]
+    [InlineData(HostUpdateApprovalOrigin.Automatic)]
+    public void Approval_AuthorizedAfterIssuance_IsDenied(HostUpdateApprovalOrigin origin)
+    {
+        HostUpdateStoredApproval approval = Approval() with { Origin = origin };
+
+        AssertDenied(
+            Context(approval with { Authorization = approval.Authorization with { AuthorizedAt = approval.IssuedAt.AddSeconds(1) } }),
+            HostUpdatePullReasons.AuthorizationMissing);
+    }
+
+    [Fact]
+    public void AutomaticApproval_WithAutomaticPolicyDisabled_IsDenied()
+    {
+        HostUpdatePullApprovalResponseDto result = HostUpdatePullApprovalEvaluator.Evaluate(
+            Context(Approval() with { Origin = HostUpdateApprovalOrigin.Automatic }) with { AutomaticPolicyEnabled = false });
+
+        result.Decision.Should().Be(HostUpdatePullApprovalDecision.Denied);
+        result.Reasons.Should().BeEquivalentTo(
+            [HostUpdatePullReasons.AutomaticPolicyDisabled, HostUpdatePullReasons.AutomaticUpdatesRuntimeDisabled]);
+    }
+
     [Fact]
     public void RecoveryPlan_RequiresPlanDigest()
     {

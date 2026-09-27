@@ -64,13 +64,13 @@ public interface IHostUpdateDaemonNonceLedger
 /// <summary>Verification outcome, in the order the checks run.</summary>
 public enum HostUpdateDaemonRequestOutcome
 {
-    /// <summary>Malformed, unknown key or bad signature. Answer with an unsigned 401.</summary>
+    /// <summary>Malformed, unknown key or bad signature. The only outcome answered with an unsigned 401.</summary>
     Unauthenticated,
 
-    /// <summary>Signed by the key holder but outside the timestamp window.</summary>
+    /// <summary>Signed by the key holder but outside the timestamp window. Answered with a signed 401.</summary>
     OutsideTimeWindow,
 
-    /// <summary>Nonce already used. A replay never quarantines a key.</summary>
+    /// <summary>Nonce already used. Answered with a signed 401; a replay never quarantines a key.</summary>
     Replay,
 
     Revoked,
@@ -247,7 +247,10 @@ public static class HostUpdateDaemonRequestVerifier
             request.Method, request.Path, request.Query, request.ContentDigest, counter, parameters);
         byte[] baseBytes = Encoding.UTF8.GetBytes(signatureBase);
 
-        if (!VerifySignature(record.PublicKey, baseBytes, Convert.FromBase64String(signatureMatch.Groups["sig"].Value)))
+        byte[] signatureBytes = new byte[64];
+        if (!Convert.TryFromBase64String(signatureMatch.Groups["sig"].Value, signatureBytes, out int signatureLength)
+            || signatureLength != signatureBytes.Length
+            || !VerifySignature(record.PublicKey, baseBytes, signatureBytes))
         {
             return Unauthenticated("request_signature_invalid");
         }

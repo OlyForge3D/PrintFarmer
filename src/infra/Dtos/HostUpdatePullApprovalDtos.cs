@@ -359,10 +359,14 @@ public sealed record HostUpdateDaemonLastResultDto
     public string? ReasonCode { get; init; }
 }
 
-/// <summary>Payload acknowledging a status report.</summary>
+/// <summary>Payload acknowledging a status report. A rejected report lists offending field names only.</summary>
 public sealed record HostUpdateDaemonStatusReportAckDto
 {
     public required DateTimeOffset ReceivedAt { get; init; }
+
+    public required bool Accepted { get; init; }
+
+    public required IReadOnlyList<string> RejectedFields { get; init; }
 }
 
 /// <summary>

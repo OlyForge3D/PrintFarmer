@@ -126,15 +126,19 @@ key material or enrollment codes.
 
 ## Status codes
 
+Every response to an authenticated request is signed, including rejections.
+Only a request that cannot be attributed to an enrolled key gets an unsigned
+response, and the daemon discards unsigned responses anyway.
+
 | Condition | Status | Body |
 |---|---|---|
 | Accepted request | `200` | Signed response |
 | Unsigned, unknown key, bad signature, non-profile input | `401` | Unsigned problem details; no state change |
-| Outside time window or replayed nonce | `401` | Unsigned; no state change |
+| Outside time window or replayed nonce | `401` | Signed `EnrollmentStatus` payload with the reason code; no state change |
 | Revoked, quarantined, expired or pending-scope key | `403` | Signed `EnrollmentStatus` payload |
 | Stale counter | `409` | Signed `EnrollmentStatus`; no state change |
 | Fork evidence | `409` | Signed `EnrollmentStatus` with state `Quarantined` |
-| Invalid status report | `400` | Problem details listing rejected field names only; values are never echoed or stored |
+| Invalid status report | `400` | Signed `StatusReportAck` with `accepted: false` and `rejectedFields` (field names only; values are never echoed or stored) |
 | Operator route without `farm_admin` | `401` / `403` | Standard API responses |
 
 ## Approvals carry identities, not instructions
@@ -167,8 +171,10 @@ condition is `Satisfied` and the kill switch is off.
 
 ## Fail-closed rules
 
-`GET approval` returns `Denied` and reports every failing reason when any of
-these hold:
+`GET approval` returns `Denied` when any of these hold. Identity failures
+short-circuit: when the host identity fails, only identity reasons are reported
+and the candidate approval is not inspected. Otherwise every failing reason is
+reported:
 
 | Category | Reason codes |
 |---|---|
