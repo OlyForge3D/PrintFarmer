@@ -881,7 +881,12 @@ then it is cleared so any later recorded attempt fails the run.
 
 **First live cell.** C2 is the first reusable live cell: monolith topology,
 PostgreSQL, shared host-owned database/storage, managed workers and identical
-prior/target schemas. Run it from an Ubuntu LTS x64 host with Docker, Node.js,
+prior/target schemas. Its recovery trigger is operator-initiated: after a
+successful activation of N, the packaged `recover-offline` preview/confirm
+sequence rolls back to N-1 and must end `RolledBack`. C2 injects no
+post-activation fault and does not rely on automatic rollback; forced-failure
+variants belong to the fault-injection cells. Run it from an Ubuntu LTS x64
+host with Docker, Node.js,
 `jq`, Bash, .NET SDK/runtime support for the host-update CLI package and
 Cosign available:
 
