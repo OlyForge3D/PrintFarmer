@@ -45,6 +45,11 @@ container replacement. Current manual installation remains operator-owned.
 | Peer threat-model review and high-risk pre-PR panel | Bishop, Hicks and Vasquez, none implementation authors; pending |
 | Permit H pilot | Separate explicit maintainer/security approval after prerequisites; blocked |
 
+The enrolled pull-reconciler daemon's identity mechanism, enrollment lifecycle
+and grant separation are designed separately in the
+[host-update daemon security model](HOST_UPDATE_DAEMON_SECURITY.md) (#3113),
+which builds on this contract.
+
 Record reviewer/maintainer identity, exact reviewed SHA, decision, exceptions and
 date in #2665. An agent comment is progress evidence, not maintainer approval.
 No PR or pilot is authorized by this document.

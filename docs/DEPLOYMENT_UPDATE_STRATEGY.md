@@ -1422,6 +1422,10 @@ production validation runs are implied by this design document.
   and older database restore, including targets newer than installed: hold,
   never apply. Test stale policy responses and replay-state loss separately.
   Risk: privileged executor compromise; maintain the manual/offline fallback.
+  Daemon identity, enrollment, rotation, revocation, the three separate grants
+  and the pull-channel threat model are designed in the
+  [host-update daemon security model](HOST_UPDATE_DAEMON_SECURITY.md) (#3113);
+  its residual risks need owner acceptance before implementation.
   #2666 orders verified canonical versions within the selected channel and
   binds desired state to manifest digest. Alias drift alone never triggers
   apply; an equal-version digest conflict holds for investigation.
