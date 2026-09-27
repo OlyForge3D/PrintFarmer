@@ -640,7 +640,9 @@ turn it into tests:
   default.
 - **#3115:** Signed-request verification, nonce, counter and timestamp
   rejection. Signed responses. Revoked and quarantined states. Approvals bound
-  to installation and epoch. camelCase and string-enum contracts.
+  to installation and epoch. camelCase and string-enum contracts. The contract
+  and its tests are defined in the
+  [host-update daemon pull API](HOST_UPDATE_PULL_API.md).
 - **#3116:** Downgrade, cross-channel and replay rejection independent of the
   API.
 - **#3117:** Signed re-confirmation before the first side effect.
