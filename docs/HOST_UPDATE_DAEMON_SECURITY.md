@@ -69,17 +69,26 @@ Mutual TLS (mTLS) is not selected.**
 ### How it works
 
 - The daemon generates its own key pair on the host during enrollment. The
-  private key never leaves the host and is never sent to the API.
+  private key is never sent to the API. It is non-exportable where the key
+  store supports that (TPM, Windows CNG). The Linux software fallback is
+  host-held but readable by root and the daemon service account (R7).
 - The API stores only the public key, a key ID, the enrollment epoch and the
-  enrollment state.
+  enrollment state. These records live in the protected `HostUpdates:HostState`
+  store, not the application database (see [Storage](#storage)).
 - Each daemon request carries an HTTP message signature
   ([RFC 9421](https://www.rfc-editor.org/rfc/rfc9421)) covering the method,
   target path, a body digest, the key ID, a timestamp, a random nonce and a
   per-key monotonic counter.
 - During enrollment, the API also issues a **per-enrollment response-signing
   public key**, which the daemon pins. Every API response to the daemon is
-  signed with that key and echoes the request nonce. The daemon rejects
-  unsigned, mis-signed or non-matching responses.
+  signed with that key and echoes the request nonce, the counter of the
+  previously accepted request and a monotonic enrollment-state revision. The
+  daemon rejects unsigned, mis-signed or non-matching responses, and detects API
+  state rollback from the echoed values (see
+  [Clone and rollback detection](#clone-and-rollback-detection)).
+- The daemon sends **one request at a time** per key. It never has two signed
+  requests in flight, and a retry is a new request with a new nonce and
+  counter, never a resend of the same signed bytes.
 - Proposed algorithm: ECDSA P-256 with SHA-256. It works with the Windows CNG
   machine key store, Linux software keys, and TPM-backed keys where present.
   Ed25519 is acceptable only if every target key store supports it.
@@ -94,7 +103,7 @@ Mutual TLS (mTLS) is not selected.**
 | --- | --- | --- |
 | TLS terminates at nginx in split deployments | The signature reaches the API unchanged; nginx needs no configuration | nginx must verify the client certificate and forward identity in headers. A misconfigured proxy, or a request that bypasses it, lets a caller forge those headers |
 | Loopback or plain-HTTP single-host installs | Authentication still holds | Either TLS is added everywhere or authentication is lost |
-| Certificate authority lifecycle | None. Key records are ordinary API data | The app would run a private CA with issuance, CRL or OCSP, and CA key protection |
+| Certificate authority lifecycle | None. Key records are protected API host-state data | The app would run a private CA with issuance, CRL or OCSP, and CA key protection |
 | Revocation | Change the key record state; takes effect on the next request | Needs CRL/OCSP distribution or short-lived certificates |
 | Replay | Signed nonce, timestamp and counter per request | Only per session; application approvals still need their own replay controls |
 | Response authenticity | Pinned response key covers the payload itself | Covers the transport only, not payloads relayed through a proxy |
@@ -130,34 +139,67 @@ Every step below fails closed: uncertainty produces a rejection or
 Enrollment needs **both** an authenticated farm administrator in the app and an
 authenticated host administrator on the host. Neither can enroll a host alone.
 
+**Prerequisites, all fail closed:**
+
+- The API's `HostUpdates:HostState` root is enabled, provisioned and passes its
+  filesystem-security validation. Enrollment records are stored there, so an
+  unprovisioned API refuses to create invitations.
+- The durable installation ID (`installation.id`) already exists in that root
+  and is read strictly. The existing `HostUpdateInstallationIdentity.GetOrCreate`
+  helper returns a transient random value when storage is unavailable. That
+  fallback must never be used for enrollment; #3115 needs a strict read that
+  fails with an error instead.
+- The daemon reaches the API over a transport it can authenticate: loopback on
+  the same host, or TLS with a certificate that validates against the host's
+  trust store or a fingerprint the host administrator pins at the prompt.
+  Enrollment over plain HTTP to a non-loopback address is refused.
+
+**Ceremony:**
+
 1. **Invitation (app).** A `farm_admin` who holds the proposed
    `updates:manage-policy` permission opens host enrollment, reauthenticates
    interactively (with origin/CSRF protection, per the #2665 contract) and
    creates one invitation. The API returns a one-time enrollment code once.
+   - The code carries at least 128 bits from a cryptographic random generator,
+     shown as grouped base32 text, so offline or online guessing is
+     infeasible.
    - At most one pending invitation per installation.
-   - It expires after 10 minutes (proposed) and is single use.
-   - The API stores only a salted hash of the code, never the code itself.
+   - It expires after 10 minutes (proposed).
+   - The API stores only a salted SHA-256 hash of the code, never the code.
    - Creating a new invitation invalidates any older one.
 2. **Key generation (host).** The host administrator runs the daemon's
    `enroll` command as the OS administrator (root or an elevated
-   Administrator). The daemon generates the key pair in protected storage
-   (see [Storage](#storage)). It also computes its installation ID, a
-   canonical Compose project and topology fingerprint, and the host-policy
-   revision.
+   Administrator). The daemon generates a provisional key pair in protected
+   storage (see [Storage](#storage)). It reads the durable installation ID
+   strictly, and computes a canonical Compose project and topology fingerprint
+   and the host-policy revision.
 3. **Code entry (host).** The code is typed at an interactive prompt on
    standard input. It is **never** accepted from `argv`, an environment
    variable, a file, a Compose value or a pipe, and is never logged. A
    non-interactive session refuses to enroll.
-4. **Request (host to API).** The daemon sends its public key, key ID,
-   installation ID, fingerprints and a fresh nonce. The request is signed with
-   the new private key, which proves possession. It also carries a MAC over
-   that payload, keyed by a hash derived from the code, which binds this key to
-   this invitation. A wrong or expired code rejects the request and consumes
-   the invitation. The API rate-limits requests per installation and in total.
-5. **Pending state (API).** The API records a *pending* enrollment. It
+4. **Request (host to API).** Over the authenticated transport above, the
+   daemon sends the code, its public key, key ID, installation ID,
+   fingerprints and a fresh nonce, all signed with the provisional private key
+   to prove possession. The API hashes the submitted code and compares it in
+   constant time with the stored hash. On a match, it binds this public key to
+   the invitation atomically, and the invitation cannot bind another key.
+   - A wrong code counts as a failed attempt. Five failed attempts, or expiry,
+     consume the invitation.
+   - The API rate-limits enrollment requests per source address, per
+     installation and in total.
+   - An unauthenticated caller can burn an invitation by failing five times.
+     That affects availability only (T10); the administrator creates a new
+     one.
+5. **Pending state (API and host).** The API records a *pending* enrollment. It
    generates the per-enrollment response-signing key pair, stores the private
-   key under ASP.NET Core Data Protection in the API's protected key storage
-   (never in environment variables), and returns the public key.
+   key in the `HostUpdates:HostState` store protected by ASP.NET Core Data
+   Protection (never in environment variables), and returns the public key in
+   a signed response. The daemon stores the provisional key and the provisional
+   pinned response key and enters its own `pending` state. In `pending` it may
+   only poll the signed enrollment status; it requests no approvals and
+   reports no status. If the enrollment is not approved within 30 minutes
+   (proposed), both sides discard it and the daemon destroys the provisional
+   key.
 6. **Fingerprint comparison.** The host CLI shows a short authentication string
    derived from both public keys and the invitation. The app shows the same
    string to the administrator, together with the installation ID, the
@@ -167,11 +209,21 @@ authenticated host administrator on the host. Neither can enroll a host alone.
    The API moves the enrollment to *active* with epoch `N+1`. It also revokes
    any previous active enrollment for this installation (see
    [Single active enrollment](#single-active-enrollment)).
-8. **Pinning (host).** On its next signed call, the daemon receives the
-   approval in a response signed by the pinned key. Only then does it record
-   the enrollment as active in its host state. Until that point the daemon
-   treats itself as unenrolled.
+8. **Activation (host).** On its next status poll, the daemon receives the
+   approval in a response signed by the provisional pinned key. Only then does
+   it record the enrollment, key and pinned response key as *active*.
 
+**What the ceremony proves.** It authenticates the host to the API against an
+unsolicited or substituted enrollment: the invitation needs a reauthenticated
+administrator, the code is bound to exactly one key, and the fingerprint
+comparison catches a key substituted by a network attacker. It authenticates
+the **API to the host only as strongly as the enrollment transport**. The
+reverse proxy and the API sit inside the same trust boundary: an attacker who
+controls nginx or the API during enrollment can present its own response key
+and also rewrite the page the administrator compares. That is equivalent to
+API compromise, which host policy bounds afterwards (R2). Enrolling through
+loopback or a directly reachable API port on the same host, where possible,
+keeps the proxy out of the path (R9).
 Enrollment grants **only** identity: the ability to authenticate, read the
 readiness/approval/revocation contract (#3115) and report redacted status. It
 grants no update execution, no automatic-update permission and no channel
@@ -190,7 +242,7 @@ enrolled by this design. Topology membership grants nothing.
 
 | Platform | Private key | Daemon identity state |
 | --- | --- | --- |
-| Linux (the only platform currently qualified by the [recovery matrix](OFFLINE_UPDATE_RECOVERY.md#isolated-recovery-matrix-scope-3098)) | TPM-backed non-exportable key where available. Otherwise a `0600` file owned by the daemon service account, in a `0700` directory under `/etc/printfarmer-host/daemon/`, never world- or group-writable, without symlink traversal | `/var/lib/printfarmer-host/daemon/`, which holds the key ID, epoch, counter high-water mark, pinned response key and consumed approval IDs |
+| Linux (the only platform currently qualified by the [recovery matrix](OFFLINE_UPDATE_RECOVERY.md#isolated-recovery-matrix-scope-3098)) | TPM-backed non-exportable key where available. Otherwise a `0600` file owned by the daemon service account, in a `0700` directory under `/etc/printfarmer-host/daemon/`, never world- or group-writable, without symlink traversal | `/var/lib/printfarmer-host/daemon/`, which holds the daemon state (`unenrolled`, `pending`, `active`, `rotating`, `revoked`), key ID, epoch, the last counter the API acknowledged, the last enrollment-state revision seen, the pinned installation ID and response key, and consumed approval IDs |
 | Windows (future, per #3118) | CNG machine key store, marked non-exportable, with the ACL restricted to the daemon service account and Administrators | `%ProgramData%\PrintFarmer\host\daemon\`, restricted to the same principals |
 
 These locations are proposals; #3114 and #3118 finalize them. The following
@@ -212,14 +264,26 @@ rules are not optional:
 
 **In the API:**
 
+- Enrollment records live in the protected `HostUpdates:HostState` store,
+  next to the replay store, anchor and policy fence. They are **not** in the
+  application database. The [runbook](HOST_UPDATE_RUNBOOK.md#protected-state-and-configuration)
+  already requires that store to be outside application-database restore
+  scope, so restoring the application database cannot reactivate a revoked
+  enrollment or roll back its counter.
 - Stored: public key, key ID, algorithm, epoch, state (`pending`, `active`,
-  `rotating`, `revoked`, `quarantined`), counter high-water mark, installation
-  ID, fingerprints, and the approving actor and time.
+  `rotating`, `revoked`, `quarantined`), a monotonic enrollment-state
+  revision, the counter high-water mark and the timestamp and request digest
+  of the request that set it, installation ID, fingerprints, and the approving
+  actor and time. Revoked and quarantined records are retained as tombstones,
+  never deleted.
 - The response-signing private key is protected by Data Protection in the
-  API's key storage, never in environment variables or plain configuration.
+  same store, never in environment variables or plain configuration.
 - The one-time code is stored only as a salted hash.
 - Enrollment events are also written to the audit trail outside restored
   application state, as required by the #2665 contract.
+- The rules for that store already apply: never reset it to clear an error,
+  and treat missing or rolled-back state as blocking, not as first-time
+  provisioning.
 
 ### Secrets in Compose environment variables are prohibited
 
@@ -264,10 +328,15 @@ redeploying the whole stack.
   automatic-update permission or reset counters or high-water marks. A rotation
   that changes the topology or installation fingerprint is rejected and needs
   a new enrollment.
-- **Response-key rotation.** The API sends the new response public key in a
-  message signed by the currently pinned key. The daemon accepts only such a
-  chained rotation, never a replacement key from an unsigned or independently
-  signed message.
+- **Response-key lifecycle.** The response-signing key has the same maximum
+  lifetime as the enrollment key and is rotated in the same rotation
+  transaction. The API sends the new response public key in a message signed
+  by the currently pinned key; the daemon accepts only such a chained rotation,
+  never a replacement key from an unsigned or independently signed message.
+  The old response key stays valid for the same 24-hour overlap at most, then
+  the API destroys it. The daemon rejects any response key past its expiry.
+  Revocation destroys the enrollment's response key, and every new enrollment
+  generates a fresh one.
 - **Failure.** If rotation fails, the current key keeps working until it
   expires. After expiry the daemon is unenrolled, fails closed, and needs a new
   owner-approved enrollment. There is no grace period and no automatic
@@ -290,7 +359,9 @@ Effects:
 
 - **In the API.** The key's next request is rejected with a signed `revoked`
   response. Pending approvals for that enrollment become invalid, and it can
-  obtain no new approvals.
+  obtain no new approvals. The enrollment's response-signing key is destroyed
+  after that final signed response, or at once if the daemon is unreachable.
+  The revoked record stays as a tombstone in the protected host-state store.
 - **In the daemon.** On a verified `revoked` response, or on local
   `unenroll`, the daemon:
   1. stops admitting new work;
@@ -299,8 +370,8 @@ Effects:
      checkpoint matrix of #3117;
   3. destroys its private key;
   4. marks itself unenrolled in host state.
-- **Automatic updates.** Revocation also clears the daemon's local
-  automatic-update grant (see [Three separate grants](#three-separate-grants)).
+- **Automatic and manual execution.** Revocation resets the daemon's local
+  execution mode to `none` (see [Three separate grants](#three-separate-grants)).
   A later enrollment never inherits it.
 - **Uncertain revocation state.** An unreachable API, an unsigned or
   unverifiable response, clock uncertainty or a response for an unexpected
@@ -317,8 +388,9 @@ Effects:
 | --- | --- |
 | Host disk lost or rebuilt | The administrator revokes the old enrollment in the app. The host administrator re-enrolls, which creates a new key and a new epoch. Automatic-update permission must be granted again. Replay and high-water host state must be restored through the executor's continuity procedure. If that is not possible, the result is `NeedsOperator`, never a reset. |
 | Host stolen, or key material suspected exposed | Revoke immediately in the app. Treat everything the host could reach as compromised, including the database and data-protection keys, under the host-compromise residual risk. Re-enroll only on a rebuilt host. |
-| Host restored from a backup or snapshot | The key should be absent because it is excluded from backups. If it is present, the counter and epoch checks quarantine it on first use. Re-enroll. |
-| Application database restored to an older state | See [Clone and rollback detection](#clone-and-rollback-detection). The daemon's pinned epoch and counter take precedence. A mismatch holds all work for operator review. |
+| Host restored from a backup or snapshot | The key should be absent because it is excluded from backups. If it is present, the fork check quarantines it on first use (see [Clone and rollback detection](#clone-and-rollback-detection)). Re-enroll. |
+| Application database restored to an older state | Enrollment records are not in the application database, so this changes nothing about identity. The #2665 replay and continuity rules still apply to update state. |
+| API host-state store restored or rolled back | This is prohibited by the runbook. If it happens anyway, the daemon detects it from the echoed counter and state revision and holds all work as `NeedsOperator`. Recovery is revocation and re-enrollment, never resetting the daemon to match. |
 | Daemon replaced on the same host | Unenroll the old daemon, then enroll the new one. No key transfer between installations is supported. |
 
 Recovery never uses trust on first use, never copies keys between hosts and
@@ -328,20 +400,45 @@ stays available without an enrolled daemon.
 
 ### Clone and rollback detection
 
+- **Verification order (API).** For each request the API checks, in order:
+  the signature against an active key; the timestamp window; nonce
+  uniqueness; then the counter. A failure at any step rejects the request
+  without changing state. A duplicate nonce is a **replay**: it is rejected,
+  not treated as a clone, and never quarantines the key.
 - **Counter.** Each signed request carries a counter that increases by one per
-  request for that key. The daemon persists it before sending. The API rejects
-  any value at or below its recorded high-water mark. A lower counter together
-  with a valid signature points to a duplicated key. The API quarantines the
-  key and invalidates its approvals, and only an administrator can resolve it
-  by re-enrolling.
+  request for that key. The daemon persists the new value before sending and
+  keeps only one request in flight, and its signing timestamps never decrease
+  (after a backward clock step it waits rather than sign an earlier time). The
+  API accepts only a counter above its high-water mark. A counter at or below
+  the mark is rejected as stale, which covers a delayed request arriving after
+  a newer one.
+- **Fork evidence and quarantine.** The API quarantines the key only when it
+  sees what a single serialized signer cannot produce: a validly signed
+  request whose counter is at or below the high-water mark **and** whose
+  timestamp is later than the timestamp recorded for that mark, or two
+  different request digests with the same counter. Only the key holder can
+  create either, so a network attacker cannot trigger quarantine. Quarantine
+  invalidates the key's approvals, and only an administrator can resolve it by
+  revoking and re-enrolling.
+- **Rollback of API state.** Every signed response echoes the counter of the
+  previous request the API accepted and the current enrollment-state revision.
+  The daemon compares them with its own records. An echoed counter lower than
+  the last one the API acknowledged, or a lower state revision, means the API
+  state was rolled back. The daemon then holds all work as `NeedsOperator`.
+  This also detects a rollback within one epoch.
 - **Epoch.** The daemon pins its enrollment epoch. A signed response for a
-  different epoch means the API's state has changed underneath it, for example
-  through a database restore, so the daemon holds all work and reports
+  different epoch means the API's state changed underneath it, so the daemon
+  holds all work as `NeedsOperator`.
+- **Installation ID.** The daemon pins the installation ID read at
+  enrollment. A later mismatch in the API's records or the host-state root is
   `NeedsOperator`.
-- **Revocation surviving a restore.** A verified revocation makes the daemon
-  destroy its key, so restoring the API database cannot bring that enrollment
-  back. If the daemon never received the revocation before the restore, the
-  enrollment can reappear. That is residual risk R4.
+- **Revocation surviving a restore.** Enrollment records are in the
+  protected host-state store, not the application database, so restoring the
+  application database does not affect them. A verified revocation also makes
+  the daemon destroy its key. The remaining gap is a prohibited restore of
+  the host-state store itself to a point before a revocation the daemon never
+  saw, taken after the daemon's last acknowledged request. The daemon cannot
+  detect that. It is residual risk R4.
 
 ## Three separate grants
 
@@ -352,39 +449,65 @@ implies, creates or widens another.
 | Grant | What it permits | Who grants it | Where it is stored | Explicitly does not permit |
 | --- | --- | --- | --- | --- |
 | **Outbound discovery consent** | The API contacts the release source to check for and verify release metadata | `farm_admin` in app settings | API policy | Enrollment, daemon installation, channel change, execution |
-| **Enrollment identity** | The daemon authenticates, reads readiness, approvals and revocation, and reports status | Owner ceremony: `farm_admin` invitation and approval plus the host administrator on the host | API key record and host identity state | Any execution; automatic updates; consent to checks; channel change |
-| **Automatic-update permission** | Standing permission for eligible updates in the selected channel and maintenance window, as defined by #2666 | **Both** a `farm_admin` enabling automatic policy in the app **and** the host administrator enabling it in host-local policy | API automation policy and a root-owned host policy file | Widening channel, window, downtime or backup policy; skipping signed verification, recovery prerequisites or active-print drain |
+| **Enrollment identity** | The daemon authenticates, reads readiness, approvals and revocation, and reports status | Owner ceremony: `farm_admin` invitation and approval plus the host administrator on the host | API host-state key record and host identity state | Any execution; automatic updates; consent to checks; channel change |
+| **Automatic-update permission** | Standing permission for eligible updates in the selected channel and maintenance window, as defined by #2666 | **Both** a `farm_admin` enabling automatic policy in the app **and** the host administrator setting host execution mode `automatic` | API automation policy and a root-owned host policy file | Widening channel, window, downtime or backup policy; skipping signed verification, recovery prerequisites or active-print drain |
+
+### Host execution mode
+
+The API authenticates the administrator who clicks **Update now**; the daemon
+cannot. A compromised API holds the response-signing key and could forge a
+"manual" approval. Enrollment therefore admits no execution by itself. The
+host administrator sets a host-local **execution mode** in the root-owned host
+policy file:
+
+| Mode | Pull-delivered operations the daemon accepts |
+| --- | --- |
+| `none` (default, and the state after any revocation) | None. Status and readiness only. Manual updates keep using the host-local CLI in the [runbook](HOST_UPDATE_RUNBOOK.md) |
+| `manual` | One-time Update now requests (#2666) |
+| `automatic` | One-time requests and, when the app-side automatic policy is also on, eligible automatic updates. This is the host half of the automatic-update permission grant |
+
+In every mode, **every pull-delivered operation, manual or automatic, is bound
+by host policy**: the host maintenance window, allowed channels, maximum
+downtime, backup and recovery class, active-print drain, signed-release
+verification and high-water marks. An approval labelled "manual" gets no
+exception from the host window. An update outside the window uses the
+host-local CLI, where the host administrator is present. Mode `manual` is an
+option inside the enrollment's scope, set only on the host; it is not a fourth
+consent that the app can grant.
 
 Additional rules:
 
 - **Installing the service is not a grant.** Installing the daemon (#3118)
   gives it no rights until enrollment completes. It must not install enabled
   or enrolled by default.
-- **Manual Update now** still needs enrollment plus a fresh one-time
-  administrator request, as in #2666. It never needs automatic-update
-  permission, and it never grants it.
+- **Manual Update now** through the daemon needs enrollment, host execution
+  mode `manual` or `automatic`, and a fresh one-time administrator request, as
+  in #2666. It never needs automatic-update permission, and it never grants
+  it.
 - **Channel changes** stay privileged policy actions under the #2665 contract.
   Choosing insider grants none of the three grants.
-- **Default for every installation:** no discovery consent, no enrollment, no
-  automatic updates. The daemon enforces its local automatic-update grant
-  itself. An API response claiming "auto enabled" never turns it on.
-- **Order of withdrawal.** Withdrawing automatic permission leaves the
-  enrollment in place. Revoking the enrollment also clears the local automatic
-  permission. Withdrawing discovery consent stops checks, so no new offers
-  appear, but does not revoke the enrollment.
+- **Default for every installation:** no discovery consent, no enrollment,
+  host execution mode `none`, no automatic updates. The daemon enforces its
+  host execution mode itself. An API response claiming "auto enabled" never
+  turns it on.
+- **Order of withdrawal.** Withdrawing automatic permission on either side
+  leaves the enrollment in place. Revoking the enrollment resets host
+  execution mode to `none`. Withdrawing discovery consent stops checks, so no
+  new offers appear, but does not revoke the enrollment.
 
 ## Owner and administrator authorization points
 
 | Action | App authorization | Host authorization | Notes |
 | --- | --- | --- | --- |
 | Grant or withdraw outbound discovery consent | `farm_admin`, reauthentication, origin/CSRF protection | None | Audited. Separate from the release channel |
-| Create an enrollment invitation | `farm_admin` with `updates:manage-policy`, reauthentication | None | One pending, 10 minutes, single use |
+| Create an enrollment invitation | `farm_admin` with `updates:manage-policy`, reauthentication | None | One pending, 10 minutes, five attempts, 128-bit code |
 | Submit an enrollment | The invitation code | Interactive OS administrator on the host | Code on standard input only |
 | Approve or reject an enrollment | `farm_admin` with `updates:manage-policy`, reauthentication, matching fingerprint | None | Revokes any earlier enrollment |
 | Rotate a key | None; routine and signed by both keys | Daemon service identity | Cannot change grants or scope |
 | Revoke or unenroll | `farm_admin` reauthentication **or** the host administrator | Either side is sufficient | Revocation always succeeds |
-| Grant automatic-update permission | `farm_admin` with `updates:manage-policy`, reauthentication, explicit confirmation | Host administrator edits host policy | Both are required. Off by default |
-| Manual Update now | `farm_admin` with `updates:execute`, reauthentication, one-time request | The existing host policy must allow the operation | Per #2666 |
+| Set host execution mode (`none`, `manual`, `automatic`) | None; the app cannot set it | Host administrator edits the root-owned host policy | Default `none`; reset to `none` by revocation |
+| Grant automatic-update permission | `farm_admin` with `updates:manage-policy`, reauthentication, explicit confirmation | Host administrator sets execution mode `automatic` | Both are required. Off by default |
+| Manual Update now through the daemon | `farm_admin` with `updates:execute`, reauthentication, one-time request | Host execution mode `manual` or `automatic`, inside the host window and policy | Per #2666. Outside the window, use the host-local CLI |
 | Change the channel or trust policy | Per the #2665 contract | Host policy agreement | Not a daemon identity action |
 | Resolve a quarantined or clone-suspected key | `farm_admin` revokes and invites again | Host administrator re-enrolls | Never an "unquarantine" button |
 
@@ -403,36 +526,42 @@ Trust boundaries:
 
 - The host administrator and the daemon's protected storage are trusted.
 - The API is **authenticated but not trusted**. A compromised API can sign
-  authentic responses.
+  authentic responses. During the enrollment ceremony only, a reverse proxy
+  that terminates the daemon's TLS sits inside this same boundary; see
+  [What the ceremony proves](#bootstrap-enrollment-ceremony).
 - The network, the reverse proxy, containers, the application database and
   the Compose environment are **untrusted** for identity purposes.
 
 | # | Threat | Attack | Control | Residual |
 | --- | --- | --- | --- | --- |
-| T1 | Host impersonation | An attacker calls the pull API as the enrolled host to read approvals or submit fake status | Every request is signed with the host-held non-exportable key; no shared secret exists to steal from the environment; enrollment needs both owner and host administrator; IP and hostname are ignored | Theft of the private key through host compromise (R1) |
-| T2 | API impersonation / MITM | A proxy or network attacker injects approvals or a fake "revoked" or "active" status | Responses are signed by the pinned per-enrollment key and bound to the request nonce; TLS off loopback; chained response-key rotation | A compromised API holds the response key (R2) |
-| T3 | Replay | Captured requests, responses or approvals are resent | Timestamp window of ±60 seconds, nonce cache, monotonic counter, nonce echo in responses; approvals carry ID, expiry, installation, epoch and immutable target; consumed approval IDs are journaled; #2665 replay high-water marks | Host clock tampering by a host administrator (R5) |
+| T1 | Host impersonation | An attacker calls the pull API as the enrolled host to read approvals or submit fake status | Every request is signed with the host-held key (non-exportable where the key store supports it); no shared secret exists to steal from the environment; enrollment needs both owner and host administrator; IP and hostname are ignored | Theft of the private key through host compromise (R1) |
+| T2 | API impersonation / MITM | A proxy or network attacker injects approvals or a fake "revoked" or "active" status | Responses are signed by the pinned per-enrollment key and bound to the request nonce; enrollment only over loopback or validated TLS; fingerprint comparison; chained response-key rotation with bounded lifetime | A compromised API holds the response key (R2); a compromised proxy during enrollment can substitute it (R9) |
+| T3 | Replay | Captured requests, responses or approvals are resent | Verification order signature, timestamp window of ±60 seconds, nonce cache, then counter, so replays are rejected without quarantine; one request in flight; nonce echo in responses; approvals carry ID, expiry, installation, epoch and immutable target; consumed approval IDs are journaled; #2665 replay high-water marks | Host clock tampering by a host administrator (R5) |
 | T4 | Release downgrade | An approval or cached metadata points to an older or cross-channel release | The daemon verifies the signed manifest and enforces per-trust-root and per-channel high-water marks (#3116); approvals cannot lower the sequence; recovery is a separate verified plan | None beyond an authorized-signer compromise (R3) |
 | T5 | Stale approval | An approval is used after policy, topology, schema, window or preflight changed, or after revocation | Short expiry (the #2665 contract proposes 5 minutes at most); binding to policy and topology fingerprints; a signed re-confirmation before the first side effect; revocation invalidates pending approvals | An operation already past its first side effect finishes to a safe checkpoint (by design, #3117) |
 | T6 | Compromised environment or configuration | An attacker reads or edits the Compose `.env`, container environment, generated Compose or daemon configuration | No secrets in environment variables at all; the daemon configuration holds no secrets; the API URL cannot redirect because of the pinned response key; host policy is root-owned and journaled; configuration fingerprints are bound into approvals; API environment settings cannot create enrollment or automatic permission | An attacker with host root can change anything (R1) |
-| T7 | Unauthorized consent expansion | An API change, settings write, restore or channel switch turns discovery consent or enrollment into automatic updates, or widens window, channel or scope | Three separate grants; automatic permission also needs the host-local grant; rotation cannot change grants; revocation clears the local automatic grant; new enrollments inherit nothing; daemon-side policy checks | A restored API database can re-show a revoked enrollment the daemon never saw revoked (R4) |
-| T8 | Confused deputy | The API is tricked into issuing a valid approval for another installation or target | Approvals are bound to installation ID, enrollment epoch, key ID and immutable signed target; the daemon checks all of them against its own state and host policy | A compromised API can still pick a target that host policy allows (R2) |
-| T9 | Stolen enrollment code | The code is shoulder-surfed or intercepted | The code is short-lived and single use, bound to a key by a MAC, and the administrator compares fingerprints before approval | A distracted administrator approves a mismatching fingerprint (R6) |
-| T10 | Enrollment flooding / denial of service | Mass enrollment or pull requests | One pending invitation; per-installation and global rate limits; the #2665 polling bounds (at least 60 seconds between polls, backoff up to 15 minutes); bounded request sizes | Availability only; no authority gained |
+| T7 | Unauthorized consent expansion | An API change, settings write, restore or channel switch turns discovery consent or enrollment into automatic updates, or widens window, channel or scope | Three separate grants; host execution mode set only on the host, default `none`; automatic permission needs both sides; every pull-delivered operation bound by host window and policy; rotation cannot change grants; revocation resets the mode; enrollment records outside application-database restore; echoed counter and state revision detect rollback; new enrollments inherit nothing | A prohibited restore of the host-state store can re-show a revoked enrollment the daemon never saw revoked (R4) |
+| T8 | Confused deputy | The API is tricked into issuing a valid approval for another installation or target | Approvals are bound to installation ID, enrollment epoch, key ID and immutable signed target; the daemon checks all of them against its own state and host policy; a "manual" label grants no exception from host policy | A compromised API can still pick a target, and label it manual, within what host policy and execution mode allow (R2) |
+| T9 | Stolen enrollment code | The code is shoulder-surfed or intercepted | The code has at least 128 bits of entropy, expires in 10 minutes, binds exactly one key, allows five attempts, travels only over loopback or validated TLS, and the administrator compares fingerprints before approval | A distracted administrator approves a mismatching fingerprint (R6) |
+| T10 | Enrollment flooding / denial of service | Mass enrollment or pull requests | One pending invitation; five-attempt limit; per-source, per-installation and global rate limits; the #2665 polling bounds (at least 60 seconds between polls, backoff up to 15 minutes); bounded request sizes | Availability only; no authority gained |
 | T11 | Credential leakage through logs or status | Keys, codes or signed material appear in logs, status, support bundles or UI | Bounded reason codes; fingerprints and IDs only; redaction tests (#3114, #3119) | None beyond the #2665 redaction limits |
-| T12 | Cloned host (backup or snapshot) | A restored or copied host runs with the same key | Keys are excluded from backups; the counter regression quarantines the key; the epoch is pinned | A clone used before the original sends another request (R4 window) |
+| T12 | Cloned host (backup or snapshot) | A restored or copied host runs with the same key | Keys are excluded from backups; fork evidence (a lower counter with a later timestamp, or one counter with two digests) quarantines the key; the epoch and installation ID are pinned | Until the original or the clone sends its next request, the API cannot tell them apart (R1 if the clone came from host access) |
 
 ### Fail-closed decision table
 
 | Condition observed by the daemon | Result |
 | --- | --- |
-| Not enrolled, pending, revoked, quarantined or expired | No approvals requested; status only, if authenticated |
-| Response unsigned, signature invalid, nonce mismatch or unexpected epoch | Discard the response; no admission; `NeedsOperator` for epoch changes |
+| Not enrolled, revoked, quarantined or expired | No approvals requested and no status reported |
+| Pending | Signed enrollment-status polling only |
+| Response unsigned, signature invalid, nonce mismatch, unexpected epoch, lower echoed counter or lower state revision | Discard the response; no admission; `NeedsOperator` for epoch changes and rollback |
+| Installation ID missing, transient or different from the pinned value | Refuse to enroll; `NeedsOperator` when enrolled |
 | API unreachable or timed out | No new admission; running work follows #3117 checkpoints |
 | Clock skew beyond the window, or clock source uncertain | No admission |
 | Key storage permissions invalid, or key unreadable | Refuse to run enrolled |
 | Host policy missing, unparseable, or its revision changed after approval | Reject the approval |
-| No local automatic-update grant | Ignore automatic approvals; manual one-time requests only |
+| Host execution mode `none` | Ignore all approvals |
+| Host execution mode `manual` | Ignore automatic approvals; one-time requests only, inside the host window and policy |
+| Any approval outside the host window, channel, downtime or backup policy | Reject, whatever its claimed origin |
 | Approval expired, consumed, for another installation or target, or a downgrade | Reject and journal the outcome |
 | Replay or high-water state missing or rolled back | Hold for trusted recovery; never reset |
 
@@ -444,7 +573,7 @@ journal both record:
 - invitation created, expired or used;
 - enrollment requested, approved or rejected (with actor and fingerprints);
 - key rotated, revoked or quarantined, and suspected clones;
-- automatic-update permission granted or withdrawn on each side;
+- host execution mode changes, and automatic-update permission granted or withdrawn on each side;
 - approvals issued, consumed and rejected.
 
 Each record carries bounded reason codes. No record contains codes, private
@@ -460,12 +589,13 @@ approval of this document is self-attested and is **not** that acceptance.
 | ID | Residual risk | Why it remains | Proposed acceptance position |
 | --- | --- | --- | --- |
 | R1 | Host root or administrator compromise | The daemon controls Docker and is root-equivalent. An attacker with host root can read keys, edit policy and forge journals | Accept. Mitigate with off-host audit replication, which the #2665 contract already names |
-| R2 | API compromise with valid response signing | The API holds the response-signing key, so a compromised API can issue authentic approvals | Accept, but only because the daemon independently verifies signatures, host policy, window and high-water marks. A compromised API can at most trigger a signed, policy-allowed update in an allowed window, or withhold updates |
+| R2 | API compromise with valid response signing | The API holds the response-signing key, so a compromised API can issue authentic approvals | Accept, but only because the daemon independently verifies signatures, host policy, window and high-water marks, and applies them to manual and automatic approvals alike. In execution mode `none` a compromised API can only withhold updates or misreport status. In `manual` or `automatic` it can at most trigger a signed, policy-allowed update inside the host window, or withhold updates |
 | R3 | Compromise of an authorized release signer or workflow | A malicious release signed by the trusted workflow passes verification | Accept as the #2665 authorized-signer risk. This design does not change it |
-| R4 | A database restore re-shows a revoked enrollment | If the daemon never received the revocation before the restore, the API can re-show the key as active | Accept, with the requirement that the off-host audit shows the revocation and the runbook tells operators to revoke again after any API database restore |
+| R4 | A host-state store restore re-shows a revoked enrollment | Application-database restores cannot, and the echoed counter detects most host-state rollbacks. A prohibited host-state restore to a point after the daemon's last acknowledged request but before a revocation it never saw is undetectable | Accept, with the requirement that the off-host audit shows the revocation and the runbook tells operators to revoke again after any host-state restore |
 | R5 | Host clock manipulation | A host administrator can skew the clock to stretch expiry windows | Accept under R1. Daemons reject clocks they cannot trust |
 | R6 | Human fingerprint-comparison error | The administrator approves a mismatched enrollment | Accept, with UI copy (#3120) that makes the comparison mandatory and prominent |
-| R7 | No hardware-backed key on most Linux hosts | Software keys are only protected by file permissions | Accept for the bounded model. Prefer a TPM where present |
+| R7 | No hardware-backed key on most Linux hosts | The software fallback key is exportable by root and the daemon service account; only file permissions protect it | Accept for the bounded model. Prefer a TPM where present |
+| R9 | Compromised reverse proxy or API during enrollment | Either can substitute the response key and rewrite the fingerprint page the administrator sees | Accept as part of R2. Prefer enrolling over loopback or a direct same-host API port |
 | R8 | Self-attested review | Every squad agent acts with the owner's authority, so the review panel is not independent | Accept, as recorded for the repository verdict gate. It is not separation of duties |
 
 ## Validation expectations for implementation children
@@ -495,4 +625,10 @@ signature, a replayed signed request, a counter regression or clone, an
 unsigned or mis-signed response, an unapproved response-key change, a leaked
 invitation code with a fingerprint mismatch, an attempt to add automatic
 permission by rotation or restore, and a daemon secret added to Compose
-environment variables.
+environment variables. Also cover: verification order (a forged or replayed
+request never advances the counter or triggers quarantine), quarantine only on
+fork evidence, host execution mode `none` blocking every pull operation
+including manual approvals, a missing `installation.id` failing enrollment
+instead of generating a fallback, a response echoing a stale counter or state
+revision after an application-database rollback, and invitation-attempt
+exhaustion.
