@@ -444,6 +444,15 @@ public sealed class HostUpdateDaemonReleaseVerifierTests : IDisposable
 
         bounded.ReadAll().Should().HaveCount(FileHostUpdateDaemonVerificationJournal.MaximumRecords);
         bounded.Invoking(j => j.Append(Evidence(-1))).Should().Throw<InvalidDataException>().WithMessage("journal_verification_full");
+
+        string state = Path.GetDirectoryName(path)!;
+        HostUpdateDaemonJournalSnapshot snapshot = new HostUpdateDaemonJournalReader(
+            state,
+            new FileHostUpdateExecutionLock(Path.Combine(state, FileHostUpdateExecutionLock.FileName)),
+            new FileHostUpdateExecutionJournal(Path.Combine(state, "journal.ndjson")),
+            bounded).Read();
+        snapshot.Failed.Should().BeTrue();
+        snapshot.VerificationCode.Should().Be("journal_verification_full");
     }
 
     [Fact]
