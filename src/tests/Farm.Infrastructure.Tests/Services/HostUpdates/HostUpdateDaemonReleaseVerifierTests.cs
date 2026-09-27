@@ -413,6 +413,82 @@ public sealed class HostUpdateDaemonReleaseVerifierTests : IDisposable
     }
 
     [Fact]
+    public async Task RepeatedRefusal_ForADifferentRelease_IsRecordedSeparately()
+    {
+        await Verifier().VerifyAsync(Approved() with { ExpiresAt = now }, Context(), default);
+        await Verifier().VerifyAsync(Approved() with { ExpiresAt = now, Sequence = Approved().Sequence + 1 }, Context(), default);
+
+        journal.ReadAll().Select(e => e.Sequence).Should().Equal(Approved().Sequence, Approved().Sequence + 1);
+    }
+
+    [Fact]
+    public void EvidenceJournal_IsBounded_AndFailsClosedWhenFull()
+    {
+        string path = Path.Combine(root.FullName, "bounded", FileHostUpdateDaemonVerificationJournal.FileName);
+        var bounded = new FileHostUpdateDaemonVerificationJournal(path);
+        HostUpdateDaemonVerificationEvidence Evidence(int i) => new(
+            "e" + i, null, null, null, i + 1, null, null, HostUpdateTrustRoot.DefaultTrustRoot, HostUpdateTrustRoot.Fingerprint,
+            null, HostUpdateDaemonVerificationEvidence.RefusedOutcome, "approval_expired", now);
+        var lines = new List<string>();
+        string previous = string.Empty;
+        for (int i = 0; i < FileHostUpdateDaemonVerificationJournal.MaximumRecords; i++)
+        {
+            string payload = System.Text.Json.JsonSerializer.Serialize(Evidence(i));
+            string hash = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(previous + payload)));
+            lines.Add(System.Text.Json.JsonSerializer.Serialize(new { PreviousHash = previous, Payload = payload, Hash = hash }));
+            previous = hash;
+        }
+
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, string.Join('\n', lines) + "\n");
+
+        bounded.ReadAll().Should().HaveCount(FileHostUpdateDaemonVerificationJournal.MaximumRecords);
+        bounded.Invoking(j => j.Append(Evidence(-1))).Should().Throw<InvalidDataException>().WithMessage("journal_verification_full");
+    }
+
+    [Fact]
+    public async Task EvidenceJournal_ConcurrentReadersAndWriters_NeverObserveATornFile()
+    {
+        HostUpdateDaemonVerificationEvidence Evidence(int i) => new(
+            "c" + i, null, null, null, i + 1, null, null, HostUpdateTrustRoot.DefaultTrustRoot, HostUpdateTrustRoot.Fingerprint,
+            null, HostUpdateDaemonVerificationEvidence.RefusedOutcome, "approval_expired", now);
+        string path = Path.Combine(root.FullName, "concurrent", FileHostUpdateDaemonVerificationJournal.FileName);
+        var writer = new FileHostUpdateDaemonVerificationJournal(path);
+        var reader = new FileHostUpdateDaemonVerificationJournal(path);
+
+        Task write = Task.Run(() =>
+        {
+            for (int i = 0; i < 40; i++)
+            {
+                writer.Append(Evidence(i));
+            }
+        });
+        Task read = Task.Run(async () =>
+        {
+            while (!write.IsCompleted)
+            {
+                _ = reader.ReadAll();
+                await Task.Yield();
+            }
+        });
+
+        await Task.WhenAll(write, read);
+        reader.ReadAll().Should().HaveCount(40);
+    }
+
+    [Fact]
+    public void EvidenceJournal_ReadDoesNotDeleteAStagedAppend()
+    {
+        string path = Path.Combine(root.FullName, "staged", FileHostUpdateDaemonVerificationJournal.FileName);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path + ".staged", "in-flight");
+        var staged = new FileHostUpdateDaemonVerificationJournal(path);
+
+        staged.ReadAll().Should().BeEmpty();
+        File.Exists(path + ".staged").Should().BeTrue();
+    }
+
+    [Fact]
     public async Task JournalReader_ReportsLatestVerificationCode()
     {
         string state = Path.Combine(root.FullName, "state");

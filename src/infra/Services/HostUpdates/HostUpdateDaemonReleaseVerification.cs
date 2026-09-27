@@ -409,9 +409,10 @@ public sealed partial class HostUpdateDaemonReleaseVerifier(
             IReadOnlyList<HostUpdateDaemonVerificationEvidence> existing = evidence.ReadAll();
             HostUpdateDaemonVerificationEvidence? last = existing.Count == 0 ? null : existing[^1];
 
-            // A repeated identical refusal (the same approval retried each poll) is recorded once.
-            if (!result.Verified && last is not null && last.Outcome == record.Outcome && last.Code == record.Code &&
-                last.ApprovalId == record.ApprovalId && last.ManifestDigest == record.ManifestDigest)
+            // A repeated identical refusal (the same approval retried each poll) is recorded once;
+            // every field except the record's own id and timestamp must match.
+            if (!result.Verified && last is not null &&
+                last with { EvidenceId = record.EvidenceId, RecordedAt = record.RecordedAt } == record)
             {
                 return result;
             }
@@ -654,22 +655,41 @@ public sealed partial class HostUpdateDaemonReleaseVerifier(
 /// Hash-chained verification evidence beside the execution journal, using the same chain and
 /// atomic-rewrite rules. It is deliberately a separate file: an execution-journal activity would
 /// change the executor's first-acceptance and in-flight semantics before anything was admitted.
+/// Readers and writers serialize on an exclusive sibling lock file so a reader never observes or
+/// removes a writer's staged file. The journal is bounded to <see cref="MaximumRecords"/> records
+/// (repeated refusals collapse to one), so the per-append rewrite stays small; a full journal fails
+/// closed with <c>journal_verification_full</c> until an operator archives it.
 /// </summary>
 public sealed class FileHostUpdateDaemonVerificationJournal(string path) : IHostUpdateDaemonVerificationJournal
 {
     public const string FileName = "daemon-verification.ndjson";
 
+    public const int MaximumRecords = 4096;
+
+    private static readonly TimeSpan LockTimeout = TimeSpan.FromSeconds(2);
+
     private readonly string stagedPath = path + ".staged";
+
+    private readonly string lockPath = path + ".lock";
 
     private sealed record ChainRecord(string PreviousHash, string Payload, string Hash);
 
-    public IReadOnlyList<HostUpdateDaemonVerificationEvidence> ReadAll() =>
-        ReadValidated().Select(pair => pair.Evidence).ToArray();
+    public IReadOnlyList<HostUpdateDaemonVerificationEvidence> ReadAll()
+    {
+        using FileStream readLease = AcquireLock();
+        return ReadValidated().Select(pair => pair.Evidence).ToArray();
+    }
 
     public void Append(HostUpdateDaemonVerificationEvidence evidence)
     {
         ArgumentNullException.ThrowIfNull(evidence);
+        using FileStream writeLease = AcquireLock();
         List<(ChainRecord Record, HostUpdateDaemonVerificationEvidence Evidence)> records = ReadValidated();
+        if (records.Count >= MaximumRecords)
+        {
+            throw new InvalidDataException("journal_verification_full");
+        }
+
         string previous = records.Count == 0 ? string.Empty : records[^1].Record.Hash;
         string payload = JsonSerializer.Serialize(evidence);
         string hash = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(previous + payload)));
@@ -701,15 +721,28 @@ public sealed class FileHostUpdateDaemonVerificationJournal(string path) : IHost
         }
     }
 
+    private FileStream AcquireLock()
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(path) ?? ".");
+        HostStateFileSecurity.RejectReparseTarget(lockPath);
+        long deadline = Environment.TickCount64 + (long)LockTimeout.TotalMilliseconds;
+        while (true)
+        {
+            try
+            {
+                return new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+            }
+            catch (IOException) when (Environment.TickCount64 < deadline)
+            {
+                Thread.Sleep(25);
+            }
+        }
+    }
+
     private List<(ChainRecord Record, HostUpdateDaemonVerificationEvidence Evidence)> ReadValidated()
     {
-        if (File.Exists(stagedPath))
-        {
-            // Rename is the commit point; a surviving stage was never committed.
-            HostStateFileSecurity.RejectReparseTarget(stagedPath);
-            File.Delete(stagedPath);
-        }
-
+        // Reads never touch the staged file: only Append (under the lock) creates, overwrites or
+        // removes it, and rename is the commit point, so a surviving stage is simply ignored.
         if (!File.Exists(path))
         {
             return [];

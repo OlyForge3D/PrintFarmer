@@ -68,7 +68,9 @@ public interface IHostUpdateDaemonJournalReader
 /// exactly as the host-local <c>status</c> command does. A held lock (the executor, CLI or a manual
 /// recovery is running) is reported and never waited on, and an existing lock file is not rewritten.
 /// When a verification journal is supplied, the latest #3116 verification outcome is reported as a
-/// fixed code; an unreadable or tampered verification journal fails the cycle closed.
+/// fixed code; an unreadable or tampered verification journal fails the cycle closed. The
+/// verification journal is read outside the execution lease because it serializes its own readers
+/// and writers on a dedicated lock, so a concurrent append is waited on briefly, never observed torn.
 /// </summary>
 public sealed partial class HostUpdateDaemonJournalReader(
     string stateDirectory,

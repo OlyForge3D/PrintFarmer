@@ -848,10 +848,14 @@ fixed code, when any of these fail:
 
 Every decision is appended to the hash-chained `daemon-verification.ndjson`
 in the executor state directory. That file holds redacted codes and digests
-only; it is separate from the executor journal. An acceptance that cannot be
-recorded is refused (`verification_evidence_unavailable`). The dispatcher
+only; it is separate from the executor journal. Readers and writers share a
+dedicated `daemon-verification.ndjson.lock`. The file holds at most 4096
+records (a refusal repeated each poll is recorded once); a full file fails
+closed with `journal_verification_full` until you archive it. An acceptance
+that cannot be recorded is refused (`verification_evidence_unavailable`). The
+dispatcher
 also refuses a verification that has expired (`verification_expired`) or
 does not match the execution request (`verification_binding_mismatch`).
-Daemon status lines report the latest decision as `verificationCode`
-(`verification_none` when no decision exists). A tampered evidence file fails
+Daemon status lines report the latest decision as `verificationCode` in JSON
+and `verification=` in text (`verification_none` when no decision exists). A tampered evidence file fails
 the cycle with a `journal_verification_*` code.

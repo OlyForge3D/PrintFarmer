@@ -77,7 +77,7 @@ internal static class HostUpdateDaemonCommand
         {
             string line = json
                 ? JsonSerializer.Serialize(status, LineOptions)
-                : $"{status.Lifecycle.ToString().ToLowerInvariant()} {status.Code} gate={status.ExecutionGateCode} identity={status.IdentityStorageCode} journal={status.JournalCode}";
+                : $"{status.Lifecycle.ToString().ToLowerInvariant()} {status.Code} gate={status.ExecutionGateCode} identity={status.IdentityStorageCode} journal={status.JournalCode} verification={status.VerificationCode}";
             lock (gate)
             {
                 output.WriteLine(line);
