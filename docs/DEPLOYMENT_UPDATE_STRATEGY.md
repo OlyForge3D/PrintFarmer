@@ -1425,7 +1425,7 @@ production validation runs are implied by this design document.
   Daemon identity, enrollment, rotation, revocation, the three separate grants
   and the pull-channel threat model are designed in the
   [host-update daemon security model](HOST_UPDATE_DAEMON_SECURITY.md) (#3113);
-  its residual risks need owner acceptance before implementation.
+  the owner accepted its runtime risks in #3124.
   #2666 orders verified canonical versions within the selected channel and
   binds desired state to manifest digest. Alias drift alone never triggers
   apply; an equal-version digest conflict holds for investigation.
@@ -1572,7 +1572,8 @@ does not create issues or mutate graph relationships.
 7. Migration serialization/startup coordination and schema compatibility policy;
    any image-only rollback exception needs explicit proof, not assumption.
 8. Discovery socket replacement and privileged-helper containment before
-   automation; authorized-signer and host-compromise residual risk acceptance.
+   automation. The authorized-signer and host-compromise risks are accepted
+   (#3124); socket replacement and helper containment remain open.
 9. Issue reuse, approved epic scope and first wave. No issue creation,
    deployment, implementation, commit, or push is authorized by this document.
 10. Channel-switch permission/enrollment mechanics, confirmation and audit

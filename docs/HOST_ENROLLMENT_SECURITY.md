@@ -38,7 +38,7 @@ container replacement. Current manual installation remains operator-owned.
 | Required recorded decision | Owner / status |
 | --- | --- |
 | Accept socket removal and network-only observation threat model | Repository maintainer; pending explicit issue comment |
-| Accept host-compromise and authorized-signer residual risks | Repository maintainer; pending explicit issue comment |
+| Accept host-compromise and authorized-signer residual risks | Repository owner; accepted in #3124 |
 | Approve initial OS/topology, limits, trust bootstrap/rotation and recovery contract below | Host operator and repository maintainer; proposed, not approved |
 | Name publication ruleset, environment, allocator and bypass owners | #2668 maintainer decision; pending, never inferred from branch ownership |
 | Approve signing identity and offline verification implementation | #2660 plus security reviewer; pending |
@@ -241,8 +241,10 @@ checkpoint and timestamp. Record rejection too, using bounded reason codes.
 Never log tokens, keys, request bodies, printer credentials, environment dumps,
 secret configuration, backup contents or arbitrary remote error text.
 Use secret-safe configuration fingerprints and restricted audit access/export.
-Protected off-host append-only replication detects host-local history tampering;
-a host administrator can compromise local evidence, so do not claim otherwise.
+Exporting or backing up the audit log off the host is optional; it helps
+investigate host-local history tampering after an incident but is not a
+required control. A host administrator can compromise local evidence, so do not
+claim otherwise.
 
 Manual deployment remains available under
 [migration-safe guidance](DEPLOYMENT.md#migration-safe-upgrades), without an
