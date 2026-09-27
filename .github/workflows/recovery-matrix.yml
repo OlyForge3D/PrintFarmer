@@ -55,5 +55,6 @@ jobs:
         with:
           name: recovery-matrix-evidence-${{ inputs.cell || 'c2' }}-${{ github.run_id }}
           path: .recovery-matrix-work/evidence-*.json
+          include-hidden-files: true
           if-no-files-found: error
           retention-days: 30
