@@ -43,7 +43,7 @@ const evidencePath = resolve(required(args.evidence, '--evidence'));
 const cosign = resolve(required(args.cosign, '--cosign'));
 const network = required(args.network, '--network');
 const appStaticIp = required(args['app-ip'], '--app-ip');
-const egressSink = required(args['egress-sink'], '--egress-sink');
+required(args['egress-sink'], '--egress-sink');
 const egressSinkIp = required(args['egress-sink-ip'], '--egress-sink-ip');
 const networkAttemptsPath = required(args['network-attempts'], '--network-attempts');
 const hostContainer = required(args['host-container'], '--host-container');
@@ -552,7 +552,6 @@ function runPackagedOperation({ cli, repo, cosign, instructionsPath, operationId
     error.operationId = operationId;
     throw error;
   }
-  return { exitCode: status, stdout: result.stdout ?? '', stderr: result.stderr ?? '' };
   return { exitCode: status, stdout: result.stdout ?? '', stderr: result.stderr ?? '' };
 }
 function executePackagedStepDuringActivation({ checkpointName, markerPath, hookContext, autoOk = true, ...operation }) {

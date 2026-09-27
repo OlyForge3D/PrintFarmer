@@ -14,8 +14,6 @@ const oidBasicConstraints = '2.5.29.19';
 const oidSubjectKeyIdentifier = '2.5.29.14';
 const oidAuthorityKeyIdentifier = '2.5.29.35';
 const oidCodeSigning = '1.3.6.1.5.5.7.3.3';
-const oidEcPublicKey = '1.2.840.10045.2.1';
-const oidPrime256v1 = '1.2.840.10045.3.1.7';
 const oidEcdsaWithSha256 = '1.2.840.10045.4.3.2';
 const oidOrganization = '2.5.4.10';
 const oidCommonName = '2.5.4.3';
@@ -134,7 +132,6 @@ export function createFixtureSigstoreRoot({ now = new Date() } = {}) {
 
 function signBlobWithRoot({ bytes, identity, issuer, validAt, caKey, caSpki, caCertificate, rekorKey, ctKey }) {
   const signingKey = generateKeyPair();
-  const signingSpki = publicSpki(signingKey);
   const notBefore = new Date(validAt.getTime() - 5 * 60 * 1000);
   const notAfter = new Date(validAt.getTime() + 10 * 60 * 1000);
   const integratedTime = Math.floor(validAt.getTime() / 1000);

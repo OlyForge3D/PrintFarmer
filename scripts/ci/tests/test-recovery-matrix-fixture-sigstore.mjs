@@ -81,7 +81,7 @@ test('real cosign verifies fixture bundles offline when PF_COSIGN is set', { ski
     os.homedir(),
     '.cache',
     'pf-fixture-sigstore-tests',
-    `${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    `${process.pid}-${Date.now()}-${crypto.randomBytes(8).toString('hex')}`,
   );
   fs.mkdirSync(scratch, { recursive: true });
   try {

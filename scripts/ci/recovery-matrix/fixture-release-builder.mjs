@@ -1,6 +1,5 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import {
-  copyFileSync,
   mkdirSync,
   readFileSync,
   renameSync,

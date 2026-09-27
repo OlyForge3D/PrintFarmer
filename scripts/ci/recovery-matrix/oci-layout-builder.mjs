@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import {
-  cpSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -19,7 +18,6 @@ const ociLayer = 'application/vnd.oci.image.layer.v1.tar';
 const dockerManifest = 'application/vnd.docker.distribution.manifest.v2+json';
 const dockerConfig = 'application/vnd.docker.container.image.v1+json';
 
-const digest = bytes => `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
 const digestHex = bytes => createHash('sha256').update(bytes).digest('hex');
 const platformParts = platform => {
   const [os, architecture] = platform.split('/');
@@ -43,7 +41,11 @@ export function writeBlob(layout, bytes) {
   const buffer = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes);
   const hex = digestHex(buffer);
   const path = join(layout, 'blobs', 'sha256', hex);
-  if (!existsSync(path)) writeFileSync(path, buffer);
+  try {
+    writeFileSync(path, buffer, { flag: 'wx' });
+  } catch (error) {
+    if (error.code !== 'EEXIST') throw error;
+  }
   return { digest: `sha256:${hex}`, size: buffer.length };
 }
 
