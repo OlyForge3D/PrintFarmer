@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 
 import {
   evidenceKind,
@@ -222,6 +222,7 @@ export function writeHostUpdateConfig(path, {
   pgRestore = 'pg_restore',
   healthBaseUrl = 'http://127.0.0.1:5245',
   activeServiceIds = ['monolith'],
+  createHostStateRoot = true,
 } = {}) {
   const compose = (name) => join(deploymentRoot, name);
   const ownedDirectories = {
@@ -235,7 +236,7 @@ export function writeHostUpdateConfig(path, {
     rootDirectory,
     join(rootDirectory, 'state'),
     join(rootDirectory, 'backups'),
-    hostStateRoot,
+    ...(createHostStateRoot ? [hostStateRoot] : []),
     ...Object.values(ownedDirectories),
   ]) {
     mkdirSync(directory, { recursive: true });
@@ -290,6 +291,12 @@ export function writeHostUpdateConfig(path, {
   };
   writeFileSync(path, `${JSON.stringify(config, undefined, 2)}\n`, { mode: 0o600 });
   return config;
+}
+
+export function recoveryHostStateRoot(runRoot, { hostBoundary = false } = {}) {
+  return hostBoundary
+    ? `/root/.cache/printfarmer-recovery-matrix/${basename(runRoot)}/host-state`
+    : join(runRoot, 'host-state');
 }
 
 export function provisionFixtureHostState(rootPath, { channel = 'insider' } = {}) {

@@ -851,9 +851,10 @@ only and is not a live matrix provider.
 **Supported cells.** Monolith and split Compose topologies, each with
 PostgreSQL and SQL Server, a shared application/slicer database, and database
 and storage owned by the host. Workers are either managed on the host or
-absent. A supported cell may expect anything other than `Activated` only after
-a successful `fault-injected` checkpoint, never with a fail-closed reason, and
-with a stable reason unless it expects `RolledBack`.
+absent. A supported recovery cell may expect `RolledBack` without an injected
+fault. Other supported non-`Activated` outcomes require a successful
+`fault-injected` checkpoint, must not use a fail-closed reason, and need a
+stable reason.
 
 **Fail-closed cells.** These cells are run to prove the refusal, never to
 prove recovery. The first matching row decides the expected result, and the
@@ -866,10 +867,17 @@ stable reason must match exactly.
 | Externally owned database | `NeedsOperator` | `database_externally_owned` |
 | Externally owned storage | `NeedsOperator` | `storage_externally_owned` |
 
-**Network denial.** Every service runs on a Docker `--internal` network whose
-only reachable peer is a default-deny egress sink that logs each attempt. The
-evidence mechanism value is `docker-internal-network+default-deny-egress-sink`.
-Any recorded outbound attempt fails the run, whatever its recovery outcome.
+**Network denial.** Every service and the throwaway host container that runs
+the packaged installer, Cosign, bundle-tool import/verify, activation and
+recovery commands runs on a Docker `--internal` network whose only reachable
+peer is a default-deny egress sink that logs each attempt. The host container
+mounts the Docker socket plus the repository and scratch roots at identical
+absolute paths, so Compose bind paths match the real host while DNS and egress
+are denied. The evidence mechanism value is
+`docker-internal-network+default-deny-egress-sink`. At run start, the harness
+proves the boundary by attempting a DNS canary and a direct TCP connection from
+inside the host container; the canary must fail and be recorded by the sink,
+then it is cleared so any later recorded attempt fails the run.
 
 **First live cell.** C2 is the first reusable live cell: monolith topology,
 PostgreSQL, shared host-owned database/storage, managed workers and identical
@@ -886,18 +894,37 @@ scripts/ci/recovery-matrix/run-cell.sh \
 
 The script creates only a repo-local scratch deployment root, generates a
 throwaway `.env`, signs fixture releases with the per-run fixture root, installs
-the CLI with the packaged trusted root, and writes schema-validated evidence.
-It gives the monolith container a deterministic address on the Docker
-`--internal` bridge and sets the product `HealthCheckBaseUrl` to that address,
-so the product's own `/health` verifier stays enabled while the host cannot
-egress. After the product verification step, the harness separately records the
-discovered `/health` entries and fails the cell if no queue/dispatch/outbox
-consumer entry is exposed. On a product build that still has the #3122
-offline-recovery defects, this cell is expected to emit valid failing evidence
-with `outcome.expected` `RolledBack`, `outcome.actual` set from the product CLI
-output/journal, and `outcome.reason` naming the refusal.
+the CLI with the packaged trusted root inside the denied host container, and
+writes schema-validated evidence. It gives the monolith container (not the
+database) a deterministic address on the Docker `--internal` bridge and sets
+the product `HealthCheckBaseUrl` to that address, so the product's own
+`/health` verifier stays enabled while the host cannot egress. After the
+product verification step, the harness separately records the discovered
+`/health` entries and fails the cell if no queue/dispatch/outbox consumer entry
+is exposed. On a product build that still has the #3122 offline-recovery
+defects, this cell is expected to emit valid failing evidence with
+`outcome.expected` `RolledBack`, `outcome.actual` set from the product CLI
+output/journal, and `outcome.reason` naming the packaged instruction step and
+refusal.
 Use `--work-dir` to move scratch space to another non-system-temp directory and
-`--keep-work` only for debugging a failed local run.
+`--keep-work` only for debugging a failed local run. Without `--keep-work`, the
+script runs `docker compose down -v --remove-orphans`, removes the host and sink
+containers and network, and fails loudly if any container, volume or network
+with the run label remains.
+
+Optional fault hooks are available for later cells:
+
+```bash
+scripts/ci/recovery-matrix/run-cell.sh --cell c2 \
+  --fault before-activate='echo before activate' \
+  --fault during-activate='echo during activate' \
+  --fault before-recover='echo before recover'
+```
+
+Hooks run inside the denied host container with `PF_RECOVERY_*` context
+environment variables. A hook failure fails closed. The `fault-injected`
+checkpoint is `ok` only after a configured hook succeeds; C2's default no-fault
+path records it as `skipped`.
 
 **Signing.** Matrix cells are signed only by a per-run **ephemeral** fixture
 Sigstore root (`signingRoot` `fixture-ephemeral`), created by
@@ -924,17 +951,25 @@ recovery outcome.
 the run identity and harness commit, entry point, host distribution, version,
 architecture and kernel, the cell, the source/target/prior release identities
 (tag `v<version>`, version, `stable` or `insider` channel, 40-character source
-commit, build and non-negative integer sequence), bundle SHA-256,
-signing root and its fingerprint, whether the prior and target schemas are
-`identical` or `changed` (`schemaDelta`; C2 fixtures are `identical`), tool
-versions, the network-denial mechanism and every attempt,
-operation checkpoints, expected and actual outcome with reason, exit code and
-journal phase, timings and the verdict. The validator rejects missing or
-unexpected fields, malformed identities, unsupported hosts or entry points, a
-non-fixture cell signing root, a wrong fail-closed expectation, a pass
-with outbound attempts, a failed checkpoint or a mismatched outcome, and any
-unredacted credential: URL user information (with or without a password), PEM
-blocks, GitHub tokens, JWTs, secret assignments and secret-bearing field names.
+commit, build and non-negative integer sequence), the target bundle SHA-256
+when it exists (`null` is allowed only for failed runs before the target bundle
+assembly checkpoint), signing root and, for `fixture-ephemeral`, its fingerprint
+and whether the prior and target schemas are `identical` or `changed`
+(`schemaDelta`; C2 fixtures are `identical`), tool versions, the
+network-denial mechanism and every attempt (`destination` is the attempted
+target or DNS name and `source` is the client when known), operation
+checkpoints, expected and actual outcome with reason, exit code and journal
+phase, timings and the verdict. The packaged-instruction checkpoints are
+`import-prior`, `activate-prior`, `import-target`, `activate-target`,
+`recover-preview` and `recover-confirm`, so the evidence shows where a refusal
+occurred. Legacy schema-1 cell records with signing root `fixture` remain valid
+without the newer fingerprint/schema-delta fields. The validator rejects missing
+or unexpected fields, malformed identities, unsupported hosts or entry points, a
+non-fixture cell signing root, placeholder bundle hashes, a wrong fail-closed
+expectation, a pass with outbound attempts, a failed checkpoint or a mismatched
+outcome, and any unredacted credential: URL user information (with or without a
+password), PEM blocks, GitHub tokens, JWTs, secret assignments and
+secret-bearing field names.
 `validateMatrixRun` validates a whole run: every record, one shared run
 identity, no duplicated cell, at least one cell and exactly one published-bundle
 verification.

@@ -122,6 +122,7 @@ test('any outbound network attempt prevents a passing verdict', () => {
   record.networkDenial.attempts.push({
     at: '2026-09-26T10:07:00Z',
     destination: 'ghcr.io:443',
+    source: '172.30.1.20:49000',
     protocol: 'tcp',
   });
   hasError(validateRecoveryEvidence(record), 'outbound network attempts');
@@ -293,12 +294,21 @@ test('matrix cells must use the fixture signing root', () => {
     validateRecoveryEvidence(record),
     'identities.signingRoot: matrix cells must use the fixture-ephemeral root',
   );
-  const stale = validRecord();
-  stale.identities.signingRoot = 'fixture';
-  hasError(validateRecoveryEvidence(stale), 'identities.signingRoot');
 });
 
-test('cells record the ephemeral root fingerprint and the prior schema delta', () => {
+test('legacy schema-1 fixture records remain valid without ephemeral root fields', () => {
+  const legacy = validRecord();
+  legacy.identities = {
+    source: identity('v0.2.3', 3),
+    target: identity('v0.2.4', 4),
+    prior: identity('v0.2.2', 2),
+    bundleSha256: 'c'.repeat(64),
+    signingRoot: 'fixture',
+  };
+  assert.deepEqual(validateRecoveryEvidence(legacy), []);
+});
+
+test('ephemeral fixture cells record the root fingerprint and prior schema delta', () => {
   const noFingerprint = validRecord();
   delete noFingerprint.identities.signingRootFingerprint;
   hasError(validateRecoveryEvidence(noFingerprint), 'identities.signingRootFingerprint: missing field');
@@ -403,6 +413,28 @@ test('release identities are validated field by field for every role', () => {
       hasError(validateRecoveryEvidence(record), fragment);
     }
   }
+});
+
+test('bundleSha256 may be null only for failed runs before target bundle assembly', () => {
+  const failedBeforeAssembly = validRecord();
+  failedBeforeAssembly.verdict = 'fail';
+  failedBeforeAssembly.identities.bundleSha256 = null;
+  failedBeforeAssembly.checkpoints = [
+    { name: 'trusted-root-created', at: '2026-09-26T10:01:00Z', result: 'ok' },
+    { name: 'e2e-complete', at: '2026-09-26T10:02:00Z', result: 'failed' },
+  ];
+  failedBeforeAssembly.outcome.actual = 'RecoveryRequired';
+  assert.deepEqual(validateRecoveryEvidence(failedBeforeAssembly), []);
+
+  const passed = validRecord();
+  passed.identities.bundleSha256 = null;
+  hasError(validateRecoveryEvidence(passed), 'bundleSha256: null is allowed only');
+
+  const failedAfterAssembly = validRecord();
+  failedAfterAssembly.verdict = 'fail';
+  failedAfterAssembly.identities.bundleSha256 = null;
+  failedAfterAssembly.checkpoints.push({ name: 'offline-bundle-assembled', at: '2026-09-26T10:03:00Z', result: 'ok' });
+  hasError(validateRecoveryEvidence(failedAfterAssembly), 'bundleSha256: null is allowed only');
 });
 
 test('URL userinfo is rejected with or without a password; safe URLs pass', () => {

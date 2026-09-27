@@ -6,16 +6,18 @@ import { basename, dirname, join, resolve } from 'node:path';
 
 import { createFixtureSigstoreRoot } from './fixture-sigstore.mjs';
 import { buildC2ImageLayout } from './oci-layout-builder.mjs';
+import { writeRecoveryCompose } from './compose-config.mjs';
+import { hasFaultHooks, invokeFaultHook, parseFaultHooks } from './fault-hooks.mjs';
+import { assertHostStateContinuity, readHostStateSnapshot } from './host-state-continuity.mjs';
+import { canaryDnsName, hasCanaryAttempt } from './network-denial.mjs';
 import {
   baseEvidence,
   createCheckpoints,
   defaultCell,
-  defaultFaultHooks,
   detectUbuntuHost,
-  directorySnapshot,
   lastJournalPhase,
   parseToolVersions,
-  provisionFixtureHostState,
+  recoveryHostStateRoot,
   writeHostUpdateConfig,
   writeThrowawayEnv,
   writeValidatedEvidence,
@@ -42,12 +44,13 @@ const appStaticIp = required(args['app-ip'], '--app-ip');
 const egressSink = required(args['egress-sink'], '--egress-sink');
 const egressSinkIp = required(args['egress-sink-ip'], '--egress-sink-ip');
 const networkAttemptsPath = required(args['network-attempts'], '--network-attempts');
+const hostContainer = required(args['host-container'], '--host-container');
+const faultHooks = parseFaultHooks(toArray(args.fault));
 
 const startedAt = new Date();
 const checkpoints = createCheckpoints();
 const cell = { ...defaultCell };
-const faultHooks = { ...defaultFaultHooks };
-void faultHooks;
+const faultState = { injected: false };
 
 const run = {
   id: runRoot.split(/[\\/]/).at(-1),
@@ -85,6 +88,8 @@ try {
     approvedBy: 'recovery-matrix',
   });
   checkpoints.ok('trusted-root-created');
+  proveNetworkDenialBoundary({ hostContainer, networkAttemptsPath });
+  checkpoints.ok('network-denial-canary-proven');
 
   const protectedBackup = protectedBackupReference(prior);
   const protectedBackupPath = join(runRoot, 'protected-backup.json');
@@ -147,6 +152,7 @@ try {
   const toolsDir = join(runRoot, 'tools');
   mkdirSync(toolsDir, { recursive: true });
   prepareOfflineTools({ repo, toolsDir, cosign, run: commandRunner });
+  const boundaryCosign = join(toolsDir, 'cosign-linux-amd64');
 
   bundlePath = join(runRoot, `printfarmer-offline-bundle-v${target.version}.tar`);
   assembleFixtureBundle({
@@ -186,12 +192,10 @@ try {
     PRINTFARMER_IMAGE: priorImages.monolith.reference,
   });
   const configPath = join(deploymentRoot, 'host-update.json');
-  const hostStateRoot = process.env.HOME
-    ? join(process.env.HOME, '.cache', 'printfarmer-recovery-matrix', basename(runRoot), 'host-state')
-    : join(runRoot, 'host-state');
-  provisionFixtureHostState(hostStateRoot, { channel: 'insider'   });
+  const hostStateRoot = recoveryHostStateRoot(runRoot, { hostBoundary: true });
+  provisionBoundaryHostState(hostContainer, repo, hostStateRoot, { channel: 'insider' });
   const dockerShim = writeDockerShim(runRoot, deploymentRoot);
-  writeCompose(deploymentRoot, network, egressSinkIp, 'database', appStaticIp);
+  writeRecoveryCompose({ deploymentRoot, network, egressSinkIp, databaseHost: 'database', appIp: appStaticIp, runId: run.id });
   checkpoints.ok('deployment-root-prepared');
   execFileSync('/usr/bin/docker', [
     'compose',
@@ -212,7 +216,7 @@ try {
   waitForDatabaseReady(deploymentRoot, env);
   const databaseContainer = `${env.COMPOSE_PROJECT_NAME}-database-1`;
   const databaseHost = dockerContainerIp(databaseContainer);
-  writeCompose(deploymentRoot, network, egressSinkIp, databaseHost, appStaticIp);
+  writeRecoveryCompose({ deploymentRoot, network, egressSinkIp, databaseHost, appIp: appStaticIp, runId: run.id });
   const postgresTools = writePostgresToolShims(runRoot, databaseContainer);
   writeHostUpdateConfig(configPath, {
     rootDirectory: join(runRoot, 'host-update'),
@@ -227,6 +231,7 @@ try {
     pgDump: postgresTools.pgDump,
     pgRestore: postgresTools.pgRestore,
     healthBaseUrl: `http://${appStaticIp}:5000`,
+    createHostStateRoot: false,
   });
 
   const cli = installHostUpdateCli({
@@ -235,7 +240,8 @@ try {
     release: target,
     assetDir: targetRelease.assets,
     trustedRootPath,
-    cosign,
+    cosign: boundaryCosign,
+    hostContainer,
   });
   tools.cli = hostUpdateCliToolIdentity({ assets: targetRelease.assets, version: target.version });
   checkpoints.ok('cli-installed');
@@ -249,7 +255,7 @@ try {
     checkpointName: 'import-prior',
     cli,
     repo,
-    cosign,
+    cosign: boundaryCosign,
     instructionsPath: join(priorRelease.assets, 'offline-recovery-instructions.json'),
     operationId: 'offline-bundle-import',
     replacements: {
@@ -266,7 +272,7 @@ try {
     checkpointName: 'activate-prior',
     cli,
     repo,
-    cosign,
+    cosign: boundaryCosign,
     instructionsPath: join(priorRelease.assets, 'offline-recovery-instructions.json'),
     operationId: 'offline-activate',
     replacements: {
@@ -297,7 +303,7 @@ try {
     checkpointName: 'import-target',
     cli,
     repo,
-    cosign,
+    cosign: boundaryCosign,
     instructionsPath: join(targetRelease.assets, 'offline-recovery-instructions.json'),
     operationId: 'offline-bundle-import-with-prior',
     replacements: {
@@ -311,13 +317,14 @@ try {
       '<protected-backup.json>': protectedBackupPath,
     },
   });
+  runFaultHook('before-activate', { runRoot, deploymentRoot, stagingDir: targetStaging, bundlePath });
   const activationStarted = Date.now();
   const targetActivation = executePackagedStep({
     checkpointName: 'activate-target',
     autoOk: false,
     cli,
     repo,
-    cosign,
+    cosign: boundaryCosign,
     instructionsPath: join(targetRelease.assets, 'offline-recovery-instructions.json'),
     operationId: 'offline-activate',
     replacements: {
@@ -332,8 +339,10 @@ try {
   }
   const activationSeconds = Math.max(1, Math.round((Date.now() - activationStarted) / 1000));
   checkpoints.ok('activate-target');
+  runFaultHook('during-activate', { runRoot, deploymentRoot, stagingDir: targetStaging, bundlePath });
 
   const recoveryStarted = Date.now();
+  runFaultHook('before-recover', { runRoot, deploymentRoot, stagingDir: targetStaging, bundlePath });
   for (const [operationId, checkpointName] of [
     ['offline-recover-preview', 'recover-preview'],
     ['offline-recover-confirm', 'recover-confirm'],
@@ -342,7 +351,7 @@ try {
       checkpointName,
       cli,
       repo,
-      cosign,
+      cosign: boundaryCosign,
       instructionsPath: join(targetRelease.assets, 'offline-recovery-instructions.json'),
       operationId,
       replacements: {
@@ -361,7 +370,7 @@ try {
   checkpoints.ok(`migration-heads-continuous:${afterRecovery.migrationHeads.join(',') || 'empty'}`);
   assertEqualJson('volume-hashes-continuous', beforeRecovery.volumeHashes, afterRecovery.volumeHashes);
   checkpoints.ok('blob-config-key-volume-hashes-continuous');
-  assertEqualJson('protected-replay-history-continuous', beforeRecovery.hostState, afterRecovery.hostState);
+  assertHostStateContinuity(beforeRecovery.hostState, afterRecovery.hostState, { targetVersion: target.version });
   checkpoints.ok('protected-replay-history-continuous');
   const runningDigest = runningComposeImageDigest(env, 'printfarmer');
   if (runningDigest !== priorImages.monolith.indexDigest) {
@@ -386,7 +395,7 @@ try {
   run.finishedAt = new Date().toISOString();
   const journalPath = join(runRoot, 'host-update', 'state', 'journal.ndjson');
   const journalPhase = lastJournalPhase(journalPath);
-  checkpoints.skipped('fault-injected');
+  recordFaultCheckpoint();
   evidence = baseEvidence({
     run,
     host,
@@ -415,7 +424,7 @@ try {
 } catch (error) {
   run.finishedAt = new Date().toISOString();
   writeFileSync(join(runRoot, 'error.txt'), formatError(error), { mode: 0o600 });
-  checkpoints.skipped('fault-injected');
+  recordFaultCheckpoint();
   checkpoints.failed('e2e-complete');
   const failure = classifyFailure(error, join(runRoot, 'host-update', 'state', 'journal.ndjson'));
   evidence = baseEvidence({
@@ -459,17 +468,27 @@ function formatError(error) {
   return `${pieces.join('\n\n')}\n`;
 }
 
-function installHostUpdateCli({ repo, runRoot, release, assetDir, trustedRootPath, cosign }) {
-  const nativeRoot = process.env.HOME
+function installHostUpdateCli({ repo, runRoot, release, assetDir, trustedRootPath, cosign, hostContainer }) {
+  const nativeRoot = hostContainer
+    ? `/root/.cache/printfarmer-recovery-matrix/${basename(runRoot)}`
+    : process.env.HOME
     ? join(process.env.HOME, '.cache', 'printfarmer-recovery-matrix', basename(runRoot))
     : join(runRoot, 'native-cache');
   const installRoot = join(nativeRoot, 'installed-cli');
   const installerWork = join(nativeRoot, 'installer-work');
-  mkdirSync(installRoot, { recursive: true, mode: 0o755 });
-  mkdirSync(installerWork, { recursive: true, mode: 0o700 });
-  chmodSync(installRoot, 0o755);
-  chmodSync(installerWork, 0o700);
-  const output = execFileSync('bash', [
+  if (hostContainer) {
+    hostExecFileSync(hostContainer, ['bash', '-lc', `mkdir -p "${installRoot}" "${installerWork}" && chmod 0755 "${installRoot}" && chmod 0700 "${installerWork}"`], {
+      cwd: repo,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  } else {
+    mkdirSync(installRoot, { recursive: true, mode: 0o755 });
+    mkdirSync(installerWork, { recursive: true, mode: 0o700 });
+    chmodSync(installRoot, 0o755);
+    chmodSync(installerWork, 0o700);
+  }
+  const output = hostExecFileSync(hostContainer, [
+    'bash',
     join(repo, 'scripts/install-host-update-cli.sh'),
     'install',
     '--version', release.version,
@@ -479,15 +498,24 @@ function installHostUpdateCli({ repo, runRoot, release, assetDir, trustedRootPat
     '--trusted-root', trustedRootPath,
   ], {
     cwd: repo,
-    encoding: 'utf8',
     env: {
-      ...process.env,
-      PATH: `${dirname(cosign)}:${process.env.PATH ?? ''}`,
+      PATH: containerPath(dirname(cosign)),
       TMPDIR: installerWork,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   return output.trim().split(/\r?\n/).at(-1);
+}
+
+function provisionBoundaryHostState(container, repo, rootPath, { channel }) {
+  const script = [
+    "import { provisionFixtureHostState } from './scripts/ci/recovery-matrix/cell-runtime.mjs';",
+    `provisionFixtureHostState(${JSON.stringify(rootPath)}, { channel: ${JSON.stringify(channel)} });`,
+  ].join('\n');
+  hostExecFileSync(container, ['node', '--input-type=module', '-e', script], {
+    cwd: repo,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
 }
 
 function runPackagedOperation({ cli, repo, cosign, instructionsPath, operationId, replacements, allowedExitCodes = [0] }) {
@@ -498,13 +526,10 @@ function runPackagedOperation({ cli, repo, cosign, instructionsPath, operationId
     const value = replacements[argument] ?? argument;
     return index === 0 ? cli : value;
   });
-  const result = spawnSync(argv[0], argv.slice(1), {
+  const result = hostSpawnSync(hostContainer, argv, {
     cwd: dirname(cli),
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'pipe'],
     env: {
-      ...process.env,
-      PATH: `${dirname(cosign)}:${process.env.PATH ?? ''}`,
+      PATH: containerPath(dirname(cosign)),
       PRINTFARMER_OFFLINE_BUNDLE_TOOL: join(repo, 'scripts/ci/offline-update-bundle.mjs'),
     },
   });
@@ -519,8 +544,34 @@ function runPackagedOperation({ cli, repo, cosign, instructionsPath, operationId
     error.operationId = operationId;
     throw error;
   }
-
   return { exitCode: status, stdout: result.stdout ?? '', stderr: result.stderr ?? '' };
+}
+
+function containerPath(prefix) {
+  return `${prefix}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`;
+}
+
+function hostExecFileSync(container, argv, { cwd, env = {}, stdio = ['ignore', 'pipe', 'pipe'] } = {}) {
+  return execFileSync('/usr/bin/docker', [
+    'exec',
+    '-w', cwd ?? '/',
+    ...Object.entries(env).flatMap(([key, value]) => ['-e', `${key}=${value}`]),
+    container,
+    ...argv,
+  ], { encoding: 'utf8', stdio });
+}
+
+function hostSpawnSync(container, argv, { cwd, env = {} } = {}) {
+  return spawnSync('/usr/bin/docker', [
+    'exec',
+    '-w', cwd ?? '/',
+    ...Object.entries(env).flatMap(([key, value]) => ['-e', `${key}=${value}`]),
+    container,
+    ...argv,
+  ], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
 }
 
 function executePackagedStep({ checkpointName, autoOk = true, ...operation }) {
@@ -539,9 +590,69 @@ function executePackagedStep({ checkpointName, autoOk = true, ...operation }) {
 
 function evidenceBundleSha256(path) {
   if (!path || !existsSync(path)) {
-    throw new Error('target_offline_bundle_not_assembled');
+    return null;
   }
   return sha256LargeFile(path);
+}
+
+function runFaultHook(point, context) {
+  if (!hasFaultHooks(faultHooks) || !faultHooks[point]) {
+    return;
+  }
+  try {
+    invokeFaultHook({
+      hooks: faultHooks,
+      point,
+      context: { ...context, hook: point },
+      run: (command, { env = {} } = {}) => hostExecFileSync(hostContainer, ['bash', '-lc', command], {
+        cwd: repo,
+        env,
+        stdio: ['ignore', 'inherit', 'pipe'],
+      }),
+    });
+    faultState.injected = true;
+  } catch (error) {
+    error.reason = `fault_hook_failed:${point}`;
+    throw error;
+  }
+}
+
+function recordFaultCheckpoint() {
+  if (faultState.injected) {
+    checkpoints.ok('fault-injected');
+  } else {
+    checkpoints.skipped('fault-injected');
+  }
+}
+
+function proveNetworkDenialBoundary({ hostContainer, networkAttemptsPath }) {
+  writeFileSync(networkAttemptsPath, '');
+  const result = hostSpawnSync(hostContainer, [
+    'bash',
+    '-lc',
+    [
+      'set +e',
+      "timeout 3 bash -lc 'cat </dev/null >/dev/tcp/1.1.1.1/443' >/dev/null 2>&1",
+      'direct=$?',
+      `getent hosts ${canaryDnsName} >/dev/null 2>&1`,
+      'dns=$?',
+      'test "$direct" -ne 0',
+      'test "$dns" -ne 0',
+    ].join('\n'),
+  ], { cwd: repo });
+  if (result.status !== 0) {
+    throw new Error(`network_denial_canary_failed:exit=${result.status}:stdout=${result.stdout}:stderr=${result.stderr}`);
+  }
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline) {
+    const attempts = readNetworkAttempts(networkAttemptsPath);
+    if (hasCanaryAttempt(attempts)) {
+      writeFileSync(networkAttemptsPath, '');
+      return;
+    }
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
+  }
+  throw new Error('network_denial_canary_not_recorded');
 }
 
 function cellFailure(reason, { actual = 'RecoveryRequired', exitCode = 1, journalPhase } = {}) {
@@ -561,6 +672,7 @@ function classifyFailure(error, journalPath) {
   const reason =
     error?.reason ??
     code ??
+    matchJsonStringValue(combined, 'reason') ??
     matchLineValue(combined, 'reason') ??
     matchLineValue(combined, 'detail') ??
     (error?.operationId ? `${error.operationId}_failed` : undefined) ??
@@ -572,10 +684,21 @@ function classifyFailure(error, journalPath) {
   const actual = normalizeOutcome(error?.actual ?? outcome ?? state ?? (decision === 'refused' || code ? 'Refused' : 'RecoveryRequired'));
   return {
     actual,
-    reason: String(step ? `${step}:${reason}` : reason).slice(0, 80),
+    reason: String(step ? `${step}:${reason}` : reason).slice(0, 200),
     exitCode: Number.isInteger(error?.exitCode) ? error.exitCode : 1,
     journalPhase: error?.journalPhase ?? safeJournalPhase(journalPath),
   };
+}
+
+function matchJsonStringValue(text, key) {
+  const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = new RegExp(`"${escapedKey}"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)"`, 'u').exec(text);
+  if (!match) return null;
+  try {
+    return JSON.parse(`"${match[1]}"`);
+  } catch {
+    return match[1];
+  }
 }
 
 function matchLineValue(text, key) {
@@ -603,9 +726,19 @@ function parseArgs(argv) {
     if (!key?.startsWith('--') || argv[index + 1] === undefined) {
       throw new Error(`Invalid argument at ${index}: ${key}`);
     }
-    parsed[key.slice(2)] = argv[index + 1];
+    const name = key.slice(2);
+    if (name === 'fault') {
+      parsed.fault = [...toArray(parsed.fault), argv[index + 1]];
+    } else {
+      parsed[name] = argv[index + 1];
+    }
   }
   return parsed;
+}
+
+function toArray(value) {
+  if (value === undefined) return [];
+  return Array.isArray(value) ? value : [value];
 }
 
 function required(value, name) {
@@ -643,6 +776,7 @@ function prepareOfflineTools({ repo, toolsDir, cosign, run }) {
     const output = join(toolsDir, artifact.name);
     if (artifact.name === 'cosign-linux-amd64') {
       cpSync(cosign, output);
+      cpSync(cosign, join(toolsDir, 'cosign'));
     } else {
       run('curl', ['-fsSL', artifact.url, '-o', output], { stdio: ['ignore', 'inherit', 'pipe'] });
     }
@@ -665,74 +799,10 @@ function readNetworkAttempts(path) {
         at: attempt.at,
         destination: attempt.destination,
         protocol: attempt.protocol,
+        ...(attempt.source ? { source: attempt.source } : {}),
+        ...(attempt.query ? { query: attempt.query } : {}),
       };
     });
-}
-
-function writeCompose(deploymentRoot, network, egressSinkIp, databaseHost = 'database', appIp = undefined) {
-  const compose = {
-    name: '${COMPOSE_PROJECT_NAME}',
-    services: {
-      database: {
-        image: '${POSTGRES_IMAGE:-postgres:16-alpine}',
-        environment: {
-          POSTGRES_DB: '${POSTGRES_DB}',
-          POSTGRES_USER: '${POSTGRES_USER}',
-          POSTGRES_PASSWORD: '${POSTGRES_PASSWORD}',
-        },
-        ports: ['127.0.0.1:${POSTGRES_PORT}:5432'],
-        networks: appIp ? { [network]: { ipv4_address: appIp } } : [network],
-        volumes: ['postgres-data:/var/lib/postgresql/data'],
-      },
-      printfarmer: {
-        image: '${PRINTFARMER_IMAGE}',
-        depends_on: { database: { condition: 'service_started' } },
-        dns: [egressSinkIp],
-        ports: ['127.0.0.1:${PRINTFARMER_PORT:-5245}:5000'],
-        environment: [
-          'DEPLOYMENT_MODE=monolith',
-          'DB_PROVIDER=Postgres',
-          `ConnectionStrings__Default=Host=${databaseHost};Port=5432;Database=\${POSTGRES_DB};Username=\${POSTGRES_USER};Password=\${POSTGRES_PASSWORD}`,
-          'ASPNETCORE_ENVIRONMENT=${ASPNETCORE_ENVIRONMENT}',
-          'ASPNETCORE_URLS=http://+:5000',
-          'Jwt__Key=${Jwt__Key}',
-          'Jwt__Issuer=${Jwt__Issuer}',
-          'Jwt__Audience=${Jwt__Audience}',
-          'WorkerAuth__SharedKey=${WORKER_SHARED_API_KEY}',
-          'SlicerPromotion__SharedKey=${PROMOTION_SHARED_API_KEY}',
-          'DiscoveryAuth__SharedKey=${DISCOVERY_SHARED_API_KEY}',
-          'HostUpdates__VerifiedReleaseDiscovery__Enabled=false',
-          'WebAuthn__RelyingPartyId=${WebAuthn__RelyingPartyId}',
-          'WebAuthn__RelyingPartyName=${WebAuthn__RelyingPartyName}',
-          'WebAuthn__Origin=${WebAuthn__Origin}',
-          'GCODE_STORAGE_PATH=/app/gcode',
-          'MODEL_UPLOAD_PATH=/app/models',
-          'SLICER_PROFILES_PATH=/app/profiles',
-          'DATAPROTECTION_KEYS_PATH=/app/data-protection-keys',
-        ],
-        networks: [network],
-        volumes: [
-          'app-data:/data',
-          'models:/app/models',
-          'gcode:/app/gcode',
-          'profiles:/app/profiles',
-          'keys:/app/data-protection-keys',
-        ],
-      },
-    },
-    networks: {
-      [network]: { external: true },
-    },
-    volumes: {
-      'postgres-data': {},
-      'app-data': {},
-      models: {},
-      gcode: {},
-      profiles: {},
-      keys: {},
-    },
-  };
-  writeFileSync(join(deploymentRoot, 'docker-compose.recovery.yml'), `${JSON.stringify(compose, undefined, 2)}\n`);
 }
 
 function waitForDatabaseReady(deploymentRoot, env) {
@@ -856,7 +926,7 @@ function stateContinuitySnapshot({ env, deploymentRoot, hostStateRoot }) {
   return {
     migrationHeads,
     volumeHashes,
-    hostState: directorySnapshot({ hostState: hostStateRoot }),
+    hostState: readHostStateSnapshot(hostStateRoot),
   };
 }
 

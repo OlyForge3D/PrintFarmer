@@ -26,10 +26,11 @@ def dns_query_name(payload):
     return None
 
 
-def record(path, protocol, destination, **extra):
+def record(path, protocol, destination, source, **extra):
     payload = {
         "at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "destination": destination,
+        "source": source,
         "protocol": protocol,
     }
     payload.update({key: value for key, value in extra.items() if value is not None})
@@ -52,7 +53,7 @@ def tcp_listener(path, port):
                 query = dns_query_name(payload[2:] if len(payload) > 2 else payload)
             except OSError:
                 query = None
-        record(path, f"tcp/{port}", f"{address[0]}:{address[1]}", query=query)
+        record(path, f"tcp/{port}", query or f"tcp-listener:{port}", f"{address[0]}:{address[1]}", query=query)
         try:
             connection.close()
         except OSError:
@@ -65,7 +66,8 @@ def udp_listener(path, port):
     server.bind(("0.0.0.0", port))
     while True:
         payload, address = server.recvfrom(4096)
-        record(path, f"udp/{port}", f"{address[0]}:{address[1]}", query=dns_query_name(payload))
+        query = dns_query_name(payload)
+        record(path, f"udp/{port}", query or f"udp-listener:{port}", f"{address[0]}:{address[1]}", query=query)
 
 
 def main():

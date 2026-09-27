@@ -158,10 +158,10 @@ const shape = {
     source: identityShape,
     target: identityShape,
     prior: identityShape,
-    bundleSha256: 'sha256',
+    bundleSha256: 'nullableSha256',
     signingRoot: 'string',
-    signingRootFingerprint: 'sha256',
-    schemaDelta: 'string',
+    signingRootFingerprint: 'optionalSha256',
+    schemaDelta: 'optionalString',
   },
   tools: toolsShape,
   networkDenial: networkDenialShape,
@@ -227,6 +227,21 @@ function checkScalar(kind, value, path, errors) {
         fail('64-character lowercase SHA-256');
       }
       break;
+    case 'nullableSha256':
+      if (value !== null && (typeof value !== 'string' || !/^[0-9a-f]{64}$/.test(value))) {
+        fail('64-character lowercase SHA-256 or null');
+      }
+      break;
+    case 'optionalSha256':
+      if (value !== undefined && (typeof value !== 'string' || !/^[0-9a-f]{64}$/.test(value))) {
+        fail('64-character lowercase SHA-256 when present');
+      }
+      break;
+    case 'optionalString':
+      if (value !== undefined && (typeof value !== 'string' || value.length === 0)) {
+        fail('non-empty string when present');
+      }
+      break;
     case 'nonNegativeInteger':
       if (!Number.isInteger(value) || value < 0) fail('non-negative integer');
       break;
@@ -251,14 +266,15 @@ function checkScalar(kind, value, path, errors) {
         fail('array');
         break;
       }
-      value.forEach((attempt, index) =>
+      value.forEach((attempt, index) => {
+        const itemPath = `${path}[${index}]`;
         checkShape(
-          { at: 'timestamp', destination: 'string', protocol: 'string' },
+          { at: 'timestamp', destination: 'string', protocol: 'string', source: 'optionalString', query: 'optionalString' },
           attempt,
-          `${path}[${index}]`,
+          itemPath,
           errors,
-        ),
-      );
+        );
+      });
       break;
     case 'checkpoints':
       if (!Array.isArray(value) || value.length === 0) {
@@ -296,6 +312,9 @@ function checkShape(expected, value, path, errors) {
   for (const [key, kind] of Object.entries(expected)) {
     const childPath = path ? `${path}.${key}` : key;
     if (!Object.hasOwn(value, key)) {
+      if (kind === 'optionalSha256' || kind === 'optionalString') {
+        continue;
+      }
       errors.push(`${childPath}: missing field`);
       continue;
     }
@@ -439,13 +458,31 @@ export function validateRecoveryEvidence(record) {
     checkEnum(cell.workers, workerModes, 'cell.workers', errors);
   }
 
-  if (isPlainObject(identities) && identities.signingRoot !== cellSigningRoot) {
-    errors.push(`identities.signingRoot: matrix cells must use the ${cellSigningRoot} root`);
-  }
   if (isPlainObject(identities)) {
-    checkEnum(identities.schemaDelta, schemaDeltas, 'identities.schemaDelta', errors);
+    if (![cellSigningRoot, 'fixture'].includes(identities.signingRoot)) {
+      errors.push(`identities.signingRoot: matrix cells must use the ${cellSigningRoot} root`);
+    }
+    if (identities.signingRoot === cellSigningRoot) {
+      if (typeof identities.signingRootFingerprint !== 'string') {
+        errors.push('identities.signingRootFingerprint: missing field');
+      }
+      if (typeof identities.schemaDelta !== 'string') {
+        errors.push('identities.schemaDelta: missing field');
+      } else {
+        checkEnum(identities.schemaDelta, schemaDeltas, 'identities.schemaDelta', errors);
+      }
+    } else if (identities.schemaDelta !== undefined) {
+      checkEnum(identities.schemaDelta, schemaDeltas, 'identities.schemaDelta', errors);
+    }
     if (identities.bundleSha256 === '0'.repeat(64)) {
       errors.push('identities.bundleSha256: must be the real target bundle SHA-256, not a placeholder');
+    }
+    if (
+      identities.bundleSha256 === null &&
+      (record.verdict !== 'fail' ||
+        (Array.isArray(checkpoints) && checkpoints.some((checkpoint) => checkpoint?.name === 'offline-bundle-assembled' && checkpoint?.result === 'ok')))
+    ) {
+      errors.push('identities.bundleSha256: null is allowed only for a failed run before target bundle assembly');
     }
     if (
       isPlainObject(identities.source) &&
