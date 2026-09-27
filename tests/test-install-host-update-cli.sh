@@ -290,6 +290,104 @@ check "deploy hook fails the deployment when install fails" \
     "[[ \$(HOOK_INSTALL_RC=1 run_hook false $STABLE) == 1 ]] && [[ \$(wc -l <'$HOOK_LOG') -eq 1 ]]"
 check "deploy hook fails the deployment when write-config fails" "[[ \$(HOOK_WRITE_RC=1 run_hook false $STABLE) == 1 ]]"
 
+# Issue #3118: the daemon unit is opt-in and installed only after the config is written.
+CLI_DIR="/opt/printfarmer/host-update-cli/$STABLE"
+check "deploy hook does not install the daemon unit unless asked" \
+    "[[ \$(run_hook false $STABLE) == 0 ]] && ! grep -q install-service '$HOOK_LOG'"
+check "deploy hook installs the daemon unit after write-config when asked" \
+    "[[ \$(HOST_UPDATE_DAEMON_SERVICE=true run_hook false $STABLE) == 0 ]] && tail -n 1 '$HOOK_LOG' | grep -qx -- 'install-service --cli-dir $CLI_DIR'"
+check "deploy hook passes the daemon account" \
+    "[[ \$(HOST_UPDATE_DAEMON_SERVICE=true HOST_UPDATE_DAEMON_USER=pfhost run_hook false $STABLE) == 0 ]] && tail -n 1 '$HOOK_LOG' | grep -qx -- 'install-service --cli-dir $CLI_DIR --service-user pfhost'"
+check "deploy hook never enables the daemon unit" \
+    "[[ \$(HOST_UPDATE_DAEMON_SERVICE=true run_hook false $STABLE) == 0 ]] && ! grep -q -- '--enable' '$HOOK_LOG'"
+check "deploy hook dry run describes the daemon unit without installing it" \
+    "[[ \$(HOST_UPDATE_DAEMON_SERVICE=true run_hook true $STABLE) == 0 && ! -s '$HOOK_LOG' ]] && grep -q 'daemon unit' '$TEST_ROOT/hook.out'"
+check "deploy hook refuses the daemon unit without a CLI version" \
+    "[[ \$(HOST_UPDATE_DAEMON_SERVICE=true run_hook false '') == 1 && ! -s '$HOOK_LOG' ]]"
+check "deploy hook fails when the daemon unit needs a config that was not written" \
+    "[[ \$(HOST_UPDATE_DAEMON_SERVICE=true HOOK_WRITE_RC=3 run_hook false $STABLE) == 1 ]] && ! grep -q install-service '$HOOK_LOG'"
+check "deploy hook fails the deployment when the daemon unit cannot be installed" \
+    "[[ \$(HOST_UPDATE_DAEMON_SERVICE=true HOOK_INSTALL_RC=1 run_hook false $STABLE) == 1 ]]"
+
+# install-service / uninstall-service against a recording systemctl stub and a scratch unit dir.
+service() {
+    local status=0
+    "$INSTALLER" "$@" >"$TEST_ROOT/out.log" 2>&1 || status=$?
+    echo "$status"
+}
+check "install-service without --cli-dir is a usage error" "[[ \$(service install-service) == 2 ]]"
+check "install-service with a relative --cli-dir is a usage error" "[[ \$(service install-service --cli-dir cli) == 2 ]]"
+if [[ "$(uname -s)" == "Linux" ]]; then
+    cat >"$BIN/systemctl" <<'STUB'
+#!/bin/sh
+printf '%s\n' "$*" >>"$SYSTEMCTL_LOG"
+exit "${SYSTEMCTL_RC:-0}"
+STUB
+    chmod +x "$BIN/systemctl"
+    export SYSTEMCTL_LOG="$TEST_ROOT/systemctl.log"
+    SVC_CLI="$TEST_ROOT/svc/cli-root/$STABLE"
+    mkdir -p "$SVC_CLI/cli" "$TEST_ROOT/svc/units" "$TEST_ROOT/svc/state"
+    chmod 0755 "$TEST_ROOT/svc" "$TEST_ROOT/svc/cli-root" "$SVC_CLI" "$SVC_CLI/cli"
+    printf '#!/bin/sh\nexit 0\n' >"$SVC_CLI/cli/Farm.HostUpdate.Cli"
+    chmod 0755 "$SVC_CLI/cli/Farm.HostUpdate.Cli"
+    printf '{\n  "package": "printfarmer-host-update-cli",\n  "rolloutAuthorization": false\n}\n' >"$SVC_CLI/host-update-cli-package.json"
+    SVC_CONFIG="$TEST_ROOT/svc/host-update.json"
+    printf '{"HostUpdateExecution":{"RootDirectory":"%s"}}\n' "$TEST_ROOT/svc/state" >"$SVC_CONFIG"
+    chmod 0600 "$SVC_CONFIG"
+    UNITS="$TEST_ROOT/svc/units"
+    UNIT="$UNITS/printfarmer-host-update-daemon.service"
+    ME="$(id -un)"
+    svc_install() { : >"$SYSTEMCTL_LOG"; service install-service --cli-dir "$SVC_CLI" --config "$SVC_CONFIG" --unit-dir "$UNITS" "$@"; }
+
+    if [[ "$(id -u)" == "0" ]]; then
+        check "a root-owned config is refused unless root is named explicitly" \
+            "[[ \$(svc_install) == 1 && ! -e '$UNIT' ]] && grep -q 'would run as root' '$TEST_ROOT/out.log'"
+    else
+        check "the unit runs as the config owner by default" \
+            "[[ \$(svc_install) == 0 ]] && grep -qx 'User=$ME' '$UNIT'"
+        rm -f "$UNIT"
+    fi
+    check "install-service writes the unit" "[[ \$(svc_install --service-user '$ME') == 0 && -f '$UNIT' ]]"
+    check "the unit is not enabled or started by default" \
+        "! grep -qE '^(enable|start)' '$SYSTEMCTL_LOG' && grep -qx 'daemon-reload' '$SYSTEMCTL_LOG'"
+    check "the unit runs the daemon from the installed CLI with the config" \
+        "grep -qx 'ExecStart=$SVC_CLI/cli/Farm.HostUpdate.Cli --config $SVC_CONFIG daemon' '$UNIT'"
+    check "the unit carries no environment or credential" "! grep -qiE '^(Environment|EnvironmentFile|LoadCredential|SetCredential)' '$UNIT'"
+    check "the unit is hardened" \
+        "grep -qx 'NoNewPrivileges=yes' '$UNIT' && grep -qx 'CapabilityBoundingSet=' '$UNIT' && grep -qx 'RestartPreventExitStatus=2 3 7' '$UNIT'"
+    check "the unit is mode 0644" "[[ \$(mode '$UNIT') == 644 ]]"
+    cp "$UNIT" "$TEST_ROOT/unit.before"
+    check "a rerun is idempotent and does not reload" \
+        "[[ \$(svc_install --service-user '$ME') == 0 ]] && cmp -s '$UNIT' '$TEST_ROOT/unit.before' && ! grep -q . '$SYSTEMCTL_LOG'"
+    check "--enable enables and starts the unit" \
+        "[[ \$(svc_install --service-user '$ME' --enable) == 0 ]] && grep -qx 'enable --now printfarmer-host-update-daemon.service' '$SYSTEMCTL_LOG'"
+    check "an unknown service account is refused" "[[ \$(svc_install --service-user pf-no-such-user) == 1 ]]"
+    check "a service account that does not own the config is refused" \
+        "[[ \$(svc_install --service-user nobody) == 1 ]] && grep -q 'must be owned by the service account' '$TEST_ROOT/out.log'"
+    chmod 0640 "$SVC_CONFIG"
+    check "a group-readable config is refused" "[[ \$(svc_install --service-user '$ME') == 1 ]]"
+    chmod 0600 "$SVC_CONFIG"
+    chmod 0775 "$SVC_CLI/cli"
+    check "a group-writable CLI is refused" "[[ \$(svc_install --service-user '$ME') == 1 ]]"
+    chmod 0755 "$SVC_CLI/cli"
+    check "a CLI directory without the package manifest is refused" \
+        "[[ \$(service install-service --cli-dir '$TEST_ROOT/svc/cli-root' --config '$SVC_CONFIG' --unit-dir '$UNITS' --service-user '$ME') == 1 ]]"
+
+    : >"$SYSTEMCTL_LOG"
+    check "uninstall-service stops, disables and removes the unit and keeps the config" \
+        "[[ \$(service uninstall-service --unit-dir '$UNITS') == 0 && ! -e '$UNIT' && -f '$SVC_CONFIG' && -d '$TEST_ROOT/svc/state' ]] && grep -qx 'disable --now printfarmer-host-update-daemon.service' '$SYSTEMCTL_LOG'"
+    check "uninstall-service is a no-op when the unit is absent" "[[ \$(service uninstall-service --unit-dir '$UNITS') == 0 ]]"
+    printf '[Unit]\nDescription=someone else\n' >"$UNIT"
+    check "install-service refuses to replace a unit it did not write" \
+        "[[ \$(svc_install --service-user '$ME') == 1 ]] && grep -qx 'Description=someone else' '$UNIT'"
+    check "uninstall-service refuses to remove a unit it did not write" \
+        "[[ \$(service uninstall-service --unit-dir '$UNITS') == 1 && -f '$UNIT' ]]"
+    rm -f "$BIN/systemctl"
+else
+    check "install-service is refused off Linux" \
+        "[[ \$(service install-service --cli-dir /opt/x --config /etc/x.json --unit-dir '$TEST_ROOT') == 1 ]]"
+fi
+
 if [[ $failures -gt 0 ]]; then
     printf '%d host-update CLI installer test(s) failed\n' "$failures" >&2
     exit 1

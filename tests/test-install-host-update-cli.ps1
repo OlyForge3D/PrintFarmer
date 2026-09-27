@@ -16,6 +16,7 @@ New-Item -ItemType Directory -Path $testRoot | Out-Null
 $savedPath = $env:PATH
 
 $script:failures = 0
+$script:registeredService = $false
 function Pass([string] $Name) { Write-Host "[PASS] $Name" }
 function Fail([string] $Name) { Write-Host "[FAIL] $Name"; $script:failures++ }
 function Check([string] $Name, [bool] $Condition) { if ($Condition) { Pass $Name } else { Fail $Name } }
@@ -316,25 +317,86 @@ exit 0
             $result.Output.Contains('non-link directory'))
     }
 
+    # install-service / uninstall-service (issue #3118): opt-in Windows service, never enabled by default.
+    Check 'install-service without -CliDir is a usage error' ((Invoke-Installer @('install-service')).ExitCode -eq 2)
+    Check 'install-service with a relative -CliDir is a usage error' ((Invoke-Installer @('install-service', '-CliDir', 'rel')).ExitCode -eq 2)
+    Check 'install-service with a repeated -Enable is a usage error' (
+        (Invoke-Installer @('install-service', '-CliDir', (Join-Path $root '1.2.3'), '-Enable', '-Enable')).ExitCode -eq 2)
+    Check 'install-service with a relative -Config is a usage error' (
+        (Invoke-Installer @('install-service', '-CliDir', (Join-Path $root '1.2.3'), '-Config', 'rel.json')).ExitCode -eq 2)
+    Check 'uninstall-service rejects unknown options' ((Invoke-Installer @('uninstall-service', '-Foo', 'x')).ExitCode -eq 2)
+    $isAdmin = $IsWindows -and ([System.Security.Principal.WindowsPrincipal] [System.Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
+        [System.Security.Principal.WindowsBuiltInRole]::Administrator)
+    if (-not $IsWindows) {
+        $result = Invoke-Installer @('install-service', '-CliDir', (Join-Path $root '1.2.3'))
+        Check 'install-service on a non-Windows host points to the shell installer' ($result.ExitCode -eq 1 -and
+            $result.Output.Contains('install-host-update-cli.sh'))
+        Check 'uninstall-service on a non-Windows host is refused' ((Invoke-Installer @('uninstall-service')).ExitCode -eq 1)
+    } elseif (-not $isAdmin) {
+        $result = Invoke-Installer @('install-service', '-CliDir', (Join-Path $root '1.2.3'))
+        Check 'install-service requires an elevated session' ($result.ExitCode -eq 1 -and $result.Output.Contains('elevated'))
+        Write-Host '[SKIP] Windows service registration cases need an elevated session'
+    } elseif (Get-CimInstance -ClassName Win32_Service -Filter "Name='PrintFarmerHostUpdateDaemon'") {
+        Write-Host '[SKIP] Windows service registration cases: PrintFarmerHostUpdateDaemon already exists on this host'
+    } else {
+        $script:registeredService = $true
+        [System.IO.File]::WriteAllText($envFile, "HostUpdateExecution__RootDirectory=$stateRoot`n")
+        Check 'write-config for the service succeeds' ((Invoke-Installer @('write-config', '-EnvFile', $envFile, '-Output', $config)).ExitCode -eq 0)
+        $cliDir = Join-Path $root '1.2.3'
+        $result = Invoke-Installer @('install-service', '-CliDir', $cliDir, '-Config', $config)
+        $service = Get-CimInstance -ClassName Win32_Service -Filter "Name='PrintFarmerHostUpdateDaemon'"
+        Check 'install-service registers the service' ($result.ExitCode -eq 0 -and $null -ne $service)
+        Check 'the service is installed disabled and stopped' ($service -and $service.StartMode -eq 'Disabled' -and $service.State -eq 'Stopped')
+        Check 'the service runs as its virtual account' ($service -and $service.StartName -eq 'NT SERVICE\PrintFarmerHostUpdateDaemon')
+        Check 'the service runs the installed daemon' ($service -and $service.PathName.Contains((Join-Path $cliDir 'cli\Farm.HostUpdate.Cli.exe')) -and
+            $service.PathName.Contains("--config `"$config`" daemon --windows-service"))
+        Check 'the service carries no environment' ($null -eq (Get-ItemProperty -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Services\PrintFarmerHostUpdateDaemon' -Name Environment -ErrorAction SilentlyContinue))
+        $serviceSid = ((& sc.exe showsid PrintFarmerHostUpdateDaemon | Out-String) -split '\s+' | Where-Object { $_ -like 'S-1-5-80-*' } | Select-Object -First 1)
+        function Get-SidRules([string] $Path) {
+            @((Get-Acl -LiteralPath $Path).GetAccessRules($true, $false, [System.Security.Principal.SecurityIdentifier]) |
+                Where-Object { $_.IdentityReference.Value -eq $serviceSid })
+        }
+        Check 'the service account may read the config' ($serviceSid -and (Get-SidRules $config).Count -gt 0)
+        Check 'the daemon state directory exists' (Test-Path -LiteralPath (Join-Path $stateRoot 'state') -PathType Container)
+        $result = Invoke-Installer @('install-service', '-CliDir', $cliDir, '-Config', $config)
+        $service = Get-CimInstance -ClassName Win32_Service -Filter "Name='PrintFarmerHostUpdateDaemon'"
+        Check 'install-service is idempotent and keeps the service disabled' ($result.ExitCode -eq 0 -and $service.StartMode -eq 'Disabled')
+        $result = Invoke-Installer @('uninstall-service')
+        Check 'uninstall-service removes the service and keeps the config' ($result.ExitCode -eq 0 -and
+            $null -eq (Get-CimInstance -ClassName Win32_Service -Filter "Name='PrintFarmerHostUpdateDaemon'") -and
+            (Test-Path -LiteralPath $config -PathType Leaf))
+        Check 'uninstall-service removes the service account ACEs' ((Get-SidRules $config).Count -eq 0 -and
+            (Get-SidRules (Join-Path $stateRoot 'state')).Count -eq 0)
+        Check 'uninstall-service without a service is a no-op' ((Invoke-Installer @('uninstall-service')).ExitCode -eq 0)
+        & sc.exe create PrintFarmerHostUpdateDaemon binPath= "$env:SystemRoot\System32\svchost.exe" start= disabled *> $null
+        $result = Invoke-Installer @('uninstall-service')
+        Check 'uninstall-service refuses a service it did not install' ($result.ExitCode -eq 1 -and
+            $null -ne (Get-CimInstance -ClassName Win32_Service -Filter "Name='PrintFarmerHostUpdateDaemon'"))
+        Check 'install-service refuses a service it did not install' ((Invoke-Installer @('install-service', '-CliDir', $cliDir, '-Config', $config)).ExitCode -eq 1)
+        & sc.exe delete PrintFarmerHostUpdateDaemon *> $null
+    }
+
     # deploy-docker.ps1 opt-in hook: run the real function against a recording stub installer.
     $hookDir = Join-Path $testRoot 'hook'
     New-Item -ItemType Directory -Path $hookDir | Out-Null
     Set-Content -LiteralPath (Join-Path $hookDir 'install-host-update-cli.ps1') -Value @'
 Add-Content -LiteralPath $env:HOOK_LOG -Value ($args -join ' ')
 if ($args[0] -eq 'write-config') { exit [int]$env:HOOK_WRITE_RC }
+if ($args[0] -eq 'install-service') { exit [int]$env:HOOK_SERVICE_RC }
 exit [int]$env:HOOK_INSTALL_RC
 '@
     $deployAst = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $repoRoot 'scripts/deploy-docker.ps1'), [ref]$null, [ref]$null)
     $hookFn = $deployAst.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -ceq 'Install-HostUpdateCliIfRequested' }, $true).Extent.Text
     Set-Content -LiteralPath (Join-Path $hookDir 'run.ps1') -Value (@(
             'function Write-Info([string]$m) { Write-Host $m }; function Write-Success([string]$m) { Write-Host $m }; function Write-ErrorMsg([string]$m) { Write-Host "ERR $m" }',
-            '$HostUpdateCliVersion = $env:HOOK_VERSION; $HostUpdateCliAssets = $env:HOOK_ASSETS',
+            '$HostUpdateCliVersion = $env:HOOK_VERSION; $HostUpdateCliAssets = $env:HOOK_ASSETS; $InstallHostUpdateDaemon = $env:HOOK_DAEMON -eq ''true''',
             $hookFn,
             "Set-Location -LiteralPath '$hookDir'; Install-HostUpdateCliIfRequested; exit 0") -join "`n")
     $env:HOOK_LOG = Join-Path $hookDir 'log'
-    function Invoke-Hook([string]$Version, [string]$Assets = '', [int]$InstallRc = 0, [int]$WriteRc = 0) {
+    function Invoke-Hook([string]$Version, [string]$Assets = '', [int]$InstallRc = 0, [int]$WriteRc = 0, [string]$Daemon = '', [int]$ServiceRc = 0) {
         Remove-Item -LiteralPath $env:HOOK_LOG -ErrorAction SilentlyContinue
-        $env:HOOK_VERSION = $Version; $env:HOOK_ASSETS = $Assets; $env:HOOK_INSTALL_RC = $InstallRc; $env:HOOK_WRITE_RC = $WriteRc
+        $env:HOOK_SERVICE_RC = $ServiceRc
+        $env:HOOK_VERSION = $Version; $env:HOOK_ASSETS = $Assets; $env:HOOK_INSTALL_RC = $InstallRc; $env:HOOK_WRITE_RC = $WriteRc; $env:HOOK_DAEMON = $Daemon
         $output = (& $pwshPath -NoProfile -File (Join-Path $hookDir 'run.ps1') 2>&1 | Out-String)
         [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = $output
             Log = @(if (Test-Path -LiteralPath $env:HOOK_LOG) { Get-Content -LiteralPath $env:HOOK_LOG }) }
@@ -353,7 +415,28 @@ exit [int]$env:HOOK_INSTALL_RC
     $hook = Invoke-Hook '1.2.3' -InstallRc 1
     Check 'deploy hook fails the deployment when install fails' ($hook.ExitCode -eq 1 -and $hook.Log.Count -eq 1)
     Check 'deploy hook fails the deployment when write-config fails' ((Invoke-Hook '1.2.3' -WriteRc 1).ExitCode -eq 1)
+    $hook = Invoke-Hook '1.2.3'
+    Check 'deploy hook does not install the daemon service unless asked' ($hook.ExitCode -eq 0 -and
+        @($hook.Log | Where-Object { $_ -like 'install-service*' }).Count -eq 0)
+    $hook = Invoke-Hook '' -Daemon 'true'
+    Check 'deploy hook refuses the daemon service without a CLI version' ($hook.ExitCode -eq 1 -and $hook.Log.Count -eq 0)
+    if ($IsWindows) {
+        $hook = Invoke-Hook '1.2.3' -Daemon 'true'
+        Check 'deploy hook installs the daemon service without enabling it' ($hook.ExitCode -eq 0 -and $hook.Log.Count -eq 3 -and
+            $hook.Log[2] -ceq "install-service -CliDir $(Join-Path $env:ProgramFiles 'PrintFarmer\HostUpdateCli\1.2.3')")
+        $hook = Invoke-Hook '1.2.3' -WriteRc 3 -Daemon 'true'
+        Check 'deploy hook fails when the daemon service has no config' ($hook.ExitCode -eq 1 -and
+            @($hook.Log | Where-Object { $_ -like 'install-service*' }).Count -eq 0)
+        $hook = Invoke-Hook '1.2.3' -Daemon 'true' -ServiceRc 1
+        Check 'deploy hook fails when the daemon service install fails' ($hook.ExitCode -eq 1 -and $hook.Log.Count -eq 3)
+    } else {
+        $hook = Invoke-Hook '1.2.3' -Daemon 'true'
+        Check 'deploy hook refuses the Windows daemon service on a non-Windows host' ($hook.ExitCode -eq 1 -and $hook.Log.Count -eq 0)
+    }
 } finally {
+    if ($script:registeredService -and (Get-CimInstance -ClassName Win32_Service -Filter "Name='PrintFarmerHostUpdateDaemon'")) {
+        & sc.exe delete PrintFarmerHostUpdateDaemon *> $null
+    }
     $env:PATH = $savedPath
     Remove-Item -LiteralPath $testRoot -Recurse -Force -ErrorAction SilentlyContinue
 }

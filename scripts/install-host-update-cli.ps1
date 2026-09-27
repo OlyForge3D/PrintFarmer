@@ -10,6 +10,8 @@
 
       install-host-update-cli.ps1 install -Version <X.Y.Z[-insider.N]> [-AssetDir <abs-dir>] [-InstallRoot <abs-dir>] [-Runtime <win-x64|linux-x64|linux-arm64>] [-TrustedRoot <abs-file>]
       install-host-update-cli.ps1 write-config -EnvFile <abs-file> [-Output <abs-file>] [-Owner <account>]
+      install-host-update-cli.ps1 install-service -CliDir <abs-dir> [-Config <abs-file>] [-Enable]
+      install-host-update-cli.ps1 uninstall-service
 
     install       Downloads (or reads from -AssetDir) the runtime's archive, the checksum list and
                   its Cosign bundle; verifies the bundle against the release workflow identity for
@@ -32,6 +34,21 @@
                   the file is mode 0600. The owner defaults to the owner of
                   HostUpdateExecution__RootDirectory when it is an absolute, non-link directory,
                   otherwise the current account.
+    install-service  Windows only, opt-in (issue #3118); run elevated. Registers the enrolled
+                  host-update daemon as the service PrintFarmerHostUpdateDaemon running
+                  "<CliDir>\cli\Farm.HostUpdate.Cli.exe" --config <Config> daemon --windows-service
+                  (default config C:\ProgramData\PrintFarmer\host-update.json). It runs as the
+                  virtual account NT SERVICE\PrintFarmerHostUpdateDaemon with only
+                  SeChangeNotifyPrivilege, read access to the config and RootDirectory, and modify
+                  access to <RootDirectory>\state and the log directory
+                  C:\ProgramData\PrintFarmer\host\daemon\logs. The service is created Disabled and
+                  stopped unless -Enable is given, and a rerun never changes its startup type. It
+                  carries no environment, credential or auto-update setting, and installing it
+                  grants nothing: daemon execution stays disabled pending #2982. On Linux use
+                  install-host-update-cli.sh install-service (systemd).
+    uninstall-service  Stops and deletes the service and removes its access entries. It never
+                  deletes the config, journal, identity storage or logs; removing a service that is
+                  not installed is a no-op.
 
     Exit codes: 0 done; 1 verification, validation or installation failed (nothing placed or
     written); 2 usage; 3 write-config only: HostUpdateExecution__RootDirectory is not configured,
@@ -45,10 +62,15 @@ $VersionPattern = '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-insider\.
 $ReleaseRepository = 'OlyForge3D/PrintFarmer'
 $OidcIssuer = 'https://token.actions.githubusercontent.com'
 $Runtimes = @('win-x64', 'linux-x64', 'linux-arm64')
+$DaemonServiceName = 'PrintFarmerHostUpdateDaemon'
+$DaemonServiceAccount = "NT SERVICE\$DaemonServiceName"
+$DaemonServiceMarker = '(Managed by install-host-update-cli install-service, issue #3118.)'
 $UsageText = @'
 usage:
   install-host-update-cli.ps1 install -Version <X.Y.Z[-insider.N]> [-AssetDir <abs-dir>] [-InstallRoot <abs-dir>] [-Runtime <win-x64|linux-x64|linux-arm64>] [-TrustedRoot <abs-file>]
   install-host-update-cli.ps1 write-config -EnvFile <abs-file> [-Output <abs-file>] [-Owner <account>]
+  install-host-update-cli.ps1 install-service -CliDir <abs-dir> [-Config <abs-file>] [-Enable]
+  install-host-update-cli.ps1 uninstall-service
 '@
 
 class InstallerFailure : System.Exception {
@@ -504,6 +526,211 @@ function Invoke-WriteConfig([string[]] $Arguments) {
     [Console]::Error.WriteLine("Wrote owner-only host-update configuration $output (owner $shown)")
 }
 
+function Assert-ServiceHost([string] $Command) {
+    if (-not $IsWindows) {
+        Stop-Install "$Command manages a Windows service; on systemd Linux hosts use install-host-update-cli.sh $Command"
+    }
+    $principal = [System.Security.Principal.WindowsPrincipal]::new([System.Security.Principal.WindowsIdentity]::GetCurrent())
+    if (-not $principal.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)) {
+        Stop-Install "$Command must run from an elevated (Administrator) PowerShell"
+    }
+}
+
+function Get-DaemonService {
+    return Get-CimInstance -ClassName Win32_Service -Filter "Name='$DaemonServiceName'" -ErrorAction SilentlyContinue
+}
+
+function Assert-ManagedDaemonService($Service) {
+    if (-not ([string] $Service.Description).Contains($DaemonServiceMarker)) {
+        Stop-Install "The $DaemonServiceName service was not installed by install-service; nothing was changed"
+    }
+}
+
+function Invoke-ServiceControl([string[]] $Arguments) {
+    $output = & sc.exe @Arguments 2>&1 | Out-String
+    if ($LASTEXITCODE -ne 0) { Stop-Install "sc.exe $($Arguments[0]) $DaemonServiceName failed: $($output.Trim())" }
+}
+
+function Get-DaemonServiceSid {
+    return [System.Security.Principal.NTAccount]::new($DaemonServiceAccount).Translate([System.Security.Principal.SecurityIdentifier])
+}
+
+# True when a broad principal (Everyone, Authenticated Users, Users, Guests, Interactive,
+# Anonymous) can read the path: the Windows counterpart of a group/other-readable mode.
+function Test-BroadlyReadable([string] $Path) {
+    $broad = @('S-1-1-0', 'S-1-5-11', 'S-1-5-32-545', 'S-1-5-32-546', 'S-1-5-4', 'S-1-5-7')
+    $readMask = 0x1 -bor 0x10000000 -bor 0x80000000
+    $acl = [System.IO.FileSystemAclExtensions]::GetAccessControl([System.IO.FileInfo]::new($Path), 'Access')
+    foreach ($rule in $acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])) {
+        if ($rule.AccessControlType -ne [System.Security.AccessControl.AccessControlType]::Allow) { continue }
+        if (([int64] $rule.FileSystemRights -band $readMask) -ne 0 -and $rule.IdentityReference.Value -in $broad) { return $true }
+    }
+    return $false
+}
+
+# Replaces (or, with $null rights, removes) the service account's explicit ACE on a path; the
+# rest of the ACL, its owner and its inheritance are left as they are.
+function Set-DaemonAccess([string] $Path, $Sid, $Rights, [bool] $Inherit) {
+    $info = if (Test-Path -LiteralPath $Path -PathType Container) { [System.IO.DirectoryInfo]::new($Path) } else { [System.IO.FileInfo]::new($Path) }
+    $acl = [System.IO.FileSystemAclExtensions]::GetAccessControl($info, 'Access')
+    $acl.PurgeAccessRules($Sid)
+    if ($null -ne $Rights) {
+        $flags = if ($Inherit) { 'ContainerInherit, ObjectInherit' } else { 'None' }
+        $acl.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new($Sid, $Rights, $flags, 'None', 'Allow'))
+    }
+    [System.IO.FileSystemAclExtensions]::SetAccessControl($info, $acl)
+}
+
+function Get-DaemonLogDirectory { return Join-Path $env:ProgramData 'PrintFarmer\host\daemon\logs' }
+
+function Invoke-InstallService([string[]] $Arguments) {
+    $enable = @($Arguments | Where-Object { $_ -ieq '-Enable' }).Count
+    if ($enable -gt 1) { Stop-Usage '-Enable may be given only once' }
+    $options = Get-Options ([string[]] @($Arguments | Where-Object { $_ -ine '-Enable' })) @('CliDir', 'Config')
+    $cliDir = [string] $options['CliDir']
+    if (-not $cliDir) { Stop-Usage '-CliDir is required' }
+    if (-not (Test-FullyQualified $cliDir)) { Stop-Usage '-CliDir must be an absolute path' }
+    $config = [string] $options['Config']
+    if ($options.ContainsKey('Config') -and -not (Test-FullyQualified $config)) { Stop-Usage '-Config must be an absolute path' }
+    Assert-ServiceHost 'install-service'
+    if (-not $config) { $config = Join-Path $env:ProgramData 'PrintFarmer\host-update.json' }
+
+    $cliDir = $cliDir.TrimEnd('\', '/')
+    $launcher = Join-Path $cliDir 'cli\Farm.HostUpdate.Cli.exe'
+    foreach ($path in $cliDir, (Join-Path $cliDir 'cli')) {
+        if (-not (Test-Path -LiteralPath $path -PathType Container) -or (Test-Link $path)) {
+            Stop-Install "Not an installed host-update CLI directory: $cliDir"
+        }
+    }
+    if (-not (Test-Path -LiteralPath $launcher -PathType Leaf) -or (Test-Link $launcher)) {
+        Stop-Install "The host-update CLI launcher is missing: $launcher"
+    }
+    $manifest = Join-Path $cliDir 'host-update-cli-package.json'
+    if (-not (Test-Path -LiteralPath $manifest -PathType Leaf) -or (Test-Link $manifest)) {
+        Stop-Install "Not an installed host-update CLI package (install it with the install command first): $cliDir"
+    }
+    $manifestLines = [System.IO.File]::ReadAllLines($manifest)
+    foreach ($expected in @('  "package": "printfarmer-host-update-cli",', '  "rolloutAuthorization": false')) {
+        if ($manifestLines -cnotcontains $expected) {
+            Stop-Install "Not an installed host-update CLI package (install it with the install command first): $cliDir"
+        }
+    }
+    # The service runs this binary, so nobody but SYSTEM, Administrators or the installer may change it.
+    foreach ($path in $cliDir, (Join-Path $cliDir 'cli'), $launcher) {
+        $untrusted = Get-UntrustedWriter $path
+        if ($untrusted) { Stop-Install "The host-update CLI is owned or writable by ${untrusted}: $path" }
+    }
+
+    if (-not (Test-Path -LiteralPath $config -PathType Leaf) -or (Test-Link $config)) {
+        Stop-Install "Host-update configuration not found (run write-config first): $config"
+    }
+    $untrustedConfig = Get-UntrustedWriter $config
+    if ($untrustedConfig) { Stop-Install "Host-update configuration is owned or writable by ${untrustedConfig}: $config" }
+    if (Test-BroadlyReadable $config) { Stop-Install "Host-update configuration is readable by a broad group: $config" }
+    $rootDirectory = try {
+        [string] (Get-Content -LiteralPath $config -Raw | ConvertFrom-Json -AsHashtable)['HostUpdateExecution']['RootDirectory']
+    } catch { '' }
+    if (-not (Test-FullyQualified $rootDirectory) -or -not (Test-Path -LiteralPath $rootDirectory -PathType Container) -or
+        (Test-Link $rootDirectory)) {
+        Stop-Install "HostUpdateExecution:RootDirectory in $config is not an existing absolute, non-link directory"
+    }
+    $stateDirectory = Join-Path $rootDirectory 'state'
+    if (Test-Link $stateDirectory) { Stop-Install "Refusing a link as the daemon state directory: $stateDirectory" }
+    if (-not (Test-Path -LiteralPath $stateDirectory)) { New-Item -ItemType Directory -Path $stateDirectory | Out-Null }
+    if (-not (Test-Path -LiteralPath $stateDirectory -PathType Container)) { Stop-Install "The daemon state directory is not a directory: $stateDirectory" }
+
+    $binaryPath = "`"$launcher`" --config `"$config`" daemon --windows-service"
+    $description = "Supervises the enrolled PrintFarmer host-update daemon. Installing it grants nothing: daemon execution stays disabled pending #2982. $DaemonServiceMarker"
+    $service = Get-DaemonService
+    $changed = $true
+    if ($service) {
+        Assert-ManagedDaemonService $service
+        $changed = ([string] $service.PathName) -cne $binaryPath -or ([string] $service.StartName) -ine $DaemonServiceAccount
+        if (([string] $service.PathName) -cne $binaryPath) {
+            $result = Invoke-CimMethod -InputObject $service -MethodName Change -Arguments @{ PathName = $binaryPath }
+            if ($result.ReturnValue -ne 0) { Stop-Install "Could not update the $DaemonServiceName service (error $($result.ReturnValue))" }
+        }
+    } else {
+        # Created disabled and stopped; only -Enable (or an operator) ever starts it.
+        New-Service -Name $DaemonServiceName -BinaryPathName $binaryPath -DisplayName 'PrintFarmer host-update daemon' `
+            -Description $description -StartupType Disabled | Out-Null
+    }
+    try {
+        # A per-service virtual account: no password, no interactive logon, no group membership
+        # beyond the built-in service identity, and only the ACEs granted below.
+        Invoke-ServiceControl @('config', $DaemonServiceName, 'obj=', $DaemonServiceAccount)
+        Invoke-ServiceControl @('description', $DaemonServiceName, $description)
+        Invoke-ServiceControl @('sidtype', $DaemonServiceName, 'unrestricted')
+        Invoke-ServiceControl @('privs', $DaemonServiceName, 'SeChangeNotifyPrivilege')
+        Invoke-ServiceControl @('failure', $DaemonServiceName, 'reset=', '86400', 'actions=', 'restart/30000/restart/30000//')
+    } catch {
+        if (-not $service) { & sc.exe delete $DaemonServiceName *> $null }
+        throw
+    }
+
+    $sid = Get-DaemonServiceSid
+    $logDirectory = Get-DaemonLogDirectory
+    if (Test-Link $logDirectory) { Stop-Install "Refusing a link as the daemon log directory: $logDirectory" }
+    if (-not (Test-Path -LiteralPath $logDirectory)) { New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null }
+    $logSecurity = [System.Security.AccessControl.DirectorySecurity]::new()
+    $logSecurity.SetAccessRuleProtection($true, $false)
+    foreach ($admin in @('S-1-5-18', 'S-1-5-32-544')) {
+        $logSecurity.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new(
+            [System.Security.Principal.SecurityIdentifier]::new($admin), 'FullControl', 'ContainerInherit, ObjectInherit', 'None', 'Allow'))
+    }
+    $logSecurity.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new(
+        $sid, 'Modify', 'ContainerInherit, ObjectInherit', 'None', 'Allow'))
+    [System.IO.FileSystemAclExtensions]::SetAccessControl([System.IO.DirectoryInfo]::new($logDirectory), $logSecurity)
+    Set-DaemonAccess $config $sid ([System.Security.AccessControl.FileSystemRights]::Read) $false
+    Set-DaemonAccess $rootDirectory $sid ([System.Security.AccessControl.FileSystemRights]::ReadAndExecute) $false
+    Set-DaemonAccess $stateDirectory $sid ([System.Security.AccessControl.FileSystemRights]::Modify) $true
+
+    if ($changed) {
+        # A running daemon picks up the new configuration; a stopped one stays stopped.
+        if ($service -and $service.State -eq 'Running') { Restart-Service -Name $DaemonServiceName -Force }
+        [Console]::Error.WriteLine("Installed the $DaemonServiceName service (runs as $DaemonServiceAccount)")
+    } else {
+        [Console]::Error.WriteLine("The $DaemonServiceName service is already installed (runs as $DaemonServiceAccount)")
+    }
+    if ($enable -eq 1) {
+        Set-Service -Name $DaemonServiceName -StartupType Automatic
+        Start-Service -Name $DaemonServiceName
+        [Console]::Error.WriteLine("Enabled and started $DaemonServiceName (daemon execution remains disabled pending #2982)")
+    } else {
+        [Console]::Error.WriteLine("$DaemonServiceName was not enabled or started. Start it with: Set-Service $DaemonServiceName -StartupType Automatic; Start-Service $DaemonServiceName")
+    }
+}
+
+function Invoke-UninstallService([string[]] $Arguments) {
+    if ($Arguments.Count -gt 0) { Stop-Usage "Unknown uninstall-service option: $($Arguments[0])" }
+    Assert-ServiceHost 'uninstall-service'
+    $service = Get-DaemonService
+    if (-not $service) {
+        [Console]::Error.WriteLine("$DaemonServiceName is not installed; nothing to remove")
+        return
+    }
+    Assert-ManagedDaemonService $service
+    # Resolved before deletion: the virtual account stops translating once the service is gone.
+    $sid = Get-DaemonServiceSid
+    $config = if (([string] $service.PathName) -match '--config "([^"]+)"') { $Matches[1] } else { $null }
+    if ($service.State -ne 'Stopped') { Stop-Service -Name $DaemonServiceName -Force }
+    Invoke-ServiceControl @('delete', $DaemonServiceName)
+    $paths = @(Get-DaemonLogDirectory)
+    if ($config -and (Test-Path -LiteralPath $config -PathType Leaf) -and -not (Test-Link $config)) {
+        $paths += $config
+        $rootDirectory = try {
+            [string] (Get-Content -LiteralPath $config -Raw | ConvertFrom-Json -AsHashtable)['HostUpdateExecution']['RootDirectory']
+        } catch { '' }
+        if ((Test-FullyQualified $rootDirectory) -and -not (Test-Link $rootDirectory)) {
+            $paths += @($rootDirectory, (Join-Path $rootDirectory 'state'))
+        }
+    }
+    foreach ($path in $paths) {
+        if ((Test-Path -LiteralPath $path) -and -not (Test-Link $path)) { Set-DaemonAccess $path $sid $null $false }
+    }
+    [Console]::Error.WriteLine("Removed $DaemonServiceName; the configuration, journal, identity storage and logs were kept")
+}
+
 try {
     $rawArgs = @($args | ForEach-Object { [string] $_ })
     if ($rawArgs.Count -lt 1) { Stop-Usage 'A command is required' }
@@ -511,6 +738,8 @@ try {
     switch -Exact ($rawArgs[0].ToLowerInvariant()) {
         'install' { Invoke-Install $rest }
         'write-config' { Invoke-WriteConfig $rest }
+        'install-service' { Invoke-InstallService $rest }
+        'uninstall-service' { Invoke-UninstallService $rest }
         { $_ -in @('help', '-help', '--help', '-h', '-?') } { [Console]::Out.WriteLine($UsageText) }
         default { Stop-Usage "Unknown command: $($rawArgs[0])" }
     }

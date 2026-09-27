@@ -5,6 +5,8 @@
 #
 #   install-host-update-cli.sh install --version <X.Y.Z[-insider.N]> [--asset-dir <abs-dir>] [--install-root <abs-dir>] [--runtime <linux-x64|linux-arm64>] [--trusted-root <abs-file>]
 #   install-host-update-cli.sh write-config --env-file <abs-file> [--output <abs-file>] [--owner <user>]
+#   install-host-update-cli.sh install-service --cli-dir <abs-dir> [--config <abs-file>] [--service-user <user>] [--unit-dir <abs-dir>] [--enable]
+#   install-host-update-cli.sh uninstall-service [--unit-dir <abs-dir>]
 #
 # install       Downloads (or reads from --asset-dir) the runtime's archive, the checksum list and
 #               its Cosign bundle; verifies the bundle against the release workflow identity for
@@ -22,6 +24,17 @@
 #               DB_PROVIDER and ConnectionStrings__Default. The owner defaults to the owner of
 #               HostUpdateExecution__RootDirectory when it is an absolute, non-link directory,
 #               otherwise the current user.
+# install-service  Opt-in only (issue #3118): registers the enrolled host-update daemon as the
+#               systemd unit printfarmer-host-update-daemon.service (default unit directory
+#               /etc/systemd/system) running <cli-dir>/cli/Farm.HostUpdate.Cli --config <config>
+#               daemon. The unit is installed disabled and stopped unless --enable is given, and a
+#               rerun never changes whether it is enabled. It runs as --service-user, which
+#               defaults to the owner of the owner-only config (default
+#               /etc/printfarmer/host-update.json); root is refused unless named explicitly. The
+#               unit carries no environment, credential or auto-update setting, and installing it
+#               grants nothing: daemon execution stays disabled pending #2982.
+# uninstall-service  Stops and disables the unit and removes it. It never deletes the config,
+#               journal, identity storage or logs. Removing a unit that is not installed is a no-op.
 #
 # Exit codes: 0 done; 1 verification, validation or installation failed (nothing placed or
 # written); 2 usage; 3 write-config only: HostUpdateExecution__RootDirectory is not configured,
@@ -37,6 +50,13 @@ readonly RELEASE_REPOSITORY='OlyForge3D/PrintFarmer'
 readonly OIDC_ISSUER='https://token.actions.githubusercontent.com'
 readonly DEFAULT_INSTALL_ROOT='/opt/printfarmer/host-update-cli'
 readonly DEFAULT_CONFIG='/etc/printfarmer/host-update.json'
+readonly DEFAULT_UNIT_DIR='/etc/systemd/system'
+readonly DAEMON_UNIT='printfarmer-host-update-daemon.service'
+readonly DAEMON_UNIT_MARKER='# Managed by install-host-update-cli.sh install-service (issue #3118).'
+# Paths and account names are written into the unit verbatim, so only characters that systemd
+# neither splits, quotes nor expands (%, $, \, whitespace) are accepted.
+readonly UNIT_PATH_RE='^/[A-Za-z0-9._/+-]+$'
+readonly UNIT_USER_RE='^[A-Za-z_][A-Za-z0-9_.-]{0,31}$'
 
 work_dir=""
 stage_dir=""
@@ -47,7 +67,7 @@ cleanup() {
 trap cleanup EXIT
 
 usage() {
-    sed -n '6,7p' "${BASH_SOURCE[0]}" | sed 's/^#   //' >&2
+    sed -n '6,9p' "${BASH_SOURCE[0]}" | sed 's/^#   //' >&2
 }
 
 fail_usage() {
@@ -395,12 +415,204 @@ cmd_write_config() {
     log_success "Wrote owner-only host-update configuration $output (owner $owner)"
 }
 
+render_daemon_unit() {
+    local launcher="$1" config="$2" user="$3" group="$4"
+    cat <<UNIT
+$DAEMON_UNIT_MARKER
+# Rerun install-service to change it and uninstall-service to remove it; do not edit it by hand.
+# Installing this unit grants nothing: daemon execution stays disabled pending #2982, and the
+# unit carries no environment, credential or automatic-update setting.
+[Unit]
+Description=PrintFarmer host-update daemon (execution disabled pending #2982)
+Documentation=https://github.com/OlyForge3D/PrintFarmer/blob/main/docs/HOST_UPDATE_RUNBOOK.md
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=600
+StartLimitBurst=5
+
+[Service]
+Type=exec
+User=$user
+Group=$group
+ExecStart=$launcher --config $config daemon
+Restart=on-failure
+RestartSec=30
+RestartPreventExitStatus=2 3 7
+TimeoutStopSec=30
+UMask=0077
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=full
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=printfarmer-host-update-daemon
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+}
+
+systemctl_or_fail() {
+    systemctl "$@" || fail "systemctl $* failed"
+}
+
+parse_unit_dir() {
+    local unit_dir="$1"
+    is_absolute "$unit_dir" || fail_usage "--unit-dir must be an absolute path"
+    [[ -d "$unit_dir" && ! -L "$unit_dir" ]] || fail "Unit directory is not a directory: $unit_dir"
+}
+
+cmd_install_service() {
+    local cli_dir="" config="$DEFAULT_CONFIG" user="" unit_dir="$DEFAULT_UNIT_DIR" enable=0
+    while [[ $# -gt 0 ]]; do
+        if [[ "$1" == "--enable" ]]; then
+            [[ "$enable" == 0 ]] || fail_usage "--enable may be given only once"
+            enable=1
+            shift
+            continue
+        fi
+        [[ $# -ge 2 ]] || fail_usage "$1 requires a value"
+        case "$1" in
+            --cli-dir) cli_dir="$2" ;;
+            --config) config="$2" ;;
+            --service-user) user="$2" ;;
+            --unit-dir) unit_dir="$2" ;;
+            *) fail_usage "Unknown install-service option: $1" ;;
+        esac
+        shift 2
+    done
+    [[ -n "$cli_dir" ]] || fail_usage "--cli-dir is required"
+    is_absolute "$cli_dir" || fail_usage "--cli-dir must be an absolute path"
+    is_absolute "$config" || fail_usage "--config must be an absolute path"
+    [[ -z "$user" || "$user" =~ $UNIT_USER_RE ]] || fail_usage "--service-user is not a valid account name"
+    parse_unit_dir "$unit_dir"
+    [[ "$(uname -s)" == "Linux" ]] || fail "install-service supports systemd Linux hosts only (use install-host-update-cli.ps1 on Windows)"
+    command -v systemctl >/dev/null 2>&1 || fail "systemd (systemctl) is required to install the host-update daemon service"
+
+    cli_dir="${cli_dir%/}"
+    [[ "$cli_dir" =~ $UNIT_PATH_RE && "$config" =~ $UNIT_PATH_RE ]] ||
+        fail "--cli-dir and --config may contain only letters, digits and . _ / + -"
+    local launcher="$cli_dir/cli/Farm.HostUpdate.Cli" manifest="$cli_dir/host-update-cli-package.json" path
+    for path in "$cli_dir" "$cli_dir/cli"; do
+        [[ -d "$path" && ! -L "$path" ]] || fail "Not an installed host-update CLI directory: $cli_dir"
+    done
+    [[ -f "$launcher" && ! -L "$launcher" && -x "$launcher" ]] || fail "The host-update CLI launcher is missing: $launcher"
+    if [[ ! -f "$manifest" || -L "$manifest" ]] ||
+        ! grep -Fxq '  "package": "printfarmer-host-update-cli",' "$manifest" ||
+        ! grep -Fxq '  "rolloutAuthorization": false' "$manifest"; then
+        fail "Not an installed host-update CLI package (install it with the install command first): $cli_dir"
+    fi
+    # The service runs this binary, so nobody but root or the installing account may change it.
+    for path in "$cli_dir" "$cli_dir/cli" "$launcher"; do
+        if [[ -n "$(find "$path" -maxdepth 0 \( -perm -002 -o -perm -020 \) -print)" ]]; then
+            fail "The host-update CLI is group- or world-writable: $path"
+        fi
+        local path_uid
+        path_uid="$(stat -c %u -- "$path")" || fail "Could not read the owner of $path"
+        [[ "$path_uid" == "0" || "$path_uid" == "$(id -u)" ]] ||
+            fail "The host-update CLI is owned by another account (uid $path_uid): $path"
+    done
+
+    [[ -f "$config" && ! -L "$config" ]] ||
+        fail "Host-update configuration not found (run write-config first): $config"
+    [[ -z "$(find "$config" -maxdepth 0 -perm /077 -print)" ]] ||
+        fail "Host-update configuration is readable or writable by group or others: $config"
+    local config_owner
+    config_owner="$(stat -c %U -- "$config")" || fail "Could not read the owner of $config"
+    if [[ -z "$user" ]]; then
+        user="$config_owner"
+        [[ "$(id -u -- "$user" 2>/dev/null)" != "0" ]] ||
+            fail "$config is owned by root; the daemon would run as root. Give HostUpdateExecution__RootDirectory and the config to a dedicated account, or pass --service-user root to accept running as root"
+    fi
+    [[ "$user" =~ $UNIT_USER_RE ]] || fail "The configuration owner is not a valid account name: $user"
+    id -u -- "$user" >/dev/null 2>&1 || fail "Unknown service account: $user"
+    [[ "$user" == "$config_owner" ]] ||
+        fail "$config must be owned by the service account $user (it is owned by $config_owner)"
+    local group
+    group="$(id -gn -- "$user")" || fail "Could not read the primary group of $user"
+    [[ "$group" =~ $UNIT_USER_RE ]] || fail "The service account's primary group is not a valid name: $group"
+
+    local unit="$unit_dir/$DAEMON_UNIT" rendered changed=1
+    rendered="$(render_daemon_unit "$launcher" "$config" "$user" "$group")"
+    if [[ -e "$unit" || -L "$unit" ]]; then
+        [[ -f "$unit" && ! -L "$unit" ]] || fail "$unit exists and is not a regular file; nothing was changed"
+        [[ "$(head -n 1 -- "$unit")" == "$DAEMON_UNIT_MARKER" ]] ||
+            fail "$unit was not installed by install-service; nothing was changed"
+        [[ "$(cat -- "$unit")" != "$rendered" ]] || changed=0
+    fi
+    if [[ "$changed" == 1 ]]; then
+        local temporary
+        umask 022
+        temporary="$(mktemp "$unit_dir/.$DAEMON_UNIT.XXXXXX")" || fail "Could not create a file in $unit_dir"
+        work_dir="$temporary"
+        printf '%s\n' "$rendered" >"$temporary"
+        chmod 0644 -- "$temporary"
+        mv -f -- "$temporary" "$unit" || fail "Could not write $unit"
+        work_dir=""
+        systemctl_or_fail daemon-reload
+        # A running daemon picks up the new unit; a stopped one stays stopped.
+        systemctl_or_fail try-restart "$DAEMON_UNIT"
+        log_success "Installed $unit (runs as $user)"
+    else
+        log_success "$unit is already installed (runs as $user)"
+    fi
+
+    if [[ "$enable" == 1 ]]; then
+        systemctl_or_fail enable --now "$DAEMON_UNIT"
+        log_success "Enabled and started $DAEMON_UNIT (daemon execution remains disabled pending #2982)"
+    else
+        log_info "$DAEMON_UNIT was not enabled or started. Start it with: systemctl enable --now $DAEMON_UNIT"
+    fi
+}
+
+cmd_uninstall_service() {
+    local unit_dir="$DEFAULT_UNIT_DIR"
+    while [[ $# -gt 0 ]]; do
+        [[ $# -ge 2 ]] || fail_usage "$1 requires a value"
+        case "$1" in
+            --unit-dir) unit_dir="$2" ;;
+            *) fail_usage "Unknown uninstall-service option: $1" ;;
+        esac
+        shift 2
+    done
+    parse_unit_dir "$unit_dir"
+    command -v systemctl >/dev/null 2>&1 || fail "systemd (systemctl) is required to uninstall the host-update daemon service"
+
+    local unit="$unit_dir/$DAEMON_UNIT"
+    if [[ ! -e "$unit" && ! -L "$unit" ]]; then
+        log_success "$DAEMON_UNIT is not installed; nothing to remove"
+        return 0
+    fi
+    [[ -f "$unit" && ! -L "$unit" ]] || fail "$unit exists and is not a regular file; nothing was changed"
+    [[ "$(head -n 1 -- "$unit")" == "$DAEMON_UNIT_MARKER" ]] ||
+        fail "$unit was not installed by install-service; nothing was changed"
+    systemctl_or_fail disable --now "$DAEMON_UNIT"
+    rm -f -- "$unit" || fail "Could not remove $unit"
+    systemctl_or_fail daemon-reload
+    systemctl reset-failed "$DAEMON_UNIT" >/dev/null 2>&1 || true
+    log_success "Removed $DAEMON_UNIT; the configuration, journal, identity storage and logs were kept"
+}
+
 [[ $# -ge 1 ]] || fail_usage "A command is required"
 command_name="$1"
 shift
 case "$command_name" in
     install) cmd_install "$@" ;;
     write-config) cmd_write_config "$@" ;;
+    install-service) cmd_install_service "$@" ;;
+    uninstall-service) cmd_uninstall_service "$@" ;;
     help|--help|-h) usage; exit 0 ;;
     *) fail_usage "Unknown command: $command_name" ;;
 esac

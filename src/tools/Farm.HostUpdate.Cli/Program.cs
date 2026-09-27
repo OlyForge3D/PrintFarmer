@@ -1,4 +1,5 @@
-﻿using Farm.HostUpdate.Cli;
+﻿using System.Runtime.InteropServices;
+using Farm.HostUpdate.Cli;
 using Microsoft.Extensions.Configuration;
 
 // --config is consumed here, before command parsing, so the command grammar never sees paths.
@@ -44,5 +45,24 @@ Console.CancelKeyPress += (_, eventArgs) =>
     eventArgs.Cancel = true;
     cancellation.Cancel();
 };
+
+bool daemon = remaining.Count > 0 && string.Equals(remaining[0], "daemon", StringComparison.Ordinal);
+
+// Issue #3118: `daemon --windows-service` runs under the Windows Service Control Manager, which
+// starts and stops it; its redacted status lines go to the fixed daemon log instead of a console.
+if (daemon && OperatingSystem.IsWindows() && remaining.Contains("--windows-service", StringComparer.Ordinal))
+{
+    return HostUpdateDaemonWindowsService.Run(remaining, LoadConfiguration);
+}
+
+// systemd stops the daemon with SIGTERM; stop it cleanly, as Ctrl+C does. Other commands keep the
+// runtime's default SIGTERM handling.
+using PosixSignalRegistration? sigterm = daemon && !OperatingSystem.IsWindows()
+    ? PosixSignalRegistration.Create(PosixSignal.SIGTERM, context =>
+    {
+        context.Cancel = true;
+        cancellation.Cancel();
+    })
+    : null;
 
 return await HostUpdateCli.RunAsync(remaining, LoadConfiguration, Console.Out, Console.Error, cancellation.Token).ConfigureAwait(false);
