@@ -98,7 +98,8 @@ case "\${args[0]:-}" in
     ;;
 esac
 log_command() {
-  printf '{"at":"%s","args":%s}\\n' "$(date -u +%FT%TZ)" "$(node -e 'process.stdout.write(JSON.stringify(process.argv.slice(1)))' -- "$@")" >> ${JSON.stringify(log)}
+  # The leading newline keeps a record torn by a SIGKILL mid-write from swallowing the next one.
+  printf '\\n{"at":"%s","args":%s}\\n' "$(date -u +%FT%TZ)" "$(node -e 'process.stdout.write(JSON.stringify(process.argv.slice(1)))' -- "$@")" >> ${JSON.stringify(log)}
 }
 ${pauseGateBash({
     specPath: join(runRoot, dockerFaultFiles.spec),
@@ -186,7 +187,7 @@ export function wrapToolWithPauseGate(toolPath, { name }) {
   const callsPath = join(dir, `fault-${name}.calls`);
   writeFileSync(toolPath, `#!/usr/bin/env bash
 set -euo pipefail
-printf '%s\\n' "$(date -u +%FT%TZ)" >> ${JSON.stringify(callsPath)}
+printf '\\n%s\\n' "$(date -u +%FT%TZ)" >> ${JSON.stringify(callsPath)}
 ${pauseGateBash({
     specPath: join(dir, `fault-${name}.json`),
     pausePath: join(dir, `fault-${name}.pause`),

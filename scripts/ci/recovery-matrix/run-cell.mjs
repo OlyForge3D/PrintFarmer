@@ -1060,8 +1060,13 @@ function launchPackagedOperation({ cli, repo, cosign, instructionsPath, operatio
 // Simulates power loss: every process in the host boundary (CLI, docker shim, tool shims) dies
 // with SIGKILL, and only durable state (bind-mounted run root, container filesystem) survives.
 function restartHostContainer(container) {
+  const startedAt = () => execFileSync('/usr/bin/docker', ['inspect', '--format', '{{.State.StartedAt}}', container], { encoding: 'utf8' }).trim();
+  const before = startedAt();
+  // A failed kill throws, so a container that was never killed cannot pass as a power loss.
   execFileSync('/usr/bin/docker', ['kill', '--signal', 'KILL', container], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
   execFileSync('/usr/bin/docker', ['start', container], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  const after = startedAt();
+  if (after === before) throw new Error(`host_restart_not_observed:${container}:${before}`);
   const deadline = Date.now() + 60_000;
   for (;;) {
     const probe = spawnSync('/usr/bin/docker', ['exec', container, 'true'], { stdio: 'ignore' });

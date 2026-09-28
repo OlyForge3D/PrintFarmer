@@ -419,3 +419,20 @@ test('corrupt-replay scenario fails when the failed activation closes the fence'
   const ctx = fakeCorruptReplayCtx('scenario-replay-closed', { closeFence: true });
   assert.throws(() => runFaultScenario(ctx), (error) => error.reason.startsWith('fence-released:corrupt-replay-activation'));
 });
+
+test('a docker log record torn by SIGKILL does not swallow the next newline-prefixed record', () => {
+  const dir = scratch('torn-log');
+  const log = path.join(dir, 'docker-commands.ndjson');
+  writeFileSync(log, '\n{"at":"t0","args":["compose","up"\n{"at":"t1","args":["compose","ps"]}\n');
+  const { commands } = readDockerCommands(log);
+  assert.deepEqual(commands, [['compose', 'ps']]);
+});
+
+test('api-down scenario fails when host-update-status crashes instead of reporting', () => {
+  const ctx = fakeScenarioCtx('scenario-status-crash');
+  const op = ctx.op;
+  ctx.op = (operationId, options) => (operationId === 'host-update-status'
+    ? { exitCode: 134, stdout: '', stderr: 'Aborted' }
+    : op(operationId, options));
+  assert.throws(() => runFaultScenario(ctx), (error) => error.reason.startsWith('status-exit-known:api-down'));
+});

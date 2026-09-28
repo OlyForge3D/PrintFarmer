@@ -17,6 +17,7 @@ export const faultExitCodes = Object.freeze({
   physicalReconciliationPending: 13,
 });
 
+const knownExitCodes = new Set(Object.values(faultExitCodes));
 const physicalTokenPattern = /physical-[0-9a-f]{32}/;
 
 export function parseCliText(stdout) {
@@ -203,9 +204,12 @@ function createHarness(ctx) {
       recoveryFinished = Date.now();
       return { ...classifyCliResult(result), stdout: result.stdout, stderr: result.stderr };
     },
-    status() {
-      const result = ctx.op('host-update-status', {});
-      return result.exitCode;
+    // host-update-status must answer with a documented CLI exit code; a crash (1, 127, 134, 139)
+    // is never a status report.
+    status(label) {
+      const { exitCode } = ctx.op('host-update-status', {});
+      harness.require(knownExitCodes.has(exitCode), `status-exit-known:${label}`, `exit=${exitCode}`);
+      return exitCode;
     },
     expect(label, result, expected) {
       if (!outcomeMatches(result, expected)) {
@@ -305,7 +309,7 @@ function proveDurable(harness, final, repeat, { fenceClosed } = {}) {
   harness.ctx.restartHost();
   harness.ok('durability-host-restarted');
   assertFenceMatchesOutcome(harness, final, 'restart', fenceClosed);
-  harness.ok(`status-after-restart:exit=${harness.status()}`);
+  harness.ok(`status-after-restart:exit=${harness.status('after-restart')}`);
   const restartMark = harness.dockerMark();
   const durable = repeat();
   harness.expect('outcome-durable-after-restart', durable, { outcome: final.actual, reason: final.reason ? final.reason.split('|')[0] : null });
@@ -323,7 +327,7 @@ function assertNoUnsafeReplay(harness, label, dockerMark, restoresBefore) {
 
 // The writer fence must stay closed while any outcome is non-terminal and be released only by
 // a terminal Activated/RolledBack outcome. A state failure detected before the executor ever
-// closes the fence passes an explicit enceClosed so the fence must stay exactly as it was.
+// closes the fence passes an explicit `fenceClosed` so the fence must stay exactly as it was.
 function assertFenceMatchesOutcome(harness, result, label, fenceClosed) {
   const closed = existsSync(harness.ctx.admissionClosedPath);
   const terminal = result.actual === 'Activated' || result.actual === 'RolledBack';
@@ -431,7 +435,7 @@ const scenarios = {
     activateIntoRecoveryRequired(harness);
     harness.ctx.stopApplication();
     harness.injected(spec.fault);
-    harness.ok(`status-while-api-down:exit=${harness.status()}`);
+    harness.ok(`status-while-api-down:exit=${harness.status('api-down')}`);
     return recoverToRolledBack(harness);
   },
 
@@ -446,7 +450,7 @@ const scenarios = {
     const confirm = harness.expect('recover-confirm', harness.recover('offline-recover-confirm'), expected);
     harness.ctx.assertNoMutation('missing-backup', before, harness.ctx.snapshot());
     harness.ok('missing-backup-no-mutation');
-    return proveDurable(harness, confirm, () => harness.recover('offline-recover-preview'));
+    return proveDurable(harness, confirm, () => harness.recover('offline-recover-confirm'));
   },
 
   'corrupt-journal'(harness, spec) {
