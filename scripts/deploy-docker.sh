@@ -70,6 +70,8 @@ DRY_RUN=false
 # Opt-in installation of the signed host-update recovery CLI (issue #3045).
 HOST_UPDATE_CLI_VERSION="${HOST_UPDATE_CLI_VERSION:-}"
 HOST_UPDATE_CLI_ASSETS="${HOST_UPDATE_CLI_ASSETS:-}"
+HOST_UPDATE_DAEMON_SERVICE="${HOST_UPDATE_DAEMON_SERVICE:-false}"
+HOST_UPDATE_DAEMON_USER="${HOST_UPDATE_DAEMON_USER:-}"
 NON_INTERACTIVE=false
 TEAR_DOWN=false
 SHOW_HELP=false
@@ -2874,6 +2876,15 @@ OPTIONS:
     --host-update-cli-assets DIR
                             Read the CLI archive, SHA256SUMS and its bundle from DIR instead of
                             the GitHub release (offline hosts). Env: HOST_UPDATE_CLI_ASSETS.
+    --install-host-update-daemon
+                            Opt in to registering the host-update daemon as the systemd unit
+                            printfarmer-host-update-daemon.service (issue #3118). Requires
+                            --host-update-cli-version. Installed disabled and stopped; installing
+                            it grants nothing (daemon execution stays disabled pending #2982).
+                            Env: HOST_UPDATE_DAEMON_SERVICE=true.
+    --host-update-daemon-user USER
+                            Account the daemon unit runs as (default: the owner of
+                            host-update.json). Env: HOST_UPDATE_DAEMON_USER.
 
 SMART IMAGE CACHING - Automatic offline support:
     * Downloaded images are automatically cached for offline use
@@ -7504,7 +7515,13 @@ display_final_info() {
 # operator opts in with --host-update-cli-version (issue #3045). This is packaging only, not
 # rollout authorization: nothing here enables or starts a host update.
 install_host_update_cli_if_requested() {
-    [ -n "${HOST_UPDATE_CLI_VERSION:-}" ] || return 0
+    if [ -z "${HOST_UPDATE_CLI_VERSION:-}" ]; then
+        if [ "${HOST_UPDATE_DAEMON_SERVICE:-false}" = "true" ]; then
+            print_error "--install-host-update-daemon requires --host-update-cli-version. See docs/HOST_UPDATE_RUNBOOK.md."
+            exit 1
+        fi
+        return 0
+    fi
 
     local installer="$SCRIPT_DIR/install-host-update-cli.sh"
     local env_file="${ENV_FILE:-.env}"
@@ -7523,6 +7540,13 @@ install_host_update_cli_if_requested() {
         install_args+=(--asset-dir "$asset_dir")
     fi
 
+    # Issue #3118: opt-in only. The unit is installed disabled and stopped; enabling it is a
+    # separate operator decision, and the daemon's execution stays disabled pending #2982.
+    local -a service_args=(install-service --cli-dir "/opt/printfarmer/host-update-cli/$HOST_UPDATE_CLI_VERSION")
+    if [ -n "${HOST_UPDATE_DAEMON_USER:-}" ]; then
+        service_args+=(--service-user "$HOST_UPDATE_DAEMON_USER")
+    fi
+
     local -a elevate=()
     if [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1; then
         elevate=(sudo)
@@ -7531,6 +7555,9 @@ install_host_update_cli_if_requested() {
     if [ "$DRY_RUN" = "true" ]; then
         print_info "[DRY RUN] Would install host-update CLI: ${elevate[*]:-} $installer ${install_args[*]}"
         print_info "[DRY RUN] Would write host-update config: ${elevate[*]:-} $installer write-config --env-file $env_file"
+        if [ "${HOST_UPDATE_DAEMON_SERVICE:-false}" = "true" ]; then
+            print_info "[DRY RUN] Would install the host-update daemon unit (not enabled): ${elevate[*]:-} $installer ${service_args[*]}"
+        fi
         return 0
     fi
 
@@ -7544,12 +7571,25 @@ install_host_update_cli_if_requested() {
     ${elevate[@]+"${elevate[@]}"} "$installer" write-config --env-file "$env_file" || rc=$?
     case "$rc" in
         0) print_success "Host-update CLI installed and host-update.json written" ;;
-        3) print_warning "HostUpdateExecution__RootDirectory is not set in $env_file; host-update.json was not written" ;;
+        3)
+            if [ "${HOST_UPDATE_DAEMON_SERVICE:-false}" = "true" ]; then
+                print_error "HostUpdateExecution__RootDirectory is not set in $env_file; the host-update daemon unit needs host-update.json and was not installed."
+                exit 1
+            fi
+            print_warning "HostUpdateExecution__RootDirectory is not set in $env_file; host-update.json was not written"
+            ;;
         *)
             print_error "Writing host-update.json failed (exit $rc). See docs/HOST_UPDATE_RUNBOOK.md."
             exit 1
             ;;
     esac
+
+    [ "${HOST_UPDATE_DAEMON_SERVICE:-false}" = "true" ] || return 0
+    print_info "Installing the host-update daemon unit (not enabled)..."
+    if ! ${elevate[@]+"${elevate[@]}"} "$installer" "${service_args[@]}"; then
+        print_error "Installing the host-update daemon unit failed. See docs/HOST_UPDATE_RUNBOOK.md."
+        exit 1
+    fi
 }
 
 redeploy_existing() {
@@ -8133,6 +8173,21 @@ while [ $# -gt 0 ]; do
             ;;
         --host-update-cli-assets=*)
             HOST_UPDATE_CLI_ASSETS="${1#--host-update-cli-assets=}"
+            shift
+            ;;
+        --install-host-update-daemon)
+            HOST_UPDATE_DAEMON_SERVICE=true
+            shift
+            ;;
+        --host-update-daemon-user)
+            if [ -z "${2:-}" ]; then
+                echo "Missing value for $1" >&2; exit 2
+            fi
+            HOST_UPDATE_DAEMON_USER="$2"
+            shift 2
+            ;;
+        --host-update-daemon-user=*)
+            HOST_UPDATE_DAEMON_USER="${1#--host-update-daemon-user=}"
             shift
             ;;
         -b|--batch|--non-interactive)

@@ -32,6 +32,7 @@ public static partial class HostUpdateCli
           printfarmer-host-update offline-activate --staging <absolute-verified-staging-dir> --channel <stable|insider> --trusted-root <absolute-trusted_root.json> [--cosign <absolute-path>] [--json]
           printfarmer-host-update offline-recover --staging <absolute-verified-staging-dir> --channel <stable|insider> --trusted-root <absolute-trusted_root.json> [--cosign <absolute-path>] --protected-backup <absolute-reference.json> --release <releaseId> [--request-id <requestId>] (--preview | --confirm <releaseId> [--reapprove-drift <token>] [--printers-reconciled <token>]) [--json]
           printfarmer-host-update daemon [--once] [--json]
+          printfarmer-host-update daemon --windows-service   (Windows Service Control Manager only)
 
         Configuration comes from --config <absolute-json-path> and environment variables
         (HostUpdateExecution__*, HostUpdates__HostState__*, DB_PROVIDER, ConnectionStrings__Default).
@@ -67,6 +68,10 @@ public static partial class HostUpdateCli
         executes nothing: runtime updates stay disabled until the #2982 recovery evidence passes
         and the owner authorizes enablement. No setting enables it; unknown HostUpdateDaemon__*
         settings are rejected.
+
+        daemon --windows-service is how the opt-in Windows service (issue #3118) starts the same
+        daemon; its status lines go to %ProgramData%\PrintFarmer\host\daemon\logs\daemon.log.
+        Installing a service grants nothing.
 
         Exit codes: 0 ok, 2 usage, 3 configuration/namespace unproven, 4 state unreadable,
         5 no history, 6 refused, 7 lock held, 10 needs operator, 11 fence release pending,

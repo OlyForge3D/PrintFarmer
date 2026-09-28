@@ -333,6 +333,11 @@ install or configuration failure stops the deployment before containers start;
 exit `3` is reported as a warning. `deploy-docker.sh` uses `sudo` when not run
 as root; run `deploy-docker.ps1` from an elevated shell.
 
+The same installers also provide opt-in `install-service` and
+`uninstall-service` commands that register the host-update daemon as a system
+service without enabling it; see
+[Opt-in daemon system service](#opt-in-daemon-system-service-3118).
+
 #### Manual install
 **Linux** (stable identity shown; insider releases use
 `@refs/heads/development`):
@@ -794,7 +799,8 @@ to `runtime_updates_disabled_pending_2982`, and no configuration value,
 environment variable or saved setting enables it. Signed-release verification
 (#3116) and journal checkpoint reconciliation (#3117) are implemented below.
 Enrollment and live pull API transport remain unavailable; the #3115 routes
-are contracts, not mapped endpoints. Service wrappers belong to #3118.
+are contracts, not mapped endpoints. The opt-in service wrappers (#3118) are described
+[below](#opt-in-daemon-system-service-3118).
 
 Each cycle the daemon:
 
@@ -840,6 +846,81 @@ Any other key under `HostUpdateDaemon` (for example an `Enabled` switch) is
 rejected as `daemon_setting_unknown:<key>` with exit `3`. Failed cycles back
 off exponentially with up to 10% jitter, capped at `MaxBackoffSeconds`; with
 `--once`, a failed cycle exits `4`.
+
+### Opt-in daemon system service (#3118)
+
+The daemon is never installed as a system service by default. Installing the
+service is an explicit operator step and **grants nothing**: the unit or
+service is created disabled and stopped, enrollment stays separate, and daemon
+execution remains hard-wired to `runtime_updates_disabled_pending_2982`
+whether the service is running or not. Neither wrapper carries environment
+variables, credentials or auto-update settings; the daemon reads only the
+owner-only `host-update.json` written by `write-config`.
+
+Install the signed CLI and write `host-update.json` first (see
+[Automated install](#automated-install-3045)), then:
+
+```bash
+# Linux (systemd): installs printfarmer-host-update-daemon.service, not enabled
+sudo scripts/install-host-update-cli.sh install-service \
+  --cli-dir /opt/printfarmer/host-update-cli/<version>
+# Enable and start it later, as a separate decision
+sudo systemctl enable --now printfarmer-host-update-daemon.service
+# Remove it (keeps host-update.json, the journal, identity storage and logs)
+sudo scripts/install-host-update-cli.sh uninstall-service
+```
+
+```powershell
+# Windows (elevated): creates the PrintFarmerHostUpdateDaemon service, Disabled
+pwsh scripts\install-host-update-cli.ps1 install-service `
+  -CliDir "$env:ProgramFiles\PrintFarmer\HostUpdateCli\<version>"
+Set-Service PrintFarmerHostUpdateDaemon -StartupType Automatic; Start-Service PrintFarmerHostUpdateDaemon
+pwsh scripts\install-host-update-cli.ps1 uninstall-service
+```
+
+| | Linux (`install-host-update-cli.sh`) | Windows (`install-host-update-cli.ps1`) |
+| --- | --- | --- |
+| Registration | `/etc/systemd/system/printfarmer-host-update-daemon.service` (`--unit-dir` overrides) | Service `PrintFarmerHostUpdateDaemon`, start type `Disabled` |
+| Command | `<cli-dir>/cli/Farm.HostUpdate.Cli --config <config> daemon` | `"<CliDir>\cli\Farm.HostUpdate.Cli.exe" --config "<Config>" daemon --windows-service` |
+| Account | `--service-user`, default the owner of `host-update.json`; `root` is refused unless named explicitly | Virtual account `NT SERVICE\PrintFarmerHostUpdateDaemon` (no password, only `SeChangeNotifyPrivilege`) |
+| Access granted | None beyond the account's own files; the config must be owned by that account with no group/other bits | Read on `host-update.json`, read/execute on `HostUpdateExecution:RootDirectory`, modify on `<RootDirectory>\state` and the log directory |
+| Hardening | `NoNewPrivileges`, empty `CapabilityBoundingSet`, `ProtectSystem=full`, `PrivateTmp` and related sandboxing | Unrestricted service SID, privileges stripped to `SeChangeNotifyPrivilege`, no service environment |
+| Restart | `Restart=on-failure`; exits `2`, `3` and `7` (usage, invalid config, already running) are not restarted | Service recovery restarts after 30 s, at most twice per 24 h, also when the daemon stops itself with a nonzero exit code |
+| Logs | journald (`journalctl -u printfarmer-host-update-daemon`) | `%ProgramData%\PrintFarmer\host\daemon\logs\daemon.log`, rotated to `daemon.log.1` at 1 MiB |
+| `--enable` / `-Enable` | Runs `systemctl enable --now` | Sets start type `Automatic` and starts it |
+
+Both commands validate before changing anything: the CLI directory must be an
+installed, signed package that only root/SYSTEM/Administrators (or the
+installing account) can write, the service account must already be able to
+read and execute it (checked as that account on Linux, and against the ACL on
+Windows, where the default Program Files ACL grants this), and the
+configuration must be owner-only. A refused rerun leaves an existing unit or
+service pointing at its previous CLI directory. Reruns
+are idempotent and never change whether the service is enabled; a running
+service is restarted only when its definition changed. On Linux, if systemd
+rejects a changed unit (`daemon-reload` or `try-restart` fails), the previous
+unit, or none, is restored and the command fails. Neither command
+overwrites or removes a unit or service it did not create. On Windows, grant
+the virtual account any additional paths (for example a relocated host state
+directory) yourself. The CI package tests exercise the real service
+lifecycle with the packaged CLI on Linux (systemd) and Windows (SCM): a
+disabled install does not start, an enabled service runs a daemon cycle, an
+operator stop exits cleanly without a restart, a crash (Linux) or nonzero
+self-exit (Windows) is restarted, and an invalid configuration (exit `3`) is
+not restarted on Linux. The Windows path is not part of the Linux-only
+[recovery matrix](OFFLINE_UPDATE_RECOVERY.md#isolated-recovery-matrix-scope-3098).
+
+The deploy scripts can install the service in the same run as the CLI; this
+also never enables it:
+
+- `scripts/deploy-docker.sh --host-update-cli-version <version> --install-host-update-daemon [--host-update-daemon-user <user>]`
+  (or `HOST_UPDATE_DAEMON_SERVICE=true`, `HOST_UPDATE_DAEMON_USER=<user>`).
+- `scripts\deploy-docker.ps1 -HostUpdateCliVersion <version> -InstallHostUpdateDaemon`
+  (or `HOST_UPDATE_DAEMON_SERVICE=true`), Windows hosts only.
+
+Either flag fails the deployment when no CLI version is given, when
+`HostUpdateExecution__RootDirectory` is missing from `.env` (so no
+`host-update.json` could be written), or when the service install fails.
 
 ## Daemon signed-release verification (#3116)
 

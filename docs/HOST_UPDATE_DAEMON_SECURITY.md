@@ -269,12 +269,15 @@ enrolled by this design. Topology membership grants nothing.
 | Platform | Private key | Daemon identity state |
 | --- | --- | --- |
 | Linux (the only platform currently qualified by the [recovery matrix](OFFLINE_UPDATE_RECOVERY.md#isolated-recovery-matrix-scope-3098)) | A `0600` file owned by the daemon service account, in a `0700` directory under `/etc/printfarmer-host/daemon/`, never world- or group-writable, without symlink traversal. A TPM-backed key is optional best effort, not required | `/var/lib/printfarmer-host/daemon/`, which holds the daemon state (`unenrolled`, `pending`, `active`, `rotating`, `revoked`), key ID, epoch, the last counter the API acknowledged, the last enrollment-state revision seen, the pinned installation ID and response key, and consumed approval IDs |
-| Windows (future, per #3118) | CNG machine key store, marked non-exportable, with the ACL restricted to the daemon service account and Administrators | `%ProgramData%\PrintFarmer\host\daemon\`, restricted to the same principals |
+| Windows (not qualified; #3118 ships only the service wrapper) | Not supported yet: the daemon fails closed with `identity_storage_platform_unsupported` when `HostUpdateDaemon:IdentityDirectory` is set on Windows. A CNG machine key store, marked non-exportable, with the ACL restricted to the `NT SERVICE\PrintFarmerHostUpdateDaemon` virtual account and Administrators, remains the proposal for a later slice | Executor state under `HostUpdateExecution:RootDirectory\state` and logs under `%ProgramData%\PrintFarmer\host\daemon\logs\`, each granted to the service's virtual account plus SYSTEM/Administrators |
 
 These locations are proposals; #3114 and #3118 finalize them. #3114 finalized
 the Linux key path as `/etc/printfarmer-host/daemon/enrollment-key.pem`,
 configured through `HostUpdateDaemon:IdentityDirectory` (an absolute path
-outside `HostUpdateExecution:RootDirectory`). Startup validation fails closed
+outside `HostUpdateExecution:RootDirectory`). #3118 finalized the service
+accounts: on Linux the systemd unit runs as the account that owns
+`host-update.json` (never root unless explicitly requested); on Windows the
+service runs as its per-service virtual account. Startup validation fails closed
 with a bounded code on any group/other permission bit, owner mismatch,
 symlink or reparse component, or non-Linux platform. The following
 rules are not optional:
@@ -668,7 +671,14 @@ turn it into tests:
 - **#3117:** Signed re-confirmation before the first side effect.
   API-unavailable and revoked-during-operation cells.
 - **#3118:** Installation grants nothing. Enrollment and automatic permission
-  are separate, persisted choices. No environment secrets.
+  are separate, persisted choices. No environment secrets. Covered by
+  `tests/test-install-host-update-cli.sh` (the systemd unit is installed but
+  not enabled, carries no `Environment=`/`EnvironmentFile=` lines, refuses a
+  root or group-readable configuration, refuses to overwrite a foreign unit,
+  and uninstall keeps configuration and state) and
+  `tests/test-install-host-update-cli.ps1` (the Windows service is created
+  `Disabled` and stopped as `NT SERVICE\PrintFarmerHostUpdateDaemon`, with no
+  service environment, and uninstall removes only its own service and ACEs).
 - **#3119:** End-to-end impersonation, replay, stale approval, clone and
   database-restore scenarios.
 - **#3120:** User-facing copy for the three grants, fingerprint comparison and

@@ -34,7 +34,8 @@ param(
     [string]$AutoAdminPassword = "",
     [string]$AutoAdminEmail = "",
     [string]$HostUpdateCliVersion = $env:HOST_UPDATE_CLI_VERSION,
-    [string]$HostUpdateCliAssets = $env:HOST_UPDATE_CLI_ASSETS
+    [string]$HostUpdateCliAssets = $env:HOST_UPDATE_CLI_ASSETS,
+    [switch]$InstallHostUpdateDaemon = ($env:HOST_UPDATE_DAEMON_SERVICE -eq 'true')
 )
 
 $ErrorActionPreference = "Stop"
@@ -155,6 +156,10 @@ function Show-Help {
     Write-Host "                               and an elevated shell. Not rollout authorization. Env: HOST_UPDATE_CLI_VERSION"
     Write-Host "    -HostUpdateCliAssets DIR   Read the CLI archive, SHA256SUMS and its bundle from DIR (offline hosts)."
     Write-Host "                               Env: HOST_UPDATE_CLI_ASSETS"
+    Write-Host "    -InstallHostUpdateDaemon   Opt in to registering the host-update daemon as the Windows service"
+    Write-Host "                               PrintFarmerHostUpdateDaemon (issue #3118). Requires -HostUpdateCliVersion."
+    Write-Host "                               Created Disabled and stopped; installing it grants nothing (daemon"
+    Write-Host "                               execution stays disabled pending #2982). Env: HOST_UPDATE_DAEMON_SERVICE=true"
     Write-Host "    -NonInteractive            Automated deployment (CI/CD mode)"
     Write-Host "    -TearDown                  Stop and remove containers/volumes (preserve images)"
     Write-Host "    -Redeploy                  Restart existing deployment with same config"
@@ -1742,7 +1747,17 @@ function Verify-Deployment {
 function Install-HostUpdateCliIfRequested {
     param([string]$EnvFilePath = ".env")
 
-    if ([string]::IsNullOrWhiteSpace($HostUpdateCliVersion)) { return }
+    if ([string]::IsNullOrWhiteSpace($HostUpdateCliVersion)) {
+        if ($InstallHostUpdateDaemon) {
+            Write-ErrorMsg "-InstallHostUpdateDaemon requires -HostUpdateCliVersion. See docs/HOST_UPDATE_RUNBOOK.md."
+            exit 1
+        }
+        return
+    }
+    if ($InstallHostUpdateDaemon -and -not $IsWindows) {
+        Write-ErrorMsg "-InstallHostUpdateDaemon registers a Windows service; on Linux use deploy-docker.sh --install-host-update-daemon."
+        exit 1
+    }
 
     $installer = Join-Path $PSScriptRoot "install-host-update-cli.ps1"
     $envPath = [System.IO.Path]::GetFullPath($EnvFilePath, (Get-Location).Path)
@@ -1761,11 +1776,28 @@ function Install-HostUpdateCliIfRequested {
     & pwsh -NoProfile -File $installer write-config -EnvFile $envPath
     switch ($LASTEXITCODE) {
         0 { Write-Success "Host-update CLI installed and host-update.json written" }
-        3 { Write-Warning "HostUpdateExecution__RootDirectory is not set in $envPath; host-update.json was not written" }
+        3 {
+            if ($InstallHostUpdateDaemon) {
+                Write-ErrorMsg "HostUpdateExecution__RootDirectory is not set in $envPath; the host-update daemon service needs host-update.json and was not installed."
+                exit 1
+            }
+            Write-Warning "HostUpdateExecution__RootDirectory is not set in $envPath; host-update.json was not written"
+        }
         default {
             Write-ErrorMsg "Writing host-update.json failed (exit $LASTEXITCODE). See docs/HOST_UPDATE_RUNBOOK.md."
             exit 1
         }
+    }
+
+    # Issue #3118: opt-in only. The service is created Disabled and stopped; enabling it is a
+    # separate operator decision, and the daemon's execution stays disabled pending #2982.
+    if (-not $InstallHostUpdateDaemon) { return }
+    $cliDir = Join-Path $env:ProgramFiles "PrintFarmer\HostUpdateCli\$HostUpdateCliVersion"
+    Write-Info "Installing the host-update daemon service (not enabled)..."
+    & pwsh -NoProfile -File $installer install-service -CliDir $cliDir
+    if ($LASTEXITCODE -ne 0) {
+        Write-ErrorMsg "Installing the host-update daemon service failed. See docs/HOST_UPDATE_RUNBOOK.md."
+        exit 1
     }
 }
 
@@ -2066,6 +2098,12 @@ if ($DryRun) {
     Write-Info "Configuration is valid and ready for deployment"
     if (-not [string]::IsNullOrWhiteSpace($HostUpdateCliVersion)) {
         Write-Info "[DRY RUN] Would install host-update CLI $HostUpdateCliVersion and write host-update.json from .env"
+        if ($InstallHostUpdateDaemon) {
+            Write-Info "[DRY RUN] Would install the host-update daemon service PrintFarmerHostUpdateDaemon (not enabled)"
+        }
+    } elseif ($InstallHostUpdateDaemon) {
+        Write-ErrorMsg "-InstallHostUpdateDaemon requires -HostUpdateCliVersion"
+        exit 1
     }
     Write-Info "Remove -DryRun flag to proceed with actual deployment"
     exit 0

@@ -33,6 +33,9 @@ internal sealed partial class HostUpdateCliArguments
 
     public bool Once { get; private set; }
 
+    /// <summary>Windows only: the daemon is hosted by the Service Control Manager (issue #3118).</summary>
+    public bool WindowsService { get; private set; }
+
     public string? ReapprovalToken { get; private set; }
 
     public string? PhysicalReconciliationToken { get; private set; }
@@ -105,6 +108,9 @@ internal sealed partial class HostUpdateCliArguments
                     break;
                 case "--once" when command == HostUpdateCliCommand.Daemon:
                     result.Once = true;
+                    break;
+                case "--windows-service" when command == HostUpdateCliCommand.Daemon && OperatingSystem.IsWindows():
+                    result.WindowsService = true;
                     break;
                 case "--staging" when IsOffline(command.Value):
                     if (!TryValue(args, ref i, out string? staging))
@@ -302,6 +308,12 @@ internal sealed partial class HostUpdateCliArguments
                     return false;
                 }
             }
+        }
+
+        if (result.WindowsService && result.Once)
+        {
+            error = "windows_service_conflicts_with:--once";
+            return false;
         }
 
         parsed = result;

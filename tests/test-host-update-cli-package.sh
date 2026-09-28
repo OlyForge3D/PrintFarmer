@@ -10,7 +10,19 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 TEST_ROOT="$(mktemp -d -t "printfarmer-host-update-package-XXXXXX")"
-trap 'rm -rf -- "$TEST_ROOT"' EXIT
+LIFE_UNIT=printfarmer-host-update-daemon.service
+LIFE_INSTALLED=0
+LIFE_CLI_ROOT=""
+LIFE_ROOT=""
+cleanup() {
+    if [[ "$LIFE_INSTALLED" == 1 ]]; then
+        sudo -n bash "$REPO_ROOT/scripts/install-host-update-cli.sh" uninstall-service >/dev/null 2>&1 || true
+    fi
+    [[ -z "$LIFE_CLI_ROOT" ]] || sudo -n rm -rf -- "$LIFE_CLI_ROOT"
+    [[ -z "$LIFE_ROOT" ]] || rm -rf -- "$LIFE_ROOT"
+    rm -rf -- "$TEST_ROOT"
+}
+trap cleanup EXIT
 
 [[ "$(uname -s)" == Linux ]] || { printf 'Packaged CLI smoke test supports Linux hosts only\n' >&2; exit 1; }
 case "$(uname -m)" in
@@ -92,6 +104,87 @@ code=0
 run_package --config relative.json status || code=$?
 [[ "$code" -eq 2 ]] && pass "packaged wrapper still refuses a relative config" \
     || fail "packaged wrapper still refuses a relative config (exit $code)"
+
+# Issue #3118: the packaged CLI as a real systemd service. Needs a running systemd, passwordless
+# sudo and no existing unit (GitHub-hosted Ubuntu runners have all three).
+if [[ -d /run/systemd/system ]] && sudo -n true >/dev/null 2>&1 && [[ ! -e "/etc/systemd/system/$LIFE_UNIT" ]]; then
+    check() { if eval "$2"; then pass "$1"; else fail "$1"; fi; }
+    wait_for() {
+        local deadline=$((SECONDS + $1))
+        shift
+        until "$@"; do
+            ((SECONDS < deadline)) || return 1
+            sleep 0.5
+        done
+    }
+    unit_active() { systemctl is-active --quiet "$LIFE_UNIT"; }
+    unit_inactive() { ! systemctl is-active --quiet "$LIFE_UNIT"; }
+    unit_show() { systemctl show -p "$1" --value "$LIFE_UNIT"; }
+    restarted_from() { unit_active && [[ "$(unit_show MainPID)" != "$1" && "$(unit_show MainPID)" != 0 ]]; }
+    installer() {
+        sudo -n bash "$REPO_ROOT/scripts/install-host-update-cli.sh" "$@" >"$TEST_ROOT/service.log" 2>&1 && return 0
+        cat "$TEST_ROOT/service.log" >&2
+        return 1
+    }
+
+    # The unit's CLI must be root-owned, as a real install is; the state root is owned by the
+    # service account and lives outside the OS temp directory.
+    LIFE_CLI_ROOT="/opt/printfarmer-lifecycle-$$"
+    LIFE_CLI="$LIFE_CLI_ROOT/$VERSION"
+    sudo -n mkdir -p "$LIFE_CLI_ROOT"
+    sudo -n cp -a "$INSTALL" "$LIFE_CLI"
+    sudo -n chown -R root:root "$LIFE_CLI_ROOT"
+    sudo -n chmod -R go-w "$LIFE_CLI_ROOT"
+    # As the install command does: the archive's root entry does not decide the directory mode.
+    sudo -n chmod 0755 "$LIFE_CLI_ROOT" "$LIFE_CLI"
+    LIFE_ROOT="$(mktemp -d "$HOME/pf-lifecycle-XXXXXX")"
+    chmod 0755 "$LIFE_ROOT"
+    mkdir -p "$LIFE_ROOT/root/state"
+    printf 'HostUpdateExecution__RootDirectory=%s\n' "$LIFE_ROOT/root" >"$LIFE_ROOT/deploy.env"
+    LIFE_CONFIG="$LIFE_ROOT/host-update.json"
+    check "write-config for the service lifecycle succeeds" \
+        "bash '$REPO_ROOT/scripts/install-host-update-cli.sh' write-config --env-file '$LIFE_ROOT/deploy.env' --output '$LIFE_CONFIG' >/dev/null 2>&1"
+
+    LIFE_INSTALLED=1
+    check "install-service installs the packaged daemon unit disabled and inactive" \
+        "installer install-service --cli-dir '$LIFE_CLI' --config '$LIFE_CONFIG' && [[ \$(systemctl is-enabled $LIFE_UNIT || true) == disabled ]] && unit_inactive"
+    sudo -n systemctl start "$LIFE_UNIT"
+    check "systemd starts the daemon as the config owner" \
+        "wait_for 30 unit_active && sleep 5 && unit_active && [[ \$(unit_show User) == '$(id -un)' ]]"
+    check "the daemon reports its cycles to the journal" \
+        "wait_for 30 sh -c \"sudo -n journalctl -u $LIFE_UNIT --no-pager -o cat | grep -q daemon_cycle_completed\""
+
+    sudo -n systemctl stop "$LIFE_UNIT"
+    check "an operator stop stops the daemon cleanly" "unit_inactive && [[ \$(unit_show Result) == success ]]"
+    sleep 35
+    check "an operator stop is not followed by a restart" "unit_inactive"
+
+    sudo -n systemctl start "$LIFE_UNIT"
+    wait_for 30 unit_active || true
+    pid="$(unit_show MainPID)"
+    sudo -n kill -KILL "$pid"
+    check "systemd restarts the daemon after it dies" "wait_for 60 restarted_from '$pid'"
+
+    # Exits 2, 3 and 7 (usage, invalid configuration, already running) are deliberately not
+    # restarted: a missing state directory makes the daemon exit 3.
+    sudo -n systemctl stop "$LIFE_UNIT"
+    rm -rf -- "$LIFE_ROOT/root/state"
+    sudo -n systemctl start "$LIFE_UNIT" || true
+    check "the daemon stops itself with exit 3 when its state directory is missing" \
+        "wait_for 30 unit_inactive && [[ \$(unit_show ExecMainStatus) == 3 ]]"
+    sleep 35
+    check "an exit-3 self-stop is not restarted" "unit_inactive"
+    mkdir -p "$LIFE_ROOT/root/state"
+    sudo -n systemctl reset-failed "$LIFE_UNIT" || true
+
+    check "install-service --enable enables and starts the daemon" \
+        "installer install-service --cli-dir '$LIFE_CLI' --config '$LIFE_CONFIG' --enable && [[ \$(systemctl is-enabled $LIFE_UNIT) == enabled ]] && wait_for 30 unit_active"
+    check "uninstall-service disables, stops and removes the unit" \
+        "installer uninstall-service && [[ ! -e /etc/systemd/system/$LIFE_UNIT ]] && unit_inactive"
+    LIFE_INSTALLED=0
+else
+    printf '[SKIP] systemd service lifecycle needs a running systemd, passwordless sudo and no existing unit\n'
+fi
 
 if [[ "$failures" -gt 0 ]]; then
     printf '%d packaged CLI test(s) failed\n' "$failures" >&2
