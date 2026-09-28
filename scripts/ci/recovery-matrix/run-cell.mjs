@@ -630,7 +630,10 @@ try {
 
   const afterRecovery = stateContinuitySnapshot({ env, deploymentRoot, hostStateRoot, hostContainer, provider });
   assertEqualJson('migration-heads-continuous', beforeRecovery.migrationHeads, afterRecovery.migrationHeads);
-  checkpoints.ok(`migration-heads-continuous:${afterRecovery.migrationHeads.join(',') || 'empty'}`);
+  if (afterRecovery.migrationHeads.length === 0) {
+    throw new Error('migration-heads-continuous: no migration history rows observed');
+  }
+  checkpoints.ok(`migration-heads-continuous:${afterRecovery.migrationHeads.join(',')}`);
   assertEqualJson('volume-hashes-continuous', beforeRecovery.volumeHashes, afterRecovery.volumeHashes);
   checkpoints.ok('blob-config-key-volume-hashes-continuous');
   assertHostStateContinuity(beforeRecovery.hostState, afterRecovery.hostState, { targetIdentity: targetReplayIdentity });

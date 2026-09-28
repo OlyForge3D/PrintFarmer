@@ -50,6 +50,9 @@ test('providers expose production provider names, connection strings, readiness,
     env: { MSSQL_DB: 'printfarmer', MSSQL_USER: 'sa', MSSQL_SA_PASSWORD: 'Secret1!' },
   }), /TrustServerCertificate=True/);
   assert.equal(sqlserver.readinessArgs({ MSSQL_USER: 'sa', MSSQL_SA_PASSWORD: 'Secret1!' })[0], '/opt/mssql-tools18/bin/sqlcmd');
+  const queryArgs = sqlserver.queryArgs({ MSSQL_DB: 'printfarmer', MSSQL_USER: 'sa', MSSQL_SA_PASSWORD: 'Secret1!' }, 'SELECT 1');
+  assert.equal(queryArgs[queryArgs.indexOf('-d') + 1], 'printfarmer', 'queries must target the application database, not master');
+  assert.ok(queryArgs.includes('-b'), 'sqlcmd errors must produce a non-zero exit instead of being read as rows');
 });
 
 test('topologies map active services and infrastructure requirements', () => {

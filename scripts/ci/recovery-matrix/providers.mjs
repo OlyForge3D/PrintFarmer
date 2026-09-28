@@ -62,7 +62,7 @@ export const providerCatalog = Object.freeze({
       return ['/opt/mssql-tools18/bin/sqlcmd', '-C', '-S', 'localhost', '-U', env.MSSQL_USER, '-P', env.MSSQL_SA_PASSWORD, '-Q', 'SELECT 1'];
     },
     queryArgs(env, sql) {
-      return ['/opt/mssql-tools18/bin/sqlcmd', '-C', '-S', 'localhost', '-U', env.MSSQL_USER, '-P', env.MSSQL_SA_PASSWORD, '-h', '-1', '-W', '-Q', sql];
+      return ['/opt/mssql-tools18/bin/sqlcmd', '-C', '-S', 'localhost', '-U', env.MSSQL_USER, '-P', env.MSSQL_SA_PASSWORD, '-d', env.MSSQL_DB, '-b', '-h', '-1', '-W', '-Q', sql];
     },
     writeToolShims({ runRoot, databaseContainer }) {
       return writeSqlServerToolShims(runRoot, databaseContainer);
