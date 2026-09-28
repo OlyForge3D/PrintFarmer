@@ -1586,6 +1586,11 @@ public class ProfilesController(
     /// returns the SAME profile (200 OK) rather than minting a second, user-visible duplicate in
     /// the owner's custom filament profile list (201 Created only on first promotion).
     /// </para>
+    /// <para>
+    /// The idempotency key is scoped per caller (#3189). A draft id another user already promoted
+    /// gets the same response as an unknown id (201 with the caller's own new profile), so this
+    /// endpoint does not reveal whether another user has promoted it.
+    /// </para>
     /// </remarks>
     [HttpPost("promote-from-calibration")]
     [RequirePermission(PrintFarmerPermissions.Calibration.Update)]
@@ -1627,15 +1632,6 @@ public class ProfilesController(
         {
             _logger.LogWarning("Promote calibration draft profile validation failed: {Message}", LogSanitizer.Sanitize(ex.Message));
             return BadRequest(ex.Message);
-        }
-        catch (UnauthorizedAccessException ex)
-        {
-            // Round-5 review fix (issue #2180 - Bishop/Hicks Blocking, round 5): the caller
-            // supplied a draft profile ID promoted by a different user. Mapped to Forbid() (403)
-            // so the other user's profile is never returned. Unlike UpdateCustomProfileAsync and
-            // DeleteCustomProfileAsync, which return 404 for a row the caller cannot view (#3185).
-            _logger.LogWarning("Promote calibration draft profile unauthorized: {Message}", LogSanitizer.Sanitize(ex.Message));
-            return Forbid();
         }
         catch (Exception ex)
         {

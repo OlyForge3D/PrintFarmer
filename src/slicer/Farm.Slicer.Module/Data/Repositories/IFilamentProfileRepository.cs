@@ -25,13 +25,15 @@ public interface IFilamentProfileRepository
     Task<FilamentProfile?> GetByHashAsync(string hash, CancellationToken ct = default);
 
     /// <summary>
-    /// Gets the filament profile, if any, that was promoted from the given calibration draft
-    /// profile (#2180, gap 1). Used as the idempotency check backing
-    /// <c>IProfilesService.PromoteCalibrationDraftProfileAsync</c>.
+    /// Gets the filament profile, if any, that <paramref name="ownerUserId"/> promoted from the
+    /// given calibration draft profile (#2180, gap 1). Used as the idempotency check backing
+    /// <c>IProfilesService.PromoteCalibrationDraftProfileAsync</c>. Scoped to the owner (#3189) so
+    /// a row another user promoted from the same draft id is never read.
     /// </summary>
+    /// <param name="ownerUserId">The user who owns the promoted profile.</param>
     /// <param name="sourceDraftProfileId">The calibration draft profile's stable identifier.</param>
     /// <param name="ct">Cancellation token.</param>
-    Task<FilamentProfile?> GetByPromotedFromCalibrationDraftProfileIdAsync(Guid sourceDraftProfileId, CancellationToken ct = default);
+    Task<FilamentProfile?> GetByPromotedFromCalibrationDraftProfileIdAsync(Guid ownerUserId, Guid sourceDraftProfileId, CancellationToken ct = default);
 
     /// <summary>Adds a new filament profile.</summary>
     /// <param name="profile">The profile to add.</param>

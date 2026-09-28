@@ -216,11 +216,11 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
 
                     b.HasIndex("Material");
 
-                    b.HasIndex("PromotedFromCalibrationDraftProfileId")
-                        .IsUnique()
-                        .HasFilter("[PromotedFromCalibrationDraftProfileId] IS NOT NULL");
-
                     b.HasIndex("SlicerType");
+
+                    b.HasIndex("CreatedByUserId", "PromotedFromCalibrationDraftProfileId")
+                        .IsUnique()
+                        .HasFilter("[CreatedByUserId] IS NOT NULL AND [PromotedFromCalibrationDraftProfileId] IS NOT NULL");
 
                     b.HasIndex("Name", "Material", "SlicerType")
                         .IsUnique();

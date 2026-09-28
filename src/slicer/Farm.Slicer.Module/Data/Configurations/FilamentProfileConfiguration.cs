@@ -41,9 +41,11 @@ public class FilamentProfileConfiguration : IEntityTypeConfiguration<FilamentPro
         _ = builder.HasIndex(p => p.IsSystem);
 
         // Idempotency key for calibration-draft promotion (#2180, gap 1): unique so a
-        // retried/replayed promotion call can never mint two real profiles for one draft. EF Core
-        // auto-generates the "IS NOT NULL" filter for a unique index on a nullable column on both
-        // SQL Server and Npgsql, matching the existing Artifact.PromotionOperationKey convention.
-        _ = builder.HasIndex(p => p.PromotedFromCalibrationDraftProfileId).IsUnique();
+        // retried/replayed promotion call can never mint two real profiles for one draft. Scoped
+        // per owner (#3189): the draft id is caller-supplied, so a global index let one user learn
+        // that another user had promoted a draft id, or claim it first and block the owner. EF Core
+        // auto-generates the "IS NOT NULL" filter for a unique index on nullable columns on SQL
+        // Server, matching the existing Artifact.PromotionOperationKey convention.
+        _ = builder.HasIndex(p => new { p.CreatedByUserId, p.PromotedFromCalibrationDraftProfileId }).IsUnique();
     }
 }
