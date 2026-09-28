@@ -16,7 +16,8 @@ public static class HealthCheckStartup
         services.AddHealthChecks()
             .AddCheck<ComprehensiveHealthCheck>("comprehensive")
             .AddCheck<SignalRHealthCheck>("signalr")
-            .AddCheck<SpoolmanHealthCheck>("spoolman");
+            .AddCheck<SpoolmanHealthCheck>("spoolman")
+            .AddCheck<QueueConsumersHealthCheck>(QueueConsumersHealthCheck.Name);
 
         return services;
     }

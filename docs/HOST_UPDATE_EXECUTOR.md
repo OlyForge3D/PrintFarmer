@@ -94,6 +94,11 @@ cannot reach the API's HTTP address. The CLI therefore replaces both registratio
   `Healthy` and every `RequiredAggregateHealthResultNames` entry present and `Healthy`. A
   missing service mapping, non-zero exit, timeout, process-runner refusal or unparseable body
   fails verification. Per-service digest verification is unchanged.
+  Because the overall status must be `Healthy`, an unhealthy `queue-consumers` entry
+  (see [Queue-consumer health entry](OFFLINE_UPDATE_RECOVERY.md#queue-consumer-health-entry-3157))
+  also fails verification on releases that expose it. `queue-consumers` is deliberately not in
+  the default `RequiredAggregateHealthResultNames`, so verifying a rollback to a release that
+  predates the entry still succeeds.
 
 ## Concrete adapters (`src/infra/Services/HostUpdates/`)
 
