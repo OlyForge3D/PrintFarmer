@@ -253,7 +253,13 @@ function createHelpers(ctx) {
     const reason = assertRefusedImport(label, result, { reason: options.reason });
     if (ctx.stagingExists(label)) fail('import_refusal_left_staging', label);
     const allowReplayRecord = authenticatedReplayRefusal(reason);
-    assertSameState(label, before, ctx.stateHashes(), { allowReplayRecord });
+    const after = ctx.stateHashes();
+    // The anchor snapshot is a cache of the append-only anchor journal. Detecting a rolled-back
+    // snapshot heals it forward to the journal head; that restores, never advances, admission.
+    if (options.anchorRepairTo && after['replay-anchor.json'] === options.anchorRepairTo) {
+      before['replay-anchor.json'] = after['replay-anchor.json'];
+    }
+    assertSameState(label, before, after, { allowReplayRecord });
     if (allowReplayRecord) {
       const drift = replayAdmissionDrift(replayBefore, ctx.replayState());
       if (drift.length > 0) fail('import_refusal_changed_admission', `${label}:${drift.join(',')}`);
@@ -424,9 +430,10 @@ const adversarialRunners = {
     const saved = ctx.hostStateFiles.save('before-26');
     h.imported('replay-store-advanced', h.release('1.0.0-insider.26'));
     const advanced = ctx.hostStateFiles.save('after-26');
+    const advancedHashes = ctx.stateHashes();
     ctx.hostStateFiles.restore(saved, ['host-update-replay.json', 'replay-anchor.json']);
     try {
-      h.refused('rolled-back-replay-store', h.release('1.0.0-insider.27'));
+      h.refused('rolled-back-replay-store', h.release('1.0.0-insider.27'), { anchorRepairTo: advancedHashes['replay-anchor.json'] });
     } finally {
       ctx.hostStateFiles.restore(advanced);
     }
