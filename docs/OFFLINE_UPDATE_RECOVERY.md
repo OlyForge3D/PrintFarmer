@@ -627,6 +627,24 @@ until it times out. A failure after the stop leaves the N-1 writer stopped
 behind the closed gate; recovery rolls back through the normal path. When no
 writer was tolerated, the fence is inert.
 
+A redrive after power loss between the target `compose up` and `apply:after`
+(#3181) can find writers already running the target. The absence probe also
+tolerates a writer when all of these hold, and never otherwise:
+
+1. Every journal activity for the release is bound to this exact request, and
+   the last one is `apply:before`. No `apply:after`, `Verifying`, `Completed`,
+   `RecoveryRequired` or `Refused` activity exists.
+2. The container's compose `State` is exactly `running` and its `ID` is
+   observable.
+3. Its compose `Image` is `<ImageRepository>@<target child digest>` from this
+   request's signed targets.
+
+Such a writer never enters the `prior-release-writer` fence's tolerated set, so
+it is never stopped. The executor then reconciles the interrupted apply by
+verifying the exact running digests, without a second `compose up` or any
+migration replay. If the digests do not verify, the redrive reports
+`RecoveryRequired` / `uncertain_side_effect:apply:*` as before.
+
 A host whose application or slicer schema was provably never migrated has no
 active work to drain (#3126). The proof requires the context's EF migration
 history table and the queried tables to be absent together. A missing work table
@@ -1107,7 +1125,7 @@ then repeats the final operator action, restarts the host, runs
 | `fault-power-loss-migration-before` | Power loss before the `AppDbContext` migration apply runs, on the N+1 schema-delta target | Redrive reports `RecoveryRequired` / `uncertain_side_effect:migration:migration_state_incomplete` (the N+1 migration is still pending, so it is never blindly replayed); recovery reports `RolledBack` and the N+1 schema is absent | Pass (2026-09-28, `eb900fa1c8ce`) |
 | `fault-power-loss-migration-after` | Power loss after the final (`SlicerDbContext`) N+1 migration apply returned, before `migration:after` | `Activated` after the reconciler proves no context has pending migrations, without re-applying them | Pass (2026-09-28, `eb900fa1c8ce`) |
 | `fault-power-loss-apply-before` | Power loss before `compose up` runs | Redrive reports `RecoveryRequired` / `uncertain_side_effect:apply:*`; recovery reports `RolledBack` | Pass (2026-09-28, `eb900fa1c8ce`) |
-| `fault-power-loss-apply-after` | Power loss after `compose up` ran, before `apply:after` | `Activated` after the reconciler verifies the running digests | Fails on #3181: the redrive is refused with `writer_service_active:monolith:running` |
+| `fault-power-loss-apply-after` | Power loss after `compose up` ran, before `apply:after` | `Activated` after the reconciler verifies the running digests | Failed on #3181 (`writer_service_active:monolith:running`); fixed, pending a live re-run |
 | `fault-partial-migration` | The `AppDbContext` N+1 migration applies, then the call fails | `RolledBack`; the N+1 history rows and tables are gone and migration heads match the prior release | Fails on #3177: the N+1 `AppDbContext` table survives rollback |
 | `fault-partial-apply` | `compose up` starts the target, then the call fails | `RolledBack`; running digests match the prior release | Pass (2026-09-28, `eb900fa1c8ce`) |
 | `fault-api-down` | Application containers stopped while `RecoveryRequired` | `RolledBack` | Pass (2026-09-28, `eb900fa1c8ce`) |
