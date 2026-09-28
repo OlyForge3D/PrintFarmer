@@ -73,6 +73,43 @@ public sealed class HealthResponseHostUpdateContractTests
         results.GetProperty("spoolman").GetProperty("status").GetInt32().Should().Be((int)HealthStatus.Unhealthy).And.Be(0);
     }
 
+    [Fact]
+    public async Task RealWriterOutput_QueueConsumersEntry_UsesNumericStatusAndCamelCaseData()
+    {
+        // Issue #3157: the recovery matrix and the host-update parser both read this entry.
+        var entries = new Dictionary<string, HealthReportEntry>(StringComparer.Ordinal)
+        {
+            ["comprehensive"] = Entry(HealthStatus.Healthy),
+            ["signalr"] = Entry(HealthStatus.Healthy),
+            ["spoolman"] = Entry(HealthStatus.Healthy),
+            [Farm.Web.Api.Health.QueueConsumersHealthCheck.Name] = new(
+                HealthStatus.Healthy,
+                "All 6 queue consumers running",
+                TimeSpan.FromMilliseconds(1),
+                exception: null,
+                data: new Dictionary<string, object> { ["backendStartCommandConsumer"] = "running" }),
+        };
+
+        string body = await WriteAsync(new HealthReport(entries, TimeSpan.FromMilliseconds(5)));
+
+        using JsonDocument document = JsonDocument.Parse(body);
+        JsonElement entry = document.RootElement.GetProperty("results").GetProperty("queue-consumers");
+        entry.GetProperty("status").GetInt32().Should().Be(2);
+        entry.GetProperty("data").GetProperty("backendStartCommandConsumer").GetString().Should().Be("running");
+
+        var withQueue = new HashSet<string>(Required, StringComparer.Ordinal) { "queue-consumers" };
+        HostUpdateAggregateHealthReport.IsHealthy(body, withQueue).Should().BeTrue(body);
+    }
+
+    [Fact]
+    public void DefaultRequiredAggregateHealthResultNames_DoNotRequireQueueConsumers()
+    {
+        // Rolling back to a release that predates #3157 must still verify, so the entry is
+        // observable but not a default host-update requirement.
+        new HostUpdateExecutionOptions().RequiredAggregateHealthResultNames
+            .Should().NotContain("queue-consumers");
+    }
+
     private static Task<string> WriteAsync(params HealthStatus[] statuses)
     {
         string[] names = ["comprehensive", "signalr", "spoolman"];
