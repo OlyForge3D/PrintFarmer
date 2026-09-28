@@ -5,11 +5,17 @@ export function writeDockerShim(runRoot, deploymentRoot, networkAttemptsPath) {
   const shim = join(runRoot, 'docker');
   const log = join(runRoot, 'docker-commands.ndjson');
   const envFile = join(deploymentRoot, '.env');
+  const composeFaultEnable = join(runRoot, 'fault-compose-up.enable');
+  const composeFaultPause = join(runRoot, 'fault-compose-up.pause');
+  const composeFaultDecision = join(runRoot, 'fault-compose-up.decision');
   mkdirSync(dirname(networkAttemptsPath), { recursive: true });
   writeFileSync(shim, `#!/usr/bin/env bash
 set -euo pipefail
 args=("$@")
 attempts=${JSON.stringify(networkAttemptsPath)}
+compose_fault_enable=${JSON.stringify(composeFaultEnable)}
+compose_fault_pause=${JSON.stringify(composeFaultPause)}
+compose_fault_decision=${JSON.stringify(composeFaultDecision)}
 deny() {
   local reason="$1"
   mkdir -p "$(dirname "$attempts")"
@@ -61,6 +67,29 @@ case "\${args[0]:-}" in
           if [[ "$has_pull_other" == 1 ]]; then deny "compose up --pull" "$@"; fi
           if [[ "$has_pull_never" == 0 ]]; then
             args=("\${args[@]:0:$((i+1))}" "--pull" "never" "\${args[@]:$((i+1))}")
+          fi
+          if [[ -f "$compose_fault_enable" ]]; then
+            fault_mode="$(cat "$compose_fault_enable")"
+            rm -f "$compose_fault_enable" "$compose_fault_pause" "$compose_fault_decision"
+            printf '{"at":"%s","args":%s}\\n' "$(date -u +%FT%TZ)" "$(node -e 'process.stdout.write(JSON.stringify(process.argv.slice(1)))' "$@")" > "$compose_fault_pause"
+            if [[ "$fault_mode" == "fail-now" ]]; then
+              echo "recovery matrix injected compose-up activation fault" >&2
+              exit 70
+            fi
+            deadline=$((SECONDS + 300))
+            while [[ ! -f "$compose_fault_decision" ]]; do
+              if (( SECONDS > deadline )); then
+                echo "timed out waiting for recovery matrix compose fault decision" >&2
+                exit 70
+              fi
+              sleep 0.1
+            done
+            decision="$(cat "$compose_fault_decision")"
+            rm -f "$compose_fault_pause" "$compose_fault_decision"
+            if [[ "$decision" == "fail" ]]; then
+              echo "recovery matrix injected compose-up activation fault" >&2
+              exit 70
+            fi
           fi
           break
           ;;

@@ -12,7 +12,7 @@ on:
       cell:
         description: Recovery matrix cell
         type: choice
-        options: [c2]
+        options: [c2, monolith-sqlserver, split-postgres, split-postgres-no-worker, split-sqlserver, external-database, external-storage, remote-worker, split-database, all]
         default: c2
 
 permissions:
@@ -24,9 +24,13 @@ concurrency:
 
 jobs:
   cell:
-    name: Recovery cell ${{ inputs.cell || 'c2' }}
+    name: Recovery cell ${{ matrix.cell }}
     runs-on: ubuntu-24.04
     timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        cell: ${{ github.event_name == 'schedule' && fromJSON('["c2","monolith-sqlserver","split-postgres","split-postgres-no-worker","split-sqlserver","external-database","external-storage","remote-worker","split-database"]') || fromJSON(format('["{0}"]', inputs.cell || 'c2')) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
@@ -58,7 +62,7 @@ jobs:
 
       - name: Run recovery cell
         env:
-          CELL: ${{ inputs.cell || 'c2' }}
+          CELL: ${{ matrix.cell }}
         run: >-
           bash scripts/ci/recovery-matrix/run-cell.sh
           --cell "$CELL"
@@ -69,7 +73,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
-          name: recovery-matrix-evidence-${{ inputs.cell || 'c2' }}-${{ github.run_id }}
+          name: recovery-matrix-evidence-${{ matrix.cell }}-${{ github.run_id }}
           path: .recovery-matrix-work/evidence-*.json
           include-hidden-files: true
           if-no-files-found: error

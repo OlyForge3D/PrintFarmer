@@ -6,16 +6,26 @@ import { basename, dirname, join, resolve } from 'node:path';
 
 import { waitForDuringActivationPoint } from './activation-runner.mjs';
 import { createFixtureSigstoreRoot } from './fixture-sigstore.mjs';
-import { buildC2ImageLayout } from './oci-layout-builder.mjs';
+import { resolveCell } from './cells.mjs';
+import { buildCellImageLayout } from './oci-layout-builder.mjs';
 import { writeRecoveryCompose } from './compose-config.mjs';
 import { writeDockerShim } from './docker-shim.mjs';
 import { hasFaultHooks, invokeFaultHook, parseFaultHooks } from './fault-hooks.mjs';
 import { assertHostStateContinuity, readHostStateSnapshotFromBoundary } from './host-state-continuity.mjs';
 import { canaryDnsName, hasCanaryAttempt } from './network-denial.mjs';
+import { providerFor } from './providers.mjs';
+import { serviceMappingsFor } from './topologies.mjs';
+import {
+  activeServiceDigestExpectations,
+  assertActiveServiceDigests,
+  assertExpectedNeedsOperator,
+  assertExpectedRefusal,
+  assertNoMutation,
+  evaluateQueueConsumersHealth,
+} from './runtime-assertions.mjs';
 import {
   baseEvidence,
   createCheckpoints,
-  defaultCell,
   detectUbuntuHost,
   lastJournalPhase,
   parseToolVersions,
@@ -37,6 +47,7 @@ import {
 } from './fixture-release-builder.mjs';
 
 const args = parseArgs(process.argv.slice(2));
+const cellSpec = resolveCell(args.cell ?? 'c2');
 const repo = resolve(required(args.repo, '--repo'));
 const runRoot = resolve(required(args['run-root'], '--run-root'));
 const evidencePath = resolve(required(args.evidence, '--evidence'));
@@ -48,10 +59,14 @@ const egressSinkIp = required(args['egress-sink-ip'], '--egress-sink-ip');
 const networkAttemptsPath = required(args['network-attempts'], '--network-attempts');
 const hostContainer = required(args['host-container'], '--host-container');
 const faultHooks = parseFaultHooks(toArray(args.fault));
+const provider = providerFor(cellSpec.cell.provider);
 
 const startedAt = new Date();
 const checkpoints = createCheckpoints();
-const cell = { ...defaultCell };
+const cell = { ...cellSpec.cell };
+const priorCell = cellSpec.id === 'split-database'
+  ? { ...cell, databaseLayout: 'shared' }
+  : cell;
 const faultState = { injected: false };
 
 const run = {
@@ -92,16 +107,16 @@ try {
   checkpoints.ok('trusted-root-created');
   proveNetworkDenialBoundary({ hostContainer, networkAttemptsPath });
   checkpoints.ok('network-denial-canary-proven');
-
   const protectedBackup = protectedBackupReference(prior);
   const protectedBackupPath = join(runRoot, 'protected-backup.json');
   writeJson(protectedBackupPath, protectedBackup);
 
-  const { layout: imageLayout, priorImages, targetImages, infrastructureLock } = buildC2ImageLayout({
+  const { layout: imageLayout, priorImages, targetImages, infrastructureLock } = buildCellImageLayout({
     repo,
     runRoot,
     prior,
     target,
+    cell,
     run: (name, commandArgs, options = {}) => execFileSync(name, commandArgs, { encoding: 'utf8', ...options }),
   });
   writeJson(join(runRoot, 'image-details-prior.json'), priorImages);
@@ -188,53 +203,55 @@ try {
   const deploymentRoot = join(runRoot, 'deployment');
   mkdirSync(join(deploymentRoot, 'volumes'), { recursive: true });
   const envPath = join(deploymentRoot, '.env');
+  const databaseStaticIp = siblingIp(appStaticIp, 11);
+  const databaseContainer = `${run.id}-database-1`;
+  const imageEnv = imageEnvironment({ cell, priorImages, infrastructureLock });
   const env = writeThrowawayEnv(envPath, {
     COMPOSE_PROJECT_NAME: run.id,
     POSTGRES_PORT: String(15432 + (process.pid % 1000)),
-    PRINTFARMER_IMAGE: priorImages.monolith.reference,
+    MSSQL_PORT: String(16433 + (process.pid % 1000)),
+    DB_PROVIDER: provider.dbProvider,
+    ...provider.env(),
+    ...imageEnv,
   });
   const configPath = join(deploymentRoot, 'host-update.json');
   const hostStateRoot = recoveryHostStateRoot(runRoot, { hostBoundary: true });
   provisionBoundaryHostState(hostContainer, repo, hostStateRoot, { channel: 'insider' });
   const dockerShim = writeDockerShim(runRoot, deploymentRoot, networkAttemptsPath);
-  writeRecoveryCompose({ deploymentRoot, network, egressSinkIp, databaseHost: 'database', appIp: appStaticIp, runId: run.id });
-  checkpoints.ok('deployment-root-prepared');
-  execFileSync('/usr/bin/docker', [
-    'compose',
-    '-f', join(deploymentRoot, 'docker-compose.recovery.yml'),
-    '-p', env.COMPOSE_PROJECT_NAME,
-    'up',
-    '-d',
-    '--no-build',
-    '--pull',
-    'never',
-    'database',
-  ], {
-    cwd: deploymentRoot,
-    encoding: 'utf8',
-    env: { ...process.env, ...env },
-    stdio: ['ignore', 'pipe', 'pipe'],
+  writeRecoveryCompose({
+    deploymentRoot,
+    network,
+    egressSinkIp,
+    databaseHost: databaseStaticIp,
+    databaseIp: databaseStaticIp,
+    appIp: appStaticIp,
+    runId: run.id,
+    cell: priorCell,
+    hostUpdateBackupsRoot: join(runRoot, 'host-update', 'backups'),
   });
-  waitForDatabaseReady(deploymentRoot, env);
-  const databaseContainer = `${env.COMPOSE_PROJECT_NAME}-database-1`;
-  const databaseHost = dockerContainerIp(databaseContainer);
-  writeRecoveryCompose({ deploymentRoot, network, egressSinkIp, databaseHost, appIp: appStaticIp, runId: run.id });
-  const postgresTools = writePostgresToolShims(runRoot, databaseContainer);
+  const databaseTools = provider.writeToolShims({ runRoot, databaseContainer });
   writeHostUpdateConfig(configPath, {
     rootDirectory: join(runRoot, 'host-update'),
     deploymentRoot,
     projectName: env.COMPOSE_PROJECT_NAME,
     hostStateRoot,
-    databaseConnectionString: `Host=${databaseHost};Port=5432;Database=${env.POSTGRES_DB};Username=${env.POSTGRES_USER};Password=${env.POSTGRES_PASSWORD}`,
+    databaseConnectionString: provider.connectionString({ host: databaseStaticIp, env }),
+    slicerConnectionString: priorCell.databaseLayout === 'split' ? provider.slicerConnectionString({ host: databaseStaticIp, env }) : undefined,
     jwtKey: env.Jwt__Key,
     jwtIssuer: env.Jwt__Issuer,
     jwtAudience: env.Jwt__Audience,
     docker: dockerShim,
-    pgDump: postgresTools.pgDump,
-    pgRestore: postgresTools.pgRestore,
+    pgDump: databaseTools.pgDump ?? 'pg_dump',
+    pgRestore: databaseTools.pgRestore ?? 'pg_restore',
+    sqlcmd: databaseTools.sqlcmd ?? 'sqlcmd',
     healthBaseUrl: `http://${appStaticIp}:5000`,
+    cell: priorCell,
+    databaseProvider: provider,
+    databaseExternallyOwned: false,
+    storageExternallyOwned: false,
     createHostStateRoot: false,
   });
+  checkpoints.ok('deployment-root-prepared');
 
   const cli = installHostUpdateCli({
     repo,
@@ -270,6 +287,26 @@ try {
       '<operator>': 'recovery-matrix',
     },
   });
+  const loadedInfrastructure = assertInfrastructureLoadedFromBundle(decisionRecords, infrastructureLock);
+  checkpoints.ok(`infrastructure-loaded-from-bundle:${loadedInfrastructure.join(',')}`);
+  execFileSync('/usr/bin/docker', [
+    'compose',
+    '-f', join(deploymentRoot, 'docker-compose.recovery.yml'),
+    '-p', env.COMPOSE_PROJECT_NAME,
+    'up',
+    '-d',
+    '--no-build',
+    '--pull',
+    'never',
+    'database',
+  ], {
+    cwd: deploymentRoot,
+    encoding: 'utf8',
+    env: { ...process.env, ...env },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  waitForDatabaseReady(deploymentRoot, env, provider);
+  ensureHarnessDatabases(deploymentRoot, env, provider, priorCell);
   executePackagedStep({
     checkpointName: 'activate-prior',
     cli,
@@ -284,21 +321,45 @@ try {
     },
   });
 
-  const beforeRecovery = stateContinuitySnapshot({ env, deploymentRoot, hostStateRoot, hostContainer });
+  const beforeRecovery = stateContinuitySnapshot({ env, deploymentRoot, hostStateRoot, hostContainer, provider });
+  if (cellSpec.scenario === 'refuse-activation' && cell.workers === 'remote') {
+    seedRemoteWorkerRegistration(deploymentRoot, env, provider);
+    checkpoints.ok('remote-worker-registration-seeded');
+  }
+
+  if (cellSpec.id === 'split-database') {
+    writeRecoveryCompose({
+      deploymentRoot,
+      network,
+      egressSinkIp,
+      databaseHost: databaseStaticIp,
+      databaseIp: databaseStaticIp,
+      appIp: appStaticIp,
+      runId: run.id,
+      cell,
+      hostUpdateBackupsRoot: join(runRoot, 'host-update', 'backups'),
+    });
+  }
 
   writeHostUpdateConfig(configPath, {
     rootDirectory: join(runRoot, 'host-update'),
     deploymentRoot,
     projectName: env.COMPOSE_PROJECT_NAME,
     hostStateRoot,
-    databaseConnectionString: `Host=${databaseHost};Port=5432;Database=${env.POSTGRES_DB};Username=${env.POSTGRES_USER};Password=${env.POSTGRES_PASSWORD}`,
+    databaseConnectionString: provider.connectionString({ host: databaseStaticIp, env }),
+    slicerConnectionString: cell.databaseLayout === 'split' ? provider.slicerConnectionString({ host: databaseStaticIp, env }) : undefined,
     jwtKey: env.Jwt__Key,
     jwtIssuer: env.Jwt__Issuer,
     jwtAudience: env.Jwt__Audience,
     docker: dockerShim,
-    pgDump: postgresTools.pgDump,
-    pgRestore: postgresTools.pgRestore,
+    pgDump: databaseTools.pgDump ?? 'pg_dump',
+    pgRestore: databaseTools.pgRestore ?? 'pg_restore',
+    sqlcmd: databaseTools.sqlcmd ?? 'sqlcmd',
     healthBaseUrl: `http://${appStaticIp}:5000`,
+    cell,
+    databaseProvider: provider,
+    databaseExternallyOwned: false,
+    storageExternallyOwned: false,
     createHostStateRoot: false,
   });
 
@@ -320,9 +381,15 @@ try {
       '<protected-backup.json>': protectedBackupPath,
     },
   });
+  const targetReplayIdentity = readImportDecisionRecords(decisionRecords).at(-1)?.replay?.correlationId?.replace(/^decision:/, '');
   runFaultHook('before-activate', { runRoot, deploymentRoot, stagingDir: targetStaging, bundlePath });
   const activationStarted = Date.now();
-  const targetActivation = executePackagedStepDuringActivation({
+  const managedActivationFault = shouldInjectManagedActivationFault(cellSpec);
+  const customDuringActivationHook = Boolean(faultHooks['during-activate']);
+  const activationFaultPaths = managedActivationFault ? enableManagedActivationFault(runRoot, {
+    mode: customDuringActivationHook ? 'pause' : 'fail-now',
+  }) : null;
+  const activationOperation = {
     checkpointName: 'activate-target',
     autoOk: false,
     cli,
@@ -335,10 +402,88 @@ try {
       '<staging-dir>': targetStaging,
       '<trusted_root.json>': trustedRootPath,
     },
-    markerPath: join(runRoot, 'host-update', 'state', 'journal.ndjson'),
-    hookContext: { runRoot, deploymentRoot, stagingDir: targetStaging, bundlePath },
-  });
-  if (!targetActivation.stdout.includes('Completed') && !targetActivation.stdout.includes('Activated')) {
+    allowedExitCodes: cellSpec.scenario === 'refuse-activation' ? [6] : managedActivationFault ? [0, 6] : [0],
+  };
+  const beforeRefusal = cellSpec.scenario === 'refuse-activation'
+    ? mutationSnapshot({ env, deploymentRoot, hostStateRoot, hostContainer, provider, cell, priorImages })
+    : null;
+  const targetActivation = customDuringActivationHook
+    ? executePackagedStepDuringActivation({
+      ...activationOperation,
+      markerPath: activationFaultPaths?.pausePath ?? join(runRoot, 'host-update', 'state', 'journal.ndjson'),
+      hookContext: {
+        runRoot,
+        deploymentRoot,
+        stagingDir: targetStaging,
+        bundlePath,
+        faultDecisionPath: activationFaultPaths?.decisionPath,
+        faultPausePath: activationFaultPaths?.pausePath,
+      },
+      managedActivationFault,
+      faultDecisionPath: activationFaultPaths?.decisionPath,
+    })
+    : executePackagedStep(activationOperation);
+  if (managedActivationFault && !customDuringActivationHook) {
+    faultState.injected = true;
+  }
+  if (cellSpec.scenario === 'refuse-activation') {
+    const failure = classifyFailure({
+      stdout: targetActivation.stdout,
+      stderr: targetActivation.stderr,
+      exitCode: targetActivation.exitCode,
+      operationId: 'offline-activate',
+    }, join(runRoot, 'host-update', 'state', 'journal.ndjson'));
+    try {
+      assertExpectedRefusal(failure, cellSpec.expected);
+    } catch (error) {
+      checkpoints.failed('activation-refused');
+      throw cellFailure(`unexpected_refusal:${failure.actual}:${failure.reason}`, {
+        actual: failure.actual,
+        exitCode: targetActivation.exitCode,
+        journalPhase: failure.journalPhase,
+      });
+    }
+    const afterRefusal = mutationSnapshot({ env, deploymentRoot, hostStateRoot, hostContainer, provider, cell, priorImages });
+    assertNoMutation('activation-refusal', beforeRefusal, afterRefusal);
+    checkpoints.ok('activation-refusal-no-mutation');
+    checkpoints.ok(`activation-refused:${failure.reason}`);
+    recordFaultCheckpoint();
+    run.finishedAt = new Date().toISOString();
+    evidence = baseEvidence({
+      run,
+      host,
+      cell,
+      identities: {
+        source: releaseEvidenceIdentity(prior),
+        target: releaseEvidenceIdentity(target),
+        prior: releaseEvidenceIdentity(prior),
+        bundleSha256: evidenceBundleSha256(bundlePath),
+        signingRootFingerprint: root.fingerprint,
+      },
+      tools,
+      checkpoints: checkpoints.checkpoints,
+      outcome: {
+        expected: cellSpec.expected.outcome,
+        expectedReason: cellSpec.expected.reason,
+        actual: failure.actual,
+        reason: failure.reason,
+        exitCode: targetActivation.exitCode,
+        journalPhase: failure.journalPhase,
+      },
+      timings: { activationSeconds: Math.max(1, Math.round((Date.now() - activationStarted) / 1000)), recoverySeconds: 0 },
+      verdict: 'pass',
+      networkAttempts: readNetworkAttempts(networkAttemptsPath),
+    });
+    writeValidatedEvidence(evidencePath, evidence);
+    const complete = new Error('expected fail-closed evidence written');
+    complete.evidenceWritten = true;
+    complete.success = true;
+    throw complete;
+  }
+  const activationReachedExpectedState = targetActivation.stdout.includes('Completed')
+    || targetActivation.stdout.includes('Activated')
+    || (managedActivationFault && targetActivation.stdout.includes('RecoveryRequired'));
+  if (!activationReachedExpectedState) {
     checkpoints.failed('activate-target');
     throw cellFailure('target_activation_did_not_complete', { actual: 'RecoveryRequired', exitCode: targetActivation.exitCode });
   }
@@ -347,6 +492,90 @@ try {
 
   const recoveryStarted = Date.now();
   runFaultHook('before-recover', { runRoot, deploymentRoot, stagingDir: targetStaging, bundlePath });
+  if (cellSpec.scenario === 'needs-operator-recover') {
+    const externalOwner = cell.databaseOwner === 'external' ? 'database' : 'storage';
+    writeHostUpdateConfig(configPath, {
+      rootDirectory: join(runRoot, 'host-update'),
+      deploymentRoot,
+      projectName: env.COMPOSE_PROJECT_NAME,
+      hostStateRoot,
+      databaseConnectionString: provider.connectionString({ host: databaseStaticIp, env }),
+      slicerConnectionString: cell.databaseLayout === 'split' ? provider.slicerConnectionString({ host: databaseStaticIp, env }) : undefined,
+      jwtKey: env.Jwt__Key,
+      jwtIssuer: env.Jwt__Issuer,
+      jwtAudience: env.Jwt__Audience,
+      docker: dockerShim,
+      pgDump: databaseTools.pgDump ?? 'pg_dump',
+      pgRestore: databaseTools.pgRestore ?? 'pg_restore',
+      sqlcmd: databaseTools.sqlcmd ?? 'sqlcmd',
+      healthBaseUrl: `http://${appStaticIp}:5000`,
+      cell,
+      databaseProvider: provider,
+      databaseExternallyOwned: cell.databaseOwner === 'external',
+      storageExternallyOwned: cell.storageOwner === 'external',
+      createHostStateRoot: false,
+    });
+    checkpoints.ok(`external-${externalOwner}-owner-flipped`);
+    const preview = executePackagedStep({
+      checkpointName: 'recover-preview',
+      cli,
+      repo,
+      cosign: boundaryCosign,
+      instructionsPath: join(targetRelease.assets, 'offline-recovery-instructions.json'),
+      operationId: 'offline-recover-preview',
+      allowedExitCodes: [10],
+      replacements: {
+        '<host-update.json>': configPath,
+        '<staging-dir>': targetStaging,
+        '<trusted_root.json>': trustedRootPath,
+        '<protected-backup.json>': protectedBackupPath,
+      },
+    });
+    try {
+      assertExpectedNeedsOperator(preview, cellSpec.expected.reason);
+    } catch (error) {
+      checkpoints.failed(`needs-operator-recover:${cellSpec.expected.reason}:not-observed`);
+      throw cellFailure('needs_operator_evidence_unavailable', { actual: 'NeedsOperator', exitCode: preview.exitCode });
+    }
+    const afterPreview = stateContinuitySnapshot({ env, deploymentRoot, hostStateRoot, hostContainer, provider });
+    assertEqualJson(`external-${externalOwner}-migration-heads-unchanged`, beforeRecovery.migrationHeads, afterPreview.migrationHeads);
+    assertEqualJson(`external-${externalOwner}-volume-hashes-unchanged`, beforeRecovery.volumeHashes, afterPreview.volumeHashes);
+    checkpoints.ok(`needs-operator-recover:${cellSpec.expected.reason}`);
+    run.finishedAt = new Date().toISOString();
+    const journalPath = join(runRoot, 'host-update', 'state', 'journal.ndjson');
+    const journalPhase = lastJournalPhase(journalPath);
+    recordFaultCheckpoint();
+    evidence = baseEvidence({
+      run,
+      host,
+      cell,
+      identities: {
+        source: releaseEvidenceIdentity(prior),
+        target: releaseEvidenceIdentity(target),
+        prior: releaseEvidenceIdentity(prior),
+        bundleSha256: evidenceBundleSha256(bundlePath),
+        signingRootFingerprint: root.fingerprint,
+      },
+      tools,
+      checkpoints: checkpoints.checkpoints,
+      outcome: {
+        expected: cellSpec.expected.outcome,
+        expectedReason: cellSpec.expected.reason,
+        actual: 'NeedsOperator',
+        reason: cellSpec.expected.reason,
+        exitCode: preview.exitCode,
+        journalPhase,
+      },
+      timings: { activationSeconds, recoverySeconds: Math.max(1, Math.round((Date.now() - recoveryStarted) / 1000)) },
+      verdict: 'pass',
+      networkAttempts: readNetworkAttempts(networkAttemptsPath),
+    });
+    writeValidatedEvidence(evidencePath, evidence);
+    const complete = new Error('expected needs-operator evidence written');
+    complete.evidenceWritten = true;
+    complete.success = true;
+    throw complete;
+  }
   for (const [operationId, checkpointName] of [
     ['offline-recover-preview', 'recover-preview'],
     ['offline-recover-confirm', 'recover-confirm'],
@@ -369,18 +598,22 @@ try {
   const recoverySeconds = Math.max(1, Math.round((Date.now() - recoveryStarted) / 1000));
   checkpoints.ok('recovery-rolled-back');
 
-  const afterRecovery = stateContinuitySnapshot({ env, deploymentRoot, hostStateRoot, hostContainer });
+  const afterRecovery = stateContinuitySnapshot({ env, deploymentRoot, hostStateRoot, hostContainer, provider });
   assertEqualJson('migration-heads-continuous', beforeRecovery.migrationHeads, afterRecovery.migrationHeads);
-  checkpoints.ok(`migration-heads-continuous:${afterRecovery.migrationHeads.join(',') || 'empty'}`);
+  if (afterRecovery.migrationHeads.length === 0) {
+    throw new Error('migration-heads-continuous: no migration history rows observed');
+  }
+  checkpoints.ok(`migration-heads-continuous:${afterRecovery.migrationHeads.join(',')}`);
   assertEqualJson('volume-hashes-continuous', beforeRecovery.volumeHashes, afterRecovery.volumeHashes);
   checkpoints.ok('blob-config-key-volume-hashes-continuous');
-  assertHostStateContinuity(beforeRecovery.hostState, afterRecovery.hostState, { targetVersion: target.version });
+  assertHostStateContinuity(beforeRecovery.hostState, afterRecovery.hostState, { targetIdentity: targetReplayIdentity });
   checkpoints.ok('protected-replay-history-continuous');
-  const runningDigest = runningComposeImageDigest(env, 'printfarmer');
-  if (runningDigest !== priorImages.monolith.indexDigest) {
-    throw new Error(`running_digest_mismatch:expected=${priorImages.monolith.indexDigest}:actual=${runningDigest}`);
-  }
-  checkpoints.ok(`running-digest-prior:${runningDigest}`);
+  const checkedDigests = assertActiveServiceDigests({
+    cell,
+    priorImages,
+    inspectDigest: (composeServiceName) => runningComposeImageDigest(env, composeServiceName),
+  });
+  checkpoints.ok(`running-digest-prior:${checkedDigests.map((digest) => `${digest.serviceId}=${digest.actualDigest}`).join(',')}`);
   const healthz = httpGetFromNetwork(network, appStaticIp, '/healthz');
   const health = httpGetFromNetwork(network, appStaticIp, '/health');
   if (!/Healthy|OK|"status"\s*:\s*"ok"|^\s*$/.test(healthz) && !healthz.includes('healthy')) {
@@ -389,12 +622,12 @@ try {
   checkpoints.ok('healthz-green');
   const healthEntries = discoverHealthEntries(health);
   checkpoints.ok(`health-green:${healthEntries.join(',') || 'plain'}`);
-  const queueEntries = healthEntries.filter(entry => /queue|dispatch|outbox|consumer/i.test(entry));
-  if (queueEntries.length === 0) {
-    checkpoints.failed('queue-consumers-running:not-exposed');
-    throw cellFailure('queue_consumers_not_exposed', { actual: 'RolledBack', exitCode: 1 });
+  const queueConsumers = evaluateQueueConsumersHealth(health);
+  if (!queueConsumers.ok) {
+    checkpoints.failed(`queue-consumers-running:${queueConsumers.detail}`);
+    throw cellFailure(queueConsumers.reason, { actual: 'RolledBack', exitCode: 1 });
   }
-  checkpoints.ok(`queue-consumers-running:${queueEntries.join(',')}`);
+  checkpoints.ok(`queue-consumers-running:${queueConsumers.consumers.join(',')}`);
 
   run.finishedAt = new Date().toISOString();
   const journalPath = join(runRoot, 'host-update', 'state', 'journal.ndjson');
@@ -415,6 +648,7 @@ try {
     checkpoints: checkpoints.checkpoints,
     outcome: {
       expected: 'RolledBack',
+      expectedReason: null,
       actual: 'RolledBack',
       reason: null,
       exitCode: 0,
@@ -426,11 +660,19 @@ try {
   });
   writeValidatedEvidence(evidencePath, evidence);
 } catch (error) {
+  if (error?.evidenceWritten) {
+    if (!error.success) {
+      console.error(error.message);
+    }
+    process.exitCode = error.success ? 0 : 1;
+  } else {
   run.finishedAt = new Date().toISOString();
   writeFileSync(join(runRoot, 'error.txt'), formatError(error), { mode: 0o600 });
   recordFaultCheckpoint();
   checkpoints.failed('e2e-complete');
   const failure = classifyFailure(error, join(runRoot, 'host-update', 'state', 'journal.ndjson'));
+  const expectedOutcome = cellSpec.expected.outcome ?? 'RolledBack';
+  const expectedReason = cellSpec.expected.reason ?? null;
   evidence = baseEvidence({
     run,
     host,
@@ -445,7 +687,8 @@ try {
     tools,
     checkpoints: checkpoints.checkpoints,
     outcome: {
-      expected: 'RolledBack',
+      expected: expectedOutcome,
+      expectedReason,
       actual: failure.actual,
       reason: failure.reason,
       exitCode: failure.exitCode,
@@ -458,6 +701,7 @@ try {
   writeValidatedEvidence(evidencePath, evidence);
   console.error(error.message);
   process.exitCode = 1;
+  }
 } finally {
   root.dispose();
 }
@@ -554,9 +798,9 @@ function runPackagedOperation({ cli, repo, cosign, instructionsPath, operationId
   }
   return { exitCode: status, stdout: result.stdout ?? '', stderr: result.stderr ?? '' };
 }
-function executePackagedStepDuringActivation({ checkpointName, markerPath, hookContext, autoOk = true, ...operation }) {
+function executePackagedStepDuringActivation({ checkpointName, markerPath, hookContext, autoOk = true, managedActivationFault = false, faultDecisionPath, ...operation }) {
   try {
-    const result = runPackagedOperationDuringActivation({ ...operation, markerPath, hookContext });
+    const result = runPackagedOperationDuringActivation({ ...operation, markerPath, hookContext, managedActivationFault, faultDecisionPath });
     if (autoOk) {
       checkpoints.ok(checkpointName);
     }
@@ -577,6 +821,8 @@ function runPackagedOperationDuringActivation({
   replacements,
   markerPath,
   hookContext,
+  managedActivationFault = false,
+  faultDecisionPath,
   allowedExitCodes = [0],
 }) {
   const argv = packagedOperationArgv({ cli, instructionsPath, operationId, replacements });
@@ -603,7 +849,17 @@ function runPackagedOperationDuringActivation({
     waitForDuringActivationPoint({
       markerAdvanced: () => fileMarkerAdvanced(markerPath, baseline),
       isComplete: () => existsSync(exitPath) || !processAlive(pid),
-      runHook: () => runFaultHook('during-activate', hookContext),
+      runHook: () => {
+        runFaultHook('during-activate', { ...hookContext, activationPid: pid });
+        if (managedActivationFault && faultDecisionPath) {
+          try {
+            writeFileSync(faultDecisionPath, 'fail', { flag: 'wx' });
+            faultState.injected = true;
+          } catch (error) {
+            if (error?.code !== 'EEXIST') throw error;
+          }
+        }
+      },
       timeoutMs: 60_000,
     });
     const status = waitForBackgroundExit(pid, exitPath);
@@ -731,7 +987,7 @@ function evidenceBundleSha256(path) {
 
 function runFaultHook(point, context) {
   if (!hasFaultHooks(faultHooks) || !faultHooks[point]) {
-    return;
+    return false;
   }
   try {
     invokeFaultHook({
@@ -745,10 +1001,23 @@ function runFaultHook(point, context) {
       }),
     });
     faultState.injected = true;
+    return true;
   } catch (error) {
     error.reason = `fault_hook_failed:${point}`;
     throw error;
   }
+}
+
+function shouldInjectManagedActivationFault(spec) {
+  return spec.scenario === 'recover' || spec.scenario === 'needs-operator-recover';
+}
+
+function enableManagedActivationFault(root, { mode }) {
+  const enablePath = join(root, 'fault-compose-up.enable');
+  const pausePath = join(root, 'fault-compose-up.pause');
+  const decisionPath = join(root, 'fault-compose-up.decision');
+  writeFileSync(enablePath, mode);
+  return { enablePath, pausePath, decisionPath };
 }
 
 function recordFaultCheckpoint() {
@@ -939,7 +1208,71 @@ function readNetworkAttempts(path) {
     });
 }
 
-function waitForDatabaseReady(deploymentRoot, env) {
+function siblingIp(ip, hostOctet) {
+  const parts = ip.split('.');
+  if (parts.length !== 4) {
+    throw new Error(`invalid_ipv4_address:${ip}`);
+  }
+  return [...parts.slice(0, 3), String(hostOctet)].join('.');
+}
+
+function imageEnvironment({ cell, priorImages, infrastructureLock }) {
+  const values = {};
+  for (const mapping of serviceMappingsFor(cell)) {
+    const image = priorImages[mapping.serviceId];
+    if (!image) {
+      throw new Error(`missing_prior_image:${mapping.serviceId}`);
+    }
+    values[mapping.imageEnvironmentVariable] = `${image.reference}@${image.indexDigest}`;
+  }
+  for (const image of infrastructureLock.images) {
+    const key = image.id === 'postgres'
+      ? 'POSTGRES_IMAGE'
+      : image.id === 'mssql'
+      ? 'MSSQL_IMAGE'
+      : `${image.id.toUpperCase().replaceAll('-', '_')}_IMAGE`;
+    values[key] = `${image.reference}@${image.digest}`;
+  }
+  return values;
+}
+
+function assertInfrastructureLoadedFromBundle(decisionRecords, infrastructureLock) {
+  const records = readImportDecisionRecords(decisionRecords);
+  const latest = records.at(-1);
+  if (!latest) {
+    throw new Error('infrastructure_import_decision_missing');
+  }
+  const loaded = new Map((latest.loadedImages ?? []).map((image) => [image.member, image.digest]));
+  const names = [];
+  for (const image of infrastructureLock.images) {
+    const member = `infrastructure-${image.id}.oci.tar`;
+    if (loaded.get(member) !== image.digest) {
+      throw new Error(`infrastructure_not_loaded_from_bundle:${image.id}`);
+    }
+    names.push(`${image.id}@${image.digest}`);
+  }
+  return names;
+}
+
+function readImportDecisionRecords(directory) {
+  if (!existsSync(directory)) {
+    return [];
+  }
+  const script = [
+    "const { readdirSync, readFileSync, statSync } = require('fs');",
+    "const { join } = require('path');",
+    "const root = process.argv[1];",
+    "const files = [];",
+    "function walk(dir) { for (const name of readdirSync(dir)) { const file = join(dir, name); const stat = statSync(file); if (stat.isDirectory()) walk(file); else if (name.endsWith('.json')) files.push(file); } }",
+    "walk(root);",
+    "const records = files.map(file => { try { return JSON.parse(readFileSync(file, 'utf8')); } catch { return undefined; } }).filter(record => record && record.kind === 'printfarmer-offline-import-decision');",
+    "records.sort((a, b) => String(a.decidedAt).localeCompare(String(b.decidedAt)));",
+    "process.stdout.write(JSON.stringify(records));",
+  ].join('\n');
+  return JSON.parse(execFileSync('node', ['-e', script, directory], { encoding: 'utf8' }));
+}
+
+function waitForDatabaseReady(deploymentRoot, env, provider) {
   const args = [
     'compose',
     '-f', join(deploymentRoot, 'docker-compose.recovery.yml'),
@@ -947,11 +1280,7 @@ function waitForDatabaseReady(deploymentRoot, env) {
     'exec',
     '-T',
     'database',
-    'pg_isready',
-    '-U',
-    env.POSTGRES_USER,
-    '-d',
-    env.POSTGRES_DB,
+    ...provider.readinessArgs(env),
   ];
   const deadline = Date.now() + 45_000;
   let lastError;
@@ -971,6 +1300,47 @@ function waitForDatabaseReady(deploymentRoot, env) {
   }
 
   throw lastError ?? new Error('database did not become ready');
+}
+
+function ensureHarnessDatabases(deploymentRoot, env, provider, cell) {
+  if (provider.id === 'postgres') {
+    if (cell.databaseLayout === 'split') {
+      createPostgresDatabaseIfMissing(deploymentRoot, env, `${env.POSTGRES_DB}_slicer`);
+    }
+    return;
+  }
+
+  const databaseNames = [env.MSSQL_DB, ...(cell.databaseLayout === 'split' ? [`${env.MSSQL_DB}_slicer`] : [])];
+  for (const databaseName of databaseNames) {
+    databaseQuery(deploymentRoot, env, provider, `IF DB_ID(N'${databaseName}') IS NULL CREATE DATABASE [${databaseName}];`, { database: 'master' });
+  }
+}
+
+function createPostgresDatabaseIfMissing(deploymentRoot, env, databaseName) {
+  try {
+    execFileSync('/usr/bin/docker', [
+      'compose',
+      '-f', join(deploymentRoot, 'docker-compose.recovery.yml'),
+      '-p', env.COMPOSE_PROJECT_NAME,
+      'exec',
+      '-T',
+      'database',
+      'createdb',
+      '-U',
+      env.POSTGRES_USER,
+      databaseName,
+    ], {
+      cwd: deploymentRoot,
+      encoding: 'utf8',
+      env: { ...process.env, ...env },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  } catch (error) {
+    const stderr = String(error.stderr ?? '');
+    if (!stderr.includes('already exists')) {
+      throw error;
+    }
+  }
 }
 
 function dockerContainerIp(containerName) {
@@ -1024,8 +1394,8 @@ unset "args[$last_index]"
   return { pgDump, pgRestore };
 }
 
-function stateContinuitySnapshot({ env, deploymentRoot, hostStateRoot, hostContainer }) {
-  const migrationHeads = psqlQuery(deploymentRoot, env, 'SELECT "MigrationId" FROM "__EFMigrationsHistory" ORDER BY "MigrationId";')
+function stateContinuitySnapshot({ env, deploymentRoot, hostStateRoot, hostContainer, provider }) {
+  const migrationHeads = databaseQuery(deploymentRoot, env, provider, provider.migrationHeadsSql)
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean);
@@ -1040,7 +1410,16 @@ function stateContinuitySnapshot({ env, deploymentRoot, hostStateRoot, hostConta
   };
 }
 
-function psqlQuery(deploymentRoot, env, sql) {
+function mutationSnapshot({ env, deploymentRoot, hostStateRoot, hostContainer, provider, cell, priorImages }) {
+  const snapshot = stateContinuitySnapshot({ env, deploymentRoot, hostStateRoot, hostContainer, provider });
+  return {
+    ...snapshot,
+    serviceDigests: Object.fromEntries(activeServiceDigestExpectations(cell, priorImages)
+      .map(({ serviceId, composeServiceName }) => [serviceId, runningComposeImageDigest(env, composeServiceName)])),
+  };
+}
+
+function databaseQuery(deploymentRoot, env, provider, sql, { database } = {}) {
   return execFileSync('/usr/bin/docker', [
     'compose',
     '-f', join(deploymentRoot, 'docker-compose.recovery.yml'),
@@ -1048,16 +1427,20 @@ function psqlQuery(deploymentRoot, env, sql) {
     'exec',
     '-T',
     'database',
-    'psql',
-    '-U', env.POSTGRES_USER,
-    '-d', env.POSTGRES_DB,
-    '-tAc', sql,
+    ...provider.queryArgs(env, sql, { database }),
   ], {
     cwd: deploymentRoot,
     encoding: 'utf8',
     env: { ...process.env, ...env },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
+}
+
+function seedRemoteWorkerRegistration(deploymentRoot, env, provider) {
+  const sql = provider.id === 'postgres'
+    ? `INSERT INTO slicer."SlicerServices" ("Id", "Name", "SlicerType", "Host", "MaxConcurrentJobs", "Status", "LastSeen", "CreatedAt", "UpdatedAt") VALUES ('00000000-0000-0000-0000-000000003100', 'remote-matrix-worker', 0, 'http://10.99.0.5:5000', 1, 'Online', NOW(), NOW(), NOW());`
+    : `INSERT INTO [slicer].[SlicerServices] ([Id], [Name], [SlicerType], [Host], [MaxConcurrentJobs], [Status], [LastSeen], [CreatedAt], [UpdatedAt]) VALUES (NEWID(), 'remote-matrix-worker', 0, 'http://10.99.0.5:5000', 1, 'Online', SYSUTCDATETIME(), SYSUTCDATETIME(), SYSUTCDATETIME());`;
+  databaseQuery(deploymentRoot, env, provider, sql);
 }
 
 function dockerVolumeHash(volume) {

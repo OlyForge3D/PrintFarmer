@@ -18,7 +18,7 @@ export function readHostStateSnapshot(root) {
     journalEntries,
     rawReplay,
     replayChecksumValid: replay ? validateReplayChecksum(replay) : false,
-    anchorValid: replay && anchor ? validateAnchor(anchor, rawReplay) : false,
+    anchorValid: replay && anchor ? validateAnchor(anchor, rawReplay, journalEntries) : false,
   };
 }
 
@@ -30,7 +30,7 @@ export function readHostStateSnapshotFromBoundary(root, { exec }) {
   return JSON.parse(exec(['node', '--input-type=module', '-e', script]));
 }
 
-export function assertHostStateContinuity(before, after, { targetVersion } = {}) {
+export function assertHostStateContinuity(before, after, { targetIdentity } = {}) {
   if (!after?.replayChecksumValid) {
     throw new Error('host_state_replay_checksum_invalid');
   }
@@ -42,8 +42,8 @@ export function assertHostStateContinuity(before, after, { targetVersion } = {})
   }
   assertMapNonDecreasing('host_state_high_water', highWater(before.replay), highWater(after.replay));
   assertMapContains('host_state_identities', identities(before.replay), identities(after.replay));
-  if (targetVersion && !after.rawReplay.includes(targetVersion)) {
-    throw new Error(`host_state_target_admission_missing:${targetVersion}`);
+  if (targetIdentity && !Object.hasOwn(identities(after.replay), targetIdentity)) {
+    throw new Error(`host_state_target_admission_missing:${targetIdentity}`);
   }
 }
 
@@ -52,6 +52,16 @@ function validateReplayChecksum(replay) {
     return false;
   }
   const candidates = [
+    {
+      Version: replay.Version,
+      Epoch: replay.Epoch,
+      HighWater: Object.entries(replay.HighWaterByNamespace ?? {})
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([Namespace, value]) => ({ Namespace, Sequence: value.Sequence, Identity: value.Identity })),
+      Identities: Object.entries(replay.Identities ?? {})
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([Identity, value]) => ({ Identity, Sequence: value.Sequence, Disposition: String(value.Disposition), CorrelationId: value.CorrelationId })),
+    },
     {
       Version: replay.Version,
       Epoch: replay.Epoch,
@@ -68,15 +78,16 @@ function validateReplayChecksum(replay) {
   return candidates.some((candidate) => sha256Json(candidate) === replay.Checksum);
 }
 
-function validateAnchor(anchor, rawReplay) {
+function validateAnchor(anchor, rawReplay, journalEntries) {
   const stateHash = createHash('sha256').update(rawReplay).digest('hex');
   if (anchor.StateHash !== stateHash) {
     return false;
   }
-  const expected = createHash('sha256')
-    .update(`${anchor.Version}|${anchor.Epoch}|${anchor.PreviousHash ?? ''}|${anchor.StateHash}`, 'utf8')
-    .digest('hex');
-  return anchor.Hash === expected;
+  return journalEntries.some(entry =>
+    entry.Version === anchor.Version
+    && entry.Epoch === anchor.Epoch
+    && entry.StateHash === anchor.StateHash
+    && entry.Hash === anchor.Hash);
 }
 
 function highWater(replay) {
