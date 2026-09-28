@@ -24,31 +24,31 @@ public sealed class HostUpdateVerificationTimeoutException(IReadOnlyList<string>
     /// </summary>
     public IReadOnlyList<string> RedactedFailedCheckNames()
     {
-        var redacted = new List<string>(Math.Min(FailedCheckNames.Count, MaxReportedCheckNames) + 1);
-        foreach (string name in FailedCheckNames.Take(MaxReportedCheckNames))
-        {
-            string source = name ?? string.Empty;
-            if (source.Length > MaxReportedCheckNameLength)
-            {
-                source = source[..MaxReportedCheckNameLength];
-            }
-
-            redacted.Add(string.Create(source.Length, source, static (span, value) =>
-            {
-                for (int i = 0; i < value.Length; i++)
-                {
-                    char c = value[i];
-                    span[i] = char.IsAsciiLetterOrDigit(c) || c is ':' or '.' or '_' or '-' ? c : '_';
-                }
-            }));
-        }
-
+        List<string> redacted = [.. FailedCheckNames.Take(MaxReportedCheckNames).Select(RedactCheckName)];
         if (FailedCheckNames.Count > MaxReportedCheckNames)
         {
             redacted.Add($"+{FailedCheckNames.Count - MaxReportedCheckNames}_more");
         }
 
         return redacted;
+    }
+
+    private static string RedactCheckName(string? name)
+    {
+        string source = name ?? string.Empty;
+        if (source.Length > MaxReportedCheckNameLength)
+        {
+            source = source[..MaxReportedCheckNameLength];
+        }
+
+        return string.Create(source.Length, source, static (span, value) =>
+        {
+            for (int i = 0; i < value.Length; i++)
+            {
+                char c = value[i];
+                span[i] = char.IsAsciiLetterOrDigit(c) || c is ':' or '.' or '_' or '-' ? c : '_';
+            }
+        });
     }
 }
 #pragma warning restore CA1032
