@@ -362,6 +362,22 @@ public sealed class HostUpdateAggregateHealthReportTests
     [InlineData("""{"status":"Healthy","results":[]}""", false)]
     [InlineData("""{"status":"Healthy","results":{"comprehensive":"Healthy","signalr":{"status":"Healthy"}}}""", false)]
     [InlineData("""{"status":1,"results":{"comprehensive":{"status":"Healthy"},"signalr":{"status":"Healthy"}}}""", false)]
+    // Issue #3145: the real writer emits each entry status as the numeric HealthStatus enum.
+    [InlineData("""{"status":"Healthy","results":{"comprehensive":{"status":2},"signalr":{"status":2}}}""", true)]
+    [InlineData("""{"status":"Healthy","results":{"comprehensive":{"status":2},"signalr":{"status":"Healthy"}}}""", true)]
+    [InlineData("""{"status":"Healthy","results":{"comprehensive":{"status":2},"signalr":{"status":1}}}""", false)]
+    [InlineData("""{"status":"Healthy","results":{"comprehensive":{"status":0},"signalr":{"status":2}}}""", false)]
+    [InlineData("""{"status":"Healthy","results":{"comprehensive":{"status":"Unhealthy"},"signalr":{"status":2}}}""", false)]
+    [InlineData("""{"status":"Healthy","results":{"comprehensive":{"status":3},"signalr":{"status":2}}}""", false)]
+    [InlineData("""{"status":"Healthy","results":{"comprehensive":{"status":-1},"signalr":{"status":2}}}""", false)]
+    [InlineData("""{"status":"Healthy","results":{"comprehensive":{"status":2.5},"signalr":{"status":2}}}""", false)]
+    [InlineData("""{"status":"Healthy","results":{"comprehensive":{"status":"2"},"signalr":{"status":2}}}""", false)]
+    [InlineData("""{"status":"Healthy","results":{"comprehensive":{"status":true},"signalr":{"status":2}}}""", false)]
+    [InlineData("""{"status":"Healthy","results":{"comprehensive":{"status":null},"signalr":{"status":2}}}""", false)]
+    [InlineData("""{"status":"Healthy","results":{"comprehensive":{"description":"no status"},"signalr":{"status":2}}}""", false)]
+    [InlineData("""{"status":"Healthy","results":{"comprehensive":{"status":99999999999},"signalr":{"status":2}}}""", false)]
+    [InlineData("""{"status":2,"results":{"comprehensive":{"status":2},"signalr":{"status":2}}}""", true)]
+    [InlineData("""{"status":0,"results":{"comprehensive":{"status":2},"signalr":{"status":2}}}""", false)]
     [InlineData("""["Healthy"]""", false)]
     [InlineData("curl: (7) Failed to connect to 127.0.0.1 port 5245", false)]
     [InlineData("", false)]
@@ -371,4 +387,40 @@ public sealed class HostUpdateAggregateHealthReportTests
     [Fact]
     public void IsHealthy_NullBody_IsUnhealthy() =>
         HostUpdateAggregateHealthReport.IsHealthy(null, Required).Should().BeFalse();
+}
+
+/// <summary>Issue #3145: failed check names are surfaced in CLI output, so they are redacted and bounded.</summary>
+public sealed class HostUpdateVerificationTimeoutExceptionTests
+{
+    [Fact]
+    public void RedactedFailedCheckNames_KeepsSafeNamesUnchanged()
+    {
+        var exception = new HostUpdateVerificationTimeoutException(["aggregate-health", "digest:api", "nginx.tls_ready"]);
+
+        exception.RedactedFailedCheckNames().Should().Equal("aggregate-health", "digest:api", "nginx.tls_ready");
+    }
+
+    [Fact]
+    public void RedactedFailedCheckNames_ReplacesUnsafeCharactersAndTruncates()
+    {
+        var exception = new HostUpdateVerificationTimeoutException(["bad name/with@token?x=1 z\n", new string('a', 200)]);
+
+        IReadOnlyList<string> redacted = exception.RedactedFailedCheckNames();
+
+        redacted[0].Should().Be("bad_name_with_token_x_1_z_");
+        redacted[0].Should().NotContain("@").And.NotContain("/").And.NotContain("\n");
+        redacted[1].Should().Be(new string('a', 64));
+    }
+
+    [Fact]
+    public void RedactedFailedCheckNames_BoundsTheNumberOfNames()
+    {
+        var exception = new HostUpdateVerificationTimeoutException([.. Enumerable.Range(0, 20).Select(i => $"check-{i}")]);
+
+        IReadOnlyList<string> redacted = exception.RedactedFailedCheckNames();
+
+        redacted.Should().HaveCount(17);
+        redacted.Take(16).Should().Equal(Enumerable.Range(0, 16).Select(i => $"check-{i}"));
+        redacted[16].Should().Be("+4_more");
+    }
 }

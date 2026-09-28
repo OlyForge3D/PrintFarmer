@@ -103,6 +103,33 @@ public sealed partial class HostUpdateCliOfflineActivateTests : IDisposable, IAs
     }
 
     [HostStateFact]
+    public async Task Verification_timeout_reports_redacted_failed_check_names()
+    {
+        await ImportAsync();
+
+        JsonElement refused = Envelope(await RunAsync(Activate(), services =>
+        {
+            services.RemoveAll<IHostUpdateLocalImageVerifier>();
+            services.AddSingleton(_imageVerifier);
+            services.AddSingleton<IHostUpdateLocalImageVerifier>(sp => sp.GetRequiredService<FakeLocalImageVerifier>());
+            services.RemoveAll<IHostUpdateOfflineActivationSafetyProbe>();
+            services.AddSingleton<IHostUpdateOfflineActivationSafetyProbe>(_safetyProbe);
+            services.RemoveAll<IHostUpdateExecutionSteps>();
+            services.AddScoped<IHostUpdateExecutionSteps>(_ => new RecordingExecutionSteps(null)
+            {
+                VerifyFailure = new HostUpdateVerificationTimeoutException(["api-comprehensive-health", "digest:api", "bad name/with@secret"]),
+            });
+        }));
+
+        refused.GetProperty("exitCode").GetInt32().Should().Be(HostUpdateCliExitCodes.Refused, refused.ToString());
+        JsonElement result = refused.GetProperty("result");
+        result.GetProperty("state").GetString().Should().Be(nameof(HostUpdateExecutionState.RecoveryRequired));
+        result.GetProperty("reason").GetString().Should().Be(nameof(HostUpdateVerificationTimeoutException));
+        result.GetProperty("failedChecks").EnumerateArray().Select(e => e.GetString())
+            .Should().Equal("api-comprehensive-health", "digest:api", "bad_name_with_secret");
+    }
+
+    [HostStateFact]
     public async Task Imported_bundle_reaches_real_scoped_executor_with_durable_policy_repository()
     {
         await ImportAsync();
@@ -1005,6 +1032,8 @@ public sealed partial class HostUpdateCliOfflineActivateTests : IDisposable, IAs
     {
         public List<string> Calls { get; } = [];
 
+        public Exception? VerifyFailure { get; init; }
+
         public Task PreflightAsync(HostUpdateExecutionRequest request, CancellationToken ct) { Calls.Add("preflight"); return Task.CompletedTask; }
         public Task DrainAsync(HostUpdateExecutionRequest request, CancellationToken ct) { Calls.Add("drain"); return Task.CompletedTask; }
         public Task FenceAsync(HostUpdateExecutionRequest request, CancellationToken ct) { Calls.Add("fence"); return Task.CompletedTask; }
@@ -1014,6 +1043,11 @@ public sealed partial class HostUpdateCliOfflineActivateTests : IDisposable, IAs
         public async Task VerifyAsync(HostUpdateExecutionRequest request, CancellationToken ct)
         {
             Calls.Add("verify");
+            if (VerifyFailure is not null)
+            {
+                throw VerifyFailure;
+            }
+
             if (store is not null)
             {
                 await store.WriteAsync(new InstalledHostState(

@@ -11,7 +11,45 @@ public sealed class HostUpdateVerificationTargetSetException(string expected, st
 public sealed class HostUpdateVerificationTimeoutException(IReadOnlyList<string> failedCheckNames)
     : TimeoutException($"health_verification_timeout:{string.Join(',', failedCheckNames)}")
 {
+    internal const int MaxReportedCheckNames = 16;
+    internal const int MaxReportedCheckNameLength = 64;
+
     public IReadOnlyList<string> FailedCheckNames { get; } = failedCheckNames;
+
+    /// <summary>
+    /// Bounded, character-restricted copy of <see cref="FailedCheckNames"/> that is safe to put in
+    /// CLI output and evidence (issue #3145). Only <c>[A-Za-z0-9:._-]</c> survive (others become
+    /// <c>_</c>), each name is capped at <see cref="MaxReportedCheckNameLength"/> characters, and at
+    /// most <see cref="MaxReportedCheckNames"/> names are listed, followed by <c>+N_more</c>.
+    /// </summary>
+    public IReadOnlyList<string> RedactedFailedCheckNames()
+    {
+        List<string> redacted = [.. FailedCheckNames.Take(MaxReportedCheckNames).Select(RedactCheckName)];
+        if (FailedCheckNames.Count > MaxReportedCheckNames)
+        {
+            redacted.Add($"+{FailedCheckNames.Count - MaxReportedCheckNames}_more");
+        }
+
+        return redacted;
+    }
+
+    private static string RedactCheckName(string? name)
+    {
+        string source = name ?? string.Empty;
+        if (source.Length > MaxReportedCheckNameLength)
+        {
+            source = source[..MaxReportedCheckNameLength];
+        }
+
+        return string.Create(source.Length, source, static (span, value) =>
+        {
+            for (int i = 0; i < value.Length; i++)
+            {
+                char c = value[i];
+                span[i] = char.IsAsciiLetterOrDigit(c) || c is ':' or '.' or '_' or '-' ? c : '_';
+            }
+        });
+    }
 }
 #pragma warning restore CA1032
 
@@ -107,8 +145,7 @@ public static class HostUpdateAggregateHealthReport
             // caught only by feeding it an actual serialized fixture instead of a hand-built one.
             return document.RootElement.ValueKind == JsonValueKind.Object &&
                 TryGetStatusProperty(document.RootElement, out JsonElement statusElement) &&
-                statusElement.ValueKind == JsonValueKind.String &&
-                string.Equals(statusElement.GetString(), "Healthy", StringComparison.OrdinalIgnoreCase) &&
+                IsHealthyStatus(statusElement) &&
                 RequiredResultsAreHealthy(document.RootElement, requiredResultNames);
         }
         catch (JsonException)
@@ -135,8 +172,7 @@ public static class HostUpdateAggregateHealthReport
             if (!results.TryGetProperty(resultName, out JsonElement result) ||
                 result.ValueKind != JsonValueKind.Object ||
                 !TryGetStatusProperty(result, out JsonElement resultStatus) ||
-                resultStatus.ValueKind != JsonValueKind.String ||
-                !string.Equals(resultStatus.GetString(), "Healthy", StringComparison.OrdinalIgnoreCase))
+                !IsHealthyStatus(resultStatus))
             {
                 return false;
             }
@@ -144,6 +180,26 @@ public static class HostUpdateAggregateHealthReport
 
         return true;
     }
+
+    /// <summary>
+    /// Issue #3145: the real writer (<c>ProgramHelpers.WriteHealthResponseAsync</c>) emits the
+    /// top-level status as a string but each entry status as the numeric <c>HealthStatus</c> enum
+    /// (<c>Unhealthy = 0</c>, <c>Degraded = 1</c>, <c>Healthy = 2</c>), and other consumers rely on
+    /// that wire format. Accept exactly the string <c>Healthy</c> or the integer <c>2</c>; every
+    /// other value, type, or fractional number fails closed.
+    /// </summary>
+    private static bool IsHealthyStatus(JsonElement status) => status.ValueKind switch
+    {
+        JsonValueKind.String => string.Equals(status.GetString(), HealthyName, StringComparison.OrdinalIgnoreCase),
+        JsonValueKind.Number => status.TryGetInt32(out int value) && value == HealthyValue,
+        _ => false,
+    };
+
+    private const string HealthyName = "Healthy";
+
+    // Mirrors Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus.Healthy; infra does not
+    // reference that package, so the writer-to-parser contract test pins the value.
+    private const int HealthyValue = 2;
 
     private static bool TryGetStatusProperty(JsonElement root, out JsonElement statusElement) =>
         root.TryGetProperty("status", out statusElement) || root.TryGetProperty("Status", out statusElement);

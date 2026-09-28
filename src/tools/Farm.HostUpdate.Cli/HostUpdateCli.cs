@@ -658,7 +658,7 @@ public static partial class HostUpdateCli
                     HostUpdateRecoveryOutcome.FenceReleasePending => HostUpdateCliExitCodes.FenceReleasePending,
                     _ => HostUpdateCliExitCodes.NeedsOperator,
                 };
-            return await EmitAsync(output, args.Json, resultCode, new RecoveryReport(args.ReleaseId!, resolution.Request!.RequestId, result.Outcome, result.Detail)).ConfigureAwait(false);
+            return await EmitAsync(output, args.Json, resultCode, new RecoveryReport(args.ReleaseId!, resolution.Request!.RequestId, result.Outcome, result.Detail, result.FailedCheckNames)).ConfigureAwait(false);
         }
         catch (TimeoutException)
         {
@@ -914,5 +914,5 @@ public static partial class HostUpdateCli
         HostUpdateDriftPreview Drift,
         HostUpdatePhysicalReconciliationPreview PhysicalReconciliation);
 
-    private sealed record RecoveryReport(string ReleaseId, string RequestId, HostUpdateRecoveryOutcome Outcome, string Detail);
+    private sealed record RecoveryReport(string ReleaseId, string RequestId, HostUpdateRecoveryOutcome Outcome, string Detail, IReadOnlyList<string>? FailedChecks);
 }
