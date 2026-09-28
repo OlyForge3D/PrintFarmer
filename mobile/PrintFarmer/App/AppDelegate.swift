@@ -8,8 +8,8 @@ import UserNotifications
 /// Wired into SwiftUI lifecycle via `@UIApplicationDelegateAdaptor` in PFarmApp.
 class AppDelegate: NSObject, UIApplicationDelegate {
     func application(
-        _ application: UIApplication,
-        didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
+        _: UIApplication,
+        didFinishLaunchingWithOptions _: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
         UNUserNotificationCenter.current().delegate = PushNotificationManager.shared
         // Issue #1321: category/action registration only needs
@@ -21,7 +21,7 @@ class AppDelegate: NSObject, UIApplicationDelegate {
     }
 
     func application(
-        _ application: UIApplication,
+        _: UIApplication,
         didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
     ) {
         Task { @MainActor in
@@ -30,7 +30,7 @@ class AppDelegate: NSObject, UIApplicationDelegate {
     }
 
     func application(
-        _ application: UIApplication,
+        _: UIApplication,
         didFailToRegisterForRemoteNotificationsWithError error: Error
     ) {
         Task { @MainActor in
@@ -41,9 +41,9 @@ class AppDelegate: NSObject, UIApplicationDelegate {
     // MARK: - Scene Configuration
 
     func application(
-        _ application: UIApplication,
+        _: UIApplication,
         configurationForConnecting connectingSceneSession: UISceneSession,
-        options: UIScene.ConnectionOptions
+        options _: UIScene.ConnectionOptions
     ) -> UISceneConfiguration {
         // Only support standard window scenes. Return empty config for CarPlay or other scene types
         // to prevent crashes when connected to unsupported scene roles.
@@ -55,13 +55,6 @@ class AppDelegate: NSObject, UIApplicationDelegate {
             // CarPlay or other unsupported scene types get minimal config
             return UISceneConfiguration(name: nil, sessionRole: connectingSceneSession.role)
         }
-    }
-
-    func application(
-        _ application: UIApplication,
-        didDiscardSceneSessions sceneSessions: Set<UISceneSession>
-    ) {
-        // Clean up any resources for discarded scenes if needed
     }
 }
 #endif

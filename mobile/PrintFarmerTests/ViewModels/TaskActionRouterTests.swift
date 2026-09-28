@@ -30,7 +30,7 @@ final class TaskActionRouterTests: XCTestCase {
         await task.value
 
         XCTAssertEqual(probe.dismissCount, 1)
-        XCTAssertEqual(probe.swapCalls.map(\.printerID), [printerA])
+        XCTAssertEqual(probe.swapCalls, [printerA])
     }
 
     func testMaintenancePresentsAfterDismiss() async {
@@ -83,7 +83,7 @@ final class TaskActionRouterTests: XCTestCase {
         await second.value
 
         // Only the newest action's destination survives (#726 newest-wins).
-        XCTAssertEqual(probe.swapCalls.map(\.printerID), [printerB])
+        XCTAssertEqual(probe.swapCalls, [printerB])
         XCTAssertNil(router.harvestPresentation)
     }
 
@@ -103,7 +103,7 @@ final class TaskActionRouterTests: XCTestCase {
         await second.value
 
         XCTAssertEqual(probe.swapCalls.count, 1)
-        XCTAssertEqual(probe.swapCalls.first?.printerID, printerA)
+        XCTAssertEqual(probe.swapCalls.first, printerA)
     }
 
     // MARK: - Fail-safe on the row (no navigation)
@@ -297,7 +297,7 @@ private final class RoutingProbe {
     var harvestResult: Result<PrintJob, TaskActionRouteError> = .failure(.dependencyUnavailable)
 
     private(set) var dismissCount = 0
-    private(set) var swapCalls: [(printerID: UUID, toolheadID: String?)] = []
+    private(set) var swapCalls: [UUID] = []
     private(set) var harvestLoadCount = 0
     private(set) var refreshCount = 0
 
@@ -312,8 +312,8 @@ private final class RoutingProbe {
     func environment() -> TaskActionRoutingEnvironment {
         TaskActionRoutingEnvironment(
             awaitPresentationDismissal: { [weak self] in await self?.handleDismiss() },
-            navigateToSwap: { [weak self] printerID, toolheadID in
-                self?.swapCalls.append((printerID, toolheadID))
+            navigateToSwap: { [weak self] printerID in
+                self?.swapCalls.append(printerID)
             },
             authoritySnapshot: { [weak self] in self?.authority ?? 0 },
             loadHarvestJob: { [weak self] _ in

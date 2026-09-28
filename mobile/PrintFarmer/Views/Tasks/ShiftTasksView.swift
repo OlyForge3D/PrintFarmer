@@ -281,8 +281,8 @@ struct ShiftTasksView: View {
                     // task-action presentation before its replacement.
                     await Task { @MainActor in }.value
                 },
-                navigateToSwap: { printerID, toolheadID in
-                    router.routeToFilamentSwap(printerID: printerID, toolheadID: toolheadID)
+                navigateToSwap: { printerID in
+                    router.routeToFilamentSwap(printerID: printerID)
                 },
                 authoritySnapshot: {
                     services.activeServerGeneration
