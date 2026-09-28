@@ -178,6 +178,44 @@ public class HostUpdateDatabaseBackupTargetFactoryTests
     }
 
     [Fact]
+    public void CreateRestoreCommand_Postgres_ClearsDatabaseBeforeRestore()
+    {
+        var dbConfig = new DatabaseProviderConfiguration { Provider = "postgres", ConnectionString = "Host=dbhost;Database=printfarmer;Username=pf" };
+
+        HostUpdateRestoreCommand command = HostUpdateDatabaseBackupTargetFactory.CreateRestoreCommand(dbConfig, TestExecutableResolver)(Path.GetTempPath());
+
+        command.PrepareTargetAsync.Should().NotBeNull();
+        command.Arguments.Should().Contain("--clean").And.Contain("--if-exists");
+    }
+
+    [Theory]
+    [InlineData("sqlite", "Data Source=farm.db")]
+    [InlineData("sqlserver", "Server=sqlhost;Database=printfarmer;Integrated Security=true")]
+    public void CreateRestoreCommand_NonPostgres_HasNoPrepareStep(string provider, string connectionString)
+    {
+        var dbConfig = new DatabaseProviderConfiguration { Provider = provider, ConnectionString = connectionString };
+
+        HostUpdateRestoreCommand command = HostUpdateDatabaseBackupTargetFactory.CreateRestoreCommand(dbConfig, TestExecutableResolver)(Path.GetTempPath());
+
+        command.PrepareTargetAsync.Should().BeNull();
+    }
+
+    [Fact]
+    public void PostgresClearDatabaseSql_DropsUserSchemasAndRestoresPublicMetadata()
+    {
+        string sql = HostUpdateDatabaseBackupTargetFactory.PostgresClearDatabaseSql;
+
+        sql.Should().Contain("DROP SCHEMA %I CASCADE");
+        sql.Should().Contain("NOT IN ('pg_catalog', 'information_schema')");
+        sql.Should().Contain(@"NOT LIKE 'pg\_toast%'");
+        sql.Should().Contain(@"NOT LIKE 'pg\_temp\_%'");
+        sql.Should().Contain("CREATE SCHEMA public;");
+        sql.Should().Contain("ALTER SCHEMA public OWNER TO %s");
+        sql.Should().Contain("aclexplode(public_acl)");
+        sql.Should().Contain("COMMENT ON SCHEMA public IS %L");
+    }
+
+    [Fact]
     public void CreateRestoreCommand_SqlServer_PasswordOnlyInEnvironmentNeverInArguments()
     {
         var dbConfig = new DatabaseProviderConfiguration

@@ -521,6 +521,100 @@ public sealed class HostUpdateRecoveryCoordinatorTests
     }
 
     [Fact]
+    public async Task RestoreAsync_PrepareTarget_RunsBeforeRestoreProcess()
+    {
+        var events = new List<string>();
+        var runner = new OrderRecordingProcessRunner(events);
+        var commands = new Dictionary<string, Func<string, HostUpdateRestoreCommand>>
+        {
+            ["database"] = _ => new HostUpdateRestoreCommand("pg_restore", [], null)
+            {
+                PrepareTargetAsync = _ =>
+                {
+                    events.Add("prepare");
+                    return Task.CompletedTask;
+                },
+            },
+        };
+        var restore = new ProcessHostUpdateRestoreExecutor(runner, commands, new Dictionary<string, string>(), TimeSpan.FromSeconds(30));
+        (HostUpdateBackupManifest manifest, string root) = await CreateSingleTargetBackupAsync("database");
+
+        await restore.RestoreAsync(manifest, root, CancellationToken.None);
+
+        events.Should().Equal("prepare", "process:pg_restore");
+    }
+
+    [Fact]
+    public async Task RestoreAsync_PrepareTargetFails_ThrowsAndNeverRunsRestoreProcess()
+    {
+        var events = new List<string>();
+        var runner = new OrderRecordingProcessRunner(events);
+        var commands = new Dictionary<string, Func<string, HostUpdateRestoreCommand>>
+        {
+            ["database"] = _ => new HostUpdateRestoreCommand("pg_restore", [], null)
+            {
+                PrepareTargetAsync = _ => throw new InvalidOperationException("connection refused"),
+            },
+        };
+        var restore = new ProcessHostUpdateRestoreExecutor(runner, commands, new Dictionary<string, string>(), TimeSpan.FromSeconds(30));
+        (HostUpdateBackupManifest manifest, string root) = await CreateSingleTargetBackupAsync("database");
+
+        Func<Task> act = () => restore.RestoreAsync(manifest, root, CancellationToken.None);
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("restore_prepare_failed:database");
+        events.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task RestoreAsync_ChecksumMismatch_NeverRunsPrepareTarget()
+    {
+        var events = new List<string>();
+        var runner = new OrderRecordingProcessRunner(events);
+        var commands = new Dictionary<string, Func<string, HostUpdateRestoreCommand>>
+        {
+            ["database"] = _ => new HostUpdateRestoreCommand("pg_restore", [], null)
+            {
+                PrepareTargetAsync = _ =>
+                {
+                    events.Add("prepare");
+                    return Task.CompletedTask;
+                },
+            },
+        };
+        var restore = new ProcessHostUpdateRestoreExecutor(runner, commands, new Dictionary<string, string>(), TimeSpan.FromSeconds(30));
+        (HostUpdateBackupManifest manifest, string root) = await CreateSingleTargetBackupAsync("database");
+        await File.WriteAllTextAsync(Path.Combine(root, "database", "payload.txt"), "tamp");
+
+        Func<Task> act = () => restore.RestoreAsync(manifest, root, CancellationToken.None);
+
+        await act.Should().ThrowAsync<Exception>();
+        events.Should().BeEmpty();
+    }
+
+    private static async Task<(HostUpdateBackupManifest Manifest, string Root)> CreateSingleTargetBackupAsync(string targetName)
+    {
+        string root = CreateTempDir();
+        string target = Path.Combine(root, targetName);
+        Directory.CreateDirectory(target);
+        await File.WriteAllTextAsync(Path.Combine(target, "payload.txt"), "data");
+        var manifest = new HostUpdateBackupManifest(
+            "release-1",
+            DateTimeOffset.UtcNow,
+            [targetName],
+            [new HostUpdateBackupManifestFile(Path.Combine(targetName, "payload.txt"), Sha256("data"), 4)]);
+        return (manifest, root);
+    }
+
+    private sealed class OrderRecordingProcessRunner(List<string> events) : IHostUpdateProcessRunner
+    {
+        public Task<HostUpdateProcessResult> RunAsync(string fileName, IReadOnlyList<string> arguments, TimeSpan timeout, CancellationToken cancellationToken, IReadOnlyDictionary<string, string>? environment = null)
+        {
+            events.Add($"process:{fileName}");
+            return Task.FromResult(new HostUpdateProcessResult(0, string.Empty, string.Empty));
+        }
+    }
+
+    [Fact]
     public async Task RecoverAsync_CorruptInstalledState_FailsClosedToNeedsOperator()
     {
         string root = CreateTempDir();

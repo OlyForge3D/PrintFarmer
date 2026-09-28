@@ -628,6 +628,11 @@ public sealed class ProcessHostUpdateRestoreExecutor(
             if (restoreCommandsByTarget.TryGetValue(targetName, out Func<string, HostUpdateRestoreCommand>? buildCommand))
             {
                 HostUpdateRestoreCommand command = buildCommand(targetDirectory);
+                if (command.PrepareTargetAsync is not null)
+                {
+                    await PrepareTargetAsync(targetName, command.PrepareTargetAsync, cancellationToken).ConfigureAwait(false);
+                }
+
                 HostUpdateProcessResult result = await processRunner.RunAsync(
                     command.FileName,
                     command.Arguments,
@@ -680,6 +685,20 @@ public sealed class ProcessHostUpdateRestoreExecutor(
             }
 
             throw new InvalidOperationException($"restore_target_unmapped:{targetName}");
+        }
+    }
+
+    private async Task PrepareTargetAsync(string targetName, Func<CancellationToken, Task> prepare, CancellationToken cancellationToken)
+    {
+        using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutSource.CancelAfter(timeout);
+        try
+        {
+            await prepare(timeoutSource.Token).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new InvalidOperationException($"restore_prepare_failed:{targetName}", exception);
         }
     }
 
