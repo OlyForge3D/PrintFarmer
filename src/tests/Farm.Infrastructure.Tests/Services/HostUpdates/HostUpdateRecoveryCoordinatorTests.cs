@@ -649,6 +649,28 @@ public sealed class HostUpdateRecoveryCoordinatorTests
         restore.Called.Should().BeFalse();
     }
 
+    [Fact]
+    public async Task RecoverAsync_StorageExternallyOwnedImageOnlyRollback_RollsBackWithoutRestore()
+    {
+        var restore = new TrackingRestoreExecutor();
+        var applier = new FakeDigestApplier();
+        var coordinator = new HostUpdateRecoveryCoordinator(
+            new FakeInstalledHostStateStore(PriorApiState()),
+            new AlwaysCompatibleEvaluator(),
+            applier,
+            restore,
+            new StubManifestLocator(["database", "app-data"]),
+            new FakeDigestVerifier(),
+            new FileHostUpdateRecoveryOutcomeStore(CreateTempDir()),
+            executionOptions: new HostUpdateExecutionOptions { ActiveServiceIds = ["api"], StorageExternallyOwned = true });
+
+        HostUpdateRecoveryResult result = await coordinator.RecoverAsync(Request, NoActivities, CancellationToken.None);
+
+        result.Outcome.Should().Be(HostUpdateRecoveryOutcome.RolledBack, "an image-only rollback mutates no storage");
+        restore.Called.Should().BeFalse("externally owned storage is never restored, even when a backup exists");
+        applier.CallCount.Should().BeGreaterThan(0);
+    }
+
     private static InstalledHostState PriorApiState() => new(
         "release-0", "sha256:prior", new Dictionary<string, string> { ["api"] = "sha256:prior-api" }, "monolith", DateTimeOffset.UtcNow);
 
