@@ -403,11 +403,11 @@ public sealed class HostUpdateVerificationTimeoutExceptionTests
     [Fact]
     public void RedactedFailedCheckNames_ReplacesUnsafeCharactersAndTruncates()
     {
-        var exception = new HostUpdateVerificationTimeoutException(["http://user:secret@host/x?y=1 z\n", new string('a', 200)]);
+        var exception = new HostUpdateVerificationTimeoutException(["bad name/with@token?x=1 z\n", new string('a', 200)]);
 
         IReadOnlyList<string> redacted = exception.RedactedFailedCheckNames();
 
-        redacted[0].Should().Be("http:__user:secret_host_x_y_1_z_");
+        redacted[0].Should().Be("bad_name_with_token_x_1_z_");
         redacted[0].Should().NotContain("@").And.NotContain("/").And.NotContain("\n");
         redacted[1].Should().Be(new string('a', 64));
     }
