@@ -1259,21 +1259,20 @@ function assertInfrastructureLoadedFromBundle(decisionRecords, infrastructureLoc
 }
 
 function readImportDecisionRecords(directory) {
-  if (!existsSync(directory)) {
-    return [];
-  }
   const script = [
-    "const { readdirSync, readFileSync, statSync } = require('fs');",
+    "const { existsSync, readdirSync, readFileSync, statSync } = require('fs');",
     "const { join } = require('path');",
     "const root = process.argv[1];",
     "const files = [];",
     "function walk(dir) { for (const name of readdirSync(dir)) { const file = join(dir, name); const stat = statSync(file); if (stat.isDirectory()) walk(file); else if (name.endsWith('.json')) files.push(file); } }",
-    "walk(root);",
+    "if (existsSync(root)) walk(root);",
     "const records = files.map(file => { try { return JSON.parse(readFileSync(file, 'utf8')); } catch { return undefined; } }).filter(record => record && record.kind === 'printfarmer-offline-import-decision');",
     "records.sort((a, b) => String(a.decidedAt).localeCompare(String(b.decidedAt)));",
     "process.stdout.write(JSON.stringify(records));",
   ].join('\n');
-  return JSON.parse(execFileSync('node', ['-e', script, directory], { encoding: 'utf8' }));
+  // The CLI writes decision records as root inside the host container with owner-only
+  // permissions, so read them there rather than as a possibly non-root runner.
+  return JSON.parse(hostExecFileSync(hostContainer, ['node', '-e', script, directory]));
 }
 
 function waitForDatabaseReady(deploymentRoot, env, provider) {
