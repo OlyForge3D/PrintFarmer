@@ -52,6 +52,11 @@ internal sealed class HostUpdateCliWriterStoppedFenceCoordinator(
     private HostUpdateFenceCoordinator CreateCoordinator(HostUpdateExecutionRequest request)
     {
         bool writerHostInTopology = options.ActiveServiceIds.Any(BackgroundWriterHostServiceIds.Contains);
+
+        // Every background writer is proven by the same host observation, so one poll probes once (#3133).
+        var writerHostsStopped = new PerPollWriterHostProbe(cancellationToken => writerHostProbe is DockerComposeApiAbsenceProbe composeProbe
+            ? composeProbe.ValidateWriterHostsStoppedAsync(cancellationToken)
+            : writerHostProbe.ValidateSafeToExecuteAsync(request, cancellationToken));
         var writers = new List<IFenceableWriter>();
         var names = new HashSet<string>(StringComparer.Ordinal);
         foreach (string name in registeredWriters.Select(writer => writer.Name).Concat(options.RequiredFencedWriterNames))
@@ -77,9 +82,7 @@ internal sealed class HostUpdateCliWriterStoppedFenceCoordinator(
                     name,
                     admissionGate,
                     writerHostInTopology,
-                    cancellationToken => writerHostProbe is DockerComposeApiAbsenceProbe composeProbe
-                        ? composeProbe.ValidateWriterHostsStoppedAsync(cancellationToken)
-                        : writerHostProbe.ValidateSafeToExecuteAsync(request, cancellationToken),
+                    writerHostsStopped.ProbeAsync,
                     _writerLogger));
             }
             else
@@ -93,7 +96,58 @@ internal sealed class HostUpdateCliWriterStoppedFenceCoordinator(
             TimeSpan.FromSeconds(options.FenceProofTimeoutSeconds),
             TimeSpan.FromSeconds(options.FencePollIntervalSeconds),
             timeProvider,
-            _coordinatorLogger);
+            _coordinatorLogger,
+            writerHostsStopped.BeginPoll);
+    }
+}
+
+/// <summary>
+/// Shares one writer-host observation across every writer evaluated in the same fence poll. The
+/// first writer to ask in a poll runs the probe; the rest of that poll reuse its result, and
+/// <see cref="BeginPoll"/> discards it so every poll observes the hosts afresh.
+/// </summary>
+internal sealed class PerPollWriterHostProbe(Func<CancellationToken, Task<string?>> probe)
+{
+    private readonly Lock _sync = new();
+    private int _poll;
+    private bool _observed;
+    private string? _failure;
+
+    public void BeginPoll()
+    {
+        lock (_sync)
+        {
+            _poll++;
+            _observed = false;
+            _failure = null;
+        }
+    }
+
+    public async Task<string?> ProbeAsync(CancellationToken cancellationToken)
+    {
+        int poll;
+        lock (_sync)
+        {
+            if (_observed)
+            {
+                return _failure;
+            }
+
+            poll = _poll;
+        }
+
+        string? failure = await probe(cancellationToken).ConfigureAwait(false);
+        lock (_sync)
+        {
+            // A result observed for an earlier poll is never published into a later one.
+            if (poll == _poll)
+            {
+                _observed = true;
+                _failure = failure;
+            }
+        }
+
+        return failure;
     }
 }
 
@@ -160,7 +214,10 @@ internal sealed class ComposeExecAggregateHealthCheck(
     IHostUpdateExecutableResolver executableResolver,
     HostUpdateExecutionOptions options) : IHostUpdateAggregateHealthCheck
 {
-    /// <summary>Container-internal listener of each host that serves the aggregate <c>/health</c> endpoint.</summary>
+    /// <summary>
+    /// Container-internal listener of each host that serves the aggregate <c>/health</c> endpoint. Must match
+    /// the <c>ASPNETCORE_URLS</c> each compose template sets; a test pins them together (#3133).
+    /// </summary>
     internal static readonly IReadOnlyDictionary<string, int> HealthPortsByServiceId = new Dictionary<string, int>(StringComparer.Ordinal)
     {
         ["monolith"] = 5000,

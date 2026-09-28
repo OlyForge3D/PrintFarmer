@@ -97,6 +97,16 @@ public sealed class HostUpdateExecutionOptions
     public bool DatabaseExternallyOwned { get; set; }
 
     /// <summary>
+    /// True when the application storage/blob directories named in <see cref="OwnedDirectories"/>
+    /// are owned by an external provider (for example a customer-managed NFS/SMB share or object
+    /// store mount) rather than by this host (issue #3155). When true, the backup step fails closed
+    /// (<see cref="HostUpdateBackupUnsupportedOwnerException"/>) instead of copying storage it does
+    /// not own, and recovery stops as <c>NeedsOperator</c> with <c>storage_externally_owned</c>
+    /// before any automated restore of those directories. Defaults to false (host-owned).
+    /// </summary>
+    public bool StorageExternallyOwned { get; set; }
+
+    /// <summary>
     /// Production facilities that must stay fail-closed when a deployment intentionally
     /// disables them by configuration. The built-in executor no longer seeds known #2663
     /// gaps here; availability is instead determined by concrete root, adapter, writer,

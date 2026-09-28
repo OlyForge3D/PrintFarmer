@@ -766,7 +766,10 @@ exists is `remote_worker_evidence_unavailable`. Restore or update remote workers
 through their owner. A coordinated
 database restore owned by an external provider (`DatabaseExternallyOwned`) stops
 as needs-operator with `database_externally_owned` before any restore or apply,
-so the external owner must restore it. Integration tests exercise a
+so the external owner must restore it. Owned directories declared externally
+owned (`StorageExternallyOwned`) likewise stop as needs-operator with
+`storage_externally_owned` before any directory is deleted or copied, and
+activation backup fails closed instead of copying them. Integration tests exercise a
 real failed offline activation followed by preview and confirm with a
 network-denied HTTP factory, asserting the prior set is restored through the
 engine activation-time backup, with no non-loopback request and no pull.
@@ -1050,26 +1053,57 @@ image from the bundle. The CLI's own `/health` verifier stays enabled while the
 host cannot egress because it probes from inside the compose network (#3127)
 rather than over that address. After the product verification step, the harness
 separately records the discovered `/health` entries and fails positive recovery
-cells if no queue/dispatch/outbox consumer entry is exposed. On a product build
-that still has offline-recovery defects, a cell is expected to emit valid
+cells unless the `queue-consumers` entry is healthy (see
+[Queue-consumer health entry](#queue-consumer-health-entry-3157)). On a product
+build that still has offline-recovery defects, a cell is expected to emit valid
 failing evidence with `outcome.expected` set from the catalog,
 `outcome.expectedReason` set from the catalog for fail-closed cells,
 `outcome.actual` set from the observed product CLI output/journal, and
 `outcome.reason` set to the observed failure or refusal reason. Passing
 fail-closed records must match the catalog outcome and expected reason
 (`Refused`/`remote_worker_unsupported`, `Refused`/`split_database_not_supported`,
-or `NeedsOperator`/`database_externally_owned`); failing setup/precondition
-records keep their observed reason instead of pretending the expected reason
-occurred. The external-storage product-gap cell is intentionally failing
-evidence: it still records the catalog expectation
-`NeedsOperator`/`storage_externally_owned`, but its observed outcome remains
-`RecoveryRequired` with reason `product-owner-signal-unavailable:storage` until
-the product exposes a storage-ownership signal (#3155).
+`NeedsOperator`/`database_externally_owned`, or
+`NeedsOperator`/`storage_externally_owned`); failing setup/precondition records
+keep their observed reason instead of pretending the expected reason occurred.
 Use `--work-dir` to move scratch space to another non-system-temp directory and
 `--keep-work` only for debugging a failed local run. Without `--keep-work`, the
 script runs `docker compose down -v --remove-orphans`, removes the host and sink
 containers and network, and fails loudly if any container, volume or network
 with the run label remains.
+
+### Queue-consumer health entry (#3157)
+
+The API's `/health` (and `/api/health`) response exposes a `queue-consumers`
+entry under `results`. Use that exact name for the queue-continuity checkpoint.
+It is registered only by the main API (`Farm.Web.Api`): the `monolith` service
+in monolith topology and the `api` service in microservices topology. The
+slicer-host does not run these consumers and does not expose the entry.
+
+The entry reports the live state of each durable queue consumer or writer
+hosted service, keyed in `data` by camelCase name:
+
+| `data` key | Hosted service |
+| --- | --- |
+| `autoDispatch` | `AutoDispatchBackgroundService` |
+| `queueOutboxPublisher` | `QueueOutboxPublisherService` |
+| `backendStartCommandConsumer` | `BackendStartCommandConsumerService` |
+| `backendControlCommandConsumer` | `BackendControlCommandConsumerService` |
+| `queueReconciliation` | `QueueReconciliationService` |
+| `queueRetentionPrune` | `QueueRetentionPruneService` |
+| `bedClearAcknowledgementExpiry` | `BedClearAcknowledgementExpiryService` |
+| `dispatchEscalation` | `DispatchEscalationService` |
+
+Each value is `running`, `notRegistered`, `notStarted`, `stopped`, `faulted`,
+`canceled` or `unobservable`. The entry `status` uses the numeric
+`HealthStatus` wire value: `2` (`Healthy`) only when every consumer is
+`running`, otherwise `0` (`Unhealthy`), which also makes the overall `/health`
+status unhealthy. A host started with `TEST_DISABLE_BACKGROUND_SERVICES` reports
+`1` (`Degraded`) with every consumer `disabled`. Acceptance checks must assert
+the entry status is `2`, not merely that the entry exists.
+
+The signal proves hosted-service liveness only. A consumer paused by the
+host-update writer fence still reports `running`, and slicer worker queue
+consumers are outside this entry.
 
 Optional fault hooks are available for later cells:
 

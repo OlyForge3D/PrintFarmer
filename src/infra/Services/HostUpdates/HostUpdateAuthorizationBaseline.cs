@@ -78,14 +78,14 @@ public static class HostUpdateBaselineHashes
 
     /// <summary>
     /// Fingerprint of the configuration the recovery engine acts on. Credentials are never
-    /// included: only the provider, the database ownership, the SQLite data-source path and the
+    /// included: only the provider, the database and storage ownership, the SQLite data-source path and the
     /// PostgreSQL/SQL Server host, port and database name contribute.
     /// </summary>
     public static string Configuration(HostUpdateExecutionOptions options, DatabaseProviderConfiguration database)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(database);
-        return "sha256:" + Hash(new
+        var fingerprint = new
         {
             options.RootDirectory,
             options.ComposeProjectName,
@@ -102,7 +102,14 @@ public static class HostUpdateBaselineHashes
             SqliteDataSource = database.IsSqlite ? SqliteDataSource(database.ConnectionString) : null,
             DatabaseServer = DatabaseServerIdentity(database),
             options.DatabaseExternallyOwned,
-        });
+        };
+
+        // Storage ownership (issue #3155) joins the fingerprint only when declared external, so
+        // every host-owned baseline recorded before this signal existed keeps its fingerprint and
+        // does not report configuration_drift, while flipping the flag either way is drift.
+        return "sha256:" + (options.StorageExternallyOwned
+            ? Hash(new { Configuration = fingerprint, options.StorageExternallyOwned })
+            : Hash(fingerprint));
     }
 
     /// <summary>

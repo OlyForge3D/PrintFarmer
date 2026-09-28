@@ -27,6 +27,8 @@ import {
   readJson,
   sha256,
   validateLicenseMetadata,
+  validateNpmLockSources,
+  validateDependencyCompliance,
   validateDependencyLicenses,
   validateProvenanceManifest,
   validateSbomDocument,
@@ -1741,6 +1743,237 @@ test('createNpmLicenseInventory rejects incomplete, invalid-date, and stale-hash
   } finally {
     await rm(root, { force: true, recursive: true });
   }
+});
+
+test('validateDependencyCompliance reports stale npm fallbacks once and dedupes npm license errors', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'printfarmer-dependency-compliance-'));
+  const lockRelativePath = 'src/Web/ReactApp/package-lock.json';
+  const licenseFile = 'compliance/licenses/npm/fixture.txt';
+  const licenseText = 'MIT license evidence\n';
+  const fallback = {
+    ecosystem: 'npm',
+    package: 'fixture',
+    version: '1.0.0',
+    license: 'MIT',
+    licenseFile,
+    sha256: sha256(Buffer.from(licenseText)),
+    source: 'https://licenses.example.test/fixture',
+    evidence: 'Immutable fixture license text',
+    reviewer: 'Maintainer',
+    reviewDate: '2026-07-24',
+    reviewAfter: '2099-07-24',
+    rationale: 'Fixture for fallback validation.',
+  };
+  const policy = {
+    allowedExpressions: ['MIT'],
+    deniedValues: ['', 'UNKNOWN'],
+    npmLockFiles: [lockRelativePath],
+    npm: { licenseTextFallbacks: [fallback] },
+    nuget: { assetsRoot: 'src', excludedProjectPathSegments: [] },
+    reviewedEvidence: [],
+    reviewedExceptions: [],
+    sbom: { npmBundleLockFile: lockRelativePath },
+  };
+  const writeLock = (packages) => writeFile(path.join(root, lockRelativePath), JSON.stringify({
+    lockfileVersion: 3,
+    packages: {
+      '': { name: 'fixture-root', version: '1.0.0', license: 'MIT' },
+      // Installed entries pin a registry tarball so validateNpmLockSources passes.
+      ...Object.fromEntries(Object.entries(packages).map(([lockPath, metadata]) => {
+        const name = lockPath.slice(lockPath.lastIndexOf('node_modules/') + 'node_modules/'.length);
+        return [lockPath, {
+          resolved: `https://registry.npmjs.org/${name}/-/${name}-${metadata.version}.tgz`,
+          integrity: `sha512-${'A'.repeat(86)}==`,
+          ...metadata,
+        }];
+      })),
+    },
+  }));
+
+  try {
+    const assetsPath = path.join(root, 'src', 'app', 'obj', 'project.assets.json');
+    await mkdir(path.dirname(assetsPath), { recursive: true });
+    await writeFile(assetsPath, JSON.stringify({
+      packageFolders: {},
+      libraries: {},
+      project: { restore: { projectPath: path.join(root, 'src', 'app', 'app.csproj') } },
+    }));
+    await mkdir(path.join(root, path.dirname(licenseFile)), { recursive: true });
+    await mkdir(path.join(root, path.dirname(lockRelativePath)), { recursive: true });
+    await writeFile(path.join(root, licenseFile), licenseText);
+
+    await writeLock({ 'node_modules/fixture': { license: 'MIT', version: '1.0.0' } });
+    assert.deepEqual(await validateDependencyCompliance(root, policy), []);
+    assert.deepEqual(await validateDependencyLicenses(root, policy), []);
+
+    // An npm-only bump leaves the reviewed fallback pointing at a version that
+    // is no longer bundled; only the npm inventory detects this.
+    await writeLock({ 'node_modules/fixture': { license: 'MIT', version: '1.0.1' } });
+    assert.deepEqual(await validateDependencyLicenses(root, policy), []);
+    assert.deepEqual(
+      (await validateDependencyCompliance(root, policy)).map((error) => error.code),
+      ['LICENSE_POLICY_STALE'],
+    );
+
+    // A production package with a denied license is reported by both
+    // validateNpmLicenses and the inventory; it must surface exactly once.
+    await writeLock({
+      'node_modules/fixture': { license: 'MIT', version: '1.0.0' },
+      'node_modules/unlicensed': { license: 'UNKNOWN', version: '2.0.0' },
+    });
+    const deniedErrors = (await validateDependencyCompliance(root, policy))
+      .filter((error) => error.path === `${lockRelativePath}:node_modules/unlicensed`);
+    assert.equal(deniedErrors.length, 1);
+
+    // The restore-free ci-tools mode skips only the NuGet inventory: missing
+    // assets are ignored, but npm staleness is still reported.
+    await rm(path.join(root, 'src', 'app'), { force: true, recursive: true });
+    await writeLock({ 'node_modules/fixture': { license: 'MIT', version: '1.0.0' } });
+    assert.deepEqual(
+      (await validateDependencyCompliance(root, policy)).map((error) => error.code),
+      ['NUGET_ASSETS_MISSING'],
+    );
+    assert.deepEqual(await validateDependencyCompliance(root, policy, { includeNuget: false }), []);
+    await writeLock({ 'node_modules/fixture': { license: 'MIT', version: '1.0.1' } });
+    assert.deepEqual(
+      (await validateDependencyCompliance(root, policy, { includeNuget: false }))
+        .map((error) => error.code),
+      ['LICENSE_POLICY_STALE'],
+    );
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('validateNpmLockSources rejects non-registry sources and weak integrity', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'printfarmer-npm-lock-sources-'));
+  const lockRelativePath = 'src/Web/ReactApp/package-lock.json';
+  const toolingLockPath = 'package-lock.json';
+  const sha512 = `sha512-${'A'.repeat(86)}==`;
+  const registryEntry = (name, version) => ({
+    version,
+    resolved: `https://registry.npmjs.org/${name}/-/${name}-${version}.tgz`,
+    integrity: sha512,
+    license: 'MIT',
+  });
+  const policy = {
+    npmLockFiles: [lockRelativePath],
+    npm: { registryCheckedLockFiles: [toolingLockPath] },
+  };
+  const writeLock = (relativePath, packages) => writeFile(path.join(root, relativePath), JSON.stringify({
+    lockfileVersion: 3,
+    packages: { '': { name: 'fixture-root', version: '1.0.0' }, ...packages },
+  }));
+  const failures = async () => (await validateNpmLockSources(root, policy))
+    .map((error) => `${error.code} ${error.path}`);
+
+  try {
+    await mkdir(path.join(root, path.dirname(lockRelativePath)), { recursive: true });
+    await writeLock(toolingLockPath, { 'node_modules/js-yaml': registryEntry('js-yaml', '4.1.0') });
+    await writeLock(lockRelativePath, {
+      'local-rules': { name: 'local-rules', version: '1.0.0' },
+      'node_modules/fixture': registryEntry('fixture', '1.0.0'),
+      'node_modules/linked': { resolved: 'local-rules', link: true },
+      'node_modules/fixture/node_modules/bundled': { version: '1.0.0', inBundle: true },
+      'node_modules/@scope/pkg': {
+        ...registryEntry('@scope/pkg', '2.0.0'),
+        resolved: 'https://registry.npmjs.org/@scope/pkg/-/pkg-2.0.0.tgz',
+      },
+    });
+    assert.deepEqual(await failures(), []);
+
+    const badSources = {
+      privateFeed: 'https://ms-feed-25.pkgs.visualstudio.com/1es-public/_packaging/npm-public/npm/registry/x/-/x-1.0.0.tgz',
+      plainHttp: 'http://registry.npmjs.org/x/-/x-1.0.0.tgz',
+      lookalike: 'https://registry.npmjs.org.example.test/x/-/x-1.0.0.tgz',
+      // Joined at runtime so the publication secret scan does not flag this file.
+      credentials: ['https://user', 'token@registry.npmjs.org/x/-/x-1.0.0.tgz'].join(':'),
+      port: 'https://registry.npmjs.org:8443/x/-/x-1.0.0.tgz',
+      git: 'git+ssh://git@github.com/example/x.git#0123456789abcdef',
+      file: 'file:../x-1.0.0.tgz',
+      notString: 42,
+    };
+    await writeLock(lockRelativePath, Object.fromEntries(Object.entries(badSources).map(([key, resolved]) => [
+      `node_modules/${key}`,
+      { ...registryEntry(key, '1.0.0'), resolved },
+    ])));
+    assert.deepEqual(
+      (await failures()).sort(),
+      Object.keys(badSources).map((key) => `NPM_LOCK_SOURCE ${lockRelativePath}:node_modules/${key}`).sort(),
+    );
+
+    await writeLock(lockRelativePath, {
+      'node_modules/sha1': { ...registryEntry('sha1', '1.0.0'), integrity: 'sha1-ce5R+nvkyuwaY4OffmgtgTLTDK8=' },
+      'node_modules/mixed': { ...registryEntry('mixed', '1.0.0'), integrity: `${sha512} sha1-ce5R+nvkyuwaY4OffmgtgTLTDK8=` },
+      'node_modules/empty': { ...registryEntry('empty', '1.0.0'), integrity: ' ' },
+      'node_modules/multi': { ...registryEntry('multi', '1.0.0'), integrity: `${sha512} ${sha512}` },
+      'node_modules/missing': { version: '1.0.0', resolved: registryEntry('missing', '1.0.0').resolved },
+    });
+    assert.deepEqual((await failures()).sort(), [
+      `NPM_LOCK_INTEGRITY ${lockRelativePath}:node_modules/empty`,
+      `NPM_LOCK_INTEGRITY ${lockRelativePath}:node_modules/missing`,
+      `NPM_LOCK_INTEGRITY ${lockRelativePath}:node_modules/mixed`,
+      `NPM_LOCK_INTEGRITY ${lockRelativePath}:node_modules/sha1`,
+    ]);
+
+    // An installed entry must pin its tarball, and malformed entries fail closed.
+    await writeLock(lockRelativePath, {
+      'node_modules/unresolved': { version: '1.0.0', integrity: sha512 },
+      'node_modules/malformed': 'https://example.test/x.tgz',
+    });
+    assert.deepEqual((await failures()).sort(), [
+      `NPM_LOCK_FORMAT ${lockRelativePath}:node_modules/malformed`,
+      `NPM_LOCK_SOURCE ${lockRelativePath}:node_modules/unresolved`,
+    ]);
+
+    // Lockfile v1 keeps fetched entries in a `dependencies` tree the guard does
+    // not inspect, so it and any other shape without a v2/v3 packages map fail closed.
+    const legacyLock = {
+      lockfileVersion: 1,
+      dependencies: {
+        x: { version: '1.0.0', resolved: badSources.privateFeed, integrity: 'sha1-ce5R+nvkyuwaY4OffmgtgTLTDK8=' },
+      },
+    };
+    for (const lock of [
+      legacyLock,
+      { ...legacyLock, packages: {} },
+      { lockfileVersion: 3 },
+      { lockfileVersion: 3, packages: [] },
+      { packages: { 'node_modules/x': registryEntry('x', '1.0.0') } },
+      [],
+    ]) {
+      await writeFile(path.join(root, lockRelativePath), JSON.stringify(lock));
+      assert.deepEqual(await failures(), [`NPM_LOCK_FORMAT ${lockRelativePath}`], JSON.stringify(lock));
+    }
+
+    // The tooling lock is provenance-checked even though it is not
+    // license-inventoried, and a missing one is reported. A missing
+    // inventoried lock is left to validateNpmLicenses, which already reports it.
+    await rm(path.join(root, lockRelativePath));
+    await writeLock(toolingLockPath, {
+      'node_modules/js-yaml': { ...registryEntry('js-yaml', '4.1.0'), resolved: badSources.privateFeed },
+    });
+    assert.deepEqual(await failures(), [`NPM_LOCK_SOURCE ${toolingLockPath}:node_modules/js-yaml`]);
+    await rm(path.join(root, toolingLockPath));
+    assert.deepEqual(await failures(), [`NPM_LOCK_MISSING ${toolingLockPath}`]);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('production npm lock source policy covers every committed lockfile', async () => {
+  const policy = await readJson(path.join(repositoryRoot, 'compliance', 'dependency-license-policy.json'));
+  const { stdout } = await execFileAsync('git', [
+    'ls-files', '-z', '--', '*package-lock.json', '*npm-shrinkwrap.json',
+  ], { cwd: repositoryRoot });
+  const committed = stdout.split('\0').filter(Boolean).sort();
+  const checked = [...new Set([
+    ...policy.npmLockFiles,
+    ...(policy.npm?.registryCheckedLockFiles ?? []),
+  ])].sort();
+
+  assert.deepEqual(checked, committed, 'every committed npm lockfile must be registry-provenance checked');
+  assert.deepEqual(await validateNpmLockSources(repositoryRoot, policy), []);
 });
 
 test('create-npm-notices accepts normalized fallback evidence without a terminal newline', async () => {

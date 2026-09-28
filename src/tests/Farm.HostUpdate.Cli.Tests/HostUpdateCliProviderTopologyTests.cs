@@ -335,6 +335,52 @@ public sealed class HostUpdateCliProviderTopologyTests : IDisposable, IAsyncLife
     }
 
     [HostStateTheory]
+    [InlineData("sqlite", Split)]
+    [InlineData("postgres-local", Monolith)]
+    [InlineData("sqlserver-local", Split)]
+    public async Task Externally_owned_storage_is_never_restored_by_this_host(string provider, string topology)
+    {
+        IConfiguration configuration = Config(provider, topology, values => values["HostUpdateExecution:StorageExternallyOwned"] = "true");
+        _host.SeedInstalledState();
+        SeedMigrationFailure(configuration);
+        SeedBackup(Providers[provider]);
+        string ownedFile = Path.Combine(_host.Root, "owned", "app-data", "live.txt");
+        File.WriteAllText(ownedFile, "externally-owned-live-data");
+        File.WriteAllText(_host.AdmissionClosedPath, string.Empty);
+
+        CliRun preview = await RunAsync(configuration, "recover", "--release", CliHostFixture.ReleaseId, "--preview", "--json");
+        CliRun confirm = await ConfirmAsync(configuration);
+
+        Result(preview).GetProperty("plan").GetProperty("kind").GetString().Should().Be("NeedsOperator");
+        Result(preview).GetProperty("plan").GetProperty("detail").GetString().Should().Be(HostUpdateRecoveryCoordinator.StorageExternallyOwnedStop);
+        confirm.ExitCode.Should().Be(HostUpdateCliExitCodes.NeedsOperator, confirm.Output);
+        Result(confirm).GetProperty("detail").GetString().Should().Be(HostUpdateRecoveryCoordinator.StorageExternallyOwnedStop);
+        _processes.Calls.Should().BeEmpty("neither the database restore tool nor any image command may run");
+        File.ReadAllText(ownedFile).Should().Be("externally-owned-live-data", "externally owned storage is never deleted or overwritten");
+        File.Exists(Path.Combine(_host.Root, "owned", "app-data", "restored.txt")).Should().BeFalse();
+        File.Exists(_host.AdmissionClosedPath).Should().BeTrue();
+    }
+
+    [HostStateFact]
+    public async Task Storage_ownership_flipped_after_authorization_is_configuration_drift()
+    {
+        IConfiguration authorized = Config("sqlite", Split);
+        IConfiguration flipped = Config("sqlite", Split, values => values["HostUpdateExecution:StorageExternallyOwned"] = "true");
+        _host.SeedInstalledState();
+        SeedMigrationFailure(authorized);
+        SeedBackup(Providers["sqlite"]);
+
+        CliRun preview = await RunAsync(flipped, "recover", "--release", CliHostFixture.ReleaseId, "--preview", "--json");
+        CliRun confirm = await ConfirmAsync(flipped);
+
+        DriftCodes(Result(preview)).Should().Contain(HostUpdateRecoveryDrift.ConfigurationDrift);
+        Result(preview).GetProperty("plan").GetProperty("detail").GetString().Should().Be(HostUpdateRecoveryCoordinator.StorageExternallyOwnedStop);
+        confirm.ExitCode.Should().Be(HostUpdateCliExitCodes.DriftUnapproved, confirm.Output);
+        _processes.Calls.Should().BeEmpty();
+        _host.ReadOutcome().Should().BeNull();
+    }
+
+    [HostStateTheory]
     [MemberData(nameof(Topologies))]
     public async Task Missing_prior_state_after_apply_started_stops_before_any_process(string topology)
     {

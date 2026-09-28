@@ -280,7 +280,12 @@ public static class HostUpdateRecoveryEngineRegistration
                     sp.GetRequiredService<IHostUpdateExecutableResolver>());
             }
 
-            var directoryRestoreTargetsByName = new Dictionary<string, string>(options.OwnedDirectories, StringComparer.Ordinal);
+            // Storage owned by an external provider is never restored by this host either: with no
+            // directory mapping, any manifest naming an owned directory fails closed
+            // (restore_target_unmapped) before a single file is deleted or copied.
+            var directoryRestoreTargetsByName = options.StorageExternallyOwned
+                ? new Dictionary<string, string>(StringComparer.Ordinal)
+                : new Dictionary<string, string>(options.OwnedDirectories, StringComparer.Ordinal);
             return new ProcessHostUpdateRestoreExecutor(
                 sp.GetRequiredService<IHostUpdateProcessRunner>(),
                 restoreCommandsByTarget,

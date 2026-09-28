@@ -551,6 +551,137 @@ public sealed class HostUpdateRecoveryCoordinatorTests
             Task.FromResult(new HostUpdateProcessResult(0, string.Empty, string.Empty));
     }
 
+    [Theory]
+    [InlineData("database,app-data")]
+    [InlineData("app-data")]
+    [InlineData("model-uploads,database")]
+    public async Task RecoverAsync_StorageExternallyOwned_StopsBeforeAnyRestoreOrApply(string targets)
+    {
+        string[] targetNames = targets.Split(',');
+        var outcomeStore = new FileHostUpdateRecoveryOutcomeStore(CreateTempDir());
+        var restore = new TrackingRestoreExecutor();
+        var applier = new FakeDigestApplier();
+        var verifier = new FakeDigestVerifier();
+        var installedStateStore = new FakeInstalledHostStateStore(PriorApiState());
+        var coordinator = new HostUpdateRecoveryCoordinator(
+            installedStateStore,
+            new NeverCompatibleEvaluator(),
+            applier,
+            restore,
+            new StubManifestLocator(targetNames),
+            verifier,
+            outcomeStore,
+            executionOptions: new HostUpdateExecutionOptions { ActiveServiceIds = ["api"], StorageExternallyOwned = true });
+
+        HostUpdateRecoveryPlan plan = await coordinator.PlanAsync(Request, NoActivities, CancellationToken.None);
+        HostUpdateRecoveryResult result = await coordinator.RecoverAsync(Request, NoActivities, CancellationToken.None);
+
+        plan.Kind.Should().Be(HostUpdateRecoveryPlanKind.NeedsOperator);
+        plan.Detail.Should().Be(HostUpdateRecoveryCoordinator.StorageExternallyOwnedStop);
+        result.Outcome.Should().Be(HostUpdateRecoveryOutcome.NeedsOperator);
+        result.Detail.Should().Be(HostUpdateRecoveryCoordinator.StorageExternallyOwnedStop);
+        restore.Called.Should().BeFalse("externally owned storage is never restored by this host");
+        applier.CallCount.Should().Be(0);
+        (await outcomeStore.ReadAsync(Request.ReleaseId, CancellationToken.None))!.Detail
+            .Should().Be(HostUpdateRecoveryCoordinator.StorageExternallyOwnedStop);
+    }
+
+    [Fact]
+    public async Task RecoverAsync_StorageExternallyOwnedButManifestHasOnlyDatabase_RestoresDatabase()
+    {
+        var restore = new TrackingRestoreExecutor();
+        var coordinator = new HostUpdateRecoveryCoordinator(
+            new FakeInstalledHostStateStore(PriorApiState()),
+            new NeverCompatibleEvaluator(),
+            new FakeDigestApplier(),
+            restore,
+            new StubManifestLocator(["database"]),
+            new FakeDigestVerifier(),
+            new FileHostUpdateRecoveryOutcomeStore(CreateTempDir()),
+            executionOptions: new HostUpdateExecutionOptions { ActiveServiceIds = ["api"], StorageExternallyOwned = true });
+
+        HostUpdateRecoveryResult result = await coordinator.RecoverAsync(Request, NoActivities, CancellationToken.None);
+
+        result.Outcome.Should().Be(HostUpdateRecoveryOutcome.RolledBack);
+        restore.Called.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task RecoverAsync_StorageHostOwnedByDefault_RestoresOwnedStorage()
+    {
+        var restore = new TrackingRestoreExecutor();
+        var coordinator = new HostUpdateRecoveryCoordinator(
+            new FakeInstalledHostStateStore(PriorApiState()),
+            new NeverCompatibleEvaluator(),
+            new FakeDigestApplier(),
+            restore,
+            new StubManifestLocator(["database", "app-data"]),
+            new FakeDigestVerifier(),
+            new FileHostUpdateRecoveryOutcomeStore(CreateTempDir()),
+            executionOptions: new HostUpdateExecutionOptions { ActiveServiceIds = ["api"] });
+
+        HostUpdateRecoveryResult result = await coordinator.RecoverAsync(Request, NoActivities, CancellationToken.None);
+
+        new HostUpdateExecutionOptions().StorageExternallyOwned.Should().BeFalse("storage defaults to host-owned");
+        result.Outcome.Should().Be(HostUpdateRecoveryOutcome.RolledBack);
+        result.Detail.Should().Be("coordinated_restore");
+        restore.Called.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task RecoverAsync_DatabaseAndStorageExternallyOwned_ReportsDatabaseStopFirst()
+    {
+        var restore = new TrackingRestoreExecutor();
+        var coordinator = new HostUpdateRecoveryCoordinator(
+            new FakeInstalledHostStateStore(PriorApiState()),
+            new NeverCompatibleEvaluator(),
+            new FakeDigestApplier(),
+            restore,
+            new StubManifestLocator(["database", "app-data"]),
+            new FakeDigestVerifier(),
+            new FileHostUpdateRecoveryOutcomeStore(CreateTempDir()),
+            executionOptions: new HostUpdateExecutionOptions { ActiveServiceIds = ["api"], DatabaseExternallyOwned = true, StorageExternallyOwned = true });
+
+        HostUpdateRecoveryResult result = await coordinator.RecoverAsync(Request, NoActivities, CancellationToken.None);
+
+        result.Outcome.Should().Be(HostUpdateRecoveryOutcome.NeedsOperator);
+        result.Detail.Should().Be(HostUpdateRecoveryCoordinator.DatabaseExternallyOwnedStop);
+        restore.Called.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task RecoverAsync_StorageExternallyOwnedImageOnlyRollback_RollsBackWithoutRestore()
+    {
+        var restore = new TrackingRestoreExecutor();
+        var applier = new FakeDigestApplier();
+        var coordinator = new HostUpdateRecoveryCoordinator(
+            new FakeInstalledHostStateStore(PriorApiState()),
+            new AlwaysCompatibleEvaluator(),
+            applier,
+            restore,
+            new StubManifestLocator(["database", "app-data"]),
+            new FakeDigestVerifier(),
+            new FileHostUpdateRecoveryOutcomeStore(CreateTempDir()),
+            executionOptions: new HostUpdateExecutionOptions { ActiveServiceIds = ["api"], StorageExternallyOwned = true });
+
+        HostUpdateRecoveryResult result = await coordinator.RecoverAsync(Request, NoActivities, CancellationToken.None);
+
+        result.Outcome.Should().Be(HostUpdateRecoveryOutcome.RolledBack, "an image-only rollback mutates no storage");
+        restore.Called.Should().BeFalse("externally owned storage is never restored, even when a backup exists");
+        applier.CallCount.Should().BeGreaterThan(0);
+    }
+
+    private static InstalledHostState PriorApiState() => new(
+        "release-0", "sha256:prior", new Dictionary<string, string> { ["api"] = "sha256:prior-api" }, "monolith", DateTimeOffset.UtcNow);
+
+    private sealed class StubManifestLocator(string[] targetNames) : IHostUpdateBackupManifestLocator
+    {
+        public Task<(HostUpdateBackupManifest Manifest, string RunDirectory)?> FindLatestAsync(string releaseId, CancellationToken cancellationToken) =>
+            Task.FromResult<(HostUpdateBackupManifest Manifest, string RunDirectory)?>((
+                new HostUpdateBackupManifest(releaseId, DateTimeOffset.UtcNow, targetNames, []),
+                Path.GetTempPath()));
+    }
+
     private sealed class TrackingRestoreExecutor : IHostUpdateRestoreExecutor
     {
         public bool Called { get; private set; }

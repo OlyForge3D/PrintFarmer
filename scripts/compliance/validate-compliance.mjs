@@ -8,6 +8,7 @@ import { validateRepository } from './compliance-lib.mjs';
 function parseArguments(argumentsList) {
   const options = {
     includeDependencies: true,
+    includeNuget: true,
     json: false,
     publicationPaths: [],
     repoRoot: path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..'),
@@ -20,6 +21,8 @@ function parseArguments(argumentsList) {
       options.repoRoot = path.resolve(argumentsList[++index]);
     } else if (argument === '--skip-dependencies') {
       options.includeDependencies = false;
+    } else if (argument === '--skip-nuget') {
+      options.includeNuget = false;
     } else if (argument === '--sbom') {
       options.sbomPaths.push(argumentsList[++index]);
     } else if (argument === '--publication') {

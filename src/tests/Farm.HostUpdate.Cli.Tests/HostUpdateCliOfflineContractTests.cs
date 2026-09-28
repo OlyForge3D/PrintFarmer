@@ -61,18 +61,89 @@ public sealed class HostUpdateCliOfflineContractTests
         failure.UnfencedWriterNames.Should().BeEquivalentTo(BackgroundWriterNames);
         failure.UnfencedWriterNames.Should().NotContain("api-admission", "the admission gate itself was proven closed");
         gate.Closed.Should().BeTrue("a failed fence never reopens admission");
-        probe.Calls.Should().BeGreaterThan(BackgroundWriterNames.Length, "the probe is re-run on every poll until the deadline");
+        probe.Calls.Should().BeGreaterThan(1, "the probe is re-run on every poll until the deadline");
+    }
+
+    [Fact]
+    public async Task Fence_probes_writer_hosts_once_per_poll_and_afresh_on_every_poll()
+    {
+        var gate = new MemoryGate();
+        var clock = new ManualTimeProvider();
+        const int polls = 3;
+        var probe = new ScriptedProbe(call =>
+        {
+            if (call == polls)
+            {
+                clock.Advance(TimeSpan.FromMinutes(1));
+            }
+
+            return "writer_absence_unproven:api_running:api";
+        });
+
+        Func<Task> run = () => CreateCoordinator(gate, probe, timeProvider: clock).RunAsync(Request, CancellationToken.None);
+
+        HostUpdateFenceProofFailedException failure = (await run.Should().ThrowAsync<HostUpdateFenceProofFailedException>()).Which;
+        probe.Calls.Should().Be(polls, "all background writers share one probe per poll, and no poll reuses an earlier result");
+        failure.UnfencedWriterNames.Should().BeEquivalentTo(BackgroundWriterNames, "every writer still receives the shared observation");
+    }
+
+    [Fact]
+    public async Task Fence_proves_every_writer_from_a_single_probe_in_the_first_poll()
+    {
+        var gate = new MemoryGate();
+        var probe = new ScriptedProbe(_ => null);
+
+        await CreateCoordinator(gate, probe).RunAsync(Request, CancellationToken.None);
+
+        probe.Calls.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task Per_poll_probe_shares_a_result_within_a_poll_and_re_probes_after_begin_poll()
+    {
+        int calls = 0;
+        var perPoll = new PerPollWriterHostProbe(_ => Task.FromResult<string?>((++calls).ToString(System.Globalization.CultureInfo.InvariantCulture)));
+
+        perPoll.BeginPoll();
+        string? first = await perPoll.ProbeAsync(CancellationToken.None);
+        string? shared = await perPoll.ProbeAsync(CancellationToken.None);
+        perPoll.BeginPoll();
+        string? next = await perPoll.ProbeAsync(CancellationToken.None);
+
+        first.Should().Be("1");
+        shared.Should().Be("1");
+        next.Should().Be("2");
+        calls.Should().Be(2);
+    }
+
+    [Theory]
+    [InlineData("api")]
+    [InlineData("monolith")]
+    public void Health_port_matches_the_aspnetcore_urls_set_by_the_compose_templates(string serviceId)
+    {
+        string composeServiceName = new HostUpdateExecutionOptions().ServiceMappings
+            .Single(mapping => string.Equals(mapping.ServiceId, serviceId, StringComparison.Ordinal))
+            .ComposeServiceName;
+        string templates = Path.Combine(FindRepositoryRoot(), "scripts", "docker", "compose-templates");
+
+        List<int> ports = [.. Directory.EnumerateFiles(templates, "*.yml", SearchOption.AllDirectories)
+            .SelectMany(path => AspNetCoreUrlPorts(File.ReadAllLines(path), composeServiceName))];
+
+        ports.Should().NotBeEmpty($"a compose template must set ASPNETCORE_URLS for the '{composeServiceName}' service");
+        ports.Should().OnlyContain(
+            port => port == ComposeExecAggregateHealthCheck.HealthPortsByServiceId[serviceId],
+            "the CLI /health verify execs curl against this listener; a mismatch rolls back a correctly applied update");
     }
 
     [Fact]
     public async Task Fence_accepts_a_writer_host_that_stops_within_the_bounded_proof_window()
     {
         var gate = new MemoryGate();
-        var probe = new ScriptedProbe(call => call <= BackgroundWriterNames.Length ? "writer_absence_unproven:api_running:api" : null);
+        var probe = new ScriptedProbe(call => call <= 1 ? "writer_absence_unproven:api_running:api" : null);
 
         await CreateCoordinator(gate, probe).RunAsync(Request, CancellationToken.None);
 
-        probe.Calls.Should().BeGreaterThan(BackgroundWriterNames.Length);
+        probe.Calls.Should().Be(2, "the second poll re-probes and observes the stopped host");
     }
 
     [Fact]
@@ -240,14 +311,75 @@ public sealed class HostUpdateCliOfflineContractTests
     private static HostUpdateCliWriterStoppedFenceCoordinator CreateCoordinator(
         MemoryGate gate,
         ScriptedProbe probe,
-        HostUpdateExecutionOptions? options = null)
+        HostUpdateExecutionOptions? options = null,
+        TimeProvider? timeProvider = null)
     {
         IFenceableWriter[] writers =
         [
             new AdmissionFenceableWriter(gate),
             .. BackgroundWriterNames.Select(name => (IFenceableWriter)new BackgroundWriterFenceableWriter(name, new InMemoryHostUpdateWriterActivityFlag())),
         ];
-        return new HostUpdateCliWriterStoppedFenceCoordinator(gate, probe, writers, options ?? Options(), NullLoggerFactory.Instance);
+        return new HostUpdateCliWriterStoppedFenceCoordinator(gate, probe, writers, options ?? Options(), NullLoggerFactory.Instance, timeProvider);
+    }
+
+    /// <summary>Ports from <c>ASPNETCORE_URLS</c> entries inside the named top-level compose service block.</summary>
+    private static IEnumerable<int> AspNetCoreUrlPorts(string[] lines, string composeServiceName)
+    {
+        bool inServices = false;
+        bool inService = false;
+        foreach (string line in lines)
+        {
+            if (line.Length == 0 || line.TrimStart().StartsWith('#'))
+            {
+                continue;
+            }
+
+            int indent = line.Length - line.TrimStart().Length;
+            if (indent == 0)
+            {
+                inServices = line.TrimEnd() == "services:";
+                inService = false;
+                continue;
+            }
+
+            if (inServices && indent == 2)
+            {
+                inService = line.TrimEnd() == $"  {composeServiceName}:";
+                continue;
+            }
+
+            if (inService)
+            {
+                System.Text.RegularExpressions.Match match = System.Text.RegularExpressions.Regex.Match(
+                    line,
+                    @"ASPNETCORE_URLS\s*[=:]\s*[""']?https?://[^:/\s]+:(?<port>\d+)");
+                if (match.Success)
+                {
+                    yield return int.Parse(match.Groups["port"].Value, System.Globalization.CultureInfo.InvariantCulture);
+                }
+            }
+        }
+    }
+
+    private static string FindRepositoryRoot()
+    {
+        DirectoryInfo? root = new(AppContext.BaseDirectory);
+        while (root is not null && !File.Exists(Path.Combine(root.FullName, "VERSION")))
+        {
+            root = root.Parent;
+        }
+
+        Assert.NotNull(root);
+        return root.FullName;
+    }
+
+    private sealed class ManualTimeProvider : TimeProvider
+    {
+        private DateTimeOffset _now = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+
+        public override DateTimeOffset GetUtcNow() => _now;
+
+        public void Advance(TimeSpan by) => _now += by;
     }
 
     private sealed class MemoryGate : IHostUpdateAdmissionGate
