@@ -56,4 +56,32 @@ public sealed record DatabaseProviderConfiguration
             ConnectionString = connectionString
         };
     }
+
+    /// <summary>
+    /// Name of the optional connection string that points <c>SlicerDbContext</c> at a database
+    /// separate from <c>AppDbContext</c>.
+    /// </summary>
+    public const string SlicerDatabaseConnectionStringName = "SlicerDatabase";
+
+    /// <summary>
+    /// Resolves the configuration for <c>SlicerDbContext</c>. Uses the same provider as
+    /// <see cref="FromConfiguration"/>, and uses <c>ConnectionStrings:SlicerDatabase</c> when it is
+    /// set; otherwise the slicer shares the application connection string.
+    /// </summary>
+    /// <remarks>
+    /// A distinct slicer database is honoured so the topology is visible to the host-update
+    /// preflight, which refuses split databases with <c>split_database_not_supported</c> because
+    /// the coordinated backup covers a single shared database.
+    /// </remarks>
+    public static DatabaseProviderConfiguration ForSlicerDatabase(IConfiguration configuration)
+    {
+        ArgumentNullException.ThrowIfNull(configuration);
+
+        DatabaseProviderConfiguration shared = FromConfiguration(configuration);
+        string? slicerConnectionString = configuration.GetConnectionString(SlicerDatabaseConnectionStringName);
+
+        return string.IsNullOrWhiteSpace(slicerConnectionString)
+            ? shared
+            : shared with { ConnectionString = slicerConnectionString };
+    }
 }

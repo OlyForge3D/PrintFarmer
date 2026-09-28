@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 
@@ -176,6 +176,23 @@ test('docker shim denies daemon-mediated pull and records it as egress evidence'
     assert.equal(attempts[0].source, 'docker-shim');
     const errors = validateRecoveryEvidence(minimalPassingEvidence({ attempts }));
     assert.match(errors.join('\n'), /networkDenial\.attempts/);
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
+test('docker shim records failed compose commands with their stderr', { skip: !existsSync('/usr/bin/docker') }, () => {
+  const scratch = path.join(scratchRoot, `docker-shim-failure-${process.pid}-${Date.now()}`);
+  const deploymentRoot = path.join(scratch, 'deployment');
+  mkdirSync(deploymentRoot, { recursive: true });
+  try {
+    const shim = writeDockerShim(scratch, deploymentRoot, path.join(scratch, 'attempts.ndjson'));
+    assert.throws(() => execFileSync('bash', [shim, 'compose', '-f', '/nonexistent.yml', 'ps'], { stdio: ['ignore', 'pipe', 'pipe'] }));
+    const failures = readFileSync(path.join(scratch, 'docker-command-failures.ndjson'), 'utf8').trim().split(/\r?\n/).map((line) => JSON.parse(line));
+    assert.equal(failures.length, 1);
+    assert.notEqual(failures[0].exitCode, 0);
+    assert.deepEqual(failures[0].args, ['compose', '-f', '/nonexistent.yml', 'ps']);
+    assert.ok(failures[0].stderr.length > 0);
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }

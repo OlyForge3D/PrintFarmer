@@ -1,6 +1,15 @@
 import { chmodSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+// sqlcmd reads SQLCMDPASSWORD; it is copied from the container's own MSSQL_SA_PASSWORD
+// so the password never appears in docker/sqlcmd argv or in command-failure text.
+export const sqlcmdInContainer = Object.freeze([
+  '/bin/sh',
+  '-c',
+  'SQLCMDPASSWORD="$MSSQL_SA_PASSWORD" exec /opt/mssql-tools18/bin/sqlcmd "$@"',
+  'sqlcmd',
+]);
+
 export const providerCatalog = Object.freeze({
   postgres: Object.freeze({
     id: 'postgres',
@@ -59,10 +68,10 @@ export const providerCatalog = Object.freeze({
     },
     migrationHeadsSql: 'SET NOCOUNT ON; SELECT [MigrationId] FROM [__EFMigrationsHistory] ORDER BY [MigrationId];',
     readinessArgs(env) {
-      return ['/opt/mssql-tools18/bin/sqlcmd', '-C', '-S', 'localhost', '-U', env.MSSQL_USER, '-P', env.MSSQL_SA_PASSWORD, '-Q', 'SELECT 1'];
+      return [...sqlcmdInContainer, '-C', '-S', 'localhost', '-U', env.MSSQL_USER, '-Q', 'SELECT 1'];
     },
     queryArgs(env, sql, { database } = {}) {
-      return ['/opt/mssql-tools18/bin/sqlcmd', '-C', '-S', 'localhost', '-U', env.MSSQL_USER, '-P', env.MSSQL_SA_PASSWORD, '-d', database ?? env.MSSQL_DB, '-b', '-h', '-1', '-W', '-Q', sql];
+      return [...sqlcmdInContainer, '-C', '-S', 'localhost', '-U', env.MSSQL_USER, '-d', database ?? env.MSSQL_DB, '-b', '-h', '-1', '-W', '-Q', sql];
     },
     writeToolShims({ runRoot, databaseContainer }) {
       return writeSqlServerToolShims(runRoot, databaseContainer);

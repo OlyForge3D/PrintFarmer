@@ -15,6 +15,8 @@ export const topologyCatalog = Object.freeze({
     },
     healthServiceId: 'monolith',
     healthComposeService: 'printfarmer',
+    // Must match the product listener the offline CLI curls in-network (ComposeExecAggregateHealthCheck).
+    healthPort: 5000,
     infrastructureIds: Object.freeze([]),
     composeServiceName() {
       return 'printfarmer';
@@ -34,6 +36,7 @@ export const topologyCatalog = Object.freeze({
     },
     healthServiceId: 'api',
     healthComposeService: 'api',
+    healthPort: 5245,
     infrastructureIds: Object.freeze(['nginx']),
     composeServiceName(serviceId) {
       return serviceId === 'monolith' ? 'printfarmer' : serviceId;

@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 export function writeDockerShim(runRoot, deploymentRoot, networkAttemptsPath, { realDocker = '/usr/bin/docker' } = {}) {
   const shim = join(runRoot, 'docker');
   const log = join(runRoot, 'docker-commands.ndjson');
+  const failureLog = join(runRoot, 'docker-command-failures.ndjson');
   const envFile = join(deploymentRoot, '.env');
   const composeFaultEnable = join(runRoot, 'fault-compose-up.enable');
   const composeFaultPause = join(runRoot, 'fault-compose-up.pause');
@@ -128,8 +129,22 @@ elif [[ "$fault_mode" == "pause-after" ]]; then
 fi
 log_command "$@"
 if [[ "\${args[0]:-}" == "compose" ]]; then
-  # Keep compose stderr as evidence: the CLI reports only the exception type for a failed up.
-  exec ${JSON.stringify(realDocker)} "\${args[@]}" 2> >(tee -a ${JSON.stringify(join(runRoot, 'docker-compose-stderr.log'))} >&2)
+  # The host-update CLI reduces compose failures to an exception name; keep the daemon's own
+  # explanation so a failed apply or rollback is diagnosable from the run directory.
+  stderr_file="$(mktemp)"
+  set +e
+  ${JSON.stringify(realDocker)} "\${args[@]}" 2>"$stderr_file"
+  rc=$?
+  set -e
+  cat "$stderr_file" >&2
+  if (( rc != 0 )); then
+    printf '{"at":"%s","exitCode":%d,"args":%s,"stderr":%s}\\n' "$(date -u +%FT%TZ)" "$rc" \\
+      "$(node -e 'process.stdout.write(JSON.stringify(process.argv.slice(1)))' -- "$@")" \\
+      "$(tail -c 4000 "$stderr_file" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.stringify(s)))')" \\
+      >> ${JSON.stringify(failureLog)}
+  fi
+  rm -f "$stderr_file"
+  exit "$rc"
 fi
 exec ${JSON.stringify(realDocker)} "\${args[@]}"
 `);

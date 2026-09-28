@@ -43,7 +43,7 @@ public static class SlicerModuleExtensions
     /// This method is idempotent — calling it multiple times has no additional effect.
     /// </summary>
     /// <param name="services">The service collection.</param>
-    /// <param name="configuration">Application configuration (reads DB_PROVIDER, ConnectionStrings:Default, etc.).</param>
+    /// <param name="configuration">Application configuration (reads DB_PROVIDER, ConnectionStrings:Default, optional ConnectionStrings:SlicerDatabase, etc.).</param>
     /// <returns>The service collection for chaining.</returns>
     public static IServiceCollection AddSlicerModule(
         this IServiceCollection services,
@@ -152,7 +152,7 @@ public static class SlicerModuleExtensions
     /// </para>
     /// </remarks>
     /// <param name="services">The service collection.</param>
-    /// <param name="configuration">Application configuration (reads DB_PROVIDER, ConnectionStrings:Default, etc.).</param>
+    /// <param name="configuration">Application configuration (reads DB_PROVIDER, ConnectionStrings:Default, optional ConnectionStrings:SlicerDatabase, etc.).</param>
     /// <returns>The service collection for chaining.</returns>
     public static IServiceCollection AddSlicerCalibrationProfileRepositories(
         this IServiceCollection services,
@@ -213,7 +213,7 @@ public static class SlicerModuleExtensions
     /// </para>
     /// </remarks>
     /// <param name="services">The service collection.</param>
-    /// <param name="configuration">Application configuration (reads DB_PROVIDER, ConnectionStrings:Default, etc.).</param>
+    /// <param name="configuration">Application configuration (reads DB_PROVIDER, ConnectionStrings:Default, optional ConnectionStrings:SlicerDatabase, etc.).</param>
     /// <returns>The service collection for chaining.</returns>
     public static IServiceCollection EnsureSlicerDatabaseRegistered(
         this IServiceCollection services,
@@ -230,7 +230,7 @@ public static class SlicerModuleExtensions
             return services;
         }
 
-        DatabaseProviderConfiguration dbConfig = DatabaseProviderConfiguration.FromConfiguration(configuration);
+        DatabaseProviderConfiguration dbConfig = DatabaseProviderConfiguration.ForSlicerDatabase(configuration);
 
         if (!hasContext)
         {
@@ -256,7 +256,7 @@ public static class SlicerModuleExtensions
     /// </summary>
     private static void AddSlicerDatabase(IServiceCollection services, IConfiguration configuration)
     {
-        DatabaseProviderConfiguration dbConfig = DatabaseProviderConfiguration.FromConfiguration(configuration);
+        DatabaseProviderConfiguration dbConfig = DatabaseProviderConfiguration.ForSlicerDatabase(configuration);
 
         _ = services.AddDbContext<SlicerDbContext>(options =>
             ConfigureProvider(options, dbConfig));

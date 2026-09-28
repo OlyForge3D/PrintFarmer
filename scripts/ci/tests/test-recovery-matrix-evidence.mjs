@@ -187,11 +187,11 @@ test('fail-closed setup failures keep observed actual and reason separate from e
   assert.deepEqual(validateRecoveryEvidence(record), []);
 });
 
-test('external-storage product gap records product-gap actual instead of fabricated NeedsOperator', () => {
+test('fail-closed cell with an observed setup failure records the observed actual, not the expected refusal', () => {
   const record = validRecord();
   record.cell.storageOwner = 'external';
   record.checkpoints[1] = {
-    name: 'product-owner-signal-unavailable:storage',
+    name: 'prior-activation',
     at: '2026-09-26T10:10:00Z',
     result: 'failed',
   };
@@ -199,7 +199,7 @@ test('external-storage product gap records product-gap actual instead of fabrica
     expected: 'NeedsOperator',
     expectedReason: 'storage_externally_owned',
     actual: 'RecoveryRequired',
-    reason: 'product-owner-signal-unavailable:storage',
+    reason: 'setup-failed:prior-activation',
     exitCode: 1,
     journalPhase: 'not-started',
   };
