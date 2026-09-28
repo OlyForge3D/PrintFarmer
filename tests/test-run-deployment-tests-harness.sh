@@ -643,9 +643,19 @@ pass "Dynamic: compose dedupe skips broken python3 aliases"
 
 # Reviewed license files are hashed byte-for-byte during Docker builds, so
 # nested npm evidence must not be converted to CRLF on Windows checkouts.
-license_eol=$(git -C "$REPO_ROOT" check-attr eol -- compliance/licenses/npm/microsoft-signalr-10.0.0.txt)
-if [[ "$license_eol" != *"eol: lf" ]]; then
-    fail "Nested reviewed compliance license files must be checked out with LF line endings."
+# Check every tracked evidence file rather than a version-pinned name, which
+# would silently go stale when a fallback is re-reviewed for a new version.
+npm_license_count=0
+while IFS= read -r npm_license_file; do
+    [[ -n "$npm_license_file" ]] || continue
+    npm_license_count=$((npm_license_count + 1))
+    license_eol=$(git -C "$REPO_ROOT" check-attr eol -- "$npm_license_file")
+    if [[ "$license_eol" != *"eol: lf" ]]; then
+        fail "Nested reviewed compliance license file $npm_license_file must be checked out with LF line endings."
+    fi
+done < <(git -C "$REPO_ROOT" ls-files -- 'compliance/licenses/npm/*.txt')
+if [[ "$npm_license_count" -eq 0 ]]; then
+    fail "Expected tracked reviewed npm license evidence under compliance/licenses/npm/."
 fi
 pass "Static: nested reviewed compliance licenses enforce LF line endings"
 

@@ -206,7 +206,7 @@ final class MockAPIServer: @unchecked Sendable {
     }
 
     private func receiveHTTP(on connection: NWConnection) {
-        connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [weak self] data, _, isComplete, error in
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [weak self] data, _, _, _ in
             guard let self, let data else {
                 connection.cancel()
                 return
