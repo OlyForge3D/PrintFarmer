@@ -1090,7 +1090,18 @@ function runImportCell({
       return dump;
     },
     restoreDatabase: (dump) => {
-      databaseExec(deploymentRoot, env, ['pg_restore', '-U', env.POSTGRES_USER, '-d', env.POSTGRES_DB, '--clean', '--if-exists', '--no-owner', dump]);
+      // Restore like an operator would: quiesce the application so it can't write while the
+      // older database is loaded, recreate the database, restore, then start the application.
+      const services = composeExec(deploymentRoot, env, ['ps', '--services', '--status', 'running'])
+        .split('\n').map((service) => service.trim()).filter((service) => service && service !== 'database');
+      if (services.length > 0) composeExec(deploymentRoot, env, ['stop', ...services]);
+      try {
+        databaseExec(deploymentRoot, env, ['dropdb', '-U', env.POSTGRES_USER, '--force', '--if-exists', env.POSTGRES_DB]);
+        databaseExec(deploymentRoot, env, ['createdb', '-U', env.POSTGRES_USER, '-O', env.POSTGRES_USER, env.POSTGRES_DB]);
+        databaseExec(deploymentRoot, env, ['pg_restore', '-U', env.POSTGRES_USER, '-d', env.POSTGRES_DB, '--no-owner', '--exit-on-error', dump]);
+      } finally {
+        if (services.length > 0) composeExec(deploymentRoot, env, ['start', ...services]);
+      }
     },
     restartHost: () => restartHostContainer(hostContainer),
     restoreOlderStaging: (label) => {
@@ -1120,13 +1131,14 @@ function runImportCell({
 }
 
 function databaseExec(deploymentRoot, env, commandArgs) {
+  return composeExec(deploymentRoot, env, ['exec', '-T', 'database', ...commandArgs]);
+}
+
+function composeExec(deploymentRoot, env, commandArgs) {
   return execFileSync('/usr/bin/docker', [
     'compose',
     '-f', join(deploymentRoot, 'docker-compose.recovery.yml'),
     '-p', env.COMPOSE_PROJECT_NAME,
-    'exec',
-    '-T',
-    'database',
     ...commandArgs,
   ], {
     cwd: deploymentRoot,

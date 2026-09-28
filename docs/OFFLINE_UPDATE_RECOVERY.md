@@ -1144,8 +1144,15 @@ is `Imported`, and the evidence validator accepts it only after a successful
 Every refused step asserts the decision record reports `refused`, is not
 installable, and loaded no images. It also asserts that no staging directory
 remains, and that the replay store, replay anchor, anchor journal and policy
-file are byte-for-byte unchanged. Channel switches are operator policy edits
-with increasing revisions.
+file are byte-for-byte unchanged. Two narrow exceptions are by design. An
+authenticated replay refusal (`replay_rejected` or `replay_superseded`) durably
+records the refused identity so it stays refused across restarts and restores.
+The cell then asserts that every channel high-water mark and earlier identity
+decision is unchanged, and that only `Rejected` or `Superseded` identities were
+added. A rolled-back replay anchor snapshot is healed forward to the
+append-only anchor journal head, and the cell asserts it matches the
+pre-rollback anchor exactly. Channel switches are operator policy edits with
+increasing revisions.
 
 | Cell id | What it proves | Local run status |
 | --- | --- | --- |
