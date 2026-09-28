@@ -35,12 +35,17 @@ public interface IFenceableWriter
 /// timeout, before allowing the executor to proceed to backup. Fails closed: any writer that
 /// cannot be proven fenced blocks the update rather than proceeding on an assumption.
 /// </summary>
+/// <remarks>
+/// <paramref name="onPollStarting"/> runs before each poll evaluates every writer, so writers that
+/// share one external observation can take it once per poll without caching it across polls.
+/// </remarks>
 public sealed class HostUpdateFenceCoordinator(
     IReadOnlyList<IFenceableWriter> writers,
     TimeSpan proofTimeout,
     TimeSpan pollInterval,
     TimeProvider? timeProvider = null,
-    ILogger<HostUpdateFenceCoordinator>? logger = null) : IHostUpdateFenceCoordinator
+    ILogger<HostUpdateFenceCoordinator>? logger = null,
+    Action? onPollStarting = null) : IHostUpdateFenceCoordinator
 {
     private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
     private readonly ILogger<HostUpdateFenceCoordinator>? _logger = logger;
@@ -84,6 +89,7 @@ public sealed class HostUpdateFenceCoordinator(
 
     private async Task<List<string>> GetUnprovenWritersAsync(CancellationToken cancellationToken)
     {
+        onPollStarting?.Invoke();
         var unproven = new List<string>();
         foreach (IFenceableWriter writer in writers)
         {
