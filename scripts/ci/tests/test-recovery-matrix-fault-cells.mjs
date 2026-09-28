@@ -17,6 +17,7 @@ import {
   parseCliText,
   readDockerCommands,
   readJournalTolerant,
+  runFaultScenario,
   uncertainPhases,
   waitFor,
 } from '../recovery-matrix/fault-scenarios.mjs';
@@ -319,4 +320,74 @@ test('fault evidence validates for every expected fault outcome', () => {
     };
     assert.deepEqual(validateRecoveryEvidence(record), [], entry.id);
   }
+});
+
+// Scenario-level harness proof: a fake ctx drives the api-down scenario end to end so the
+// terminal durability and fence assertions are exercised without a live deployment.
+function fakeScenarioCtx(name, { replayComposeUpAfterRestart = false, releaseFenceEarly = false } = {}) {
+  const dir = scratch(name);
+  const ctx = {
+    cellSpec: faultCells.find((entry) => entry.id === 'fault-api-down'),
+    journalPath: path.join(dir, 'journal.jsonl'),
+    dockerLogPath: path.join(dir, 'docker.jsonl'),
+    admissionClosedPath: path.join(dir, 'admission.closed'),
+    toolGates: { pgRestore: { calls: path.join(dir, 'pg_restore.calls') } },
+    passed: [],
+    failedCheckpoints: [],
+    restarts: 0,
+    rolledBack: false,
+  };
+  ctx.checkpoints = { ok: (checkpoint) => ctx.passed.push(checkpoint), failed: (checkpoint) => ctx.failedCheckpoints.push(checkpoint) };
+  ctx.markInjected = () => {};
+  ctx.enableComposeFault = () => {};
+  ctx.stopApplication = () => {};
+  ctx.assertRolledBack = () => {};
+  ctx.restartHost = () => { ctx.restarts += 1; };
+  const docker = (args) => writeFileSync(ctx.dockerLogPath, `${JSON.stringify({ args })}\n`, { flag: 'a' });
+  ctx.op = (operationId) => {
+    if (operationId === 'offline-activate') {
+      writeFileSync(ctx.admissionClosedPath, '');
+      return { exitCode: 6, stdout: 'state: RecoveryRequired\nreason: compose_up_failed\n', stderr: '' };
+    }
+    if (operationId === 'host-update-status') return { exitCode: 0, stdout: '', stderr: '' };
+    if (operationId === 'offline-recover-preview') {
+      return { exitCode: 0, stdout: 'plan.kind: RestoreBackup\n', stderr: '' };
+    }
+    if (!ctx.rolledBack) {
+      ctx.rolledBack = true;
+      writeFileSync(ctx.toolGates.pgRestore.calls, 'restore\n');
+      rmSync(ctx.admissionClosedPath, { force: true });
+    }
+    if (replayComposeUpAfterRestart && ctx.restarts > 0) docker(['compose', 'up', '-d', '--remove-orphans']);
+    if (releaseFenceEarly) rmSync(ctx.admissionClosedPath, { force: true });
+    return { exitCode: 0, stdout: 'outcome: RolledBack\n', stderr: '' };
+  };
+  return ctx;
+}
+
+test('api-down scenario passes when the rollback is durable and the fence tracks the outcome', () => {
+  const ctx = fakeScenarioCtx('scenario-pass');
+  const result = runFaultScenario(ctx);
+  assert.equal(result.actual, 'RolledBack');
+  assert.deepEqual(ctx.failedCheckpoints, []);
+  assert.ok(ctx.passed.includes('fence-held:activation-fault'));
+  assert.ok(ctx.passed.includes('fence-released:durable'));
+  assert.ok(ctx.passed.includes('restart-no-apply-or-migration-replay'));
+});
+
+test('api-down scenario fails when a post-restart repeat replays compose up', () => {
+  const ctx = fakeScenarioCtx('scenario-replay', { replayComposeUpAfterRestart: true });
+  assert.throws(() => runFaultScenario(ctx), (error) => error.reason.startsWith('restart-no-apply-or-migration-replay'));
+  assert.ok(ctx.failedCheckpoints.includes('restart-no-apply-or-migration-replay'));
+});
+
+test('api-down scenario fails when the fence is released while RecoveryRequired', () => {
+  const ctx = fakeScenarioCtx('scenario-fence');
+  const activate = ctx.op;
+  ctx.op = (operationId, options) => {
+    const result = activate(operationId, options);
+    if (operationId === 'offline-activate') rmSync(ctx.admissionClosedPath, { force: true });
+    return result;
+  };
+  assert.throws(() => runFaultScenario(ctx), (error) => error.reason.startsWith('fence-held:activation-fault'));
 });

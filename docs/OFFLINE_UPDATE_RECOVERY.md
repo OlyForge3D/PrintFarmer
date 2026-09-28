@@ -1107,12 +1107,19 @@ then repeats the final operator action, restarts the host, runs
 | `fault-api-down` | Application containers stopped while `RecoveryRequired` | `RolledBack` | Pending live run |
 | `fault-missing-backup` | Backups deleted while `RecoveryRequired` | `NeedsOperator` / `no_backup_available`, exit 10, no mutation | Pending live run |
 | `fault-corrupt-journal` | Journal record tampered while `RecoveryRequired` | `RecoveryRequired` / `journal_integrity_failure`, exit 4, no mutation | Pending live run |
-| `fault-corrupt-replay` | Replay store garbled before activation | `RecoveryRequired` / `replay_store_unreadable`, exit 4, no mutation | Pending live run |
+| `fault-corrupt-replay` | Replay store garbled before activation | `RecoveryRequired` / `host_update_replay_state_invalid`, exit 4, no mutation | Pending live run |
 | `fault-fence-release` | Printer inventory present at fence release | Confirm reports `FenceReleasePending` / `physical_reconciliation_pending` (exit 13), with the fence held across a restart. Confirming with `--printers-reconciled <token>` releases only the fence, without replaying restore, and reports `RolledBack` | Pending live run |
 
 The evidence `outcome.expectedReason` is `null` for fault cells because they are
 supported cells. The observed stable reason is recorded in `outcome.reason` for
 `NeedsOperator` and `RecoveryRequired` outcomes.
+
+The `c2` prior and target share a schema (`schemaDelta: identical`), so the
+migration power-loss cells exercise journal fencing, reconciler probing, and
+apply-at-most-once around a migration apply that changes no schema.
+`fault-partial-migration` is the cell that proves a real history mutation is
+reverted. A fixture with a real migration from N to N+1 is tracked in
+#3167.
 
 ### Queue-consumer health entry (#3157)
 

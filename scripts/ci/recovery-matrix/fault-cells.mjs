@@ -115,7 +115,7 @@ export const faultCells = Object.freeze([
   defineFaultCell({
     id: 'fault-corrupt-replay',
     fault: { kind: 'corrupt-replay', point: 'activate:before' },
-    expected: { outcome: 'RecoveryRequired', reason: 'replay_store_unreadable' },
+    expected: { outcome: 'RecoveryRequired', reason: 'host_update_replay_state_invalid' },
   }),
   defineFaultCell({
     id: 'fault-fence-release',

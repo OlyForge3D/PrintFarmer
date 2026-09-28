@@ -300,17 +300,33 @@ function proveDurable(harness, final, repeat) {
   const dockerMark = harness.dockerMark();
   const again = repeat();
   harness.expect('repeat-operator-action', again, { outcome: final.actual, reason: final.reason ? final.reason.split('|')[0] : null });
-  const replay = harness.dockerSince(dockerMark);
-  harness.require(harness.restoreCalls() === restoresBefore, 'repeat-no-restore-replay');
-  harness.require(replay.composeUp === 0 && Object.keys(replay.migrationApply).length === 0, 'repeat-no-apply-or-migration-replay',
-    JSON.stringify(replay));
+  assertNoUnsafeReplay(harness, 'repeat', dockerMark, restoresBefore);
+  assertFenceMatchesOutcome(harness, final, 'repeat');
   harness.ctx.restartHost();
   harness.ok('durability-host-restarted');
+  assertFenceMatchesOutcome(harness, final, 'restart');
   harness.ok(`status-after-restart:exit=${harness.status()}`);
+  const restartMark = harness.dockerMark();
   const durable = repeat();
   harness.expect('outcome-durable-after-restart', durable, { outcome: final.actual, reason: final.reason ? final.reason.split('|')[0] : null });
-  harness.require(harness.restoreCalls() === restoresBefore, 'restart-no-restore-replay');
+  assertNoUnsafeReplay(harness, 'restart', restartMark, restoresBefore);
+  assertFenceMatchesOutcome(harness, final, 'durable');
   return final;
+}
+
+function assertNoUnsafeReplay(harness, label, dockerMark, restoresBefore) {
+  const replay = harness.dockerSince(dockerMark);
+  harness.require(harness.restoreCalls() === restoresBefore, `${label}-no-restore-replay`);
+  harness.require(replay.composeUp === 0 && Object.keys(replay.migrationApply).length === 0,
+    `${label}-no-apply-or-migration-replay`, JSON.stringify(replay));
+}
+
+// The writer fence must stay closed while any outcome is non-terminal and be released only by
+// a terminal Activated/RolledBack outcome.
+function assertFenceMatchesOutcome(harness, result, label) {
+  const closed = existsSync(harness.ctx.admissionClosedPath);
+  const terminal = result.actual === 'Activated' || result.actual === 'RolledBack';
+  harness.require(closed !== terminal, `fence-${terminal ? 'released' : 'held'}:${label}`, `admissionClosed=${closed}`);
 }
 
 function recoverToRolledBack(harness) {
@@ -338,6 +354,7 @@ function activateIntoRecoveryRequired(harness, label = 'activation-fault') {
   harness.ctx.enableComposeFault('fail-now');
   const result = harness.activate({ allowedExitCodes: [0, 6] });
   harness.expect(label, result, { outcome: 'RecoveryRequired' });
+  assertFenceMatchesOutcome(harness, result, label);
   return result;
 }
 
@@ -361,6 +378,7 @@ const scenarios = {
     const dockerMark = harness.dockerMark();
     const redrive = harness.activate({ allowedExitCodes: [0, 4, 6, 10, 11, 13] });
     harness.expect('redrive-activate', redrive, fault.redrive);
+    assertFenceMatchesOutcome(harness, redrive, 'redrive');
     const redriveCommands = harness.dockerSince(dockerMark);
     const whole = harness.dockerSince();
     const after = harness.journal();
