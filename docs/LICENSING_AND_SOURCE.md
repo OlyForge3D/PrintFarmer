@@ -155,6 +155,12 @@ The frontend build also generates
 package terms and exact package/version/license/hash-bound fallbacks. Frontend
 and monolith images ship that file with the web assets; the frontend image also
 installs it under `/usr/share/licenses/printfarmer/`.
+Because fallbacks are pinned to an exact version, bumping a fallback-dependent
+package (for example `@microsoft/signalr`) requires re-reviewing the new
+version's upstream license text and updating its fallback record and evidence
+file in the same change. The CI `Frontend build & tests` job runs
+`scripts/compliance/create-npm-notices.mjs` against the installed lockfile so a
+missing fallback fails on the pull request rather than in the Docker build.
 
 Images are initially pushed only by immutable digest. The workflow validates
 and uploads all six digest/SBOM pairs (including slicer-host), attaches the enriched SPDX document as

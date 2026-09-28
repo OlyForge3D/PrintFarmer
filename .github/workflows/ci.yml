@@ -527,6 +527,13 @@ jobs:
         working-directory: src/Web/ReactApp
         run: npm run build
 
+      # Mirrors the frontend Docker build's notices step (#3148): fails when a
+      # production npm package ships no license text and no reviewed fallback
+      # in compliance/dependency-license-policy.json matches its exact version,
+      # so a dependency bump fails here instead of in the deployment smoke.
+      - name: Generate npm license notices
+        run: node scripts/compliance/create-npm-notices.mjs
+
       - name: Test frontend (with coverage)
         working-directory: src/Web/ReactApp
         run: npm run test:coverage
