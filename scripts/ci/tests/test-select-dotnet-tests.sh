@@ -345,6 +345,7 @@ case_react_only() {
     select_run >/dev/null 2>&1
   assert_eq "want_frontend" "$(get_output "$out" want_frontend)" "true" || return 1
   assert_eq "want_dotnet_build" "$(get_output "$out" want_dotnet_build)" "false" || return 1
+  assert_eq "want_dependency_compliance" "$(get_output "$out" want_dependency_compliance)" "true" || return 1
   assert_eq "want_dotnet_test" "$(get_output "$out" want_dotnet_test)" "false" || return 1
   assert_eq "want_mig_drift" "$(get_output "$out" want_mig_drift)" "false" || return 1
   assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "false" || return 1
@@ -359,6 +360,7 @@ case_docs_only() {
     select_run >/dev/null 2>&1
   assert_eq "want_frontend" "$(get_output "$out" want_frontend)" "false" || return 1
   assert_eq "want_dotnet_build" "$(get_output "$out" want_dotnet_build)" "false" || return 1
+  assert_eq "want_dependency_compliance" "$(get_output "$out" want_dependency_compliance)" "false" || return 1
   assert_eq "want_dotnet_test" "$(get_output "$out" want_dotnet_test)" "false" || return 1
 }
 
@@ -412,6 +414,7 @@ case_api_change() {
     CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
     select_run >/dev/null 2>&1
   assert_eq "want_dotnet_build" "$(get_output "$out" want_dotnet_build)" "true" || return 1
+  assert_eq "want_dependency_compliance" "$(get_output "$out" want_dependency_compliance)" "true" || return 1
   assert_eq "want_dotnet_test" "$(get_output "$out" want_dotnet_test)" "true" || return 1
   assert_eq "want_mig_drift" "$(get_output "$out" want_mig_drift)" "true" || return 1
   assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "false" || return 1
@@ -1630,6 +1633,7 @@ case_ci_other_ci_script_change_no_dotnet() {
     CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
     select_run >/dev/null 2>&1
   assert_eq "want_dotnet_build" "$(get_output "$out" want_dotnet_build)" "false" || return 1
+  assert_eq "want_dependency_compliance" "$(get_output "$out" want_dependency_compliance)" "false" || return 1
   assert_eq "want_dotnet_test" "$(get_output "$out" want_dotnet_test)" "false" || return 1
   assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "false" || return 1
 }
@@ -1689,6 +1693,7 @@ case_tools_only_build_no_tests() {
     CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
     select_run >/dev/null 2>&1
   assert_eq "want_dotnet_build" "$(get_output "$out" want_dotnet_build)" "true" || return 1
+  assert_eq "want_dependency_compliance" "$(get_output "$out" want_dependency_compliance)" "true" || return 1
   assert_eq "want_dotnet_test" "$(get_output "$out" want_dotnet_test)" "false" || return 1
   assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "false" || return 1
 }
@@ -1701,6 +1706,7 @@ case_mobile_change_no_dotnet() {
     select_run >/dev/null 2>&1
   assert_eq "want_frontend" "$(get_output "$out" want_frontend)" "false" || return 1
   assert_eq "want_dotnet_build" "$(get_output "$out" want_dotnet_build)" "false" || return 1
+  assert_eq "want_dependency_compliance" "$(get_output "$out" want_dependency_compliance)" "false" || return 1
   assert_eq "want_dotnet_test" "$(get_output "$out" want_dotnet_test)" "false" || return 1
   assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "false" || return 1
 }
@@ -1819,6 +1825,7 @@ case_push_to_development_full_safe() {
     CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
     select_run >/dev/null 2>&1
   assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "true" || return 1
+  assert_eq "want_dependency_compliance" "$(get_output "$out" want_dependency_compliance)" "true" || return 1
   # R14: a trusted push to `development` runs the full safe matrix,
   # and the migration-drift matrix must cover ALL four canonical
   # context/provider pairs exactly once — no duplicates, no gaps.
@@ -1988,6 +1995,7 @@ case_empty_changes() {
     select_run >/dev/null 2>&1
   # No changes → nothing wanted, not full-safe.
   assert_eq "want_frontend" "$(get_output "$out" want_frontend)" "false" || return 1
+  assert_eq "want_dependency_compliance" "$(get_output "$out" want_dependency_compliance)" "false" || return 1
   assert_eq "want_dotnet_test" "$(get_output "$out" want_dotnet_test)" "false" || return 1
   assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "false" || return 1
 }
@@ -2220,6 +2228,145 @@ case_selector_finish_tolerates_empty_args() {
     printf '  finish() has unsafe empty-array expansion:\n%s\n' "$unsafe" >&2
     return 1
   fi
+}
+
+# =============================================================================
+# Dependency-compliance gating (issue #3150). `want_dependency_compliance` is
+# a superset of `want_dotnet_build`: it additionally fires for npm dependency
+# manifests and for compliance policy/evidence/tooling paths, neither of which
+# can change the NuGet graph.
+# =============================================================================
+
+# assert_dependency_selection <out> <frontend> <dependency_compliance>
+# Shared shape for non-.NET dependency-compliance cases: never builds or tests
+# .NET, never runs migration drift, never goes full-safe.
+assert_dependency_selection() {
+  local out="$1" frontend="$2" dependency="$3"
+  assert_eq "want_frontend" "$(get_output "$out" want_frontend)" "$frontend" || return 1
+  assert_eq "want_dependency_compliance" "$(get_output "$out" want_dependency_compliance)" "$dependency" || return 1
+  assert_eq "want_dotnet_build" "$(get_output "$out" want_dotnet_build)" "false" || return 1
+  assert_eq "want_dotnet_test" "$(get_output "$out" want_dotnet_test)" "false" || return 1
+  assert_eq "want_mig_drift" "$(get_output "$out" want_mig_drift)" "false" || return 1
+  assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "false" || return 1
+  assert_eq "matrix" "$(get_output "$out" matrix)" '{"include":[]}' || return 1
+}
+
+case_compliance_policy_only_runs_notices_and_validation() {
+  local out="$1"
+  CHANGED_FILES="compliance/dependency-license-policy.json"
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  assert_dependency_selection "$out" "true" "true" || return 1
+  local reason ; reason="$(get_output "$out" reason)"
+  assert_eq "reason" "$reason" "scoped: compliance" || return 1
+}
+
+case_compliance_evidence_markdown_is_not_docs() {
+  # Reviewed license-text evidence can be `LICENSE.md`/`*.md`; the compliance
+  # pattern must win over the generic docs pattern or deleting an evidence
+  # file would be treated as an inert docs edit.
+  local out="$1"
+  CHANGED_FILES=$'compliance/licenses/npm/fixture/LICENSE.md\ncompliance/licenses/LICENSE'
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  assert_dependency_selection "$out" "true" "true" || return 1
+  local reason ; reason="$(get_output "$out" reason)"
+  assert_not_contains "reason not docs" "$reason" "docs" || return 1
+  assert_contains "reason compliance" "$reason" "compliance" || return 1
+}
+
+case_compliance_scripts_run_notices_and_validation() {
+  local out="$1"
+  CHANGED_FILES=$'scripts/compliance/compliance-lib.mjs\nscripts/compliance/create-npm-notices.mjs'
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  assert_dependency_selection "$out" "true" "true" || return 1
+  local reason ; reason="$(get_output "$out" reason)"
+  assert_not_contains "reason not other" "$reason" "other" || return 1
+}
+
+case_frontend_lockfile_runs_dependency_compliance() {
+  local out="$1"
+  CHANGED_FILES="src/Web/ReactApp/package-lock.json"
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  assert_dependency_selection "$out" "true" "true" || return 1
+  local reason ; reason="$(get_output "$out" reason)"
+  assert_eq "reason" "$reason" "scoped: frontend npm-manifest" || return 1
+}
+
+case_frontend_source_skips_dependency_compliance() {
+  local out="$1"
+  CHANGED_FILES=$'src/Web/ReactApp/src/App.tsx\nsrc/Web/ReactApp/src/components/PrinterCard.tsx'
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  assert_dependency_selection "$out" "true" "false" || return 1
+}
+
+case_nested_package_json_lookalikes_skip_dependency_compliance() {
+  # Only the manifests next to a policy-listed lockfile count; a vendored or
+  # fixture package.json elsewhere must not trigger the NuGet restore.
+  local out="$1"
+  CHANGED_FILES=$'src/Web/ReactApp/e2e/fixtures/package.json\ntools/sub/package-lock.json\npackage-lock.json'
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  assert_eq "want_dependency_compliance" "$(get_output "$out" want_dependency_compliance)" "false" || return 1
+  assert_eq "want_dotnet_build" "$(get_output "$out" want_dotnet_build)" "false" || return 1
+}
+
+case_policy_npm_lockfiles_trigger_dependency_compliance() {
+  # Drift guard: every lockfile validate-compliance.mjs reads (`npmLockFiles`
+  # in the checked-in policy) and its sibling package.json must select
+  # dependency-compliance. Adding a lockfile to the policy without teaching
+  # is_npm_dependency_manifest_input about it fails here.
+  local out="$1" policy="$REPO_ROOT/compliance/dependency-license-policy.json"
+  local lockfiles lock manifest
+  lockfiles="$("$PYTHON_BIN" -c 'import json,sys; print("\n".join(json.load(open(sys.argv[1]))["npmLockFiles"]))' "$policy")" || {
+    printf '  could not read npmLockFiles from %s\n' "$policy" >&2
+    return 1
+  }
+  if [[ -z "$lockfiles" ]]; then
+    printf '  npmLockFiles is empty in %s\n' "$policy" >&2
+    return 1
+  fi
+  while IFS= read -r lock; do
+    manifest="${lock%package-lock.json}package.json"
+    for p in "$lock" "$manifest"; do
+      : > "$out"
+      EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+        CHANGED_FILES_FROM_Z="" CHANGED_FILES="$p" \
+        select_run >/dev/null 2>&1
+      assert_eq "want_dependency_compliance ($p)" \
+        "$(get_output "$out" want_dependency_compliance)" "true" || return 1
+      assert_eq "want_dotnet_build ($p)" \
+        "$(get_output "$out" want_dotnet_build)" "false" || return 1
+    done
+  done <<< "$lockfiles"
+}
+
+case_workflow_dependency_compliance_uses_own_output() {
+  # ci.yml must gate the job on, export, and require-check the dedicated
+  # output; gating it on want_dotnet_build again would silently re-open the
+  # npm-only/compliance-only gap from #3150.
+  local workflow="$REPO_ROOT/.github/workflows/ci.yml" body block
+  body="$(tr -d '\r' < "$workflow")"
+  assert_contains "select output export" "$body" \
+    'want_dependency_compliance: ${{ steps.selector.outputs.want_dependency_compliance }}' || return 1
+  block="$(printf '%s\n' "$body" | awk '/^  dependency-compliance:$/{f=1; print; next} f && /^  [A-Za-z_][A-Za-z0-9_-]*:$/{exit} f{print}')"
+  assert_contains "dependency-compliance gate" "$block" \
+    "if: \${{ needs.select.outputs.want_dependency_compliance == 'true' }}" || return 1
+  assert_not_contains "dependency-compliance not dotnet-gated" "$block" "want_dotnet_build" || return 1
+  assert_contains "summary check" "$body" \
+    'check_conditional dependency-compliance "$DEPENDENCY_COMPLIANCE_RESULT" "$WANT_DEPENDENCY_COMPLIANCE"' || return 1
+  local wanted_env_count
+  wanted_env_count="$(printf '%s\n' "$body" | grep -cF 'WANT_DEPENDENCY_COMPLIANCE: ${{ needs.select.outputs.want_dependency_compliance }}' || true)"
+  assert_eq "summary env bindings" "$wanted_env_count" "2" || return 1
 }
 
 # =============================================================================
@@ -3971,6 +4118,14 @@ TESTS=(
   case_ci_other_mixed_with_api_still_selects_api
   case_tools_only_build_no_tests
   case_mobile_change_no_dotnet
+  case_compliance_policy_only_runs_notices_and_validation
+  case_compliance_evidence_markdown_is_not_docs
+  case_compliance_scripts_run_notices_and_validation
+  case_frontend_lockfile_runs_dependency_compliance
+  case_frontend_source_skips_dependency_compliance
+  case_nested_package_json_lookalikes_skip_dependency_compliance
+  case_policy_npm_lockfiles_trigger_dependency_compliance
+  case_workflow_dependency_compliance_uses_own_output
   case_merge_base_diverged_pr_base_sha_mobile_only
   case_push_to_development_full_safe
   case_push_to_main_full_safe

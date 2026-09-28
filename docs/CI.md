@@ -26,7 +26,7 @@ flowchart LR
   D -->|project tarballs| F[migration-drift]
   D -->|API test + App migration tarballs| J[dotnet-test-providers]
   B --> G[ci-tools]
-  B -->|dotnet inputs or full-safe| I[dependency-compliance]
+  B -->|dotnet, npm-manifest, or compliance inputs or full-safe| I[dependency-compliance]
   B -->|dotnet inputs or full-safe| K[dotnet-format]
   C --> H[summary]
   E --> H
@@ -48,9 +48,9 @@ docs-only PR.
 | ----------------------- | ------------------------------------------------------------ | --------------------------------------------------------------------- |
 | `select`                | always                                                       | Classifies changed paths; emits `want_*`, `matrix`, `mig_matrix`.     |
 | `ci-tools`              | always                                                       | Runs `bash -n` + selector + hook tests + `node --test` compliance/squad-tooling suites; no .NET restore. |
-| `dependency-compliance` | any .NET input changed OR full-safe (same as `want_dotnet_build`) | `dotnet restore` + `node scripts/compliance/validate-compliance.mjs` — dependency-license/provenance inventory. See #1395. |
+| `dependency-compliance` | `want_dependency_compliance`: any .NET input, npm manifest/lockfile, or `compliance` bucket changed OR full-safe | `dotnet restore` + `node scripts/compliance/validate-compliance.mjs` — NuGet and npm dependency-license/provenance inventory, including stale npm license-text fallbacks (`LICENSE_POLICY_STALE`). See #1395, #3150. |
 | `dotnet-format`         | any .NET input changed OR full-safe (same as `want_dotnet_build`) | Asserts SDK >= 10.0.200, restores, then runs `dotnet format ./farm-web.sln --verify-no-changes --no-restore`. Runs in parallel with `dotnet-build`. See #2978. |
-| `frontend`              | React inputs changed OR full-safe                            | `npm ci`, lint, build, `npm run test:coverage` in `src/Web/ReactApp/`; coverage first runs the zero-diagnostic test gate, application typecheck, and source-coverage guards through `pretest:coverage`. |
+| `frontend`              | React or `compliance` inputs changed OR full-safe            | `npm ci`, lint, build, `npm run test:coverage` in `src/Web/ReactApp/`; coverage first runs the zero-diagnostic test gate, application typecheck, and source-coverage guards through `pretest:coverage`. |
 | `dotnet-build`          | any .NET input changed OR full-safe                          | Restores/builds once, explicitly builds IntegrationTests when selected, and uploads one compressed tarball per selected project. |
 | `migration-drift`       | App or Slicer schema-relevant inputs changed OR full-safe    | Restores runner-local project metadata, downloads its compiled project, then runs `has-pending-model-changes --no-build`. |
 | `dotnet-test`           | .NET test-relevant inputs changed OR full-safe               | **Matrix** — one leg per project/shard; downloads the archive keyed by `matrix.project`, then executes the test DLL directly. |
@@ -72,8 +72,9 @@ editing `farm-web.sln` itself, which is `shared_config` and always forces
 full-safe.
 
 `dependency-compliance` now runs the restore-then-validate pair in its own
-job gated by the exact same `want_dotnet_build` output the `dotnet-build`
-job uses, so mobile-only/docs-only PRs skip it entirely. Coverage does not
+job, originally gated by the exact same `want_dotnet_build` output the
+`dotnet-build` job uses (now `want_dependency_compliance`, see below), so
+mobile-only/docs-only PRs skip it entirely. Coverage does not
 regress: `want_dotnet_build` is forced `true` (full-safe) on every trusted
 push to `main`/`development`, on `workflow_dispatch`, and on any
 `shared_config` bucket change (`Directory.Packages.props`, `NuGet.Config`,
@@ -81,6 +82,26 @@ any `*.sln`, `Directory.Build.*`) — see "Full-safe (`full_matrix=1`)
 triggers" above — so dependency/license drift is still caught fail-closed
 on the branches that matter. `ci-tools` itself stays restore-free and fast
 on every PR.
+
+The gate is the selector's `want_dependency_compliance` output (#3150), a
+strict superset of `want_dotnet_build`. The NuGet graph argument above does
+not cover the npm graph: `src/Web/ReactApp/package-lock.json` can change
+without any .NET bucket changing, and the compliance policy/evidence files
+under `compliance/**` and `scripts/compliance/**` belong to no .NET bucket at
+all. `want_dependency_compliance` is therefore also `true` when:
+
+- a `package.json` or `package-lock.json` listed in the policy's
+  `npmLockFiles` changes (`src/Web/ReactApp/`, `tests/ui-validation/`,
+  `tools/`) — the selector test suite asserts the selector's list matches
+  the policy; or
+- any path in the `compliance` bucket changes.
+
+A `compliance` bucket change also forces `want_frontend=true`, so the
+`frontend` job's `create-npm-notices.mjs` step (which needs `npm ci`
+`node_modules`) runs against a policy-only change instead of first failing in
+the Docker build. `validate-compliance.mjs` itself checks the npm bundle
+inventory — including stale fallback hashes and missing evidence files — and
+does not need `node_modules`.
 
 ## Selection logic (selector script)
 
@@ -144,6 +165,7 @@ classify.
 | `tools`: `src/tools/**` | | ✓ | | | |
 | `docs`: `docs/**`, root `*.md`, `LICENSE*`, root `.editorconfig`, `.gitignore`, `.gitattributes` | | | | | |
 | `mobile`: `mobile/**` | | | | | |
+| `compliance`: `compliance/**`, `scripts/compliance/**` (dependency-compliance too) | ✓ | | | | |
 | `unclassified`: every other repository path | | | | | |
 
 Canonical API corpus inputs also drive the iOS selector. Changes to
@@ -173,11 +195,14 @@ wire-contract assertions execute.
 
 `ci-tools` is unconditional and therefore runs for every bucket, including
 `docs`, `mobile`, and `unclassified`. `dependency-compliance` is gated on
-`want_dotnet_build` (see the ".NET build" ✓ column above) and therefore
-runs for the same buckets as `dotnet-build` — it does NOT run for `docs`-
-or `mobile`-only buckets, but DOES run for a `tools`-only bucket, since
-`src/tools/**` sets `.NET build` to ✓ (a tools-only change still needs the
-restored `project.assets.json` the validator reads).
+`want_dependency_compliance`: it runs for every bucket that sets the
+".NET build" ✓ column above, plus the `compliance` bucket and the npm
+manifests described in [`dependency-compliance` gating](#dependency-compliance-gating-1395).
+It does NOT run for `docs`- or `mobile`-only buckets, or for React source
+changes that leave `package.json`/`package-lock.json` untouched, but DOES run
+for a `tools`-only bucket, since `src/tools/**` sets `.NET build` to ✓ (a
+tools-only change still needs the restored `project.assets.json` the
+validator reads).
 
 Unlike `orca_worker` (a pure-service module with no owned controller),
 `smartplug` also selects `Farm.Web.Api.Tests`: `AdminPowerMonitorsController`
@@ -367,8 +392,8 @@ hook below. Because that hook is local and opt-in, it never ran in agent
 worktrees or in host checkouts that skipped `.githooks/setup.sh`. As a
 result, 140 real diagnostics (missing BOMs, whitespace, import ordering, and
 braces) accumulated on `development`. The `dotnet-format` job now enforces
-the documented command on the server. It has the same `want_dotnet_build`
-gating as `dependency-compliance` and needs only a restore, so it runs in
+the documented command on the server. It is gated on `want_dotnet_build`
+(like `dotnet-build`) and needs only a restore, so it runs in
 parallel with `dotnet-build`. It adds runner minutes but no wall-clock time
 before the test fan-out.
 
@@ -523,11 +548,13 @@ cached after the first successful verification of each tree. The
 - `ci-tools` failed → the selector or hook tests regressed. Reproduce with
   `bash scripts/ci/tests/test-select-dotnet-tests.sh` and
   `bash .githooks/tests/test-pre-push.sh` locally.
-- `dependency-compliance` failed → a NuGet package license/provenance check
-  regressed, or the solution failed to restore. Reproduce with
+- `dependency-compliance` failed → a NuGet or npm package license/provenance
+  check regressed (including a stale npm fallback hash or a missing evidence
+  file), or the solution failed to restore. Reproduce with
   `cd src && dotnet restore ./farm-web.sln && cd .. && node scripts/compliance/validate-compliance.mjs`.
   If it unexpectedly ran (or was skipped) for a given PR, check
-  `want_dotnet_build` in the `select` job summary — it mirrors `dotnet-build`.
+  `want_dependency_compliance` in the `select` job summary — it is
+  `want_dotnet_build` plus npm-manifest and `compliance` bucket changes.
 - `dotnet-format` failed → the job log lists each file, line, and diagnostic
   ID. Reproduce with `cd src && dotnet restore ./farm-web.sln && dotnet format
   ./farm-web.sln --verify-no-changes --no-restore`. Fix with the same command

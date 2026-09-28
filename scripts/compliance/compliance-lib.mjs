@@ -767,6 +767,28 @@ export async function validateDependencyLicenses(repoRoot, dependencyPolicy) {
   return errors;
 }
 
+// Dependency validation run by validate-compliance.mjs. Adds the bundled
+// frontend npm inventory, which checks every reviewed npm license-text
+// fallback against the production lock entries (LICENSE_POLICY_STALE) and
+// its evidence file hash — otherwise enforced only by the publish-time
+// release inventory (#3150). Its per-package license checks repeat
+// validateNpmLicenses, so exact duplicates are dropped.
+export async function validateDependencyCompliance(repoRoot, dependencyPolicy) {
+  const errors = [];
+  const seen = new Set();
+  for (const error of [
+    ...await validateDependencyLicenses(repoRoot, dependencyPolicy),
+    ...(await createNpmLicenseInventory(repoRoot, dependencyPolicy)).errors,
+  ]) {
+    const key = JSON.stringify([error.code, error.path, error.message]);
+    if (!seen.has(key)) {
+      seen.add(key);
+      errors.push(error);
+    }
+  }
+  return errors;
+}
+
 function isSafeRepositoryPath(relativePath) {
   const normalized = normalizeRelativePath(relativePath);
   return normalized.length > 0
@@ -2151,7 +2173,7 @@ export async function validateRepository(repoRoot, options = {}) {
   errors.push(...await validateProvenanceManifest(repoRoot, provenance));
 
   if (options.includeDependencies !== false) {
-    errors.push(...await validateDependencyLicenses(repoRoot, dependencyPolicy));
+    errors.push(...await validateDependencyCompliance(repoRoot, dependencyPolicy));
   }
 
   for (const sbomPath of options.sbomPaths ?? []) {
