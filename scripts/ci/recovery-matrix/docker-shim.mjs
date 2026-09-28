@@ -1,7 +1,7 @@
-import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
-export function writeDockerShim(runRoot, deploymentRoot, networkAttemptsPath) {
+export function writeDockerShim(runRoot, deploymentRoot, networkAttemptsPath, { realDocker = '/usr/bin/docker' } = {}) {
   const shim = join(runRoot, 'docker');
   const log = join(runRoot, 'docker-commands.ndjson');
   const envFile = join(deploymentRoot, '.env');
@@ -97,9 +97,116 @@ case "\${args[0]:-}" in
     done
     ;;
 esac
-printf '{"at":"%s","args":%s}\\n' "$(date -u +%FT%TZ)" "$(node -e 'process.stdout.write(JSON.stringify(process.argv.slice(1)))' "$@")" >> ${JSON.stringify(log)}
-exec /usr/bin/docker "\${args[@]}"
+log_command() {
+  printf '{"at":"%s","args":%s}\\n' "$(date -u +%FT%TZ)" "$(node -e 'process.stdout.write(JSON.stringify(process.argv.slice(1)))' -- "$@")" >> ${JSON.stringify(log)}
+}
+${pauseGateBash({
+    specPath: join(runRoot, dockerFaultFiles.spec),
+    pausePath: join(runRoot, dockerFaultFiles.pause),
+    decisionPath: join(runRoot, dockerFaultFiles.decision),
+  })}
+fault_mode="$(fault_gate_claim "$@")"
+if [[ "$fault_mode" == "pause-before" ]]; then
+  fault_gate_pause "$fault_mode" 0 "$@"
+  if [[ "$(fault_gate_decision)" != "run" ]]; then
+    echo "recovery matrix injected docker fault before side effect" >&2
+    exit 70
+  fi
+elif [[ "$fault_mode" == "pause-after" ]]; then
+  log_command "$@"
+  set +e
+  ${JSON.stringify(realDocker)} "\${args[@]}"
+  fault_status=$?
+  set -e
+  fault_gate_pause "$fault_mode" "$fault_status" "$@"
+  if [[ "$(fault_gate_decision)" == "fail" ]]; then
+    echo "recovery matrix injected docker fault after side effect" >&2
+    exit 70
+  fi
+  exit "$fault_status"
+fi
+log_command "$@"
+exec ${JSON.stringify(realDocker)} "\${args[@]}"
 `);
   chmodSync(shim, 0o755);
   return shim;
+}
+
+// One-shot pause gate shared by the docker shim and tool wrappers. The harness arms it by
+// writing {"tokens":[...],"mode":"pause-before"|"pause-after"} to the spec path; the first
+// invocation whose argv contains every token claims it atomically, records the pause marker
+// and blocks until the harness writes a decision (run | return | fail) or the host is killed.
+export function pauseGateBash({ specPath, pausePath, decisionPath }) {
+  return `fault_gate_spec=${JSON.stringify(specPath)}
+fault_gate_pause_path=${JSON.stringify(pausePath)}
+fault_gate_decision_path=${JSON.stringify(decisionPath)}
+fault_gate_claim() {
+  [[ -f "$fault_gate_spec" ]] || return 0
+  local mode
+  mode="$(node -e 'const fs=require("fs");let s;try{s=JSON.parse(fs.readFileSync(process.argv[1],"utf8"))}catch{process.exit(0)}const a=process.argv.slice(2);if(Array.isArray(s.tokens)&&s.tokens.every(t=>a.includes(t)))process.stdout.write(String(s.mode))' -- "$fault_gate_spec" "$@" 2>/dev/null || true)"
+  [[ -n "$mode" ]] || return 0
+  mv "$fault_gate_spec" "$fault_gate_spec.claimed.$$" 2>/dev/null || return 0
+  rm -f "$fault_gate_decision_path"
+  printf '%s' "$mode"
+}
+fault_gate_pause() {
+  local mode="$1" status="$2"
+  shift 2
+  printf '{"at":"%s","pid":%s,"mode":"%s","status":%s,"args":%s}\\n' "$(date -u +%FT%TZ)" "$$" "$mode" "$status" \\
+    "$(node -e 'process.stdout.write(JSON.stringify(process.argv.slice(1)))' -- "$@")" > "$fault_gate_pause_path.tmp"
+  mv "$fault_gate_pause_path.tmp" "$fault_gate_pause_path"
+}
+fault_gate_decision() {
+  local deadline=$((SECONDS + 600))
+  while [[ ! -f "$fault_gate_decision_path" ]]; do
+    if (( SECONDS > deadline )); then
+      printf 'fail'
+      return 0
+    fi
+    sleep 0.1
+  done
+  cat "$fault_gate_decision_path"
+  rm -f "$fault_gate_decision_path"
+}`;
+}
+
+export const dockerFaultFiles = Object.freeze({
+  spec: 'fault-docker.json',
+  pause: 'fault-docker.pause',
+  decision: 'fault-docker.decision',
+});
+
+// Wraps an existing tool shim (for example pg_dump) with the same one-shot pause gate so the
+// harness can hold a safe step at a deterministic point, and records every invocation so a
+// scenario can prove a restore or dump was (not) replayed. The original shim is kept beside it.
+export function wrapToolWithPauseGate(toolPath, { name }) {
+  const realPath = `${toolPath}.real`;
+  renameSync(toolPath, realPath);
+  const dir = dirname(toolPath);
+  const callsPath = join(dir, `fault-${name}.calls`);
+  writeFileSync(toolPath, `#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' "$(date -u +%FT%TZ)" >> ${JSON.stringify(callsPath)}
+${pauseGateBash({
+    specPath: join(dir, `fault-${name}.json`),
+    pausePath: join(dir, `fault-${name}.pause`),
+    decisionPath: join(dir, `fault-${name}.decision`),
+  })}
+fault_mode="$(fault_gate_claim "$@")"
+if [[ "$fault_mode" == "pause-before" ]]; then
+  fault_gate_pause "$fault_mode" 0 "$@"
+  if [[ "$(fault_gate_decision)" != "run" ]]; then
+    echo "recovery matrix injected ${name} fault before side effect" >&2
+    exit 70
+  fi
+fi
+exec ${JSON.stringify(realPath)} "$@"
+`);
+  chmodSync(toolPath, 0o755);
+  return {
+    spec: join(dir, `fault-${name}.json`),
+    pause: join(dir, `fault-${name}.pause`),
+    decision: join(dir, `fault-${name}.decision`),
+    calls: callsPath,
+  };
 }
