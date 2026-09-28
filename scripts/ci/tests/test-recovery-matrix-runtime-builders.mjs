@@ -6,7 +6,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { waitForDuringActivationPoint } from '../recovery-matrix/activation-runner.mjs';
-import { recoveryHostStateRoot, writeHostUpdateConfig } from '../recovery-matrix/cell-runtime.mjs';
+import { containerizedDotnetArgs, recoveryHostStateRoot, writeHostUpdateConfig } from '../recovery-matrix/cell-runtime.mjs';
 import { writeRecoveryCompose } from '../recovery-matrix/compose-config.mjs';
 import { writeDockerShim } from '../recovery-matrix/docker-shim.mjs';
 import { validateRecoveryEvidence } from '../recovery-matrix/evidence.mjs';
@@ -323,3 +323,24 @@ function minimalPassingEvidence({ attempts }) {
 function sha256Json(value) {
   return `sha256:${createHash('sha256').update(JSON.stringify(value), 'utf8').digest('hex')}`;
 }
+
+test('containerized dotnet fallback runs as a non-root invoking user so cleanup can remove its output', () => {
+  const args = containerizedDotnetArgs({
+    commandArgs: ['publish', 'x.csproj'],
+    cwd: '/repo',
+    mounts: ['/repo', '/work/run', '/repo'],
+    uid: 1000,
+    gid: 1001,
+  });
+  assert.deepEqual(args.slice(0, 4), ['run', '--rm', '--user', '1000:1001']);
+  assert.ok(args.includes('DOTNET_CLI_HOME=/tmp/pf-dotnet-home'));
+  assert.equal(args.filter((arg) => arg === '-v').length, 2);
+  assert.ok(args.includes('/work/run:/work/run'));
+  assert.deepEqual(args.slice(-6), ['-w', '/repo', 'mcr.microsoft.com/dotnet/sdk:10.0-noble', 'dotnet', 'publish', 'x.csproj']);
+
+  const rootArgs = containerizedDotnetArgs({ commandArgs: ['--info'], cwd: '/repo', mounts: ['/repo'], uid: 0, gid: 0 });
+  assert.ok(!rootArgs.includes('--user'));
+  // `undefined` would fall back to process.getuid() on Linux; null simulates Windows, which has no uid.
+  const windowsArgs = containerizedDotnetArgs({ commandArgs: ['--info'], cwd: '/repo', mounts: ['/repo'], uid: null, gid: null });
+  assert.ok(!windowsArgs.includes('--user'));
+});

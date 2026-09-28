@@ -26,6 +26,7 @@ import {
 } from './runtime-assertions.mjs';
 import {
   baseEvidence,
+  containerizedDotnetArgs,
   createCheckpoints,
   detectUbuntuHost,
   lastJournalPhase,
@@ -135,15 +136,11 @@ try {
     }
     if (name === 'dotnet' && !commandExists('dotnet')) {
       const cwd = options.cwd ?? repo;
-      return execFileSync('docker', [
-        'run',
-        '--rm',
-        '-v', `${repo}:${repo}`,
-        '-w', cwd,
-        'mcr.microsoft.com/dotnet/sdk:10.0-noble',
-        'dotnet',
-        ...commandArgs,
-      ], { encoding: 'utf8', stdio: options.stdio, env: options.env });
+      return execFileSync('docker', containerizedDotnetArgs({
+        commandArgs,
+        cwd,
+        mounts: [repo, runRoot],
+      }), { encoding: 'utf8', stdio: options.stdio, env: options.env });
     }
     return execFileSync(name, commandArgs, { encoding: 'utf8', ...options });
   };
@@ -332,6 +329,9 @@ try {
   }
 
   if (cellSpec.id === 'split-database') {
+    // The split layout's slicer database must exist, as it would on a real split host, so the
+    // remote-worker guard can read it and the preflight fingerprint guard gets to refuse.
+    ensureHarnessDatabases(deploymentRoot, env, provider, cell);
     writeRecoveryCompose({
       deploymentRoot,
       network,
@@ -1262,21 +1262,20 @@ function assertInfrastructureLoadedFromBundle(decisionRecords, infrastructureLoc
 }
 
 function readImportDecisionRecords(directory) {
-  if (!existsSync(directory)) {
-    return [];
-  }
   const script = [
-    "const { readdirSync, readFileSync, statSync } = require('fs');",
+    "const { existsSync, readdirSync, readFileSync, statSync } = require('fs');",
     "const { join } = require('path');",
     "const root = process.argv[1];",
     "const files = [];",
     "function walk(dir) { for (const name of readdirSync(dir)) { const file = join(dir, name); const stat = statSync(file); if (stat.isDirectory()) walk(file); else if (name.endsWith('.json')) files.push(file); } }",
-    "walk(root);",
+    "if (existsSync(root)) walk(root);",
     "const records = files.map(file => { try { return JSON.parse(readFileSync(file, 'utf8')); } catch { return undefined; } }).filter(record => record && record.kind === 'printfarmer-offline-import-decision');",
     "records.sort((a, b) => String(a.decidedAt).localeCompare(String(b.decidedAt)));",
     "process.stdout.write(JSON.stringify(records));",
   ].join('\n');
-  return JSON.parse(execFileSync('node', ['-e', script, directory], { encoding: 'utf8' }));
+  // The CLI writes decision records as root inside the host container with owner-only
+  // permissions, so read them there rather than as a possibly non-root runner.
+  return JSON.parse(hostExecFileSync(hostContainer, ['node', '-e', script, directory]));
 }
 
 function waitForDatabaseReady(deploymentRoot, env, provider) {

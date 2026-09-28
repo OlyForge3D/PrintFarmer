@@ -1016,13 +1016,19 @@ offending values.
 | `external-database` | monolith, PostgreSQL, shared database, externally owned database, host-owned storage | `needs-operator-recover` | `NeedsOperator` / `database_externally_owned` | Passing evidence: preview returns `NeedsOperator` / `database_externally_owned` and no restore mutation is performed |
 | `external-storage` | monolith, PostgreSQL, shared database, host-owned database, externally owned storage | `needs-operator-recover` | `NeedsOperator` / `storage_externally_owned` | Passing evidence: activates host-owned, then sets `HostUpdateExecution:StorageExternallyOwned` (#3155); preview returns `NeedsOperator` / `storage_externally_owned` and no restore mutation is performed |
 | `remote-worker` | monolith, PostgreSQL, shared host-owned database/storage, remote pinned worker | `refuse-activation` | `Refused` / `remote_worker_unsupported` | Passing evidence: target activation refuses before mutation with `remote_worker_unsupported` |
-| `split-database` | split, PostgreSQL, split application/slicer databases, host-owned storage, managed worker | `refuse-activation` | `Refused` / `split_database_not_supported` | Awaiting a live re-run: the split prior activation passes (#3160 fixed the harness health port). Before #3168 the target activated instead of refusing (`actual: Activated` / `activation_unexpectedly_succeeded`) because the product ignored `ConnectionStrings:SlicerDatabase`. `SlicerDbContext` now honours that connection string in the API, slicer host and offline CLI, so the preflight fingerprint guard can refuse the split layout |
+| `split-database` | split, PostgreSQL, split application/slicer databases, host-owned storage, managed worker | `refuse-activation` | `Refused` / `split_database_not_supported` | Failing evidence, blocked by #3182: since #3168 the preflight guard detects the split layout and target activation stops before mutation with zero egress attempts. The executor's generic catch then drops the stable preflight code and journals `RecoveryRequired` (`actual: RecoveryRequired` / `unexpected_refusal:RecoveryRequired:HostUpdatePreflightFailedException`) instead of `Refused` / `split_database_not_supported`. The harness now creates the slicer database before writing the split compose file (#3100) |
 
 Run a single cell from an Ubuntu LTS x64 host with Docker (containerd image
 store enabled; see
 [Docker image store requirement](#docker-image-store-requirement-3137)), Node.js,
 `jq`, Bash, .NET SDK/runtime support for the host-update CLI package and
-Cosign available:
+Cosign available. Run only one live matrix batch per Docker daemon at a time.
+Every run loads fixture-built images under the same canonical tags, such as
+`postgres:16-alpine`. A second run on the same daemon moves those tags, so the
+first run's pinned digests can disappear (#3183). The script works as a
+non-root runner: the CLI's `dotnet` fallback runs as the invoking user, and
+cleanup hands root-owned run files back to that user so the retained run
+directory can be removed without root:
 
 ```bash
 scripts/ci/recovery-matrix/run-cell.sh \
