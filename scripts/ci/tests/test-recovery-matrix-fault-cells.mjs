@@ -59,6 +59,17 @@ test('fault cells cover every #3101 fault kind on the supported c2 shape', () =>
   ]);
 });
 
+test('migration power-loss cells interrupt the first context before and the final context after its apply', () => {
+  const before = faultCells.find((entry) => entry.id === 'fault-power-loss-migration-before');
+  const after = faultCells.find((entry) => entry.id === 'fault-power-loss-migration-after');
+  assert.deepEqual(before.fault.trigger.docker, { tokens: ['--host-update-migration', 'AppDbContext', 'apply'], mode: 'pause-before' });
+  assert.deepEqual(before.fault.redrive, { outcome: 'RecoveryRequired', reason: 'uncertain_side_effect:migration:migration_state_incomplete' });
+  assert.equal(before.expected.outcome, 'RolledBack');
+  assert.deepEqual(after.fault.trigger.docker, { tokens: ['--host-update-migration', 'SlicerDbContext', 'apply'], mode: 'pause-after' });
+  assert.deepEqual(after.fault.redrive, { outcome: 'Activated' });
+  assert.equal(after.expected.outcome, 'Activated');
+});
+
 test('fault cells are runnable individually and as a group without changing `all`', () => {
   assert.equal(resolveCellList('all').length, cellIds.length);
   assert.ok(cellIds.every((id) => !id.startsWith('fault-')));
@@ -459,5 +470,14 @@ test('recovery on a schema-delta target passes when the N+1 migration is reverte
   assert.equal(runFaultScenario(ctx).actual, 'RolledBack');
   assert.ok(ctx.passed.includes('schema-delta-absent:recovered'));
   assert.ok(ctx.passed.includes('schema-delta-absent:durable'));
-  assert.deepEqual([...new Set(contexts)], ['AppDbContext']);
+  assert.deepEqual([...new Set(contexts)], ['AppDbContext', 'SlicerDbContext']);
+});
+
+test('recovery on a schema-delta target fails when only the SlicerDbContext N+1 migration survives', () => {
+  const ctx = fakeScenarioCtx('scenario-schema-delta-slicer-kept');
+  ctx.schemaDelta = 'changed';
+  ctx.schemaDeltaState = (context) => (context === 'SlicerDbContext'
+    ? { historyRows: 0, tableExists: 1 }
+    : { historyRows: 0, tableExists: 0 });
+  assert.throws(() => runFaultScenario(ctx), (error) => error.reason.startsWith('schema-delta-absent:recovered'));
 });

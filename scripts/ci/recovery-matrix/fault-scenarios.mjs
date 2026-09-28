@@ -336,15 +336,19 @@ function assertFenceMatchesOutcome(harness, result, label, fenceClosed) {
   harness.require(closed === expectClosed, `fence-${expectClosed ? 'held' : 'released'}:${label}`, `admissionClosed=${closed}`);
 }
 
-// For cells on the #3167 schema-delta target, the AppDbContext N+1 fixture migration must be
-// in the database exactly as the outcome claims: applied once for Activated, absent after a
-// rollback. `state` is 'Activated' or 'RolledBack' (the latter also means "not yet applied").
-function assertSchemaDelta(harness, state, label) {
+// For cells on the #3167 schema-delta target, the N+1 fixture migrations must be in the
+// database exactly as the outcome claims: applied once for Activated, absent after a rollback.
+// `state` is 'Activated' or 'RolledBack' (the latter also means "not yet applied"). Durable
+// outcomes check every fixture context; a pause mid-phase checks only the contexts it has reached.
+const allSchemaDeltaContexts = Object.freeze(['AppDbContext', 'SlicerDbContext']);
+
+function assertSchemaDelta(harness, state, label, contexts = allSchemaDeltaContexts) {
   if (harness.ctx.schemaDelta !== 'changed') return;
   const expected = expectedSchemaDeltaFixtureState(state);
-  const actual = harness.ctx.schemaDeltaState('AppDbContext');
-  harness.require(actual.historyRows === expected.historyRows && actual.tableExists === expected.tableExists,
-    `schema-delta-${state === 'Activated' ? 'applied' : 'absent'}:${label}`, JSON.stringify(actual));
+  const actual = Object.fromEntries(contexts.map((context) => [context, harness.ctx.schemaDeltaState(context)]));
+  const matches = Object.values(actual).every((entry) =>
+    entry.historyRows === expected.historyRows && entry.tableExists === expected.tableExists);
+  harness.require(matches, `schema-delta-${state === 'Activated' ? 'applied' : 'absent'}:${label}`, JSON.stringify(actual));
 }
 
 function recoverToRolledBack(harness) {
@@ -392,6 +396,8 @@ const scenarios = {
       harness.require(pause.status === 0, `${label}-side-effect-completed`, `status=${pause.status}`);
     }
     if (step === 'migration') {
+      // pause-before AppDbContext: nothing applied yet. pause-after the final context: every
+      // fixture migration has been applied.
       assertSchemaDelta(harness, pause.mode === 'pause-after' ? 'Activated' : 'RolledBack', `${label}-paused`);
     }
     assertFenced(harness, step);
@@ -432,7 +438,7 @@ const scenarios = {
     if (harness.ctx.schemaDelta === 'changed') {
       // The real N+1 migration has been applied; the call is then failed so recovery must revert it.
       harness.require(pause.status === 0, 'partial-migration-apply-executed', `status=${pause.status}`);
-      assertSchemaDelta(harness, 'Activated', 'partial-migration-paused');
+      assertSchemaDelta(harness, 'Activated', 'partial-migration-paused', ['AppDbContext']);
     } else {
       harness.ctx.dbQuery(`INSERT INTO "__EFMigrationsHistory" ("MigrationId","ProductVersion") VALUES ('29990101000000_RecoveryMatrixPartialMigration','10.0.0');`);
       harness.ok('partial-migration-row-written');

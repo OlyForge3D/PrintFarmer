@@ -1098,11 +1098,11 @@ then repeats the final operator action, restarts the host, runs
 | Cell id | Fault | Expected durable outcome/reason | Local run status |
 | --- | --- | --- | --- |
 | `fault-power-loss-backup` | Power loss at `backup:before` (inside `pg_dump`) | `Activated` after redrive re-runs the safe backup | Pending live run |
-| `fault-power-loss-migration-before` | Power loss before the `AppDbContext` migration apply runs (no-op apply: identical schema; real N→N+1 coverage in #3167) | `Activated` after the reconciler probes the migration | Pending live run |
-| `fault-power-loss-migration-after` | Power loss after the migration apply returned, before `migration:after` (no-op apply: identical schema; real N→N+1 coverage in #3167) | `Activated` after the reconciler probes the migration | Pending live run |
+| `fault-power-loss-migration-before` | Power loss before the `AppDbContext` migration apply runs, on the N+1 schema-delta target | Redrive reports `RecoveryRequired` / `uncertain_side_effect:migration:migration_state_incomplete` (the N+1 migration is still pending, so it is never blindly replayed); recovery reports `RolledBack` and the N+1 schema is absent | Pending live run |
+| `fault-power-loss-migration-after` | Power loss after the final (`SlicerDbContext`) N+1 migration apply returned, before `migration:after` | `Activated` after the reconciler proves no context has pending migrations, without re-applying them | Pending live run |
 | `fault-power-loss-apply-before` | Power loss before `compose up` runs | Redrive reports `RecoveryRequired` / `uncertain_side_effect:apply:*`; recovery reports `RolledBack` | Pending live run |
 | `fault-power-loss-apply-after` | Power loss after `compose up` ran, before `apply:after` | `Activated` after the reconciler verifies the running digests | Pending live run |
-| `fault-partial-migration` | Migration applies and writes an extra history row, then the call fails | `RolledBack`; migration heads match the prior release | Pending live run |
+| `fault-partial-migration` | The `AppDbContext` N+1 migration applies, then the call fails | `RolledBack`; the N+1 history rows and tables are gone and migration heads match the prior release | Pending live run |
 | `fault-partial-apply` | `compose up` starts the target, then the call fails | `RolledBack`; running digests match the prior release | Pending live run |
 | `fault-api-down` | Application containers stopped while `RecoveryRequired` | `RolledBack` | Pending live run |
 | `fault-missing-backup` | Backups deleted while `RecoveryRequired` | `NeedsOperator` / `no_backup_available`, exit 10, no mutation | Pending live run |
@@ -1114,12 +1114,15 @@ The evidence `outcome.expectedReason` is `null` for fault cells because they are
 supported cells. The observed stable reason is recorded in `outcome.reason` for
 `NeedsOperator` and `RecoveryRequired` outcomes.
 
-The `c2` prior and target share a schema (`schemaDelta: identical`), so the
-migration power-loss cells exercise journal fencing, reconciler probing, and
-apply-at-most-once around a migration apply that changes no schema.
-`fault-partial-migration` is the cell that proves a real history mutation is
-reverted. A fixture with a real migration from N to N+1 is tracked in
-#3167, and #3101 stays open until it lands.
+The two migration power-loss cells and `fault-partial-migration` declare
+`schemaDelta: 'changed'`, so the target carries the N+1 fixture migration
+described below and the fault lands inside a real schema change. Each asserts
+the `AppDbContext` and `SlicerDbContext` fixture history rows and tables
+against the outcome: absent before the apply and after a rollback, present
+exactly once after activation, both at the fault point and again after the
+durability restart. A pause mid-phase checks only the contexts it has reached. Evidence
+records the choice as `identities.schemaDelta`. The other fault cells use the
+identical-schema target.
 
 ### Queue-consumer health entry (#3157)
 

@@ -15,6 +15,9 @@ const c2Shape = Object.freeze({
 // The executor probes then applies each context in turn; AppDbContext apply is the first unsafe
 // database side effect of an activation.
 export const migrationApplyTokens = Object.freeze(['--host-update-migration', 'AppDbContext', 'apply']);
+// SlicerDbContext is the final context the executor migrates, so pausing after its apply lands
+// after every migration side effect and before the durable `migration:after` receipt.
+export const finalMigrationApplyTokens = Object.freeze(['--host-update-migration', 'SlicerDbContext', 'apply']);
 export const composeUpTokens = Object.freeze(['compose', 'up']);
 
 export const faultKinds = Object.freeze([
@@ -56,9 +59,11 @@ export const faultCells = Object.freeze([
       kind: 'power-loss',
       point: 'migration:before',
       trigger: { docker: { tokens: migrationApplyTokens, mode: 'pause-before' } },
-      redrive: { outcome: 'Activated' },
+      // The N+1 migration is still pending, so the reconciler cannot prove completion and
+      // fences the uncertainty (docs/HOST_UPDATE_EXECUTOR.md); recovery restores the backup.
+      redrive: { outcome: 'RecoveryRequired', reason: 'uncertain_side_effect:migration:migration_state_incomplete' },
     },
-    expected: { outcome: 'Activated' },
+    expected: { outcome: 'RolledBack' },
   }),
   defineFaultCell({
     id: 'fault-power-loss-migration-after',
@@ -66,7 +71,7 @@ export const faultCells = Object.freeze([
     fault: {
       kind: 'power-loss',
       point: 'migration:after-side-effect',
-      trigger: { docker: { tokens: migrationApplyTokens, mode: 'pause-after' } },
+      trigger: { docker: { tokens: finalMigrationApplyTokens, mode: 'pause-after' } },
       redrive: { outcome: 'Activated' },
     },
     expected: { outcome: 'Activated' },
