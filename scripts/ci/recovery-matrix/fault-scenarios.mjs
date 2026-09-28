@@ -295,22 +295,22 @@ function powerLoss(harness, running, label) {
 
 // Terminal proof shared by every cell: a repeat of the final operator action must not add a
 // restore, compose up or migration apply, and the outcome must survive a host restart.
-function proveDurable(harness, final, repeat) {
+function proveDurable(harness, final, repeat, { fenceClosed } = {}) {
   const restoresBefore = harness.restoreCalls();
   const dockerMark = harness.dockerMark();
   const again = repeat();
   harness.expect('repeat-operator-action', again, { outcome: final.actual, reason: final.reason ? final.reason.split('|')[0] : null });
   assertNoUnsafeReplay(harness, 'repeat', dockerMark, restoresBefore);
-  assertFenceMatchesOutcome(harness, final, 'repeat');
+  assertFenceMatchesOutcome(harness, final, 'repeat', fenceClosed);
   harness.ctx.restartHost();
   harness.ok('durability-host-restarted');
-  assertFenceMatchesOutcome(harness, final, 'restart');
+  assertFenceMatchesOutcome(harness, final, 'restart', fenceClosed);
   harness.ok(`status-after-restart:exit=${harness.status()}`);
   const restartMark = harness.dockerMark();
   const durable = repeat();
   harness.expect('outcome-durable-after-restart', durable, { outcome: final.actual, reason: final.reason ? final.reason.split('|')[0] : null });
   assertNoUnsafeReplay(harness, 'restart', restartMark, restoresBefore);
-  assertFenceMatchesOutcome(harness, final, 'durable');
+  assertFenceMatchesOutcome(harness, final, 'durable', fenceClosed);
   return final;
 }
 
@@ -322,11 +322,13 @@ function assertNoUnsafeReplay(harness, label, dockerMark, restoresBefore) {
 }
 
 // The writer fence must stay closed while any outcome is non-terminal and be released only by
-// a terminal Activated/RolledBack outcome.
-function assertFenceMatchesOutcome(harness, result, label) {
+// a terminal Activated/RolledBack outcome. A state failure detected before the executor ever
+// closes the fence passes an explicit enceClosed so the fence must stay exactly as it was.
+function assertFenceMatchesOutcome(harness, result, label, fenceClosed) {
   const closed = existsSync(harness.ctx.admissionClosedPath);
   const terminal = result.actual === 'Activated' || result.actual === 'RolledBack';
-  harness.require(closed !== terminal, `fence-${terminal ? 'released' : 'held'}:${label}`, `admissionClosed=${closed}`);
+  const expectClosed = fenceClosed ?? !terminal;
+  harness.require(closed === expectClosed, `fence-${expectClosed ? 'held' : 'released'}:${label}`, `admissionClosed=${closed}`);
 }
 
 function recoverToRolledBack(harness) {
@@ -472,13 +474,16 @@ const scenarios = {
     harness.injected(spec.fault);
     const before = harness.ctx.snapshot();
     const journalBefore = harness.journal().lines;
+    const fenceClosed = existsSync(harness.ctx.admissionClosedPath);
+    harness.require(!fenceClosed, 'corrupt-replay-fence-open-before-activation');
     const result = harness.activate({ allowedExitCodes: [4, 6] });
     const expected = { outcome: 'RecoveryRequired', reason: spec.expected.reason, exitCode: faultExitCodes.stateUnreadable };
     harness.expect('activate-with-corrupt-replay', result, expected);
     harness.require(harness.journal().lines === journalBefore, 'corrupt-replay-journal-unchanged');
     harness.ctx.assertNoMutation('corrupt-replay', before, harness.ctx.snapshot());
     harness.ok('corrupt-replay-no-mutation');
-    return proveDurable(harness, result, () => harness.activate({ allowedExitCodes: [4, 6] }));
+    assertFenceMatchesOutcome(harness, result, 'corrupt-replay-activation', fenceClosed);
+    return proveDurable(harness, result, () => harness.activate({ allowedExitCodes: [4, 6] }), { fenceClosed });
   },
 
   'fence-release'(harness, spec) {

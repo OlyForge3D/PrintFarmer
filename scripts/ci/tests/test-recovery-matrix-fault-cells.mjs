@@ -391,3 +391,31 @@ test('api-down scenario fails when the fence is released while RecoveryRequired'
   };
   assert.throws(() => runFaultScenario(ctx), (error) => error.reason.startsWith('fence-held:activation-fault'));
 });
+
+function fakeCorruptReplayCtx(name, { closeFence = false } = {}) {
+  const ctx = fakeScenarioCtx(name);
+  ctx.cellSpec = faultCells.find((entry) => entry.id === 'fault-corrupt-replay');
+  ctx.hostStateRoot = path.dirname(ctx.journalPath);
+  ctx.hostShell = () => {};
+  ctx.snapshot = () => ({});
+  ctx.assertNoMutation = () => {};
+  ctx.op = (operationId) => {
+    if (operationId === 'host-update-status') return { exitCode: 4, stdout: '', stderr: '' };
+    if (closeFence) writeFileSync(ctx.admissionClosedPath, '');
+    return { exitCode: 4, stdout: '', stderr: 'code: host_update_replay_state_invalid\n' };
+  };
+  return ctx;
+}
+
+test('corrupt-replay scenario passes when the fence stays open because activation never started', () => {
+  const ctx = fakeCorruptReplayCtx('scenario-replay-open');
+  const result = runFaultScenario(ctx);
+  assert.equal(result.actual, 'RecoveryRequired');
+  assert.equal(result.reason, 'host_update_replay_state_invalid');
+  assert.ok(ctx.passed.includes('fence-released:durable'));
+});
+
+test('corrupt-replay scenario fails when the failed activation closes the fence', () => {
+  const ctx = fakeCorruptReplayCtx('scenario-replay-closed', { closeFence: true });
+  assert.throws(() => runFaultScenario(ctx), (error) => error.reason.startsWith('fence-released:corrupt-replay-activation'));
+});
