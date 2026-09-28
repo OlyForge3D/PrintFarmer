@@ -300,18 +300,18 @@ public sealed class HostUpdateDaemonTests : IDisposable
     }
 
     [Fact]
-    public async Task ReleaseWithEmptyHistory_FailsTheCycleWithAFixedCode()
+    public async Task InvalidCheckpoint_FailsTheCycleWithAFixedCode()
     {
         var journal = new Mock<IHostUpdateExecutionJournal>();
-        journal.Setup(j => j.ListReleaseIds()).Returns([ReleaseId]);
-        journal.Setup(j => j.Read(ReleaseId)).Returns([]);
+        journal.Setup(j => j.ReadAll()).Returns(
+            [new("invalid", ReleaseId, (HostUpdateExecutionState)99, "seeded", DateTimeOffset.UtcNow)]);
         var executionLock = new FileHostUpdateExecutionLock(Path.Combine(StateDirectory, FileHostUpdateExecutionLock.FileName));
         var sink = new ListSink();
 
         await Daemon(sink, new HostUpdateDaemonJournalReader(StateDirectory, executionLock, journal.Object)).RunAsync(once: true, CancellationToken.None);
 
         HostUpdateDaemonStatus running = sink.Statuses.Single(s => s.Lifecycle == HostUpdateDaemonLifecycle.Running);
-        running.JournalCode.Should().Be("journal_release_history_empty");
+        running.JournalCode.Should().Be("journal_checkpoint_invalid");
         running.Code.Should().Be("daemon_cycle_failed");
     }
 
@@ -319,7 +319,7 @@ public sealed class HostUpdateDaemonTests : IDisposable
     public async Task UnavailableSubsystem_ReportsTheSameStateCodeAsTheCli()
     {
         var journal = new Mock<IHostUpdateExecutionJournal>();
-        journal.Setup(j => j.ListReleaseIds()).Throws(new HostUpdateSubsystemUnavailableException("host_update_unavailable", null));
+        journal.Setup(j => j.ReadAll()).Throws(new HostUpdateSubsystemUnavailableException("host_update_unavailable", null));
         var executionLock = new FileHostUpdateExecutionLock(Path.Combine(StateDirectory, FileHostUpdateExecutionLock.FileName));
         var sink = new ListSink();
 

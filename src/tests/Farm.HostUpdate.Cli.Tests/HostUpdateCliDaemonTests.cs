@@ -49,6 +49,7 @@ public sealed class HostUpdateCliDaemonTests : IDisposable
 
         run.ExitCode.Should().Be(HostUpdateCliExitCodes.Success, run.Output + run.Error);
         run.Output.Should().Contain("gate=" + DisabledHostUpdateDaemonExecutionGate.DisabledCode);
+        run.Output.Should().Contain("checkpoint=approval_required").And.Contain("recovery=none");
     }
 
     [Fact]
