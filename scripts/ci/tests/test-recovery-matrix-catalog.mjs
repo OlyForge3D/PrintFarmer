@@ -7,7 +7,8 @@ import { cells, cellIds, resolveCell, resolveCellList } from '../recovery-matrix
 import { writeHostUpdateConfig } from '../recovery-matrix/cell-runtime.mjs';
 import { writeRecoveryCompose } from '../recovery-matrix/compose-config.mjs';
 import { expectedCellOutcome } from '../recovery-matrix/evidence.mjs';
-import { providerFor } from '../recovery-matrix/providers.mjs';
+import { providerFor, sqlcmdInContainer } from '../recovery-matrix/providers.mjs';
+import { redactSecrets, secretValuesFrom } from '../recovery-matrix/redaction.mjs';
 import { requiredInfrastructureIds, serviceMappingsFor, topologyFor } from '../recovery-matrix/topologies.mjs';
 
 const scratchRoot = path.resolve('.recovery-matrix-test-work');
@@ -49,12 +50,35 @@ test('providers expose production provider names, connection strings, readiness,
     host: '172.30.1.11',
     env: { MSSQL_DB: 'printfarmer', MSSQL_USER: 'sa', MSSQL_SA_PASSWORD: 'Secret1!' },
   }), /TrustServerCertificate=True/);
-  assert.equal(sqlserver.readinessArgs({ MSSQL_USER: 'sa', MSSQL_SA_PASSWORD: 'Secret1!' })[0], '/opt/mssql-tools18/bin/sqlcmd');
+  const readinessArgs = sqlserver.readinessArgs({ MSSQL_USER: 'sa', MSSQL_SA_PASSWORD: 'Secret1!' });
+  assert.deepEqual(readinessArgs.slice(0, sqlcmdInContainer.length), [...sqlcmdInContainer]);
+  assert.match(sqlcmdInContainer[2], /SQLCMDPASSWORD="\$MSSQL_SA_PASSWORD" exec \/opt\/mssql-tools18\/bin\/sqlcmd "\$@"/);
   const queryArgs = sqlserver.queryArgs({ MSSQL_DB: 'printfarmer', MSSQL_USER: 'sa', MSSQL_SA_PASSWORD: 'Secret1!' }, 'SELECT 1');
   assert.equal(queryArgs[queryArgs.indexOf('-d') + 1], 'printfarmer', 'queries must target the application database, not master');
   assert.ok(queryArgs.includes('-b'), 'sqlcmd errors must produce a non-zero exit instead of being read as rows');
   const bootstrapArgs = sqlserver.queryArgs({ MSSQL_DB: 'printfarmer', MSSQL_USER: 'sa', MSSQL_SA_PASSWORD: 'Secret1!' }, 'SELECT 1', { database: 'master' });
   assert.equal(bootstrapArgs[bootstrapArgs.indexOf('-d') + 1], 'master', 'database creation must connect before the app database exists');
+  for (const argv of [readinessArgs, queryArgs, bootstrapArgs]) {
+    assert.ok(!argv.includes('-P'), 'sqlcmd password must not be passed with -P');
+    assert.ok(!argv.join(' ').includes('Secret1!'), 'sqlcmd argv must not contain the SA password');
+  }
+});
+
+test('command-failure text never contains harness credentials', () => {
+  const env = { MSSQL_SA_PASSWORD: 'Pf!abc123aA1', POSTGRES_PASSWORD: 'deadbeefcafe', Jwt__Key: 'jwtkeyvalue', MSSQL_USER: 'sa', MSSQL_DB: 'printfarmer' };
+  const secrets = secretValuesFrom(env);
+  assert.ok(!secrets.includes('sa') && !secrets.includes('printfarmer'), 'non-secret values are not treated as secrets');
+  const failure = [
+    'Command failed: /usr/bin/docker compose exec -T database /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P Pf!abc123aA1 -Q SELECT 1',
+    'stderr: Login failed; PGPASSWORD=deadbeefcafe jwt=jwtkeyvalue',
+    'legacy: sqlcmd --password=other-value -P "quoted value"',
+  ].join('\n');
+  const redacted = redactSecrets(failure, secrets);
+  for (const value of ['Pf!abc123aA1', 'deadbeefcafe', 'jwtkeyvalue', 'other-value', 'quoted value']) {
+    assert.ok(!redacted.includes(value), `failure text must not contain ${value}`);
+  }
+  assert.match(redacted, /-P \[REDACTED\]/);
+  assert.match(redacted, /-U sa/, 'non-secret arguments survive redaction');
 });
 
 test('topologies map active services and infrastructure requirements', () => {

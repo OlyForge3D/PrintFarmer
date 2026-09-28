@@ -14,6 +14,7 @@ import { hasFaultHooks, invokeFaultHook, parseFaultHooks } from './fault-hooks.m
 import { assertHostStateContinuity, readHostStateSnapshotFromBoundary } from './host-state-continuity.mjs';
 import { canaryDnsName, hasCanaryAttempt } from './network-denial.mjs';
 import { providerFor } from './providers.mjs';
+import { redactSecrets, secretValuesFrom } from './redaction.mjs';
 import { serviceMappingsFor } from './topologies.mjs';
 import {
   activeServiceDigestExpectations,
@@ -94,6 +95,7 @@ const target = fixtureRelease({
 let bundlePath;
 
 let evidence;
+let harnessSecrets = [];
 try {
   mkdirSync(runRoot, { recursive: true });
   const trustedRootPath = join(runRoot, 'trusted-root.json');
@@ -214,6 +216,7 @@ try {
     ...provider.env(),
     ...imageEnv,
   });
+  harnessSecrets = secretValuesFrom(env);
   const configPath = join(deploymentRoot, 'host-update.json');
   const hostStateRoot = recoveryHostStateRoot(runRoot, { hostBoundary: true });
   provisionBoundaryHostState(hostContainer, repo, hostStateRoot, { channel: 'insider' });
@@ -662,12 +665,12 @@ try {
 } catch (error) {
   if (error?.evidenceWritten) {
     if (!error.success) {
-      console.error(error.message);
+      console.error(redactSecrets(error.message, harnessSecrets));
     }
     process.exitCode = error.success ? 0 : 1;
   } else {
   run.finishedAt = new Date().toISOString();
-  writeFileSync(join(runRoot, 'error.txt'), formatError(error), { mode: 0o600 });
+  writeFileSync(join(runRoot, 'error.txt'), redactSecrets(formatError(error), harnessSecrets), { mode: 0o600 });
   recordFaultCheckpoint();
   checkpoints.failed('e2e-complete');
   const failure = classifyFailure(error, join(runRoot, 'host-update', 'state', 'journal.ndjson'));
@@ -699,7 +702,7 @@ try {
     networkAttempts: readNetworkAttempts(networkAttemptsPath),
   });
   writeValidatedEvidence(evidencePath, evidence);
-  console.error(error.message);
+  console.error(redactSecrets(error.message, harnessSecrets));
   process.exitCode = 1;
   }
 } finally {
