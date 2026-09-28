@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Runs one isolated recovery-matrix cell. C2 is the first implemented cell:
-# monolith + PostgreSQL, network denied during import/activation/recovery.
+# Runs one isolated recovery-matrix cell with network denied during import,
+# activation and recovery.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -9,6 +9,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 CELL="c2"
 WORK_DIR="$REPO_ROOT/.recovery-matrix-work"
 EVIDENCE="$REPO_ROOT/.recovery-matrix-work/c2-evidence.json"
+EVIDENCE_PROVIDED=0
 COSIGN="${PF_COSIGN:-$HOME/.cache/pf-cosign/cosign}"
 KEEP_WORK=0
 FAULT_ARGS=()
@@ -18,7 +19,7 @@ usage() {
 Usage: scripts/ci/recovery-matrix/run-cell.sh [OPTIONS]
 
 Options:
-  --cell c2                 Cell to run (currently c2 only).
+  --cell <id|all>           Cell to run. Use all for every catalog cell.
   --work-dir DIR            Repo-local scratch directory. Default: .recovery-matrix-work
   --evidence FILE           Evidence JSON output path.
   --cosign FILE             Cosign executable. Default: PF_COSIGN or ~/.cache/pf-cosign/cosign
@@ -32,7 +33,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --cell) CELL="${2:?}"; shift 2 ;;
     --work-dir) WORK_DIR="${2:?}"; shift 2 ;;
-    --evidence) EVIDENCE="${2:?}"; shift 2 ;;
+    --evidence) EVIDENCE="${2:?}"; EVIDENCE_PROVIDED=1; shift 2 ;;
     --cosign) COSIGN="${2:?}"; shift 2 ;;
     --fault) FAULT_ARGS+=("--fault" "${2:?}"); shift 2 ;;
     --keep-work) KEEP_WORK=1; shift ;;
@@ -40,11 +41,6 @@ while [[ $# -gt 0 ]]; do
     *) echo "Unknown option: $1" >&2; usage; exit 2 ;;
   esac
 done
-
-if [[ "$CELL" != "c2" ]]; then
-  echo "Only recovery matrix cell c2 is implemented by this entrypoint." >&2
-  exit 2
-fi
 
 case "$WORK_DIR" in
   /tmp/*|/var/tmp/*) echo "--work-dir must not be under a system temp directory" >&2; exit 2 ;;
@@ -68,9 +64,28 @@ if [[ ! -x "$COSIGN" ]]; then
     echo "cosign is required (pass --cosign or set PF_COSIGN)" >&2
     exit 2
   fi
+
+  CELL_IDS="$(
+    node --input-type=module -e "import { cellIds } from './scripts/ci/recovery-matrix/cells.mjs'; console.log(cellIds.join(' '));"
+  )"
+  if [[ "$CELL" == "all" ]]; then
+    status=0
+    for matrix_cell in $CELL_IDS; do
+      cell_evidence="$EVIDENCE"
+      if [[ "$EVIDENCE_PROVIDED" == 0 ]]; then
+        cell_evidence="$WORK_DIR/$matrix_cell-evidence.json"
+      fi
+      "$0" --cell "$matrix_cell" --work-dir "$WORK_DIR" --evidence "$cell_evidence" --cosign "$COSIGN" "${FAULT_ARGS[@]}" || status=$?
+    done
+    exit "$status"
+  fi
+  case " $CELL_IDS " in
+    *" $CELL "*) ;;
+    *) echo "Unknown recovery matrix cell: $CELL (expected one of: $CELL_IDS, all)" >&2; exit 2 ;;
+  esac
 fi
 
-RUN_ID="c2-$(date -u +%Y%m%dt%H%M%Sz)-$$"
+RUN_ID="$CELL-$(date -u +%Y%m%dt%H%M%Sz)-$$"
 RUN_ROOT="$WORK_DIR/$RUN_ID"
 NETWORK="$RUN_ID-network"
 SINK="$RUN_ID-egress-sink"
@@ -149,6 +164,7 @@ docker run -d --name "$HOST" --label "$RUN_LABEL" --network "$NETWORK" --dns "$S
   "$HOST_IMAGE" sleep infinity >/dev/null
 
 node "$SCRIPT_DIR/run-cell.mjs" \
+  --cell "$CELL" \
   --repo "$REPO_ROOT" \
   --run-root "$RUN_ROOT" \
   --evidence "$EVIDENCE" \

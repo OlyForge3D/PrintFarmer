@@ -988,14 +988,28 @@ proves the boundary by attempting a DNS canary and a direct TCP connection from
 inside the host container; the canary must fail and be recorded by the sink,
 then it is cleared so any later recorded attempt fails the run.
 
-**First live cell.** C2 is the first reusable live cell: monolith topology,
-PostgreSQL, shared host-owned database/storage, managed workers and identical
-prior/target schemas. Its recovery trigger is operator-initiated: after a
-successful activation of N, the packaged `recover-offline` preview/confirm
-sequence rolls back to N-1 and must end `RolledBack`. C2 injects no
-post-activation fault and does not rely on automatic rollback; forced-failure
-variants belong to the fault-injection cells. Run it from an Ubuntu LTS x64
-host with Docker (containerd image store enabled; see
+**Live cell catalog.** The harness catalog is frozen in
+`scripts/ci/recovery-matrix/cells.mjs`. Positive recovery cells must import
+their infrastructure images from the offline bundle before Compose starts the
+database or proxy service, run Compose with `--pull never`, and pin each
+infrastructure image as `reference@<bundle index digest>`. The import decision
+record's loaded image list is recorded as checkpoint
+`infrastructure-loaded-from-bundle:<id>@<digest>,...`.
+
+| Cell id | Descriptor | Scenario | Expected outcome/reason | Local run status |
+| --- | --- | --- | --- | --- |
+| `c2` | monolith, PostgreSQL, shared host-owned database/storage, managed worker | `recover` | `RolledBack` | Implemented; emits pass/fail evidence from the live run |
+| `monolith-sqlserver` | monolith, SQL Server, shared host-owned database/storage, managed worker | `recover` | `RolledBack` | Implemented; live status recorded by each run |
+| `split-postgres` | split, PostgreSQL, shared host-owned database/storage, managed worker | `recover` | `RolledBack` | Implemented; live status recorded by each run |
+| `split-postgres-no-worker` | split, PostgreSQL, shared host-owned database/storage, no optional worker | `recover` | `RolledBack` | Implemented; live status recorded by each run |
+| `split-sqlserver` | split, SQL Server, shared host-owned database/storage, managed worker | `recover` | `RolledBack` | Implemented; live status recorded by each run |
+| `external-database` | monolith, PostgreSQL, shared database, externally owned database, host-owned storage | `needs-operator-recover` | `NeedsOperator` / `database_externally_owned` | Implemented; evidence must show no restore mutation |
+| `external-storage` | monolith, PostgreSQL, shared database, host-owned database, externally owned storage | `product-gap` | failing evidence with `NeedsOperator` / `storage_externally_owned` and failed checkpoint `product-owner-signal-unavailable:storage` | Intentionally failing until the product exposes a storage-owner signal; tracked by #3155 from #3100/#2982 |
+| `remote-worker` | monolith, PostgreSQL, shared host-owned database/storage, remote pinned worker | `refuse-activation` | `Refused` / `remote_worker_unsupported` | Implemented; refusal evidence must precede target mutation |
+| `split-database` | split, PostgreSQL, split application/slicer databases, host-owned storage, managed worker | `refuse-activation` | `Refused` / `split_database_not_supported` | Implemented; refusal evidence must precede mutation |
+
+Run a single cell from an Ubuntu LTS x64 host with Docker (containerd image
+store enabled; see
 [Docker image store requirement](#docker-image-store-requirement-3137)), Node.js,
 `jq`, Bash, .NET SDK/runtime support for the host-update CLI package and
 Cosign available:
@@ -1007,21 +1021,34 @@ scripts/ci/recovery-matrix/run-cell.sh \
   --cosign "$HOME/.cache/pf-cosign/cosign"
 ```
 
+Run every catalog cell:
+
+```bash
+scripts/ci/recovery-matrix/run-cell.sh \
+  --cell all \
+  --work-dir .recovery-matrix-work \
+  --cosign "$HOME/.cache/pf-cosign/cosign"
+```
+
 The script creates only a repo-local scratch deployment root, generates a
 throwaway `.env`, signs fixture releases with the per-run fixture root, installs
 the CLI with the packaged trusted root inside the denied host container, and
 writes schema-validated evidence. It gives the monolith container (not the
-database) a deterministic address on the Docker `--internal` bridge and sets
-the product `HealthCheckBaseUrl` to that address for the API host. The CLI's own
-`/health` verifier stays enabled while the host cannot egress because it probes
-from inside the compose network (#3127) rather than over that address. After the
-product verification step, the harness separately records the discovered
-`/health` entries and fails the cell if no queue/dispatch/outbox consumer entry
-is exposed. On a product build that still has the #3122 offline-recovery
-defects, this cell is expected to emit valid failing evidence with
-`outcome.expected` `RolledBack`, `outcome.actual` set from the product CLI
-output/journal, and `outcome.reason` naming the packaged instruction step and
-refusal.
+database) or split API container a deterministic address on the Docker
+`--internal` bridge and sets the product `HealthCheckBaseUrl` to that address
+for the API host. The database also gets a deterministic bridge address so the
+throwaway `host-update.json` can be written before the database exists; Compose
+starts the database only after the prior bundle import has loaded the database
+image from the bundle. The CLI's own `/health` verifier stays enabled while the
+host cannot egress because it probes from inside the compose network (#3127)
+rather than over that address. After the product verification step, the harness
+separately records the discovered `/health` entries and fails positive recovery
+cells if no queue/dispatch/outbox consumer entry is exposed. On a product build
+that still has offline-recovery defects, a cell is expected to emit valid
+failing evidence with `outcome.expected` set from the catalog,
+`outcome.actual` set from the product CLI output/journal, and
+`outcome.reason` naming the packaged instruction step and refusal unless the
+cell has a stable fail-closed reason.
 Use `--work-dir` to move scratch space to another non-system-temp directory and
 `--keep-work` only for debugging a failed local run. Without `--keep-work`, the
 script runs `docker compose down -v --remove-orphans`, removes the host and sink

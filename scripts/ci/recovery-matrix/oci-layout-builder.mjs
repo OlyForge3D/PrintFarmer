@@ -10,6 +10,8 @@ import {
 import { basename, join, resolve } from 'node:path';
 
 import { components, requireThat } from '../release-policy.mjs';
+import { defaultCell } from './cell-runtime.mjs';
+import { requiredInfrastructureIds, topologyFor } from './topologies.mjs';
 
 const ociIndex = 'application/vnd.oci.image.index.v1+json';
 const ociManifest = 'application/vnd.oci.image.manifest.v1+json';
@@ -178,6 +180,7 @@ export function buildC2ImageLayout({
   prior,
   target,
   run,
+  cell = defaultCell,
 }) {
   const layout = resolve(runRoot, 'oci-layout');
   rmSync(layout, { recursive: true, force: true });
@@ -190,16 +193,120 @@ export function buildC2ImageLayout({
   } catch {
     sourceCommit = run('git.exe', ['--no-pager', 'rev-parse', 'HEAD'], { cwd: repo }).trim();
   }
-  const priorTag = `printfarmer-c2-monolith-prior:${prior.version}`;
-  const targetTag = `printfarmer-c2-monolith-target:${target.version}`;
-  const priorSlicerTag = `printfarmer-c2-slicer-host-prior:${prior.version}`;
-  const targetSlicerTag = `printfarmer-c2-slicer-host-target:${target.version}`;
   const buildEnvironment = { ...process.env, DOCKER_BUILDKIT: '1' };
+  const topology = topologyFor(cell.topology);
+  const realServiceIds = topology.serviceIds(cell.workers);
+  const archives = Object.fromEntries(realServiceIds.map((serviceId) => [
+    serviceId,
+    buildServiceArchives({
+      repo,
+      runRoot,
+      imageScratch,
+      run,
+      buildEnvironment,
+      sourceCommit,
+      serviceId,
+      prior,
+      target,
+    }),
+  ]));
+
+  const priorImages = Object.fromEntries(Object.keys(components).map(id => [id, addTinyImage(layout, {
+    id,
+    version: prior.version,
+    labels: { 'org.printfarmer.fixture-release': 'prior' },
+  })]));
+  for (const serviceId of realServiceIds) {
+    priorImages[serviceId] = addDockerArchiveImage(layout, {
+      archive: archives[serviceId].priorArchive,
+      scratch: join(imageScratch, `extract-prior-${serviceId}`),
+      reference: `${imageRepository(serviceId)}:${prior.version}`,
+      extraPlatforms: components[serviceId]?.platforms?.includes('linux/arm64') ? ['linux/arm64'] : [],
+    });
+  }
+
+  const targetImages = Object.fromEntries(Object.keys(components).map(id => [id, addTinyImage(layout, {
+    id,
+    version: target.version,
+    labels: { 'org.printfarmer.fixture-release': 'target' },
+  })]));
+  for (const serviceId of realServiceIds) {
+    targetImages[serviceId] = addDockerArchiveImage(layout, {
+      archive: archives[serviceId].targetArchive,
+      scratch: join(imageScratch, `extract-target-${serviceId}`),
+      reference: `${imageRepository(serviceId)}:${target.version}`,
+      extraPlatforms: components[serviceId]?.platforms?.includes('linux/arm64') ? ['linux/arm64'] : [],
+    });
+  }
+
+  const sourceInfrastructureLock = JSON.parse(readFileSync(join(repo, 'scripts/docker/infrastructure-images.lock.json'), 'utf8'));
+  const infraById = Object.fromEntries(sourceInfrastructureLock.images.map(image => [image.id, image]));
+
+  const infrastructureIds = requiredInfrastructureIds(cell);
+  const infrastructureImages = {};
+  if (infrastructureIds.includes('postgres')) {
+    run('docker', ['pull', 'postgres:16-alpine'], { cwd: repo, stdio: ['ignore', 'inherit', 'pipe'] });
+    const postgresArchive = join(imageScratch, 'postgres.docker.tar');
+    run('docker', ['save', 'postgres:16-alpine', '--output', postgresArchive], { cwd: repo });
+    infrastructureImages.postgres = addDockerArchiveImage(layout, {
+      archive: postgresArchive,
+      scratch: join(imageScratch, 'extract-postgres'),
+      reference: infraById.postgres.reference,
+    });
+  }
+  if (infrastructureIds.includes('mssql')) {
+    run('docker', ['pull', infraById.mssql.reference], { cwd: repo, stdio: ['ignore', 'inherit', 'pipe'] });
+    const mssqlArchive = join(imageScratch, 'mssql.docker.tar');
+    run('docker', ['save', infraById.mssql.reference, '--output', mssqlArchive], { cwd: repo });
+    infrastructureImages.mssql = addDockerArchiveImage(layout, {
+      archive: mssqlArchive,
+      scratch: join(imageScratch, 'extract-mssql'),
+      reference: infraById.mssql.reference,
+    });
+  }
+  if (infrastructureIds.includes('nginx')) {
+    infrastructureImages.nginx = addTinyImage(layout, {
+      id: 'nginx',
+      version: target.version,
+      platforms: Object.keys(infraById.nginx.platforms),
+      reference: infraById.nginx.reference,
+      labels: { 'org.printfarmer.fixture-infrastructure': 'nginx' },
+    });
+  }
+  const infrastructureLock = {
+    schema: 1,
+    kind: 'printfarmer-infrastructure-images-lock',
+    images: infrastructureIds.sort().map((id) => ({
+      id,
+      reference: infraById[id].reference,
+      mediaType: infrastructureImages[id].mediaType,
+      digest: infrastructureImages[id].indexDigest,
+      platforms: infrastructureImages[id].platformDigests,
+    })),
+  };
+  return { layout, priorImages, targetImages, infrastructureLock };
+}
+
+export const buildCellImageLayout = buildC2ImageLayout;
+
+function buildServiceArchives({
+  repo,
+  runRoot,
+  imageScratch,
+  run,
+  buildEnvironment,
+  sourceCommit,
+  serviceId,
+  prior,
+  target,
+}) {
+  const priorTag = `printfarmer-${serviceId}-prior:${prior.version}`;
+  const targetTag = `printfarmer-${serviceId}-target:${target.version}`;
   run('docker', [
     'build',
     repo,
     '--file', join(repo, 'scripts/docker/dockerfiles/Dockerfile.multistage'),
-    '--target', 'monolith-runtime',
+    '--target', components[serviceId].target,
     '--tag', priorTag,
     '--build-arg', `GIT_SHA=${sourceCommit}`,
     '--build-arg', `VITE_GIT_SHA=${sourceCommit}`,
@@ -207,7 +314,7 @@ export function buildC2ImageLayout({
     '--build-arg', `VCS_REF=${sourceCommit}`,
   ], { cwd: repo, stdio: ['ignore', 'inherit', 'pipe'], env: buildEnvironment });
 
-  const deriveDockerfile = join(runRoot, 'Dockerfile.monolith-target');
+  const deriveDockerfile = join(runRoot, `Dockerfile.${serviceId}-target`);
   writeFileSync(deriveDockerfile, [
     `FROM ${priorTag}`,
     `LABEL org.printfarmer.recovery-fixture-target="${target.version}"`,
@@ -218,141 +325,10 @@ export function buildC2ImageLayout({
     stdio: ['ignore', 'inherit', 'pipe'],
     env: buildEnvironment,
   });
-  run('docker', [
-    'build',
-    repo,
-    '--file', join(repo, 'scripts/docker/dockerfiles/Dockerfile.multistage'),
-    '--target', 'slicer-host-runtime',
-    '--tag', priorSlicerTag,
-    '--build-arg', `GIT_SHA=${sourceCommit}`,
-    '--build-arg', `VITE_GIT_SHA=${sourceCommit}`,
-    '--build-arg', `BUILD_VERSION=${prior.version}`,
-    '--build-arg', `VCS_REF=${sourceCommit}`,
-  ], { cwd: repo, stdio: ['ignore', 'inherit', 'pipe'], env: buildEnvironment });
-  const deriveSlicerDockerfile = join(runRoot, 'Dockerfile.slicer-host-target');
-  writeFileSync(deriveSlicerDockerfile, [
-    `FROM ${priorSlicerTag}`,
-    `LABEL org.printfarmer.recovery-fixture-target="${target.version}"`,
-    '',
-  ].join('\n'));
-  run('docker', ['build', runRoot, '--file', deriveSlicerDockerfile, '--tag', targetSlicerTag], {
-    cwd: repo,
-    stdio: ['ignore', 'inherit', 'pipe'],
-    env: buildEnvironment,
-  });
 
-  const priorArchive = join(imageScratch, 'monolith-prior.docker.tar');
-  const targetArchive = join(imageScratch, 'monolith-target.docker.tar');
-  const priorSlicerArchive = join(imageScratch, 'slicer-host-prior.docker.tar');
-  const targetSlicerArchive = join(imageScratch, 'slicer-host-target.docker.tar');
+  const priorArchive = join(imageScratch, `${serviceId}-prior.docker.tar`);
+  const targetArchive = join(imageScratch, `${serviceId}-target.docker.tar`);
   run('docker', ['save', priorTag, '--output', priorArchive], { cwd: repo });
   run('docker', ['save', targetTag, '--output', targetArchive], { cwd: repo });
-  run('docker', ['save', priorSlicerTag, '--output', priorSlicerArchive], { cwd: repo });
-  run('docker', ['save', targetSlicerTag, '--output', targetSlicerArchive], { cwd: repo });
-
-  const priorImages = Object.fromEntries(Object.keys(components).map(id => [id, addTinyImage(layout, {
-    id,
-    version: prior.version,
-    labels: { 'org.printfarmer.fixture-release': 'prior' },
-  })]));
-  priorImages.monolith = addDockerArchiveImage(layout, {
-    archive: priorArchive,
-    scratch: join(imageScratch, 'extract-prior-monolith'),
-    reference: `${imageRepository('monolith')}:${prior.version}`,
-    extraPlatforms: ['linux/arm64'],
-  });
-  priorImages['slicer-host'] = addDockerArchiveImage(layout, {
-    archive: priorSlicerArchive,
-    scratch: join(imageScratch, 'extract-prior-slicer-host'),
-    reference: `${imageRepository('slicer-host')}:${prior.version}`,
-    extraPlatforms: ['linux/arm64'],
-  });
-  for (const serviceId of ['api']) {
-    priorImages[serviceId] = addDockerArchiveImage(layout, {
-      archive: priorArchive,
-      scratch: join(imageScratch, `extract-prior-${serviceId}`),
-      reference: `${imageRepository(serviceId)}:${prior.version}`,
-      extraPlatforms: ['linux/arm64'],
-    });
-  }
-
-  const targetImages = Object.fromEntries(Object.keys(components).map(id => [id, addTinyImage(layout, {
-    id,
-    version: target.version,
-    labels: { 'org.printfarmer.fixture-release': 'target' },
-  })]));
-  targetImages.monolith = addDockerArchiveImage(layout, {
-    archive: targetArchive,
-    scratch: join(imageScratch, 'extract-target-monolith'),
-    reference: `${imageRepository('monolith')}:${target.version}`,
-    extraPlatforms: ['linux/arm64'],
-  });
-  targetImages['slicer-host'] = addDockerArchiveImage(layout, {
-    archive: targetSlicerArchive,
-    scratch: join(imageScratch, 'extract-target-slicer-host'),
-    reference: `${imageRepository('slicer-host')}:${target.version}`,
-    extraPlatforms: ['linux/arm64'],
-  });
-  for (const serviceId of ['api']) {
-    targetImages[serviceId] = addDockerArchiveImage(layout, {
-      archive: targetArchive,
-      scratch: join(imageScratch, `extract-target-${serviceId}`),
-      reference: `${imageRepository(serviceId)}:${target.version}`,
-      extraPlatforms: ['linux/arm64'],
-    });
-  }
-
-  const sourceInfrastructureLock = JSON.parse(readFileSync(join(repo, 'scripts/docker/infrastructure-images.lock.json'), 'utf8'));
-  const infraById = Object.fromEntries(sourceInfrastructureLock.images.map(image => [image.id, image]));
-
-  run('docker', ['pull', 'postgres:16-alpine'], { cwd: repo, stdio: ['ignore', 'inherit', 'pipe'] });
-  const postgresArchive = join(imageScratch, 'postgres.docker.tar');
-  run('docker', ['save', 'postgres:16-alpine', '--output', postgresArchive], { cwd: repo });
-  const postgres = addDockerArchiveImage(layout, {
-    archive: postgresArchive,
-    scratch: join(imageScratch, 'extract-postgres'),
-    reference: 'docker.io/library/postgres:16-alpine',
-  });
-  const nginx = addTinyImage(layout, {
-    id: 'nginx',
-    version: target.version,
-    platforms: Object.keys(infraById.nginx.platforms),
-    reference: infraById.nginx.reference,
-    labels: { 'org.printfarmer.fixture-infrastructure': 'nginx' },
-  });
-  const mssql = addTinyImage(layout, {
-    id: 'mssql',
-    version: target.version,
-    platforms: Object.keys(infraById.mssql.platforms),
-    reference: infraById.mssql.reference,
-    labels: { 'org.printfarmer.fixture-infrastructure': 'mssql' },
-  });
-  const infrastructureLock = {
-    schema: 1,
-    kind: 'printfarmer-infrastructure-images-lock',
-    images: [
-      {
-        id: 'mssql',
-        reference: infraById.mssql.reference,
-        mediaType: mssql.mediaType,
-        digest: mssql.indexDigest,
-        platforms: mssql.platformDigests,
-      },
-      {
-        id: 'nginx',
-        reference: infraById.nginx.reference,
-        mediaType: nginx.mediaType,
-        digest: nginx.indexDigest,
-        platforms: nginx.platformDigests,
-      },
-      {
-        id: 'postgres',
-        reference: infraById.postgres.reference,
-        mediaType: postgres.mediaType,
-        digest: postgres.indexDigest,
-        platforms: postgres.platformDigests,
-      },
-    ],
-  };
-  return { layout, priorImages, targetImages, infrastructureLock };
+  return { priorArchive, targetArchive };
 }

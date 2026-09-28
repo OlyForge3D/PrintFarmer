@@ -9,6 +9,8 @@ import {
   networkDenialMechanism,
   validateRecoveryEvidence,
 } from './evidence.mjs';
+import { providerFor } from './providers.mjs';
+import { serviceMappingsFor, topologyFor } from './topologies.mjs';
 
 export const defaultCell = Object.freeze({
   topology: 'monolith',
@@ -190,6 +192,11 @@ export function writeThrowawayEnv(path, values = {}) {
     POSTGRES_DB: 'printfarmer',
     POSTGRES_USER: 'printfarmer',
     POSTGRES_PASSWORD: createHash('sha256').update(`postgres-${process.pid}-${Date.now()}`).digest('hex'),
+    MSSQL_DB: 'printfarmer',
+    MSSQL_USER: 'sa',
+    MSSQL_PID: 'Developer',
+    ACCEPT_EULA: 'Y',
+    MSSQL_SA_PASSWORD: `Pf!${createHash('sha256').update(`mssql-${process.pid}-${Date.now()}`).digest('hex').slice(0, 28)}aA1`,
     Jwt__Key: createHash('sha256').update(`jwt-${process.pid}-${Date.now()}`).digest('base64url'),
     Jwt__Issuer: 'PrintFarmerRecoveryHarness',
     Jwt__Audience: 'PrintFarmerRecoveryHarness',
@@ -220,10 +227,20 @@ export function writeHostUpdateConfig(path, {
   docker = '/usr/bin/docker',
   pgDump = 'pg_dump',
   pgRestore = 'pg_restore',
+  sqlcmd = 'sqlcmd',
   healthBaseUrl = 'http://127.0.0.1:5245',
-  activeServiceIds = ['monolith'],
+  activeServiceIds,
+  serviceMappings,
+  cell = defaultCell,
+  databaseProvider,
+  databaseExternallyOwned,
+  slicerConnectionString,
   createHostStateRoot = true,
 } = {}) {
+  const provider = databaseProvider ?? providerFor(cell.provider);
+  const topology = topologyFor(cell.topology);
+  const resolvedActiveServiceIds = activeServiceIds ?? topology.activeServiceIds(cell.workers);
+  const resolvedServiceMappings = serviceMappings ?? serviceMappingsFor(cell);
   const compose = (name) => join(deploymentRoot, name);
   const ownedDirectories = {
     'app-data': join(deploymentRoot, 'volumes', 'app-data'),
@@ -241,23 +258,11 @@ export function writeHostUpdateConfig(path, {
   ]) {
     mkdirSync(directory, { recursive: true });
   }
-  const serviceMappings = [
-    'api',
-    'frontend',
-    'slicer-host',
-    'printer-discovery',
-    'orcaslicer-worker',
-    'monolith',
-  ].map((serviceId) => ({
-    serviceId,
-    composeServiceName: 'printfarmer',
-    imageEnvironmentVariable: 'PRINTFARMER_IMAGE',
-    imageRepository: `ghcr.io/olyforge3d/printfarmer-${serviceId}`,
-  }));
   const config = {
-    DB_PROVIDER: 'Postgres',
+    DB_PROVIDER: provider.dbProvider,
     ConnectionStrings: {
       Default: databaseConnectionString,
+      ...(slicerConnectionString ? { SlicerDatabase: slicerConnectionString } : {}),
     },
     Jwt: {
       Key: jwtKey,
@@ -277,16 +282,18 @@ export function writeHostUpdateConfig(path, {
         'docker-compose': docker,
         pg_dump: pgDump,
         pg_restore: pgRestore,
+        sqlcmd,
       },
       MinimumFreeBytes: 1,
-      SupportedProviderNames: ['Npgsql.EntityFrameworkCore.PostgreSQL'],
-      ActiveServiceIds: activeServiceIds,
+      SupportedProviderNames: [provider.supportedProviderName],
+      ActiveServiceIds: resolvedActiveServiceIds,
       RequiredFencedWriterNames: [],
+      DatabaseExternallyOwned: databaseExternallyOwned ?? cell.databaseOwner === 'external',
       OwnedDirectories: ownedDirectories,
       ComposeFiles: [compose('docker-compose.recovery.yml')],
       ComposeProjectName: projectName,
       HealthCheckBaseUrl: healthBaseUrl,
-      ServiceMappings: serviceMappings,
+      ServiceMappings: resolvedServiceMappings,
     },
   };
   writeFileSync(path, `${JSON.stringify(config, undefined, 2)}\n`, { mode: 0o600 });
