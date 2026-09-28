@@ -340,6 +340,7 @@ test('containerized dotnet fallback runs as a non-root invoking user so cleanup 
 
   const rootArgs = containerizedDotnetArgs({ commandArgs: ['--info'], cwd: '/repo', mounts: ['/repo'], uid: 0, gid: 0 });
   assert.ok(!rootArgs.includes('--user'));
-  const windowsArgs = containerizedDotnetArgs({ commandArgs: ['--info'], cwd: '/repo', mounts: ['/repo'], uid: undefined });
+  // `undefined` would fall back to process.getuid() on Linux; null simulates Windows, which has no uid.
+  const windowsArgs = containerizedDotnetArgs({ commandArgs: ['--info'], cwd: '/repo', mounts: ['/repo'], uid: null, gid: null });
   assert.ok(!windowsArgs.includes('--user'));
 });
