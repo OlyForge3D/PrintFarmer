@@ -146,7 +146,10 @@ alone is not success: read its `outcome` and `detail`.
 
 The executor proceeds through `Accepted`, `Preflight`, `Draining`, `Fenced`,
 `BackedUp`, `Migrating`, `Applying`, `Verifying`, then `Completed`, or
-`RecoveryRequired`. Receipts such as `migration:before` and `migration:after`
+`RecoveryRequired`. A preflight refusal (such as `split_database_not_supported`)
+instead ends in `Refused` with its stable code, before any drain, fence, backup
+or mutation; nothing needs recovery, and the release can be re-run once the
+cause is fixed. Receipts such as `migration:before` and `migration:after`
 distinguish intent from observed completion. Drain waits for active work and
 proven writer quiescence; a timeout defers/fails closed, never cancels a physical
 print. Do not clear pending commands, leases or job pins to force progress.
@@ -994,6 +997,7 @@ returning does not itself grant permission to execute.
 | No execution history, including a fetched approval or verification audit alone | `approval_required`; defer, no new admission | Wait for live enrollment/approval facilities; a verification record is not authorization |
 | Bound `Accepted`, before staging | `confirmation_required`; defer | Obtain fresh signed confirmation before any new side effect |
 | Bound `Preflight`, before/after staging | `confirmation_required`; no staging replay or expiry extension | Inspect `status`; staged images alone do not prove current authorization |
+| Bound `Refused` (`refused:<code>`) with only `Accepted`/`Preflight` history | `preflight_refused`; await a fresh approval, never recovery | Fix the refusal cause (for example split databases), then re-run; nothing was drained, fenced or changed |
 | Bound `Draining`, `Fenced`, `BackedUp`, `Migrating`, `Applying` or `Verifying`, and execution lock is free | `execution_interrupted`; append request-bound `RecoveryRequired` / `failure:daemon_interrupted` once | Use the existing local recovery preview and confirmation flow |
 | Execution/recovery lock held | `execution_lock_held`; defer without reading/changing checkpoints | Let the current holder reach its safe checkpoint; never delete the lock |
 | `RecoveryRequired`, including `recovery:started`, `recovery:interrupted` or `recovery:unknown` | `recovery_required` or `recovery_interrupted`; never automatically retry recovery | Preview recovery locally, preserve writer fences and reconcile physical commands |

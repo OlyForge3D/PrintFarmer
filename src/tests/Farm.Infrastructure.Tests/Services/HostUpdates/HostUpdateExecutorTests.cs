@@ -55,6 +55,74 @@ public sealed class HostUpdateExecutorTests
 
     [Fact] public void Journal_reconstructs_and_rejects_truncation() { string path = Path.Combine(HostStateTestPaths.TempRoot, Guid.NewGuid() + ".journal"); try { var journal = new FileHostUpdateExecutionJournal(path); journal.Append(new("a", "r", HostUpdateExecutionState.Accepted, "accepted", DateTimeOffset.UtcNow)); Assert.Single(journal.Read("r")); File.WriteAllText(path, File.ReadAllText(path)[..^3]); Assert.Throws<InvalidDataException>(() => journal.Read("r")); } finally { if (File.Exists(path)) { File.Delete(path); } } }
     [Fact] public async Task Executor_persists_transition_order_and_completion_async() { var steps = new FakeSteps(); var journal = new MemoryJournal(); var executor = new HostUpdateExecutor(steps, journal, new NoopLock(), automationPolicyRepository: new InlinePolicyRepository(Policy())); var result = await executor.ExecuteAsync(Request()); Assert.True(result.Succeeded); Assert.Equal(new[] { "preflight", "drain", "fence", "backup", "migration", "apply", "verify" }, steps.Calls); }
+
+    [Theory]
+    [InlineData("split_database_not_supported")]
+    [InlineData("topology_mismatch")]
+    [InlineData("unsupported_provider:mysql")]
+    public async Task Executor_preserves_preflight_refusal_code_without_recovery_async(string code)
+    {
+        var steps = new RefusingSteps(code);
+        var journal = new MemoryJournal();
+        var executor = new HostUpdateExecutor(steps, journal, new NoopLock(), automationPolicyRepository: new InlinePolicyRepository(Policy()));
+
+        HostUpdateExecutionResult result = await executor.ExecuteAsync(Request());
+
+        Assert.Equal(HostUpdateExecutionState.Refused, result.State);
+        Assert.Equal(code, result.FailureCode);
+        Assert.False(result.Succeeded);
+        Assert.Equal(new[] { "preflight" }, steps.Calls);
+        IReadOnlyList<HostUpdateExecutionActivity> history = journal.Read(Request().ReleaseId);
+        Assert.Equal(HostUpdateExecutionState.Refused, history[^1].State);
+        Assert.Equal("refused:" + code, history[^1].Phase);
+        Assert.DoesNotContain(history, a => a.State == HostUpdateExecutionState.RecoveryRequired);
+        Assert.True(HostUpdateExecutor.IsBeforeAnyMutation(history));
+
+        HostUpdateDaemonCheckpointStatus checkpoint = HostUpdateDaemonCheckpoints.Evaluate(history);
+        Assert.Equal(HostUpdateDaemonCheckpointAction.AwaitApproval, checkpoint.Action);
+        Assert.Equal("preflight_refused", checkpoint.Code);
+        Assert.Null(checkpoint.RecoveryHint);
+    }
+
+    [Fact]
+    public async Task Daemon_checkpoint_still_requires_operator_when_activation_was_interrupted_async()
+    {
+        var journal = new MemoryJournal();
+        await new HostUpdateExecutor(new PreflightFailureDuringApplySteps(), journal, new NoopLock(), automationPolicyRepository: new InlinePolicyRepository(Policy())).ExecuteAsync(Request());
+
+        HostUpdateDaemonCheckpointStatus checkpoint = HostUpdateDaemonCheckpoints.Evaluate(journal.Read(Request().ReleaseId));
+
+        Assert.Equal(HostUpdateDaemonCheckpointAction.NeedsOperator, checkpoint.Action);
+    }
+
+    [Fact]
+    public async Task Executor_retries_cleanly_after_preflight_refusal_is_resolved_async()
+    {
+        var journal = new MemoryJournal();
+        var refused = await new HostUpdateExecutor(new RefusingSteps("split_database_not_supported"), journal, new NoopLock(), automationPolicyRepository: new InlinePolicyRepository(Policy())).ExecuteAsync(Request());
+        Assert.Equal(HostUpdateExecutionState.Refused, refused.State);
+
+        var steps = new FakeSteps();
+        var retried = await new HostUpdateExecutor(steps, journal, new NoopLock(), automationPolicyRepository: new InlinePolicyRepository(Policy())).ExecuteAsync(Request());
+
+        Assert.True(retried.Succeeded);
+        Assert.Equal(new[] { "preflight", "drain", "fence", "backup", "migration", "apply", "verify" }, steps.Calls);
+        Assert.Single(journal.Read(Request().ReleaseId), a => a.State == HostUpdateExecutionState.Accepted);
+    }
+
+    [Fact]
+    public async Task Executor_keeps_mid_activation_preflight_exception_as_recovery_required_async()
+    {
+        var steps = new PreflightFailureDuringApplySteps();
+        var journal = new MemoryJournal();
+        var executor = new HostUpdateExecutor(steps, journal, new NoopLock(), automationPolicyRepository: new InlinePolicyRepository(Policy()));
+
+        HostUpdateExecutionResult result = await executor.ExecuteAsync(Request());
+
+        Assert.Equal(HostUpdateExecutionState.RecoveryRequired, result.State);
+        Assert.Equal(HostUpdateExecutionState.RecoveryRequired, journal.Read(Request().ReleaseId)[^1].State);
+        Assert.DoesNotContain(journal.Read(Request().ReleaseId), a => a.State == HostUpdateExecutionState.Refused);
+    }
     [Fact]
     public async Task Executor_rejects_policy_fingerprint_drift_before_execution()
     {
@@ -477,5 +545,19 @@ public sealed class HostUpdateExecutorTests
 
     private sealed class NoopLock : IHostUpdateExecutionLock { public IHostUpdateExecutionLease Acquire(TimeSpan timeout, CancellationToken cancellationToken) => new Lease(); private sealed class Lease : IHostUpdateExecutionLease { public void Dispose() { } } }
     private sealed class MemoryJournal : IHostUpdateExecutionJournal { private readonly List<HostUpdateExecutionActivity> entries = []; public IReadOnlyList<HostUpdateExecutionActivity> Read(string releaseId) => entries.Where(e => e.ReleaseId == releaseId).ToArray(); public IReadOnlyList<string> ListReleaseIds() => entries.Select(e => e.ReleaseId).Distinct(StringComparer.Ordinal).ToArray(); public void Append(HostUpdateExecutionActivity activity) => entries.Add(activity); }
-    private class FakeSteps : IHostUpdateExecutionSteps { public List<string> Calls { get; } = []; public Task PreflightAsync(HostUpdateExecutionRequest r, CancellationToken c) => AddAsync("preflight"); public Task DrainAsync(HostUpdateExecutionRequest r, CancellationToken c) => AddAsync("drain"); public Task FenceAsync(HostUpdateExecutionRequest r, CancellationToken c) => AddAsync("fence"); public Task BackupAsync(HostUpdateExecutionRequest r, CancellationToken c) => AddAsync("backup"); public Task MigrateAsync(HostUpdateExecutionRequest r, CancellationToken c) => AddAsync("migration"); public virtual Task ApplyAsync(HostUpdateExecutionRequest r, CancellationToken c) => AddAsync("apply"); public Task VerifyAsync(HostUpdateExecutionRequest r, CancellationToken c) => AddAsync("verify"); private Task AddAsync(string value) { Calls.Add(value); return Task.CompletedTask; } }
+    private sealed class RefusingSteps(string code) : FakeSteps
+    {
+        public override Task PreflightAsync(HostUpdateExecutionRequest r, CancellationToken c)
+        {
+            Calls.Add("preflight");
+            throw new HostUpdatePreflightFailedException(code);
+        }
+    }
+
+    private sealed class PreflightFailureDuringApplySteps : FakeSteps
+    {
+        public override Task ApplyAsync(HostUpdateExecutionRequest r, CancellationToken c) => throw new HostUpdatePreflightFailedException("split_database_not_supported");
+    }
+
+    private class FakeSteps : IHostUpdateExecutionSteps { public List<string> Calls { get; } = []; public virtual Task PreflightAsync(HostUpdateExecutionRequest r, CancellationToken c) => AddAsync("preflight"); public Task DrainAsync(HostUpdateExecutionRequest r, CancellationToken c) => AddAsync("drain"); public Task FenceAsync(HostUpdateExecutionRequest r, CancellationToken c) => AddAsync("fence"); public Task BackupAsync(HostUpdateExecutionRequest r, CancellationToken c) => AddAsync("backup"); public Task MigrateAsync(HostUpdateExecutionRequest r, CancellationToken c) => AddAsync("migration"); public virtual Task ApplyAsync(HostUpdateExecutionRequest r, CancellationToken c) => AddAsync("apply"); public Task VerifyAsync(HostUpdateExecutionRequest r, CancellationToken c) => AddAsync("verify"); private Task AddAsync(string value) { Calls.Add(value); return Task.CompletedTask; } }
 }

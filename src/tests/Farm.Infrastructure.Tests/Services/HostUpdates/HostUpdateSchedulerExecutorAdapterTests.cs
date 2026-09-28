@@ -50,6 +50,7 @@ public sealed class HostUpdateSchedulerExecutorAdapterTests
     [Theory]
     [InlineData(HostUpdateExecutionState.RecoveryRequired, HostUpdateExecutorResult.RecoveryRequired)]
     [InlineData(HostUpdateExecutionState.Applying, HostUpdateExecutorResult.Refused)]
+    [InlineData(HostUpdateExecutionState.Refused, HostUpdateExecutorResult.Refused)]
     public async Task ExecuteAsync_MapsHostUpdateStateToSchedulerResult(HostUpdateExecutionState state, HostUpdateExecutorResult expected)
     {
         CapturingExecutor executor = new(new HostUpdateExecutionResult(Request().ReleaseId, state, "failure-code", []));

@@ -130,6 +130,33 @@ public sealed partial class HostUpdateCliOfflineActivateTests : IDisposable, IAs
     }
 
     [HostStateFact]
+    public async Task Preflight_refusal_reports_stable_code_and_refused_state_without_mutation()
+    {
+        await ImportAsync();
+        RecordingExecutionSteps steps = new(null)
+        {
+            PreflightFailure = new HostUpdatePreflightFailedException("split_database_not_supported"),
+        };
+
+        JsonElement refused = Envelope(await RunAsync(Activate(), services =>
+        {
+            services.RemoveAll<IHostUpdateLocalImageVerifier>();
+            services.AddSingleton(_imageVerifier);
+            services.AddSingleton<IHostUpdateLocalImageVerifier>(sp => sp.GetRequiredService<FakeLocalImageVerifier>());
+            services.RemoveAll<IHostUpdateOfflineActivationSafetyProbe>();
+            services.AddSingleton<IHostUpdateOfflineActivationSafetyProbe>(_safetyProbe);
+            services.RemoveAll<IHostUpdateExecutionSteps>();
+            services.AddScoped<IHostUpdateExecutionSteps>(_ => steps);
+        }));
+
+        refused.GetProperty("exitCode").GetInt32().Should().Be(HostUpdateCliExitCodes.Refused, refused.ToString());
+        JsonElement result = refused.GetProperty("result");
+        result.GetProperty("state").GetString().Should().Be(nameof(HostUpdateExecutionState.Refused));
+        result.GetProperty("reason").GetString().Should().Be("split_database_not_supported");
+        steps.Calls.Should().Equal("preflight");
+    }
+
+    [HostStateFact]
     public async Task Imported_bundle_reaches_real_scoped_executor_with_durable_policy_repository()
     {
         await ImportAsync();
@@ -1034,7 +1061,9 @@ public sealed partial class HostUpdateCliOfflineActivateTests : IDisposable, IAs
 
         public Exception? VerifyFailure { get; init; }
 
-        public Task PreflightAsync(HostUpdateExecutionRequest request, CancellationToken ct) { Calls.Add("preflight"); return Task.CompletedTask; }
+        public Exception? PreflightFailure { get; init; }
+
+        public Task PreflightAsync(HostUpdateExecutionRequest request, CancellationToken ct) { Calls.Add("preflight"); return PreflightFailure is null ? Task.CompletedTask : Task.FromException(PreflightFailure); }
         public Task DrainAsync(HostUpdateExecutionRequest request, CancellationToken ct) { Calls.Add("drain"); return Task.CompletedTask; }
         public Task FenceAsync(HostUpdateExecutionRequest request, CancellationToken ct) { Calls.Add("fence"); return Task.CompletedTask; }
         public Task BackupAsync(HostUpdateExecutionRequest request, CancellationToken ct) { Calls.Add("backup"); return Task.CompletedTask; }

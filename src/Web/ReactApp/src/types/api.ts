@@ -5139,7 +5139,8 @@ export type HostUpdateExecutionState =
   | 'Applying'
   | 'Verifying'
   | 'Completed'
-  | 'RecoveryRequired';
+  | 'RecoveryRequired'
+  | 'Refused';
 
 export interface HostUpdateExecutionActivity {
   activityId: string;

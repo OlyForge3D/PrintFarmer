@@ -8,7 +8,11 @@ foundation, issue #2663 adds concrete, repository-appropriate step adapters for 
 described below: an operator (or, later, #2666's scheduler once it is granted standing permission
 — not yet the case here) submits a staged release id through the admin API; execution resolves the immutable request only from server-side verified staging journal evidence, then drives it through
 preflight → drain → fence → backup → migration → apply → verify, or into `RecoveryRequired` on any
-failure. There is still no automatic/unattended execution path.
+failure after preflight. A `HostUpdatePreflightFailedException` raised by preflight (for example
+`split_database_not_supported`, `topology_mismatch`, `unsupported_provider:<name>`) happens before
+any drain, fence, backup or mutation, so it ends in the retryable `Refused` state with that stable
+code as `FailureCode`, journaled as `refused:<code>` (issue #3182). There is still no
+automatic/unattended execution path.
 
 ## Configuration: `HostUpdateExecutionOptions`
 

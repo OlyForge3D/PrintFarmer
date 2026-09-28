@@ -331,6 +331,12 @@ public sealed class HostUpdateExecutionAvailabilityProvider(
                 continue;
             }
 
+            // A preflight refusal never drained, fenced or mutated anything (issue #3182).
+            if (last == HostUpdateExecutionState.Refused && HostUpdateExecutor.IsBeforeAnyMutation(activities))
+            {
+                continue;
+            }
+
             // Journaled recovery records a confirmed rollback as Completed/recovery:rolled_back
             // rather than fence-release:after, so both terminal shapes consult the outcome store.
             if (last == HostUpdateExecutionState.RecoveryRequired ||
