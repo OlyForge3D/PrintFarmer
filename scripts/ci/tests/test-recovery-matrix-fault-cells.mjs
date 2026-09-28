@@ -215,7 +215,7 @@ test('docker shim pause-before gate holds the side effect until the harness deci
   assert.equal(failed.code, 70);
   assert.equal(failed.pause.mode, 'pause-before');
   assert.equal(realCalls(dir).length, 1, 'a failed pause-before never executes the side effect');
-  assert.ok(!existsSync(files.spec), 'the gate is one-shot');
+  assert.throws(() => readFileSync(files.spec), { code: 'ENOENT' }, 'the gate is one-shot');
 
   assert.equal(spawnSync(shim, migration).status, 0, 'a disarmed gate passes through');
   assert.equal(realCalls(dir).length, 2);
