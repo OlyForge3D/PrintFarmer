@@ -432,6 +432,11 @@ namespace Farm.Slicer.Migrations.PostgreSQL.Migrations
                     b.HasIndex("SlicerType");
 
                     b.HasIndex("Name", "SlicerType")
+                        .IsUnique()
+                        .HasDatabaseName("IX_MachineProfiles_Name_SlicerType_Unowned")
+                        .HasFilter("\"CreatedByUserId\" IS NULL");
+
+                    b.HasIndex("CreatedByUserId", "Name", "SlicerType")
                         .IsUnique();
 
                     b.ToTable("MachineProfiles", "slicer");
@@ -687,6 +692,11 @@ namespace Farm.Slicer.Migrations.PostgreSQL.Migrations
                     b.HasIndex("SlicerType");
 
                     b.HasIndex("Name", "SlicerType", "PrinterModelId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_ProcessProfiles_Name_SlicerType_PrinterModelId_Unowned")
+                        .HasFilter("\"CreatedByUserId\" IS NULL AND \"PrinterModelId\" IS NOT NULL");
+
+                    b.HasIndex("CreatedByUserId", "Name", "SlicerType", "PrinterModelId")
                         .IsUnique();
 
                     b.ToTable("ProcessProfiles", "slicer");

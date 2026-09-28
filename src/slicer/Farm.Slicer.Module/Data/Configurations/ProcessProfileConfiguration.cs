@@ -13,6 +13,13 @@ namespace Farm.Slicer.Module.Data.Configurations;
 /// </remarks>
 public class ProcessProfileConfiguration : IEntityTypeConfiguration<ProcessProfile>
 {
+    /// <summary>
+    /// Name of the unique <c>(Name, SlicerType, PrinterModelId)</c> index over unowned
+    /// (system/stock) rows. Its filter is provider-specific SQL, so it is applied in
+    /// <see cref="SlicerDbContext"/> rather than here.
+    /// </summary>
+    public const string UnownedNameUniqueIndexName = "IX_ProcessProfiles_Name_SlicerType_PrinterModelId_Unowned";
+
     /// <inheritdoc/>
     public void Configure(EntityTypeBuilder<ProcessProfile> builder)
     {
@@ -35,7 +42,15 @@ public class ProcessProfileConfiguration : IEntityTypeConfiguration<ProcessProfi
         _ = builder.HasIndex(p => p.CreatedByUserId);
 
         // Indexes
-        _ = builder.HasIndex(p => new { p.Name, p.SlicerType, p.PrinterModelId }).IsUnique();
+        // Name uniqueness is scoped per owner (#3198, mirroring #3192 for filaments); see
+        // MachineProfileConfiguration. PrinterModelId is nullable, and a NULL model never
+        // participates in uniqueness on any provider: PostgreSQL and SQLite treat NULLs as distinct,
+        // and SQL Server gets EF's auto "IS NOT NULL" filter for the per-owner index and an explicit
+        // one for the unowned index. That preserves the pre-#3198 semantics of the global index.
+        _ = builder.HasIndex(p => new { p.CreatedByUserId, p.Name, p.SlicerType, p.PrinterModelId }).IsUnique();
+        _ = builder.HasIndex(p => new { p.Name, p.SlicerType, p.PrinterModelId })
+            .IsUnique()
+            .HasDatabaseName(UnownedNameUniqueIndexName);
         _ = builder.HasIndex(p => p.SlicerType);
         _ = builder.HasIndex(p => p.IsDefault);
         _ = builder.HasIndex(p => p.IsPublic);

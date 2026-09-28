@@ -38,6 +38,16 @@ public class EfMachineProfileRepository(SlicerDbContext db) : IMachineProfileRep
         await _db.MachineProfiles.AsNoTracking().FirstOrDefaultAsync(p => p.Hash == hash, ct);
 
     /// <inheritdoc/>
+    public async Task<bool> OwnerHasNameAsync(Guid ownerUserId, string name, SlicerType slicerType, Guid? excludeProfileId = null, CancellationToken ct = default) =>
+        await _db.MachineProfiles.AsNoTracking()
+            .AnyAsync(
+                p => p.CreatedByUserId == ownerUserId &&
+                    p.Name == name &&
+                    p.SlicerType == slicerType &&
+                    (excludeProfileId == null || p.Id != excludeProfileId),
+                ct);
+
+    /// <inheritdoc/>
     public async Task AddAsync(MachineProfile profile, CancellationToken ct = default)
     {
         _ = _db.MachineProfiles.Add(profile);

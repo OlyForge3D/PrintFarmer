@@ -1504,7 +1504,7 @@ public class ProfilesController(
         }
         catch (ProfileNameConflictException ex)
         {
-            _logger.LogInformation("Clone profile rejected: caller already owns a filament profile with this name");
+            _logger.LogInformation("Clone profile rejected: caller already owns a profile with this name");
             return ProfileNameConflict(ex);
         }
         catch (Exception ex)
@@ -1548,7 +1548,7 @@ public class ProfilesController(
         }
         catch (ProfileNameConflictException ex)
         {
-            _logger.LogInformation("Upload profile rejected: caller already owns a filament profile with this name");
+            _logger.LogInformation("Upload profile rejected: caller already owns a profile with this name");
             return ProfileNameConflict(ex);
         }
         catch (Exception ex)
@@ -1734,7 +1734,7 @@ public class ProfilesController(
         }
         catch (ProfileNameConflictException ex)
         {
-            _logger.LogInformation("Update profile rejected: caller already owns a filament profile with this name");
+            _logger.LogInformation("Update profile rejected: caller already owns a profile with this name");
             return ProfileNameConflict(ex);
         }
         catch (InvalidOperationException ex)
@@ -1884,7 +1884,7 @@ public class ProfilesController(
     }
 
     /// <summary>
-    /// 409 for a same-owner filament name collision (#3192), shaped like
+    /// 409 for a same-owner profile name collision (#3192, #3198), shaped like
     /// <c>profile_family_name_conflict</c>. The service only raises it after a caller-scoped check,
     /// so it never reveals another user's profile names.
     /// </summary>

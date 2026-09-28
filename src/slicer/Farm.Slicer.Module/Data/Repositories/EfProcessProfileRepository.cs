@@ -56,6 +56,18 @@ public class EfProcessProfileRepository(SlicerDbContext db) : IProcessProfileRep
         await _db.ProcessProfiles.AsNoTracking().FirstOrDefaultAsync(p => p.Hash == hash, ct);
 
     /// <inheritdoc/>
+    public async Task<bool> OwnerHasNameAsync(Guid ownerUserId, string name, SlicerType slicerType, Guid? printerModelId, Guid? excludeProfileId = null, CancellationToken ct = default) =>
+        printerModelId.HasValue &&
+        await _db.ProcessProfiles.AsNoTracking()
+            .AnyAsync(
+                p => p.CreatedByUserId == ownerUserId &&
+                    p.Name == name &&
+                    p.SlicerType == slicerType &&
+                    p.PrinterModelId == printerModelId &&
+                    (excludeProfileId == null || p.Id != excludeProfileId),
+                ct);
+
+    /// <inheritdoc/>
     public async Task AddAsync(ProcessProfile profile, CancellationToken ct = default)
     {
         profile.CreatedAt = DateTime.UtcNow;

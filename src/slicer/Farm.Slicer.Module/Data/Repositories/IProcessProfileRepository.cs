@@ -27,6 +27,22 @@ public interface IProcessProfileRepository
     /// <summary>Gets a process profile by its content hash.</summary>
     Task<ProcessProfile?> GetByHashAsync(string hash, CancellationToken ct = default);
 
+    /// <summary>
+    /// Returns whether <paramref name="ownerUserId"/> already owns a process profile with the given
+    /// identity, the key of the per-owner unique index (#3198). Reads only the caller's own rows,
+    /// so it never reveals another user's private profile names. Name comparison follows the
+    /// database collation, matching the index it mirrors. Always <see langword="false"/> for a
+    /// <see langword="null"/> <paramref name="printerModelId"/>, because a NULL model never
+    /// participates in that index on any provider.
+    /// </summary>
+    /// <param name="ownerUserId">The owning user.</param>
+    /// <param name="name">The profile name.</param>
+    /// <param name="slicerType">The slicer engine type.</param>
+    /// <param name="printerModelId">The printer model the profile is scoped to, if any.</param>
+    /// <param name="excludeProfileId">Optional profile to ignore (the row being renamed).</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<bool> OwnerHasNameAsync(Guid ownerUserId, string name, SlicerType slicerType, Guid? printerModelId, Guid? excludeProfileId = null, CancellationToken ct = default);
+
     /// <summary>Adds a new process profile.</summary>
     Task AddAsync(ProcessProfile profile, CancellationToken ct = default);
 

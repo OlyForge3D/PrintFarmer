@@ -1842,13 +1842,20 @@ public partial class SliceJobController(
 
         IReadOnlyList<MachineProfile> machines =
             await _machineProfileRepository.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: true, userId, ct);
-        MachineProfile? machine = machines.FirstOrDefault(m =>
-            string.Equals(m.Name, machineName, StringComparison.OrdinalIgnoreCase));
+
+        // Profile names are unique per owner, not globally (#3192, #3198), so the same name can
+        // match the caller's own row, an unowned stock row, and another user's public row. Order
+        // candidates by ownership so the caller's own copy wins, then stock, then anyone else.
+        MachineProfile? machine = machines
+            .Where(m => string.Equals(m.Name, machineName, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(m => OwnershipRank(m.CreatedByUserId, userId))
+            .FirstOrDefault();
 
         IReadOnlyList<ProcessProfile> processes =
             await _processProfileRepository.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: true, userId, ct);
         List<ProcessProfile> processCandidates = processes
             .Where(p => string.Equals(p.Name, processName, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(p => OwnershipRank(p.CreatedByUserId, userId))
             .ToList();
         ProcessProfile? process = SelectCompatibleProfile(
             processCandidates, machine, p => p.CompatiblePrinters, p => p.PrinterModelId);
@@ -1857,6 +1864,7 @@ public partial class SliceJobController(
             await _filamentProfileRepository.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: true, userId, ct);
         List<FilamentProfile> filamentCandidates = filaments
             .Where(f => string.Equals(f.Name, filamentName, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(f => OwnershipRank(f.CreatedByUserId, userId))
             .ToList();
         FilamentProfile? filament = SelectCompatibleProfile(filamentCandidates, machine, f => f.CompatiblePrinters);
 
@@ -1920,6 +1928,9 @@ public partial class SliceJobController(
     /// candidate can be confidently matched to the resolved machine, so the caller bails to the
     /// legacy worker-side path rather than guessing.
     /// </summary>
+    private static int OwnershipRank(Guid? createdByUserId, Guid userId) =>
+        createdByUserId == userId ? 0 : createdByUserId is null ? 1 : 2;
+
     private static T? SelectCompatibleProfile<T>(
         List<T> candidates,
         MachineProfile? machine,

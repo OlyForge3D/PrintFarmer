@@ -14,6 +14,13 @@ namespace Farm.Slicer.Module.Data.Configurations;
 /// </remarks>
 public class MachineProfileConfiguration : IEntityTypeConfiguration<MachineProfile>
 {
+    /// <summary>
+    /// Name of the unique <c>(Name, SlicerType)</c> index over unowned (system/stock) rows. Its
+    /// <c>CreatedByUserId IS NULL</c> filter is provider-specific SQL, so it is applied in
+    /// <see cref="SlicerDbContext"/> rather than here.
+    /// </summary>
+    public const string UnownedNameUniqueIndexName = "IX_MachineProfiles_Name_SlicerType_Unowned";
+
     /// <inheritdoc/>
     public void Configure(EntityTypeBuilder<MachineProfile> builder)
     {
@@ -42,7 +49,16 @@ public class MachineProfileConfiguration : IEntityTypeConfiguration<MachineProfi
         _ = builder.HasIndex(p => p.CreatedByUserId);
 
         // Indexes
-        _ = builder.HasIndex(p => new { p.Name, p.SlicerType }).IsUnique();
+        // Name uniqueness is scoped per owner (#3198, mirroring #3192 for filaments): a global index
+        // made one user's private profile name block another user's upload/clone/rename with a 500,
+        // which also disclosed that the name existed. EF Core auto-generates the "IS NOT NULL"
+        // filter for the nullable owner column on SQL Server; PostgreSQL and SQLite treat NULL
+        // owners as distinct. Unowned (system/stock) rows keep global name uniqueness through
+        // UnownedNameUniqueIndexName, the backstop for the system import paths (#1779).
+        _ = builder.HasIndex(p => new { p.CreatedByUserId, p.Name, p.SlicerType }).IsUnique();
+        _ = builder.HasIndex(p => new { p.Name, p.SlicerType })
+            .IsUnique()
+            .HasDatabaseName(UnownedNameUniqueIndexName);
         _ = builder.HasIndex(p => p.SlicerType);
         _ = builder.HasIndex(p => p.Manufacturer);
         _ = builder.HasIndex(p => p.Hash).IsUnique();

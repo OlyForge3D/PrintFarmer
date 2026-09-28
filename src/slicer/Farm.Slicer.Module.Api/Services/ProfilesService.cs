@@ -1105,12 +1105,10 @@ public class ProfilesService(
     /// The identity must mirror the table's declared UNIQUE index, not merely the name: filament is
     /// unique on <c>(Name, Material, SlicerType)</c> and process on <c>(Name, SlicerType,
     /// PrinterModelId)</c>, so a name-only key would silently discard legitimate rows such as the
-    /// same process name under two printer models. Machine and process rows are loaded regardless
-    /// of owner, because those indexes are global: a user-created profile sharing an identity
-    /// collides just as hard. Filament callers load only unowned rows, because filament name
-    /// uniqueness is per owner and system rows only collide with other unowned rows (#3192); a
-    /// user's private profile must not suppress a stock import. Failures propagate rather than
-    /// degrading to an empty set, since an empty set is
+    /// same process name under two printer models. Callers load only unowned rows, because name
+    /// uniqueness is per owner for every profile type and system rows only collide with other
+    /// unowned rows (#3192, #3198); a user's private profile must not suppress a stock import.
+    /// Failures propagate rather than degrading to an empty set, since an empty set is
     /// indistinguishable from "nothing imported yet" and would drive straight into a collision.
     /// </remarks>
     private static async Task<HashSet<string>> LoadExistingProfileIdentitiesAsync(
@@ -1531,7 +1529,15 @@ public class ProfilesService(
                 List<MachineProfile> candidates = machines
                     .Where(m => viewer.CanView(m) && string.Equals(m.Name, profileName, StringComparison.OrdinalIgnoreCase))
                     .ToList();
-                return SelectCompatibleMachineCandidate(candidates, printerModelId)?.Id;
+
+                // Machine names are unique per owner, not globally (#3198); see the filament case.
+                List<MachineProfile> tier = SelectOwnershipCandidateTier(
+                    candidates,
+                    viewer,
+                    m => m.CreatedByUserId,
+                    m => m.PrinterModelId == printerModelId,
+                    m => m.PrinterModelId is null);
+                return SelectCompatibleMachineCandidate(tier, printerModelId)?.Id;
             }
 
             case ProfileResolutionType.Process:
@@ -1541,8 +1547,16 @@ public class ProfilesService(
                     .Where(p => viewer.CanView(p) && string.Equals(p.Name, profileName, StringComparison.OrdinalIgnoreCase))
                     .ToList();
                 IReadOnlyList<string> modelMachineNames = await GetMachineNamesForModelAsync(printerModelId, viewer, ct);
+
+                // Process names are unique per owner, not globally (#3198); see the filament case.
+                List<ProcessProfile> tier = SelectOwnershipCandidateTier(
+                    candidates,
+                    viewer,
+                    p => p.CreatedByUserId,
+                    p => DeclaresModelMachine(p.CompatiblePrinters, modelMachineNames) || p.PrinterModelId == printerModelId,
+                    p => string.IsNullOrWhiteSpace(p.CompatiblePrinters) && p.PrinterModelId is null);
                 return SelectCompatibleProfileCandidate(
-                    candidates, printerModelId, modelMachineNames, p => p.PrinterModelId, p => p.CompatiblePrinters)?.Id;
+                    tier, printerModelId, modelMachineNames, p => p.PrinterModelId, p => p.CompatiblePrinters)?.Id;
             }
 
             case ProfileResolutionType.Filament:
@@ -1559,7 +1573,12 @@ public class ProfilesService(
                 // the caller's own copy nor another user's private row (visible to administrators)
                 // can make a compatible stock row ambiguous or shadow it. Ambiguity within the chosen
                 // tier still returns null rather than guessing across tiers.
-                List<FilamentProfile> tier = SelectFilamentCandidateTier(candidates, viewer, modelMachineNames);
+                List<FilamentProfile> tier = SelectOwnershipCandidateTier(
+                    candidates,
+                    viewer,
+                    f => f.CreatedByUserId,
+                    f => DeclaresModelMachine(f.CompatiblePrinters, modelMachineNames),
+                    f => string.IsNullOrWhiteSpace(f.CompatiblePrinters));
                 return SelectCompatibleProfileCandidate(
                     tier, printerModelId, modelMachineNames, _ => null, f => f.CompatiblePrinters)?.Id;
             }
@@ -1570,32 +1589,37 @@ public class ProfilesService(
     }
 
     /// <summary>
-    /// Chooses the same-name filament ownership tier to resolve against (#3192). Tiers are the
+    /// Chooses the same-name ownership tier to resolve against (#3192, #3198). Tiers are the
     /// caller's own rows, unowned stock rows, then every other row the caller may see. The first
-    /// tier holding a row that explicitly declares one of <paramref name="modelMachineNames"/> wins;
-    /// failing that, the first tier holding a model-agnostic row (no <c>CompatiblePrinters</c>);
-    /// failing that, the first non-empty tier.
+    /// tier holding a row that <paramref name="matchesModel"/> wins; failing that, the first tier
+    /// holding a model-agnostic row; failing that, the first non-empty tier. Compatibility narrows
+    /// first and ownership only breaks ties, so neither the caller's own copy nor another user's
+    /// private row (visible to administrators) can make a compatible stock row ambiguous or shadow it.
     /// </summary>
-    private static List<FilamentProfile> SelectFilamentCandidateTier(
-        List<FilamentProfile> candidates, ProfileViewer viewer, IReadOnlyList<string> modelMachineNames)
+    private static List<T> SelectOwnershipCandidateTier<T>(
+        List<T> candidates,
+        ProfileViewer viewer,
+        Func<T, Guid?> ownerSelector,
+        Func<T, bool> matchesModel,
+        Func<T, bool> isModelAgnostic)
     {
-        List<FilamentProfile> own = viewer.UserId.HasValue
-            ? candidates.Where(f => f.CreatedByUserId == viewer.UserId).ToList()
+        List<T> own = viewer.UserId.HasValue
+            ? candidates.Where(c => ownerSelector(c) == viewer.UserId).ToList()
             : [];
-        List<FilamentProfile> unowned = candidates.Where(f => f.CreatedByUserId is null).ToList();
-        List<FilamentProfile> others = candidates.Except(own).Except(unowned).ToList();
-        List<FilamentProfile>[] tiers = [own, unowned, others];
+        List<T> unowned = candidates.Where(c => ownerSelector(c) is null).ToList();
+        List<T> others = candidates.Except(own).Except(unowned).ToList();
+        List<T>[] tiers = [own, unowned, others];
 
-        bool DeclaresModelMachine(FilamentProfile f) =>
-            !string.IsNullOrWhiteSpace(f.CompatiblePrinters) &&
-            f.CompatiblePrinters.Split(',', StringSplitOptions.RemoveEmptyEntries)
-                .Any(cp => modelMachineNames.Any(n => string.Equals(cp.Trim(), n, StringComparison.OrdinalIgnoreCase)));
-
-        return tiers.FirstOrDefault(t => t.Any(DeclaresModelMachine))
-            ?? tiers.FirstOrDefault(t => t.Any(f => string.IsNullOrWhiteSpace(f.CompatiblePrinters)))
+        return tiers.FirstOrDefault(t => t.Any(matchesModel))
+            ?? tiers.FirstOrDefault(t => t.Any(isModelAgnostic))
             ?? tiers.FirstOrDefault(t => t.Count > 0)
             ?? [];
     }
+
+    private static bool DeclaresModelMachine(string? compatiblePrinters, IReadOnlyList<string> modelMachineNames) =>
+        !string.IsNullOrWhiteSpace(compatiblePrinters) &&
+        compatiblePrinters.Split(',', StringSplitOptions.RemoveEmptyEntries)
+            .Any(cp => modelMachineNames.Any(n => string.Equals(cp.Trim(), n, StringComparison.OrdinalIgnoreCase)));
 
     /// <summary>
     /// Machine profile names imported for <paramref name="printerModelId"/>, used to disambiguate
@@ -1885,11 +1909,11 @@ public class ProfilesService(
         // identity mirrors its table's declared index, and ALL rows are loaded (not just system
         // ones) because those indexes are global.
         HashSet<string> existingMachineNames = await LoadExistingProfileIdentitiesAsync(
-            async token => (await _machineProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, token)).Select(p => (p.Name ?? string.Empty).Trim()), ct);
+            async token => (await _machineProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, token)).Where(p => p.CreatedByUserId == null).Select(p => (p.Name ?? string.Empty).Trim()), ct);
         HashSet<string> existingFilamentNames = await LoadExistingProfileIdentitiesAsync(
             async token => (await _filamentProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, token)).Where(p => p.CreatedByUserId == null).Select(p => FilamentIdentity(p.Name, p.Material)), ct);
         HashSet<string> existingProcessNames = await LoadExistingProfileIdentitiesAsync(
-            async token => (await _processProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, token)).Select(p => ProcessIdentity(p.Name, p.PrinterModelId)), ct);
+            async token => (await _processProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, token)).Where(p => p.CreatedByUserId == null).Select(p => ProcessIdentity(p.Name, p.PrinterModelId)), ct);
 
         foreach ((string? manufacturerKey, ManufacturerProfilesDto? manufacturerProfiles) in allProfiles.ByHierarchy)
         {
@@ -2143,11 +2167,11 @@ public class ProfilesService(
         // appears under several hierarchy groups — routine for filament profiles shared across
         // models — from being staged twice.
         HashSet<string> reseedMachineNames = await LoadExistingProfileIdentitiesAsync(
-            async token => (await _machineProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, token)).Select(p => (p.Name ?? string.Empty).Trim()), ct);
+            async token => (await _machineProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, token)).Where(p => p.CreatedByUserId == null).Select(p => (p.Name ?? string.Empty).Trim()), ct);
         HashSet<string> reseedFilamentNames = await LoadExistingProfileIdentitiesAsync(
             async token => (await _filamentProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, token)).Where(p => p.CreatedByUserId == null).Select(p => FilamentIdentity(p.Name, p.Material)), ct);
         HashSet<string> reseedProcessNames = await LoadExistingProfileIdentitiesAsync(
-            async token => (await _processProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, token)).Select(p => ProcessIdentity(p.Name, p.PrinterModelId)), ct);
+            async token => (await _processProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, token)).Where(p => p.CreatedByUserId == null).Select(p => ProcessIdentity(p.Name, p.PrinterModelId)), ct);
 
         foreach ((string? manufacturerKey, ManufacturerProfilesDto? manufacturerProfiles) in allProfiles.ByHierarchy)
         {
@@ -3904,7 +3928,7 @@ public class ProfilesService(
             UpdatedAt = DateTime.UtcNow
         };
 
-        await _processProfileRepo.AddAsync(clone, ct);
+        await AddOwnedProcessProfileAsync(clone, userId, ct);
         _logger.LogInformation("Cloned process profile '{SourceName}' to '{NewName}' for user {UserId}", LogSanitizer.Sanitize(source.Name), LogSanitizer.Sanitize(newName), userId);
 
         return new CloneSingleProfileResponseDto
@@ -3995,7 +4019,7 @@ public class ProfilesService(
             UpdatedAt = DateTime.UtcNow
         };
 
-        await _machineProfileRepo.AddAsync(clone, ct);
+        await AddOwnedMachineProfileAsync(clone, userId, ct);
         _logger.LogInformation("Cloned machine profile '{SourceName}' to '{NewName}' for user {UserId}", LogSanitizer.Sanitize(source.Name), LogSanitizer.Sanitize(newName), userId);
 
         return new CloneSingleProfileResponseDto
@@ -4066,7 +4090,7 @@ public class ProfilesService(
             UpdatedAt = DateTime.UtcNow
         };
 
-        await _processProfileRepo.AddAsync(profile, ct);
+        await AddOwnedProcessProfileAsync(profile, userId, ct);
         _logger.LogInformation("Uploaded process profile '{Name}' for user {UserId} (PrinterModelId={PrinterModelId})", LogSanitizer.Sanitize(name), userId, LogSanitizer.Sanitize(profile.PrinterModelId?.ToString()));
 
         return new CustomProfileDto
@@ -4263,37 +4287,79 @@ public class ProfilesService(
     /// <c>(CreatedByUserId, Name, Material, SlicerType)</c> unique index to
     /// <see cref="ProfileNameConflictException"/> (409) instead of an unhandled 500 (#3192).
     /// </summary>
-    private async Task AddOwnedFilamentProfileAsync(FilamentProfile profile, Guid userId, CancellationToken ct)
+    private Task AddOwnedFilamentProfileAsync(FilamentProfile profile, Guid userId, CancellationToken ct) =>
+        SaveWithOwnerNameGuardAsync(
+            () => _filamentProfileRepo.OwnerHasNameAsync(userId, profile.Name, profile.Material, profile.SlicerType, excludeProfileId: null, ct),
+            () => _filamentProfileRepo.AddAsync(profile, ct),
+            inner => FilamentNameConflict(profile.Name, inner));
+
+    /// <summary>
+    /// Inserts a caller-owned machine profile, mapping a collision on the per-owner
+    /// <c>(CreatedByUserId, Name, SlicerType)</c> unique index to
+    /// <see cref="ProfileNameConflictException"/> (409) instead of an unhandled 500 (#3198).
+    /// </summary>
+    private Task AddOwnedMachineProfileAsync(MachineProfile profile, Guid userId, CancellationToken ct) =>
+        SaveWithOwnerNameGuardAsync(
+            () => _machineProfileRepo.OwnerHasNameAsync(userId, profile.Name, profile.SlicerType, excludeProfileId: null, ct),
+            () => _machineProfileRepo.AddAsync(profile, ct),
+            inner => MachineNameConflict(profile.Name, inner));
+
+    /// <summary>
+    /// Inserts a caller-owned process profile, mapping a collision on the per-owner
+    /// <c>(CreatedByUserId, Name, SlicerType, PrinterModelId)</c> unique index to
+    /// <see cref="ProfileNameConflictException"/> (409) instead of an unhandled 500 (#3198).
+    /// </summary>
+    private Task AddOwnedProcessProfileAsync(ProcessProfile profile, Guid userId, CancellationToken ct) =>
+        SaveWithOwnerNameGuardAsync(
+            () => _processProfileRepo.OwnerHasNameAsync(userId, profile.Name, profile.SlicerType, profile.PrinterModelId, excludeProfileId: null, ct),
+            () => _processProfileRepo.AddAsync(profile, ct),
+            inner => ProcessNameConflict(profile.Name, inner));
+
+    /// <summary>
+    /// Runs <paramref name="save"/> guarded by a caller-scoped name check (#3192, #3198). A name
+    /// the caller already owns is rejected up front; a <see cref="DbUpdateException"/> is mapped to
+    /// the same conflict only when the recheck shows a concurrent request from this caller took the
+    /// name between the check and the write. Any other persistence failure propagates. Only the
+    /// caller's own rows are consulted, so another user's names never influence the outcome.
+    /// </summary>
+    private static async Task SaveWithOwnerNameGuardAsync(
+        Func<Task<bool>> ownerHasName,
+        Func<Task> save,
+        Func<Exception?, ProfileNameConflictException> conflict)
     {
-        if (await _filamentProfileRepo.OwnerHasNameAsync(userId, profile.Name, profile.Material, profile.SlicerType, excludeProfileId: null, ct))
+        if (await ownerHasName())
         {
-            throw FilamentNameConflict(profile.Name);
+            throw conflict(null);
         }
 
         try
         {
-            await _filamentProfileRepo.AddAsync(profile, ct);
+            await save();
         }
         catch (DbUpdateException ex)
         {
-            // A concurrent request from this caller took the name between the check and the
-            // insert. Any other persistence failure is not a name collision and propagates.
-            if (await _filamentProfileRepo.OwnerHasNameAsync(userId, profile.Name, profile.Material, profile.SlicerType, excludeProfileId: null, ct))
+            if (await ownerHasName())
             {
-                throw FilamentNameConflict(profile.Name, ex);
+                throw conflict(ex);
             }
 
             throw;
         }
     }
 
-    private static ProfileNameConflictException FilamentNameConflict(string name, Exception? innerException = null)
-    {
-        string message = $"You already have a filament profile named '{name}'.";
-        return innerException is null
+    private static ProfileNameConflictException FilamentNameConflict(string name, Exception? innerException = null) =>
+        ProfileNameConflict($"You already have a filament profile named '{name}'.", innerException);
+
+    private static ProfileNameConflictException MachineNameConflict(string name, Exception? innerException = null) =>
+        ProfileNameConflict($"You already have a machine profile named '{name}'.", innerException);
+
+    private static ProfileNameConflictException ProcessNameConflict(string name, Exception? innerException = null) =>
+        ProfileNameConflict($"You already have a process profile named '{name}' for this printer model.", innerException);
+
+    private static ProfileNameConflictException ProfileNameConflict(string message, Exception? innerException) =>
+        innerException is null
             ? new ProfileNameConflictException(message)
             : new ProfileNameConflictException(message, innerException);
-    }
 
     private static (string Name, string? CompatiblePrinters) ParseFilamentProfileMetadata(UploadProfileRequestDto request)
     {
@@ -4371,7 +4437,7 @@ public class ProfilesService(
             UpdatedAt = DateTime.UtcNow
         };
 
-        await _machineProfileRepo.AddAsync(profile, ct);
+        await AddOwnedMachineProfileAsync(profile, userId, ct);
         _logger.LogInformation("Uploaded machine profile '{Name}' for user {UserId} (PrinterModelId={PrinterModelId})", LogSanitizer.Sanitize(name), userId, LogSanitizer.Sanitize(profile.PrinterModelId?.ToString()));
 
         return new CustomProfileDto
@@ -4545,6 +4611,11 @@ public class ProfilesService(
 
         Guid userId = RequireProfileOwner(caller, profile.CreatedByUserId, "update");
 
+        // The per-owner unique key includes PrinterModelId (#3198), so moving a profile to another
+        // printer model can collide just like a rename.
+        string originalName = profile.Name;
+        Guid? originalPrinterModelId = profile.PrinterModelId;
+
         if (!string.IsNullOrWhiteSpace(request.Name))
         {
             profile.Name = request.Name;
@@ -4569,7 +4640,19 @@ public class ProfilesService(
         }
 
         profile.UpdatedAt = DateTime.UtcNow;
-        await _processProfileRepo.UpdateAsync(profile, ct);
+        bool keyChanged = !string.Equals(profile.Name, originalName, StringComparison.Ordinal) || profile.PrinterModelId != originalPrinterModelId;
+        if (keyChanged)
+        {
+            await SaveWithOwnerNameGuardAsync(
+                () => _processProfileRepo.OwnerHasNameAsync(userId, profile.Name, profile.SlicerType, profile.PrinterModelId, profile.Id, ct),
+                () => _processProfileRepo.UpdateAsync(profile, ct),
+                inner => ProcessNameConflict(profile.Name, inner));
+        }
+        else
+        {
+            await _processProfileRepo.UpdateAsync(profile, ct);
+        }
+
         _logger.LogInformation("Updated process profile '{ProfileName}' for user {UserId}", LogSanitizer.Sanitize(profile.Name), userId);
 
         return new CustomProfileDto
@@ -4665,6 +4748,7 @@ public class ProfilesService(
 
         Guid userId = RequireProfileOwner(caller, profile.CreatedByUserId, "update");
 
+        bool renaming = !string.IsNullOrWhiteSpace(request.Name) && !string.Equals(request.Name, profile.Name, StringComparison.Ordinal);
         if (!string.IsNullOrWhiteSpace(request.Name))
         {
             profile.Name = request.Name;
@@ -4687,7 +4771,19 @@ public class ProfilesService(
         }
 
         profile.UpdatedAt = DateTime.UtcNow;
-        await _machineProfileRepo.UpdateAsync(profile, ct);
+        if (renaming)
+        {
+            // Per-owner name uniqueness (#3198): a same-owner rename collision is a 409, not a 500.
+            await SaveWithOwnerNameGuardAsync(
+                () => _machineProfileRepo.OwnerHasNameAsync(userId, profile.Name, profile.SlicerType, profile.Id, ct),
+                () => _machineProfileRepo.UpdateAsync(profile, ct),
+                inner => MachineNameConflict(profile.Name, inner));
+        }
+        else
+        {
+            await _machineProfileRepo.UpdateAsync(profile, ct);
+        }
+
         _logger.LogInformation("Updated machine profile '{ProfileName}' for user {UserId}", LogSanitizer.Sanitize(profile.Name), userId);
 
         return new CustomProfileDto
