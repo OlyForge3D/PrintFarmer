@@ -242,9 +242,10 @@ export function buildC2ImageLayout({
   const sourceInfrastructureLock = JSON.parse(readFileSync(join(repo, 'scripts/docker/infrastructure-images.lock.json'), 'utf8'));
   const infraById = Object.fromEntries(sourceInfrastructureLock.images.map(image => [image.id, image]));
 
-  const infrastructureIds = requiredInfrastructureIds(cell);
+  const requiredForCell = new Set(requiredInfrastructureIds(cell));
+  const infrastructureIds = ['mssql', 'nginx', 'postgres'];
   const infrastructureImages = {};
-  if (infrastructureIds.includes('postgres')) {
+  if (requiredForCell.has('postgres')) {
     run('docker', ['pull', 'postgres:16-alpine'], { cwd: repo, stdio: ['ignore', 'inherit', 'pipe'] });
     const postgresArchive = join(imageScratch, 'postgres.docker.tar');
     run('docker', ['save', 'postgres:16-alpine', '--output', postgresArchive], { cwd: repo });
@@ -253,8 +254,16 @@ export function buildC2ImageLayout({
       scratch: join(imageScratch, 'extract-postgres'),
       reference: infraById.postgres.reference,
     });
+  } else {
+    infrastructureImages.postgres = addTinyImage(layout, {
+      id: 'postgres',
+      version: target.version,
+      platforms: Object.keys(infraById.postgres.platforms),
+      reference: infraById.postgres.reference,
+      labels: { 'org.printfarmer.fixture-infrastructure': 'postgres' },
+    });
   }
-  if (infrastructureIds.includes('mssql')) {
+  if (requiredForCell.has('mssql')) {
     run('docker', ['pull', infraById.mssql.reference], { cwd: repo, stdio: ['ignore', 'inherit', 'pipe'] });
     const mssqlArchive = join(imageScratch, 'mssql.docker.tar');
     run('docker', ['save', infraById.mssql.reference, '--output', mssqlArchive], { cwd: repo });
@@ -263,16 +272,22 @@ export function buildC2ImageLayout({
       scratch: join(imageScratch, 'extract-mssql'),
       reference: infraById.mssql.reference,
     });
-  }
-  if (infrastructureIds.includes('nginx')) {
-    infrastructureImages.nginx = addTinyImage(layout, {
-      id: 'nginx',
+  } else {
+    infrastructureImages.mssql = addTinyImage(layout, {
+      id: 'mssql',
       version: target.version,
-      platforms: Object.keys(infraById.nginx.platforms),
-      reference: infraById.nginx.reference,
-      labels: { 'org.printfarmer.fixture-infrastructure': 'nginx' },
+      platforms: Object.keys(infraById.mssql.platforms),
+      reference: infraById.mssql.reference,
+      labels: { 'org.printfarmer.fixture-infrastructure': 'mssql' },
     });
   }
+  infrastructureImages.nginx = addTinyImage(layout, {
+    id: 'nginx',
+    version: target.version,
+    platforms: Object.keys(infraById.nginx.platforms),
+    reference: infraById.nginx.reference,
+    labels: { 'org.printfarmer.fixture-infrastructure': 'nginx' },
+  });
   const infrastructureLock = {
     schema: 1,
     kind: 'printfarmer-infrastructure-images-lock',
