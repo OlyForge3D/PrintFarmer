@@ -998,7 +998,8 @@ public sealed class DatabaseMigrationTests
             "20260826063137_EnforceNormalizedMachineModelProfileNames",
             "20260828022254_AddMachineModelProfileRevision",
             "20260829194758_AddFilamentProfilePromotedFromCalibrationDraftProfileId",
-            "20260830221213_AddProcessProfileMaterialAndTemperatureFields");
+            "20260830221213_AddProcessProfileMaterialAndTemperatureFields",
+            "20260928195945_ScopeFilamentPromotionIndexPerOwner");
         (await context.Database.GetPendingMigrationsAsync()).Should().BeEmpty();
     }
 
@@ -1331,6 +1332,7 @@ public sealed class DatabaseMigrationTests
                 "20260828022249_AddMachineModelProfileRevision",
                 "20260829194246_AddFilamentProfilePromotedFromCalibrationDraftProfileId",
                 "20260830221122_AddProcessProfileMaterialAndTemperatureFields",
+                "20260928195942_ScopeFilamentPromotionIndexPerOwner",
             ]
             :
             [
@@ -1347,6 +1349,7 @@ public sealed class DatabaseMigrationTests
                 "20260828022252_AddMachineModelProfileRevision",
                 "20260829194255_AddFilamentProfilePromotedFromCalibrationDraftProfileId",
                 "20260830221156_AddProcessProfileMaterialAndTemperatureFields",
+                "20260928195943_ScopeFilamentPromotionIndexPerOwner",
             ];
         _ = slicerMigrations.Should().Equal(expectedSlicerMigrations,
             $"the {provider} slicer migration set must apply in the exact recorded order");

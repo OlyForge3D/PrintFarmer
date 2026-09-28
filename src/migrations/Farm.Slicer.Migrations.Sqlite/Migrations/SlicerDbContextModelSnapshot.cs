@@ -208,10 +208,10 @@ namespace Farm.Slicer.Migrations.Sqlite.Migrations
 
                     b.HasIndex("Material");
 
-                    b.HasIndex("PromotedFromCalibrationDraftProfileId")
-                        .IsUnique();
-
                     b.HasIndex("SlicerType");
+
+                    b.HasIndex("CreatedByUserId", "PromotedFromCalibrationDraftProfileId")
+                        .IsUnique();
 
                     b.HasIndex("Name", "Material", "SlicerType")
                         .IsUnique();

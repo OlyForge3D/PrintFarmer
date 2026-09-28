@@ -229,7 +229,8 @@ public interface IProfilesService
     /// Promotes a calibration project's draft profile to a real, owner-visible custom filament
     /// profile (#2180, gap 1), idempotently keyed on <paramref name="sourceDraftProfileId"/> so a
     /// retried/replayed call after a reclaimed promotion claim returns the SAME profile instead of
-    /// minting a duplicate.
+    /// minting a duplicate. The key is scoped per owner (#3189): a draft id another user already
+    /// promoted is treated exactly like an unknown id, so the response never reveals that row.
     /// </summary>
     /// <param name="request">Promotion request with raw JSON content and optional name.</param>
     /// <param name="userId">ID of the calibration project's owner.</param>

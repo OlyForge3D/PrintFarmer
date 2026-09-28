@@ -57,8 +57,8 @@ public class FilamentProfile
     /// the draft profile's own stable identifier - used as an idempotency key so a retried/replayed
     /// promotion call (e.g. after a TTL-reclaimed stranded claim) returns this SAME profile instead
     /// of minting a visible duplicate in the owner's custom profile list. Null for every profile
-    /// created any other way. Enforced unique (nulls excluded) - see
-    /// <c>FilamentProfileConfiguration</c>.
+    /// created any other way. Enforced unique per owner together with <see cref="CreatedByUserId"/>
+    /// (#3189; nulls excluded) - see <c>FilamentProfileConfiguration</c>.
     /// </summary>
     public Guid? PromotedFromCalibrationDraftProfileId { get; set; }
 

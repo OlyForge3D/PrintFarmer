@@ -616,7 +616,7 @@ public sealed class CalibrationProjectService(
                 // Round-4 review fix (Hicks Blocking #2, issue #2180): a reclaim after the TTL
                 // that calls the gateway again is now genuinely safe, not merely "harmless" -
                 // PromoteCalibrationDraftProfileAsync dedups on the draft profile's own stable ID
-                // (a unique-indexed column on FilamentProfile), so a replayed gateway call returns
+                // (unique per owner on FilamentProfile, #3189), so a replayed gateway call returns
                 // the SAME already-promoted profile instead of minting a second, user-visible
                 // duplicate in the owner's custom filament profile list. (An earlier version of
                 // this comment described the duplicate as a "harmless orphaned" profile; that
