@@ -229,7 +229,7 @@ test('replayAdmissionDrift allows only durable authenticated refusals', () => {
   const withRefusal = structuredClone(before);
   withRefusal.Identities.i41 = { Sequence: 41, Disposition: 'Superseded', CorrelationId: 'd' };
   assert.deepEqual(replayAdmissionDrift(before, withRefusal), []);
-  const camel = { highWaterByNamespace: before.HighWaterByNamespace, identities: withRefusal.Identities };
+  const camel = { version: 1, highWaterByNamespace: before.HighWaterByNamespace, identities: withRefusal.Identities };
   assert.deepEqual(replayAdmissionDrift(before, camel), []);
 
   const admitted = structuredClone(before);
@@ -263,6 +263,26 @@ test('replayAdmissionDrift with an expectation requires exactly the refused iden
   const two = structuredClone(rejected);
   two.Identities.i39 = { Sequence: 40, Disposition: 'Rejected', CorrelationId: 'e' };
   assert.deepEqual(replayAdmissionDrift(before, two, { added: 1, sequence: 40 }), ['identities-added:2!=1']);
+});
+
+test('replayAdmissionDrift rejects untracked replay-store fields and epoch drift', () => {
+  const before = {
+    Version: 1,
+    Epoch: 7,
+    Checksum: 'a',
+    HighWaterByNamespace: {},
+    Identities: {},
+  };
+  const rejected = structuredClone(before);
+  rejected.Epoch = 8;
+  rejected.Checksum = 'b';
+  rejected.Identities.i40 = { Sequence: 40, Disposition: 'Rejected', CorrelationId: 'd' };
+  assert.deepEqual(replayAdmissionDrift(before, rejected, { added: 1, sequence: 40 }), []);
+  assert.deepEqual(replayAdmissionDrift(before, { ...rejected, Version: 2 }, { added: 1, sequence: 40 }), ['field:version']);
+  assert.deepEqual(replayAdmissionDrift(before, { ...rejected, Extra: true }, { added: 1, sequence: 40 }), ['field:extra']);
+  assert.deepEqual(replayAdmissionDrift(before, { ...rejected, Epoch: 9 }, { added: 1, sequence: 40 }), ['epoch:7->9']);
+  assert.deepEqual(replayAdmissionDrift(before, { ...before, Epoch: 8 }, { added: 0, sequence: 40 }), ['epoch:7->8']);
+  assert.deepEqual(replayAdmissionDrift(before, { ...before, Checksum: 'z' }, { added: 0, sequence: 40 }), ['checksum']);
 });
 
 function anchorEntry(epoch, previous, stateHash) {

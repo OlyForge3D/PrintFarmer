@@ -255,6 +255,14 @@ export function assertAnchorTransition(label, before, after, { mode }) {
 export function replayAdmissionDrift(before, after, expect) {
   if (!before || !after) return before === after ? [] : ['replay-store-presence'];
   const drift = [];
+  const tracked = /^(highwaterbynamespace|identities|epoch|checksum)$/;
+  const lower = (o) => Object.fromEntries(Object.entries(o).map(([k, v]) => [k.toLowerCase(), v]));
+  const topBefore = lower(before);
+  const topAfter = lower(after);
+  for (const key of new Set([...Object.keys(topBefore), ...Object.keys(topAfter)])) {
+    if (tracked.test(key)) continue;
+    if (JSON.stringify(topBefore[key]) !== JSON.stringify(topAfter[key])) drift.push(`field:${key}`);
+  }
   const hwmBefore = field(before, 'HighWaterByNamespace') ?? {};
   const hwmAfter = field(after, 'HighWaterByNamespace') ?? {};
   for (const ns of new Set([...Object.keys(hwmBefore), ...Object.keys(hwmAfter)])) {
@@ -276,6 +284,13 @@ export function replayAdmissionDrift(before, after, expect) {
     }
   }
   if (expect && added.length !== expect.added) drift.push(`identities-added:${added.length}!=${expect.added}`);
+  const epochBefore = topBefore.epoch;
+  const epochAfter = topAfter.epoch;
+  if (epochBefore !== undefined || epochAfter !== undefined) {
+    const expectedEpoch = added.length > 0 ? Number(epochBefore) + 1 : Number(epochBefore);
+    if (Number(epochAfter) !== expectedEpoch) drift.push(`epoch:${epochBefore}->${epochAfter}`);
+  }
+  if (added.length === 0 && topBefore.checksum !== topAfter.checksum) drift.push('checksum');
   return drift;
 }
 
