@@ -263,6 +263,62 @@ public class HostUpdateExecutionOptionsDefaultsTests
         options.RequiredFencedWriterNames.Should().Equal(expectedWriters.AsEnumerable());
     }
 
+    [Fact]
+    public void StorageExternallyOwned_BindsThroughRegistrationAndDefaultsToHostOwned()
+    {
+        BindThroughRegistration([]).StorageExternallyOwned.Should().BeFalse();
+        BindThroughRegistration(new Dictionary<string, string?> { ["HostUpdateExecution:StorageExternallyOwned"] = "true" })
+            .StorageExternallyOwned.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task StorageExternallyOwned_RegisteredRestoreExecutorLeavesOwnedDirectoriesUnmapped()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "hu-storage-" + Guid.NewGuid().ToString("N"));
+        string destination = Path.Combine(root, "live", "app-data");
+        string run = Path.Combine(root, "run");
+        Directory.CreateDirectory(destination);
+        Directory.CreateDirectory(Path.Combine(run, "app-data"));
+        await File.WriteAllTextAsync(Path.Combine(destination, "live.txt"), "external");
+        byte[] payload = "backup"u8.ToArray();
+        await File.WriteAllBytesAsync(Path.Combine(run, "app-data", "restored.txt"), payload);
+        var manifest = new HostUpdateBackupManifest(
+            "release-1",
+            DateTimeOffset.UtcNow,
+            ["app-data"],
+            [new HostUpdateBackupManifestFile(Path.Combine("app-data", "restored.txt"), Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(payload)), payload.LongLength)]);
+        try
+        {
+            IConfiguration configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["DB_PROVIDER"] = "sqlite",
+                ["ConnectionStrings:Default"] = "Data Source=" + Path.Combine(root, "farm.db"),
+            }).Build();
+            var services = new ServiceCollection();
+            services.AddSingleton(configuration);
+            services.AddHostUpdateRecoveryEngine(configuration);
+            services.AddSingleton(new HostUpdateExecutionOptions
+            {
+                DatabaseExternallyOwned = true,
+                StorageExternallyOwned = true,
+                OwnedDirectories = new Dictionary<string, string>(StringComparer.Ordinal) { ["app-data"] = destination },
+            });
+            await using ServiceProvider provider = services.BuildServiceProvider();
+            await using AsyncServiceScope scope = provider.CreateAsyncScope();
+            IHostUpdateRestoreExecutor restore = scope.ServiceProvider.GetRequiredService<IHostUpdateRestoreExecutor>();
+
+            Func<Task> act = async () => await restore.RestoreAsync(manifest, run, CancellationToken.None);
+
+            await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*restore_target_unmapped:app-data*");
+            (await File.ReadAllTextAsync(Path.Combine(destination, "live.txt"))).Should().Be("external");
+            File.Exists(Path.Combine(destination, "restored.txt")).Should().BeFalse();
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     private static HostUpdateExecutionOptions BindThroughRegistration(Dictionary<string, string?> values)
     {
         IConfiguration configuration = new ConfigurationBuilder().AddInMemoryCollection(values).Build();

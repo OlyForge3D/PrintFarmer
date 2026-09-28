@@ -190,6 +190,9 @@ public sealed class HostUpdateRecoveryCoordinator(
     /// <summary>The backup includes the database but this host does not own it, so it is never restored here.</summary>
     public const string DatabaseExternallyOwnedStop = "database_externally_owned";
 
+    /// <summary>The backup includes owned storage directories but an external provider owns them, so they are never restored here.</summary>
+    public const string StorageExternallyOwnedStop = "storage_externally_owned";
+
     private const string HostUpdateDatabaseTargetName = "database";
 
     private const string PolicyDriftedFenceReleaseDetail = "policy_drifted_before_side_effects";
@@ -535,6 +538,15 @@ public sealed class HostUpdateRecoveryCoordinator(
             // This host never restores a database it does not own, so preview and confirm both
             // stop here rather than advertising a restore the executor would refuse.
             return new(HostUpdateRecoveryPlanKind.NeedsOperator, DatabaseExternallyOwnedStop, priorState, null);
+        }
+
+        if (located is not null && executionOptions is { StorageExternallyOwned: true } &&
+            located.Value.Manifest.TargetNames.Any(name => !string.Equals(name, HostUpdateDatabaseTargetName, StringComparison.Ordinal)))
+        {
+            // Every non-database target is an owned storage/blob directory. Storage owned by an
+            // external provider is never restored here, so preview and confirm stop before any
+            // host-owned directory is deleted, copied or re-applied.
+            return new(HostUpdateRecoveryPlanKind.NeedsOperator, StorageExternallyOwnedStop, priorState, null);
         }
 
         return located is null

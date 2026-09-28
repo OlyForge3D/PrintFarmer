@@ -633,9 +633,9 @@ The CLI reads the policy from `HostUpdates:HostState` (`Enabled`, `RootPath`,
 variables), the same keys the API host uses. The token binds the recorded
 request, the drift items, the configuration fingerprint (root, compose files and
 their content hashes, service mappings, owned directories, host tool paths,
-provider, SQLite path, database server identity and `DatabaseExternallyOwned`,
-never connection-string secrets), the installed state and the observed manifest
-binding. Any further change invalidates it (`drift_reapproval_mismatch`); a token
+provider, SQLite path, database server identity, `DatabaseExternallyOwned` and,
+when `true`, `StorageExternallyOwned`; never connection-string secrets), the
+installed state and the observed manifest binding. Any further change invalidates it (`drift_reapproval_mismatch`); a token
 supplied when nothing drifted is refused (`drift_reapproval_unexpected`). The
 refusal lists the drift codes but never prints the token, so reapproval
 requires reading `--preview`. A release with a recorded `RolledBack` outcome has
@@ -727,6 +727,8 @@ or compose command, when:
 | --- | --- | --- |
 | Database provider, server (host/port or data source), database name, or `DatabaseExternallyOwned` changed after authorization | Exit 12 `drift_reapproval_required` (`configuration_drift`) | Confirm with the deployment owner that the configured database is the one the backup came from. Never reapprove a retarget to a different server. |
 | `DatabaseExternallyOwned` is `true` and the manifest includes `database` | Exit 10 `NeedsOperator` (`database_externally_owned`) in both `--preview` and `--confirm`; no restore tool is required or run. The executor also leaves the `database` target unmapped, so any other path fails closed with `restore_target_unmapped` | The database owner restores it with their own procedure; this host never restores an externally owned database. |
+| `StorageExternallyOwned` was changed after authorization | Exit 12 `drift_reapproval_required` (`configuration_drift`); if it is now `true`, the storage stop below still applies after reapproval | Confirm with the storage owner which party owns the directories before reapproving. |
+| `StorageExternallyOwned` is `true` and the manifest includes any owned-directory target (any target other than `database`) | Exit 10 `NeedsOperator` (`storage_externally_owned`) in both `--preview` and `--confirm`; nothing is deleted, copied, pulled or restarted. The executor also leaves every directory target unmapped, so any other path fails closed with `restore_target_unmapped`. `database_externally_owned` takes precedence when both apply | The storage owner restores the directories with their own procedure; this host never restores externally owned storage. |
 | The recorded prior state's services differ from the failed request's signed targets, or omit an `ActiveServiceIds` entry (topology changed since the update) | Exit 10 `NeedsOperator` (`prior_state_topology_mismatch`), even after drift reapproval | Do not force a restore onto a different topology. Restore the matching compose configuration or recover manually. |
 | Aggregate `/health` unreachable or unhealthy after restore | Exit 10 `NeedsOperator`; admission stays closed | Diagnose the API; do not reopen writers by hand. |
 | Fence release fails after a successful restore | Exit 11; a repeat `--confirm` only redrives the release | Re-run `--confirm` once the fence adapter is reachable. It never repeats the restore. |
@@ -736,6 +738,16 @@ and SQLite path. On an otherwise unchanged host, its first recovery with this
 build reports `configuration_drift` once. Before you reapprove, confirm that
 the configured database server, database name and `DatabaseExternallyOwned`
 match the host the release ran on.
+
+Owned directories are host-owned by default. When another party (a NAS, a
+managed volume, a storage team) owns them, set
+`HostUpdateExecution:StorageExternallyOwned` to `true`
+(`HostUpdateExecution__StorageExternallyOwned=true`) on both the API host and
+the CLI. The flag covers every `OwnedDirectories` entry. Activation backup then
+fails closed with `external_backup_owner_unsupported:<targets>` before any backup
+run directory is created, and recovery stops with `storage_externally_owned`
+before any directory is deleted or copied. Leaving the flag unset keeps the
+existing fingerprint, so a host-owned installation reports no drift on upgrade.
 
 Connection-string credentials are never part of the fingerprint, a process
 argument or CLI output; PostgreSQL and SQL Server restores receive the password

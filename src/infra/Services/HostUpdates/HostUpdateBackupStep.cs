@@ -185,15 +185,25 @@ public sealed class ProcessDatabaseBackupTarget(
     }
 }
 
-/// <summary>Backs up an application-owned directory (blobs/profiles/calibration/config/keyrings) via a recursive copy.</summary>
-public sealed class DirectoryCopyBackupTarget(string name, string sourceDirectory, bool isRequired = true) : IHostUpdateBackupTarget
+/// <summary>
+/// Backs up an application-owned directory (blobs/profiles/calibration/config/keyrings) via a
+/// recursive copy. A directory declared externally owned
+/// (<see cref="HostUpdateExecutionOptions.StorageExternallyOwned"/>) is never copied: the
+/// coordinator fails closed on it before creating any backup run directory.
+/// </summary>
+public sealed class DirectoryCopyBackupTarget(string name, string sourceDirectory, bool isRequired = true, bool isExternallyOwned = false) : IHostUpdateBackupTarget
 {
     public string Name { get; } = name;
 
-    public bool IsExternallyOwned => false;
+    public bool IsExternallyOwned { get; } = isExternallyOwned;
 
     public async Task BackupAsync(string destinationDirectory, CancellationToken cancellationToken)
     {
+        if (IsExternallyOwned)
+        {
+            throw new HostUpdateBackupUnsupportedOwnerException([Name]);
+        }
+
         if (!Directory.Exists(sourceDirectory))
         {
             if (isRequired)
