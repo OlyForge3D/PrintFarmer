@@ -12,6 +12,8 @@ import { expectedSchemaDeltaFixtureState } from './schema-delta-fixture.mjs';
 export const faultExitCodes = Object.freeze({
   success: 0,
   stateUnreadable: 4,
+  // `status` before any request was journaled (for example a corrupt replay store refused it).
+  noHistory: 5,
   refused: 6,
   needsOperator: 10,
   fenceReleasePending: 11,
@@ -63,7 +65,9 @@ export function classifyCliResult({ exitCode, stdout = '', stderr = '' }) {
 export function outcomeMatches(result, expected) {
   if (result.actual !== expected.outcome) return false;
   if (!expected.reason) return true;
-  return typeof result.reason === 'string' && result.reason.startsWith(expected.reason);
+  // The CLI joins multiple reasons with '|' (for example `coordinated_restore|physical_reconciliation_pending`).
+  return typeof result.reason === 'string' &&
+    result.reason.split('|').some((segment) => segment.startsWith(expected.reason));
 }
 
 export function readJournalTolerant(journalPath, { fromLine = 0 } = {}) {

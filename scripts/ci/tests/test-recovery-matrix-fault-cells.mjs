@@ -118,6 +118,14 @@ test('outcomeMatches compares the outcome and a stable reason prefix', () => {
   const result = { actual: 'FenceReleasePending', reason: 'physical_reconciliation_pending|fence_release_failed:IOException' };
   assert.ok(outcomeMatches(result, { outcome: 'FenceReleasePending', reason: 'physical_reconciliation_pending' }));
   assert.ok(outcomeMatches(result, { outcome: 'FenceReleasePending', reason: null }));
+  assert.ok(outcomeMatches(
+    { actual: 'FenceReleasePending', reason: 'coordinated_restore|physical_reconciliation_pending' },
+    { outcome: 'FenceReleasePending', reason: 'physical_reconciliation_pending' },
+  ));
+  assert.ok(!outcomeMatches(
+    { actual: 'FenceReleasePending', reason: 'coordinated_restore' },
+    { outcome: 'FenceReleasePending', reason: 'physical_reconciliation_pending' },
+  ));
   assert.ok(!outcomeMatches(result, { outcome: 'RolledBack' }));
   assert.ok(!outcomeMatches({ actual: 'NeedsOperator', reason: null }, { outcome: 'NeedsOperator', reason: 'no_backup_available' }));
 });
