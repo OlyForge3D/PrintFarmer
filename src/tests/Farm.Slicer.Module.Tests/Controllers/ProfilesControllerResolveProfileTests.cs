@@ -2,6 +2,7 @@
 using System.Linq;
 using System.Net.Http;
 using System.Reflection;
+using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Security;
@@ -27,6 +28,8 @@ namespace Farm.Slicer.Module.Tests.Controllers;
 /// </summary>
 public class ProfilesControllerResolveProfileTests
 {
+    private static readonly Guid CallerId = Guid.NewGuid();
+
     /// <summary>
     /// Review finding (Hicks): the tests above call the action method directly, which never
     /// exercises the MVC filter pipeline, so they cannot prove the endpoint is actually gated by
@@ -102,7 +105,7 @@ public class ProfilesControllerResolveProfileTests
         NotFoundObjectResult notFound = Assert.IsType<NotFoundObjectResult>(result);
         Assert.Contains(modelId.ToString(), Assert.IsType<string>(notFound.Value), StringComparison.Ordinal);
         profilesService.Verify(
-            s => s.ResolveOrImportProfileForModelAsync(It.IsAny<HttpClient>(), It.IsAny<Guid>(), It.IsAny<ProfileResolutionType>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            s => s.ResolveOrImportProfileForModelAsync(It.IsAny<HttpClient>(), It.IsAny<Guid>(), It.IsAny<ProfileResolutionType>(), It.IsAny<string>(), It.IsAny<ProfileViewer>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
@@ -123,7 +126,7 @@ public class ProfilesControllerResolveProfileTests
             .Setup(c => c.GetModelByIdAsync(modelId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new CatalogModelInfo(modelId, profileName, "Qidi Technology"));
         _ = profilesService
-            .Setup(s => s.ResolveOrImportProfileForModelAsync(It.IsAny<HttpClient>(), modelId, ProfileResolutionType.Machine, profileName, It.IsAny<CancellationToken>()))
+            .Setup(s => s.ResolveOrImportProfileForModelAsync(It.IsAny<HttpClient>(), modelId, ProfileResolutionType.Machine, profileName, It.IsAny<ProfileViewer>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ResolveProfileForModelResultDto
             {
                 PrinterModelId = modelId,
@@ -159,7 +162,7 @@ public class ProfilesControllerResolveProfileTests
             .Setup(c => c.GetModelByIdAsync(modelId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new CatalogModelInfo(modelId, profileName, "Prusa Research"));
         _ = profilesService
-            .Setup(s => s.ResolveOrImportProfileForModelAsync(It.IsAny<HttpClient>(), modelId, ProfileResolutionType.Machine, profileName, It.IsAny<CancellationToken>()))
+            .Setup(s => s.ResolveOrImportProfileForModelAsync(It.IsAny<HttpClient>(), modelId, ProfileResolutionType.Machine, profileName, It.Is<ProfileViewer>(v => v.UserId == CallerId && !v.IsAdmin), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ResolveProfileForModelResultDto
             {
                 PrinterModelId = modelId,
@@ -193,7 +196,7 @@ public class ProfilesControllerResolveProfileTests
             .Setup(c => c.GetModelByIdAsync(modelId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new CatalogModelInfo(modelId, profileName, "Qidi Technology"));
         _ = profilesService
-            .Setup(s => s.ResolveOrImportProfileForModelAsync(It.IsAny<HttpClient>(), modelId, ProfileResolutionType.Machine, profileName, It.IsAny<CancellationToken>()))
+            .Setup(s => s.ResolveOrImportProfileForModelAsync(It.IsAny<HttpClient>(), modelId, ProfileResolutionType.Machine, profileName, It.IsAny<ProfileViewer>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ResolveProfileForModelResultDto
             {
                 PrinterModelId = modelId,
@@ -224,7 +227,7 @@ public class ProfilesControllerResolveProfileTests
             .Setup(c => c.GetModelByIdAsync(modelId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new CatalogModelInfo(modelId, "Qidi X-Plus 4", "Qidi Technology"));
         _ = profilesService
-            .Setup(s => s.ResolveOrImportProfileForModelAsync(It.IsAny<HttpClient>(), modelId, ProfileResolutionType.Machine, profileName, It.IsAny<CancellationToken>()))
+            .Setup(s => s.ResolveOrImportProfileForModelAsync(It.IsAny<HttpClient>(), modelId, ProfileResolutionType.Machine, profileName, It.IsAny<ProfileViewer>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ResolveProfileForModelResultDto
             {
                 PrinterModelId = modelId,
@@ -279,6 +282,15 @@ public class ProfilesControllerResolveProfileTests
         return new ProfilesController(
             NullLogger<ProfilesController>.Instance,
             profilesService.Object,
-            catalogService.Object);
+            catalogService.Object)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, CallerId.ToString())], "Test"))
+                }
+            }
+        };
     }
 }

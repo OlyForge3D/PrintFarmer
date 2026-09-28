@@ -4,8 +4,9 @@ namespace Farm.Slicer.Module.Services;
 
 /// <summary>
 /// Identifies who is reading slicer profiles so every read projection applies the same visibility
-/// rule (issue #3174): system and public profiles are visible to everyone, private profiles only
-/// to their owner, and administrators see everything.
+/// rule (issues #3174 and #3180) to process, filament, and machine profiles: system and public
+/// profiles are visible to everyone, private profiles only to their owner, and administrators see
+/// everything.
 /// </summary>
 /// <param name="UserId">
 /// The caller's verified user id, or <see langword="null"/> when the caller has no valid identity
@@ -31,6 +32,22 @@ public sealed record ProfileViewer(Guid? UserId, bool IsAdmin)
     /// <summary>Returns whether this viewer may see the given process profile.</summary>
     /// <param name="profile">The process profile.</param>
     public bool CanView(ProcessProfile profile)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+        return CanView(profile.IsSystem, profile.IsPublic, profile.CreatedByUserId);
+    }
+
+    /// <summary>Returns whether this viewer may see the given filament profile (issue #3180).</summary>
+    /// <param name="profile">The filament profile.</param>
+    public bool CanView(FilamentProfile profile)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+        return CanView(profile.IsSystem, profile.IsPublic, profile.CreatedByUserId);
+    }
+
+    /// <summary>Returns whether this viewer may see the given machine profile (issue #3180).</summary>
+    /// <param name="profile">The machine profile.</param>
+    public bool CanView(MachineProfile profile)
     {
         ArgumentNullException.ThrowIfNull(profile);
         return CanView(profile.IsSystem, profile.IsPublic, profile.CreatedByUserId);

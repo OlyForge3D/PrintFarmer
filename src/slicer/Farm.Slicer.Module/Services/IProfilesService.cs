@@ -26,14 +26,14 @@ public interface IProfilesService
     Task<bool> SetDefaultProfileAsync(Guid id, CancellationToken ct);
 
     /// <summary>Lists all profiles organized by type with basic properties.</summary>
-    /// <param name="viewer">Caller whose visibility scope filters private process profiles (issue #3174).</param>
+    /// <param name="viewer">Caller whose visibility scope filters private process, filament, and machine profiles (issues #3174, #3180).</param>
     /// <param name="ct">Cancellation token.</param>
     Task<ExtendedProfilesResponseDto> ListExtendedAsync(ProfileViewer viewer, CancellationToken ct);
 
     /// <summary>Lists profiles organized in a hierarchical structure by manufacturer and machine model.</summary>
     /// <param name="manufacturer">Optional manufacturer name filter.</param>
     /// <param name="machineProfileId">Optional machine profile ID filter.</param>
-    /// <param name="viewer">Caller whose visibility scope filters private process profiles (issue #3174).</param>
+    /// <param name="viewer">Caller whose visibility scope filters private process, filament, and machine profiles (issues #3174, #3180).</param>
     /// <param name="ct">Cancellation token.</param>
     Task<HierarchicalProfilesResponseDto> ListHierarchyAsync(string? manufacturer, Guid? machineProfileId, ProfileViewer viewer, CancellationToken ct);
 
@@ -91,7 +91,7 @@ public interface IProfilesService
 
     /// <summary>Gets names of profiles already imported for a specific printer model.</summary>
     /// <param name="printerModelId">The printer model ID.</param>
-    /// <param name="viewer">Caller whose visibility scope filters private process profile names (issue #3174).</param>
+    /// <param name="viewer">Caller whose visibility scope filters private process, filament, and machine profile names (issues #3174, #3180).</param>
     /// <param name="ct">Cancellation token.</param>
     Task<ImportedProfileNamesDto> GetImportedProfileNamesForModelAsync(Guid printerModelId, ProfileViewer viewer, CancellationToken ct);
 
@@ -176,12 +176,14 @@ public interface IProfilesService
     /// <param name="printerModelId">The catalog PrinterModel ID.</param>
     /// <param name="profileType">The kind of profile to resolve.</param>
     /// <param name="profileName">The profile name as reported by the catalog read endpoints.</param>
+    /// <param name="viewer">Caller whose visibility scope limits which already-imported profiles can match by name, so another user's private profile id is never returned (issue #3180).</param>
     /// <param name="ct">Cancellation token.</param>
     Task<ResolveProfileForModelResultDto> ResolveOrImportProfileForModelAsync(
         HttpClient httpClient,
         Guid printerModelId,
         ProfileResolutionType profileType,
         string profileName,
+        ProfileViewer viewer,
         CancellationToken ct);
 
     /// <summary>Creates a new process profile.</summary>
@@ -213,7 +215,7 @@ public interface IProfilesService
     /// <summary>Clones a single profile to create a user-owned custom copy.</summary>
     /// <param name="request">Clone request with source profile ID, type, and optional custom name.</param>
     /// <param name="userId">ID of the user creating the clone.</param>
-    /// <param name="viewer">Caller whose visibility scope applies to the source process profile; an invisible source is reported as not found (issue #3174).</param>
+    /// <param name="viewer">Caller whose visibility scope applies to the source profile of any type; an invisible source is reported as not found (issues #3174, #3180).</param>
     /// <param name="ct">Cancellation token.</param>
     Task<CloneSingleProfileResponseDto> CloneSingleProfileAsync(CloneSingleProfileRequestDto request, Guid userId, ProfileViewer viewer, CancellationToken ct);
 
