@@ -138,7 +138,30 @@ test('host-update config follows selected provider, active services, split DB an
     });
     const config = JSON.parse(readFileSync(configPath, 'utf8'));
     assert.equal(config.HostUpdateExecution.DatabaseExternallyOwned, true);
+    assert.equal(config.HostUpdateExecution.StorageExternallyOwned, false);
     assert.deepEqual(config.HostUpdateExecution.SupportedProviderNames, ['Npgsql.EntityFrameworkCore.PostgreSQL']);
+
+    const storageCell = resolveCell('external-storage').cell;
+    assert.equal(resolveCell('external-storage').scenario, 'needs-operator-recover');
+    const storageConfig = writeHostUpdateConfig(configPath, {
+      rootDirectory: path.join(scratch, 'host-update-storage'),
+      deploymentRoot: scratch,
+      projectName: 'external-storage-test',
+      databaseConnectionString: 'Host=172.30.55.11;Database=printfarmer',
+      cell: storageCell,
+      databaseProvider: providerFor(storageCell.provider),
+    });
+    assert.equal(storageConfig.HostUpdateExecution.StorageExternallyOwned, true);
+    assert.equal(storageConfig.HostUpdateExecution.DatabaseExternallyOwned, false);
+    assert.equal(writeHostUpdateConfig(configPath, {
+      rootDirectory: path.join(scratch, 'host-update-storage-prior'),
+      deploymentRoot: scratch,
+      projectName: 'external-storage-test',
+      databaseConnectionString: 'Host=172.30.55.11;Database=printfarmer',
+      cell: storageCell,
+      databaseProvider: providerFor(storageCell.provider),
+      storageExternallyOwned: false,
+    }).HostUpdateExecution.StorageExternallyOwned, false, 'prior activation must run host-owned before the owner flip');
 
     const splitCell = resolveCell('split-database').cell;
     writeHostUpdateConfig(configPath, {

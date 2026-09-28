@@ -107,41 +107,6 @@ try {
   checkpoints.ok('trusted-root-created');
   proveNetworkDenialBoundary({ hostContainer, networkAttemptsPath });
   checkpoints.ok('network-denial-canary-proven');
-  if (cellSpec.scenario === 'product-gap') {
-    checkpoints.failed('product-owner-signal-unavailable:storage');
-    recordFaultCheckpoint();
-    run.finishedAt = new Date().toISOString();
-    evidence = baseEvidence({
-      run,
-      host,
-      cell,
-      identities: {
-        source: releaseEvidenceIdentity(prior),
-        target: releaseEvidenceIdentity(target),
-        prior: releaseEvidenceIdentity(prior),
-        bundleSha256: null,
-        signingRootFingerprint: root.fingerprint,
-      },
-      tools,
-      checkpoints: checkpoints.checkpoints,
-      outcome: {
-        expected: cellSpec.expected.outcome,
-        expectedReason: cellSpec.expected.reason,
-        actual: 'RecoveryRequired',
-        reason: 'product-owner-signal-unavailable:storage',
-        exitCode: 1,
-        journalPhase: 'not-started',
-      },
-      timings: { activationSeconds: 0, recoverySeconds: 0 },
-      verdict: 'fail',
-      networkAttempts: readNetworkAttempts(networkAttemptsPath),
-    });
-    writeValidatedEvidence(evidencePath, evidence);
-    const error = new Error('product-owner-signal-unavailable:storage');
-    error.evidenceWritten = true;
-    throw error;
-  }
-
   const protectedBackup = protectedBackupReference(prior);
   const protectedBackupPath = join(runRoot, 'protected-backup.json');
   writeJson(protectedBackupPath, protectedBackup);
@@ -283,6 +248,7 @@ try {
     cell: priorCell,
     databaseProvider: provider,
     databaseExternallyOwned: false,
+    storageExternallyOwned: false,
     createHostStateRoot: false,
   });
   checkpoints.ok('deployment-root-prepared');
@@ -393,6 +359,7 @@ try {
     cell,
     databaseProvider: provider,
     databaseExternallyOwned: false,
+    storageExternallyOwned: false,
     createHostStateRoot: false,
   });
 
@@ -526,6 +493,7 @@ try {
   const recoveryStarted = Date.now();
   runFaultHook('before-recover', { runRoot, deploymentRoot, stagingDir: targetStaging, bundlePath });
   if (cellSpec.scenario === 'needs-operator-recover') {
+    const externalOwner = cell.databaseOwner === 'external' ? 'database' : 'storage';
     writeHostUpdateConfig(configPath, {
       rootDirectory: join(runRoot, 'host-update'),
       deploymentRoot,
@@ -543,10 +511,11 @@ try {
       healthBaseUrl: `http://${appStaticIp}:5000`,
       cell,
       databaseProvider: provider,
-      databaseExternallyOwned: true,
+      databaseExternallyOwned: cell.databaseOwner === 'external',
+      storageExternallyOwned: cell.storageOwner === 'external',
       createHostStateRoot: false,
     });
-    checkpoints.ok('external-database-owner-flipped');
+    checkpoints.ok(`external-${externalOwner}-owner-flipped`);
     const preview = executePackagedStep({
       checkpointName: 'recover-preview',
       cli,
@@ -569,8 +538,8 @@ try {
       throw cellFailure('needs_operator_evidence_unavailable', { actual: 'NeedsOperator', exitCode: preview.exitCode });
     }
     const afterPreview = stateContinuitySnapshot({ env, deploymentRoot, hostStateRoot, hostContainer, provider });
-    assertEqualJson('external-database-migration-heads-unchanged', beforeRecovery.migrationHeads, afterPreview.migrationHeads);
-    assertEqualJson('external-database-volume-hashes-unchanged', beforeRecovery.volumeHashes, afterPreview.volumeHashes);
+    assertEqualJson(`external-${externalOwner}-migration-heads-unchanged`, beforeRecovery.migrationHeads, afterPreview.migrationHeads);
+    assertEqualJson(`external-${externalOwner}-volume-hashes-unchanged`, beforeRecovery.volumeHashes, afterPreview.volumeHashes);
     checkpoints.ok(`needs-operator-recover:${cellSpec.expected.reason}`);
     run.finishedAt = new Date().toISOString();
     const journalPath = join(runRoot, 'host-update', 'state', 'journal.ndjson');

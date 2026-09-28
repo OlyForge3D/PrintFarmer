@@ -234,6 +234,7 @@ export function writeHostUpdateConfig(path, {
   cell = defaultCell,
   databaseProvider,
   databaseExternallyOwned,
+  storageExternallyOwned,
   slicerConnectionString,
   createHostStateRoot = true,
 } = {}) {
@@ -289,6 +290,7 @@ export function writeHostUpdateConfig(path, {
       ActiveServiceIds: resolvedActiveServiceIds,
       RequiredFencedWriterNames: [],
       DatabaseExternallyOwned: databaseExternallyOwned ?? cell.databaseOwner === 'external',
+      StorageExternallyOwned: storageExternallyOwned ?? cell.storageOwner === 'external',
       OwnedDirectories: ownedDirectories,
       ComposeFiles: [compose('docker-compose.recovery.yml')],
       ComposeProjectName: projectName,

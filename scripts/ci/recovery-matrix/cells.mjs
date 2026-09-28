@@ -94,7 +94,7 @@ export const cells = Object.freeze([
   }),
   defineCell({
     id: 'external-storage',
-    scenario: 'product-gap',
+    scenario: 'needs-operator-recover',
     cell: {
       topology: 'monolith',
       provider: 'postgres',
