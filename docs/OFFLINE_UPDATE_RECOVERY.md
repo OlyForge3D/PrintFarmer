@@ -1167,6 +1167,34 @@ secret-bearing field names.
 identity, no duplicated cell, at least one cell and exactly one published-bundle
 verification.
 
+**Schema-delta fixture (#3167).** Migration power-loss and partial-migration
+fault cells need a target whose schema really differs from the prior release,
+so the interruption lands inside a real migration applied by the product's
+`HostUpdateTargetImageMigrationRunner`. Cells request this with
+`schemaDelta: 'changed'` (default `identical`); `buildC2ImageLayout` then builds
+the target `api` and `slicer-host` images from
+[`scripts/ci/recovery-matrix/fixture-migrations/Dockerfile.target-schema-delta`](../scripts/ci/recovery-matrix/fixture-migrations/Dockerfile.target-schema-delta),
+which overlays rebuilt PostgreSQL and SQL Server migrations assemblies onto the
+prior image, and returns `schemaDelta` plus `fixtureMigrations`. The fixture adds
+one additive migration per context:
+
+| Context | Migration ID | Table |
+| --- | --- | --- |
+| `AppDbContext` | `29990601000000_RecoveryMatrixFixtureSchemaDelta` | `RecoveryMatrixFixtureMarkers` |
+| `SlicerDbContext` | `29990601000001_RecoveryMatrixFixtureSlicerSchemaDelta` | `RecoveryMatrixFixtureSlicerMarkers` |
+
+The migrations are test-only: their sources live under
+`scripts/ci/recovery-matrix/fixture-migrations/` and are compiled in only when
+`RecoveryMatrixFixture.targets` is passed through
+`-p:CustomAfterMicrosoftCommonTargets` inside the fixture Dockerfile. Shipped
+migrations projects, model snapshots and `Dockerfile.multistage` are unchanged,
+so `dotnet ef migrations has-pending-model-changes` is unaffected and no release
+image contains them. The far-future IDs sort after every real migration.
+[`schema-delta-fixture.mjs`](../scripts/ci/recovery-matrix/schema-delta-fixture.mjs)
+exports the IDs, the per-provider SQL that reads the migration-history row and
+table presence, and the expected fixture state for `Activated` (history row and
+table present) and `RolledBack` (both absent) outcomes, so fault cells can assert the database after recovery.
+
 **Cadence.** The matrix runs on `workflow_dispatch` and nightly. It is never
 part of a release publication workflow and never targets a real deployment.
 
