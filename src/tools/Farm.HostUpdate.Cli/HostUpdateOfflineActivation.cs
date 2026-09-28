@@ -486,7 +486,8 @@ internal sealed class DockerComposeApiAbsenceProbe(
     IHostUpdateExecutableResolver executableResolver,
     HostUpdateExecutionOptions options,
     HostUpdatePriorReleaseContext? priorContext = null,
-    IInstalledHostStateStore? installedStateStore = null) : IHostUpdateOfflineActivationSafetyProbe
+    IInstalledHostStateStore? installedStateStore = null,
+    IHostUpdateExecutionJournal? journal = null) : IHostUpdateOfflineActivationSafetyProbe
 {
     private static readonly IReadOnlySet<string> WriterServiceIds = new HashSet<string>(StringComparer.Ordinal)
     {
@@ -517,15 +518,97 @@ internal sealed class DockerComposeApiAbsenceProbe(
             return null;
         }
 
-        Func<string, string?, string?, bool>? tolerate = await BuildPriorReleaseToleranceAsync(request, mappings, cancellationToken).ConfigureAwait(false);
+        Func<string, string?, string?, bool>? priorTolerance = await BuildPriorReleaseToleranceAsync(request, mappings, cancellationToken).ConfigureAwait(false);
+        Func<string, string?, string?, bool>? inFlightApplyTolerance = BuildInFlightApplyTolerance(request, mappings);
+        Func<string, string?, string?, bool>? tolerate = (priorTolerance, inFlightApplyTolerance) switch
+        {
+            (null, null) => null,
+            ({ } prior, null) => prior,
+            (null, { } inFlight) => inFlight,
+            ({ } prior, { } inFlight) => (serviceId, image, containerId) => prior(serviceId, image, containerId) || inFlight(serviceId, image, containerId),
+        };
         Dictionary<string, List<string>> tolerated = new(StringComparer.Ordinal);
         string? error = await ObserveWritersAsync(mappings, tolerate, tolerated, cancellationToken).ConfigureAwait(false);
         if (error is null && priorContext is not null)
         {
-            priorContext.RecordTolerated(tolerated.ToDictionary(pair => pair.Key, pair => pair.Value.ToArray(), StringComparer.Ordinal));
+            // Only authenticated prior-release writers enter the fence's tolerated set: the N-1 fence
+            // stops that set by container ID, and it must never stop a writer already on the target —
+            // including one whose digest is unchanged between N-1 and the target during an in-flight apply.
+            priorContext.RecordTolerated(tolerated
+                .Select(pair => (pair.Key, Identities: pair.Value.Where(identity =>
+                    MatchesTolerance(priorTolerance, pair.Key, identity) &&
+                    !MatchesTolerance(inFlightApplyTolerance, pair.Key, identity)).ToArray()))
+                .Where(pair => pair.Identities.Length > 0)
+                .ToDictionary(pair => pair.Key, pair => pair.Identities, StringComparer.Ordinal));
         }
 
         return error;
+    }
+
+    private static bool MatchesTolerance(Func<string, string?, string?, bool>? tolerance, string serviceId, string identity)
+    {
+        int separator = identity.IndexOf(' ', StringComparison.Ordinal);
+        return tolerance is not null &&
+            separator > 0 &&
+            tolerance(serviceId, identity[(separator + 1)..], identity[..separator]);
+    }
+
+    /// <summary>
+    /// After a crash between the target <c>compose up</c> and the durable <c>apply:after</c> marker
+    /// (issue #3181), writers may already run the target release. They are tolerated only when this
+    /// exact request's journal is interrupted at <c>apply:before</c>: every activity is bound to the
+    /// same request, and no apply completion, failure, refusal or completion was ever recorded. Only
+    /// the request's own signed target pin is tolerated; the executor then reconciles the apply by
+    /// verifying the exact running digests instead of repeating it.
+    /// </summary>
+    private Func<string, string?, string?, bool>? BuildInFlightApplyTolerance(
+        HostUpdateExecutionRequest request,
+        Dictionary<string, HostUpdateServiceMappingOptions> mappings)
+    {
+        if (journal is null || !JournalInterruptedAtApply(request))
+        {
+            return null;
+        }
+
+        Dictionary<string, string> targetDigests = request.Targets.ToDictionary(target => target.ServiceId, target => target.ChildDigest, StringComparer.Ordinal);
+        return (serviceId, image, containerId) =>
+            image is not null &&
+            containerId is not null &&
+            mappings.TryGetValue(serviceId, out HostUpdateServiceMappingOptions? mapping) &&
+            !string.IsNullOrWhiteSpace(mapping.ImageRepository) &&
+            targetDigests.TryGetValue(serviceId, out string? digest) &&
+            string.Equals(image, mapping.ImageRepository + "@" + digest, StringComparison.Ordinal);
+    }
+
+    private bool JournalInterruptedAtApply(HostUpdateExecutionRequest request)
+    {
+        IReadOnlyList<HostUpdateExecutionActivity> activities;
+        try
+        {
+            activities = journal!.Read(request.ReleaseId);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return false;
+        }
+
+        if (activities.Count == 0)
+        {
+            return false;
+        }
+
+        string bindingHash = HostUpdateRequestBinding.Compute(request);
+        HostUpdateExecutionActivity last = activities[^1];
+        return activities.All(activity => string.Equals(activity.RequestBindingHash, bindingHash, StringComparison.Ordinal)) &&
+            last.State == HostUpdateExecutionState.Applying &&
+            string.Equals(last.Phase, "apply:before", StringComparison.Ordinal) &&
+            !activities.Any(activity => activity.State is
+                HostUpdateExecutionState.Verifying or
+                HostUpdateExecutionState.Completed or
+                HostUpdateExecutionState.RecoveryRequired or
+                HostUpdateExecutionState.Refused) &&
+            !activities.Any(activity => activity.State == HostUpdateExecutionState.Applying &&
+                !string.Equals(activity.Phase, "apply:before", StringComparison.Ordinal));
     }
 
     /// <summary>
