@@ -6,6 +6,7 @@ import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 
 import { readOfflineBundleEntries, tarHeader } from '../offline-update-bundle.mjs';
+import { imageTarHeader } from '../offline-bundle-images.mjs';
 import { adversarialCases, importCellsVerifiedCheckpoint } from './import-cells.mjs';
 
 const block = 512;
@@ -144,37 +145,114 @@ export function assertImportedIdentity(label, record, built) {
   }
 }
 
+// Every refusal must leave a refused decision record whose reason is the one the case exists to
+// prove; a nonzero exit for any other cause (a crashed tool, a different guard) is not evidence.
 export function assertRefusedImport(label, result, { reason } = {}) {
   if (result.exitCode === 0) fail('import_not_refused', label);
+  if (!(typeof reason === 'string' && reason) && !(reason instanceof RegExp)) fail('import_refusal_reason_unbound', label);
   const record = result.record;
-  if (record) {
-    if (record.outcome !== 'refused') fail('import_refusal_outcome', `${label}:${record.outcome}`);
-    if (record.installable !== false || record.replay?.admitted === true) fail('import_refusal_admitted', label);
-    if ((record.loadedImages ?? []).length !== 0) fail('import_refusal_loaded_images', label);
-    if (reason && !String(record.reason ?? '').includes(reason)) {
-      fail('import_refusal_reason', `${label}:expected ${reason}:got ${record.reason}`);
-    }
-  } else if (reason && !`${result.stdout}\n${result.stderr}`.includes(reason)) {
-    fail('import_refusal_reason', `${label}:expected ${reason}:no decision record`);
+  if (!record) fail('import_refusal_no_record', `${label}:exit ${result.exitCode}`);
+  if (record.outcome !== 'refused') fail('import_refusal_outcome', `${label}:${record.outcome}`);
+  if (record.installable !== false || record.replay?.admitted === true) fail('import_refusal_admitted', label);
+  if ((record.loadedImages ?? []).length !== 0) fail('import_refusal_loaded_images', label);
+  const actual = String(record.reason ?? '');
+  if (reason instanceof RegExp ? !reason.test(actual) : !actual.includes(reason)) {
+    fail('import_refusal_reason', `${label}:expected ${reason}:got ${record.reason}`);
   }
-  return record?.reason ?? `exit:${result.exitCode}`;
+  return actual;
 }
 
-function assertSameState(label, before, after, { allowReplayRecord = false } = {}) {
-  const replayFiles = new Set(['host-update-replay.json', 'replay-anchor.json', 'replay-anchor.journal']);
+const replayFiles = ['host-update-replay.json', 'replay-anchor.json', 'replay-anchor.journal'];
+
+function assertSameState(label, before, after, { exempt = [] } = {}) {
   const drift = Object.keys({ ...before, ...after })
     .filter((key) => before[key] !== after[key])
-    .filter((key) => !(allowReplayRecord && replayFiles.has(key)));
+    .filter((key) => !exempt.includes(key));
   if (drift.length > 0) fail('import_refusal_mutated_state', `${label}:${drift.join(',')}`);
 }
 
 const field = (object, name) => object?.[name] ?? object?.[name[0].toLowerCase() + name.slice(1)];
 
+const anchorVersion = 1;
+
+export function anchorEntryHash(epoch, previous, stateHash) {
+  return sha256(Buffer.from(`${anchorVersion}|${epoch}|${previous}|${stateHash}`));
+}
+
+function parseJournal(label, text) {
+  if (text === null || text === undefined) return [];
+  if (!text.endsWith('\n')) fail('replay_anchor_journal_truncated', label);
+  return text.split('\n').filter(Boolean).map((line) => {
+    try {
+      return JSON.parse(line);
+    } catch {
+      return fail('replay_anchor_journal_corrupt', label);
+    }
+  });
+}
+
+function parseSnapshot(label, text) {
+  if (text === null || text === undefined) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return fail('replay_anchor_snapshot_corrupt', label);
+  }
+}
+
+const snapshotOf = (entry) => ({ Version: anchorVersion, Epoch: entry.Epoch, StateHash: entry.StateHash, Hash: entry.Hash });
+const sameSnapshot = (snapshot, entry) => JSON.stringify(snapshot && snapshotOf(snapshot)) === JSON.stringify(snapshotOf(entry));
+
+// The replay anchor is an append-only hash-chained journal plus a snapshot cache of its head; the
+// head's StateHash authenticates host-update-replay.json. A refusal may touch it in exactly two
+// ways, and nothing else counts as an unchanged anchor:
+//  - 'recorded': an authenticated replay refusal appends at most one chained entry (none when
+//    the identity was already decided), the snapshot is that new head, and the head authenticates
+//    the replay file now on disk. Returns the number of appended entries.
+//  - 'healed': a rolled-back snapshot is rewritten to the unchanged journal head; the journal and
+//    the replay file are untouched.
+export function assertAnchorTransition(label, before, after, { mode }) {
+  const journalBefore = parseJournal(label, before.journal);
+  const journalAfter = parseJournal(label, after.journal);
+  if (journalBefore.length === 0) fail('replay_anchor_not_provisioned', label);
+  const headBefore = journalBefore.at(-1);
+  const snapshotBefore = parseSnapshot(label, before.snapshot);
+  const snapshotAfter = parseSnapshot(label, after.snapshot);
+  if (mode === 'healed') {
+    if (after.journal !== before.journal) fail('replay_anchor_journal_changed', label);
+    if (after.replayHash !== before.replayHash) fail('replay_anchor_state_changed', label);
+    if (!snapshotBefore || sameSnapshot(snapshotBefore, headBefore) || !(Number(snapshotBefore.Epoch) < Number(headBefore.Epoch))) {
+      fail('replay_anchor_not_rolled_back', label);
+    }
+    if (!sameSnapshot(snapshotAfter, headBefore)) fail('replay_anchor_not_healed_to_head', label);
+    return 0;
+  }
+  if (mode !== 'recorded') fail('replay_anchor_mode_unknown', `${label}:${mode}`);
+  if (!String(after.journal ?? '').startsWith(before.journal)) fail('replay_anchor_journal_rewritten', label);
+  const appended = journalAfter.slice(journalBefore.length);
+  if (appended.length === 0) {
+    if (after.snapshot !== before.snapshot) fail('replay_anchor_snapshot_changed', label);
+    if (after.replayHash !== before.replayHash) fail('replay_anchor_state_changed', label);
+    return 0;
+  }
+  if (appended.length !== 1) fail('replay_anchor_multiple_entries', `${label}:${appended.length}`);
+  const [entry] = appended;
+  if (entry.Version !== anchorVersion || !(Number(entry.Epoch) > Number(headBefore.Epoch)) ||
+    entry.PreviousHash !== headBefore.Hash || entry.Hash !== anchorEntryHash(entry.Epoch, entry.PreviousHash, entry.StateHash)) {
+    fail('replay_anchor_entry_unchained', label);
+  }
+  if (entry.StateHash !== after.replayHash) fail('replay_anchor_state_unauthenticated', label);
+  if (!sameSnapshot(snapshotAfter, entry)) fail('replay_anchor_snapshot_not_head', label);
+  return 1;
+}
+
 // An authenticated replay refusal durably records the refused identity (so it stays refused
 // across restarts and restores). That record must not change what is admitted: every channel
 // high-water mark and every earlier identity decision is unchanged, and only Rejected or
-// Superseded identities are added.
-export function replayAdmissionDrift(before, after) {
+// Superseded identities are added. With `expect`, exactly `expect.added` identities are added,
+// each the refused candidate's sequence recorded as Rejected (the only disposition a refusal
+// persists for a new identity).
+export function replayAdmissionDrift(before, after, expect) {
   if (!before || !after) return before === after ? [] : ['replay-store-presence'];
   const drift = [];
   const hwmBefore = field(before, 'HighWaterByNamespace') ?? {};
@@ -187,11 +265,17 @@ export function replayAdmissionDrift(before, after) {
   for (const [identity, record] of Object.entries(idsBefore)) {
     if (JSON.stringify(record) !== JSON.stringify(idsAfter[identity])) drift.push(`identity-changed:${identity}`);
   }
-  for (const [identity, record] of Object.entries(idsAfter)) {
-    if (identity in idsBefore) continue;
+  const added = Object.entries(idsAfter).filter(([identity]) => !(identity in idsBefore));
+  for (const [identity, record] of added) {
     const disposition = String(field(record, 'Disposition'));
-    if (disposition !== 'Rejected' && disposition !== 'Superseded') drift.push(`identity-added:${identity}:${disposition}`);
+    if (expect) {
+      if (disposition !== 'Rejected') drift.push(`identity-added:${identity}:${disposition}`);
+      if (String(field(record, 'Sequence')) !== String(expect.sequence)) drift.push(`identity-added-sequence:${identity}`);
+    } else if (disposition !== 'Rejected' && disposition !== 'Superseded') {
+      drift.push(`identity-added:${identity}:${disposition}`);
+    }
   }
+  if (expect && added.length !== expect.added) drift.push(`identities-added:${added.length}!=${expect.added}`);
   return drift;
 }
 
@@ -249,20 +333,25 @@ function createHelpers(ctx) {
   const refused = (label, rel, options = {}) => {
     const before = ctx.stateHashes();
     const replayBefore = ctx.replayState();
+    const anchorBefore = ctx.replayAnchor();
     const result = ctx.importBundle({ built: rel, bundle: options.bundle ?? bundle(rel), label, ...options });
     const reason = assertRefusedImport(label, result, { reason: options.reason });
     if (ctx.stagingExists(label)) fail('import_refusal_left_staging', label);
-    const allowReplayRecord = authenticatedReplayRefusal(reason);
     const after = ctx.stateHashes();
-    // The anchor snapshot is a cache of the append-only anchor journal. Detecting a rolled-back
-    // snapshot heals it forward to the journal head; that restores, never advances, admission.
-    if (options.anchorRepairTo && after['replay-anchor.json'] === options.anchorRepairTo) {
-      before['replay-anchor.json'] = after['replay-anchor.json'];
-    }
-    assertSameState(label, before, after, { allowReplayRecord });
-    if (allowReplayRecord) {
-      const drift = replayAdmissionDrift(replayBefore, ctx.replayState());
+    if (authenticatedReplayRefusal(reason)) {
+      assertSameState(label, before, after, { exempt: replayFiles });
+      const appended = assertAnchorTransition(label, anchorBefore, ctx.replayAnchor(), { mode: 'recorded' });
+      const drift = replayAdmissionDrift(replayBefore, ctx.replayState(), { added: appended, sequence: rel.release.sequence });
       if (drift.length > 0) fail('import_refusal_changed_admission', `${label}:${drift.join(',')}`);
+    } else if (options.anchorHealedTo) {
+      // A rolled-back anchor snapshot is a stale cache of the append-only journal; detecting it
+      // rewrites the snapshot to the unchanged journal head, which restores, never advances, admission.
+      if (!/host_update_replay_state_rollback/.test(reason)) fail('import_refusal_heal_reason', `${label}:${reason}`);
+      assertSameState(label, before, after, { exempt: ['replay-anchor.json'] });
+      assertAnchorTransition(label, anchorBefore, ctx.replayAnchor(), { mode: 'healed' });
+      if (after['replay-anchor.json'] !== options.anchorHealedTo) fail('replay_anchor_not_healed_to_advanced', label);
+    } else {
+      assertSameState(label, before, after);
     }
     checkpoints.ok(`refused-before-mutation:${label}:${shortReason(reason)}`);
     return result;
@@ -284,14 +373,18 @@ function createHelpers(ctx) {
 function runIdentity(ctx, h) {
   const insider = h.release('1.0.0-insider.10');
   const attacker = h.release('1.0.0-insider.11', { sigstore: 'attacker' });
-  h.refused('self-enrolled-root', attacker, { bundle: h.bundle(attacker, { trustedRootPath: attacker.trustedRootPath }) });
+  h.refused('self-enrolled-root', attacker, {
+    bundle: h.bundle(attacker, { trustedRootPath: attacker.trustedRootPath }),
+    reason: reasons.signature,
+  });
   h.refused('self-enrolled-root-approval', attacker, {
     bundle: h.bundle(attacker, { trustedRootPath: attacker.trustedRootPath }),
     approval: attacker.approvalPath,
+    reason: reasons.unboundApproval,
   });
   const insiderBundle = h.bundle(insider);
-  h.refused('fresh-host-without-approval', insider, { bundle: insiderBundle, approval: join(ctx.runRoot, 'absent-approval.json') });
-  h.refused('fresh-host-unbound-approval', insider, { bundle: insiderBundle, approval: attacker.approvalPath });
+  h.refused('fresh-host-without-approval', insider, { bundle: insiderBundle, approval: join(ctx.runRoot, 'absent-approval.json'), reason: reasons.unreadableApproval });
+  h.refused('fresh-host-unbound-approval', insider, { bundle: insiderBundle, approval: attacker.approvalPath, reason: reasons.unboundApproval });
   h.imported('insider-original-identity', insider, { bundle: insiderBundle });
   h.setPolicy('stable');
   h.imported('stable-original-identity', h.release('1.0.0'));
@@ -318,14 +411,62 @@ function runChannelRoundTrips(ctx, h) {
     }
     h.imported(`${labels[index < 3 ? 0 : 1]}:${index % 3}`, h.release(version));
   });
-  h.refused('insider-bundle-as-stable-alias', h.release('1.0.5-insider.1'), { channel: 'stable' });
+  h.refused('insider-bundle-as-stable-alias', h.release('1.0.5-insider.1'), { channel: 'stable', reason: /channel insider does not match the expected stable/ });
   h.setPolicy('stable');
-  h.refused('unsupported-downgrade-stable', h.release('1.0.0'));
-  h.refused('moved-branch-same-version', h.release('1.0.3', { seed: 'moved-branch' }));
+  h.refused('unsupported-downgrade-stable', h.release('1.0.0'), { reason: 'replay_rejected' });
+  h.refused('moved-branch-same-version', h.release('1.0.3', { seed: 'moved-branch' }), { reason: 'replay_rejected' });
   h.refused('deleted-alias-reimport', h.release('1.0.2'), { reason: 'replay_superseded' });
   h.setPolicy('insider');
   h.refused('unsupported-downgrade-insider', h.release('1.0.3-insider.1'), { reason: 'replay_superseded' });
-  h.refused('moved-branch-insider', h.release('1.0.4-insider.1', { seed: 'moved-branch' }));
+  h.refused('moved-branch-insider', h.release('1.0.4-insider.1', { seed: 'moved-branch' }), { reason: 'replay_rejected' });
+}
+
+const reasons = {
+  signature: /signature verification failed for update-manifest\.json/,
+  unboundApproval: /does not bind the supplied trusted root/,
+  unreadableApproval: /approval record is unreadable/,
+};
+
+function readNestedImageArchive(bytes) {
+  const members = [];
+  for (let offset = 0; offset + block <= bytes.length;) {
+    const header = bytes.subarray(offset, offset + block);
+    if (header.every((byte) => byte === 0)) break;
+    const nameField = header.subarray(0, 100);
+    const name = nameField.subarray(0, nameField.indexOf(0) === -1 ? 100 : nameField.indexOf(0)).toString('latin1');
+    const size = Number.parseInt(header.subarray(124, 136).toString('latin1').replace(/\0.*$/s, '').trim(), 8);
+    if (!Number.isSafeInteger(size)) fail('nested_image_archive_malformed', name);
+    const start = offset + block;
+    members.push({ name, data: bytes.subarray(start, start + size) });
+    offset = start + Math.ceil(size / block) * block;
+  }
+  if (members[0]?.name !== 'oci-layout' || members[1]?.name !== 'index.json') fail('nested_image_archive_not_oci_layout');
+  return members;
+}
+
+// Adds a correctly hashed arm64 image config and manifest to a nested OCI archive, in canonical
+// member order, so every blob still matches its digest and only the platform selection can refuse it.
+export function addForeignPlatformBlobs(archive) {
+  const members = readNestedImageArchive(Buffer.from(archive));
+  const config = Buffer.from(JSON.stringify({ architecture: 'arm64', os: 'linux', rootfs: { type: 'layers', diff_ids: [] }, config: {} }));
+  const manifest = Buffer.from(JSON.stringify({
+    schemaVersion: 2,
+    mediaType: 'application/vnd.oci.image.manifest.v1+json',
+    config: { mediaType: 'application/vnd.oci.image.config.v1+json', digest: `sha256:${sha256(config)}`, size: config.length },
+    layers: [],
+  }));
+  const blobs = members.slice(2);
+  for (const data of [config, manifest]) {
+    const name = `blobs/sha256/${sha256(data)}`;
+    if (!blobs.some((blob) => blob.name === name)) blobs.push({ name, data });
+  }
+  blobs.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  const parts = [];
+  for (const member of [...members.slice(0, 2), ...blobs]) {
+    parts.push(imageTarHeader({ name: member.name, size: member.data.length }), member.data, padding(member.data.length));
+  }
+  parts.push(Buffer.alloc(block * 2));
+  return Buffer.concat(parts);
 }
 
 function applicationImage(b) {
@@ -338,21 +479,25 @@ function applicationImage(b) {
 const adversarialRunners = {
   'missing-image': (ctx, h, base) => h.refused('missing-image', base.rel, {
     bundle: base.tampered('missing-image', (b) => b.drop(applicationImage(b))),
+    reason: /does not carry exactly the release-selected image set/,
   }),
   'missing-trust-approval': (ctx, h, base) => h.refused('missing-trust-approval', base.rel, {
-    bundle: base.path, approval: join(ctx.runRoot, 'absent-approval.json'),
+    bundle: base.path, approval: join(ctx.runRoot, 'absent-approval.json'), reason: reasons.unreadableApproval,
   }),
   'unbound-trust-approval': (ctx, h, base) => h.refused('unbound-trust-approval', base.rel, {
     bundle: base.path, approval: h.release('1.0.0-insider.12', { sigstore: 'attacker' }).approvalPath,
+    reason: reasons.unboundApproval,
   }),
   'missing-config': (ctx, h, base) => h.refused('missing-config', base.rel, {
-    bundle: base.path, config: join(ctx.runRoot, 'absent-host-update.json'),
+    bundle: base.path, config: join(ctx.runRoot, 'absent-host-update.json'), reason: /configuration unreadable/,
   }),
   'malicious-archive-symlink': (ctx, h, base) => h.refused('malicious-archive-symlink', base.rel, {
     bundle: base.tampered('symlink', (b) => b.insertRaw(tarHeader({ name: 'evil-link', size: 0, type: '2', linkname: '/etc/passwd' }))),
+    reason: /member type is not allowed: symbolic link/,
   }),
   'malicious-archive-traversal': (ctx, h, base) => h.refused('malicious-archive-traversal', base.rel, {
     bundle: base.tampered('traversal', (b) => b.insertRaw(tarHeader({ name: '../evil', size: 4 }), Buffer.from('evil'))),
+    reason: /nested or absolute/,
   }),
   'modified-bytes': (ctx, h, base) => h.refused('modified-bytes', base.rel, {
     bundle: base.tampered('modified', (b) => {
@@ -362,11 +507,12 @@ const adversarialRunners = {
       bytes[bytes.length >> 1] ^= 0xff;
       b.replace(name, bytes, { updateIndex: false });
     }),
+    reason: /member was modified/,
   }),
   'forged-promotion': (ctx, h) => {
     h.setPolicy('stable');
     try {
-      h.refused('forged-promotion', h.release('1.1.0', { signAs: 'insider' }));
+      h.refused('forged-promotion', h.release('1.1.0', { signAs: 'insider' }), { reason: reasons.signature });
     } finally {
       h.setPolicy('insider');
     }
@@ -374,21 +520,16 @@ const adversarialRunners = {
   'wrong-platform': (ctx, h, base) => h.refused('wrong-platform', base.rel, {
     bundle: base.tampered('platform', (b) => {
       const name = applicationImage(b);
-      const bytes = Buffer.from(b.read(name));
-      let swapped = 0;
-      for (let at = bytes.indexOf('amd64'); at !== -1; at = bytes.indexOf('amd64', at + 5)) {
-        bytes.write('arm64', at, 'ascii');
-        swapped += 1;
-      }
-      if (swapped === 0) fail('wrong_platform_marker_missing', name);
-      b.replace(name, bytes);
+      b.replace(name, addForeignPlatformBlobs(b.read(name)));
     }),
+    reason: /blobs outside the selected platforms/,
   }),
   'mixed-digests': (ctx, h, base) => h.refused('mixed-digests', base.rel, {
     bundle: base.tampered('mixed-digests', (b) => {
       const name = applicationImage(b);
       b.replace(name, readMembers(ctx.priorBundlePath, [name])[name]);
     }),
+    reason: /image-frontend\.oci\.tar failed verification: Image archive a/,
   }),
   'mixed-channels': (ctx, h, base) => {
     const stable = h.release('1.2.0');
@@ -399,20 +540,22 @@ const adversarialRunners = {
         b.replace('update-manifest.json', donor['update-manifest.json']);
         b.replace('update-manifest.sigstore.json', donor['update-manifest.sigstore.json']);
       }),
+      reason: /channel stable does not match the expected insider/,
     });
   },
   'expired-trust': (ctx, h, base) => h.refused('expired-trust', base.rel, {
-    bundle: base.path, approval: ctx.writeApproval('expired', { ageDays: 91 }),
+    bundle: base.path, approval: ctx.writeApproval('expired', { ageDays: 91 }), reason: /approval expired/,
   }),
   'revoked-trust': (ctx, h, base) => {
     const revoked = ctx.writeRevokedTrustedRoot();
-    h.refused('revoked-trust', base.rel, { bundle: base.path, trustedRoot: revoked.trustedRootPath, approval: revoked.approvalPath });
+    h.refused('revoked-trust', base.rel, { bundle: base.path, trustedRoot: revoked.trustedRootPath, approval: revoked.approvalPath, reason: /no certificate authority valid now/ });
   },
   'invalid-signature-poisoning': (ctx, h, base) => {
     const high = h.release('1.0.0-insider.30');
     const donor = readMembers(base.path, ['update-manifest.sigstore.json']);
     h.refused('invalid-signature-poisoning', high, {
       bundle: tamper(ctx, h, h.bundle(high), 'poisoning', (b) => b.replace('update-manifest.sigstore.json', donor['update-manifest.sigstore.json'])),
+      reason: reasons.signature,
     });
     h.imported('poisoning-did-not-raise-high-water', h.release('1.0.0-insider.25'));
   },
@@ -421,7 +564,7 @@ const adversarialRunners = {
   'missing-replay-store': (ctx, h) => {
     ctx.hostStateFiles.hide('host-update-replay.json');
     try {
-      h.refused('missing-replay-store', h.release('1.0.0-insider.26'));
+      h.refused('missing-replay-store', h.release('1.0.0-insider.26'), { reason: 'host_update_replay_state_missing' });
     } finally {
       ctx.hostStateFiles.unhide('host-update-replay.json');
     }
@@ -433,7 +576,10 @@ const adversarialRunners = {
     const advancedHashes = ctx.stateHashes();
     ctx.hostStateFiles.restore(saved, ['host-update-replay.json', 'replay-anchor.json']);
     try {
-      h.refused('rolled-back-replay-store', h.release('1.0.0-insider.27'), { anchorRepairTo: advancedHashes['replay-anchor.json'] });
+      h.refused('rolled-back-replay-store', h.release('1.0.0-insider.27'), {
+        reason: 'host_update_replay_state_rollback',
+        anchorHealedTo: advancedHashes['replay-anchor.json'],
+      });
     } finally {
       ctx.hostStateFiles.restore(advanced);
     }
@@ -517,7 +663,7 @@ function runReplaySupersede(ctx, h) {
   h.setPolicy('insider');
   holds('after-insider-stable-insider');
   h.setPolicy('stable');
-  h.refused('stable-lower-after-round-trip', h.release('1.0.0'));
+  h.refused('stable-lower-after-round-trip', h.release('1.0.0'), { reason: 'replay_rejected' });
   h.setPolicy('insider');
   h.setPolicy('stable');
   h.setPolicy('insider');

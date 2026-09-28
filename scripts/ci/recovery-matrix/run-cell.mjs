@@ -1051,6 +1051,16 @@ function runImportCell({
       const text = hostShell(`if [ -e ${path} ]; then cat ${path}; fi`).trim();
       return text ? JSON.parse(text) : null;
     },
+    replayAnchor: () => {
+      const read = (name) => {
+        const path = shellQuote(join(hostStateRoot, name));
+        const output = String(hostShell(`if [ -e ${path} ]; then printf 'present:'; base64 -w0 < ${path}; else printf absent; fi`)).trim();
+        return output.startsWith('present:') ? Buffer.from(output.slice('present:'.length), 'base64').toString('utf8') : null;
+      };
+      const replay = shellQuote(join(hostStateRoot, 'host-update-replay.json'));
+      const replayHash = String(hostShell(`if [ -e ${replay} ]; then sha256sum < ${replay} | cut -d' ' -f1; fi`)).trim() || null;
+      return { journal: read('replay-anchor.journal'), snapshot: read('replay-anchor.json'), replayHash };
+    },
     hostStateFiles: {
       save: (tag) => {
         const directory = join(saveRoot, safe(tag));

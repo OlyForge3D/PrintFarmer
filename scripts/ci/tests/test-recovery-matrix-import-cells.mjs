@@ -14,8 +14,12 @@ import {
   importCells,
   importCellsVerifiedCheckpoint,
 } from '../recovery-matrix/import-cells.mjs';
+import { readImageArchiveEntries } from '../offline-bundle-images.mjs';
 import {
+  addForeignPlatformBlobs,
   adversarialRunners,
+  anchorEntryHash,
+  assertAnchorTransition,
   assertImportedIdentity,
   assertRefusedImport,
   ImportScenarioError,
@@ -182,12 +186,13 @@ test('assertImportedIdentity requires the builder original identity', () => {
   );
 });
 
-test('assertRefusedImport rejects admitted or mutating refusals', () => {
+test('assertRefusedImport requires a refused record bound to the expected reason', () => {
   const refused = { outcome: 'refused', installable: false, reason: 'replay_superseded', replay: { admitted: false } };
   assert.equal(assertRefusedImport('ok', { exitCode: 1, record: refused }, { reason: 'replay_superseded' }), 'replay_superseded');
-  assert.equal(reasonOf(() => assertRefusedImport('x', { exitCode: 0, record: refused })), 'import_not_refused');
+  assert.equal(assertRefusedImport('re', { exitCode: 1, record: refused }, { reason: /^replay_super/ }), 'replay_superseded');
+  assert.equal(reasonOf(() => assertRefusedImport('x', { exitCode: 0, record: refused }, { reason: 'x' })), 'import_not_refused');
   assert.equal(
-    reasonOf(() => assertRefusedImport('x', { exitCode: 1, record: { ...refused, loadedImages: ['img'] } })),
+    reasonOf(() => assertRefusedImport('x', { exitCode: 1, record: { ...refused, loadedImages: ['img'] } }, { reason: 'replay' })),
     'import_refusal_loaded_images',
   );
   assert.equal(
@@ -195,8 +200,15 @@ test('assertRefusedImport rejects admitted or mutating refusals', () => {
     'import_refusal_reason',
   );
   assert.equal(
-    assertRefusedImport('cli', { exitCode: 2, record: null, stdout: '', stderr: 'config missing' }, { reason: 'config' }),
-    'exit:2',
+    reasonOf(() => assertRefusedImport('x', { exitCode: 1, record: refused }, { reason: /channel/ })),
+    'import_refusal_reason',
+  );
+  assert.equal(reasonOf(() => assertRefusedImport('x', { exitCode: 1, record: refused })), 'import_refusal_reason_unbound');
+  assert.equal(
+    reasonOf(() =>
+      assertRefusedImport('cli', { exitCode: 2, record: null, stdout: '', stderr: 'config missing' }, { reason: 'config' }),
+    ),
+    'import_refusal_no_record',
   );
 });
 
@@ -231,4 +243,104 @@ test('replayAdmissionDrift allows only durable authenticated refusals', () => {
   assert.deepEqual(replayAdmissionDrift(before, rewritten), ['identity-changed:i42']);
   assert.deepEqual(replayAdmissionDrift(before, null), ['replay-store-presence']);
   assert.deepEqual(replayAdmissionDrift(null, null), []);
+});
+
+test('replayAdmissionDrift with an expectation requires exactly the refused identity as Rejected', () => {
+  const before = {
+    HighWaterByNamespace: { insider: { Sequence: 42, Identity: 'i42' } },
+    Identities: { i42: { Sequence: 42, Disposition: 'Imported', CorrelationId: 'c' } },
+  };
+  const rejected = structuredClone(before);
+  rejected.Identities.i40 = { Sequence: 40, Disposition: 'Rejected', CorrelationId: 'd' };
+  assert.deepEqual(replayAdmissionDrift(before, rejected, { added: 1, sequence: 40 }), []);
+  assert.deepEqual(replayAdmissionDrift(before, before, { added: 0, sequence: 40 }), []);
+  assert.deepEqual(replayAdmissionDrift(before, rejected, { added: 0, sequence: 40 }), ['identities-added:1!=0']);
+  assert.deepEqual(replayAdmissionDrift(before, before, { added: 1, sequence: 40 }), ['identities-added:0!=1']);
+  assert.deepEqual(replayAdmissionDrift(before, rejected, { added: 1, sequence: 39 }), ['identity-added-sequence:i40']);
+  const superseded = structuredClone(before);
+  superseded.Identities.i40 = { Sequence: 40, Disposition: 'Superseded', CorrelationId: 'd' };
+  assert.deepEqual(replayAdmissionDrift(before, superseded, { added: 1, sequence: 40 }), ['identity-added:i40:Superseded']);
+  const two = structuredClone(rejected);
+  two.Identities.i39 = { Sequence: 40, Disposition: 'Rejected', CorrelationId: 'e' };
+  assert.deepEqual(replayAdmissionDrift(before, two, { added: 1, sequence: 40 }), ['identities-added:2!=1']);
+});
+
+function anchorEntry(epoch, previous, stateHash) {
+  return { Version: 1, Epoch: epoch, PreviousHash: previous, StateHash: stateHash, Hash: anchorEntryHash(epoch, previous, stateHash) };
+}
+const line = (entry) => `${JSON.stringify(entry)}\n`;
+const snap = (entry) => JSON.stringify({ Version: 1, Epoch: entry.Epoch, StateHash: entry.StateHash, Hash: entry.Hash });
+
+test('assertAnchorTransition accepts only one chained append authenticating the replay file', () => {
+  const e0 = anchorEntry(0, '', 'a'.repeat(64));
+  const e1 = anchorEntry(1, e0.Hash, 'b'.repeat(64));
+  const e2 = anchorEntry(2, e1.Hash, 'c'.repeat(64));
+  const before = { journal: line(e0) + line(e1), snapshot: snap(e1), replayHash: e1.StateHash };
+  const recorded = { journal: before.journal + line(e2), snapshot: snap(e2), replayHash: e2.StateHash };
+  const check = (after) => reasonOf(() => assertAnchorTransition('x', before, after, { mode: 'recorded' }));
+  assert.equal(assertAnchorTransition('x', before, recorded, { mode: 'recorded' }), 1);
+  assert.equal(assertAnchorTransition('x', before, { ...before }, { mode: 'recorded' }), 0);
+  assert.equal(check({ ...before, replayHash: 'd'.repeat(64) }), 'replay_anchor_state_changed');
+  assert.equal(check({ ...before, snapshot: snap(e0) }), 'replay_anchor_snapshot_changed');
+  assert.equal(check({ ...recorded, journal: line(e0) + line(e2) }), 'replay_anchor_journal_rewritten');
+  const e3 = anchorEntry(3, e2.Hash, 'e'.repeat(64));
+  assert.equal(check({ ...recorded, journal: recorded.journal + line(e3), snapshot: snap(e3), replayHash: e3.StateHash }), 'replay_anchor_multiple_entries');
+  const forged = { ...e2, Hash: 'f'.repeat(64) };
+  assert.equal(check({ ...recorded, journal: before.journal + line(forged) }), 'replay_anchor_entry_unchained');
+  const unlinked = anchorEntry(2, e0.Hash, 'c'.repeat(64));
+  assert.equal(check({ ...recorded, journal: before.journal + line(unlinked) }), 'replay_anchor_entry_unchained');
+  assert.equal(check({ ...recorded, replayHash: 'd'.repeat(64) }), 'replay_anchor_state_unauthenticated');
+  assert.equal(check({ ...recorded, snapshot: snap(e1) }), 'replay_anchor_snapshot_not_head');
+  assert.equal(check({ ...recorded, journal: recorded.journal.slice(0, -1) }), 'replay_anchor_journal_truncated');
+});
+
+test('assertAnchorTransition heals only a rolled-back snapshot to the unchanged journal head', () => {
+  const e0 = anchorEntry(0, '', 'a'.repeat(64));
+  const e1 = anchorEntry(1, e0.Hash, 'b'.repeat(64));
+  const journal = line(e0) + line(e1);
+  const before = { journal, snapshot: snap(e0), replayHash: e0.StateHash };
+  const healed = { journal, snapshot: snap(e1), replayHash: e0.StateHash };
+  const check = (b, a) => reasonOf(() => assertAnchorTransition('x', b, a, { mode: 'healed' }));
+  assert.equal(check(before, healed), null);
+  assert.equal(check(before, { ...healed, snapshot: snap(e0) }), 'replay_anchor_not_healed_to_head');
+  assert.equal(check({ ...before, snapshot: snap(e1) }, healed), 'replay_anchor_not_rolled_back');
+  assert.equal(check(before, { ...healed, journal: line(e0) }), 'replay_anchor_journal_changed');
+  assert.equal(check(before, { ...healed, replayHash: e1.StateHash }), 'replay_anchor_state_changed');
+});
+
+test('addForeignPlatformBlobs keeps a canonical, correctly hashed OCI archive', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'import-platform-'));
+  try {
+    const layout = Buffer.from('{"imageLayoutVersion":"1.0.0"}');
+    const index = Buffer.from('{"schemaVersion":2}');
+    const blob = Buffer.from('root');
+    const header = (name, size) => {
+      const h = tarHeader({ name, size });
+      return h;
+    };
+    const original = Buffer.concat([
+      ...[['oci-layout', layout], ['index.json', index], [`blobs/sha256/${sha256(blob)}`, blob]]
+        .flatMap(([name, bytes]) => [header(name, bytes.length), bytes, pad(bytes.length)]),
+      Buffer.alloc(1024),
+    ]);
+    const rewritten = addForeignPlatformBlobs(original);
+    const path = join(dir, 'image.oci.tar');
+    writeFileSync(path, rewritten);
+    const fd = openSync(path, 'r');
+    try {
+      const entries = readImageArchiveEntries(fd, 0, rewritten.length);
+      assert.equal(entries.length, 5);
+      assert.deepEqual(entries.slice(0, 2).map((entry) => entry.name), ['oci-layout', 'index.json']);
+      const blobs = entries.slice(2);
+      assert.deepEqual(blobs.map((entry) => entry.name), [...blobs.map((entry) => entry.name)].sort());
+      for (const entry of blobs) {
+        assert.equal(entry.name, `blobs/sha256/${sha256(rewritten.subarray(entry.offset, entry.offset + entry.size))}`);
+      }
+      assert.ok(blobs.some((entry) => rewritten.subarray(entry.offset, entry.offset + entry.size).includes('arm64')));
+    } finally {
+      closeSync(fd);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
