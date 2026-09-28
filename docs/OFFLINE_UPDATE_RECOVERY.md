@@ -1047,6 +1047,8 @@ hosted service, keyed in `data` by camelCase name:
 | `backendControlCommandConsumer` | `BackendControlCommandConsumerService` |
 | `queueReconciliation` | `QueueReconciliationService` |
 | `queueRetentionPrune` | `QueueRetentionPruneService` |
+| `bedClearAcknowledgementExpiry` | `BedClearAcknowledgementExpiryService` |
+| `dispatchEscalation` | `DispatchEscalationService` |
 
 Each value is `running`, `notRegistered`, `notStarted`, `stopped`, `faulted`,
 `canceled` or `unobservable`. The entry `status` uses the numeric

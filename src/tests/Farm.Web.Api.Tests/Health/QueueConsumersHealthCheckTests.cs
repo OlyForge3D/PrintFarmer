@@ -157,7 +157,7 @@ public sealed class QueueConsumersHealthCheckTests
     [Fact]
     public void DefaultConsumers_AreBackgroundServicesWithUniqueCamelCaseKeys()
     {
-        QueueConsumersHealthCheck.DefaultConsumers.Should().HaveCount(6);
+        QueueConsumersHealthCheck.DefaultConsumers.Should().HaveCount(8);
         QueueConsumersHealthCheck.DefaultConsumers.Select(c => c.Key).Should().OnlyHaveUniqueItems();
         foreach (KeyValuePair<string, Type> consumer in QueueConsumersHealthCheck.DefaultConsumers)
         {
@@ -203,6 +203,13 @@ public sealed class QueueConsumersHealthCheckTests
         {
             hostedTypes.Should().Contain(consumer.Value, consumer.Key);
         }
+
+        // Any queue-domain hosted service added later must be monitored too, or the entry
+        // could report Healthy while that service is down.
+        IEnumerable<Type> queueHostedTypes = hostedTypes.Where(t =>
+            t.Namespace is not null &&
+            t.Namespace.StartsWith("Farm.Infrastructure.Services.Queue", StringComparison.Ordinal));
+        queueHostedTypes.Should().BeSubsetOf(QueueConsumersHealthCheck.DefaultConsumers.Select(c => c.Value));
     }
 
     private static Task<HealthCheckResult> CheckAsync(

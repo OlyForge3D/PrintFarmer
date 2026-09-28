@@ -84,7 +84,7 @@ public sealed class HealthResponseHostUpdateContractTests
             ["spoolman"] = Entry(HealthStatus.Healthy),
             [Farm.Web.Api.Health.QueueConsumersHealthCheck.Name] = new(
                 HealthStatus.Healthy,
-                "All 6 queue consumers running",
+                "All 8 queue consumers running",
                 TimeSpan.FromMilliseconds(1),
                 exception: null,
                 data: new Dictionary<string, object> { ["backendStartCommandConsumer"] = "running" }),
