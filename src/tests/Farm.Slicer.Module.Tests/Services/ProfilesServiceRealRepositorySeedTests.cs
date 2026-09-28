@@ -232,12 +232,50 @@ public class ProfilesServiceRealRepositorySeedTests
     }
 
     /// <summary>
-    /// The UNIQUE indexes are global, not scoped to system rows. A user-created profile occupying a
-    /// name the bundle also uses must therefore be treated as occupied: the seed must skip it rather
-    /// than collide, and must still import every other profile — notably the HF rows.
+    /// Machine names are unique per owner (#3198), and stock rows only collide with other unowned
+    /// rows. A user-created profile that happens to share a bundle name must therefore neither block
+    /// the stock import nor be touched by it, and every other profile, notably the HF rows, is still
+    /// imported.
     /// </summary>
     [Fact]
-    public async Task SeedSystemProfiles_UserProfileOccupiesABundleName_SkipsItAndStillImportsHf()
+    public async Task SeedSystemProfiles_UserProfileSharesABundleName_StillImportsStockRowAndHf()
+    {
+        using SlicerDbContext db = TestInfrastructure.TestHelpers.CreateSqliteInMemoryDb();
+        Harness harness = new(db);
+        Guid userId = Guid.NewGuid();
+
+        await harness.MachineRepo.AddAsync(new MachineProfile
+        {
+            Id = Guid.NewGuid(),
+            Name = "Prusa CORE One 0.4 nozzle",
+            Manufacturer = ManufacturerName,
+            SlicerType = SlicerType.OrcaSlicer,
+            IsSystem = false,
+            CreatedByUserId = userId,
+            Hash = "user-created-hash",
+            RawJson = "{}"
+        });
+
+        ProfilesService svc = harness.CreateService();
+        _ = await svc.SeedSystemProfilesFromWorkerAsync(harness.CreateWorkerHttpClient(), CancellationToken.None);
+
+        List<MachineProfile> persisted = (await harness.MachineRepo.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, CancellationToken.None)).ToList();
+
+        Assert.Equal(2, persisted.Count(p => p.Name == "Prusa CORE One 0.4 nozzle"));
+        MachineProfile userRow = Assert.Single(persisted, p => p.Name == "Prusa CORE One 0.4 nozzle" && p.CreatedByUserId == userId);
+        Assert.Equal("user-created-hash", userRow.Hash);
+        Assert.True(Assert.Single(persisted, p => p.Name == "Prusa CORE One 0.4 nozzle" && p.CreatedByUserId == null).IsSystem);
+        Assert.Contains(persisted, p => p.Name == "Prusa CORE One HF 0.4 nozzle");
+        Assert.Contains(persisted, p => p.Name == "Prusa CORE One L HF 0.4 nozzle");
+    }
+
+    /// <summary>
+    /// Unowned stock rows still share one namespace: a pre-existing unowned row with a bundle name
+    /// is treated as occupied, so the seed skips it rather than colliding with the unowned-only
+    /// unique index, and still imports every other profile.
+    /// </summary>
+    [Fact]
+    public async Task SeedSystemProfiles_UnownedRowOccupiesABundleName_SkipsItAndStillImportsHf()
     {
         using SlicerDbContext db = TestInfrastructure.TestHelpers.CreateSqliteInMemoryDb();
         Harness harness = new(db);
@@ -249,8 +287,8 @@ public class ProfilesServiceRealRepositorySeedTests
             Manufacturer = ManufacturerName,
             SlicerType = SlicerType.OrcaSlicer,
             IsSystem = false,
-            CreatedByUserId = Guid.NewGuid(),
-            Hash = "user-created-hash",
+            CreatedByUserId = null,
+            Hash = "pre-existing-unowned-hash",
             RawJson = "{}"
         });
 
@@ -259,8 +297,7 @@ public class ProfilesServiceRealRepositorySeedTests
 
         List<MachineProfile> persisted = (await harness.MachineRepo.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, CancellationToken.None)).ToList();
 
-        Assert.Single(persisted, p => p.Name == "Prusa CORE One 0.4 nozzle");
-        Assert.False(Assert.Single(persisted, p => p.Name == "Prusa CORE One 0.4 nozzle").IsSystem);
+        Assert.Equal("pre-existing-unowned-hash", Assert.Single(persisted, p => p.Name == "Prusa CORE One 0.4 nozzle").Hash);
         Assert.Contains(persisted, p => p.Name == "Prusa CORE One HF 0.4 nozzle");
         Assert.Contains(persisted, p => p.Name == "Prusa CORE One L HF 0.4 nozzle");
     }

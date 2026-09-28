@@ -517,6 +517,122 @@ public class ProfilesServiceResolveOrImportTests
         Assert.Equal(stockId, result.ProfileId);
     }
 
+    /// <summary>
+    /// #3198: machine and process names are unique per owner, so the caller's own same-named,
+    /// model-scoped copy and the stock row can coexist. The caller's own row wins.
+    /// </summary>
+    [Theory]
+    [InlineData(ProfileResolutionType.Machine)]
+    [InlineData(ProfileResolutionType.Process)]
+    public async Task ResolveOrImportProfileForModelAsync_CallerOwnsSameNameMachineOrProcessAsStock_ReturnsCallersOwnRow(ProfileResolutionType type)
+    {
+        Guid modelId = Guid.NewGuid();
+        Guid callerId = Guid.NewGuid();
+        Guid ownId = Guid.NewGuid();
+
+        ProfilesService svc = CreateSameNameMachineProcessService(type, modelId, stockId: Guid.NewGuid(), (ownId, callerId, modelId));
+
+        ResolveProfileForModelResultDto result = await ResolveSameNameAsync(svc, type, modelId, new ProfileViewer(callerId, false));
+
+        Assert.Null(result.Error);
+        Assert.False(result.Imported);
+        Assert.Equal(ownId, result.ProfileId);
+    }
+
+    /// <summary>
+    /// #3198: an administrator can see every user's private machine and process rows. Another
+    /// user's private same-named row must not make the stock row ambiguous, nor replace it.
+    /// </summary>
+    [Theory]
+    [InlineData(ProfileResolutionType.Machine)]
+    [InlineData(ProfileResolutionType.Process)]
+    public async Task ResolveOrImportProfileForModelAsync_AdminSeesOtherUsersSameNamePrivateMachineOrProcess_ReturnsStockRow(ProfileResolutionType type)
+    {
+        Guid modelId = Guid.NewGuid();
+        Guid stockId = Guid.NewGuid();
+
+        ProfilesService svc = CreateSameNameMachineProcessService(type, modelId, stockId, (Guid.NewGuid(), Guid.NewGuid(), modelId));
+
+        ResolveProfileForModelResultDto result = await ResolveSameNameAsync(svc, type, modelId, ProfileViewer.Administrator);
+
+        Assert.Null(result.Error);
+        Assert.False(result.Imported);
+        Assert.Equal(stockId, result.ProfileId);
+    }
+
+    /// <summary>
+    /// #3198: ownership only breaks ties after compatibility narrowing (as R3196-B08 for filaments).
+    /// A caller's own same-named row scoped to a different printer model must not shadow a stock
+    /// row scoped to the requested model.
+    /// </summary>
+    [Theory]
+    [InlineData(ProfileResolutionType.Machine)]
+    [InlineData(ProfileResolutionType.Process)]
+    public async Task ResolveOrImportProfileForModelAsync_CallerOwnsSameNameMachineOrProcessForOtherModel_ReturnsCompatibleStockRow(ProfileResolutionType type)
+    {
+        Guid modelId = Guid.NewGuid();
+        Guid callerId = Guid.NewGuid();
+        Guid stockId = Guid.NewGuid();
+
+        ProfilesService svc = CreateSameNameMachineProcessService(type, modelId, stockId, (Guid.NewGuid(), callerId, Guid.NewGuid()));
+
+        ResolveProfileForModelResultDto result = await ResolveSameNameAsync(svc, type, modelId, new ProfileViewer(callerId, false));
+
+        Assert.Null(result.Error);
+        Assert.False(result.Imported);
+        Assert.Equal(stockId, result.ProfileId);
+    }
+
+    private const string SameNameProcessName = "0.20mm Standard @Qidi";
+
+    private static async Task<ResolveProfileForModelResultDto> ResolveSameNameAsync(
+        ProfilesService svc, ProfileResolutionType type, Guid modelId, ProfileViewer viewer)
+    {
+        using HttpClient httpClient = new(new StubHttpMessageHandler(_ => throw new InvalidOperationException("Worker should not be called for an already-imported profile")));
+        string name = type == ProfileResolutionType.Machine ? SameNameMachineName : SameNameProcessName;
+        return await svc.ResolveOrImportProfileForModelAsync(httpClient, modelId, type, name, viewer, CancellationToken.None);
+    }
+
+    /// <summary>
+    /// Builds a service whose repositories hold a stock machine (and, for processes, a stock
+    /// process) scoped to <paramref name="modelId"/>, plus one owned same-named row of the
+    /// requested type.
+    /// </summary>
+    private static ProfilesService CreateSameNameMachineProcessService(
+        ProfileResolutionType type, Guid modelId, Guid stockId, (Guid Id, Guid OwnerId, Guid ModelId) owned)
+    {
+        bool machine = type == ProfileResolutionType.Machine;
+        List<MachineProfile> machines =
+        [
+            new() { Id = machine ? stockId : Guid.NewGuid(), Name = SameNameMachineName, SlicerType = SlicerType.OrcaSlicer, PrinterModelId = modelId, IsSystem = true, Hash = "hash-machine" }
+        ];
+        List<ProcessProfile> processes = [];
+        if (machine)
+        {
+            machines.Add(new() { Id = owned.Id, Name = SameNameMachineName, SlicerType = SlicerType.OrcaSlicer, PrinterModelId = owned.ModelId, CreatedByUserId = owned.OwnerId, Hash = $"hash-{owned.Id}" });
+        }
+        else
+        {
+            processes.Add(new() { Id = stockId, Name = SameNameProcessName, SlicerType = SlicerType.OrcaSlicer, PrinterModelId = modelId, IsSystem = true, Hash = "hash-stock-process" });
+            processes.Add(new() { Id = owned.Id, Name = SameNameProcessName, SlicerType = SlicerType.OrcaSlicer, PrinterModelId = owned.ModelId, CreatedByUserId = owned.OwnerId, Hash = $"hash-{owned.Id}" });
+        }
+
+        Mock<IMachineProfileRepository> machineRepo = new(MockBehavior.Strict);
+        _ = machineRepo
+            .Setup(r => r.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(machines);
+
+        Mock<IProcessProfileRepository> processRepo = new(MockBehavior.Strict);
+        _ = processRepo
+            .Setup(r => r.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(processes);
+
+        return CreateService(
+            processRepoOverride: processRepo.Object,
+            machineRepoOverride: machineRepo.Object,
+            catalogServiceOverride: new Mock<ICatalogService>(MockBehavior.Strict).Object);
+    }
+
     private const string SameNameFilamentName = "Generic PLA";
     private const string SameNameMachineName = "Qidi X-Plus 4 0.4 nozzle";
 

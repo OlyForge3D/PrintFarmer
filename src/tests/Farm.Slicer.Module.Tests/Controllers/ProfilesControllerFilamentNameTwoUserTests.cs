@@ -1,21 +1,10 @@
 ﻿using System;
-using System.Security.Claims;
-using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using Farm.Infrastructure.PrinterCalibration;
-using Farm.Infrastructure.Repositories.UnitOfWork;
-using Farm.Infrastructure.Services.Catalog;
-using Farm.Infrastructure.Services.Gcode;
 using Farm.Slicer.Module.Api.Controllers.Slicing;
-using Farm.Slicer.Module.Api.Hubs;
 using Farm.Slicer.Module.Api.Services;
-using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Logging.Abstractions;
-using Moq;
 using Xunit;
 
 namespace Farm.Slicer.Module.Tests.Controllers;
@@ -27,7 +16,7 @@ namespace Farm.Slicer.Module.Tests.Controllers;
 /// now scoped per owner, and a same-owner collision is a 409 (or a suffixed name for unattended
 /// promotion), never a 500. Each test drives the real controller action against the real
 /// <see cref="ProfilesService"/> and SQLite-backed repository, with a distinct
-/// <see cref="ClaimsPrincipal"/> per user.
+/// <see cref="System.Security.Claims.ClaimsPrincipal"/> per user.
 /// </summary>
 public sealed class ProfilesControllerFilamentNameTwoUserTests : IDisposable
 {
@@ -183,17 +172,10 @@ public sealed class ProfilesControllerFilamentNameTwoUserTests : IDisposable
     private static string RawJson(string name) => $"{{\"name\":\"{name}\",\"filament_type\":[\"PLA\"]}}";
 
     private static CustomProfileDto AssertCreated(IActionResult result) =>
-        Assert.IsType<CustomProfileDto>(Assert.IsType<CreatedResult>(result).Value);
+        ProfilesControllerNameConflictHarness.AssertCreated(result);
 
-    private static void AssertNameConflict(IActionResult result, string name)
-    {
-        ConflictObjectResult conflict = Assert.IsType<ConflictObjectResult>(result);
-        Assert.Equal(StatusCodes.Status409Conflict, conflict.StatusCode);
-
-        using JsonDocument body = JsonDocument.Parse(JsonSerializer.Serialize(conflict.Value));
-        Assert.Equal(ProfileNameConflictException.Code, body.RootElement.GetProperty("code").GetString());
-        Assert.Contains(name, body.RootElement.GetProperty("detail").GetString(), StringComparison.Ordinal);
-    }
+    private static void AssertNameConflict(IActionResult result, string name) =>
+        ProfilesControllerNameConflictHarness.AssertNameConflict(result, name);
 
     private Task<int> CountOwnedAsync(Guid ownerId, string name) =>
         _db.FilamentProfiles.AsNoTracking().CountAsync(p => p.CreatedByUserId == ownerId && p.Name == name);
@@ -228,28 +210,6 @@ public sealed class ProfilesControllerFilamentNameTwoUserTests : IDisposable
         return result;
     }
 
-    private ProfilesController CreateController(Guid userId)
-    {
-        ProfilesService service = new(
-            new EfProfilesRepository(_db),
-            NullLogger<ProfilesService>.Instance,
-            new EfProcessProfileRepository(_db),
-            new EfMachineProfileRepository(_db),
-            _filamentRepo,
-            new Mock<IUnitOfWork>(MockBehavior.Loose).Object,
-            new Mock<ICatalogService>(MockBehavior.Loose).Object,
-            new Mock<IProfileParsingService>(MockBehavior.Loose).Object,
-            new Mock<IHubContext<SlicerHub>>(MockBehavior.Loose).Object,
-            new Mock<ISlicersService>(MockBehavior.Loose).Object,
-            new Mock<IPrinterModelAliasService>(MockBehavior.Loose).Object);
-
-        ClaimsPrincipal user = new(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, userId.ToString())], "Test"));
-        return new ProfilesController(
-            NullLogger<ProfilesController>.Instance,
-            service,
-            new Mock<ICatalogServiceAdapter>(MockBehavior.Loose).Object)
-        {
-            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext { User = user } }
-        };
-    }
+    private ProfilesController CreateController(Guid userId) =>
+        ProfilesControllerNameConflictHarness.CreateController(_db, userId);
 }
