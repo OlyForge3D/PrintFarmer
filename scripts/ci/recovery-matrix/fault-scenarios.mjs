@@ -7,6 +7,7 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { composeUpTokens, faultCheckpointName, migrationApplyTokens } from './fault-cells.mjs';
+import { expectedSchemaDeltaFixtureState } from './schema-delta-fixture.mjs';
 
 export const faultExitCodes = Object.freeze({
   success: 0,
@@ -335,23 +336,40 @@ function assertFenceMatchesOutcome(harness, result, label, fenceClosed) {
   harness.require(closed === expectClosed, `fence-${expectClosed ? 'held' : 'released'}:${label}`, `admissionClosed=${closed}`);
 }
 
+// For cells on the #3167 schema-delta target, the AppDbContext N+1 fixture migration must be
+// in the database exactly as the outcome claims: applied once for Activated, absent after a
+// rollback. `state` is 'Activated' or 'RolledBack' (the latter also means "not yet applied").
+function assertSchemaDelta(harness, state, label) {
+  if (harness.ctx.schemaDelta !== 'changed') return;
+  const expected = expectedSchemaDeltaFixtureState(state);
+  const actual = harness.ctx.schemaDeltaState('AppDbContext');
+  harness.require(actual.historyRows === expected.historyRows && actual.tableExists === expected.tableExists,
+    `schema-delta-${state === 'Activated' ? 'applied' : 'absent'}:${label}`, JSON.stringify(actual));
+}
+
 function recoverToRolledBack(harness) {
   const preview = harness.recover('offline-recover-preview');
   harness.expect('recover-preview', preview, { outcome: 'RecoveryRequired' });
   const confirm = harness.recover('offline-recover-confirm');
   harness.expect('recover-confirm', confirm, { outcome: 'RolledBack', exitCode: 0 });
   harness.ctx.assertRolledBack();
-  return proveDurable(harness, confirm, () => harness.recover('offline-recover-confirm'));
+  assertSchemaDelta(harness, 'RolledBack', 'recovered');
+  const final = proveDurable(harness, confirm, () => harness.recover('offline-recover-confirm'));
+  assertSchemaDelta(harness, 'RolledBack', 'durable');
+  return final;
 }
 
 function activatedDurably(harness, result) {
   harness.ctx.assertActivated();
-  return proveDurable(harness, result, () => {
+  assertSchemaDelta(harness, 'Activated', 'activated');
+  const final = proveDurable(harness, result, () => {
     const again = harness.activate({ allowedExitCodes: [0, 6] });
     return again.actual === 'Activated' || again.reason === 'replay_accepted'
       ? { ...again, actual: 'Activated', reason: null }
       : again;
   });
+  assertSchemaDelta(harness, 'Activated', 'durable');
+  return final;
 }
 
 // Fails the next target activation at compose up without executing it and returns the
@@ -372,6 +390,9 @@ const scenarios = {
     const { gate, running, pause } = activateUntilPaused(harness, fault.trigger, label);
     if (pause.mode === 'pause-after') {
       harness.require(pause.status === 0, `${label}-side-effect-completed`, `status=${pause.status}`);
+    }
+    if (step === 'migration') {
+      assertSchemaDelta(harness, pause.mode === 'pause-after' ? 'Activated' : 'RolledBack', `${label}-paused`);
     }
     assertFenced(harness, step);
     const restoresBeforeKill = harness.restoreCalls();
@@ -407,9 +428,15 @@ const scenarios = {
 
   'partial-migration'(harness, spec) {
     const trigger = { docker: { tokens: migrationApplyTokens, mode: 'pause-after' } };
-    const { gate, running } = activateUntilPaused(harness, trigger, 'partial-migration');
-    harness.ctx.dbQuery(`INSERT INTO "__EFMigrationsHistory" ("MigrationId","ProductVersion") VALUES ('29990101000000_RecoveryMatrixPartialMigration','10.0.0');`);
-    harness.ok('partial-migration-row-written');
+    const { gate, running, pause } = activateUntilPaused(harness, trigger, 'partial-migration');
+    if (harness.ctx.schemaDelta === 'changed') {
+      // The real N+1 migration has been applied; the call is then failed so recovery must revert it.
+      harness.require(pause.status === 0, 'partial-migration-apply-executed', `status=${pause.status}`);
+      assertSchemaDelta(harness, 'Activated', 'partial-migration-paused');
+    } else {
+      harness.ctx.dbQuery(`INSERT INTO "__EFMigrationsHistory" ("MigrationId","ProductVersion") VALUES ('29990101000000_RecoveryMatrixPartialMigration','10.0.0');`);
+      harness.ok('partial-migration-row-written');
+    }
     writeFileSync(gate.decision, 'fail');
     harness.injected(spec.fault);
     const failed = classifyCliResult(running.wait());

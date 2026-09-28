@@ -35,9 +35,12 @@ function scratch(name) {
 test('fault cells cover every #3101 fault kind on the supported c2 shape', () => {
   assert.deepEqual([...new Set(faultCells.map((entry) => entry.fault.kind))].sort(), [...faultKinds].sort());
   const c2 = resolveCell('c2').cell;
+  const schemaDeltaCells = ['fault-power-loss-migration-before', 'fault-power-loss-migration-after', 'fault-partial-migration'];
   for (const entry of faultCells) {
     assert.equal(entry.scenario, 'fault');
-    assert.deepEqual(entry.cell, c2, entry.id);
+    const { schemaDelta, ...shape } = entry.cell;
+    assert.deepEqual(shape, c2, entry.id);
+    assert.equal(schemaDelta, schemaDeltaCells.includes(entry.id) ? 'changed' : undefined, entry.id);
     assert.match(entry.id, /^fault-/);
     assert.ok(['Activated', 'RolledBack', 'NeedsOperator', 'RecoveryRequired'].includes(entry.expected.outcome), entry.id);
     assert.equal(entry.expected.failClosed, false);
@@ -280,6 +283,7 @@ test('wrapped tool records every call and supports a pause-before gate', { skip:
 test('fault evidence validates for every expected fault outcome', () => {
   for (const entry of faultCells) {
     const operatorVisible = !['Activated', 'RolledBack'].includes(entry.expected.outcome);
+    const { schemaDelta = 'identical', ...cell } = entry.cell;
     const record = {
       schema: evidenceSchema,
       kind: evidenceKind,
@@ -291,7 +295,7 @@ test('fault evidence validates for every expected fault outcome', () => {
         entryPoint: 'bash',
       },
       host: { distribution: 'ubuntu', distributionVersion: '24.04', arch: 'x64', kernel: '6.8.0-45-generic' },
-      cell: { ...entry.cell },
+      cell,
       identities: {
         source: { tag: 'v0.2.3', version: '0.2.3', channel: 'insider', sourceCommit: 'a'.repeat(40), buildId: 'b-3', sequence: 3 },
         target: { tag: 'v0.2.4', version: '0.2.4', channel: 'insider', sourceCommit: 'a'.repeat(40), buildId: 'b-4', sequence: 4 },
@@ -299,7 +303,7 @@ test('fault evidence validates for every expected fault outcome', () => {
         bundleSha256: 'c'.repeat(64),
         signingRoot: 'fixture-ephemeral',
         signingRootFingerprint: 'e'.repeat(64),
-        schemaDelta: 'identical',
+        schemaDelta,
       },
       tools: { cli: '0.2.4', docker: '29.1.3', compose: '2.29.7', cosign: '2.4.1', node: '24.0.0', shell: 'bash 5.2.21' },
       networkDenial: { mechanism: networkDenialMechanism, egressSinkActive: true, attempts: [] },
@@ -435,4 +439,25 @@ test('api-down scenario fails when host-update-status crashes instead of reporti
     ? { exitCode: 134, stdout: '', stderr: 'Aborted' }
     : op(operationId, options));
   assert.throws(() => runFaultScenario(ctx), (error) => error.reason.startsWith('status-exit-known:api-down'));
+});
+
+test('recovery on a schema-delta target fails when the N+1 migration survives the rollback', () => {
+  const ctx = fakeScenarioCtx('scenario-schema-delta-kept');
+  ctx.schemaDelta = 'changed';
+  ctx.schemaDeltaState = () => ({ historyRows: 1, tableExists: 1 });
+  assert.throws(() => runFaultScenario(ctx), (error) => error.reason.startsWith('schema-delta-absent:recovered'));
+});
+
+test('recovery on a schema-delta target passes when the N+1 migration is reverted durably', () => {
+  const ctx = fakeScenarioCtx('scenario-schema-delta-reverted');
+  ctx.schemaDelta = 'changed';
+  const contexts = [];
+  ctx.schemaDeltaState = (context) => {
+    contexts.push(context);
+    return { historyRows: 0, tableExists: 0 };
+  };
+  assert.equal(runFaultScenario(ctx).actual, 'RolledBack');
+  assert.ok(ctx.passed.includes('schema-delta-absent:recovered'));
+  assert.ok(ctx.passed.includes('schema-delta-absent:durable'));
+  assert.deepEqual([...new Set(contexts)], ['AppDbContext']);
 });

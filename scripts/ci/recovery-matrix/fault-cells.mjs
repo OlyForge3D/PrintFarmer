@@ -28,10 +28,12 @@ export const faultKinds = Object.freeze([
   'fence-release',
 ]);
 
-const defineFaultCell = ({ id, fault, expected }) => Object.freeze({
+// Migration cells run against the #3167 N -> N+1 fixture target so the interruption lands
+// inside a real schema-changing migration; every other cell keeps the identical-schema target.
+const defineFaultCell = ({ id, fault, expected, schemaDelta }) => Object.freeze({
   id,
   scenario: 'fault',
-  cell: c2Shape,
+  cell: schemaDelta ? Object.freeze({ ...c2Shape, schemaDelta }) : c2Shape,
   fault: Object.freeze(fault),
   expected: Object.freeze({ failClosed: false, reason: null, ...expected }),
 });
@@ -49,6 +51,7 @@ export const faultCells = Object.freeze([
   }),
   defineFaultCell({
     id: 'fault-power-loss-migration-before',
+    schemaDelta: 'changed',
     fault: {
       kind: 'power-loss',
       point: 'migration:before',
@@ -59,6 +62,7 @@ export const faultCells = Object.freeze([
   }),
   defineFaultCell({
     id: 'fault-power-loss-migration-after',
+    schemaDelta: 'changed',
     fault: {
       kind: 'power-loss',
       point: 'migration:after-side-effect',
@@ -89,6 +93,7 @@ export const faultCells = Object.freeze([
   }),
   defineFaultCell({
     id: 'fault-partial-migration',
+    schemaDelta: 'changed',
     fault: { kind: 'partial-migration', point: 'migration:after-side-effect' },
     expected: { outcome: 'RolledBack' },
   }),

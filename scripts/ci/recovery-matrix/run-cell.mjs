@@ -8,6 +8,7 @@ import { waitForDuringActivationPoint } from './activation-runner.mjs';
 import { createFixtureSigstoreRoot } from './fixture-sigstore.mjs';
 import { resolveCell } from './cells.mjs';
 import { buildCellImageLayout } from './oci-layout-builder.mjs';
+import { schemaDeltaFixtureStateSql } from './schema-delta-fixture.mjs';
 import { writeRecoveryCompose } from './compose-config.mjs';
 import { dockerFaultFiles, wrapToolWithPauseGate, writeDockerShim } from './docker-shim.mjs';
 import { runFaultScenario } from './fault-scenarios.mjs';
@@ -112,7 +113,7 @@ try {
   const protectedBackupPath = join(runRoot, 'protected-backup.json');
   writeJson(protectedBackupPath, protectedBackup);
 
-  const { layout: imageLayout, priorImages, targetImages, infrastructureLock } = buildCellImageLayout({
+  const { layout: imageLayout, priorImages, targetImages, infrastructureLock, schemaDelta } = buildCellImageLayout({
     repo,
     runRoot,
     prior,
@@ -489,6 +490,9 @@ try {
       restartHost: () => restartHostContainer(hostContainer),
       hostShell: (script) => hostExecFileSync(hostContainer, ['bash', '-lc', script], { cwd: repo }),
       dbQuery: (sql) => databaseQuery(deploymentRoot, env, provider, sql),
+      schemaDelta,
+      schemaDeltaState: (context) => parseSchemaDeltaState(
+        databaseQuery(deploymentRoot, env, provider, schemaDeltaFixtureStateSql(provider.id, context))),
       seedPrinter: () => databaseQuery(deploymentRoot, env, provider, seedPrinterSql()),
       snapshot: faultSnapshot,
       assertNoMutation,
@@ -526,6 +530,7 @@ try {
         prior: releaseEvidenceIdentity(prior),
         bundleSha256: evidenceBundleSha256(bundlePath),
         signingRootFingerprint: root.fingerprint,
+        schemaDelta,
       },
       tools,
       checkpoints: checkpoints.checkpoints,
@@ -1631,6 +1636,15 @@ function mutationSnapshot({ env, deploymentRoot, hostStateRoot, hostContainer, p
     serviceDigests: Object.fromEntries(activeServiceDigestExpectations(cell, priorImages)
       .map(({ serviceId, composeServiceName }) => [serviceId, runningComposeImageDigest(env, composeServiceName)])),
   };
+}
+
+// psql -tA prints `1|1`; sqlcmd prints the two columns separated by whitespace.
+function parseSchemaDeltaState(output) {
+  const values = String(output).trim().split(/[\s|]+/).filter(Boolean).map(Number);
+  if (values.length !== 2 || values.some((value) => !Number.isInteger(value))) {
+    throw new Error(`schema-delta fixture state unreadable: ${JSON.stringify(output)}`);
+  }
+  return { historyRows: values[0], tableExists: values[1] };
 }
 
 function databaseQuery(deploymentRoot, env, provider, sql, { database } = {}) {
