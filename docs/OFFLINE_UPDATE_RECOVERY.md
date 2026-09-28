@@ -1017,7 +1017,7 @@ the product `HealthCheckBaseUrl` to that address for the API host. The CLI's own
 from inside the compose network (#3127) rather than over that address. After the
 product verification step, the harness separately records the discovered
 `/health` entries and fails the cell if no queue/dispatch/outbox consumer entry
-is exposed. On a product build that still has the #3122 offline-recovery
+is exposed (see [Queue-consumer health entry](#queue-consumer-health-entry-3157)). On a product build that still has the #3122 offline-recovery
 defects, this cell is expected to emit valid failing evidence with
 `outcome.expected` `RolledBack`, `outcome.actual` set from the product CLI
 output/journal, and `outcome.reason` naming the packaged instruction step and
@@ -1027,6 +1027,38 @@ Use `--work-dir` to move scratch space to another non-system-temp directory and
 script runs `docker compose down -v --remove-orphans`, removes the host and sink
 containers and network, and fails loudly if any container, volume or network
 with the run label remains.
+
+### Queue-consumer health entry (#3157)
+
+The API's `/health` (and `/api/health`) response exposes a `queue-consumers`
+entry under `results`. Use that exact name for the queue-continuity checkpoint.
+It is registered only by the main API (`Farm.Web.Api`): the `monolith` service
+in monolith topology and the `api` service in microservices topology. The
+slicer-host does not run these consumers and does not expose the entry.
+
+The entry reports the live state of each durable queue consumer or writer
+hosted service, keyed in `data` by camelCase name:
+
+| `data` key | Hosted service |
+| --- | --- |
+| `autoDispatch` | `AutoDispatchBackgroundService` |
+| `queueOutboxPublisher` | `QueueOutboxPublisherService` |
+| `backendStartCommandConsumer` | `BackendStartCommandConsumerService` |
+| `backendControlCommandConsumer` | `BackendControlCommandConsumerService` |
+| `queueReconciliation` | `QueueReconciliationService` |
+| `queueRetentionPrune` | `QueueRetentionPruneService` |
+
+Each value is `running`, `notRegistered`, `notStarted`, `stopped`, `faulted`,
+`canceled` or `unobservable`. The entry `status` uses the numeric
+`HealthStatus` wire value: `2` (`Healthy`) only when every consumer is
+`running`, otherwise `0` (`Unhealthy`), which also makes the overall `/health`
+status unhealthy. A host started with `TEST_DISABLE_BACKGROUND_SERVICES` reports
+`1` (`Degraded`) with every consumer `disabled`. Acceptance checks must assert
+the entry status is `2`, not merely that the entry exists.
+
+The signal proves hosted-service liveness only. A consumer paused by the
+host-update writer fence still reports `running`, and slicer worker queue
+consumers are outside this entry.
 
 Optional fault hooks are available for later cells:
 

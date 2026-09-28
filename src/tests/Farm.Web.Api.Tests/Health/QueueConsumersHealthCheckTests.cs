@@ -1,4 +1,4 @@
-using Farm.Web.Api.Health;
+﻿using Farm.Web.Api.Health;
 using Farm.Web.Api.Infrastructure;
 using Farm.Web.Api.Startup;
 using FluentAssertions;

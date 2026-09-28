@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Services.Queue;
+﻿using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.Queue.Dispatch;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 
