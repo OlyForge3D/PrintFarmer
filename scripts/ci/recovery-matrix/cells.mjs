@@ -1,5 +1,6 @@
 import { expectedCellOutcome } from './evidence.mjs';
 import { faultCellIds, faultCells } from './fault-cells.mjs';
+import { importCellIds, importCells } from './import-cells.mjs';
 
 const defineCell = ({ id, cell, scenario, expected }) => Object.freeze({
   id,
@@ -133,10 +134,11 @@ export const cells = Object.freeze([
 
 export const cellIds = Object.freeze(cells.map((entry) => entry.id));
 // Fault cells (#3101) run separately from the topology matrix: `all` keeps its meaning and
-// `faults` selects every fault cell.
+// `faults` selects every fault cell. Import cells (#3102) are selected together by `imports`.
 export const faultCellList = faultCells;
-export const runnableCellIds = Object.freeze([...cellIds, ...faultCellIds]);
-export const cellsById = Object.freeze(Object.fromEntries([...cells, ...faultCellList].map((entry) => [entry.id, entry])));
+export const importCellList = importCells;
+export const runnableCellIds = Object.freeze([...cellIds, ...faultCellIds, ...importCellIds]);
+export const cellsById = Object.freeze(Object.fromEntries([...cells, ...faultCellList, ...importCellList].map((entry) => [entry.id, entry])));
 
 export function resolveCell(id) {
   const cell = cellsById[id];
@@ -152,6 +154,9 @@ export function resolveCellList(value) {
   }
   if (value === 'faults') {
     return faultCellList;
+  }
+  if (value === 'imports') {
+    return importCellList;
   }
   return [resolveCell(value)];
 }

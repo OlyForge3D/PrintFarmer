@@ -13,7 +13,7 @@ const c2Shape = Object.freeze({
   workers: 'managed',
 });
 
-export const importCellsVerifiedCheckpoint = 'import-cells-verified';
+export { importCellsVerifiedCheckpoint } from './evidence.mjs';
 
 export const importCaseKinds = Object.freeze([
   'identity',
