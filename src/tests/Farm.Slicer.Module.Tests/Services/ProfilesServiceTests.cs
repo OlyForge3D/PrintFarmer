@@ -71,7 +71,7 @@ public class ProfilesServiceTests
 
         ProfilesService svc = CreateService(mockRepo.Object, mockLogger);
 
-        ProcessProfileResponseDto? dto = await svc.GetProfileAsync(id, CancellationToken.None);
+        ProcessProfileResponseDto? dto = await svc.GetProfileAsync(id, ProfileViewer.Administrator, CancellationToken.None);
         Assert.NotNull(dto);
         Assert.Equal(profile.Id, dto!.Id);
         Assert.Equal(profile.Name, dto.Name);
@@ -87,7 +87,7 @@ public class ProfilesServiceTests
 
         ProfilesService svc = CreateService(mockRepo.Object, mockLogger);
 
-        ProcessProfileResponseDto? dto = await svc.GetProfileAsync(id, CancellationToken.None);
+        ProcessProfileResponseDto? dto = await svc.GetProfileAsync(id, ProfileViewer.Administrator, CancellationToken.None);
         Assert.Null(dto);
     }
 
@@ -104,7 +104,7 @@ public class ProfilesServiceTests
         _ = mockRepo.Setup(r => r.GetAllAsync(It.IsAny<CancellationToken>())).ReturnsAsync(list);
 
         ProfilesService svc = CreateService(mockRepo.Object, mockLogger);
-        IReadOnlyList<SlicerProfileDto> result = await svc.GetProfilesAsync(CancellationToken.None);
+        IReadOnlyList<SlicerProfileDto> result = await svc.GetProfilesAsync(ProfileViewer.Administrator, CancellationToken.None);
         Assert.Equal(2, result.Count);
     }
 
@@ -116,7 +116,7 @@ public class ProfilesServiceTests
         _ = mockRepo.Setup(r => r.GetAllAsync(It.IsAny<CancellationToken>())).ReturnsAsync(new List<ProcessProfile>());
 
         ProfilesService svc = CreateService(mockRepo.Object, mockLogger);
-        IReadOnlyList<SlicerProfileDto> result = await svc.GetProfilesAsync(CancellationToken.None);
+        IReadOnlyList<SlicerProfileDto> result = await svc.GetProfilesAsync(ProfileViewer.Administrator, CancellationToken.None);
         Assert.Empty(result);
     }
 

@@ -90,7 +90,7 @@ public sealed class ProfilesServiceLibraryHierarchyTests
             Mock.Of<IPrinterModelAliasService>());
 
         HierarchicalProfilesResponseDto result =
-            await service.ListHierarchyAsync(null, null, CancellationToken.None);
+            await service.ListHierarchyAsync(null, null, ProfileViewer.Administrator, CancellationToken.None);
 
         result.ByHierarchy["Test"].Models[modelId.ToString()].ProcessProfiles.Should().BeEmpty();
         result.ByHierarchy["Test"].Models[unboundMachine.Id.ToString()].ProcessProfiles
