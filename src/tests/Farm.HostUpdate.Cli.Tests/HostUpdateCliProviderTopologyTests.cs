@@ -217,6 +217,8 @@ public sealed class HostUpdateCliProviderTopologyTests : IDisposable, IAsyncLife
 
         run.ExitCode.Should().Be(HostUpdateCliExitCodes.NeedsOperator, run.Output);
         Result(run).GetProperty("detail").GetString().Should().Be(nameof(HostUpdateVerificationTimeoutException));
+        Result(run).GetProperty("failedChecks").EnumerateArray().Select(e => e.GetString())
+            .Should().Contain(HostUpdateRecoveryEngineRegistration.AggregateHealthCheckName, "an operator must see which readiness check failed (issue #3145)");
         _health.Requests.Should().BeGreaterThan(0);
         File.Exists(_host.AdmissionClosedPath).Should().BeTrue("an unverified rollback never reopens admission");
         _host.ReadOutcome()!.Outcome.Should().Be(HostUpdateRecoveryOutcome.NeedsOperator);
@@ -651,8 +653,9 @@ public sealed class HostUpdateCliProviderTopologyTests : IDisposable, IAsyncLife
 
     private sealed class HealthState
     {
+        // Issue #3145: the real /health writer emits each entry status as the numeric HealthStatus enum.
         internal const string HealthyReport = """
-            {"status":"Healthy","results":{"comprehensive":{"status":"Healthy"},"signalr":{"status":"Healthy"},"spoolman":{"status":"Healthy"}}}
+            {"status":"Healthy","results":{"comprehensive":{"status":2},"signalr":{"status":2},"spoolman":{"status":2,"description":"Spoolman not configured"}}}
             """;
 
         private int _requests;

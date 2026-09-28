@@ -118,6 +118,9 @@ public sealed record HostUpdateExecutionActivity(
 public sealed record HostUpdateExecutionResult(string ReleaseId, HostUpdateExecutionState State, string? FailureCode, IReadOnlyList<HostUpdateExecutionActivity> Activities)
 {
     public bool Succeeded => State == HostUpdateExecutionState.Completed;
+
+    /// <summary>Redacted, bounded failed readiness check names when verification timed out (issue #3145).</summary>
+    public IReadOnlyList<string>? FailedCheckNames { get; init; }
 }
 
 public interface IHostUpdateExecutor
@@ -330,7 +333,10 @@ public sealed class HostUpdateExecutor(
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             Append(activities, request, HostUpdateExecutionState.RecoveryRequired, "failure:" + ex.GetType().Name);
-            return new(request.ReleaseId, HostUpdateExecutionState.RecoveryRequired, ex.GetType().Name, activities);
+            return new(request.ReleaseId, HostUpdateExecutionState.RecoveryRequired, ex.GetType().Name, activities)
+            {
+                FailedCheckNames = (ex as HostUpdateVerificationTimeoutException)?.RedactedFailedCheckNames(),
+            };
         }
     }
 

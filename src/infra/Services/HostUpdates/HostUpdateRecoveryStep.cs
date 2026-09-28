@@ -22,7 +22,11 @@ public enum HostUpdateRecoveryOutcome
 }
 
 /// <summary>Durable, immutable record of one recovery attempt.</summary>
-public sealed record HostUpdateRecoveryResult(HostUpdateRecoveryOutcome Outcome, string Detail);
+public sealed record HostUpdateRecoveryResult(HostUpdateRecoveryOutcome Outcome, string Detail)
+{
+    /// <summary>Redacted, bounded failed readiness check names when verification timed out (issue #3145). Not persisted.</summary>
+    public IReadOnlyList<string>? FailedCheckNames { get; init; }
+}
 
 /// <summary>The recovery path <see cref="IHostUpdateRecoveryCoordinator.RecoverAsync"/> would take.</summary>
 public enum HostUpdateRecoveryPlanKind
@@ -424,7 +428,10 @@ public sealed class HostUpdateRecoveryCoordinator(
         {
             // Fail closed: any exception during recovery itself is an uncertain outcome, never
             // reported as a successful rollback.
-            return new HostUpdateRecoveryResult(HostUpdateRecoveryOutcome.NeedsOperator, exception.GetType().Name);
+            return new HostUpdateRecoveryResult(HostUpdateRecoveryOutcome.NeedsOperator, exception.GetType().Name)
+            {
+                FailedCheckNames = (exception as HostUpdateVerificationTimeoutException)?.RedactedFailedCheckNames(),
+            };
         }
     }
 

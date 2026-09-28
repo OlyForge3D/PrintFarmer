@@ -202,7 +202,8 @@ internal static class HostUpdateOfflineActivation
                 request.ReleaseId,
                 request.ManifestDigest,
                 request.RequestId,
-                result.State)).ConfigureAwait(false);
+                result.State,
+                result.FailedCheckNames)).ConfigureAwait(false);
     }
 
     private static HostUpdatePlatformDigests PlatformDigestsFor(SignedUpdateManifest manifest, string hostPlatform) =>
@@ -310,7 +311,8 @@ internal static class HostUpdateOfflineActivation
         string ReleaseId,
         string ManifestDigest,
         string RequestId,
-        HostUpdateExecutionState State);
+        HostUpdateExecutionState State,
+        IReadOnlyList<string>? FailedChecks);
 }
 
 internal interface IHostUpdateOfflineActivationSafetyProbe
