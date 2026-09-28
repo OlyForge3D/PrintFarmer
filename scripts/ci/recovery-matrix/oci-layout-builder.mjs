@@ -195,7 +195,7 @@ export function buildC2ImageLayout({
   }
   const buildEnvironment = { ...process.env, DOCKER_BUILDKIT: '1' };
   const topology = topologyFor(cell.topology);
-  const realServiceIds = topology.serviceIds(cell.workers);
+  const realServiceIds = [...new Set([...topology.serviceIds(cell.workers), 'api', 'slicer-host'])];
   const archives = Object.fromEntries(realServiceIds.map((serviceId) => [
     serviceId,
     buildServiceArchives({

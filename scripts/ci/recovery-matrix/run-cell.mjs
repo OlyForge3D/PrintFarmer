@@ -329,6 +329,7 @@ try {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   waitForDatabaseReady(deploymentRoot, env, provider);
+  ensureHarnessDatabases(deploymentRoot, env, provider, cell);
   executePackagedStep({
     checkpointName: 'activate-prior',
     cli,
@@ -1129,6 +1130,47 @@ function waitForDatabaseReady(deploymentRoot, env, provider) {
   }
 
   throw lastError ?? new Error('database did not become ready');
+}
+
+function ensureHarnessDatabases(deploymentRoot, env, provider, cell) {
+  if (provider.id === 'postgres') {
+    if (cell.databaseLayout === 'split') {
+      createPostgresDatabaseIfMissing(deploymentRoot, env, `${env.POSTGRES_DB}_slicer`);
+    }
+    return;
+  }
+
+  const databaseNames = [env.MSSQL_DB, ...(cell.databaseLayout === 'split' ? [`${env.MSSQL_DB}_slicer`] : [])];
+  for (const databaseName of databaseNames) {
+    databaseQuery(deploymentRoot, env, provider, `IF DB_ID(N'${databaseName}') IS NULL CREATE DATABASE [${databaseName}];`);
+  }
+}
+
+function createPostgresDatabaseIfMissing(deploymentRoot, env, databaseName) {
+  try {
+    execFileSync('/usr/bin/docker', [
+      'compose',
+      '-f', join(deploymentRoot, 'docker-compose.recovery.yml'),
+      '-p', env.COMPOSE_PROJECT_NAME,
+      'exec',
+      '-T',
+      'database',
+      'createdb',
+      '-U',
+      env.POSTGRES_USER,
+      databaseName,
+    ], {
+      cwd: deploymentRoot,
+      encoding: 'utf8',
+      env: { ...process.env, ...env },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  } catch (error) {
+    const stderr = String(error.stderr ?? '');
+    if (!stderr.includes('already exists')) {
+      throw error;
+    }
+  }
 }
 
 function dockerContainerIp(containerName) {
