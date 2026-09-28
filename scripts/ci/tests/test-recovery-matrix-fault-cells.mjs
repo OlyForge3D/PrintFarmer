@@ -231,7 +231,7 @@ test('docker shim pause-before gate holds the side effect until the harness deci
   writeFileSync(files.spec, JSON.stringify({ tokens: ['--host-update-migration', 'AppDbContext', 'apply'], mode: 'pause-before' }));
   assert.equal(spawnSync(shim, ['run', '--rm', 'img', '--host-update-migration', 'AppDbContext', 'probe', 'Npgsql']).status, 0);
   assert.equal(realCalls(dir).length, 1, 'non-matching command passes through without claiming the gate');
-  assert.ok(existsSync(files.spec));
+  assert.ok(readFileSync(files.spec, 'utf8').length > 0, 'a non-matching command leaves the gate armed');
 
   const failed = await runPaused(shim, migration, { pausePath: files.pause, decisionPath: files.decision, decision: 'fail' });
   assert.equal(failed.code, 70);
