@@ -151,8 +151,14 @@ public static class HostUpdateDatabaseBackupTargetFactory
 
         if (dbConfig.IsPostgres)
         {
-            var builder = new NpgsqlConnectionStringBuilder(dbConfig.ConnectionString);
+            string connectionString = dbConfig.ConnectionString;
+            var builder = new NpgsqlConnectionStringBuilder(connectionString);
             string password = builder.Password ?? string.Empty;
+
+            // pg_restore --clean drops only objects that are in the archive, so anything an
+            // interrupted target migration created after the dump would survive the restore
+            // (#3177). Clearing every user schema first makes the restore reproduce exactly the
+            // pre-update snapshot; --clean --if-exists is kept as a harmless safety net.
             return targetDirectory => new HostUpdateRestoreCommand(
                 executableResolver.Resolve("pg_restore"),
                 [
@@ -164,7 +170,10 @@ public static class HostUpdateDatabaseBackupTargetFactory
                     "-d", builder.Database ?? string.Empty,
                     Path.Combine(targetDirectory, PostgresFileName),
                 ],
-                string.IsNullOrEmpty(password) ? null : new Dictionary<string, string>(StringComparer.Ordinal) { ["PGPASSWORD"] = password });
+                string.IsNullOrEmpty(password) ? null : new Dictionary<string, string>(StringComparer.Ordinal) { ["PGPASSWORD"] = password })
+            {
+                PrepareTargetAsync = cancellationToken => ClearPostgresDatabaseAsync(connectionString, cancellationToken),
+            };
         }
 
         if (dbConfig.IsSqlServer)
@@ -184,6 +193,87 @@ public static class HostUpdateDatabaseBackupTargetFactory
         }
 
         throw new NotSupportedException($"unsupported_restore_provider:{dbConfig.Provider}");
+    }
+
+    /// <summary>
+    /// Drops every user schema (including <c>public</c>) with <c>CASCADE</c>, then recreates
+    /// <c>public</c> with its previous owner, ACL and comment. The schema-level metadata of
+    /// <c>public</c> is preserved because pg_dump emits it only as a delta and pg_restore never
+    /// recreated it before; every contained object is left for pg_restore to recreate from the
+    /// archive. Runs as one atomic DO block, so a failure changes nothing. Objects outside any
+    /// schema (event triggers, publications, casts, foreign servers) are out of scope.
+    /// </summary>
+    internal const string PostgresClearDatabaseSql = """
+        DO $printfarmer_restore$
+        DECLARE
+            schema_name name;
+            public_owner regrole;
+            public_acl aclitem[];
+            public_comment text;
+            grant_entry record;
+        BEGIN
+            SELECT n.nspowner::regrole, n.nspacl, obj_description(n.oid, 'pg_namespace')
+              INTO public_owner, public_acl, public_comment
+              FROM pg_namespace n
+             WHERE n.nspname = 'public';
+
+            FOR schema_name IN
+                SELECT n.nspname
+                  FROM pg_namespace n
+                 WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
+                   AND n.nspname NOT LIKE 'pg\_toast%'
+                   AND n.nspname NOT LIKE 'pg\_temp\_%'
+                 ORDER BY n.nspname
+            LOOP
+                EXECUTE format('DROP SCHEMA %I CASCADE', schema_name);
+            END LOOP;
+
+            IF public_owner IS NOT NULL THEN
+                CREATE SCHEMA public;
+                EXECUTE format('ALTER SCHEMA public OWNER TO %s', public_owner);
+                IF public_acl IS NOT NULL THEN
+                    EXECUTE format('REVOKE ALL ON SCHEMA public FROM %s', public_owner);
+                    FOR grant_entry IN
+                        SELECT a.grantee, a.privilege_type, a.is_grantable FROM aclexplode(public_acl) a
+                    LOOP
+                        EXECUTE format(
+                            'GRANT %s ON SCHEMA public TO %s%s',
+                            grant_entry.privilege_type,
+                            CASE WHEN grant_entry.grantee = 0 THEN 'PUBLIC' ELSE grant_entry.grantee::regrole::text END,
+                            CASE WHEN grant_entry.is_grantable THEN ' WITH GRANT OPTION' ELSE '' END);
+                    END LOOP;
+                END IF;
+
+                IF public_comment IS NOT NULL THEN
+                    EXECUTE format('COMMENT ON SCHEMA public IS %L', public_comment);
+                END IF;
+            END IF;
+        END
+        $printfarmer_restore$;
+        """;
+
+    /// <summary>
+    /// Clears the target PostgreSQL database with <see cref="PostgresClearDatabaseSql"/> before
+    /// pg_restore runs, so objects created after the dump cannot survive a rollback (#3177).
+    /// Pooling is disabled so no idle session outlives the step; the command has no timeout of
+    /// its own and is bounded by the restore executor's cancellation.
+    /// </summary>
+    internal static async Task ClearPostgresDatabaseAsync(string connectionString, CancellationToken cancellationToken)
+    {
+        var builder = new NpgsqlConnectionStringBuilder(connectionString)
+        {
+            Pooling = false,
+            CommandTimeout = 0,
+        };
+        await using var connection = new NpgsqlConnection(builder.ConnectionString);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using NpgsqlTransaction transaction = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+        await using (var command = new NpgsqlCommand(PostgresClearDatabaseSql, connection, transaction))
+        {
+            _ = await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -476,7 +566,15 @@ internal sealed class SqlServerProcessDatabaseBackupTarget(
 public sealed record HostUpdateRestoreCommand(
     string FileName,
     IReadOnlyList<string> Arguments,
-    IReadOnlyDictionary<string, string>? Environment);
+    IReadOnlyDictionary<string, string>? Environment)
+{
+    /// <summary>
+    /// Optional in-process step that must succeed before the restore process runs, e.g. clearing
+    /// objects the restore tool would not drop itself. It runs only after the backup's checksums
+    /// have been verified.
+    /// </summary>
+    public Func<CancellationToken, Task>? PrepareTargetAsync { get; init; }
+}
 
 /// <summary>A backup target this host does not own and therefore never attempts to back up itself.</summary>
 public sealed class ExternallyOwnedBackupTarget(string name) : IHostUpdateBackupTarget

@@ -736,7 +736,18 @@ requires, in order (every refusal exits 6 and changes nothing):
    precondition only: the engine never contacts, reads or restores the protected
    backup (whatever its `locationClass`). A coordinated restore uses only the
    engine's own activation-time backup manifest under host state, whose per-file
-   checksums are re-verified before restore.
+   checksums are re-verified before restore. For PostgreSQL, the restore first
+   drops every user schema (recreating `public` with its previous owner, ACL
+   and comment) and then runs `pg_restore`, so objects an interrupted target
+   migration created after the backup do not survive the rollback (#3177).
+   Only schema-contained objects are cleared; database-level objects such as
+   event triggers, publications, casts and foreign servers are left as they
+   are. The restore account must own those schemas, otherwise the clear fails
+   atomically (`restore_prepare_failed:database`) and nothing is changed. The
+   clear commits before `pg_restore` starts, so if `pg_restore` then fails
+   (`restore_failed:database`) the database is left empty rather than partially
+   rolled back; the admission fence stays closed and the verified backup is
+   kept, so the restore can be repeated once the cause is fixed.
 6. The reference's `locationClass` is `host-local`. An `attached-volume` or
    `external-storage` backup belongs to an owner this host has no configured,
    authenticated provider for, so recovery refuses with
