@@ -127,6 +127,10 @@ elif [[ "$fault_mode" == "pause-after" ]]; then
   exit "$fault_status"
 fi
 log_command "$@"
+if [[ "\${args[0]:-}" == "compose" ]]; then
+  # Keep compose stderr as evidence: the CLI reports only the exception type for a failed up.
+  exec ${JSON.stringify(realDocker)} "\${args[@]}" 2> >(tee -a ${JSON.stringify(join(runRoot, 'docker-compose-stderr.log'))} >&2)
+fi
 exec ${JSON.stringify(realDocker)} "\${args[@]}"
 `);
   chmodSync(shim, 0o755);
