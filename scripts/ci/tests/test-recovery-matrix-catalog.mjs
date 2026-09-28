@@ -68,6 +68,8 @@ test('topologies map active services and infrastructure requirements', () => {
     'frontend',
     'slicer-host',
     'printer-discovery',
+    'orcaslicer-worker',
+    'monolith',
   ]);
   assert.deepEqual(requiredInfrastructureIds(resolveCell('split-sqlserver').cell).sort(), ['mssql', 'nginx']);
 });

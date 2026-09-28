@@ -57,6 +57,9 @@ const topology = topologyFor(cellSpec.cell.topology);
 const startedAt = new Date();
 const checkpoints = createCheckpoints();
 const cell = { ...cellSpec.cell };
+const priorCell = cellSpec.id === 'split-database'
+  ? { ...cell, databaseLayout: 'shared' }
+  : cell;
 const faultState = { injected: false };
 
 const run = {
@@ -250,7 +253,7 @@ try {
     databaseIp: databaseStaticIp,
     appIp: appStaticIp,
     runId: run.id,
-    cell,
+    cell: priorCell,
     hostUpdateBackupsRoot: join(runRoot, 'host-update', 'backups'),
   });
   const databaseTools = provider.writeToolShims({ runRoot, databaseContainer });
@@ -260,7 +263,7 @@ try {
     projectName: env.COMPOSE_PROJECT_NAME,
     hostStateRoot,
     databaseConnectionString: provider.connectionString({ host: databaseStaticIp, env }),
-    slicerConnectionString: cell.databaseLayout === 'split' ? provider.slicerConnectionString({ host: databaseStaticIp, env }) : undefined,
+    slicerConnectionString: priorCell.databaseLayout === 'split' ? provider.slicerConnectionString({ host: databaseStaticIp, env }) : undefined,
     jwtKey: env.Jwt__Key,
     jwtIssuer: env.Jwt__Issuer,
     jwtAudience: env.Jwt__Audience,
@@ -269,7 +272,7 @@ try {
     pgRestore: databaseTools.pgRestore ?? 'pg_restore',
     sqlcmd: databaseTools.sqlcmd ?? 'sqlcmd',
     healthBaseUrl: `http://${appStaticIp}:5000`,
-    cell,
+    cell: priorCell,
     databaseProvider: provider,
     databaseExternallyOwned: false,
     createHostStateRoot: false,
@@ -329,7 +332,7 @@ try {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   waitForDatabaseReady(deploymentRoot, env, provider);
-  ensureHarnessDatabases(deploymentRoot, env, provider, cell);
+  ensureHarnessDatabases(deploymentRoot, env, provider, priorCell);
   executePackagedStep({
     checkpointName: 'activate-prior',
     cli,
@@ -348,6 +351,20 @@ try {
   if (cellSpec.scenario === 'refuse-activation' && cell.workers === 'remote') {
     seedRemoteWorkerRegistration(deploymentRoot, env, provider);
     checkpoints.ok('remote-worker-registration-seeded');
+  }
+
+  if (cellSpec.id === 'split-database') {
+    writeRecoveryCompose({
+      deploymentRoot,
+      network,
+      egressSinkIp,
+      databaseHost: databaseStaticIp,
+      databaseIp: databaseStaticIp,
+      appIp: appStaticIp,
+      runId: run.id,
+      cell,
+      hostUpdateBackupsRoot: join(runRoot, 'host-update', 'backups'),
+    });
   }
 
   writeHostUpdateConfig(configPath, {
@@ -410,11 +427,10 @@ try {
       '<staging-dir>': targetStaging,
       '<trusted_root.json>': trustedRootPath,
     },
-    allowedExitCodes: managedActivationFault ? [0, 6] : [0],
+    allowedExitCodes: cellSpec.scenario === 'refuse-activation' ? [0, 6] : managedActivationFault ? [0, 6] : [0],
   };
-  const targetActivation = managedActivationFault && !customDuringActivationHook
-    ? executePackagedStep(activationOperation)
-    : executePackagedStepDuringActivation({
+  const targetActivation = customDuringActivationHook
+    ? executePackagedStepDuringActivation({
       ...activationOperation,
       markerPath: activationFaultPaths?.pausePath ?? join(runRoot, 'host-update', 'state', 'journal.ndjson'),
       hookContext: {
@@ -427,9 +443,58 @@ try {
       },
       managedActivationFault,
       faultDecisionPath: activationFaultPaths?.decisionPath,
-    });
+    })
+    : executePackagedStep(activationOperation);
   if (managedActivationFault && !customDuringActivationHook) {
     faultState.injected = true;
+  }
+  if (cellSpec.scenario === 'refuse-activation') {
+    const failure = classifyFailure({
+      stdout: targetActivation.stdout,
+      stderr: targetActivation.stderr,
+      exitCode: targetActivation.exitCode,
+      operationId: 'offline-activate',
+    }, join(runRoot, 'host-update', 'state', 'journal.ndjson'));
+    if (failure.actual !== cellSpec.expected.outcome || failure.reason !== cellSpec.expected.reason) {
+      checkpoints.failed('activation-refused');
+      throw cellFailure(`unexpected_refusal:${failure.actual}:${failure.reason}`, {
+        actual: failure.actual,
+        exitCode: targetActivation.exitCode,
+        journalPhase: failure.journalPhase,
+      });
+    }
+    checkpoints.ok(`activation-refused:${failure.reason}`);
+    recordFaultCheckpoint();
+    run.finishedAt = new Date().toISOString();
+    evidence = baseEvidence({
+      run,
+      host,
+      cell,
+      identities: {
+        source: releaseEvidenceIdentity(prior),
+        target: releaseEvidenceIdentity(target),
+        prior: releaseEvidenceIdentity(prior),
+        bundleSha256: evidenceBundleSha256(bundlePath),
+        signingRootFingerprint: root.fingerprint,
+      },
+      tools,
+      checkpoints: checkpoints.checkpoints,
+      outcome: {
+        expected: cellSpec.expected.outcome,
+        actual: failure.actual,
+        reason: failure.reason,
+        exitCode: targetActivation.exitCode,
+        journalPhase: failure.journalPhase,
+      },
+      timings: { activationSeconds: Math.max(1, Math.round((Date.now() - activationStarted) / 1000)), recoverySeconds: 0 },
+      verdict: 'pass',
+      networkAttempts: readNetworkAttempts(networkAttemptsPath),
+    });
+    writeValidatedEvidence(evidencePath, evidence);
+    const complete = new Error('expected fail-closed evidence written');
+    complete.evidenceWritten = true;
+    complete.success = true;
+    throw complete;
   }
   const activationReachedExpectedState = targetActivation.stdout.includes('Completed')
     || targetActivation.stdout.includes('Activated')
@@ -465,6 +530,62 @@ try {
       createHostStateRoot: false,
     });
     checkpoints.ok('external-database-owner-flipped');
+    const preview = executePackagedStep({
+      checkpointName: 'recover-preview',
+      cli,
+      repo,
+      cosign: boundaryCosign,
+      instructionsPath: join(targetRelease.assets, 'offline-recovery-instructions.json'),
+      operationId: 'offline-recover-preview',
+      allowedExitCodes: [10],
+      replacements: {
+        '<host-update.json>': configPath,
+        '<staging-dir>': targetStaging,
+        '<trusted_root.json>': trustedRootPath,
+        '<protected-backup.json>': protectedBackupPath,
+      },
+    });
+    if (!preview.stdout.includes('plan.kind: NeedsOperator') || !preview.stdout.includes(cellSpec.expected.reason)) {
+      checkpoints.failed(`needs-operator-recover:${cellSpec.expected.reason}:not-observed`);
+      throw cellFailure('needs_operator_evidence_unavailable', { actual: 'NeedsOperator', exitCode: preview.exitCode });
+    }
+    const afterPreview = stateContinuitySnapshot({ env, deploymentRoot, hostStateRoot, hostContainer, provider });
+    assertEqualJson('external-database-migration-heads-unchanged', beforeRecovery.migrationHeads, afterPreview.migrationHeads);
+    assertEqualJson('external-database-volume-hashes-unchanged', beforeRecovery.volumeHashes, afterPreview.volumeHashes);
+    checkpoints.ok(`needs-operator-recover:${cellSpec.expected.reason}`);
+    run.finishedAt = new Date().toISOString();
+    const journalPath = join(runRoot, 'host-update', 'state', 'journal.ndjson');
+    const journalPhase = lastJournalPhase(journalPath);
+    recordFaultCheckpoint();
+    evidence = baseEvidence({
+      run,
+      host,
+      cell,
+      identities: {
+        source: releaseEvidenceIdentity(prior),
+        target: releaseEvidenceIdentity(target),
+        prior: releaseEvidenceIdentity(prior),
+        bundleSha256: evidenceBundleSha256(bundlePath),
+        signingRootFingerprint: root.fingerprint,
+      },
+      tools,
+      checkpoints: checkpoints.checkpoints,
+      outcome: {
+        expected: cellSpec.expected.outcome,
+        actual: 'NeedsOperator',
+        reason: cellSpec.expected.reason,
+        exitCode: preview.exitCode,
+        journalPhase,
+      },
+      timings: { activationSeconds, recoverySeconds: Math.max(1, Math.round((Date.now() - recoveryStarted) / 1000)) },
+      verdict: 'pass',
+      networkAttempts: readNetworkAttempts(networkAttemptsPath),
+    });
+    writeValidatedEvidence(evidencePath, evidence);
+    const complete = new Error('expected needs-operator evidence written');
+    complete.evidenceWritten = true;
+    complete.success = true;
+    throw complete;
   }
   for (const [operationId, checkpointName] of [
     ['offline-recover-preview', 'recover-preview'],
@@ -546,8 +667,10 @@ try {
   writeValidatedEvidence(evidencePath, evidence);
 } catch (error) {
   if (error?.evidenceWritten) {
-    console.error(error.message);
-    process.exitCode = 1;
+    if (!error.success) {
+      console.error(error.message);
+    }
+    process.exitCode = error.success ? 0 : 1;
   } else {
   run.finishedAt = new Date().toISOString();
   writeFileSync(join(runRoot, 'error.txt'), formatError(error), { mode: 0o600 });

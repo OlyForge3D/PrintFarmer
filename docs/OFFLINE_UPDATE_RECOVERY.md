@@ -998,15 +998,15 @@ record's loaded image list is recorded as checkpoint
 
 | Cell id | Descriptor | Scenario | Expected outcome/reason | Local run status |
 | --- | --- | --- | --- | --- |
-| `c2` | monolith, PostgreSQL, shared host-owned database/storage, managed worker | `recover` | `RolledBack` | Implemented; emits pass/fail evidence from the live run |
-| `monolith-sqlserver` | monolith, SQL Server, shared host-owned database/storage, managed worker | `recover` | `RolledBack` | Implemented; live status recorded by each run |
-| `split-postgres` | split, PostgreSQL, shared host-owned database/storage, managed worker | `recover` | `RolledBack` | Implemented; live status recorded by each run |
-| `split-postgres-no-worker` | split, PostgreSQL, shared host-owned database/storage, no optional worker | `recover` | `RolledBack` | Implemented; live status recorded by each run |
-| `split-sqlserver` | split, SQL Server, shared host-owned database/storage, managed worker | `recover` | `RolledBack` | Implemented; live status recorded by each run |
-| `external-database` | monolith, PostgreSQL, shared database, externally owned database, host-owned storage | `needs-operator-recover` | `NeedsOperator` / `database_externally_owned` | Implemented; evidence must show no restore mutation |
+| `c2` | monolith, PostgreSQL, shared host-owned database/storage, managed worker | `recover` | `RolledBack` | Fails honestly after rollback at `queue-consumers-running:not-exposed`; `/health` exposes only `comprehensive`, `signalr` and `spoolman`, so queue-consumer continuity needs product signal #3157 |
+| `monolith-sqlserver` | monolith, SQL Server, shared host-owned database/storage, managed worker | `recover` | `RolledBack` | Fails honestly at `activate-prior:HostUpdateBackupIncompleteException`; SQL backup target remains empty despite identical bind path and writable directory, tracked by #3158 |
+| `split-postgres` | split, PostgreSQL, shared host-owned database/storage, managed worker | `recover` | `RolledBack` | Implemented; not run in the final bounded pass |
+| `split-postgres-no-worker` | split, PostgreSQL, shared host-owned database/storage, no optional worker | `recover` | `RolledBack` | Implemented; not run in the final bounded pass |
+| `split-sqlserver` | split, SQL Server, shared host-owned database/storage, managed worker | `recover` | `RolledBack` | Implemented; not run in the final bounded pass |
+| `external-database` | monolith, PostgreSQL, shared database, externally owned database, host-owned storage | `needs-operator-recover` | `NeedsOperator` / `database_externally_owned` | Passing evidence: preview returns `NeedsOperator` / `database_externally_owned` and no restore mutation is performed |
 | `external-storage` | monolith, PostgreSQL, shared database, host-owned database, externally owned storage | `product-gap` | failing evidence with `NeedsOperator` / `storage_externally_owned` and failed checkpoint `product-owner-signal-unavailable:storage` | Intentionally failing until the product exposes a storage-owner signal; tracked by #3155 from #3100/#2982 |
-| `remote-worker` | monolith, PostgreSQL, shared host-owned database/storage, remote pinned worker | `refuse-activation` | `Refused` / `remote_worker_unsupported` | Implemented; refusal evidence must precede target mutation |
-| `split-database` | split, PostgreSQL, split application/slicer databases, host-owned storage, managed worker | `refuse-activation` | `Refused` / `split_database_not_supported` | Implemented; refusal evidence must precede mutation |
+| `remote-worker` | monolith, PostgreSQL, shared host-owned database/storage, remote pinned worker | `refuse-activation` | `Refused` / `remote_worker_unsupported` | Passing evidence: target activation refuses before mutation with `remote_worker_unsupported` |
+| `split-database` | split, PostgreSQL, split application/slicer databases, host-owned storage, managed worker | `refuse-activation` | `Refused` / `split_database_not_supported` | Fails honestly during setup before the intended target refusal: split prior activation times out on `api-comprehensive-health`; the evidence still records expected `split_database_not_supported` outcome for the cell |
 
 Run a single cell from an Ubuntu LTS x64 host with Docker (containerd image
 store enabled; see

@@ -36,10 +36,10 @@ export const topologyCatalog = Object.freeze({
     healthComposeService: 'api',
     infrastructureIds: Object.freeze(['nginx']),
     composeServiceName(serviceId) {
-      return serviceId;
+      return serviceId === 'monolith' ? 'printfarmer' : serviceId;
     },
     imageEnvironmentVariable(serviceId) {
-      return `${envPrefix(serviceId)}_IMAGE`;
+      return serviceId === 'monolith' ? 'PRINTFARMER_IMAGE' : `PRINTFARMER_${envPrefix(serviceId)}_IMAGE`;
     },
   }),
 });
@@ -54,7 +54,7 @@ export function topologyFor(id) {
 
 export function serviceMappingsFor(cell) {
   const topology = topologyFor(cell.topology);
-  const serviceIds = cell.topology === 'monolith' ? manifestServices : topology.serviceIds(cell.workers);
+  const serviceIds = cell.topology === 'monolith' ? manifestServices : manifestServices;
   return serviceIds.map((serviceId) => ({
     serviceId,
     composeServiceName: topology.composeServiceName(serviceId),
