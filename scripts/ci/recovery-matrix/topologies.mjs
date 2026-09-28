@@ -1,4 +1,5 @@
 const monolithServices = Object.freeze(['monolith']);
+const manifestServices = Object.freeze(['api', 'frontend', 'slicer-host', 'printer-discovery', 'orcaslicer-worker', 'monolith']);
 const splitManagedServices = Object.freeze(['api', 'frontend', 'slicer-host', 'printer-discovery', 'orcaslicer-worker']);
 const splitNoWorkerServices = Object.freeze(['api', 'frontend', 'slicer-host', 'printer-discovery']);
 
@@ -53,7 +54,8 @@ export function topologyFor(id) {
 
 export function serviceMappingsFor(cell) {
   const topology = topologyFor(cell.topology);
-  return topology.serviceIds(cell.workers).map((serviceId) => ({
+  const serviceIds = cell.topology === 'monolith' ? manifestServices : topology.serviceIds(cell.workers);
+  return serviceIds.map((serviceId) => ({
     serviceId,
     composeServiceName: topology.composeServiceName(serviceId),
     imageEnvironmentVariable: topology.imageEnvironmentVariable(serviceId),

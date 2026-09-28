@@ -54,6 +54,14 @@ test('providers expose production provider names, connection strings, readiness,
 
 test('topologies map active services and infrastructure requirements', () => {
   assert.deepEqual(topologyFor('monolith').activeServiceIds(), ['monolith']);
+  assert.deepEqual(serviceMappingsFor(resolveCell('c2').cell).map((mapping) => mapping.composeServiceName), [
+    'printfarmer',
+    'printfarmer',
+    'printfarmer',
+    'printfarmer',
+    'printfarmer',
+    'printfarmer',
+  ]);
   assert.deepEqual(topologyFor('split').activeServiceIds('none'), ['api', 'frontend', 'slicer-host', 'printer-discovery']);
   assert.deepEqual(serviceMappingsFor(resolveCell('split-postgres-no-worker').cell).map((mapping) => mapping.serviceId), [
     'api',
