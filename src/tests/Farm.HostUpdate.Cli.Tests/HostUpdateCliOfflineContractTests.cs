@@ -302,6 +302,34 @@ public sealed class HostUpdateCliOfflineContractTests
             .Should().Be(HostUpdateRecoveryEngineRegistration.AggregateHealthCheckName);
     }
 
+    [Theory]
+    [InlineData(null, true)]
+    [InlineData("Data Source=slicer-3168.db", false)]
+    public async Task Cli_migration_targets_expose_split_slicer_database_to_preflight(string? slicerDatabase, bool expectShared)
+    {
+        // Issue #3168: the offline CLI must build SlicerDbContext from ConnectionStrings:SlicerDatabase
+        // so the preflight fingerprint guard can refuse a split database (split_database_not_supported).
+        IConfiguration configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["DB_PROVIDER"] = "sqlite",
+                ["ConnectionStrings:Default"] = "Data Source=app-3168.db",
+                ["ConnectionStrings:SlicerDatabase"] = slicerDatabase,
+            })
+            .Build();
+        IServiceCollection services = HostUpdateCli.ConfigureServices(new ServiceCollection(), configuration, TextWriter.Null);
+        await using ServiceProvider provider = services.BuildServiceProvider();
+        await using AsyncServiceScope scope = provider.CreateAsyncScope();
+
+        IReadOnlyList<IHostUpdateMigrationTarget> targets = scope.ServiceProvider.GetRequiredService<IReadOnlyList<IHostUpdateMigrationTarget>>();
+        string app = await targets.Single(t => t.ContextName == "AppDbContext").GetConnectionStringFingerprintAsync(CancellationToken.None);
+        string slicer = await targets.Single(t => t.ContextName == "SlicerDbContext").GetConnectionStringFingerprintAsync(CancellationToken.None);
+
+        app.Should().NotBeEmpty();
+        slicer.Should().NotBeEmpty();
+        (app == slicer).Should().Be(expectShared);
+    }
+
     private static HostUpdateExecutionOptions Options() => new()
     {
         FenceProofTimeoutSeconds = 1,
