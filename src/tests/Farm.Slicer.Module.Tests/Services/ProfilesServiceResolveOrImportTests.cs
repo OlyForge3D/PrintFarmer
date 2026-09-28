@@ -432,6 +432,98 @@ public class ProfilesServiceResolveOrImportTests
     }
 
     /// <summary>
+    /// #3192 review finding R3196-B01: filament names are unique per owner, so a caller may own a
+    /// same-named copy of a stock filament that declares the same compatible printers. That copy
+    /// must not make the stock row ambiguous; the caller's own row wins.
+    /// </summary>
+    [Fact]
+    public async Task ResolveOrImportProfileForModelAsync_CallerOwnsSameNameFilamentAsStock_ReturnsCallersOwnRow()
+    {
+        Guid modelId = Guid.NewGuid();
+        Guid callerId = Guid.NewGuid();
+        Guid stockId = Guid.NewGuid();
+        Guid ownId = Guid.NewGuid();
+
+        ProfilesService svc = CreateSameNameFilamentService(modelId, new List<FilamentProfile>
+        {
+            SameNameFilament(stockId, ownerId: null),
+            SameNameFilament(ownId, ownerId: callerId),
+        });
+
+        using HttpClient httpClient = new(new StubHttpMessageHandler(_ => throw new InvalidOperationException("Worker should not be called for an already-imported profile")));
+
+        ResolveProfileForModelResultDto result = await svc.ResolveOrImportProfileForModelAsync(
+            httpClient, modelId, ProfileResolutionType.Filament, SameNameFilamentName, new ProfileViewer(callerId, false), CancellationToken.None);
+
+        Assert.Null(result.Error);
+        Assert.False(result.Imported);
+        Assert.Equal(ownId, result.ProfileId);
+    }
+
+    /// <summary>
+    /// #3192 review finding R3196-B01: an administrator can see every user's private filament
+    /// rows. Another user's private same-named row must not make the stock row ambiguous for the
+    /// administrator, and must never be resolved in place of it.
+    /// </summary>
+    [Fact]
+    public async Task ResolveOrImportProfileForModelAsync_AdminSeesOtherUsersSameNamePrivateFilament_ReturnsStockRow()
+    {
+        Guid modelId = Guid.NewGuid();
+        Guid stockId = Guid.NewGuid();
+
+        ProfilesService svc = CreateSameNameFilamentService(modelId, new List<FilamentProfile>
+        {
+            SameNameFilament(stockId, ownerId: null),
+            SameNameFilament(Guid.NewGuid(), ownerId: Guid.NewGuid()),
+        });
+
+        using HttpClient httpClient = new(new StubHttpMessageHandler(_ => throw new InvalidOperationException("Worker should not be called for an already-imported profile")));
+
+        ResolveProfileForModelResultDto result = await svc.ResolveOrImportProfileForModelAsync(
+            httpClient, modelId, ProfileResolutionType.Filament, SameNameFilamentName, ProfileViewer.Administrator, CancellationToken.None);
+
+        Assert.Null(result.Error);
+        Assert.False(result.Imported);
+        Assert.Equal(stockId, result.ProfileId);
+    }
+
+    private const string SameNameFilamentName = "Generic PLA";
+    private const string SameNameMachineName = "Qidi X-Plus 4 0.4 nozzle";
+
+    private static FilamentProfile SameNameFilament(Guid id, Guid? ownerId) => new()
+    {
+        Id = id,
+        Name = SameNameFilamentName,
+        Material = "PLA",
+        SlicerType = SlicerType.OrcaSlicer,
+        CompatiblePrinters = SameNameMachineName,
+        IsSystem = ownerId is null,
+        CreatedByUserId = ownerId,
+        Hash = $"hash-{id}"
+    };
+
+    private static ProfilesService CreateSameNameFilamentService(Guid modelId, List<FilamentProfile> filaments)
+    {
+        Mock<IMachineProfileRepository> machineRepo = new(MockBehavior.Strict);
+        _ = machineRepo
+            .Setup(r => r.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<MachineProfile>
+            {
+                new() { Id = Guid.NewGuid(), Name = SameNameMachineName, SlicerType = SlicerType.OrcaSlicer, PrinterModelId = modelId, IsSystem = true, Hash = "hash-machine" }
+            });
+
+        Mock<IFilamentProfileRepository> filamentRepo = new(MockBehavior.Strict);
+        _ = filamentRepo
+            .Setup(r => r.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(filaments);
+
+        return CreateService(
+            machineRepoOverride: machineRepo.Object,
+            filamentRepoOverride: filamentRepo.Object,
+            catalogServiceOverride: new Mock<ICatalogService>(MockBehavior.Strict).Object);
+    }
+
+    /// <summary>
     /// TOCTOU race (#2004 review finding): if a concurrent caller imports the same profile between
     /// this call's initial "not yet imported" lookup and its worker-backed import attempt,
     /// <c>Persist*ProfileAsync</c>'s duplicate check reports the row as <c>Skipped</c> rather than

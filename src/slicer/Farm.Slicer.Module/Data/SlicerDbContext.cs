@@ -144,7 +144,10 @@ public class SlicerDbContext(DbContextOptions<SlicerDbContext> options) : DbCont
             .SingleOrDefault(i => i.GetDatabaseName() == FilamentProfileConfiguration.UnownedNameUniqueIndexName);
         if (index is null)
         {
-            return;
+            // Failing open would silently turn the unowned-row filter into a global unique index
+            // again (#3192), so a renamed or removed index must break model building loudly.
+            throw new InvalidOperationException(
+                $"Index '{FilamentProfileConfiguration.UnownedNameUniqueIndexName}' was not found on {nameof(FilamentProfile)}.");
         }
 
         string ownerColumn = Database.IsSqlServer()

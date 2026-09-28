@@ -1552,13 +1552,40 @@ public class ProfilesService(
                     .Where(f => viewer.CanView(f) && string.Equals(f.Name, profileName, StringComparison.OrdinalIgnoreCase))
                     .ToList();
                 IReadOnlyList<string> modelMachineNames = await GetMachineNamesForModelAsync(printerModelId, viewer, ct);
+
+                // Filament names are unique per owner, not globally (#3192), so an owned row may share
+                // a stock row's name. Resolve against the first non-empty ownership tier only — the
+                // caller's own rows, then unowned stock rows, then any other visible row — so neither
+                // the caller's own copy nor another user's private row (visible to administrators) can
+                // make the stock row ambiguous. Ambiguity within the chosen tier still returns null
+                // rather than guessing across tiers.
+                List<FilamentProfile> tier = FirstFilamentCandidateTier(candidates, viewer);
                 return SelectCompatibleProfileCandidate(
-                    candidates, printerModelId, modelMachineNames, _ => null, f => f.CompatiblePrinters)?.Id;
+                    tier, printerModelId, modelMachineNames, _ => null, f => f.CompatiblePrinters)?.Id;
             }
 
             default:
                 return null;
         }
+    }
+
+    /// <summary>
+    /// Returns the first non-empty same-name filament resolution tier (#3192): rows owned by the
+    /// caller, else unowned stock rows, else every other row the caller may see.
+    /// </summary>
+    private static List<FilamentProfile> FirstFilamentCandidateTier(List<FilamentProfile> candidates, ProfileViewer viewer)
+    {
+        if (viewer.UserId.HasValue)
+        {
+            List<FilamentProfile> own = candidates.Where(f => f.CreatedByUserId == viewer.UserId).ToList();
+            if (own.Count > 0)
+            {
+                return own;
+            }
+        }
+
+        List<FilamentProfile> unowned = candidates.Where(f => f.CreatedByUserId is null).ToList();
+        return unowned.Count > 0 ? unowned : candidates;
     }
 
     /// <summary>
@@ -4212,8 +4239,14 @@ public class ProfilesService(
     {
         string suffix = string.Create(CultureInfo.InvariantCulture, $" ({n})");
         int maxBaseLength = FilamentNameMaxLength - suffix.Length;
-        string trimmedBase = baseName.Length > maxBaseLength ? baseName[..maxBaseLength] : baseName;
-        return trimmedBase + suffix;
+        if (baseName.Length <= maxBaseLength)
+        {
+            return baseName + suffix;
+        }
+
+        // Never cut between the halves of a UTF-16 surrogate pair.
+        int cut = char.IsHighSurrogate(baseName[maxBaseLength - 1]) ? maxBaseLength - 1 : maxBaseLength;
+        return baseName[..cut] + suffix;
     }
 
     /// <summary>

@@ -301,6 +301,33 @@ public class ProfilesServicePromoteCalibrationDraftProfileTests
     }
 
     [Fact]
+    public async Task PromoteCalibrationDraftProfileAsync_TruncatesBaseName_WithoutSplittingSurrogatePair()
+    {
+        Guid userId = Guid.NewGuid();
+        Guid draftProfileId = Guid.NewGuid();
+        // The 251-char base budget (255 minus " (2)") would end on the high surrogate of the emoji.
+        string longName = new string('x', 250) + "\U0001F600" + new string('y', 3);
+        FilamentProfile? added = null;
+
+        Mock<IFilamentProfileRepository> filamentRepo = new(MockBehavior.Strict);
+        _ = filamentRepo
+            .Setup(r => r.GetByPromotedFromCalibrationDraftProfileIdAsync(userId, draftProfileId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((FilamentProfile?)null);
+        _ = filamentRepo
+            .Setup(r => r.AddAsync(It.IsAny<FilamentProfile>(), It.IsAny<CancellationToken>()))
+            .Callback<FilamentProfile, CancellationToken>((p, _) => added = p)
+            .Returns(Task.CompletedTask);
+        SetupOwnerNames(filamentRepo, userId, longName);
+
+        ProfilesService svc = CreateService(filamentRepo.Object);
+
+        _ = await svc.PromoteCalibrationDraftProfileAsync(MakeRequest(longName), userId, draftProfileId, CancellationToken.None);
+
+        Assert.Equal(new string('x', 250) + " (2)", added!.Name);
+        Assert.DoesNotContain(added.Name, char.IsSurrogate);
+    }
+
+    [Fact]
     public async Task PromoteCalibrationDraftProfileAsync_PicksNextFreeName_WhenConcurrentInsertTookTheChosenName()
     {
         Guid userId = Guid.NewGuid();
