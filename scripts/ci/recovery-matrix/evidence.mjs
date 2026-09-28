@@ -168,6 +168,7 @@ const shape = {
   checkpoints: 'checkpoints',
   outcome: {
     expected: 'string',
+    expectedReason: 'optionalNullableString',
     actual: 'string',
     reason: 'nullableString',
     exitCode: 'integer',
@@ -192,6 +193,11 @@ function checkScalar(kind, value, path, errors) {
     case 'nullableString':
       if (value !== null && (typeof value !== 'string' || value.length === 0)) {
         fail('non-empty string or null');
+      }
+      break;
+    case 'optionalNullableString':
+      if (value !== undefined && value !== null && (typeof value !== 'string' || value.length === 0)) {
+        fail('non-empty string or null when present');
       }
       break;
     case 'number':
@@ -312,7 +318,7 @@ function checkShape(expected, value, path, errors) {
   for (const [key, kind] of Object.entries(expected)) {
     const childPath = path ? `${path}.${key}` : key;
     if (!Object.hasOwn(value, key)) {
-      if (kind === 'optionalSha256' || kind === 'optionalString') {
+      if (kind === 'optionalSha256' || kind === 'optionalString' || kind === 'optionalNullableString') {
         continue;
       }
       errors.push(`${childPath}: missing field`);
@@ -511,12 +517,18 @@ export function validateRecoveryEvidence(record) {
           `outcome.expected: unsupported cell must expect ${expectation.outcome}`,
         );
       }
-      if (outcome.reason !== expectation.reason) {
-        errors.push(`outcome.reason: unsupported cell must report ${expectation.reason}`);
+      if (outcome.expectedReason !== expectation.reason) {
+        errors.push(`outcome.expectedReason: unsupported cell must expect ${expectation.reason}`);
+      }
+      if (record.verdict === 'pass' && outcome.reason !== expectation.reason) {
+        errors.push(`outcome.reason: passing unsupported cell must report ${expectation.reason}`);
       }
     } else {
       if (outcome.expected === 'Refused') {
         errors.push('outcome.expected: supported cell must not expect Refused');
+      }
+      if (outcome.expectedReason !== undefined && outcome.expectedReason !== null) {
+        errors.push('outcome.expectedReason: supported cell must not carry a fail-closed reason');
       }
       if (failClosedReasons.has(outcome.reason)) {
         errors.push('outcome.reason: supported cell must not report a fail-closed reason');
@@ -543,6 +555,12 @@ export function validateRecoveryEvidence(record) {
   if (record.verdict === 'pass') {
     if (isPlainObject(outcome) && outcome.actual !== outcome.expected) {
       errors.push('verdict: a run whose actual outcome differs from expected cannot pass');
+    }
+    if (isPlainObject(outcome) && outcome.actual === 'Refused' && outcome.exitCode !== 6) {
+      errors.push('outcome.exitCode: Refused pass records must use HostUpdateCliExitCodes.Refused (6)');
+    }
+    if (isPlainObject(outcome) && outcome.actual === 'NeedsOperator' && outcome.exitCode !== 10) {
+      errors.push('outcome.exitCode: NeedsOperator pass records must use HostUpdateCliExitCodes.NeedsOperator (10)');
     }
     if (
       Array.isArray(checkpoints) &&

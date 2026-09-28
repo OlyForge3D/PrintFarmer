@@ -57,10 +57,54 @@ require_tool() {
   command -v "$1" >/dev/null 2>&1 || { echo "$1 is required" >&2; exit 2; }
 }
 
+require_tool bash
 require_tool node
+
+CELL_IDS="$(
+  node --input-type=module -e "import { cellIds } from '$SCRIPT_DIR/cells.mjs'; console.log(cellIds.join(' '));"
+)"
+
+evidence_for_cell() {
+  local evidence_path=$1
+  local matrix_cell=$2
+  local dir base stem ext
+  dir="$(dirname "$evidence_path")"
+  base="$(basename "$evidence_path")"
+  if [[ "$base" == *.* ]]; then
+    stem="${base%.*}"
+    ext=".${base##*.}"
+  else
+    stem="$base"
+    ext=""
+  fi
+  printf '%s/%s-%s%s\n' "$dir" "$stem" "$matrix_cell" "$ext"
+}
+
+if [[ "$CELL" == "all" ]]; then
+  status=0
+  for matrix_cell in $CELL_IDS; do
+    cell_evidence="$EVIDENCE"
+    if [[ "$EVIDENCE_PROVIDED" == 1 ]]; then
+      cell_evidence="$(evidence_for_cell "$EVIDENCE" "$matrix_cell")"
+    else
+      cell_evidence="$WORK_DIR/$matrix_cell-evidence.json"
+    fi
+    args=(--cell "$matrix_cell" --work-dir "$WORK_DIR" --evidence "$cell_evidence" --cosign "$COSIGN")
+    if [[ "$KEEP_WORK" == 1 ]]; then
+      args+=(--keep-work)
+    fi
+    "$0" "${args[@]}" "${FAULT_ARGS[@]}" || status=$?
+  done
+  exit "$status"
+fi
+
+case " $CELL_IDS " in
+  *" $CELL "*) ;;
+  *) echo "Unknown recovery matrix cell: $CELL (expected one of: $CELL_IDS, all)" >&2; exit 2 ;;
+esac
+
 require_tool docker
 require_tool jq
-require_tool bash
 if [[ ! -x "$COSIGN" ]]; then
   if command -v cosign >/dev/null 2>&1; then
     COSIGN="$(command -v cosign)"
@@ -68,25 +112,6 @@ if [[ ! -x "$COSIGN" ]]; then
     echo "cosign is required (pass --cosign or set PF_COSIGN)" >&2
     exit 2
   fi
-
-  CELL_IDS="$(
-    node --input-type=module -e "import { cellIds } from './scripts/ci/recovery-matrix/cells.mjs'; console.log(cellIds.join(' '));"
-  )"
-  if [[ "$CELL" == "all" ]]; then
-    status=0
-    for matrix_cell in $CELL_IDS; do
-      cell_evidence="$EVIDENCE"
-      if [[ "$EVIDENCE_PROVIDED" == 0 ]]; then
-        cell_evidence="$WORK_DIR/$matrix_cell-evidence.json"
-      fi
-      "$0" --cell "$matrix_cell" --work-dir "$WORK_DIR" --evidence "$cell_evidence" --cosign "$COSIGN" "${FAULT_ARGS[@]}" || status=$?
-    done
-    exit "$status"
-  fi
-  case " $CELL_IDS " in
-    *" $CELL "*) ;;
-    *) echo "Unknown recovery matrix cell: $CELL (expected one of: $CELL_IDS, all)" >&2; exit 2 ;;
-  esac
 fi
 
 RUN_ID="$CELL-$(date -u +%Y%m%dt%H%M%Sz)-$$"

@@ -281,13 +281,24 @@ export function buildC2ImageLayout({
       labels: { 'org.printfarmer.fixture-infrastructure': 'mssql' },
     });
   }
-  infrastructureImages.nginx = addTinyImage(layout, {
-    id: 'nginx',
-    version: target.version,
-    platforms: Object.keys(infraById.nginx.platforms),
-    reference: infraById.nginx.reference,
-    labels: { 'org.printfarmer.fixture-infrastructure': 'nginx' },
-  });
+  if (requiredForCell.has('nginx')) {
+    run('docker', ['pull', infraById.nginx.reference], { cwd: repo, stdio: ['ignore', 'inherit', 'pipe'] });
+    const nginxArchive = join(imageScratch, 'nginx.docker.tar');
+    run('docker', ['save', infraById.nginx.reference, '--output', nginxArchive], { cwd: repo });
+    infrastructureImages.nginx = addDockerArchiveImage(layout, {
+      archive: nginxArchive,
+      scratch: join(imageScratch, 'extract-nginx'),
+      reference: infraById.nginx.reference,
+    });
+  } else {
+    infrastructureImages.nginx = addTinyImage(layout, {
+      id: 'nginx',
+      version: target.version,
+      platforms: Object.keys(infraById.nginx.platforms),
+      reference: infraById.nginx.reference,
+      labels: { 'org.printfarmer.fixture-infrastructure': 'nginx' },
+    });
+  }
   const infrastructureLock = {
     schema: 1,
     kind: 'printfarmer-infrastructure-images-lock',
@@ -315,8 +326,9 @@ function buildServiceArchives({
   prior,
   target,
 }) {
-  const priorTag = `printfarmer-${serviceId}-prior:${prior.version}`;
-  const targetTag = `printfarmer-${serviceId}-target:${target.version}`;
+  const runTag = basename(runRoot).replace(/[^A-Za-z0-9_.-]/g, '-').toLowerCase();
+  const priorTag = `printfarmer-${runTag}-${serviceId}-prior:${prior.version}`;
+  const targetTag = `printfarmer-${runTag}-${serviceId}-target:${target.version}`;
   run('docker', [
     'build',
     repo,

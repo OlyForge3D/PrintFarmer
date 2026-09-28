@@ -88,7 +88,7 @@ function databaseService({ provider, network, databaseIp, labels, hostUpdateBack
   const backupsRoot = hostUpdateBackupsRoot ?? '${HOST_UPDATE_BACKUPS_ROOT:-./host-update/backups}';
   return {
     ...base,
-    user: 'root',
+    user: '10001',
     environment: {
       ACCEPT_EULA: '${ACCEPT_EULA:-Y}',
       MSSQL_SA_PASSWORD: '${MSSQL_SA_PASSWORD}',

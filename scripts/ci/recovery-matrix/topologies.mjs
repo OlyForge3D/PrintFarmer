@@ -54,8 +54,7 @@ export function topologyFor(id) {
 
 export function serviceMappingsFor(cell) {
   const topology = topologyFor(cell.topology);
-  const serviceIds = cell.topology === 'monolith' ? manifestServices : manifestServices;
-  return serviceIds.map((serviceId) => ({
+  return manifestServices.map((serviceId) => ({
     serviceId,
     composeServiceName: topology.composeServiceName(serviceId),
     imageEnvironmentVariable: topology.imageEnvironmentVariable(serviceId),

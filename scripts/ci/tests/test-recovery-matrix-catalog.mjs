@@ -91,7 +91,7 @@ test('compose generation uses selected provider, split services, static IPs, and
       hostUpdateBackupsRoot: '/work/host-update/backups',
     });
     assert.equal(compose.services.database.image, '${MSSQL_IMAGE:-mcr.microsoft.com/mssql/server:2022-latest}');
-    assert.equal(compose.services.database.user, 'root');
+    assert.equal(compose.services.database.user, '10001');
     assert.equal(compose.services.database.networks['matrix-net'].ipv4_address, '172.30.55.11');
     assert.equal(compose.services.api.networks['matrix-net'].ipv4_address, '172.30.55.20');
     assert.equal(compose.services.api.environment.find((value) => value.startsWith('DB_PROVIDER=')), 'DB_PROVIDER=SqlServer');

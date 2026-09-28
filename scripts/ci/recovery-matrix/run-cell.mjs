@@ -16,6 +16,13 @@ import { canaryDnsName, hasCanaryAttempt } from './network-denial.mjs';
 import { providerFor } from './providers.mjs';
 import { serviceMappingsFor, topologyFor } from './topologies.mjs';
 import {
+  activeServiceDigestExpectations,
+  assertActiveServiceDigests,
+  assertExpectedNeedsOperator,
+  assertExpectedRefusal,
+  assertNoMutation,
+} from './runtime-assertions.mjs';
+import {
   baseEvidence,
   createCheckpoints,
   detectUbuntuHost,
@@ -119,8 +126,9 @@ try {
       checkpoints: checkpoints.checkpoints,
       outcome: {
         expected: cellSpec.expected.outcome,
-        actual: cellSpec.expected.outcome,
-        reason: cellSpec.expected.reason,
+        expectedReason: cellSpec.expected.reason,
+        actual: 'RecoveryRequired',
+        reason: 'product-owner-signal-unavailable:storage',
         exitCode: 1,
         journalPhase: 'not-started',
       },
@@ -427,8 +435,11 @@ try {
       '<staging-dir>': targetStaging,
       '<trusted_root.json>': trustedRootPath,
     },
-    allowedExitCodes: cellSpec.scenario === 'refuse-activation' ? [0, 6] : managedActivationFault ? [0, 6] : [0],
+    allowedExitCodes: cellSpec.scenario === 'refuse-activation' ? [6] : managedActivationFault ? [0, 6] : [0],
   };
+  const beforeRefusal = cellSpec.scenario === 'refuse-activation'
+    ? mutationSnapshot({ env, deploymentRoot, hostStateRoot, hostContainer, provider, cell, priorImages })
+    : null;
   const targetActivation = customDuringActivationHook
     ? executePackagedStepDuringActivation({
       ...activationOperation,
@@ -455,7 +466,9 @@ try {
       exitCode: targetActivation.exitCode,
       operationId: 'offline-activate',
     }, join(runRoot, 'host-update', 'state', 'journal.ndjson'));
-    if (failure.actual !== cellSpec.expected.outcome || failure.reason !== cellSpec.expected.reason) {
+    try {
+      assertExpectedRefusal(failure, cellSpec.expected);
+    } catch (error) {
       checkpoints.failed('activation-refused');
       throw cellFailure(`unexpected_refusal:${failure.actual}:${failure.reason}`, {
         actual: failure.actual,
@@ -463,6 +476,9 @@ try {
         journalPhase: failure.journalPhase,
       });
     }
+    const afterRefusal = mutationSnapshot({ env, deploymentRoot, hostStateRoot, hostContainer, provider, cell, priorImages });
+    assertNoMutation('activation-refusal', beforeRefusal, afterRefusal);
+    checkpoints.ok('activation-refusal-no-mutation');
     checkpoints.ok(`activation-refused:${failure.reason}`);
     recordFaultCheckpoint();
     run.finishedAt = new Date().toISOString();
@@ -481,6 +497,7 @@ try {
       checkpoints: checkpoints.checkpoints,
       outcome: {
         expected: cellSpec.expected.outcome,
+        expectedReason: cellSpec.expected.reason,
         actual: failure.actual,
         reason: failure.reason,
         exitCode: targetActivation.exitCode,
@@ -545,7 +562,9 @@ try {
         '<protected-backup.json>': protectedBackupPath,
       },
     });
-    if (!preview.stdout.includes('plan.kind: NeedsOperator') || !preview.stdout.includes(cellSpec.expected.reason)) {
+    try {
+      assertExpectedNeedsOperator(preview, cellSpec.expected.reason);
+    } catch (error) {
       checkpoints.failed(`needs-operator-recover:${cellSpec.expected.reason}:not-observed`);
       throw cellFailure('needs_operator_evidence_unavailable', { actual: 'NeedsOperator', exitCode: preview.exitCode });
     }
@@ -572,6 +591,7 @@ try {
       checkpoints: checkpoints.checkpoints,
       outcome: {
         expected: cellSpec.expected.outcome,
+        expectedReason: cellSpec.expected.reason,
         actual: 'NeedsOperator',
         reason: cellSpec.expected.reason,
         exitCode: preview.exitCode,
@@ -616,11 +636,12 @@ try {
   checkpoints.ok('blob-config-key-volume-hashes-continuous');
   assertHostStateContinuity(beforeRecovery.hostState, afterRecovery.hostState, { targetIdentity: targetReplayIdentity });
   checkpoints.ok('protected-replay-history-continuous');
-  const runningDigest = runningComposeImageDigest(env, 'printfarmer');
-  if (runningDigest !== priorImages.monolith.indexDigest) {
-    throw new Error(`running_digest_mismatch:expected=${priorImages.monolith.indexDigest}:actual=${runningDigest}`);
-  }
-  checkpoints.ok(`running-digest-prior:${runningDigest}`);
+  const checkedDigests = assertActiveServiceDigests({
+    cell,
+    priorImages,
+    inspectDigest: (composeServiceName) => runningComposeImageDigest(env, composeServiceName),
+  });
+  checkpoints.ok(`running-digest-prior:${checkedDigests.map((digest) => `${digest.serviceId}=${digest.actualDigest}`).join(',')}`);
   const healthz = httpGetFromNetwork(network, appStaticIp, '/healthz');
   const health = httpGetFromNetwork(network, appStaticIp, '/health');
   if (!/Healthy|OK|"status"\s*:\s*"ok"|^\s*$/.test(healthz) && !healthz.includes('healthy')) {
@@ -655,6 +676,7 @@ try {
     checkpoints: checkpoints.checkpoints,
     outcome: {
       expected: 'RolledBack',
+      expectedReason: null,
       actual: 'RolledBack',
       reason: null,
       exitCode: 0,
@@ -678,7 +700,7 @@ try {
   checkpoints.failed('e2e-complete');
   const failure = classifyFailure(error, join(runRoot, 'host-update', 'state', 'journal.ndjson'));
   const expectedOutcome = cellSpec.expected.outcome ?? 'RolledBack';
-  const expectedReason = cellSpec.expected.reason ?? failure.reason;
+  const expectedReason = cellSpec.expected.reason ?? null;
   evidence = baseEvidence({
     run,
     host,
@@ -694,8 +716,9 @@ try {
     checkpoints: checkpoints.checkpoints,
     outcome: {
       expected: expectedOutcome,
-      actual: cellSpec.expected.failClosed ? expectedOutcome : failure.actual,
-      reason: expectedReason,
+      expectedReason,
+      actual: failure.actual,
+      reason: failure.reason,
       exitCode: failure.exitCode,
       journalPhase: failure.journalPhase,
     },
@@ -1408,6 +1431,15 @@ function stateContinuitySnapshot({ env, deploymentRoot, hostStateRoot, hostConta
     hostState: readHostStateSnapshotFromBoundary(hostStateRoot, {
       exec: (argv) => hostExecFileSync(hostContainer, argv, { cwd: repo }),
     }),
+  };
+}
+
+function mutationSnapshot({ env, deploymentRoot, hostStateRoot, hostContainer, provider, cell, priorImages }) {
+  const snapshot = stateContinuitySnapshot({ env, deploymentRoot, hostStateRoot, hostContainer, provider });
+  return {
+    ...snapshot,
+    serviceDigests: Object.fromEntries(activeServiceDigestExpectations(cell, priorImages)
+      .map(({ serviceId, composeServiceName }) => [serviceId, runningComposeImageDigest(env, composeServiceName)])),
   };
 }
 

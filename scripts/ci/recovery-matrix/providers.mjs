@@ -132,7 +132,7 @@ done
 if [[ "$query" =~ TO[[:space:]]+DISK[[:space:]]*=[[:space:]]*N\\'([^\\']+)\\' ]]; then
   backup_file="\${BASH_REMATCH[1]}"
   backup_dir="$(dirname "$backup_file")"
-  /usr/bin/docker exec ${databaseContainer} sh -c 'mkdir -p "$1" && chmod 0777 "$1"' sh "$backup_dir"
+  /usr/bin/docker exec -u 0 ${databaseContainer} sh -c 'mkdir -p "$1" && chown 10001:0 "$1"' sh "$backup_dir"
 fi
 /usr/bin/docker exec ${databaseContainer} /opt/mssql-tools18/bin/sqlcmd -C "$@"
 `);

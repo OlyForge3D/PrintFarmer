@@ -157,9 +157,10 @@ test('unsupported cells must expect their fail-closed outcome and reason', () =>
 
   record.outcome = {
     expected: 'Refused',
+    expectedReason: 'remote_worker_unsupported',
     actual: 'Refused',
     reason: 'remote_worker_unsupported',
-    exitCode: 2,
+    exitCode: 6,
     journalPhase: 'Refused',
   };
   assert.deepEqual(validateRecoveryEvidence(record), []);
@@ -169,6 +170,73 @@ test('unsupported cells must expect their fail-closed outcome and reason', () =>
   supported.outcome.actual = 'Refused';
   errors = validateRecoveryEvidence(supported);
   hasError(errors, 'supported cell must not expect Refused');
+});
+
+test('fail-closed setup failures keep observed actual and reason separate from expected reason', () => {
+  const record = validRecord();
+  record.cell.workers = 'remote';
+  record.outcome = {
+    expected: 'Refused',
+    expectedReason: 'remote_worker_unsupported',
+    actual: 'RecoveryRequired',
+    reason: 'activate-prior:HostUpdateVerificationTimeoutException',
+    exitCode: 1,
+    journalPhase: 'ActivatePrior',
+  };
+  record.verdict = 'fail';
+  assert.deepEqual(validateRecoveryEvidence(record), []);
+});
+
+test('external-storage product gap records product-gap actual instead of fabricated NeedsOperator', () => {
+  const record = validRecord();
+  record.cell.storageOwner = 'external';
+  record.checkpoints[1] = {
+    name: 'product-owner-signal-unavailable:storage',
+    at: '2026-09-26T10:10:00Z',
+    result: 'failed',
+  };
+  record.outcome = {
+    expected: 'NeedsOperator',
+    expectedReason: 'storage_externally_owned',
+    actual: 'RecoveryRequired',
+    reason: 'product-owner-signal-unavailable:storage',
+    exitCode: 1,
+    journalPhase: 'not-started',
+  };
+  record.verdict = 'fail';
+  assert.deepEqual(validateRecoveryEvidence(record), []);
+});
+
+test('passing Refused and NeedsOperator evidence requires exact CLI exit codes', () => {
+  const refused = validRecord();
+  refused.cell.workers = 'remote';
+  refused.outcome = {
+    expected: 'Refused',
+    expectedReason: 'remote_worker_unsupported',
+    actual: 'Refused',
+    reason: 'remote_worker_unsupported',
+    exitCode: 0,
+    journalPhase: 'Refused',
+  };
+  hasError(validateRecoveryEvidence(refused), 'Refused pass records');
+
+  refused.outcome.exitCode = 6;
+  assert.deepEqual(validateRecoveryEvidence(refused), []);
+
+  const needsOperator = validRecord();
+  needsOperator.cell.databaseOwner = 'external';
+  needsOperator.outcome = {
+    expected: 'NeedsOperator',
+    expectedReason: 'database_externally_owned',
+    actual: 'NeedsOperator',
+    reason: 'database_externally_owned',
+    exitCode: 0,
+    journalPhase: 'RecoveryPreview',
+  };
+  hasError(validateRecoveryEvidence(needsOperator), 'NeedsOperator pass records');
+
+  needsOperator.outcome.exitCode = 10;
+  assert.deepEqual(validateRecoveryEvidence(needsOperator), []);
 });
 
 test('expectedCellOutcome maps every fail-closed cell', () => {
@@ -366,9 +434,10 @@ test('a matrix run needs exactly one verification and unique cells', () => {
   unsupported.cell.workers = 'remote';
   unsupported.outcome = {
     expected: 'Refused',
+    expectedReason: 'remote_worker_unsupported',
     actual: 'Refused',
     reason: 'remote_worker_unsupported',
-    exitCode: 2,
+    exitCode: 6,
     journalPhase: 'Refused',
   };
   assert.deepEqual(
@@ -472,7 +541,7 @@ test('supported recovery cells may expect rollback without an injected fault', (
     expected: 'NeedsOperator',
     actual: 'NeedsOperator',
     reason: 'restore_uncertain',
-    exitCode: 3,
+    exitCode: 10,
     journalPhase: 'NeedsOperator',
   };
   hasError(validateRecoveryEvidence(operator), 'only after a successful fault-injected');
