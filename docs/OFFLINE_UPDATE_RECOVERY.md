@@ -1046,9 +1046,18 @@ separately records the discovered `/health` entries and fails positive recovery
 cells if no queue/dispatch/outbox consumer entry is exposed. On a product build
 that still has offline-recovery defects, a cell is expected to emit valid
 failing evidence with `outcome.expected` set from the catalog,
-`outcome.actual` set from the product CLI output/journal, and
-`outcome.reason` naming the packaged instruction step and refusal unless the
-cell has a stable fail-closed reason.
+`outcome.expectedReason` set from the catalog for fail-closed cells,
+`outcome.actual` set from the observed product CLI output/journal, and
+`outcome.reason` set to the observed failure or refusal reason. Passing
+fail-closed records must match the catalog outcome and expected reason
+(`Refused`/`remote_worker_unsupported`, `Refused`/`split_database_not_supported`,
+or `NeedsOperator`/`database_externally_owned`); failing setup/precondition
+records keep their observed reason instead of pretending the expected reason
+occurred. The external-storage product-gap cell is intentionally failing
+evidence: it still records the catalog expectation
+`NeedsOperator`/`storage_externally_owned`, but its observed outcome remains
+`RecoveryRequired` with reason `product-owner-signal-unavailable:storage` until
+the product exposes a storage-ownership signal (#3155).
 Use `--work-dir` to move scratch space to another non-system-temp directory and
 `--keep-work` only for debugging a failed local run. Without `--keep-work`, the
 script runs `docker compose down -v --remove-orphans`, removes the host and sink
