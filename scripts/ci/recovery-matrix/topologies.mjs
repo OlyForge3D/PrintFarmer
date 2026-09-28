@@ -16,11 +16,11 @@ export const topologyCatalog = Object.freeze({
     healthServiceId: 'monolith',
     healthComposeService: 'printfarmer',
     infrastructureIds: Object.freeze([]),
-    composeServiceName(serviceId) {
-      return serviceId === 'monolith' ? 'printfarmer' : serviceId;
+    composeServiceName() {
+      return 'printfarmer';
     },
-    imageEnvironmentVariable(serviceId) {
-      return serviceId === 'monolith' ? 'PRINTFARMER_IMAGE' : `${envPrefix(serviceId)}_IMAGE`;
+    imageEnvironmentVariable() {
+      return 'PRINTFARMER_IMAGE';
     },
   }),
   split: Object.freeze({
