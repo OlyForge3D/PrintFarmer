@@ -696,7 +696,7 @@ public sealed class ProcessHostUpdateRestoreExecutor(
         {
             await prepare(timeoutSource.Token).ConfigureAwait(false);
         }
-        catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
+        catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
             throw new InvalidOperationException($"restore_prepare_failed:{targetName}", exception);
         }
