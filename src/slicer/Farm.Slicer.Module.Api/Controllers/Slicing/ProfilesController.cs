@@ -1631,10 +1631,9 @@ public class ProfilesController(
         catch (UnauthorizedAccessException ex)
         {
             // Round-5 review fix (issue #2180 - Bishop/Hicks Blocking, round 5): the caller
-            // supplied a draft profile ID promoted by a different user. Deliberately mapped to
-            // Forbid() (403), matching UpdateCustomProfileAsync/DeleteCustomProfileAsync's
-            // existing precedent for this exception, rather than NotFound - do not disclose
-            // whether the ID exists.
+            // supplied a draft profile ID promoted by a different user. Mapped to Forbid() (403)
+            // so the other user's profile is never returned. Unlike UpdateCustomProfileAsync and
+            // DeleteCustomProfileAsync, which return 404 for a row the caller cannot view (#3185).
             _logger.LogWarning("Promote calibration draft profile unauthorized: {Message}", LogSanitizer.Sanitize(ex.Message));
             return Forbid();
         }
@@ -1680,7 +1679,11 @@ public class ProfilesController(
     /// <param name="id">ID of the custom profile to update.</param>
     /// <param name="request">Update request with optional new values.</param>
     /// <param name="ct">Cancellation token.</param>
-    /// <remarks>Requires an interactive session - see <see cref="CloneSingleProfileAsync"/>.</remarks>
+    /// <remarks>
+    /// Requires an interactive session - see <see cref="CloneSingleProfileAsync"/>. Returns 404 with
+    /// the same message as a missing id when the caller may not view the profile (another user's
+    /// private profile, issue #3185); 403 only when the caller can view it but does not own it.
+    /// </remarks>
     [HttpPut("custom/{id:guid}")]
     [Authorize(Policy = Farm.Infrastructure.Authorization.InteractiveSessionRequirement.PolicyName)]
     [ProducesResponseType(typeof(CustomProfileDto), StatusCodes.Status200OK)]
@@ -1701,7 +1704,7 @@ public class ProfilesController(
         {
             Guid userId = GetCurrentUserId();
 
-            CustomProfileDto result = await _profilesService.UpdateCustomProfileAsync(id, request, userId, ct);
+            CustomProfileDto result = await _profilesService.UpdateCustomProfileAsync(id, request, GetProfileMutator(userId), ct);
             return Ok(result);
         }
         catch (KeyNotFoundException ex)
@@ -1744,9 +1747,10 @@ public class ProfilesController(
     /// <see cref="UpdateCustomProfileAsync"/>, because the desktop calls this endpoint with a
     /// short-lived API-key exchange token, which that policy would reject outright), and scoped
     /// strictly to the caller's own profiles via <see cref="IProfilesService.DeleteCustomProfileAsync"/>:
-    /// a system profile can never be targeted (structurally excluded server-side), an ownership
-    /// mismatch returns 403 (not 404, matching <see cref="UpdateCustomProfileAsync"/> and
-    /// <see cref="PromoteCalibrationDraftProfileAsync"/> precedent), and - because this endpoint is
+    /// a system profile can never be targeted (structurally excluded server-side), another user's
+    /// private profile returns 404 with the same message as a missing id (issue #3185, matching
+    /// <see cref="UpdateCustomProfileAsync"/>), a visible row the caller does not own (public or
+    /// farm-wide) returns 403, and - because this endpoint is
     /// reachable by a desktop exchange token rather than only an interactive session - the target
     /// is deliberately narrowed to filament profiles only (a process or machine profile ID is
     /// treated as not-found), the same way <c>PromoteCalibrationDraftProfileAsync</c> hardcodes
@@ -1777,7 +1781,7 @@ public class ProfilesController(
                 return Unauthorized("A valid user identity is required to delete a custom profile.");
             }
 
-            await _profilesService.DeleteCustomProfileAsync(id, userId, ct);
+            await _profilesService.DeleteCustomProfileAsync(id, GetProfileMutator(userId), ct);
             return NoContent();
         }
         catch (KeyNotFoundException ex)
@@ -1871,6 +1875,15 @@ public class ProfilesController(
         Guid? userId = Guid.TryParse(userIdClaim, out Guid parsed) && parsed != Guid.Empty ? parsed : null;
         return new ProfileViewer(userId, isAdmin);
     }
+
+    /// <summary>
+    /// Builds the caller scope for owner-scoped mutations (issue #3185). <paramref name="userId"/> is
+    /// the identity that must own the row, resolved exactly as each action already did; the admin
+    /// flag matches <see cref="GetProfileViewer"/> and only decides visibility (404 vs 403), never
+    /// ownership.
+    /// </summary>
+    private ProfileViewer GetProfileMutator(Guid userId) =>
+        new(userId, PrintFarmerPermissions.HasPermission(User, SlicerEnginesAdminPermission));
 
     /// <summary>
     /// Gets the current user's ID from the authentication claims.

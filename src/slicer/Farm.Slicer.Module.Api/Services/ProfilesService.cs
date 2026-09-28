@@ -4378,41 +4378,62 @@ public class ProfilesService(
     }
 
     /// <inheritdoc />
-    public async Task<CustomProfileDto> UpdateCustomProfileAsync(Guid profileId, UpdateCustomProfileRequestDto request, Guid userId, CancellationToken ct)
+    public async Task<CustomProfileDto> UpdateCustomProfileAsync(Guid profileId, UpdateCustomProfileRequestDto request, ProfileViewer caller, CancellationToken ct)
     {
-        // Try to find the profile in each table
+        ArgumentNullException.ThrowIfNull(caller);
+
+        // Try to find the profile in each table. A row the caller may not view is reported exactly
+        // like a missing id (issue #3185), so a 404 never reveals that another user's private
+        // profile exists.
         ProcessProfile? processProfile = await _processProfileRepo.GetByIdAsync(profileId, ct);
         if (processProfile != null)
         {
-            return await UpdateProcessProfileAsync(processProfile, request, userId, ct);
+            return caller.CanView(processProfile)
+                ? await UpdateProcessProfileAsync(processProfile, request, caller, ct)
+                : throw CustomProfileNotFound(profileId);
         }
 
         FilamentProfile? filamentProfile = await _filamentProfileRepo.GetByIdAsync(profileId, ct);
         if (filamentProfile != null)
         {
-            return await UpdateFilamentProfileAsync(filamentProfile, request, userId, ct);
+            return caller.CanView(filamentProfile)
+                ? await UpdateFilamentProfileAsync(filamentProfile, request, caller, ct)
+                : throw CustomProfileNotFound(profileId);
         }
 
         MachineProfile? machineProfile = await _machineProfileRepo.GetByIdAsync(profileId, ct);
         if (machineProfile != null)
         {
-            return await UpdateMachineProfileAsync(machineProfile, request, userId, ct);
+            return caller.CanView(machineProfile)
+                ? await UpdateMachineProfileAsync(machineProfile, request, caller, ct)
+                : throw CustomProfileNotFound(profileId);
         }
 
-        throw new KeyNotFoundException($"Profile with ID {profileId} not found.");
+        throw CustomProfileNotFound(profileId);
     }
 
-    private async Task<CustomProfileDto> UpdateProcessProfileAsync(ProcessProfile profile, UpdateCustomProfileRequestDto request, Guid userId, CancellationToken ct)
+    private static KeyNotFoundException CustomProfileNotFound(Guid profileId) =>
+        new($"Profile with ID {profileId} not found.");
+
+    /// <summary>
+    /// Returns the caller's id when they own the profile; otherwise throws
+    /// <see cref="UnauthorizedAccessException"/> (403). Only reached for a row the caller can
+    /// already view (a public/farm-wide row, or any row for an administrator), so the 403 discloses
+    /// nothing the caller could not already list (issue #3185).
+    /// </summary>
+    private static Guid RequireProfileOwner(ProfileViewer caller, Guid? ownerUserId, string action) =>
+        caller.UserId is Guid userId && ownerUserId == userId
+            ? userId
+            : throw new UnauthorizedAccessException($"You do not have permission to {action} this profile.");
+
+    private async Task<CustomProfileDto> UpdateProcessProfileAsync(ProcessProfile profile, UpdateCustomProfileRequestDto request, ProfileViewer caller, CancellationToken ct)
     {
         if (profile.IsSystem)
         {
             throw new InvalidOperationException("Cannot update a system profile. Clone it first to create a custom version.");
         }
 
-        if (profile.CreatedByUserId != userId)
-        {
-            throw new UnauthorizedAccessException("You do not have permission to update this profile.");
-        }
+        Guid userId = RequireProfileOwner(caller, profile.CreatedByUserId, "update");
 
         if (!string.IsNullOrWhiteSpace(request.Name))
         {
@@ -4454,17 +4475,14 @@ public class ProfilesService(
         };
     }
 
-    private async Task<CustomProfileDto> UpdateFilamentProfileAsync(FilamentProfile profile, UpdateCustomProfileRequestDto request, Guid userId, CancellationToken ct)
+    private async Task<CustomProfileDto> UpdateFilamentProfileAsync(FilamentProfile profile, UpdateCustomProfileRequestDto request, ProfileViewer caller, CancellationToken ct)
     {
         if (profile.IsSystem)
         {
             throw new InvalidOperationException("Cannot update a system profile. Clone it first to create a custom version.");
         }
 
-        if (profile.CreatedByUserId != userId)
-        {
-            throw new UnauthorizedAccessException("You do not have permission to update this profile.");
-        }
+        Guid userId = RequireProfileOwner(caller, profile.CreatedByUserId, "update");
 
         if (!string.IsNullOrWhiteSpace(request.Name))
         {
@@ -4508,17 +4526,14 @@ public class ProfilesService(
         };
     }
 
-    private async Task<CustomProfileDto> UpdateMachineProfileAsync(MachineProfile profile, UpdateCustomProfileRequestDto request, Guid userId, CancellationToken ct)
+    private async Task<CustomProfileDto> UpdateMachineProfileAsync(MachineProfile profile, UpdateCustomProfileRequestDto request, ProfileViewer caller, CancellationToken ct)
     {
         if (profile.IsSystem)
         {
             throw new InvalidOperationException("Cannot update a system profile. Clone it first to create a custom version.");
         }
 
-        if (profile.CreatedByUserId != userId)
-        {
-            throw new UnauthorizedAccessException("You do not have permission to update this profile.");
-        }
+        Guid userId = RequireProfileOwner(caller, profile.CreatedByUserId, "update");
 
         if (!string.IsNullOrWhiteSpace(request.Name))
         {
@@ -4573,12 +4588,17 @@ public class ProfilesService(
     /// <c>ProfileType = "filament"</c> server-side rather than trusting caller input. That keeps a
     /// short-lived desktop token from being able to irreversibly delete a caller's process or
     /// machine profiles, matching PrintFarmerDesktop's actual need (cleaning up filament clones
-    /// created by its calibration wizard).
+    /// created by its calibration wizard). Another user's private filament profile is reported
+    /// exactly like a missing id (issue #3185); only a row the caller can view but does not own
+    /// is 403.
     /// </remarks>
-    public async Task DeleteCustomProfileAsync(Guid profileId, Guid userId, CancellationToken ct)
+    public async Task DeleteCustomProfileAsync(Guid profileId, ProfileViewer caller, CancellationToken ct)
     {
+        ArgumentNullException.ThrowIfNull(caller);
+
+        // A row the caller may not view is reported exactly like a missing id (issue #3185).
         FilamentProfile? filamentProfile = await _filamentProfileRepo.GetByIdAsync(profileId, ct);
-        if (filamentProfile == null)
+        if (filamentProfile == null || !caller.CanView(filamentProfile))
         {
             throw new KeyNotFoundException($"Filament profile with ID {profileId} not found.");
         }
@@ -4588,10 +4608,7 @@ public class ProfilesService(
             throw new InvalidOperationException("Cannot delete a system profile.");
         }
 
-        if (filamentProfile.CreatedByUserId != userId)
-        {
-            throw new UnauthorizedAccessException("You do not have permission to delete this profile.");
-        }
+        Guid userId = RequireProfileOwner(caller, filamentProfile.CreatedByUserId, "delete");
 
         await _filamentProfileRepo.DeleteAsync(filamentProfile, ct);
         _logger.LogInformation("Deleted custom filament profile '{ProfileName}' for user {UserId}", LogSanitizer.Sanitize(filamentProfile.Name), userId);
