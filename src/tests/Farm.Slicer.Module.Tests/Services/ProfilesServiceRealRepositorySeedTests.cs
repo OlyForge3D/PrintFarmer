@@ -104,7 +104,7 @@ public class ProfilesServiceRealRepositorySeedTests
         Assert.Equal(persisted.Count, persisted.Select(p => p.Name).Distinct(StringComparer.Ordinal).Count());
 
         // And the whole point of the issue: extended now surfaces the HF rows.
-        ExtendedProfilesResponseDto extended = await svc.ListExtendedAsync(CancellationToken.None);
+        ExtendedProfilesResponseDto extended = await svc.ListExtendedAsync(ProfileViewer.Administrator, CancellationToken.None);
         Assert.Equal(2, extended.MachineProfiles.Count(p => Regex.IsMatch(p.Name, @"\bHF\b")));
     }
 
@@ -143,7 +143,7 @@ public class ProfilesServiceRealRepositorySeedTests
 
         _ = await svc.SeedSystemProfilesFromWorkerAsync(harness.CreateWorkerHttpClient(), CancellationToken.None);
 
-        ExtendedProfilesResponseDto extended = await svc.ListExtendedAsync(CancellationToken.None);
+        ExtendedProfilesResponseDto extended = await svc.ListExtendedAsync(ProfileViewer.Administrator, CancellationToken.None);
         List<string> hfNames = extended.MachineProfiles
             .Where(p => Regex.IsMatch(p.Name, @"\bHF\b"))
             .Select(p => p.Name)

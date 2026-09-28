@@ -26,14 +26,16 @@ public interface IProfilesService
     Task<bool> SetDefaultProfileAsync(Guid id, CancellationToken ct);
 
     /// <summary>Lists all profiles organized by type with basic properties.</summary>
+    /// <param name="viewer">Caller whose visibility scope filters private process profiles (issue #3174).</param>
     /// <param name="ct">Cancellation token.</param>
-    Task<ExtendedProfilesResponseDto> ListExtendedAsync(CancellationToken ct);
+    Task<ExtendedProfilesResponseDto> ListExtendedAsync(ProfileViewer viewer, CancellationToken ct);
 
     /// <summary>Lists profiles organized in a hierarchical structure by manufacturer and machine model.</summary>
     /// <param name="manufacturer">Optional manufacturer name filter.</param>
     /// <param name="machineProfileId">Optional machine profile ID filter.</param>
+    /// <param name="viewer">Caller whose visibility scope filters private process profiles (issue #3174).</param>
     /// <param name="ct">Cancellation token.</param>
-    Task<HierarchicalProfilesResponseDto> ListHierarchyAsync(string? manufacturer, Guid? machineProfileId, CancellationToken ct);
+    Task<HierarchicalProfilesResponseDto> ListHierarchyAsync(string? manufacturer, Guid? machineProfileId, ProfileViewer viewer, CancellationToken ct);
 
     /// <summary>Lists system OrcaSlicer profiles available for import.</summary>
     /// <param name="ct">Cancellation token.</param>
@@ -89,8 +91,9 @@ public interface IProfilesService
 
     /// <summary>Gets names of profiles already imported for a specific printer model.</summary>
     /// <param name="printerModelId">The printer model ID.</param>
+    /// <param name="viewer">Caller whose visibility scope filters private process profile names (issue #3174).</param>
     /// <param name="ct">Cancellation token.</param>
-    Task<ImportedProfileNamesDto> GetImportedProfileNamesForModelAsync(Guid printerModelId, CancellationToken ct);
+    Task<ImportedProfileNamesDto> GetImportedProfileNamesForModelAsync(Guid printerModelId, ProfileViewer viewer, CancellationToken ct);
 
     /// <summary>Fetches machine profiles by OrcaSlicer alias from the worker.</summary>
     /// <param name="httpClient">HTTP client for worker communication.</param>
@@ -188,12 +191,14 @@ public interface IProfilesService
 
     /// <summary>Retrieves a single profile by ID.</summary>
     /// <param name="id">The profile identifier.</param>
+    /// <param name="viewer">Caller whose visibility scope applies; a profile the caller cannot see is reported as not found (issue #3174).</param>
     /// <param name="ct">Cancellation token.</param>
-    Task<ProcessProfileResponseDto?> GetProfileAsync(Guid id, CancellationToken ct);
+    Task<ProcessProfileResponseDto?> GetProfileAsync(Guid id, ProfileViewer viewer, CancellationToken ct);
 
-    /// <summary>Retrieves all profiles with basic properties.</summary>
+    /// <summary>Retrieves all profiles visible to the caller with basic properties.</summary>
+    /// <param name="viewer">Caller whose visibility scope filters private process profiles (issue #3174).</param>
     /// <param name="ct">Cancellation token.</param>
-    Task<IReadOnlyList<SlicerProfileDto>> GetProfilesAsync(CancellationToken ct);
+    Task<IReadOnlyList<SlicerProfileDto>> GetProfilesAsync(ProfileViewer viewer, CancellationToken ct);
 
     /// <summary>Deletes a profile by ID.</summary>
     /// <param name="id">The profile identifier.</param>
@@ -208,8 +213,9 @@ public interface IProfilesService
     /// <summary>Clones a single profile to create a user-owned custom copy.</summary>
     /// <param name="request">Clone request with source profile ID, type, and optional custom name.</param>
     /// <param name="userId">ID of the user creating the clone.</param>
+    /// <param name="viewer">Caller whose visibility scope applies to the source process profile; an invisible source is reported as not found (issue #3174).</param>
     /// <param name="ct">Cancellation token.</param>
-    Task<CloneSingleProfileResponseDto> CloneSingleProfileAsync(CloneSingleProfileRequestDto request, Guid userId, CancellationToken ct);
+    Task<CloneSingleProfileResponseDto> CloneSingleProfileAsync(CloneSingleProfileRequestDto request, Guid userId, ProfileViewer viewer, CancellationToken ct);
 
     /// <summary>Uploads a custom profile from raw JSON content.</summary>
     /// <param name="request">Upload request with raw JSON, profile type, and optional name.</param>

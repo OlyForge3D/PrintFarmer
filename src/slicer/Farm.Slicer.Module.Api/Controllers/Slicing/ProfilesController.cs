@@ -37,6 +37,9 @@ public class ProfilesController(
     private readonly IProfilesService _profilesService = profilesService;
     private readonly ICatalogServiceAdapter _catalogService = catalogService;
 
+    /// <summary>Permission that gates every administrative profile route and grants visibility of all profiles.</summary>
+    private const string SlicerEnginesAdminPermission = "slicer_engines:admin";
+
     /// <summary>
     /// Imports a process profile from raw slicer configuration JSON with deduplication and validation.
     /// </summary>
@@ -148,7 +151,7 @@ public class ProfilesController(
     {
         try
         {
-            ExtendedProfilesResponseDto response = await _profilesService.ListExtendedAsync(ct);
+            ExtendedProfilesResponseDto response = await _profilesService.ListExtendedAsync(GetProfileViewer(), ct);
             return Ok(response);
         }
         catch (Exception ex)
@@ -173,7 +176,7 @@ public class ProfilesController(
     {
         try
         {
-            HierarchicalProfilesResponseDto response = await _profilesService.ListHierarchyAsync(manufacturer, machineProfileId, ct);
+            HierarchicalProfilesResponseDto response = await _profilesService.ListHierarchyAsync(manufacturer, machineProfileId, GetProfileViewer(), ct);
             return Ok(response);
         }
         catch (KeyNotFoundException ex)
@@ -255,12 +258,16 @@ public class ProfilesController(
     /// Retrieves a specific process profile by its unique identifier.
     /// </summary>
     /// <param name="id">Unique identifier of the profile.</param>
+    /// <remarks>
+    /// Another user's private profile returns 404 rather than 403 so a caller cannot probe which
+    /// private profile ids exist (issue #3174). Administrators can read every profile.
+    /// </remarks>
     [HttpGet("{id:guid}")]
     [ProducesResponseType(typeof(ProcessProfileResponseDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetProfileAsync(Guid id)
     {
-        ProcessProfileResponseDto? profile = await _profilesService.GetProfileAsync(id, CancellationToken.None);
+        ProcessProfileResponseDto? profile = await _profilesService.GetProfileAsync(id, GetProfileViewer(), CancellationToken.None);
         return profile == null ? NotFound() : Ok(profile);
     }
 
@@ -321,7 +328,7 @@ public class ProfilesController(
 
         try
         {
-            IReadOnlyList<SlicerProfileDto> allProfiles = await _profilesService.GetProfilesAsync(CancellationToken.None);
+            IReadOnlyList<SlicerProfileDto> allProfiles = await _profilesService.GetProfilesAsync(GetProfileViewer(), CancellationToken.None);
 
             IReadOnlyList<ProcessProfileListEntryDto> result = allProfiles
                 .Where(p => p.ProcessProfile != null)
@@ -1136,7 +1143,7 @@ public class ProfilesController(
     {
         try
         {
-            ImportedProfileNamesDto result = await _profilesService.GetImportedProfileNamesForModelAsync(modelId, ct);
+            ImportedProfileNamesDto result = await _profilesService.GetImportedProfileNamesForModelAsync(modelId, GetProfileViewer(), ct);
             return Ok(result);
         }
         catch (Exception ex)
@@ -1455,7 +1462,9 @@ public class ProfilesController(
     /// Requires an interactive session: this controller is class-gated by the broad
     /// <c>slicing:submit</c> permission, which a Desktop-exchange token legitimately holds in order
     /// to submit calibration slice jobs. Profile-state mutation is not part of that intent, so
-    /// exchange tokens are denied here while normal sessions are unaffected.
+    /// exchange tokens are denied here while normal sessions are unaffected. A process-profile
+    /// source that is another user's private profile returns 404, like a missing id, because a
+    /// clone copies the source's full settings (issue #3174).
     /// </remarks>
     [HttpPost("clone")]
     [Authorize(Policy = Farm.Infrastructure.Authorization.InteractiveSessionRequirement.PolicyName)]
@@ -1475,7 +1484,7 @@ public class ProfilesController(
         {
             Guid userId = GetCurrentUserId();
 
-            CloneSingleProfileResponseDto result = await _profilesService.CloneSingleProfileAsync(request, userId, ct);
+            CloneSingleProfileResponseDto result = await _profilesService.CloneSingleProfileAsync(request, userId, GetProfileViewer(), ct);
             return Created($"/api/slicer/profiles/{result.Id}", result);
         }
         catch (ArgumentException ex)
@@ -1844,6 +1853,19 @@ public class ProfilesController(
     public IActionResult GetFilamentSchema([FromQuery] string? engineVersion = null)
     {
         return Ok(ProfileSchemaProvider.GetFilamentSchema(engineVersion));
+    }
+
+    /// <summary>
+    /// Builds the caller's profile visibility scope (issue #3174). Unlike <see cref="GetCurrentUserId"/>,
+    /// this never falls back to the shared development user id: a caller without a valid identity
+    /// claim is treated as owning nothing and sees only system and public profiles.
+    /// </summary>
+    private ProfileViewer GetProfileViewer()
+    {
+        bool isAdmin = PrintFarmerPermissions.HasPermission(User, SlicerEnginesAdminPermission);
+        string? userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        Guid? userId = Guid.TryParse(userIdClaim, out Guid parsed) && parsed != Guid.Empty ? parsed : null;
+        return new ProfileViewer(userId, isAdmin);
     }
 
     /// <summary>

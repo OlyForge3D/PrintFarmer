@@ -69,7 +69,7 @@ public class ProfilesServiceListExtendedTests
         ProfilesService svc = CreateService(new List<MachineProfile> { standard, hf });
 
         // Act
-        ExtendedProfilesResponseDto result = await svc.ListExtendedAsync(CancellationToken.None);
+        ExtendedProfilesResponseDto result = await svc.ListExtendedAsync(ProfileViewer.Administrator, CancellationToken.None);
 
         // Assert: both variants are present simultaneously, each with its own distinct fields.
         Assert.Equal(2, result.MachineProfiles.Count);
@@ -125,7 +125,7 @@ public class ProfilesServiceListExtendedTests
         ProfilesService svc = CreateService(new List<MachineProfile> { standard, hf });
 
         // Act
-        ExtendedProfilesResponseDto result = await svc.ListExtendedAsync(CancellationToken.None);
+        ExtendedProfilesResponseDto result = await svc.ListExtendedAsync(ProfileViewer.Administrator, CancellationToken.None);
 
         // Assert: both same-nozzle-diameter variants are present, and the HF one is identifiable by name.
         Assert.Equal(2, result.MachineProfiles.Count);
@@ -272,7 +272,7 @@ public class ProfilesServiceListExtendedTests
         // Act: seed from the (mocked) worker, then read back through the extended endpoint exactly
         // as /api/slicer/profiles/extended would.
         _ = await svc.SeedSystemProfilesFromWorkerAsync(httpClient, CancellationToken.None);
-        ExtendedProfilesResponseDto result = await svc.ListExtendedAsync(CancellationToken.None);
+        ExtendedProfilesResponseDto result = await svc.ListExtendedAsync(ProfileViewer.Administrator, CancellationToken.None);
 
         // Assert: both same-nozzle-diameter variants made it through seeding and are surfaced by
         // ListExtendedAsync, with the HF one identifiable by name.
@@ -365,7 +365,7 @@ public class ProfilesServiceListExtendedTests
         ProfilesService svc = CreateService(new List<MachineProfile> { profile });
 
         // Act
-        ExtendedProfilesResponseDto result = await svc.ListExtendedAsync(CancellationToken.None);
+        ExtendedProfilesResponseDto result = await svc.ListExtendedAsync(ProfileViewer.Administrator, CancellationToken.None);
 
         // Assert
         MachineProfileListItemDto dto = Assert.Single(result.MachineProfiles);
@@ -391,7 +391,7 @@ public class ProfilesServiceListExtendedTests
         ProfilesService svc = CreateService(new List<MachineProfile> { profile });
 
         // Act
-        ExtendedProfilesResponseDto result = await svc.ListExtendedAsync(CancellationToken.None);
+        ExtendedProfilesResponseDto result = await svc.ListExtendedAsync(ProfileViewer.Administrator, CancellationToken.None);
 
         // Assert
         MachineProfileListItemDto dto = Assert.Single(result.MachineProfiles);
@@ -416,7 +416,7 @@ public class ProfilesServiceListExtendedTests
         ProfilesService svc = CreateService(new List<MachineProfile> { profile });
 
         // Act
-        ExtendedProfilesResponseDto result = await svc.ListExtendedAsync(CancellationToken.None);
+        ExtendedProfilesResponseDto result = await svc.ListExtendedAsync(ProfileViewer.Administrator, CancellationToken.None);
 
         // Assert
         MachineProfileListItemDto dto = Assert.Single(result.MachineProfiles);
@@ -441,7 +441,7 @@ public class ProfilesServiceListExtendedTests
         ProfilesService svc = CreateService(new List<MachineProfile> { profile });
 
         // Act
-        ExtendedProfilesResponseDto result = await svc.ListExtendedAsync(CancellationToken.None);
+        ExtendedProfilesResponseDto result = await svc.ListExtendedAsync(ProfileViewer.Administrator, CancellationToken.None);
 
         // Assert
         MachineProfileListItemDto dto = Assert.Single(result.MachineProfiles);

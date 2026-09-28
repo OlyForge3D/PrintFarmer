@@ -365,6 +365,7 @@ public class ProfilesService(
     /// <summary>
     /// Retrieves all available profiles organized by type with full extended details.
     /// </summary>
+    /// <param name="viewer">Caller whose visibility scope filters private process profiles (issue #3174)</param>
     /// <param name="ct">Cancellation token for the async operation</param>
     /// <returns>
     /// An ExtendedProfilesResponseDto containing:
@@ -379,15 +380,18 @@ public class ProfilesService(
     /// This is primarily used for UI components that need to display all available profile options
     /// organized by category and manufacturer.
     /// </remarks>
-    public async Task<ExtendedProfilesResponseDto> ListExtendedAsync(CancellationToken ct)
+    public async Task<ExtendedProfilesResponseDto> ListExtendedAsync(ProfileViewer viewer, CancellationToken ct)
     {
+        ArgumentNullException.ThrowIfNull(viewer);
         _logger.LogInformation("[ListExtendedAsync] Retrieving all extended profiles");
         List<ProcessProfileListItemDto> processProfiles = new();
         List<FilamentProfileListItemDto> filamentProfiles = new();
         List<MachineProfileListItemDto> machineProfiles = new();
 
-        IReadOnlyList<ProcessProfile> processProfileEntities = await _processProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: true, userId: null, ct);
-        _logger.LogDebug("[ListExtendedAsync] Found {ProcessProfileEntitiesCount} process profiles for OrcaSlicer", processProfileEntities.Count);
+        List<ProcessProfile> processProfileEntities = (await _processProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: true, userId: null, ct))
+            .Where(viewer.CanView)
+            .ToList();
+        _logger.LogDebug("[ListExtendedAsync] Found {ProcessProfileEntitiesCount} visible process profiles for OrcaSlicer", processProfileEntities.Count);
         foreach (ProcessProfile p in processProfileEntities)
         {
             processProfiles.Add(new ProcessProfileListItemDto
@@ -514,6 +518,7 @@ public class ProfilesService(
     /// </summary>
     /// <param name="manufacturer">Optional filter to retrieve only profiles for a specific manufacturer</param>
     /// <param name="machineProfileId">Optional filter to retrieve only profiles compatible with a specific machine</param>
+    /// <param name="viewer">Caller whose visibility scope filters private process profiles (issue #3174)</param>
     /// <param name="ct">Cancellation token for the async operation</param>
     /// <returns>
     /// A HierarchicalProfilesResponseDto containing profiles organized as:
@@ -531,8 +536,9 @@ public class ProfilesService(
     /// - If both are specified: Both filters apply
     /// - If neither is specified: Returns all profiles in hierarchy
     /// </remarks>
-    public async Task<HierarchicalProfilesResponseDto> ListHierarchyAsync(string? manufacturer, Guid? machineProfileId, CancellationToken ct)
+    public async Task<HierarchicalProfilesResponseDto> ListHierarchyAsync(string? manufacturer, Guid? machineProfileId, ProfileViewer viewer, CancellationToken ct)
     {
+        ArgumentNullException.ThrowIfNull(viewer);
         string? manufacturerFilter = string.IsNullOrWhiteSpace(manufacturer) ? null : manufacturer.Trim();
 
         // Return all profiles (system + custom) from database for browsing
@@ -578,7 +584,7 @@ public class ProfilesService(
 
         // Return all profiles (system + custom) from database for browsing
         IReadOnlyList<ProcessProfile> processProfilesAll = await _processProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: true, userId: null, ct);
-        IEnumerable<ProcessProfile> processProfilesFiltered = processProfilesAll;
+        IEnumerable<ProcessProfile> processProfilesFiltered = processProfilesAll.Where(viewer.CanView);
 
         // If a specific machine profile is selected, filter by CompatiblePrinters field
         // This ensures "Qidi X-Plus 4 0.4 nozzle" only shows profiles with compatible_printers containing that exact machine name
@@ -2877,8 +2883,10 @@ public class ProfilesService(
     /// <inheritdoc />
     public async Task<ImportedProfileNamesDto> GetImportedProfileNamesForModelAsync(
         Guid printerModelId,
+        ProfileViewer viewer,
         CancellationToken ct)
     {
+        ArgumentNullException.ThrowIfNull(viewer);
         _logger.LogInformation("[GetImportedProfileNamesForModel] Getting imported profile names for model: {PrinterModelId}", printerModelId);
 
         // Get all OrcaSlicer machine profiles for this model
@@ -2895,7 +2903,7 @@ public class ProfilesService(
             SlicerType.OrcaSlicer, includeSystem: true, userId: null, ct);
 
         List<string> processNames = processProfiles
-            .Where(p => p.PrinterModelId == printerModelId && !string.IsNullOrEmpty(p.Name))
+            .Where(p => p.PrinterModelId == printerModelId && !string.IsNullOrEmpty(p.Name) && viewer.CanView(p))
             .Select(p => p.Name!)
             .ToList();
 
@@ -3394,6 +3402,7 @@ public class ProfilesService(
     /// Retrieves a single profile by its unique identifier with full details.
     /// </summary>
     /// <param name="id">The unique identifier of the profile to retrieve</param>
+    /// <param name="viewer">Caller whose visibility scope filters private process profiles (issue #3174)</param>
     /// <param name="ct">Cancellation token for the async operation</param>
     /// <returns>
     /// A ProcessProfileResponseDto containing full profile details including configuration,
@@ -3407,15 +3416,24 @@ public class ProfilesService(
     /// - Validating profile existence
     /// - Getting profile metadata for export/import operations
     ///
-    /// Returns null if the profile ID does not exist; no exception is thrown.
+    /// Returns null if the profile ID does not exist or the profile is another user's private
+    /// profile that <paramref name="viewer"/> may not see; no exception is thrown.
     /// </remarks>
-    public async Task<ProcessProfileResponseDto?> GetProfileAsync(Guid id, CancellationToken ct)
+    public async Task<ProcessProfileResponseDto?> GetProfileAsync(Guid id, ProfileViewer viewer, CancellationToken ct)
     {
+        ArgumentNullException.ThrowIfNull(viewer);
         _logger.LogInformation("[GetProfileAsync] Retrieving profile with ID: {Id}", id);
         ProcessProfile? profile = await _repo.FindByIdAsync(id, ct);
         if (profile is null)
         {
             _logger.LogWarning("[GetProfileAsync] Profile not found with ID: {Id}", id);
+            return null;
+        }
+
+        // Another user's private profile is reported exactly like a missing one so its existence is not disclosed (#3174).
+        if (!viewer.CanView(profile))
+        {
+            _logger.LogWarning("[GetProfileAsync] Profile {Id} is not visible to the caller; reporting not found", id);
             return null;
         }
 
@@ -3426,6 +3444,7 @@ public class ProfilesService(
     /// <summary>
     /// Retrieves all available profiles in a lightweight summary format.
     /// </summary>
+    /// <param name="viewer">Caller whose visibility scope filters private process profiles (issue #3174)</param>
     /// <param name="ct">Cancellation token for the async operation</param>
     /// <returns>
     /// A read-only list of SlicerProfileDto containing all available profiles with summary information
@@ -3445,11 +3464,12 @@ public class ProfilesService(
     ///
     /// Results are sorted by profile name for consistent ordering.
     /// </remarks>
-    public async Task<IReadOnlyList<SlicerProfileDto>> GetProfilesAsync(CancellationToken ct)
+    public async Task<IReadOnlyList<SlicerProfileDto>> GetProfilesAsync(ProfileViewer viewer, CancellationToken ct)
     {
+        ArgumentNullException.ThrowIfNull(viewer);
         _logger.LogInformation("[GetProfilesAsync] Retrieving all slicer profiles");
-        List<ProcessProfile> profiles = await _repo.GetAllAsync(ct);
-        _logger.LogDebug("[GetProfilesAsync] Retrieved {ProfilesCount} profiles, sorting by name", profiles.Count);
+        List<ProcessProfile> profiles = (await _repo.GetAllAsync(ct)).Where(viewer.CanView).ToList();
+        _logger.LogDebug("[GetProfilesAsync] Retrieved {ProfilesCount} visible profiles, sorting by name", profiles.Count);
         var result = profiles.OrderBy(p => p.Name).Select(ToSummaryDto).ToList();
         _logger.LogDebug("[GetProfilesAsync] Returning {ResultCount} profiles", result.Count);
         return result;
@@ -3771,25 +3791,28 @@ public class ProfilesService(
     }
 
     /// <inheritdoc />
-    public async Task<CloneSingleProfileResponseDto> CloneSingleProfileAsync(CloneSingleProfileRequestDto request, Guid userId, CancellationToken ct)
+    public async Task<CloneSingleProfileResponseDto> CloneSingleProfileAsync(CloneSingleProfileRequestDto request, Guid userId, ProfileViewer viewer, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(viewer);
 
         string profileType = request.ProfileType?.ToLowerInvariant() ?? string.Empty;
 
         return profileType switch
         {
-            "process" => await CloneProcessProfileAsync(request, userId, ct),
+            "process" => await CloneProcessProfileAsync(request, userId, viewer, ct),
             "filament" => await CloneFilamentProfileAsync(request, userId, ct),
             "machine" => await CloneMachineProfileAsync(request, userId, ct),
             _ => throw new ArgumentException($"Invalid profile type: '{request.ProfileType}'. Must be 'machine', 'filament', or 'process'.")
         };
     }
 
-    private async Task<CloneSingleProfileResponseDto> CloneProcessProfileAsync(CloneSingleProfileRequestDto request, Guid userId, CancellationToken ct)
+    private async Task<CloneSingleProfileResponseDto> CloneProcessProfileAsync(CloneSingleProfileRequestDto request, Guid userId, ProfileViewer viewer, CancellationToken ct)
     {
         ProcessProfile? source = await _processProfileRepo.GetByIdAsync(request.SourceProfileId, ct);
-        if (source == null)
+
+        // Cloning copies the source's full settings, so an invisible source is treated as missing (#3174).
+        if (source == null || !viewer.CanView(source))
         {
             throw new KeyNotFoundException($"Process profile with ID {request.SourceProfileId} not found.");
         }

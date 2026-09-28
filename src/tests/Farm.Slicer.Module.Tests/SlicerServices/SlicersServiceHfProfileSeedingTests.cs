@@ -109,7 +109,7 @@ public class SlicersServiceHfProfileSeedingTests
 
         ProfilesService profilesService = harness.CreateProfilesService();
 
-        ExtendedProfilesResponseDto extended = await profilesService.ListExtendedAsync(CancellationToken.None);
+        ExtendedProfilesResponseDto extended = await profilesService.ListExtendedAsync(ProfileViewer.Administrator, CancellationToken.None);
         IReadOnlyList<MachineProfileDto> forModel = await profilesService.GetMachineProfilesForCatalogModelAsync(
             harness.CreateWorkerHttpClient(),
             new[] { BaseModelName, HfModelName },
