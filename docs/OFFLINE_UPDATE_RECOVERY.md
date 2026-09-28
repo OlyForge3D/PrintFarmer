@@ -1027,7 +1027,8 @@ Every run loads fixture-built images under the same canonical tags, such as
 `postgres:16-alpine`. A second run on the same daemon moves those tags, so the
 first run's pinned digests can disappear (#3183). The script works as a
 non-root runner: the CLI's `dotnet` fallback runs as the invoking user, and
-cleanup hands root-owned run files back to that user before it deletes them:
+cleanup hands root-owned run files back to that user so the retained run
+directory can be removed without root:
 
 ```bash
 scripts/ci/recovery-matrix/run-cell.sh \

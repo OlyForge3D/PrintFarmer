@@ -136,9 +136,13 @@ cleanup() {
     docker compose -f "$RUN_ROOT/deployment/docker-compose.recovery.yml" -p "$RUN_ID" down -v --remove-orphans >/dev/null 2>&1 || true
   fi
   # The CLI runs as root inside the host container; hand its backups/staging back to a non-root
-  # runner so the scratch directory stays removable.
+  # runner so the retained scratch directory stays removable. Fall back to a throwaway container
+  # from the local host image when the host container is already gone.
   if [[ "$(id -u)" != 0 ]]; then
-    docker exec "$HOST" chown -R "$(id -u):$(id -g)" "$RUN_ROOT" >/dev/null 2>&1 || true
+    docker exec "$HOST" chown -h -R "$(id -u):$(id -g)" "$RUN_ROOT" >/dev/null 2>&1 \
+      || docker run --rm --network none --user 0 --entrypoint chown \
+        -v "$RUN_ROOT:$RUN_ROOT" "$HOST_IMAGE" -h -R "$(id -u):$(id -g)" "$RUN_ROOT" >/dev/null 2>&1 \
+      || echo "Warning: could not restore ownership of $RUN_ROOT; remove it as root" >&2
   fi
   docker rm -f "$HOST" >/dev/null 2>&1 || true
   docker rm -f "$SINK" >/dev/null 2>&1 || true
