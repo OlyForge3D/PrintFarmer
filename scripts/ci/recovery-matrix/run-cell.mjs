@@ -14,7 +14,7 @@ import { hasFaultHooks, invokeFaultHook, parseFaultHooks } from './fault-hooks.m
 import { assertHostStateContinuity, readHostStateSnapshotFromBoundary } from './host-state-continuity.mjs';
 import { canaryDnsName, hasCanaryAttempt } from './network-denial.mjs';
 import { providerFor } from './providers.mjs';
-import { serviceMappingsFor, topologyFor } from './topologies.mjs';
+import { serviceMappingsFor } from './topologies.mjs';
 import {
   activeServiceDigestExpectations,
   assertActiveServiceDigests,
@@ -59,7 +59,6 @@ const networkAttemptsPath = required(args['network-attempts'], '--network-attemp
 const hostContainer = required(args['host-container'], '--host-container');
 const faultHooks = parseFaultHooks(toArray(args.fault));
 const provider = providerFor(cellSpec.cell.provider);
-const topology = topologyFor(cellSpec.cell.topology);
 
 const startedAt = new Date();
 const checkpoints = createCheckpoints();
@@ -879,9 +878,13 @@ function runPackagedOperationDuringActivation({
       isComplete: () => existsSync(exitPath) || !processAlive(pid),
       runHook: () => {
         runFaultHook('during-activate', { ...hookContext, activationPid: pid });
-        if (managedActivationFault && faultDecisionPath && !existsSync(faultDecisionPath)) {
-          writeFileSync(faultDecisionPath, 'fail');
-          faultState.injected = true;
+        if (managedActivationFault && faultDecisionPath) {
+          try {
+            writeFileSync(faultDecisionPath, 'fail', { flag: 'wx' });
+            faultState.injected = true;
+          } catch (error) {
+            if (error?.code !== 'EEXIST') throw error;
+          }
         }
       },
       timeoutMs: 60_000,

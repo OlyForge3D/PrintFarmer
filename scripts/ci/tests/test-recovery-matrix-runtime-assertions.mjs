@@ -26,7 +26,7 @@ test('post-recovery digest checks every active split service and never probes mo
     priorImages,
     inspectDigest: (composeServiceName) => {
       probed.push(composeServiceName);
-      return priorImages[composeServiceName]?.indexDigest ?? priorImages[composeServiceName.replaceAll('-', '-')].indexDigest;
+      return priorImages[composeServiceName].indexDigest;
     },
   });
 
