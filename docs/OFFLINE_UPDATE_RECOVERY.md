@@ -1071,6 +1071,49 @@ script runs `docker compose down -v --remove-orphans`, removes the host and sink
 containers and network, and fails loudly if any container, volume or network
 with the run label remains.
 
+### Live fault cells (#3101)
+
+Fault cells live in `scripts/ci/recovery-matrix/fault-cells.mjs`. Each one runs
+on the supported `c2` shape, so the injected fault is the only variable. The
+`all` group keeps its meaning. Run one fault cell with `--cell <id>`, or every
+fault cell with `--cell faults`. Faults are injected live against the packaged
+CLI:
+
+- **Power loss.** A one-shot pause gate in the harness docker shim (or the
+  `pg_dump` shim) holds the executor at the chosen journal checkpoint. The
+  harness then kills the host container (`docker kill -s KILL` then `start`),
+  which kills the CLI and the paused shim.
+- **Partial side effects.** The gate lets the side effect run, then fails the
+  call.
+- **State faults.** The harness deletes or corrupts state on disk before the
+  operator redrive.
+
+Each cell records a `fault:<kind>:<point>` checkpoint and the `fault-injected`
+checkpoint. It asserts the journal fenced the uncertain step (`<step>:before`
+with no `<step>:after`). On redrive it asserts that no migration apply or
+`compose up` ran more than once, and that `pg_restore` was never replayed. It
+then repeats the final operator action, restarts the host, runs
+`host-update-status`, and proves the same outcome is reported again.
+
+| Cell id | Fault | Expected durable outcome/reason | Local run status |
+| --- | --- | --- | --- |
+| `fault-power-loss-backup` | Power loss at `backup:before` (inside `pg_dump`) | `Activated` after redrive re-runs the safe backup | Pending live run |
+| `fault-power-loss-migration-before` | Power loss before the `AppDbContext` migration apply runs | `Activated` after the reconciler probes the migration | Pending live run |
+| `fault-power-loss-migration-after` | Power loss after the migration applied, before `migration:after` | `Activated` after the reconciler probes the migration | Pending live run |
+| `fault-power-loss-apply-before` | Power loss before `compose up` runs | Redrive reports `RecoveryRequired` / `uncertain_side_effect:apply:*`; recovery reports `RolledBack` | Pending live run |
+| `fault-power-loss-apply-after` | Power loss after `compose up` ran, before `apply:after` | `Activated` after the reconciler verifies the running digests | Pending live run |
+| `fault-partial-migration` | Migration applies and writes an extra history row, then the call fails | `RolledBack`; migration heads match the prior release | Pending live run |
+| `fault-partial-apply` | `compose up` starts the target, then the call fails | `RolledBack`; running digests match the prior release | Pending live run |
+| `fault-api-down` | Application containers stopped while `RecoveryRequired` | `RolledBack` | Pending live run |
+| `fault-missing-backup` | Backups deleted while `RecoveryRequired` | `NeedsOperator` / `no_backup_available`, exit 10, no mutation | Pending live run |
+| `fault-corrupt-journal` | Journal record tampered while `RecoveryRequired` | `RecoveryRequired` / `journal_integrity_failure`, exit 4, no mutation | Pending live run |
+| `fault-corrupt-replay` | Replay store garbled before activation | `RecoveryRequired` / `replay_store_unreadable`, exit 4, no mutation | Pending live run |
+| `fault-fence-release` | Printer inventory present at fence release | Confirm reports `FenceReleasePending` / `physical_reconciliation_pending` (exit 13), with the fence held across a restart. Confirming with `--printers-reconciled <token>` releases only the fence, without replaying restore, and reports `RolledBack` | Pending live run |
+
+The evidence `outcome.expectedReason` is `null` for fault cells because they are
+supported cells. The observed stable reason is recorded in `outcome.reason` for
+`NeedsOperator` and `RecoveryRequired` outcomes.
+
 ### Queue-consumer health entry (#3157)
 
 The API's `/health` (and `/api/health`) response exposes a `queue-consumers`
