@@ -1776,7 +1776,18 @@ test('validateDependencyCompliance reports stale npm fallbacks once and dedupes 
   };
   const writeLock = (packages) => writeFile(path.join(root, lockRelativePath), JSON.stringify({
     lockfileVersion: 3,
-    packages: { '': { name: 'fixture-root', version: '1.0.0', license: 'MIT' }, ...packages },
+    packages: {
+      '': { name: 'fixture-root', version: '1.0.0', license: 'MIT' },
+      // Installed entries pin a registry tarball so validateNpmLockSources passes.
+      ...Object.fromEntries(Object.entries(packages).map(([lockPath, metadata]) => {
+        const name = lockPath.slice(lockPath.lastIndexOf('node_modules/') + 'node_modules/'.length);
+        return [lockPath, {
+          resolved: `https://registry.npmjs.org/${name}/-/${name}-${metadata.version}.tgz`,
+          integrity: `sha512-${'A'.repeat(86)}==`,
+          ...metadata,
+        }];
+      })),
+    },
   }));
 
   try {
@@ -1864,7 +1875,6 @@ test('validateNpmLockSources rejects non-registry sources and weak integrity', a
       'node_modules/fixture': registryEntry('fixture', '1.0.0'),
       'node_modules/linked': { resolved: 'local-rules', link: true },
       'node_modules/fixture/node_modules/bundled': { version: '1.0.0', inBundle: true },
-      'node_modules/unresolved': { version: '1.0.0' },
       'node_modules/@scope/pkg': {
         ...registryEntry('@scope/pkg', '2.0.0'),
         resolved: 'https://registry.npmjs.org/@scope/pkg/-/pkg-2.0.0.tgz',
@@ -1897,12 +1907,44 @@ test('validateNpmLockSources rejects non-registry sources and weak integrity', a
       'node_modules/mixed': { ...registryEntry('mixed', '1.0.0'), integrity: `${sha512} sha1-ce5R+nvkyuwaY4OffmgtgTLTDK8=` },
       'node_modules/empty': { ...registryEntry('empty', '1.0.0'), integrity: ' ' },
       'node_modules/multi': { ...registryEntry('multi', '1.0.0'), integrity: `${sha512} ${sha512}` },
+      'node_modules/missing': { version: '1.0.0', resolved: registryEntry('missing', '1.0.0').resolved },
     });
     assert.deepEqual((await failures()).sort(), [
       `NPM_LOCK_INTEGRITY ${lockRelativePath}:node_modules/empty`,
+      `NPM_LOCK_INTEGRITY ${lockRelativePath}:node_modules/missing`,
       `NPM_LOCK_INTEGRITY ${lockRelativePath}:node_modules/mixed`,
       `NPM_LOCK_INTEGRITY ${lockRelativePath}:node_modules/sha1`,
     ]);
+
+    // An installed entry must pin its tarball, and malformed entries fail closed.
+    await writeLock(lockRelativePath, {
+      'node_modules/unresolved': { version: '1.0.0', integrity: sha512 },
+      'node_modules/malformed': 'https://example.test/x.tgz',
+    });
+    assert.deepEqual((await failures()).sort(), [
+      `NPM_LOCK_FORMAT ${lockRelativePath}:node_modules/malformed`,
+      `NPM_LOCK_SOURCE ${lockRelativePath}:node_modules/unresolved`,
+    ]);
+
+    // Lockfile v1 keeps fetched entries in a `dependencies` tree the guard does
+    // not inspect, so it and any other shape without a v2/v3 packages map fail closed.
+    const legacyLock = {
+      lockfileVersion: 1,
+      dependencies: {
+        x: { version: '1.0.0', resolved: badSources.privateFeed, integrity: 'sha1-ce5R+nvkyuwaY4OffmgtgTLTDK8=' },
+      },
+    };
+    for (const lock of [
+      legacyLock,
+      { ...legacyLock, packages: {} },
+      { lockfileVersion: 3 },
+      { lockfileVersion: 3, packages: [] },
+      { packages: { 'node_modules/x': registryEntry('x', '1.0.0') } },
+      [],
+    ]) {
+      await writeFile(path.join(root, lockRelativePath), JSON.stringify(lock));
+      assert.deepEqual(await failures(), [`NPM_LOCK_FORMAT ${lockRelativePath}`], JSON.stringify(lock));
+    }
 
     // The tooling lock is provenance-checked even though it is not
     // license-inventoried, and a missing one is reported. A missing

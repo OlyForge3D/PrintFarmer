@@ -460,11 +460,25 @@ function isNpmRegistryTarball(resolved) {
     && resolved.startsWith(`${npmRegistryOrigin}/`);
 }
 
+function isSha512Integrity(integrity) {
+  if (typeof integrity !== 'string' || integrity.trim().length === 0) {
+    return false;
+  }
+
+  return integrity.trim().split(/\s+/).every((hash) => hash.startsWith('sha512-'));
+}
+
+function isPlainObject(value) {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 // Every fetched lock entry must come from the public npm registry with SHA-512
-// integrity (#3152). Entries without `resolved` are workspace/local packages or
-// fetched from the configured registry at install time, and are not pinned to
-// a foreign host. `npm.registryCheckedLockFiles` adds lockfiles (such as the
-// root tooling lock) that are provenance-checked but not license-inventoried.
+// integrity (#3152). Only the lockfile v2/v3 `packages` map is inspected, so
+// any other format fails closed. Installed (`node_modules/`) entries must pin
+// `resolved`; workspace/local package entries without `resolved` are skipped,
+// as are `link` and `inBundle` entries, which npm never fetches on their own.
+// `npm.registryCheckedLockFiles` adds lockfiles (such as the root tooling lock)
+// that are provenance-checked but not license-inventoried.
 export async function validateNpmLockSources(repoRoot, policy) {
   const errors = [];
   const inventoried = new Set(policy.npmLockFiles ?? []);
@@ -481,13 +495,42 @@ export async function validateNpmLockSources(repoRoot, policy) {
     }
 
     const lock = await readJson(lockPath);
-    for (const [lockPackagePath, metadata] of Object.entries(lock.packages ?? {})) {
-      if (lockPackagePath.length === 0 || metadata.link === true || metadata.inBundle === true) {
+    if (!isPlainObject(lock) || ![2, 3].includes(lock.lockfileVersion) || !isPlainObject(lock.packages)) {
+      errors.push(createError(
+        'NPM_LOCK_FORMAT',
+        lockRelativePath,
+        'lockfile must be lockfileVersion 2 or 3 with a packages map; regenerate it with npm 7 or later',
+      ));
+      continue;
+    }
+
+    for (const [lockPackagePath, metadata] of Object.entries(lock.packages)) {
+      if (lockPackagePath.length === 0) {
         continue;
       }
 
       const contextPath = `${lockRelativePath}:${lockPackagePath}`;
-      if (metadata.resolved !== undefined && !isNpmRegistryTarball(metadata.resolved)) {
+      if (!isPlainObject(metadata)) {
+        errors.push(createError('NPM_LOCK_FORMAT', contextPath, 'lock entry must be an object'));
+        continue;
+      }
+
+      if (metadata.link === true || metadata.inBundle === true) {
+        continue;
+      }
+
+      if (metadata.resolved === undefined) {
+        if (lockPackagePath.split('/').includes('node_modules')) {
+          errors.push(createError(
+            'NPM_LOCK_SOURCE',
+            contextPath,
+            `installed package has no resolved ${npmRegistryOrigin}/ tarball`,
+          ));
+        }
+        continue;
+      }
+
+      if (!isNpmRegistryTarball(metadata.resolved)) {
         errors.push(createError(
           'NPM_LOCK_SOURCE',
           contextPath,
@@ -495,14 +538,11 @@ export async function validateNpmLockSources(repoRoot, policy) {
         ));
       }
 
-      if (metadata.integrity !== undefined
-        && (typeof metadata.integrity !== 'string'
-          || metadata.integrity.trim().length === 0
-          || !metadata.integrity.trim().split(/\s+/).every((hash) => hash.startsWith('sha512-')))) {
+      if (!isSha512Integrity(metadata.integrity)) {
         errors.push(createError(
           'NPM_LOCK_INTEGRITY',
           contextPath,
-          `integrity ${JSON.stringify(metadata.integrity)} must be SHA-512`,
+          `integrity ${JSON.stringify(metadata.integrity ?? null)} must be present and SHA-512`,
         ));
       }
     }
