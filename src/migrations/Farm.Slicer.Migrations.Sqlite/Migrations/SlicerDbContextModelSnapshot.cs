@@ -214,6 +214,11 @@ namespace Farm.Slicer.Migrations.Sqlite.Migrations
                         .IsUnique();
 
                     b.HasIndex("Name", "Material", "SlicerType")
+                        .IsUnique()
+                        .HasDatabaseName("IX_FilamentProfiles_Name_Material_SlicerType_Unowned")
+                        .HasFilter("\"CreatedByUserId\" IS NULL");
+
+                    b.HasIndex("CreatedByUserId", "Name", "Material", "SlicerType")
                         .IsUnique();
 
                     b.ToTable("FilamentProfiles");

@@ -35,6 +35,20 @@ public interface IFilamentProfileRepository
     /// <param name="ct">Cancellation token.</param>
     Task<FilamentProfile?> GetByPromotedFromCalibrationDraftProfileIdAsync(Guid ownerUserId, Guid sourceDraftProfileId, CancellationToken ct = default);
 
+    /// <summary>
+    /// Returns whether <paramref name="ownerUserId"/> already owns a filament profile with the
+    /// given identity, the key of the per-owner unique index (#3192). Reads only the caller's own
+    /// rows, so it never reveals another user's private profile names. Name comparison follows the
+    /// database collation, matching the index it mirrors.
+    /// </summary>
+    /// <param name="ownerUserId">The owning user.</param>
+    /// <param name="name">The profile name.</param>
+    /// <param name="material">The profile material.</param>
+    /// <param name="slicerType">The slicer engine type.</param>
+    /// <param name="excludeProfileId">Optional profile to ignore (the row being renamed).</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<bool> OwnerHasNameAsync(Guid ownerUserId, string name, string material, SlicerType slicerType, Guid? excludeProfileId = null, CancellationToken ct = default);
+
     /// <summary>Adds a new filament profile.</summary>
     /// <param name="profile">The profile to add.</param>
     /// <param name="ct">Cancellation token.</param>

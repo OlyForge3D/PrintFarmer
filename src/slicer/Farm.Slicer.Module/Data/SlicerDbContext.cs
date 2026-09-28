@@ -72,6 +72,7 @@ public class SlicerDbContext(DbContextOptions<SlicerDbContext> options) : DbCont
         RevisionConcurrency.Configure(modelBuilder);
 
         ApplyProviderSpecificIdempotencyFilters(modelBuilder);
+        ApplyUnownedFilamentNameFilter(modelBuilder);
     }
 
     /// <inheritdoc/>
@@ -129,6 +130,30 @@ public class SlicerDbContext(DbContextOptions<SlicerDbContext> options) : DbCont
             entry.Entity.NormalizedEngine =
                 (int)SlicerEngineNames.ResolvePersistedName(entry.Entity.SlicerEngineName);
         }
+    }
+
+    /// <summary>
+    /// Restricts the global filament name index to unowned (system/stock) rows (#3192). Owned
+    /// rows are covered by the per-owner <c>(CreatedByUserId, Name, Material, SlicerType)</c>
+    /// index, so one user's private profile name never collides with another user's.
+    /// </summary>
+    private void ApplyUnownedFilamentNameFilter(ModelBuilder modelBuilder)
+    {
+        IMutableEntityType? filamentProfile = modelBuilder.Model.FindEntityType(typeof(FilamentProfile));
+        IMutableIndex? index = filamentProfile?.GetIndexes()
+            .SingleOrDefault(i => i.GetDatabaseName() == FilamentProfileConfiguration.UnownedNameUniqueIndexName);
+        if (index is null)
+        {
+            // Failing open would silently turn the unowned-row filter into a global unique index
+            // again (#3192), so a renamed or removed index must break model building loudly.
+            throw new InvalidOperationException(
+                $"Index '{FilamentProfileConfiguration.UnownedNameUniqueIndexName}' was not found on {nameof(FilamentProfile)}.");
+        }
+
+        string ownerColumn = Database.IsSqlServer()
+            ? $"[{nameof(FilamentProfile.CreatedByUserId)}]"
+            : $"\"{nameof(FilamentProfile.CreatedByUserId)}\"";
+        index.SetFilter($"{ownerColumn} IS NULL");
     }
 
     /// <summary>

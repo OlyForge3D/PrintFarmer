@@ -45,6 +45,17 @@ public class EfFilamentProfileRepository(SlicerDbContext db) : IFilamentProfileR
                 ct);
 
     /// <inheritdoc/>
+    public async Task<bool> OwnerHasNameAsync(Guid ownerUserId, string name, string material, SlicerType slicerType, Guid? excludeProfileId = null, CancellationToken ct = default) =>
+        await _db.FilamentProfiles.AsNoTracking()
+            .AnyAsync(
+                p => p.CreatedByUserId == ownerUserId &&
+                    p.Name == name &&
+                    p.Material == material &&
+                    p.SlicerType == slicerType &&
+                    (excludeProfileId == null || p.Id != excludeProfileId),
+                ct);
+
+    /// <inheritdoc/>
     public async Task AddAsync(FilamentProfile profile, CancellationToken ct = default)
     {
         _ = _db.FilamentProfiles.Add(profile);

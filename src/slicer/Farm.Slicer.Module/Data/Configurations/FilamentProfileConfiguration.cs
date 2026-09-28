@@ -13,6 +13,13 @@ namespace Farm.Slicer.Module.Data.Configurations;
 /// </remarks>
 public class FilamentProfileConfiguration : IEntityTypeConfiguration<FilamentProfile>
 {
+    /// <summary>
+    /// Name of the unique <c>(Name, Material, SlicerType)</c> index over unowned (system/stock)
+    /// rows. Its <c>CreatedByUserId IS NULL</c> filter is provider-specific SQL, so it is applied in
+    /// <see cref="SlicerDbContext"/> rather than here.
+    /// </summary>
+    public const string UnownedNameUniqueIndexName = "IX_FilamentProfiles_Name_Material_SlicerType_Unowned";
+
     /// <inheritdoc/>
     public void Configure(EntityTypeBuilder<FilamentProfile> builder)
     {
@@ -33,8 +40,17 @@ public class FilamentProfileConfiguration : IEntityTypeConfiguration<FilamentPro
         _ = builder.HasIndex(p => p.CreatedByUserId);
 
         // Indexes — Name included in unique constraint to allow multiple profiles
-        // with same material (e.g., "Generic PLA" vs "Bambu PLA" both Material="PLA")
-        _ = builder.HasIndex(p => new { p.Name, p.Material, p.SlicerType }).IsUnique();
+        // with same material (e.g., "Generic PLA" vs "Bambu PLA" both Material="PLA").
+        // Scoped per owner (#3192): a global index made one user's private profile name block
+        // another user's upload/promote with a 500, which also disclosed that the name existed.
+        // EF Core auto-generates the "IS NOT NULL" filter for the nullable owner column on SQL
+        // Server; PostgreSQL and SQLite treat NULL owners as distinct. Unowned (system/stock) rows
+        // keep global name uniqueness through UnownedNameUniqueIndexName, because the system
+        // import paths dedupe on hash only and rely on this constraint as their backstop (#1779).
+        _ = builder.HasIndex(p => new { p.CreatedByUserId, p.Name, p.Material, p.SlicerType }).IsUnique();
+        _ = builder.HasIndex(p => new { p.Name, p.Material, p.SlicerType })
+            .IsUnique()
+            .HasDatabaseName(UnownedNameUniqueIndexName);
         _ = builder.HasIndex(p => p.SlicerType);
         _ = builder.HasIndex(p => p.Material);
         _ = builder.HasIndex(p => p.Hash).IsUnique();

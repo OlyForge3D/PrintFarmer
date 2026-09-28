@@ -1475,6 +1475,7 @@ public class ProfilesController(
     [ProducesResponseType(typeof(CloneSingleProfileResponseDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> CloneSingleProfileAsync(
         [FromBody] CloneSingleProfileRequestDto? request,
         CancellationToken ct)
@@ -1501,6 +1502,11 @@ public class ProfilesController(
             _logger.LogWarning("Source profile not found: {Message}", LogSanitizer.Sanitize(ex.Message));
             return NotFound(ex.Message);
         }
+        catch (ProfileNameConflictException ex)
+        {
+            _logger.LogInformation("Clone profile rejected: caller already owns a filament profile with this name");
+            return ProfileNameConflict(ex);
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Clone profile failed");
@@ -1518,6 +1524,7 @@ public class ProfilesController(
     [Authorize(Policy = Farm.Infrastructure.Authorization.InteractiveSessionRequirement.PolicyName)]
     [ProducesResponseType(typeof(CustomProfileDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> UploadCustomProfileAsync(
         [FromBody] UploadProfileRequestDto? request,
         CancellationToken ct)
@@ -1538,6 +1545,11 @@ public class ProfilesController(
         {
             _logger.LogWarning("Upload profile validation failed: {Message}", LogSanitizer.Sanitize(ex.Message));
             return BadRequest(ex.Message);
+        }
+        catch (ProfileNameConflictException ex)
+        {
+            _logger.LogInformation("Upload profile rejected: caller already owns a filament profile with this name");
+            return ProfileNameConflict(ex);
         }
         catch (Exception ex)
         {
@@ -1597,6 +1609,7 @@ public class ProfilesController(
     [ProducesResponseType(typeof(CustomProfileDto), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(CustomProfileDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> PromoteCalibrationDraftProfileAsync(
         [FromBody] PromoteCalibrationDraftProfileRequestDto? request,
         CancellationToken ct)
@@ -1632,6 +1645,11 @@ public class ProfilesController(
         {
             _logger.LogWarning("Promote calibration draft profile validation failed: {Message}", LogSanitizer.Sanitize(ex.Message));
             return BadRequest(ex.Message);
+        }
+        catch (ProfileNameConflictException ex)
+        {
+            _logger.LogInformation("Promote calibration draft profile rejected: caller already owns a filament profile with this name");
+            return ProfileNameConflict(ex);
         }
         catch (Exception ex)
         {
@@ -1686,6 +1704,7 @@ public class ProfilesController(
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> UpdateCustomProfileAsync(
         Guid id,
         [FromBody] UpdateCustomProfileRequestDto? request,
@@ -1712,6 +1731,11 @@ public class ProfilesController(
         {
             _logger.LogWarning("Update profile unauthorized: {Message}", LogSanitizer.Sanitize(ex.Message));
             return Forbid();
+        }
+        catch (ProfileNameConflictException ex)
+        {
+            _logger.LogInformation("Update profile rejected: caller already owns a filament profile with this name");
+            return ProfileNameConflict(ex);
         }
         catch (InvalidOperationException ex)
         {
@@ -1858,6 +1882,14 @@ public class ProfilesController(
     {
         return Ok(ProfileSchemaProvider.GetFilamentSchema(engineVersion));
     }
+
+    /// <summary>
+    /// 409 for a same-owner filament name collision (#3192), shaped like
+    /// <c>profile_family_name_conflict</c>. The service only raises it after a caller-scoped check,
+    /// so it never reveals another user's profile names.
+    /// </summary>
+    private ConflictObjectResult ProfileNameConflict(ProfileNameConflictException ex) =>
+        Conflict(new { code = ProfileNameConflictException.Code, detail = ex.Message });
 
     /// <summary>
     /// Builds the caller's profile visibility scope (issue #3174). Unlike <see cref="GetCurrentUserId"/>,
