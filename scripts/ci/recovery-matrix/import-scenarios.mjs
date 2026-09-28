@@ -339,8 +339,17 @@ function createHelpers(ctx) {
     ctx.writePolicy({ channel, revision: policyRevision });
     checkpoints.ok(`policy-channel:${channel}@${policyRevision}`);
   };
+  // A bundle built implicitly for one import has no other holder, so free its disk immediately.
+  const importOnce = (label, rel, options) => {
+    const own = options.bundle ? null : bundle(rel);
+    try {
+      return ctx.importBundle({ built: rel, bundle: options.bundle ?? own, label, ...options });
+    } finally {
+      if (own) rmSync(own, { force: true });
+    }
+  };
   const imported = (label, rel, options = {}) => {
-    const result = ctx.importBundle({ built: rel, bundle: options.bundle ?? bundle(rel), label, ...options });
+    const result = importOnce(label, rel, options);
     assertImportedIdentity(label, result.record, rel);
     checkpoints.ok(`imported:${label}:${rel.release.channel}:${rel.release.version}`);
     return result;
@@ -349,7 +358,7 @@ function createHelpers(ctx) {
     const before = ctx.stateHashes();
     const replayBefore = ctx.replayState();
     const anchorBefore = ctx.replayAnchor();
-    const result = ctx.importBundle({ built: rel, bundle: options.bundle ?? bundle(rel), label, ...options });
+    const result = importOnce(label, rel, options);
     const reason = assertRefusedImport(label, result, { reason: options.reason });
     if (ctx.stagingExists(label)) fail('import_refusal_left_staging', label);
     const after = ctx.stateHashes();
