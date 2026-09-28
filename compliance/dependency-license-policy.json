@@ -50,6 +50,9 @@
     ]
   },
   "npm": {
+    "registryCheckedLockFiles": [
+      "package-lock.json"
+    ],
     "licenseTextFallbacks": [
       {
         "package": "@microsoft/signalr",
