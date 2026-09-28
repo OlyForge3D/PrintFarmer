@@ -340,34 +340,7 @@ export function provisionFixtureHostState(rootPath, { channel = 'insider' } = {}
   mkdirSync(rootPath, { recursive: true, mode: 0o700 });
   chmodSync(rootPath, 0o700);
 
-  const policy = {
-    Enabled: false,
-    KillSwitch: false,
-    Channel: channel,
-    InsiderAcknowledged: channel === 'insider',
-    PollIntervalSeconds: 3600,
-    InsiderPollIntervalSeconds: null,
-    MaintenanceWindowStartHour: 0,
-    MaintenanceWindowEndHour: 24,
-    Revision: 0,
-    Fingerprint: '',
-  };
-  policy.Fingerprint = sha256Json({
-    Enabled: policy.Enabled,
-    KillSwitch: policy.KillSwitch,
-    Channel: policy.Channel,
-    InsiderAcknowledged: policy.InsiderAcknowledged,
-    PollIntervalSeconds: policy.PollIntervalSeconds,
-    InsiderPollIntervalSeconds: policy.InsiderPollIntervalSeconds,
-    MaintenanceWindowStartHour: policy.MaintenanceWindowStartHour,
-    MaintenanceWindowEndHour: policy.MaintenanceWindowEndHour,
-    Revision: policy.Revision,
-  });
-  writeFileSync(join(rootPath, 'update-automation-policy.json'), JSON.stringify({
-    Version: 1,
-    Policy: policy,
-    Checksum: policy.Fingerprint,
-  }));
+  writeFixturePolicy(rootPath, { channel, revision: 0 });
 
   const replayChecksum = sha256Json({
     Version: 1,
@@ -399,6 +372,39 @@ export function provisionFixtureHostState(rootPath, { channel = 'insider' } = {}
     Epoch: 0,
     StateHash: stateHash,
     Hash: anchorHash,
+  }));
+}
+
+// Writes the host-state automation policy exactly as the product persists it. An offline channel
+// switch is an operator policy edit, so the import cells call this to move between channels.
+export function writeFixturePolicy(rootPath, { channel, revision }) {
+  const policy = {
+    Enabled: false,
+    KillSwitch: false,
+    Channel: channel,
+    InsiderAcknowledged: channel === 'insider',
+    PollIntervalSeconds: 3600,
+    InsiderPollIntervalSeconds: null,
+    MaintenanceWindowStartHour: 0,
+    MaintenanceWindowEndHour: 24,
+    Revision: revision,
+    Fingerprint: '',
+  };
+  policy.Fingerprint = sha256Json({
+    Enabled: policy.Enabled,
+    KillSwitch: policy.KillSwitch,
+    Channel: policy.Channel,
+    InsiderAcknowledged: policy.InsiderAcknowledged,
+    PollIntervalSeconds: policy.PollIntervalSeconds,
+    InsiderPollIntervalSeconds: policy.InsiderPollIntervalSeconds,
+    MaintenanceWindowStartHour: policy.MaintenanceWindowStartHour,
+    MaintenanceWindowEndHour: policy.MaintenanceWindowEndHour,
+    Revision: policy.Revision,
+  });
+  writeFileSync(join(rootPath, 'update-automation-policy.json'), JSON.stringify({
+    Version: 1,
+    Policy: policy,
+    Checksum: policy.Fingerprint,
   }));
 }
 
