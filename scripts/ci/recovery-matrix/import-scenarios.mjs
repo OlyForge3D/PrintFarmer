@@ -3,7 +3,7 @@
 // module owns the channel, identity, adversarial and replay assertions so they stay unit-testable.
 import { closeSync, fstatSync, openSync, readFileSync, readSync, rmSync, writeFileSync, writeSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 
 import { readOfflineBundleEntries, tarHeader } from '../offline-update-bundle.mjs';
 import { imageTarHeader } from '../offline-bundle-images.mjs';
@@ -346,6 +346,7 @@ function createHelpers(ctx) {
       return ctx.importBundle({ built: rel, bundle: options.bundle ?? own, label, ...options });
     } finally {
       if (own) rmSync(own, { force: true });
+      if (options.bundle && basename(options.bundle).startsWith(tamperedPrefix)) rmSync(options.bundle, { force: true });
     }
   };
   const imported = (label, rel, options = {}) => {
@@ -558,9 +559,10 @@ const adversarialRunners = {
   'mixed-channels': (ctx, h, base) => {
     const stable = h.release('1.2.0');
     const stableBundle = h.bundle(stable);
+    const donor = readMembers(stableBundle, ['update-manifest.json', 'update-manifest.sigstore.json']);
+    rmSync(stableBundle, { force: true });
     h.refused('mixed-channels', base.rel, {
       bundle: base.tampered('mixed-channels', (b) => {
-        const donor = readMembers(stableBundle, ['update-manifest.json', 'update-manifest.sigstore.json']);
         b.replace('update-manifest.json', donor['update-manifest.json']);
         b.replace('update-manifest.sigstore.json', donor['update-manifest.sigstore.json']);
       }),
@@ -577,10 +579,10 @@ const adversarialRunners = {
   'invalid-signature-poisoning': (ctx, h, base) => {
     const high = h.release('1.0.0-insider.30');
     const donor = readMembers(base.path, ['update-manifest.sigstore.json']);
-    h.refused('invalid-signature-poisoning', high, {
-      bundle: tamper(ctx, h, h.bundle(high), 'poisoning', (b) => b.replace('update-manifest.sigstore.json', donor['update-manifest.sigstore.json'])),
-      reason: reasons.signature,
-    });
+    const source = h.bundle(high);
+    const poisoned = tamper(ctx, h, source, 'poisoning', (b) => b.replace('update-manifest.sigstore.json', donor['update-manifest.sigstore.json']));
+    rmSync(source, { force: true });
+    h.refused('invalid-signature-poisoning', high, { bundle: poisoned, reason: reasons.signature });
     h.imported('poisoning-did-not-raise-high-water', h.release('1.0.0-insider.25'));
   },
   'equal-sequence-substitution': (ctx, h) => h.refused('equal-sequence-substitution',
@@ -624,8 +626,11 @@ function readMembers(bundlePath, names) {
   }
 }
 
+// Tampered bundles are single-use copies; the import helpers free them once imported.
+const tamperedPrefix = 'tampered-';
+
 function tamper(ctx, h, source, label, edit) {
-  const output = join(ctx.runRoot, 'import-bundles', `tampered-${label}.tar`);
+  const output = join(ctx.runRoot, 'import-bundles', `${tamperedPrefix}${label}.tar`);
   rmSync(output, { force: true });
   rewriteOfflineBundle({ source, output, edit });
   return output;
