@@ -1,4 +1,4 @@
-﻿# Host update executor
+# Host update executor
 
 The safe-executor core (`HostUpdateExecutor`) supplies
 immutable release identity contracts, durable canonical request fingerprint binding, active-topology target validation, a bounded process/installation
@@ -300,8 +300,9 @@ and `HostUpdateExecutionAvailabilityTests`.
   outcome, `RecoveryRequired` with a recorded `NeedsOperator` outcome, `RecoveryRequired` with a
   recorded `RolledBack` outcome (correctly does not re-fence), and a `Completed` release (no-op).
 - Split-topology deployments where `AppDbContext` and `SlicerDbContext` point at genuinely
-  different physical databases are not yet handled by the single shared database backup/restore
-  target. Preflight now fails closed (`split_database_not_supported`) whenever the two contexts'
+  different physical databases (configured with `ConnectionStrings:SlicerDatabase`, which the API,
+  slicer host and offline CLI honour for `SlicerDbContext`) are not yet handled by the single shared
+  database backup/restore target. Preflight now fails closed (`split_database_not_supported`) whenever the two contexts'
   connection strings differ (compared only as a SHA256 fingerprint — the raw connection string,
   which may embed a password, is never logged or persisted), so a real split topology is
   explicitly refused rather than silently backing up only one database; the common
