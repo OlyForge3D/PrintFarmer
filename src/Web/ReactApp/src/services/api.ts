@@ -178,6 +178,7 @@ const HOST_UPDATE_STATES = [
   "Verifying",
   "Completed",
   "RecoveryRequired",
+  "Refused",
 ] as const satisfies readonly HostUpdateExecutionState[];
 
 const HOST_UPDATE_STATE_SET = new Set<HostUpdateExecutionState>(HOST_UPDATE_STATES);

@@ -58,6 +58,8 @@ public sealed record HostUpdateDaemonCheckpointStatus(
 /// </summary>
 internal static class HostUpdateDaemonCheckpoints
 {
+    internal const string PreflightRefusedCode = "preflight_refused";
+
     internal static HostUpdateDaemonCheckpointStatus Evaluate(IReadOnlyList<HostUpdateExecutionActivity> history)
     {
         HostUpdateExecutionActivity last = history[^1];
@@ -81,9 +83,15 @@ internal static class HostUpdateDaemonCheckpoints
 
         // Inspect the whole history, not only the latest state: an incomplete fence or unsafe
         // operation must not become a staging retry if a later record regresses the state.
-        if (history.Any(a => a.State is not (HostUpdateExecutionState.Accepted or HostUpdateExecutionState.Preflight)))
+        if (!HostUpdateExecutor.IsBeforeAnyMutation(history))
         {
             return new(HostUpdateDaemonCheckpointAction.NeedsOperator, "execution_interrupted", "host_local_recover");
+        }
+
+        // A preflight refusal changed nothing; it needs a fresh approval, never operator recovery.
+        if (last.State == HostUpdateExecutionState.Refused)
+        {
+            return new(HostUpdateDaemonCheckpointAction.AwaitApproval, PreflightRefusedCode, null);
         }
 
         return new(HostUpdateDaemonCheckpointAction.AwaitConfirmation, "confirmation_required", "host_local_status");

@@ -23,6 +23,13 @@ public enum HostUpdateExecutionState
     Verifying,
     Completed,
     RecoveryRequired,
+
+    /// <summary>
+    /// Preflight refused the request before any drain, fence, backup or mutation (issue #3182).
+    /// Nothing was changed, so the release is not in recovery and may be retried once the
+    /// refusal reason is resolved. Appended last so journaled integer values stay stable.
+    /// </summary>
+    Refused,
 }
 
 public enum HostUpdateExecutionChannel
@@ -193,6 +200,10 @@ public sealed class HostUpdateExecutor(
 
     internal const string PolicyDriftedFailurePhase = "failure:" + PolicyDriftedFailureCode;
 
+    internal const string RefusedPhasePrefix = "refused:";
+
+    internal const string PreflightRefusedFallbackCode = "preflight_refused";
+
     private static readonly (HostUpdateExecutionState State, string Phase, bool Safe)[] Plan =
     [
         (HostUpdateExecutionState.Preflight, "preflight", true),
@@ -310,6 +321,15 @@ public sealed class HostUpdateExecutor(
                     Append(activities, request, HostUpdateExecutionState.RecoveryRequired, "failure:" + failure);
                     return new(request.ReleaseId, HostUpdateExecutionState.RecoveryRequired, failure, activities);
                 }
+                catch (HostUpdatePreflightFailedException refusal) when (
+                    state == HostUpdateExecutionState.Preflight && IsBeforeAnyMutation(activities))
+                {
+                    // Preflight is read-only and runs before drain/fence/backup, so its refusal is a
+                    // clean, retryable refusal that keeps its stable code (issue #3182).
+                    string code = string.IsNullOrWhiteSpace(refusal.Code) ? PreflightRefusedFallbackCode : refusal.Code;
+                    Append(activities, request, HostUpdateExecutionState.Refused, RefusedPhasePrefix + code);
+                    return new(request.ReleaseId, HostUpdateExecutionState.Refused, code, activities);
+                }
 
                 Append(activities, request, state, phase + ":after");
                 current = state;
@@ -367,6 +387,16 @@ public sealed class HostUpdateExecutor(
         Append(activities, request, HostUpdateExecutionState.RecoveryRequired, PolicyDriftedFailurePhase);
         return new(request.ReleaseId, HostUpdateExecutionState.RecoveryRequired, PolicyDriftedFailureCode, activities);
     }
+
+    /// <summary>
+    /// True while a release's history holds only acceptance, preflight and prior preflight
+    /// refusals -- i.e. no drain, fence, backup or mutating step has ever started.
+    /// </summary>
+    internal static bool IsBeforeAnyMutation(IEnumerable<HostUpdateExecutionActivity> activities) =>
+        activities.All(activity => activity.State is
+            HostUpdateExecutionState.Accepted or
+            HostUpdateExecutionState.Preflight or
+            HostUpdateExecutionState.Refused);
 
     private Task InvokeAsync(HostUpdateExecutionState state, HostUpdateExecutionRequest request, CancellationToken cancellationToken) => state switch
     {

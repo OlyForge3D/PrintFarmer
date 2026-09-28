@@ -57,7 +57,9 @@ function isRolledBackStatus(status: HostUpdateStatusResponse) {
 }
 
 function isTerminalForRetry(status: HostUpdateStatusResponse) {
-  return status.currentState === "Completed" || status.currentState === "RecoveryRequired";
+  return status.currentState === "Completed" ||
+    status.currentState === "RecoveryRequired" ||
+    status.currentState === "Refused";
 }
 
 function isTerminalForReleaseIdentity(status: HostUpdateStatusResponse) {

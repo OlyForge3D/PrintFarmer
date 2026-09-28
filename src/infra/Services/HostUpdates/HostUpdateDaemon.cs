@@ -193,7 +193,7 @@ public sealed partial class HostUpdateDaemonJournalReader(
                     {
                         recoveryRequired++;
                     }
-                    else if (last != HostUpdateExecutionState.Completed)
+                    else if (last is not (HostUpdateExecutionState.Completed or HostUpdateExecutionState.Refused))
                     {
                         inFlight++;
                     }
