@@ -329,6 +329,9 @@ try {
   }
 
   if (cellSpec.id === 'split-database') {
+    // The split layout's slicer database must exist, as it would on a real split host, so the
+    // remote-worker guard can read it and the preflight fingerprint guard gets to refuse.
+    ensureHarnessDatabases(deploymentRoot, env, provider, cell);
     writeRecoveryCompose({
       deploymentRoot,
       network,
