@@ -5,7 +5,7 @@ vi.mock('fflate', () => ({
   unzipSync: vi.fn(),
 }));
 
-import { unzipSync } from 'fflate';
+import { unzipSync, type Unzipped } from 'fflate';
 import { isZipFile, extractOrcaBundle } from './orcaBundleExtractor';
 
 const mockedUnzip = vi.mocked(unzipSync);
@@ -73,7 +73,7 @@ describe('orcaBundleExtractor', () => {
         'filament/Filament.json': toU8(filamentPreset),
         'process/Process.json': toU8(processPreset),
         'bundle_structure.json': toU8({ bundle_type: 'printer config bundle' }),
-      } as Record<string, Uint8Array>);
+      } as Unzipped);
 
       const result = await extractOrcaBundle(new Uint8Array(8));
       const parsed = JSON.parse(result);
@@ -86,7 +86,7 @@ describe('orcaBundleExtractor', () => {
     it('categorizes printer presets by printer_settings_id', async () => {
       mockedUnzip.mockReturnValue({
         'printer/P.json': toU8(printerPreset),
-      } as Record<string, Uint8Array>);
+      } as Unzipped);
 
       const parsed = JSON.parse(await extractOrcaBundle(new Uint8Array(8)));
       expect(parsed.printer).toHaveLength(1);
@@ -97,7 +97,7 @@ describe('orcaBundleExtractor', () => {
     it('categorizes filament presets by filament_settings_id', async () => {
       mockedUnzip.mockReturnValue({
         'filament/F.json': toU8(filamentPreset),
-      } as Record<string, Uint8Array>);
+      } as Unzipped);
 
       const parsed = JSON.parse(await extractOrcaBundle(new Uint8Array(8)));
       expect(parsed.filament).toHaveLength(1);
@@ -107,7 +107,7 @@ describe('orcaBundleExtractor', () => {
     it('categorizes process presets by print_settings_id', async () => {
       mockedUnzip.mockReturnValue({
         'process/P.json': toU8(processPreset),
-      } as Record<string, Uint8Array>);
+      } as Unzipped);
 
       const parsed = JSON.parse(await extractOrcaBundle(new Uint8Array(8)));
       expect(parsed.process).toHaveLength(1);
@@ -123,7 +123,7 @@ describe('orcaBundleExtractor', () => {
       };
       mockedUnzip.mockReturnValue({
         'printer/utf8.json': toU8(utf8Preset),
-      } as Record<string, Uint8Array>);
+      } as Unzipped);
 
       const parsed = JSON.parse(await extractOrcaBundle(new Uint8Array(8)));
       expect(parsed.printer[0].printer_settings_id).toBe('Test 测试 🖨️');
@@ -134,7 +134,7 @@ describe('orcaBundleExtractor', () => {
       mockedUnzip.mockReturnValue({
         'bundle_structure.json': toU8({ bundle_type: 'printer config bundle', printer_config: [] }),
         'printer/P.json': toU8(printerPreset),
-      } as Record<string, Uint8Array>);
+      } as Unzipped);
 
       const parsed = JSON.parse(await extractOrcaBundle(new Uint8Array(8)));
       expect(parsed.printer).toHaveLength(1);
@@ -148,7 +148,7 @@ describe('orcaBundleExtractor', () => {
         'printer/P.json': toU8(printerPreset),
         'README.txt': new TextEncoder().encode('readme'),
         'image.png': new Uint8Array([0x89, 0x50, 0x4e, 0x47]),
-      } as Record<string, Uint8Array>);
+      } as Unzipped);
 
       const parsed = JSON.parse(await extractOrcaBundle(new Uint8Array(8)));
       expect(parsed.printer).toHaveLength(1);
@@ -158,7 +158,7 @@ describe('orcaBundleExtractor', () => {
       mockedUnzip.mockReturnValue({
         'unknown/Mystery.json': toU8({ name: 'Unknown', some_field: 'value' }),
         'printer/P.json': toU8(printerPreset),
-      } as Record<string, Uint8Array>);
+      } as Unzipped);
 
       const parsed = JSON.parse(await extractOrcaBundle(new Uint8Array(8)));
       expect(parsed.printer).toHaveLength(1);
@@ -171,7 +171,7 @@ describe('orcaBundleExtractor', () => {
         'printer/A.json': toU8({ ...printerPreset, printer_settings_id: 'Printer A' }),
         'printer/B.json': toU8({ ...printerPreset, printer_settings_id: 'Printer B' }),
         'printer/C.json': toU8({ ...printerPreset, printer_settings_id: 'Printer C' }),
-      } as Record<string, Uint8Array>);
+      } as Unzipped);
 
       const parsed = JSON.parse(await extractOrcaBundle(new Uint8Array(8)));
       expect(parsed.printer).toHaveLength(3);
@@ -185,7 +185,7 @@ describe('orcaBundleExtractor', () => {
       mockedUnzip.mockReturnValue({
         'configs/printers/sub/Test.json': toU8(printerPreset),
         'configs/filaments/Generic PLA.json': toU8(filamentPreset),
-      } as Record<string, Uint8Array>);
+      } as Unzipped);
 
       const parsed = JSON.parse(await extractOrcaBundle(new Uint8Array(8)));
       expect(parsed.printer).toHaveLength(1);
@@ -195,7 +195,7 @@ describe('orcaBundleExtractor', () => {
     it('returns empty arrays when ZIP has no JSON files', async () => {
       mockedUnzip.mockReturnValue({
         'README.txt': new TextEncoder().encode('hello'),
-      } as Record<string, Uint8Array>);
+      } as Unzipped);
 
       const parsed = JSON.parse(await extractOrcaBundle(new Uint8Array(8)));
       expect(parsed.printer).toEqual([]);
@@ -213,7 +213,7 @@ describe('orcaBundleExtractor', () => {
       mockedUnzip.mockReturnValue({
         'printer/bad.json': new TextEncoder().encode('{ not valid json }'),
         'printer/good.json': toU8(printerPreset),
-      } as Record<string, Uint8Array>);
+      } as Unzipped);
 
       const parsed = JSON.parse(await extractOrcaBundle(new Uint8Array(8)));
       // Good preset extracted, bad one skipped
@@ -238,7 +238,7 @@ describe('orcaBundleExtractor', () => {
     it('bundleJson output has correct shape for preview API', async () => {
       mockedUnzip.mockReturnValue({
         'printer/P.json': toU8({ printer_settings_id: 'X', name: 'X' }),
-      } as Record<string, Uint8Array>);
+      } as Unzipped);
 
       const bundleJson = await extractOrcaBundle(new Uint8Array(8));
       const parsed = JSON.parse(bundleJson);
