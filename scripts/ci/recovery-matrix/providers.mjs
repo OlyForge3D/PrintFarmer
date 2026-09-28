@@ -134,7 +134,7 @@ if [[ "$query" =~ TO[[:space:]]+DISK[[:space:]]*=[[:space:]]*N\\'([^\\']+)\\' ]]
   backup_dir="$(dirname "$backup_file")"
   /usr/bin/docker exec -u 0 ${databaseContainer} sh -c 'mkdir -p "$1" && chown 10001:0 "$1"' sh "$backup_dir"
 fi
-/usr/bin/docker exec ${databaseContainer} /opt/mssql-tools18/bin/sqlcmd -C "$@"
+/usr/bin/docker exec -e SQLCMDPASSWORD ${databaseContainer} /opt/mssql-tools18/bin/sqlcmd -C "$@"
 `);
   chmodSync(sqlcmd, 0o755);
   return { sqlcmd };

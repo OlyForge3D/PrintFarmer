@@ -152,3 +152,19 @@ test('host-update config follows selected provider, active services, split DB an
     rmSync(scratch, { recursive: true, force: true });
   }
 });
+
+test('sqlserver sqlcmd shim forwards SQLCMDPASSWORD by name so the product password reaches sqlcmd without argv', () => {
+  const runRoot = path.join(scratchRoot, `sqlcmd-shim-${process.pid}`);
+  mkdirSync(runRoot, { recursive: true });
+  try {
+    const { sqlcmd } = providerFor('sqlserver').writeToolShims({ runRoot, databaseContainer: 'pf-db-1' });
+    const shim = readFileSync(sqlcmd, 'utf8');
+    const execLine = shim.split('\n').find((line) => line.includes('/opt/mssql-tools18/bin/sqlcmd'));
+    assert.ok(execLine, 'shim must exec sqlcmd in the database container');
+    assert.match(execLine, /docker exec -e SQLCMDPASSWORD pf-db-1 /);
+    assert.doesNotMatch(execLine, /SQLCMDPASSWORD=/, 'password value must never be expanded into docker argv');
+    assert.doesNotMatch(execLine, / -P /, 'password must not be passed on the sqlcmd command line');
+  } finally {
+    rmSync(runRoot, { recursive: true, force: true });
+  }
+});
