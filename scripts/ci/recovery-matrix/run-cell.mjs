@@ -14,7 +14,8 @@ import { hasFaultHooks, invokeFaultHook, parseFaultHooks } from './fault-hooks.m
 import { assertHostStateContinuity, readHostStateSnapshotFromBoundary } from './host-state-continuity.mjs';
 import { canaryDnsName, hasCanaryAttempt } from './network-denial.mjs';
 import { providerFor } from './providers.mjs';
-import { serviceMappingsFor } from './topologies.mjs';
+import { redactSecrets, secretValuesFrom } from './redaction.mjs';
+import { serviceMappingsFor, topologyFor } from './topologies.mjs';
 import {
   activeServiceDigestExpectations,
   assertActiveServiceDigests,
@@ -54,6 +55,7 @@ const evidencePath = resolve(required(args.evidence, '--evidence'));
 const cosign = resolve(required(args.cosign, '--cosign'));
 const network = required(args.network, '--network');
 const appStaticIp = required(args['app-ip'], '--app-ip');
+const appHealthPort = topologyFor(cellSpec.cell.topology).healthPort;
 required(args['egress-sink'], '--egress-sink');
 const egressSinkIp = required(args['egress-sink-ip'], '--egress-sink-ip');
 const networkAttemptsPath = required(args['network-attempts'], '--network-attempts');
@@ -94,6 +96,7 @@ const target = fixtureRelease({
 let bundlePath;
 
 let evidence;
+let harnessSecrets = [];
 try {
   mkdirSync(runRoot, { recursive: true });
   const trustedRootPath = join(runRoot, 'trusted-root.json');
@@ -214,6 +217,7 @@ try {
     ...provider.env(),
     ...imageEnv,
   });
+  harnessSecrets = secretValuesFrom(env);
   const configPath = join(deploymentRoot, 'host-update.json');
   const hostStateRoot = recoveryHostStateRoot(runRoot, { hostBoundary: true });
   provisionBoundaryHostState(hostContainer, repo, hostStateRoot, { channel: 'insider' });
@@ -244,7 +248,7 @@ try {
     pgDump: databaseTools.pgDump ?? 'pg_dump',
     pgRestore: databaseTools.pgRestore ?? 'pg_restore',
     sqlcmd: databaseTools.sqlcmd ?? 'sqlcmd',
-    healthBaseUrl: `http://${appStaticIp}:5000`,
+    healthBaseUrl: `http://${appStaticIp}:${appHealthPort}`,
     cell: priorCell,
     databaseProvider: provider,
     databaseExternallyOwned: false,
@@ -355,7 +359,7 @@ try {
     pgDump: databaseTools.pgDump ?? 'pg_dump',
     pgRestore: databaseTools.pgRestore ?? 'pg_restore',
     sqlcmd: databaseTools.sqlcmd ?? 'sqlcmd',
-    healthBaseUrl: `http://${appStaticIp}:5000`,
+    healthBaseUrl: `http://${appStaticIp}:${appHealthPort}`,
     cell,
     databaseProvider: provider,
     databaseExternallyOwned: false,
@@ -508,7 +512,7 @@ try {
       pgDump: databaseTools.pgDump ?? 'pg_dump',
       pgRestore: databaseTools.pgRestore ?? 'pg_restore',
       sqlcmd: databaseTools.sqlcmd ?? 'sqlcmd',
-      healthBaseUrl: `http://${appStaticIp}:5000`,
+      healthBaseUrl: `http://${appStaticIp}:${appHealthPort}`,
       cell,
       databaseProvider: provider,
       databaseExternallyOwned: cell.databaseOwner === 'external',
@@ -662,12 +666,12 @@ try {
 } catch (error) {
   if (error?.evidenceWritten) {
     if (!error.success) {
-      console.error(error.message);
+      console.error(redactSecrets(error.message, harnessSecrets));
     }
     process.exitCode = error.success ? 0 : 1;
   } else {
   run.finishedAt = new Date().toISOString();
-  writeFileSync(join(runRoot, 'error.txt'), formatError(error), { mode: 0o600 });
+  writeFileSync(join(runRoot, 'error.txt'), redactSecrets(formatError(error), harnessSecrets), { mode: 0o600 });
   recordFaultCheckpoint();
   checkpoints.failed('e2e-complete');
   const failure = classifyFailure(error, join(runRoot, 'host-update', 'state', 'journal.ndjson'));
@@ -699,7 +703,7 @@ try {
     networkAttempts: readNetworkAttempts(networkAttemptsPath),
   });
   writeValidatedEvidence(evidencePath, evidence);
-  console.error(error.message);
+  console.error(redactSecrets(error.message, harnessSecrets));
   process.exitCode = 1;
   }
 } finally {
@@ -1072,8 +1076,12 @@ function cellFailure(reason, { actual = 'RecoveryRequired', exitCode = 1, journa
 function classifyFailure(error, journalPath) {
   const combined = `${error?.stdout ?? ''}\n${error?.stderr ?? ''}\n${error?.message ?? String(error)}`;
   const code = matchLineValue(combined, 'code');
+  const decision = matchLineValue(combined, 'decision');
+  // An expected refusal that instead activated is recorded as what it was, never as a recovery state.
+  const unexpectedlyActivated = decision === 'activated' && error?.exitCode === 0;
   const reason =
     error?.reason ??
+    (unexpectedlyActivated ? 'activation_unexpectedly_succeeded' : undefined) ??
     code ??
     matchJsonStringValue(combined, 'reason') ??
     matchLineValue(combined, 'reason') ??
@@ -1082,9 +1090,8 @@ function classifyFailure(error, journalPath) {
     String(error?.message ?? error).split(/\s+/)[0];
   const outcome = matchLineValue(combined, 'outcome');
   const state = matchLineValue(combined, 'state');
-  const decision = matchLineValue(combined, 'decision');
   const step = typeof error?.stepName === 'string' ? error.stepName : null;
-  const actual = normalizeOutcome(error?.actual ?? outcome ?? state ?? (decision === 'refused' || code ? 'Refused' : 'RecoveryRequired'));
+  const actual = normalizeOutcome(error?.actual ?? (unexpectedlyActivated ? 'Activated' : undefined) ?? outcome ?? state ?? (decision === 'refused' || code ? 'Refused' : 'RecoveryRequired'));
   return {
     actual,
     reason: String(step ? `${step}:${reason}` : reason).slice(0, 200),
@@ -1463,7 +1470,7 @@ function runningComposeImageDigest(env, service) {
 }
 
 function httpGetFromNetwork(network, ip, path) {
-  const script = `import urllib.request; print(urllib.request.urlopen('http://${ip}:5000${path}', timeout=20).read().decode())`;
+  const script = `import urllib.request; print(urllib.request.urlopen('http://${ip}:${appHealthPort}${path}', timeout=20).read().decode())`;
   let lastError;
   for (let attempt = 1; attempt <= 12; attempt += 1) {
     try {
