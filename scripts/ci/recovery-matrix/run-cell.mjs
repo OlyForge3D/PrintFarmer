@@ -1343,7 +1343,7 @@ function ensureHarnessDatabases(deploymentRoot, env, provider, cell) {
 
   const databaseNames = [env.MSSQL_DB, ...(cell.databaseLayout === 'split' ? [`${env.MSSQL_DB}_slicer`] : [])];
   for (const databaseName of databaseNames) {
-    databaseQuery(deploymentRoot, env, provider, `IF DB_ID(N'${databaseName}') IS NULL CREATE DATABASE [${databaseName}];`);
+    databaseQuery(deploymentRoot, env, provider, `IF DB_ID(N'${databaseName}') IS NULL CREATE DATABASE [${databaseName}];`, { database: 'master' });
   }
 }
 
@@ -1450,7 +1450,7 @@ function mutationSnapshot({ env, deploymentRoot, hostStateRoot, hostContainer, p
   };
 }
 
-function databaseQuery(deploymentRoot, env, provider, sql) {
+function databaseQuery(deploymentRoot, env, provider, sql, { database } = {}) {
   return execFileSync('/usr/bin/docker', [
     'compose',
     '-f', join(deploymentRoot, 'docker-compose.recovery.yml'),
@@ -1458,7 +1458,7 @@ function databaseQuery(deploymentRoot, env, provider, sql) {
     'exec',
     '-T',
     'database',
-    ...provider.queryArgs(env, sql),
+    ...provider.queryArgs(env, sql, { database }),
   ], {
     cwd: deploymentRoot,
     encoding: 'utf8',
