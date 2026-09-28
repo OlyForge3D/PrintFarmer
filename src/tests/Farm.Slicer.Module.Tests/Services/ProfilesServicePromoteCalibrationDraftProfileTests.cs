@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.PrinterCalibration;
@@ -63,6 +64,15 @@ public class ProfilesServicePromoteCalibrationDraftProfileTests
         ProfileType = "filament",
     };
 
+    /// <summary>
+    /// Sets up the per-owner name lookup (#3192) for <paramref name="userId"/> only: the strict mock
+    /// has no setup for any other user, so consulting another user's names would throw.
+    /// </summary>
+    private static void SetupOwnerNames(Mock<IFilamentProfileRepository> filamentRepo, Guid userId, params string[] takenNames) =>
+        filamentRepo
+            .Setup(r => r.OwnerHasNameAsync(userId, It.IsAny<string>(), It.IsAny<string>(), It.IsAny<SlicerType>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid _, string name, string _, SlicerType _, Guid? _, CancellationToken _) => Array.IndexOf(takenNames, name) >= 0);
+
     [Fact]
     public async Task PromoteCalibrationDraftProfileAsync_CreatesProfile_OnFirstCall()
     {
@@ -78,6 +88,7 @@ public class ProfilesServicePromoteCalibrationDraftProfileTests
             .Setup(r => r.AddAsync(It.IsAny<FilamentProfile>(), It.IsAny<CancellationToken>()))
             .Callback<FilamentProfile, CancellationToken>((p, _) => added = p)
             .Returns(Task.CompletedTask);
+        SetupOwnerNames(filamentRepo, userId);
 
         ProfilesService svc = CreateService(filamentRepo.Object);
 
@@ -160,6 +171,7 @@ public class ProfilesServicePromoteCalibrationDraftProfileTests
         _ = filamentRepo
             .Setup(r => r.AddAsync(It.IsAny<FilamentProfile>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new DbUpdateException("unique constraint violation"));
+        SetupOwnerNames(filamentRepo, userId);
 
         ProfilesService svc = CreateService(filamentRepo.Object);
 
@@ -190,6 +202,7 @@ public class ProfilesServicePromoteCalibrationDraftProfileTests
             .Setup(r => r.AddAsync(It.IsAny<FilamentProfile>(), It.IsAny<CancellationToken>()))
             .Callback<FilamentProfile, CancellationToken>((p, _) => added = p)
             .Returns(Task.CompletedTask);
+        SetupOwnerNames(filamentRepo, callerUserId);
 
         ProfilesService svc = CreateService(filamentRepo.Object);
 
@@ -202,14 +215,16 @@ public class ProfilesServicePromoteCalibrationDraftProfileTests
         Assert.Equal(added.Id, profile.Id);
         filamentRepo.Verify(r => r.GetByPromotedFromCalibrationDraftProfileIdAsync(callerUserId, draftProfileId, It.IsAny<CancellationToken>()), Times.Once);
         filamentRepo.Verify(r => r.AddAsync(It.IsAny<FilamentProfile>(), It.IsAny<CancellationToken>()), Times.Once);
+        filamentRepo.Verify(r => r.OwnerHasNameAsync(callerUserId, "Draft PLA", It.IsAny<string>(), It.IsAny<SlicerType>(), null, It.IsAny<CancellationToken>()), Times.Once);
         filamentRepo.VerifyNoOtherCalls();
     }
 
     [Fact]
     public async Task PromoteCalibrationDraftProfileAsync_Rethrows_WhenInsertFailsAndCallerHasNoWinner()
     {
-        // A DbUpdateException that is not this caller's own replay race (for example another
-        // unique index) is surfaced, never resolved by reading some other user's row.
+        // A DbUpdateException that is neither this caller's own replay race nor a collision with
+        // one of the caller's own names (for example another unique index) is surfaced, never
+        // resolved by reading some other user's row.
         Guid callerUserId = Guid.NewGuid();
         Guid draftProfileId = Guid.NewGuid();
 
@@ -220,6 +235,7 @@ public class ProfilesServicePromoteCalibrationDraftProfileTests
         _ = filamentRepo
             .Setup(r => r.AddAsync(It.IsAny<FilamentProfile>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new DbUpdateException("unique constraint violation"));
+        SetupOwnerNames(filamentRepo, callerUserId);
 
         ProfilesService svc = CreateService(filamentRepo.Object);
 
@@ -227,6 +243,132 @@ public class ProfilesServicePromoteCalibrationDraftProfileTests
             MakeRequest(), callerUserId, draftProfileId, CancellationToken.None));
 
         filamentRepo.Verify(r => r.GetByPromotedFromCalibrationDraftProfileIdAsync(callerUserId, draftProfileId, It.IsAny<CancellationToken>()), Times.Exactly(2));
+    }
+
+    [Fact]
+    public async Task PromoteCalibrationDraftProfileAsync_SuffixesName_WhenCallerAlreadyOwnsIt()
+    {
+        // Issue #3192: promotion is unattended, so a name the caller already uses is suffixed
+        // rather than rejected. Only the caller's own names are consulted.
+        Guid userId = Guid.NewGuid();
+        Guid draftProfileId = Guid.NewGuid();
+        FilamentProfile? added = null;
+
+        Mock<IFilamentProfileRepository> filamentRepo = new(MockBehavior.Strict);
+        _ = filamentRepo
+            .Setup(r => r.GetByPromotedFromCalibrationDraftProfileIdAsync(userId, draftProfileId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((FilamentProfile?)null);
+        _ = filamentRepo
+            .Setup(r => r.AddAsync(It.IsAny<FilamentProfile>(), It.IsAny<CancellationToken>()))
+            .Callback<FilamentProfile, CancellationToken>((p, _) => added = p)
+            .Returns(Task.CompletedTask);
+        SetupOwnerNames(filamentRepo, userId, "Draft PLA", "Draft PLA (2)");
+
+        ProfilesService svc = CreateService(filamentRepo.Object);
+
+        (CustomProfileDto profile, bool wasCreated) = await svc.PromoteCalibrationDraftProfileAsync(
+            MakeRequest(), userId, draftProfileId, CancellationToken.None);
+
+        Assert.True(wasCreated);
+        Assert.Equal("Draft PLA (3)", added!.Name);
+        Assert.Equal("Draft PLA (3)", profile.Name);
+    }
+
+    [Fact]
+    public async Task PromoteCalibrationDraftProfileAsync_TruncatesBaseName_SoSuffixedNameFitsColumn()
+    {
+        Guid userId = Guid.NewGuid();
+        Guid draftProfileId = Guid.NewGuid();
+        string longName = new('x', 255);
+        FilamentProfile? added = null;
+
+        Mock<IFilamentProfileRepository> filamentRepo = new(MockBehavior.Strict);
+        _ = filamentRepo
+            .Setup(r => r.GetByPromotedFromCalibrationDraftProfileIdAsync(userId, draftProfileId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((FilamentProfile?)null);
+        _ = filamentRepo
+            .Setup(r => r.AddAsync(It.IsAny<FilamentProfile>(), It.IsAny<CancellationToken>()))
+            .Callback<FilamentProfile, CancellationToken>((p, _) => added = p)
+            .Returns(Task.CompletedTask);
+        SetupOwnerNames(filamentRepo, userId, longName);
+
+        ProfilesService svc = CreateService(filamentRepo.Object);
+
+        _ = await svc.PromoteCalibrationDraftProfileAsync(MakeRequest(longName), userId, draftProfileId, CancellationToken.None);
+
+        Assert.Equal(255, added!.Name.Length);
+        Assert.EndsWith(" (2)", added.Name, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task PromoteCalibrationDraftProfileAsync_PicksNextFreeName_WhenConcurrentInsertTookTheChosenName()
+    {
+        Guid userId = Guid.NewGuid();
+        Guid draftProfileId = Guid.NewGuid();
+        List<string> taken = [];
+        List<string> attempted = [];
+
+        Mock<IFilamentProfileRepository> filamentRepo = new(MockBehavior.Strict);
+        _ = filamentRepo
+            .Setup(r => r.GetByPromotedFromCalibrationDraftProfileIdAsync(userId, draftProfileId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((FilamentProfile?)null);
+        _ = filamentRepo
+            .Setup(r => r.AddAsync(It.IsAny<FilamentProfile>(), It.IsAny<CancellationToken>()))
+            .Returns((FilamentProfile p, CancellationToken _) =>
+            {
+                attempted.Add(p.Name);
+                if (attempted.Count == 1)
+                {
+                    // A concurrent request from the same caller inserted this name first.
+                    taken.Add(p.Name);
+                    throw new DbUpdateException("unique constraint violation");
+                }
+
+                return Task.CompletedTask;
+            });
+        _ = filamentRepo
+            .Setup(r => r.OwnerHasNameAsync(userId, It.IsAny<string>(), It.IsAny<string>(), It.IsAny<SlicerType>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid _, string name, string _, SlicerType _, Guid? _, CancellationToken _) => taken.Contains(name));
+
+        ProfilesService svc = CreateService(filamentRepo.Object);
+
+        (CustomProfileDto profile, bool wasCreated) = await svc.PromoteCalibrationDraftProfileAsync(
+            MakeRequest(), userId, draftProfileId, CancellationToken.None);
+
+        Assert.True(wasCreated);
+        Assert.Equal(["Draft PLA", "Draft PLA (2)"], attempted);
+        Assert.Equal("Draft PLA (2)", profile.Name);
+    }
+
+    [Fact]
+    public async Task PromoteCalibrationDraftProfileAsync_ThrowsNameConflict_WhenEveryAttemptLosesTheNameRace()
+    {
+        Guid userId = Guid.NewGuid();
+        Guid draftProfileId = Guid.NewGuid();
+        List<string> taken = [];
+
+        Mock<IFilamentProfileRepository> filamentRepo = new(MockBehavior.Strict);
+        _ = filamentRepo
+            .Setup(r => r.GetByPromotedFromCalibrationDraftProfileIdAsync(userId, draftProfileId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((FilamentProfile?)null);
+        _ = filamentRepo
+            .Setup(r => r.AddAsync(It.IsAny<FilamentProfile>(), It.IsAny<CancellationToken>()))
+            .Returns((FilamentProfile p, CancellationToken _) =>
+            {
+                taken.Add(p.Name);
+                throw new DbUpdateException("unique constraint violation");
+            });
+        _ = filamentRepo
+            .Setup(r => r.OwnerHasNameAsync(userId, It.IsAny<string>(), It.IsAny<string>(), It.IsAny<SlicerType>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid _, string name, string _, SlicerType _, Guid? _, CancellationToken _) => taken.Contains(name));
+
+        ProfilesService svc = CreateService(filamentRepo.Object);
+
+        ProfileNameConflictException ex = await Assert.ThrowsAsync<ProfileNameConflictException>(() =>
+            svc.PromoteCalibrationDraftProfileAsync(MakeRequest(), userId, draftProfileId, CancellationToken.None));
+
+        Assert.IsType<DbUpdateException>(ex.InnerException);
+        Assert.Equal(3, taken.Count);
     }
 
     [Fact]
