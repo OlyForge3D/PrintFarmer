@@ -617,6 +617,75 @@ describe('InstallerUpdatesExperience', () => {
     expect(execute).toHaveBeenCalledTimes(2);
   });
 
+  it('explains a preflight refusal and allows re-authorizing after it', async () => {
+    const authorization = {
+      authorizationId: 'auth-1',
+      releaseId: 'stable:1.2.4',
+      sequence: 4,
+      channel: 'stable',
+      candidateFingerprint: 'candidate',
+      policyRevision: 1,
+      policyFingerprint: 'policy',
+      expiresAt: '2026-09-19T20:00:00Z',
+    };
+    const authorize = vi.fn()
+      .mockResolvedValueOnce(authorization)
+      .mockResolvedValueOnce({ ...authorization, authorizationId: 'auth-2' });
+    const execute = vi.fn()
+      .mockResolvedValueOnce({
+        releaseId: 'stable:1.2.4',
+        currentState: 'Refused',
+        activities: [{
+          activityId: 'a1',
+          releaseId: 'stable:1.2.4',
+          state: 'Refused',
+          phase: 'refused:split_database_not_supported',
+          recordedAt: '2026-09-19T19:00:00Z',
+        }],
+      })
+      .mockResolvedValueOnce({ releaseId: 'stable:1.2.4', currentState: 'Completed', activities: [] });
+    const user = userEvent.setup();
+
+    render(<TestInstallerUpdatesExperience
+      inventory={inventory({ eligibility: 'Eligible', readiness: { state: 'Eligible', reasons: [], hops: [] } })}
+      observation="connected"
+      onAuthorizeHostUpdate={authorize}
+      onExecuteHostUpdate={execute}
+    />);
+
+    await user.click(screen.getByRole('button', { name: 'Update now' }));
+    await user.click(screen.getByRole('button', { name: 'Authorize and update' }));
+    expect(await screen.findByText('Host update refused by preflight')).toBeVisible();
+    expect(screen.getByText('split_database_not_supported', { selector: 'code' })).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Recover update' })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Close' }));
+    await user.click(screen.getByRole('button', { name: 'Update now' }));
+    const retry = screen.getByRole('button', { name: 'Authorize and update' });
+    expect(retry).not.toBeDisabled();
+    await user.click(retry);
+
+    await screen.findByText('Host update completed');
+    expect(authorize).toHaveBeenCalledTimes(2);
+    expect(execute).toHaveBeenCalledTimes(2);
+  });
+
+  it('offers re-authorization for a rehydrated preflight refusal', async () => {
+    window.localStorage.setItem('printfarmer.manual-host-update.release-id', 'stable:1.2.4');
+    const status = vi.fn().mockResolvedValue({ releaseId: 'stable:1.2.4', currentState: 'Refused', activities: [] });
+
+    render(<TestInstallerUpdatesExperience
+      inventory={inventory({ eligibility: 'Eligible', readiness: { state: 'Eligible', reasons: [], hops: [] } })}
+      observation="connected"
+      onAuthorizeHostUpdate={vi.fn()}
+      onExecuteHostUpdate={vi.fn()}
+      onGetHostUpdateStatus={status}
+    />);
+
+    expect(await screen.findByText('Host update refused by preflight')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Authorize and update' })).not.toBeDisabled();
+  });
+
   it('shows a blocked alert when execute returns a non-status conflict body', async () => {
     const authorize = vi.fn().mockResolvedValue({
       authorizationId: 'auth-1',

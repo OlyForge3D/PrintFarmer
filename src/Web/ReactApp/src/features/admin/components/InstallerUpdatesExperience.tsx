@@ -66,6 +66,13 @@ function isTerminalForReleaseIdentity(status: HostUpdateStatusResponse) {
   return status.currentState === "Completed";
 }
 
+function preflightRefusalCode(status: HostUpdateStatusResponse) {
+  if (status.currentState !== "Refused") return null;
+  const activities = Array.isArray(status.activities) ? status.activities : [];
+  const phase = activities.at(-1)?.phase ?? "";
+  return phase.startsWith("refused:") ? phase.slice("refused:".length) : null;
+}
+
 export interface InstallerUpdatesExperienceProps {
   inventory: ServiceInventory | null | undefined;
   updateScheduling?: UpdateSchedulingStatus | null;
@@ -1126,7 +1133,7 @@ export function InstallerUpdatesExperience({
             >
               Close
             </Button>
-            {!manualUpdateStatus && (
+            {(!manualUpdateStatus || manualUpdateStatus.currentState === "Refused") && (
               <Button
                 type="button"
                 variant="primary"
@@ -1204,6 +1211,16 @@ export function InstallerUpdatesExperience({
             {isRolledBackStatus(manualUpdateStatus) && (
               <Alert type="warning" title="Host update rolled back">
                 The host rolled back the update. No new installation is active.
+              </Alert>
+            )}
+            {manualUpdateStatus.currentState === "Refused" && (
+              <Alert type="warning" title="Host update refused by preflight">
+                The host refused the update before draining, backing up or
+                changing anything
+                {preflightRefusalCode(manualUpdateStatus)
+                  ? <> (<code>{preflightRefusalCode(manualUpdateStatus)}</code>)</>
+                  : null}
+                . Resolve the reason, then authorize the update again.
               </Alert>
             )}
             {manualUpdateStatus.currentState !== "Completed" && (
