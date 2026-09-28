@@ -431,9 +431,15 @@ public sealed partial class HostUpdateCliOfflineActivateTests
         {
             ReleaseId = PriorReleaseId,
             ManifestDigest = PriorDigest(),
-            Targets = [.. request.Targets.Select(target => target with { ChildDigest = PriorAmd64Digests[target.ServiceId] })],
+            Targets = [.. request.Targets.Select(target => target with { ChildDigest = PriorPin(target.ServiceId) })],
         });
     }
+
+    /// <summary>Per-test overrides of the prior release's preloaded pins, e.g. a digest unchanged between N-1 and N.</summary>
+    private readonly Dictionary<string, string> _priorPinOverrides = new(StringComparer.Ordinal);
+
+    private string PriorPin(string serviceId) =>
+        _priorPinOverrides.TryGetValue(serviceId, out string? pin) ? pin : PriorAmd64Digests[serviceId];
 
     private string PriorDigest() => Digest(File.ReadAllBytes(Path.Combine(_staging, HostUpdateOfflineRecovery.PriorManifestName)));
 
@@ -454,7 +460,7 @@ public sealed partial class HostUpdateCliOfflineActivateTests
         foreach (JsonNode? service in prior["services"]!.AsArray())
         {
             string image = service!["image"]!.GetValue<string>();
-            service["image"] = image[..(image.LastIndexOf('@') + 1)] + PriorAmd64Digests[service["id"]!.GetValue<string>()];
+            service["image"] = image[..(image.LastIndexOf('@') + 1)] + PriorPin(service["id"]!.GetValue<string>());
         }
 
         byte[] priorBytes = Encoding.UTF8.GetBytes(prior.ToJsonString());

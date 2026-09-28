@@ -1,6 +1,7 @@
 ﻿using System.Text.Json;
 using Farm.Infrastructure.Services.HostUpdates;
 using FluentAssertions;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Farm.HostUpdate.Cli.Tests;
 
@@ -46,11 +47,41 @@ public sealed partial class HostUpdateCliOfflineActivateTests
             activity.State == HostUpdateExecutionState.Completed && activity.Phase == "completed");
     }
 
+    [HostStateFact]
+    public async Task Activation_redrive_never_fences_a_target_writer_whose_digest_is_unchanged_from_the_prior_release()
+    {
+        string targetDigest = TargetDigest(RequestFromCurrentStaging(), "monolith");
+        _priorPinOverrides["monolith"] = targetDigest;
+        StagePriorRecoverySet();
+        await ImportAsync();
+        await WritePriorInstalledStateAsync();
+        HostUpdateExecutionRequest request = RequestFromCurrentStaging();
+        _host.SeedJournal(request, InterruptedAtApply, baseline: null, withBaseline: false);
+        var runner = new IntegratedActivationProcessRunner(healthSucceeds: true);
+        runner.RunningWriterImages["monolith"] = MonolithRepository + "@" + targetDigest;
+        var priorContext = new HostUpdatePriorReleaseContext();
+
+        JsonElement activated = Envelope(await RunAsync(Activate(), IntegratedConfiguration(), services =>
+        {
+            UsePriorWriterFence(services, runner, new RecordingHealthHttpClientFactory("http://localhost:5245", succeeds: true));
+            services.AddSingleton(priorContext);
+        }));
+
+        activated.GetProperty("exitCode").GetInt32().Should().Be(HostUpdateCliExitCodes.Success, activated.ToString());
+        priorContext.Prior.Should().NotBeNull("the prior release is authenticated, so prior-release tolerance is active");
+        priorContext.ToleratedWriters.Should().BeEmpty("a writer matching both N-1 and the in-flight target must never enter the N-1 fence's stop set");
+        runner.StoppedContainerIds.Should().BeEmpty("a writer matching both N-1 and the in-flight target is already on the target");
+        runner.ComposeUpCalls.Should().BeEmpty("the interrupted apply is reconciled, never repeated");
+        (await new FileInstalledHostStateStore(InstalledStatePath()).ReadAsync(CancellationToken.None))!
+            .ReleaseId.Should().Be(TargetReleaseId);
+    }
+
     [HostStateTheory]
     [InlineData("no-journal")]
     [InlineData("interrupted-at-migration")]
     [InlineData("apply-completed")]
     [InlineData("recovery-required")]
+    [InlineData("earlier-refused")]
     [InlineData("other-request")]
     [InlineData("other-repository")]
     [InlineData("tag")]
@@ -72,6 +103,9 @@ public sealed partial class HostUpdateCliOfflineActivateTests
                 break;
             case "recovery-required":
                 _host.SeedJournal(request, [.. InterruptedAtApply, (HostUpdateExecutionState.RecoveryRequired, "failure:uncertain_side_effect:apply")], baseline: null, withBaseline: false);
+                break;
+            case "earlier-refused":
+                _host.SeedJournal(request, [(HostUpdateExecutionState.Refused, "refused"), .. InterruptedAtApply], baseline: null, withBaseline: false);
                 break;
             case "other-request":
                 _host.SeedJournal(request with { ImageSourceMode = HostUpdateImageSourceMode.Registry }, InterruptedAtApply, baseline: null, withBaseline: false);

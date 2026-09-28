@@ -532,9 +532,12 @@ internal sealed class DockerComposeApiAbsenceProbe(
         if (error is null && priorContext is not null)
         {
             // Only authenticated prior-release writers enter the fence's tolerated set: the N-1 fence
-            // stops that set by container ID, and it must never stop a writer already on the target.
+            // stops that set by container ID, and it must never stop a writer already on the target —
+            // including one whose digest is unchanged between N-1 and the target during an in-flight apply.
             priorContext.RecordTolerated(tolerated
-                .Select(pair => (pair.Key, Identities: pair.Value.Where(identity => IsPriorTolerated(priorTolerance, pair.Key, identity)).ToArray()))
+                .Select(pair => (pair.Key, Identities: pair.Value.Where(identity =>
+                    MatchesTolerance(priorTolerance, pair.Key, identity) &&
+                    !MatchesTolerance(inFlightApplyTolerance, pair.Key, identity)).ToArray()))
                 .Where(pair => pair.Identities.Length > 0)
                 .ToDictionary(pair => pair.Key, pair => pair.Identities, StringComparer.Ordinal));
         }
@@ -542,12 +545,12 @@ internal sealed class DockerComposeApiAbsenceProbe(
         return error;
     }
 
-    private static bool IsPriorTolerated(Func<string, string?, string?, bool>? priorTolerance, string serviceId, string identity)
+    private static bool MatchesTolerance(Func<string, string?, string?, bool>? tolerance, string serviceId, string identity)
     {
         int separator = identity.IndexOf(' ', StringComparison.Ordinal);
-        return priorTolerance is not null &&
+        return tolerance is not null &&
             separator > 0 &&
-            priorTolerance(serviceId, identity[(separator + 1)..], identity[..separator]);
+            tolerance(serviceId, identity[(separator + 1)..], identity[..separator]);
     }
 
     /// <summary>
