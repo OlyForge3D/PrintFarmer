@@ -1554,12 +1554,12 @@ public class ProfilesService(
                 IReadOnlyList<string> modelMachineNames = await GetMachineNamesForModelAsync(printerModelId, viewer, ct);
 
                 // Filament names are unique per owner, not globally (#3192), so an owned row may share
-                // a stock row's name. Resolve against the first non-empty ownership tier only — the
-                // caller's own rows, then unowned stock rows, then any other visible row — so neither
-                // the caller's own copy nor another user's private row (visible to administrators) can
-                // make the stock row ambiguous. Ambiguity within the chosen tier still returns null
-                // rather than guessing across tiers.
-                List<FilamentProfile> tier = FirstFilamentCandidateTier(candidates, viewer);
+                // a stock row's name. Compatibility narrows first and ownership only breaks ties (the
+                // caller's own rows, then unowned stock rows, then any other visible row), so neither
+                // the caller's own copy nor another user's private row (visible to administrators)
+                // can make a compatible stock row ambiguous or shadow it. Ambiguity within the chosen
+                // tier still returns null rather than guessing across tiers.
+                List<FilamentProfile> tier = SelectFilamentCandidateTier(candidates, viewer, modelMachineNames);
                 return SelectCompatibleProfileCandidate(
                     tier, printerModelId, modelMachineNames, _ => null, f => f.CompatiblePrinters)?.Id;
             }
@@ -1570,22 +1570,31 @@ public class ProfilesService(
     }
 
     /// <summary>
-    /// Returns the first non-empty same-name filament resolution tier (#3192): rows owned by the
-    /// caller, else unowned stock rows, else every other row the caller may see.
+    /// Chooses the same-name filament ownership tier to resolve against (#3192). Tiers are the
+    /// caller's own rows, unowned stock rows, then every other row the caller may see. The first
+    /// tier holding a row that explicitly declares one of <paramref name="modelMachineNames"/> wins;
+    /// failing that, the first tier holding a model-agnostic row (no <c>CompatiblePrinters</c>);
+    /// failing that, the first non-empty tier.
     /// </summary>
-    private static List<FilamentProfile> FirstFilamentCandidateTier(List<FilamentProfile> candidates, ProfileViewer viewer)
+    private static List<FilamentProfile> SelectFilamentCandidateTier(
+        List<FilamentProfile> candidates, ProfileViewer viewer, IReadOnlyList<string> modelMachineNames)
     {
-        if (viewer.UserId.HasValue)
-        {
-            List<FilamentProfile> own = candidates.Where(f => f.CreatedByUserId == viewer.UserId).ToList();
-            if (own.Count > 0)
-            {
-                return own;
-            }
-        }
-
+        List<FilamentProfile> own = viewer.UserId.HasValue
+            ? candidates.Where(f => f.CreatedByUserId == viewer.UserId).ToList()
+            : [];
         List<FilamentProfile> unowned = candidates.Where(f => f.CreatedByUserId is null).ToList();
-        return unowned.Count > 0 ? unowned : candidates;
+        List<FilamentProfile> others = candidates.Except(own).Except(unowned).ToList();
+        List<FilamentProfile>[] tiers = [own, unowned, others];
+
+        bool DeclaresModelMachine(FilamentProfile f) =>
+            !string.IsNullOrWhiteSpace(f.CompatiblePrinters) &&
+            f.CompatiblePrinters.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                .Any(cp => modelMachineNames.Any(n => string.Equals(cp.Trim(), n, StringComparison.OrdinalIgnoreCase)));
+
+        return tiers.FirstOrDefault(t => t.Any(DeclaresModelMachine))
+            ?? tiers.FirstOrDefault(t => t.Any(f => string.IsNullOrWhiteSpace(f.CompatiblePrinters)))
+            ?? tiers.FirstOrDefault(t => t.Count > 0)
+            ?? [];
     }
 
     /// <summary>

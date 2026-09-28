@@ -487,16 +487,46 @@ public class ProfilesServiceResolveOrImportTests
         Assert.Equal(stockId, result.ProfileId);
     }
 
+    /// <summary>
+    /// #3192 review finding R3196-B08: ownership only breaks ties after compatibility narrowing. A
+    /// caller's own same-named row that is scoped to a different printer, or declares no printers
+    /// at all, must not shadow a stock row that explicitly declares the requested model's machine.
+    /// </summary>
+    [Theory]
+    [InlineData("Some Other Printer 0.4 nozzle")]
+    [InlineData(null)]
+    public async Task ResolveOrImportProfileForModelAsync_CallerOwnsLessSpecificSameNameFilament_ReturnsCompatibleStockRow(string? ownCompatiblePrinters)
+    {
+        Guid modelId = Guid.NewGuid();
+        Guid callerId = Guid.NewGuid();
+        Guid stockId = Guid.NewGuid();
+
+        ProfilesService svc = CreateSameNameFilamentService(modelId, new List<FilamentProfile>
+        {
+            SameNameFilament(stockId, ownerId: null),
+            SameNameFilament(Guid.NewGuid(), ownerId: callerId, compatiblePrinters: ownCompatiblePrinters),
+        });
+
+        using HttpClient httpClient = new(new StubHttpMessageHandler(_ => throw new InvalidOperationException("Worker should not be called for an already-imported profile")));
+
+        ResolveProfileForModelResultDto result = await svc.ResolveOrImportProfileForModelAsync(
+            httpClient, modelId, ProfileResolutionType.Filament, SameNameFilamentName, new ProfileViewer(callerId, false), CancellationToken.None);
+
+        Assert.Null(result.Error);
+        Assert.False(result.Imported);
+        Assert.Equal(stockId, result.ProfileId);
+    }
+
     private const string SameNameFilamentName = "Generic PLA";
     private const string SameNameMachineName = "Qidi X-Plus 4 0.4 nozzle";
 
-    private static FilamentProfile SameNameFilament(Guid id, Guid? ownerId) => new()
+    private static FilamentProfile SameNameFilament(Guid id, Guid? ownerId, string? compatiblePrinters = SameNameMachineName) => new()
     {
         Id = id,
         Name = SameNameFilamentName,
         Material = "PLA",
         SlicerType = SlicerType.OrcaSlicer,
-        CompatiblePrinters = SameNameMachineName,
+        CompatiblePrinters = compatiblePrinters,
         IsSystem = ownerId is null,
         CreatedByUserId = ownerId,
         Hash = $"hash-{id}"
