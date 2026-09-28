@@ -996,9 +996,16 @@ infrastructure image as `reference@<bundle index digest>`. The import decision
 record's loaded image list is recorded as checkpoint
 `infrastructure-loaded-from-bundle:<id>@<digest>,...`.
 
+After recovery, the `queue-consumers-running` checkpoint reads the main API's
+`/health` `queue-consumers` entry. It passes only when the entry `status` is `2`
+(`Healthy`) and all eight consumers in `data` report `running`. A missing entry
+fails with `queue_consumers_not_exposed`. Any other status or consumer state
+fails with `queue_consumers_not_running`, and the checkpoint records the
+offending values.
+
 | Cell id | Descriptor | Scenario | Expected outcome/reason | Local run status |
 | --- | --- | --- | --- | --- |
-| `c2` | monolith, PostgreSQL, shared host-owned database/storage, managed worker | `recover` | `RolledBack` | Fails honestly after rollback at `queue-consumers-running:not-exposed`; `/health` exposes only `comprehensive`, `signalr` and `spoolman`, so queue-consumer continuity needs product signal #3157 |
+| `c2` | monolith, PostgreSQL, shared host-owned database/storage, managed worker | `recover` | `RolledBack` | Fails honestly after rollback at `queue-consumers-running:entry-missing` (`queue_consumers_not_exposed`) until the `queue-consumers` health entry from #3157 (PR #3163) is on the tested build |
 | `monolith-sqlserver` | monolith, SQL Server, shared host-owned database/storage, managed worker | `recover` | `RolledBack` | Fails honestly at `activate-prior:HostUpdateBackupIncompleteException`; SQL backup target remains empty despite identical bind path and writable directory, tracked by #3158 |
 | `split-postgres` | split, PostgreSQL, shared host-owned database/storage, managed worker | `recover` | `RolledBack` | Implemented; not run in the final bounded pass |
 | `split-postgres-no-worker` | split, PostgreSQL, shared host-owned database/storage, no optional worker | `recover` | `RolledBack` | Implemented; not run in the final bounded pass |

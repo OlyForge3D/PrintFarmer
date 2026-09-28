@@ -61,3 +61,42 @@ export function assertNoMutation(label, before, after) {
     }
   }
 }
+
+export const queueConsumerNames = Object.freeze([
+  'autoDispatch',
+  'queueOutboxPublisher',
+  'backendStartCommandConsumer',
+  'backendControlCommandConsumer',
+  'queueReconciliation',
+  'queueRetentionPrune',
+  'bedClearAcknowledgementExpiry',
+  'dispatchEscalation',
+]);
+
+// The main API's /health exposes a `queue-consumers` entry (#3157) whose numeric
+// HealthStatus is 2 (Healthy) only when every durable consumer is running.
+export function evaluateQueueConsumersHealth(body) {
+  let parsed;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return { ok: false, reason: 'queue_consumers_not_exposed', detail: 'health-not-json' };
+  }
+  const entries = parsed?.results ?? parsed?.entries;
+  const entry = entries && typeof entries === 'object' ? entries['queue-consumers'] : undefined;
+  if (!entry || typeof entry !== 'object') {
+    return { ok: false, reason: 'queue_consumers_not_exposed', detail: 'entry-missing' };
+  }
+  const data = entry.data && typeof entry.data === 'object' ? entry.data : {};
+  const notRunning = queueConsumerNames
+    .filter((name) => data[name] !== 'running')
+    .map((name) => `${name}=${data[name] ?? 'missing'}`);
+  if (entry.status !== 2 || notRunning.length > 0) {
+    return {
+      ok: false,
+      reason: 'queue_consumers_not_running',
+      detail: `status=${entry.status}${notRunning.length > 0 ? `;${notRunning.join(',')}` : ''}`,
+    };
+  }
+  return { ok: true, consumers: [...queueConsumerNames] };
+}

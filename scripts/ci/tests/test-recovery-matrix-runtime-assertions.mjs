@@ -7,6 +7,8 @@ import {
   assertExpectedNeedsOperator,
   assertExpectedRefusal,
   assertNoMutation,
+  evaluateQueueConsumersHealth,
+  queueConsumerNames,
 } from '../recovery-matrix/runtime-assertions.mjs';
 
 const priorImages = {
@@ -98,4 +100,26 @@ test('refusal no-mutation assertion blocks mutated service digests and state', (
   const after = structuredClone(before);
   after.serviceDigests.monolith = 'sha256:target';
   assert.throws(() => assertNoMutation('remote-worker', before, after), /serviceDigests-changed/);
+});
+
+test('queue-consumer health requires the queue-consumers entry at status 2 with every consumer running', () => {
+  const running = Object.fromEntries(queueConsumerNames.map((name) => [name, 'running']));
+  const body = (entry) => JSON.stringify({ status: 2, results: { comprehensive: { status: 2 }, ...(entry ? { 'queue-consumers': entry } : {}) } });
+
+  assert.deepEqual(evaluateQueueConsumersHealth(body({ status: 2, data: running })), { ok: true, consumers: [...queueConsumerNames] });
+  assert.equal(queueConsumerNames.length, 8);
+
+  assert.deepEqual(evaluateQueueConsumersHealth(body()), { ok: false, reason: 'queue_consumers_not_exposed', detail: 'entry-missing' });
+  assert.equal(evaluateQueueConsumersHealth('Healthy').reason, 'queue_consumers_not_exposed');
+
+  const degraded = evaluateQueueConsumersHealth(body({ status: 1, data: Object.fromEntries(queueConsumerNames.map((name) => [name, 'disabled'])) }));
+  assert.equal(degraded.reason, 'queue_consumers_not_running');
+  assert.match(degraded.detail, /^status=1;autoDispatch=disabled/);
+
+  const faulted = evaluateQueueConsumersHealth(body({ status: 2, data: { ...running, dispatchEscalation: 'faulted' } }));
+  assert.deepEqual(faulted, { ok: false, reason: 'queue_consumers_not_running', detail: 'status=2;dispatchEscalation=faulted' });
+
+  const { queueReconciliation, ...partial } = running;
+  assert.equal(evaluateQueueConsumersHealth(body({ status: 2, data: partial })).detail, 'status=2;queueReconciliation=missing');
+  assert.equal(evaluateQueueConsumersHealth(body({ status: 'Healthy', data: running })).reason, 'queue_consumers_not_running');
 });

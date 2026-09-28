@@ -21,6 +21,7 @@ import {
   assertExpectedNeedsOperator,
   assertExpectedRefusal,
   assertNoMutation,
+  evaluateQueueConsumersHealth,
 } from './runtime-assertions.mjs';
 import {
   baseEvidence,
@@ -652,12 +653,12 @@ try {
   checkpoints.ok('healthz-green');
   const healthEntries = discoverHealthEntries(health);
   checkpoints.ok(`health-green:${healthEntries.join(',') || 'plain'}`);
-  const queueEntries = healthEntries.filter(entry => /queue|dispatch|outbox|consumer/i.test(entry));
-  if (queueEntries.length === 0) {
-    checkpoints.failed('queue-consumers-running:not-exposed');
-    throw cellFailure('queue_consumers_not_exposed', { actual: 'RolledBack', exitCode: 1 });
+  const queueConsumers = evaluateQueueConsumersHealth(health);
+  if (!queueConsumers.ok) {
+    checkpoints.failed(`queue-consumers-running:${queueConsumers.detail}`);
+    throw cellFailure(queueConsumers.reason, { actual: 'RolledBack', exitCode: 1 });
   }
-  checkpoints.ok(`queue-consumers-running:${queueEntries.join(',')}`);
+  checkpoints.ok(`queue-consumers-running:${queueConsumers.consumers.join(',')}`);
 
   run.finishedAt = new Date().toISOString();
   const journalPath = join(runRoot, 'host-update', 'state', 'journal.ndjson');
