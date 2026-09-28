@@ -1083,6 +1083,91 @@ jobs:
           fi
 
   # ---------------------------------------------------------------------------
+  # recovery-matrix-fixture-migrations — the test-only schema-delta fixture
+  # (#3167) compiles into each PostgreSQL/SQL Server migrations assembly and is
+  # discovered by EF Core as the newest migration, with provider SQL generated
+  # for both Up and Down. Release builds never import the fixture targets.
+  # ---------------------------------------------------------------------------
+  recovery-matrix-fixture-migrations:
+    name: Recovery-matrix fixture migrations (${{ matrix.project }})
+    needs: [ci-tools]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - project: Farm.Migrations.PostgreSQL
+            provider: postgres
+            context: AppDbContext
+            migration: 29990601000000_RecoveryMatrixFixtureSchemaDelta
+          - project: Farm.Migrations.SqlServer
+            provider: sqlserver
+            context: AppDbContext
+            migration: 29990601000000_RecoveryMatrixFixtureSchemaDelta
+          - project: Farm.Slicer.Migrations.PostgreSQL
+            provider: postgres
+            context: SlicerDbContext
+            migration: 29990601000001_RecoveryMatrixFixtureSlicerSchemaDelta
+          - project: Farm.Slicer.Migrations.SqlServer
+            provider: sqlserver
+            context: SlicerDbContext
+            migration: 29990601000001_RecoveryMatrixFixtureSlicerSchemaDelta
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.CI_SOURCE_SHA }}
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Install dotnet-ef
+        run: |
+          dotnet tool install -g dotnet-ef
+          echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
+
+      - name: Build with fixture migrations
+        working-directory: src
+        env:
+          MATRIX_PROJECT: ${{ matrix.project }}
+        run: |
+          set -euo pipefail
+          dotnet build "./migrations/$MATRIX_PROJECT" -c Debug -nologo \
+            "-p:CustomAfterMicrosoftCommonTargets=$GITHUB_WORKSPACE/scripts/ci/recovery-matrix/fixture-migrations/RecoveryMatrixFixture.targets"
+
+      - name: Verify EF discovers fixture and generates provider SQL
+        working-directory: src
+        env:
+          MATRIX_PROJECT: ${{ matrix.project }}
+          MATRIX_CONTEXT: ${{ matrix.context }}
+          MATRIX_MIGRATION: ${{ matrix.migration }}
+          DB_PROVIDER: ${{ matrix.provider }}
+        run: |
+          set -euo pipefail
+          ef_args=(--project "./migrations/$MATRIX_PROJECT"
+            --startup-project "./migrations/$MATRIX_PROJECT"
+            --context "$MATRIX_CONTEXT" --no-build)
+          mapfile -t ids < <(dotnet ef migrations list "${ef_args[@]}" \
+            --no-connect | grep -E '^[0-9]{14}_[A-Za-z0-9_]+$')
+          count="${#ids[@]}"
+          if [ "$count" -lt 2 ] || [ "${ids[count-1]}" != "$MATRIX_MIGRATION" ]; then
+            echo "::error::$MATRIX_PROJECT: expected $MATRIX_MIGRATION as newest of $count migrations; got '${ids[count-1]:-none}'"
+            exit 1
+          fi
+          previous="${ids[count-2]}"
+          dotnet ef migrations script "$previous" "$MATRIX_MIGRATION" \
+            "${ef_args[@]}" --output "$RUNNER_TEMP/up.sql"
+          dotnet ef migrations script "$MATRIX_MIGRATION" "$previous" \
+            "${ef_args[@]}" --output "$RUNNER_TEMP/down.sql"
+          grep -q "RecoveryMatrixFixture" "$RUNNER_TEMP/up.sql"
+          grep -q "$MATRIX_MIGRATION" "$RUNNER_TEMP/up.sql"
+          grep -q "$MATRIX_MIGRATION" "$RUNNER_TEMP/down.sql"
+          grep -qiE "DROP TABLE" "$RUNNER_TEMP/down.sql"
+          echo "$MATRIX_PROJECT: $MATRIX_MIGRATION discovered after $previous; Up/Down SQL generated."
+
+  # ---------------------------------------------------------------------------
   # dotnet-test — one or more matrix legs per affected test project.
   # ---------------------------------------------------------------------------
   dotnet-test:
@@ -1405,6 +1490,7 @@ jobs:
       - frontend
       - dotnet-build
       - migration-drift
+      - recovery-matrix-fixture-migrations
       - dotnet-test
       - dotnet-test-providers
       - canonical-path-casing
@@ -1443,6 +1529,7 @@ jobs:
           FRONTEND_RESULT: ${{ needs.frontend.result }}
           DOTNET_BUILD_RESULT: ${{ needs.dotnet-build.result }}
           MIG_RESULT: ${{ needs.migration-drift.result }}
+          FIXTURE_MIG_RESULT: ${{ needs.recovery-matrix-fixture-migrations.result }}
           DOTNET_TEST_RESULT: ${{ needs.dotnet-test.result }}
           DOTNET_TEST_PROVIDERS_RESULT: ${{ needs.dotnet-test-providers.result }}
           WANT_FRONTEND: ${{ needs.select.outputs.want_frontend }}
@@ -1466,6 +1553,7 @@ jobs:
             printf -- '- frontend: `%s` (wanted=`%s`)\n' "$FRONTEND_RESULT" "$WANT_FRONTEND"
             printf -- '- dotnet-build: `%s` (wanted=`%s`)\n' "$DOTNET_BUILD_RESULT" "$WANT_DOTNET_BUILD"
             printf -- '- migration-drift: `%s` (wanted=`%s`)\n' "$MIG_RESULT" "$WANT_MIG_DRIFT"
+            printf -- '- recovery-matrix-fixture-migrations: `%s`\n' "$FIXTURE_MIG_RESULT"
             printf -- '- dotnet-test: `%s` (wanted=`%s`)\n' "$DOTNET_TEST_RESULT" "$WANT_DOTNET_TEST"
             printf -- '- dotnet-test-providers: `%s` (wanted=`%s`)\n' "$DOTNET_TEST_PROVIDERS_RESULT" "$WANT_DOTNET_TEST"
           } >> "$GITHUB_STEP_SUMMARY"
@@ -1479,6 +1567,7 @@ jobs:
           FRONTEND_RESULT: ${{ needs.frontend.result }}
           DOTNET_BUILD_RESULT: ${{ needs.dotnet-build.result }}
           MIG_RESULT: ${{ needs.migration-drift.result }}
+          FIXTURE_MIG_RESULT: ${{ needs.recovery-matrix-fixture-migrations.result }}
           DOTNET_TEST_RESULT: ${{ needs.dotnet-test.result }}
           DOTNET_TEST_PROVIDERS_RESULT: ${{ needs.dotnet-test-providers.result }}
           WANT_FRONTEND: ${{ needs.select.outputs.want_frontend }}
@@ -1499,6 +1588,7 @@ jobs:
           # Foundations always required.
           require_success select "$SELECT_RESULT"
           require_success ci-tools "$CI_TOOLS_RESULT"
+          require_success recovery-matrix-fixture-migrations "$FIXTURE_MIG_RESULT"
 
           # Conditional jobs: require success when wanted, require skipped
           # when not wanted.

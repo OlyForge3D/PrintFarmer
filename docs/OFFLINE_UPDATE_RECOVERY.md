@@ -1172,11 +1172,16 @@ fault cells need a target whose schema really differs from the prior release,
 so the interruption lands inside a real migration applied by the product's
 `HostUpdateTargetImageMigrationRunner`. Cells request this with
 `schemaDelta: 'changed'` (default `identical`); `buildC2ImageLayout` then builds
-the target `api` and `slicer-host` images from
+the target `api`, `monolith` and `slicer-host` images from
 [`scripts/ci/recovery-matrix/fixture-migrations/Dockerfile.target-schema-delta`](../scripts/ci/recovery-matrix/fixture-migrations/Dockerfile.target-schema-delta),
 which overlays rebuilt PostgreSQL and SQL Server migrations assemblies onto the
-prior image, and returns `schemaDelta` plus `fixtureMigrations`. The fixture adds
-one additive migration per context:
+prior image, and returns `schemaDelta` plus `fixtureMigrations`. The overlay
+replaces those assemblies wherever the prior image carries them, in `/app` and
+in `/app/plugins/slicer` (where `api` and `monolith` load the slicer
+migrations), and fails the build if an expected assembly is missing. Services
+without migrations assemblies (`frontend`, `printer-discovery`,
+`orcaslicer-worker`) keep an identical target. The fixture adds one additive
+migration per context:
 
 | Context | Migration ID | Table |
 | --- | --- | --- |
@@ -1189,7 +1194,10 @@ The migrations are test-only: their sources live under
 `-p:CustomAfterMicrosoftCommonTargets` inside the fixture Dockerfile. Shipped
 migrations projects, model snapshots and `Dockerfile.multistage` are unchanged,
 so `dotnet ef migrations has-pending-model-changes` is unaffected and no release
-image contains them. The far-future IDs sort after every real migration.
+image contains them. CI job `recovery-matrix-fixture-migrations` builds each
+PostgreSQL/SQL Server migrations project with the fixture, checks EF Core lists
+it as the newest migration and generates its Up and Down SQL. The far-future IDs
+sort after every real migration.
 [`schema-delta-fixture.mjs`](../scripts/ci/recovery-matrix/schema-delta-fixture.mjs)
 exports the IDs, the per-provider SQL that reads the migration-history row and
 table presence, and the expected fixture state for `Activated` (history row and

@@ -1,7 +1,7 @@
 // N -> N+1 schema-delta fixture for the recovery matrix (#3167).
 //
-// A cell whose `cell.schemaDelta` is 'changed' gets api / slicer-host target images that
-// carry exactly one extra real EF migration per DbContext over the prior image. The prior
+// A cell whose `cell.schemaDelta` is 'changed' gets api, monolith and slicer-host target
+// images that carry exactly one extra real EF migration per DbContext over the prior image. The prior
 // image is unchanged. The fixture is test-only: the migration sources live beside this
 // module and are injected into rebuilt migrations assemblies through MSBuild's
 // CustomAfterMicrosoftCommonTargets hook (see fixture-migrations/), so no shipped
@@ -29,11 +29,27 @@ export const schemaDeltaFixtureMigrations = Object.freeze({
 });
 
 // The executor runs each context's migration from exactly one service image
-// (HostUpdateTargetImageMigrationRunner.ContextServices); that image must carry the fixture.
+// (HostUpdateTargetImageMigrationRunner.ContextServices: AppDbContext -> api,
+// SlicerDbContext -> slicer-host). The monolith image is built FROM the api image, so it
+// carries the same assemblies and is overlaid too, keeping the running application's
+// migrations assembly in step with the database. Paths are relative to /app; api and
+// monolith load the slicer migrations from plugins/slicer. Other services (frontend,
+// printer-discovery, orcaslicer-worker) carry no migrations and keep an identical target.
+const appMigrationPaths = Object.freeze([
+  'Farm.Migrations.PostgreSQL.dll',
+  'Farm.Migrations.SqlServer.dll',
+  'plugins/slicer/Farm.Slicer.Migrations.PostgreSQL.dll',
+  'plugins/slicer/Farm.Slicer.Migrations.SqlServer.dll',
+]);
 export const schemaDeltaRequiredAssemblies = Object.freeze({
-  api: Object.freeze(['Farm.Migrations.PostgreSQL', 'Farm.Migrations.SqlServer']),
-  'slicer-host': Object.freeze(['Farm.Slicer.Migrations.PostgreSQL', 'Farm.Slicer.Migrations.SqlServer']),
+  api: appMigrationPaths,
+  monolith: appMigrationPaths,
+  'slicer-host': Object.freeze(['Farm.Slicer.Migrations.PostgreSQL.dll', 'Farm.Slicer.Migrations.SqlServer.dll']),
 });
+
+export function schemaDeltaAppliesTo(serviceId) {
+  return Object.hasOwn(schemaDeltaRequiredAssemblies, serviceId);
+}
 
 export function resolveSchemaDelta(cell, override) {
   const value = override ?? cell?.schemaDelta ?? 'identical';
@@ -48,7 +64,10 @@ export function schemaDeltaFixtureSummary(schemaDelta) {
 }
 
 export function schemaDeltaTargetBuildArgs({ repo, priorTag, targetTag, targetVersion, sourceCommit, serviceId }) {
-  const required = schemaDeltaRequiredAssemblies[serviceId] ?? [];
+  if (!schemaDeltaAppliesTo(serviceId)) {
+    throw new Error(`service '${serviceId}' carries no migrations assemblies; build an identical target instead`);
+  }
+  const required = schemaDeltaRequiredAssemblies[serviceId];
   return [
     'build',
     repo,

@@ -36,21 +36,28 @@ RUN set -eu; \
     done
 
 FROM --platform=${BUILDPLATFORM:-linux/amd64} ${SDK_IMAGE} AS overlay
-# Space-separated migrations assemblies that MUST already exist in the prior image's /app.
+# Space-separated paths (relative to /app) of migrations assemblies that MUST already exist
+# in the prior image and are therefore replaced. Both the application root and the slicer
+# plugin directory are overlaid: api/monolith images carry the slicer migrations under
+# plugins/slicer, while slicer-host carries them at the root.
 ARG REQUIRED_ASSEMBLIES=""
 RUN --mount=type=bind,from=prior,source=/app,target=/prior-app \
     --mount=type=bind,from=fixture-build,source=/fixture-out,target=/fixture-out \
     set -eu; \
-    mkdir -p /overlay; \
+    test -n "${REQUIRED_ASSEMBLIES}" || { echo "REQUIRED_ASSEMBLIES must not be empty" >&2; exit 1; }; \
+    mkdir -p /overlay/plugins/slicer; \
     for project in Farm.Migrations.PostgreSQL Farm.Migrations.SqlServer Farm.Slicer.Migrations.PostgreSQL Farm.Slicer.Migrations.SqlServer; do \
-      if [ -f "/prior-app/${project}.dll" ]; then cp "/fixture-out/${project}/${project}.dll" /overlay/; fi; \
+      for dir in . plugins/slicer; do \
+        if [ -f "/prior-app/${dir}/${project}.dll" ]; then cp "/fixture-out/${project}/${project}.dll" "/overlay/${dir}/"; fi; \
+      done; \
     done; \
     for required in ${REQUIRED_ASSEMBLIES}; do \
-      test -f "/overlay/${required}.dll" || { echo "prior image lacks ${required}.dll" >&2; exit 1; }; \
-    done
+      test -f "/overlay/${required}" || { echo "prior image lacks /app/${required}" >&2; exit 1; }; \
+    done; \
+    rmdir /overlay/plugins/slicer /overlay/plugins 2>/dev/null || true
 
 FROM prior
 ARG TARGET_VERSION
-COPY --from=overlay /overlay/ /app/
+COPY --chown=appuser:appuser --from=overlay /overlay/ /app/
 LABEL org.printfarmer.recovery-fixture-target="${TARGET_VERSION}" \
       org.printfarmer.recovery-fixture-schema-delta="changed"

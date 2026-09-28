@@ -13,6 +13,7 @@ import { components, requireThat } from '../release-policy.mjs';
 import { defaultCell } from './cell-runtime.mjs';
 import {
   resolveSchemaDelta,
+  schemaDeltaAppliesTo,
   schemaDeltaFixtureSummary,
   schemaDeltaTargetBuildArgs,
 } from './schema-delta-fixture.mjs';
@@ -357,7 +358,7 @@ export function buildServiceArchives({
     '--build-arg', `VCS_REF=${sourceCommit}`,
   ], { cwd: repo, stdio: ['ignore', 'inherit', 'pipe'], env: buildEnvironment });
 
-  if (schemaDelta === 'changed') {
+  if (schemaDelta === 'changed' && schemaDeltaAppliesTo(serviceId)) {
     run('docker', schemaDeltaTargetBuildArgs({
       repo,
       priorTag,

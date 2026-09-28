@@ -8,6 +8,7 @@ import { buildServiceArchives } from '../recovery-matrix/oci-layout-builder.mjs'
 import {
   expectedSchemaDeltaFixtureState,
   resolveSchemaDelta,
+  schemaDeltaAppliesTo,
   schemaDeltaFixtureDirectory,
   schemaDeltaFixtureDockerfile,
   schemaDeltaFixtureMigrations,
@@ -108,9 +109,37 @@ test('target Dockerfile derives from the prior image and rebuilds only the migra
   for (const project of shippedMigrationProjects) {
     assert.ok(dockerfile.includes(project), `${project} is rebuilt`);
   }
-  assert.match(dockerfile, /^COPY --from=overlay \/overlay\/ \/app\/$/m);
-  assert.match(dockerfile, /REQUIRED_ASSEMBLIES/);
+  assert.match(dockerfile, /^COPY --chown=appuser:appuser --from=overlay \/overlay\/ \/app\/$/m);
+  assert.match(dockerfile, /for dir in \. plugins\/slicer; do/, 'overlay covers the root and the slicer plugin directory');
+  assert.match(dockerfile, /REQUIRED_ASSEMBLIES must not be empty/);
   assert.doesNotMatch(dockerfile, /dotnet publish|Farm\.Web\.Api\.csproj|Farm\.Slicer\.Host\.csproj/);
+});
+
+test('required assembly paths match the product image layout and migration runner', () => {
+  const multistage = readFileSync(path.join(repoRoot, 'scripts/docker/dockerfiles/Dockerfile.multistage'), 'utf8');
+  for (const project of ['Farm.Slicer.Migrations.PostgreSQL', 'Farm.Slicer.Migrations.SqlServer']) {
+    assert.ok(multistage.includes(`${project}.csproj -c Release -o /app/publish/api/plugins/slicer`), `api stages ${project} under plugins/slicer`);
+  }
+  assert.match(multistage, /^FROM api-runtime AS monolith-runtime$/m, 'monolith inherits the api layout');
+  assert.deepEqual(schemaDeltaRequiredAssemblies.monolith, schemaDeltaRequiredAssemblies.api);
+  for (const required of schemaDeltaRequiredAssemblies.api.filter(entry => entry.includes('Slicer'))) {
+    assert.match(required, /^plugins\/slicer\//);
+  }
+  const runner = readFileSync(path.join(repoRoot, 'src/infra/Services/HostUpdates/HostUpdateTargetImageMigrationRunner.cs'), 'utf8');
+  assert.match(runner, /\["AppDbContext"\] = "api"/);
+  assert.match(runner, /\["SlicerDbContext"\] = "slicer-host"/);
+  for (const [contextName, serviceId] of [['AppDbContext', 'api'], ['SlicerDbContext', 'slicer-host']]) {
+    for (const assembly of schemaDeltaFixtureMigrations[contextName].assemblies) {
+      assert.ok(
+        schemaDeltaRequiredAssemblies[serviceId].some(entry => path.posix.basename(entry) === `${assembly}.dll`),
+        `${serviceId} must carry ${assembly} for ${contextName}`,
+      );
+    }
+  }
+  assert.deepEqual(Object.keys(schemaDeltaRequiredAssemblies).filter(schemaDeltaAppliesTo).sort(), ['api', 'monolith', 'slicer-host']);
+  for (const serviceId of ['frontend', 'printer-discovery', 'orcaslicer-worker']) {
+    assert.equal(schemaDeltaAppliesTo(serviceId), false);
+  }
 });
 
 test('target build args pin the prior tag and required assemblies per migration service', () => {
@@ -133,10 +162,15 @@ test('target build args pin the prior tag and required assemblies per migration 
     repo: '/repo', priorTag: 'p', targetTag: 't', targetVersion: 'v', sourceCommit: 'b'.repeat(40), serviceId: 'slicer-host',
   });
   assert.ok(slicer.includes(`REQUIRED_ASSEMBLIES=${schemaDeltaRequiredAssemblies['slicer-host'].join(' ')}`));
-  const worker = schemaDeltaTargetBuildArgs({
-    repo: '/repo', priorTag: 'p', targetTag: 't', targetVersion: 'v', sourceCommit: 'c'.repeat(40), serviceId: 'orcaslicer-worker',
+  const monolith = schemaDeltaTargetBuildArgs({
+    repo: '/repo', priorTag: 'p', targetTag: 't', targetVersion: 'v', sourceCommit: 'b'.repeat(40), serviceId: 'monolith',
   });
-  assert.ok(worker.includes('REQUIRED_ASSEMBLIES='));
+  assert.ok(monolith.includes(`REQUIRED_ASSEMBLIES=${schemaDeltaRequiredAssemblies.monolith.join(' ')}`));
+  for (const serviceId of ['frontend', 'orcaslicer-worker', 'printer-discovery']) {
+    assert.throws(() => schemaDeltaTargetBuildArgs({
+      repo: '/repo', priorTag: 'p', targetTag: 't', targetVersion: 'v', sourceCommit: 'c'.repeat(40), serviceId,
+    }), /carries no migrations assemblies/);
+  }
 });
 
 test('service archives use the label-only derive for identical and the fixture Dockerfile for changed', () => {
@@ -144,7 +178,7 @@ test('service archives use the label-only derive for identical and the fixture D
   try {
     const imageScratch = path.join(runRoot, 'image-scratch');
     mkdirSync(imageScratch, { recursive: true });
-    const build = schemaDelta => {
+    const build = (schemaDelta, serviceId = 'api') => {
       const calls = [];
       buildServiceArchives({
         repo: '/repo',
@@ -156,7 +190,7 @@ test('service archives use the label-only derive for identical and the fixture D
         },
         buildEnvironment: {},
         sourceCommit: 'd'.repeat(40),
-        serviceId: 'api',
+        serviceId,
         prior: { version: '1.0.0-insider.1' },
         target: { version: '1.0.0-insider.2' },
         schemaDelta,
@@ -175,6 +209,16 @@ test('service archives use the label-only derive for identical and the fixture D
     assert.equal(changed[1][changed[1].indexOf('--file') + 1], path.join('/repo', schemaDeltaFixtureDockerfile));
     const priorTag = changed[0][changed[0].indexOf('--tag') + 1];
     assert.ok(changed[1].includes(`PRIOR_IMAGE=${priorTag}`));
+
+    for (const serviceId of ['monolith', 'slicer-host']) {
+      const calls = build('changed', serviceId);
+      assert.equal(calls[1][calls[1].indexOf('--file') + 1], path.join('/repo', schemaDeltaFixtureDockerfile), `${serviceId} gets the fixture target`);
+    }
+    for (const serviceId of ['frontend', 'printer-discovery', 'orcaslicer-worker']) {
+      const calls = build('changed', serviceId);
+      assert.equal(calls[1][2], runRoot, `${serviceId} keeps an identical target`);
+      assert.ok(!calls[1].includes(path.join('/repo', schemaDeltaFixtureDockerfile)));
+    }
   } finally {
     rmSync(runRoot, { recursive: true, force: true });
   }
