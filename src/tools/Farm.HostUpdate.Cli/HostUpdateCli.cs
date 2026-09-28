@@ -403,7 +403,11 @@ public static partial class HostUpdateCli
             List<IHostUpdateBackupTarget> targets = [.. sp.GetServices<IHostUpdateBackupTarget>()];
             var optionalDirectoryNames = new HashSet<string>(options.OptionalOwnedDirectories, StringComparer.Ordinal);
             targets.AddRange(options.OwnedDirectories.Select(pair =>
-                new DirectoryCopyBackupTarget(pair.Key, pair.Value, isRequired: !optionalDirectoryNames.Contains(pair.Key))));
+                new DirectoryCopyBackupTarget(
+                    pair.Key,
+                    pair.Value,
+                    isRequired: !optionalDirectoryNames.Contains(pair.Key),
+                    isExternallyOwned: options.StorageExternallyOwned)));
             return targets;
         });
         services.AddScoped<IHostUpdateBackupCoordinator>(sp =>

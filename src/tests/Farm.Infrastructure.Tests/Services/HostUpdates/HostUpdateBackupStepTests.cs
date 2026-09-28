@@ -133,6 +133,65 @@ public sealed class HostUpdateBackupStepTests
         }
     }
     [Fact]
+    public async Task BackupCoordinator_StorageExternallyOwned_FailsClosedBeforeCreatingAnyBackupOrReadingStorage()
+    {
+        string source = Path.Combine(Path.GetTempPath(), "hu-src-" + Guid.NewGuid());
+        Directory.CreateDirectory(source);
+        await File.WriteAllTextAsync(Path.Combine(source, "a.txt"), "external");
+        var hostOwned = new DirectoryCopyBackupTarget("slicer-profiles", source);
+        var external = new DirectoryCopyBackupTarget("app-data", source, isExternallyOwned: true);
+        string root = Path.Combine(Path.GetTempPath(), "hu-root-" + Guid.NewGuid());
+        var coordinator = new HostUpdateBackupCoordinator([hostOwned, external], root);
+        try
+        {
+            Func<Task> act = () => coordinator.RunAsync(Request(), CancellationToken.None);
+
+            (await act.Should().ThrowAsync<HostUpdateBackupUnsupportedOwnerException>())
+                .Which.ExternallyOwnedTargetNames.Should().Equal("app-data");
+            Directory.Exists(root).Should().BeFalse("no backup run may start for storage this host does not own");
+            (await File.ReadAllTextAsync(Path.Combine(source, "a.txt"))).Should().Be("external");
+        }
+        finally
+        {
+            Directory.Delete(source, recursive: true);
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task DirectoryCopyBackupTarget_ExternallyOwned_RefusesDirectBackup()
+    {
+        string source = Path.Combine(Path.GetTempPath(), "hu-src-" + Guid.NewGuid());
+        Directory.CreateDirectory(source);
+        await File.WriteAllTextAsync(Path.Combine(source, "a.txt"), "external");
+        var target = new DirectoryCopyBackupTarget("app-data", source, isExternallyOwned: true);
+        string destination = Path.Combine(Path.GetTempPath(), "hu-dest-" + Guid.NewGuid());
+        Directory.CreateDirectory(destination);
+        try
+        {
+            target.IsExternallyOwned.Should().BeTrue();
+            Func<Task> act = () => target.BackupAsync(destination, CancellationToken.None);
+
+            await act.Should().ThrowAsync<HostUpdateBackupUnsupportedOwnerException>();
+            Directory.EnumerateFileSystemEntries(destination).Should().BeEmpty();
+        }
+        finally
+        {
+            Directory.Delete(source, recursive: true);
+            Directory.Delete(destination, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void DirectoryCopyBackupTarget_DefaultsToHostOwned()
+    {
+        new DirectoryCopyBackupTarget("app-data", "/data").IsExternallyOwned.Should().BeFalse();
+    }
+
+    [Fact]
     public async Task BackupCoordinator_RequiredDirectoryMissing_FailsRunClosed()
     {
         string missingSource = Path.Combine(Path.GetTempPath(), "hu-missing-" + Guid.NewGuid());

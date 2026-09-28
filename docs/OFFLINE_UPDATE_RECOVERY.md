@@ -766,7 +766,10 @@ exists is `remote_worker_evidence_unavailable`. Restore or update remote workers
 through their owner. A coordinated
 database restore owned by an external provider (`DatabaseExternallyOwned`) stops
 as needs-operator with `database_externally_owned` before any restore or apply,
-so the external owner must restore it. Integration tests exercise a
+so the external owner must restore it. Owned directories declared externally
+owned (`StorageExternallyOwned`) likewise stop as needs-operator with
+`storage_externally_owned` before any directory is deleted or copied, and
+activation backup fails closed instead of copying them. Integration tests exercise a
 real failed offline activation followed by preview and confirm with a
 network-denied HTTP factory, asserting the prior set is restored through the
 engine activation-time backup, with no non-loopback request and no pull.
