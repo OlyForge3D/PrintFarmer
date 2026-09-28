@@ -48,6 +48,10 @@ esac
 case "$EVIDENCE" in
   /tmp/*|/var/tmp/*) echo "--evidence must not be under a system temp directory" >&2; exit 2 ;;
 esac
+mkdir -p "$WORK_DIR" "$(dirname "$EVIDENCE")"
+WORK_DIR="$(cd "$WORK_DIR" && pwd)"
+EVIDENCE_DIR="$(cd "$(dirname "$EVIDENCE")" && pwd)"
+EVIDENCE="$EVIDENCE_DIR/$(basename "$EVIDENCE")"
 
 require_tool() {
   command -v "$1" >/dev/null 2>&1 || { echo "$1 is required" >&2; exit 2; }
