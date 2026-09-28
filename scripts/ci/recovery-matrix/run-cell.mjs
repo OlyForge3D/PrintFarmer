@@ -1046,6 +1046,11 @@ function runImportCell({
       }).join('; '));
       return Object.fromEntries(output.trim().split(/\r?\n/).map((line) => line.split(' ')));
     },
+    replayState: () => {
+      const path = shellQuote(join(hostStateRoot, 'host-update-replay.json'));
+      const text = hostShell(`if [ -e ${path} ]; then cat ${path}; fi`).trim();
+      return text ? JSON.parse(text) : null;
+    },
     hostStateFiles: {
       save: (tag) => {
         const directory = join(saveRoot, safe(tag));

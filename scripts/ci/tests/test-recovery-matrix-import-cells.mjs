@@ -19,6 +19,7 @@ import {
   assertImportedIdentity,
   assertRefusedImport,
   ImportScenarioError,
+  replayAdmissionDrift,
   rewriteOfflineBundle,
 } from '../recovery-matrix/import-scenarios.mjs';
 
@@ -197,4 +198,37 @@ test('assertRefusedImport rejects admitted or mutating refusals', () => {
     assertRefusedImport('cli', { exitCode: 2, record: null, stdout: '', stderr: 'config missing' }, { reason: 'config' }),
     'exit:2',
   );
+});
+
+test('failed import cells may record a refusal without the verified checkpoint', () => {
+  const record = importedRecord([{ name: 'backup-verified', at: '2026-09-26T10:05:00Z', result: 'ok' }]);
+  record.outcome.actual = 'Refused';
+  record.outcome.reason = 'import_refusal_mutated_state';
+  record.outcome.exitCode = 1;
+  assert.deepEqual(validateRecoveryEvidence(record).filter((error) => error.includes('Imported')), []);
+});
+
+test('replayAdmissionDrift allows only durable authenticated refusals', () => {
+  const before = {
+    Version: 1,
+    HighWaterByNamespace: { insider: { Sequence: 42, Identity: 'i42' } },
+    Identities: { i42: { Sequence: 42, Disposition: 'Imported', CorrelationId: 'c' } },
+  };
+  const withRefusal = structuredClone(before);
+  withRefusal.Identities.i41 = { Sequence: 41, Disposition: 'Superseded', CorrelationId: 'd' };
+  assert.deepEqual(replayAdmissionDrift(before, withRefusal), []);
+  const camel = { highWaterByNamespace: before.HighWaterByNamespace, identities: withRefusal.Identities };
+  assert.deepEqual(replayAdmissionDrift(before, camel), []);
+
+  const admitted = structuredClone(before);
+  admitted.Identities.i43 = { Sequence: 43, Disposition: 'Imported', CorrelationId: 'e' };
+  assert.deepEqual(replayAdmissionDrift(before, admitted), ['identity-added:i43:Imported']);
+  const raised = structuredClone(before);
+  raised.HighWaterByNamespace.insider = { Sequence: 43, Identity: 'i43' };
+  assert.deepEqual(replayAdmissionDrift(before, raised), ['high-water:insider']);
+  const rewritten = structuredClone(before);
+  rewritten.Identities.i42.Disposition = 'Superseded';
+  assert.deepEqual(replayAdmissionDrift(before, rewritten), ['identity-changed:i42']);
+  assert.deepEqual(replayAdmissionDrift(before, null), ['replay-store-presence']);
+  assert.deepEqual(replayAdmissionDrift(null, null), []);
 });

@@ -546,14 +546,15 @@ export function validateRecoveryEvidence(record) {
         typeof outcome.expected === 'string' &&
         outcome.expected === 'Imported'
       ) {
-        // An import cell passes only once every channel, identity, adversarial or replay step
-        // was verified; a bare staged import is never evidence on its own.
-        if (!importsVerified) {
+        // An import cell reports Imported only once every channel, identity, adversarial or
+        // replay step was verified; a bare staged import is never evidence on its own. A
+        // failed import cell records what it observed instead.
+        if (outcome.actual === 'Imported' && !importsVerified) {
           errors.push(
-            `outcome.expected: supported cell may expect Imported only after a successful ${importCellsVerifiedCheckpoint} checkpoint`,
+            `outcome.actual: supported cell may report Imported only after a successful ${importCellsVerifiedCheckpoint} checkpoint`,
           );
         }
-        if (outcome.reason !== null) {
+        if (outcome.actual === 'Imported' && outcome.reason !== null) {
           errors.push('outcome.reason: Imported must not carry a reason');
         }
       } else if (

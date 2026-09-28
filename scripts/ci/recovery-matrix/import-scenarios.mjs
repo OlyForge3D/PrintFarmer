@@ -160,10 +160,42 @@ export function assertRefusedImport(label, result, { reason } = {}) {
   return record?.reason ?? `exit:${result.exitCode}`;
 }
 
-function assertSameState(label, before, after) {
-  const drift = Object.keys({ ...before, ...after }).filter((key) => before[key] !== after[key]);
+function assertSameState(label, before, after, { allowReplayRecord = false } = {}) {
+  const replayFiles = new Set(['host-update-replay.json', 'replay-anchor.json', 'replay-anchor.journal']);
+  const drift = Object.keys({ ...before, ...after })
+    .filter((key) => before[key] !== after[key])
+    .filter((key) => !(allowReplayRecord && replayFiles.has(key)));
   if (drift.length > 0) fail('import_refusal_mutated_state', `${label}:${drift.join(',')}`);
 }
+
+const field = (object, name) => object?.[name] ?? object?.[name[0].toLowerCase() + name.slice(1)];
+
+// An authenticated replay refusal durably records the refused identity (so it stays refused
+// across restarts and restores). That record must not change what is admitted: every channel
+// high-water mark and every earlier identity decision is unchanged, and only Rejected or
+// Superseded identities are added.
+export function replayAdmissionDrift(before, after) {
+  if (!before || !after) return before === after ? [] : ['replay-store-presence'];
+  const drift = [];
+  const hwmBefore = field(before, 'HighWaterByNamespace') ?? {};
+  const hwmAfter = field(after, 'HighWaterByNamespace') ?? {};
+  for (const ns of new Set([...Object.keys(hwmBefore), ...Object.keys(hwmAfter)])) {
+    if (JSON.stringify(hwmBefore[ns]) !== JSON.stringify(hwmAfter[ns])) drift.push(`high-water:${ns}`);
+  }
+  const idsBefore = field(before, 'Identities') ?? {};
+  const idsAfter = field(after, 'Identities') ?? {};
+  for (const [identity, record] of Object.entries(idsBefore)) {
+    if (JSON.stringify(record) !== JSON.stringify(idsAfter[identity])) drift.push(`identity-changed:${identity}`);
+  }
+  for (const [identity, record] of Object.entries(idsAfter)) {
+    if (identity in idsBefore) continue;
+    const disposition = String(field(record, 'Disposition'));
+    if (disposition !== 'Rejected' && disposition !== 'Superseded') drift.push(`identity-added:${identity}:${disposition}`);
+  }
+  return drift;
+}
+
+const authenticatedReplayRefusal = (reason) => /replay_(rejected|superseded)/.test(String(reason));
 
 function shortReason(reason) {
   return String(reason).replace(/\s+/g, '_').replace(/[^A-Za-z0-9_.:\-]/g, '').slice(0, 80);
@@ -216,10 +248,16 @@ function createHelpers(ctx) {
   };
   const refused = (label, rel, options = {}) => {
     const before = ctx.stateHashes();
+    const replayBefore = ctx.replayState();
     const result = ctx.importBundle({ built: rel, bundle: options.bundle ?? bundle(rel), label, ...options });
     const reason = assertRefusedImport(label, result, { reason: options.reason });
     if (ctx.stagingExists(label)) fail('import_refusal_left_staging', label);
-    assertSameState(label, before, ctx.stateHashes());
+    const allowReplayRecord = authenticatedReplayRefusal(reason);
+    assertSameState(label, before, ctx.stateHashes(), { allowReplayRecord });
+    if (allowReplayRecord) {
+      const drift = replayAdmissionDrift(replayBefore, ctx.replayState());
+      if (drift.length > 0) fail('import_refusal_changed_admission', `${label}:${drift.join(',')}`);
+    }
     checkpoints.ok(`refused-before-mutation:${label}:${shortReason(reason)}`);
     return result;
   };
@@ -284,9 +322,16 @@ function runChannelRoundTrips(ctx, h) {
   h.refused('moved-branch-insider', h.release('1.0.4-insider.1', { seed: 'moved-branch' }));
 }
 
+function applicationImage(b) {
+  const names = b.names().filter((name) => /^image-[a-z0-9-]+\.oci\.tar$/.test(name));
+  const name = names.includes('image-frontend.oci.tar') ? 'image-frontend.oci.tar' : names[0];
+  if (!name) fail('bundle_application_image_missing');
+  return name;
+}
+
 const adversarialRunners = {
   'missing-image': (ctx, h, base) => h.refused('missing-image', base.rel, {
-    bundle: base.tampered('missing-image', (b) => b.drop(b.names().find((name) => name.startsWith('application-')))),
+    bundle: base.tampered('missing-image', (b) => b.drop(applicationImage(b))),
   }),
   'missing-trust-approval': (ctx, h, base) => h.refused('missing-trust-approval', base.rel, {
     bundle: base.path, approval: join(ctx.runRoot, 'absent-approval.json'),
@@ -306,7 +351,7 @@ const adversarialRunners = {
   'modified-bytes': (ctx, h, base) => h.refused('modified-bytes', base.rel, {
     bundle: base.tampered('modified', (b) => {
       const name = b.names().find((candidate) => candidate.startsWith('printfarmer-host-update-cli-') && candidate.endsWith('.tar.gz'))
-        ?? b.names().find((candidate) => candidate.startsWith('application-'));
+        ?? applicationImage(b);
       const bytes = Buffer.from(b.read(name));
       bytes[bytes.length >> 1] ^= 0xff;
       b.replace(name, bytes, { updateIndex: false });
@@ -322,7 +367,7 @@ const adversarialRunners = {
   },
   'wrong-platform': (ctx, h, base) => h.refused('wrong-platform', base.rel, {
     bundle: base.tampered('platform', (b) => {
-      const name = b.names().find((candidate) => candidate.startsWith('application-'));
+      const name = applicationImage(b);
       const bytes = Buffer.from(b.read(name));
       let swapped = 0;
       for (let at = bytes.indexOf('amd64'); at !== -1; at = bytes.indexOf('amd64', at + 5)) {
@@ -335,7 +380,7 @@ const adversarialRunners = {
   }),
   'mixed-digests': (ctx, h, base) => h.refused('mixed-digests', base.rel, {
     bundle: base.tampered('mixed-digests', (b) => {
-      const name = b.names().find((candidate) => candidate.startsWith('application-'));
+      const name = applicationImage(b);
       b.replace(name, readMembers(ctx.priorBundlePath, [name])[name]);
     }),
   }),
@@ -433,7 +478,17 @@ function runReplaySupersede(ctx, h) {
   const b42 = h.bundle(r42);
   h.imported('replay-41-admitted', r41, { bundle: b41, keepStaging: true });
   h.imported('replay-42-supersedes-41', r42, { bundle: b42, keepStaging: true });
-  const stateAfter42 = ctx.stateHashes();
+  const stateAfter42 = ctx.replayState();
+  const seq42 = String(r42.release.sequence);
+  const seqs = new Set([String(r41.release.sequence), seq42]);
+  const supersedeView = (state) => JSON.stringify({
+    highWater: Object.entries(field(state, 'HighWaterByNamespace') ?? {})
+      .filter(([, mark]) => String(field(mark, 'Sequence')) === seq42),
+    identities: Object.entries(field(state, 'Identities') ?? {})
+      .filter(([, record]) => seqs.has(String(field(record, 'Sequence'))))
+      .sort(([a], [b]) => a.localeCompare(b)),
+  });
+  const expectedView = supersedeView(stateAfter42);
   const holds = (phase) => {
     h.refused(`41-rejected-${phase}`, r41, { bundle: b41, reason: 'replay_superseded' });
     const before = ctx.mutationSnapshot();
@@ -441,8 +496,7 @@ function runReplaySupersede(ctx, h) {
     if (activation.exitCode === 0) fail('superseded_release_activated', phase);
     ctx.assertNoMutation(`41-activation-${phase}`, before, ctx.mutationSnapshot());
     ctx.checkpoints.ok(`41-activation-refused-${phase}:exit-${activation.exitCode}`);
-    const hashes = ctx.stateHashes();
-    if (hashes['host-update-replay.json'] !== stateAfter42['host-update-replay.json']) {
+    if (supersedeView(ctx.replayState()) !== expectedView) {
       fail('replay_state_changed', phase);
     }
     ctx.checkpoints.ok(`42-supersedes-41-${phase}`);
