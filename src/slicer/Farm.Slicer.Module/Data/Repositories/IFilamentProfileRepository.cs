@@ -15,7 +15,7 @@ public interface IFilamentProfileRepository
     /// <summary>Gets filament profiles for a slicer engine with optional user filtering.</summary>
     /// <param name="engine">The slicer engine type.</param>
     /// <param name="includeSystem">Whether to include system profiles.</param>
-    /// <param name="userId">Optional user ID to filter by.</param>
+    /// <param name="userId">Optional user ID; when set, only profiles the user owns, public profiles, and system profiles are returned.</param>
     /// <param name="ct">Cancellation token.</param>
     Task<IReadOnlyList<FilamentProfile>> GetByEngineAsync(SlicerType engine, bool includeSystem = true, Guid? userId = null, CancellationToken ct = default);
 

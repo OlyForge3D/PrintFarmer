@@ -167,6 +167,10 @@ public class ProfilesController(
     /// <param name="manufacturer">Optional filter to retrieve only profiles for a specific manufacturer.</param>
     /// <param name="machineProfileId">Optional filter to retrieve only profiles compatible with a specific machine.</param>
     /// <param name="ct">Cancellation token.</param>
+    /// <remarks>
+    /// A <paramref name="machineProfileId"/> that is another user's private machine profile returns
+    /// 404, like a missing id, so a caller cannot probe which private ids exist (issue #3180).
+    /// </remarks>
     [HttpGet("hierarchy")]
     [ProducesResponseType(typeof(HierarchicalProfilesResponseDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> ListHierarchyAsync(
@@ -1344,7 +1348,7 @@ public class ProfilesController(
             }
 
             ResolveProfileForModelResultDto result = await _profilesService.ResolveOrImportProfileForModelAsync(
-                httpClient, modelId, request.ProfileType, request.ProfileName, ct);
+                httpClient, modelId, request.ProfileType, request.ProfileName, GetProfileViewer(), ct);
 
             if (!string.IsNullOrEmpty(result.Error))
             {
@@ -1462,9 +1466,9 @@ public class ProfilesController(
     /// Requires an interactive session: this controller is class-gated by the broad
     /// <c>slicing:submit</c> permission, which a Desktop-exchange token legitimately holds in order
     /// to submit calibration slice jobs. Profile-state mutation is not part of that intent, so
-    /// exchange tokens are denied here while normal sessions are unaffected. A process-profile
-    /// source that is another user's private profile returns 404, like a missing id, because a
-    /// clone copies the source's full settings (issue #3174).
+    /// exchange tokens are denied here while normal sessions are unaffected. A process, filament,
+    /// or machine source that is another user's private profile returns 404, like a missing id,
+    /// because a clone copies the source's full settings (issues #3174, #3180).
     /// </remarks>
     [HttpPost("clone")]
     [Authorize(Policy = Farm.Infrastructure.Authorization.InteractiveSessionRequirement.PolicyName)]

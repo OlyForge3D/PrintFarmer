@@ -26,7 +26,8 @@ public class EfFilamentProfileRepository(SlicerDbContext db) : IFilamentProfileR
 
         if (userId.HasValue)
         {
-            query = query.Where(p => p.CreatedByUserId == userId || p.IsSystem);
+            // Same visibility rule as process profiles and ProfileViewer: owned, public, or system (#3180).
+            query = query.Where(p => p.CreatedByUserId == userId || p.IsPublic || p.IsSystem);
         }
 
         return await query.OrderBy(p => p.Material).ToListAsync(ct);

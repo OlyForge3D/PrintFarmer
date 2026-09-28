@@ -54,4 +54,46 @@ public class ProfileViewerTests
         Assert.True(new ProfileViewer(Owner, IsAdmin: false).CanView(privateProfile));
         _ = Assert.Throws<ArgumentNullException>(() => other.CanView((ProcessProfile)null!));
     }
+
+    [Theory]
+    [InlineData(false, false, false)]
+    [InlineData(true, false, true)]
+    [InlineData(false, true, true)]
+    public void CanView_FilamentEntity_AppliesSameRuleAsProcess(bool isSystem, bool isPublic, bool expectedForOther)
+    {
+        FilamentProfile profile = new() { Name = "f", IsSystem = isSystem, IsPublic = isPublic, CreatedByUserId = Owner };
+
+        Assert.Equal(expectedForOther, new ProfileViewer(Other, IsAdmin: false).CanView(profile));
+        Assert.Equal(expectedForOther, new ProfileViewer(null, IsAdmin: false).CanView(profile));
+        Assert.True(new ProfileViewer(Owner, IsAdmin: false).CanView(profile));
+        Assert.True(new ProfileViewer(Other, IsAdmin: true).CanView(profile));
+        _ = Assert.Throws<ArgumentNullException>(() => ProfileViewer.Administrator.CanView((FilamentProfile)null!));
+    }
+
+    [Theory]
+    [InlineData(false, false, false)]
+    [InlineData(true, false, true)]
+    [InlineData(false, true, true)]
+    public void CanView_MachineEntity_AppliesSameRuleAsProcess(bool isSystem, bool isPublic, bool expectedForOther)
+    {
+        MachineProfile profile = new() { Name = "m", IsSystem = isSystem, IsPublic = isPublic, CreatedByUserId = Owner };
+
+        Assert.Equal(expectedForOther, new ProfileViewer(Other, IsAdmin: false).CanView(profile));
+        Assert.Equal(expectedForOther, new ProfileViewer(null, IsAdmin: false).CanView(profile));
+        Assert.True(new ProfileViewer(Owner, IsAdmin: false).CanView(profile));
+        Assert.True(new ProfileViewer(Other, IsAdmin: true).CanView(profile));
+        _ = Assert.Throws<ArgumentNullException>(() => ProfileViewer.Administrator.CanView((MachineProfile)null!));
+    }
+
+    [Fact]
+    public void CanView_OwnerlessPrivateFilamentAndMachine_HiddenFromEveryNonAdmin()
+    {
+        FilamentProfile filament = new() { Name = "f", IsSystem = false, IsPublic = false, CreatedByUserId = null };
+        MachineProfile machine = new() { Name = "m", IsSystem = false, IsPublic = false, CreatedByUserId = null };
+
+        Assert.False(new ProfileViewer(null, IsAdmin: false).CanView(filament));
+        Assert.False(new ProfileViewer(null, IsAdmin: false).CanView(machine));
+        Assert.False(new ProfileViewer(Other, IsAdmin: false).CanView(filament));
+        Assert.False(new ProfileViewer(Other, IsAdmin: false).CanView(machine));
+    }
 }

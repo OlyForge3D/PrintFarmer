@@ -75,7 +75,7 @@ public class ProfilesServiceResolveOrImportTests
         using HttpClient httpClient = new(new StubHttpMessageHandler(_ => throw new InvalidOperationException("Worker should not be called for an already-imported profile")));
 
         ResolveProfileForModelResultDto result = await svc.ResolveOrImportProfileForModelAsync(
-            httpClient, modelId, ProfileResolutionType.Machine, ModelName, CancellationToken.None);
+            httpClient, modelId, ProfileResolutionType.Machine, ModelName, ProfileViewer.Administrator, CancellationToken.None);
 
         Assert.Null(result.Error);
         Assert.False(result.Imported);
@@ -167,7 +167,7 @@ public class ProfilesServiceResolveOrImportTests
             new List<MachineProfileDto> { workerMachineProfile }));
 
         ResolveProfileForModelResultDto result = await svc.ResolveOrImportProfileForModelAsync(
-            httpClient, modelId, ProfileResolutionType.Machine, ModelName, CancellationToken.None);
+            httpClient, modelId, ProfileResolutionType.Machine, ModelName, ProfileViewer.Administrator, CancellationToken.None);
 
         Assert.Null(result.Error);
         Assert.True(result.Imported);
@@ -219,7 +219,7 @@ public class ProfilesServiceResolveOrImportTests
         using HttpClient httpClient = new(new StubHttpMessageHandler(_ => throw new InvalidOperationException("No HTTP call should be attempted when no worker is registered")));
 
         ResolveProfileForModelResultDto result = await svc.ResolveOrImportProfileForModelAsync(
-            httpClient, modelId, ProfileResolutionType.Machine, ModelName, CancellationToken.None);
+            httpClient, modelId, ProfileResolutionType.Machine, ModelName, ProfileViewer.Administrator, CancellationToken.None);
 
         Assert.Null(result.ProfileId);
         Assert.False(result.Imported);
@@ -356,7 +356,7 @@ public class ProfilesServiceResolveOrImportTests
         using HttpClient httpClient = new(new StubHttpMessageHandler(_ => throw new InvalidOperationException("Worker should not be called when a model-scoped candidate already exists")));
 
         ResolveProfileForModelResultDto result = await svc.ResolveOrImportProfileForModelAsync(
-            httpClient, modelId, ProfileResolutionType.Process, ProcessName, CancellationToken.None);
+            httpClient, modelId, ProfileResolutionType.Process, ProcessName, ProfileViewer.Administrator, CancellationToken.None);
 
         Assert.Null(result.Error);
         Assert.False(result.Imported);
@@ -415,7 +415,7 @@ public class ProfilesServiceResolveOrImportTests
         using HttpClient httpClient = new(new StubHttpMessageHandler(_ => throw new InvalidOperationException("Worker should not be called; this test asserts the ambiguity is surfaced as an error, not a worker retry")));
 
         ResolveProfileForModelResultDto result = await svc.ResolveOrImportProfileForModelAsync(
-            httpClient, modelId, ProfileResolutionType.Filament, FilamentName, CancellationToken.None);
+            httpClient, modelId, ProfileResolutionType.Filament, FilamentName, ProfileViewer.Administrator, CancellationToken.None);
 
         // Neither the DB lookup nor the (attempted) import may silently pick one of the two
         // ambiguous rows — an explicit error is the only acceptable outcome here.
@@ -528,7 +528,7 @@ public class ProfilesServiceResolveOrImportTests
             new List<MachineProfileDto> { workerMachineProfile }));
 
         ResolveProfileForModelResultDto result = await svc.ResolveOrImportProfileForModelAsync(
-            httpClient, modelId, ProfileResolutionType.Machine, ModelName, CancellationToken.None);
+            httpClient, modelId, ProfileResolutionType.Machine, ModelName, ProfileViewer.Administrator, CancellationToken.None);
 
         Assert.Null(result.Error);
         Assert.False(result.Imported);

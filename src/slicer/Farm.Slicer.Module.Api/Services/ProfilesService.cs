@@ -365,7 +365,7 @@ public class ProfilesService(
     /// <summary>
     /// Retrieves all available profiles organized by type with full extended details.
     /// </summary>
-    /// <param name="viewer">Caller whose visibility scope filters private process profiles (issue #3174)</param>
+    /// <param name="viewer">Caller whose visibility scope filters private process, filament, and machine profiles (issues #3174, #3180)</param>
     /// <param name="ct">Cancellation token for the async operation</param>
     /// <returns>
     /// An ExtendedProfilesResponseDto containing:
@@ -409,7 +409,8 @@ public class ProfilesService(
             });
         }
 
-        IReadOnlyList<FilamentProfile> filamentProfileEntities = await _filamentProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: true, userId: null, ct);
+        IEnumerable<FilamentProfile> filamentProfileEntities = (await _filamentProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: true, userId: null, ct))
+            .Where(viewer.CanView);
         foreach (FilamentProfile p in filamentProfileEntities)
         {
             filamentProfiles.Add(new FilamentProfileListItemDto
@@ -428,7 +429,8 @@ public class ProfilesService(
             });
         }
 
-        IReadOnlyList<MachineProfile> machineProfileEntities = await _machineProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: true, userId: null, ct);
+        IEnumerable<MachineProfile> machineProfileEntities = (await _machineProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: true, userId: null, ct))
+            .Where(viewer.CanView);
         foreach (MachineProfile p in machineProfileEntities)
         {
             (double? nozzleDiameter, string? printerVariant) = ExtractNozzleDiameterAndVariant(p.SettingsJson, p.RawJson);
@@ -518,7 +520,7 @@ public class ProfilesService(
     /// </summary>
     /// <param name="manufacturer">Optional filter to retrieve only profiles for a specific manufacturer</param>
     /// <param name="machineProfileId">Optional filter to retrieve only profiles compatible with a specific machine</param>
-    /// <param name="viewer">Caller whose visibility scope filters private process profiles (issue #3174)</param>
+    /// <param name="viewer">Caller whose visibility scope filters private process, filament, and machine profiles (issues #3174, #3180)</param>
     /// <param name="ct">Cancellation token for the async operation</param>
     /// <returns>
     /// A HierarchicalProfilesResponseDto containing profiles organized as:
@@ -541,8 +543,10 @@ public class ProfilesService(
         ArgumentNullException.ThrowIfNull(viewer);
         string? manufacturerFilter = string.IsNullOrWhiteSpace(manufacturer) ? null : manufacturer.Trim();
 
-        // Return all profiles (system + custom) from database for browsing
-        IReadOnlyList<MachineProfile> machineProfilesAll = await _machineProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: true, userId: null, ct);
+        // Return all profiles (system + custom) the caller may see from database for browsing
+        List<MachineProfile> machineProfilesAll = (await _machineProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: true, userId: null, ct))
+            .Where(viewer.CanView)
+            .ToList();
 
         MachineProfile? selectedMachine = null;
         if (machineProfileId.HasValue)
@@ -550,7 +554,8 @@ public class ProfilesService(
             selectedMachine = machineProfilesAll.FirstOrDefault(m => m.Id == machineProfileId.Value)
                 ?? await _machineProfileRepo.GetByIdAsync(machineProfileId.Value, ct);
 
-            if (selectedMachine is null)
+            // Another user's private machine is reported exactly like a missing one so its existence is not disclosed (#3180).
+            if (selectedMachine is null || !viewer.CanView(selectedMachine))
             {
                 throw new KeyNotFoundException($"Machine profile {machineProfileId.Value} not found");
             }
@@ -613,7 +618,7 @@ public class ProfilesService(
 
         // Return all profiles (system + custom) from database for browsing
         IReadOnlyList<FilamentProfile> filamentProfilesAll = await _filamentProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: true, userId: null, ct);
-        IEnumerable<FilamentProfile> filamentProfilesFiltered = filamentProfilesAll;
+        IEnumerable<FilamentProfile> filamentProfilesFiltered = filamentProfilesAll.Where(viewer.CanView);
 
         // Filter filaments by CompatiblePrinters if a specific machine is selected
         // Profiles without CompatiblePrinters are excluded - only show explicitly compatible profiles
@@ -1502,15 +1507,17 @@ public class ProfilesService(
     /// "not yet imported for this model" and falls through to worker-backed resolution rather than
     /// risking a false match.
     /// </summary>
-    private async Task<Guid?> FindExistingProfileIdByNameAsync(ProfileResolutionType profileType, string profileName, Guid printerModelId, CancellationToken ct)
+    private async Task<Guid?> FindExistingProfileIdByNameAsync(ProfileResolutionType profileType, string profileName, Guid printerModelId, ProfileViewer viewer, CancellationToken ct)
     {
+        // Only profiles the caller may see are candidates, so a name can never resolve to another
+        // user's private profile id (#3180).
         switch (profileType)
         {
             case ProfileResolutionType.Machine:
             {
                 IReadOnlyList<MachineProfile> machines = await _machineProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: true, userId: null, ct);
                 List<MachineProfile> candidates = machines
-                    .Where(m => string.Equals(m.Name, profileName, StringComparison.OrdinalIgnoreCase))
+                    .Where(m => viewer.CanView(m) && string.Equals(m.Name, profileName, StringComparison.OrdinalIgnoreCase))
                     .ToList();
                 return SelectCompatibleMachineCandidate(candidates, printerModelId)?.Id;
             }
@@ -1519,9 +1526,9 @@ public class ProfilesService(
             {
                 IReadOnlyList<ProcessProfile> processes = await _processProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: true, userId: null, ct);
                 List<ProcessProfile> candidates = processes
-                    .Where(p => string.Equals(p.Name, profileName, StringComparison.OrdinalIgnoreCase))
+                    .Where(p => viewer.CanView(p) && string.Equals(p.Name, profileName, StringComparison.OrdinalIgnoreCase))
                     .ToList();
-                IReadOnlyList<string> modelMachineNames = await GetMachineNamesForModelAsync(printerModelId, ct);
+                IReadOnlyList<string> modelMachineNames = await GetMachineNamesForModelAsync(printerModelId, viewer, ct);
                 return SelectCompatibleProfileCandidate(
                     candidates, printerModelId, modelMachineNames, p => p.PrinterModelId, p => p.CompatiblePrinters)?.Id;
             }
@@ -1530,9 +1537,9 @@ public class ProfilesService(
             {
                 IReadOnlyList<FilamentProfile> filaments = await _filamentProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: true, userId: null, ct);
                 List<FilamentProfile> candidates = filaments
-                    .Where(f => string.Equals(f.Name, profileName, StringComparison.OrdinalIgnoreCase))
+                    .Where(f => viewer.CanView(f) && string.Equals(f.Name, profileName, StringComparison.OrdinalIgnoreCase))
                     .ToList();
-                IReadOnlyList<string> modelMachineNames = await GetMachineNamesForModelAsync(printerModelId, ct);
+                IReadOnlyList<string> modelMachineNames = await GetMachineNamesForModelAsync(printerModelId, viewer, ct);
                 return SelectCompatibleProfileCandidate(
                     candidates, printerModelId, modelMachineNames, _ => null, f => f.CompatiblePrinters)?.Id;
             }
@@ -1547,11 +1554,11 @@ public class ProfilesService(
     /// same-named process/filament candidates via their <c>CompatiblePrinters</c> lists (which store
     /// machine profile names, not catalog model names/aliases).
     /// </summary>
-    private async Task<IReadOnlyList<string>> GetMachineNamesForModelAsync(Guid printerModelId, CancellationToken ct)
+    private async Task<IReadOnlyList<string>> GetMachineNamesForModelAsync(Guid printerModelId, ProfileViewer viewer, CancellationToken ct)
     {
         IReadOnlyList<MachineProfile> machines = await _machineProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: true, userId: null, ct);
         return machines
-            .Where(m => m.PrinterModelId == printerModelId)
+            .Where(m => m.PrinterModelId == printerModelId && viewer.CanView(m))
             .Select(m => m.Name)
             .ToList();
     }
@@ -1635,8 +1642,10 @@ public class ProfilesService(
         Guid printerModelId,
         ProfileResolutionType profileType,
         string profileName,
+        ProfileViewer viewer,
         CancellationToken ct)
     {
+        ArgumentNullException.ThrowIfNull(viewer);
         ResolveProfileForModelResultDto result = new()
         {
             PrinterModelId = printerModelId,
@@ -1654,7 +1663,7 @@ public class ProfilesService(
         {
             // Already-imported case: no worker call, no admin action needed — this is the common
             // path once a model has been used at least once (#2004).
-            Guid? existingId = await FindExistingProfileIdByNameAsync(profileType, profileName, printerModelId, ct);
+            Guid? existingId = await FindExistingProfileIdByNameAsync(profileType, profileName, printerModelId, viewer, ct);
             if (existingId.HasValue)
             {
                 result.ProfileId = existingId;
@@ -1710,7 +1719,7 @@ public class ProfilesService(
                 // already-visible row. Re-check the DB before declaring failure so a genuine race
                 // resolves as success rather than a false "not found or incompatible" error (#2004
                 // review finding).
-                Guid? wonByConcurrentImport = await FindExistingProfileIdByNameAsync(profileType, profileName, printerModelId, ct);
+                Guid? wonByConcurrentImport = await FindExistingProfileIdByNameAsync(profileType, profileName, printerModelId, viewer, ct);
                 if (wonByConcurrentImport.HasValue)
                 {
                     result.ProfileId = wonByConcurrentImport;
@@ -1722,7 +1731,7 @@ public class ProfilesService(
                 return result;
             }
 
-            Guid? importedId = await FindExistingProfileIdByNameAsync(profileType, profileName, printerModelId, ct);
+            Guid? importedId = await FindExistingProfileIdByNameAsync(profileType, profileName, printerModelId, viewer, ct);
             if (!importedId.HasValue)
             {
                 result.Error = $"Profile '{profileName}' was imported but could not be located afterward";
@@ -2894,7 +2903,7 @@ public class ProfilesService(
             SlicerType.OrcaSlicer, includeSystem: true, userId: null, ct);
 
         List<string> machineNames = machineProfiles
-            .Where(p => p.PrinterModelId == printerModelId && !string.IsNullOrEmpty(p.Name))
+            .Where(p => p.PrinterModelId == printerModelId && !string.IsNullOrEmpty(p.Name) && viewer.CanView(p))
             .Select(p => p.Name!)
             .ToList();
 
@@ -2913,7 +2922,7 @@ public class ProfilesService(
             SlicerType.OrcaSlicer, includeSystem: true, userId: null, ct);
 
         List<string> filamentNames = filamentProfiles
-            .Where(p => !string.IsNullOrEmpty(p.Name))
+            .Where(p => !string.IsNullOrEmpty(p.Name) && viewer.CanView(p))
             .Select(p => p.Name!)
             .ToList();
 
@@ -3801,8 +3810,8 @@ public class ProfilesService(
         return profileType switch
         {
             "process" => await CloneProcessProfileAsync(request, userId, viewer, ct),
-            "filament" => await CloneFilamentProfileAsync(request, userId, ct),
-            "machine" => await CloneMachineProfileAsync(request, userId, ct),
+            "filament" => await CloneFilamentProfileAsync(request, userId, viewer, ct),
+            "machine" => await CloneMachineProfileAsync(request, userId, viewer, ct),
             _ => throw new ArgumentException($"Invalid profile type: '{request.ProfileType}'. Must be 'machine', 'filament', or 'process'.")
         };
     }
@@ -3859,10 +3868,12 @@ public class ProfilesService(
         };
     }
 
-    private async Task<CloneSingleProfileResponseDto> CloneFilamentProfileAsync(CloneSingleProfileRequestDto request, Guid userId, CancellationToken ct)
+    private async Task<CloneSingleProfileResponseDto> CloneFilamentProfileAsync(CloneSingleProfileRequestDto request, Guid userId, ProfileViewer viewer, CancellationToken ct)
     {
         FilamentProfile? source = await _filamentProfileRepo.GetByIdAsync(request.SourceProfileId, ct);
-        if (source == null)
+
+        // Cloning copies the source's full settings, so an invisible source is treated as missing (#3180).
+        if (source == null || !viewer.CanView(source))
         {
             throw new KeyNotFoundException($"Filament profile with ID {request.SourceProfileId} not found.");
         }
@@ -3904,10 +3915,12 @@ public class ProfilesService(
         };
     }
 
-    private async Task<CloneSingleProfileResponseDto> CloneMachineProfileAsync(CloneSingleProfileRequestDto request, Guid userId, CancellationToken ct)
+    private async Task<CloneSingleProfileResponseDto> CloneMachineProfileAsync(CloneSingleProfileRequestDto request, Guid userId, ProfileViewer viewer, CancellationToken ct)
     {
         MachineProfile? source = await _machineProfileRepo.GetByIdAsync(request.SourceProfileId, ct);
-        if (source == null)
+
+        // Cloning copies the source's full settings, so an invisible source is treated as missing (#3180).
+        if (source == null || !viewer.CanView(source))
         {
             throw new KeyNotFoundException($"Machine profile with ID {request.SourceProfileId} not found.");
         }
