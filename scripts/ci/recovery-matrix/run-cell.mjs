@@ -1083,26 +1083,59 @@ function restartHostContainer(container) {
 
 // Inserts one printer row using only required columns, so the physical reconciliation gate sees
 // a non-empty inventory regardless of optional schema columns.
+// Inserts one placeholder printer by filling every required column generically. A required
+// foreign key takes an existing parent row, and an empty parent table (e.g. `Manufacturers`,
+// which only the runtime seed service populates) is seeded the same way first.
 function seedPrinterSql() {
-  return `DO $$
-DECLARE cols text; vals text;
+  return `CREATE FUNCTION pg_temp.recovery_matrix_seed(tbl text) RETURNS void LANGUAGE plpgsql AS $fn$
+DECLARE cols text; vals text; parent record; parent_rows bigint;
 BEGIN
-  SELECT string_agg(quote_ident(column_name), ',' ORDER BY ordinal_position),
+  FOR parent IN
+    SELECT DISTINCT ccu.table_name AS ref_table
+      FROM information_schema.table_constraints tc
+      JOIN information_schema.key_column_usage kcu
+        ON kcu.constraint_name = tc.constraint_name AND kcu.table_schema = tc.table_schema
+      JOIN information_schema.constraint_column_usage ccu
+        ON ccu.constraint_name = tc.constraint_name AND ccu.table_schema = tc.table_schema
+      JOIN information_schema.columns c
+        ON c.table_schema = kcu.table_schema AND c.table_name = kcu.table_name AND c.column_name = kcu.column_name
+     WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = 'public' AND tc.table_name = tbl
+       AND c.is_nullable = 'NO' AND ccu.table_name <> tbl
+  LOOP
+    EXECUTE format('SELECT count(*) FROM public.%I', parent.ref_table) INTO parent_rows;
+    IF parent_rows = 0 THEN
+      PERFORM pg_temp.recovery_matrix_seed(parent.ref_table);
+    END IF;
+  END LOOP;
+
+  SELECT string_agg(quote_ident(c.column_name), ',' ORDER BY c.ordinal_position),
          string_agg(CASE
-           WHEN data_type IN ('integer', 'bigint', 'smallint', 'numeric', 'double precision', 'real') THEN '0'
-           WHEN data_type = 'boolean' THEN 'false'
-           WHEN data_type = 'uuid' THEN quote_literal(gen_random_uuid()::text) || '::uuid'
-           WHEN data_type LIKE 'timestamp%' THEN 'now()'
-           WHEN data_type IN ('json', 'jsonb') THEN quote_literal('{}')
-           WHEN data_type = 'bytea' THEN quote_literal('') || '::bytea'
-           ELSE quote_literal('recovery-matrix-printer')
-         END, ',' ORDER BY ordinal_position)
+           WHEN fk.ref_table IS NOT NULL THEN format('(SELECT %I FROM public.%I LIMIT 1)', fk.ref_column, fk.ref_table)
+           WHEN c.data_type IN ('integer', 'bigint', 'smallint', 'numeric', 'double precision', 'real') THEN '0'
+           WHEN c.data_type = 'boolean' THEN 'false'
+           WHEN c.data_type = 'uuid' THEN quote_literal(gen_random_uuid()::text) || '::uuid'
+           WHEN c.data_type LIKE 'timestamp%' THEN 'now()'
+           WHEN c.data_type IN ('json', 'jsonb') THEN quote_literal('{}')
+           WHEN c.data_type = 'bytea' THEN quote_literal('') || '::bytea'
+           ELSE quote_literal('recovery-matrix-' || lower(tbl))
+         END, ',' ORDER BY c.ordinal_position)
     INTO cols, vals
-    FROM information_schema.columns
-   WHERE table_schema = 'public' AND table_name = 'Printers'
-     AND is_nullable = 'NO' AND column_default IS NULL AND is_identity = 'NO';
-  EXECUTE format('INSERT INTO "Printers" (%s) VALUES (%s)', cols, vals);
-END $$;`;
+    FROM information_schema.columns c
+    LEFT JOIN LATERAL (
+      SELECT ccu.table_name AS ref_table, ccu.column_name AS ref_column
+        FROM information_schema.table_constraints tc
+        JOIN information_schema.key_column_usage kcu
+          ON kcu.constraint_name = tc.constraint_name AND kcu.table_schema = tc.table_schema
+        JOIN information_schema.constraint_column_usage ccu
+          ON ccu.constraint_name = tc.constraint_name AND ccu.table_schema = tc.table_schema
+       WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = 'public' AND tc.table_name = tbl
+         AND kcu.column_name = c.column_name AND ccu.table_name <> tbl
+       LIMIT 1) fk ON true
+   WHERE c.table_schema = 'public' AND c.table_name = tbl
+     AND c.is_nullable = 'NO' AND c.column_default IS NULL AND c.is_identity = 'NO';
+  EXECUTE format('INSERT INTO public.%I (%s) VALUES (%s)', tbl, cols, vals);
+END $fn$;
+SELECT pg_temp.recovery_matrix_seed('Printers');`;
 }
 
 function waitForBackgroundExit(pid, exitPath) {

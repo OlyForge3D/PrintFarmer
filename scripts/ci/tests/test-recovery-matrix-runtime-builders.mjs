@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 
@@ -117,6 +117,32 @@ test('semantic host-state continuity allows advancing replay history but rejects
       () => assertHostStateContinuity(before, readHostStateSnapshot(afterRoot), { targetVersion: '1.0.0-insider.2' }),
       /host_state_epoch_regressed|host_state_high_water_regressed|host_state_identities_missing/,
     );
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
+test('host-state snapshot reads a garbled replay store without crashing and fails continuity closed', () => {
+  const scratch = path.join(scratchRoot, `host-state-garbled-${process.pid}-${Date.now()}`);
+  const beforeRoot = path.join(scratch, 'before');
+  const afterRoot = path.join(scratch, 'after');
+  mkdirSync(beforeRoot, { recursive: true });
+  mkdirSync(afterRoot, { recursive: true });
+  try {
+    writeHostState(beforeRoot, { epoch: 1, highWater: { release: 1 }, identities: { prior: { version: '1.0.0-insider.1' } } });
+    writeHostState(afterRoot, { epoch: 1, highWater: { release: 1 }, identities: { prior: { version: '1.0.0-insider.1' } } });
+    const garbled = '{"Version":1,"Epoch":0,"Checksum":"sha256:tampered"';
+    writeFileSync(path.join(afterRoot, 'host-update-replay.json'), garbled);
+    appendFileSync(path.join(afterRoot, 'replay-anchor.journal'), 'not-json\n');
+
+    const after = readHostStateSnapshot(afterRoot);
+    assert.equal(after.replay, null);
+    assert.equal(after.rawReplay, garbled);
+    assert.equal(after.replayChecksumValid, false);
+    assert.equal(after.anchorValid, false);
+    assert.deepEqual(after.journalEntries.at(-1), { unparsable: 'not-json' });
+    assert.notDeepEqual(after, readHostStateSnapshot(beforeRoot));
+    assert.throws(() => assertHostStateContinuity(readHostStateSnapshot(beforeRoot), after), /host_state_replay_checksum_invalid/);
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }

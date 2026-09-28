@@ -2,21 +2,34 @@ import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+// Faults may garble any of these files on purpose, so an unparsable file reads as `null` (or an
+// `{ unparsable }` journal entry) with its raw text kept for mutation comparison. Continuity then
+// fails closed through the checksum/anchor validity flags instead of crashing the reader.
+function tryParseJson(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
 export function readHostStateSnapshot(root) {
   const replayPath = join(root, 'host-update-replay.json');
   const anchorPath = join(root, 'replay-anchor.json');
   const journalPath = join(root, 'replay-anchor.journal');
-  const replay = existsSync(replayPath) ? JSON.parse(readFileSync(replayPath, 'utf8')) : null;
-  const anchor = existsSync(anchorPath) ? JSON.parse(readFileSync(anchorPath, 'utf8')) : null;
+  const rawReplay = existsSync(replayPath) ? readFileSync(replayPath, 'utf8') : '';
+  const rawAnchor = existsSync(anchorPath) ? readFileSync(anchorPath, 'utf8') : '';
+  const replay = rawReplay ? tryParseJson(rawReplay) : null;
+  const anchor = rawAnchor ? tryParseJson(rawAnchor) : null;
   const journalEntries = existsSync(journalPath)
-    ? readFileSync(journalPath, 'utf8').split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line))
+    ? readFileSync(journalPath, 'utf8').split(/\r?\n/).filter(Boolean).map((line) => tryParseJson(line) ?? { unparsable: line })
     : [];
-  const rawReplay = replay ? readFileSync(replayPath, 'utf8') : '';
   return {
     replay,
     anchor,
     journalEntries,
     rawReplay,
+    rawAnchor,
     replayChecksumValid: replay ? validateReplayChecksum(replay) : false,
     anchorValid: replay && anchor ? validateAnchor(anchor, rawReplay, journalEntries) : false,
   };
