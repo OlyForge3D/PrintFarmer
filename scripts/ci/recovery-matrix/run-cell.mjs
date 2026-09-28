@@ -389,9 +389,15 @@ try {
       '<protected-backup.json>': protectedBackupPath,
     },
   });
+  const targetReplayIdentity = readImportDecisionRecords(decisionRecords).at(-1)?.replay?.correlationId?.replace(/^decision:/, '');
   runFaultHook('before-activate', { runRoot, deploymentRoot, stagingDir: targetStaging, bundlePath });
   const activationStarted = Date.now();
-  const targetActivation = executePackagedStepDuringActivation({
+  const managedActivationFault = shouldInjectManagedActivationFault(cellSpec);
+  const customDuringActivationHook = Boolean(faultHooks['during-activate']);
+  const activationFaultPaths = managedActivationFault ? enableManagedActivationFault(runRoot, {
+    mode: customDuringActivationHook ? 'pause' : 'fail-now',
+  }) : null;
+  const activationOperation = {
     checkpointName: 'activate-target',
     autoOk: false,
     cli,
@@ -404,10 +410,31 @@ try {
       '<staging-dir>': targetStaging,
       '<trusted_root.json>': trustedRootPath,
     },
-    markerPath: join(runRoot, 'host-update', 'state', 'journal.ndjson'),
-    hookContext: { runRoot, deploymentRoot, stagingDir: targetStaging, bundlePath },
-  });
-  if (!targetActivation.stdout.includes('Completed') && !targetActivation.stdout.includes('Activated')) {
+    allowedExitCodes: managedActivationFault ? [0, 6] : [0],
+  };
+  const targetActivation = managedActivationFault && !customDuringActivationHook
+    ? executePackagedStep(activationOperation)
+    : executePackagedStepDuringActivation({
+      ...activationOperation,
+      markerPath: activationFaultPaths?.pausePath ?? join(runRoot, 'host-update', 'state', 'journal.ndjson'),
+      hookContext: {
+        runRoot,
+        deploymentRoot,
+        stagingDir: targetStaging,
+        bundlePath,
+        faultDecisionPath: activationFaultPaths?.decisionPath,
+        faultPausePath: activationFaultPaths?.pausePath,
+      },
+      managedActivationFault,
+      faultDecisionPath: activationFaultPaths?.decisionPath,
+    });
+  if (managedActivationFault && !customDuringActivationHook) {
+    faultState.injected = true;
+  }
+  const activationReachedExpectedState = targetActivation.stdout.includes('Completed')
+    || targetActivation.stdout.includes('Activated')
+    || (managedActivationFault && targetActivation.stdout.includes('RecoveryRequired'));
+  if (!activationReachedExpectedState) {
     checkpoints.failed('activate-target');
     throw cellFailure('target_activation_did_not_complete', { actual: 'RecoveryRequired', exitCode: targetActivation.exitCode });
   }
@@ -466,7 +493,7 @@ try {
   checkpoints.ok(`migration-heads-continuous:${afterRecovery.migrationHeads.join(',') || 'empty'}`);
   assertEqualJson('volume-hashes-continuous', beforeRecovery.volumeHashes, afterRecovery.volumeHashes);
   checkpoints.ok('blob-config-key-volume-hashes-continuous');
-  assertHostStateContinuity(beforeRecovery.hostState, afterRecovery.hostState, { targetVersion: target.version });
+  assertHostStateContinuity(beforeRecovery.hostState, afterRecovery.hostState, { targetIdentity: targetReplayIdentity });
   checkpoints.ok('protected-replay-history-continuous');
   const runningDigest = runningComposeImageDigest(env, 'printfarmer');
   if (runningDigest !== priorImages.monolith.indexDigest) {
@@ -653,9 +680,9 @@ function runPackagedOperation({ cli, repo, cosign, instructionsPath, operationId
   }
   return { exitCode: status, stdout: result.stdout ?? '', stderr: result.stderr ?? '' };
 }
-function executePackagedStepDuringActivation({ checkpointName, markerPath, hookContext, autoOk = true, ...operation }) {
+function executePackagedStepDuringActivation({ checkpointName, markerPath, hookContext, autoOk = true, managedActivationFault = false, faultDecisionPath, ...operation }) {
   try {
-    const result = runPackagedOperationDuringActivation({ ...operation, markerPath, hookContext });
+    const result = runPackagedOperationDuringActivation({ ...operation, markerPath, hookContext, managedActivationFault, faultDecisionPath });
     if (autoOk) {
       checkpoints.ok(checkpointName);
     }
@@ -676,6 +703,8 @@ function runPackagedOperationDuringActivation({
   replacements,
   markerPath,
   hookContext,
+  managedActivationFault = false,
+  faultDecisionPath,
   allowedExitCodes = [0],
 }) {
   const argv = packagedOperationArgv({ cli, instructionsPath, operationId, replacements });
@@ -702,7 +731,13 @@ function runPackagedOperationDuringActivation({
     waitForDuringActivationPoint({
       markerAdvanced: () => fileMarkerAdvanced(markerPath, baseline),
       isComplete: () => existsSync(exitPath) || !processAlive(pid),
-      runHook: () => runFaultHook('during-activate', hookContext),
+      runHook: () => {
+        runFaultHook('during-activate', { ...hookContext, activationPid: pid });
+        if (managedActivationFault && faultDecisionPath && !existsSync(faultDecisionPath)) {
+          writeFileSync(faultDecisionPath, 'fail');
+          faultState.injected = true;
+        }
+      },
       timeoutMs: 60_000,
     });
     const status = waitForBackgroundExit(pid, exitPath);
@@ -830,7 +865,7 @@ function evidenceBundleSha256(path) {
 
 function runFaultHook(point, context) {
   if (!hasFaultHooks(faultHooks) || !faultHooks[point]) {
-    return;
+    return false;
   }
   try {
     invokeFaultHook({
@@ -844,10 +879,23 @@ function runFaultHook(point, context) {
       }),
     });
     faultState.injected = true;
+    return true;
   } catch (error) {
     error.reason = `fault_hook_failed:${point}`;
     throw error;
   }
+}
+
+function shouldInjectManagedActivationFault(spec) {
+  return spec.scenario === 'recover' || spec.scenario === 'needs-operator-recover';
+}
+
+function enableManagedActivationFault(root, { mode }) {
+  const enablePath = join(root, 'fault-compose-up.enable');
+  const pausePath = join(root, 'fault-compose-up.pause');
+  const decisionPath = join(root, 'fault-compose-up.decision');
+  writeFileSync(enablePath, mode);
+  return { enablePath, pausePath, decisionPath };
 }
 
 function recordFaultCheckpoint() {

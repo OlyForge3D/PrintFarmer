@@ -121,6 +121,19 @@ function writeSqlServerToolShims(runRoot, databaseContainer) {
   const sqlcmd = join(runRoot, 'sqlcmd');
   writeFileSync(sqlcmd, `#!/usr/bin/env bash
 set -euo pipefail
+query=""
+for ((i=1; i<=$#; i++)); do
+  if [[ "\${!i}" == "-Q" ]]; then
+    next=$((i + 1))
+    query="\${!next:-}"
+    break
+  fi
+done
+if [[ "$query" =~ TO[[:space:]]+DISK[[:space:]]*=[[:space:]]*N\\'([^\\']+)\\' ]]; then
+  backup_file="\${BASH_REMATCH[1]}"
+  backup_dir="$(dirname "$backup_file")"
+  /usr/bin/docker exec ${databaseContainer} sh -c 'mkdir -p "$1" && chmod 0777 "$1"' sh "$backup_dir"
+fi
 /usr/bin/docker exec ${databaseContainer} /opt/mssql-tools18/bin/sqlcmd -C "$@"
 `);
   chmodSync(sqlcmd, 0o755);
