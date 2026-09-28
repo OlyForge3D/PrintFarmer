@@ -1,4 +1,5 @@
 import { expectedCellOutcome } from './evidence.mjs';
+import { faultCellIds, faultCells } from './fault-cells.mjs';
 
 const defineCell = ({ id, cell, scenario, expected }) => Object.freeze({
   id,
@@ -131,12 +132,16 @@ export const cells = Object.freeze([
 ]);
 
 export const cellIds = Object.freeze(cells.map((entry) => entry.id));
-export const cellsById = Object.freeze(Object.fromEntries(cells.map((entry) => [entry.id, entry])));
+// Fault cells (#3101) run separately from the topology matrix: `all` keeps its meaning and
+// `faults` selects every fault cell.
+export const faultCellList = faultCells;
+export const runnableCellIds = Object.freeze([...cellIds, ...faultCellIds]);
+export const cellsById = Object.freeze(Object.fromEntries([...cells, ...faultCellList].map((entry) => [entry.id, entry])));
 
 export function resolveCell(id) {
   const cell = cellsById[id];
   if (!cell) {
-    throw new Error(`unknown recovery matrix cell '${id}'. Expected one of: ${cellIds.join(', ')}`);
+    throw new Error(`unknown recovery matrix cell '${id}'. Expected one of: ${runnableCellIds.join(', ')}`);
   }
   return cell;
 }
@@ -144,6 +149,9 @@ export function resolveCell(id) {
 export function resolveCellList(value) {
   if (value === 'all') {
     return cells;
+  }
+  if (value === 'faults') {
+    return faultCellList;
   }
   return [resolveCell(value)];
 }

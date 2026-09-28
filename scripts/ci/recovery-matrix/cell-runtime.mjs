@@ -114,16 +114,18 @@ export function baseEvidence({
   networkAttempts = [],
   cell = defaultCell,
 }) {
+  // A cell's schemaDelta selects the target fixture; evidence records it as an identity.
+  const { schemaDelta: cellSchemaDelta, ...evidenceCell } = cell;
   return {
     schema: evidenceSchema,
     kind: evidenceKind,
     run,
     host,
-    cell,
+    cell: evidenceCell,
     identities: {
       ...identities,
       signingRoot: 'fixture-ephemeral',
-      schemaDelta: identities.schemaDelta ?? 'identical',
+      schemaDelta: identities.schemaDelta ?? cellSchemaDelta ?? 'identical',
     },
     tools,
     networkDenial: networkDenial(networkAttempts),

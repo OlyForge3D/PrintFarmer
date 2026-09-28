@@ -8,8 +8,10 @@ import { waitForDuringActivationPoint } from './activation-runner.mjs';
 import { createFixtureSigstoreRoot } from './fixture-sigstore.mjs';
 import { resolveCell } from './cells.mjs';
 import { buildCellImageLayout } from './oci-layout-builder.mjs';
+import { schemaDeltaFixtureStateSql } from './schema-delta-fixture.mjs';
 import { writeRecoveryCompose } from './compose-config.mjs';
-import { writeDockerShim } from './docker-shim.mjs';
+import { dockerFaultFiles, wrapToolWithPauseGate, writeDockerShim } from './docker-shim.mjs';
+import { runFaultScenario } from './fault-scenarios.mjs';
 import { hasFaultHooks, invokeFaultHook, parseFaultHooks } from './fault-hooks.mjs';
 import { assertHostStateContinuity, readHostStateSnapshotFromBoundary } from './host-state-continuity.mjs';
 import { canaryDnsName, hasCanaryAttempt } from './network-denial.mjs';
@@ -115,7 +117,7 @@ try {
   const protectedBackupPath = join(runRoot, 'protected-backup.json');
   writeJson(protectedBackupPath, protectedBackup);
 
-  const { layout: imageLayout, priorImages, targetImages, infrastructureLock } = buildCellImageLayout({
+  const { layout: imageLayout, priorImages, targetImages, infrastructureLock, schemaDelta } = buildCellImageLayout({
     repo,
     runRoot,
     prior,
@@ -231,6 +233,12 @@ try {
     hostUpdateBackupsRoot: join(runRoot, 'host-update', 'backups'),
   });
   const databaseTools = provider.writeToolShims({ runRoot, databaseContainer });
+  const toolGates = cellSpec.scenario === 'fault' && databaseTools.pgDump && databaseTools.pgRestore
+    ? {
+      pgDump: wrapToolWithPauseGate(databaseTools.pgDump, { name: 'pg_dump' }),
+      pgRestore: wrapToolWithPauseGate(databaseTools.pgRestore, { name: 'pg_restore' }),
+    }
+    : null;
   writeHostUpdateConfig(configPath, {
     rootDirectory: join(runRoot, 'host-update'),
     deploymentRoot,
@@ -387,6 +395,167 @@ try {
   });
   const targetReplayIdentity = readImportDecisionRecords(decisionRecords).at(-1)?.replay?.correlationId?.replace(/^decision:/, '');
   runFaultHook('before-activate', { runRoot, deploymentRoot, stagingDir: targetStaging, bundlePath });
+  const assertRecoveredToPrior = () => {
+    const afterRecovery = stateContinuitySnapshot({ env, deploymentRoot, hostStateRoot, hostContainer, provider });
+    assertEqualJson('migration-heads-continuous', beforeRecovery.migrationHeads, afterRecovery.migrationHeads);
+    if (afterRecovery.migrationHeads.length === 0) {
+      throw new Error('migration-heads-continuous: no migration history rows observed');
+    }
+    checkpoints.ok(`migration-heads-continuous:${afterRecovery.migrationHeads.join(',')}`);
+    assertEqualJson('volume-hashes-continuous', beforeRecovery.volumeHashes, afterRecovery.volumeHashes);
+    checkpoints.ok('blob-config-key-volume-hashes-continuous');
+    assertHostStateContinuity(beforeRecovery.hostState, afterRecovery.hostState, { targetIdentity: targetReplayIdentity });
+    checkpoints.ok('protected-replay-history-continuous');
+    const checkedDigests = assertActiveServiceDigests({
+      cell,
+      priorImages,
+      inspectDigest: (composeServiceName) => runningComposeImageDigest(env, composeServiceName),
+    });
+    checkpoints.ok(`running-digest-prior:${checkedDigests.map((digest) => `${digest.serviceId}=${digest.actualDigest}`).join(',')}`);
+    assertApplicationHealthy('RolledBack');
+  };
+  const assertApplicationHealthy = (actual) => {
+    const healthz = httpGetFromNetwork(network, appStaticIp, '/healthz');
+    const health = httpGetFromNetwork(network, appStaticIp, '/health');
+    if (!/Healthy|OK|"status"\s*:\s*"ok"|^\s*$/.test(healthz) && !healthz.includes('healthy')) {
+      throw new Error(`healthz_not_green:${healthz.slice(0, 120)}`);
+    }
+    checkpoints.ok('healthz-green');
+    const healthEntries = discoverHealthEntries(health);
+    checkpoints.ok(`health-green:${healthEntries.join(',') || 'plain'}`);
+    const queueConsumers = evaluateQueueConsumersHealth(health);
+    if (!queueConsumers.ok) {
+      checkpoints.failed(`queue-consumers-running:${queueConsumers.detail}`);
+      throw cellFailure(queueConsumers.reason, { actual, exitCode: 1 });
+    }
+    checkpoints.ok(`queue-consumers-running:${queueConsumers.consumers.join(',')}`);
+  };
+  if (cellSpec.scenario === 'fault') {
+    const journalPath = join(runRoot, 'host-update', 'state', 'journal.ndjson');
+    const instructionsPath = join(targetRelease.assets, 'offline-recovery-instructions.json');
+    const replacements = {
+      '<host-update.json>': configPath,
+      '<staging-dir>': targetStaging,
+      '<trusted_root.json>': trustedRootPath,
+      '<protected-backup.json>': protectedBackupPath,
+    };
+    const anyExitCode = Array.from({ length: 256 }, (_, code) => code);
+    const composeArgs = ['compose', '-f', join(deploymentRoot, 'docker-compose.recovery.yml'), '-p', env.COMPOSE_PROJECT_NAME];
+    const composeServices = activeServiceDigestExpectations(cell, priorImages).map((entry) => entry.composeServiceName);
+    const faultSnapshot = () => {
+      const snapshot = stateContinuitySnapshot({ env, deploymentRoot, hostStateRoot, hostContainer, provider });
+      return {
+        ...snapshot,
+        serviceDigests: Object.fromEntries(composeServices.map((service) => {
+          try {
+            return [service, runningComposeImageDigest(env, service)];
+          } catch {
+            return [service, 'absent'];
+          }
+        })),
+      };
+    };
+    const fault = runFaultScenario({
+      cellSpec,
+      runRoot,
+      journalPath,
+      hostStateRoot,
+      checkpoints,
+      dockerLogPath: join(runRoot, 'docker-commands.ndjson'),
+      dockerGate: {
+        spec: join(runRoot, dockerFaultFiles.spec),
+        pause: join(runRoot, dockerFaultFiles.pause),
+        decision: join(runRoot, dockerFaultFiles.decision),
+      },
+      toolGates,
+      admissionClosedPath: join(runRoot, 'host-update', 'state', 'admission.closed'),
+      markInjected: () => {
+        faultState.injected = true;
+      },
+      op: (operationId, { extraArgs = [], allowedExitCodes = anyExitCode } = {}) => runPackagedOperation({
+        cli,
+        repo,
+        cosign: boundaryCosign,
+        instructionsPath,
+        operationId,
+        replacements,
+        allowedExitCodes,
+        extraArgs,
+      }),
+      launchOp: (operationId) => launchPackagedOperation({
+        cli,
+        repo,
+        cosign: boundaryCosign,
+        instructionsPath,
+        operationId,
+        replacements,
+        workRoot: join(runRoot, 'fault-ops'),
+      }),
+      restartHost: () => restartHostContainer(hostContainer),
+      hostShell: (script) => hostExecFileSync(hostContainer, ['bash', '-lc', script], { cwd: repo }),
+      dbQuery: (sql) => databaseQuery(deploymentRoot, env, provider, sql),
+      schemaDelta,
+      schemaDeltaState: (context) => parseSchemaDeltaState(
+        databaseQuery(deploymentRoot, env, provider, schemaDeltaFixtureStateSql(provider.id, context))),
+      seedPrinter: () => databaseQuery(deploymentRoot, env, provider, seedPrinterSql()),
+      snapshot: faultSnapshot,
+      assertNoMutation,
+      assertRolledBack: assertRecoveredToPrior,
+      assertActivated: () => {
+        const checked = assertActiveServiceDigests({
+          cell,
+          priorImages: targetImages,
+          inspectDigest: (composeServiceName) => runningComposeImageDigest(env, composeServiceName),
+        });
+        checkpoints.ok(`running-digest-target:${checked.map((digest) => `${digest.serviceId}=${digest.actualDigest}`).join(',')}`);
+        assertApplicationHealthy('Activated');
+      },
+      runningDigest: () => runningComposeImageDigest(env, composeServices[0]),
+      enableComposeFault: (mode) => {
+        enableManagedActivationFault(runRoot, { mode });
+        faultState.injected = true;
+      },
+      stopApplication: () => execFileSync('/usr/bin/docker', [...composeArgs, 'stop', ...composeServices], {
+        cwd: deploymentRoot,
+        encoding: 'utf8',
+        env: { ...process.env, ...env },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      }),
+    });
+    run.finishedAt = new Date().toISOString();
+    recordFaultCheckpoint();
+    evidence = baseEvidence({
+      run,
+      host,
+      cell,
+      identities: {
+        source: releaseEvidenceIdentity(prior),
+        target: releaseEvidenceIdentity(target),
+        prior: releaseEvidenceIdentity(prior),
+        bundleSha256: evidenceBundleSha256(bundlePath),
+        signingRootFingerprint: root.fingerprint,
+        schemaDelta,
+      },
+      tools,
+      checkpoints: checkpoints.checkpoints,
+      outcome: {
+        expected: cellSpec.expected.outcome,
+        expectedReason: null,
+        actual: fault.actual,
+        reason: fault.actual === 'Activated' || fault.actual === 'RolledBack' ? null : fault.reason,
+        exitCode: fault.exitCode,
+        journalPhase: safeJournalPhase(journalPath),
+      },
+      timings: { activationSeconds: fault.activationSeconds, recoverySeconds: fault.recoverySeconds },
+      verdict: 'pass',
+      networkAttempts: readNetworkAttempts(networkAttemptsPath),
+    });
+    writeValidatedEvidence(evidencePath, evidence);
+    const complete = new Error('fault cell evidence written');
+    complete.evidenceWritten = true;
+    complete.success = true;
+    throw complete;
+  }
   const activationStarted = Date.now();
   const managedActivationFault = shouldInjectManagedActivationFault(cellSpec);
   const customDuringActivationHook = Boolean(faultHooks['during-activate']);
@@ -602,36 +771,7 @@ try {
   const recoverySeconds = Math.max(1, Math.round((Date.now() - recoveryStarted) / 1000));
   checkpoints.ok('recovery-rolled-back');
 
-  const afterRecovery = stateContinuitySnapshot({ env, deploymentRoot, hostStateRoot, hostContainer, provider });
-  assertEqualJson('migration-heads-continuous', beforeRecovery.migrationHeads, afterRecovery.migrationHeads);
-  if (afterRecovery.migrationHeads.length === 0) {
-    throw new Error('migration-heads-continuous: no migration history rows observed');
-  }
-  checkpoints.ok(`migration-heads-continuous:${afterRecovery.migrationHeads.join(',')}`);
-  assertEqualJson('volume-hashes-continuous', beforeRecovery.volumeHashes, afterRecovery.volumeHashes);
-  checkpoints.ok('blob-config-key-volume-hashes-continuous');
-  assertHostStateContinuity(beforeRecovery.hostState, afterRecovery.hostState, { targetIdentity: targetReplayIdentity });
-  checkpoints.ok('protected-replay-history-continuous');
-  const checkedDigests = assertActiveServiceDigests({
-    cell,
-    priorImages,
-    inspectDigest: (composeServiceName) => runningComposeImageDigest(env, composeServiceName),
-  });
-  checkpoints.ok(`running-digest-prior:${checkedDigests.map((digest) => `${digest.serviceId}=${digest.actualDigest}`).join(',')}`);
-  const healthz = httpGetFromNetwork(network, appStaticIp, '/healthz');
-  const health = httpGetFromNetwork(network, appStaticIp, '/health');
-  if (!/Healthy|OK|"status"\s*:\s*"ok"|^\s*$/.test(healthz) && !healthz.includes('healthy')) {
-    throw new Error(`healthz_not_green:${healthz.slice(0, 120)}`);
-  }
-  checkpoints.ok('healthz-green');
-  const healthEntries = discoverHealthEntries(health);
-  checkpoints.ok(`health-green:${healthEntries.join(',') || 'plain'}`);
-  const queueConsumers = evaluateQueueConsumersHealth(health);
-  if (!queueConsumers.ok) {
-    checkpoints.failed(`queue-consumers-running:${queueConsumers.detail}`);
-    throw cellFailure(queueConsumers.reason, { actual: 'RolledBack', exitCode: 1 });
-  }
-  checkpoints.ok(`queue-consumers-running:${queueConsumers.consumers.join(',')}`);
+  assertRecoveredToPrior();
 
   run.finishedAt = new Date().toISOString();
   const journalPath = join(runRoot, 'host-update', 'state', 'journal.ndjson');
@@ -676,7 +816,7 @@ try {
   checkpoints.failed('e2e-complete');
   const failure = classifyFailure(error, join(runRoot, 'host-update', 'state', 'journal.ndjson'));
   const expectedOutcome = cellSpec.expected.outcome ?? 'RolledBack';
-  const expectedReason = cellSpec.expected.reason ?? null;
+  const expectedReason = cellSpec.scenario === 'fault' ? null : cellSpec.expected.reason ?? null;
   evidence = baseEvidence({
     run,
     host,
@@ -770,18 +910,18 @@ function provisionBoundaryHostState(container, repo, rootPath, { channel }) {
   });
 }
 
-function packagedOperationArgv({ cli, instructionsPath, operationId, replacements }) {
+function packagedOperationArgv({ cli, instructionsPath, operationId, replacements, extraArgs = [] }) {
   const instructions = JSON.parse(readFileSync(instructionsPath, 'utf8'));
   const operation = instructions.operations.find(candidate => candidate.id === operationId);
   if (!operation) throw new Error(`missing_packaged_operation:${operationId}`);
-  return operation.bash.map((argument, index) => {
+  return [...operation.bash.map((argument, index) => {
     const value = replacements[argument] ?? argument;
     return index === 0 ? cli : value;
-  });
+  }), ...extraArgs];
 }
 
-function runPackagedOperation({ cli, repo, cosign, instructionsPath, operationId, replacements, allowedExitCodes = [0] }) {
-  const argv = packagedOperationArgv({ cli, instructionsPath, operationId, replacements });
+function runPackagedOperation({ cli, repo, cosign, instructionsPath, operationId, replacements, allowedExitCodes = [0], extraArgs = [] }) {
+  const argv = packagedOperationArgv({ cli, instructionsPath, operationId, replacements, extraArgs });
   const result = hostSpawnSync(hostContainer, argv, {
     cwd: dirname(cli),
     env: {
@@ -888,6 +1028,118 @@ function runPackagedOperationDuringActivation({
     }
     throw error;
   }
+}
+
+// Starts a packaged operation in the host container without waiting, so a fault scenario can
+// hold it at a pause gate and kill the host underneath it.
+function launchPackagedOperation({ cli, repo, cosign, instructionsPath, operationId, replacements, workRoot }) {
+  const argv = packagedOperationArgv({ cli, instructionsPath, operationId, replacements });
+  const workDir = join(workRoot, `${operationId}-${Date.now()}-${process.pid}`);
+  mkdirSync(workDir, { recursive: true });
+  const stdoutPath = join(workDir, 'stdout.log');
+  const stderrPath = join(workDir, 'stderr.log');
+  const exitPath = join(workDir, 'exit-code');
+  const dockerArgs = [
+    'exec',
+    '-w', dirname(cli),
+    '-e', `PATH=${containerPath(dirname(cosign))}`,
+    '-e', `PRINTFARMER_OFFLINE_BUNDLE_TOOL=${join(repo, 'scripts/ci/offline-update-bundle.mjs')}`,
+    hostContainer,
+    ...argv,
+  ].map(shellQuote).join(' ');
+  const launch = `(${shellQuote('/usr/bin/docker')} ${dockerArgs} >${shellQuote(stdoutPath)} 2>${shellQuote(stderrPath)}; printf '%s' "$?" >${shellQuote(exitPath)}) >/dev/null 2>&1 & echo $!`;
+  const pid = Number(execFileSync('bash', ['-lc', launch], { encoding: 'utf8' }).trim());
+  if (!Number.isInteger(pid) || pid <= 0) {
+    throw new Error(`fault_launch_failed:${operationId}`);
+  }
+  return {
+    pid,
+    finished: () => existsSync(exitPath) || !processAlive(pid),
+    wait: () => {
+      const exitCode = waitForBackgroundExit(pid, exitPath);
+      const stdout = existsSync(stdoutPath) ? readFileSync(stdoutPath, 'utf8') : '';
+      const stderr = existsSync(stderrPath) ? readFileSync(stderrPath, 'utf8') : '';
+      if (stdout) process.stdout.write(stdout);
+      if (stderr) process.stderr.write(stderr);
+      return { exitCode, stdout, stderr };
+    },
+  };
+}
+
+// Simulates power loss: every process in the host boundary (CLI, docker shim, tool shims) dies
+// with SIGKILL, and only durable state (bind-mounted run root, container filesystem) survives.
+function restartHostContainer(container) {
+  const startedAt = () => execFileSync('/usr/bin/docker', ['inspect', '--format', '{{.State.StartedAt}}', container], { encoding: 'utf8' }).trim();
+  const before = startedAt();
+  // A failed kill throws, so a container that was never killed cannot pass as a power loss.
+  execFileSync('/usr/bin/docker', ['kill', '--signal', 'KILL', container], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  execFileSync('/usr/bin/docker', ['start', container], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  const after = startedAt();
+  if (after === before) throw new Error(`host_restart_not_observed:${container}:${before}`);
+  const deadline = Date.now() + 60_000;
+  for (;;) {
+    const probe = spawnSync('/usr/bin/docker', ['exec', container, 'true'], { stdio: 'ignore' });
+    if (probe.status === 0) return;
+    if (Date.now() > deadline) throw new Error(`host_restart_timeout:${container}`);
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250);
+  }
+}
+
+// Inserts one printer row using only required columns, so the physical reconciliation gate sees
+// a non-empty inventory regardless of optional schema columns.
+// Inserts one placeholder printer by filling every required column generically. A required
+// foreign key takes an existing parent row, and an empty parent table (e.g. `Manufacturers`,
+// which only the runtime seed service populates) is seeded the same way first.
+function seedPrinterSql() {
+  return `CREATE FUNCTION pg_temp.recovery_matrix_seed(tbl text) RETURNS void LANGUAGE plpgsql AS $fn$
+DECLARE cols text; vals text; parent record; parent_rows bigint;
+BEGIN
+  FOR parent IN
+    SELECT DISTINCT ccu.table_name AS ref_table
+      FROM information_schema.table_constraints tc
+      JOIN information_schema.key_column_usage kcu
+        ON kcu.constraint_name = tc.constraint_name AND kcu.table_schema = tc.table_schema
+      JOIN information_schema.constraint_column_usage ccu
+        ON ccu.constraint_name = tc.constraint_name AND ccu.table_schema = tc.table_schema
+      JOIN information_schema.columns c
+        ON c.table_schema = kcu.table_schema AND c.table_name = kcu.table_name AND c.column_name = kcu.column_name
+     WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = 'public' AND tc.table_name = tbl
+       AND c.is_nullable = 'NO' AND ccu.table_name <> tbl
+  LOOP
+    EXECUTE format('SELECT count(*) FROM public.%I', parent.ref_table) INTO parent_rows;
+    IF parent_rows = 0 THEN
+      PERFORM pg_temp.recovery_matrix_seed(parent.ref_table);
+    END IF;
+  END LOOP;
+
+  SELECT string_agg(quote_ident(c.column_name), ',' ORDER BY c.ordinal_position),
+         string_agg(CASE
+           WHEN fk.ref_table IS NOT NULL THEN format('(SELECT %I FROM public.%I LIMIT 1)', fk.ref_column, fk.ref_table)
+           WHEN c.data_type IN ('integer', 'bigint', 'smallint', 'numeric', 'double precision', 'real') THEN '0'
+           WHEN c.data_type = 'boolean' THEN 'false'
+           WHEN c.data_type = 'uuid' THEN quote_literal(gen_random_uuid()::text) || '::uuid'
+           WHEN c.data_type LIKE 'timestamp%' THEN 'now()'
+           WHEN c.data_type IN ('json', 'jsonb') THEN quote_literal('{}')
+           WHEN c.data_type = 'bytea' THEN quote_literal('') || '::bytea'
+           ELSE quote_literal('recovery-matrix-' || lower(tbl))
+         END, ',' ORDER BY c.ordinal_position)
+    INTO cols, vals
+    FROM information_schema.columns c
+    LEFT JOIN LATERAL (
+      SELECT ccu.table_name AS ref_table, ccu.column_name AS ref_column
+        FROM information_schema.table_constraints tc
+        JOIN information_schema.key_column_usage kcu
+          ON kcu.constraint_name = tc.constraint_name AND kcu.table_schema = tc.table_schema
+        JOIN information_schema.constraint_column_usage ccu
+          ON ccu.constraint_name = tc.constraint_name AND ccu.table_schema = tc.table_schema
+       WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = 'public' AND tc.table_name = tbl
+         AND kcu.column_name = c.column_name AND ccu.table_name <> tbl
+       LIMIT 1) fk ON true
+   WHERE c.table_schema = 'public' AND c.table_name = tbl
+     AND c.is_nullable = 'NO' AND c.column_default IS NULL AND c.is_identity = 'NO';
+  EXECUTE format('INSERT INTO public.%I (%s) VALUES (%s)', tbl, cols, vals);
+END $fn$;
+SELECT pg_temp.recovery_matrix_seed('Printers');`;
 }
 
 function waitForBackgroundExit(pid, exitPath) {
@@ -1423,6 +1675,15 @@ function mutationSnapshot({ env, deploymentRoot, hostStateRoot, hostContainer, p
     serviceDigests: Object.fromEntries(activeServiceDigestExpectations(cell, priorImages)
       .map(({ serviceId, composeServiceName }) => [serviceId, runningComposeImageDigest(env, composeServiceName)])),
   };
+}
+
+// psql -tA prints `1|1`; sqlcmd prints the two columns separated by whitespace.
+function parseSchemaDeltaState(output) {
+  const values = String(output).trim().split(/[\s|]+/).filter(Boolean).map(Number);
+  if (values.length !== 2 || values.some((value) => !Number.isInteger(value))) {
+    throw new Error(`schema-delta fixture state unreadable: ${JSON.stringify(output)}`);
+  }
+  return { historyRows: values[0], tableExists: values[1] };
 }
 
 function databaseQuery(deploymentRoot, env, provider, sql, { database } = {}) {

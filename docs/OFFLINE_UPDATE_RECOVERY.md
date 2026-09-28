@@ -1077,6 +1077,59 @@ script runs `docker compose down -v --remove-orphans`, removes the host and sink
 containers and network, and fails loudly if any container, volume or network
 with the run label remains.
 
+### Live fault cells (#3101)
+
+Fault cells live in `scripts/ci/recovery-matrix/fault-cells.mjs`. Each one runs
+on the supported `c2` shape, so the injected fault is the only variable. The
+`all` group keeps its meaning. Run one fault cell with `--cell <id>`, or every
+fault cell with `--cell faults`. Faults are injected live against the packaged
+CLI:
+
+- **Power loss.** A one-shot pause gate in the harness docker shim (or the
+  `pg_dump` shim) holds the executor at the chosen journal checkpoint. The
+  harness then kills the host container (`docker kill -s KILL` then `start`),
+  which kills the CLI and the paused shim.
+- **Partial side effects.** The gate lets the side effect run, then fails the
+  call.
+- **State faults.** The harness deletes or corrupts state on disk before the
+  operator redrive.
+
+Each cell records a `fault:<kind>:<point>` checkpoint and the `fault-injected`
+checkpoint. It asserts the journal fenced the uncertain step (`<step>:before`
+with no `<step>:after`). On redrive it asserts that no migration apply or
+`compose up` ran more than once, and that `pg_restore` was never replayed. It
+then repeats the final operator action, restarts the host, runs
+`host-update-status`, and proves the same outcome is reported again.
+
+| Cell id | Fault | Expected durable outcome/reason | Local run status |
+| --- | --- | --- | --- |
+| `fault-power-loss-backup` | Power loss at `backup:before` (inside `pg_dump`) | `Activated` after redrive re-runs the safe backup | Pass (2026-09-28, `eb900fa1c8ce`) |
+| `fault-power-loss-migration-before` | Power loss before the `AppDbContext` migration apply runs, on the N+1 schema-delta target | Redrive reports `RecoveryRequired` / `uncertain_side_effect:migration:migration_state_incomplete` (the N+1 migration is still pending, so it is never blindly replayed); recovery reports `RolledBack` and the N+1 schema is absent | Pass (2026-09-28, `eb900fa1c8ce`) |
+| `fault-power-loss-migration-after` | Power loss after the final (`SlicerDbContext`) N+1 migration apply returned, before `migration:after` | `Activated` after the reconciler proves no context has pending migrations, without re-applying them | Pass (2026-09-28, `eb900fa1c8ce`) |
+| `fault-power-loss-apply-before` | Power loss before `compose up` runs | Redrive reports `RecoveryRequired` / `uncertain_side_effect:apply:*`; recovery reports `RolledBack` | Pass (2026-09-28, `eb900fa1c8ce`) |
+| `fault-power-loss-apply-after` | Power loss after `compose up` ran, before `apply:after` | `Activated` after the reconciler verifies the running digests | Fails on #3181: the redrive is refused with `writer_service_active:monolith:running` |
+| `fault-partial-migration` | The `AppDbContext` N+1 migration applies, then the call fails | `RolledBack`; the N+1 history rows and tables are gone and migration heads match the prior release | Fails on #3177: the N+1 `AppDbContext` table survives rollback |
+| `fault-partial-apply` | `compose up` starts the target, then the call fails | `RolledBack`; running digests match the prior release | Pass (2026-09-28, `eb900fa1c8ce`) |
+| `fault-api-down` | Application containers stopped while `RecoveryRequired` | `RolledBack` | Pass (2026-09-28, `eb900fa1c8ce`) |
+| `fault-missing-backup` | Backups deleted while `RecoveryRequired` | `NeedsOperator` / `no_backup_available`, exit 10, no mutation | Pass (2026-09-28, `eb900fa1c8ce`) |
+| `fault-corrupt-journal` | Journal record tampered while `RecoveryRequired` | `RecoveryRequired` / `journal_integrity_failure`, exit 4, no mutation | Pass (2026-09-28, `eb900fa1c8ce`) |
+| `fault-corrupt-replay` | Replay store garbled before activation | `RecoveryRequired` / `host_update_replay_state_invalid`, exit 4, no mutation | Pass (2026-09-28, `cd314c3a53bf`) |
+| `fault-fence-release` | Printer inventory present at fence release | Confirm reports `FenceReleasePending` / `physical_reconciliation_pending` (exit 13), with the fence held across a restart. Confirming with `--printers-reconciled <token>` releases only the fence, without replaying restore, and reports `RolledBack` | Pass (2026-09-28, `cd314c3a53bf`) |
+
+The evidence `outcome.expectedReason` is `null` for fault cells because they are
+supported cells. The observed stable reason is recorded in `outcome.reason` for
+`NeedsOperator` and `RecoveryRequired` outcomes.
+
+The two migration power-loss cells and `fault-partial-migration` declare
+`schemaDelta: 'changed'`, so the target carries the N+1 fixture migration
+described below and the fault lands inside a real schema change. Each asserts
+the `AppDbContext` and `SlicerDbContext` fixture history rows and tables
+against the outcome: absent before the apply and after a rollback, present
+exactly once after activation, both at the fault point and again after the
+durability restart. A pause mid-phase checks only the contexts it has reached. Evidence
+records the choice as `identities.schemaDelta`. The other fault cells use the
+identical-schema target.
+
 ### Queue-consumer health entry (#3157)
 
 The API's `/health` (and `/api/health`) response exposes a `queue-consumers`
