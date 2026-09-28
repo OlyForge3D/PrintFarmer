@@ -261,6 +261,16 @@ evidence. `--skip-nuget` runs every other check (licensing metadata,
 provenance, npm lock entries, and reviewed npm fallbacks) without a restore;
 CI runs it on every pull request.
 
+Every committed npm lockfile must record packages fetched from
+`https://registry.npmjs.org/` with SHA-512 integrity. The validator rejects
+any other `resolved` host, scheme, port, embedded credential, git or `file:`
+source (`NPM_LOCK_SOURCE`) and any non-SHA-512 integrity (`NPM_LOCK_INTEGRITY`).
+Lockfiles are listed in `npmLockFiles`, or in `npm.registryCheckedLockFiles`
+when they are provenance-checked but not license-inventoried (the root tooling
+lock). A test fails if a committed lockfile is missing from both lists. If a
+private mirror rewrites `resolved` URLs during `npm install`, reset them to the
+public registry before committing.
+
 The allowlist and narrow exceptions are in
 [`compliance/dependency-license-policy.json`](../compliance/dependency-license-policy.json).
 An exception requires the exact ecosystem, package and version, observed and

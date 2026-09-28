@@ -440,6 +440,77 @@ async function validateNpmLicenses(repoRoot, policy) {
   return errors;
 }
 
+const npmRegistryOrigin = 'https://registry.npmjs.org';
+
+function isNpmRegistryTarball(resolved) {
+  if (typeof resolved !== 'string') {
+    return false;
+  }
+
+  let url;
+  try {
+    url = new URL(resolved);
+  } catch {
+    return false;
+  }
+
+  return url.origin === npmRegistryOrigin
+    && url.username === ''
+    && url.password === ''
+    && resolved.startsWith(`${npmRegistryOrigin}/`);
+}
+
+// Every fetched lock entry must come from the public npm registry with SHA-512
+// integrity (#3152). Entries without `resolved` are workspace/local packages or
+// fetched from the configured registry at install time, and are not pinned to
+// a foreign host. `npm.registryCheckedLockFiles` adds lockfiles (such as the
+// root tooling lock) that are provenance-checked but not license-inventoried.
+export async function validateNpmLockSources(repoRoot, policy) {
+  const errors = [];
+  const inventoried = new Set(policy.npmLockFiles ?? []);
+  const lockFiles = [...new Set([...inventoried, ...(policy.npm?.registryCheckedLockFiles ?? [])])];
+
+  for (const lockRelativePath of lockFiles) {
+    const lockPath = path.join(repoRoot, lockRelativePath);
+    if (!(await pathExists(lockPath))) {
+      // A missing inventoried lockfile is already reported by validateNpmLicenses.
+      if (!inventoried.has(lockRelativePath)) {
+        errors.push(createError('NPM_LOCK_MISSING', lockRelativePath, 'required npm lockfile is missing'));
+      }
+      continue;
+    }
+
+    const lock = await readJson(lockPath);
+    for (const [lockPackagePath, metadata] of Object.entries(lock.packages ?? {})) {
+      if (lockPackagePath.length === 0 || metadata.link === true || metadata.inBundle === true) {
+        continue;
+      }
+
+      const contextPath = `${lockRelativePath}:${lockPackagePath}`;
+      if (metadata.resolved !== undefined && !isNpmRegistryTarball(metadata.resolved)) {
+        errors.push(createError(
+          'NPM_LOCK_SOURCE',
+          contextPath,
+          `resolved ${JSON.stringify(metadata.resolved)} is not a ${npmRegistryOrigin}/ tarball`,
+        ));
+      }
+
+      if (metadata.integrity !== undefined
+        && (typeof metadata.integrity !== 'string'
+          || metadata.integrity.trim().length === 0
+          || !metadata.integrity.trim().split(/\s+/).every((hash) => hash.startsWith('sha512-')))) {
+        errors.push(createError(
+          'NPM_LOCK_INTEGRITY',
+          contextPath,
+          `integrity ${JSON.stringify(metadata.integrity)} must be SHA-512`,
+        ));
+      }
+    }
+  }
+
+  return errors;
+}
+
 export async function createNpmLicenseInventory(repoRoot, policy) {
   const errors = [];
   const lockRelativePath = policy.sbom?.npmBundleLockFile;
@@ -763,6 +834,7 @@ export async function validateDependencyLicenses(repoRoot, dependencyPolicy, opt
 
   errors.push(...await loadSbomPackageLicenseEvidence(repoRoot, dependencyPolicy));
   errors.push(...await validateNpmLicenses(repoRoot, dependencyPolicy));
+  errors.push(...await validateNpmLockSources(repoRoot, dependencyPolicy));
   if (options.includeNuget !== false) {
     errors.push(...await validateNugetLicenses(repoRoot, dependencyPolicy));
   }
