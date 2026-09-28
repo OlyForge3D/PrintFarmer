@@ -504,7 +504,7 @@ const adversarialRunners = {
     reason: reasons.unboundApproval,
   }),
   'missing-config': (ctx, h, base) => h.refused('missing-config', base.rel, {
-    bundle: base.path, config: join(ctx.runRoot, 'absent-host-update.json'), reason: /configuration unreadable/,
+    bundle: base.path, config: join(ctx.runRoot, 'absent-host-update.json'), reason: /configuration_unreadable/,
   }),
   'malicious-archive-symlink': (ctx, h, base) => h.refused('malicious-archive-symlink', base.rel, {
     bundle: base.tampered('symlink', (b) => b.insertRaw(tarHeader({ name: 'evil-link', size: 0, type: '2', linkname: '/etc/passwd' }))),
