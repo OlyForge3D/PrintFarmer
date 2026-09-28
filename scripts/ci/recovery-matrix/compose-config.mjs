@@ -28,7 +28,7 @@ export function writeRecoveryCompose({
   const serviceIds = topology.serviceIds(cell.workers);
   const applicationServices = Object.fromEntries(serviceIds.map((serviceId) => [
     topology.composeServiceName(serviceId),
-    applicationService({ serviceId, topology, provider, databaseHost, appIp, network, egressSinkIp, labels }),
+    applicationService({ serviceId, topology, provider, databaseHost, appIp, network, egressSinkIp, labels, cell }),
   ]));
   const services = {
     database: databaseService({ provider, network, databaseIp, labels, hostUpdateBackupsRoot }),
@@ -102,7 +102,7 @@ function databaseService({ provider, network, databaseIp, labels, hostUpdateBack
   };
 }
 
-function applicationService({ serviceId, topology, provider, databaseHost, appIp, network, egressSinkIp, labels }) {
+function applicationService({ serviceId, topology, provider, databaseHost, appIp, network, egressSinkIp, labels, cell }) {
   const composeService = topology.composeServiceName(serviceId);
   const isHttpHost = ['monolith', 'api', 'slicer-host', 'frontend', 'printer-discovery', 'orcaslicer-worker'].includes(serviceId);
   const service = {
@@ -110,7 +110,7 @@ function applicationService({ serviceId, topology, provider, databaseHost, appIp
     labels,
     depends_on: { database: { condition: 'service_started' } },
     dns: [egressSinkIp],
-    environment: commonEnvironment({ serviceId, topology, provider, databaseHost }),
+    environment: commonEnvironment({ serviceId, topology, provider, databaseHost, cell }),
     networks: composeService === topology.healthComposeService && appIp
       ? { [network]: { ipv4_address: appIp } }
       : [network],
@@ -131,15 +131,19 @@ function applicationService({ serviceId, topology, provider, databaseHost, appIp
   return service;
 }
 
-function commonEnvironment({ serviceId, topology, provider, databaseHost }) {
+function commonEnvironment({ serviceId, topology, provider, databaseHost, cell }) {
   const connection = provider.id === 'postgres'
     ? `Host=${databaseHost};Port=5432;Database=\${POSTGRES_DB};Username=\${POSTGRES_USER};Password=\${POSTGRES_PASSWORD}`
     : `Server=${databaseHost},1433;Database=\${MSSQL_DB};User Id=\${MSSQL_USER};Password=\${MSSQL_SA_PASSWORD};TrustServerCertificate=True;Encrypt=True`;
+  const slicerConnection = provider.id === 'postgres'
+    ? `Host=${databaseHost};Port=5432;Database=\${POSTGRES_DB}_slicer;Username=\${POSTGRES_USER};Password=\${POSTGRES_PASSWORD}`
+    : `Server=${databaseHost},1433;Database=\${MSSQL_DB}_slicer;User Id=\${MSSQL_USER};Password=\${MSSQL_SA_PASSWORD};TrustServerCertificate=True;Encrypt=True`;
   return [
     `DEPLOYMENT_MODE=${topology.deploymentMode}`,
     `PRINT_FARMER_SERVICE_ID=${serviceId}`,
     `DB_PROVIDER=${provider.dbProvider}`,
     `ConnectionStrings__Default=${connection}`,
+    ...(cell.databaseLayout === 'split' ? [`ConnectionStrings__SlicerDatabase=${slicerConnection}`] : []),
     'ASPNETCORE_ENVIRONMENT=${ASPNETCORE_ENVIRONMENT}',
     'Jwt__Key=${Jwt__Key}',
     'Jwt__Issuer=${Jwt__Issuer}',

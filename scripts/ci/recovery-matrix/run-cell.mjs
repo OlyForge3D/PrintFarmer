@@ -343,6 +343,10 @@ try {
   });
 
   const beforeRecovery = stateContinuitySnapshot({ env, deploymentRoot, hostStateRoot, hostContainer, provider });
+  if (cellSpec.scenario === 'refuse-activation' && cell.workers === 'remote') {
+    seedRemoteWorkerRegistration(deploymentRoot, env, provider);
+    checkpoints.ok('remote-worker-registration-seeded');
+  }
 
   writeHostUpdateConfig(configPath, {
     rootDirectory: join(runRoot, 'host-update'),
@@ -1185,6 +1189,13 @@ function databaseQuery(deploymentRoot, env, provider, sql) {
     env: { ...process.env, ...env },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
+}
+
+function seedRemoteWorkerRegistration(deploymentRoot, env, provider) {
+  const sql = provider.id === 'postgres'
+    ? `INSERT INTO slicer."SlicerServices" ("Id", "Name", "SlicerType", "Host", "MaxConcurrentJobs", "Status", "LastSeen", "CreatedAt", "UpdatedAt") VALUES ('00000000-0000-0000-0000-000000003100', 'remote-matrix-worker', 0, 'http://10.99.0.5:5000', 1, 'Online', NOW(), NOW(), NOW());`
+    : `INSERT INTO [slicer].[SlicerServices] ([Id], [Name], [SlicerType], [Host], [MaxConcurrentJobs], [Status], [LastSeen], [CreatedAt], [UpdatedAt]) VALUES (NEWID(), 'remote-matrix-worker', 0, 'http://10.99.0.5:5000', 1, 'Online', SYSUTCDATETIME(), SYSUTCDATETIME(), SYSUTCDATETIME());`;
+  databaseQuery(deploymentRoot, env, provider, sql);
 }
 
 function dockerVolumeHash(volume) {

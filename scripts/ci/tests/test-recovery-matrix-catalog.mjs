@@ -95,6 +95,21 @@ test('compose generation uses selected provider, split services, static IPs, and
     assert.equal(compose.services.api.environment.find((value) => value.startsWith('DB_PROVIDER=')), 'DB_PROVIDER=SqlServer');
     assert.ok(compose.services.nginx);
     assert.ok(!compose.services.printfarmer);
+
+    const splitDbCompose = writeRecoveryCompose({
+      deploymentRoot: scratch,
+      network: 'matrix-net',
+      egressSinkIp: '172.30.55.10',
+      databaseHost: '172.30.55.11',
+      databaseIp: '172.30.55.11',
+      appIp: '172.30.55.20',
+      runId: 'split-database-test',
+      cell: resolveCell('split-database').cell,
+    });
+    assert.match(
+      splitDbCompose.services.api.environment.find((value) => value.startsWith('ConnectionStrings__SlicerDatabase=')),
+      /Database=\$\{POSTGRES_DB\}_slicer/,
+    );
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }
