@@ -138,7 +138,7 @@ public sealed class ProfilesControllerDeleteCustomProfileTests
     public async Task DeleteCustomProfileAsync_ReturnsNoContent_OnSuccess()
     {
         Mock<IProfilesService> service = new(MockBehavior.Strict);
-        _ = service.Setup(s => s.DeleteCustomProfileAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+        _ = service.Setup(s => s.DeleteCustomProfileAsync(It.IsAny<Guid>(), It.IsAny<ProfileViewer>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
         ProfilesController controller = CreateController(service.Object);
@@ -152,7 +152,7 @@ public sealed class ProfilesControllerDeleteCustomProfileTests
     public async Task DeleteCustomProfileAsync_ReturnsNotFound_WhenServiceThrowsKeyNotFound()
     {
         Mock<IProfilesService> service = new(MockBehavior.Strict);
-        _ = service.Setup(s => s.DeleteCustomProfileAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+        _ = service.Setup(s => s.DeleteCustomProfileAsync(It.IsAny<Guid>(), It.IsAny<ProfileViewer>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new KeyNotFoundException("not found"));
 
         ProfilesController controller = CreateController(service.Object);
@@ -169,7 +169,7 @@ public sealed class ProfilesControllerDeleteCustomProfileTests
         // caller can't distinguish "not mine" from "doesn't exist" via the wrong status code being
         // swapped in by a future edit.
         Mock<IProfilesService> service = new(MockBehavior.Strict);
-        _ = service.Setup(s => s.DeleteCustomProfileAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+        _ = service.Setup(s => s.DeleteCustomProfileAsync(It.IsAny<Guid>(), It.IsAny<ProfileViewer>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new UnauthorizedAccessException("not yours"));
 
         ProfilesController controller = CreateController(service.Object);
@@ -183,7 +183,7 @@ public sealed class ProfilesControllerDeleteCustomProfileTests
     public async Task DeleteCustomProfileAsync_ReturnsBadRequest_WhenServiceThrowsInvalidOperation()
     {
         Mock<IProfilesService> service = new(MockBehavior.Strict);
-        _ = service.Setup(s => s.DeleteCustomProfileAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+        _ = service.Setup(s => s.DeleteCustomProfileAsync(It.IsAny<Guid>(), It.IsAny<ProfileViewer>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Cannot delete a system profile."));
 
         ProfilesController controller = CreateController(service.Object);
@@ -197,7 +197,7 @@ public sealed class ProfilesControllerDeleteCustomProfileTests
     public async Task DeleteCustomProfileAsync_Returns500_OnUnexpectedException()
     {
         Mock<IProfilesService> service = new(MockBehavior.Strict);
-        _ = service.Setup(s => s.DeleteCustomProfileAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+        _ = service.Setup(s => s.DeleteCustomProfileAsync(It.IsAny<Guid>(), It.IsAny<ProfileViewer>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidCastException("unexpected"));
 
         ProfilesController controller = CreateController(service.Object);

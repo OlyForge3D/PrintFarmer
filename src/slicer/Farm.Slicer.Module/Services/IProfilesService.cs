@@ -262,15 +262,33 @@ public interface IProfilesService
     /// <summary>Updates a custom profile's properties.</summary>
     /// <param name="profileId">ID of the profile to update.</param>
     /// <param name="request">Update request with optional new name, rawJson, or description.</param>
-    /// <param name="userId">ID of the user requesting the update.</param>
+    /// <param name="caller">
+    /// The caller: <see cref="ProfileViewer.UserId"/> is the identity that must own the profile, and
+    /// <see cref="ProfileViewer.IsAdmin"/> widens only what the caller can <i>see</i>, never what it
+    /// may mutate.
+    /// </param>
     /// <param name="ct">Cancellation token.</param>
-    Task<CustomProfileDto> UpdateCustomProfileAsync(Guid profileId, UpdateCustomProfileRequestDto request, Guid userId, CancellationToken ct);
+    /// <remarks>
+    /// Issue #3185: a profile the caller cannot view (another user's private profile) is reported as
+    /// <see cref="KeyNotFoundException"/> with the same message as a missing id, so the endpoint's
+    /// 404 does not disclose that the row exists. A row the caller can view but does not own (a
+    /// public/farm-wide row, or any row for an administrator) still throws
+    /// <see cref="UnauthorizedAccessException"/> (403). System rows throw
+    /// <see cref="InvalidOperationException"/>.
+    /// </remarks>
+    /// <exception cref="KeyNotFoundException">No profile with this ID exists, or the caller may not view it.</exception>
+    /// <exception cref="InvalidOperationException">The profile is a system profile.</exception>
+    /// <exception cref="UnauthorizedAccessException">The caller can view the profile but does not own it.</exception>
+    Task<CustomProfileDto> UpdateCustomProfileAsync(Guid profileId, UpdateCustomProfileRequestDto request, ProfileViewer caller, CancellationToken ct);
 
     /// <summary>
     /// Deletes a custom (non-system) <b>filament</b> profile owned by the calling user (issue #2203).
     /// </summary>
     /// <param name="profileId">ID of the filament profile to delete.</param>
-    /// <param name="userId">ID of the user requesting the deletion.</param>
+    /// <param name="caller">
+    /// The caller: <see cref="ProfileViewer.UserId"/> is the identity that must own the profile, and
+    /// <see cref="ProfileViewer.IsAdmin"/> widens only what the caller can see, never what it may delete.
+    /// </param>
     /// <param name="ct">Cancellation token.</param>
     /// <remarks>
     /// Deliberately narrowed to filament profiles only, the same way
@@ -282,8 +300,11 @@ public interface IProfilesService
     /// machine profile ID is treated as not-found by this method (<see cref="KeyNotFoundException"/>),
     /// not silently ignored.
     /// </remarks>
-    /// <exception cref="KeyNotFoundException">No filament profile with this ID exists (or the ID belongs to a process/machine profile).</exception>
+    /// <exception cref="KeyNotFoundException">
+    /// No filament profile with this ID exists, the ID belongs to a process/machine profile, or the
+    /// caller may not view it (another user's private profile, issue #3185). All three share one message.
+    /// </exception>
     /// <exception cref="InvalidOperationException">The profile is a system profile (<c>IsSystem == true</c>) and cannot be targeted by this owner-scoped path.</exception>
-    /// <exception cref="UnauthorizedAccessException">The profile exists but is owned by a different user.</exception>
-    Task DeleteCustomProfileAsync(Guid profileId, Guid userId, CancellationToken ct);
+    /// <exception cref="UnauthorizedAccessException">The caller can view the profile (public/farm-wide, or any row for an administrator) but does not own it.</exception>
+    Task DeleteCustomProfileAsync(Guid profileId, ProfileViewer caller, CancellationToken ct);
 }

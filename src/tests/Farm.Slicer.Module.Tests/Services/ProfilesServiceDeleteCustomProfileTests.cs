@@ -20,9 +20,10 @@ namespace Farm.Slicer.Module.Tests.Services;
 /// delete path that lets a non-admin caller remove their own custom filament profile without
 /// <c>slicer_engines:admin</c>. Mirrors the ownership/system-profile checks already covered for
 /// <c>UpdateCustomProfileAsync</c> and <c>PromoteCalibrationDraftProfileAsync</c> (#2180/#2189): a
-/// system profile must never be deletable through this path, and an ownership mismatch must throw
-/// <see cref="UnauthorizedAccessException"/> (mapped to 403 by the controller) rather than
-/// silently succeeding or returning 404.
+/// system profile must never be deletable through this path, another user's private profile must
+/// throw <see cref="KeyNotFoundException"/> exactly like a missing id (404, issue #3185), and a
+/// visible row owned by someone else must throw <see cref="UnauthorizedAccessException"/> (403)
+/// rather than silently succeeding.
 ///
 /// Deliberately narrowed to filament profiles only (unlike <c>UpdateCustomProfileAsync</c>, which
 /// requires an interactive session and can target any custom profile type): this endpoint is
@@ -79,7 +80,7 @@ public class ProfilesServiceDeleteCustomProfileTests
 
         ProfilesService svc = CreateService(filamentRepo.Object, processRepo.Object, machineRepo.Object);
 
-        await svc.DeleteCustomProfileAsync(profileId, userId, CancellationToken.None);
+        await svc.DeleteCustomProfileAsync(profileId, new ProfileViewer(userId, false), CancellationToken.None);
 
         filamentRepo.Verify(r => r.DeleteAsync(profile, It.IsAny<CancellationToken>()), Times.Once);
 
@@ -100,7 +101,7 @@ public class ProfilesServiceDeleteCustomProfileTests
 
         ProfilesService svc = CreateService(filamentProfileRepo: filamentRepo.Object);
 
-        _ = await Assert.ThrowsAsync<KeyNotFoundException>(() => svc.DeleteCustomProfileAsync(profileId, userId, CancellationToken.None));
+        _ = await Assert.ThrowsAsync<KeyNotFoundException>(() => svc.DeleteCustomProfileAsync(profileId, new ProfileViewer(userId, false), CancellationToken.None));
     }
 
     [Fact]
@@ -122,7 +123,7 @@ public class ProfilesServiceDeleteCustomProfileTests
 
         ProfilesService svc = CreateService(filamentRepo.Object, processRepo.Object, machineRepo.Object);
 
-        _ = await Assert.ThrowsAsync<KeyNotFoundException>(() => svc.DeleteCustomProfileAsync(profileId, userId, CancellationToken.None));
+        _ = await Assert.ThrowsAsync<KeyNotFoundException>(() => svc.DeleteCustomProfileAsync(profileId, new ProfileViewer(userId, false), CancellationToken.None));
 
         processRepo.VerifyNoOtherCalls();
         machineRepo.VerifyNoOtherCalls();
@@ -142,7 +143,7 @@ public class ProfilesServiceDeleteCustomProfileTests
 
         ProfilesService svc = CreateService(filamentProfileRepo: filamentRepo.Object);
 
-        _ = await Assert.ThrowsAsync<InvalidOperationException>(() => svc.DeleteCustomProfileAsync(profileId, userId, CancellationToken.None));
+        _ = await Assert.ThrowsAsync<InvalidOperationException>(() => svc.DeleteCustomProfileAsync(profileId, new ProfileViewer(userId, false), CancellationToken.None));
 
         // Strict mock: DeleteAsync was never Setup, so any call to it would throw before this
         // line, proving a system profile is never actually removed.
@@ -150,23 +151,49 @@ public class ProfilesServiceDeleteCustomProfileTests
         filamentRepo.VerifyNoOtherCalls();
     }
 
-    [Fact]
-    public async Task DeleteCustomProfileAsync_Throws_WhenOwnedByDifferentUser()
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task DeleteCustomProfileAsync_ThrowsUnauthorized_WhenVisibleButOwnedByDifferentUser(bool isPublic, bool callerIsAdmin)
     {
+        // Issue #3185: 403 is reserved for a row the caller can already see - a public/farm-wide
+        // row, or any row for an administrator. Another user's private row is 404 (see
+        // ProfilesControllerCustomProfileMutationVisibilityTests).
         Guid callerUserId = Guid.NewGuid();
         Guid otherUserId = Guid.NewGuid();
         Guid profileId = Guid.NewGuid();
-        FilamentProfile profile = new() { Id = profileId, Name = "Someone Else's", IsSystem = false, CreatedByUserId = otherUserId };
+        FilamentProfile profile = new() { Id = profileId, Name = "Someone Else's", IsSystem = false, IsPublic = isPublic, CreatedByUserId = otherUserId };
 
         Mock<IFilamentProfileRepository> filamentRepo = new(MockBehavior.Strict);
         _ = filamentRepo.Setup(r => r.GetByIdAsync(profileId, It.IsAny<CancellationToken>())).ReturnsAsync(profile);
 
         ProfilesService svc = CreateService(filamentProfileRepo: filamentRepo.Object);
 
-        _ = await Assert.ThrowsAsync<UnauthorizedAccessException>(() => svc.DeleteCustomProfileAsync(profileId, callerUserId, CancellationToken.None));
+        _ = await Assert.ThrowsAsync<UnauthorizedAccessException>(() => svc.DeleteCustomProfileAsync(profileId, new ProfileViewer(callerUserId, callerIsAdmin), CancellationToken.None));
 
         // Strict mock: DeleteAsync was never Setup, so any call to it would throw before this
         // line, proving another user's profile is never actually removed.
+        filamentRepo.Verify(r => r.GetByIdAsync(profileId, It.IsAny<CancellationToken>()), Times.Once);
+        filamentRepo.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task DeleteCustomProfileAsync_ThrowsNotFoundWithMissingIdMessage_WhenPrivateAndOwnedByDifferentUser()
+    {
+        // Issue #3185: another user's private row is indistinguishable from a missing id.
+        Guid callerUserId = Guid.NewGuid();
+        Guid profileId = Guid.NewGuid();
+        FilamentProfile profile = new() { Id = profileId, Name = "Someone Else's", IsSystem = false, IsPublic = false, CreatedByUserId = Guid.NewGuid() };
+
+        Mock<IFilamentProfileRepository> filamentRepo = new(MockBehavior.Strict);
+        _ = filamentRepo.Setup(r => r.GetByIdAsync(profileId, It.IsAny<CancellationToken>())).ReturnsAsync(profile);
+
+        ProfilesService svc = CreateService(filamentProfileRepo: filamentRepo.Object);
+
+        KeyNotFoundException ex = await Assert.ThrowsAsync<KeyNotFoundException>(
+            () => svc.DeleteCustomProfileAsync(profileId, new ProfileViewer(callerUserId, false), CancellationToken.None));
+        Assert.Equal($"Filament profile with ID {profileId} not found.", ex.Message);
+
         filamentRepo.Verify(r => r.GetByIdAsync(profileId, It.IsAny<CancellationToken>()), Times.Once);
         filamentRepo.VerifyNoOtherCalls();
     }
