@@ -153,6 +153,32 @@ export function parseToolVersions({ cosign }) {
   };
 }
 
+// Runs dotnet in the SDK image when the runner has no SDK. A non-root runner maps its
+// own uid/gid so publish output and obj/bin stay removable by the harness cleanup.
+export function containerizedDotnetArgs({
+  commandArgs,
+  cwd,
+  mounts,
+  uid = process.getuid?.(),
+  gid = process.getgid?.(),
+  image = 'mcr.microsoft.com/dotnet/sdk:10.0-noble',
+}) {
+  const args = ['run', '--rm'];
+  if (Number.isInteger(uid) && uid !== 0) {
+    args.push(
+      '--user', `${uid}:${Number.isInteger(gid) ? gid : uid}`,
+      '-e', 'HOME=/tmp/pf-dotnet-home',
+      '-e', 'DOTNET_CLI_HOME=/tmp/pf-dotnet-home',
+      '-e', 'DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1',
+    );
+  }
+  for (const mount of [...new Set(mounts)]) {
+    args.push('-v', `${mount}:${mount}`);
+  }
+  args.push('-w', cwd, image, 'dotnet', ...commandArgs);
+  return args;
+}
+
 export function parseCosignGitVersion(output) {
   if (typeof output !== 'string' || output.length === 0 || output === 'unavailable') {
     return 'unavailable';

@@ -26,6 +26,7 @@ import {
 } from './runtime-assertions.mjs';
 import {
   baseEvidence,
+  containerizedDotnetArgs,
   createCheckpoints,
   detectUbuntuHost,
   lastJournalPhase,
@@ -135,15 +136,11 @@ try {
     }
     if (name === 'dotnet' && !commandExists('dotnet')) {
       const cwd = options.cwd ?? repo;
-      return execFileSync('docker', [
-        'run',
-        '--rm',
-        '-v', `${repo}:${repo}`,
-        '-w', cwd,
-        'mcr.microsoft.com/dotnet/sdk:10.0-noble',
-        'dotnet',
-        ...commandArgs,
-      ], { encoding: 'utf8', stdio: options.stdio, env: options.env });
+      return execFileSync('docker', containerizedDotnetArgs({
+        commandArgs,
+        cwd,
+        mounts: [repo, runRoot],
+      }), { encoding: 'utf8', stdio: options.stdio, env: options.env });
     }
     return execFileSync(name, commandArgs, { encoding: 'utf8', ...options });
   };
