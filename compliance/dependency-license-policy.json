@@ -53,17 +53,17 @@
     "licenseTextFallbacks": [
       {
         "package": "@microsoft/signalr",
-        "version": "10.0.0",
+        "version": "10.0.11",
         "license": "MIT",
-        "licenseFile": "compliance/licenses/npm/microsoft-signalr-10.0.0.txt",
+        "licenseFile": "compliance/licenses/npm/microsoft-signalr-10.0.11.txt",
         "sha256": "cfc21f5e8bd655ae997eec916138b707b1d290b83272c02a95c9f821b8c87310",
-        "source": "https://github.com/dotnet/aspnetcore/blob/v10.0.0/LICENSE.txt",
-        "evidence": "Upstream LICENSE.txt at https://github.com/dotnet/aspnetcore/blob/v10.0.0/LICENSE.txt; the published package omits the repository-root license.",
-        "reviewer": "repository owner",
-        "reviewDate": "2026-02-20",
-        "reviewAfter": "2027-02-20",
+        "source": "https://github.com/dotnet/aspnetcore/blob/a5383385245bdacc20ec19f30e46090a8154d8da/LICENSE.txt",
+        "evidence": "Upstream LICENSE.txt at https://github.com/dotnet/aspnetcore/blob/a5383385245bdacc20ec19f30e46090a8154d8da/LICENSE.txt (tag v10.0.11); byte-identical to the v10.0.0 text reviewed under #902. The published 10.0.11 package declares MIT and ships only src/third-party-notices.txt, omitting the repository-root license.",
+        "reviewer": "PrintFarmer dependency bump review (#3148)",
+        "reviewDate": "2026-09-27",
+        "reviewAfter": "2027-09-27",
         "rationale": "The package declares MIT, and the immutable upstream license text is preserved as fallback evidence.",
-        "reviewIssue": "OlyForge3D/PrintFarmer#902"
+        "reviewIssue": "OlyForge3D/PrintFarmer#3148"
       },
       {
         "package": "agent-base",
