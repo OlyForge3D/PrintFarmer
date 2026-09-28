@@ -1076,8 +1076,12 @@ function cellFailure(reason, { actual = 'RecoveryRequired', exitCode = 1, journa
 function classifyFailure(error, journalPath) {
   const combined = `${error?.stdout ?? ''}\n${error?.stderr ?? ''}\n${error?.message ?? String(error)}`;
   const code = matchLineValue(combined, 'code');
+  const decision = matchLineValue(combined, 'decision');
+  // An expected refusal that instead activated is recorded as what it was, never as a recovery state.
+  const unexpectedlyActivated = decision === 'activated' && error?.exitCode === 0;
   const reason =
     error?.reason ??
+    (unexpectedlyActivated ? 'activation_unexpectedly_succeeded' : undefined) ??
     code ??
     matchJsonStringValue(combined, 'reason') ??
     matchLineValue(combined, 'reason') ??
@@ -1086,9 +1090,8 @@ function classifyFailure(error, journalPath) {
     String(error?.message ?? error).split(/\s+/)[0];
   const outcome = matchLineValue(combined, 'outcome');
   const state = matchLineValue(combined, 'state');
-  const decision = matchLineValue(combined, 'decision');
   const step = typeof error?.stepName === 'string' ? error.stepName : null;
-  const actual = normalizeOutcome(error?.actual ?? outcome ?? state ?? (decision === 'refused' || code ? 'Refused' : 'RecoveryRequired'));
+  const actual = normalizeOutcome(error?.actual ?? (unexpectedlyActivated ? 'Activated' : undefined) ?? outcome ?? state ?? (decision === 'refused' || code ? 'Refused' : 'RecoveryRequired'));
   return {
     actual,
     reason: String(step ? `${step}:${reason}` : reason).slice(0, 200),

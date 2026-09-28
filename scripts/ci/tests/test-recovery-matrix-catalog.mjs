@@ -154,6 +154,9 @@ test('compose generation uses selected provider, split services, static IPs, and
     assert.equal(compose.services.api.environment.find((value) => value.startsWith('DB_PROVIDER=')), 'DB_PROVIDER=SqlServer');
     assert.ok(compose.services.nginx);
     assert.ok(!compose.services.printfarmer);
+    assert.equal(compose.services.api.extra_hosts, undefined);
+    assert.deepEqual(compose.services['slicer-host'].extra_hosts, ['api:172.30.55.20']);
+    assert.deepEqual(compose.services.nginx.extra_hosts, ['api:172.30.55.20']);
 
     const splitDbCompose = writeRecoveryCompose({
       deploymentRoot: scratch,

@@ -39,6 +39,7 @@ export function writeRecoveryCompose({
         labels,
         depends_on: { frontend: { condition: 'service_started' }, api: { condition: 'service_started' } },
         dns: [egressSinkIp],
+        ...(appIp ? { extra_hosts: healthHostEntry(topology, appIp) } : {}),
         networks: [network],
       },
     } : {}),
@@ -128,8 +129,17 @@ function applicationService({ serviceId, topology, provider, databaseHost, appIp
   }
   if (isHealthHost) {
     service.ports = [`127.0.0.1:\${PRINTFARMER_PORT:-5245}:${topology.healthPort}`];
+  } else if (appIp) {
+    service.extra_hosts = healthHostEntry(topology, appIp);
   }
   return service;
+}
+
+// Siblings reach the health host by its compose name. While activation recreates it, Docker's embedded
+// DNS cannot resolve that name and forwards it to the egress sink, which is recorded as an outbound
+// attempt. Pin the name to its static IP; every other lookup still reaches the sink (#3161).
+function healthHostEntry(topology, appIp) {
+  return [`${topology.healthComposeService}:${appIp}`];
 }
 
 function commonEnvironment({ serviceId, topology, provider, databaseHost, cell }) {
