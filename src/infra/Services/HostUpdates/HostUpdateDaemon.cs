@@ -33,7 +33,8 @@ public sealed record HostUpdateDaemonStatus(
     DateTimeOffset? LastCycleAt,
     int ConsecutiveFailures,
     int? NextCycleSeconds,
-    string VerificationCode = "verification_not_read");
+    string VerificationCode = "verification_not_read",
+    HostUpdateDaemonCheckpointStatus? Checkpoint = null);
 
 /// <summary>Receives each published daemon status (for example the CLI writes one line per status).</summary>
 public interface IHostUpdateDaemonStatusSink
@@ -48,7 +49,8 @@ public sealed record HostUpdateDaemonJournalSnapshot(
     int? ReleaseCount,
     int? InFlightCount,
     int? RecoveryRequiredCount,
-    string? VerificationCode = null)
+    string? VerificationCode = null,
+    HostUpdateDaemonCheckpointStatus? Checkpoint = null)
 {
     public const string OkCode = "journal_ok";
 
@@ -64,13 +66,15 @@ public interface IHostUpdateDaemonJournalReader
 }
 
 /// <summary>
-/// Reads the shared hash-chained execution journal only while holding the shared execution lock,
+/// Reconciles the shared hash-chained execution journal only while holding the shared execution lock,
 /// exactly as the host-local <c>status</c> command does. A held lock (the executor, CLI or a manual
 /// recovery is running) is reported and never waited on, and an existing lock file is not rewritten.
 /// When a verification journal is supplied, the latest #3116 verification outcome is reported as a
 /// fixed code; an unreadable or tampered verification journal fails the cycle closed. The
 /// verification journal is read outside the execution lease because it serializes its own readers
 /// and writers on a dedicated lock, so a concurrent append is waited on briefly, never observed torn.
+/// An interrupted, request-bound execution is moved to RecoveryRequired without invoking any
+/// execution or recovery side effect. At most one such transition is appended per cycle.
 /// </summary>
 public sealed partial class HostUpdateDaemonJournalReader(
     string stateDirectory,
@@ -138,7 +142,7 @@ public sealed partial class HostUpdateDaemonJournalReader(
                 int inFlight = 0;
                 int recoveryRequired = 0;
                 IReadOnlyList<HostUpdateExecutionActivity> activities = journal.ReadAll();
-                var latest = new Dictionary<string, HostUpdateExecutionState>(StringComparer.Ordinal);
+                var histories = new Dictionary<string, List<HostUpdateExecutionActivity>>(StringComparer.Ordinal);
                 foreach (HostUpdateExecutionActivity activity in activities)
                 {
                     if (!HostUpdateValidation.IsReleaseId(activity.ReleaseId) || !Enum.IsDefined(activity.State))
@@ -146,11 +150,45 @@ public sealed partial class HostUpdateDaemonJournalReader(
                         throw new InvalidDataException("journal_checkpoint_invalid");
                     }
 
-                    latest[activity.ReleaseId] = activity.State;
+                    if (!histories.TryGetValue(activity.ReleaseId, out List<HostUpdateExecutionActivity>? history))
+                    {
+                        history = [];
+                        histories.Add(activity.ReleaseId, history);
+                    }
+
+                    history.Add(activity);
                 }
 
-                foreach (HostUpdateExecutionState last in latest.Values)
+                HostUpdateDaemonCheckpointStatus checkpoint = histories.Count == 0
+                    ? HostUpdateDaemonCheckpointStatus.AwaitApproval
+                    : new(HostUpdateDaemonCheckpointAction.Completed, "completed", null);
+                bool recordedInterruption = false;
+                foreach (List<HostUpdateExecutionActivity> history in histories.Values)
                 {
+                    HostUpdateDaemonCheckpointStatus decision = HostUpdateDaemonCheckpoints.Evaluate(history);
+                    HostUpdateExecutionState last = history[^1].State;
+                    if (!recordedInterruption && decision.Code == "execution_interrupted")
+                    {
+                        // No executor owns the shared lock. Journal the stop so the existing CLI
+                        // can recover it; never fabricate a successful checkpoint or release a fence.
+                        HostUpdateExecutionActivity stopped = history[^1] with
+                        {
+                            ActivityId = Guid.NewGuid().ToString("N"),
+                            State = HostUpdateExecutionState.RecoveryRequired,
+                            Phase = "failure:daemon_interrupted",
+                            RecordedAt = DateTimeOffset.UtcNow,
+                            AuthorizationBaseline = null,
+                        };
+                        journal.Append(stopped);
+                        recordedInterruption = true;
+                        last = stopped.State;
+                    }
+
+                    if (HostUpdateDaemonCheckpoints.Priority(decision.Action) > HostUpdateDaemonCheckpoints.Priority(checkpoint.Action))
+                    {
+                        checkpoint = decision;
+                    }
+
                     if (last == HostUpdateExecutionState.RecoveryRequired)
                     {
                         recoveryRequired++;
@@ -161,7 +199,7 @@ public sealed partial class HostUpdateDaemonJournalReader(
                     }
                 }
 
-                return new(HostUpdateDaemonJournalSnapshot.OkCode, false, latest.Count, inFlight, recoveryRequired);
+                return new(HostUpdateDaemonJournalSnapshot.OkCode, false, histories.Count, inFlight, recoveryRequired, Checkpoint: checkpoint);
             }
             catch (Exception ex) when (IsStateFailure(ex))
             {
@@ -199,8 +237,8 @@ public sealed partial class HostUpdateDaemonJournalReader(
 /// existing executor, journal and lock. It holds a single-instance lease, loads durable state
 /// from the shared journal each cycle, and reports redacted health. It executes nothing: the
 /// only production <see cref="IHostUpdateDaemonExecutionGate"/> is permanently disabled, the
-/// daemon never resumes in-flight releases (that is #3117), and it has no approval source yet
-/// (#3115). Execution, when later authorized, goes only through
+/// daemon derives defer/operator recovery decisions from durable checkpoints (#3117), and has
+/// no live approval transport yet (#3115). Execution, when later authorized, goes only through
 /// <see cref="HostUpdateDaemonExecutionDispatcher"/>.
 /// </summary>
 public sealed class HostUpdateDaemon(
@@ -323,7 +361,8 @@ public sealed class HostUpdateDaemon(
             journal is null ? Status?.LastCycleAt : time.GetUtcNow(),
             consecutiveFailures,
             nextDelay is null ? null : (int)Math.Ceiling(nextDelay.Value.TotalSeconds),
-            journal?.VerificationCode ?? Status?.VerificationCode ?? "verification_not_read");
+            journal?.VerificationCode ?? Status?.VerificationCode ?? "verification_not_read",
+            journal is null ? Status?.Checkpoint : journal.Checkpoint);
     }
 
     private void Publish(HostUpdateDaemonStatus status)

@@ -791,9 +791,10 @@ described in [HOST_UPDATE_DAEMON_SECURITY.md](HOST_UPDATE_DAEMON_SECURITY.md).
 It reuses the CLI's executor, journal and execution-lock registrations; it is
 not a second update engine. **Execution is disabled:** the gate is hard-wired
 to `runtime_updates_disabled_pending_2982`, and no configuration value,
-environment variable or saved setting enables it. Enrollment, signed
-approvals (#3115, #3116), checkpoints (#3117) and service wrappers (#3118) are
-not part of this slice.
+environment variable or saved setting enables it. Signed-release verification
+(#3116) and journal checkpoint reconciliation (#3117) are implemented below.
+Enrollment and live pull API transport remain unavailable; the #3115 routes
+are contracts, not mapped endpoints. Service wrappers belong to #3118.
 
 Each cycle the daemon:
 
@@ -808,10 +809,13 @@ Each cycle the daemon:
    The key bytes are never read or logged. Configured storage that fails any
    check (`Invalid`) fails the cycle; the daemon never falls back to running
    unenrolled over an unsafe key.
-3. Reads the existing journal without writing it. If a manual run holds the
+3. Reads and verifies the existing journal once, then reduces its checkpoints.
+   An interrupted, fully request-bound execution is stopped durably for local
+   recovery (at most one release per cycle), without running any update or
+   recovery step. If a manual run holds the
    execution lock, the cycle reports `execution_lock_held` and waits for the
    next normal poll; it never waits on or rewrites the lock.
-4. Publishes one redacted status line: lifecycle, fixed codes, counts and
+4. Publishes one redacted status line: lifecycle, checkpoint/recovery codes, counts and
    timestamps only, never paths, keys, tokens or journal payloads.
 
 With `--json`, output is newline-delimited status objects (one per line), not
@@ -876,3 +880,69 @@ A full file fails the cycle with `journal_verification_full`. To archive it,
 stop the daemon, move `daemon-verification.ndjson` out of the state directory
 (keep it as evidence; do not delete it), then start the daemon. The next
 decision starts a new chain.
+
+## Daemon checkpoint and API-down recovery (#3117)
+
+The daemon uses the **existing** `state/journal.ndjson` and execution lock,
+not a daemon command queue or a second recovery engine. Append order, not wall
+clock time, determines the latest checkpoint. A cycle reads the entire validated
+hash chain once and groups activities once: O(journal entries + releases), not
+one chain verification per release (R3130-B05). At most one interrupted release
+is stopped per cycle; its atomic append adds a constant number of whole-journal
+passes. Later cycles do not append that stop again.
+
+### Checkpoint matrix
+
+These decisions apply with the API down **and after restart**. Connectivity
+returning does not itself grant permission to execute.
+
+| Durable evidence | Daemon action | Host-local action |
+| --- | --- | --- |
+| No execution history, including a fetched approval or verification audit alone | `approval_required`; defer, no new admission | Wait for live enrollment/approval facilities; a verification record is not authorization |
+| Bound `Accepted`, before staging | `confirmation_required`; defer | Obtain fresh signed confirmation before any new side effect |
+| Bound `Preflight`, before/after staging | `confirmation_required`; no staging replay or expiry extension | Inspect `status`; staged images alone do not prove current authorization |
+| Bound `Draining`, `Fenced`, `BackedUp`, `Migrating`, `Applying` or `Verifying`, and execution lock is free | `execution_interrupted`; append request-bound `RecoveryRequired` / `failure:daemon_interrupted` once | Use the existing local recovery preview and confirmation flow |
+| Execution/recovery lock held | `execution_lock_held`; defer without reading/changing checkpoints | Let the current holder reach its safe checkpoint; never delete the lock |
+| `RecoveryRequired`, including `recovery:started`, `recovery:interrupted` or `recovery:unknown` | `recovery_required` or `recovery_interrupted`; never automatically retry recovery | Preview recovery locally, preserve writer fences and reconcile physical commands |
+| `Completed`, including `recovery:rolled_back` | `completed`; never replay completed steps | No daemon action |
+| Nonterminal history missing/conflicting immutable request bindings | `checkpoint_binding_unproven`; do not rewrite evidence | Inspect local `status`; repair through supported operator procedures, never invent request material |
+| Unreadable/tampered journal or verification evidence | Fail the cycle, back off; no execution | Preserve evidence and inspect local status/configuration |
+
+An execution already holding the lock continues under the shared executor's
+safe-stop semantics: migration/apply are not canceled mid-side-effect; safe
+steps observe cancellation. The daemon never runs the executor a second time
+to compensate for an API timeout. After a crash, an unsafe `:before` without
+`:after` is **not** inferred complete. Recovery must prove actual state using
+the existing migration/digest probes and physical-printer reconciliation.
+
+The current durable records do not contain a complete signed approval and
+pre-side-effect confirmation suitable for offline continuation. Consequently
+this implementation deliberately **does not resume execution offline** or
+recreate the in-memory verified-release capability from an audit record.
+Runtime dispatch stays hard-disabled pending #2982. No new command-fetching,
+approval refresh, rollback choice, fence release or enrollment transport is
+introduced by this change.
+
+### When the app is unavailable
+
+Run the installed CLI directly on the host:
+
+```bash
+"$CLI" --config /etc/printfarmer/host-update.json daemon --once --json
+"$CLI" --config /etc/printfarmer/host-update.json status --json
+```
+
+JSON status includes `checkpoint.action`, `checkpoint.code` and
+`checkpoint.recoveryHint`; text status includes `checkpoint=` and `recovery=`.
+`host_local_status` means inspect the journal with `status`.
+`host_local_recover` means follow the existing
+[host-local status and recovery CLI](#host-local-status-and-recovery-cli)
+preview/confirmation procedure for the release shown by `status`. The daemon
+never chooses a recovery plan or acknowledges physical printer commands for
+the operator. A completed rollback does not waive physical reconciliation.
+
+Each cycle rebuilds redacted status from current durable evidence. The
+checkpoint status can also produce the #3115 status-report DTO with fixed
+codes only, so a future live transport reports the current state on reconnect
+instead of replaying old commands or stale recovery hints. No API status
+transmission is claimed while those endpoints remain unmapped.
