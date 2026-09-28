@@ -135,6 +135,11 @@ cleanup() {
   if [[ -f "$RUN_ROOT/deployment/docker-compose.recovery.yml" ]]; then
     docker compose -f "$RUN_ROOT/deployment/docker-compose.recovery.yml" -p "$RUN_ID" down -v --remove-orphans >/dev/null 2>&1 || true
   fi
+  # The CLI runs as root inside the host container; hand its backups/staging back to a non-root
+  # runner so the scratch directory stays removable.
+  if [[ "$(id -u)" != 0 ]]; then
+    docker exec "$HOST" chown -R "$(id -u):$(id -g)" "$RUN_ROOT" >/dev/null 2>&1 || true
+  fi
   docker rm -f "$HOST" >/dev/null 2>&1 || true
   docker rm -f "$SINK" >/dev/null 2>&1 || true
   docker network rm "$NETWORK" >/dev/null 2>&1 || true
