@@ -271,6 +271,7 @@ try {
     healthBaseUrl: `http://${appStaticIp}:5000`,
     cell,
     databaseProvider: provider,
+    databaseExternallyOwned: false,
     createHostStateRoot: false,
   });
   checkpoints.ok('deployment-root-prepared');
@@ -365,7 +366,7 @@ try {
     healthBaseUrl: `http://${appStaticIp}:5000`,
     cell,
     databaseProvider: provider,
-    databaseExternallyOwned: cellSpec.scenario === 'needs-operator-recover',
+    databaseExternallyOwned: false,
     createHostStateRoot: false,
   });
 
@@ -414,6 +415,29 @@ try {
 
   const recoveryStarted = Date.now();
   runFaultHook('before-recover', { runRoot, deploymentRoot, stagingDir: targetStaging, bundlePath });
+  if (cellSpec.scenario === 'needs-operator-recover') {
+    writeHostUpdateConfig(configPath, {
+      rootDirectory: join(runRoot, 'host-update'),
+      deploymentRoot,
+      projectName: env.COMPOSE_PROJECT_NAME,
+      hostStateRoot,
+      databaseConnectionString: provider.connectionString({ host: databaseStaticIp, env }),
+      slicerConnectionString: cell.databaseLayout === 'split' ? provider.slicerConnectionString({ host: databaseStaticIp, env }) : undefined,
+      jwtKey: env.Jwt__Key,
+      jwtIssuer: env.Jwt__Issuer,
+      jwtAudience: env.Jwt__Audience,
+      docker: dockerShim,
+      pgDump: databaseTools.pgDump ?? 'pg_dump',
+      pgRestore: databaseTools.pgRestore ?? 'pg_restore',
+      sqlcmd: databaseTools.sqlcmd ?? 'sqlcmd',
+      healthBaseUrl: `http://${appStaticIp}:5000`,
+      cell,
+      databaseProvider: provider,
+      databaseExternallyOwned: true,
+      createHostStateRoot: false,
+    });
+    checkpoints.ok('external-database-owner-flipped');
+  }
   for (const [operationId, checkpointName] of [
     ['offline-recover-preview', 'recover-preview'],
     ['offline-recover-confirm', 'recover-confirm'],
