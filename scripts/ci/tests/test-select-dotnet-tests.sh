@@ -2369,6 +2369,20 @@ case_workflow_dependency_compliance_uses_own_output() {
   assert_eq "summary env bindings" "$wanted_env_count" "2" || return 1
 }
 
+case_workflow_ci_tools_runs_restore_free_compliance() {
+  # The licensing policy reads repository paths (LICENSE, notices, docs,
+  # Dockerfiles, release workflows, package manifests) that no selector
+  # bucket tracks, so ci-tools must run the restore-free validator on every
+  # PR (#3150 R3151-H01).
+  local workflow="$REPO_ROOT/.github/workflows/ci.yml" block
+  block="$(tr -d '\r' < "$workflow" | awk '/^  ci-tools:$/{f=1; print; next} f && /^  [A-Za-z_][A-Za-z0-9_-]*:$/{exit} f{print}')"
+  assert_contains "ci-tools restore-free validation" "$block" \
+    'run: node scripts/compliance/validate-compliance.mjs --skip-nuget' || return 1
+  local job_if
+  job_if="$(printf '%s\n' "$block" | grep -cE '^    if:' || true)"
+  assert_eq "ci-tools is unconditional" "$job_if" "0" || return 1
+}
+
 # =============================================================================
 # Portability regressions specific to this Windows-worktree revision (#772).
 # =============================================================================
@@ -4126,6 +4140,7 @@ TESTS=(
   case_nested_package_json_lookalikes_skip_dependency_compliance
   case_policy_npm_lockfiles_trigger_dependency_compliance
   case_workflow_dependency_compliance_uses_own_output
+  case_workflow_ci_tools_runs_restore_free_compliance
   case_merge_base_diverged_pr_base_sha_mobile_only
   case_push_to_development_full_safe
   case_push_to_main_full_safe

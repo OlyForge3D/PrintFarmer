@@ -1812,6 +1812,22 @@ test('validateDependencyCompliance reports stale npm fallbacks once and dedupes 
     const deniedErrors = (await validateDependencyCompliance(root, policy))
       .filter((error) => error.path === `${lockRelativePath}:node_modules/unlicensed`);
     assert.equal(deniedErrors.length, 1);
+
+    // The restore-free ci-tools mode skips only the NuGet inventory: missing
+    // assets are ignored, but npm staleness is still reported.
+    await rm(path.join(root, 'src', 'app'), { force: true, recursive: true });
+    await writeLock({ 'node_modules/fixture': { license: 'MIT', version: '1.0.0' } });
+    assert.deepEqual(
+      (await validateDependencyCompliance(root, policy)).map((error) => error.code),
+      ['NUGET_ASSETS_MISSING'],
+    );
+    assert.deepEqual(await validateDependencyCompliance(root, policy, { includeNuget: false }), []);
+    await writeLock({ 'node_modules/fixture': { license: 'MIT', version: '1.0.1' } });
+    assert.deepEqual(
+      (await validateDependencyCompliance(root, policy, { includeNuget: false }))
+        .map((error) => error.code),
+      ['LICENSE_POLICY_STALE'],
+    );
   } finally {
     await rm(root, { force: true, recursive: true });
   }

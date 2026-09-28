@@ -275,7 +275,11 @@ jobs:
   # summary because the selector's own correctness gates every scoped run.
   # Deliberately kept free of any .NET restore (see `dependency-compliance`
   # below, #1395) so this job stays fast and cheap on every PR, including
-  # mobile-only/docs-only changes.
+  # mobile-only/docs-only changes. It does run the restore-free part of
+  # validate-compliance.mjs (`--skip-nuget`, #3150) on every PR, because the
+  # licensing policy reads repository paths (LICENSE, notices, docs,
+  # Dockerfiles, release workflows, package manifests) that no selector
+  # bucket tracks.
   # ---------------------------------------------------------------------------
   ci-tools:
     name: CI tooling tests
@@ -354,6 +358,12 @@ jobs:
       - name: Test compliance controls
         run: node --test scripts/compliance/compliance.test.mjs
 
+      # Everything except the NuGet inventory, which needs a restore and runs
+      # in dependency-compliance. Unconditional so path-list drift in the
+      # selector can never skip licensing/npm validation (#3150).
+      - name: Validate compliance (restore-free)
+        run: node scripts/compliance/validate-compliance.mjs --skip-nuget
+
       - name: Test manual server release path
         run: >-
           node --test scripts/ci/tests/test-publish-release.mjs
@@ -403,7 +413,10 @@ jobs:
   # ---------------------------------------------------------------------------
   # dependency-compliance — full dependency-license/provenance validation.
   # Requires restored NuGet assets (project.assets.json under src/**/obj/);
-  # without a restore the validator emits NUGET_ASSETS_MISSING. Gated on the
+  # without a restore the validator emits NUGET_ASSETS_MISSING. Everything
+  # except the NuGet inventory also runs unconditionally in ci-tools
+  # (`--skip-nuget`), so this job exists for the NuGet graph and for policy
+  # changes that affect NuGet validation. Gated on the
   # selector's `want_dependency_compliance` output, which is a strict
   # superset of `want_dotnet_build` (see #1395, #3150):
   #   - NuGet graph: can only change through a bucket that already sets
@@ -419,7 +432,8 @@ jobs:
   #     still validates its lock entries and reviewed npm fallbacks here.
   #   - The policy/evidence/validators themselves (`compliance/**`,
   #     `scripts/compliance/**`, the `compliance` bucket).
-  # A mobile-only or docs-only PR provably has nothing new to validate.
+  # A mobile-only or docs-only PR cannot change the NuGet graph or the
+  # dependency policy, and ci-tools still validates its licensing inputs.
   # `want_dotnet_build` (and therefore this) is forced `true` (full-safe) on
   # every trusted push to `main`/`development` or `release/**` (see
   # select-dotnet-tests.sh `emit_full_safe "full-safe: trusted push to $base"`)

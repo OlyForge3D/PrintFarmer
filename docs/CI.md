@@ -47,7 +47,7 @@ docs-only PR.
 | Job                     | Runs when                                                    | Notes                                                                 |
 | ----------------------- | ------------------------------------------------------------ | --------------------------------------------------------------------- |
 | `select`                | always                                                       | Classifies changed paths; emits `want_*`, `matrix`, `mig_matrix`.     |
-| `ci-tools`              | always                                                       | Runs `bash -n` + selector + hook tests + `node --test` compliance/squad-tooling suites; no .NET restore. |
+| `ci-tools`              | always                                                       | Runs `bash -n` + selector + hook tests + `node --test` compliance/squad-tooling suites + restore-free `validate-compliance.mjs --skip-nuget`; no .NET restore. |
 | `dependency-compliance` | `want_dependency_compliance`: any .NET input, npm manifest/lockfile, or `compliance` bucket changed OR full-safe | `dotnet restore` + `node scripts/compliance/validate-compliance.mjs` — NuGet and npm dependency-license/provenance inventory, including stale npm license-text fallbacks (`LICENSE_POLICY_STALE`). See #1395, #3150. |
 | `dotnet-format`         | any .NET input changed OR full-safe (same as `want_dotnet_build`) | Asserts SDK >= 10.0.200, restores, then runs `dotnet format ./farm-web.sln --verify-no-changes --no-restore`. Runs in parallel with `dotnet-build`. See #2978. |
 | `frontend`              | React or `compliance` inputs changed OR full-safe            | `npm ci`, lint, build, `npm run test:coverage` in `src/Web/ReactApp/`; coverage first runs the zero-diagnostic test gate, application typecheck, and source-coverage guards through `pretest:coverage`. |
@@ -102,6 +102,13 @@ A `compliance` bucket change also forces `want_frontend=true`, so the
 the Docker build. `validate-compliance.mjs` itself checks the npm bundle
 inventory — including stale fallback hashes and missing evidence files — and
 does not need `node_modules`.
+
+The selector cannot track every path the licensing policy reads (`LICENSE`,
+`THIRD-PARTY-NOTICES.md`, policy-listed docs, Dockerfiles, release workflows,
+first-party package manifests). `ci-tools` therefore runs
+`node scripts/compliance/validate-compliance.mjs --skip-nuget` on every PR:
+every check except the NuGet inventory, which needs a restore. The full run
+in `dependency-compliance` adds the NuGet inventory.
 
 ## Selection logic (selector script)
 
