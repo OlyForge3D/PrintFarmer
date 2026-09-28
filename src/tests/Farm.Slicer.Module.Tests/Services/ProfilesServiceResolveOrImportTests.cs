@@ -92,9 +92,17 @@ public class ProfilesServiceResolveOrImportTests
     /// auto-importing the requested profile from the OrcaSlicer worker catalog and returning its
     /// new database Guid.
     /// </summary>
-    [Fact]
-    public async Task ResolveOrImportProfileForModelAsync_NeverImported_AutoImportsFromWorkerAndReturnsNewId()
+    /// <remarks>
+    /// Runs for both an administrator and an ordinary non-admin submitter (#3180): auto-import is
+    /// available to any interactive caller, and the freshly imported catalog row must be visible to
+    /// the non-admin viewer who triggered it.
+    /// </remarks>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ResolveOrImportProfileForModelAsync_NeverImported_AutoImportsFromWorkerAndReturnsNewId(bool isAdmin)
     {
+        ProfileViewer viewer = isAdmin ? ProfileViewer.Administrator : new ProfileViewer(Guid.NewGuid(), false);
         Guid modelId = Guid.NewGuid();
         Guid manufacturerId = Guid.NewGuid();
 
@@ -167,7 +175,7 @@ public class ProfilesServiceResolveOrImportTests
             new List<MachineProfileDto> { workerMachineProfile }));
 
         ResolveProfileForModelResultDto result = await svc.ResolveOrImportProfileForModelAsync(
-            httpClient, modelId, ProfileResolutionType.Machine, ModelName, ProfileViewer.Administrator, CancellationToken.None);
+            httpClient, modelId, ProfileResolutionType.Machine, ModelName, viewer, CancellationToken.None);
 
         Assert.Null(result.Error);
         Assert.True(result.Imported);
