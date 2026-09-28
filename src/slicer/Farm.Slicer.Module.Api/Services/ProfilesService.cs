@@ -96,6 +96,15 @@ public class ProfilesService(
     /// <summary>Shared options for compact, case-insensitive JSON (re)serialization used for hashing/storage.</summary>
     private static readonly JsonSerializerOptions CaseInsensitiveCompactJsonOptions = new() { PropertyNameCaseInsensitive = true, WriteIndented = false };
 
+    /// <summary>Insert attempts when a concurrent same-owner request takes the chosen promotion name (#3192).</summary>
+    private const int MaxPromotionNameAttempts = 3;
+
+    /// <summary>Highest <c>" (N)"</c> suffix tried when de-duplicating a promoted filament name (#3192).</summary>
+    private const int MaxOwnedFilamentNameSuffix = 100;
+
+    /// <summary>Matches the <c>FilamentProfile.Name</c> column length.</summary>
+    private const int FilamentNameMaxLength = 255;
+
     /// <summary>
     /// Imports a process profile from raw slicer configuration JSON with deduplication and validation.
     /// </summary>
@@ -1096,9 +1105,12 @@ public class ProfilesService(
     /// The identity must mirror the table's declared UNIQUE index, not merely the name: filament is
     /// unique on <c>(Name, Material, SlicerType)</c> and process on <c>(Name, SlicerType,
     /// PrinterModelId)</c>, so a name-only key would silently discard legitimate rows such as the
-    /// same process name under two printer models. All rows are loaded, not just system ones,
-    /// because those indexes are global — a user-created profile sharing an identity collides just
-    /// as hard. Failures propagate rather than degrading to an empty set, since an empty set is
+    /// same process name under two printer models. Machine and process rows are loaded regardless
+    /// of owner, because those indexes are global: a user-created profile sharing an identity
+    /// collides just as hard. Filament callers load only unowned rows, because filament name
+    /// uniqueness is per owner and system rows only collide with other unowned rows (#3192); a
+    /// user's private profile must not suppress a stock import. Failures propagate rather than
+    /// degrading to an empty set, since an empty set is
     /// indistinguishable from "nothing imported yet" and would drive straight into a collision.
     /// </remarks>
     private static async Task<HashSet<string>> LoadExistingProfileIdentitiesAsync(
@@ -1839,7 +1851,7 @@ public class ProfilesService(
         HashSet<string> existingMachineNames = await LoadExistingProfileIdentitiesAsync(
             async token => (await _machineProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, token)).Select(p => (p.Name ?? string.Empty).Trim()), ct);
         HashSet<string> existingFilamentNames = await LoadExistingProfileIdentitiesAsync(
-            async token => (await _filamentProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, token)).Select(p => FilamentIdentity(p.Name, p.Material)), ct);
+            async token => (await _filamentProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, token)).Where(p => p.CreatedByUserId == null).Select(p => FilamentIdentity(p.Name, p.Material)), ct);
         HashSet<string> existingProcessNames = await LoadExistingProfileIdentitiesAsync(
             async token => (await _processProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, token)).Select(p => ProcessIdentity(p.Name, p.PrinterModelId)), ct);
 
@@ -2097,7 +2109,7 @@ public class ProfilesService(
         HashSet<string> reseedMachineNames = await LoadExistingProfileIdentitiesAsync(
             async token => (await _machineProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, token)).Select(p => (p.Name ?? string.Empty).Trim()), ct);
         HashSet<string> reseedFilamentNames = await LoadExistingProfileIdentitiesAsync(
-            async token => (await _filamentProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, token)).Select(p => FilamentIdentity(p.Name, p.Material)), ct);
+            async token => (await _filamentProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, token)).Where(p => p.CreatedByUserId == null).Select(p => FilamentIdentity(p.Name, p.Material)), ct);
         HashSet<string> reseedProcessNames = await LoadExistingProfileIdentitiesAsync(
             async token => (await _processProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, token)).Select(p => ProcessIdentity(p.Name, p.PrinterModelId)), ct);
 
@@ -3903,7 +3915,7 @@ public class ProfilesService(
             UpdatedAt = DateTime.UtcNow
         };
 
-        await _filamentProfileRepo.AddAsync(clone, ct);
+        await AddOwnedFilamentProfileAsync(clone, userId, ct);
         _logger.LogInformation("Cloned filament profile '{SourceName}' to '{NewName}' for user {UserId}", LogSanitizer.Sanitize(source.Name), LogSanitizer.Sanitize(newName), userId);
 
         return new CloneSingleProfileResponseDto
@@ -4053,7 +4065,7 @@ public class ProfilesService(
             UpdatedAt = DateTime.UtcNow
         };
 
-        await _filamentProfileRepo.AddAsync(profile, ct);
+        await AddOwnedFilamentProfileAsync(profile, userId, ct);
         _logger.LogInformation("Uploaded filament profile '{Name}' for user {UserId} (CompatiblePrinters={CompatiblePrinters})", LogSanitizer.Sanitize(name), userId, LogSanitizer.Sanitize(profile.CompatiblePrinters ?? "<none>"));
 
         return ToCustomProfileDto(profile);
@@ -4084,6 +4096,11 @@ public class ProfilesService(
     /// from their own request. The other user's row is never read, returned, or disclosed through
     /// a different status code. The caller also cannot claim the id and block the owner's own
     /// promotion. (Before #3189 the index was global and a foreign hit was rejected with 403.)
+    ///
+    /// The name is unique per owner, not globally (#3192): another user's profile with the same
+    /// name never affects this call. When the caller already owns a profile with the promoted name,
+    /// the new profile is named <c>"{name} (N)"</c> with the first free N instead of failing,
+    /// because promotion runs unattended on calibration completion.
     /// </remarks>
     public async Task<(CustomProfileDto Profile, bool WasCreated)> PromoteCalibrationDraftProfileAsync(
         UploadProfileRequestDto request, Guid userId, Guid sourceDraftProfileId, CancellationToken ct)
@@ -4118,38 +4135,122 @@ public class ProfilesService(
             IsPublic = false,
             CreatedByUserId = userId,
             RawJson = request.RawJson,
-            Hash = ComputeSha256Hash($"{userId}{name}{request.RawJson}{DateTime.UtcNow.Ticks}"),
             CompatiblePrinters = compatiblePrinters,
             PromotedFromCalibrationDraftProfileId = sourceDraftProfileId,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
         };
 
+        // Promotion runs unattended on calibration completion and names the profile after the
+        // project, so there is no user in the loop to pick another name. A name the caller already
+        // uses is therefore suffixed rather than rejected (#3192). Only the caller's own rows are
+        // consulted, so another user's private profile names never influence the outcome.
+        DbUpdateException? lastNameCollision = null;
+        for (int attempt = 1; attempt <= MaxPromotionNameAttempts; attempt++)
+        {
+            profile.Name = await FirstFreeOwnedFilamentNameAsync(userId, name, profile.Material, profile.SlicerType, ct);
+            profile.Hash = ComputeSha256Hash($"{userId}{profile.Name}{request.RawJson}{DateTime.UtcNow.Ticks}");
+
+            try
+            {
+                await _filamentProfileRepo.AddAsync(profile, ct);
+            }
+            catch (DbUpdateException ex)
+            {
+                // Lost the race: another concurrent/replayed request from this same caller already
+                // promoted this exact draft and won the per-owner unique-index race. Reload and
+                // return the winner instead of surfacing a spurious failure to a caller that is
+                // itself only retrying the same idempotent completion.
+                FilamentProfile? winner = await _filamentProfileRepo
+                    .GetByPromotedFromCalibrationDraftProfileIdAsync(userId, sourceDraftProfileId, ct);
+                if (winner is not null)
+                {
+                    return (ToCustomProfileDto(winner), false);
+                }
+
+                // A concurrent request from this caller took the chosen name first: pick the next
+                // free one. Anything else is not a name collision and still propagates.
+                if (!await _filamentProfileRepo.OwnerHasNameAsync(userId, profile.Name, profile.Material, profile.SlicerType, excludeProfileId: null, ct))
+                {
+                    throw;
+                }
+
+                lastNameCollision = ex;
+                continue;
+            }
+
+            _logger.LogInformation(
+                "Promoted calibration draft profile {DraftProfileId} to filament profile '{Name}' for user {UserId}",
+                sourceDraftProfileId, LogSanitizer.Sanitize(profile.Name), userId);
+
+            return (ToCustomProfileDto(profile), true);
+        }
+
+        throw FilamentNameConflict(profile.Name, lastNameCollision);
+    }
+
+    /// <summary>
+    /// Returns <paramref name="baseName"/> when the caller does not already own a filament profile
+    /// with that identity, otherwise the first free <c>"{baseName} (N)"</c> (#3192).
+    /// </summary>
+    /// <exception cref="ProfileNameConflictException">Every candidate up to the cap is taken.</exception>
+    private async Task<string> FirstFreeOwnedFilamentNameAsync(Guid userId, string baseName, string material, SlicerType slicerType, CancellationToken ct)
+    {
+        for (int n = 1; n <= MaxOwnedFilamentNameSuffix; n++)
+        {
+            string candidate = n == 1 ? baseName : SuffixedName(baseName, n);
+            if (!await _filamentProfileRepo.OwnerHasNameAsync(userId, candidate, material, slicerType, excludeProfileId: null, ct))
+            {
+                return candidate;
+            }
+        }
+
+        throw FilamentNameConflict(baseName);
+    }
+
+    private static string SuffixedName(string baseName, int n)
+    {
+        string suffix = string.Create(CultureInfo.InvariantCulture, $" ({n})");
+        int maxBaseLength = FilamentNameMaxLength - suffix.Length;
+        string trimmedBase = baseName.Length > maxBaseLength ? baseName[..maxBaseLength] : baseName;
+        return trimmedBase + suffix;
+    }
+
+    /// <summary>
+    /// Inserts a caller-owned filament profile, mapping a collision on the per-owner
+    /// <c>(CreatedByUserId, Name, Material, SlicerType)</c> unique index to
+    /// <see cref="ProfileNameConflictException"/> (409) instead of an unhandled 500 (#3192).
+    /// </summary>
+    private async Task AddOwnedFilamentProfileAsync(FilamentProfile profile, Guid userId, CancellationToken ct)
+    {
+        if (await _filamentProfileRepo.OwnerHasNameAsync(userId, profile.Name, profile.Material, profile.SlicerType, excludeProfileId: null, ct))
+        {
+            throw FilamentNameConflict(profile.Name);
+        }
+
         try
         {
             await _filamentProfileRepo.AddAsync(profile, ct);
         }
-        catch (DbUpdateException)
+        catch (DbUpdateException ex)
         {
-            // Lost the race: another concurrent/replayed request from this same caller already
-            // promoted this exact draft and won the per-owner unique-index race. Reload and return
-            // the winner instead of surfacing a spurious failure to a caller that is itself only
-            // retrying the same idempotent completion.
-            FilamentProfile? winner = await _filamentProfileRepo
-                .GetByPromotedFromCalibrationDraftProfileIdAsync(userId, sourceDraftProfileId, ct);
-            if (winner is not null)
+            // A concurrent request from this caller took the name between the check and the
+            // insert. Any other persistence failure is not a name collision and propagates.
+            if (await _filamentProfileRepo.OwnerHasNameAsync(userId, profile.Name, profile.Material, profile.SlicerType, excludeProfileId: null, ct))
             {
-                return (ToCustomProfileDto(winner), false);
+                throw FilamentNameConflict(profile.Name, ex);
             }
 
             throw;
         }
+    }
 
-        _logger.LogInformation(
-            "Promoted calibration draft profile {DraftProfileId} to filament profile '{Name}' for user {UserId}",
-            sourceDraftProfileId, LogSanitizer.Sanitize(name), userId);
-
-        return (ToCustomProfileDto(profile), true);
+    private static ProfileNameConflictException FilamentNameConflict(string name, Exception? innerException = null)
+    {
+        string message = $"You already have a filament profile named '{name}'.";
+        return innerException is null
+            ? new ProfileNameConflictException(message)
+            : new ProfileNameConflictException(message, innerException);
     }
 
     private static (string Name, string? CompatiblePrinters) ParseFilamentProfileMetadata(UploadProfileRequestDto request)
@@ -4451,6 +4552,12 @@ public class ProfilesService(
 
         Guid userId = RequireProfileOwner(caller, profile.CreatedByUserId, "update");
 
+        bool renaming = !string.IsNullOrWhiteSpace(request.Name) && !string.Equals(request.Name, profile.Name, StringComparison.Ordinal);
+        if (renaming && await _filamentProfileRepo.OwnerHasNameAsync(userId, request.Name!, profile.Material, profile.SlicerType, profile.Id, ct))
+        {
+            throw FilamentNameConflict(request.Name!);
+        }
+
         if (!string.IsNullOrWhiteSpace(request.Name))
         {
             profile.Name = request.Name;
@@ -4474,7 +4581,21 @@ public class ProfilesService(
         }
 
         profile.UpdatedAt = DateTime.UtcNow;
-        await _filamentProfileRepo.UpdateAsync(profile, ct);
+        try
+        {
+            await _filamentProfileRepo.UpdateAsync(profile, ct);
+        }
+        catch (DbUpdateException ex) when (renaming)
+        {
+            // A concurrent request from this caller took the new name after the check above.
+            if (await _filamentProfileRepo.OwnerHasNameAsync(userId, profile.Name, profile.Material, profile.SlicerType, profile.Id, ct))
+            {
+                throw FilamentNameConflict(profile.Name, ex);
+            }
+
+            throw;
+        }
+
         _logger.LogInformation("Updated filament profile '{ProfileName}' for user {UserId}", LogSanitizer.Sanitize(profile.Name), userId);
 
         // Filament profiles do not have a PrinterModelId column; ignore any printer-model

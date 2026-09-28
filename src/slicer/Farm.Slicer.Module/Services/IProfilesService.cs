@@ -217,12 +217,14 @@ public interface IProfilesService
     /// <param name="userId">ID of the user creating the clone.</param>
     /// <param name="viewer">Caller whose visibility scope applies to the source profile of any type; an invisible source is reported as not found (issues #3174, #3180).</param>
     /// <param name="ct">Cancellation token.</param>
+    /// <exception cref="ProfileNameConflictException">The caller already owns a filament profile with this name (#3192).</exception>
     Task<CloneSingleProfileResponseDto> CloneSingleProfileAsync(CloneSingleProfileRequestDto request, Guid userId, ProfileViewer viewer, CancellationToken ct);
 
     /// <summary>Uploads a custom profile from raw JSON content.</summary>
     /// <param name="request">Upload request with raw JSON, profile type, and optional name.</param>
     /// <param name="userId">ID of the user uploading the profile.</param>
     /// <param name="ct">Cancellation token.</param>
+    /// <exception cref="ProfileNameConflictException">The caller already owns a filament profile with this name (#3192).</exception>
     Task<CustomProfileDto> UploadCustomProfileAsync(UploadProfileRequestDto request, Guid userId, CancellationToken ct);
 
     /// <summary>
@@ -231,6 +233,8 @@ public interface IProfilesService
     /// retried/replayed call after a reclaimed promotion claim returns the SAME profile instead of
     /// minting a duplicate. The key is scoped per owner (#3189): a draft id another user already
     /// promoted is treated exactly like an unknown id, so the response never reveals that row.
+    /// Names are unique per owner (#3192): when the caller already owns a filament profile with the
+    /// promoted name, the new profile gets the first free <c>"{name} (N)"</c> suffix instead.
     /// </summary>
     /// <param name="request">Promotion request with raw JSON content and optional name.</param>
     /// <param name="userId">ID of the calibration project's owner.</param>
@@ -242,6 +246,7 @@ public interface IProfilesService
     /// The promoted (or, on replay, the already-promoted) profile, and whether this call created
     /// it (<c>true</c>) or found and returned an existing one (<c>false</c>).
     /// </returns>
+    /// <exception cref="ProfileNameConflictException">No free suffixed name remains for the caller (#3192).</exception>
     Task<(CustomProfileDto Profile, bool WasCreated)> PromoteCalibrationDraftProfileAsync(
         UploadProfileRequestDto request, Guid userId, Guid sourceDraftProfileId, CancellationToken ct);
 
@@ -280,6 +285,7 @@ public interface IProfilesService
     /// <exception cref="KeyNotFoundException">No profile with this ID exists, or the caller may not view it.</exception>
     /// <exception cref="InvalidOperationException">The profile is a system profile.</exception>
     /// <exception cref="UnauthorizedAccessException">The caller can view the profile but does not own it.</exception>
+    /// <exception cref="ProfileNameConflictException">The caller already owns a filament profile with this name (#3192).</exception>
     Task<CustomProfileDto> UpdateCustomProfileAsync(Guid profileId, UpdateCustomProfileRequestDto request, ProfileViewer caller, CancellationToken ct);
 
     /// <summary>
