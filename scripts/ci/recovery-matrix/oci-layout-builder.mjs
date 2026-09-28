@@ -11,6 +11,12 @@ import { basename, join, resolve } from 'node:path';
 
 import { components, requireThat } from '../release-policy.mjs';
 import { defaultCell } from './cell-runtime.mjs';
+import {
+  resolveSchemaDelta,
+  schemaDeltaAppliesTo,
+  schemaDeltaFixtureSummary,
+  schemaDeltaTargetBuildArgs,
+} from './schema-delta-fixture.mjs';
 import { requiredInfrastructureIds, topologyFor } from './topologies.mjs';
 
 const ociIndex = 'application/vnd.oci.image.index.v1+json';
@@ -181,7 +187,9 @@ export function buildC2ImageLayout({
   target,
   run,
   cell = defaultCell,
+  schemaDelta: schemaDeltaOverride,
 }) {
+  const schemaDelta = resolveSchemaDelta(cell, schemaDeltaOverride);
   const layout = resolve(runRoot, 'oci-layout');
   rmSync(layout, { recursive: true, force: true });
   ensureOciLayout(layout);
@@ -208,6 +216,7 @@ export function buildC2ImageLayout({
       serviceId,
       prior,
       target,
+      schemaDelta,
     }),
   ]));
 
@@ -310,12 +319,19 @@ export function buildC2ImageLayout({
       platforms: infrastructureImages[id].platformDigests,
     })),
   };
-  return { layout, priorImages, targetImages, infrastructureLock };
+  return {
+    layout,
+    priorImages,
+    targetImages,
+    infrastructureLock,
+    schemaDelta,
+    fixtureMigrations: schemaDeltaFixtureSummary(schemaDelta),
+  };
 }
 
 export const buildCellImageLayout = buildC2ImageLayout;
 
-function buildServiceArchives({
+export function buildServiceArchives({
   repo,
   runRoot,
   imageScratch,
@@ -325,6 +341,7 @@ function buildServiceArchives({
   serviceId,
   prior,
   target,
+  schemaDelta = 'identical',
 }) {
   const runTag = basename(runRoot).replace(/[^A-Za-z0-9_.-]/g, '-').toLowerCase();
   const priorTag = `printfarmer-${runTag}-${serviceId}-prior:${prior.version}`;
@@ -341,17 +358,28 @@ function buildServiceArchives({
     '--build-arg', `VCS_REF=${sourceCommit}`,
   ], { cwd: repo, stdio: ['ignore', 'inherit', 'pipe'], env: buildEnvironment });
 
-  const deriveDockerfile = join(runRoot, `Dockerfile.${serviceId}-target`);
-  writeFileSync(deriveDockerfile, [
-    `FROM ${priorTag}`,
-    `LABEL org.printfarmer.recovery-fixture-target="${target.version}"`,
-    '',
-  ].join('\n'));
-  run('docker', ['build', runRoot, '--file', deriveDockerfile, '--tag', targetTag], {
-    cwd: repo,
-    stdio: ['ignore', 'inherit', 'pipe'],
-    env: buildEnvironment,
-  });
+  if (schemaDelta === 'changed' && schemaDeltaAppliesTo(serviceId)) {
+    run('docker', schemaDeltaTargetBuildArgs({
+      repo,
+      priorTag,
+      targetTag,
+      targetVersion: target.version,
+      sourceCommit,
+      serviceId,
+    }), { cwd: repo, stdio: ['ignore', 'inherit', 'pipe'], env: buildEnvironment });
+  } else {
+    const deriveDockerfile = join(runRoot, `Dockerfile.${serviceId}-target`);
+    writeFileSync(deriveDockerfile, [
+      `FROM ${priorTag}`,
+      `LABEL org.printfarmer.recovery-fixture-target="${target.version}"`,
+      '',
+    ].join('\n'));
+    run('docker', ['build', runRoot, '--file', deriveDockerfile, '--tag', targetTag], {
+      cwd: repo,
+      stdio: ['ignore', 'inherit', 'pipe'],
+      env: buildEnvironment,
+    });
+  }
 
   const priorArchive = join(imageScratch, `${serviceId}-prior.docker.tar`);
   const targetArchive = join(imageScratch, `${serviceId}-target.docker.tar`);
