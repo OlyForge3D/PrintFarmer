@@ -256,6 +256,11 @@ Dependency changes must preserve package license evidence and pass:
 node scripts/compliance/validate-compliance.mjs
 ```
 
+The full run needs a `dotnet restore` of `src/farm-web.sln` for NuGet
+evidence. `--skip-nuget` runs every other check (licensing metadata,
+provenance, npm lock entries, and reviewed npm fallbacks) without a restore;
+CI runs it on every pull request.
+
 The allowlist and narrow exceptions are in
 [`compliance/dependency-license-policy.json`](../compliance/dependency-license-policy.json).
 An exception requires the exact ecosystem, package and version, observed and

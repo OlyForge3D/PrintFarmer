@@ -721,7 +721,7 @@ async function validateNugetLicenses(repoRoot, policy) {
   return (await createNugetLicenseInventory(repoRoot, policy)).errors;
 }
 
-export async function validateDependencyLicenses(repoRoot, dependencyPolicy) {
+export async function validateDependencyLicenses(repoRoot, dependencyPolicy, options = {}) {
   const errors = [];
   for (const exception of dependencyPolicy.reviewedExceptions) {
     errors.push(...validateException(
@@ -763,7 +763,32 @@ export async function validateDependencyLicenses(repoRoot, dependencyPolicy) {
 
   errors.push(...await loadSbomPackageLicenseEvidence(repoRoot, dependencyPolicy));
   errors.push(...await validateNpmLicenses(repoRoot, dependencyPolicy));
-  errors.push(...await validateNugetLicenses(repoRoot, dependencyPolicy));
+  if (options.includeNuget !== false) {
+    errors.push(...await validateNugetLicenses(repoRoot, dependencyPolicy));
+  }
+  return errors;
+}
+
+// Dependency validation run by validate-compliance.mjs. Adds the bundled
+// frontend npm inventory, which checks every reviewed npm license-text
+// fallback against the production lock entries (LICENSE_POLICY_STALE) and
+// its evidence file hash — otherwise enforced only by the publish-time
+// release inventory (#3150). Its per-package license checks repeat
+// validateNpmLicenses, so exact duplicates are dropped. `includeNuget: false`
+// skips only the NuGet inventory, which needs restored project.assets.json.
+export async function validateDependencyCompliance(repoRoot, dependencyPolicy, options = {}) {
+  const errors = [];
+  const seen = new Set();
+  for (const error of [
+    ...await validateDependencyLicenses(repoRoot, dependencyPolicy, options),
+    ...(await createNpmLicenseInventory(repoRoot, dependencyPolicy)).errors,
+  ]) {
+    const key = JSON.stringify([error.code, error.path, error.message]);
+    if (!seen.has(key)) {
+      seen.add(key);
+      errors.push(error);
+    }
+  }
   return errors;
 }
 
@@ -2151,7 +2176,9 @@ export async function validateRepository(repoRoot, options = {}) {
   errors.push(...await validateProvenanceManifest(repoRoot, provenance));
 
   if (options.includeDependencies !== false) {
-    errors.push(...await validateDependencyLicenses(repoRoot, dependencyPolicy));
+    errors.push(...await validateDependencyCompliance(repoRoot, dependencyPolicy, {
+      includeNuget: options.includeNuget,
+    }));
   }
 
   for (const sbomPath of options.sbomPaths ?? []) {

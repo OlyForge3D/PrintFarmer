@@ -27,6 +27,7 @@ import {
   readJson,
   sha256,
   validateLicenseMetadata,
+  validateDependencyCompliance,
   validateDependencyLicenses,
   validateProvenanceManifest,
   validateSbomDocument,
@@ -1738,6 +1739,95 @@ test('createNpmLicenseInventory rejects incomplete, invalid-date, and stale-hash
       (await createNpmLicenseInventory(root, staleHash)).errors,
       'LICENSE_EVIDENCE_MISMATCH',
     ));
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('validateDependencyCompliance reports stale npm fallbacks once and dedupes npm license errors', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'printfarmer-dependency-compliance-'));
+  const lockRelativePath = 'src/Web/ReactApp/package-lock.json';
+  const licenseFile = 'compliance/licenses/npm/fixture.txt';
+  const licenseText = 'MIT license evidence\n';
+  const fallback = {
+    ecosystem: 'npm',
+    package: 'fixture',
+    version: '1.0.0',
+    license: 'MIT',
+    licenseFile,
+    sha256: sha256(Buffer.from(licenseText)),
+    source: 'https://licenses.example.test/fixture',
+    evidence: 'Immutable fixture license text',
+    reviewer: 'Maintainer',
+    reviewDate: '2026-07-24',
+    reviewAfter: '2099-07-24',
+    rationale: 'Fixture for fallback validation.',
+  };
+  const policy = {
+    allowedExpressions: ['MIT'],
+    deniedValues: ['', 'UNKNOWN'],
+    npmLockFiles: [lockRelativePath],
+    npm: { licenseTextFallbacks: [fallback] },
+    nuget: { assetsRoot: 'src', excludedProjectPathSegments: [] },
+    reviewedEvidence: [],
+    reviewedExceptions: [],
+    sbom: { npmBundleLockFile: lockRelativePath },
+  };
+  const writeLock = (packages) => writeFile(path.join(root, lockRelativePath), JSON.stringify({
+    lockfileVersion: 3,
+    packages: { '': { name: 'fixture-root', version: '1.0.0', license: 'MIT' }, ...packages },
+  }));
+
+  try {
+    const assetsPath = path.join(root, 'src', 'app', 'obj', 'project.assets.json');
+    await mkdir(path.dirname(assetsPath), { recursive: true });
+    await writeFile(assetsPath, JSON.stringify({
+      packageFolders: {},
+      libraries: {},
+      project: { restore: { projectPath: path.join(root, 'src', 'app', 'app.csproj') } },
+    }));
+    await mkdir(path.join(root, path.dirname(licenseFile)), { recursive: true });
+    await mkdir(path.join(root, path.dirname(lockRelativePath)), { recursive: true });
+    await writeFile(path.join(root, licenseFile), licenseText);
+
+    await writeLock({ 'node_modules/fixture': { license: 'MIT', version: '1.0.0' } });
+    assert.deepEqual(await validateDependencyCompliance(root, policy), []);
+    assert.deepEqual(await validateDependencyLicenses(root, policy), []);
+
+    // An npm-only bump leaves the reviewed fallback pointing at a version that
+    // is no longer bundled; only the npm inventory detects this.
+    await writeLock({ 'node_modules/fixture': { license: 'MIT', version: '1.0.1' } });
+    assert.deepEqual(await validateDependencyLicenses(root, policy), []);
+    assert.deepEqual(
+      (await validateDependencyCompliance(root, policy)).map((error) => error.code),
+      ['LICENSE_POLICY_STALE'],
+    );
+
+    // A production package with a denied license is reported by both
+    // validateNpmLicenses and the inventory; it must surface exactly once.
+    await writeLock({
+      'node_modules/fixture': { license: 'MIT', version: '1.0.0' },
+      'node_modules/unlicensed': { license: 'UNKNOWN', version: '2.0.0' },
+    });
+    const deniedErrors = (await validateDependencyCompliance(root, policy))
+      .filter((error) => error.path === `${lockRelativePath}:node_modules/unlicensed`);
+    assert.equal(deniedErrors.length, 1);
+
+    // The restore-free ci-tools mode skips only the NuGet inventory: missing
+    // assets are ignored, but npm staleness is still reported.
+    await rm(path.join(root, 'src', 'app'), { force: true, recursive: true });
+    await writeLock({ 'node_modules/fixture': { license: 'MIT', version: '1.0.0' } });
+    assert.deepEqual(
+      (await validateDependencyCompliance(root, policy)).map((error) => error.code),
+      ['NUGET_ASSETS_MISSING'],
+    );
+    assert.deepEqual(await validateDependencyCompliance(root, policy, { includeNuget: false }), []);
+    await writeLock({ 'node_modules/fixture': { license: 'MIT', version: '1.0.1' } });
+    assert.deepEqual(
+      (await validateDependencyCompliance(root, policy, { includeNuget: false }))
+        .map((error) => error.code),
+      ['LICENSE_POLICY_STALE'],
+    );
   } finally {
     await rm(root, { force: true, recursive: true });
   }

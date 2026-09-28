@@ -5,8 +5,9 @@
 # Emits deterministic GITHUB_OUTPUT lines that downstream CI jobs consume to
 # decide (a) whether the frontend build/test job runs, (b) whether the full
 # .NET solution is compiled, (c) which .NET test projects run in a matrix,
-# (d) which EF Core migration-drift context/provider pairs run, and (e) a
-# human-readable reason used in job summaries.
+# (d) which EF Core migration-drift context/provider pairs run, (e) whether
+# dependency-license/provenance validation runs, and (f) a human-readable
+# reason used in job summaries.
 #
 # Inputs (env):
 #   CHANGED_FILES_FROM_Z  path to a file containing NUL-terminated changed paths
@@ -31,8 +32,12 @@
 #                         test-dotnet-test-manifest.sh to point at fixtures.
 #
 # Outputs (GITHUB_OUTPUT):
-#   want_frontend, want_dotnet_build, want_dotnet_test, want_mig_drift
-#         — string booleans "true" | "false".
+#   want_frontend, want_dotnet_build, want_dotnet_test, want_mig_drift,
+#   want_dependency_compliance
+#         — string booleans "true" | "false". want_dependency_compliance is
+#           always "true" when want_dotnet_build is "true" (a superset), and
+#           additionally when an npm dependency manifest or a compliance
+#           policy/tooling path changed (issue #3150).
 #   full_matrix
 #         — "true" when the full safe fallback was chosen.
 #   matrix
@@ -53,7 +58,7 @@
 
 set -uo pipefail
 
-SCRIPT_VERSION="1.5.0"
+SCRIPT_VERSION="1.6.0"
 
 # ---------------------------------------------------------------------------
 # Required CI test projects, loaded from the checked manifest
@@ -346,6 +351,14 @@ load_changed_files() {
 #                     Inert like docs/mobile — recorded in the reason string
 #                     but never forces want_dotnet_build/want_dotnet_test/
 #                     want_mig_drift/want_frontend or full-safe.
+#   compliance      — compliance/** and scripts/compliance/** (dependency-
+#                     license policy, reviewed license-text evidence, and the
+#                     validators/notices generators that consume them; issue
+#                     #3150). Matched before `docs` so evidence files such as
+#                     compliance/licenses/**/LICENSE.md are not treated as
+#                     inert prose. Forces want_frontend (the frontend job runs
+#                     create-npm-notices.mjs, mirroring the Docker build) and
+#                     want_dependency_compliance, but never the .NET build.
 #   docs            — docs/**, *.md, LICENSE, .editorconfig outside src/
 #   frontend        — src/Web/**
 #   api             — src/api/**
@@ -505,7 +518,31 @@ load_changed_files() {
 #   wire_contract   — canonical API wire-contract JSON/manifest inputs
 #   unknown_src     — any other src/**
 #   unclassified    — anything else outside the buckets above
+#
+# Out-of-band (like wire_contract, evaluated independently of the single
+# classify_path token):
+#   npm_manifest    — package.json/package-lock.json of every lockfile listed
+#                     in compliance/dependency-license-policy.json
+#                     `npmLockFiles` (see is_npm_dependency_manifest_input).
+#                     Forces want_dependency_compliance only; the path still
+#                     keeps its ordinary bucket (e.g. src/Web/** -> frontend).
 # ---------------------------------------------------------------------------
+# Keep in sync with `npmLockFiles` in compliance/dependency-license-policy.json;
+# test-select-dotnet-tests.sh cross-checks every listed lockfile (and its
+# sibling package.json) against this predicate.
+is_npm_dependency_manifest_input() {
+  case "$1" in
+    src/Web/ReactApp/package.json|src/Web/ReactApp/package-lock.json)
+      return 0 ;;
+    tests/ui-validation/package.json|tests/ui-validation/package-lock.json)
+      return 0 ;;
+    tools/package.json|tools/package-lock.json)
+      return 0 ;;
+    *)
+      return 1 ;;
+  esac
+}
+
 is_api_wire_contract_input() {
   local p="$1"
   case "$p" in
@@ -564,6 +601,12 @@ classify_path() {
     # iOS/macOS surface — does not trigger .NET work.
     mobile/*)
       printf 'mobile' ; return ;;
+
+    # Dependency-license policy, reviewed evidence, and compliance tooling.
+    # Must precede the docs pattern: `*.md`/`LICENSE` evidence files under
+    # compliance/licenses/** are validated inputs, not inert prose.
+    compliance/*|scripts/compliance/*)
+      printf 'compliance' ; return ;;
 
     # Documentation and markdown outside src/. `LICENSE.md` is intentionally
     # not listed separately because `*.md` already covers it (ShellCheck
@@ -693,6 +736,14 @@ finish() {
   local want_frontend="$1" want_dotnet_build="$2" want_dotnet_test="$3"
   local want_mig_drift="$4" full_matrix="$5" reason_raw="$6"
   shift 6
+  # Dependency validation is a superset of the .NET build decision: the
+  # NuGet graph can only change through a want_dotnet_build bucket, but the
+  # npm graph and the compliance policy itself change through
+  # DEPENDENCY_COMPLIANCE_INPUT paths that never touch .NET (issue #3150).
+  local want_dependency_compliance="false"
+  if [[ "$want_dotnet_build" == "true" ]] || (( DEPENDENCY_COMPLIANCE_INPUT )); then
+    want_dependency_compliance="true"
+  fi
   # Remaining args: test project names, then a "---" separator, then mig entry names.
   # `"$@"` is safe with 0 args; we defensively guard subsequent array
   # expansions with `${arr[@]+"${arr[@]}"}` for Bash 3.2 + `set -u`
@@ -776,6 +827,7 @@ finish() {
   emit "want_dotnet_build" "$want_dotnet_build"
   emit "want_dotnet_test"  "$want_dotnet_test"
   emit "want_mig_drift"    "$want_mig_drift"
+  emit "want_dependency_compliance" "$want_dependency_compliance"
   emit "full_matrix"       "$full_matrix"
   emit "matrix"            "$matrix_json"
   emit "mig_matrix"        "$mig_json"
@@ -789,6 +841,7 @@ finish() {
     printf 'want_dotnet_build: %s\n' "$want_dotnet_build"
     printf 'want_dotnet_test:  %s\n' "$want_dotnet_test"
     printf 'want_mig_drift:    %s\n' "$want_mig_drift"
+    printf 'want_dependency_compliance: %s\n' "$want_dependency_compliance"
     printf 'full_matrix:       %s\n' "$full_matrix"
     printf 'matrix:            %s\n' "$matrix_json"
     printf 'mig_matrix:        %s\n' "$mig_json"
@@ -827,6 +880,10 @@ emit_full_safe() {
 # ---------------------------------------------------------------------------
 # Main decision logic.
 # ---------------------------------------------------------------------------
+# Set by main() when a compliance or npm dependency-manifest path changed;
+# read by finish() to derive want_dependency_compliance.
+DEPENDENCY_COMPLIANCE_INPUT=0
+
 main() {
   # Explicit force from caller — used when the workflow's own diff step failed.
   if [[ -n "${FORCE_FULL_SAFE:-}" ]]; then
@@ -880,12 +937,15 @@ main() {
   local has_tests_gcode=0 has_tests_inventory=0 has_tests_administration=0 has_tests_observability=0
   local has_tests_printers=0
   local has_tools=0 has_unknown_src=0 has_docs=0 has_mobile=0 has_ci_other=0 has_other=0
-  local has_wire_contract=0
+  local has_wire_contract=0 has_compliance=0 has_npm_manifest=0
 
   local p category
   for p in "${CHANGED_LIST[@]}"; do
     if is_api_wire_contract_input "$p"; then
       has_wire_contract=1
+    fi
+    if is_npm_dependency_manifest_input "$p"; then
+      has_npm_manifest=1
     fi
     category="$(classify_path "$p")"
     case "$category" in
@@ -939,6 +999,7 @@ main() {
       docs)            has_docs=1 ;;
       mobile)          has_mobile=1 ;;
       wire_contract)   has_wire_contract=1 ;;
+      compliance)      has_compliance=1 ;;
       ci_other)        has_ci_other=1 ;;
       *)               has_other=1 ;;
     esac
@@ -994,8 +1055,14 @@ main() {
   local want_frontend="false" want_dotnet_build="false"
   local want_dotnet_test="false" want_mig_drift="false"
 
-  if (( has_frontend )); then
+  # compliance/** also runs the frontend job: its create-npm-notices.mjs step
+  # is the only PR-time check that every production npm package still has
+  # bundled or reviewed license text after a policy/fallback edit.
+  if (( has_frontend || has_compliance )); then
     want_frontend="true"
+  fi
+  if (( has_compliance || has_npm_manifest )); then
+    DEPENDENCY_COMPLIANCE_INPUT=1
   fi
 
   # Any .NET-relevant bucket forces a full solution build to preserve compile
@@ -1394,6 +1461,8 @@ main() {
   local reason=""
   if (( has_wire_contract )); then reason+="wire-contract "; fi
   if (( has_frontend )); then reason+="frontend "; fi
+  if (( has_npm_manifest )); then reason+="npm-manifest "; fi
+  if (( has_compliance )); then reason+="compliance "; fi
   if (( has_api )); then reason+="api "; fi
   if (( has_infra )); then reason+="infra "; fi
   if (( has_backend )); then reason+="backend-plugin "; fi
