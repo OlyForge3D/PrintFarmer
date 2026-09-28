@@ -103,6 +103,34 @@ test('topologies map active services and infrastructure requirements', () => {
   assert.deepEqual(requiredInfrastructureIds(resolveCell('split-sqlserver').cell).sort(), ['mssql', 'nginx']);
 });
 
+test('health host listens where the offline CLI in-network health check curls (issue #3160)', () => {
+  const cliSource = readFileSync(path.resolve('src/tools/Farm.HostUpdate.Cli/HostUpdateCliOfflineContract.cs'), 'utf8');
+  const cliPorts = Object.fromEntries([...cliSource.matchAll(/\["([a-z-]+)"\] = (\d+),/g)].map((match) => [match[1], Number(match[2])]));
+  const scratch = path.join(scratchRoot, `catalog-health-port-${process.pid}-${Date.now()}`);
+  mkdirSync(scratch, { recursive: true });
+  try {
+    for (const cellId of ['c2', 'split-sqlserver', 'split-database']) {
+      const cell = resolveCell(cellId).cell;
+      const topology = topologyFor(cell.topology);
+      assert.equal(topology.healthPort, cliPorts[topology.healthServiceId], `${cellId} health port`);
+      const compose = writeRecoveryCompose({
+        deploymentRoot: scratch,
+        network: 'matrix-net',
+        egressSinkIp: '172.30.55.10',
+        databaseHost: '172.30.55.11',
+        databaseIp: '172.30.55.11',
+        appIp: '172.30.55.20',
+        runId: `${cellId}-health-port`,
+        cell,
+      });
+      const service = compose.services[topology.healthComposeService];
+      assert.ok(service.environment.includes(`ASPNETCORE_URLS=http://+:${topology.healthPort}`), `${cellId} listener`);
+      assert.deepEqual(service.ports, [`127.0.0.1:\${PRINTFARMER_PORT:-5245}:${topology.healthPort}`]);
+    }
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+});
 test('compose generation uses selected provider, split services, static IPs, and pull-never-ready image variables', () => {
   const scratch = path.join(scratchRoot, `catalog-compose-${process.pid}-${Date.now()}`);
   mkdirSync(scratch, { recursive: true });

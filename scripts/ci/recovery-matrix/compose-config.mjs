@@ -122,11 +122,12 @@ function applicationService({ serviceId, topology, provider, databaseHost, appIp
       'keys:/app/data-protection-keys',
     ],
   };
+  const isHealthHost = composeService === topology.healthComposeService;
   if (isHttpHost) {
-    service.environment.push('ASPNETCORE_URLS=http://+:5000');
+    service.environment.push(`ASPNETCORE_URLS=http://+:${isHealthHost ? topology.healthPort : 5000}`);
   }
-  if (composeService === topology.healthComposeService) {
-    service.ports = ['127.0.0.1:${PRINTFARMER_PORT:-5245}:5000'];
+  if (isHealthHost) {
+    service.ports = [`127.0.0.1:\${PRINTFARMER_PORT:-5245}:${topology.healthPort}`];
   }
   return service;
 }

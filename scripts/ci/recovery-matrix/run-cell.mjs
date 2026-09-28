@@ -15,7 +15,7 @@ import { assertHostStateContinuity, readHostStateSnapshotFromBoundary } from './
 import { canaryDnsName, hasCanaryAttempt } from './network-denial.mjs';
 import { providerFor } from './providers.mjs';
 import { redactSecrets, secretValuesFrom } from './redaction.mjs';
-import { serviceMappingsFor } from './topologies.mjs';
+import { serviceMappingsFor, topologyFor } from './topologies.mjs';
 import {
   activeServiceDigestExpectations,
   assertActiveServiceDigests,
@@ -55,6 +55,7 @@ const evidencePath = resolve(required(args.evidence, '--evidence'));
 const cosign = resolve(required(args.cosign, '--cosign'));
 const network = required(args.network, '--network');
 const appStaticIp = required(args['app-ip'], '--app-ip');
+const appHealthPort = topologyFor(cellSpec.cell.topology).healthPort;
 required(args['egress-sink'], '--egress-sink');
 const egressSinkIp = required(args['egress-sink-ip'], '--egress-sink-ip');
 const networkAttemptsPath = required(args['network-attempts'], '--network-attempts');
@@ -247,7 +248,7 @@ try {
     pgDump: databaseTools.pgDump ?? 'pg_dump',
     pgRestore: databaseTools.pgRestore ?? 'pg_restore',
     sqlcmd: databaseTools.sqlcmd ?? 'sqlcmd',
-    healthBaseUrl: `http://${appStaticIp}:5000`,
+    healthBaseUrl: `http://${appStaticIp}:${appHealthPort}`,
     cell: priorCell,
     databaseProvider: provider,
     databaseExternallyOwned: false,
@@ -358,7 +359,7 @@ try {
     pgDump: databaseTools.pgDump ?? 'pg_dump',
     pgRestore: databaseTools.pgRestore ?? 'pg_restore',
     sqlcmd: databaseTools.sqlcmd ?? 'sqlcmd',
-    healthBaseUrl: `http://${appStaticIp}:5000`,
+    healthBaseUrl: `http://${appStaticIp}:${appHealthPort}`,
     cell,
     databaseProvider: provider,
     databaseExternallyOwned: false,
@@ -511,7 +512,7 @@ try {
       pgDump: databaseTools.pgDump ?? 'pg_dump',
       pgRestore: databaseTools.pgRestore ?? 'pg_restore',
       sqlcmd: databaseTools.sqlcmd ?? 'sqlcmd',
-      healthBaseUrl: `http://${appStaticIp}:5000`,
+      healthBaseUrl: `http://${appStaticIp}:${appHealthPort}`,
       cell,
       databaseProvider: provider,
       databaseExternallyOwned: cell.databaseOwner === 'external',
@@ -1466,7 +1467,7 @@ function runningComposeImageDigest(env, service) {
 }
 
 function httpGetFromNetwork(network, ip, path) {
-  const script = `import urllib.request; print(urllib.request.urlopen('http://${ip}:5000${path}', timeout=20).read().decode())`;
+  const script = `import urllib.request; print(urllib.request.urlopen('http://${ip}:${appHealthPort}${path}', timeout=20).read().decode())`;
   let lastError;
   for (let attempt = 1; attempt <= 12; attempt += 1) {
     try {
