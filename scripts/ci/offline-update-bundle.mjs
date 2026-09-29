@@ -100,6 +100,12 @@ export function offlineBundleName(version) {
   return `printfarmer-offline-bundle-v${version}.tar`;
 }
 
+// Issue #3195: the release workflow signs the published bundle archive itself with the release
+// identity, so an operator can authenticate the download before opening it.
+export function offlineBundleSignatureName(version) {
+  return `${offlineBundleName(version)}.sigstore.json`;
+}
+
 // Same keyless identity publish-release.mjs verifies immediately before upload.
 export function releaseSigningIdentity(channel) {
   requireThat(['stable', 'insider'].includes(channel), 'Offline bundle channel must be stable or insider');
