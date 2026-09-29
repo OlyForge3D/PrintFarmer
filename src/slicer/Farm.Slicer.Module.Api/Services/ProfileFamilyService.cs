@@ -8,6 +8,7 @@ using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Services.Gcode;
 using Farm.Slicer.Module.Api.Repositories;
 using Farm.Slicer.Module.Data;
+using Farm.Slicer.Module.Data.Configurations;
 using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Dtos;
 using Farm.Slicer.Module.Services;
@@ -108,6 +109,15 @@ public sealed class ProfileFamilyService(
             familyId,
             normalizedRequest,
             catalog);
+
+        // #3201: generated variants are owned by the caller, so their names share the caller's
+        // per-owner machine-profile namespace. Reject a clash before any mutation or worker write.
+        await EnsureVariantNamesAvailableAsync(
+            familyId,
+            userId,
+            rendered.MachineVariants.Select(variant => variant.Name),
+            ct);
+
         string familyHash = ComputeHash(
             familyName,
             $"{normalizedRequest.SourceManufacturer.Trim()}/{normalizedRequest.SourceMachineModelName.Trim()}",
@@ -724,6 +734,14 @@ public sealed class ProfileFamilyService(
             // missing source preset/nozzle throws ProfileFamilySourceException (422). Both fire before any
             // mutation, so a validation failure preserves the family and its live bundle.
             rendered = _renderer.Render(family.Id, renderRequest, catalog);
+
+            // #3201: a rename or added nozzle can produce a variant name the family owner already uses
+            // for another machine profile. Detected here, before any mutation, so it is a clean 409.
+            await EnsureVariantNamesAvailableAsync(
+                family.Id,
+                family.CreatedByUserId,
+                rendered.MachineVariants.Select(variant => variant.Name),
+                ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -886,6 +904,15 @@ public sealed class ProfileFamilyService(
                     collidingProfile is null
                         ? $"A machine profile with the same rendered content already exists (family '{targetName}')."
                         : $"A machine profile with the same rendered content already exists: '{collidingProfile.SourceSystemPresetName}'.",
+                    ex);
+            }
+            catch (DbUpdateException ex) when (IsMachineProfileNameUniqueConstraintViolation(ex))
+            {
+                // #3201: a variant-name clash that raced past EnsureVariantNamesAvailableAsync. Same shape as
+                // the family-name case above: the generic handler below restores the previous bundle/alias
+                // and marks the row Failed before this surfaces as a 409 rather than a bare 500.
+                throw new ProfileFamilyConflictException(
+                    VariantNameConflictMessage(targetName),
                     ex);
             }
         }
@@ -1805,7 +1832,53 @@ public sealed class ProfileFamilyService(
                     : $"A machine profile with the same rendered content already exists: '{collidingProfile.SourceSystemPresetName}'.",
                 ex);
         }
+        catch (DbUpdateException ex) when (IsMachineProfileNameUniqueConstraintViolation(ex))
+        {
+            // #3201: a concurrent insert of a same-owner machine profile raced past the pre-check.
+            await transaction.RollbackAsync(CancellationToken.None);
+            throw new ProfileFamilyConflictException(VariantNameConflictMessage(family.Name), ex);
+        }
     }
+
+    /// <summary>
+    /// #3201: rejects generated variant names that clash with another machine profile in the owner's
+    /// name namespace (<c>IX_MachineProfiles_CreatedByUserId_Name_SlicerType</c>, or the unowned
+    /// <c>(Name, SlicerType)</c> index for a family without an owner). Only rows of that same owner
+    /// are consulted, so another user's private profile never blocks the family nor leaks its name.
+    /// The family's own variants are excluded because the same save renames or replaces them.
+    /// </summary>
+    private async Task EnsureVariantNamesAvailableAsync(
+        Guid familyId,
+        Guid? ownerUserId,
+        IEnumerable<string> variantNames,
+        CancellationToken ct)
+    {
+        List<string> names = [.. variantNames.Distinct(StringComparer.Ordinal)];
+        if (names.Count == 0)
+        {
+            return;
+        }
+
+        string? collidingName = await _dbContext.MachineProfiles
+            .AsNoTracking()
+            .Where(profile =>
+                profile.CreatedByUserId == ownerUserId
+                && profile.SlicerType == SlicerType.OrcaSlicer
+                && profile.MachineModelProfileId != familyId
+                && names.Contains(profile.Name))
+            .Select(profile => profile.Name)
+            .FirstOrDefaultAsync(ct);
+        if (collidingName is not null)
+        {
+            throw new ProfileFamilyConflictException(
+                $"Generated machine variant name '{collidingName}' conflicts with an existing machine " +
+                "profile owned by the family owner; rename or delete that profile, or choose a different family name.");
+        }
+    }
+
+    private static string VariantNameConflictMessage(string familyName) =>
+        $"A generated machine variant name for family '{familyName}' conflicts with an existing machine " +
+        "profile owned by the family owner; rename or delete that profile, or choose a different family name.";
 
     private static CloneProfileFamilyRequestDto CopyRequest(
         CloneProfileFamilyRequestDto request,
@@ -1843,6 +1916,20 @@ public sealed class ProfileFamilyService(
             exception,
             "IX_MachineProfiles_Hash",
             "MachineProfiles.Hash");
+
+    /// <summary>
+    /// #3201: a machine-profile name clash on either the per-owner index or the unowned
+    /// <c>(Name, SlicerType)</c> index introduced by #3198.
+    /// </summary>
+    private static bool IsMachineProfileNameUniqueConstraintViolation(DbUpdateException exception) =>
+        IsUniqueConstraintViolation(
+            exception,
+            "IX_MachineProfiles_CreatedByUserId_Name_SlicerType",
+            "MachineProfiles.CreatedByUserId, MachineProfiles.Name, MachineProfiles.SlicerType")
+        || IsUniqueConstraintViolation(
+            exception,
+            MachineProfileConfiguration.UnownedNameUniqueIndexName,
+            "MachineProfiles.Name, MachineProfiles.SlicerType");
 
     /// <summary>
     /// #2080: shared unique-constraint detection for <see cref="PersistFamilyAsync"/>'s catch
