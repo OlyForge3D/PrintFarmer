@@ -27,6 +27,16 @@ public sealed class HostUpdateExecutionOptions
     public string RootDirectory { get; set; } = string.Empty;
 
     /// <summary>
+    /// Optional absolute path, inside an application container, of a read-only mount of the host
+    /// executor's <see cref="StateDirectory"/> (issue #3207). When set, every submission/scheduling
+    /// producer in this process refuses work while the host executor's <c>admission.closed</c>
+    /// marker exists, without enabling the in-process executor that <see cref="RootDirectory"/>
+    /// would. A configured directory that is missing, unreadable, or not fully qualified fails
+    /// closed. Deployment templates set this to <c>/run/printfarmer/host-update-state</c>.
+    /// </summary>
+    public string AdmissionStateDirectory { get; set; } = string.Empty;
+
+    /// <summary>
     /// Explicit absolute paths to the host tools used by update adapters. Bare executable names
     /// and ambient PATH lookup are never accepted by the process boundary.
     /// </summary>

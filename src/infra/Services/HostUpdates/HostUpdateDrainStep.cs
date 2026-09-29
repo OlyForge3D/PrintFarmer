@@ -32,15 +32,22 @@ public interface IHostUpdateAdmissionGate
 }
 
 /// <summary>
-/// Host-root-backed admission gate shared by API replicas and the standalone slicer-host. A
-/// missing or invalid root is treated as closed so producers fail safe instead of admitting work
-/// while executor availability is unavailable.
+/// Host-root-backed admission gate shared by API replicas and the standalone slicer-host. The
+/// executor owner (<see cref="HostUpdateExecutionOptions.RootDirectory"/> configured) closes and
+/// opens the durable marker. A containerized replica that only observes the host executor's fence
+/// configures <see cref="HostUpdateExecutionOptions.AdmissionStateDirectory"/> (a read-only mount of
+/// the host state directory); a configured observation directory that is missing, unreadable, or
+/// not rooted is treated as closed so producers fail safe instead of admitting work (issue #3207).
 /// </summary>
 public sealed class FileHostUpdateAdmissionGate(HostUpdateExecutionOptions options) : IHostUpdateAdmissionGate
 {
+    public const string MarkerFileName = "admission.closed";
+
     private bool IsConfigured => !string.IsNullOrWhiteSpace(options.RootDirectory);
 
-    private string GatePath => Path.Combine(options.StateDirectory, "admission.closed");
+    private bool IsObserving => !string.IsNullOrWhiteSpace(options.AdmissionStateDirectory);
+
+    private string GatePath => Path.Combine(options.StateDirectory, MarkerFileName);
 
     public async Task CloseAsync(CancellationToken cancellationToken)
     {
@@ -72,6 +79,11 @@ public sealed class FileHostUpdateAdmissionGate(HostUpdateExecutionOptions optio
 
     public Task<bool> IsClosedAsync(CancellationToken cancellationToken)
     {
+        if (IsObserving && IsObservedMarkerClosed(options.AdmissionStateDirectory))
+        {
+            return Task.FromResult(true);
+        }
+
         if (!IsConfigured)
         {
             return Task.FromResult(false);
@@ -84,6 +96,25 @@ public sealed class FileHostUpdateAdmissionGate(HostUpdateExecutionOptions optio
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
         {
             return Task.FromResult(true);
+        }
+    }
+
+    // File.Exists reports false for an unreadable directory, which would silently admit work, so the
+    // observed directory is enumerated instead: any failure to prove the marker absent is closed.
+    private static bool IsObservedMarkerClosed(string directory)
+    {
+        if (!Path.IsPathFullyQualified(directory))
+        {
+            return true;
+        }
+
+        try
+        {
+            return Directory.EnumerateFileSystemEntries(directory, MarkerFileName, SearchOption.TopDirectoryOnly).Any();
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or System.Security.SecurityException)
+        {
+            return true;
         }
     }
 }
