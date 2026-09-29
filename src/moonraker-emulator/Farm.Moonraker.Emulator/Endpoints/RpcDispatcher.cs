@@ -32,6 +32,8 @@ public static class RpcDispatcher
             ? methodEl.GetString() ?? string.Empty
             : string.Empty;
 
+        registry.Requests.RecordRpc(method);
+
         bool disconnectAfter = false;
         FaultRule? rule = registry.Rules.MatchWebSocket(printer.Id, method);
         if (rule is not null)

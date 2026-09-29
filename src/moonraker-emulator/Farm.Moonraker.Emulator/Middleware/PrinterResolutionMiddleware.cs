@@ -1,4 +1,5 @@
-﻿using Farm.Moonraker.Emulator.Domain;
+﻿using System.Text.Json;
+using Farm.Moonraker.Emulator.Domain;
 using Farm.Moonraker.Emulator.Json;
 using Farm.Moonraker.Emulator.Options;
 using Microsoft.Extensions.Options;
@@ -31,6 +32,14 @@ public sealed class PrinterResolutionMiddleware(RequestDelegate next)
         // to clear that rule again.
         bool isControlApiRequest = path.StartsWith("/__emulator", StringComparison.OrdinalIgnoreCase);
         bool isHealthRequest = path.Equals("/healthz", StringComparison.OrdinalIgnoreCase);
+        if (!isControlApiRequest && !isHealthRequest)
+        {
+            // Recorded before auth/fault handling so a rejected or faulted command
+            // attempt is still visible as an attempt.
+            string? proxiedMethod = await ReadSpoolmanProxyMethodAsync(context, path);
+            registry.Requests.RecordHttp(context.Request.Method, path, proxiedMethod);
+        }
+
         string? requiredApiKey = options.Value.ApiKey;
         if (!isControlApiRequest &&
             !isHealthRequest &&
@@ -77,5 +86,38 @@ public sealed class PrinterResolutionMiddleware(RequestDelegate next)
         }
 
         await next(context);
+    }
+
+    private const int MaxProxyBodyBytes = 64 * 1024;
+
+    // Peeks the forwarded request_method of a Spoolman proxy call without consuming the body
+    // the endpoint reads next. Any other request, or an unreadable body, returns null.
+    private static async Task<string?> ReadSpoolmanProxyMethodAsync(HttpContext context, string path)
+    {
+        if (!HttpMethods.IsPost(context.Request.Method) ||
+            !path.TrimEnd('/').Equals(RequestLog.SpoolmanProxyPath, StringComparison.OrdinalIgnoreCase) ||
+            context.Request.ContentLength is > MaxProxyBodyBytes)
+        {
+            return null;
+        }
+
+        context.Request.EnableBuffering(MaxProxyBodyBytes);
+        try
+        {
+            using JsonDocument document = await JsonDocument.ParseAsync(context.Request.Body, cancellationToken: context.RequestAborted);
+            return document.RootElement.ValueKind == JsonValueKind.Object &&
+                   document.RootElement.TryGetProperty("request_method", out JsonElement method) &&
+                   method.ValueKind == JsonValueKind.String
+                ? method.GetString()
+                : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+        finally
+        {
+            context.Request.Body.Position = 0;
+        }
     }
 }
