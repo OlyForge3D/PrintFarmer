@@ -7,6 +7,7 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { composeUpTokens, faultCheckpointName, migrationApplyTokens } from './fault-cells.mjs';
+import { commandsSince } from './emulated-printer.mjs';
 import { expectedSchemaDeltaFixtureState } from './schema-delta-fixture.mjs';
 
 export const faultExitCodes = Object.freeze({
@@ -553,5 +554,58 @@ const scenarios = {
     harness.require(!existsSync(harness.ctx.admissionClosedPath), 'fence-released');
     harness.ctx.assertRolledBack();
     return proveDurable(harness, released, () => harness.recover('offline-recover-confirm'));
+  },
+
+  // Issue #3103: a registered printer backed by the Moonraker emulator. Recovery must never
+  // command the printer, dispatch must stay fenced (including across a host restart) until the
+  // operator confirms physical reconciliation, and must reopen only after that confirmation.
+  'emulated-printer-reconciliation'(harness, spec) {
+    const printer = harness.ctx.emulatedPrinter;
+    printer.start();
+    harness.ok('emulated-printer-started');
+    harness.ctx.seedPrinter();
+    const printerId = printer.attach();
+    harness.ok('emulated-printer-registered');
+    const baseline = printer.requests();
+    harness.ok(`emulator-baseline:total=${baseline.total}:commands=${baseline.commands}`);
+    activateIntoRecoveryRequired(harness);
+    const preview = harness.recover('offline-recover-preview');
+    harness.expect('recover-preview', preview, { outcome: 'RecoveryRequired' });
+    const pending = harness.recover('offline-recover-confirm');
+    harness.injected(spec.fault);
+    harness.expect('recover-confirm-pending', pending, {
+      outcome: 'FenceReleasePending',
+      reason: 'physical_reconciliation_pending',
+      exitCode: faultExitCodes.physicalReconciliationPending,
+    });
+    harness.require(existsSync(harness.ctx.admissionClosedPath), 'fence-held-while-pending');
+    const requireFenced = (label) => {
+      const probe = printer.dispatchProbe(printerId);
+      harness.require(probe.classification === 'admission-closed', `dispatch-fenced:${label}`,
+        `${probe.classification}:status=${probe.status}`);
+    };
+    requireFenced('pending');
+    const restores = harness.restoreCalls();
+    harness.ctx.restartHost();
+    harness.ok('pending-host-restarted');
+    requireFenced('pending-after-restart');
+    const pendingPreview = harness.recover('offline-recover-preview');
+    const token = physicalTokenPattern.exec(`${pendingPreview.stdout}\n${pendingPreview.stderr}`)?.[0];
+    harness.require(Boolean(token), 'physical-reconciliation-token-offered');
+    const duringRecovery = commandsSince(baseline, printer.requests());
+    harness.require(duringRecovery.count === 0, `emulator-commands-during-recovery:0:reads=${duringRecovery.reads}`,
+      duringRecovery.offenders.join(','));
+    const released = harness.recover('offline-recover-confirm', { extraArgs: ['--printers-reconciled', token] });
+    harness.expect('recover-confirm-release', released, { outcome: 'RolledBack', exitCode: 0 });
+    harness.require(harness.restoreCalls() === restores, 'release-redrive-no-restore-replay');
+    harness.require(!existsSync(harness.ctx.admissionClosedPath), 'fence-released');
+    harness.ctx.assertRolledBack();
+    const reopened = printer.dispatchProbe(printerId);
+    harness.require(reopened.classification === 'admitted', 'dispatch-reopened-after-reconciliation',
+      `${reopened.classification}:status=${reopened.status}`);
+    const final = proveDurable(harness, released, () => harness.recover('offline-recover-confirm'));
+    const total = commandsSince(baseline, printer.requests());
+    harness.require(total.count === 0, `emulator-commands-total:0:reads=${total.reads}`, total.offenders.join(','));
+    return final;
   },
 };

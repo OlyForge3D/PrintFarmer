@@ -159,6 +159,7 @@ cleanup() {
   fi
   docker rm -f "$HOST" >/dev/null 2>&1 || true
   docker rm -f "$SINK" >/dev/null 2>&1 || true
+  docker rm -f "$RUN_ID-printer-emulator" >/dev/null 2>&1 || true
   docker network rm "$NETWORK" >/dev/null 2>&1 || true
   docker image rm "$HOST_IMAGE" >/dev/null 2>&1 || true
   local leaks

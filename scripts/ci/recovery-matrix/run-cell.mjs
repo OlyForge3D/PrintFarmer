@@ -12,6 +12,16 @@ import { schemaDeltaFixtureStateSql } from './schema-delta-fixture.mjs';
 import { writeRecoveryCompose } from './compose-config.mjs';
 import { dockerFaultFiles, wrapToolWithPauseGate, writeDockerShim } from './docker-shim.mjs';
 import { runFaultScenario } from './fault-scenarios.mjs';
+import {
+  classifyDispatchProbe,
+  emulatorIpFor,
+  emulatorPort,
+  mintHarnessJwt,
+  networkRequestScript,
+  parseEmulatorRequests,
+  parseNetworkResponse,
+  pointPrinterAtEmulatorSql,
+} from './emulated-printer.mjs';
 import { runImportScenario } from './import-scenarios.mjs';
 import { hasFaultHooks, invokeFaultHook, parseFaultHooks } from './fault-hooks.mjs';
 import { assertHostStateContinuity, readHostStateSnapshotFromBoundary } from './host-state-continuity.mjs';
@@ -75,6 +85,8 @@ const priorCell = cellSpec.id === 'split-database'
   ? { ...cell, databaseLayout: 'shared' }
   : cell;
 const faultState = { injected: false };
+// Name of the #3103 emulated-printer container once started, so cleanup always removes it.
+let emulatedPrinterContainer = null;
 
 const run = {
   id: runRoot.split(/[\\/]/).at(-1),
@@ -555,6 +567,7 @@ try {
       schemaDeltaState: (context) => parseSchemaDeltaState(
         databaseQuery(deploymentRoot, env, provider, schemaDeltaFixtureStateSql(provider.id, context))),
       seedPrinter: () => databaseQuery(deploymentRoot, env, provider, seedPrinterSql()),
+      emulatedPrinter: createEmulatedPrinter({ env, deploymentRoot }),
       snapshot: faultSnapshot,
       assertNoMutation,
       assertRolledBack: assertRecoveredToPrior,
@@ -904,6 +917,7 @@ try {
   process.exitCode = 1;
   }
 } finally {
+  disposeEmulatedPrinter();
   root.dispose();
 }
 
@@ -2043,6 +2057,78 @@ function runningComposeImageDigest(env, service) {
   const container = `${env.COMPOSE_PROJECT_NAME}-${service}-1`;
   const image = execFileSync('/usr/bin/docker', ['inspect', container, '--format', '{{.Config.Image}}'], { encoding: 'utf8' }).trim();
   return image.includes('@') ? image.split('@').at(-1) : image;
+}
+
+// Issue #3103: the repository's Moonraker emulator, built from source and attached only to the
+// run's internal network, stands in for a physical printer. The container name is recorded so the
+// finally block (and run-cell.sh cleanup) always removes it.
+function createEmulatedPrinter({ env, deploymentRoot }) {
+  const emulatorIp = emulatorIpFor(appStaticIp);
+  const container = `${run.id}-printer-emulator`;
+  const image = `printfarmer-${run.id.replace(/[^A-Za-z0-9_.-]/g, '-').toLowerCase()}-moonraker-emulator:recovery`;
+  const request = (spec) => {
+    const result = spawnSync('/usr/bin/docker', [
+      'run', '--rm', '--network', network, '--env', 'REQ', 'python:3.12-alpine', 'python', '-c', networkRequestScript,
+    ], { encoding: 'utf8', env: { ...process.env, REQ: JSON.stringify(spec) }, stdio: ['ignore', 'pipe', 'pipe'] });
+    if (result.status !== 0) throw new Error(`network_request_failed:${spec.method}:${spec.url}:${result.stderr}`);
+    return parseNetworkResponse(result.stdout);
+  };
+  const emulatorGet = (path) => request({ url: `http://${emulatorIp}:${emulatorPort}${path}`, method: 'GET' });
+  return {
+    start() {
+      execFileSync('/usr/bin/docker', [
+        'build', repo,
+        '--file', join(repo, 'scripts/docker/dockerfiles/Dockerfile.multistage'),
+        '--target', 'moonraker-emulator-runtime',
+        '--tag', image,
+      ], { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'inherit', 'pipe'] });
+      emulatedPrinterContainer = container;
+      execFileSync('/usr/bin/docker', [
+        'run', '--detach',
+        '--name', container,
+        '--label', `printfarmer.recovery-matrix.run=${run.id}`,
+        '--network', network,
+        '--ip', emulatorIp,
+        '--env', `ASPNETCORE_URLS=http://0.0.0.0:${emulatorPort}`,
+        '--env', 'Emulator__EnableControlApi=true',
+        image,
+      ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+      const deadline = Date.now() + 120_000;
+      for (;;) {
+        const health = emulatorGet('/healthz');
+        if (health.status === 200) break;
+        if (Date.now() > deadline) throw new Error(`emulator_not_healthy:status=${health.status}`);
+        execFileSync('/usr/bin/sleep', ['2'], { stdio: 'ignore' });
+      }
+    },
+    attach() {
+      const output = databaseQuery(deploymentRoot, env, provider, pointPrinterAtEmulatorSql(emulatorIp));
+      const ids = String(output).match(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi) ?? [];
+      if (ids.length !== 1) throw new Error(`emulated_printer_attach_expected_one_row:${output}`);
+      return ids[0];
+    },
+    requests() {
+      const response = emulatorGet('/__emulator/requests');
+      if (response.status !== 200) throw new Error(`emulator_request_log_unavailable:status=${response.status}`);
+      return parseEmulatorRequests(response.body);
+    },
+    dispatchProbe(printerId) {
+      const token = mintHarnessJwt({ key: env.Jwt__Key, issuer: env.Jwt__Issuer, audience: env.Jwt__Audience });
+      const response = request({
+        url: `http://${appStaticIp}:${appHealthPort}/api/auto-dispatch/${printerId}/ready`,
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: '{}',
+      });
+      return { status: response.status, classification: classifyDispatchProbe(response) };
+    },
+  };
+}
+
+function disposeEmulatedPrinter() {
+  if (!emulatedPrinterContainer) return;
+  spawnSync('/usr/bin/docker', ['rm', '--force', emulatedPrinterContainer], { stdio: 'ignore' });
+  emulatedPrinterContainer = null;
 }
 
 function httpGetFromNetwork(network, ip, path) {
