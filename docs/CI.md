@@ -200,7 +200,7 @@ The narrow exception is an API serialization-source change under
 those paths additionally select `Farm.Web.Api.Tests` so the producer
 wire-contract assertions execute.
 
-**Host-update services (issue #3210):** a change under
+**Host-update services (issue #3210):** a non-prose change under
 `src/infra/Services/HostUpdates/**` keeps the `infra` selection and additionally
 selects `Farm.HostUpdate.Cli.Tests` (the CLI references `Farm.Infrastructure` and
 drives these services end to end) and `Farm.Web.Api.Tests` (which owns the

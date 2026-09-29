@@ -560,6 +560,7 @@ case_host_updates_change_selects_host_update_cli_tests() {
     EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
       CHANGED_FILES_FROM_Z="" CHANGED_FILES="$path" \
       select_run >/dev/null 2>&1
+    assert_eq "want_dotnet_build ($path)" "$(get_output "$out" want_dotnet_build)" "true" || return 1
     assert_eq "want_dotnet_test ($path)" "$(get_output "$out" want_dotnet_test)" "true" || return 1
     assert_eq "full_matrix ($path)" "$(get_output "$out" full_matrix)" "false" || return 1
     local matrix ; matrix="$(get_output "$out" matrix)"
@@ -577,6 +578,15 @@ case_host_updates_change_selects_host_update_cli_tests() {
   local other ; other="$(get_output "$out" matrix)"
   assert_not_contains "no host-update cli for other infra" "$other" "Farm.HostUpdate.Cli.Tests" || return 1
   assert_not_contains "no api for other infra" "$other" "Farm.Web.Api.Tests" || return 1
+  : > "$out"
+
+  # Prose under HostUpdates/ stays inert like every other docs path.
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="src/infra/Services/HostUpdates/README.md" \
+    select_run >/dev/null 2>&1
+  assert_eq "docs want_dotnet_test" "$(get_output "$out" want_dotnet_test)" "false" || return 1
+  assert_eq "docs want_dotnet_build" "$(get_output "$out" want_dotnet_build)" "false" || return 1
+  assert_not_contains "docs no host-update cli" "$(get_output "$out" matrix)" "Farm.HostUpdate.Cli.Tests" || return 1
 }
 
 case_infra_test_project_change_selects_narrow_bucket() {

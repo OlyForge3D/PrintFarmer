@@ -965,10 +965,12 @@ main() {
     if is_npm_dependency_manifest_input "$p"; then
       has_npm_manifest=1
     fi
-    if is_host_update_services_input "$p"; then
+    category="$(classify_path "$p")"
+    # Only executable infra inputs count: prose under HostUpdates/ (e.g.
+    # README.md) classifies as docs and must stay inert.
+    if [[ "$category" == infra ]] && is_host_update_services_input "$p"; then
       has_host_updates=1
     fi
-    category="$(classify_path "$p")"
     case "$category" in
       shared_config)   has_shared_config=1 ;;
       ci_selector)     has_ci_selector=1 ;;
@@ -1090,7 +1092,7 @@ main() {
   # coverage across the whole graph. This is load-bearing: dotnet-test and
   # migration-drift both depend on dotnet-build and consume its artifacts, so
   # every bucket that can request either consumer must also request the build.
-  if (( has_wire_contract || has_api || has_infra || has_backend || has_backend_core || has_slicer ||
+  if (( has_wire_contract || has_api || has_infra || has_host_updates || has_backend || has_backend_core || has_slicer ||
         has_orca || has_smartplug || has_printqueue || has_maintenance || has_calibration || has_devices || has_identity ||
         has_gcode || has_inventory || has_administration || has_observability || has_printers ||
         has_mig_app || has_mig_slcr ||
