@@ -232,6 +232,15 @@ The validation-only control API is available only when
 | `GET/POST /__emulator/rules` | List or add fault rules |
 | `DELETE /__emulator/rules/{id}` | Remove one fault rule |
 | `POST /__emulator/rules/clear` | Remove all fault rules |
+| `GET /__emulator/requests` | Read the protocol request log: `{ total, commands, entries[] }`. Each entry has `sequence`, `receivedAtUtc`, `transport` (`http` or `jsonrpc`), `method`, `target` and `isCommand`. `total` and `commands` are cumulative; `entries` keeps only the most recent requests |
+
+The request log records every Moonraker-protocol HTTP request and WebSocket JSON-RPC
+call, but not `/__emulator/**` control calls or `/healthz`. A request counts as a
+command when it could change printer state: any HTTP method other than
+`GET`/`HEAD`/`OPTIONS` (except the `/websocket` upgrade), and any JSON-RPC method outside the read-only set (identify,
+`server.info`, object list/subscribe/query, camera monitor start/stop and directory
+listing). The offline-update recovery matrix uses it to prove that recovery never
+commands a printer (see `docs/OFFLINE_UPDATE_RECOVERY.md`, #3103).
 
 Fault rules can target HTTP paths/methods or WebSocket JSON-RPC methods. Supported
 effects are latency, explicit HTTP status/body, JSON-RPC error, malformed JSON,

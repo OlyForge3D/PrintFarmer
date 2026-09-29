@@ -78,12 +78,12 @@ test('emulator command delta uses the cumulative counter and names offenders', (
     total: 6,
     commands: 1,
     entries: [
-      { sequence: 4, transport: 'rpc', method: 'printer.objects.query', target: '', isCommand: false },
-      { sequence: 5, transport: 'rpc', method: 'printer.gcode.script', target: 'G28', isCommand: true },
+      { sequence: 4, transport: 'jsonrpc', method: 'printer.objects.query', target: '', isCommand: false },
+      { sequence: 5, transport: 'jsonrpc', method: 'printer.gcode.script', target: 'G28', isCommand: true },
       { sequence: 6, transport: 'http', method: 'GET', target: '/server/info', isCommand: false },
     ],
   }));
-  assert.deepEqual(commandsSince(baseline, current), { count: 1, reads: 2, offenders: ['rpc:printer.gcode.script:G28'] });
+  assert.deepEqual(commandsSince(baseline, current), { count: 1, reads: 2, offenders: ['jsonrpc:printer.gcode.script:G28'] });
   assert.throws(() => commandsSince(current, baseline), /emulator_request_log_regressed/);
   assert.throws(() => parseEmulatorRequests('{"total":1}'), /emulator_request_log_invalid/);
 });
@@ -116,7 +116,7 @@ function fakeCtx(name, { admittedWhilePending = false, commandDuringRecovery = f
       log.total += 1;
       if (commandDuringRecovery && ctx.state === 'pending' && log.commands === 0) {
         log.commands += 1;
-        log.entries.push({ sequence: log.total, transport: 'rpc', method: 'printer.gcode.script', target: 'G28', isCommand: true });
+        log.entries.push({ sequence: log.total, transport: 'jsonrpc', method: 'printer.gcode.script', target: 'G28', isCommand: true });
       }
       return { ...log, entries: [...log.entries] };
     },

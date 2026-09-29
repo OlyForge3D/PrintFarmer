@@ -579,10 +579,17 @@ const scenarios = {
       exitCode: faultExitCodes.physicalReconciliationPending,
     });
     harness.require(existsSync(harness.ctx.admissionClosedPath), 'fence-held-while-pending');
+    // A dispatch admitted while reconciliation is pending is recorded and the recovery flow is
+    // still driven to completion, so one run proves every other invariant before the cell fails.
+    const fenceGaps = [];
     const requireFenced = (label) => {
       const probe = printer.dispatchProbe(printerId);
-      harness.require(probe.classification === 'admission-closed', `dispatch-fenced:${label}`,
-        `${probe.classification}:status=${probe.status}`);
+      if (probe.classification === 'admission-closed') {
+        harness.ok(`dispatch-fenced:${label}`);
+        return;
+      }
+      harness.failed(`dispatch-fenced:${label}`);
+      fenceGaps.push(`dispatch-fenced:${label}:${probe.classification}:status=${probe.status}`);
     };
     requireFenced('pending');
     const restores = harness.restoreCalls();
@@ -606,6 +613,7 @@ const scenarios = {
     const final = proveDurable(harness, released, () => harness.recover('offline-recover-confirm'));
     const total = commandsSince(baseline, printer.requests());
     harness.require(total.count === 0, `emulator-commands-total:0:reads=${total.reads}`, total.offenders.join(','));
+    if (fenceGaps.length > 0) throw faultScenarioFailure(fenceGaps.join('|'));
     return final;
   },
 };
