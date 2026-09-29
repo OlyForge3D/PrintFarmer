@@ -99,6 +99,17 @@ node scripts/ci/offline-update-bundle.mjs verify \
   --trusted-root ./trusted_root.json --staging ./offline-staging
 ```
 
+Every release published by `consolidated-release.yml` (insider and stable)
+includes this bundle as the `printfarmer-offline-bundle-v<version>.tar` release
+asset. The sign job assembles it from the exact signed release assets, checks
+it is under GitHub's 2 GiB asset limit, and keyless-signs the archive itself
+with the release workflow identity (`.tar.sigstore.json` asset). Publication
+re-verifies the size and that signature before tagging and again before
+upload. The published bundle carries the signed release metadata, the host-update CLI
+and the signed recovery instructions. It deliberately excludes container
+images, deployment tools and Node.js/Cosign, which exceed the asset limit or are
+provisioned out of band.
+
 The bundle is a flat, uncompressed ustar archive. Its first member,
 `offline-bundle.json`, is an unsigned index; every trusted fact is re-derived
 from the signed members, never from the index. Members are the exact
@@ -1208,11 +1219,35 @@ higher sequence with a foreign signature must not raise the high-water mark),
 equal-sequence substitution (`replay_rejected`), a missing replay store and a
 rolled-back replay store.
 
-Criterion 5 of #3102, a read-only verification of a real published insider
-bundle, can't run yet. Published insider releases carry no offline recovery
-bundle, host-update CLI archive or packaged instructions. See #3195. The
-`printfarmer-published-bundle-verification` record stays schema-only until
-those assets are published.
+Criterion 5 of #3102 is a read-only verification of a real published insider
+bundle (#3195). Run it on a connected Ubuntu host with Docker, Node.js, jq,
+`gh` and a pinned Cosign:
+
+```bash
+scripts/ci/recovery-matrix/verify-published-bundle.sh \
+  --evidence ./evidence-published-bundle.json [--tag v<version>-insider.<n>]
+```
+
+The script selects the newest non-draft insider release (or `--tag`), downloads
+exactly its `printfarmer-offline-bundle-v<version>.tar` and `.tar.sigstore.json`
+assets, checks them against the release asset digests, and obtains the
+public-good `trusted_root.json` with `cosign initialize`. The verification then
+runs in a read-only container on an internal Docker network whose only peer is
+the default-deny egress sink, after the same canary proof the matrix cells use.
+Cosign `verify-blob --trusted-root` first authenticates the published archive
+against the insider release workflow identity, then the
+[offline verifier](#verified-release-metadata-bundle-first-slice) checks every
+member into a fresh staging directory. The script writes the
+`printfarmer-published-bundle-verification` record; it passes only when the
+signature verified, no egress was attempted, the bundle bytes were unchanged
+and the host's Docker images, Docker volumes and trusted root were unchanged.
+
+There is no fallback. It never downloads another release, builds or re-signs a
+bundle, imports, activates or resets anything, and it rejects any unsupported
+option. If the newest insider release lacks its signed bundle, it fails with
+`published_bundle_missing` rather than verifying an older release. The Recovery
+Matrix workflow runs it as the `published-bundle` job on its schedule and on
+dispatch. It fails until the first insider release that publishes the bundle.
 
 ### Queue-consumer health entry (#3157)
 

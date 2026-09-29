@@ -8,7 +8,9 @@ import { load } from 'js-yaml';
 import { components, compareVersions, parseTag, validateVersion, verifyEnvironmentRestrictions } from '../release-policy.mjs';
 import { githubClient, verifyOwnerDispatch } from '../release-dispatch.mjs';
 import { buildMetadata } from '../release-metadata.mjs';
-import { buildImages, publishRelease, releaseAssets, rejectExistingVersion, selectRelease } from '../publish-release.mjs';
+import { buildImages, publishRelease, releaseAssetMaxBytes, releaseAssets, rejectExistingVersion, selectRelease }
+  from '../publish-release.mjs';
+import { offlineBundleName, offlineBundleSignatureName } from '../offline-update-bundle.mjs';
 import { formatSums, hostUpdateCliArchiveName, hostUpdateCliAssets, hostUpdateCliRuntimes, hostUpdateCliSbomName,
   hostUpdateCliSumsBundleName, hostUpdateCliSumsName, packageHostUpdateCli, parseSums, validateHostUpdateCliSbom,
   verifyHostUpdateCliSums } from '../host-update-cli-package.mjs';
@@ -701,6 +703,12 @@ function publishFixture(t, channel = 'insider') {
     issuer: manifestIssuer,
     identity: manifestIdentityFor(chosen.channel),
   }));
+  writeFileSync(join(assets, offlineBundleName(chosen.version)), 'offline bundle archive');
+  writeFileSync(join(assets, offlineBundleSignatureName(chosen.version)), JSON.stringify({
+    sha256: createHash('sha256').update('offline bundle archive').digest('hex'),
+    issuer: manifestIssuer,
+    identity: manifestIdentityFor(chosen.channel),
+  }));
   const calls = [];
   const api = async (endpoint, options = {}) => {
     calls.push({ endpoint, ...options });
@@ -860,6 +868,36 @@ test('the signed deployment set is uploaded and verified before tagging and befo
   assert.ok(!calls.some(call => call.endpoint === 'git/refs'), 'a set for another build must stop before tagging');
 });
 
+test('the signed offline recovery bundle is uploaded and verified before tagging and before upload', async t => {
+  for (const channel of ['stable', 'insider']) {
+    const { chosen, assets, api, deps, calls, files } = publishFixture(t, channel);
+    const bundle = offlineBundleName(chosen.version);
+    assert.equal(bundle, `printfarmer-offline-bundle-v${chosen.version}.tar`);
+    assert.ok(files.includes(bundle) && files.includes(offlineBundleSignatureName(chosen.version)));
+    await publishRelease(chosen, assets, api, deps);
+    const checks = calls.flatMap((call, index) =>
+      call.command === 'cosign' && call.args[7].endsWith(bundle) ? [index] : []);
+    assert.equal(checks.length, 2);
+    for (const index of checks) {
+      assert.equal(calls[index].args[2], join(assets, `${bundle}.sigstore.json`));
+      assert.equal(calls[index].args[4], manifestIssuer);
+      assert.equal(calls[index].args[6], manifestIdentityFor(channel));
+    }
+    assert.ok(checks[0] < calls.findIndex(call => call.endpoint === 'git/refs'));
+    assert.ok(checks[1] > calls.findIndex(call => call.endpoint === 'releases'));
+    assert.ok(checks[1] < calls.findIndex(call => call.command === 'gh'));
+    const upload = calls.find(call => call.command === 'gh');
+    assert.ok(upload.args.includes(join(assets, bundle)), 'the bundle archive must be uploaded');
+  }
+  assert.equal(releaseAssetMaxBytes, 2 * 1024 * 1024 * 1024 - 1);
+  const { chosen, assets, api, deps, calls } = publishFixture(t);
+  writeFileSync(join(assets, offlineBundleName(chosen.version)), 'a different archive');
+  await assert.rejects(publishRelease(chosen, assets, api, deps));
+  assert.ok(!calls.some(call => call.endpoint === 'git/refs'), 'a mismatched bundle must stop before tagging');
+  const empty = publishFixture(t);
+  writeFileSync(join(empty.assets, offlineBundleName(empty.chosen.version)), '');
+  await assert.rejects(publishRelease(empty.chosen, empty.assets, empty.api, empty.deps), /Missing release asset/);
+});
 test('host-update CLI checksum list is canonical and names exactly the supported archives and SBOMs', t => {
   assert.deepEqual([...hostUpdateCliRuntimes], ['linux-x64', 'linux-arm64', 'win-x64']);
   assert.throws(() => hostUpdateCliArchiveName('1.2.3', 'osx-arm64'), /Unsupported host-update CLI runtime/);
