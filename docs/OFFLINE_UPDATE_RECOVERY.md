@@ -1155,7 +1155,7 @@ then repeats the final operator action, restarts the host, runs
 | `fault-corrupt-journal` | Journal record tampered while `RecoveryRequired` | `RecoveryRequired` / `journal_integrity_failure`, exit 4, no mutation | Pass (2026-09-28, `eb900fa1c8ce`) |
 | `fault-corrupt-replay` | Replay store garbled before activation | `RecoveryRequired` / `host_update_replay_state_invalid`, exit 4, no mutation | Pass (2026-09-28, `cd314c3a53bf`) |
 | `fault-fence-release` | Printer inventory present at fence release | Confirm reports `FenceReleasePending` / `physical_reconciliation_pending` (exit 13), with the fence held across a restart. Confirming with `--printers-reconciled <token>` releases only the fence, without replaying restore, and reports `RolledBack` | Pass (2026-09-28, `cd314c3a53bf`) |
-| `fault-emulated-printer-reconciliation` | A Moonraker emulator attached to the seeded printer at fence release (#3103) | As `fault-fence-release`, plus: dispatch is refused with `409 host_update_admission_closed` while `FenceReleasePending`, before and after a restart; the emulator records no printer command during or after recovery (no pending workload; queued-work fencing is #3209); dispatch is admitted again (`428 precondition_required`) after `--printers-reconciled` | Fail (2026-09-29, `f9ac7b7c1da0`): blocked by #3207, dispatch admitted while `FenceReleasePending`. Every other checkpoint passes |
+| `fault-emulated-printer-reconciliation` | A Moonraker emulator attached to the seeded printer at fence release (#3103) | As `fault-fence-release`, plus: dispatch is refused with `409 host_update_admission_closed` while `FenceReleasePending`, before and after a restart; the emulator records no printer command during or after recovery (no pending workload; queued-work fencing is #3209); dispatch is admitted again (`428 precondition_required`) after `--printers-reconciled` | Pass (2026-09-29, `74f6ec80384d`) |
 
 The evidence `outcome.expectedReason` is `null` for fault cells because they are
 supported cells. The observed stable reason is recorded in `outcome.reason` for
@@ -1192,16 +1192,21 @@ emulated printer, and the evidence records `emulator-commands-scope:no-pending-w
 It does not prove that queue consumers stay fenced while queued work is pending.
 Issue #3209 tracks that coverage.
 
-The live run on 2026-09-29 (`f9ac7b7c1da0`, run
-`fault-emulated-printer-reconciliation-20260929t014537z-934845`) recorded no
-emulator command during recovery (8 reads) or in total (10 reads). The fence was
-released only by `--printers-reconciled`, and the durable outcome was `RolledBack`
-after a restart. Dispatch was admitted again after reconciliation. The run fails
-on `dispatch-fenced:pending` and `dispatch-fenced:pending-after-restart`: the
-probe returned the exact `428` precondition response, not `409`, while the host held `admission.closed`. The
-application containers have no `HostUpdateExecution__RootDirectory` or executor
-state mount, so their admission gate is unconfigured and open. Issue #3207
-tracks the fix.
+The first live run on 2026-09-29 (`f9ac7b7c1da0`) failed `dispatch-fenced:pending`
+and `dispatch-fenced:pending-after-restart`: the probe got the `428` precondition
+response while the host held `admission.closed`. The application containers had
+no view of the executor state directory, so their admission gate was
+unconfigured and open (#3207). The deployment templates and the harness now
+mount the host `state` directory read-only at `/run/printfarmer/host-update-state`
+in the `api`, `slicer-host`, and `monolith` containers and set
+`HostUpdateExecution__AdmissionStateDirectory` to it.
+
+The live rerun on 2026-09-29 (`74f6ec80384d`, run
+`fault-emulated-printer-reconciliation-20260929t024056z-1007021`) passes. Dispatch
+was refused with `409` while `FenceReleasePending`, before and after a restart.
+The emulator recorded no command during recovery (8 reads) or in total (10
+reads). The fence was released only by `--printers-reconciled`, dispatch was
+admitted again afterwards, and the durable outcome was `RolledBack` after a restart.
 
 ### Live import cells (#3102)
 

@@ -56,6 +56,14 @@ validated fail-closed by `ConfiguredHostUpdateExecutableResolver`. The executor 
 - Derived paths: `StateDirectory` (`{RootDirectory}/state`), `BackupRootDirectory`
   (`{RootDirectory}/backups`), `DiskWatchPath` (`RootDirectory`, checked for free space at
   preflight).
+- **`AdmissionStateDirectory`** (optional): an absolute, read-only replica of the host executor's
+  `StateDirectory` for containers that must honor the admission fence without running the
+  executor. The admission gate reports closed when `admission.closed` exists in either
+  `StateDirectory` or `AdmissionStateDirectory`. A configured directory that is missing,
+  unreadable, or not rooted also reports closed. The deployment templates bind-mount
+  `${HostUpdateExecution__RootDirectory}/state` read-only at `/run/printfarmer/host-update-state`
+  in the `api`, `slicer-host`, and `monolith` containers and set
+  `HostUpdateExecution__AdmissionStateDirectory` to that path (#3207).
 - Timeouts/poll intervals for drain, fence-proof, backup, verify, apply, and short diagnostic
   process calls; `MinimumFreeBytes`; the EF Core provider allowlist (`SupportedProviderNames`);
   `DatabaseExternallyOwned` (fails backup closed instead of silently skipping a customer-managed
