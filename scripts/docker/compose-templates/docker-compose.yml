@@ -118,7 +118,7 @@ services:
       - ${EXTERNAL_GCODE_PATH:-.volumes/printfarmer-gcode-storage}:/app/gcode
       - ${EXTERNAL_PROFILES_PATH:-.volumes/printfarmer-slicer-profiles}:/app/profiles
       - ${EXTERNAL_DATAPROTECTION_PATH:-.volumes/printfarmer-dataprotection-keys}:/app/data-protection-keys
-      - ${HostUpdateExecution__RootDirectory:-.volumes/printfarmer-host-update}/state:/run/printfarmer/host-update-state:ro
+      - ${HostUpdateExecution__RootDirectory:-.volumes/host-update-executor}/state:/run/printfarmer/host-update-state:ro
 
     networks:
       - printfarmer-network

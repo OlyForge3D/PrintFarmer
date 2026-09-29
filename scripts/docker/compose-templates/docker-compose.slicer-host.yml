@@ -74,7 +74,7 @@ services:
       - ${EXTERNAL_SLICER_DATA_PATH:-.volumes/printfarmer-slicer-data}:/data
       - ${EXTERNAL_PROFILES_PATH:-.volumes/printfarmer-slicer-profiles}:/app/profiles:ro
       - ${EXTERNAL_MODELS_PATH:-.volumes/printfarmer-model-storage}:/app/models
-      - ${HostUpdateExecution__RootDirectory:-.volumes/printfarmer-host-update}/state:/run/printfarmer/host-update-state:ro
+      - ${HostUpdateExecution__RootDirectory:-.volumes/host-update-executor}/state:/run/printfarmer/host-update-state:ro
     networks:
       - printfarmer-network
     healthcheck: *slicer-host-healthcheck

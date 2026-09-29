@@ -42,7 +42,7 @@ services:
       # Data protection keys for ASP.NET Core
       - printfarmer-keys:/app/data-protection-keys
       # Host update executor state (admission fence), read-only
-      - ${HostUpdateExecution__RootDirectory:-.volumes/printfarmer-host-update}/state:/run/printfarmer/host-update-state:ro
+      - ${HostUpdateExecution__RootDirectory:-.volumes/host-update-executor}/state:/run/printfarmer/host-update-state:ro
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/healthz"]
       interval: 30s

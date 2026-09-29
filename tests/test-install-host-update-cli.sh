@@ -309,7 +309,7 @@ fi
 for template in docker-compose.yml docker-compose.slicer-host.yml docker-compose.monolith.yml; do
     template_path="$REPO_ROOT/scripts/docker/compose-templates/$template"
     check "$template mounts the executor state directory read-only for the admission gate" \
-        "grep -Fqx -- '      - \${HostUpdateExecution__RootDirectory:-.volumes/printfarmer-host-update}/state:/run/printfarmer/host-update-state:ro' '$template_path' && grep -Fqx -- '      - HostUpdateExecution__AdmissionStateDirectory=/run/printfarmer/host-update-state' '$template_path'"
+        "grep -Fqx -- '      - \${HostUpdateExecution__RootDirectory:-.volumes/host-update-executor}/state:/run/printfarmer/host-update-state:ro' '$template_path' && grep -Fqx -- '      - HostUpdateExecution__AdmissionStateDirectory=/run/printfarmer/host-update-state' '$template_path'"
 done
 
 # deploy-docker.sh opt-in hook: run the real function against a recording stub installer.
