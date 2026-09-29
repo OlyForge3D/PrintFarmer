@@ -521,6 +521,12 @@ load_changed_files() {
 #
 # Out-of-band (like wire_contract, evaluated independently of the single
 # classify_path token):
+#   host_updates    — src/infra/Services/HostUpdates/** (issue #3210). Still
+#                     classified infra; additionally selects
+#                     Farm.HostUpdate.Cli.Tests (its CLI links this code via
+#                     Farm.Infrastructure and exercises it end to end) and
+#                     Farm.Web.Api.Tests (owns the host-update startup,
+#                     integration and provider tests).
 #   npm_manifest    — package.json/package-lock.json of every lockfile listed
 #                     in compliance/dependency-license-policy.json
 #                     `npmLockFiles` (see is_npm_dependency_manifest_input).
@@ -537,6 +543,18 @@ is_npm_dependency_manifest_input() {
     tests/ui-validation/package.json|tests/ui-validation/package-lock.json)
       return 0 ;;
     tools/package.json|tools/package-lock.json)
+      return 0 ;;
+    *)
+      return 1 ;;
+  esac
+}
+
+# Host-update services are executed by Farm.HostUpdate.Cli.Tests and by the
+# host-update tests in Farm.Web.Api.Tests, neither of which the plain infra
+# bucket selects (issue #3210: #3194 broke 16 CLI topology tests undetected).
+is_host_update_services_input() {
+  case "$1" in
+    src/infra/Services/HostUpdates/*)
       return 0 ;;
     *)
       return 1 ;;
@@ -937,7 +955,7 @@ main() {
   local has_tests_gcode=0 has_tests_inventory=0 has_tests_administration=0 has_tests_observability=0
   local has_tests_printers=0
   local has_tools=0 has_unknown_src=0 has_docs=0 has_mobile=0 has_ci_other=0 has_other=0
-  local has_wire_contract=0 has_compliance=0 has_npm_manifest=0
+  local has_wire_contract=0 has_compliance=0 has_npm_manifest=0 has_host_updates=0
 
   local p category
   for p in "${CHANGED_LIST[@]}"; do
@@ -946,6 +964,9 @@ main() {
     fi
     if is_npm_dependency_manifest_input "$p"; then
       has_npm_manifest=1
+    fi
+    if is_host_update_services_input "$p"; then
+      has_host_updates=1
     fi
     category="$(classify_path "$p")"
     case "$category" in
@@ -1137,6 +1158,14 @@ main() {
     # Farm.Backend.Plugins.Tests (issue #2034)
     # also references Farm.Infrastructure directly, so it must run too.
     test_names+=("Farm.Infrastructure.Tests" "Farm.Slicer.Module.Tests" "Farm.OrcaSlicer.Worker.Tests" "Farm.Modules.SmartPlug.Tests" "Farm.Modules.PrintQueue.Tests" "Farm.Modules.Maintenance.Tests" "Farm.Modules.Calibration.Tests" "Farm.Modules.Devices.Tests" "Farm.Modules.Gcode.Tests" "Farm.Modules.Identity.Tests" "Farm.Modules.Inventory.Tests" "Farm.Modules.Administration.Tests" "Farm.Modules.Observability.Tests" "Farm.Modules.Printers.Tests" "Farm.Backend.Plugins.Tests")
+    net_test_bucket_hit=1
+  fi
+  if (( has_host_updates )); then
+    # Issue #3210: Farm.HostUpdate.Cli references Farm.Infrastructure and its
+    # tests drive src/infra/Services/HostUpdates/** end to end; Farm.Web.Api.Tests
+    # owns the host-update startup, integration and provider tests. The infra
+    # bucket (always set alongside this flag) selects neither.
+    test_names+=("Farm.HostUpdate.Cli.Tests" "Farm.Web.Api.Tests")
     net_test_bucket_hit=1
   fi
   if (( has_backend )); then
@@ -1465,6 +1494,7 @@ main() {
   if (( has_compliance )); then reason+="compliance "; fi
   if (( has_api )); then reason+="api "; fi
   if (( has_infra )); then reason+="infra "; fi
+  if (( has_host_updates )); then reason+="host-updates "; fi
   if (( has_backend )); then reason+="backend-plugin "; fi
   if (( has_backend_core )); then reason+="backend-core "; fi
   if (( has_slicer )); then reason+="slicer "; fi
