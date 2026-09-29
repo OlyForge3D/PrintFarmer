@@ -13,7 +13,7 @@ on:
       cell:
         description: Recovery matrix cell
         type: choice
-        options: [c2, monolith-sqlserver, split-postgres, split-postgres-no-worker, split-sqlserver, external-database, external-storage, remote-worker, split-database, all, faults, fault-power-loss-backup, fault-power-loss-migration-before, fault-power-loss-migration-after, fault-power-loss-apply-before, fault-power-loss-apply-after, fault-partial-migration, fault-partial-apply, fault-api-down, fault-missing-backup, fault-corrupt-journal, fault-corrupt-replay, fault-fence-release, imports, import-identity, import-channel-round-trips, import-adversarial, import-replay-supersede, published-bundle]
+        options: [c2, monolith-sqlserver, split-postgres, split-postgres-no-worker, split-sqlserver, external-database, external-storage, remote-worker, split-database, all, faults, fault-power-loss-backup, fault-power-loss-migration-before, fault-power-loss-migration-after, fault-power-loss-apply-before, fault-power-loss-apply-after, fault-partial-migration, fault-partial-apply, fault-api-down, fault-missing-backup, fault-corrupt-journal, fault-corrupt-replay, fault-fence-release, fault-emulated-printer-reconciliation, imports, import-identity, import-channel-round-trips, import-adversarial, import-replay-supersede, published-bundle]
         default: c2
 
 permissions:
