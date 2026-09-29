@@ -200,6 +200,13 @@ The narrow exception is an API serialization-source change under
 those paths additionally select `Farm.Web.Api.Tests` so the producer
 wire-contract assertions execute.
 
+**Host-update services (issue #3210):** a non-prose change under
+`src/infra/Services/HostUpdates/**` keeps the `infra` selection and additionally
+selects `Farm.HostUpdate.Cli.Tests` (the CLI references `Farm.Infrastructure` and
+drives these services end to end) and `Farm.Web.Api.Tests` (which owns the
+host-update startup, integration, and provider tests). Before this, #3194 broke 16
+CLI topology tests without either leg being scheduled.
+
 `ci-tools` is unconditional and therefore runs for every bucket, including
 `docs`, `mobile`, and `unclassified`. `dependency-compliance` is gated on
 `want_dependency_compliance`: it runs for every bucket that sets the
