@@ -1225,7 +1225,7 @@ bundle (#3195). Run it on a connected Ubuntu host with Docker, Node.js, jq,
 
 ```bash
 scripts/ci/recovery-matrix/verify-published-bundle.sh \
-  --output ./evidence-published-bundle.json [--tag v<version>-insider.<n>]
+  --evidence ./evidence-published-bundle.json [--tag v<version>-insider.<n>]
 ```
 
 The script selects the newest non-draft insider release (or `--tag`), downloads
