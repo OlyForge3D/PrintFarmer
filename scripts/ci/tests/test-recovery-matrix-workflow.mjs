@@ -16,8 +16,7 @@ import { importCellIds } from '../recovery-matrix/import-cells.mjs';
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const workflowPath = path.join(repositoryRoot, '.github', 'workflows', 'recovery-matrix.yml');
 const workflow = yaml.load(readFileSync(workflowPath, 'utf8'));
-// YAML 1.1 parses the bare `on` key as boolean true.
-const triggers = workflow.on ?? workflow.true;
+const triggers = workflow.on;
 const cellGroups = ['all', 'faults', 'imports'];
 const publishedBundleOption = 'published-bundle';
 
@@ -31,6 +30,14 @@ function scheduledCells() {
 test('recovery matrix runs only nightly and on manual dispatch, never per PR', () => {
   assert.deepEqual(Object.keys(triggers).sort(), ['schedule', 'workflow_dispatch']);
   assert.equal(triggers.schedule.length, 1);
+  // Nightly: a fixed minute and hour, every day of every month and weekday.
+  assert.match(triggers.schedule[0].cron, /^([0-5]?\d) ([01]?\d|2[0-3]) \* \* \*$/);
+});
+
+test('dispatch runs exactly the selected cell, defaulting to c2', () => {
+  const expression = workflow.jobs.cell.strategy.matrix.cell;
+  assert.match(expression, /\|\| fromJSON\(format\('\["\{0\}"\]', inputs\.cell \|\| 'c2'\)\) \}\}$/);
+  assert.equal(triggers.workflow_dispatch.inputs.cell.default, 'c2');
 });
 
 test('dispatch offers exactly every runnable cell, every cell group and the published bundle', () => {
