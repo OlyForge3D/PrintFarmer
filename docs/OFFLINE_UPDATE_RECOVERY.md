@@ -1144,6 +1144,7 @@ then repeats the final operator action, restarts the host, runs
 | `fault-corrupt-journal` | Journal record tampered while `RecoveryRequired` | `RecoveryRequired` / `journal_integrity_failure`, exit 4, no mutation | Pass (2026-09-28, `eb900fa1c8ce`) |
 | `fault-corrupt-replay` | Replay store garbled before activation | `RecoveryRequired` / `host_update_replay_state_invalid`, exit 4, no mutation | Pass (2026-09-28, `cd314c3a53bf`) |
 | `fault-fence-release` | Printer inventory present at fence release | Confirm reports `FenceReleasePending` / `physical_reconciliation_pending` (exit 13), with the fence held across a restart. Confirming with `--printers-reconciled <token>` releases only the fence, without replaying restore, and reports `RolledBack` | Pass (2026-09-28, `cd314c3a53bf`) |
+| `fault-emulated-printer-reconciliation` | A Moonraker emulator registered as a printer at fence release (#3103) | As `fault-fence-release`, plus: dispatch is refused with `409 host_update_admission_closed` while `FenceReleasePending`, before and after a restart; the emulator records no printer command during or after recovery; dispatch is admitted again after `--printers-reconciled` | Fail (2026-09-29, `3103dc56cedf`): blocked by #3207, dispatch admitted while `FenceReleasePending`. Every other checkpoint passes |
 
 The evidence `outcome.expectedReason` is `null` for fault cells because they are
 supported cells. The observed stable reason is recorded in `outcome.reason` for
@@ -1158,6 +1159,30 @@ exactly once after activation, both at the fault point and again after the
 durability restart. A pause mid-phase checks only the contexts it has reached. Evidence
 records the choice as `identities.schemaDelta`. The other fault cells use the
 identical-schema target.
+
+#### Emulated-printer reconciliation (#3103)
+
+`fault-emulated-printer-reconciliation` starts the Moonraker emulator
+(`moonraker-emulator-runtime` image, control API enabled) on the run network and
+registers it as a Moonraker printer through the API. It then drives the
+`fault-fence-release` flow and reads the emulator's request log
+(`GET /__emulator/requests`, see `docs/MOONRAKER_EMULATOR_VALIDATION.md`) to
+prove recovery sent no printer command. Status reads, such as Spoolman proxy
+`GET`s, are allowed and counted. The cell probes
+`POST /api/auto-dispatch/{printerId}/ready` without `If-Match`, so an admitted
+request stops at `428` and never mutates state. A fenced API answers
+`409 host_update_admission_closed`.
+
+The live run on 2026-09-29 (`3103dc56cedf`, run
+`fault-emulated-printer-reconciliation-20260929t012705z-914219`) recorded no
+emulator command during recovery (8 reads) or in total (10 reads). The fence was
+released only by `--printers-reconciled`, and the durable outcome was `RolledBack`
+after a restart. Dispatch was admitted again after reconciliation. The run fails
+on `dispatch-fenced:pending` and `dispatch-fenced:pending-after-restart`: the
+probe returned `428`, not `409`, while the host held `admission.closed`. The
+application containers have no `HostUpdateExecution__RootDirectory` or executor
+state mount, so their admission gate is unconfigured and open. Issue #3207
+tracks the fix.
 
 ### Live import cells (#3102)
 
