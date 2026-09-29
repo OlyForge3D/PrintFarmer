@@ -2160,6 +2160,25 @@ function createEmulatedPrinter({ env, deploymentRoot, appComposeService }) {
         raw: String(raw).trim(),
       };
     },
+    cleanupQueuedAutoDispatchWork(fileName) {
+      if (!/^[0-9a-f-]+\.gcode$/i.test(fileName)) throw new Error(`invalid_file_name:${fileName}`);
+      execFileSync('/usr/bin/docker', [
+        'compose',
+        '-f', join(deploymentRoot, 'docker-compose.recovery.yml'),
+        '-p', env.COMPOSE_PROJECT_NAME,
+        'exec',
+        '-T',
+        appComposeService,
+        'sh',
+        '-ec',
+        `rm -f ${shellQuote(`/app/gcode/${fileName}`)}`,
+      ], {
+        cwd: deploymentRoot,
+        encoding: 'utf8',
+        env: { ...process.env, ...env },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+    },
     requests() {
       const response = emulatorGet('/__emulator/requests');
       if (response.status !== 200) throw new Error(`emulator_request_log_unavailable:status=${response.status}`);

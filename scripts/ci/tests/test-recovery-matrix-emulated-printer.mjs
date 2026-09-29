@@ -186,6 +186,7 @@ function fakeCtx(name, { admittedWhilePending = false, commandDuringRecovery = f
       assigned: true,
       raw: '3|1',
     }),
+    cleanupQueuedAutoDispatchWork: () => {},
     dispatchProbe: () => {
       const fenced = existsSync(ctx.admissionClosedPath) && !admittedWhilePending;
       if (fenced || (fencedAfterRelease && ctx.state === 'released')) {
@@ -241,6 +242,7 @@ test('emulated-printer scenario passes when dispatch is fenced until release and
   assert.ok(ctx.passed.some((checkpoint) => checkpoint.startsWith('queued-work-dispatched-after-reconciliation:commands=1:')));
   assert.ok(ctx.passed.some((checkpoint) => checkpoint.startsWith('queued-work-dispatched-after-reconciliation:upload=/server/files/upload:gcodes/20000000-0000-0000-0000-000000000001.gcode:print=true:')));
   assert.ok(ctx.passed.some((checkpoint) => checkpoint.startsWith('queued-work-db-state:job=10000000-0000-0000-0000-000000000001:status=3:assigned=true')));
+  assert.ok(ctx.passed.includes('queued-auto-dispatch-work-cleaned:file=20000000-0000-0000-0000-000000000001.gcode'));
 });
 
 test('emulated-printer scenario fails when dispatch is admitted while reconciliation is pending', () => {
