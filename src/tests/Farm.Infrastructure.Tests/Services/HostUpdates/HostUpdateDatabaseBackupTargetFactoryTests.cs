@@ -188,6 +188,30 @@ public class HostUpdateDatabaseBackupTargetFactoryTests
         command.Arguments.Should().Contain("--clean").And.Contain("--if-exists");
     }
 
+    [Fact]
+    public async Task CreateRestoreCommand_Postgres_PrepareStepClearsThroughInjectedPreparer()
+    {
+        const string connectionString = "Host=dbhost;Database=printfarmer;Username=pf";
+        var dbConfig = new DatabaseProviderConfiguration { Provider = "postgres", ConnectionString = connectionString };
+        var preparer = new RecordingPostgresRestorePreparer();
+
+        HostUpdateRestoreCommand command = HostUpdateDatabaseBackupTargetFactory.CreateRestoreCommand(dbConfig, TestExecutableResolver, preparer)(Path.GetTempPath());
+        await command.PrepareTargetAsync!(CancellationToken.None);
+
+        preparer.ConnectionStrings.Should().Equal(connectionString);
+    }
+
+    private sealed class RecordingPostgresRestorePreparer : IHostUpdatePostgresRestorePreparer
+    {
+        public List<string> ConnectionStrings { get; } = [];
+
+        public Task ClearDatabaseAsync(string connectionString, CancellationToken cancellationToken)
+        {
+            ConnectionStrings.Add(connectionString);
+            return Task.CompletedTask;
+        }
+    }
+
     [Theory]
     [InlineData("sqlite", "Data Source=farm.db")]
     [InlineData("sqlserver", "Server=sqlhost;Database=printfarmer;Integrated Security=true")]

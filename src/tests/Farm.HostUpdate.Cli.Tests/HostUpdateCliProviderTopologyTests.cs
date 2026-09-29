@@ -15,8 +15,9 @@ namespace Farm.HostUpdate.Cli.Tests;
 /// provider the engine restores (SQLite, host-local and external PostgreSQL, host-local and
 /// external SQL Server) is exercised against both the split and the monolith topology through
 /// the real CLI, engine registration, coordinator, restore executor, image applier and health
-/// verifier. Only the two host boundaries are replaced: processes are recorded by a fake
-/// <see cref="IHostUpdateProcessRunner"/> (nothing is ever executed, so no container, database
+/// verifier. Only the host boundaries are replaced: processes are recorded by a fake
+/// <see cref="IHostUpdateProcessRunner"/>, the pre-restore PostgreSQL clear (#3177) by a fake
+/// <see cref="IHostUpdatePostgresRestorePreparer"/> (nothing is ever executed, so no container, database
 /// or printer is touched) and the API <c>/health</c> endpoint is served in-memory.
 /// </summary>
 public sealed class HostUpdateCliProviderTopologyTests : IDisposable, IAsyncLifetime
@@ -62,11 +63,13 @@ public sealed class HostUpdateCliProviderTopologyTests : IDisposable, IAsyncLife
     private readonly CliHostFixture _host = new();
     private readonly HealthState _health = new();
     private readonly RecordingProcessRunner _processes;
+    private readonly RecordingPostgresRestorePreparer _postgresPreparer;
     private IHostUpdateFenceCoordinator? _fence;
 
     public HostUpdateCliProviderTopologyTests()
     {
         _processes = new RecordingProcessRunner(ContainerImageVariables(), _health);
+        _postgresPreparer = new RecordingPostgresRestorePreparer(_processes);
         File.WriteAllText(ToolPath("pg_restore"), string.Empty);
         File.WriteAllText(ToolPath("sqlcmd"), string.Empty);
         File.WriteAllText(MonolithComposeFile, "services: {}\n");
@@ -149,6 +152,16 @@ public sealed class HostUpdateCliProviderTopologyTests : IDisposable, IAsyncLife
         }
 
         int restoreIndex = IndexOf(calls, restore);
+        if (database.DbProvider == "postgres")
+        {
+            _postgresPreparer.Clears.Should().ContainSingle("the database is cleared once before the single pg_restore (#3177)")
+                .Which.Should().Be((database.ConnectionString, restoreIndex), "the clear runs immediately before pg_restore");
+        }
+        else
+        {
+            _postgresPreparer.Clears.Should().BeEmpty("only PostgreSQL needs a pre-restore clear");
+        }
+
         ProcessCall[] pulls = [.. calls.Where(IsPull)];
         pulls.Select(call => call.Arguments[^1]).Should().BeEquivalentTo(ExpectedImageReferences(prior));
         calls.Where(IsPull).Should().OnlyContain(call => IndexOf(calls, call) > restoreIndex, "images are re-applied only after the database is restored");
@@ -614,6 +627,7 @@ public sealed class HostUpdateCliProviderTopologyTests : IDisposable, IAsyncLife
     private void ReplaceHostBoundaries(IServiceCollection services)
     {
         services.AddSingleton<IHostUpdateProcessRunner>(_processes);
+        services.AddSingleton<IHostUpdatePostgresRestorePreparer>(_postgresPreparer);
         services.AddSingleton<IHostUpdateManifestBindingReader>(new UnboundManifestBindingReader());
         services.AddSingleton<IHostUpdatePrinterCommandInventoryReader>(new EmptyPrinterCommandInventoryReader());
         services.AddHttpClient(HostUpdateRecoveryEngineRegistration.HealthClientName)
@@ -643,6 +657,24 @@ public sealed class HostUpdateCliProviderTopologyTests : IDisposable, IAsyncLife
     private sealed record ProviderCase(string DbProvider, string? ConnectionString, string Tool, string DumpFile, string? Password, string? PasswordVariable);
 
     private sealed record ProcessCall(string FileName, string[] Arguments, IReadOnlyDictionary<string, string>? Environment);
+
+    /// <summary>
+    /// Records the pre-restore PostgreSQL clear (#3177) instead of opening a connection, with
+    /// the number of host processes already started so its ordering against pg_restore is
+    /// observable.
+    /// </summary>
+    private sealed class RecordingPostgresRestorePreparer(RecordingProcessRunner processes) : IHostUpdatePostgresRestorePreparer
+    {
+        private readonly ConcurrentQueue<(string? ConnectionString, int ProcessCallsBefore)> _clears = new();
+
+        public IReadOnlyList<(string? ConnectionString, int ProcessCallsBefore)> Clears => [.. _clears];
+
+        public Task ClearDatabaseAsync(string connectionString, CancellationToken cancellationToken)
+        {
+            _clears.Enqueue((connectionString, processes.Calls.Count));
+            return Task.CompletedTask;
+        }
+    }
 
     /// <summary>
     /// Records every host process instead of running it. <c>docker compose up</c> environments are
