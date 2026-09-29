@@ -26,6 +26,8 @@ services:
       - MODEL_UPLOAD_PATH=/app/models
       - SLICER_PROFILES_PATH=/app/profiles
       - ArtifactStorage__RootPath=/app/data/artifacts
+      # Read-only observation of the host update executor's admission fence (issue #3207).
+      - HostUpdateExecution__AdmissionStateDirectory=/run/printfarmer/host-update-state
     volumes:
       # Persistent SQLite database and application data
       - printfarmer-data:/app/data
@@ -39,6 +41,8 @@ services:
       - printfarmer-uploads:/app/uploads
       # Data protection keys for ASP.NET Core
       - printfarmer-keys:/app/data-protection-keys
+      # Host update executor state (admission fence), read-only
+      - ${HostUpdateExecution__RootDirectory:-.volumes/host-update-executor}/state:/run/printfarmer/host-update-state:ro
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/healthz"]
       interval: 30s

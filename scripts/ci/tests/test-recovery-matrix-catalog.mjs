@@ -5,7 +5,7 @@ import test from 'node:test';
 
 import { cells, cellIds, resolveCell, resolveCellList } from '../recovery-matrix/cells.mjs';
 import { writeHostUpdateConfig } from '../recovery-matrix/cell-runtime.mjs';
-import { writeRecoveryCompose } from '../recovery-matrix/compose-config.mjs';
+import { admissionStateMount, writeRecoveryCompose } from '../recovery-matrix/compose-config.mjs';
 import { expectedCellOutcome } from '../recovery-matrix/evidence.mjs';
 import { providerFor, sqlcmdInContainer } from '../recovery-matrix/providers.mjs';
 import { redactSecrets, secretValuesFrom } from '../recovery-matrix/redaction.mjs';
@@ -172,6 +172,39 @@ test('compose generation uses selected provider, split services, static IPs, and
       splitDbCompose.services.api.environment.find((value) => value.startsWith('ConnectionStrings__SlicerDatabase=')),
       /Database=\$\{POSTGRES_DB\}_slicer/,
     );
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
+test('admission producers observe the host executor fence through a read-only mount (issue #3207)', () => {
+  const scratch = path.join(scratchRoot, `catalog-admission-${process.pid}-${Date.now()}`);
+  mkdirSync(scratch, { recursive: true });
+  try {
+    const expected = { env: `HostUpdateExecution__AdmissionStateDirectory=${admissionStateMount}`, volume: `/work/host-update/state:${admissionStateMount}:ro` };
+    for (const [cellId, observers] of [['split-sqlserver', ['api', 'slicer-host']], ['c2', null]]) {
+      const cell = resolveCell(cellId).cell;
+      const compose = writeRecoveryCompose({
+        deploymentRoot: scratch,
+        network: 'matrix-net',
+        egressSinkIp: '172.30.55.10',
+        runId: `${cellId}-admission`,
+        cell,
+        hostUpdateStateDirectory: '/work/host-update/state',
+      });
+      const topology = topologyFor(cell.topology);
+      const observerNames = observers ?? [topology.healthComposeService];
+      for (const [name, service] of Object.entries(compose.services)) {
+        if (name === 'database' || name === 'nginx') continue;
+        const observes = observerNames.includes(name);
+        assert.equal(service.environment.includes(expected.env), observes, `${cellId}/${name} env`);
+        assert.equal(service.volumes.includes(expected.volume), observes, `${cellId}/${name} mount`);
+      }
+    }
+    const withoutState = writeRecoveryCompose({
+      deploymentRoot: scratch, network: 'matrix-net', egressSinkIp: '172.30.55.10', runId: 'no-state', cell: resolveCell('split-sqlserver').cell,
+    });
+    assert.ok(!withoutState.services.api.environment.some((value) => value.startsWith('HostUpdateExecution__AdmissionStateDirectory=')));
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }

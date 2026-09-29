@@ -235,6 +235,10 @@ try {
   const hostStateRoot = recoveryHostStateRoot(runRoot, { hostBoundary: true });
   provisionBoundaryHostState(hostContainer, repo, hostStateRoot, { channel: 'insider' });
   const dockerShim = writeDockerShim(runRoot, deploymentRoot, networkAttemptsPath);
+  // Pre-create the executor state directory so the app containers' read-only admission mount
+  // binds the harness-owned directory rather than one Docker would create as root (#3207).
+  const hostUpdateStateDirectory = join(runRoot, 'host-update', 'state');
+  mkdirSync(hostUpdateStateDirectory, { recursive: true });
   writeRecoveryCompose({
     deploymentRoot,
     network,
@@ -245,6 +249,7 @@ try {
     runId: run.id,
     cell: priorCell,
     hostUpdateBackupsRoot: join(runRoot, 'host-update', 'backups'),
+    hostUpdateStateDirectory,
   });
   const databaseTools = provider.writeToolShims({ runRoot, databaseContainer });
   const toolGates = cellSpec.scenario === 'fault' && databaseTools.pgDump && databaseTools.pgRestore
@@ -419,6 +424,7 @@ try {
       runId: run.id,
       cell,
       hostUpdateBackupsRoot: join(runRoot, 'host-update', 'backups'),
+      hostUpdateStateDirectory,
     });
   }
 

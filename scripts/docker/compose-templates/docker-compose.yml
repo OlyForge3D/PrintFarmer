@@ -108,12 +108,17 @@ services:
       - GCODE_STORAGE_PATH=/app/gcode
       - MODEL_UPLOAD_PATH=/app/models
       - DATAPROTECTION_KEYS_PATH=/app/data-protection-keys
+      # Read-only observation of the host update executor's admission fence (issue #3207):
+      # while the host CLI/daemon holds state/admission.closed, dispatch and job submission
+      # are refused with 409 host_update_admission_closed. A missing/unreadable mount fails closed.
+      - HostUpdateExecution__AdmissionStateDirectory=/run/printfarmer/host-update-state
     volumes:
       - ${EXTERNAL_APP_DATA_PATH:-.volumes/printfarmer-app-data}:/data
       - ${EXTERNAL_MODELS_PATH:-.volumes/printfarmer-model-storage}:/app/models
       - ${EXTERNAL_GCODE_PATH:-.volumes/printfarmer-gcode-storage}:/app/gcode
       - ${EXTERNAL_PROFILES_PATH:-.volumes/printfarmer-slicer-profiles}:/app/profiles
       - ${EXTERNAL_DATAPROTECTION_PATH:-.volumes/printfarmer-dataprotection-keys}:/app/data-protection-keys
+      - ${HostUpdateExecution__RootDirectory:-.volumes/host-update-executor}/state:/run/printfarmer/host-update-state:ro
 
     networks:
       - printfarmer-network

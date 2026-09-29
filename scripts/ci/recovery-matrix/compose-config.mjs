@@ -11,6 +11,9 @@ export function recoveryRunLabel(runId) {
   };
 }
 
+export const admissionStateMount = '/run/printfarmer/host-update-state';
+const admissionObserverServiceIds = new Set(['monolith', 'api', 'slicer-host']);
+
 export function writeRecoveryCompose({
   deploymentRoot,
   network,
@@ -21,6 +24,7 @@ export function writeRecoveryCompose({
   runId,
   cell = defaultCell,
   hostUpdateBackupsRoot,
+  hostUpdateStateDirectory,
 }) {
   const labels = recoveryRunLabel(runId);
   const provider = providerFor(cell.provider);
@@ -28,7 +32,7 @@ export function writeRecoveryCompose({
   const serviceIds = topology.serviceIds(cell.workers);
   const applicationServices = Object.fromEntries(serviceIds.map((serviceId) => [
     topology.composeServiceName(serviceId),
-    applicationService({ serviceId, topology, provider, databaseHost, appIp, network, egressSinkIp, labels, cell }),
+    applicationService({ serviceId, topology, provider, databaseHost, appIp, network, egressSinkIp, labels, cell, hostUpdateStateDirectory }),
   ]));
   const services = {
     database: databaseService({ provider, network, databaseIp, labels, hostUpdateBackupsRoot }),
@@ -103,7 +107,7 @@ function databaseService({ provider, network, databaseIp, labels, hostUpdateBack
   };
 }
 
-function applicationService({ serviceId, topology, provider, databaseHost, appIp, network, egressSinkIp, labels, cell }) {
+function applicationService({ serviceId, topology, provider, databaseHost, appIp, network, egressSinkIp, labels, cell, hostUpdateStateDirectory }) {
   const composeService = topology.composeServiceName(serviceId);
   const isHttpHost = ['monolith', 'api', 'slicer-host', 'frontend', 'printer-discovery', 'orcaslicer-worker'].includes(serviceId);
   const service = {
@@ -124,6 +128,12 @@ function applicationService({ serviceId, topology, provider, databaseHost, appIp
     ],
   };
   const isHealthHost = composeService === topology.healthComposeService;
+  // Admission producers observe the host executor's fence through a read-only mount, exactly as
+  // the deployment templates do (#3207).
+  if (hostUpdateStateDirectory && admissionObserverServiceIds.has(serviceId)) {
+    service.environment.push(`HostUpdateExecution__AdmissionStateDirectory=${admissionStateMount}`);
+    service.volumes.push(`${hostUpdateStateDirectory}:${admissionStateMount}:ro`);
+  }
   if (isHttpHost) {
     service.environment.push(`ASPNETCORE_URLS=http://+:${isHealthHost ? topology.healthPort : 5000}`);
   }

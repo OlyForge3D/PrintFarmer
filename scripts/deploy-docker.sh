@@ -7592,6 +7592,45 @@ install_host_update_cli_if_requested() {
     fi
 }
 
+# Issue #3207: the api, slicer-host and monolith containers bind-mount
+# <HostUpdateExecution__RootDirectory>/state read-only to observe the host-update admission
+# fence. Create it before Compose does, or Docker creates it as root and the executor account
+# can no longer write admission.closed.
+prepare_host_update_admission_state() {
+    local installer="$SCRIPT_DIR/install-host-update-cli.sh"
+    local env_file="${ENV_FILE:-.env}"
+    case "$env_file" in
+        /*) ;;
+        *) env_file="$(pwd)/$env_file" ;;
+    esac
+    [ -f "$env_file" ] || return 0
+
+    local root
+    root="$(sed -n 's/^HostUpdateExecution__RootDirectory=//p' "$env_file" | tail -n 1 | tr -d '\r')"
+    [ -n "$root" ] || return 0
+
+    local -a elevate=()
+    if [ "$(id -u)" -ne 0 ] && [ -d "$root" ] && [ ! -O "$root" ] &&
+        command -v sudo >/dev/null 2>&1; then
+        elevate=(sudo)
+    fi
+
+    if [ "$DRY_RUN" = "true" ]; then
+        print_info "[DRY RUN] Would prepare the host-update admission state directory: ${elevate[*]:-} $installer prepare-state --env-file $env_file"
+        return 0
+    fi
+
+    local rc=0
+    ${elevate[@]+"${elevate[@]}"} "$installer" prepare-state --env-file "$env_file" || rc=$?
+    case "$rc" in
+        0|3) ;;
+        *)
+            print_error "Preparing the host-update admission state directory failed (exit $rc). See docs/HOST_UPDATE_RUNBOOK.md."
+            exit 1
+            ;;
+    esac
+}
+
 redeploy_existing() {
     print_header "🔄 Redeploying PrintFarmer (Rebuild Mode)"
     
@@ -7662,6 +7701,7 @@ redeploy_existing() {
     fi
 
     install_host_update_cli_if_requested
+    prepare_host_update_admission_state
     
     # Remove stale legacy override file - the compose-generator produces a complete
     # docker-compose.yml that already includes the database service configuration.
@@ -8037,6 +8077,7 @@ main() {
     print_success "Deployment configuration generated successfully"
 
     install_host_update_cli_if_requested
+    prepare_host_update_admission_state
 
     # Optional prepull for Apple Silicon or slow networks: pull common base images
     prepull_images() {

@@ -324,8 +324,8 @@ is both a value and a section, and malformed key segments are refused without
 printing the value, and the existing file is kept.
 
 Exit codes: `0` done; `1` verification, validation or installation failed;
-`2` usage; `3` (`write-config` only) `HostUpdateExecution__RootDirectory` is
-not set, so nothing was written.
+`2` usage; `3` (`write-config` and `prepare-state` only)
+`HostUpdateExecution__RootDirectory` is not set, so nothing was written.
 
 The deploy scripts can run both steps after generating `.env`. It is opt-in:
 pass `--host-update-cli-version <version>` to `scripts/deploy-docker.sh` or
@@ -335,6 +335,17 @@ pass `--host-update-cli-version <version>` to `scripts/deploy-docker.sh` or
 install or configuration failure stops the deployment before containers start;
 exit `3` is reported as a warning. `deploy-docker.sh` uses `sudo` when not run
 as root; run `deploy-docker.ps1` from an elevated shell.
+
+Whenever `HostUpdateExecution__RootDirectory` is set, `deploy-docker.sh` also
+runs `install-host-update-cli.sh prepare-state --env-file <abs .env>` before
+Compose starts, whether or not the CLI is installed (#3207). The `api`,
+`slicer-host`, and `monolith` containers bind-mount `<RootDirectory>/state`
+read-only to observe the admission fence. `prepare-state` creates a missing
+`state` directory with mode `0755`, owned by the `RootDirectory` owner, so Docker
+does not create it as root. It uses `sudo` only when the deploying account does
+not own the root. It stops the deployment when the root is relative, missing, or
+a link, or when `state` is a link or not a directory. Create the root, owned by
+the host-update account, before deploying.
 
 The same installers also provide opt-in `install-service` and
 `uninstall-service` commands that register the host-update daemon as a system
