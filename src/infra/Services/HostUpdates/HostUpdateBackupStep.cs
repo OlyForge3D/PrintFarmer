@@ -13,6 +13,14 @@ public sealed class HostUpdateBackupUnsupportedOwnerException(IReadOnlyList<stri
 
 /// <summary>Thrown when a backup target fails to produce any files or explicit directory coverage.</summary>
 public sealed class HostUpdateBackupIncompleteException(string targetName) : InvalidOperationException($"backup_incomplete:{targetName}");
+
+/// <summary>
+/// Thrown before the backup tool is started when a target needs a password that is missing or
+/// empty. SQL Server's <c>sqlcmd</c> would otherwise prompt, read end-of-file and exit 0 without
+/// running <c>BACKUP</c>, which would surface only as a generic
+/// <see cref="HostUpdateBackupIncompleteException"/> (issue #3162).
+/// </summary>
+public sealed class HostUpdateBackupCredentialsMissingException(string targetName) : InvalidOperationException($"backup_credentials_missing:{targetName}");
 #pragma warning restore CA1032
 
 /// <summary>

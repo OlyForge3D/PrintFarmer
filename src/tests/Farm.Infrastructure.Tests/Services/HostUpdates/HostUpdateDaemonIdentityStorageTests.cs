@@ -91,6 +91,24 @@ public sealed class HostUpdateDaemonIdentityStorageTests : IDisposable
         path.Should().Be(Path.Join(directory, HostUpdateDaemonIdentityStorage.KeyFileName));
     }
 
+    [Fact]
+    public void TryJoinChild_NormalizesATrailingSeparatorOnTheDirectory()
+    {
+        string directory = Path.TrimEndingDirectorySeparator(root.FullName);
+
+        HostUpdateDaemonIdentityStorage.TryJoinChild(directory + Path.DirectorySeparatorChar, HostUpdateDaemonIdentityStorage.KeyFileName, out string path).Should().BeTrue();
+        path.Should().Be(Path.Join(directory, HostUpdateDaemonIdentityStorage.KeyFileName));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("identity")]
+    public void TryJoinChild_RejectsDirectoryThatIsNotFullyQualified(string directory)
+    {
+        HostUpdateDaemonIdentityStorage.TryJoinChild(directory, HostUpdateDaemonIdentityStorage.KeyFileName, out string path).Should().BeFalse();
+        path.Should().BeEmpty();
+    }
+
     [Theory]
     [InlineData("")]
     [InlineData("keys")]
@@ -243,15 +261,27 @@ public sealed class HostUpdateDaemonIdentityStorageTests : IDisposable
     public void Linux_FifoKey_IsRejectedWithoutBlocking()
     {
         CreateIdentity(writeKey: false);
-        using (var mkfifo = System.Diagnostics.Process.Start("mkfifo", ["-m", "600", KeyPath]))
-        {
-            mkfifo.WaitForExit();
-            mkfifo.ExitCode.Should().Be(0);
-        }
+        // libc mkfifo(3) directly, so the test never depends on a mkfifo binary being installed (R3130-B09).
+        NativeMethods.MakeFifo(KeyPath, Convert.ToUInt32("600", 8)).Should().Be(0);
 
         var status = HostUpdateDaemonIdentityStorage.Inspect(IdentityDirectory, ExecutorRoot);
 
         status.Code.Should().Be("identity_key_not_regular_file");
+    }
+
+    [LinuxOnlyFact]
+    public void Linux_KeyTypeStatFailure_HasItsOwnCode()
+    {
+        CreateIdentity();
+
+        var status = HostUpdateDaemonIdentityStorage.Inspect(
+            IdentityDirectory,
+            ExecutorRoot,
+            isLinux: true,
+            _ => true,
+            _ => throw new IOException("host_state_type_stat_failed"));
+
+        status.Should().Be(new HostUpdateDaemonIdentityStorageStatus(HostUpdateDaemonIdentityStorageState.Invalid, "identity_key_type_validation_unavailable"));
     }
 
     [LinuxOnlyFact]
@@ -287,5 +317,15 @@ public sealed class HostUpdateDaemonIdentityStorageTests : IDisposable
         {
             File.SetUnixFileMode(KeyPath, OwnerOnlyFile);
         }
+    }
+
+    private static class NativeMethods
+    {
+        [System.Runtime.InteropServices.DllImport("libc", EntryPoint = "mkfifo", SetLastError = true)]
+        [System.Runtime.InteropServices.DefaultDllImportSearchPaths(System.Runtime.InteropServices.DllImportSearchPath.SafeDirectories)]
+        private static extern int MakeFifo(byte[] nullTerminatedUtf8Path, uint mode);
+
+        internal static int MakeFifo(string path, uint mode) =>
+            MakeFifo(System.Text.Encoding.UTF8.GetBytes(path + "\0"), mode);
     }
 }

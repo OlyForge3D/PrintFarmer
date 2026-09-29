@@ -164,6 +164,12 @@ public sealed record HostUpdateDaemonVerificationEvidence(
 
 public interface IHostUpdateDaemonVerificationJournal
 {
+    /// <summary>
+    /// Most records the journal holds; once reached, <see cref="Append"/> fails closed with
+    /// <c>journal_verification_full</c>. Readers judge fullness against this, never an implementation constant.
+    /// </summary>
+    int Capacity { get; }
+
     void Append(HostUpdateDaemonVerificationEvidence evidence);
 
     IReadOnlyList<HostUpdateDaemonVerificationEvidence> ReadAll();
@@ -673,6 +679,8 @@ public sealed class FileHostUpdateDaemonVerificationJournal(string path) : IHost
     private readonly string lockPath = path + ".lock";
 
     private sealed record ChainRecord(string PreviousHash, string Payload, string Hash);
+
+    public int Capacity => MaximumRecords;
 
     public IReadOnlyList<HostUpdateDaemonVerificationEvidence> ReadAll()
     {

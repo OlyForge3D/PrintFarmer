@@ -456,6 +456,29 @@ public sealed class HostUpdateDaemonReleaseVerifierTests : IDisposable
     }
 
     [Fact]
+    public void JournalReader_JudgesFullnessByTheJournalsOwnCapacity()
+    {
+        HostUpdateDaemonVerificationEvidence Evidence(int i) => new(
+            "k" + i, null, null, null, i + 1, null, null, HostUpdateTrustRoot.DefaultTrustRoot, HostUpdateTrustRoot.Fingerprint,
+            null, HostUpdateDaemonVerificationEvidence.RefusedOutcome, "approval_expired", now);
+        string state = Path.Combine(root.FullName, "capacity");
+        Directory.CreateDirectory(state);
+        HostUpdateDaemonJournalSnapshot Read(int capacity) => new HostUpdateDaemonJournalReader(
+            state,
+            new FileHostUpdateExecutionLock(Path.Combine(state, FileHostUpdateExecutionLock.FileName)),
+            new FileHostUpdateExecutionJournal(Path.Combine(state, "journal.ndjson")),
+            new FixedJournal(capacity, [Evidence(0), Evidence(1)])).Read();
+
+        HostUpdateDaemonJournalSnapshot full = Read(capacity: 2);
+        full.Failed.Should().BeTrue();
+        full.VerificationCode.Should().Be("journal_verification_full");
+
+        HostUpdateDaemonJournalSnapshot roomy = Read(capacity: 3);
+        roomy.Failed.Should().BeFalse();
+        roomy.VerificationCode.Should().Be("refused:approval_expired");
+    }
+
+    [Fact]
     public async Task EvidenceJournal_ConcurrentReadersAndWriters_NeverObserveATornFile()
     {
         HostUpdateDaemonVerificationEvidence Evidence(int i) => new(
@@ -727,8 +750,19 @@ public sealed class HostUpdateDaemonReleaseVerifierTests : IDisposable
         public Task<string?> EvaluateAdmissionAsync(VerifiedHostUpdateCandidate candidate, CancellationToken ct) => Task.FromResult<string?>(null);
     }
 
+    private sealed class FixedJournal(int capacity, IReadOnlyList<HostUpdateDaemonVerificationEvidence> records) : IHostUpdateDaemonVerificationJournal
+    {
+        public int Capacity => capacity;
+
+        public void Append(HostUpdateDaemonVerificationEvidence evidence) => throw new NotSupportedException();
+
+        public IReadOnlyList<HostUpdateDaemonVerificationEvidence> ReadAll() => records;
+    }
+
     private sealed class FailingJournal : IHostUpdateDaemonVerificationJournal
     {
+        public int Capacity => FileHostUpdateDaemonVerificationJournal.MaximumRecords;
+
         public void Append(HostUpdateDaemonVerificationEvidence evidence) => throw new IOException("disk full");
 
         public IReadOnlyList<HostUpdateDaemonVerificationEvidence> ReadAll() => [];

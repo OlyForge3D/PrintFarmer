@@ -49,7 +49,8 @@ public static class HostUpdateDaemonIdentityStorage
         string? identityDirectory,
         string? executorRootDirectory,
         bool isLinux,
-        Func<string, bool> ownedByEffectiveUser)
+        Func<string, bool> ownedByEffectiveUser,
+        Func<string, bool>? isRegularFile = null)
     {
         if (string.IsNullOrWhiteSpace(identityDirectory))
         {
@@ -121,9 +122,23 @@ public static class HostUpdateDaemonIdentityStorage
             }
 
             // A FIFO or device node would block or misbehave on open; only a regular file is acceptable.
-            if (OperatingSystem.IsLinux() && !HostStateFileSecurity.NativeMethods.IsLinuxRegularFile(key))
+            if (OperatingSystem.IsLinux())
             {
-                return Invalid("identity_key_not_regular_file");
+                bool regularFile;
+                try
+                {
+                    regularFile = (isRegularFile ?? HostStateFileSecurity.NativeMethods.IsLinuxRegularFile)(key);
+                }
+                catch (IOException)
+                {
+                    // The file-type stat failed; this is distinct from an ownership lookup failure.
+                    return Invalid("identity_key_type_validation_unavailable");
+                }
+
+                if (!regularFile)
+                {
+                    return Invalid("identity_key_not_regular_file");
+                }
             }
 
             if (OperatingSystem.IsLinux() &&
@@ -166,12 +181,15 @@ public static class HostUpdateDaemonIdentityStorage
     /// <summary>
     /// Joins a single plain file name under <paramref name="directory"/>. Unlike <see cref="Path.Combine(string, string)"/>
     /// this never lets a rooted child discard the directory: rooted, separator-bearing, <c>.</c>/<c>..</c> or empty
-    /// children are rejected, and the result must still resolve directly under the directory.
+    /// children are rejected, and the result must still resolve directly under the directory. The directory must be
+    /// fully qualified; it is normalized first, so a trailing separator or a non-canonical form is accepted.
     /// </summary>
     internal static bool TryJoinChild(string directory, string childName, out string path)
     {
         path = string.Empty;
-        if (string.IsNullOrWhiteSpace(childName) ||
+        if (string.IsNullOrWhiteSpace(directory) ||
+            !Path.IsPathFullyQualified(directory) ||
+            string.IsNullOrWhiteSpace(childName) ||
             childName is "." or ".." ||
             Path.IsPathRooted(childName) ||
             childName.IndexOfAny(PathSeparators) >= 0)
@@ -179,9 +197,10 @@ public static class HostUpdateDaemonIdentityStorage
             return false;
         }
 
-        string joined = Path.Join(directory, childName);
+        string normalized = Path.TrimEndingDirectorySeparator(Path.GetFullPath(directory));
+        string joined = Path.Join(normalized, childName);
         StringComparison comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-        if (!string.Equals(Path.GetDirectoryName(Path.GetFullPath(joined)), directory, comparison))
+        if (!string.Equals(Path.GetDirectoryName(Path.GetFullPath(joined)), normalized, comparison))
         {
             return false;
         }

@@ -119,7 +119,8 @@ public static class HostUpdateDatabaseBackupTargetFactory
                 connectionArgs,
                 connectionEnvironment,
                 backupRootDirectory,
-                timeout);
+                timeout,
+                IsSqlServerPasswordMissing(builder));
         }
 
         throw new NotSupportedException($"unsupported_backup_provider:{dbConfig.Provider}");
@@ -255,13 +256,26 @@ public static class HostUpdateDatabaseBackupTargetFactory
         """;
 
     /// <summary>
+    /// Longest the pre-restore clear waits for any one lock (#3197, R3194-B03). A session that
+    /// still holds a conflicting lock then fails the clear fast with PostgreSQL's
+    /// <c>lock_not_available</c> (55P03) error instead of silently consuming the whole restore
+    /// budget; the transaction rolls back, so the database is left untouched.
+    /// </summary>
+    internal static readonly TimeSpan PostgresClearLockTimeout = TimeSpan.FromSeconds(30);
+
+    /// <summary>
     /// Clears the target PostgreSQL database with <see cref="PostgresClearDatabaseSql"/> before
     /// pg_restore runs, so objects created after the dump cannot survive a rollback (#3177).
-    /// Pooling is disabled so no idle session outlives the step; the command has no timeout of
-    /// its own and is bounded by the restore executor's cancellation.
+    /// Pooling is disabled so no idle session outlives the step. The command has no timeout of
+    /// its own and is bounded by the restore executor's cancellation, but each lock wait is
+    /// bounded by <see cref="PostgresClearLockTimeout"/>.
     /// </summary>
-    internal static async Task ClearPostgresDatabaseAsync(string connectionString, CancellationToken cancellationToken)
+    internal static Task ClearPostgresDatabaseAsync(string connectionString, CancellationToken cancellationToken) =>
+        ClearPostgresDatabaseAsync(connectionString, PostgresClearLockTimeout, cancellationToken);
+
+    internal static async Task ClearPostgresDatabaseAsync(string connectionString, TimeSpan lockTimeout, CancellationToken cancellationToken)
     {
+        ArgumentOutOfRangeException.ThrowIfLessThan(lockTimeout, TimeSpan.FromMilliseconds(1));
         var builder = new NpgsqlConnectionStringBuilder(connectionString)
         {
             Pooling = false,
@@ -270,6 +284,14 @@ public static class HostUpdateDatabaseBackupTargetFactory
         await using var connection = new NpgsqlConnection(builder.ConnectionString);
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
         await using NpgsqlTransaction transaction = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+        string setLockTimeout = string.Create(
+            System.Globalization.CultureInfo.InvariantCulture,
+            $"SET LOCAL lock_timeout = '{(long)lockTimeout.TotalMilliseconds}ms'");
+        await using (var command = new NpgsqlCommand(setLockTimeout, connection, transaction))
+        {
+            _ = await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+
         await using (var command = new NpgsqlCommand(PostgresClearDatabaseSql, connection, transaction))
         {
             _ = await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
@@ -367,6 +389,18 @@ public static class HostUpdateDatabaseBackupTargetFactory
         arguments.Add(builder.UserID);
         return (arguments, environment);
     }
+
+    /// <summary>
+    /// True when <paramref name="builder"/> uses SQL authentication but neither the connection
+    /// string nor the inherited <c>SQLCMDPASSWORD</c> supplies a password. <c>sqlcmd</c> would
+    /// then prompt, read end-of-file and exit 0 without running the statement (issue #3162).
+    /// Other authentication modes are left to <c>sqlcmd</c>.
+    /// </summary>
+    internal static bool IsSqlServerPasswordMissing(SqlConnectionStringBuilder builder) =>
+        !builder.IntegratedSecurity &&
+        builder.Authentication is SqlAuthenticationMethod.NotSpecified or SqlAuthenticationMethod.SqlPassword &&
+        string.IsNullOrEmpty(builder.Password) &&
+        string.IsNullOrEmpty(Environment.GetEnvironmentVariable("SQLCMDPASSWORD"));
 }
 
 /// <summary>
@@ -391,8 +425,12 @@ internal sealed class SqlServerProcessDatabaseBackupTarget(
     IReadOnlyList<string> connectionArguments,
     IReadOnlyDictionary<string, string>? connectionEnvironment,
     string backupRootDirectory,
-    TimeSpan timeout) : IHostUpdateBackupTarget, IHostUpdateServerSideBackupTarget
+    TimeSpan timeout,
+    bool sqlPasswordMissing = false) : IHostUpdateBackupTarget, IHostUpdateServerSideBackupTarget
 {
+    /// <summary>Evidence returned by the mapping check when SQL authentication has no password (#3162).</summary>
+    internal const string SqlPasswordMissingEvidence = "sql_password_missing";
+
     // Fixed (not per-invocation-unique) name: BACKUP DATABASE ... WITH INIT overwrites an
     // existing file at this path, so every ~5-minute availability re-check reuses and
     // overwrites the same single probe file instead of accumulating a new one on the SQL
@@ -411,7 +449,9 @@ internal sealed class SqlServerProcessDatabaseBackupTarget(
     public bool IsExternallyOwned => inner.IsExternallyOwned;
 
     public Task BackupAsync(string destinationDirectory, CancellationToken cancellationToken) =>
-        inner.BackupAsync(destinationDirectory, cancellationToken);
+        sqlPasswordMissing
+            ? throw new HostUpdateBackupCredentialsMissingException(Name)
+            : inner.BackupAsync(destinationDirectory, cancellationToken);
 
     /// <summary>
     /// Instructs the SQL Server engine itself to write a small, disposable probe file (a
@@ -430,6 +470,11 @@ internal sealed class SqlServerProcessDatabaseBackupTarget(
     /// </summary>
     public async Task<string?> VerifyVisibleBackupPathMappingAsync(CancellationToken cancellationToken)
     {
+        if (sqlPasswordMissing)
+        {
+            return SqlPasswordMissingEvidence;
+        }
+
         if (string.IsNullOrWhiteSpace(backupRootDirectory))
         {
             return "backup_root_directory_not_configured";
@@ -573,7 +618,9 @@ public sealed record HostUpdateRestoreCommand(
     /// <summary>
     /// Optional in-process step that must succeed before the restore process runs, e.g. clearing
     /// objects the restore tool would not drop itself. It runs only after the backup's checksums
-    /// have been verified.
+    /// have been verified. Like <see cref="Arguments"/>, it takes part in the generated record
+    /// equality by reference, so two commands built by separate factory calls never compare
+    /// equal; nothing relies on value equality of this record (R3194-B07).
     /// </summary>
     public Func<CancellationToken, Task>? PrepareTargetAsync { get; init; }
 }
