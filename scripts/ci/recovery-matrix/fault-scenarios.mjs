@@ -12,6 +12,7 @@ import {
   commandsSince,
   fencedConsumerPollWindowMs,
   postReconciliationDispatchWindowMs,
+  queuedAutoDispatchEvidenceSince,
 } from './emulated-printer.mjs';
 import { expectedSchemaDeltaFixtureState } from './schema-delta-fixture.mjs';
 
@@ -651,6 +652,17 @@ const scenarios = {
       afterRelease.count > 0,
       `queued-work-dispatched-after-reconciliation:commands=${afterRelease.count}:reads=${afterRelease.reads}`,
       afterRelease.offenders.join(','));
+    const queuedDispatch = queuedAutoDispatchEvidenceSince(baseline, printer.requests(), queuedWork.fileName);
+    harness.require(
+      queuedDispatch.matched,
+      `queued-work-dispatched-after-reconciliation:upload=${queuedDispatch.upload ?? 'missing'}:start=${queuedDispatch.start ?? 'missing'}:commands=${queuedDispatch.count}:reads=${queuedDispatch.reads}`,
+      queuedDispatch.offenders.join(','));
+    const queuedState = printer.queuedAutoDispatchJobState(queuedWork.jobId);
+    harness.require(
+      queuedState.status === 2 || queuedState.status === 3,
+      `queued-work-db-state:job=${queuedWork.jobId}:status=${queuedState.status}:assigned=${queuedState.assigned}`,
+      queuedState.raw);
+    harness.ok(`queued-work-db-state:job=${queuedWork.jobId}:status=${queuedState.status}:assigned=${queuedState.assigned}`);
     const final = proveDurable(harness, released, () => harness.recover('offline-recover-confirm'));
     if (fenceGaps.length > 0) throw faultScenarioFailure(fenceGaps.join('|'));
     return final;

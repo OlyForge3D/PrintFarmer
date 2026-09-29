@@ -233,3 +233,25 @@ export function commandsSince(baseline, current) {
     .map((entry) => `${entry.transport}:${entry.method}:${entry.target}`);
   return { count, reads: (current.total - baseline.total) - count, offenders };
 }
+
+export function queuedAutoDispatchEvidenceSince(baseline, current, fileName) {
+  if (!/^[0-9a-f-]+\.gcode$/i.test(fileName)) throw new Error(`invalid_file_name:${fileName}`);
+  const observed = commandsSince(baseline, current);
+  const commands = current.entries.filter((entry) => entry.isCommand && entry.sequence > baseline.total);
+  const upload = commands.find((entry) =>
+    entry.transport === 'http' &&
+    entry.method === 'POST' &&
+    entry.target.startsWith('/server/files/upload:') &&
+    entry.target.includes(`/${fileName}:`));
+  const start = commands.find((entry) =>
+    entry.transport === 'http' &&
+    entry.method === 'POST' &&
+    entry.target.startsWith('/printer/print/start:') &&
+    entry.target.endsWith(fileName));
+  return {
+    ...observed,
+    upload: upload?.target,
+    start: start?.target,
+    matched: Boolean(upload || start),
+  };
+}

@@ -576,7 +576,11 @@ try {
       schemaDeltaState: (context) => parseSchemaDeltaState(
         databaseQuery(deploymentRoot, env, provider, schemaDeltaFixtureStateSql(provider.id, context))),
       seedPrinter: () => databaseQuery(deploymentRoot, env, provider, seedPrinterSql()),
-      emulatedPrinter: createEmulatedPrinter({ env, deploymentRoot, hostShell }),
+      emulatedPrinter: createEmulatedPrinter({
+        env,
+        deploymentRoot,
+        appComposeService: topologyFor(cell.topology).healthComposeService,
+      }),
       snapshot: faultSnapshot,
       assertNoMutation,
       assertRolledBack: assertRecoveredToPrior,
@@ -2071,7 +2075,7 @@ function runningComposeImageDigest(env, service) {
 // Issue #3103: the repository's Moonraker emulator, built from source and attached only to the
 // run's internal network, stands in for a physical printer. The container name is recorded so the
 // finally block (and run-cell.sh cleanup) always removes it.
-function createEmulatedPrinter({ env, deploymentRoot, hostShell }) {
+function createEmulatedPrinter({ env, deploymentRoot, appComposeService }) {
   const emulatorIp = emulatorIpFor(appStaticIp);
   const container = `${run.id}-printer-emulator`;
   const image = `printfarmer-${run.id.replace(/[^A-Za-z0-9_.-]/g, '-').toLowerCase()}-moonraker-emulator:recovery`;
@@ -2118,14 +2122,43 @@ function createEmulatedPrinter({ env, deploymentRoot, hostShell }) {
     },
     seedQueuedAutoDispatchWork(printerId) {
       const work = queuedAutoDispatchWork({ printerId });
-      hostShell([
-        'set -euo pipefail',
-        'mkdir -p /app/gcode',
-        `printf '%s' '${work.contentBase64}' | base64 -d > /app/gcode/${work.fileName}`,
-      ].join('\n'));
+      const gcodePath = `/app/gcode/${work.fileName}`;
+      execFileSync('/usr/bin/docker', [
+        'compose',
+        '-f', join(deploymentRoot, 'docker-compose.recovery.yml'),
+        '-p', env.COMPOSE_PROJECT_NAME,
+        'exec',
+        '-T',
+        appComposeService,
+        'sh',
+        '-ec',
+        `mkdir -p /app/gcode && base64 -d > ${shellQuote(gcodePath)} && test -s ${shellQuote(gcodePath)}`,
+      ], {
+        cwd: deploymentRoot,
+        encoding: 'utf8',
+        env: { ...process.env, ...env },
+        input: work.contentBase64,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
       const output = databaseQuery(deploymentRoot, env, provider, queuedAutoDispatchWorkSql({ printerId, ...work }));
       if (!String(output).includes(work.jobId)) throw new Error(`queued_auto_dispatch_seed_missing_job:${output}`);
       return work;
+    },
+    queuedAutoDispatchJobState(jobId) {
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(jobId)) {
+        throw new Error(`invalid_job_id:${jobId}`);
+      }
+      const sql = provider.id === 'postgres'
+        ? `SELECT "Status", ("AssignedPrinterId" IS NOT NULL)::int FROM "PrintJobs" WHERE "Id" = '${jobId}'::uuid;`
+        : `SET NOCOUNT ON; SELECT [Status], CASE WHEN [AssignedPrinterId] IS NULL THEN 0 ELSE 1 END FROM [PrintJobs] WHERE [Id] = CONVERT(uniqueidentifier, '${jobId}');`;
+      const raw = databaseQuery(deploymentRoot, env, provider, sql);
+      const values = String(raw).trim().split(/[\s|]+/).filter(Boolean);
+      if (values.length < 2) return { status: Number.NaN, assigned: false, raw: String(raw).trim() };
+      return {
+        status: Number(values[0]),
+        assigned: values[1] === '1' || values[1].toLowerCase() === 'true',
+        raw: String(raw).trim(),
+      };
     },
     requests() {
       const response = emulatorGet('/__emulator/requests');
