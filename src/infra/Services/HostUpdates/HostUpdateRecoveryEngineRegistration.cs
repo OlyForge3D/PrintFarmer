@@ -1,6 +1,7 @@
 ﻿using Farm.Infrastructure.Data;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -257,6 +258,7 @@ public static class HostUpdateRecoveryEngineRegistration
     private static void AddRecovery(IServiceCollection services)
     {
         services.AddSingleton<IHostUpdateRecoveryCompatibilityEvaluator, DefaultHostUpdateRecoveryCompatibilityEvaluator>();
+        services.TryAddSingleton<IHostUpdatePostgresRestorePreparer, NpgsqlHostUpdatePostgresRestorePreparer>();
         services.AddScoped<IHostUpdateBackupManifestLocator>(sp =>
         {
             HostUpdateExecutionOptions options = sp.GetRequiredService<HostUpdateExecutionOptions>();
@@ -277,7 +279,8 @@ public static class HostUpdateRecoveryEngineRegistration
             {
                 restoreCommandsByTarget["database"] = HostUpdateDatabaseBackupTargetFactory.CreateRestoreCommand(
                     dbConfig,
-                    sp.GetRequiredService<IHostUpdateExecutableResolver>());
+                    sp.GetRequiredService<IHostUpdateExecutableResolver>(),
+                    sp.GetRequiredService<IHostUpdatePostgresRestorePreparer>());
             }
 
             // Storage owned by an external provider is never restored by this host either: with no

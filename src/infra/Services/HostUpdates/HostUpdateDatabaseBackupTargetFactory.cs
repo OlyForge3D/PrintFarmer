@@ -136,7 +136,8 @@ public static class HostUpdateDatabaseBackupTargetFactory
     /// </summary>
     public static Func<string, HostUpdateRestoreCommand> CreateRestoreCommand(
         Farm.Infrastructure.Data.DatabaseProviderConfiguration dbConfig,
-        IHostUpdateExecutableResolver executableResolver)
+        IHostUpdateExecutableResolver executableResolver,
+        IHostUpdatePostgresRestorePreparer? postgresRestorePreparer = null)
     {
         ArgumentNullException.ThrowIfNull(dbConfig);
 
@@ -154,6 +155,7 @@ public static class HostUpdateDatabaseBackupTargetFactory
             string connectionString = dbConfig.ConnectionString;
             var builder = new NpgsqlConnectionStringBuilder(connectionString);
             string password = builder.Password ?? string.Empty;
+            IHostUpdatePostgresRestorePreparer preparer = postgresRestorePreparer ?? new NpgsqlHostUpdatePostgresRestorePreparer();
 
             // pg_restore --clean drops only objects that are in the archive, so anything an
             // interrupted target migration created after the dump would survive the restore
@@ -172,7 +174,7 @@ public static class HostUpdateDatabaseBackupTargetFactory
                 ],
                 string.IsNullOrEmpty(password) ? null : new Dictionary<string, string>(StringComparer.Ordinal) { ["PGPASSWORD"] = password })
             {
-                PrepareTargetAsync = cancellationToken => ClearPostgresDatabaseAsync(connectionString, cancellationToken),
+                PrepareTargetAsync = cancellationToken => preparer.ClearDatabaseAsync(connectionString, cancellationToken),
             };
         }
 
@@ -574,6 +576,24 @@ public sealed record HostUpdateRestoreCommand(
     /// have been verified.
     /// </summary>
     public Func<CancellationToken, Task>? PrepareTargetAsync { get; init; }
+}
+
+/// <summary>
+/// Clears a PostgreSQL database before <c>pg_restore</c> runs (#3177). A host boundary like
+/// <see cref="IHostUpdateProcessRunner"/>: it is the only restore step that opens a database
+/// connection in-process, so it is injectable and replaceable in tests that must never touch
+/// a real database.
+/// </summary>
+public interface IHostUpdatePostgresRestorePreparer
+{
+    Task ClearDatabaseAsync(string connectionString, CancellationToken cancellationToken);
+}
+
+/// <summary>Clears the database over a non-pooled Npgsql connection.</summary>
+public sealed class NpgsqlHostUpdatePostgresRestorePreparer : IHostUpdatePostgresRestorePreparer
+{
+    public Task ClearDatabaseAsync(string connectionString, CancellationToken cancellationToken) =>
+        HostUpdateDatabaseBackupTargetFactory.ClearPostgresDatabaseAsync(connectionString, cancellationToken);
 }
 
 /// <summary>A backup target this host does not own and therefore never attempts to back up itself.</summary>
