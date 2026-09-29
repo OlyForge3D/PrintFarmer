@@ -12,7 +12,7 @@ on:
       cell:
         description: Recovery matrix cell
         type: choice
-        options: [c2, monolith-sqlserver, split-postgres, split-postgres-no-worker, split-sqlserver, external-database, external-storage, remote-worker, split-database, all, faults, fault-power-loss-backup, fault-power-loss-migration-before, fault-power-loss-migration-after, fault-power-loss-apply-before, fault-power-loss-apply-after, fault-partial-migration, fault-partial-apply, fault-api-down, fault-missing-backup, fault-corrupt-journal, fault-corrupt-replay, fault-fence-release]
+        options: [c2, monolith-sqlserver, split-postgres, split-postgres-no-worker, split-sqlserver, external-database, external-storage, remote-worker, split-database, all, faults, fault-power-loss-backup, fault-power-loss-migration-before, fault-power-loss-migration-after, fault-power-loss-apply-before, fault-power-loss-apply-after, fault-partial-migration, fault-partial-apply, fault-api-down, fault-missing-backup, fault-corrupt-journal, fault-corrupt-replay, fault-fence-release, published-bundle]
         default: c2
 
 permissions:
@@ -25,6 +25,7 @@ concurrency:
 jobs:
   cell:
     name: Recovery cell ${{ matrix.cell }}
+    if: github.event_name == 'schedule' || inputs.cell != 'published-bundle'
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     strategy:
@@ -75,6 +76,45 @@ jobs:
         with:
           name: recovery-matrix-evidence-${{ matrix.cell }}-${{ github.run_id }}
           path: .recovery-matrix-work/evidence-*.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 30
+
+  # Read-only, network-denied verification of the newest real published insider offline recovery
+  # bundle (#3195). No fallback download, local build, fixture root or reset: a missing or
+  # unverifiable published bundle fails this job.
+  published-bundle:
+    name: Published insider bundle verification
+    if: github.event_name == 'schedule' || inputs.cell == 'published-bundle'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7
+        with:
+          node-version: '24'
+
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6  # v4.1.2
+        with:
+          cosign-release: 'v3.0.6'
+
+      - name: Verify published insider bundle
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          bash scripts/ci/recovery-matrix/verify-published-bundle.sh
+          --cosign "$(command -v cosign)"
+          --evidence "$GITHUB_WORKSPACE/.recovery-matrix-work/evidence-published-bundle.json"
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: recovery-matrix-evidence-published-bundle-${{ github.run_id }}
+          path: .recovery-matrix-work/evidence-published-bundle.json
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 30
