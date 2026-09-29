@@ -31,6 +31,13 @@ public sealed class PrinterResolutionMiddleware(RequestDelegate next)
         // to clear that rule again.
         bool isControlApiRequest = path.StartsWith("/__emulator", StringComparison.OrdinalIgnoreCase);
         bool isHealthRequest = path.Equals("/healthz", StringComparison.OrdinalIgnoreCase);
+        if (!isControlApiRequest && !isHealthRequest)
+        {
+            // Recorded before auth/fault handling so a rejected or faulted command
+            // attempt is still visible as an attempt.
+            registry.Requests.RecordHttp(context.Request.Method, path);
+        }
+
         string? requiredApiKey = options.Value.ApiKey;
         if (!isControlApiRequest &&
             !isHealthRequest &&
