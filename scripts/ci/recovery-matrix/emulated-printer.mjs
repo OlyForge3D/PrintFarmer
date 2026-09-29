@@ -77,14 +77,14 @@ export function queuedAutoDispatchWorkSql({
 
   return `
 WITH root AS (
-  INSERT INTO "FolderNodes" ("Id", "Path", "FolderType", "CreatedAt", "DeletedAt")
+  INSERT INTO "FolderNode" ("Id", "Path", "FolderType", "CreatedAt", "DeletedAt")
   VALUES (gen_random_uuid(), '/', 'gcode', now(), NULL)
   ON CONFLICT ("Path", "FolderType") DO UPDATE SET "DeletedAt" = NULL
   RETURNING "Id"
 ), folder AS (
   SELECT "Id" FROM root
   UNION ALL
-  SELECT "Id" FROM "FolderNodes" WHERE "Path" = '/' AND "FolderType" = 'gcode' LIMIT 1
+  SELECT "Id" FROM "FolderNode" WHERE "Path" = '/' AND "FolderType" = 'gcode' LIMIT 1
 ), settings AS (
   INSERT INTO "DispatchSettings" (
     "Id", "AutoDispatchEnabled", "AutoDispatchMode", "CreatedDate", "IdleThresholdSeconds",

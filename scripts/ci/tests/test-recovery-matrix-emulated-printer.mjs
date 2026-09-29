@@ -51,6 +51,7 @@ test('queued auto-dispatch work SQL enables auto mode and seeds an unassigned qu
   const sql = queuedAutoDispatchWorkSql({ printerId, ...work });
   assert.match(work.fileName, /^[0-9a-f-]+\.gcode$/);
   assert.ok(work.fileSizeBytes > 0);
+  assert.match(sql, /INSERT INTO "FolderNode"/);
   assert.match(sql, /"AutoDispatchMode" = 'Auto'/);
   assert.match(sql, /"AutoDispatchState" = 2/);
   assert.match(sql, /"BedPreConfirmed" = true/);
