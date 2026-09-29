@@ -1214,6 +1214,12 @@ operation. Run one cell with `--cell <id>`, or every import cell with
 is `Imported`, and the evidence validator accepts it only after a successful
 `import-cells-verified` checkpoint.
 
+The Recovery Matrix workflow runs every import cell nightly, alongside the
+topology cells, and offers `imports` and each import cell id on manual
+dispatch. It never runs per pull request. Fault cells stay dispatch-only.
+`scripts/ci/tests/test-recovery-matrix-workflow.mjs` fails CI if the
+workflow's dispatch options or nightly cell list drift from the cell catalog.
+
 Every refused step requires a decision record, and binds the record's reason to
 the expected refusal (for example `channel_mismatch_policy`, `replay_rejected`
 or `signature verification failed for update-manifest.json`). A refusal with no
@@ -1281,6 +1287,14 @@ option. If the newest insider release lacks its signed bundle, it fails with
 `published_bundle_missing` rather than verifying an older release. The Recovery
 Matrix workflow runs it as the `published-bundle` job on its schedule and on
 dispatch. It fails until the first insider release that publishes the bundle.
+
+Criterion 5 is still pending a real release. As of 2026-09-28 the newest
+published insider release, `v0.2.3-insider.4`, predates #3195 and carries no
+offline recovery bundle, so there is nothing real to verify yet. Cutting that
+release is the repository owner's decision, and no fixture or locally built
+bundle can stand in for it. Record the first passing
+`printfarmer-published-bundle-verification` result against #3102 once an
+insider release publishes the bundle.
 
 ### Queue-consumer health entry (#3157)
 

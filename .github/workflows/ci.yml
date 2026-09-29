@@ -376,6 +376,12 @@ jobs:
           scripts/ci/tests/test-recovery-matrix-runtime-builders.mjs
           scripts/ci/tests/test-recovery-matrix-schema-delta-fixture.mjs
           scripts/ci/tests/test-recovery-matrix-published-bundle.mjs
+          scripts/ci/tests/test-recovery-matrix-workflow.mjs
+          scripts/ci/tests/test-recovery-matrix-catalog.mjs
+          scripts/ci/tests/test-recovery-matrix-entrypoint.mjs
+          scripts/ci/tests/test-recovery-matrix-fault-cells.mjs
+          scripts/ci/tests/test-recovery-matrix-import-cells.mjs
+          scripts/ci/tests/test-recovery-matrix-runtime-assertions.mjs
           scripts/ci/tests/test-install-host-update-cli-trusted-root.mjs
 
       - name: Test daily development image-set policy
