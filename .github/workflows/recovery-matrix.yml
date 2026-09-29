@@ -53,11 +53,19 @@ jobs:
           set -euo pipefail
           config=/etc/docker/daemon.json
           current='{}'
-          # jq -s tolerates a whitespace-only file, which would otherwise make jq emit nothing
-          # and tee truncate the config.
-          if sudo test -s "$config"; then current="$(sudo cat "$config" | jq -s '.[0] // {}')"; fi
-          jq '.features = ((.features // {}) + {"containerd-snapshotter": true})' <<<"$current" \
-            | sudo tee "$config" >/dev/null
+          # An empty or whitespace-only file is treated as {}; anything other than exactly one
+          # JSON object fails the step before the privileged config is touched.
+          if sudo test -s "$config"; then
+            current="$(sudo cat "$config" | jq -s 'if length == 0 then {}
+              elif length == 1 and (.[0] | type) == "object" then .[0]
+              else error("daemon.json must contain exactly one JSON object") end')"
+          fi
+          # Render and validate the complete config before replacing the privileged file.
+          rendered="$(mktemp)"
+          jq '.features = ((.features // {}) + {"containerd-snapshotter": true})' <<<"$current" > "$rendered"
+          jq -e 'type == "object" and .features["containerd-snapshotter"] == true' "$rendered" >/dev/null
+          sudo install -m 0644 -o root -g root "$rendered" "$config"
+          rm -f "$rendered"
           sudo systemctl restart docker
           ready=false
           for _ in $(seq 1 30); do
