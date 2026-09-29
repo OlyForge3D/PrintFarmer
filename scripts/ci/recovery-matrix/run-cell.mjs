@@ -2123,7 +2123,7 @@ function createEmulatedPrinter({ env, deploymentRoot, hostShell }) {
         'mkdir -p /app/gcode',
         `printf '%s' '${work.contentBase64}' | base64 -d > /app/gcode/${work.fileName}`,
       ].join('\n'));
-      const output = databaseQuery(deploymentRoot, env, provider, queuedAutoDispatchWorkSql(work));
+      const output = databaseQuery(deploymentRoot, env, provider, queuedAutoDispatchWorkSql({ printerId, ...work }));
       if (!String(output).includes(work.jobId)) throw new Error(`queued_auto_dispatch_seed_missing_job:${output}`);
       return work;
     },
