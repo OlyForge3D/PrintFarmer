@@ -1492,6 +1492,195 @@ public sealed class ProfileFamilyServiceTests
     }
 
     [Fact]
+    public async Task CloneFamilyAsync_VariantNameCollidesWithCallersMachineProfile_Throws409BeforeAnyMutation()
+    {
+        // #3201: generated variants are owned by the caller, so a same-owner name clash on
+        // IX_MachineProfiles_CreatedByUserId_Name_SlicerType must be a 409, not a raw 500.
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using SlicerDbContext dbContext = CreateContext(connection);
+        Guid modelId = Guid.NewGuid();
+        Guid userId = Guid.NewGuid();
+        SeedCustomMachineProfile(dbContext, "Farm Test 0.6 nozzle", userId);
+
+        Mock<IProfileFamilyWorkerClient> workerClient = Worker();
+        ProfileFamilyService service = CreateService(
+            dbContext, Catalog(modelId), Aliases(modelId), Renderer(), workerClient);
+
+        Func<Task> act = async () =>
+            await service.CloneFamilyAsync(Request(modelId), userId, CancellationToken.None);
+
+        await act.Should()
+            .ThrowAsync<ProfileFamilyConflictException>()
+            .WithMessage("*Farm Test 0.6 nozzle*");
+        workerClient.Verify(
+            client => client.GetCatalogAsync("Prusa", null, It.IsAny<CancellationToken>()),
+            Times.Once);
+        workerClient.VerifyNoOtherCalls();
+        (await dbContext.MachineModelProfiles.AsNoTracking().CountAsync()).Should().Be(0);
+        (await dbContext.MachineProfiles.AsNoTracking().CountAsync()).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task CloneFamilyAsync_VariantNameMatchesAnotherUsersMachineProfile_Succeeds()
+    {
+        // #3201: another user's private profile with the same name must neither block the family
+        // nor be disclosed; the names live in different per-owner namespaces.
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using SlicerDbContext dbContext = CreateContext(connection);
+        Guid modelId = Guid.NewGuid();
+        Guid userId = Guid.NewGuid();
+        SeedCustomMachineProfile(dbContext, "Farm Test 0.6 nozzle", Guid.NewGuid());
+
+        ProfileFamilyService service = CreateService(
+            dbContext, Catalog(modelId), Aliases(modelId), Renderer(), Worker());
+
+        CloneProfileFamilyResponseDto response =
+            await service.CloneFamilyAsync(Request(modelId), userId, CancellationToken.None);
+
+        response.RenderStatus.Should().Be(ProfileFamilyRenderStatus.Healthy);
+        (await dbContext.MachineProfiles.AsNoTracking()
+            .CountAsync(profile => profile.Name == "Farm Test 0.6 nozzle")).Should().Be(2);
+    }
+
+    [Fact]
+    public async Task CloneFamilyAsync_VariantNameRacesPastPreCheck_MapsOwnerNameIndexViolationTo409()
+    {
+        // #3201 backstop: a same-owner profile committed between the pre-check and the insert makes
+        // the database reject the variant. Simulated by adding the colliding row to the same save.
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using SlicerDbContext dbContext = CreateContext(connection);
+        Guid modelId = Guid.NewGuid();
+        Guid userId = Guid.NewGuid();
+        InjectCollidingMachineProfileOnFirstVariantSave(dbContext, "Farm Test 0.6 nozzle", userId);
+
+        Mock<IProfileFamilyWorkerClient> workerClient = Worker();
+        ProfileFamilyService service = CreateService(
+            dbContext, Catalog(modelId), Aliases(modelId), Renderer(), workerClient);
+
+        Func<Task> act = async () =>
+            await service.CloneFamilyAsync(Request(modelId), userId, CancellationToken.None);
+
+        (await act.Should().ThrowAsync<ProfileFamilyConflictException>())
+            .Which.InnerException.Should().BeAssignableTo<DbUpdateException>();
+        workerClient.Verify(
+            client => client.WriteBundleAsync(
+                It.IsAny<ProfileFamilyWorkerTarget>(),
+                It.IsAny<ProfileFamilyBundleDto>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+        (await dbContext.MachineModelProfiles.AsNoTracking().CountAsync()).Should().Be(
+            0,
+            "the family insert must be rolled back with the rejected variant insert");
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task EditFamilyAsync_RenameCollidesWithOwnersMachineProfile_Throws409AndLeavesFamilyUntouched(
+        bool ownedFamily)
+    {
+        // #3201: the rename path renames every variant, so a clash with the family owner's own
+        // machine profile (or, for an unowned family, an unowned profile) is a 409 raised before
+        // the worker install, leaving the family and its bundle exactly as they were.
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using SlicerDbContext dbContext = CreateContext(connection);
+        Guid modelId = Guid.NewGuid();
+        (Guid familyId, Guid variantId) = SeedHealthyFamily(dbContext, modelId);
+        Guid? ownerId = ownedFamily ? Guid.NewGuid() : null;
+        SetFamilyOwner(dbContext, familyId, ownerId);
+        SeedCustomMachineProfile(dbContext, "Renamed 0.4 nozzle", ownerId);
+
+        Mock<IProfileFamilyWorkerClient> worker = EditWorker();
+        ProfileFamilyService service = CreateService(
+            dbContext,
+            Catalog(modelId),
+            EditAliases(modelId, "Renamed", renameFrom: "Farm Test"),
+            EchoRenderer(),
+            worker);
+
+        Func<Task> act = async () => await service.EditFamilyAsync(
+            familyId, new EditProfileFamilyRequestDto { Name = "Renamed" }, CancellationToken.None);
+
+        await act.Should()
+            .ThrowAsync<ProfileFamilyConflictException>()
+            .WithMessage("*Renamed 0.4 nozzle*");
+        worker.Verify(
+            s => s.WriteBundleAsync(
+                It.IsAny<ProfileFamilyWorkerTarget>(),
+                It.IsAny<ProfileFamilyBundleDto>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+        MachineModelProfile family = await dbContext.MachineModelProfiles.AsNoTracking()
+            .SingleAsync(candidate => candidate.Id == familyId);
+        family.Name.Should().Be("Farm Test");
+        family.RenderStatus.Should().Be(ProfileFamilyRenderStatus.Healthy);
+        (await dbContext.MachineProfiles.AsNoTracking().SingleAsync(profile => profile.Id == variantId))
+            .Name.Should().Be("Farm Test 0.4 nozzle");
+    }
+
+    [Fact]
+    public async Task EditFamilyAsync_RenameMatchesAnotherUsersMachineProfile_Succeeds()
+    {
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using SlicerDbContext dbContext = CreateContext(connection);
+        Guid modelId = Guid.NewGuid();
+        (Guid familyId, Guid variantId) = SeedHealthyFamily(dbContext, modelId);
+        SetFamilyOwner(dbContext, familyId, Guid.NewGuid());
+        SeedCustomMachineProfile(dbContext, "Renamed 0.4 nozzle", Guid.NewGuid());
+        ProfileFamilyService service = CreateService(
+            dbContext,
+            Catalog(modelId),
+            EditAliases(modelId, "Renamed", renameFrom: "Farm Test"),
+            EchoRenderer(),
+            EditWorker());
+
+        ProfileFamilySummaryDto result = await service.EditFamilyAsync(
+            familyId, new EditProfileFamilyRequestDto { Name = "Renamed" }, CancellationToken.None);
+
+        result.FamilyName.Should().Be("Renamed");
+        (await dbContext.MachineProfiles.AsNoTracking().SingleAsync(profile => profile.Id == variantId))
+            .Name.Should().Be("Renamed 0.4 nozzle");
+    }
+
+    [Fact]
+    public async Task RenderFamilyAsync_VariantNameRacesPastPreCheck_Throws409MarksFailedAndRestoresPreviousBundle()
+    {
+        // #3201 backstop on the re-render save: the name-index violation maps to a 409 and still runs
+        // the restore/mark-Failed compensation, exactly like the family-name and hash cases.
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using SlicerDbContext dbContext = CreateContext(connection);
+        Guid modelId = Guid.NewGuid();
+        Guid ownerId = Guid.NewGuid();
+        (Guid familyId, _) = SeedHealthyFamily(dbContext, modelId);
+        SetFamilyOwner(dbContext, familyId, ownerId);
+        InjectCollidingMachineProfileOnFirstVariantSave(dbContext, "Farm Test 0.4 nozzle", ownerId);
+
+        Mock<IProfileFamilyWorkerClient> worker = EditWorker();
+        ProfileFamilyService service = CreateService(
+            dbContext, Catalog(modelId), EditAliases(modelId, "Farm Test"), EchoRenderer(), worker);
+
+        Func<Task> act = async () => await service.RenderFamilyAsync(familyId, CancellationToken.None);
+
+        (await act.Should().ThrowAsync<ProfileFamilyConflictException>())
+            .Which.InnerException.Should().BeAssignableTo<DbUpdateException>();
+        (await dbContext.MachineModelProfiles.AsNoTracking().SingleAsync(f => f.Id == familyId))
+            .RenderStatus.Should().Be(ProfileFamilyRenderStatus.Failed);
+        worker.Verify(
+            s => s.WriteBundleAsync(
+                It.IsAny<ProfileFamilyWorkerTarget>(),
+                It.IsAny<ProfileFamilyBundleDto>(),
+                It.IsAny<CancellationToken>()),
+            Times.Exactly(2),
+            "the previous good bundle must be re-installed after the failed name-collision save");
+    }
+
+    [Fact]
     public async Task RenderStaleFamiliesAsync_ReturnsPerFamilyResults_WithPartialFailureSurfaced()
     {
         await using SqliteConnection connection = new("Data Source=:memory:");
@@ -3088,6 +3277,75 @@ public sealed class ProfileFamilyServiceTests
         });
         _ = dbContext.SaveChanges();
         return (familyId, variantId);
+    }
+
+    /// <summary>
+    /// Seeds a stand-alone (non-family) OrcaSlicer machine profile owned by <paramref name="ownerId"/>
+    /// (unowned when <see langword="null"/>), e.g. a user's custom upload or clone (#3201).
+    /// </summary>
+    private static void SeedCustomMachineProfile(SlicerDbContext dbContext, string name, Guid? ownerId)
+    {
+        dbContext.MachineProfiles.Add(new MachineProfile
+        {
+            Id = Guid.NewGuid(),
+            Name = name,
+            Manufacturer = "Custom",
+            SlicerType = SlicerType.OrcaSlicer,
+            CreatedByUserId = ownerId,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        });
+        _ = dbContext.SaveChanges();
+    }
+
+    /// <summary>Assigns an owner to a seeded family and its variants through the tracked graph.</summary>
+    private static void SetFamilyOwner(SlicerDbContext dbContext, Guid familyId, Guid? ownerId)
+    {
+        MachineModelProfile family = dbContext.MachineModelProfiles
+            .Include(candidate => candidate.MachineProfiles)
+            .Single(candidate => candidate.Id == familyId);
+        family.CreatedByUserId = ownerId;
+        foreach (MachineProfile variant in family.MachineProfiles)
+        {
+            variant.CreatedByUserId = ownerId;
+        }
+
+        _ = dbContext.SaveChanges();
+    }
+
+    /// <summary>
+    /// Simulates a same-owner machine profile racing past the service's pre-check: the first save
+    /// that writes a family variant also inserts a colliding profile, so the database rejects the
+    /// save on the per-owner name index (#3201 backstop).
+    /// </summary>
+    private static void InjectCollidingMachineProfileOnFirstVariantSave(
+        SlicerDbContext dbContext,
+        string name,
+        Guid ownerId)
+    {
+        bool injected = false;
+        dbContext.SavingChanges += (_, _) =>
+        {
+            if (injected
+                || !dbContext.ChangeTracker.Entries<MachineProfile>().Any(entry =>
+                    entry.Entity.MachineModelProfileId != null
+                    && entry.State is EntityState.Added or EntityState.Modified))
+            {
+                return;
+            }
+
+            injected = true;
+            dbContext.MachineProfiles.Add(new MachineProfile
+            {
+                Id = Guid.NewGuid(),
+                Name = name,
+                Manufacturer = "Custom",
+                SlicerType = SlicerType.OrcaSlicer,
+                CreatedByUserId = ownerId,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            });
+        };
     }
 
     /// <summary>
