@@ -1,4 +1,4 @@
-namespace Farm.Moonraker.Emulator.Domain;
+﻿namespace Farm.Moonraker.Emulator.Domain;
 
 /// <summary>One observed Moonraker protocol request (REST call or JSON-RPC method).</summary>
 public sealed record RequestLogEntry(
@@ -21,7 +21,9 @@ public sealed record RequestLogSnapshot(
 /// host issued any printer command during a window. A request is classified as a
 /// <em>command</em> conservatively: every REST call using a method other than
 /// GET/HEAD/OPTIONS (except the JSON-RPC-over-HTTP fallback, which is classified per
-/// RPC method instead) and every JSON-RPC method outside a fixed read-only set. The
+/// RPC method instead, and a <c>POST /server/spoolman/proxy</c> whose forwarded
+/// <c>request_method</c> is itself GET/HEAD/OPTIONS) and every JSON-RPC method outside a
+/// fixed read-only set. The
 /// <c>/__emulator/**</c> control surface and <c>/healthz</c> are never recorded.
 /// Counters are cumulative for the process lifetime and are deliberately NOT cleared
 /// by <c>/__emulator/reset</c>, so a reset can never hide an earlier command. Only the
@@ -63,14 +65,29 @@ public sealed class RequestLog
 
     public RequestLog(TimeProvider timeProvider) => _timeProvider = timeProvider;
 
-    public static bool IsHttpCommand(string method, string path) =>
-        !SafeHttpMethods.Contains(method) &&
-        !path.Equals("/websocket", StringComparison.OrdinalIgnoreCase);
+    public const string SpoolmanProxyPath = "/server/spoolman/proxy";
+
+    /// <summary>
+    /// Classifies a REST call. <paramref name="proxiedMethod"/> is the <c>request_method</c>
+    /// forwarded by a <c>POST /server/spoolman/proxy</c> call: that proxy is a read only when
+    /// the forwarded method is itself safe. A missing or unreadable forwarded method stays a command.
+    /// </summary>
+    public static bool IsHttpCommand(string method, string path, string? proxiedMethod = null)
+    {
+        if (SafeHttpMethods.Contains(method) || path.Equals("/websocket", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return !(path.TrimEnd('/').Equals(SpoolmanProxyPath, StringComparison.OrdinalIgnoreCase) &&
+                 proxiedMethod is not null &&
+                 SafeHttpMethods.Contains(proxiedMethod));
+    }
 
     public static bool IsRpcCommand(string method) => !ReadOnlyRpcMethods.Contains(method);
 
-    public RequestLogEntry RecordHttp(string method, string path) =>
-        Record("http", method.ToUpperInvariant(), path, IsHttpCommand(method, path));
+    public RequestLogEntry RecordHttp(string method, string path, string? proxiedMethod = null) =>
+        Record("http", method.ToUpperInvariant(), path, IsHttpCommand(method, path, proxiedMethod));
 
     public RequestLogEntry RecordRpc(string method) =>
         Record("jsonrpc", method, method, IsRpcCommand(method));

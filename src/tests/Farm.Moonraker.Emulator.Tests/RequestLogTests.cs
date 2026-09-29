@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
@@ -22,6 +22,19 @@ public sealed class RequestLogTests
     [InlineData("PUT", "/printer/info", true)]
     public void IsHttpCommand_ClassifiesConservatively(string method, string path, bool expected) =>
         RequestLog.IsHttpCommand(method, path).Should().Be(expected);
+
+    [Theory]
+    [InlineData("GET", false)]
+    [InlineData("get", false)]
+    [InlineData("POST", true)]
+    [InlineData("DELETE", true)]
+    [InlineData(null, true)]
+    public void IsHttpCommand_ClassifiesSpoolmanProxyByForwardedMethod(string? proxiedMethod, bool expected) =>
+        RequestLog.IsHttpCommand("POST", RequestLog.SpoolmanProxyPath, proxiedMethod).Should().Be(expected);
+
+    [Fact]
+    public void IsHttpCommand_IgnoresForwardedMethodOutsideSpoolmanProxy() =>
+        RequestLog.IsHttpCommand("POST", "/printer/gcode/script", "GET").Should().BeTrue();
 
     [Theory]
     [InlineData("server.info", false)]
@@ -99,6 +112,26 @@ public sealed class RequestLogEndpointTests : IClassFixture<ReadyPrinterFactory>
             .Where(e => e.GetProperty("transport").GetString() == "jsonrpc")
             .Select(e => (e.GetProperty("method").GetString(), e.GetProperty("isCommand").GetBoolean()))
             .Should().Contain([("server.info", false), ("printer.gcode.script", true)]);
+    }
+
+    [Fact]
+    public async Task Requests_ClassifiesSpoolmanProxyReadsAndWrites_AndEndpointStillReadsBody()
+    {
+        using HttpClient client = _factory.CreateClient();
+        long totalBefore = (await GetRequestsAsync(client)).GetProperty("total").GetInt64();
+
+        using HttpResponseMessage read = await client.PostAsync(
+            "/server/spoolman/proxy", TestRequests.Json("""{"request_method":"GET","path":"/v1/spool"}"""));
+        read.StatusCode.Should().Be(HttpStatusCode.OK);
+        await client.PostAsync(
+            "/server/spoolman/proxy", TestRequests.Json("""{"request_method":"PATCH","path":"/v1/spool/1"}"""));
+        await client.PostAsync("/server/spoolman/proxy", TestRequests.Json("not json"));
+
+        JsonElement after = await GetRequestsAsync(client);
+        after.GetProperty("entries").EnumerateArray()
+            .Where(e => e.GetProperty("sequence").GetInt64() > totalBefore)
+            .Select(e => e.GetProperty("isCommand").GetBoolean())
+            .Should().Equal(false, true, true);
     }
 
     private static async Task<JsonElement> GetRequestsAsync(HttpClient client)

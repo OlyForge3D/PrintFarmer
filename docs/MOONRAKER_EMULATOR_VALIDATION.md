@@ -237,7 +237,8 @@ The validation-only control API is available only when
 The request log records every Moonraker-protocol HTTP request and WebSocket JSON-RPC
 call, but not `/__emulator/**` control calls or `/healthz`. A request counts as a
 command when it could change printer state: any HTTP method other than
-`GET`/`HEAD`/`OPTIONS` (except the `/websocket` upgrade), and any JSON-RPC method outside the read-only set (identify,
+`GET`/`HEAD`/`OPTIONS` (except the `/websocket` upgrade, and a `POST /server/spoolman/proxy`
+whose forwarded `request_method` is `GET`/`HEAD`/`OPTIONS`), and any JSON-RPC method outside the read-only set (identify,
 `server.info`, object list/subscribe/query, camera monitor start/stop and directory
 listing). The offline-update recovery matrix uses it to prove that recovery never
 commands a printer (see `docs/OFFLINE_UPDATE_RECOVERY.md`, #3103).
