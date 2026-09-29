@@ -7,6 +7,7 @@
 #   install-host-update-cli.sh write-config --env-file <abs-file> [--output <abs-file>] [--owner <user>]
 #   install-host-update-cli.sh install-service --cli-dir <abs-dir> [--config <abs-file>] [--service-user <user>] [--unit-dir <abs-dir>] [--enable]
 #   install-host-update-cli.sh uninstall-service [--unit-dir <abs-dir>]
+#   install-host-update-cli.sh prepare-state --env-file <abs-file>
 #
 # install       Downloads (or reads from --asset-dir) the runtime's archive, the checksum list and
 #               its Cosign bundle; verifies the bundle against the release workflow identity for
@@ -35,10 +36,16 @@
 #               grants nothing: daemon execution stays disabled pending #2982.
 # uninstall-service  Stops and disables the unit and removes it. It never deletes the config,
 #               journal, identity storage or logs. Removing a unit that is not installed is a no-op.
+# prepare-state Issue #3207: creates <HostUpdateExecution__RootDirectory>/state (mode 0755, owned by
+#               the root directory's owner) before Compose bind-mounts it read-only into the
+#               application containers, so Docker never creates it as root and the executor
+#               account can still write admission.closed. The root must already be an absolute,
+#               non-link directory; an existing state directory must be a non-link directory and
+#               is left unchanged.
 #
 # Exit codes: 0 done; 1 verification, validation or installation failed (nothing placed or
-# written); 2 usage; 3 write-config only: HostUpdateExecution__RootDirectory is not configured,
-# so nothing was written.
+# written); 2 usage; 3 write-config and prepare-state only: HostUpdateExecution__RootDirectory is
+# not configured, so nothing was written.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -67,7 +74,7 @@ cleanup() {
 trap cleanup EXIT
 
 usage() {
-    sed -n '6,9p' "${BASH_SOURCE[0]}" | sed 's/^#   //' >&2
+    sed -n '6,10p' "${BASH_SOURCE[0]}" | sed 's/^#   //' >&2
 }
 
 fail_usage() {
@@ -361,6 +368,50 @@ owner_of() {
     stat -c %U -- "$1" 2>/dev/null || stat -f %Su -- "$1"
 }
 
+env_root_directory() {
+    LC_ALL=C awk '{ sub(/\r$/, "") } index($0, "=") > 0 && substr($0, 1, index($0, "=") - 1) == "HostUpdateExecution__RootDirectory" { value = substr($0, index($0, "=") + 1) } END { print value }' "$1"
+}
+
+cmd_prepare_state() {
+    local env_file=""
+    while [[ $# -gt 0 ]]; do
+        [[ $# -ge 2 ]] || fail_usage "$1 requires a value"
+        case "$1" in
+            --env-file) env_file="$2" ;;
+            *) fail_usage "Unknown prepare-state option: $1" ;;
+        esac
+        shift 2
+    done
+    [[ -n "$env_file" ]] || fail_usage "--env-file is required"
+    is_absolute "$env_file" || fail_usage "--env-file must be an absolute path"
+    [[ -f "$env_file" ]] || fail "Environment file not found: $env_file"
+
+    local root state owner
+    root="$(env_root_directory "$env_file")"
+    if [[ -z "$root" ]]; then
+        log_info "HostUpdateExecution__RootDirectory is not set in $env_file; no admission state directory to prepare" >&2
+        exit 3
+    fi
+    [[ "$root" == /* ]] || fail "HostUpdateExecution__RootDirectory must be an absolute path: $root"
+    root="${root%/}"
+    [[ -n "$root" ]] || fail "HostUpdateExecution__RootDirectory must not be the filesystem root"
+    [[ -d "$root" && ! -L "$root" ]] ||
+        fail "HostUpdateExecution__RootDirectory must be an existing, non-link directory owned by the host-update account before deploying, or Docker creates its state directory as root: $root"
+    state="$root/state"
+    if [[ -e "$state" || -L "$state" ]]; then
+        [[ -d "$state" && ! -L "$state" ]] || fail "The admission state path is not a non-link directory: $state"
+        log_info "Admission state directory already exists: $state" >&2
+        return 0
+    fi
+    owner="$(owner_of "$root")" || fail "Could not read the owner of $root"
+    umask 022
+    mkdir -m 0755 -- "$state" || fail "Could not create $state"
+    if [[ "$owner" != "$(id -un)" ]]; then
+        chown -- "$owner" "$state" || { rmdir -- "$state"; fail "Could not give $state to $owner"; }
+    fi
+    log_success "Created admission state directory $state (owner $owner)" >&2
+}
+
 cmd_write_config() {
     local env_file="" output="$DEFAULT_CONFIG" owner=""
     while [[ $# -gt 0 ]]; do
@@ -388,7 +439,7 @@ cmd_write_config() {
 
     if [[ -z "$owner" ]]; then
         local root
-        root="$(LC_ALL=C awk '{ sub(/\r$/, "") } index($0, "=") > 0 && substr($0, 1, index($0, "=") - 1) == "HostUpdateExecution__RootDirectory" { value = substr($0, index($0, "=") + 1) } END { print value }' "$env_file")"
+        root="$(env_root_directory "$env_file")"
         if [[ "$root" == /* && -d "$root" && ! -L "$root" ]]; then
             owner="$(owner_of "$root")" || fail "Could not read the owner of $root"
         else
@@ -641,6 +692,7 @@ shift
 case "$command_name" in
     install) cmd_install "$@" ;;
     write-config) cmd_write_config "$@" ;;
+    prepare-state) cmd_prepare_state "$@" ;;
     install-service) cmd_install_service "$@" ;;
     uninstall-service) cmd_uninstall_service "$@" ;;
     help|--help|-h) usage; exit 0 ;;

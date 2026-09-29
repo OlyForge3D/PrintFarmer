@@ -63,7 +63,11 @@ validated fail-closed by `ConfiguredHostUpdateExecutableResolver`. The executor 
   unreadable, or not rooted also reports closed. The deployment templates bind-mount
   `${HostUpdateExecution__RootDirectory}/state` read-only at `/run/printfarmer/host-update-state`
   in the `api`, `slicer-host`, and `monolith` containers and set
-  `HostUpdateExecution__AdmissionStateDirectory` to that path (#3207).
+  `HostUpdateExecution__AdmissionStateDirectory` to that path (#3207). Before Compose starts,
+  `deploy-docker.sh` runs `install-host-update-cli.sh prepare-state`, which creates a missing
+  `state` directory (mode `0755`, owned by the `RootDirectory` owner) so Docker never creates it
+  as root. It fails the deployment when a configured `RootDirectory` is relative, missing, or a
+  link, or when `state` is a link or not a directory.
 - Timeouts/poll intervals for drain, fence-proof, backup, verify, apply, and short diagnostic
   process calls; `MinimumFreeBytes`; the EF Core provider allowlist (`SupportedProviderNames`);
   `DatabaseExternallyOwned` (fails backup closed instead of silently skipping a customer-managed

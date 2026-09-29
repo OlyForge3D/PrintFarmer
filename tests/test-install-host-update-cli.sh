@@ -251,6 +251,67 @@ printf 'HostUpdateExecution__RootDirectory=relative/state\n' >"$ENV"
 check "a relative state root warns that the current user owns the config" \
     "[[ \$(write_config --env-file '$ENV' --output '$CONFIG') == 0 ]] && grep -q 'non-link directory' '$TEST_ROOT/out.log'"
 
+# prepare-state (issue #3207): the admission state directory the application containers mount
+# read-only must exist before Compose runs, owned by the executor root's owner.
+prepare_state() {
+    local status=0
+    "$INSTALLER" prepare-state "$@" >"$TEST_ROOT/out.log" 2>&1 || status=$?
+    echo "$status"
+}
+PS_ROOT="$TEST_ROOT/prepare"
+mkdir -p "$PS_ROOT"
+PS_ENV="$PS_ROOT/deploy.env"
+printf 'DB_PROVIDER=postgres\n' >"$PS_ENV"
+check "prepare-state exits 3 when the root is not configured" "[[ \$(prepare_state --env-file '$PS_ENV') == 3 ]]"
+check "prepare-state requires an absolute env file" "[[ \$(prepare_state --env-file deploy.env) == 2 ]]"
+printf 'HostUpdateExecution__RootDirectory=relative/root\n' >"$PS_ENV"
+check "prepare-state refuses a relative root" "[[ \$(prepare_state --env-file '$PS_ENV') == 1 && ! -e relative/root ]]"
+printf 'HostUpdateExecution__RootDirectory=%s\n' "$PS_ROOT/missing" >"$PS_ENV"
+check "prepare-state refuses a missing root and creates nothing" \
+    "[[ \$(prepare_state --env-file '$PS_ENV') == 1 && ! -e '$PS_ROOT/missing' ]]"
+mkdir -p "$PS_ROOT/real"
+ln -s "$PS_ROOT/real" "$PS_ROOT/root-link"
+printf 'HostUpdateExecution__RootDirectory=%s\n' "$PS_ROOT/root-link" >"$PS_ENV"
+check "prepare-state refuses a symlinked root" \
+    "[[ \$(prepare_state --env-file '$PS_ENV') == 1 && ! -e '$PS_ROOT/real/state' ]]"
+mkdir -p "$PS_ROOT/exec"
+printf 'HostUpdateExecution__RootDirectory=%s/\r\n' "$PS_ROOT/exec" >"$PS_ENV"
+check "prepare-state creates the missing state directory under an existing root" \
+    "[[ \$(prepare_state --env-file '$PS_ENV') == 0 && -d '$PS_ROOT/exec/state' && ! -L '$PS_ROOT/exec/state' ]]"
+if $POSIX_MODES; then
+    check "the created state directory is mode 0755 and owned by the root's owner" \
+        "[[ \$(mode '$PS_ROOT/exec/state') == 755 && \$(ls -ld '$PS_ROOT/exec/state' | awk '{print \$3}') == \$(ls -ld '$PS_ROOT/exec' | awk '{print \$3}') ]]"
+fi
+check "the root's owner can write the admission marker into the created directory" \
+    "touch '$PS_ROOT/exec/state/admission.closed' && rm -f '$PS_ROOT/exec/state/admission.closed'"
+if $POSIX_MODES; then chmod 0700 "$PS_ROOT/exec/state"; fi
+check "prepare-state leaves an existing state directory unchanged" \
+    "[[ \$(prepare_state --env-file '$PS_ENV') == 0 ]] && { ! $POSIX_MODES || [[ \$(mode '$PS_ROOT/exec/state') == 700 ]]; }"
+mkdir -p "$PS_ROOT/linked" "$PS_ROOT/elsewhere"
+ln -s "$PS_ROOT/elsewhere" "$PS_ROOT/linked/state"
+printf 'HostUpdateExecution__RootDirectory=%s\n' "$PS_ROOT/linked" >"$PS_ENV"
+check "prepare-state refuses a symlinked state directory" "[[ \$(prepare_state --env-file '$PS_ENV') == 1 ]]"
+mkdir -p "$PS_ROOT/filed"
+: >"$PS_ROOT/filed/state"
+printf 'HostUpdateExecution__RootDirectory=%s\n' "$PS_ROOT/filed" >"$PS_ENV"
+check "prepare-state refuses a state path that is not a directory" "[[ \$(prepare_state --env-file '$PS_ENV') == 1 ]]"
+if [[ "$(uname -s)" == "Linux" && "$(id -u)" == "0" ]] && id -u nobody >/dev/null 2>&1 &&
+    command -v setpriv >/dev/null 2>&1; then
+    # The executor account must be able to traverse to its root, as on a real host.
+    chmod 0755 "$TEST_ROOT" "$PS_ROOT"
+    mkdir -p "$PS_ROOT/daemon" && chown nobody "$PS_ROOT/daemon" && chmod 0755 "$PS_ROOT/daemon"
+    printf 'HostUpdateExecution__RootDirectory=%s\n' "$PS_ROOT/daemon" >"$PS_ENV"
+    check "prepare-state run as root gives the state directory to the executor account" \
+        "[[ \$(prepare_state --env-file '$PS_ENV') == 0 && \$(stat -c %U '$PS_ROOT/daemon/state') == nobody ]] && setpriv --reuid=nobody --regid=\$(id -g nobody) --clear-groups touch '$PS_ROOT/daemon/state/admission.closed'"
+fi
+
+# The application containers observe the fence through the same read-only bind in every template.
+for template in docker-compose.yml docker-compose.slicer-host.yml docker-compose.monolith.yml; do
+    template_path="$REPO_ROOT/scripts/docker/compose-templates/$template"
+    check "$template mounts the executor state directory read-only for the admission gate" \
+        "grep -Fqx -- '      - \${HostUpdateExecution__RootDirectory:-.volumes/printfarmer-host-update}/state:/run/printfarmer/host-update-state:ro' '$template_path' && grep -Fqx -- '      - HostUpdateExecution__AdmissionStateDirectory=/run/printfarmer/host-update-state' '$template_path'"
+done
+
 # deploy-docker.sh opt-in hook: run the real function against a recording stub installer.
 HOOK_DIR="$TEST_ROOT/hook"
 mkdir -p "$HOOK_DIR"
@@ -308,6 +369,35 @@ check "deploy hook fails when the daemon unit needs a config that was not writte
     "[[ \$(HOST_UPDATE_DAEMON_SERVICE=true HOOK_WRITE_RC=3 run_hook false $STABLE) == 1 ]] && ! grep -q install-service '$HOOK_LOG'"
 check "deploy hook fails the deployment when the daemon unit cannot be installed" \
     "[[ \$(HOST_UPDATE_DAEMON_SERVICE=true HOOK_INSTALL_RC=1 run_hook false $STABLE) == 1 ]]"
+
+# Issue #3207: deploy-docker.sh prepares the admission state directory before Compose.
+sed -n '/^prepare_host_update_admission_state() {$/,/^}$/p' "$REPO_ROOT/scripts/deploy-docker.sh" >"$HOOK_DIR/prepare.sh"
+run_prepare_hook() {
+    # run_prepare_hook <dry-run>: echoes the exit status; log in $HOOK_LOG.
+    : >"$HOOK_LOG"
+    (
+        cd "$HOOK_DIR"
+        print_info() { echo "$*"; }; print_error() { echo "ERR $*"; }
+        # shellcheck disable=SC1091
+        source ./prepare.sh
+        SCRIPT_DIR="$HOOK_DIR" ENV_FILE=.env DRY_RUN="$1"
+        prepare_host_update_admission_state
+    ) >"$TEST_ROOT/hook.out" 2>&1 && echo 0 || echo $?
+}
+printf 'DB_PROVIDER=postgres\n' >"$HOOK_DIR/.env"
+check "deploy prepare hook is a no-op when the root is not configured" \
+    "[[ \$(run_prepare_hook false) == 0 && ! -s '$HOOK_LOG' ]]"
+printf 'HostUpdateExecution__RootDirectory=%s\r\n' "$HOOK_DIR" >"$HOOK_DIR/.env"
+check "deploy prepare hook runs prepare-state with the absolute env file" \
+    "[[ \$(run_prepare_hook false) == 0 ]] && diff -q <(printf 'prepare-state --env-file $HOOK_DIR/.env\n') '$HOOK_LOG' >/dev/null"
+check "deploy prepare hook dry run changes nothing" \
+    "[[ \$(run_prepare_hook true) == 0 && ! -s '$HOOK_LOG' ]] && grep -q 'DRY RUN' '$TEST_ROOT/hook.out'"
+check "deploy prepare hook tolerates an unconfigured root reported by prepare-state" \
+    "[[ \$(HOOK_INSTALL_RC=3 run_prepare_hook false) == 0 ]]"
+check "deploy prepare hook fails the deployment when prepare-state fails" \
+    "[[ \$(HOOK_INSTALL_RC=1 run_prepare_hook false) == 1 ]] && grep -q '^ERR' '$TEST_ROOT/hook.out'"
+check "deploy-docker.sh prepares the admission state directory after every host-update CLI hook" \
+    "[[ \$(grep -c '^    install_host_update_cli_if_requested\$' '$REPO_ROOT/scripts/deploy-docker.sh') == \$(grep -A1 '^    install_host_update_cli_if_requested\$' '$REPO_ROOT/scripts/deploy-docker.sh' | grep -c '^    prepare_host_update_admission_state\$') ]]"
 
 # install-service / uninstall-service against a recording systemctl stub and a scratch unit dir.
 service() {
