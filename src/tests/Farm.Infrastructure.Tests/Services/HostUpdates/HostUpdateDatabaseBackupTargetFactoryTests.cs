@@ -843,5 +843,66 @@ public class HostUpdateDatabaseBackupTargetFactoryTests
             Directory.Delete(backupRootDirectory, recursive: true);
         }
     }
+
+    private static DatabaseProviderConfiguration SqlServerConfigWithoutPassword() => new()
+    {
+        Provider = "sqlserver",
+        ConnectionString = "Server=sqlhost;Database=printfarmer;User Id=sa;TrustServerCertificate=True",
+    };
+
+    [Fact]
+    public async Task CreateBackupTarget_SqlServer_SqlAuthWithoutPassword_FailsBeforeInvokingSqlcmd()
+    {
+        if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("SQLCMDPASSWORD")))
+        {
+            return;
+        }
+
+        var runner = new RecordingProcessRunner();
+        IHostUpdateBackupTarget target = HostUpdateDatabaseBackupTargetFactory.CreateBackupTarget(
+            "database", SqlServerConfigWithoutPassword(), runner, TestExecutableResolver, TimeSpan.FromSeconds(30), isExternallyOwned: false);
+
+        Func<Task> act = () => target.BackupAsync(Path.GetTempPath(), CancellationToken.None);
+
+        await act.Should().ThrowAsync<HostUpdateBackupCredentialsMissingException>()
+            .WithMessage("backup_credentials_missing:database");
+        runner.LastFileName.Should().BeNull("sqlcmd would prompt, read end-of-file and exit 0 without backing anything up");
+    }
+
+    [Fact]
+    public async Task VerifyVisibleBackupPathMappingAsync_SqlAuthWithoutPassword_ReportsMissingPassword()
+    {
+        if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("SQLCMDPASSWORD")))
+        {
+            return;
+        }
+
+        var runner = new RecordingProcessRunner();
+        IHostUpdateBackupTarget target = HostUpdateDatabaseBackupTargetFactory.CreateBackupTarget(
+            "database", SqlServerConfigWithoutPassword(), runner, TestExecutableResolver, TimeSpan.FromSeconds(30), isExternallyOwned: false,
+            backupRootDirectory: Path.GetTempPath());
+
+        string? evidence = await ((IHostUpdateServerSideBackupTarget)target).VerifyVisibleBackupPathMappingAsync(CancellationToken.None);
+
+        evidence.Should().Be("sql_password_missing");
+        runner.LastFileName.Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData("Server=sqlhost;Database=printfarmer;Integrated Security=true", false)]
+    [InlineData("Server=sqlhost;Database=printfarmer;User Id=sa;Password=x", false)]
+    [InlineData("Server=sqlhost;Database=printfarmer;User Id=sa;Authentication=ActiveDirectoryDefault", false)]
+    [InlineData("Server=sqlhost;Database=printfarmer;User Id=sa", true)]
+    [InlineData("Server=sqlhost;Database=printfarmer;User Id=sa;Authentication=SqlPassword", true)]
+    public void IsSqlServerPasswordMissing_OnlyFlagsSqlAuthenticationWithoutAPassword(string connectionString, bool expected)
+    {
+        if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("SQLCMDPASSWORD")))
+        {
+            return;
+        }
+
+        HostUpdateDatabaseBackupTargetFactory.IsSqlServerPasswordMissing(new SqlConnectionStringBuilder(connectionString))
+            .Should().Be(expected);
+    }
 }
 

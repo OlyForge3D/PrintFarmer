@@ -245,6 +245,11 @@ and `HostUpdateExecutionAvailabilityTests`.
 
 ## Known limitations
 
+- PostgreSQL rollback clears every user schema before `pg_restore` (#3177), which
+  requires the restore role to own those schemas. That ownership is **not**
+  preflight-verified: it is an operator responsibility, and a non-owning restore
+  role is discovered only when a rollback runs, where the clear fails atomically
+  with `restore_prepare_failed:database` and changes nothing (#3197, R3194-B04).
 - The verify adapter persists each verified target's platform alongside its digest
   before releasing the writer fence. The real installed-state store requires an
   exact service-to-platform map for recovery; omitting it previously caused
@@ -394,8 +399,14 @@ and `HostUpdateExecutionAvailabilityTests`.
   `backup_root_directory_not_configured`, `backup_root_directory_not_absolute`,
   `probe_directory_creation_failed:<exception-type>`,
   `probe_stale_file_removal_failed:<exception-type>`, `probe_backup_invocation_failed:<exception-type>`,
-  `probe_backup_command_failed:<exit-code>`, `probe_file_not_visible_from_printfarmer`) and closes
-  availability for the whole executor until it is verified. This
+  `probe_backup_command_failed:<exit-code>`, `probe_file_not_visible_from_printfarmer`,
+  `sql_password_missing`) and closes
+  availability for the whole executor until it is verified. `sql_password_missing` means the
+  connection uses SQL authentication but neither the connection string nor an inherited
+  `SQLCMDPASSWORD` supplies a password: `sqlcmd` would prompt, read end-of-file and exit 0 without
+  running the statement. A real backup refuses the same configuration before starting `sqlcmd`,
+  failing with `HostUpdateBackupCredentialsMissingException` instead of a generic
+  `HostUpdateBackupIncompleteException` (#3162). This
   verification is resolved lazily (only when the availability probe or a real backup actually
   runs), so a deployment that only uses PostgreSQL or SQLite never touches SQL Server-specific
   resolution at all. See `HostUpdateDatabaseBackupTargetFactoryTests` for the fail-closed and

@@ -754,11 +754,18 @@ requires, in order (every refusal exits 6 and changes nothing):
    Only schema-contained objects are cleared; database-level objects such as
    event triggers, publications, casts and foreign servers are left as they
    are. The restore account must own those schemas, otherwise the clear fails
-   atomically (`restore_prepare_failed:database`) and nothing is changed. The
+   atomically (`restore_prepare_failed:database`) and nothing is changed. This
+   ownership is not checked before an update is authorized; it is an operator
+   responsibility, and a non-owning restore role is discovered only when a
+   rollback runs. Each lock the clear needs is waited on for at most 30 seconds,
+   so a session still holding a conflicting lock fails the clear fast with
+   PostgreSQL's `lock_not_available` error instead of consuming the whole restore
+   budget; the clear again changes nothing. The
    clear commits before `pg_restore` starts, so if `pg_restore` then fails
-   (`restore_failed:database`) the database is left empty rather than partially
-   rolled back; the admission fence stays closed and the verified backup is
-   kept, so the restore can be repeated once the cause is fixed.
+   (`restore_failed:database`) the database is left empty or only partly
+   restored; the admission fence stays closed and the
+   verified backup is kept, so the restore can be repeated once the cause is
+   fixed.
 6. The reference's `locationClass` is `host-local`. An `attached-volume` or
    `external-storage` backup belongs to an owner this host has no configured,
    authenticated provider for, so recovery refuses with

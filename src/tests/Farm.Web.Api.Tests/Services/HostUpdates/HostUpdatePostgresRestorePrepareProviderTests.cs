@@ -61,6 +61,59 @@ public sealed class HostUpdatePostgresRestorePrepareProviderTests
         Assert.Equal(publicBefore, await database.ScalarAsync(PublicSchemaMetadataSql));
     }
 
+    [Fact]
+    public async Task Clear_preserves_a_public_schema_owned_by_a_role_other_than_the_connecting_user()
+    {
+        string ownerRole = "pf_owner_" + Guid.NewGuid().ToString("N");
+        string serverConnectionString = ScratchDatabase.RequireServerConnectionString();
+        await ScratchDatabase.ExecuteOnAsync(serverConnectionString, $"CREATE ROLE \"{ownerRole}\" NOLOGIN");
+        try
+        {
+            await using (ScratchDatabase database = await ScratchDatabase.CreateAsync())
+            {
+                await database.ExecuteAsync($"""
+                    ALTER SCHEMA public OWNER TO "{ownerRole}";
+                    CREATE TABLE public.leftover_table (id integer);
+                    """);
+                string publicBefore = await database.ScalarAsync(PublicSchemaMetadataSql);
+                Assert.StartsWith(ownerRole + "|", publicBefore, StringComparison.Ordinal);
+
+                await HostUpdateDatabaseBackupTargetFactory.ClearPostgresDatabaseAsync(database.ConnectionString, CancellationToken.None);
+
+                Assert.Equal(publicBefore, await database.ScalarAsync(PublicSchemaMetadataSql));
+                Assert.Equal("0", await database.ScalarAsync(
+                    "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public'"));
+            }
+        }
+        finally
+        {
+            await ScratchDatabase.ExecuteOnAsync(serverConnectionString, $"DROP ROLE IF EXISTS \"{ownerRole}\"");
+        }
+    }
+
+    [Fact]
+    public async Task Clear_fails_fast_and_changes_nothing_when_another_session_holds_a_conflicting_lock()
+    {
+        await using ScratchDatabase database = await ScratchDatabase.CreateAsync();
+        await database.ExecuteAsync("CREATE TABLE public.locked_table (id integer)");
+
+        await using var holder = new NpgsqlConnection(database.ConnectionString);
+        await holder.OpenAsync();
+        await using NpgsqlTransaction holderTransaction = await holder.BeginTransactionAsync();
+        await using (var lockCommand = new NpgsqlCommand("LOCK TABLE public.locked_table IN ACCESS SHARE MODE", holder, holderTransaction))
+        {
+            _ = await lockCommand.ExecuteNonQueryAsync();
+        }
+
+        PostgresException error = await Assert.ThrowsAsync<PostgresException>(() =>
+            HostUpdateDatabaseBackupTargetFactory.ClearPostgresDatabaseAsync(database.ConnectionString, TimeSpan.FromSeconds(1), CancellationToken.None));
+
+        Assert.Equal(PostgresErrorCodes.LockNotAvailable, error.SqlState);
+        await holderTransaction.RollbackAsync();
+        Assert.Equal("1", await database.ScalarAsync(
+            "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relname = 'locked_table'"));
+    }
+
     private const string PublicSchemaMetadataSql = """
         SELECT concat_ws('|', n.nspowner::regrole::text, coalesce(n.nspacl::text, '<null>'), coalesce(obj_description(n.oid, 'pg_namespace'), '<null>'))
           FROM pg_namespace n WHERE n.nspname = 'public'
@@ -80,15 +133,20 @@ public sealed class HostUpdatePostgresRestorePrepareProviderTests
 
         public string ConnectionString { get; }
 
-        public static async Task<ScratchDatabase> CreateAsync()
+        public static string RequireServerConnectionString()
         {
             string? serverConnectionString = Environment.GetEnvironmentVariable(PostgresConnectionVariable);
             Assert.False(string.IsNullOrWhiteSpace(serverConnectionString), $"postgres provider verification did not run: set {PostgresConnectionVariable}.");
+            return serverConnectionString!;
+        }
 
+        public static async Task<ScratchDatabase> CreateAsync()
+        {
+            string serverConnectionString = RequireServerConnectionString();
             string name = "pf_prepare_" + Guid.NewGuid().ToString("N");
             string connectionString = new NpgsqlConnectionStringBuilder(serverConnectionString) { Database = name }.ConnectionString;
-            await ExecuteOnAsync(serverConnectionString!, $"CREATE DATABASE \"{name}\"");
-            return new ScratchDatabase(serverConnectionString!, name, connectionString);
+            await ExecuteOnAsync(serverConnectionString, $"CREATE DATABASE \"{name}\"");
+            return new ScratchDatabase(serverConnectionString, name, connectionString);
         }
 
         public Task ExecuteAsync(string sql) => ExecuteOnAsync(ConnectionString, sql);
@@ -107,7 +165,7 @@ public sealed class HostUpdatePostgresRestorePrepareProviderTests
             await ExecuteOnAsync(_serverConnectionString, $"DROP DATABASE IF EXISTS \"{_name}\" WITH (FORCE)");
         }
 
-        private static async Task ExecuteOnAsync(string connectionString, string sql)
+        public static async Task ExecuteOnAsync(string connectionString, string sql)
         {
             await using var connection = new NpgsqlConnection(connectionString);
             await connection.OpenAsync();

@@ -100,7 +100,7 @@ public sealed partial class HostUpdateDaemonJournalReader(
             }
 
             HostUpdateDaemonVerificationEvidence last = evidence[^1];
-            if (evidence.Count >= FileHostUpdateDaemonVerificationJournal.MaximumRecords)
+            if (evidence.Count >= verificationJournal.Capacity)
             {
                 // A full journal refuses every new verification; surface it instead of the last code.
                 return execution with { Failed = true, VerificationCode = "journal_verification_full" };
