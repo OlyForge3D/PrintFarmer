@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { closeSync, fstatSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -44,8 +44,8 @@ function buildTinyBundle(path, members) {
 function readBundle(path) {
   const fd = openSync(path, 'r');
   try {
-    const bytes = readFileSync(path);
-    const entries = readOfflineBundleEntries(fd, fstatSync(fd).size);
+    const bytes = readFileSync(fd);
+    const entries = readOfflineBundleEntries(fd, bytes.length);
     return entries.map((entry) => ({
       name: entry.name,
       bytes: bytes.subarray(entry.offset, entry.offset + entry.size),
