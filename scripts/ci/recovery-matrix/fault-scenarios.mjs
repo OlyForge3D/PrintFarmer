@@ -568,6 +568,10 @@ const scenarios = {
     harness.ok('emulated-printer-registered');
     const baseline = printer.requests();
     harness.ok(`emulator-baseline:total=${baseline.total}:commands=${baseline.commands}`);
+    // Scope of the zero-command proof: no job is queued for the emulated printer, so it shows
+    // recovery itself sends no command. It does not prove that queue consumers are fenced while
+    // queued work is pending; that coverage is tracked separately.
+    harness.ok('emulator-commands-scope:no-pending-workload');
     activateIntoRecoveryRequired(harness);
     const preview = harness.recover('offline-recover-preview');
     harness.expect('recover-preview', preview, { outcome: 'RecoveryRequired' });

@@ -52,14 +52,29 @@ export function mintHarnessJwt({ key, issuer, audience, nowSeconds = Math.floor(
 
 // Classifies one POST /api/auto-dispatch/{printerId}/ready response. The probe deliberately omits
 // the If-Match dispatch precondition, so an admitted request stops at 428 without changing
-// dispatch state. `unreachable` means the application was not serving; `unauthenticated` means
-// the probe itself was rejected and proves nothing about the fence.
+// dispatch state. `admitted` is only that exact precondition response: any other status or body
+// (for example 404 printer_not_found) is `unexpected:status=N` and proves nothing either way.
+// `unreachable` means the application was not serving; `unauthenticated` means the probe itself
+// was rejected and proves nothing about the fence.
 export function classifyDispatchProbe({ status, body }) {
   if (status === -1) return 'unreachable';
-  if (status === 409 && /host_update_admission_closed/.test(String(body ?? ''))) return 'admission-closed';
+  const payload = parseJsonObject(body);
+  if (status === 409 && payload?.error === 'host_update_admission_closed') return 'admission-closed';
   if (status === 401 || status === 403) return 'unauthenticated';
   if (status >= 500) return 'server-error';
-  return 'admitted';
+  if (status === 428 && payload?.error === 'precondition_required' && payload?.detail === 'If-Match is required.') {
+    return 'admitted';
+  }
+  return `unexpected:status=${status}`;
+}
+
+function parseJsonObject(body) {
+  try {
+    const value = JSON.parse(String(body ?? ''));
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : null;
+  } catch {
+    return null;
+  }
 }
 
 // Python program run inside a throwaway container on the run network. The request spec arrives in

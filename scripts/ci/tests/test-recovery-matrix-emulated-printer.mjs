@@ -58,8 +58,15 @@ test('harness JWT is an HS256 farm_admin token signed with the run key', () => {
 
 test('dispatch probe classification distinguishes the fence from auth, outage and admission', () => {
   assert.equal(classifyDispatchProbe({ status: 409, body: '{"error":"host_update_admission_closed"}' }), 'admission-closed');
-  assert.equal(classifyDispatchProbe({ status: 409, body: '{"error":"other"}' }), 'admitted');
-  assert.equal(classifyDispatchProbe({ status: 428, body: '' }), 'admitted');
+  assert.equal(classifyDispatchProbe({ status: 409, body: 'host_update_admission_closed' }), 'unexpected:status=409');
+  assert.equal(classifyDispatchProbe({ status: 409, body: '{"error":"other"}' }), 'unexpected:status=409');
+  const precondition = '{"error":"precondition_required","detail":"If-Match is required."}';
+  assert.equal(classifyDispatchProbe({ status: 428, body: precondition }), 'admitted');
+  assert.equal(classifyDispatchProbe({ status: 428, body: '' }), 'unexpected:status=428');
+  assert.equal(classifyDispatchProbe({ status: 428, body: '{"error":"precondition_required"}' }), 'unexpected:status=428');
+  assert.equal(classifyDispatchProbe({ status: 404, body: '{"error":"printer_not_found"}' }), 'unexpected:status=404');
+  assert.equal(classifyDispatchProbe({ status: 200, body: '{}' }), 'unexpected:status=200');
+  assert.equal(classifyDispatchProbe({ status: 400, body: precondition }), 'unexpected:status=400');
   assert.equal(classifyDispatchProbe({ status: 401, body: '' }), 'unauthenticated');
   assert.equal(classifyDispatchProbe({ status: 403, body: '' }), 'unauthenticated');
   assert.equal(classifyDispatchProbe({ status: 503, body: '' }), 'server-error');
@@ -90,7 +97,8 @@ test('emulator command delta uses the cumulative counter and names offenders', (
 
 // Scenario-level proof with a fake ctx: pending recovery holds the fence, the dispatch probe is
 // admission-closed until release, and any emulator command fails the cell.
-function fakeCtx(name, { admittedWhilePending = false, commandDuringRecovery = false, fencedAfterRelease = false } = {}) {
+function fakeCtx(name, { admittedWhilePending = false, commandDuringRecovery = false, fencedAfterRelease = false,
+  unexpectedAfterRelease = false } = {}) {
   const dir = scratch(name);
   const log = { total: 2, commands: 0, entries: [] };
   const ctx = {
@@ -124,6 +132,9 @@ function fakeCtx(name, { admittedWhilePending = false, commandDuringRecovery = f
       const fenced = existsSync(ctx.admissionClosedPath) && !admittedWhilePending;
       if (fenced || (fencedAfterRelease && ctx.state === 'released')) {
         return { status: 409, classification: 'admission-closed' };
+      }
+      if (unexpectedAfterRelease && ctx.state === 'released') {
+        return { status: 404, classification: 'unexpected:status=404' };
       }
       return { status: 428, classification: 'admitted' };
     },
@@ -185,4 +196,16 @@ test('emulated-printer scenario fails when recovery commands the printer', () =>
 test('emulated-printer scenario fails when dispatch stays fenced after reconciliation', () => {
   const ctx = fakeCtx('emulated-still-fenced', { fencedAfterRelease: true });
   assert.throws(() => runFaultScenario(ctx), (error) => error.reason.startsWith('dispatch-reopened-after-reconciliation'));
+});
+
+test('emulated-printer scenario does not treat an unexpected probe response as reopened dispatch', () => {
+  const ctx = fakeCtx('emulated-unexpected', { unexpectedAfterRelease: true });
+  assert.throws(() => runFaultScenario(ctx), (error) =>
+    error.reason.startsWith('dispatch-reopened-after-reconciliation') && error.reason.includes('unexpected:status=404'));
+});
+
+test('emulated-printer scenario records that the zero-command proof has no pending workload', () => {
+  const ctx = fakeCtx('emulated-scope');
+  runFaultScenario(ctx);
+  assert.ok(ctx.passed.includes('emulator-commands-scope:no-pending-workload'));
 });
