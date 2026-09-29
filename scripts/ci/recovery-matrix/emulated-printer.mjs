@@ -10,6 +10,7 @@ export const autoDispatchDurableScanIntervalMs = 30_000;
 export const fencedConsumerPollWindowMs = 35_000;
 export const postReconciliationDispatchWindowMs = 45_000;
 export const queuedAutoDispatchFileName = '00000000-0000-0000-0000-000000003209.gcode';
+export const queuedAutoDispatchJobName = 'recovery-matrix-queued.gcode';
 
 const nameIdentifierClaim = 'http://schemas.microsoft.com/ws/2008/05/identity/claims/nameidentifier';
 const roleClaim = 'http://schemas.microsoft.com/ws/2008/06/identity/claims/role';
@@ -53,6 +54,7 @@ export function queuedAutoDispatchWork({ printerId }) {
     jobId,
     gcodeFileId,
     fileName: queuedAutoDispatchFileName,
+    backendFileNameSuffix: queuedAutoDispatchJobName,
     fileHash,
     fileSizeBytes: Buffer.byteLength(queuedAutoDispatchGcode),
     contentBase64: Buffer.from(queuedAutoDispatchGcode, 'utf8').toString('base64'),
@@ -138,7 +140,7 @@ INSERT INTO "PrintJobs" (
   "Id", "Name", "GcodeFileId", "AssignedPrinterId", "Status", "Priority", "QueuePosition",
   "CreatedAt", "UpdatedAt", "QueuedAt", "IsExternalPrint")
 VALUES (
-  '${jobId}'::uuid, 'recovery-matrix-queued.gcode', '${gcodeFileId}'::uuid, NULL, 0, 3, 1,
+  '${jobId}'::uuid, '${queuedAutoDispatchJobName}', '${gcodeFileId}'::uuid, NULL, 0, 3, 1,
   now(), now(), now() - interval '1 second', false)
 RETURNING "Id";`;
 }
@@ -234,15 +236,16 @@ export function commandsSince(baseline, current) {
   return { count, reads: (current.total - baseline.total) - count, offenders };
 }
 
-export function queuedAutoDispatchEvidenceSince(baseline, current, fileName) {
+export function queuedAutoDispatchEvidenceSince(baseline, current, fileName, backendFileNameSuffix = queuedAutoDispatchJobName) {
   if (!/^[0-9a-f-]+\.gcode$/i.test(fileName)) throw new Error(`invalid_file_name:${fileName}`);
+  if (!/^[A-Za-z0-9_.-]+\.gcode$/i.test(backendFileNameSuffix)) throw new Error(`invalid_backend_file_name:${backendFileNameSuffix}`);
   const observed = commandsSince(baseline, current);
   const commands = current.entries.filter((entry) => entry.isCommand && entry.sequence > baseline.total);
   const upload = commands.find((entry) =>
     entry.transport === 'http' &&
     entry.method === 'POST' &&
     entry.target.startsWith('/server/files/upload:') &&
-    entry.target.includes(`/${fileName}:`));
+    (entry.target.includes(`/${fileName}:`) || entry.target.endsWith(`-${backendFileNameSuffix}:print=true`)));
   const start = commands.find((entry) =>
     entry.transport === 'http' &&
     entry.method === 'POST' &&

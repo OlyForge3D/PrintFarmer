@@ -652,7 +652,11 @@ const scenarios = {
       afterRelease.count > 0,
       `queued-work-dispatched-after-reconciliation:commands=${afterRelease.count}:reads=${afterRelease.reads}`,
       afterRelease.offenders.join(','));
-    const queuedDispatch = queuedAutoDispatchEvidenceSince(baseline, printer.requests(), queuedWork.fileName);
+    const queuedDispatch = queuedAutoDispatchEvidenceSince(
+      baseline,
+      printer.requests(),
+      queuedWork.fileName,
+      queuedWork.backendFileNameSuffix);
     harness.require(
       queuedDispatch.matched,
       `queued-work-dispatched-after-reconciliation:upload=${queuedDispatch.upload ?? 'missing'}:start=${queuedDispatch.start ?? 'missing'}:commands=${queuedDispatch.count}:reads=${queuedDispatch.reads}`,

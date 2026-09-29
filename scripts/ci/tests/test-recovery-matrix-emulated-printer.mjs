@@ -15,6 +15,7 @@ import {
   pointPrinterAtEmulatorSql,
   queuedAutoDispatchEvidenceSince,
   queuedAutoDispatchFileName,
+  queuedAutoDispatchJobName,
   queuedAutoDispatchWork,
   queuedAutoDispatchWorkSql,
 } from '../recovery-matrix/emulated-printer.mjs';
@@ -52,6 +53,7 @@ test('queued auto-dispatch work SQL enables auto mode and seeds an unassigned qu
   const work = queuedAutoDispatchWork({ printerId });
   const sql = queuedAutoDispatchWorkSql({ printerId, ...work });
   assert.equal(work.fileName, queuedAutoDispatchFileName);
+  assert.equal(work.backendFileNameSuffix, queuedAutoDispatchJobName);
   assert.ok(work.fileSizeBytes > 0);
   assert.match(sql, /INSERT INTO "FolderNode"/);
   assert.match(sql, /"AutoDispatchMode" = 'Auto'/);
@@ -137,6 +139,14 @@ test('queued dispatch evidence requires the seeded gcode upload or start command
     start: undefined,
     matched: true,
   });
+  const backendCurrent = parseEmulatorRequests(JSON.stringify({
+    total: 4,
+    commands: 1,
+    entries: [
+      { sequence: 4, transport: 'http', method: 'POST', target: `/server/files/upload:gcodes/pf-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-${queuedAutoDispatchJobName}:print=true`, isCommand: true },
+    ],
+  }));
+  assert.equal(queuedAutoDispatchEvidenceSince(baseline, backendCurrent, queuedAutoDispatchFileName, queuedAutoDispatchJobName).matched, true);
   assert.equal(queuedAutoDispatchEvidenceSince(baseline, current, '30000000-0000-0000-0000-000000000001.gcode').matched, false);
 });
 
@@ -178,7 +188,7 @@ function fakeCtx(name, { admittedWhilePending = false, commandDuringRecovery = f
       }
       if (!noDispatchAfterRelease && ctx.state === 'released' && log.commands === 0) {
         log.commands += 1;
-        log.entries.push({ sequence: log.total, transport: 'http', method: 'POST', target: `/server/files/upload:gcodes/${queuedAutoDispatchFileName}:print=true`, isCommand: true });
+        log.entries.push({ sequence: log.total, transport: 'http', method: 'POST', target: `/server/files/upload:gcodes/pf-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-${queuedAutoDispatchJobName}:print=true`, isCommand: true });
       }
       return { ...log, entries: [...log.entries] };
     },
@@ -240,7 +250,7 @@ test('emulated-printer scenario passes when dispatch is fenced until release and
   }
   assert.ok(ctx.passed.some((checkpoint) => checkpoint.startsWith('emulator-commands-during-recovery:0:')));
   assert.ok(ctx.passed.some((checkpoint) => checkpoint.startsWith('queued-work-dispatched-after-reconciliation:commands=1:')));
-  assert.ok(ctx.passed.some((checkpoint) => checkpoint.startsWith(`queued-work-dispatched-after-reconciliation:upload=/server/files/upload:gcodes/${queuedAutoDispatchFileName}:print=true:`)));
+  assert.ok(ctx.passed.some((checkpoint) => checkpoint.startsWith(`queued-work-dispatched-after-reconciliation:upload=/server/files/upload:gcodes/pf-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-${queuedAutoDispatchJobName}:print=true:`)));
   assert.ok(ctx.passed.some((checkpoint) => checkpoint.startsWith('queued-work-db-state:job=10000000-0000-0000-0000-000000000001:status=3:assigned=true')));
 });
 
