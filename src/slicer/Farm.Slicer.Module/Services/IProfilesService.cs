@@ -217,14 +217,14 @@ public interface IProfilesService
     /// <param name="userId">ID of the user creating the clone.</param>
     /// <param name="viewer">Caller whose visibility scope applies to the source profile of any type; an invisible source is reported as not found (issues #3174, #3180).</param>
     /// <param name="ct">Cancellation token.</param>
-    /// <exception cref="ProfileNameConflictException">The caller already owns a filament profile with this name (#3192).</exception>
+    /// <exception cref="ProfileNameConflictException">The caller already owns a profile of the same type with this name (for process profiles, for the same printer model) (#3192, #3198).</exception>
     Task<CloneSingleProfileResponseDto> CloneSingleProfileAsync(CloneSingleProfileRequestDto request, Guid userId, ProfileViewer viewer, CancellationToken ct);
 
     /// <summary>Uploads a custom profile from raw JSON content.</summary>
     /// <param name="request">Upload request with raw JSON, profile type, and optional name.</param>
     /// <param name="userId">ID of the user uploading the profile.</param>
     /// <param name="ct">Cancellation token.</param>
-    /// <exception cref="ProfileNameConflictException">The caller already owns a filament profile with this name (#3192).</exception>
+    /// <exception cref="ProfileNameConflictException">The caller already owns a profile of the same type with this name (for process profiles, for the same printer model) (#3192, #3198).</exception>
     Task<CustomProfileDto> UploadCustomProfileAsync(UploadProfileRequestDto request, Guid userId, CancellationToken ct);
 
     /// <summary>
@@ -285,7 +285,7 @@ public interface IProfilesService
     /// <exception cref="KeyNotFoundException">No profile with this ID exists, or the caller may not view it.</exception>
     /// <exception cref="InvalidOperationException">The profile is a system profile.</exception>
     /// <exception cref="UnauthorizedAccessException">The caller can view the profile but does not own it.</exception>
-    /// <exception cref="ProfileNameConflictException">The caller already owns a filament profile with this name (#3192).</exception>
+    /// <exception cref="ProfileNameConflictException">The caller already owns a profile of the same type with this name (for process profiles, for the same printer model) (#3192, #3198).</exception>
     Task<CustomProfileDto> UpdateCustomProfileAsync(Guid profileId, UpdateCustomProfileRequestDto request, ProfileViewer caller, CancellationToken ct);
 
     /// <summary>

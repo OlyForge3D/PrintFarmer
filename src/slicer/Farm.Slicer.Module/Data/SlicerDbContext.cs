@@ -72,7 +72,7 @@ public class SlicerDbContext(DbContextOptions<SlicerDbContext> options) : DbCont
         RevisionConcurrency.Configure(modelBuilder);
 
         ApplyProviderSpecificIdempotencyFilters(modelBuilder);
-        ApplyUnownedFilamentNameFilter(modelBuilder);
+        ApplyUnownedProfileNameFilters(modelBuilder);
     }
 
     /// <inheritdoc/>
@@ -133,27 +133,43 @@ public class SlicerDbContext(DbContextOptions<SlicerDbContext> options) : DbCont
     }
 
     /// <summary>
-    /// Restricts the global filament name index to unowned (system/stock) rows (#3192). Owned
-    /// rows are covered by the per-owner <c>(CreatedByUserId, Name, Material, SlicerType)</c>
-    /// index, so one user's private profile name never collides with another user's.
+    /// Restricts the global profile name indexes to unowned (system/stock) rows (#3192, #3198).
+    /// Owned rows are covered by the per-owner <c>(CreatedByUserId, Name, ...)</c> indexes, so one
+    /// user's private profile name never collides with another user's.
     /// </summary>
-    private void ApplyUnownedFilamentNameFilter(ModelBuilder modelBuilder)
+    private void ApplyUnownedProfileNameFilters(ModelBuilder modelBuilder)
     {
-        IMutableEntityType? filamentProfile = modelBuilder.Model.FindEntityType(typeof(FilamentProfile));
-        IMutableIndex? index = filamentProfile?.GetIndexes()
-            .SingleOrDefault(i => i.GetDatabaseName() == FilamentProfileConfiguration.UnownedNameUniqueIndexName);
+        string ownerColumn = QuoteColumn(nameof(FilamentProfile.CreatedByUserId));
+        string unowned = $"{ownerColumn} IS NULL";
+
+        ApplyIndexFilter<FilamentProfile>(modelBuilder, FilamentProfileConfiguration.UnownedNameUniqueIndexName, unowned);
+        ApplyIndexFilter<MachineProfile>(modelBuilder, MachineProfileConfiguration.UnownedNameUniqueIndexName, unowned);
+
+        // A NULL PrinterModelId never participated in process name uniqueness (SQL Server's auto
+        // "IS NOT NULL" filter; NULLs are distinct elsewhere). A custom filter replaces SQL Server's
+        // auto filter, so the model predicate is restated to keep those semantics on every provider.
+        ApplyIndexFilter<ProcessProfile>(
+            modelBuilder,
+            ProcessProfileConfiguration.UnownedNameUniqueIndexName,
+            $"{unowned} AND {QuoteColumn(nameof(ProcessProfile.PrinterModelId))} IS NOT NULL");
+    }
+
+    private string QuoteColumn(string column) =>
+        Database.IsSqlServer() ? $"[{column}]" : $"\"{column}\"";
+
+    private static void ApplyIndexFilter<TEntity>(ModelBuilder modelBuilder, string indexName, string filter)
+    {
+        IMutableIndex? index = modelBuilder.Model.FindEntityType(typeof(TEntity))?.GetIndexes()
+            .SingleOrDefault(i => i.GetDatabaseName() == indexName);
         if (index is null)
         {
-            // Failing open would silently turn the unowned-row filter into a global unique index
+            // Failing open would silently turn an unowned-row filter into a global unique index
             // again (#3192), so a renamed or removed index must break model building loudly.
             throw new InvalidOperationException(
-                $"Index '{FilamentProfileConfiguration.UnownedNameUniqueIndexName}' was not found on {nameof(FilamentProfile)}.");
+                $"Index '{indexName}' was not found on {typeof(TEntity).Name}.");
         }
 
-        string ownerColumn = Database.IsSqlServer()
-            ? $"[{nameof(FilamentProfile.CreatedByUserId)}]"
-            : $"\"{nameof(FilamentProfile.CreatedByUserId)}\"";
-        index.SetFilter($"{ownerColumn} IS NULL");
+        index.SetFilter(filter);
     }
 
     /// <summary>

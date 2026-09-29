@@ -1185,17 +1185,19 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
             // it already imported. These tables carry UNIQUE indexes, so re-inserting does not merely
             // duplicate a row: it throws and leaves the failed entity tracked, which can then block the
             // very HF inserts this fix is about. Each identity below mirrors its table's declared index
-            // (machine/machine-model on Name, filament on Name+Material, process on Name+PrinterModelId)
-            // and covers ALL rows, not just system ones, because those indexes are global. Loading them
+            // (machine/machine-model on Name, filament on Name+Material, process on Name+PrinterModelId).
+            // Machine-model names are globally unique, so every row counts. Machine, filament and process
+            // names are unique per owner (#3192, #3198), and seeded rows are unowned, so only unowned
+            // rows can collide; a user's private profile must not suppress a stock import. Loading them
             // once also replaces one database roundtrip per profile with one query per type.
             HashSet<string> existingMachineModelNames = await LoadExistingProfileIdentitiesAsync(
                 async token => (await _machineModelProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, token)).Select(p => (p.Name ?? string.Empty).Trim()), ct);
             HashSet<string> existingMachineNames = await LoadExistingProfileIdentitiesAsync(
-                async token => (await _machineProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, token)).Select(p => (p.Name ?? string.Empty).Trim()), ct);
+                async token => (await _machineProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, token)).Where(p => p.CreatedByUserId == null).Select(p => (p.Name ?? string.Empty).Trim()), ct);
             HashSet<string> existingFilamentNames = await LoadExistingProfileIdentitiesAsync(
-                async token => (await _filamentProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, token)).Select(p => FilamentIdentity(p.Name, p.Material)), ct);
+                async token => (await _filamentProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, token)).Where(p => p.CreatedByUserId == null).Select(p => FilamentIdentity(p.Name, p.Material)), ct);
             HashSet<string> existingProcessNames = await LoadExistingProfileIdentitiesAsync(
-                async token => (await _profileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, token)).Select(p => ProcessIdentity(p.Name, p.PrinterModelId)), ct);
+                async token => (await _profileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, token)).Where(p => p.CreatedByUserId == null).Select(p => ProcessIdentity(p.Name, p.PrinterModelId)), ct);
 
             _logger.LogInformation(
                 "[SeedProfilesFromWorker] Existing system profiles: {MachineModelCount} machine model, {MachineCount} machine, {FilamentCount} filament, {ProcessCount} process",

@@ -302,6 +302,40 @@ public sealed class SliceJobNamedProfileResolutionTests : IAsyncLifetime, IDispo
         _ = job.FilamentProfileJson.Should().BeNullOrEmpty();
     }
 
+    [Fact(DisplayName = "When another user publishes profiles with the same names, the caller's own profiles are snapshotted")]
+    public async Task Submit_WhenAnotherUsersPublicProfilesShareTheNames_PrefersCallersOwnProfiles()
+    {
+        // Names are unique per owner, not globally (#3192, #3198), so the caller's own row and
+        // another user's public row can share a name. Seed the other user's rows first so an
+        // insertion-order pick would choose them.
+        Guid userId = await GetAuthenticatedUserIdAsync();
+        await AddOtherUsersPublicProfilesAsync(Guid.NewGuid(), CustomFilamentName);
+        await AddProfilesAsync(userId, filamentName: CustomFilamentName);
+
+        string slicerProfileJson = JsonSerializer.Serialize(new
+        {
+            machineProfileName = "Test Machine",
+            processProfileName = "Test Process",
+            filamentProfileName = CustomFilamentName,
+            overrides = new Dictionary<string, object>(),
+        });
+
+        HttpResponseMessage submit = await _client.PostAsJsonAsync("/api/slice", new SubmitSliceJobRequest
+        {
+            UserId = userId,
+            ModelFileUrl = "models/test.stl",
+            ModelFileName = "test.stl",
+            SlicerEngine = SlicerEngineType.OrcaSlicer,
+            SlicerProfileJson = slicerProfileJson,
+        });
+        _ = submit.StatusCode.Should().Be(HttpStatusCode.Created, await submit.Content.ReadAsStringAsync());
+
+        WorkerSliceJobResponse claimed = await ClaimAsync();
+        _ = claimed.MachineProfileJson.Should().Be(MachineProfileJson);
+        _ = claimed.ProcessProfileJson.Should().Be(ProcessProfileJson);
+        _ = claimed.FilamentProfileJson.Should().Be(FilamentProfileJson);
+    }
+
     [Fact(DisplayName = "A process profile name shared across incompatible printer models resolves to the one compatible with the selected machine")]
     public async Task Submit_WithDuplicateProcessNameAcrossModels_ResolvesTheCompatibleOne()
     {
@@ -507,6 +541,57 @@ public sealed class SliceJobNamedProfileResolutionTests : IAsyncLifetime, IDispo
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         User user = await db.Users.AsNoTracking().FirstAsync(value => value.Username == "named-profile-worker");
         return user.Id;
+    }
+
+    private async Task AddOtherUsersPublicProfilesAsync(Guid ownerId, string filamentName)
+    {
+        await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        SlicerDbContext db = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
+
+        const string OtherMachineJson = """{"type":"machine","printer_model":"Other","nozzle_diameter":["0.6"]}""";
+        const string OtherProcessJson = """{"type":"process","layer_height":"0.32"}""";
+        const string OtherFilamentJson = """{"type":"filament","filament_type":["PETG"]}""";
+
+        _ = db.MachineProfiles.Add(new MachineProfile
+        {
+            Id = Guid.NewGuid(),
+            Name = "Test Machine",
+            SlicerType = SlicerType.OrcaSlicer,
+            ProfileFormat = "orca-json",
+            RawJson = OtherMachineJson,
+            Hash = Sha256(OtherMachineJson),
+            CreatedByUserId = ownerId,
+            IsPublic = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        _ = db.ProcessProfiles.Add(new ProcessProfile
+        {
+            Id = Guid.NewGuid(),
+            Name = "Test Process",
+            SlicerType = SlicerType.OrcaSlicer,
+            ProfileFormat = "orca-json",
+            RawJson = OtherProcessJson,
+            Hash = Sha256(OtherProcessJson),
+            CreatedByUserId = ownerId,
+            IsPublic = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        _ = db.FilamentProfiles.Add(new FilamentProfile
+        {
+            Id = Guid.NewGuid(),
+            Name = filamentName,
+            SlicerType = SlicerType.OrcaSlicer,
+            ProfileFormat = "orca-json",
+            RawJson = OtherFilamentJson,
+            Hash = Sha256(OtherFilamentJson),
+            CreatedByUserId = ownerId,
+            IsPublic = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        _ = await db.SaveChangesAsync();
     }
 
     private async Task AddProfilesAsync(Guid ownerId, string filamentName)
