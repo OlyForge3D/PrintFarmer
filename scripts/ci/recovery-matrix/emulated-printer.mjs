@@ -9,6 +9,7 @@ export const emulatorHostOctet = 40;
 export const autoDispatchDurableScanIntervalMs = 30_000;
 export const fencedConsumerPollWindowMs = 35_000;
 export const postReconciliationDispatchWindowMs = 45_000;
+export const queuedAutoDispatchFileName = '00000000-0000-0000-0000-000000003209.gcode';
 
 const nameIdentifierClaim = 'http://schemas.microsoft.com/ws/2008/05/identity/claims/nameidentifier';
 const roleClaim = 'http://schemas.microsoft.com/ws/2008/06/identity/claims/role';
@@ -47,12 +48,11 @@ export function queuedAutoDispatchWork({ printerId }) {
 
   const jobId = randomUUID();
   const gcodeFileId = randomUUID();
-  const fileName = `${gcodeFileId}.gcode`;
   const fileHash = createHash('sha256').update(queuedAutoDispatchGcode).digest('hex');
   return {
     jobId,
     gcodeFileId,
-    fileName,
+    fileName: queuedAutoDispatchFileName,
     fileHash,
     fileSizeBytes: Buffer.byteLength(queuedAutoDispatchGcode),
     contentBase64: Buffer.from(queuedAutoDispatchGcode, 'utf8').toString('base64'),

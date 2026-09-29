@@ -663,8 +663,6 @@ const scenarios = {
       `queued-work-db-state:job=${queuedWork.jobId}:status=${queuedState.status}:assigned=${queuedState.assigned}`,
       queuedState.raw);
     harness.ok(`queued-work-db-state:job=${queuedWork.jobId}:status=${queuedState.status}:assigned=${queuedState.assigned}`);
-    printer.cleanupQueuedAutoDispatchWork(queuedWork.fileName);
-    harness.ok(`queued-auto-dispatch-work-cleaned:file=${queuedWork.fileName}`);
     const final = proveDurable(harness, released, () => harness.recover('offline-recover-confirm'));
     if (fenceGaps.length > 0) throw faultScenarioFailure(fenceGaps.join('|'));
     return final;

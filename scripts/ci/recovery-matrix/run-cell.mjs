@@ -21,6 +21,8 @@ import {
   parseEmulatorRequests,
   parseNetworkResponse,
   pointPrinterAtEmulatorSql,
+  queuedAutoDispatchFileName,
+  queuedAutoDispatchGcode,
   queuedAutoDispatchWork,
   queuedAutoDispatchWorkSql,
 } from './emulated-printer.mjs';
@@ -351,6 +353,15 @@ try {
     },
   });
 
+  if (cellSpec.id === 'fault-emulated-printer-reconciliation') {
+    writeQueuedAutoDispatchArtifactToApp({
+      env,
+      deploymentRoot,
+      appComposeService: topologyFor(priorCell.topology).healthComposeService,
+    });
+    checkpoints.ok(`queued-auto-dispatch-artifact-preseeded:file=${queuedAutoDispatchFileName}`);
+  }
+
   const beforeRecovery = stateContinuitySnapshot({ env, deploymentRoot, hostStateRoot, hostContainer, provider });
   if (cellSpec.scenario === 'import') {
     const importStarted = Date.now();
@@ -579,7 +590,6 @@ try {
       emulatedPrinter: createEmulatedPrinter({
         env,
         deploymentRoot,
-        appComposeService: topologyFor(cell.topology).healthComposeService,
       }),
       snapshot: faultSnapshot,
       assertNoMutation,
@@ -2075,7 +2085,28 @@ function runningComposeImageDigest(env, service) {
 // Issue #3103: the repository's Moonraker emulator, built from source and attached only to the
 // run's internal network, stands in for a physical printer. The container name is recorded so the
 // finally block (and run-cell.sh cleanup) always removes it.
-function createEmulatedPrinter({ env, deploymentRoot, appComposeService }) {
+function writeQueuedAutoDispatchArtifactToApp({ env, deploymentRoot, appComposeService }) {
+  const gcodePath = `/app/gcode/${queuedAutoDispatchFileName}`;
+  execFileSync('/usr/bin/docker', [
+    'compose',
+    '-f', join(deploymentRoot, 'docker-compose.recovery.yml'),
+    '-p', env.COMPOSE_PROJECT_NAME,
+    'exec',
+    '-T',
+    appComposeService,
+    'sh',
+    '-ec',
+    `mkdir -p /app/gcode && base64 -d > ${shellQuote(gcodePath)} && test -s ${shellQuote(gcodePath)}`,
+  ], {
+    cwd: deploymentRoot,
+    encoding: 'utf8',
+    env: { ...process.env, ...env },
+    input: Buffer.from(queuedAutoDispatchGcode, 'utf8').toString('base64'),
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+}
+
+function createEmulatedPrinter({ env, deploymentRoot }) {
   const emulatorIp = emulatorIpFor(appStaticIp);
   const container = `${run.id}-printer-emulator`;
   const image = `printfarmer-${run.id.replace(/[^A-Za-z0-9_.-]/g, '-').toLowerCase()}-moonraker-emulator:recovery`;
@@ -2122,24 +2153,6 @@ function createEmulatedPrinter({ env, deploymentRoot, appComposeService }) {
     },
     seedQueuedAutoDispatchWork(printerId) {
       const work = queuedAutoDispatchWork({ printerId });
-      const gcodePath = `/app/gcode/${work.fileName}`;
-      execFileSync('/usr/bin/docker', [
-        'compose',
-        '-f', join(deploymentRoot, 'docker-compose.recovery.yml'),
-        '-p', env.COMPOSE_PROJECT_NAME,
-        'exec',
-        '-T',
-        appComposeService,
-        'sh',
-        '-ec',
-        `mkdir -p /app/gcode && base64 -d > ${shellQuote(gcodePath)} && test -s ${shellQuote(gcodePath)}`,
-      ], {
-        cwd: deploymentRoot,
-        encoding: 'utf8',
-        env: { ...process.env, ...env },
-        input: work.contentBase64,
-        stdio: ['pipe', 'pipe', 'pipe'],
-      });
       const output = databaseQuery(deploymentRoot, env, provider, queuedAutoDispatchWorkSql({ printerId, ...work }));
       if (!String(output).includes(work.jobId)) throw new Error(`queued_auto_dispatch_seed_missing_job:${output}`);
       return work;
@@ -2159,25 +2172,6 @@ function createEmulatedPrinter({ env, deploymentRoot, appComposeService }) {
         assigned: values[1] === '1' || values[1].toLowerCase() === 'true',
         raw: String(raw).trim(),
       };
-    },
-    cleanupQueuedAutoDispatchWork(fileName) {
-      if (!/^[0-9a-f-]+\.gcode$/i.test(fileName)) throw new Error(`invalid_file_name:${fileName}`);
-      execFileSync('/usr/bin/docker', [
-        'compose',
-        '-f', join(deploymentRoot, 'docker-compose.recovery.yml'),
-        '-p', env.COMPOSE_PROJECT_NAME,
-        'exec',
-        '-T',
-        appComposeService,
-        'sh',
-        '-ec',
-        `rm -f ${shellQuote(`/app/gcode/${fileName}`)}`,
-      ], {
-        cwd: deploymentRoot,
-        encoding: 'utf8',
-        env: { ...process.env, ...env },
-        stdio: ['ignore', 'pipe', 'pipe'],
-      });
     },
     requests() {
       const response = emulatorGet('/__emulator/requests');
