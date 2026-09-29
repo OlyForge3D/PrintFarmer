@@ -31,6 +31,8 @@ export const verificationSigningRoot = 'published-insider';
 export const schemaDeltas = Object.freeze(['identical', 'changed']);
 export const channels = Object.freeze(['stable', 'insider']);
 export const faultInjectionCheckpoint = 'fault-injected';
+// Import cells (#3102) stop after staging: every import step was asserted and nothing was installed.
+export const importCellsVerifiedCheckpoint = 'import-cells-verified';
 export const outcomes = Object.freeze([
   'Activated',
   'RolledBack',
@@ -38,6 +40,7 @@ export const outcomes = Object.freeze([
   'RecoveryRequired',
   'FenceReleasePending',
   'Refused',
+  'Imported',
 ]);
 export const checkpointResults = Object.freeze(['ok', 'failed', 'skipped']);
 export const verdicts = Object.freeze(['pass', 'fail']);
@@ -506,6 +509,12 @@ export function validateRecoveryEvidence(record) {
       (checkpoint) =>
         checkpoint?.name === faultInjectionCheckpoint && checkpoint?.result === 'ok',
     );
+  const importsVerified =
+    Array.isArray(checkpoints) &&
+    checkpoints.some(
+      (checkpoint) =>
+        checkpoint?.name === importCellsVerifiedCheckpoint && checkpoint?.result === 'ok',
+    );
 
   if (isPlainObject(outcome)) {
     checkEnum(outcome.expected, outcomes, 'outcome.expected', errors);
@@ -534,6 +543,21 @@ export function validateRecoveryEvidence(record) {
         errors.push('outcome.reason: supported cell must not report a fail-closed reason');
       }
       if (
+        typeof outcome.expected === 'string' &&
+        outcome.expected === 'Imported'
+      ) {
+        // An import cell reports Imported only once every channel, identity, adversarial or
+        // replay step was verified; a bare staged import is never evidence on its own. A
+        // failed import cell records what it observed instead.
+        if (outcome.actual === 'Imported' && !importsVerified) {
+          errors.push(
+            `outcome.actual: supported cell may report Imported only after a successful ${importCellsVerifiedCheckpoint} checkpoint`,
+          );
+        }
+        if (outcome.actual === 'Imported' && outcome.reason !== null) {
+          errors.push('outcome.reason: Imported must not carry a reason');
+        }
+      } else if (
         typeof outcome.expected === 'string' &&
         outcome.expected !== 'Activated' &&
         outcome.expected !== 'RolledBack'

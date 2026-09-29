@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { execFileSync, spawnSync } from 'node:child_process';
-import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { basename, dirname, join, resolve } from 'node:path';
 
@@ -12,6 +12,7 @@ import { schemaDeltaFixtureStateSql } from './schema-delta-fixture.mjs';
 import { writeRecoveryCompose } from './compose-config.mjs';
 import { dockerFaultFiles, wrapToolWithPauseGate, writeDockerShim } from './docker-shim.mjs';
 import { runFaultScenario } from './fault-scenarios.mjs';
+import { runImportScenario } from './import-scenarios.mjs';
 import { hasFaultHooks, invokeFaultHook, parseFaultHooks } from './fault-hooks.mjs';
 import { assertHostStateContinuity, readHostStateSnapshotFromBoundary } from './host-state-continuity.mjs';
 import { canaryDnsName, hasCanaryAttempt } from './network-denial.mjs';
@@ -46,6 +47,7 @@ import {
   hostUpdateCliToolIdentity,
   protectedBackupReference,
   releaseEvidenceIdentity,
+  signFixtureReleaseAssets,
   writeJson,
   writeTrustedRootApproval,
 } from './fixture-release-builder.mjs';
@@ -331,6 +333,61 @@ try {
   });
 
   const beforeRecovery = stateContinuitySnapshot({ env, deploymentRoot, hostStateRoot, hostContainer, provider });
+  if (cellSpec.scenario === 'import') {
+    const importStarted = Date.now();
+    runImportCell({
+      releaseRoot,
+      scratch,
+      commandRunner,
+      targetImages,
+      infrastructureLock,
+      targetRelease,
+      imageLayout,
+      toolsDir,
+      trustedRootPath,
+      trustedRootBytes,
+      trustedRootApprovalPath,
+      configPath,
+      hostStateRoot,
+      cli,
+      boundaryCosign,
+      priorBundlePath,
+      env,
+      deploymentRoot,
+      priorImages,
+    });
+    run.finishedAt = new Date().toISOString();
+    evidence = baseEvidence({
+      run,
+      host,
+      cell,
+      identities: {
+        source: releaseEvidenceIdentity(prior),
+        target: releaseEvidenceIdentity(target),
+        prior: releaseEvidenceIdentity(prior),
+        bundleSha256: evidenceBundleSha256(bundlePath),
+        signingRootFingerprint: root.fingerprint,
+      },
+      tools,
+      checkpoints: checkpoints.checkpoints,
+      outcome: {
+        expected: cellSpec.expected.outcome,
+        expectedReason: null,
+        actual: 'Imported',
+        reason: null,
+        exitCode: 0,
+        journalPhase: safeJournalPhase(join(runRoot, 'host-update', 'state', 'journal.ndjson')),
+      },
+      timings: { activationSeconds: Math.max(1, Math.round((Date.now() - importStarted) / 1000)), recoverySeconds: 0 },
+      verdict: 'pass',
+      networkAttempts: readNetworkAttempts(networkAttemptsPath),
+    });
+    writeValidatedEvidence(evidencePath, evidence);
+    const complete = new Error('import cell evidence written');
+    complete.evidenceWritten = true;
+    complete.success = true;
+    throw complete;
+  }
   if (cellSpec.scenario === 'refuse-activation' && cell.workers === 'remote') {
     seedRemoteWorkerRegistration(deploymentRoot, env, provider);
     checkpoints.ok('remote-worker-registration-seeded');
@@ -850,6 +907,257 @@ try {
   root.dispose();
 }
 
+// Live boundary for the #3102 import cells: every import, activation, host-state edit and restart
+// goes through the packaged CLI or the isolated host container; import-scenarios.mjs owns the
+// assertions.
+function runImportCell({
+  releaseRoot, scratch, commandRunner, targetImages, infrastructureLock, targetRelease, imageLayout, toolsDir,
+  trustedRootPath, trustedRootBytes, trustedRootApprovalPath, configPath, hostStateRoot, cli, boundaryCosign,
+  priorBundlePath, env, deploymentRoot, priorImages,
+}) {
+  const anyExitCode = Array.from({ length: 256 }, (_, code) => code);
+  const hostShell = (script) => hostExecFileSync(hostContainer, ['bash', '-lc', script], { cwd: repo });
+  const safe = (label) => String(label).replace(/[^A-Za-z0-9._-]/g, '-');
+  const importRoot = join(runRoot, 'import');
+  const bundlesRoot = join(runRoot, 'import-bundles');
+  const approvalsRoot = join(importRoot, 'approvals');
+  mkdirSync(bundlesRoot, { recursive: true });
+  mkdirSync(approvalsRoot, { recursive: true });
+  const stagingPath = (label) => join(runRoot, 'import-staging', safe(label));
+  const saveRoot = `${hostStateRoot}-import-saves`;
+  const stateFiles = ['host-update-replay.json', 'replay-anchor.json', 'replay-anchor.journal', 'update-automation-policy.json'];
+  let attacker;
+  const attackerTrust = () => {
+    if (!attacker) {
+      const attackerRoot = createFixtureSigstoreRoot({ now: new Date() });
+      const attackerTrustedRootPath = join(importRoot, 'attacker-trusted-root.json');
+      attackerRoot.writeTrustedRoot(attackerTrustedRootPath);
+      const attackerApprovalPath = join(approvalsRoot, 'attacker-self-approval.json');
+      writeTrustedRootApproval(attackerApprovalPath, readFileSync(attackerTrustedRootPath), { approvedBy: 'attacker' });
+      attacker = { root: attackerRoot, trustedRootPath: attackerTrustedRootPath, approvalPath: attackerApprovalPath };
+    }
+    return attacker;
+  };
+  const approvalAt = (label, approvedAt, rootBytes = trustedRootBytes) => {
+    const path = join(approvalsRoot, `${safe(label)}.json`);
+    writeTrustedRootApproval(path, rootBytes, { approvedAt, approvedBy: 'recovery-matrix' });
+    return path;
+  };
+  const ctx = {
+    cellSpec,
+    checkpoints,
+    runRoot,
+    priorBundlePath,
+    newRelease: ({ version, channel, seed = 'main', sigstore, signAs }) => {
+      const release = fixtureRelease({
+        version,
+        channel,
+        sourceCommit: seed === 'main' ? sourceCommit : fixtureSourceCommit(`import-${seed}`),
+      });
+      const signing = sigstore === 'attacker' ? attackerTrust() : null;
+      const built = buildFixtureRelease({
+        source: repo,
+        output: join(releaseRoot, `import-${safe(version)}-${channel}-${safe(seed)}${signing ? '-attacker' : ''}${signAs ? `-as-${signAs}` : ''}`),
+        release,
+        imageDetails: targetImages,
+        infrastructureLock,
+        sigstoreRoot: signing?.root ?? root,
+        run: commandRunner,
+        scratch,
+        cliFrom: { assets: targetRelease.assets, version: target.version },
+      });
+      if (signAs) {
+        signFixtureReleaseAssets({ root, assets: built.assets, release: { ...release, channel: signAs } });
+      }
+      checkpoints.ok(`import-release-built:${channel}:${version}${seed === 'main' ? '' : `:${seed}`}${signing ? ':attacker-root' : ''}${signAs ? `:signed-as-${signAs}` : ''}`);
+      return {
+        ...built,
+        forged: Boolean(signAs),
+        trustedRootPath: signing?.trustedRootPath ?? trustedRootPath,
+        approvalPath: signing?.approvalPath ?? trustedRootApprovalPath,
+      };
+    },
+    assembleBundle: ({ built, trustedRootPath: bundleTrustedRoot, label }) => {
+      const output = join(bundlesRoot, `bundle-${safe(label)}.tar`);
+      rmSync(output, { force: true });
+      assembleFixtureBundle({
+        releaseAssets: built.assets,
+        channel: built.release.channel,
+        output,
+        // A forged promotion cannot pass the assembler's own verification; the attacker skips it.
+        run: built.forged
+          ? (name, commandArgs, options) => (name === 'cosign' ? '' : commandRunner(name, commandArgs, options))
+          : commandRunner,
+        trustedRoot: bundleTrustedRoot ?? built.trustedRootPath,
+        cosign,
+        imageLayout,
+        tools: toolsDir,
+      });
+      return output;
+    },
+    importBundle: ({ built, bundle, label, approval, trustedRoot, config, channel, keepStaging = false }) => {
+      const staging = stagingPath(label);
+      const records = join(importRoot, 'records', safe(label));
+      hostShell(`rm -rf ${shellQuote(staging)} ${shellQuote(`${staging}.older`)} && mkdir -p ${shellQuote(dirname(staging))} ${shellQuote(records)}`);
+      const result = runPackagedOperation({
+        cli,
+        repo,
+        cosign: boundaryCosign,
+        instructionsPath: join(built.assets, 'offline-recovery-instructions.json'),
+        operationId: 'offline-bundle-import',
+        replacements: {
+          '<host-update.json>': config ?? configPath,
+          '<bundle.tar>': bundle,
+          '<trusted_root.json>': trustedRoot ?? trustedRootPath,
+          '<trusted-root-approval.json>': approval ?? trustedRootApprovalPath,
+          '<new-staging-dir>': staging,
+          '<decision-records-dir>': records,
+          '<operator>': 'recovery-matrix',
+        },
+        allowedExitCodes: anyExitCode,
+        optionOverrides: channel ? { '--channel': channel } : {},
+      });
+      const record = readImportDecisionRecords(records).at(-1) ?? null;
+      if (result.exitCode === 0) {
+        hostShell(keepStaging
+          ? `cp -a ${shellQuote(staging)} ${shellQuote(`${staging}.older`)}`
+          : `rm -rf ${shellQuote(staging)}`);
+      }
+      return { ...result, record };
+    },
+    stagingExists: (label) => hostShell(`if [ -e ${shellQuote(stagingPath(label))} ]; then echo yes; else echo no; fi`).trim() === 'yes',
+    activate: ({ built, label }) => runPackagedOperation({
+      cli,
+      repo,
+      cosign: boundaryCosign,
+      instructionsPath: join(built.assets, 'offline-recovery-instructions.json'),
+      operationId: 'offline-activate',
+      replacements: {
+        '<host-update.json>': configPath,
+        '<staging-dir>': stagingPath(label),
+        '<trusted_root.json>': trustedRootPath,
+      },
+      allowedExitCodes: anyExitCode,
+    }),
+    stateHashes: () => {
+      const output = hostShell(stateFiles.map((name) => {
+        const path = shellQuote(join(hostStateRoot, name));
+        return `if [ -e ${path} ]; then printf '%s %s\\n' ${shellQuote(name)} "$(sha256sum < ${path} | cut -d' ' -f1)"; else printf '%s absent\\n' ${shellQuote(name)}; fi`;
+      }).join('; '));
+      return Object.fromEntries(output.trim().split(/\r?\n/).map((line) => line.split(' ')));
+    },
+    replayState: () => {
+      const path = shellQuote(join(hostStateRoot, 'host-update-replay.json'));
+      const text = hostShell(`if [ -e ${path} ]; then cat ${path}; fi`).trim();
+      return text ? JSON.parse(text) : null;
+    },
+    replayAnchor: () => {
+      const read = (name) => {
+        const path = shellQuote(join(hostStateRoot, name));
+        const output = String(hostShell(`if [ -e ${path} ]; then printf 'present:'; base64 -w0 < ${path}; else printf absent; fi`)).trim();
+        return output.startsWith('present:') ? Buffer.from(output.slice('present:'.length), 'base64').toString('utf8') : null;
+      };
+      const replay = shellQuote(join(hostStateRoot, 'host-update-replay.json'));
+      const replayHash = String(hostShell(`if [ -e ${replay} ]; then sha256sum < ${replay} | cut -d' ' -f1; fi`)).trim() || null;
+      return { journal: read('replay-anchor.journal'), snapshot: read('replay-anchor.json'), replayHash };
+    },
+    hostStateFiles: {
+      save: (tag) => {
+        const directory = join(saveRoot, safe(tag));
+        hostShell([
+          `rm -rf ${shellQuote(directory)} && mkdir -p ${shellQuote(directory)}`,
+          ...stateFiles.map((name) => `if [ -e ${shellQuote(join(hostStateRoot, name))} ]; then cp -a ${shellQuote(join(hostStateRoot, name))} ${shellQuote(join(directory, name))}; fi`),
+        ].join(' && '));
+        checkpoints.ok(`host-state-saved:${tag}`);
+        return tag;
+      },
+      restore: (tag, names = stateFiles) => {
+        const directory = join(saveRoot, safe(tag));
+        hostShell(names.map((name) => {
+          const saved = shellQuote(join(directory, name));
+          const live = shellQuote(join(hostStateRoot, name));
+          return `if [ -e ${saved} ]; then cp -a ${saved} ${live}; else rm -f ${live}; fi`;
+        }).join(' && '));
+        checkpoints.ok(`host-state-restored:${tag}:${names.join(',')}`);
+      },
+      hide: (name) => hostShell(`mv ${shellQuote(join(hostStateRoot, name))} ${shellQuote(join(hostStateRoot, `${name}.hidden`))}`),
+      unhide: (name) => hostShell(`mv ${shellQuote(join(hostStateRoot, `${name}.hidden`))} ${shellQuote(join(hostStateRoot, name))}`),
+    },
+    writePolicy: ({ channel, revision }) => {
+      const script = [
+        "import { writeFixturePolicy } from './scripts/ci/recovery-matrix/cell-runtime.mjs';",
+        `writeFixturePolicy(${JSON.stringify(hostStateRoot)}, { channel: ${JSON.stringify(channel)}, revision: ${Number(revision)} });`,
+      ].join('\n');
+      hostExecFileSync(hostContainer, ['node', '--input-type=module', '-e', script], { cwd: repo });
+    },
+    mutationSnapshot: () => mutationSnapshot({ env, deploymentRoot, hostStateRoot, hostContainer, provider, cell, priorImages }),
+    assertNoMutation,
+    dumpDatabase: () => {
+      if (provider.id !== 'postgres') throw new Error(`import_cell_database_dump_unsupported:${provider.id}`);
+      const dump = '/tmp/import-cell-older.dump';
+      databaseExec(deploymentRoot, env, ['pg_dump', '-U', env.POSTGRES_USER, '-d', env.POSTGRES_DB, '-Fc', '-f', dump]);
+      checkpoints.ok('older-app-database-dumped');
+      return dump;
+    },
+    restoreDatabase: (dump) => {
+      // Restore like an operator would: quiesce the application so it can't write while the
+      // older database is loaded, recreate the database, restore, then start the application.
+      const services = composeExec(deploymentRoot, env, ['ps', '--services', '--status', 'running'])
+        .split('\n').map((service) => service.trim()).filter((service) => service && service !== 'database');
+      if (services.length > 0) composeExec(deploymentRoot, env, ['stop', ...services]);
+      try {
+        databaseExec(deploymentRoot, env, ['dropdb', '-U', env.POSTGRES_USER, '--force', '--if-exists', env.POSTGRES_DB]);
+        databaseExec(deploymentRoot, env, ['createdb', '-U', env.POSTGRES_USER, '-O', env.POSTGRES_USER, env.POSTGRES_DB]);
+        databaseExec(deploymentRoot, env, ['pg_restore', '-U', env.POSTGRES_USER, '-d', env.POSTGRES_DB, '--no-owner', '--exit-on-error', dump]);
+      } finally {
+        if (services.length > 0) composeExec(deploymentRoot, env, ['start', ...services]);
+      }
+    },
+    restartHost: () => restartHostContainer(hostContainer),
+    restoreOlderStaging: (label) => {
+      const staging = stagingPath(label);
+      hostShell(`test -d ${shellQuote(`${staging}.older`)} && rm -rf ${shellQuote(staging)} && cp -a ${shellQuote(`${staging}.older`)} ${shellQuote(staging)}`);
+    },
+    writeApproval: (label, { ageDays }) => approvalAt(label, new Date(Date.now() - ageDays * 86_400_000).toISOString()),
+    writeRevokedTrustedRoot: () => {
+      const document = JSON.parse(trustedRootBytes.toString('utf8'));
+      const ended = new Date(Date.now() - 60_000).toISOString();
+      for (const authority of document.certificateAuthorities ?? []) {
+        authority.validFor = { ...(authority.validFor ?? {}), end: ended };
+      }
+      for (const log of document.tlogs ?? []) {
+        if (log.publicKey) log.publicKey.validFor = { ...(log.publicKey.validFor ?? {}), end: ended };
+      }
+      const revokedPath = join(importRoot, 'revoked-trusted-root.json');
+      writeFileSync(revokedPath, `${JSON.stringify(document, undefined, 2)}\n`);
+      return { trustedRootPath: revokedPath, approvalPath: approvalAt('revoked-root', new Date().toISOString(), readFileSync(revokedPath)) };
+    },
+  };
+  try {
+    runImportScenario(ctx);
+  } finally {
+    attacker?.root.dispose();
+  }
+}
+
+function databaseExec(deploymentRoot, env, commandArgs) {
+  return composeExec(deploymentRoot, env, ['exec', '-T', 'database', ...commandArgs]);
+}
+
+function composeExec(deploymentRoot, env, commandArgs) {
+  return execFileSync('/usr/bin/docker', [
+    'compose',
+    '-f', join(deploymentRoot, 'docker-compose.recovery.yml'),
+    '-p', env.COMPOSE_PROJECT_NAME,
+    ...commandArgs,
+  ], {
+    cwd: deploymentRoot,
+    encoding: 'utf8',
+    env: { ...process.env, ...env },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+}
+
 function formatError(error) {
   const pieces = [
     `message=${error?.message ?? String(error)}`,
@@ -910,18 +1218,26 @@ function provisionBoundaryHostState(container, repo, rootPath, { channel }) {
   });
 }
 
-function packagedOperationArgv({ cli, instructionsPath, operationId, replacements, extraArgs = [] }) {
+function packagedOperationArgv({ cli, instructionsPath, operationId, replacements, extraArgs = [], optionOverrides = {} }) {
   const instructions = JSON.parse(readFileSync(instructionsPath, 'utf8'));
   const operation = instructions.operations.find(candidate => candidate.id === operationId);
   if (!operation) throw new Error(`missing_packaged_operation:${operationId}`);
-  return [...operation.bash.map((argument, index) => {
+  const argv = operation.bash.map((argument, index) => {
     const value = replacements[argument] ?? argument;
     return index === 0 ? cli : value;
-  }), ...extraArgs];
+  });
+  // Import cells present an operator typing a different option value (e.g. a channel alias) than the
+  // signed instructions carry; only the value after an existing option is ever replaced.
+  for (const [option, value] of Object.entries(optionOverrides)) {
+    const at = argv.indexOf(option);
+    if (at < 1 || at + 1 >= argv.length) throw new Error(`missing_packaged_option:${operationId}:${option}`);
+    argv[at + 1] = value;
+  }
+  return [...argv, ...extraArgs];
 }
 
-function runPackagedOperation({ cli, repo, cosign, instructionsPath, operationId, replacements, allowedExitCodes = [0], extraArgs = [] }) {
-  const argv = packagedOperationArgv({ cli, instructionsPath, operationId, replacements, extraArgs });
+function runPackagedOperation({ cli, repo, cosign, instructionsPath, operationId, replacements, allowedExitCodes = [0], extraArgs = [], optionOverrides = {} }) {
+  const argv = packagedOperationArgv({ cli, instructionsPath, operationId, replacements, extraArgs, optionOverrides });
   const result = hostSpawnSync(hostContainer, argv, {
     cwd: dirname(cli),
     env: {

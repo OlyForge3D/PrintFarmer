@@ -19,7 +19,8 @@ usage() {
 Usage: scripts/ci/recovery-matrix/run-cell.sh [OPTIONS]
 
 Options:
-  --cell <id|all|faults>    Cell to run. Use all for every topology cell, faults for every fault cell.
+  --cell <id|all|faults|imports>  Cell to run. Use all for every topology cell, faults for every fault cell,
+                            imports for every live import cell.
   --work-dir DIR            Repo-local scratch directory. Default: .recovery-matrix-work
   --evidence FILE           Evidence JSON output path.
   --cosign FILE             Cosign executable. Default: PF_COSIGN or ~/.cache/pf-cosign/cosign
@@ -66,6 +67,9 @@ CELL_IDS="$(
 FAULT_CELL_IDS="$(
   node --input-type=module -e "import { faultCellIds } from '$SCRIPT_DIR/fault-cells.mjs'; console.log(faultCellIds.join(' '));"
 )"
+IMPORT_CELL_IDS="$(
+  node --input-type=module -e "import { importCellIds } from '$SCRIPT_DIR/import-cells.mjs'; console.log(importCellIds.join(' '));"
+)"
 
 evidence_for_cell() {
   local evidence_path=$1
@@ -83,10 +87,12 @@ evidence_for_cell() {
   printf '%s/%s-%s%s\n' "$dir" "$stem" "$matrix_cell" "$ext"
 }
 
-if [[ "$CELL" == "all" || "$CELL" == "faults" ]]; then
+if [[ "$CELL" == "all" || "$CELL" == "faults" || "$CELL" == "imports" ]]; then
   group_ids="$CELL_IDS"
   if [[ "$CELL" == "faults" ]]; then
     group_ids="$FAULT_CELL_IDS"
+  elif [[ "$CELL" == "imports" ]]; then
+    group_ids="$IMPORT_CELL_IDS"
   fi
   status=0
   for matrix_cell in $group_ids; do
@@ -105,9 +111,9 @@ if [[ "$CELL" == "all" || "$CELL" == "faults" ]]; then
   exit "$status"
 fi
 
-case " $CELL_IDS $FAULT_CELL_IDS " in
+case " $CELL_IDS $FAULT_CELL_IDS $IMPORT_CELL_IDS " in
   *" $CELL "*) ;;
-  *) echo "Unknown recovery matrix cell: $CELL (expected one of: $CELL_IDS $FAULT_CELL_IDS, all, faults)" >&2; exit 2 ;;
+  *) echo "Unknown recovery matrix cell: $CELL (expected one of: $CELL_IDS $FAULT_CELL_IDS $IMPORT_CELL_IDS, all, faults, imports)" >&2; exit 2 ;;
 esac
 
 require_tool docker

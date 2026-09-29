@@ -1159,6 +1159,61 @@ durability restart. A pause mid-phase checks only the contexts it has reached. E
 records the choice as `identities.schemaDelta`. The other fault cells use the
 identical-schema target.
 
+### Live import cells (#3102)
+
+Import cells live in `scripts/ci/recovery-matrix/import-cells.mjs`, with their
+assertions in `import-scenarios.mjs`. Each one runs on the supported `c2` shape.
+After the prior release is activated, the cell builds extra fixture releases
+and bundles, then imports them through the packaged `offline-bundle-import`
+operation. Run one cell with `--cell <id>`, or every import cell with
+`--cell imports`. No cell activates a release it imported. The terminal outcome
+is `Imported`, and the evidence validator accepts it only after a successful
+`import-cells-verified` checkpoint.
+
+Every refused step requires a decision record, and binds the record's reason to
+the expected refusal (for example `channel_mismatch_policy`, `replay_rejected`
+or `signature verification failed for update-manifest.json`). A refusal with no
+record, or with a different reason, fails the cell. The record must report
+`refused`, not installable, and no loaded images. The cell also asserts that no
+staging directory remains, and that the replay store, replay anchor, anchor
+journal and policy file are byte-for-byte unchanged. Two narrow exceptions are
+by design. An authenticated replay refusal (`replay_rejected` or
+`replay_superseded`) durably records a newly refused identity so it stays
+refused across restarts and restores. The cell then asserts that every channel
+high-water mark and earlier identity decision is unchanged, and that at most
+the one refused identity was added, as `Rejected` at the candidate's sequence.
+The anchor journal must be append-only, with at most one appended entry that
+chains to the previous head and authenticates the new replay store hash, and
+the anchor snapshot must equal the journal head. Only a rolled-back replay
+store (`host_update_replay_state_rollback`) may heal: the journal and replay
+store stay unchanged and the snapshot must move forward to exactly the
+pre-rollback anchor. Channel switches are operator policy edits with
+increasing revisions.
+
+| Cell id | What it proves | Local run status |
+| --- | --- | --- |
+| `import-identity` | Stable `1.0.0` and insider `1.0.0-insider.10` imports keep the builder's version, channel, source commit and manifest digest. A fresh host trusts a root only through an approval bound to its exact bytes. A bundle-supplied attacker root, an attacker approval, a missing approval and an unbound approval are each refused before mutation | Pass (2026-09-28, `4df1f7109`) |
+| `import-channel-round-trips` | stable→insider→stable and insider→stable→insider through policy edits. An insider bundle is refused without the policy edit (`channel_mismatch_policy`) and under a `stable` alias. A lower sequence is an unsupported downgrade on each channel. A moved branch (same version, different source) and a deleted-alias reimport are refused | Pass (2026-09-28, `4df1f7109`) |
+| `import-adversarial` | The adversarial set below, each refused before mutation, then an intact higher insider release still imports | Pass (2026-09-28, `4df1f7109`) |
+| `import-replay-supersede` | 41 is admitted, then 42 supersedes it. Neither is installed. Reimporting 41 is refused `replay_superseded`, and activating 41's staging is refused with no mutation. Both hold after policy edits, both round trips, a host restart, and restores of an older app database (`pg_dump`, then application stopped, database recreated and `pg_restore`), policy file and staging cache. The independent stable channel keeps importing | Pass (2026-09-28, `4df1f7109`) |
+
+The adversarial set: missing image, missing or unbound trust approval, missing
+config, symlink and `../` traversal archive members, modified bytes, forged
+promotion (a stable version re-signed with the insider identity), wrong
+platform (correctly hashed `arm64` blobs added to an image archive), mixed
+digests (a prior-release image member), mixed channels (a stable
+manifest in an insider bundle), expired trust (a 91-day-old approval), revoked
+trust (a root whose CA and log validity ended), invalid-signature poisoning (a
+higher sequence with a foreign signature must not raise the high-water mark),
+equal-sequence substitution (`replay_rejected`), a missing replay store and a
+rolled-back replay store.
+
+Criterion 5 of #3102, a read-only verification of a real published insider
+bundle, can't run yet. Published insider releases carry no offline recovery
+bundle, host-update CLI archive or packaged instructions. See #3195. The
+`printfarmer-published-bundle-verification` record stays schema-only until
+those assets are published.
+
 ### Queue-consumer health entry (#3157)
 
 The API's `/health` (and `/api/health`) response exposes a `queue-consumers`
