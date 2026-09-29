@@ -2,10 +2,15 @@
 // the repository's Moonraker emulator on the run's internal (egress-denied) network — never a
 // real endpoint — and every observation is read from the emulator's own request log.
 
-import { createHmac, randomUUID } from 'node:crypto';
+import { createHash, createHmac, randomUUID } from 'node:crypto';
 
 export const emulatorPort = 7125;
 export const emulatorHostOctet = 40;
+export const autoDispatchDurableScanIntervalMs = 30_000;
+export const fencedConsumerPollWindowMs = 35_000;
+export const postReconciliationDispatchWindowMs = 45_000;
+export const queuedAutoDispatchFileName = '00000000-0000-0000-0000-000000003209.gcode';
+export const queuedAutoDispatchJobName = 'recovery-matrix-queued.gcode';
 
 const nameIdentifierClaim = 'http://schemas.microsoft.com/ws/2008/05/identity/claims/nameidentifier';
 const roleClaim = 'http://schemas.microsoft.com/ws/2008/06/identity/claims/role';
@@ -24,8 +29,120 @@ export function emulatorIpFor(appIp) {
 export function pointPrinterAtEmulatorSql(emulatorIp) {
   if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(emulatorIp)) throw new Error(`invalid_emulator_ip:${emulatorIp}`);
   return `UPDATE "Printers" SET "ServerUrl" = 'http://${emulatorIp}', "BackendPort" = ${emulatorPort}, `
-    + `"Backend" = 1, "IsEnabled" = true, "IsAvailable" = true, "Name" = 'recovery-matrix-emulated-printer' `
+    + `"Backend" = 1, "IsEnabled" = true, "IsAvailable" = true, "InMaintenance" = false, `
+    + `"AutoDispatchEnabled" = true, "Name" = 'recovery-matrix-emulated-printer' `
     + `RETURNING "Id";`;
+}
+
+export const queuedAutoDispatchGcode = [
+  '; recovery matrix queued auto-dispatch fixture',
+  'G28',
+  'G1 X5 Y5 Z0.3 F3000',
+  'M84',
+  '',
+].join('\n');
+
+export function queuedAutoDispatchWork({ printerId }) {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(printerId)) {
+    throw new Error(`invalid_printer_id:${printerId}`);
+  }
+
+  const jobId = randomUUID();
+  const gcodeFileId = randomUUID();
+  const fileHash = createHash('sha256').update(queuedAutoDispatchGcode).digest('hex');
+  return {
+    jobId,
+    gcodeFileId,
+    fileName: queuedAutoDispatchFileName,
+    backendFileNameSuffix: queuedAutoDispatchJobName,
+    fileHash,
+    fileSizeBytes: Buffer.byteLength(queuedAutoDispatchGcode),
+    contentBase64: Buffer.from(queuedAutoDispatchGcode, 'utf8').toString('base64'),
+  };
+}
+
+export function queuedAutoDispatchWorkSql({
+  printerId,
+  jobId,
+  gcodeFileId,
+  fileName,
+  fileHash,
+  fileSizeBytes,
+}) {
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (!uuid.test(printerId)) throw new Error(`invalid_printer_id:${printerId}`);
+  if (!uuid.test(jobId)) throw new Error(`invalid_job_id:${jobId}`);
+  if (!uuid.test(gcodeFileId)) throw new Error(`invalid_gcode_file_id:${gcodeFileId}`);
+  if (!/^[0-9a-f]{64}$/i.test(fileHash)) throw new Error(`invalid_file_hash:${fileHash}`);
+  if (!/^[0-9a-f-]+\.gcode$/i.test(fileName)) throw new Error(`invalid_file_name:${fileName}`);
+  if (!Number.isInteger(fileSizeBytes) || fileSizeBytes <= 0) throw new Error(`invalid_file_size:${fileSizeBytes}`);
+
+  return `
+WITH root AS (
+  INSERT INTO "FolderNode" ("Id", "Path", "FolderType", "CreatedAt", "DeletedAt")
+  VALUES (gen_random_uuid(), '/', 'gcode', now(), NULL)
+  ON CONFLICT ("Path", "FolderType") DO UPDATE SET "DeletedAt" = NULL
+  RETURNING "Id"
+), folder AS (
+  SELECT "Id" FROM root
+  UNION ALL
+  SELECT "Id" FROM "FolderNode" WHERE "Path" = '/' AND "FolderType" = 'gcode' LIMIT 1
+), settings AS (
+  INSERT INTO "DispatchSettings" (
+    "Id", "AutoDispatchEnabled", "AutoDispatchMode", "CreatedDate", "IdleThresholdSeconds",
+    "LoadBalancingStrategy", "MaxConcurrentDispatches", "MinimumScoreThreshold",
+    "Revision", "UpdatedAt", "UpdatedDate")
+  VALUES (1, true, 'Auto', now(), 30, 'BestFit', 3, 0, 1, now(), now())
+  ON CONFLICT ("Id") DO UPDATE SET
+    "AutoDispatchEnabled" = true,
+    "AutoDispatchMode" = 'Auto',
+    "IdleThresholdSeconds" = 30,
+    "MinimumScoreThreshold" = 0,
+    "UpdatedAt" = now(),
+    "UpdatedDate" = now()
+), printer_ready AS (
+  UPDATE "Printers" SET
+    "IsEnabled" = true,
+    "IsAvailable" = true,
+    "InMaintenance" = false,
+    "AutoDispatchEnabled" = true
+  WHERE "Id" = '${printerId}'::uuid
+), dispatch_state AS (
+  INSERT INTO "PrinterDispatchStates" (
+    "PrinterId", "AutoDispatchState", "BedPreConfirmed", "QueueRevision", "Revision",
+    "PhysicalControlRequiresReconciliation")
+  VALUES ('${printerId}'::uuid, 2, true, 1, 1, false)
+  ON CONFLICT ("PrinterId") DO UPDATE SET
+    "AutoDispatchState" = 2,
+    "BedPreConfirmed" = true,
+    "QueueRevision" = "PrinterDispatchStates"."QueueRevision" + 1,
+    "PhysicalControlCommandId" = NULL,
+    "PhysicalControlAttemptId" = NULL,
+    "PhysicalControlOperation" = NULL,
+    "PhysicalControlActorSubject" = NULL,
+    "PhysicalControlStartedAtUtc" = NULL,
+    "PhysicalControlRequiresReconciliation" = false
+), gcode AS (
+  INSERT INTO "GcodeFiles" (
+    "Id", "Name", "FileName", "FolderId", "FilePath", "FileSizeBytes", "FileHash",
+    "UploadedAt", "CreatedAt", "UpdatedAt", "Source", "HealthStatus")
+  SELECT '${gcodeFileId}'::uuid, 'recovery-matrix-queued.gcode', '${fileName}', "Id", '/',
+    ${fileSizeBytes}, '${fileHash}', now(), now(), now(), 0, 1
+  FROM folder
+  ON CONFLICT ("Id") DO UPDATE SET
+    "FileName" = EXCLUDED."FileName",
+    "FilePath" = EXCLUDED."FilePath",
+    "FileSizeBytes" = EXCLUDED."FileSizeBytes",
+    "FileHash" = EXCLUDED."FileHash",
+    "UpdatedAt" = now()
+)
+INSERT INTO "PrintJobs" (
+  "Id", "Name", "GcodeFileId", "AssignedPrinterId", "Status", "Priority", "QueuePosition",
+  "CreatedAt", "UpdatedAt", "QueuedAt", "IsExternalPrint")
+VALUES (
+  '${jobId}'::uuid, '${queuedAutoDispatchJobName}', '${gcodeFileId}'::uuid, NULL, 0, 3, 1,
+  now(), now(), now() - interval '1 second', false)
+RETURNING "Id";`;
 }
 
 // Short-lived farm_admin bearer token minted with the throwaway run's own signing key. It carries
@@ -117,4 +234,27 @@ export function commandsSince(baseline, current) {
     .filter((entry) => entry.isCommand && entry.sequence > baseline.total)
     .map((entry) => `${entry.transport}:${entry.method}:${entry.target}`);
   return { count, reads: (current.total - baseline.total) - count, offenders };
+}
+
+export function queuedAutoDispatchEvidenceSince(baseline, current, fileName, backendFileNameSuffix = queuedAutoDispatchJobName) {
+  if (!/^[0-9a-f-]+\.gcode$/i.test(fileName)) throw new Error(`invalid_file_name:${fileName}`);
+  if (!/^[A-Za-z0-9_.-]+\.gcode$/i.test(backendFileNameSuffix)) throw new Error(`invalid_backend_file_name:${backendFileNameSuffix}`);
+  const observed = commandsSince(baseline, current);
+  const commands = current.entries.filter((entry) => entry.isCommand && entry.sequence > baseline.total);
+  const upload = commands.find((entry) =>
+    entry.transport === 'http' &&
+    entry.method === 'POST' &&
+    entry.target.startsWith('/server/files/upload:') &&
+    (entry.target.includes(`/${fileName}:`) || entry.target.endsWith(`-${backendFileNameSuffix}:print=true`)));
+  const start = commands.find((entry) =>
+    entry.transport === 'http' &&
+    entry.method === 'POST' &&
+    entry.target.startsWith('/printer/print/start:') &&
+    entry.target.endsWith(fileName));
+  return {
+    ...observed,
+    upload: upload?.target,
+    start: start?.target,
+    matched: Boolean(upload || start),
+  };
 }

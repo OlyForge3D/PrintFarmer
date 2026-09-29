@@ -37,7 +37,7 @@ public sealed class PrinterResolutionMiddleware(RequestDelegate next)
             // Recorded before auth/fault handling so a rejected or faulted command
             // attempt is still visible as an attempt.
             string? proxiedMethod = await ReadSpoolmanProxyMethodAsync(context, path);
-            registry.Requests.RecordHttp(context.Request.Method, path, proxiedMethod);
+            context.Items["requestLogEntry"] = registry.Requests.RecordHttp(context.Request.Method, path, proxiedMethod);
         }
 
         string? requiredApiKey = options.Value.ApiKey;

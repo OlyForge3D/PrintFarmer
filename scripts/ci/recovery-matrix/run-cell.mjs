@@ -21,6 +21,10 @@ import {
   parseEmulatorRequests,
   parseNetworkResponse,
   pointPrinterAtEmulatorSql,
+  queuedAutoDispatchFileName,
+  queuedAutoDispatchGcode,
+  queuedAutoDispatchWork,
+  queuedAutoDispatchWorkSql,
 } from './emulated-printer.mjs';
 import { runImportScenario } from './import-scenarios.mjs';
 import { hasFaultHooks, invokeFaultHook, parseFaultHooks } from './fault-hooks.mjs';
@@ -349,6 +353,15 @@ try {
     },
   });
 
+  if (cellSpec.id === 'fault-emulated-printer-reconciliation') {
+    writeQueuedAutoDispatchArtifactToApp({
+      env,
+      deploymentRoot,
+      appComposeService: topologyFor(priorCell.topology).healthComposeService,
+    });
+    checkpoints.ok(`queued-auto-dispatch-artifact-preseeded:file=${queuedAutoDispatchFileName}`);
+  }
+
   const beforeRecovery = stateContinuitySnapshot({ env, deploymentRoot, hostStateRoot, hostContainer, provider });
   if (cellSpec.scenario === 'import') {
     const importStarted = Date.now();
@@ -530,6 +543,7 @@ try {
         })),
       };
     };
+    const hostShell = (script) => hostExecFileSync(hostContainer, ['bash', '-lc', script], { cwd: repo });
     const fault = runFaultScenario({
       cellSpec,
       runRoot,
@@ -567,13 +581,16 @@ try {
         workRoot: join(runRoot, 'fault-ops'),
       }),
       restartHost: () => restartHostContainer(hostContainer),
-      hostShell: (script) => hostExecFileSync(hostContainer, ['bash', '-lc', script], { cwd: repo }),
+      hostShell,
       dbQuery: (sql) => databaseQuery(deploymentRoot, env, provider, sql),
       schemaDelta,
       schemaDeltaState: (context) => parseSchemaDeltaState(
         databaseQuery(deploymentRoot, env, provider, schemaDeltaFixtureStateSql(provider.id, context))),
       seedPrinter: () => databaseQuery(deploymentRoot, env, provider, seedPrinterSql()),
-      emulatedPrinter: createEmulatedPrinter({ env, deploymentRoot }),
+      emulatedPrinter: createEmulatedPrinter({
+        env,
+        deploymentRoot,
+      }),
       snapshot: faultSnapshot,
       assertNoMutation,
       assertRolledBack: assertRecoveredToPrior,
@@ -2068,6 +2085,27 @@ function runningComposeImageDigest(env, service) {
 // Issue #3103: the repository's Moonraker emulator, built from source and attached only to the
 // run's internal network, stands in for a physical printer. The container name is recorded so the
 // finally block (and run-cell.sh cleanup) always removes it.
+function writeQueuedAutoDispatchArtifactToApp({ env, deploymentRoot, appComposeService }) {
+  const gcodePath = `/app/gcode/${queuedAutoDispatchFileName}`;
+  execFileSync('/usr/bin/docker', [
+    'compose',
+    '-f', join(deploymentRoot, 'docker-compose.recovery.yml'),
+    '-p', env.COMPOSE_PROJECT_NAME,
+    'exec',
+    '-T',
+    appComposeService,
+    'sh',
+    '-ec',
+    `mkdir -p /app/gcode && base64 -d > ${shellQuote(gcodePath)} && test -s ${shellQuote(gcodePath)}`,
+  ], {
+    cwd: deploymentRoot,
+    encoding: 'utf8',
+    env: { ...process.env, ...env },
+    input: Buffer.from(queuedAutoDispatchGcode, 'utf8').toString('base64'),
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+}
+
 function createEmulatedPrinter({ env, deploymentRoot }) {
   const emulatorIp = emulatorIpFor(appStaticIp);
   const container = `${run.id}-printer-emulator`;
@@ -2112,6 +2150,28 @@ function createEmulatedPrinter({ env, deploymentRoot }) {
       const ids = String(output).match(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi) ?? [];
       if (ids.length !== 1) throw new Error(`emulated_printer_attach_expected_one_row:${output}`);
       return ids[0];
+    },
+    seedQueuedAutoDispatchWork(printerId) {
+      const work = queuedAutoDispatchWork({ printerId });
+      const output = databaseQuery(deploymentRoot, env, provider, queuedAutoDispatchWorkSql({ printerId, ...work }));
+      if (!String(output).includes(work.jobId)) throw new Error(`queued_auto_dispatch_seed_missing_job:${output}`);
+      return work;
+    },
+    queuedAutoDispatchJobState(jobId) {
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(jobId)) {
+        throw new Error(`invalid_job_id:${jobId}`);
+      }
+      const sql = provider.id === 'postgres'
+        ? `SELECT "Status", ("AssignedPrinterId" IS NOT NULL)::int FROM "PrintJobs" WHERE "Id" = '${jobId}'::uuid;`
+        : `SET NOCOUNT ON; SELECT [Status], CASE WHEN [AssignedPrinterId] IS NULL THEN 0 ELSE 1 END FROM [PrintJobs] WHERE [Id] = CONVERT(uniqueidentifier, '${jobId}');`;
+      const raw = databaseQuery(deploymentRoot, env, provider, sql);
+      const values = String(raw).trim().split(/[\s|]+/).filter(Boolean);
+      if (values.length < 2) return { status: Number.NaN, assigned: false, raw: String(raw).trim() };
+      return {
+        status: Number(values[0]),
+        assigned: values[1] === '1' || values[1].toLowerCase() === 'true',
+        raw: String(raw).trim(),
+      };
     },
     requests() {
       const response = emulatorGet('/__emulator/requests');

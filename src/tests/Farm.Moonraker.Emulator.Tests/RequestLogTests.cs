@@ -64,6 +64,20 @@ public sealed class RequestLogTests
         snapshot.Entries[^1].Should().Match<RequestLogEntry>(e =>
             e.IsCommand && e.Method == "POST" && e.Target == "/printer/gcode/script" && e.Sequence == RequestLog.Capacity + 6);
     }
+
+    [Fact]
+    public void Retarget_UpdatesRetainedEntryWithoutChangingCounters()
+    {
+        RequestLog log = new();
+        RequestLogEntry entry = log.RecordHttp("POST", "/server/files/upload");
+
+        log.Retarget(entry.Sequence, "/server/files/upload:gcodes/benchy.gcode:print=true");
+
+        RequestLogSnapshot snapshot = log.Snapshot();
+        snapshot.Total.Should().Be(1);
+        snapshot.Commands.Should().Be(1);
+        snapshot.Entries.Should().ContainSingle().Which.Target.Should().Be("/server/files/upload:gcodes/benchy.gcode:print=true");
+    }
 }
 
 public sealed class RequestLogEndpointTests : IClassFixture<ReadyPrinterFactory>
@@ -132,6 +146,26 @@ public sealed class RequestLogEndpointTests : IClassFixture<ReadyPrinterFactory>
             .Where(e => e.GetProperty("sequence").GetInt64() > totalBefore)
             .Select(e => e.GetProperty("isCommand").GetBoolean())
             .Should().Equal(false, true, true);
+    }
+
+    [Fact]
+    public async Task Requests_RetargetsUploadAndPrintStartWithFileNames()
+    {
+        using HttpClient client = _factory.CreateClient();
+        long totalBefore = (await GetRequestsAsync(client)).GetProperty("total").GetInt64();
+        const string filename = "queued-fixture.gcode";
+
+        await TestRequests.EnsureGcodeFileExistsAsync(client, filename);
+        (await client.PostAsync("/printer/print/start", TestRequests.Json($$"""{"filename":"{{filename}}"}"""))).EnsureSuccessStatusCode();
+
+        JsonElement after = await GetRequestsAsync(client);
+        after.GetProperty("entries").EnumerateArray()
+            .Where(e => e.GetProperty("sequence").GetInt64() > totalBefore)
+            .Select(e => e.GetProperty("target").GetString())
+            .Should().Contain([
+                $"/server/files/upload:gcodes/{filename}:print=false",
+                $"/printer/print/start:{filename}",
+            ]);
     }
 
     private static async Task<JsonElement> GetRequestsAsync(HttpClient client)

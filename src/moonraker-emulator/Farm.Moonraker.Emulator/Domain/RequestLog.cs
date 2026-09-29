@@ -53,7 +53,7 @@ public sealed class RequestLog
     };
 
     private readonly object _gate = new();
-    private readonly Queue<RequestLogEntry> _entries = new();
+    private readonly List<RequestLogEntry> _entries = [];
     private readonly TimeProvider _timeProvider;
     private long _sequence;
     private long _commands;
@@ -92,6 +92,19 @@ public sealed class RequestLog
     public RequestLogEntry RecordRpc(string method) =>
         Record("jsonrpc", method, method, IsRpcCommand(method));
 
+    public void Retarget(long sequence, string target)
+    {
+        lock (_gate)
+        {
+            int index = _entries.FindIndex(entry => entry.Sequence == sequence);
+            if (index >= 0)
+            {
+                RequestLogEntry entry = _entries[index];
+                _entries[index] = entry with { Target = target };
+            }
+        }
+    }
+
     public RequestLogSnapshot Snapshot()
     {
         lock (_gate)
@@ -111,10 +124,10 @@ public sealed class RequestLog
             }
 
             RequestLogEntry entry = new(_sequence, _timeProvider.GetUtcNow(), transport, method, target, isCommand);
-            _entries.Enqueue(entry);
+            _entries.Add(entry);
             while (_entries.Count > Capacity)
             {
-                _entries.Dequeue();
+                _entries.RemoveAt(0);
             }
 
             return entry;

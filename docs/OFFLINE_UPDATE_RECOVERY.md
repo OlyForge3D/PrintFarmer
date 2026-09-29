@@ -1162,7 +1162,7 @@ then repeats the final operator action, restarts the host, runs
 | `fault-corrupt-journal` | Journal record tampered while `RecoveryRequired` | `RecoveryRequired` / `journal_integrity_failure`, exit 4, no mutation | Pass (2026-09-28, `eb900fa1c8ce`) |
 | `fault-corrupt-replay` | Replay store garbled before activation | `RecoveryRequired` / `host_update_replay_state_invalid`, exit 4, no mutation | Pass (2026-09-28, `cd314c3a53bf`) |
 | `fault-fence-release` | Printer inventory present at fence release | Confirm reports `FenceReleasePending` / `physical_reconciliation_pending` (exit 13), with the fence held across a restart. Confirming with `--printers-reconciled <token>` releases only the fence, without replaying restore, and reports `RolledBack` | Pass (2026-09-28, `cd314c3a53bf`) |
-| `fault-emulated-printer-reconciliation` | A Moonraker emulator attached to the seeded printer at fence release (#3103) | As `fault-fence-release`, plus: dispatch is refused with `409 host_update_admission_closed` while `FenceReleasePending`, before and after a restart; the emulator records no printer command during or after recovery (no pending workload; queued-work fencing is #3209); dispatch is admitted again (`428 precondition_required`) after `--printers-reconciled` | Pass (2026-09-29, `74f6ec80384d`) |
+| `fault-emulated-printer-reconciliation` | A Moonraker emulator attached to the seeded printer at fence release (#3103, #3209) | As `fault-fence-release`, plus: an eligible queued G-code job is present while `FenceReleasePending`; dispatch is refused with `409 host_update_admission_closed`, before and after a restart; after a 35s fenced consumer window (longer than the 30s durable auto-dispatch scan) the emulator has no printer command; after `--printers-reconciled`, dispatch is admitted again (`428 precondition_required`) and the queued job's backend-safe upload reaches the emulator | Pass (2026-09-28, `35dbe730286a`) |
 
 The evidence `outcome.expectedReason` is `null` for fault cells because they are
 supported cells. The observed stable reason is recorded in `outcome.reason` for
@@ -1194,10 +1194,26 @@ answers `409` with `host_update_admission_closed`. An admitted request stops at
 mutates state. Any other response is recorded as `unexpected:status=N` and does
 not count as either outcome.
 
-The zero-command proof is scoped to recovery itself: no job is queued for the
-emulated printer, and the evidence records `emulator-commands-scope:no-pending-workload`.
-It does not prove that queue consumers stay fenced while queued work is pending.
-Issue #3209 tracks that coverage.
+The zero-command proof now includes pending auto-dispatch work (#3209). After
+the prior release is activated but before the recovery baseline volume snapshot,
+the cell writes a small deterministic G-code fixture through the running
+application container into the application `gcode` volume at `/app/gcode`. That
+matches the path resolved by `GCODE_STORAGE_PATH`, which production dispatch
+uses when it opens a local artifact for upload. After the recovery flow reaches
+`FenceReleasePending` and `admission.closed` exists, the cell seeds an
+unassigned urgent `PrintJob` linked to that healthy `GcodeFile`. It also enables
+global `DispatchSettings` auto mode, enables per-printer auto-dispatch, and
+marks the printer dispatch state `Ready` with `BedPreConfirmed = true`. That is
+the same shape the durable auto-dispatch consumer normally scans for. The cell
+records `emulator-commands-scope:pending-auto-dispatch-workload`, restarts the
+host while the fence is held, and waits 35 seconds before checking the emulator.
+That window is intentionally longer than the product's 30-second durable
+auto-dispatch scan interval, so at least one consumer scan has a chance to run.
+Only after `--printers-reconciled` releases the fence may the queued job reach
+the emulator. The post-release control no longer accepts a generic command
+count: it requires the emulator request log to include the queued job's
+backend-safe upload name (`pf-<attempt>-recovery-matrix-queued.gcode`) or an
+explicit print-start for it, and it records the queued job's database state.
 
 The first live run on 2026-09-29 (`f9ac7b7c1da0`) failed `dispatch-fenced:pending`
 and `dispatch-fenced:pending-after-restart`: the probe got the `428` precondition
@@ -1208,12 +1224,33 @@ mount the host `state` directory read-only at `/run/printfarmer/host-update-stat
 in the `api`, `slicer-host`, and `monolith` containers and set
 `HostUpdateExecution__AdmissionStateDirectory` to it.
 
-The live rerun on 2026-09-29 (`74f6ec80384d`, run
-`fault-emulated-printer-reconciliation-20260929t024056z-1007021`) passes. Dispatch
-was refused with `409` while `FenceReleasePending`, before and after a restart.
-The emulator recorded no command during recovery (8 reads) or in total (10
-reads). The fence was released only by `--printers-reconciled`, dispatch was
-admitted again afterwards, and the durable outcome was `RolledBack` after a restart.
+The no-pending live rerun on 2026-09-29 (`74f6ec80384d`, run
+`fault-emulated-printer-reconciliation-20260929t024056z-1007021`) passed the
+#3207 admission-fence coverage: dispatch was refused with `409` while
+`FenceReleasePending`, before and after a restart, and the emulator recorded no
+recovery command.
+
+The queued-work live rerun on 2026-09-28 (`35dbe730286a`, run log
+`~/x3209-r3216-live4.log`) passes. The earlier generic checkpoint
+`queued-work-dispatched-after-reconciliation:commands=1:reads=20` did not prove
+which request reached the emulator; retained logs did not show
+`artifact_unavailable`, but they also did not identify the queued job. The
+current evidence retargets emulator upload/start requests after parsing and
+proves the specific backend-safe queued upload. Key checkpoints: fixture
+preseeded in app storage
+`queued-auto-dispatch-artifact-preseeded:file=00000000-0000-0000-0000-000000003209.gcode`;
+queued work seeded
+`queued-auto-dispatch-work-seeded:job=d3c4fa08-37fb-420d-beea-4aedd8ab65e8:file=00000000-0000-0000-0000-000000003209.gcode`;
+scope `emulator-commands-scope:pending-auto-dispatch-workload`; both
+`dispatch-fenced:pending` and `dispatch-fenced:pending-after-restart`; fenced
+wait `consumer-poll-window:35000ms>=auto-dispatch-scan:30000ms`;
+`emulator-commands-during-recovery:0:reads=10`; release by
+`--printers-reconciled`; `dispatch-reopened-after-reconciliation`;
+`queued-work-dispatched-after-reconciliation:commands=2:reads=24`;
+`queued-work-dispatched-after-reconciliation:upload=/server/files/upload:gcodes/pf-514281740ddf4b0ca3a675f9f9209229-recovery-matrix-queued.gcode:print=true:start=missing:commands=2:reads=24`;
+and `queued-work-db-state:job=d3c4fa08-37fb-420d-beea-4aedd8ab65e8:status=3:assigned=true`.
+The durable outcome is `RolledBack` after repeat confirmation and host restart,
+and the evidence validator reports `pass`.
 
 ### Live import cells (#3102)
 
