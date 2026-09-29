@@ -13,6 +13,8 @@ import {
   parseEmulatorRequests,
   parseNetworkResponse,
   pointPrinterAtEmulatorSql,
+  queuedAutoDispatchWork,
+  queuedAutoDispatchWorkSql,
 } from '../recovery-matrix/emulated-printer.mjs';
 import { faultCells } from '../recovery-matrix/fault-cells.mjs';
 import { runFaultScenario } from '../recovery-matrix/fault-scenarios.mjs';
@@ -38,8 +40,25 @@ test('printer attach SQL points the seeded printer at the emulator as a Moonrake
   assert.match(sql, /"ServerUrl" = 'http:\/\/172\.30\.7\.40'/);
   assert.match(sql, /"BackendPort" = 7125/);
   assert.match(sql, /"Backend" = 1/);
+  assert.match(sql, /"AutoDispatchEnabled" = true/);
   assert.match(sql, /RETURNING "Id"/);
   assert.throws(() => pointPrinterAtEmulatorSql("1.2.3.4'; DROP TABLE x;--"), /invalid_emulator_ip/);
+});
+
+test('queued auto-dispatch work SQL enables auto mode and seeds an unassigned queued gcode job', () => {
+  const printerId = '00000000-0000-0000-0000-000000000001';
+  const work = queuedAutoDispatchWork({ printerId });
+  const sql = queuedAutoDispatchWorkSql({ printerId, ...work });
+  assert.match(work.fileName, /^[0-9a-f-]+\.gcode$/);
+  assert.ok(work.fileSizeBytes > 0);
+  assert.match(sql, /"AutoDispatchMode" = 'Auto'/);
+  assert.match(sql, /"AutoDispatchState" = 2/);
+  assert.match(sql, /"BedPreConfirmed" = true/);
+  assert.match(sql, /"AssignedPrinterId", "Status", "Priority"/);
+  assert.match(sql, /NULL, 0, 3/);
+  assert.throws(
+    () => queuedAutoDispatchWorkSql({ printerId: "x'; DROP TABLE x;--", ...work }),
+    /invalid_printer_id/);
 });
 
 test('harness JWT is an HS256 farm_admin token signed with the run key', () => {
@@ -96,9 +115,9 @@ test('emulator command delta uses the cumulative counter and names offenders', (
 });
 
 // Scenario-level proof with a fake ctx: pending recovery holds the fence, the dispatch probe is
-// admission-closed until release, and any emulator command fails the cell.
+// admission-closed until release, and queued work reaches the emulator only after release.
 function fakeCtx(name, { admittedWhilePending = false, commandDuringRecovery = false, fencedAfterRelease = false,
-  unexpectedAfterRelease = false } = {}) {
+  unexpectedAfterRelease = false, noDispatchAfterRelease = false } = {}) {
   const dir = scratch(name);
   const log = { total: 2, commands: 0, entries: [] };
   const ctx = {
@@ -117,14 +136,23 @@ function fakeCtx(name, { admittedWhilePending = false, commandDuringRecovery = f
   ctx.assertRolledBack = () => {};
   ctx.seedPrinter = () => {};
   ctx.restartHost = () => {};
+  ctx.wait = () => {};
   ctx.emulatedPrinter = {
     start: () => {},
     attach: () => '00000000-0000-0000-0000-000000000001',
+    seedQueuedAutoDispatchWork: () => ({
+      jobId: '10000000-0000-0000-0000-000000000001',
+      fileName: '20000000-0000-0000-0000-000000000001.gcode',
+    }),
     requests: () => {
       log.total += 1;
       if (commandDuringRecovery && ctx.state === 'pending' && log.commands === 0) {
         log.commands += 1;
         log.entries.push({ sequence: log.total, transport: 'jsonrpc', method: 'printer.gcode.script', target: 'G28', isCommand: true });
+      }
+      if (!noDispatchAfterRelease && ctx.state === 'released' && log.commands === 0) {
+        log.commands += 1;
+        log.entries.push({ sequence: log.total, transport: 'http', method: 'POST', target: '/server/files/upload', isCommand: true });
       }
       return { ...log, entries: [...log.entries] };
     },
@@ -174,12 +202,13 @@ test('emulated-printer scenario passes when dispatch is fenced until release and
     'dispatch-fenced:pending',
     'dispatch-fenced:pending-after-restart',
     'dispatch-reopened-after-reconciliation',
+    'emulator-commands-scope:pending-auto-dispatch-workload',
     'fence-released:durable',
   ]) {
     assert.ok(ctx.passed.includes(checkpoint), checkpoint);
   }
   assert.ok(ctx.passed.some((checkpoint) => checkpoint.startsWith('emulator-commands-during-recovery:0:')));
-  assert.ok(ctx.passed.some((checkpoint) => checkpoint.startsWith('emulator-commands-total:0:')));
+  assert.ok(ctx.passed.some((checkpoint) => checkpoint.startsWith('queued-work-dispatched-after-reconciliation:commands=1:')));
 });
 
 test('emulated-printer scenario fails when dispatch is admitted while reconciliation is pending', () => {
@@ -204,8 +233,14 @@ test('emulated-printer scenario does not treat an unexpected probe response as r
     error.reason.startsWith('dispatch-reopened-after-reconciliation') && error.reason.includes('unexpected:status=404'));
 });
 
-test('emulated-printer scenario records that the zero-command proof has no pending workload', () => {
+test('emulated-printer scenario fails when queued work is not dispatched after reconciliation', () => {
+  const ctx = fakeCtx('emulated-not-dispatched', { noDispatchAfterRelease: true });
+  assert.throws(() => runFaultScenario(ctx), (error) =>
+    error.reason.startsWith('queued-work-dispatched-after-reconciliation:commands=0'));
+});
+
+test('emulated-printer scenario records that the zero-command proof includes pending workload', () => {
   const ctx = fakeCtx('emulated-scope');
   runFaultScenario(ctx);
-  assert.ok(ctx.passed.includes('emulator-commands-scope:no-pending-workload'));
+  assert.ok(ctx.passed.includes('emulator-commands-scope:pending-auto-dispatch-workload'));
 });

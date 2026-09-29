@@ -21,6 +21,8 @@ import {
   parseEmulatorRequests,
   parseNetworkResponse,
   pointPrinterAtEmulatorSql,
+  queuedAutoDispatchWork,
+  queuedAutoDispatchWorkSql,
 } from './emulated-printer.mjs';
 import { runImportScenario } from './import-scenarios.mjs';
 import { hasFaultHooks, invokeFaultHook, parseFaultHooks } from './fault-hooks.mjs';
@@ -530,6 +532,7 @@ try {
         })),
       };
     };
+    const hostShell = (script) => hostExecFileSync(hostContainer, ['bash', '-lc', script], { cwd: repo });
     const fault = runFaultScenario({
       cellSpec,
       runRoot,
@@ -567,13 +570,13 @@ try {
         workRoot: join(runRoot, 'fault-ops'),
       }),
       restartHost: () => restartHostContainer(hostContainer),
-      hostShell: (script) => hostExecFileSync(hostContainer, ['bash', '-lc', script], { cwd: repo }),
+      hostShell,
       dbQuery: (sql) => databaseQuery(deploymentRoot, env, provider, sql),
       schemaDelta,
       schemaDeltaState: (context) => parseSchemaDeltaState(
         databaseQuery(deploymentRoot, env, provider, schemaDeltaFixtureStateSql(provider.id, context))),
       seedPrinter: () => databaseQuery(deploymentRoot, env, provider, seedPrinterSql()),
-      emulatedPrinter: createEmulatedPrinter({ env, deploymentRoot }),
+      emulatedPrinter: createEmulatedPrinter({ env, deploymentRoot, hostShell }),
       snapshot: faultSnapshot,
       assertNoMutation,
       assertRolledBack: assertRecoveredToPrior,
@@ -2068,7 +2071,7 @@ function runningComposeImageDigest(env, service) {
 // Issue #3103: the repository's Moonraker emulator, built from source and attached only to the
 // run's internal network, stands in for a physical printer. The container name is recorded so the
 // finally block (and run-cell.sh cleanup) always removes it.
-function createEmulatedPrinter({ env, deploymentRoot }) {
+function createEmulatedPrinter({ env, deploymentRoot, hostShell }) {
   const emulatorIp = emulatorIpFor(appStaticIp);
   const container = `${run.id}-printer-emulator`;
   const image = `printfarmer-${run.id.replace(/[^A-Za-z0-9_.-]/g, '-').toLowerCase()}-moonraker-emulator:recovery`;
@@ -2112,6 +2115,17 @@ function createEmulatedPrinter({ env, deploymentRoot }) {
       const ids = String(output).match(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi) ?? [];
       if (ids.length !== 1) throw new Error(`emulated_printer_attach_expected_one_row:${output}`);
       return ids[0];
+    },
+    seedQueuedAutoDispatchWork(printerId) {
+      const work = queuedAutoDispatchWork({ printerId });
+      hostShell([
+        'set -euo pipefail',
+        'mkdir -p /app/gcode',
+        `printf '%s' '${work.contentBase64}' | base64 -d > /app/gcode/${work.fileName}`,
+      ].join('\n'));
+      const output = databaseQuery(deploymentRoot, env, provider, queuedAutoDispatchWorkSql(work));
+      if (!String(output).includes(work.jobId)) throw new Error(`queued_auto_dispatch_seed_missing_job:${output}`);
+      return work;
     },
     requests() {
       const response = emulatorGet('/__emulator/requests');

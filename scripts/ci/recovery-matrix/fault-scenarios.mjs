@@ -7,7 +7,12 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { composeUpTokens, faultCheckpointName, migrationApplyTokens } from './fault-cells.mjs';
-import { commandsSince } from './emulated-printer.mjs';
+import {
+  autoDispatchDurableScanIntervalMs,
+  commandsSince,
+  fencedConsumerPollWindowMs,
+  postReconciliationDispatchWindowMs,
+} from './emulated-printer.mjs';
 import { expectedSchemaDeltaFixtureState } from './schema-delta-fixture.mjs';
 
 export const faultExitCodes = Object.freeze({
@@ -23,6 +28,28 @@ export const faultExitCodes = Object.freeze({
 
 const knownExitCodes = new Set(Object.values(faultExitCodes));
 const physicalTokenPattern = /physical-[0-9a-f]{32}/;
+
+function waitMs(harness, ms) {
+  if (typeof harness.ctx.wait === 'function') {
+    harness.ctx.wait(ms);
+    return;
+  }
+
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function waitForEmulatorCommand(harness, printer, baseline, timeoutMs) {
+  let elapsedMs = 0;
+  let observed = commandsSince(baseline, printer.requests());
+  while (observed.count === 0 && elapsedMs < timeoutMs) {
+    const stepMs = Math.min(2_000, timeoutMs - elapsedMs);
+    waitMs(harness, stepMs);
+    elapsedMs += stepMs;
+    observed = commandsSince(baseline, printer.requests());
+  }
+
+  return observed;
+}
 
 export function parseCliText(stdout) {
   const fields = {};
@@ -568,10 +595,6 @@ const scenarios = {
     harness.ok('emulated-printer-registered');
     const baseline = printer.requests();
     harness.ok(`emulator-baseline:total=${baseline.total}:commands=${baseline.commands}`);
-    // Scope of the zero-command proof: no job is queued for the emulated printer, so it shows
-    // recovery itself sends no command. It does not prove that queue consumers are fenced while
-    // queued work is pending; that coverage is tracked separately.
-    harness.ok('emulator-commands-scope:no-pending-workload');
     activateIntoRecoveryRequired(harness);
     const preview = harness.recover('offline-recover-preview');
     harness.expect('recover-preview', preview, { outcome: 'RecoveryRequired' });
@@ -583,6 +606,9 @@ const scenarios = {
       exitCode: faultExitCodes.physicalReconciliationPending,
     });
     harness.require(existsSync(harness.ctx.admissionClosedPath), 'fence-held-while-pending');
+    const queuedWork = printer.seedQueuedAutoDispatchWork(printerId);
+    harness.ok(`queued-auto-dispatch-work-seeded:job=${queuedWork.jobId}:file=${queuedWork.fileName}`);
+    harness.ok('emulator-commands-scope:pending-auto-dispatch-workload');
     // A dispatch admitted while reconciliation is pending is recorded and the recovery flow is
     // still driven to completion, so one run proves every other invariant before the cell fails.
     const fenceGaps = [];
@@ -600,6 +626,8 @@ const scenarios = {
     harness.ctx.restartHost();
     harness.ok('pending-host-restarted');
     requireFenced('pending-after-restart');
+    waitMs(harness, fencedConsumerPollWindowMs);
+    harness.ok(`consumer-poll-window:${fencedConsumerPollWindowMs}ms>=auto-dispatch-scan:${autoDispatchDurableScanIntervalMs}ms`);
     const pendingPreview = harness.recover('offline-recover-preview');
     const token = physicalTokenPattern.exec(`${pendingPreview.stdout}\n${pendingPreview.stderr}`)?.[0];
     harness.require(Boolean(token), 'physical-reconciliation-token-offered');
@@ -614,9 +642,16 @@ const scenarios = {
     const reopened = printer.dispatchProbe(printerId);
     harness.require(reopened.classification === 'admitted', 'dispatch-reopened-after-reconciliation',
       `${reopened.classification}:status=${reopened.status}`);
+    const afterRelease = waitForEmulatorCommand(
+      harness,
+      printer,
+      baseline,
+      postReconciliationDispatchWindowMs);
+    harness.require(
+      afterRelease.count > 0,
+      `queued-work-dispatched-after-reconciliation:commands=${afterRelease.count}:reads=${afterRelease.reads}`,
+      afterRelease.offenders.join(','));
     const final = proveDurable(harness, released, () => harness.recover('offline-recover-confirm'));
-    const total = commandsSince(baseline, printer.requests());
-    harness.require(total.count === 0, `emulator-commands-total:0:reads=${total.reads}`, total.offenders.join(','));
     if (fenceGaps.length > 0) throw faultScenarioFailure(fenceGaps.join('|'));
     return final;
   },
