@@ -154,8 +154,11 @@ if [[ -z "$SINK_IP" ]]; then
   exit 1
 fi
 
+# `--dns-search .` stops the runner's search domain (for example the Azure
+# `*.internal.cloudapp.net` suffix) being appended to lookups, so the canary query reaches the
+# sink as the exact name the evidence filter excludes and is not miscounted as egress (#3102).
 denied() {
-  docker run --rm --label "$RUN_LABEL" --network "$NETWORK" --dns "$SINK_IP" \
+  docker run --rm --label "$RUN_LABEL" --network "$NETWORK" --dns "$SINK_IP" --dns-search . \
     --read-only --tmpfs /tmp --user "$(id -u):$(id -g)" -e HOME=/tmp \
     -v "$REPO_ROOT:/repo:ro" -v "$PUBLISHED:/published:ro" -v "$TRUST:/trust:ro" \
     -v "$COSIGN:/usr/local/bin/cosign:ro" -v "$OUT:/out:rw" \

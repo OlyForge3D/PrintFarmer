@@ -186,6 +186,19 @@ test('fails on egress, a modified bundle, a changed host or an unverified signat
     verification: { signatureVerified: true, release: { ...insider, channel: 'stable', sequence: 7 } } }), /insider/);
 });
 
+test('a search-domain-suffixed canary query still counts as egress', () => {
+  const suffixed = 'canary.printfarmer.invalid.example.internal.cloudapp.net';
+  const record = buildVerificationRecord({ ...base,
+    attempts: [{ at: '2026-09-28T10:01:00Z', destination: suffixed, protocol: 'udp/53', query: suffixed }] });
+  assert.equal(record.verdict, 'fail');
+});
+
+test('the denied verification container disables DNS search domains', () => {
+  const script = readFileSync(new URL('../recovery-matrix/verify-published-bundle.sh', import.meta.url), 'utf8');
+  const denied = script.slice(script.indexOf('denied() {'), script.indexOf('\n}', script.indexOf('denied() {')));
+  assert.match(denied, /--dns "\$SINK_IP" --dns-search \. /);
+});
+
 test('reads egress-sink NDJSON attempts', () => {
   const root = mkdtempSync(join(tmpdir(), 'published-attempts-'));
   try {
