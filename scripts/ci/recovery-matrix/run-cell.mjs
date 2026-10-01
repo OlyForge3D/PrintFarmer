@@ -29,7 +29,7 @@ import {
 import { runImportScenario } from './import-scenarios.mjs';
 import { hasFaultHooks, invokeFaultHook, parseFaultHooks } from './fault-hooks.mjs';
 import { assertHostStateContinuity, readHostStateSnapshotFromBoundary } from './host-state-continuity.mjs';
-import { canaryDnsName, hasCanaryAttempt } from './network-denial.mjs';
+import { canaryDnsLookupCommand, hasCanaryAttempt } from './network-denial.mjs';
 import { providerFor } from './providers.mjs';
 import { redactSecrets, secretValuesFrom } from './redaction.mjs';
 import { serviceMappingsFor, topologyFor } from './topologies.mjs';
@@ -1646,7 +1646,7 @@ function proveNetworkDenialBoundary({ hostContainer, networkAttemptsPath }) {
       'set +e',
       "timeout 3 bash -lc 'cat </dev/null >/dev/tcp/1.1.1.1/443' >/dev/null 2>&1",
       'direct=$?',
-      `getent hosts ${canaryDnsName} >/dev/null 2>&1`,
+      canaryDnsLookupCommand,
       'dns=$?',
       'test "$direct" -ne 0',
       'test "$dns" -ne 0',

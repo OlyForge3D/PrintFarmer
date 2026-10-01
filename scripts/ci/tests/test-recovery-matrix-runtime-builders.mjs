@@ -12,7 +12,12 @@ import { writeDockerShim } from '../recovery-matrix/docker-shim.mjs';
 import { validateRecoveryEvidence } from '../recovery-matrix/evidence.mjs';
 import { hasFaultHooks, invokeFaultHook, parseFaultHooks } from '../recovery-matrix/fault-hooks.mjs';
 import { assertHostStateContinuity, readHostStateSnapshot, readHostStateSnapshotFromBoundary } from '../recovery-matrix/host-state-continuity.mjs';
-import { canaryDnsName, hasCanaryAttempt, withoutCanaryAttempts } from '../recovery-matrix/network-denial.mjs';
+import {
+  canaryDnsLookupCommand,
+  canaryDnsName,
+  hasCanaryAttempt,
+  withoutCanaryAttempts,
+} from '../recovery-matrix/network-denial.mjs';
 
 const scratchRoot = path.resolve('.recovery-matrix-test-work');
 
@@ -155,6 +160,25 @@ test('network-denial canary accounting is segregated from real attempts', () => 
   ];
   assert.equal(hasCanaryAttempt(attempts), true);
   assert.deepEqual(withoutCanaryAttempts(attempts), [attempts[1]]);
+});
+
+test('network-denial canary lookup passes an absolute name to the resolver', () => {
+  const scratch = path.join(scratchRoot, `resolver-canary-${process.pid}-${Date.now()}`);
+  const capturePath = path.join(scratch, 'getent-arguments.txt');
+  mkdirSync(scratch, { recursive: true });
+  try {
+    execFileSync('bash', ['-c', [
+      'getent() { printf "%s\\n" "$*" > "$CAPTURE_PATH"; return 2; }',
+      canaryDnsLookupCommand,
+      'test "$?" -eq 2',
+    ].join('\n')], {
+      env: { ...process.env, CAPTURE_PATH: capturePath },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    assert.equal(readFileSync(capturePath, 'utf8'), `hosts ${canaryDnsName}.\n`);
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
 });
 
 test('docker shim denies daemon-mediated pull and records it as egress evidence', () => {
