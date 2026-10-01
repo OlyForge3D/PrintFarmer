@@ -165,7 +165,7 @@ denied() {
 # Canary: prove the container cannot reach the internet and that DNS lands on the sink.
 denied bash -c '
   if timeout 3 bash -c "cat </dev/null >/dev/tcp/1.1.1.1/443" 2>/dev/null; then exit 90; fi
-  if getent hosts canary.printfarmer.invalid >/dev/null; then exit 91; fi
+  if getent hosts canary.printfarmer.invalid. >/dev/null; then exit 91; fi
 ' || { echo "Network-denial canary failed: the verification container reached the network" >&2; exit 1; }
 for _ in $(seq 1 25); do
   grep -q 'canary.printfarmer.invalid' "$RUN_ROOT/egress-sink/network-attempts.ndjson" && break

@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
+import { createSocket } from 'node:dgram';
+import { Resolver } from 'node:dns/promises';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
@@ -12,7 +14,12 @@ import { writeDockerShim } from '../recovery-matrix/docker-shim.mjs';
 import { validateRecoveryEvidence } from '../recovery-matrix/evidence.mjs';
 import { hasFaultHooks, invokeFaultHook, parseFaultHooks } from '../recovery-matrix/fault-hooks.mjs';
 import { assertHostStateContinuity, readHostStateSnapshot, readHostStateSnapshotFromBoundary } from '../recovery-matrix/host-state-continuity.mjs';
-import { canaryDnsName, hasCanaryAttempt, withoutCanaryAttempts } from '../recovery-matrix/network-denial.mjs';
+import {
+  canaryDnsName,
+  canaryDnsQuery,
+  hasCanaryAttempt,
+  withoutCanaryAttempts,
+} from '../recovery-matrix/network-denial.mjs';
 
 const scratchRoot = path.resolve('.recovery-matrix-test-work');
 
@@ -148,14 +155,58 @@ test('host-state snapshot reads a garbled replay store without crashing and fail
   }
 });
 
-test('network-denial canary accounting is segregated from real attempts', () => {
-  const attempts = [
-    { at: '2026-09-27T00:00:00Z', destination: canaryDnsName, protocol: 'udp/53', source: '172.30.1.2:45555' },
-    { at: '2026-09-27T00:00:01Z', destination: 'api.github.com', protocol: 'udp/53', source: '172.30.1.2:45556' },
-  ];
-  assert.equal(hasCanaryAttempt(attempts), true);
-  assert.deepEqual(withoutCanaryAttempts(attempts), [attempts[1]]);
+test('absolute canary DNS query records canonical identity and other resolver attempts fail closed', async () => {
+  const attempts = [];
+  const server = createSocket('udp4');
+  server.on('message', (message, remote) => {
+    const query = dnsQueryName(message);
+    attempts.push({
+      at: '2026-09-27T00:00:00Z',
+      destination: query,
+      protocol: 'udp/53',
+      source: `${remote.address}:${remote.port}`,
+      query,
+    });
+    const response = Buffer.from(message);
+    response.writeUInt16BE(0x8183, 2);
+    response.writeUInt16BE(0, 6);
+    response.writeUInt16BE(0, 8);
+    response.writeUInt16BE(0, 10);
+    server.send(response, remote.port, remote.address);
+  });
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.bind(0, '127.0.0.1', resolve);
+  });
+  try {
+    const resolver = new Resolver();
+    resolver.setServers([`127.0.0.1:${server.address().port}`]);
+    await assert.rejects(resolver.resolve4(canaryDnsQuery), { code: 'ENOTFOUND' });
+    assert.deepEqual(attempts.map(attempt => attempt.query), [canaryDnsName]);
+    assert.equal(hasCanaryAttempt(attempts), true);
+    assert.deepEqual(withoutCanaryAttempts(attempts), []);
+
+    await assert.rejects(resolver.resolve4('api.github.com.'), { code: 'ENOTFOUND' });
+    const realAttempts = withoutCanaryAttempts(attempts);
+    assert.deepEqual(realAttempts.map(attempt => attempt.query), ['api.github.com']);
+    assert.match(
+      validateRecoveryEvidence(minimalPassingEvidence({ attempts: realAttempts })).join('\n'),
+      /verdict: a run with outbound network attempts cannot pass/,
+    );
+  } finally {
+    server.close();
+  }
 });
+
+function dnsQueryName(message) {
+  const labels = [];
+  for (let index = 12; message[index] !== 0;) {
+    const length = message[index];
+    labels.push(message.subarray(index + 1, index + 1 + length).toString('ascii'));
+    index += length + 1;
+  }
+  return labels.join('.');
+}
 
 test('docker shim denies daemon-mediated pull and records it as egress evidence', () => {
   const scratch = path.join(scratchRoot, `docker-shim-${process.pid}-${Date.now()}`);
