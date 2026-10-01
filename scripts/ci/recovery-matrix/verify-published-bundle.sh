@@ -147,7 +147,22 @@ docker network create --internal --subnet "$NETWORK_SUBNET" --label "$RUN_LABEL"
 docker run -d --name "$SINK" --label "$RUN_LABEL" --network "$NETWORK" --network-alias egress-sink \
   -v "$SCRIPT_DIR/egress-sink.py:/egress-sink.py:ro" \
   -v "$RUN_ROOT/egress-sink:/egress:rw" \
-  "$SINK_IMAGE" python /egress-sink.py /egress/network-attempts.ndjson >/dev/null
+  "$SINK_IMAGE" python /egress-sink.py /egress/network-attempts.ndjson /egress/ready >/dev/null
+# The canary runs immediately; a sink that has not bound its listeners refuses the DNS query, so the
+# attempt is never recorded and the canary fails spuriously.
+for _ in $(seq 1 150); do
+  [[ -f "$RUN_ROOT/egress-sink/ready" ]] && break
+  if [[ "$(docker inspect -f '{{.State.Running}}' "$SINK" 2>/dev/null)" != "true" ]]; then
+    echo "Egress sink exited before becoming ready" >&2
+    docker logs "$SINK" >&2 || true
+    exit 1
+  fi
+  sleep 0.2
+done
+if [[ ! -f "$RUN_ROOT/egress-sink/ready" ]]; then
+  echo "Egress sink did not become ready" >&2
+  exit 1
+fi
 SINK_IP="$(docker inspect -f "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}" "$SINK")"
 if [[ -z "$SINK_IP" ]]; then
   echo "Failed to determine egress sink IP" >&2

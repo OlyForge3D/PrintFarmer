@@ -39,11 +39,22 @@ def record(path, protocol, destination, source, **extra):
         handle.flush()
 
 
-def tcp_listener(path, port):
+def tcp_socket(port):
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server.bind(("0.0.0.0", port))
     server.listen(128)
+    return server
+
+
+def udp_socket(port):
+    server = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    server.bind(("0.0.0.0", port))
+    return server
+
+
+def tcp_listener(path, server, port):
     while True:
         connection, address = server.accept()
         query = None
@@ -60,10 +71,7 @@ def tcp_listener(path, port):
             pass
 
 
-def udp_listener(path, port):
-    server = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    server.bind(("0.0.0.0", port))
+def udp_listener(path, server, port):
     while True:
         payload, address = server.recvfrom(4096)
         query = dns_query_name(payload)
@@ -71,14 +79,21 @@ def udp_listener(path, port):
 
 
 def main():
-    if len(sys.argv) != 2:
-        print("usage: egress-sink.py <attempts.ndjson>", file=sys.stderr)
+    if len(sys.argv) not in (2, 3):
+        print("usage: egress-sink.py <attempts.ndjson> [ready-marker]", file=sys.stderr)
         return 2
     path = sys.argv[1]
     open(path, "a", encoding="utf-8").close()
-    for port in (53, 80, 443):
-        threading.Thread(target=tcp_listener, args=(path, port), daemon=True).start()
-    threading.Thread(target=udp_listener, args=(path, 53), daemon=True).start()
+    # Bind every listener before signalling readiness so a caller never probes a sink that would
+    # refuse (and therefore not record) its first attempt.
+    tcp_servers = [(tcp_socket(port), port) for port in (53, 80, 443)]
+    udp_server = udp_socket(53)
+    for server, port in tcp_servers:
+        threading.Thread(target=tcp_listener, args=(path, server, port), daemon=True).start()
+    threading.Thread(target=udp_listener, args=(path, udp_server, 53), daemon=True).start()
+    if len(sys.argv) == 3:
+        with open(sys.argv[2], "w", encoding="utf-8") as handle:
+            handle.write("ready\n")
     threading.Event().wait()
     return 0
 

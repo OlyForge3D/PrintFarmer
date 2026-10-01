@@ -1322,6 +1322,8 @@ assets, checks them against the release asset digests, and obtains the
 public-good `trusted_root.json` with `cosign initialize`. The verification then
 runs in a read-only container on an internal Docker network whose only peer is
 the default-deny egress sink, after the same canary proof the matrix cells use.
+The canary runs only after the sink signals that every listener is bound, so a
+slow-starting sink cannot refuse (and fail to record) the canary DNS query.
 Cosign `verify-blob --trusted-root` first authenticates the published archive
 against the insider release workflow identity, then the
 [offline verifier](#verified-release-metadata-bundle-first-slice) checks every
