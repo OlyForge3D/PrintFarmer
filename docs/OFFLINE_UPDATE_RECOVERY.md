@@ -1289,12 +1289,12 @@ store stay unchanged and the snapshot must move forward to exactly the
 pre-rollback anchor. Channel switches are operator policy edits with
 increasing revisions.
 
-| Cell id | What it proves | Local run status |
+| Cell id | What it proves | Workflow evidence |
 | --- | --- | --- |
-| `import-identity` | Stable `1.0.0` and insider `1.0.0-insider.10` imports keep the builder's version, channel, source commit and manifest digest. A fresh host trusts a root only through an approval bound to its exact bytes. A bundle-supplied attacker root, an attacker approval, a missing approval and an unbound approval are each refused before mutation | Pass (2026-09-28, `4df1f7109`) |
-| `import-channel-round-trips` | stable→insider→stable and insider→stable→insider through policy edits. An insider bundle is refused without the policy edit (`channel_mismatch_policy`) and under a `stable` alias. A lower sequence is an unsupported downgrade on each channel. A moved branch (same version, different source) and a deleted-alias reimport are refused | Pass (2026-09-28, `4df1f7109`) |
-| `import-adversarial` | The adversarial set below, each refused before mutation, then an intact higher insider release still imports | Pass (2026-09-28, `4df1f7109`) |
-| `import-replay-supersede` | 41 is admitted, then 42 supersedes it. Neither is installed. Reimporting 41 is refused `replay_superseded`, and activating 41's staging must return the packaged CLI `Refused` exit code with the same `replay_superseded` reason and no mutation; a crash or unrelated refusal fails the cell. Both hold after policy edits, both round trips, a host restart, and restores of an older app database (`pg_dump`, then application stopped, database recreated and `pg_restore`), policy file and staging cache. The independent stable channel keeps importing | Pass (2026-09-28, `4df1f7109`) |
+| `import-identity` | Stable `1.0.0` and insider `1.0.0-insider.10` imports keep the builder's version, channel, source commit and manifest digest. A fresh host trusts a root only through an approval bound to its exact bytes. A bundle-supplied attacker root, an attacker approval, a missing approval and an unbound approval are each refused before mutation | Pass (2026-10-02, Ubuntu 24.04 x64, [run 37017025722](https://github.com/OlyForge3D/PrintFarmer/actions/runs/37017025722), commit `6fc4094dd0e6999684d94016efbc335d59baa7b8`) |
+| `import-channel-round-trips` | stable→insider→stable and insider→stable→insider through policy edits. An insider bundle is refused without the policy edit (`channel_mismatch_policy`) and under a `stable` alias. A lower sequence is an unsupported downgrade on each channel. A moved branch (same version, different source) and a deleted-alias reimport are refused | Pass (2026-10-02, Ubuntu 24.04 x64, [run 37017025722](https://github.com/OlyForge3D/PrintFarmer/actions/runs/37017025722), commit `6fc4094dd0e6999684d94016efbc335d59baa7b8`) |
+| `import-adversarial` | The adversarial set below, each refused before mutation, then an intact higher insider release still imports | Pass (2026-10-02, Ubuntu 24.04 x64, [run 37017025722](https://github.com/OlyForge3D/PrintFarmer/actions/runs/37017025722), commit `6fc4094dd0e6999684d94016efbc335d59baa7b8`) |
+| `import-replay-supersede` | 41 is admitted, then 42 supersedes it. Neither is installed. Reimporting 41 is refused `replay_superseded`, and activating 41's staging must return the packaged CLI `Refused` exit code with the same `replay_superseded` reason and no mutation; a crash or unrelated refusal fails the cell. Both hold after policy edits, both round trips, a host restart, and restores of an older app database (`pg_dump`, then application stopped, database recreated and `pg_restore`), policy file and staging cache. The independent stable channel keeps importing | Pass (2026-10-02, Ubuntu 24.04 x64, [run 37017025722](https://github.com/OlyForge3D/PrintFarmer/actions/runs/37017025722), commit `6fc4094dd0e6999684d94016efbc335d59baa7b8`); every superseded activation returned `replay_superseded` / exit 6 |
 
 The adversarial set: missing image, missing or unbound trust approval, missing
 config, symlink and `../` traversal archive members, modified bytes, forged
@@ -1339,12 +1339,14 @@ option. If the newest insider release lacks its signed bundle, it fails with
 Matrix workflow runs it as the `published-bundle` job on its schedule and on
 dispatch. It fails until the first insider release that publishes the bundle.
 
-Criterion 5 passed on 2026-10-01 against the real published insider release
+Criterion 5 passed on 2026-10-02 against the real published insider release
 `v0.2.3-insider.5` in
-[Recovery Matrix run 36917806612](https://github.com/OlyForge3D/PrintFarmer/actions/runs/36917806612).
-The retained `printfarmer-published-bundle-verification` record names harness
-commit `1859e894757c7c80bb754970e349c1c9d2d0099d`, Ubuntu 24.04 x64, bundle
-SHA-256
+[Recovery Matrix run 37021745811](https://github.com/OlyForge3D/PrintFarmer/actions/runs/37021745811),
+at harness commit `6fc4094dd0e6999684d94016efbc335d59baa7b8`; the retained
+`recovery-matrix-evidence-published-bundle-37021745811` artifact contains the
+`printfarmer-published-bundle-verification` record. It identifies source commit
+`28783c0dbca6dd93d9b3c05b7e630d5bb093f4e4`, build `36889005001`, sequence
+`20000300005`, Ubuntu 24.04 x64, bundle SHA-256
 `e4b807baa9708be0e97961d774583ea5e88ad35478ee81ccc425175bd067c9f7`,
 and signing root `published-insider`. Its verdict is `pass`: the signature
 verified, the denied phase recorded no outbound attempt, and `imported`,
