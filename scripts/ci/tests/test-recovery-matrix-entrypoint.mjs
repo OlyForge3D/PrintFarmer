@@ -5,6 +5,8 @@ import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 
 import { cellIds } from '../recovery-matrix/cells.mjs';
+import { faultCellIds } from '../recovery-matrix/fault-cells.mjs';
+import { importCellIds } from '../recovery-matrix/import-cells.mjs';
 
 const repoRoot = path.resolve(import.meta.dirname, '../../..');
 const script = path.join(repoRoot, 'scripts/ci/recovery-matrix/run-cell.sh');
@@ -37,7 +39,11 @@ function createHarness() {
   writeExecutable(path.join(bin, 'node'), `#!/usr/bin/env bash
 set -euo pipefail
 if [[ " $* " == *" --input-type=module "* ]]; then
-  printf '%s\n' "${cellIds.join(' ')}"
+  case "$*" in
+    *import-cells.mjs*) printf '%s\n' "${importCellIds.join(' ')}" ;;
+    *fault-cells.mjs*) printf '%s\n' "${faultCellIds.join(' ')}" ;;
+    *) printf '%s\n' "${cellIds.join(' ')}" ;;
+  esac
   exit 0
 fi
 printf '%s\n' "$*" >> "${toBashPath(runLog)}"
@@ -88,6 +94,35 @@ test('run-cell.sh expands all cells with executable cosign and distinct evidence
       const line = invocations.find((candidate) => candidate.includes(`--cell ${cellId}`));
       assert.ok(line, `expected invocation for ${cellId}`);
       assert.match(line, new RegExp(`--evidence .*matrix-${cellId}\\.json`));
+    }
+  } finally {
+    harness.cleanup();
+  }
+});
+
+test('run-cell.sh expands the imports group to every live import cell', { skip: !hasBash() }, () => {
+  const harness = createHarness();
+  try {
+    const evidence = path.join(harness.work, 'imports.json');
+    const result = spawnSync('bash', [
+      toBashPath(script),
+      '--cell', 'imports',
+      '--work-dir', toBashPath(harness.work),
+      '--evidence', toBashPath(evidence),
+      '--cosign', toBashPath(harness.cosign),
+      '--keep-work',
+    ], {
+      cwd: repoRoot,
+      env: { ...process.env, PATH: `${harness.bin}${path.delimiter}${process.env.PATH}` },
+      encoding: 'utf8',
+    });
+    assert.equal(result.status, 0, `${result.stderr}\n${result.stdout}`);
+    const invocations = readFileSync(harness.runLog, 'utf8').trim().split(/\r?\n/);
+    assert.equal(invocations.length, importCellIds.length);
+    for (const cellId of importCellIds) {
+      const line = invocations.find((candidate) => candidate.includes(`--cell ${cellId}`));
+      assert.ok(line, `expected invocation for ${cellId}`);
+      assert.match(line, new RegExp(`--evidence .*imports-${cellId}\\.json`));
     }
   } finally {
     harness.cleanup();

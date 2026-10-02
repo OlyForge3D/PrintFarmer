@@ -162,6 +162,16 @@ export function assertRefusedImport(label, result, { reason } = {}) {
   return actual;
 }
 
+export function assertSupersededActivation(label, result) {
+  if (result.exitCode !== 6) {
+    fail('superseded_activation_not_refused', `${label}:exit ${result.exitCode}`);
+  }
+  const output = `${result.stdout ?? ''}\n${result.stderr ?? ''}`;
+  if (!/\breplay_superseded\b/.test(output)) {
+    fail('superseded_activation_wrong_reason', label);
+  }
+}
+
 const replayFiles = ['host-update-replay.json', 'replay-anchor.json', 'replay-anchor.journal'];
 
 function assertSameState(label, before, after, { exempt = [] } = {}) {
@@ -675,9 +685,9 @@ function runReplaySupersede(ctx, h) {
     h.refused(`41-rejected-${phase}`, r41, { bundle: b41, reason: 'replay_superseded' });
     const before = ctx.mutationSnapshot();
     const activation = ctx.activate({ built: r41, label: 'replay-41-admitted' });
-    if (activation.exitCode === 0) fail('superseded_release_activated', phase);
+    assertSupersededActivation(phase, activation);
     ctx.assertNoMutation(`41-activation-${phase}`, before, ctx.mutationSnapshot());
-    ctx.checkpoints.ok(`41-activation-refused-${phase}:exit-${activation.exitCode}`);
+    ctx.checkpoints.ok(`41-activation-refused-${phase}:replay_superseded:exit-${activation.exitCode}`);
     if (supersedeView(ctx.replayState()) !== expectedView) {
       fail('replay_state_changed', phase);
     }

@@ -1294,7 +1294,7 @@ increasing revisions.
 | `import-identity` | Stable `1.0.0` and insider `1.0.0-insider.10` imports keep the builder's version, channel, source commit and manifest digest. A fresh host trusts a root only through an approval bound to its exact bytes. A bundle-supplied attacker root, an attacker approval, a missing approval and an unbound approval are each refused before mutation | Pass (2026-09-28, `4df1f7109`) |
 | `import-channel-round-trips` | stable→insider→stable and insider→stable→insider through policy edits. An insider bundle is refused without the policy edit (`channel_mismatch_policy`) and under a `stable` alias. A lower sequence is an unsupported downgrade on each channel. A moved branch (same version, different source) and a deleted-alias reimport are refused | Pass (2026-09-28, `4df1f7109`) |
 | `import-adversarial` | The adversarial set below, each refused before mutation, then an intact higher insider release still imports | Pass (2026-09-28, `4df1f7109`) |
-| `import-replay-supersede` | 41 is admitted, then 42 supersedes it. Neither is installed. Reimporting 41 is refused `replay_superseded`, and activating 41's staging is refused with no mutation. Both hold after policy edits, both round trips, a host restart, and restores of an older app database (`pg_dump`, then application stopped, database recreated and `pg_restore`), policy file and staging cache. The independent stable channel keeps importing | Pass (2026-09-28, `4df1f7109`) |
+| `import-replay-supersede` | 41 is admitted, then 42 supersedes it. Neither is installed. Reimporting 41 is refused `replay_superseded`, and activating 41's staging must return the packaged CLI `Refused` exit code with the same `replay_superseded` reason and no mutation; a crash or unrelated refusal fails the cell. Both hold after policy edits, both round trips, a host restart, and restores of an older app database (`pg_dump`, then application stopped, database recreated and `pg_restore`), policy file and staging cache. The independent stable channel keeps importing | Pass (2026-09-28, `4df1f7109`) |
 
 The adversarial set: missing image, missing or unbound trust approval, missing
 config, symlink and `../` traversal archive members, modified bytes, forged
@@ -1339,13 +1339,17 @@ option. If the newest insider release lacks its signed bundle, it fails with
 Matrix workflow runs it as the `published-bundle` job on its schedule and on
 dispatch. It fails until the first insider release that publishes the bundle.
 
-Criterion 5 is still pending a real release. As of 2026-09-28 the newest
-published insider release, `v0.2.3-insider.4`, predates #3195 and carries no
-offline recovery bundle, so there is nothing real to verify yet. Cutting that
-release is the repository owner's decision, and no fixture or locally built
-bundle can stand in for it. Record the first passing
-`printfarmer-published-bundle-verification` result against #3102 once an
-insider release publishes the bundle.
+Criterion 5 passed on 2026-10-01 against the real published insider release
+`v0.2.3-insider.5` in
+[Recovery Matrix run 36917806612](https://github.com/OlyForge3D/PrintFarmer/actions/runs/36917806612).
+The retained `printfarmer-published-bundle-verification` record names harness
+commit `1859e894757c7c80bb754970e349c1c9d2d0099d`, Ubuntu 24.04 x64, bundle
+SHA-256
+`e4b807baa9708be0e97961d774583ea5e88ad35478ee81ccc425175bd067c9f7`,
+and signing root `published-insider`. Its verdict is `pass`: the signature
+verified, the denied phase recorded no outbound attempt, and `imported`,
+`activated`, and `hostModified` are all `false`. No fixture or locally built
+bundle stands in for this evidence.
 
 ### Queue-consumer health entry (#3157)
 
