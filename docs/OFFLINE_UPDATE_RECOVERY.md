@@ -463,12 +463,25 @@ instructions' SHA-256 and operation IDs.
 The signed instructions package these exact schema-2 command vectors for a
 stable `1.4.0` release. Replace angle-bracket placeholders with host-local
 absolute paths or identifiers; do not add optional flags to the packaged
-operation. The generator and focused test bind these lines byte-for-byte to
-`offline-recovery-instructions.json`.
+operation. `--channel`, `--version` and `--release` are release-bound values:
+use the values reproduced verbatim in the host's signed
+`offline-recovery-instructions.json`. The generator and focused test bind the
+complete ordered block below line-for-line.
 
+<!-- packaged-command-vectors:start -->
 ```text
 printfarmer-host-update.sh import --config <host-update.json> --bundle <bundle.tar> --channel stable --version 1.4.0 --trusted-root <trusted_root.json> --trusted-root-approval <trusted-root-approval.json> --staging <new-staging-dir> --records <decision-records-dir> --operator <operator>
 pwsh -File printfarmer-host-update.ps1 import -Config <host-update.json> -Bundle <bundle.tar> -Channel stable -Version 1.4.0 -TrustedRoot <trusted_root.json> -TrustedRootApproval <trusted-root-approval.json> -Staging <new-staging-dir> -Records <decision-records-dir> -Operator <operator>
+printfarmer-host-update.sh --config <host-update.json> status --release stable:1.4.0 --json
+pwsh -File printfarmer-host-update.ps1 -Config <host-update.json> status -Release stable:1.4.0 -Json
+printfarmer-host-update.sh --config <host-update.json> recover --release stable:1.4.0 --preview
+pwsh -File printfarmer-host-update.ps1 -Config <host-update.json> recover -Release stable:1.4.0 -Preview
+printfarmer-host-update.sh --config <host-update.json> recover --release stable:1.4.0 --confirm stable:1.4.0
+pwsh -File printfarmer-host-update.ps1 -Config <host-update.json> recover -Release stable:1.4.0 -Confirm stable:1.4.0
+printfarmer-host-update.sh import --config <host-update.json> --bundle <bundle.tar> --channel stable --version 1.4.0 --trusted-root <trusted_root.json> --trusted-root-approval <trusted-root-approval.json> --staging <new-staging-dir> --records <decision-records-dir> --operator <operator> --protected-backup <protected-backup.json>
+pwsh -File printfarmer-host-update.ps1 import -Config <host-update.json> -Bundle <bundle.tar> -Channel stable -Version 1.4.0 -TrustedRoot <trusted_root.json> -TrustedRootApproval <trusted-root-approval.json> -Staging <new-staging-dir> -Records <decision-records-dir> -Operator <operator> -ProtectedBackup <protected-backup.json>
+printfarmer-host-update.sh import --config <host-update.json> --bundle <bundle.tar> --channel stable --version 1.4.0 --trusted-root <trusted_root.json> --trusted-root-approval <trusted-root-approval.json> --staging <new-staging-dir> --records <decision-records-dir> --operator <operator> --prior-recovery-set <prior-recovery-set-dir> --protected-backup <protected-backup.json>
+pwsh -File printfarmer-host-update.ps1 import -Config <host-update.json> -Bundle <bundle.tar> -Channel stable -Version 1.4.0 -TrustedRoot <trusted_root.json> -TrustedRootApproval <trusted-root-approval.json> -Staging <new-staging-dir> -Records <decision-records-dir> -Operator <operator> -PriorRecoverySet <prior-recovery-set-dir> -ProtectedBackup <protected-backup.json>
 printfarmer-host-update.sh activate --config <host-update.json> --staging <staging-dir> --channel stable --trusted-root <trusted_root.json>
 pwsh -File printfarmer-host-update.ps1 activate -Config <host-update.json> -Staging <staging-dir> -Channel stable -TrustedRoot <trusted_root.json>
 printfarmer-host-update.sh recover-offline --config <host-update.json> --staging <staging-dir> --channel stable --trusted-root <trusted_root.json> --protected-backup <protected-backup.json> --release stable:1.4.0 --preview
@@ -476,16 +489,7 @@ pwsh -File printfarmer-host-update.ps1 recover-offline -Config <host-update.json
 printfarmer-host-update.sh recover-offline --config <host-update.json> --staging <staging-dir> --channel stable --trusted-root <trusted_root.json> --protected-backup <protected-backup.json> --release stable:1.4.0 --confirm stable:1.4.0
 pwsh -File printfarmer-host-update.ps1 recover-offline -Config <host-update.json> -Staging <staging-dir> -Channel stable -TrustedRoot <trusted_root.json> -ProtectedBackup <protected-backup.json> -Release stable:1.4.0 -Confirm stable:1.4.0
 ```
-
-The two prior-bound import variants append exactly one of these suffixes to the
-matching import vector:
-
-```text
---protected-backup <protected-backup.json>
---prior-recovery-set <prior-recovery-set-dir> --protected-backup <protected-backup.json>
--ProtectedBackup <protected-backup.json>
--PriorRecoverySet <prior-recovery-set-dir> -ProtectedBackup <protected-backup.json>
-```
+<!-- packaged-command-vectors:end -->
 
 Import on the network-denied host with the one documented command for each
 platform (the paths must be absolute; `--staging` must not exist yet and
