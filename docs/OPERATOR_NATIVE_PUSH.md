@@ -1,27 +1,30 @@
 # Operator native push (F3 / #708) — backend architecture
 
-Status: **implemented (backend/API stage)** on `feature/705-operator-redesign`.
-Mobile client wiring is a separate stage; this document covers the server design
-that Bishop / Hicks / Vasquez reviewed and gated.
+Status: **optional backend capability; disabled in the shipped v1 mobile
+architecture**. OlyForge3D does not operate a notification relay. The App Store
+build uses SignalR updates and on-device local notifications for normal alerts.
+This document covers server-side infrastructure that operators of custom
+deployments may configure.
 
 ## 1. Constraints and the topology decision
 
 PrintFarmer is self-hosted per customer. OlyForge3D owns the App Store bundle
-identifier and the associated APNs `.p8` provider key; that key must never be
-distributed to a self-hosted install (Dallas triage on #708). At the same time
-the backend must compile, run, and pass tests without any live credentials.
+identifier and does not distribute its APNs credentials or provide a hosted
+push service. The backend must compile, run, and pass tests without any live
+credentials.
 
 We resolve this with a **provider-abstract sender** chosen by configuration:
 
-| Mode      | `NativePush__Mode` | Where APNs credentials live                    | Intended use                       |
-|-----------|--------------------|------------------------------------------------|------------------------------------|
-| `disabled`| (default / unset)  | nowhere                                        | fresh install, dev, CI             |
-| `relay`   | `relay`            | OlyForge3D-hosted relay (backend never sees)   | production TestFlight / App Store  |
-| `direct`  | `direct`           | local backend `.p8` (path or PEM)              | self-signed enterprise / dev-cert  |
+| Mode       | `NativePush__Mode` | Where APNs credentials live                  | Intended use |
+|------------|--------------------|----------------------------------------------|--------------|
+| `disabled` | (default / unset)  | nowhere                                      | shipped v1, fresh installs, dev, CI |
+| `relay`    | `relay`            | operator-selected relay (backend never sees) | optional custom deployment |
+| `direct`   | `direct`           | local backend `.p8` (path or PEM)            | custom-signed enterprise/development build |
 
-The default is **disabled**. The recommended production topology is **relay**;
-`direct` exists so an operator who signs their own build can bring their own
-provider key without a code change.
+The default and shipped v1 topology is **disabled**. Normal mobile alerts use
+SignalR and on-device local notifications. Relay and direct modes are optional
+building blocks for operators who own the required service and signing
+credentials; OlyForge3D does not host or recommend a relay endpoint.
 
 > **All `NativePushSettings` values are startup-bound and require a process
 > restart after changes.** The options are validated with `ValidateOnStart()`,
@@ -47,9 +50,9 @@ time (chosen by `Mode`); the disabled sender is a no-op that returns
   authoritative and the path is ignored; an invalid/public-only inline key fails
   startup rather than falling back to the file. The path is read only when the
   inline slot is empty.
-- Relay mode uses a bearer token (`NativePush__Relay__ApiKey`) issued per
-  installation by OlyForge3D. The relay endpoint URL is separate
-  (`NativePush__Relay__Endpoint`).
+- Relay mode uses a bearer token (`NativePush__Relay__ApiKey`) issued by the
+  operator's chosen relay service. The operator supplies the separate relay URL
+  (`NativePush__Relay__Endpoint`). OlyForge3D does not provide either value.
 - Deployment template `.env.template` documents the keys but never contains
   live values. See `.env.template` at the repository root.
 - Startup validation (`NativePushSettingsValidator`, wired via
@@ -426,10 +429,10 @@ Structured logs use `attentionItemId`, `changeKind`, `installationId`,
 # Native push (F3 / #708). Default: disabled.
 NativePush__Mode=disabled
 
-# Relay mode (production)
+# Optional relay mode (operator-provided; not hosted by OlyForge3D)
 # NativePush__Mode=relay
-# NativePush__Relay__Endpoint=https://push-relay.olyforge3d.com/v1/dispatch
-# NativePush__Relay__ApiKey=<per-install bearer, obtained from OlyForge3D>
+# NativePush__Relay__Endpoint=https://push-relay.example.com/v1/dispatch
+# NativePush__Relay__ApiKey=<per-install bearer issued by your relay operator>
 
 # Direct APNs mode (self-signed / enterprise). Inline PEM takes precedence over the path.
 # NativePush__Mode=direct
@@ -528,4 +531,5 @@ locks this.
   a follow-up.
 - No React preferences UI changes. #716 will consume the shared enum + the
   `GET /api/notifications/attention-categories` endpoint.
-- Provisioning of live APNs / relay credentials is Parker's release/#724 scope.
+- Provisioning custom-deployment APNs or relay credentials is the operator's
+  responsibility and is not part of the shipped v1 App Store release.
