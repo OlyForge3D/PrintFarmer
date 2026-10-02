@@ -458,6 +458,35 @@ the signed manifest identity, so a re-signed, edited, wrong-release or
 unflagged copy is rejected. The verification record then names the
 instructions' SHA-256 and operation IDs.
 
+### Exact packaged commands
+
+The signed instructions package these exact schema-2 command vectors for a
+stable `1.4.0` release. Replace angle-bracket placeholders with host-local
+absolute paths or identifiers; do not add optional flags to the packaged
+operation. The generator and focused test bind these lines byte-for-byte to
+`offline-recovery-instructions.json`.
+
+```text
+printfarmer-host-update.sh import --config <host-update.json> --bundle <bundle.tar> --channel stable --version 1.4.0 --trusted-root <trusted_root.json> --trusted-root-approval <trusted-root-approval.json> --staging <new-staging-dir> --records <decision-records-dir> --operator <operator>
+pwsh -File printfarmer-host-update.ps1 import -Config <host-update.json> -Bundle <bundle.tar> -Channel stable -Version 1.4.0 -TrustedRoot <trusted_root.json> -TrustedRootApproval <trusted-root-approval.json> -Staging <new-staging-dir> -Records <decision-records-dir> -Operator <operator>
+printfarmer-host-update.sh activate --config <host-update.json> --staging <staging-dir> --channel stable --trusted-root <trusted_root.json>
+pwsh -File printfarmer-host-update.ps1 activate -Config <host-update.json> -Staging <staging-dir> -Channel stable -TrustedRoot <trusted_root.json>
+printfarmer-host-update.sh recover-offline --config <host-update.json> --staging <staging-dir> --channel stable --trusted-root <trusted_root.json> --protected-backup <protected-backup.json> --release stable:1.4.0 --preview
+pwsh -File printfarmer-host-update.ps1 recover-offline -Config <host-update.json> -Staging <staging-dir> -Channel stable -TrustedRoot <trusted_root.json> -ProtectedBackup <protected-backup.json> -Release stable:1.4.0 -Preview
+printfarmer-host-update.sh recover-offline --config <host-update.json> --staging <staging-dir> --channel stable --trusted-root <trusted_root.json> --protected-backup <protected-backup.json> --release stable:1.4.0 --confirm stable:1.4.0
+pwsh -File printfarmer-host-update.ps1 recover-offline -Config <host-update.json> -Staging <staging-dir> -Channel stable -TrustedRoot <trusted_root.json> -ProtectedBackup <protected-backup.json> -Release stable:1.4.0 -Confirm stable:1.4.0
+```
+
+The two prior-bound import variants append exactly one of these suffixes to the
+matching import vector:
+
+```text
+--protected-backup <protected-backup.json>
+--prior-recovery-set <prior-recovery-set-dir> --protected-backup <protected-backup.json>
+-ProtectedBackup <protected-backup.json>
+-PriorRecoverySet <prior-recovery-set-dir> -ProtectedBackup <protected-backup.json>
+```
+
 Import on the network-denied host with the one documented command for each
 platform (the paths must be absolute; `--staging` must not exist yet and
 `--records` must be an existing directory kept outside replaced containers and
@@ -1442,6 +1471,14 @@ secret-bearing field names.
 `validateMatrixRun` validates a whole run: every record, one shared run
 identity, no duplicated cell, at least one cell and exactly one published-bundle
 verification.
+
+Retain the validated JSON record and the complete cell log together. A fixture
+cell record proves only the isolated harness behavior it names; it never proves
+staging, a named pilot, or a real published-bundle result. A real published
+bundle is evidence only when its separate
+`printfarmer-published-bundle-verification` record passes and is retained with
+the workflow run. Retention duration remains the proposed, unapproved value
+below until jpapiez agrees.
 
 **Schema-delta fixture (#3167).** Migration power-loss and partial-migration
 fault cells need a target whose schema really differs from the prior release,

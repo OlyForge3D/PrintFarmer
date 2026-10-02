@@ -1615,6 +1615,18 @@ test('recovery instructions are derived only from the signed release identity', 
     assert.deepEqual(byId[id].bash, [sh, ...bashArgs], `${id} Bash vector`);
     assert.deepEqual(byId[id].powershell, [...ps, ...powershellArgs], `${id} PowerShell vector`);
   }
+  const documentedOperationIds = ['offline-bundle-import', 'offline-activate',
+    'offline-recover-preview', 'offline-recover-confirm'];
+  const docs = ['docs/OFFLINE_UPDATE_RECOVERY.md', 'docs/HOST_UPDATE_RUNBOOK.md']
+    .map(path => [path, readFileSync(path, 'utf8')]);
+  for (const id of documentedOperationIds) {
+    for (const vector of [byId[id].bash, byId[id].powershell]) {
+      const command = vector.join(' ');
+      for (const [path, content] of docs) {
+        assert.ok(content.includes(command), `${path} must quote ${id} exactly: ${command}`);
+      }
+    }
+  }
   // Schema 1 documents published before #2981 stay verifiable, byte for byte. The golden digest was
   // produced by the pre-#2981 generator, so it does not depend on the current implementation.
   const legacy = recoveryInstructionsDocument(identity, 1);
