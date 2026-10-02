@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Privacy Policy — PrintFarmer Mobile</title>
+  <meta name="description" content="Privacy policy for the PrintFarmer Mobile iOS app.">
+  <meta name="robots" content="index, follow">
+  <link rel="canonical" href="https://olyforge3d.github.io/PrintFarmer/privacy/">
+  <style>
+    :root {
+      color-scheme: light dark;
+      --max-width: 46rem;
+      --fg: #1b1f23;
+      --bg: #ffffff;
+      --muted: #4b5563;
+      --accent: #0b5fff;
+      --border: #d7dbe0;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --fg: #e6e8eb;
+        --bg: #14161a;
+        --muted: #aab0b8;
+        --accent: #6fa8ff;
+        --border: #30343a;
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      padding: 0;
+      background: var(--bg);
+      color: var(--fg);
+      font: 1rem/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+
+    a {
+      color: var(--accent);
+    }
+
+    a:focus-visible,
+    button:focus-visible {
+      outline: 3px solid var(--accent);
+      outline-offset: 2px;
+    }
+
+    .skip-link {
+      position: absolute;
+      left: -9999px;
+      top: 0;
+      background: var(--bg);
+      color: var(--fg);
+      padding: 0.75rem 1rem;
+      border: 2px solid var(--accent);
+      z-index: 10;
+    }
+
+    .skip-link:focus {
+      left: 1rem;
+      top: 1rem;
+    }
+
+    header,
+    main,
+    footer {
+      max-width: var(--max-width);
+      margin: 0 auto;
+      padding: 1.5rem 1.25rem;
+    }
+
+    header {
+      border-bottom: 1px solid var(--border);
+    }
+
+    header p {
+      color: var(--muted);
+      margin: 0.25rem 0 0;
+    }
+
+    h1 {
+      font-size: 1.75rem;
+      margin: 0;
+    }
+
+    h2 {
+      font-size: 1.25rem;
+      margin-top: 2.25rem;
+      border-top: 1px solid var(--border);
+      padding-top: 1.25rem;
+    }
+
+    h2:first-of-type {
+      border-top: none;
+      padding-top: 0;
+      margin-top: 1.5rem;
+    }
+
+    ul {
+      padding-left: 1.25rem;
+    }
+
+    li + li {
+      margin-top: 0.4rem;
+    }
+
+    code {
+      font-size: 0.9em;
+      background: rgba(127, 127, 127, 0.15);
+      padding: 0.1rem 0.3rem;
+      border-radius: 0.25rem;
+    }
+
+    .note {
+      background: rgba(11, 95, 255, 0.08);
+      border: 1px solid var(--border);
+      border-radius: 0.5rem;
+      padding: 0.9rem 1rem;
+    }
+
+    footer {
+      border-top: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Skip to main content</a>
+
+  <header>
+    <h1>PrintFarmer Mobile Privacy Policy</h1>
+    <p>Last updated: October 2, 2026</p>
+  </header>
+
+  <main id="main-content">
+    <p>
+      PrintFarmer Mobile is a client app for <strong>PrintFarmer</strong>, an open-source,
+      self-hosted 3D-printer farm management system. You run your own PrintFarmer server (or
+      have one run for you), and the app connects to the server or servers you choose to add.
+      This page explains what the app does and does not do with your information.
+    </p>
+
+    <div class="note">
+      <strong>In short:</strong> PrintFarmer Mobile does not include advertising or
+      cross-app/cross-site tracking SDKs. The app talks directly to the self-hosted server(s)
+      you add, keeps your sign-in credentials in the iOS Keychain, and keeps connection and
+      preference data on your device. The only data that leaves your device toward
+      <strong>OlyForge3D</strong> (rather than your own server) is the optional native push
+      notification path described below, which you can turn off at any time.
+    </div>
+
+    <h2>Information we do not collect</h2>
+    <ul>
+      <li>No advertising identifiers, ad networks, or ad SDKs.</li>
+      <li>No cross-app or cross-site behavioral tracking.</li>
+      <li>No third-party analytics, crash-reporting, or marketing SDKs are bundled with the
+        app. The app's own "analytics" screens (for example print job history and
+        maintenance insights) compute statistics from data already on your selected server
+        and display them locally; they are not sent to OlyForge3D or any third party.</li>
+    </ul>
+
+    <h2>Information stored on your device</h2>
+    <p>The app stores the following locally, on your device, so it can reconnect and remember
+      your preferences between launches:</p>
+    <ul>
+      <li><strong>Server registrations</strong> — the address and display name of each
+        PrintFarmer server you add, and which one is active.</li>
+      <li><strong>Sign-in credentials and session tokens</strong> — stored in the iOS
+        Keychain (not plain app storage), encrypted at rest, scoped to this device only
+        (excluded from iCloud Keychain sync), and unavailable until the device has been
+        unlocked at least once since restart. This does not require a passcode or Face
+        ID/Touch ID prompt on every use of the app.</li>
+      <li><strong>App preferences</strong> — settings such as theme, NFC tag format, advanced
+        printer-controls opt-in, and push-notification opt-in.</li>
+      <li><strong>Local caches</strong> — recent printer/job status snapshots and similar
+        operational data fetched from your server, cached on-device to make the app feel
+        responsive and to support brief offline viewing. These caches mirror data that
+        already lives on your server; the app is not the source of truth for it.</li>
+    </ul>
+    <p>None of this on-device data is shared with OlyForge3D. Clearing app data, signing out,
+      or deleting the app removes it from your device.</p>
+
+    <h2>How the app communicates with servers</h2>
+    <p>PrintFarmer Mobile connects to the PrintFarmer server(s) you explicitly add —
+      typically a server you or your organization operate on your own network or
+      infrastructure. Public or remote servers (reachable over the internet, including by
+      hostname or public IP address) are required to use HTTPS; the app will not connect
+      to such a server over plain http://, so the address is rejected and you must use
+      https://. Servers you add
+      on your own local network — for example by IP address on your Wi-Fi, or a
+      <code>.local</code> hostname discovered via Bonjour — may instead use plain HTTP, since
+      that traffic does not leave your local network. In both cases, data you send and
+      receive travels using whichever transport (HTTP or HTTPS) that server is configured
+      for; the app does not add its own encryption on top of a server's chosen transport.
+      The app may also use local-network discovery (Bonjour) to help you find a PrintFarmer
+      server on your own Wi-Fi network. Your account data, printer data, job data, and files
+      you manage through the app are controlled by that server and its operator, not by
+      OlyForge3D. If you have questions about how a specific server retains or deletes your
+      data, contact that server's operator.</p>
+
+    <h2>Camera, barcode/QR, and NFC scanning</h2>
+    <p>The app can use the device camera to scan barcodes and QR codes on filament spools and
+      parts, and can read NFC tags on printers and spools, for quick inventory lookups. This
+      processing happens on-device: the app decodes an identifier from the camera frame or NFC
+      tag and does not capture, store, or upload photos, video, or raw NFC payloads. The
+      decoded identifier (for example a spool or part ID) may then be sent to the server you
+      have selected, the same way any other lookup in the app is sent, so that server can
+      match it to inventory records it holds.</p>
+
+    <h2>Printer camera (webcam) viewing</h2>
+    <p>If a printer's webcam feed is available on your selected server, the app displays that
+      video stream to you directly from your server. This is your printer's own camera feed,
+      proxied by your server — the app does not access the device's camera for this feature,
+      and does not record, store, or forward that video anywhere else.</p>
+
+    <h2>Optional native push notifications</h2>
+    <p>Push notifications are off by default. If you turn them on in Settings, the app
+      registers an Apple-issued device token with your selected PrintFarmer server. From
+      there, delivery depends on how that server's operator has configured native push:</p>
+    <ul>
+      <li><strong>Disabled (default)</strong> — nothing is sent anywhere for native push; you
+        still receive in-app and local notifications while the app is in use.</li>
+      <li><strong>Relay mode</strong> — your server forwards a notification envelope to an
+        OlyForge3D-hosted relay service, which forwards it to Apple's Push Notification
+        service (APNs) so it can be delivered to your device. OlyForge3D operates this relay
+        because the Apple Push credential for the app's App Store listing cannot be
+        distributed to individual self-hosted servers.</li>
+      <li><strong>Direct mode</strong> — an operator who has their own Apple Push credential
+        can configure their server to talk to APNs directly, without the OlyForge3D relay.</li>
+    </ul>
+    <p>The envelope forwarded for a push notification is limited to what is needed to show and
+      route the alert: your device's push token, an app installation identifier, the
+      notification's title/subtitle/body/category and thread, related printer/job/toolhead
+      identifiers, a deep link back into the app, priority and expiration, available quick
+      actions, and an identifier for the server the alert came from. It does not include your
+      server credentials, account password, or files from your print jobs.</p>
+
+    <h2>Data retention and logs</h2>
+    <p>We describe retention in bounded, verifiable terms rather than promising guarantees we
+      cannot make for infrastructure PrintFarmer does not operate:</p>
+    <ul>
+      <li>Your selected PrintFarmer server stores device-push-token rows only while push is
+        registered; a row is removed when you unregister, disable push, or your account is
+        deleted, and is deactivated after repeated delivery failures reported by Apple.</li>
+      <li>The OlyForge3D-hosted relay (used only in relay mode) is an operational
+        store-and-forward path to APNs. Like most push-delivery infrastructure, it may keep
+        short-lived operational logs (for example, request/response status) for delivery
+        troubleshooting, reliability, and abuse prevention. OlyForge3D does not use relay
+        traffic for advertising and does not sell it.</li>
+      <li>We do not claim a specific guaranteed retention or deletion timeline for relay
+        operational logs beyond what is stated here, because that infrastructure is
+        operated centrally rather than per self-hosted install. If you need more detail for
+        compliance purposes, contact us using the details below.</li>
+      <li>Data held on a self-hosted PrintFarmer server (accounts, jobs, printers, files) is
+        controlled entirely by that server's operator and its own retention/deletion
+        settings, not by this policy.</li>
+    </ul>
+
+    <h2>Data sharing</h2>
+    <p>We do not sell your data and do not share it with advertisers or data brokers. Data
+      leaves your device only to: (1) the PrintFarmer server(s) you explicitly add, as normal
+      use of the app, and (2) when you opt in to native push in relay mode, the OlyForge3D
+      relay and Apple's APNs, solely to deliver that notification.</p>
+
+    <h2>Your choices and controls</h2>
+    <ul>
+      <li>Turn native push notifications on or off at any time in <strong>Settings</strong>.</li>
+      <li>Add, switch, or remove PrintFarmer server registrations in <strong>Settings</strong>;
+        removing a server clears its stored credentials from the Keychain on your device.</li>
+      <li>Sign out at any time to clear your locally stored session for the active server.</li>
+      <li>Leave the camera/NFC scanning features unused — they are optional and only run when
+        you open a scan screen.</li>
+      <li>Ask your PrintFarmer server operator to export or delete account data held on that
+        server, since the app itself does not hold a separate copy of it.</li>
+    </ul>
+
+    <h2>Children's privacy</h2>
+    <p>PrintFarmer Mobile is a tool for operating self-hosted 3D-printer infrastructure and is
+      not directed at children. We do not knowingly collect personal information from
+      children through the app.</p>
+
+    <h2>Changes to this policy</h2>
+    <p>If this policy changes, we will update the "Last updated" date above and, for material
+      changes, call them out in the app's release notes.</p>
+
+    <h2>Contact</h2>
+    <p>Questions, requests, or reports about this policy or the app's data practices can be
+      filed as an issue in the project's public repository:
+      <a href="https://github.com/OlyForge3D/PrintFarmer/issues">github.com/OlyForge3D/PrintFarmer/issues</a>.
+      For questions about data held on a specific self-hosted server, contact that server's
+      operator directly. PrintFarmer is open source; the source code is available at
+      <a href="https://github.com/OlyForge3D/PrintFarmer">github.com/OlyForge3D/PrintFarmer</a>.</p>
+  </main>
+
+  <footer>
+    <p><a href="../">PrintFarmer</a> · Privacy Policy</p>
+  </footer>
+</body>
+</html>
