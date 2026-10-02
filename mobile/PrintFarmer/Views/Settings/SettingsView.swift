@@ -147,6 +147,7 @@ struct SettingsView: View {
                 Section("About") {
                     LabeledContent("Version", value: AppConfig.appVersion)
                     LabeledContent("Build", value: AppConfig.buildNumber)
+                    Link("Privacy Policy", destination: URL(string: "https://olyforge3d.github.io/PrintFarmer/privacy/")!)
                 }
 
                 if DemoMode.shared.isActive {
