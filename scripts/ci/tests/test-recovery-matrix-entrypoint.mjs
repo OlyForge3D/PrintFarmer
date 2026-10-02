@@ -10,6 +10,7 @@ import { importCellIds } from '../recovery-matrix/import-cells.mjs';
 
 const repoRoot = path.resolve(import.meta.dirname, '../../..');
 const script = path.join(repoRoot, 'scripts/ci/recovery-matrix/run-cell.sh');
+const powershellScript = path.join(repoRoot, 'scripts/ci/recovery-matrix/run-cell.ps1');
 
 function toBashPath(value) {
   return value.replace(/^([A-Za-z]):\\/, (_, drive) => `/${drive.toLowerCase()}/`).replaceAll('\\', '/');
@@ -148,4 +149,92 @@ test('run-cell.sh rejects unknown cells before Docker work', { skip: !hasBash() 
   } finally {
     harness.cleanup();
   }
+});
+
+test('run-cell.sh rejects unsupported entry points before Docker work', { skip: !hasBash() }, () => {
+  const harness = createHarness();
+  try {
+    const result = spawnSync('bash', [
+      toBashPath(script),
+      '--cell', 'c2',
+      '--entry-point', 'windows',
+      '--work-dir', toBashPath(harness.work),
+      '--cosign', toBashPath(harness.cosign),
+    ], {
+      cwd: repoRoot,
+      env: { ...process.env, PATH: `${harness.bin}${path.delimiter}${process.env.PATH}` },
+      encoding: 'utf8',
+    });
+    assert.equal(result.status, 2);
+    assert.match(result.stderr, /--entry-point must be bash or powershell/);
+    assert.throws(() => readFileSync(harness.dockerLog, 'utf8'), /ENOENT/);
+  } finally {
+    harness.cleanup();
+  }
+});
+
+test('run-cell.ps1 help documents the supported Linux host boundary', () => {
+  const result = spawnSync('pwsh', ['-NoProfile', '-File', powershellScript, '-Help'], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+  });
+  if (result.error?.code === 'ENOENT') return;
+  assert.equal(result.status, 0, `${result.stderr}\n${result.stdout}`);
+  assert.match(result.stdout, /Ubuntu LTS x64/);
+  assert.match(result.stdout, /Windows hosts are unsupported/);
+});
+
+test('run-cell.ps1 invokes the Bash harness with PowerShell evidence identity on Linux', {
+  skip: process.platform !== 'linux',
+}, () => {
+  const pwsh = spawnSync('pwsh', ['-NoProfile', '-Command', '$PSVersionTable.PSVersion.Major'], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+  });
+  if (pwsh.error?.code === 'ENOENT' || pwsh.status !== 0) return;
+
+  const harness = createHarness();
+  try {
+    const evidence = path.join(harness.work, 'powershell.json');
+    const result = spawnSync('pwsh', [
+      '-NoProfile',
+      '-File',
+      powershellScript,
+      '-Cell',
+      'remote-worker',
+      '-WorkDir',
+      toBashPath(harness.work),
+      '-Evidence',
+      toBashPath(evidence),
+      '-Cosign',
+      toBashPath(harness.cosign),
+      '-Fault',
+      'before-recover=exit 0',
+      '-KeepWork',
+    ], {
+      cwd: repoRoot,
+      env: { ...process.env, PATH: `${harness.bin}${path.delimiter}${process.env.PATH}` },
+      encoding: 'utf8',
+    });
+    assert.equal(result.status, 0, `${result.stderr}\n${result.stdout}`);
+    const args = readFileSync(harness.runLog, 'utf8').trim().split(/\r?\n/);
+    assert.equal(args[0], toBashPath(script));
+    assert.ok(args.includes('--entry-point'));
+    assert.ok(args.includes('powershell'));
+    assert.ok(args.includes('remote-worker'));
+    assert.ok(args.includes(toBashPath(evidence)));
+    assert.ok(args.includes('before-recover=exit 0'));
+  } finally {
+    harness.cleanup();
+  }
+});
+
+test('run-cell.ps1 refuses live execution on Windows', { skip: process.platform !== 'win32' }, () => {
+  const result = spawnSync('pwsh', ['-NoProfile', '-File', powershellScript, '-Cell', 'c2'], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+  });
+  if (result.error?.code === 'ENOENT') return;
+  assert.equal(result.status, 2);
+  assert.match(result.stderr, /Windows hosts are unsupported/);
 });

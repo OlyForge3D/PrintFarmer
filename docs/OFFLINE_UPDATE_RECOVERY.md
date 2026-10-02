@@ -1002,10 +1002,11 @@ for the harness, not evidence that any cell has run.
 
 **Supported host.** The matrix runs only on **Ubuntu LTS x64** (22.04, 24.04
 or 26.04). Linux arm64 and Windows hosts are **unsupported** for host-update
-recovery. Live cells run only through the Bash entry point; the PowerShell
-entry point is documented and link-checked only, proves no Linux restore or
-runtime parity, and cannot produce matrix evidence. SQLite is component-tested
-only and is not a live matrix provider.
+recovery. Live cells may be invoked through either the Bash entry point or the
+PowerShell wrapper on Ubuntu; PowerShell requires `pwsh` and delegates to the
+same isolated harness while recording `run.entryPoint: powershell`. Invoking
+the wrapper on Windows is refused and cannot produce acceptable live evidence.
+SQLite is component-tested only and is not a live matrix provider.
 
 **Supported cells.** Monolith and split Compose topologies, each with
 PostgreSQL and SQL Server, a shared application/slicer database, and database
@@ -1113,7 +1114,8 @@ failing evidence with `outcome.expected` set from the catalog,
 `outcome.expectedReason` set from the catalog for fail-closed cells,
 `outcome.actual` set from the observed product CLI output/journal, and
 `outcome.reason` set to the observed failure or refusal reason. Passing
-fail-closed records must match the catalog outcome and expected reason
+evidence requires the actual outcome to match the catalog. Passing fail-closed
+records must match the catalog outcome and expected reason
 (`Refused`/`remote_worker_unsupported`, `Refused`/`split_database_not_supported`,
 `NeedsOperator`/`database_externally_owned`, or
 `NeedsOperator`/`storage_externally_owned`); failing setup/precondition records
@@ -1123,6 +1125,34 @@ Use `--work-dir` to move scratch space to another non-system-temp directory and
 script runs `docker compose down -v --remove-orphans`, removes the host and sink
 containers and network, and fails loudly if any container, volume or network
 with the run label remains.
+
+**Bash/PowerShell parity (#3104).** Run each cell once through each wrapper on
+the same supported Ubuntu LTS x64 runner, into separate evidence files. Both
+commands create independent throwaway runs; they do not share a deployment root,
+database, storage, or journal. The comparator validates both records, confirms
+they describe the same cell, and requires their complete `outcome` objects
+(including expected/actual outcomes and reasons) to match:
+
+```bash
+cell=remote-worker
+work="$PWD/.recovery-matrix-work"
+scripts/ci/recovery-matrix/run-cell.sh --cell "$cell" \
+  --work-dir "$work" \
+  --evidence "$work/evidence-$cell-bash.json" \
+  --cosign "$HOME/.cache/pf-cosign/cosign"
+pwsh -NoProfile -File scripts/ci/recovery-matrix/run-cell.ps1 \
+  -Cell "$cell" -WorkDir "$work" \
+  -Evidence "$work/evidence-$cell-powershell.json" \
+  -Cosign "$HOME/.cache/pf-cosign/cosign"
+node scripts/ci/recovery-matrix/compare-evidence.mjs \
+  "$work/evidence-$cell-bash.json" \
+  "$work/evidence-$cell-powershell.json"
+```
+
+Comparator success alone is not live acceptance evidence: retain both JSON
+records and the Ubuntu workflow run/artifact reference. The settled #3102
+Linux records remain authoritative and must be reused rather than rerun; the
+read-only published-bundle verification is not a parity cell.
 
 ### Live fault cells (#3101)
 

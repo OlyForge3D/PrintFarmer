@@ -41,6 +41,7 @@ import {
   assertNoMutation,
   evaluateQueueConsumersHealth,
 } from './runtime-assertions.mjs';
+import { entryPoints } from './evidence.mjs';
 import {
   baseEvidence,
   containerizedDotnetArgs,
@@ -68,6 +69,10 @@ import {
 
 const args = parseArgs(process.argv.slice(2));
 const cellSpec = resolveCell(args.cell ?? 'c2');
+const entryPoint = args['entry-point'] ?? 'bash';
+if (!entryPoints.includes(entryPoint)) {
+  throw new Error(`Unknown recovery matrix entry point: ${entryPoint}`);
+}
 const repo = resolve(required(args.repo, '--repo'));
 const runRoot = resolve(required(args['run-root'], '--run-root'));
 const evidencePath = resolve(required(args.evidence, '--evidence'));
@@ -97,7 +102,7 @@ const run = {
   startedAt: startedAt.toISOString(),
   finishedAt: startedAt.toISOString(),
   harnessCommit: git(repo, ['rev-parse', 'HEAD']).trim(),
-  entryPoint: 'bash',
+  entryPoint,
 };
 
 const host = detectUbuntuHost();

@@ -6,6 +6,7 @@ import {
   evidenceSchema,
   expectedCellOutcome,
   networkDenialMechanism,
+  validateEvidenceParity,
   validateMatrixRun,
   validatePublishedBundleVerification,
   validateRecoveryEvidence,
@@ -346,13 +347,33 @@ function validVerification() {
   };
 }
 
-test('PowerShell is not a live matrix entry point', () => {
+test('PowerShell is a live-cell entry point but not a published-bundle entry point', () => {
   const record = validRecord();
   record.run.entryPoint = 'powershell';
-  hasError(validateRecoveryEvidence(record), 'run.entryPoint: must be one of bash');
+  assert.deepEqual(validateRecoveryEvidence(record), []);
   const verification = validVerification();
   verification.run = { ...verification.run, entryPoint: 'powershell' };
-  hasError(validatePublishedBundleVerification(verification), 'run.entryPoint');
+  hasError(validatePublishedBundleVerification(verification), 'published-bundle verification must use bash');
+});
+
+test('paired Bash and PowerShell evidence requires identical cell outcomes and reasons', () => {
+  const bash = validRecord();
+  const powershell = structuredClone(bash);
+  powershell.run = { ...powershell.run, id: 'run-powershell', entryPoint: 'powershell' };
+  assert.deepEqual(validateEvidenceParity(bash, powershell), []);
+
+  powershell.outcome = { ...powershell.outcome, reason: 'different_reason' };
+  hasError(
+    validateEvidenceParity(bash, powershell),
+    'outcome: Bash and PowerShell outcomes and reasons must be identical',
+  );
+
+  powershell.outcome = { ...bash.outcome };
+  powershell.cell = { ...powershell.cell, provider: 'sqlserver' };
+  hasError(
+    validateEvidenceParity(bash, powershell),
+    'cell: Bash and PowerShell evidence must describe the same cell',
+  );
 });
 
 test('matrix cells must use the fixture signing root', () => {

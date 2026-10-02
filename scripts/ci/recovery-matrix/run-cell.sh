@@ -7,6 +7,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 
 CELL="c2"
+ENTRY_POINT="bash"
 WORK_DIR="$REPO_ROOT/.recovery-matrix-work"
 EVIDENCE="$REPO_ROOT/.recovery-matrix-work/c2-evidence.json"
 EVIDENCE_PROVIDED=0
@@ -21,6 +22,8 @@ Usage: scripts/ci/recovery-matrix/run-cell.sh [OPTIONS]
 Options:
   --cell <id|all|faults|imports>  Cell to run. Use all for every topology cell, faults for every fault cell,
                             imports for every live import cell.
+  --entry-point <bash|powershell>
+                            Entry point that invoked this runner. Default: bash.
   --work-dir DIR            Repo-local scratch directory. Default: .recovery-matrix-work
   --evidence FILE           Evidence JSON output path.
   --cosign FILE             Cosign executable. Default: PF_COSIGN or ~/.cache/pf-cosign/cosign
@@ -33,6 +36,7 @@ EOF
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --cell) CELL="${2:?}"; shift 2 ;;
+    --entry-point) ENTRY_POINT="${2:?}"; shift 2 ;;
     --work-dir) WORK_DIR="${2:?}"; shift 2 ;;
     --evidence) EVIDENCE="${2:?}"; EVIDENCE_PROVIDED=1; shift 2 ;;
     --cosign) COSIGN="${2:?}"; shift 2 ;;
@@ -42,6 +46,11 @@ while [[ $# -gt 0 ]]; do
     *) echo "Unknown option: $1" >&2; usage; exit 2 ;;
   esac
 done
+
+case "$ENTRY_POINT" in
+  bash|powershell) ;;
+  *) echo "--entry-point must be bash or powershell" >&2; exit 2 ;;
+esac
 
 case "$WORK_DIR" in
   /tmp/*|/var/tmp/*) echo "--work-dir must not be under a system temp directory" >&2; exit 2 ;;
@@ -102,7 +111,7 @@ if [[ "$CELL" == "all" || "$CELL" == "faults" || "$CELL" == "imports" ]]; then
     else
       cell_evidence="$WORK_DIR/$matrix_cell-evidence.json"
     fi
-    args=(--cell "$matrix_cell" --work-dir "$WORK_DIR" --evidence "$cell_evidence" --cosign "$COSIGN")
+    args=(--cell "$matrix_cell" --entry-point "$ENTRY_POINT" --work-dir "$WORK_DIR" --evidence "$cell_evidence" --cosign "$COSIGN")
     if [[ "$KEEP_WORK" == 1 ]]; then
       args+=(--keep-work)
     fi
@@ -217,6 +226,7 @@ docker run -d --name "$HOST" --label "$RUN_LABEL" --network "$NETWORK" --dns "$S
 
 node "$SCRIPT_DIR/run-cell.mjs" \
   --cell "$CELL" \
+  --entry-point "$ENTRY_POINT" \
   --repo "$REPO_ROOT" \
   --run-root "$RUN_ROOT" \
   --evidence "$EVIDENCE" \

@@ -4,6 +4,8 @@
 // truth for both record shapes, the approved host, fail-closed cells, and the
 // redaction rules each record must satisfy before it is uploaded.
 
+import { isDeepStrictEqual } from 'node:util';
+
 export const evidenceKind = 'printfarmer-recovery-matrix-evidence';
 export const verificationKind = 'printfarmer-published-bundle-verification';
 export const evidenceSchema = 1;
@@ -19,9 +21,7 @@ export const providers = Object.freeze(['postgres', 'sqlserver']);
 export const databaseLayouts = Object.freeze(['shared', 'split']);
 export const owners = Object.freeze(['host', 'external']);
 export const workerModes = Object.freeze(['managed', 'none', 'remote']);
-// PowerShell is documented and link-checked only, so it can never be a live
-// matrix entry point.
-export const entryPoints = Object.freeze(['bash']);
+export const entryPoints = Object.freeze(['bash', 'powershell']);
 // Matrix cells are signed only by a per-run ephemeral fixture root whose keys
 // never leave memory; the published insider root appears only in the
 // read-only verification record.
@@ -603,6 +603,9 @@ export function validatePublishedBundleVerification(record) {
   checkShape(verificationShape, record, '', errors);
   if (!isPlainObject(record)) return errors;
   checkCommon(record, verificationKind, errors);
+  if (record.run?.entryPoint !== 'bash') {
+    errors.push('run.entryPoint: published-bundle verification must use bash');
+  }
 
   const { identities, verification } = record;
   if (isPlainObject(identities)) {
@@ -627,6 +630,31 @@ export function validatePublishedBundleVerification(record) {
     }
   }
 
+  return errors;
+}
+
+export function validateEvidenceParity(bashRecord, powershellRecord) {
+  const errors = [];
+  for (const [name, record] of [
+    ['bash', bashRecord],
+    ['powershell', powershellRecord],
+  ]) {
+    for (const error of validateRecoveryEvidence(record)) {
+      errors.push(`${name}.${error}`);
+    }
+  }
+  if (bashRecord?.run?.entryPoint !== 'bash') {
+    errors.push('bash.run.entryPoint: expected bash');
+  }
+  if (powershellRecord?.run?.entryPoint !== 'powershell') {
+    errors.push('powershell.run.entryPoint: expected powershell');
+  }
+  if (!isDeepStrictEqual(bashRecord?.cell, powershellRecord?.cell)) {
+    errors.push('cell: Bash and PowerShell evidence must describe the same cell');
+  }
+  if (!isDeepStrictEqual(bashRecord?.outcome, powershellRecord?.outcome)) {
+    errors.push('outcome: Bash and PowerShell outcomes and reasons must be identical');
+  }
   return errors;
 }
 
