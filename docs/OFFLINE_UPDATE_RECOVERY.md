@@ -1126,33 +1126,38 @@ script runs `docker compose down -v --remove-orphans`, removes the host and sink
 containers and network, and fails loudly if any container, volume or network
 with the run label remains.
 
-**Bash/PowerShell parity (#3104).** Run each cell once through each wrapper on
-the same supported Ubuntu LTS x64 runner, into separate evidence files. Both
-commands create independent throwaway runs; they do not share a deployment root,
-database, storage, or journal. The comparator validates both records, confirms
-they describe the same cell, and requires their complete `outcome` objects
+**Bash/PowerShell parity (#3104).** Manual `all` and `faults` dispatches run each
+cell once through each wrapper on the same supported Ubuntu LTS x64 runner,
+sequentially into separate evidence files. Both commands create independent
+throwaway runs; they do not share a deployment root, database, storage, or
+journal. The comparator requires exactly one expected record for each entry
+point, rejects unexpected/missing cells and failed verdicts, validates each
+record against its cell definition, and requires the complete `outcome` objects
 (including expected/actual outcomes and reasons) to match:
 
 ```bash
 cell=remote-worker
 work="$PWD/.recovery-matrix-work"
 scripts/ci/recovery-matrix/run-cell.sh --cell "$cell" \
-  --work-dir "$work" \
-  --evidence "$work/evidence-$cell-bash.json" \
+  --work-dir "$work/bash-work" \
+  --evidence "$work/evidence-parity-$cell-bash.json" \
   --cosign "$HOME/.cache/pf-cosign/cosign"
 pwsh -NoProfile -File scripts/ci/recovery-matrix/run-cell.ps1 \
-  -Cell "$cell" -WorkDir "$work" \
-  -Evidence "$work/evidence-$cell-powershell.json" \
+  -Cell "$cell" -WorkDir "$work/powershell-work" \
+  -Evidence "$work/evidence-parity-$cell-powershell.json" \
   -Cosign "$HOME/.cache/pf-cosign/cosign"
 node scripts/ci/recovery-matrix/compare-evidence.mjs \
-  "$work/evidence-$cell-bash.json" \
-  "$work/evidence-$cell-powershell.json"
+  "$cell" "$work"
 ```
 
-Comparator success alone is not live acceptance evidence: retain both JSON
-records and the Ubuntu workflow run/artifact reference. The settled #3102
-Linux records remain authoritative and must be reused rather than rerun; the
-read-only published-bundle verification is not a parity cell.
+The workflow uploads paired records even when either invocation or comparison
+fails. `imports` dispatches reuse the settled Bash records from run
+[37028604300](https://github.com/OlyForge3D/PrintFarmer/actions/runs/37028604300)
+and run only the PowerShell import cells; this preserves the completed #3102
+replay evidence without rerunning or resetting it. Comparator success alone is
+not live acceptance evidence: retain both JSON records and the Ubuntu workflow
+run/artifact reference. The read-only published-bundle verification remains a
+separate Bash-only check, not a recovery-matrix cell.
 
 ### Live fault cells (#3101)
 

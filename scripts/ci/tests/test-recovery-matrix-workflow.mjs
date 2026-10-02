@@ -62,3 +62,31 @@ test('the published-bundle job runs nightly and only on its own dispatch option'
   assert.equal(workflow.jobs.cell.if,
     "github.event_name == 'schedule' || inputs.cell != 'published-bundle'");
 });
+
+test('group dispatches run Bash and PowerShell once in the parity step and upload evidence', () => {
+  const steps = workflow.jobs.cell.steps;
+  const bashStep = steps.find(step => step.name === 'Run recovery cell');
+  const parityStep = steps.find(step => step.name === 'Run and compare Bash and PowerShell recovery cells');
+  const importParityStep = steps.find(step => step.name === 'Reuse #3102 Bash evidence and run PowerShell import cells');
+  const uploadStep = steps.find(step => step.name === 'Upload evidence');
+
+  assert.match(bashStep.if, /inputs\.cell != 'all'/);
+  assert.match(bashStep.if, /inputs\.cell != 'faults'/);
+  assert.match(bashStep.if, /inputs\.cell != 'imports'/);
+  assert.match(parityStep.if, /github\.event_name == 'workflow_dispatch'/);
+  assert.match(parityStep.if, /inputs\.cell == 'all'/);
+  assert.match(parityStep.if, /inputs\.cell == 'faults'/);
+  assert.match(parityStep.run, /run-cell\.sh/);
+  assert.match(parityStep.run, /run-cell\.ps1/);
+  assert.match(parityStep.run, /compare-evidence\.mjs/);
+  assert.match(parityStep.run, /bash_status/);
+  assert.match(parityStep.run, /powershell_status/);
+  assert.match(importParityStep.if, /inputs\.cell == 'imports'/);
+  assert.match(importParityStep.run, /gh run download 37028604300/);
+  assert.match(importParityStep.run, /run-cell\.ps1/);
+  assert.match(importParityStep.run, /compare-evidence\.mjs imports/);
+  assert.match(importParityStep.run, /import-replay-supersede/);
+  assert.deepEqual(workflow.jobs.cell.permissions, { actions: 'read', contents: 'read' });
+  assert.equal(uploadStep.if, 'always()');
+  assert.match(uploadStep.with.path, /\.recovery-matrix-work\/evidence-\*\.json/);
+});

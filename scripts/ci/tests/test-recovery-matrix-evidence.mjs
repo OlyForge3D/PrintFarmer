@@ -1,5 +1,10 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 import {
   evidenceKind,
@@ -12,6 +17,7 @@ import {
   validateRecoveryEvidence,
   verificationKind,
 } from '../recovery-matrix/evidence.mjs';
+import { cellIds, cellsById } from '../recovery-matrix/cells.mjs';
 
 const identity = (tag, sequence) => ({
   tag,
@@ -22,7 +28,15 @@ const identity = (tag, sequence) => ({
   sequence,
 });
 
-function validRecord() {
+function validRecord(cell = {
+  topology: 'monolith',
+  provider: 'postgres',
+  databaseLayout: 'shared',
+  databaseOwner: 'host',
+  storageOwner: 'host',
+  workers: 'managed',
+}) {
+  const expectation = expectedCellOutcome(cell);
   return {
     schema: evidenceSchema,
     kind: evidenceKind,
@@ -39,14 +53,7 @@ function validRecord() {
       arch: 'x64',
       kernel: '6.8.0-45-generic',
     },
-    cell: {
-      topology: 'monolith',
-      provider: 'postgres',
-      databaseLayout: 'shared',
-      databaseOwner: 'host',
-      storageOwner: 'host',
-      workers: 'managed',
-    },
+    cell,
     identities: {
       source: identity('v0.2.3', 3),
       target: identity('v0.2.4', 4),
@@ -73,13 +80,22 @@ function validRecord() {
       { name: 'backup-verified', at: '2026-09-26T10:05:00Z', result: 'ok' },
       { name: 'fault-injected', at: '2026-09-26T10:10:00Z', result: 'ok' },
     ],
-    outcome: {
-      expected: 'RolledBack',
-      actual: 'RolledBack',
-      reason: null,
-      exitCode: 0,
-      journalPhase: 'RolledBack',
-    },
+    outcome: expectation.failClosed
+      ? {
+          expected: expectation.outcome,
+          expectedReason: expectation.reason,
+          actual: expectation.outcome,
+          reason: expectation.reason,
+          exitCode: expectation.outcome === 'Refused' ? 6 : 10,
+          journalPhase: expectation.outcome,
+        }
+      : {
+          expected: 'RolledBack',
+          actual: 'RolledBack',
+          reason: null,
+          exitCode: 0,
+          journalPhase: 'RolledBack',
+        },
     timings: { activationSeconds: 120, recoverySeconds: 240 },
     verdict: 'pass',
   };
@@ -93,6 +109,80 @@ const hasError = (errors, fragment) =>
 
 test('a complete supported-cell record validates', () => {
   assert.deepEqual(validateRecoveryEvidence(validRecord()), []);
+});
+
+test('parity comparison requires every expected cell and a passing pair', () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'recovery-evidence-parity-'));
+  const comparator = path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    '../recovery-matrix/compare-evidence.mjs',
+  );
+  try {
+    for (const entryPoint of ['bash', 'powershell']) {
+      for (const cellId of cellIds) {
+        const record = validRecord(cellsById[cellId].cell);
+        record.run.entryPoint = entryPoint;
+        writeFileSync(
+          path.join(root, `evidence-parity-all-${entryPoint}-${cellId}.json`),
+          JSON.stringify(record),
+        );
+      }
+    }
+
+    let result = spawnSync(process.execPath, [comparator, 'all', root], { encoding: 'utf8' });
+    assert.equal(result.status, 0, `${result.stderr}\n${result.stdout}`);
+    assert.match(result.stdout, /all 9 all cells/);
+
+    const mismatchedOutcome = validRecord(cellsById.c2.cell);
+    mismatchedOutcome.run.entryPoint = 'powershell';
+    mismatchedOutcome.outcome.reason = 'different-reason';
+    writeFileSync(
+      path.join(root, 'evidence-parity-all-powershell-c2.json'),
+      JSON.stringify(mismatchedOutcome),
+    );
+    result = spawnSync(process.execPath, [comparator, 'all', root], { encoding: 'utf8' });
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /outcome: Bash and PowerShell outcomes and reasons must be identical/);
+
+    rmSync(path.join(root, 'evidence-parity-all-powershell-split-database.json'));
+    result = spawnSync(process.execPath, [comparator, 'all', root], { encoding: 'utf8' });
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /expected exactly one 'split-database' evidence record, found 0/);
+
+    writeFileSync(path.join(root, 'evidence-parity-all-powershell-unexpected.json'), '{}');
+    result = spawnSync(process.execPath, [comparator, 'all', root], { encoding: 'utf8' });
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /unexpected evidence record for cell 'unexpected'/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('parity comparison rejects failed evidence even when both entry points agree', () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'recovery-evidence-parity-failed-'));
+  const comparator = path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    '../recovery-matrix/compare-evidence.mjs',
+  );
+  try {
+    for (const entryPoint of ['bash', 'powershell']) {
+      const record = validRecord();
+      record.run.entryPoint = entryPoint;
+      record.verdict = 'fail';
+      for (const cellId of cellIds) {
+        writeFileSync(
+          path.join(root, `evidence-parity-all-${entryPoint}-${cellId}.json`),
+          JSON.stringify(record),
+        );
+      }
+    }
+
+    const result = spawnSync(process.execPath, [comparator, 'all', root], { encoding: 'utf8' });
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /both entry points must have a passing cell verdict/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('missing and unexpected fields are rejected', () => {

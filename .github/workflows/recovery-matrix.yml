@@ -28,6 +28,9 @@ jobs:
     name: Recovery cell ${{ matrix.cell }}
     if: github.event_name == 'schedule' || inputs.cell != 'published-bundle'
     runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+      contents: read
     timeout-minutes: 120
     strategy:
       fail-fast: false
@@ -78,6 +81,7 @@ jobs:
             || { echo "::error::containerd image store is not active"; exit 1; }
 
       - name: Run recovery cell
+        if: github.event_name != 'workflow_dispatch' || (inputs.cell != 'all' && inputs.cell != 'faults' && inputs.cell != 'imports')
         env:
           CELL: ${{ matrix.cell }}
         run: >-
@@ -85,6 +89,96 @@ jobs:
           --cell "$CELL"
           --cosign "$(command -v cosign)"
           --evidence "$GITHUB_WORKSPACE/.recovery-matrix-work/evidence-$CELL.json"
+
+      - name: Run and compare Bash and PowerShell recovery cells
+        if: github.event_name == 'workflow_dispatch' && (inputs.cell == 'all' || inputs.cell == 'faults')
+        env:
+          CELL: ${{ inputs.cell }}
+        run: |
+          set -euo pipefail
+          command -v pwsh >/dev/null || {
+            echo "::error::PowerShell Core is required for recovery-matrix parity"
+            exit 2
+          }
+
+          evidence_root="$GITHUB_WORKSPACE/.recovery-matrix-work"
+          bash_status=0
+          powershell_status=0
+          comparison_status=0
+
+          bash scripts/ci/recovery-matrix/run-cell.sh \
+            --cell "$CELL" \
+            --work-dir "$evidence_root/bash-work" \
+            --cosign "$(command -v cosign)" \
+            --evidence "$evidence_root/evidence-parity-$CELL-bash.json" \
+            || bash_status=$?
+
+          pwsh -NoProfile -File scripts/ci/recovery-matrix/run-cell.ps1 \
+            -Cell "$CELL" \
+            -WorkDir "$evidence_root/powershell-work" \
+            -Cosign "$(command -v cosign)" \
+            -Evidence "$evidence_root/evidence-parity-$CELL-powershell.json" \
+            || powershell_status=$?
+
+          node scripts/ci/recovery-matrix/compare-evidence.mjs "$CELL" "$evidence_root" \
+            || comparison_status=$?
+
+          if [[ "$bash_status" -ne 0 || "$powershell_status" -ne 0 || "$comparison_status" -ne 0 ]]; then
+            echo "::error::Recovery-matrix parity failed (Bash=$bash_status, PowerShell=$powershell_status, comparison=$comparison_status)"
+            exit 1
+          fi
+
+      - name: "Reuse #3102 Bash evidence and run PowerShell import cells"
+        if: github.event_name == 'workflow_dispatch' && inputs.cell == 'imports'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          command -v pwsh >/dev/null || {
+            echo "::error::PowerShell Core is required for recovery-matrix parity"
+            exit 2
+          }
+
+          evidence_root="$GITHUB_WORKSPACE/.recovery-matrix-work"
+          baseline_root="$evidence_root/import-baseline/recovery-matrix-evidence-imports-37028604300"
+          mkdir -p "$evidence_root/import-baseline"
+          echo "Reusing Bash import-cell evidence from run 37028604300; no Bash import cells are rerun."
+          gh run download 37028604300 \
+            --repo "$GITHUB_REPOSITORY" \
+            --name recovery-matrix-evidence-imports-37028604300 \
+            --dir "$evidence_root/import-baseline"
+
+          expected_cells=(import-identity import-channel-round-trips import-adversarial import-replay-supersede)
+          baseline_files=("$baseline_root"/evidence-imports-*.json)
+          [[ "${#baseline_files[@]}" -eq "${#expected_cells[@]}" ]] || {
+            echo "::error::Expected exactly ${#expected_cells[@]} Bash import evidence records from run 37028604300"
+            exit 1
+          }
+          for cell in "${expected_cells[@]}"; do
+            source="$baseline_root/evidence-imports-$cell.json"
+            [[ -s "$source" ]] || {
+              echo "::error::Missing Bash import evidence for $cell in run 37028604300"
+              exit 1
+            }
+            cp "$source" "$evidence_root/evidence-parity-imports-bash-$cell.json"
+          done
+
+          powershell_status=0
+          comparison_status=0
+          pwsh -NoProfile -File scripts/ci/recovery-matrix/run-cell.ps1 \
+            -Cell imports \
+            -WorkDir "$evidence_root/powershell-import-work" \
+            -Cosign "$(command -v cosign)" \
+            -Evidence "$evidence_root/evidence-parity-imports-powershell.json" \
+            || powershell_status=$?
+
+          node scripts/ci/recovery-matrix/compare-evidence.mjs imports "$evidence_root" \
+            || comparison_status=$?
+
+          if [[ "$powershell_status" -ne 0 || "$comparison_status" -ne 0 ]]; then
+            echo "::error::PowerShell import parity failed (PowerShell=$powershell_status, comparison=$comparison_status)"
+            exit 1
+          fi
 
       - name: Upload evidence
         if: always()
