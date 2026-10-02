@@ -13,15 +13,17 @@ permissions:
   pages: write
   id-token: write
 
-# Only one Pages deployment at a time; cancel stale ones so the latest push wins.
+# Only one Pages deployment at a time; queue rather than cancel so an in-flight
+# production deploy always finishes instead of being interrupted mid-publish.
 concurrency:
   group: pages
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   deploy:
     name: Build and deploy
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

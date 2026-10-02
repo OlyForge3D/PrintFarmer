@@ -172,8 +172,10 @@
       <li><strong>Server registrations</strong> — the address and display name of each
         PrintFarmer server you add, and which one is active.</li>
       <li><strong>Sign-in credentials and session tokens</strong> — stored in the iOS
-        Keychain (not plain app storage), protected by the device passcode/biometrics and
-        scoped so they are unavailable before first unlock on that device.</li>
+        Keychain (not plain app storage), encrypted at rest, scoped to this device only
+        (excluded from iCloud Keychain sync), and unavailable until the device has been
+        unlocked at least once since restart. This does not require a passcode or Face
+        ID/Touch ID prompt on every use of the app.</li>
       <li><strong>App preferences</strong> — settings such as theme, NFC tag format, advanced
         printer-controls opt-in, and push-notification opt-in.</li>
       <li><strong>Local caches</strong> — recent printer/job status snapshots and similar
@@ -185,13 +187,21 @@
       or deleting the app removes it from your device.</p>
 
     <h2>How the app communicates with servers</h2>
-    <p>PrintFarmer Mobile connects directly, over HTTPS, to the PrintFarmer server(s) you
-      explicitly add — typically a server you or your organization operate on your own
-      network or infrastructure. The app may also use local-network discovery (Bonjour) to
-      help you find a PrintFarmer server on your own Wi-Fi network. Your account data, printer
-      data, job data, and files you manage through the app are controlled by that server and
-      its operator, not by OlyForge3D. If you have questions about how a specific server
-      retains or deletes your data, contact that server's operator.</p>
+    <p>PrintFarmer Mobile connects to the PrintFarmer server(s) you explicitly add —
+      typically a server you or your organization operate on your own network or
+      infrastructure. Public or remote servers (reachable over the internet, including by
+      hostname or public IP address) are required to use HTTPS; the app upgrades an
+      http:// address you enter for such a server to https:// automatically. Servers you add
+      on your own local network — for example by IP address on your Wi-Fi, or a
+      <code>.local</code> hostname discovered via Bonjour — may instead use plain HTTP, since
+      that traffic does not leave your local network. In both cases, data you send and
+      receive travels using whichever transport (HTTP or HTTPS) that server is configured
+      for; the app does not add its own encryption on top of a server's chosen transport.
+      The app may also use local-network discovery (Bonjour) to help you find a PrintFarmer
+      server on your own Wi-Fi network. Your account data, printer data, job data, and files
+      you manage through the app are controlled by that server and its operator, not by
+      OlyForge3D. If you have questions about how a specific server retains or deletes your
+      data, contact that server's operator.</p>
 
     <h2>Camera, barcode/QR, and NFC scanning</h2>
     <p>The app can use the device camera to scan barcodes and QR codes on filament spools and
