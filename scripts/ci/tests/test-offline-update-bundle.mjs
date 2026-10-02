@@ -1619,10 +1619,10 @@ test('recovery instructions are derived only from the signed release identity', 
     .flatMap(operation => [operation.bash.join(' '), operation.powershell.join(' ')]);
   for (const path of ['docs/OFFLINE_UPDATE_RECOVERY.md', 'docs/HOST_UPDATE_RUNBOOK.md']) {
     const content = readFileSync(new URL(`../../../${path}`, import.meta.url), 'utf8');
-    const block = content.match(
-      /<!-- packaged-command-vectors:start -->\r?\n```text\r?\n([\s\S]*?)\r?\n```\r?\n<!-- packaged-command-vectors:end -->/);
-    assert.ok(block, `${path} must contain one packaged command vector block`);
-    assert.deepEqual(block[1].split(/\r?\n/), expectedDocumentedCommands,
+    const blocks = [...content.matchAll(
+      /<!-- packaged-command-vectors:start -->\r?\n```text\r?\n([\s\S]*?)\r?\n```\r?\n<!-- packaged-command-vectors:end -->/g)];
+    assert.equal(blocks.length, 1, `${path} must contain exactly one packaged command vector block`);
+    assert.deepEqual(blocks[0][1].split(/\r?\n/), expectedDocumentedCommands,
       `${path} packaged command vectors must match the generated schema-2 document exactly`);
   }
   // Schema 1 documents published before #2981 stay verifiable, byte for byte. The golden digest was
