@@ -190,8 +190,9 @@
     <p>PrintFarmer Mobile connects to the PrintFarmer server(s) you explicitly add —
       typically a server you or your organization operate on your own network or
       infrastructure. Public or remote servers (reachable over the internet, including by
-      hostname or public IP address) are required to use HTTPS; the app upgrades an
-      http:// address you enter for such a server to https:// automatically. Servers you add
+      hostname or public IP address) are required to use HTTPS; the app will not connect
+      to such a server over plain http://, so the address is rejected and you must use
+      https://. Servers you add
       on your own local network — for example by IP address on your Wi-Fi, or a
       <code>.local</code> hostname discovered via Bonjour — may instead use plain HTTP, since
       that traffic does not leave your local network. In both cases, data you send and
