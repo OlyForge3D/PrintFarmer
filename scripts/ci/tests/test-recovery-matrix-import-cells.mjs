@@ -22,6 +22,7 @@ import {
   assertAnchorTransition,
   assertImportedIdentity,
   assertRefusedImport,
+  assertSupersededActivation,
   ImportScenarioError,
   replayAdmissionDrift,
   rewriteOfflineBundle,
@@ -210,6 +211,24 @@ test('assertRefusedImport requires a refused record bound to the expected reason
     ),
     'import_refusal_no_record',
   );
+});
+
+test('assertSupersededActivation requires the packaged refusal code and replay reason', () => {
+  assert.equal(reasonOf(() => assertSupersededActivation('ok', {
+    exitCode: 6,
+    stdout: '{"code":"replay_superseded"}\n',
+    stderr: '',
+  })), null);
+  assert.equal(reasonOf(() => assertSupersededActivation('crash', {
+    exitCode: 1,
+    stdout: '',
+    stderr: 'unhandled exception',
+  })), 'superseded_activation_not_refused');
+  assert.equal(reasonOf(() => assertSupersededActivation('other-refusal', {
+    exitCode: 6,
+    stdout: '{"code":"channel_mismatch_policy"}\n',
+    stderr: '',
+  })), 'superseded_activation_wrong_reason');
 });
 
 test('failed import cells may record a refusal without the verified checkpoint', () => {
