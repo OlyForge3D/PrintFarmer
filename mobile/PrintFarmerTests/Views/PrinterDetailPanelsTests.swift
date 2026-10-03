@@ -129,8 +129,9 @@ final class PrinterDetailPanelsTests: XCTestCase {
     func testFilamentSafetyRefreshSurvivesStatusQueueAndControlTraversal() async throws {
         let fixture = try detailHostFixture(verifiedMaterial: true)
         fixture.registry.setAdvancedPrinterControlsEnabled(true)
+        let detail = PrinterDetailView(printerId: fixture.printer.id)
         let controller = DetailHostingController(rootView: try host(
-            PrinterDetailView(printerId: fixture.printer.id), services: fixture.services, registry: fixture.registry
+            detail, services: fixture.services, registry: fixture.registry
         ))
         let window = show(controller)
         defer { window.isHidden = true; window.rootViewController = nil }
@@ -151,6 +152,22 @@ final class PrinterDetailPanelsTests: XCTestCase {
             XCTAssertTrue(views(UIButton.self, in: controller.view).contains {
                 $0.accessibilityIdentifier == "printer.detail.safety.refresh"
             })
+        }
+        controller.rootView = try host(
+            detail, services: fixture.services, registry: fixture.registry, scenePhase: .background
+        )
+        try await waitForHost("Backgrounding must revoke material actuation", in: controller.view) {
+            self.views(UIButton.self, in: controller.view).contains {
+                $0.accessibilityIdentifier == "printer.controls.filament-load" && !$0.isEnabled
+            }
+        }
+        controller.rootView = try host(
+            detail, services: fixture.services, registry: fixture.registry, scenePhase: .active
+        )
+        try await waitForHost("Foreground Filament must obtain new proof, not stay permanently disabled", in: controller.view) {
+            self.views(UIButton.self, in: controller.view).contains {
+                $0.accessibilityIdentifier == "printer.controls.filament-load" && $0.isEnabled
+            }
         }
         XCTAssertGreaterThanOrEqual(fixture.api.capturedRequests.filter { $0.url?.path.hasSuffix("/status") == true }.count, 2)
         XCTAssertFalse(fixture.api.capturedRequests.contains { $0.httpMethod != "GET" })
@@ -192,12 +209,13 @@ final class PrinterDetailPanelsTests: XCTestCase {
                 data = printerData
             } else if path.hasSuffix("/backend-capabilities") {
                 if verifiedMaterial {
-                    var supported = PrinterBackendCapabilities.allControlsFixture
-                    supported.supportsFilamentLoad = true
-                    supported.supportsFilamentUnload = true
-                    supported.supportsFilamentChange = true
-                    supported.verifiedSafety = VerifiedSafetyFixtures.discovery()
-                    data = try encoder.encode(supported)
+                    let safety = String(decoding: try encoder.encode(VerifiedSafetyFixtures.discovery()), as: UTF8.self)
+                    data = Data("""
+                    {"printerId":"\(printer.id)","backend":"Moonraker",
+                     "supportsHotendTemperature":true,"supportsBedTemperature":true,
+                     "supportsFilamentLoad":true,"supportsFilamentUnload":true,
+                     "supportsFilamentChange":true,"verifiedSafety":\(safety)}
+                    """.utf8)
                 } else {
                     data = capabilities
                 }
@@ -247,7 +265,8 @@ final class PrinterDetailPanelsTests: XCTestCase {
     }
 
     private func host(
-        _ detail: PrinterDetailView, services: ServiceContainer, registry: ServerRegistry
+        _ detail: PrinterDetailView, services: ServiceContainer, registry: ServerRegistry,
+        scenePhase: ScenePhase = .active
     ) throws -> some View {
         let auth = AuthViewModel(services: services)
         auth.isAuthenticated = true
@@ -259,7 +278,7 @@ final class PrinterDetailPanelsTests: XCTestCase {
             .environment(registry)
             .environment(auth)
             .environment(AppRouter())
-            .environment(\.scenePhase, .active)
+            .environment(\.scenePhase, scenePhase)
             .transaction { $0.disablesAnimations = true }
     }
 

@@ -2216,6 +2216,44 @@ extension PrinterDetailViewModelTests {
         }
     }
 
+    func testStartNextJobExplainsOfflineBusyEmptyStaleAndMalformedQueue() async throws {
+        for scenario in ["offline", "busy", "empty", "stale", "invalid-id", "missing-revision"] {
+            let service = MockJobService()
+            let vm = makeOperatorViewModel(jobService: service)
+            var printer = try TestData.decodePrinter()
+            printer.isOnline = scenario != "offline"
+            printer.state = "idle"
+            vm.printer = printer
+            let reviewed = makeQueuedJob(
+                id: scenario == "invalid-id" ? "not-a-uuid" : UUID().uuidString,
+                assignedTo: printer.id, status: "Queued", position: 1,
+                revision: scenario == "missing-revision" ? nil : "reviewed"
+            )
+            vm.assignedQueue = scenario == "empty" ? [] : [reviewed]
+            if scenario == "stale" {
+                vm.assignedQueue = [
+                    makeQueuedJob(id: UUID().uuidString, assignedTo: printer.id, status: "Queued",
+                                  position: 1, revision: "new-head")
+                ]
+            }
+            vm.isDispatching = scenario == "busy"
+
+            await vm.startNextJob(reviewed)
+
+            let expected: String
+            switch scenario {
+            case "offline": expected = "Reconnect this printer before starting the next job."
+            case "busy": expected = "Wait for the current printer action to finish before starting a job."
+            case "empty": expected = "There is no waiting job assigned to this printer. Refresh the queue."
+            case "stale": expected = "The next job changed. Refresh the queue and review the new head before starting it."
+            case "invalid-id": expected = "The next job has an invalid identifier. Refresh the queue before starting it."
+            default: expected = "The next job has no revision. Refresh the queue before starting it."
+            }
+            XCTAssertEqual(vm.dispatchError, expected, scenario)
+            XCTAssertNil(service.dispatchCalledWith, scenario)
+        }
+    }
+
     func testStartNextJobSurfacesServiceFailure() async throws {
         let service = MockJobService()
         service.actionErrorToThrow = NetworkError.forbidden
