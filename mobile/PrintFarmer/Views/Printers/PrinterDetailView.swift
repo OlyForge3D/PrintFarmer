@@ -344,8 +344,7 @@ struct PrinterDetailView: View {
             // Assignment-only (issue #2522 / #2519 integration contract):
             // NEVER alias to `ejectFilament()`, which also dispatches a
             // physical `unloadFilament()` POST. That combined operation
-            // stays reachable separately, accurately labeled "Eject
-            // Filament", in `setupActionsSection`.
+            // stays reachable separately as Eject on Filament.
             UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
             let task = Task { await viewModel.clearActiveSpoolAssignment() }
             activeTasks.append(task)
@@ -1232,7 +1231,7 @@ enum PrinterDetailViewLifecycle {
     ///   STARTED, not when it actually applies the result. If the operator
     ///   switches pages mid-refresh (Status → Control or back), that stale
     ///   snapshot would restart polling on a now-hidden Controls page, or
-    ///   stop it on a now-visible Overview page — the opposite of current
+    ///   stop it on a now-visible Status page — the opposite of current
     ///   reality. A closure re-reads the caller's live state at the exact
     ///   moment it is invoked, below.
     static func refresh(
