@@ -35,6 +35,7 @@ import {
   PrinterSummary,
   PrintJobPriority,
   PrintJobObjectListDto,
+  QueuedPrintJobDto,
   QueuedPrintJobWithFileMetaDto,
   RegisterDiscoveredPrinterRequest,
   StartDiscoveryRequest,
@@ -78,7 +79,7 @@ import {
   CustomFieldEntityType,
   CustomFieldValue,
 } from '@/types/api';
-import type { UseQueryOptions } from '@tanstack/react-query';
+import type { UseQueryOptions, UseQueryResult } from '@tanstack/react-query';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo } from 'react';
 import { toast } from 'sonner';
@@ -1314,13 +1315,34 @@ export function useRestartHarvestDiscovery() {
 
 // ============ Job Queue Hooks ============
 
-export function useJobQueue(printerId?: string, options?: QueryOptions<QueuedPrintJobWithFileMetaDto[]>) {
-  return useQuery({
+export function useJobQueue(): UseQueryResult<QueuedPrintJobWithFileMetaDto[], ApiError>;
+export function useJobQueue(
+  printerId: undefined,
+  options?: QueryOptions<QueuedPrintJobWithFileMetaDto[]>
+): UseQueryResult<QueuedPrintJobWithFileMetaDto[], ApiError>;
+export function useJobQueue(
+  printerId: string,
+  options?: QueryOptions<QueuedPrintJobDto[]>
+): UseQueryResult<QueuedPrintJobDto[], ApiError>;
+export function useJobQueue(
+  options?: QueryOptions<QueuedPrintJobWithFileMetaDto[]>
+): UseQueryResult<QueuedPrintJobWithFileMetaDto[], ApiError>;
+export function useJobQueue(
+  printerIdOrOptions?: string | QueryOptions<QueuedPrintJobWithFileMetaDto[]>,
+  options?: QueryOptions<QueuedPrintJobDto[]> | QueryOptions<QueuedPrintJobWithFileMetaDto[]>
+): UseQueryResult<QueuedPrintJobDto[] | QueuedPrintJobWithFileMetaDto[], ApiError> {
+  const printerId =
+    typeof printerIdOrOptions === 'string' ? printerIdOrOptions : undefined;
+  const queryOptions = (
+    typeof printerIdOrOptions === 'string' ? options : printerIdOrOptions
+  ) as QueryOptions<QueuedPrintJobDto[] | QueuedPrintJobWithFileMetaDto[]> | undefined;
+
+  return useQuery<QueuedPrintJobDto[] | QueuedPrintJobWithFileMetaDto[], ApiError>({
     queryKey: queryKeys.jobQueue(printerId),
-    queryFn: () => apiClient.getJobQueue(printerId),
+    queryFn: () => printerId ? apiClient.getJobQueue(printerId) : apiClient.getJobQueue(),
     staleTime: 30000, // 30 seconds
     refetchInterval: 30000, // Auto-refresh every 30 seconds
-    ...options,
+    ...queryOptions,
   });
 }
 
