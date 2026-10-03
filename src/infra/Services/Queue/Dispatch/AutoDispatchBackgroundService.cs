@@ -481,43 +481,92 @@ public sealed class AutoDispatchBackgroundService(
             return DispatchPlan.NoWork;
         }
 
-        // Find candidate jobs: unassigned queued jobs OR jobs assigned to this printer.
-        // Uses the SINGLE shared ordering selector so readiness/skip and dispatch agree.
-        List<PrintJob> candidateJobs = await db.PrintJobs
+        // Queue positions are scoped per printer; find each scope's first eligible job
+        // independently, then compare only those heads using the cross-scope FIFO order.
+        List<PrintJob> assignedJobs = await db.PrintJobs
             .AsNoTracking()
-            .Where(job => job.Status == PrintJobStatus.Queued
-                && (job.AssignedPrinterId == null || job.AssignedPrinterId == printerId))
+            .Where(job => job.Status == PrintJobStatus.Queued && job.AssignedPrinterId == printerId)
             .WhereNotOperatorRecoveryBlocked()
-            .OrderByPriorityDescending()
-            .Take(20) // reasonable batch to score
+            .OrderWithinScope()
             .ToListAsync(ct);
-        if (candidateJobs.Count == 0)
+        List<PrintJob> unassignedJobs = await db.PrintJobs
+            .AsNoTracking()
+            .Where(job => job.Status == PrintJobStatus.Queued && job.AssignedPrinterId == null)
+            .WhereNotOperatorRecoveryBlocked()
+            .OrderWithinScope()
+            .ToListAsync(ct);
+        HashSet<Guid> jobsThatCouldNotBeClaimed = [];
+
+        async Task<(PrintJob Job, DispatchScore Score)?> FindEligibleHeadAsync(
+            IEnumerable<PrintJob> jobs)
         {
-            logger.LogDebug(
-                "[AutoDispatch] No queued jobs available for printer {PrinterId}",
-                printerId);
-            return DispatchPlan.NoWork;
+            foreach (PrintJob job in jobs)
+            {
+                if (jobsThatCouldNotBeClaimed.Contains(job.Id) || IsJobClaimed(job.Id))
+                {
+                    continue;
+                }
+
+                DispatchScore? score = await scorer.ScorePrinterForJobAsync(job.Id, printerId, ct);
+                if (score is not null &&
+                    !score.Eliminated &&
+                    score.TotalScore >= settings.MinimumScoreThreshold)
+                {
+                    return (job, score);
+                }
+            }
+
+            return null;
         }
 
-        foreach (PrintJob job in candidateJobs)
+        while (true)
         {
-            if (IsJobClaimed(job.Id))
+            (PrintJob Job, DispatchScore Score)? assignedHead =
+                await FindEligibleHeadAsync(assignedJobs);
+            (PrintJob Job, DispatchScore Score)? unassignedHead =
+                await FindEligibleHeadAsync(unassignedJobs);
+            List<(PrintJob Job, DispatchScore Score)> eligibleHeads = [];
+            if (assignedHead.HasValue)
             {
-                continue;
+                eligibleHeads.Add(assignedHead.Value);
             }
 
-            // Targeted single-printer scoring (issue #1705): the fleet-scoring API used here
-            // previously loaded and scored every enabled printer only to discard all but this
-            // one, under the global selection lock. See IDispatchScorer.ScorePrinterForJobAsync
-            // for the equivalence guarantee this relies on.
-            DispatchScore? printerScore = await scorer.ScorePrinterForJobAsync(job.Id, printerId, ct);
-            if (printerScore is null
-                || printerScore.Eliminated
-                || printerScore.TotalScore < settings.MinimumScoreThreshold)
+            if (unassignedHead.HasValue)
             {
-                continue;
+                eligibleHeads.Add(unassignedHead.Value);
             }
 
+            (PrintJob Job, DispatchScore Score)? selectedHead = eligibleHeads
+                .OrderByDescending(candidate => candidate.Job.Priority)
+                .ThenBy(candidate => candidate.Job.QueuedAt)
+                .ThenBy(candidate => candidate.Job.Id)
+                .Select(candidate => ((PrintJob Job, DispatchScore Score)?)candidate)
+                .FirstOrDefault();
+
+            if (selectedHead is null)
+            {
+                DispatchPlanKind emptyKind = assignedJobs.Count == 0 && unassignedJobs.Count == 0
+                    ? DispatchPlanKind.NoWork
+                    : DispatchPlanKind.NoCompatibleJob;
+                if (emptyKind == DispatchPlanKind.NoWork)
+                {
+                    logger.LogDebug(
+                        "[AutoDispatch] No queued jobs available for printer {PrinterId}",
+                        printerId);
+                    return DispatchPlan.NoWork;
+                }
+
+                return new DispatchPlan(
+                    DispatchPlanKind.NoCompatibleJob,
+                    printerId,
+                    printer.Name ?? printerId.ToString(),
+                    Guid.Empty,
+                    string.Empty,
+                    Score: null,
+                    ClaimedJobId: null);
+            }
+
+            (PrintJob job, DispatchScore printerScore) = selectedHead.Value;
             string printerName = printer.Name ?? printerId.ToString();
             string jobName = job.Name ?? "Unknown";
             if (settings.AutoDispatchMode == AutoDispatchMode.Suggest)
@@ -532,29 +581,20 @@ public sealed class AutoDispatchBackgroundService(
                     ClaimedJobId: null);
             }
 
-            if (!TryClaimJob(job.Id))
+            if (TryClaimJob(job.Id))
             {
-                continue;
+                return new DispatchPlan(
+                    DispatchPlanKind.Auto,
+                    printerId,
+                    printerName,
+                    job.Id,
+                    jobName,
+                    printerScore,
+                    ClaimedJobId: job.Id);
             }
 
-            return new DispatchPlan(
-                DispatchPlanKind.Auto,
-                printerId,
-                printerName,
-                job.Id,
-                jobName,
-                printerScore,
-                ClaimedJobId: job.Id);
+            jobsThatCouldNotBeClaimed.Add(job.Id);
         }
-
-        return new DispatchPlan(
-            DispatchPlanKind.NoCompatibleJob,
-            printerId,
-            printer.Name ?? printerId.ToString(),
-            Guid.Empty,
-            string.Empty,
-            Score: null,
-            ClaimedJobId: null);
     }
 
     private async Task ExecuteDispatchPlanAsync(

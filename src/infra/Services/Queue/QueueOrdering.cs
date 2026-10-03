@@ -3,20 +3,19 @@
 namespace Farm.Infrastructure.Services.Queue;
 
 /// <summary>
-/// The single shared queue-ordering selector used by every readiness, skip, scoring,
-/// batch and ready-head query (issue #900, defect 12).
+/// Shared ordering selectors for cross-scope and single-scope queue consumers.
 ///
 /// Semantics: higher <see cref="PrintJob.Priority"/> runs first
-/// (<c>Urgent(3) → High(2) → Normal(1) → Low(0)</c>), then FIFO by queued timestamp,
-/// then job id as a total-order tiebreak so results are deterministic across providers
-/// and processes.
+/// (<c>Urgent(3) → High(2) → Normal(1) → Low(0)</c>). General reporting and cross-scope
+/// dispatch-head comparisons use FIFO by queued timestamp. Queue positions are only
+/// comparable within a scope: queue-client lists group by scope before sorting its
+/// rows by priority, position, queued timestamp and job id.
 /// </summary>
 public static class QueueOrdering
 {
     /// <summary>
-    /// Orders jobs by descending priority, then queued time, then id.
-    /// Every ready-head / auto-dispatch / batch query MUST use this selector so operators
-    /// never see one ordering in the UI and a different one during dispatch.
+    /// Orders jobs across scopes by descending priority, then queued time, then id.
+    /// Queue positions must not be compared across scopes.
     /// </summary>
     /// <param name="jobs">Source query or sequence.</param>
     /// <returns>Deterministically ordered query.</returns>
@@ -41,6 +40,51 @@ public static class QueueOrdering
 
         return jobs
             .OrderByDescending(j => j.Priority)
+            .ThenBy(j => j.QueuedAt)
+            .ThenBy(j => j.Id);
+    }
+
+    /// <summary>
+    /// Orders jobs in one queue scope by priority, queue position, queued time and id.
+    /// Callers must filter to one assigned printer or to the unassigned scope first.
+    /// </summary>
+    public static IOrderedQueryable<PrintJob> OrderWithinScope(this IQueryable<PrintJob> jobs)
+    {
+        ArgumentNullException.ThrowIfNull(jobs);
+
+        return jobs
+            .OrderByDescending(j => j.Priority)
+            .ThenBy(j => j.QueuePosition)
+            .ThenBy(j => j.QueuedAt)
+            .ThenBy(j => j.Id);
+    }
+
+    /// <summary>In-memory counterpart of <see cref="OrderWithinScope(IQueryable{PrintJob})"/>.</summary>
+    public static IOrderedEnumerable<PrintJob> OrderWithinScope(this IEnumerable<PrintJob> jobs)
+    {
+        ArgumentNullException.ThrowIfNull(jobs);
+
+        return jobs
+            .OrderByDescending(j => j.Priority)
+            .ThenBy(j => j.QueuePosition)
+            .ThenBy(j => j.QueuedAt)
+            .ThenBy(j => j.Id);
+    }
+
+    /// <summary>
+    /// Flattens queue scope groups for display: unassigned first, then printer id.
+    /// Priority and position are compared only after the scope key, never across scopes.
+    /// This presentation order does not rank scopes for dispatch.
+    /// </summary>
+    public static IOrderedQueryable<PrintJob> OrderGroupedByScope(this IQueryable<PrintJob> jobs)
+    {
+        ArgumentNullException.ThrowIfNull(jobs);
+
+        return jobs
+            .OrderBy(j => j.AssignedPrinterId.HasValue ? 1 : 0)
+            .ThenBy(j => j.AssignedPrinterId)
+            .ThenByDescending(j => j.Priority)
+            .ThenBy(j => j.QueuePosition)
             .ThenBy(j => j.QueuedAt)
             .ThenBy(j => j.Id);
     }

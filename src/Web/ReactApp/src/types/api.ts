@@ -3080,6 +3080,13 @@ export interface UpdateQueueJobRequest {
   failureReason?: string;
 }
 
+export interface MoveQueuedJobRequest {
+  beforeJobId?: string;
+  beforeJobETag?: string;
+  afterJobId?: string;
+  afterJobETag?: string;
+}
+
 export interface BulkCancelQueueJobsRequest {
   jobIds: string[];
 }

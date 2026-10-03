@@ -2,6 +2,7 @@
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Queue;
+using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Infrastructure.Services.SignalR;
 using Microsoft.AspNetCore.SignalR;
@@ -64,7 +65,7 @@ public sealed class PriorityQueueOrderingTests
     }
 
     [Fact]
-    public async Task BatchDispatchAsync_TwoUrgentJobs_ProcessesOldestQueuedJobFirst()
+    public async Task BatchDispatchAsync_TwoUrgentJobs_UsesQueuePositionBeforeQueuedTime()
     {
         await using SqliteConnection connection = new("Data Source=:memory:");
         await connection.OpenAsync();
@@ -78,11 +79,11 @@ public sealed class PriorityQueueOrderingTests
         BatchDispatchResult result = await CreateBatchDispatchService(db)
             .BatchDispatchAsync(CreateRequest(jobs), "operator");
 
-        Assert.Equal([older.Id, newer.Id], result.Results.Select(item => item.JobId));
+        Assert.Equal([newer.Id, older.Id], result.Results.Select(item => item.JobId));
     }
 
     [Fact]
-    public async Task GetFilteredJobsAsync_SameJobsAsBatchDispatch_UsesIdenticalOrder()
+    public async Task GetFilteredJobsAsync_QueueSortMatchesDispatchWhileReportingKeepsFifo()
     {
         await using SqliteConnection connection = new("Data Source=:memory:");
         await connection.OpenAsync();
@@ -100,12 +101,66 @@ public sealed class PriorityQueueOrderingTests
         EfPrintJobManagementRepository repository = new(db);
         List<PrintJob> displayJobs = await repository.GetFilteredJobsAsync(
             filterStatus: PrintJobStatus.Queued);
+        List<PrintJob> queueJobs = await repository.GetFilteredJobsAsync(
+            filterStatus: PrintJobStatus.Queued,
+            sortBy: "queue");
         BatchDispatchResult dispatchResult = await CreateBatchDispatchService(db)
             .BatchDispatchAsync(CreateRequest(jobs), "operator");
 
         Assert.Equal(
-            dispatchResult.Results.Select(item => item.JobId),
+            [jobs[2].Id, jobs[1].Id, jobs[0].Id, jobs[3].Id],
             displayJobs.Select(job => job.Id));
+        Assert.Equal(
+            [jobs[1].Id, jobs[2].Id, jobs[0].Id, jobs[3].Id],
+            dispatchResult.Results.Select(item => item.JobId));
+        Assert.Equal(
+            queueJobs.Select(job => job.Id),
+            dispatchResult.Results.Select(item => item.JobId));
+    }
+
+    [Fact]
+    public async Task OrderWithinScope_UsesQueuePositionAndQueryableMatchesEnumerable()
+    {
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using AppDbContext db = await CreateContextAsync(connection);
+        DateTime queuedAt = new(2026, 8, 4, 12, 0, 0, DateTimeKind.Utc);
+        List<PrintJob> jobs =
+        [
+            CreateJob(PrintJobPriority.Normal, queuedAt, queuePosition: 3),
+            CreateJob(PrintJobPriority.Normal, queuedAt.AddMinutes(1), queuePosition: 1),
+            CreateJob(PrintJobPriority.Normal, queuedAt.AddMinutes(2), queuePosition: 2),
+        ];
+        await SeedAsync(db, jobs);
+
+        List<Guid> expected = [jobs[1].Id, jobs[2].Id, jobs[0].Id];
+        List<Guid> queryableOrder = await db.PrintJobs
+            .OrderWithinScope()
+            .Select(job => job.Id)
+            .ToListAsync();
+        List<Guid> enumerableOrder = jobs
+            .OrderWithinScope()
+            .Select(job => job.Id)
+            .ToList();
+
+        Assert.Equal(expected, queryableOrder);
+        Assert.Equal(expected, enumerableOrder);
+    }
+
+    [Fact]
+    public void OrderByPriorityDescending_AcrossScopes_IgnoresQueuePosition()
+    {
+        DateTime queuedAt = new(2026, 8, 4, 12, 0, 0, DateTimeKind.Utc);
+        PrintJob older = CreateJob(PrintJobPriority.Normal, queuedAt, queuePosition: 20);
+        older.AssignedPrinterId = Guid.NewGuid();
+        PrintJob newer = CreateJob(PrintJobPriority.Normal, queuedAt.AddMinutes(1), queuePosition: 1);
+        newer.AssignedPrinterId = Guid.NewGuid();
+        List<Guid> enumerableOrder = new[] { newer, older }
+            .OrderByPriorityDescending()
+            .Select(job => job.Id)
+            .ToList();
+
+        Assert.Equal([older.Id, newer.Id], enumerableOrder);
     }
 
     private static async Task<AppDbContext> CreateContextAsync(SqliteConnection connection)

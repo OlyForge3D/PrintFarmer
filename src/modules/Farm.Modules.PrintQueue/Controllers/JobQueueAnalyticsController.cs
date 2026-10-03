@@ -55,7 +55,7 @@ public class JobQueueAnalyticsController(
     /// <param name="deadlineEnd">Filter jobs with deadline at or before this UTC timestamp</param>
     /// <param name="queuedFrom">Filter jobs queued at or after this UTC timestamp. Only honored for terminal (History-style) views; ignored for the active queue, which reflects current state and is never date-windowed.</param>
     /// <param name="queuedTo">Filter jobs queued at or before this UTC timestamp. Only honored for terminal (History-style) views; ignored for the active queue, which reflects current state and is never date-windowed.</param>
-    /// <param name="sortBy">Sort mode (priority, deadline, deadline_desc)</param>
+    /// <param name="sortBy">Sort mode (priority groups active jobs by scope in persisted queue order; deadline and deadline_desc are reporting views)</param>
     /// <param name="limit">Maximum number of results (default 100, max 1000)</param>
     /// <param name="offset">Number of results to skip (default 0)</param>
     /// <param name="cancellationToken">Cancellation token for async operation</param>
@@ -139,7 +139,8 @@ public class JobQueueAnalyticsController(
     }
 
     /// <summary>
-    /// Get print jobs for a specific printer
+    /// Get active print jobs for a specific printer: occupying, assigned, then queued.
+    /// Only queued rows use queue-position ordering and are eligible for reorder.
     /// </summary>
     /// <param name="printerId">The unique identifier of the printer</param>
     /// <param name="limit">Maximum number of jobs to return (default 50)</param>
