@@ -6,8 +6,6 @@ import XCTest
 @MainActor
 final class AttentionFeedViewModelTests: XCTestCase {
 
-    // Concrete Sendable identifiers used to seed distinct fixtures.
-
     // MARK: - Loading & success
 
     func testInitialRefreshTransitionsLoadingToLoadedWithGroupedItems() async {

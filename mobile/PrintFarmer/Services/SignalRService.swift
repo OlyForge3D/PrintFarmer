@@ -1999,9 +1999,9 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
         // r21 (F4-L #777) owner-scoped completion watcher.
         //
         // This Task runs in ALL build configurations. It is the SOLE
-        // authority that releases the reconnect slot for this owner
-        // (R1 correction: no in-body slot release remains on the
-        // success or cancel-exit paths — see the
+        // authority that releases the reconnect slot on success or
+        // cancellation (R1 correction: no in-body slot release remains
+        // on those exit paths — see the
         // retry-loop above), and it enforces the receive-completion
         // happens-before edge required by the frozen strict order
         // `R1.completed < A.completed < B.created` (R2 correction).
