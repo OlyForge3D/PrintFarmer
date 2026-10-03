@@ -475,7 +475,7 @@ struct PreheatSubgroup: View {
 
         private func stepButton(delta: Double, symbol: String) -> some View {
             let next = Self.steppedTarget(
-                draft: target, current: currentTarget, maximum: viewModel.maximum(for: heater), delta: delta
+                draft: target, current: currentTarget, maximum: viewModel.maximum(for: heater).map(Double.init), delta: delta
             )
             return Button {
                 if let next { target = next.formatted(.number.locale(Locale(identifier: "en_US_POSIX")).grouping(.never)) }
