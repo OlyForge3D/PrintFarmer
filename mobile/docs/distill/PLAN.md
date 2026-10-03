@@ -84,6 +84,16 @@ from the first 200 cross-scope jobs or use creation time as queue time. Before
 #3228 lands this preserves the server's existing order; after #3228 it follows
 the authoritative scoped reorder automatically.
 
+The printer-scoped response is a **flat** `QueuedPrintJobDto` array, not the
+cross-scope analytics wrapper. The client decodes existing `QueuedJobInfo`
+and adapts it to detail presentation without inventing G-code/navigation
+metadata. Name, ID and reviewed revision remain observable. The #3242
+active-state correction supplies Starting/Printing/Paused, then Assigned
+committed handoffs, then Queued jobs in authoritative server order. All bands
+remain visible; only **Queued** is eligible for Start next job. Integration
+requires that backend correction; the client cannot recover omitted active
+rows from older servers and must not guess from a truncated global list.
+
 Control and Filament share one parent-owned safety observation loop while
 either page is foreground. Both provide **Refresh safety checks**; leaving
 both pages or backgrounding invalidates evidence until a fresh read succeeds.

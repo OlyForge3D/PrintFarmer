@@ -419,16 +419,15 @@ struct PrinterDetailView: View {
         .modifier(PrinterControlsAccessLifecycle(viewModel: controlsViewModel))
         .task(id: PrinterDetailSafetyDemand(
             observes: scenePhase == .active && (selectedPanel == .control || selectedPanel == .filament),
-            owner: controlsViewModel.map(ObjectIdentifier.init)
+            owner: controlsViewModel.map(ObjectIdentifier.init),
+            loadingCapabilities: controlsViewModel?.isLoadingCapabilities ?? false
         )) {
             guard let controlsViewModel else { return }
             guard scenePhase == .active && (selectedPanel == .control || selectedPanel == .filament) else {
                 controlsViewModel.suspendSafetyObservation()
                 return
             }
-            while controlsViewModel.isLoadingCapabilities {
-                do { try await Task.sleep(for: .milliseconds(50)) } catch { return }
-            }
+            guard !controlsViewModel.isLoadingCapabilities else { return }
             await controlsViewModel.refreshSafetyEvidence()
             while !Task.isCancelled && controlsViewModel.isActive {
                 do { try await Task.sleep(for: .seconds(5)) } catch { return }
@@ -594,6 +593,7 @@ struct PrinterDetailView: View {
     private struct PrinterDetailSafetyDemand: Equatable {
         let observes: Bool
         let owner: ObjectIdentifier?
+        let loadingCapabilities: Bool
     }
 
     /// Eject clears assignment and requests physical unload; Unassign only
@@ -727,12 +727,12 @@ struct PrinterDetailView: View {
             Text("Queue")
                 .font(.headline)
 
-            if viewModel.nextQueuedJobs.isEmpty {
-                operatorEmptyState(icon: "tray", message: "No jobs queued for this printer")
+            if viewModel.displayedQueueJobs.isEmpty {
+                operatorEmptyState(icon: "tray", message: "No active or queued jobs for this printer")
             } else {
                 VStack(spacing: 10) {
-                    ForEach(Array(viewModel.nextQueuedJobs.enumerated()), id: \.element.id) { index, job in
-                        queueRow(job, isNext: index == 0, printer: printer)
+                    ForEach(viewModel.displayedQueueJobs) { job in
+                        queueRow(job, isNext: job.id == viewModel.nextQueuedJobs.first?.id, printer: printer)
                     }
                 }
             }
@@ -744,7 +744,8 @@ struct PrinterDetailView: View {
         let match = viewModel.matchState(for: job)
         let title = job.gcodeFile?.name ?? job.job.name
         return VStack(alignment: .leading, spacing: 8) {
-            Text(isNext ? "Up next" : "Later").font(.caption).foregroundStyle(Color.pfTextSecondary)
+            Text(job.job.status.lowercased() == "queued" ? (isNext ? "Up next" : "Later") : job.job.status)
+                .font(.caption).foregroundStyle(Color.pfTextSecondary)
             HStack(alignment: .top, spacing: 12) {
                 remoteThumbnail(job.gcodeFile?.thumbnailUrl ?? job.job.thumbnailUrl, size: 44)
                 VStack(alignment: .leading, spacing: 4) {

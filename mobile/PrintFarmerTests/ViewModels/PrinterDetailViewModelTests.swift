@@ -1958,6 +1958,29 @@ extension PrinterDetailViewModelTests {
         )
     }
 
+    func testCommittedAndOccupyingJobsRemainVisibleButCannotBeStartedAgain() async throws {
+        let service = MockJobService()
+        let vm = makeOperatorViewModel(jobService: service)
+        var printer = try TestData.decodePrinter()
+        printer.isOnline = true
+        printer.state = "idle"
+        vm.printer = printer
+        let active = ["Starting", "Printing", "Paused", "Assigned"].map {
+            makeQueuedJob(id: UUID().uuidString, assignedTo: printer.id, status: $0,
+                          position: 0, revision: "active-revision")
+        }
+        let queued = makeQueuedJob(id: UUID().uuidString, assignedTo: printer.id, status: "Queued",
+                                   position: 1, revision: "queued-revision")
+        vm.assignedQueue = active + [queued]
+        XCTAssertEqual(vm.displayedQueueJobs.map(\.id), (active + [queued]).map(\.id))
+        XCTAssertEqual(vm.nextQueuedJobs.map(\.id), [queued.id])
+        for job in active {
+            await vm.startNextJob(job)
+            XCTAssertNil(service.dispatchCalledWith, "\(job.job.status) must not be dispatched twice")
+            XCTAssertEqual(vm.dispatchError, "The next job changed. Refresh the queue and review the new head before starting it.")
+        }
+    }
+
     func testMatchStateMatchMismatchUnknown() {
         let vm = makeOperatorViewModel()
         vm.toolheads = [makeToolhead(index: 0, material: "PLA")]

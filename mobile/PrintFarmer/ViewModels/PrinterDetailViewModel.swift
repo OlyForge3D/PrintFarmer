@@ -2323,9 +2323,15 @@ final class PrinterDetailViewModel {
             .first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     }
 
-    /// Waiting assigned jobs in authoritative printer-scope response order.
+    /// Only Queued is eligible for a new dispatch; Assigned is a committed handoff.
     var nextQueuedJobs: [QueuedPrintJobResponse] {
-        assignedQueue.filter { ["queued", "assigned"].contains($0.job.status.lowercased()) }
+        assignedQueue.filter { $0.job.status.lowercased() == "queued" }
+    }
+
+    var displayedQueueJobs: [QueuedPrintJobResponse] {
+        assignedQueue.filter {
+            ["starting", "printing", "paused", "assigned", "queued"].contains($0.job.status.lowercased())
+        }
     }
 
     /// Per-job compatibility verdict derived read-only from the loaded
