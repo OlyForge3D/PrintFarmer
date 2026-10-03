@@ -2801,39 +2801,8 @@ public sealed class MoonrakerSubscriptionService(
                 return;
             }
 
-            if (result.TryGetProperty("size", out JsonElement size) &&
-                size.ValueKind == JsonValueKind.Number &&
-                size.TryGetInt64(out long fileSize))
-            {
-                state.ThumbnailFileSize = fileSize;
-            }
-
-            if (result.TryGetProperty("modified", out JsonElement modified) &&
-                modified.ValueKind == JsonValueKind.Number &&
-                modified.TryGetDouble(out double fileModified) &&
-                double.IsFinite(fileModified))
-            {
-                state.ThumbnailFileModified = fileModified;
-            }
-
-            if (result.TryGetProperty("thumbnails", out JsonElement thumbnails) &&
-                thumbnails.ValueKind == JsonValueKind.Array)
-            {
-                JsonElement largest = thumbnails.EnumerateArray()
-                    .Where(item => item.ValueKind == JsonValueKind.Object)
-                    .OrderByDescending(item =>
-                        (item.TryGetProperty("width", out JsonElement width) && width.TryGetInt32(out int w) ? w : 0) *
-                        (item.TryGetProperty("height", out JsonElement height) && height.TryGetInt32(out int h) ? h : 0))
-                    .FirstOrDefault();
-                if (largest.ValueKind == JsonValueKind.Object &&
-                    largest.TryGetProperty("relative_path", out JsonElement relativePath) &&
-                    relativePath.ValueKind == JsonValueKind.String)
-                {
-                    state.ThumbnailUrl = MoonrakerThumbnailCacheIdentity.CreateThumbnailUrl(
-                        serverUrl,
-                        relativePath.GetString()!);
-                }
-            }
+            (state.ThumbnailUrl, state.ThumbnailFileSize, state.ThumbnailFileModified) =
+                MoonrakerThumbnailCacheIdentity.ReadFileMetadata(serverUrl, result);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -3389,7 +3358,7 @@ public sealed class MoonrakerSubscriptionService(
     /// </summary>
     /// <param name="printer">The printer to poll.</param>
     /// <param name="ct">Cancellation token.</param>
-    private async Task TriggerHttpPollingFallbackAsync(Printer printer, CancellationToken ct)
+    internal async Task TriggerHttpPollingFallbackAsync(Printer printer, CancellationToken ct)
     {
         try
         {
@@ -3453,24 +3422,9 @@ public sealed class MoonrakerSubscriptionService(
                         return;
                     }
 
-                    PrinterStatusDto cacheUpdate = new(
-                        Id: printer.Id,
-                        IsOnline: compositeStatus.IsOnline,
-                        State: PrinterStateNormalizer.NormalizeState(compositeStatus.State),
-                        Progress: compositeStatus.Progress,
-                        JobName: compositeStatus.JobName,
-                        ThumbnailUrl: compositeStatus.ThumbnailUrl,
-                        CameraStreamUrl: compositeStatus.CameraStreamUrl,
-                        CameraSnapshotUrl: compositeStatus.CameraSnapshotUrl,
-                        X: compositeStatus.X,
-                        Y: compositeStatus.Y,
-                        Z: compositeStatus.Z,
-                        HotendTemp: compositeStatus.HotendTemp,
-                        BedTemp: compositeStatus.BedTemp,
-                        HotendTarget: compositeStatus.HotendTarget,
-                        BedTarget: compositeStatus.BedTarget,
-                        SpoolInfo: spoolInfo,
-                        PrintTimeLeftSeconds: compositeStatus.PrintTimeLeftSeconds);
+                    PrinterStatusDto cacheUpdate = statusUpdate.ToStatusDto(
+                        compositeStatus.CameraSnapshotUrl,
+                        compositeStatus.PrintTimeLeftSeconds);
                     _statusCacheWriter.UpdateStatus(cacheUpdate, originWatermark);
                     _klippyReadyState[printer.Id] = compositeStatus.IsOnline;
 

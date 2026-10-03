@@ -24,7 +24,7 @@ public record ExtruderTemperature(double Current, double Target);
 /// <summary>
 /// Composite printer status combining state, job progress, position, and temperatures.
 /// </summary>
-#pragma warning disable CA1056 // Keep existing backend URL fields string-based for contract compatibility.
+#pragma warning disable CA1056 // URI-like properties should not be strings
 public record PrinterCompositeStatus(
     bool IsOnline,
     string? State,

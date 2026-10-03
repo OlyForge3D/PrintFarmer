@@ -57,7 +57,7 @@ public sealed class MoonrakerCurrentJobThumbnailTests
 
         Assert.Equal("same-name.gcode", firstJob.JobName);
         Assert.Equal(
-            "http://moonraker-thumbnail.invalid/server/files/gcodes/thumbnails/thumbnail.png",
+            "http://moonraker-thumbnail.invalid/server/files/gcodes/thumbnails/nested%20folder/thumbnail.png",
             firstJob.ThumbnailUrl);
         Assert.Equal(firstJob.ThumbnailUrl, secondJob.ThumbnailUrl);
         Assert.Equal(firstJob.ThumbnailCacheIdentity, secondJob.ThumbnailCacheIdentity);
@@ -254,13 +254,15 @@ public sealed class MoonrakerCurrentJobThumbnailTests
                         modified = ReplaceFile ? 1_700_000_001 : 1_700_000_000,
                         thumbnails = new[]
                         {
-                            new { width = 32, height = 32, relative_path = "thumbnails/thumbnail.png" },
+                            new { width = 32, height = 32, relative_path = "thumbnails/nested folder/thumbnail.png" },
                         },
                     },
                 })));
             }
 
-            Assert.Equal("/server/files/gcodes/thumbnails/thumbnail.png", request.RequestUri.AbsolutePath);
+            Assert.Equal(
+                "/server/files/gcodes/thumbnails/nested%20folder/thumbnail.png",
+                request.RequestUri.AbsolutePath);
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new ByteArrayContent(PngSignature),

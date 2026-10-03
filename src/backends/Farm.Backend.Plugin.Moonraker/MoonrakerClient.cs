@@ -296,22 +296,7 @@ public partial class MoonrakerClient(
             long? thumbnailFileSize = null;
             double? thumbnailFileModified = null;
 
-            // Try Klipper job queue for thumbnail path
-            if (result.TryGetProperty("job_queue", out JsonElement jq) && jq.ValueKind == JsonValueKind.Object &&
-                jq.TryGetProperty("thumbnails", out JsonElement thumbs) && thumbs.ValueKind == JsonValueKind.Array && thumbs.GetArrayLength() > 0)
-            {
-                JsonElement first = thumbs[0];
-                if (first.TryGetProperty("relative_path", out JsonElement rp) && rp.ValueKind == JsonValueKind.String)
-                {
-                    Uri baseUri2 = new(baseUrl);
-                    string relPath = Uri.EscapeDataString(rp.GetString()!);
-                    Uri thumbUri = new(baseUri2, $"server/files/gcodes/{relPath}");
-                    thumb = thumbUri.ToString();
-                }
-            }
-
-            // File metadata differentiates overwritten files at the same path. Job start identity
-            // above also distinguishes separate runs of an unchanged file.
+            // File metadata identifies overwritten files and supplies the canonical thumbnail path.
             if (!string.IsNullOrWhiteSpace(jobName))
             {
                 try
@@ -333,34 +318,8 @@ public partial class MoonrakerClient(
                         if (mroot.TryGetProperty("result", out JsonElement mres) &&
                             mres.ValueKind == JsonValueKind.Object)
                         {
-                            thumbnailFileSize = mres.TryGetProperty("size", out JsonElement size) &&
-                                size.ValueKind == JsonValueKind.Number &&
-                                size.TryGetInt64(out long fileSizeValue)
-                                    ? fileSizeValue
-                                    : null;
-                            thumbnailFileModified = mres.TryGetProperty("modified", out JsonElement modifiedNode) &&
-                                modifiedNode.ValueKind == JsonValueKind.Number &&
-                                modifiedNode.TryGetDouble(out double modifiedValue) &&
-                                double.IsFinite(modifiedValue)
-                                    ? modifiedValue
-                                    : null;
-
-                            if (mres.TryGetProperty("thumbnails", out JsonElement mthumbs) &&
-                                mthumbs.ValueKind == JsonValueKind.Array && mthumbs.GetArrayLength() > 0)
-                            {
-                                JsonElement largest = mthumbs.EnumerateArray()
-                                    .Where(item => item.ValueKind == JsonValueKind.Object)
-                                    .OrderByDescending(item =>
-                                        (item.TryGetProperty("width", out JsonElement width) && width.TryGetInt32(out int w) ? w : 0) *
-                                        (item.TryGetProperty("height", out JsonElement height) && height.TryGetInt32(out int h) ? h : 0))
-                                    .FirstOrDefault();
-                                if (largest.ValueKind == JsonValueKind.Object &&
-                                    largest.TryGetProperty("relative_path", out JsonElement rp) &&
-                                    rp.ValueKind == JsonValueKind.String)
-                                {
-                                    thumb = MoonrakerThumbnailCacheIdentity.CreateThumbnailUrl(baseUrl, rp.GetString()!);
-                                }
-                            }
+                            (thumb, thumbnailFileSize, thumbnailFileModified) =
+                                MoonrakerThumbnailCacheIdentity.ReadFileMetadata(baseUrl, mres);
                         }
                     }
                 }

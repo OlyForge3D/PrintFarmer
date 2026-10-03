@@ -61,12 +61,15 @@ public sealed class PrintersServiceCurrentJobThumbnailTests
             null,
             null,
             ThumbnailCacheIdentity: job.ThumbnailCacheIdentity);
+        PrinterStatusDto cachedStatus = subscriptionUpdate.ToStatusDto();
         using JsonDocument signalRPayload = JsonDocument.Parse(JsonSerializer.Serialize(
             subscriptionUpdate,
             new JsonSerializerOptions(JsonSerializerDefaults.Web)));
         string signalRUrl = signalRPayload.RootElement.GetProperty("currentJobThumbnailUrl").GetString()!;
-        int tokenStart = signalRUrl.IndexOf("?v=", StringComparison.Ordinal) + 3;
-        string validToken = signalRUrl[tokenStart..];
+        string cachedUrl = Assert.IsType<string>(cachedStatus.CurrentJobThumbnailUrl);
+        Assert.Equal(signalRUrl, cachedUrl);
+        int tokenStart = cachedUrl.IndexOf("?v=", StringComparison.Ordinal) + 3;
+        string validToken = cachedUrl[tokenStart..];
 
         HistoryThumbnailContent? result = await service.GetCurrentJobThumbnailAsync(
             printer.Id,

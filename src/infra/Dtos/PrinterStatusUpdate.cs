@@ -37,4 +37,32 @@ public record PrinterStatusUpdate(
     /// </summary>
     public string? CurrentJobThumbnailUrl =>
         PrinterThumbnailUrl.Create(Id, State, JobName, ThumbnailUrl, ThumbnailCacheIdentity);
+
+    /// <summary>
+    /// Creates the cache snapshot corresponding to this broadcast, preserving all shared fields.
+    /// </summary>
+    public PrinterStatusDto ToStatusDto(string? cameraSnapshotUrl = null, double? printTimeLeftSeconds = null) =>
+        new(
+            Id: Id,
+            IsOnline: IsOnline,
+            State: State,
+            Progress: Progress,
+            JobName: JobName,
+            FileName: FileName,
+            ThumbnailUrl: ThumbnailUrl,
+            CameraStreamUrl: CameraStreamUrl,
+            CameraSnapshotUrl: cameraSnapshotUrl,
+            X: X,
+            Y: Y,
+            Z: Z,
+            HotendTemp: HotendTemp,
+            BedTemp: BedTemp,
+            HotendTarget: HotendTarget,
+            BedTarget: BedTarget,
+            SpoolInfo: SpoolInfo,
+            MmuStatus: MmuStatus,
+            PrintTimeLeftSeconds: printTimeLeftSeconds,
+            HomedAxes: HomedAxes,
+            SafetyTelemetry: SafetyTelemetry,
+            ThumbnailCacheIdentity: ThumbnailCacheIdentity);
 }
