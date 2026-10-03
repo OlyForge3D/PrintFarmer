@@ -641,13 +641,12 @@ public class PrintersService(
         }
 
         IBackendClient client = GetBackendClient((PrinterBackend)printer.Backend);
-        if (client is not ISupportsJobControl jobClient ||
-            client is not ISupportsCurrentJobThumbnail thumbnailClient)
+        if (client is not ISupportsCurrentJobThumbnail thumbnailClient)
         {
             return null;
         }
 
-        PrinterJob? job = await jobClient.GetJobAsync(
+        PrinterJob? job = await thumbnailClient.GetCurrentJobAsync(
             printer.BackendUrl,
             printer.Credential,
             ct).ConfigureAwait(false);
@@ -5892,11 +5891,13 @@ public class PrintersService(
                     Progress = job.Progress,
                     JobName = job.JobName,
                     ThumbnailUrl = job.ThumbnailUrl,
+                    ThumbnailCacheIdentity = job.ThumbnailCacheIdentity,
                     CurrentJobThumbnailUrl = PrinterThumbnailUrl.Create(
                         id,
                         job.PrintState,
                         job.JobName,
-                        job.ThumbnailUrl)
+                        job.ThumbnailUrl,
+                        job.ThumbnailCacheIdentity)
                 }
                 : null;
         }

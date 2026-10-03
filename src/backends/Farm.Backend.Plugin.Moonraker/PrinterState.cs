@@ -70,6 +70,14 @@ internal sealed class PrinterState
 
     public string? ThumbnailCacheIdentity { get; set; }
 
+    public long? ThumbnailFileSize { get; set; }
+
+    public double? ThumbnailFileModified { get; set; }
+
+    public DateTime ThumbnailFileMetadataFetchedAtUtc { get; set; }
+
+    public double? ThumbnailJobStartTime { get; set; }
+
     // MMU (Happy Hare) state
     public bool MmuDetected { get; set; }
 

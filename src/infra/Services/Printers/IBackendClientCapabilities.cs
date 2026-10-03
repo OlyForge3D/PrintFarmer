@@ -509,6 +509,14 @@ public interface ISupportsHistoryThumbnail
 public interface ISupportsCurrentJobThumbnail
 {
     /// <summary>
+    /// Retrieves the active job whose thumbnail is served by this capability.
+    /// </summary>
+    Task<PrinterJob?> GetCurrentJobAsync(
+        string baseUrl,
+        PrinterCredential? credential = null,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// Retrieves validated thumbnail content from the configured printer backend.
     /// </summary>
     Task<HistoryThumbnailContent?> GetCurrentJobThumbnailAsync(

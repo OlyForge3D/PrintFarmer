@@ -1101,6 +1101,7 @@ public sealed class MoonrakerSubscriptionService(
                     statusObj,
                     printer.Id,
                     printer.BackendUrl,
+                    printer.Credential,
                     null,
                     null,
                     originWatermark,
@@ -1159,6 +1160,7 @@ public sealed class MoonrakerSubscriptionService(
                         p[0],
                         printer.Id,
                         printer.BackendUrl,
+                        printer.Credential,
                         null,
                         null,
                         originWatermark,
@@ -1205,6 +1207,7 @@ public sealed class MoonrakerSubscriptionService(
     /// <param name="statusObj">The status JSON element from Moonraker.</param>
     /// <param name="printerId">The ID of the printer being updated.</param>
     /// <param name="serverUrl">The Moonraker server URL (for fetching additional data).</param>
+    /// <param name="credential">The printer credential used for authenticated metadata requests.</param>
     /// <param name="cameraStreamUrl">The camera stream URL from printer configuration.</param>
     /// <param name="thumbnailUrl">The thumbnail URL from printer configuration.</param>
     /// <param name="originWatermark">Watermark captured before receiving the status.</param>
@@ -1213,6 +1216,7 @@ public sealed class MoonrakerSubscriptionService(
         JsonElement statusObj,
         Guid printerId,
         string serverUrl,
+        PrinterCredential? credential,
         string? cameraStreamUrl,
         string? thumbnailUrl,
         long? originWatermark,
@@ -1297,7 +1301,7 @@ public sealed class MoonrakerSubscriptionService(
             statusObj.TryGetProperty("print_stats", out _) ||
             statusObj.TryGetProperty("webhooks", out _))
         {
-            await HandleStateUpdateAsync(printerId, state, statusObj, ct);
+            await HandleStateUpdateAsync(printerId, state, statusObj, serverUrl, credential, ct);
         }
 
         // Get spool information for consolidated update (cached; refreshed at most once per TTL)
@@ -2576,13 +2580,20 @@ public sealed class MoonrakerSubscriptionService(
     /// <param name="printerId">The ID of the printer.</param>
     /// <param name="state">The persistent printer state to update.</param>
     /// <param name="statusObj">The complete status JSON element containing display_status, print_stats, and webhooks.</param>
+    /// <param name="serverUrl">The Moonraker server URL used for file metadata requests.</param>
+    /// <param name="credential">The printer credential used for authenticated metadata requests.</param>
     /// <param name="ct">Cancellation token.</param>
-    private async Task HandleStateUpdateAsync(Guid printerId, PrinterState state, JsonElement statusObj, CancellationToken ct)
+    private async Task HandleStateUpdateAsync(
+        Guid printerId,
+        PrinterState state,
+        JsonElement statusObj,
+        string serverUrl,
+        PrinterCredential? credential,
+        CancellationToken ct)
     {
         string? stateValue = null;
         double? progress = null;
         string? jobName = null;
-        double? totalDuration = null;
         double? startTime = null;
 
         // Display status (progress)
@@ -2624,14 +2635,6 @@ public sealed class MoonrakerSubscriptionService(
                 }
             }
 
-            if (ps.TryGetProperty("total_duration", out JsonElement td) &&
-                td.ValueKind == JsonValueKind.Number &&
-                td.TryGetDouble(out double totalDurationValue) &&
-                double.IsFinite(totalDurationValue))
-            {
-                totalDuration = totalDurationValue;
-            }
-
             if (ps.TryGetProperty("start_time", out JsonElement startNode) &&
                 startNode.ValueKind == JsonValueKind.Number &&
                 startNode.TryGetDouble(out double startTimeValue) &&
@@ -2666,20 +2669,49 @@ public sealed class MoonrakerSubscriptionService(
             stateValue = webhooksState;
         }
 
-        if (startTime is { } jobStartTime)
-        {
-            state.ThumbnailCacheIdentity = $"start:{Math.Round(jobStartTime, MidpointRounding.AwayFromZero):0}";
-        }
-        else if (totalDuration is { } elapsed)
-        {
-            state.ThumbnailCacheIdentity =
-                $"start:{Math.Round(DateTimeOffset.UtcNow.ToUnixTimeSeconds() - elapsed, MidpointRounding.AwayFromZero):0}";
-        }
-        else if (stateValue is not null &&
-                 !string.Equals(stateValue, "printing", StringComparison.OrdinalIgnoreCase) &&
-                 !string.Equals(stateValue, "paused", StringComparison.OrdinalIgnoreCase))
+        bool isActiveJob = string.Equals(stateValue, "printing", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(stateValue, "paused", StringComparison.OrdinalIgnoreCase);
+        string? activeJobName = jobName ?? state.JobName;
+        if (!isActiveJob)
         {
             state.ThumbnailCacheIdentity = null;
+            state.ThumbnailJobStartTime = null;
+            state.ThumbnailFileSize = null;
+            state.ThumbnailFileModified = null;
+            state.ThumbnailFileMetadataFetchedAtUtc = DateTime.MinValue;
+            state.ThumbnailUrl = null;
+        }
+        else
+        {
+            bool jobChanged = !string.IsNullOrWhiteSpace(jobName) &&
+                !string.Equals(jobName, state.JobName, StringComparison.Ordinal);
+            bool startChanged = startTime.HasValue &&
+                state.ThumbnailJobStartTime.HasValue &&
+                Math.Abs(startTime.Value - state.ThumbnailJobStartTime.Value) > 0.5;
+            if (jobChanged || startChanged)
+            {
+                state.ThumbnailFileSize = null;
+                state.ThumbnailFileModified = null;
+                state.ThumbnailFileMetadataFetchedAtUtc = DateTime.MinValue;
+                state.ThumbnailUrl = null;
+            }
+
+            if (startTime.HasValue)
+            {
+                state.ThumbnailJobStartTime = startTime;
+            }
+
+            if (!string.IsNullOrWhiteSpace(activeJobName) &&
+                DateTime.UtcNow - state.ThumbnailFileMetadataFetchedAtUtc >= TimeSpan.FromSeconds(30))
+            {
+                // Metadata supplies the file identity and thumbnail path; throttle this extra request per printer.
+                await RefreshThumbnailFileMetadataAsync(state, serverUrl, activeJobName, credential, ct);
+            }
+
+            state.ThumbnailCacheIdentity = MoonrakerThumbnailCacheIdentity.Create(
+                state.ThumbnailJobStartTime,
+                state.ThumbnailFileSize,
+                state.ThumbnailFileModified);
         }
 
         // Detect state transitions for job completion synchronization
@@ -2729,6 +2761,88 @@ public sealed class MoonrakerSubscriptionService(
         await _coverageBroadcaster
             .BroadcastJobProgressIfChangedAsync(printerId, progressChanged, ct)
             .ConfigureAwait(false);
+    }
+
+    private async Task RefreshThumbnailFileMetadataAsync(
+        PrinterState state,
+        string serverUrl,
+        string jobName,
+        PrinterCredential? credential,
+        CancellationToken ct)
+    {
+        state.ThumbnailFileMetadataFetchedAtUtc = DateTime.UtcNow;
+        try
+        {
+            Uri baseUri = new(serverUrl);
+            Uri metadataUri = new(
+                baseUri,
+                $"server/files/metadata?filename={Uri.EscapeDataString(jobName)}");
+            using HttpClient client = _httpClientFactory.CreateClient();
+            using HttpRequestMessage request = new(HttpMethod.Get, metadataUri);
+            if (!string.IsNullOrWhiteSpace(credential?.ApiKey))
+            {
+                request.Headers.Add("X-Api-Key", credential.ApiKey);
+            }
+
+            using HttpResponseMessage response = await client.SendAsync(
+                request,
+                HttpCompletionOption.ResponseHeadersRead,
+                ct).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                return;
+            }
+
+            await using Stream stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+            using JsonDocument document = await JsonDocument.ParseAsync(stream, cancellationToken: ct).ConfigureAwait(false);
+            if (!document.RootElement.TryGetProperty("result", out JsonElement result) ||
+                result.ValueKind != JsonValueKind.Object)
+            {
+                return;
+            }
+
+            if (result.TryGetProperty("size", out JsonElement size) &&
+                size.ValueKind == JsonValueKind.Number &&
+                size.TryGetInt64(out long fileSize))
+            {
+                state.ThumbnailFileSize = fileSize;
+            }
+
+            if (result.TryGetProperty("modified", out JsonElement modified) &&
+                modified.ValueKind == JsonValueKind.Number &&
+                modified.TryGetDouble(out double fileModified) &&
+                double.IsFinite(fileModified))
+            {
+                state.ThumbnailFileModified = fileModified;
+            }
+
+            if (result.TryGetProperty("thumbnails", out JsonElement thumbnails) &&
+                thumbnails.ValueKind == JsonValueKind.Array)
+            {
+                JsonElement largest = thumbnails.EnumerateArray()
+                    .Where(item => item.ValueKind == JsonValueKind.Object)
+                    .OrderByDescending(item =>
+                        (item.TryGetProperty("width", out JsonElement width) && width.TryGetInt32(out int w) ? w : 0) *
+                        (item.TryGetProperty("height", out JsonElement height) && height.TryGetInt32(out int h) ? h : 0))
+                    .FirstOrDefault();
+                if (largest.ValueKind == JsonValueKind.Object &&
+                    largest.TryGetProperty("relative_path", out JsonElement relativePath) &&
+                    relativePath.ValueKind == JsonValueKind.String)
+                {
+                    state.ThumbnailUrl = MoonrakerThumbnailCacheIdentity.CreateThumbnailUrl(
+                        serverUrl,
+                        relativePath.GetString()!);
+                }
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Could not refresh current-job thumbnail identity for {JobName}", jobName);
+        }
     }
 
     /// <summary>

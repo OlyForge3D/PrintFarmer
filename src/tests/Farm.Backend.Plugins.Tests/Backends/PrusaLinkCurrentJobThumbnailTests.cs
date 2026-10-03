@@ -12,23 +12,28 @@ namespace Farm.Backend.Plugins.Tests.Backends;
 public sealed class PrusaLinkCurrentJobThumbnailTests
 {
     [Fact]
-    public async Task JobControlCapability_UsesProviderJobAndFileIdentity()
+    public async Task ThumbnailCapability_UsesStableProviderJobAndFileIdentity()
     {
         using var handler = new JobHandler();
         using var http = new HttpClient(handler);
         var client = new PrusaLinkClient(http, NullLogger<PrusaLinkClient>.Instance);
-        ISupportsJobControl capability = Assert.IsAssignableFrom<ISupportsJobControl>(client);
+        ISupportsCurrentJobThumbnail capability = Assert.IsAssignableFrom<ISupportsCurrentJobThumbnail>(client);
+        Assert.IsNotAssignableFrom<ISupportsJobControl>(client);
         PrinterCredential credential = PrinterCredential.FromApiKey("prusa-key");
 
         PrinterJob firstJob = Assert.IsType<PrinterJob>(
-            await capability.GetJobAsync("http://prusalink-thumbnail.invalid/", credential));
+            await capability.GetCurrentJobAsync("http://prusalink-thumbnail.invalid/", credential));
         PrinterJob secondJob = Assert.IsType<PrinterJob>(
-            await capability.GetJobAsync("http://prusalink-thumbnail.invalid/", credential));
+            await capability.GetCurrentJobAsync("http://prusalink-thumbnail.invalid/", credential));
 
         Assert.Equal("same-name.gcode", firstJob.JobName);
         Assert.Equal(firstJob.ThumbnailUrl, secondJob.ThumbnailUrl);
-        Assert.NotEqual(firstJob.ThumbnailCacheIdentity, secondJob.ThumbnailCacheIdentity);
+        Assert.Equal(firstJob.ThumbnailCacheIdentity, secondJob.ThumbnailCacheIdentity);
         Assert.Equal(2, handler.Requests);
+        handler.ReplaceFile = true;
+        PrinterJob replacedJob = Assert.IsType<PrinterJob>(
+            await capability.GetCurrentJobAsync("http://prusalink-thumbnail.invalid/", credential));
+        Assert.NotEqual(firstJob.ThumbnailCacheIdentity, replacedJob.ThumbnailCacheIdentity);
     }
 
     [Theory]
@@ -106,6 +111,8 @@ public sealed class PrusaLinkCurrentJobThumbnailTests
     {
         public int Requests { get; private set; }
 
+        public bool ReplaceFile { get; set; }
+
         protected override Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
             CancellationToken cancellationToken)
@@ -116,14 +123,14 @@ public sealed class PrusaLinkCurrentJobThumbnailTests
             {
                 Content = new StringContent(JsonSerializer.Serialize(new
                 {
-                    id = Requests,
+                    id = 42,
                     state = "PRINTING",
                     progress = 0.25,
                     file = new
                     {
                         name = "same-name.gcode",
-                        size = 100,
-                        m_timestamp = 1_700_000_000,
+                        size = ReplaceFile ? 101 : 100,
+                        m_timestamp = ReplaceFile ? 1_700_000_001 : 1_700_000_000,
                         refs = new { thumbnail = "/thumbs/same.png" },
                     },
                 }), System.Text.Encoding.UTF8, "application/json"),

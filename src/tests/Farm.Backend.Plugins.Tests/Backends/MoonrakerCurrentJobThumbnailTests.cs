@@ -18,30 +18,56 @@ public sealed class MoonrakerCurrentJobThumbnailTests
     private static readonly byte[] PngSignature = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
 
     [Fact]
-    public async Task CurrentJobThumbnail_UsesCapabilityCredentialsAndRotatesForRestartedSamePathJob()
+    public void ThumbnailCacheIdentity_UsesStableStartAndFileMetadataWithoutClockFallback()
+    {
+        string? subscriptionIdentity = MoonrakerThumbnailCacheIdentity.Create(
+            startTime: null,
+            fileSize: 100,
+            modified: 1_700_000_000);
+        string? directPollIdentity = MoonrakerThumbnailCacheIdentity.Create(
+            startTime: null,
+            fileSize: 100,
+            modified: 1_700_000_000);
+        string? replacedFileIdentity = MoonrakerThumbnailCacheIdentity.Create(
+            startTime: null,
+            fileSize: 101,
+            modified: 1_700_000_001);
+
+        Assert.Equal("file:100:1700000000", subscriptionIdentity);
+        Assert.Equal(subscriptionIdentity, directPollIdentity);
+        Assert.NotEqual(subscriptionIdentity, replacedFileIdentity);
+        Assert.Null(MoonrakerThumbnailCacheIdentity.Create(null, null, null));
+    }
+
+    [Fact]
+    public async Task CurrentJobThumbnail_UsesStableFileMetadataIdentityAndRetrievesImage()
     {
         using var handler = new ActiveJobHandler();
         using var http = new HttpClient(handler);
         var client = new MoonrakerClient(http, NullLogger<MoonrakerClient>.Instance, new BackendTimeoutSettings());
         IBackendClient backend = client;
-        ISupportsJobControl jobControl = Assert.IsAssignableFrom<ISupportsJobControl>(backend);
         ISupportsCurrentJobThumbnail thumbnail = Assert.IsAssignableFrom<ISupportsCurrentJobThumbnail>(backend);
+        Assert.IsNotAssignableFrom<ISupportsJobControl>(backend);
         PrinterCredential credential = PrinterCredential.FromApiKey("thumbnail-test-key");
 
         PrinterJob firstJob = Assert.IsType<PrinterJob>(
-            await jobControl.GetJobAsync(BaseUrl, credential, CancellationToken.None));
+            await thumbnail.GetCurrentJobAsync(BaseUrl, credential, CancellationToken.None));
         PrinterJob secondJob = Assert.IsType<PrinterJob>(
-            await jobControl.GetJobAsync(BaseUrl, credential, CancellationToken.None));
+            await thumbnail.GetCurrentJobAsync(BaseUrl, credential, CancellationToken.None));
 
         Assert.Equal("same-name.gcode", firstJob.JobName);
         Assert.Equal(
-            "http://moonraker-thumbnail.invalid/server/files/gcodes/thumbnail.png",
+            "http://moonraker-thumbnail.invalid/server/files/gcodes/thumbnails/thumbnail.png",
             firstJob.ThumbnailUrl);
         Assert.Equal(firstJob.ThumbnailUrl, secondJob.ThumbnailUrl);
-        Assert.NotEqual(firstJob.ThumbnailCacheIdentity, secondJob.ThumbnailCacheIdentity);
-        Assert.NotEqual(
+        Assert.Equal(firstJob.ThumbnailCacheIdentity, secondJob.ThumbnailCacheIdentity);
+        Assert.Equal(
             PrinterThumbnailUrl.GetCacheToken(firstJob.JobName!, firstJob.ThumbnailUrl!, firstJob.ThumbnailCacheIdentity),
             PrinterThumbnailUrl.GetCacheToken(secondJob.JobName!, secondJob.ThumbnailUrl!, secondJob.ThumbnailCacheIdentity));
+        handler.ReplaceFile = true;
+        PrinterJob replacedJob = Assert.IsType<PrinterJob>(
+            await thumbnail.GetCurrentJobAsync(BaseUrl, credential, CancellationToken.None));
+        Assert.NotEqual(firstJob.ThumbnailCacheIdentity, replacedJob.ThumbnailCacheIdentity);
 
         HistoryThumbnailContent? content = await thumbnail.GetCurrentJobThumbnailAsync(
             BaseUrl,
@@ -187,7 +213,7 @@ public sealed class MoonrakerCurrentJobThumbnailTests
 
     private sealed class ActiveJobHandler : HttpMessageHandler
     {
-        private int _jobRequests;
+        public bool ReplaceFile { get; set; }
 
         public List<string> ApiKeyHeaders { get; } = [];
 
@@ -198,7 +224,6 @@ public sealed class MoonrakerCurrentJobThumbnailTests
             ApiKeyHeaders.Add(Assert.Single(request.Headers.GetValues("X-Api-Key")));
             if (request.RequestUri!.AbsolutePath == "/printer/objects/query")
             {
-                int startTime = Interlocked.Increment(ref _jobRequests) + 1;
                 object payload = new
                 {
                     result = new
@@ -211,13 +236,9 @@ public sealed class MoonrakerCurrentJobThumbnailTests
                                 state = "printing",
                                 filename = "same-name.gcode",
                                 print_duration = 10,
-                                start_time = 1_700_000_000 + startTime,
                             },
                         },
-                        job_queue = new
-                        {
-                            thumbnails = new[] { new { relative_path = "thumbnail.png" } },
-                        },
+                        job_queue = new { },
                     },
                 };
                 return Task.FromResult(JsonResponse(JsonSerializer.Serialize(payload)));
@@ -225,10 +246,21 @@ public sealed class MoonrakerCurrentJobThumbnailTests
 
             if (request.RequestUri.AbsolutePath == "/server/files/metadata")
             {
-                return Task.FromResult(JsonResponse("""{"result":{"size":100,"modified":1700000000}}"""));
+                return Task.FromResult(JsonResponse(JsonSerializer.Serialize(new
+                {
+                    result = new
+                    {
+                        size = ReplaceFile ? 101 : 100,
+                        modified = ReplaceFile ? 1_700_000_001 : 1_700_000_000,
+                        thumbnails = new[]
+                        {
+                            new { width = 32, height = 32, relative_path = "thumbnails/thumbnail.png" },
+                        },
+                    },
+                })));
             }
 
-            Assert.Equal("/server/files/gcodes/thumbnail.png", request.RequestUri.AbsolutePath);
+            Assert.Equal("/server/files/gcodes/thumbnails/thumbnail.png", request.RequestUri.AbsolutePath);
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new ByteArrayContent(PngSignature),

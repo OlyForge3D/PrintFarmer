@@ -27,7 +27,6 @@ public partial class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
     ISupportsFilamentUsageQuery,
     ISupportsHistory,
     ISupportsHistoryThumbnail,
-    ISupportsJobControl,
     ISupportsCurrentJobThumbnail
 {
     [SuppressMessage(
@@ -94,6 +93,23 @@ public partial class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
             thumbnailUrl,
             credential,
             ct);
+
+    /// <inheritdoc />
+    public async Task<PrinterJob?> GetCurrentJobAsync(
+        string baseUrl,
+        PrinterCredential? credential = null,
+        CancellationToken ct = default)
+    {
+        PrusaJob? job = await GetJobAsync(baseUrl, credential, ct).ConfigureAwait(false);
+        return job is null
+            ? null
+            : new PrinterJob(
+                job.PrintState,
+                job.Progress,
+                job.JobName,
+                job.ThumbnailUrl,
+                ThumbnailCacheIdentity: job.ThumbnailCacheIdentity);
+    }
 
     public async Task<HistoryTotals?> GetHistoryTotalsAsync(
         string baseUrl,
@@ -247,23 +263,6 @@ public partial class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
     {
         ArgumentNullException.ThrowIfNull(baseUrl);
         return GetJobAsync(baseUrl.ToString().TrimEnd('/'), credential, ct);
-    }
-
-    /// <inheritdoc />
-    async Task<PrinterJob?> ISupportsJobControl.GetJobAsync(
-        string baseUrl,
-        PrinterCredential? credential,
-        CancellationToken ct)
-    {
-        PrusaJob? job = await GetJobAsync(baseUrl, credential, ct).ConfigureAwait(false);
-        return job is null
-            ? null
-            : new PrinterJob(
-                job.PrintState,
-                job.Progress,
-                job.JobName,
-                job.ThumbnailUrl,
-                ThumbnailCacheIdentity: job.ThumbnailCacheIdentity);
     }
 
     public async Task<PrinterDto> CreatePrinterDtoAsync(

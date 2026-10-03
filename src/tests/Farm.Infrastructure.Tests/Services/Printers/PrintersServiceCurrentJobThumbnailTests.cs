@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure;
+﻿using System.Text.Json;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Contracts.Printers;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
@@ -20,16 +21,15 @@ public sealed class PrintersServiceCurrentJobThumbnailTests
         await using AppDbContext db = CreateDbContext();
         Printer printer = CreatePrinter();
         var backend = new Mock<IBackendClient>();
-        var jobControl = backend.As<ISupportsJobControl>();
         var thumbnailClient = backend.As<ISupportsCurrentJobThumbnail>();
         PrinterJob job = new(
             "printing",
             25,
             "same-name.gcode",
             "http://printer.internal/server/files/gcodes/thumb.png",
-            ThumbnailCacheIdentity: "job-start:123");
-        jobControl
-            .Setup(client => client.GetJobAsync(
+            ThumbnailCacheIdentity: "file:100:1700000000");
+        thumbnailClient
+            .Setup(client => client.GetCurrentJobAsync(
                 printer.BackendUrl,
                 printer.Credential,
                 It.IsAny<CancellationToken>()))
@@ -43,10 +43,30 @@ public sealed class PrintersServiceCurrentJobThumbnailTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(expectedImage);
         PrintersService service = CreateService(db, printer, backend.Object);
-        string validToken = PrinterThumbnailUrl.GetCacheToken(
-            job.JobName!,
-            job.ThumbnailUrl!,
-            job.ThumbnailCacheIdentity);
+        PrinterStatusUpdate subscriptionUpdate = new(
+            printer.Id,
+            true,
+            "printing",
+            25,
+            job.JobName,
+            job.ThumbnailUrl,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            ThumbnailCacheIdentity: job.ThumbnailCacheIdentity);
+        using JsonDocument signalRPayload = JsonDocument.Parse(JsonSerializer.Serialize(
+            subscriptionUpdate,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+        string signalRUrl = signalRPayload.RootElement.GetProperty("currentJobThumbnailUrl").GetString()!;
+        int tokenStart = signalRUrl.IndexOf("?v=", StringComparison.Ordinal) + 3;
+        string validToken = signalRUrl[tokenStart..];
 
         HistoryThumbnailContent? result = await service.GetCurrentJobThumbnailAsync(
             printer.Id,
@@ -74,10 +94,9 @@ public sealed class PrintersServiceCurrentJobThumbnailTests
         await using AppDbContext db = CreateDbContext();
         Printer printer = CreatePrinter();
         var backend = new Mock<IBackendClient>();
-        Mock<ISupportsJobControl> jobControl = backend.As<ISupportsJobControl>();
         Mock<ISupportsCurrentJobThumbnail> thumbnailClient = backend.As<ISupportsCurrentJobThumbnail>();
-        jobControl
-            .Setup(client => client.GetJobAsync(
+        thumbnailClient
+            .Setup(client => client.GetCurrentJobAsync(
                 printer.BackendUrl,
                 printer.Credential,
                 It.IsAny<CancellationToken>()))

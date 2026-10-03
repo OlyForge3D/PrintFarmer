@@ -24,7 +24,6 @@ public partial class MoonrakerClient(
     ISnapmakerU1CameraMonitorManager? snapmakerU1CameraMonitorManager = null,
     HttpClient? thumbnailHttp = null) : PrinterClientBase, IMoonrakerClient,
     ISupportsFileDownload,
-    ISupportsJobControl,
     ISupportsCurrentJobThumbnail,
     ISupportsFileList,
     ISupportsFileUpload,
@@ -194,7 +193,6 @@ public partial class MoonrakerClient(
     public Task<PrinterJob?> GetJobAsync(string baseUrl, CancellationToken ct = default) =>
         GetJobAsync(baseUrl, null, ct);
 
-    /// <inheritdoc />
     public async Task<PrinterJob?> GetJobAsync(
         string baseUrl,
         PrinterCredential? credential,
@@ -248,9 +246,7 @@ public partial class MoonrakerClient(
             string? jobName = null;
             string? thumb = null;
             double? printDuration = null;
-            double? totalDuration = null;
             double? startTime = null;
-            string? thumbnailCacheIdentity;
 
             if (result.TryGetProperty("status", out JsonElement statusEl))
             {
@@ -287,14 +283,6 @@ public partial class MoonrakerClient(
                         }
                     }
 
-                    if (ps.TryGetProperty("total_duration", out JsonElement td) &&
-                        td.ValueKind == JsonValueKind.Number &&
-                        td.TryGetDouble(out double totalDurationValue) &&
-                        double.IsFinite(totalDurationValue))
-                    {
-                        totalDuration = totalDurationValue;
-                    }
-
                     if (ps.TryGetProperty("start_time", out JsonElement st) &&
                         st.ValueKind == JsonValueKind.Number &&
                         st.TryGetDouble(out double startTimeValue) &&
@@ -305,11 +293,8 @@ public partial class MoonrakerClient(
                 }
             }
 
-            thumbnailCacheIdentity = startTime is { } jobStartTime
-                ? $"start:{Math.Round(jobStartTime, MidpointRounding.AwayFromZero):0}"
-                : totalDuration is { } elapsed
-                    ? $"start:{Math.Round(DateTimeOffset.UtcNow.ToUnixTimeSeconds() - elapsed, MidpointRounding.AwayFromZero):0}"
-                    : null;
+            long? thumbnailFileSize = null;
+            double? thumbnailFileModified = null;
 
             // Try Klipper job queue for thumbnail path
             if (result.TryGetProperty("job_queue", out JsonElement jq) && jq.ValueKind == JsonValueKind.Object &&
@@ -348,28 +333,32 @@ public partial class MoonrakerClient(
                         if (mroot.TryGetProperty("result", out JsonElement mres) &&
                             mres.ValueKind == JsonValueKind.Object)
                         {
-                            string? fileSize = mres.TryGetProperty("size", out JsonElement size) && size.ValueKind == JsonValueKind.Number
-                                ? size.GetRawText()
-                                : null;
-                            string? modified = mres.TryGetProperty("modified", out JsonElement modifiedNode) &&
-                                modifiedNode.ValueKind == JsonValueKind.Number
-                                    ? modifiedNode.GetRawText()
+                            thumbnailFileSize = mres.TryGetProperty("size", out JsonElement size) &&
+                                size.ValueKind == JsonValueKind.Number &&
+                                size.TryGetInt64(out long fileSizeValue)
+                                    ? fileSizeValue
                                     : null;
-                            if (fileSize is not null || modified is not null)
-                            {
-                                thumbnailCacheIdentity = $"{thumbnailCacheIdentity}|file:{fileSize}:{modified}";
-                            }
+                            thumbnailFileModified = mres.TryGetProperty("modified", out JsonElement modifiedNode) &&
+                                modifiedNode.ValueKind == JsonValueKind.Number &&
+                                modifiedNode.TryGetDouble(out double modifiedValue) &&
+                                double.IsFinite(modifiedValue)
+                                    ? modifiedValue
+                                    : null;
 
-                            if (thumb is null &&
-                                mres.TryGetProperty("thumbnails", out JsonElement mthumbs) &&
+                            if (mres.TryGetProperty("thumbnails", out JsonElement mthumbs) &&
                                 mthumbs.ValueKind == JsonValueKind.Array && mthumbs.GetArrayLength() > 0)
                             {
-                                JsonElement first = mthumbs[0];
-                                if (first.TryGetProperty("relative_path", out JsonElement rp) && rp.ValueKind == JsonValueKind.String)
+                                JsonElement largest = mthumbs.EnumerateArray()
+                                    .Where(item => item.ValueKind == JsonValueKind.Object)
+                                    .OrderByDescending(item =>
+                                        (item.TryGetProperty("width", out JsonElement width) && width.TryGetInt32(out int w) ? w : 0) *
+                                        (item.TryGetProperty("height", out JsonElement height) && height.TryGetInt32(out int h) ? h : 0))
+                                    .FirstOrDefault();
+                                if (largest.ValueKind == JsonValueKind.Object &&
+                                    largest.TryGetProperty("relative_path", out JsonElement rp) &&
+                                    rp.ValueKind == JsonValueKind.String)
                                 {
-                                    Uri baseUriX = new(baseUrl);
-                                    Uri thumbUri2 = new(baseUriX, $"server/files/gcodes/{Uri.EscapeDataString(rp.GetString()!)}");
-                                    thumb = thumbUri2.ToString();
+                                    thumb = MoonrakerThumbnailCacheIdentity.CreateThumbnailUrl(baseUrl, rp.GetString()!);
                                 }
                             }
                         }
@@ -380,7 +369,13 @@ public partial class MoonrakerClient(
                 }
             }
 
-            return new PrinterJob(state, progress, jobName, thumb, printDuration, thumbnailCacheIdentity);
+            return new PrinterJob(
+                state,
+                progress,
+                jobName,
+                thumb,
+                printDuration,
+                MoonrakerThumbnailCacheIdentity.Create(startTime, thumbnailFileSize, thumbnailFileModified));
         }
         catch
         {
@@ -3635,6 +3630,13 @@ public partial class MoonrakerClient(
         => await DownloadFileAsync(baseUrl, filePath, ct);
 
     /// <inheritdoc />
+    public Task<PrinterJob?> GetCurrentJobAsync(
+        string baseUrl,
+        PrinterCredential? credential = null,
+        CancellationToken ct = default) =>
+        GetJobAsync(baseUrl, credential, ct);
+
+    /// <inheritdoc />
     public async Task<HistoryThumbnailContent?> GetCurrentJobThumbnailAsync(
         string baseUrl,
         string thumbnailUrl,
@@ -3684,9 +3686,12 @@ public partial class MoonrakerClient(
 
         using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         cts.CancelAfter(_timeouts.FileDownloadTimeout);
+        string encodedThumbnailPath = string.Join(
+            '/',
+            filePath["gcodes/".Length..].Split('/').Select(Uri.EscapeDataString));
         Uri safeThumbnailUri = new(
             baseUri,
-            $"server/files/gcodes/{Uri.EscapeDataString(filePath["gcodes/".Length..])}");
+            $"server/files/gcodes/{encodedThumbnailPath}");
         using HttpRequestMessage request = new(HttpMethod.Get, safeThumbnailUri);
         if (!string.IsNullOrWhiteSpace(credential?.ApiKey))
         {
