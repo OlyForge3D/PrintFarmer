@@ -222,7 +222,11 @@
 
     <h2>Alerts and notifications</h2>
     <p>Normal app alerts come from the PrintFarmer server you selected and are handled on
-      your device:</p>
+      your device. If you enable the optional <strong>Push Notifications</strong> control in
+      the app's <strong>Settings</strong>, iOS asks for notification permission and the app
+      registers an Apple-issued device token with that selected self-hosted server. Any
+      onward delivery is configured and operated by that server's operator; OlyForge3D does
+      not host or recommend a notification relay.</p>
     <ul>
       <li><strong>Live updates</strong> — while connected, the app receives server events
         directly from your selected server over SignalR.</li>
@@ -231,8 +235,11 @@
     </ul>
     <p>The shipped v1 app does not use an OlyForge3D backend or notification relay.
       OlyForge3D does not receive device tokens, notification contents, printer identifiers,
-      job identifiers, or other alert data. Local notifications are created and delivered by
-      iOS on your device rather than being sent through an OlyForge3D service.</p>
+      job identifiers, or other alert data. The App Store privacy disclosure remains
+      <strong>Data Not Collected</strong> because any token and alert data goes only to the
+      self-hosted server you selected, not to OlyForge3D. Local notifications are created
+      and delivered by iOS on your device rather than being sent through an OlyForge3D
+      service.</p>
 
     <h2>Data retention and logs</h2>
     <p>We describe retention in bounded, verifiable terms rather than promising guarantees we

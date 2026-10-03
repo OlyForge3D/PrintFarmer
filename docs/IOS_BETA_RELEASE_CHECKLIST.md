@@ -42,8 +42,8 @@ Architecture reference: [`docs/OPERATOR_NATIVE_PUSH.md`](./OPERATOR_NATIVE_PUSH.
 
 ### Rollback rehearsal (run in staging before beta trigger)
 
-Per Dallas's #708 acceptance addendum, rehearse the full disable/enable cycle
-in staging and record the result here or in the release run notes:
+Per Dallas's #708 acceptance addendum, rehearse the disabled-only native-push
+configuration in staging and record the result here or in the release run notes:
 
 1. Disable: flip `nativePushEnabled` off (Unified Settings or
    `OperatorFeatures__nativePushEnabled=false` + restart).

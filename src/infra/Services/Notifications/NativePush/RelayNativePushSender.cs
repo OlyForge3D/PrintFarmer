@@ -9,7 +9,7 @@ using Microsoft.Extensions.Options;
 namespace Farm.Infrastructure.Services.Notifications.NativePush;
 
 /// <summary>
-/// Relay-mode sender. Forwards typed envelopes to the OlyForge3D-hosted relay over HTTPS
+/// Relay-mode sender. Forwards typed envelopes to an operator-provided relay over HTTPS
 /// using a per-install bearer token. The relay owns the APNs provider key; the local
 /// backend never holds it. See <c>docs/OPERATOR_NATIVE_PUSH.md</c>.
 /// </summary>
