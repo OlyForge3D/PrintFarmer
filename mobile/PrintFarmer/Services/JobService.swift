@@ -17,6 +17,16 @@ actor JobService: JobServiceProtocol {
         try await apiClient.get("/api/job-queue-analytics?limit=200&offset=0")
     }
 
+    func listPrinterQueue(printerId: UUID) async throws -> [QueuedPrintJobResponse] {
+        let jobs: [QueuedJobInfo] = try await apiClient.get("/api/job-queue-analytics/printer/\(printerId)?limit=200")
+        return jobs.map {
+            QueuedPrintJobResponse(
+                job: $0, gcodeFile: nil, assignedPrinter: nil,
+                estimatedStartTime: nil, estimatedCompletionTime: nil
+            )
+        }
+    }
+
     func get(id: UUID) async throws -> PrintJob {
         try await apiClient.get("/api/job-queue/\(id)")
     }

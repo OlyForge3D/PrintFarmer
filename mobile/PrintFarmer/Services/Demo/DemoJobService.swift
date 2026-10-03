@@ -155,6 +155,10 @@ final class DemoJobService: JobServiceProtocol, @unchecked Sendable {
         }
     }
 
+    func listPrinterQueue(printerId: UUID) async throws -> [QueuedPrintJobResponse] {
+        try await listAllJobs().filter { $0.job.assignedPrinterId?.lowercased() == printerId.uuidString.lowercased() }
+    }
+
     func get(id: UUID) async throws -> PrintJob {
         guard let job = Self.jobs.first(where: { $0.id == id }) else {
             throw ServiceError.notImplemented("Job not found in demo data")

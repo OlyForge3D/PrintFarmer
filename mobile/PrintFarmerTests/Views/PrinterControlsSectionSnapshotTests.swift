@@ -591,16 +591,18 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         for size in [CGSize(width: 390, height: 844), CGSize(width: 1068, height: 850)] {
             let tablet = size.width >= 760
             let content = PrinterDetailPanelsHost(
-                selection: .constant(.controls), controlsAvailable: true, printer: printer,
-                overview: { Text("Overview fixture") },
-                controls: {
+                selection: .constant(.control), controlsAvailable: true, printer: printer,
+                status: { Text("Status fixture") },
+                control: {
                     ScrollView {
                         PrinterSetupControlsContent(printer: printer, viewModel: model, usesColumns: tablet)
                             .padding(.horizontal, tablet ? 24 : 16)
                             .padding(.vertical, 16)
                     }
                     .background(Color.pfBackgroundTertiary)
-                }
+                },
+                filament: { Color.clear },
+                queue: { Color.clear }
             )
             .safeAreaInset(edge: .top, spacing: 0) {
                 PrinterRunActionBar(
@@ -624,7 +626,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
                 $0 as? UISegmentedControl
             }.first)
             XCTAssertEqual(selector.selectedSegmentIndex, 1)
-            XCTAssertEqual(selector.bounds.width, tablet ? 380 : size.width - 32, accuracy: 1)
+            XCTAssertEqual(selector.bounds.width, size.width - (tablet ? 48 : 32), accuracy: 1)
             XCTAssertGreaterThanOrEqual(selector.bounds.height, 44)
             XCTAssertNotNil(nativeControls(in: controller.view).first {
                 $0.accessibilityIdentifier == "printer.controls.disable-motors"
@@ -648,7 +650,8 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
                 for selection in PrinterDetailPanel.allCases {
                     let content = PrinterDetailPanelsHost(
                         selection: .constant(selection), controlsAvailable: true, printer: printer,
-                        overview: { Color.clear }, controls: { Color.clear }
+                        status: { Color.clear }, control: { Color.clear },
+                        filament: { Color.clear }, queue: { Color.clear }
                     )
                     .environment(\.dynamicTypeSize, textSize)
                     .frame(width: width, height: 844)

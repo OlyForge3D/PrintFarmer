@@ -12,12 +12,14 @@ final class MockJobService: JobServiceProtocol, @unchecked Sendable {
     // Call tracking
     var listJobsCalled = false
     var listAllJobsCalled = false
+    var listPrinterQueueCalledWith: UUID?
     var getJobCalledWith: UUID?
     var createCalledWith: CreatePrintJobRequest?
     var updateCalledWith: (id: UUID, request: UpdatePrintJobRequest)?
     var deleteCalledWith: UUID?
     var cancelCalledWith: UUID?
     var dispatchCalledWith: UUID?
+    var dispatchReviewedRowVersion: String?
     var abortCalledWith: UUID?
     var pauseCalledWith: UUID?
     var resumeCalledWith: UUID?
@@ -35,6 +37,12 @@ final class MockJobService: JobServiceProtocol, @unchecked Sendable {
 
     func listAllJobs() async throws -> [QueuedPrintJobResponse] {
         listAllJobsCalled = true
+        if let error = errorToThrow { throw error }
+        return queuedJobResponsesToReturn
+    }
+
+    func listPrinterQueue(printerId: UUID) async throws -> [QueuedPrintJobResponse] {
+        listPrinterQueueCalledWith = printerId
         if let error = errorToThrow { throw error }
         return queuedJobResponsesToReturn
     }
@@ -79,6 +87,7 @@ final class MockJobService: JobServiceProtocol, @unchecked Sendable {
         reviewedRowVersion: String
     ) async throws -> JobDispatchResult {
         dispatchCalledWith = id
+        dispatchReviewedRowVersion = reviewedRowVersion
         if let error = actionErrorToThrow ?? errorToThrow { throw error }
         if let dispatchResultToReturn {
             return dispatchResultToReturn
@@ -154,6 +163,7 @@ final class MockJobService: JobServiceProtocol, @unchecked Sendable {
         dispatchResultToReturn = nil
         listJobsCalled = false
         listAllJobsCalled = false
+        listPrinterQueueCalledWith = nil
         getJobCalledWith = nil
         createCalledWith = nil
         updateCalledWith = nil

@@ -18,6 +18,38 @@ final class JobServiceTests: XCTestCase {
         super.tearDown()
     }
 
+    func testPrinterQueueUsesScopedEndpointAndPreservesServerOrderWithConflictingTimestamps() async throws {
+        let printerId = UUID()
+        let firstId = UUID()
+        let secondId = UUID()
+        let entries = [
+            (firstId, 2, "2026-10-01T00:00:00Z"),
+            (secondId, 1, "2026-10-02T00:00:00Z")
+        ].map { id, position, timestamp in
+            """
+            {"id":"\(id)","name":"Scoped job","assignedPrinterId":"\(printerId)",
+            "status":"Queued","priority":"Normal","queuePosition":\(position),
+            "queuedAtUtc":"\(timestamp)","createdAtUtc":"\(timestamp)",
+            "rowVersion":"revision-\(position)","jobKind":"Standard","toolRequirements":[],
+            "updatedAtUtc":"\(timestamp)","wasSeededFromHistory":false,
+            "copies":1,"completedCopies":0,"remainingCopies":1,"toolheadUsages":[]}
+            """
+        }
+        mockAPIClient.stubResponse(json: "[\(entries.joined(separator: ","))]")
+
+        let jobs = try await service.listPrinterQueue(printerId: printerId)
+
+        XCTAssertEqual(jobs.map(\.id), [firstId.uuidString, secondId.uuidString])
+        XCTAssertEqual(jobs.map(\.job.queuePosition), [2, 1])
+        XCTAssertEqual(jobs.map(\.job.rowVersion), ["revision-2", "revision-1"])
+        XCTAssertEqual(jobs.map(\.job.name), ["Scoped job", "Scoped job"])
+        XCTAssertTrue(jobs.allSatisfy { $0.gcodeFile == nil && $0.assignedPrinter == nil })
+        let request = try XCTUnwrap(mockAPIClient.capturedRequests.last)
+        XCTAssertEqual(request.url?.path, "/api/job-queue-analytics/printer/\(printerId)")
+        XCTAssertEqual(request.url?.query, "limit=200")
+        XCTAssertEqual(request.httpMethod, "GET")
+    }
+
     func testDispatchAcceptedUsesReviewedETagAndTypedBody() async throws {
         stubDispatch(statusCode: 200, outcome: "Accepted")
 
@@ -39,6 +71,75 @@ final class JobServiceTests: XCTestCase {
             request.value(forHTTPHeaderField: "If-Match"),
             "\"job-v1\""
         )
+    }
+
+    @MainActor
+    func testFlatBackendPrinterQueueLoadsDetailAndDispatchesFirstWaitingRow() async throws {
+            let printerService = MockPrinterService()
+            var printer = try TestData.decodePrinter()
+            printer.isOnline = true
+            printer.state = "idle"
+            printerService.printerToReturn = printer
+            let firstId = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
+            let secondId = UUID(uuidString: "33333333-3333-3333-3333-333333333333")!
+            // QueuedPrintJobDto's camelCase/null-omitting shape, not the
+            // cross-scope analytics {job,gcodeFile,assignedPrinter} response.
+            let waitingRows = """
+            {"id":"\(firstId)","rowVersion":"AQID","name":"queue-fixture.gcode",
+            "assignedPrinterId":"\(printer.id)","jobKind":"Standard","status":"Queued",
+            "priority":"Normal","queuePosition":10,"toolRequirements":[],
+            "createdAtUtc":"2026-10-03T19:00:00Z","updatedAtUtc":"2026-10-03T19:00:00Z",
+            "queuedAtUtc":"2026-10-03T19:00:00Z","wasSeededFromHistory":false,
+            "copies":1,"completedCopies":0,"remainingCopies":1,"toolheadUsages":[]},
+            {"id":"\(secondId)","rowVersion":"BAUG","name":"later-fixture.gcode",
+            "assignedPrinterId":"\(printer.id)","jobKind":"Standard","status":"Queued",
+            "priority":"Normal","queuePosition":1,"toolRequirements":[],
+            "createdAtUtc":"2026-10-03T20:00:00Z","updatedAtUtc":"2026-10-03T20:00:00Z",
+            "queuedAtUtc":"2026-10-03T20:00:00Z","wasSeededFromHistory":false,
+            "copies":1,"completedCopies":0,"remainingCopies":1,"toolheadUsages":[]}
+            """
+            let occupyingRows = ["Starting", "Printing", "Paused", "Assigned"].map { status in
+                """
+                {"id":"\(UUID())","rowVersion":"active-revision","name":"\(status)-fixture.gcode",
+                "assignedPrinterId":"\(printer.id)","jobKind":"Standard","status":"\(status)",
+                "priority":"Normal","queuePosition":0,"toolRequirements":[],
+                "createdAtUtc":"2026-10-03T18:00:00Z","updatedAtUtc":"2026-10-03T18:00:00Z",
+                "queuedAtUtc":"2026-10-03T18:00:00Z","wasSeededFromHistory":false,
+                "copies":1,"completedCopies":0,"remainingCopies":1,"toolheadUsages":[]}
+                """
+            }
+            let json = "[\(occupyingRows.joined(separator: ",")),\(waitingRows)]"
+            let dispatchBody = """
+            {"id":"\(firstId)","rowVersion":"AQIE","status":"Starting",
+            "dispatchResult":{"attemptId":"\(UUID())","attemptNumber":1,"outcome":"Accepted",
+            "isRetryable":false,"requiresReconciliation":false,"jobRevision":"AQIE",
+            "dispatchStateRevision":"printer-revision"}}
+            """
+            mockAPIClient.stubResponses([
+                "/api/job-queue-analytics/printer/": (200, json),
+                "/api/job-queue/\(firstId)/dispatch": (200, dispatchBody)
+            ])
+            let vm = PrinterDetailViewModel(printerId: printer.id)
+            vm.configure(printerService: printerService)
+            vm.configureOperatorServices(jobService: service, maintenanceService: MockMaintenanceService())
+            defer { vm.stopSnapshotPolling() }
+
+            await vm.loadPrinter()
+
+            XCTAssertEqual(vm.nextQueuedJobs.map(\.id), [firstId.uuidString, secondId.uuidString])
+            XCTAssertEqual(vm.displayedQueueJobs.map(\.job.status), ["Starting", "Printing", "Paused", "Assigned", "Queued", "Queued"])
+            let head = try XCTUnwrap(vm.nextQueuedJobs.first)
+            XCTAssertEqual(head.job.name, "queue-fixture.gcode")
+            XCTAssertEqual(head.job.rowVersion, "AQID")
+            XCTAssertNil(head.gcodeFile)
+            await vm.startNextJob(head)
+            XCTAssertNil(vm.dispatchError)
+
+            let dispatch = try XCTUnwrap(mockAPIClient.capturedRequests.first {
+                $0.httpMethod == "POST" && $0.url?.path.hasSuffix("/dispatch") == true
+            })
+            XCTAssertEqual(dispatch.url?.path, "/api/job-queue/\(firstId)/dispatch")
+            XCTAssertEqual(dispatch.value(forHTTPHeaderField: "If-Match"), "\"AQID\"")
     }
 
     func testDispatchUnknownReturnsReconciliation() async throws {

@@ -11,10 +11,11 @@ struct PrinterDetailView: View {
     @State private var coverageViewModel: PrinterFilamentCoverageViewModel
     @State private var activeTasks: [Task<Void, Never>] = []
     @State private var guidedSwapTarget: AppRouter.FilamentSwapDeepLink?
+    @State private var showsEjectConfirmation = false
     // Transient UI state only (issue #2522) — never persisted, resets to
-    // `.overview` whenever this view is (re)constructed for a printer/server,
+    // `.status` whenever this view is (re)constructed for a printer/server,
     // matching `viewModel`/`coverageViewModel`'s own per-identity lifetime.
-    @State private var selectedPanel: PrinterDetailPanel = .overview
+    @State private var selectedPanel: PrinterDetailPanel = .status
     // The command owner outlives page visibility and access changes.
     @State private var controlsViewModel: PrinterControlsViewModel?
     @State private var controlsComposition: PrinterControlsComposition?
@@ -29,17 +30,9 @@ struct PrinterDetailView: View {
         services.capabilitiesService.resolved.guidedSwapEnabled
     }
 
-    /// Gates camera snapshot polling and MJPEG stream mounting (issue #2522,
-    /// Hicks review finding 19). Native `TabView` paging keeps the adjacent
-    /// page mounted for swipe animation, so `overviewPage`'s `cameraSection`
-    /// stays alive — and, without this gate, kept polling/streaming — even
-    /// while the Controls page is the one on screen. Combines BOTH
-    /// conditions the pre-#2522 single-page screen never had to distinguish:
-    /// the existing `scenePhase == .active` foreground gate, and now also
-    /// `selectedPanel == .overview`, so leaving the Overview page (Controls
-    /// selected) stops the camera exactly the same way backgrounding the
-    /// app already did.
-    private var isOverviewPageForeground: Bool {
+    /// Pager neighbors stay mounted; camera work requires visible Status
+    /// and an active application scene.
+    private var isStatusPageForeground: Bool {
         PrinterDetailCameraLifecycleMapping.isForeground(
             scenePhase: scenePhase,
             selectedPanel: selectedPanel
@@ -100,13 +93,31 @@ struct PrinterDetailView: View {
         // `SegmentedControl` and the paging `TabView`'s internal
         // `CollectionView` both silently lost their own identifiers and
         // reported "printer.detail.root.<uuid>" instead once the
-        // Overview/Controls pager replaced the single old `ScrollView`).
+        // paged detail replaced the single old `ScrollView`).
         // `.contain` makes this VStack a genuine, opaque accessibility node
         // in its own right so its identifier stops leaking onto children
         // that already declare their own.
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("printer.detail.root.\(printerId.uuidString)")
         .navigationTitle("Printer")
+        .navigationBarBackButtonHidden()
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button {
+                    Self.returnToFarm(router: router, capabilities: services.capabilitiesService.resolved)
+                } label: { Label("Farm", systemImage: "chevron.left") }
+                    .accessibilityIdentifier("printer.detail.farm")
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                if let baseURL = serverRegistry.activeServer?.baseURL {
+                    Link(destination: baseURL.appendingPathComponent("printers")
+                        .appendingPathComponent(printerId.uuidString.lowercased())) {
+                        Label("Open in web", systemImage: "arrow.up.right")
+                    }
+                    .accessibilityIdentifier("printer.detail.web")
+                }
+            }
+        }
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
@@ -115,7 +126,7 @@ struct PrinterDetailView: View {
                 viewModel: viewModel,
                 coverageViewModel: coverageViewModel,
                 refreshCoverage: filamentCoverageEnabled,
-                snapshotPollingAllowed: { isOverviewPageForeground }
+                snapshotPollingAllowed: { isStatusPageForeground }
             )
         }
         .alert(
@@ -139,6 +150,11 @@ struct PrinterDetailView: View {
                 Text(error)
             }
         }
+        .alert("Start Failed", isPresented: .constant(viewModel.dispatchError != nil)) {
+            Button("OK") { viewModel.dispatchError = nil }
+        } message: {
+            Text(viewModel.dispatchError ?? "")
+        }
         .task {
             let generation = services.activeServerGeneration
             await services.awaitActiveServerSettled()
@@ -148,14 +164,13 @@ struct PrinterDetailView: View {
             let composition = services.printerControlsComposition
             controlsComposition = composition
             viewModel.isViewActive = true
-            viewModel.setSnapshotPollingAllowed(isOverviewPageForeground)
+            viewModel.setSnapshotPollingAllowed(isStatusPageForeground)
             viewModel.configure(printerService: composition?.printerService ?? services.printerService)
             #if canImport(UIKit)
             if let nfc = services.nfcService {
                 viewModel.configureNFCScanner(nfc)
             }
             #endif
-            viewModel.configureAutoDispatch(services.autoPrintService)
             viewModel.configureSignalR(services.signalRService)
             viewModel.configurePredictive(services.predictiveService)
             viewModel.configureFailureDetection(services.failureDetectionService)
@@ -164,7 +179,7 @@ struct PrinterDetailView: View {
                 maintenanceService: services.maintenanceService
             )
             await viewModel.loadPrinter()
-            viewModel.setSnapshotPollingAllowed(isOverviewPageForeground)
+            viewModel.setSnapshotPollingAllowed(isStatusPageForeground)
 
             // Handle NFC "mark ready" deep link
             if let pendingId = router.pendingNFCReadyPrinterId, pendingId == viewModel.printerId {
@@ -208,7 +223,7 @@ struct PrinterDetailView: View {
                             viewModel: viewModel,
                             coverageViewModel: coverageViewModel,
                             refreshCoverage: filamentCoverageEnabled,
-                            snapshotPollingAllowed: selectedPanel == .overview
+                            snapshotPollingAllowed: selectedPanel == .status
                         )
                     }
                     activeTasks.append(task)
@@ -220,11 +235,11 @@ struct PrinterDetailView: View {
             }
         }
         // Reacts to a page switch alone, independent of `scenePhase` (issue
-        // #2522, Hicks review finding 19): leaving the Overview page for
-        // Controls must stop camera polling immediately, not just the next
+        // #2522, Hicks review finding 19): leaving Status for another page
+        // must stop camera polling immediately, not just the next
         // time the app backgrounds/foregrounds.
         .onChange(of: selectedPanel) { _, _ in
-            viewModel.setSnapshotPollingAllowed(isOverviewPageForeground)
+            viewModel.setSnapshotPollingAllowed(isStatusPageForeground)
         }
         .onChange(of: guidedSwapEnabled) { _, isEnabled in
             guard !isEnabled, guidedSwapTarget != nil else { return }
@@ -243,9 +258,6 @@ struct PrinterDetailView: View {
                 }
                 activeTasks.append(task)
             }
-        }
-        .sheet(item: $viewModel.dispatchTargetJob) { job in
-            dispatchSheet(job)
         }
         .sheet(isPresented: $viewModel.showScannedDataSheet) {
             if let data = viewModel.nfcScannedData {
@@ -323,14 +335,6 @@ struct PrinterDetailView: View {
         )
     }
 
-    private func filamentSectionView(_ printer: Printer) -> some View {
-        PrinterFilamentSection(
-            presentation: filamentPresentation(printer),
-            actions: filamentActions(printer),
-            onAction: { action in handleFilamentAction(action) }
-        )
-    }
-
     @MainActor
     private func handleFilamentAction(_ action: PrinterFilamentAction) {
         switch action.kind {
@@ -340,8 +344,7 @@ struct PrinterDetailView: View {
             // Assignment-only (issue #2522 / #2519 integration contract):
             // NEVER alias to `ejectFilament()`, which also dispatches a
             // physical `unloadFilament()` POST. That combined operation
-            // stays reachable separately, accurately labeled "Eject
-            // Filament", in `setupActionsSection`.
+            // stays reachable separately as Eject on Filament.
             UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
             let task = Task { await viewModel.clearActiveSpoolAssignment() }
             activeTasks.append(task)
@@ -354,7 +357,7 @@ struct PrinterDetailView: View {
         }
     }
 
-    // MARK: - Main Content (issue #2522 — Overview/Controls paging)
+    // MARK: - Main Content
 
     private func controlsAvailable(for printer: Printer) -> Bool {
         AdvancedPrinterControlsAccess.isEntryVisible(
@@ -386,8 +389,12 @@ struct PrinterDetailView: View {
             selection: $selectedPanel,
             controlsAvailable: controlsAvailable(for: printer),
             printer: printer,
-            overview: { overviewPage(printer) },
-            controls: { controlsPage(printer) }
+            status: { statusPage(printer) },
+            control: { controlsPage(printer) },
+            filament: { filamentPage(printer) },
+            queue: {
+                ScrollView { queueSection(printer).padding().padding(.bottom, 32) }
+            }
         )
         // Construction remains authorization-gated even though both pages exist.
         .task(id: printer.id) {
@@ -410,7 +417,12 @@ struct PrinterDetailView: View {
             controlsViewModel?.handlePrinterUpdate(printer)
         }
         .modifier(PrinterControlsAccessLifecycle(viewModel: controlsViewModel))
+        .modifier(PrinterDetailSafetyLifecycle(
+            viewModel: controlsViewModel,
+            observes: scenePhase == .active && (selectedPanel == .control || selectedPanel == .filament)
+        ))
         .safeAreaInset(edge: .top, spacing: 0) {
+            if selectedPanel == .control {
             let presentation = runActionPresentation(for: printer)
             VStack(alignment: .trailing, spacing: 4) {
                 PrinterRunActionBar(
@@ -428,11 +440,12 @@ struct PrinterDetailView: View {
             .padding(.horizontal)
             .padding(.vertical, 4)
             .background(.bar)
+            }
         }
     }
 
     /// AnyLayout preserves child identity (especially the camera) on reflow.
-    private func overviewPage(_ printer: Printer) -> some View {
+    private func statusPage(_ printer: Printer) -> some View {
         GeometryReader { geometry in
             let columns = PrinterDetailLayout.usesColumns(
                 width: geometry.size.width, dynamicTypeSize: dynamicTypeSize
@@ -442,9 +455,15 @@ struct PrinterDetailView: View {
                     ? AnyLayout(HStackLayout(alignment: .top, spacing: 24))
                     : AnyLayout(VStackLayout(alignment: .leading, spacing: 20))
                 layout {
-                    overviewPrimary(printer)
+                    cameraSection(printer)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                    overviewSupporting(printer)
+                    VStack(alignment: .leading, spacing: 16) {
+                        currentJobBlock(printer)
+                        temperatureSection(printer)
+                        if printer.obicoEnabled && viewModel.isActivelyPrinting {
+                            failureDetectionSummary(printer)
+                        }
+                    }
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .padding()
@@ -454,38 +473,36 @@ struct PrinterDetailView: View {
         }
     }
 
-    private func overviewPrimary(_ printer: Printer) -> some View {
-        VStack(alignment: .leading, spacing: 20) {
-            temperatureSection(printer)
-            filamentSectionView(printer)
-            currentJobBlock(printer)
-            if let homedAxes = resolvedHomedAxes(printer) {
-                homedAxesBadges(homedAxes)
+    private func filamentPage(_ printer: Printer) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                PrinterFilamentSection(
+                    presentation: filamentPresentation(printer),
+                    actions: filamentActions(printer),
+                    onAction: { handleFilamentAction($0) },
+                    showsAllActions: true
+                )
+                if let controlsViewModel, controlsAvailable(for: printer) {
+                    safetyRefresh(controlsViewModel)
+                    PrinterMaterialControls(viewModel: controlsViewModel)
+                        .padding()
+                        .operatorCard()
+                } else {
+                    controlsUnavailable(printer)
+                }
+                ejectFilamentUtility(printer)
+                    .disabled(!printer.isOnline || viewModel.isActivelyPrinting)
+                if viewModel.isActivelyPrinting {
+                    Text("Load, Unload and Eject are disabled while a print is active.")
+                        .font(.footnote).foregroundStyle(Color.pfTextSecondary)
+                }
             }
-            ejectFilamentUtility(printer)
-        }
-    }
-
-    private func overviewSupporting(_ printer: Printer) -> some View {
-        VStack(alignment: .leading, spacing: 20) {
-            cameraSection(printer)
-            if printer.obicoEnabled && viewModel.isActivelyPrinting {
-                failureDetectionSummary(printer)
-            }
-            queueSection(printer)
-            maintenanceSection(printer)
-            historySection(printer)
-            mainsailLinkSection(printer)
-            AutoDispatchSection(printerId: printer.id, isPrinting: viewModel.isPrinting || viewModel.isPaused)
-            if printer.isOnline {
-                setupActionsSection(printer)
-            }
-            predictiveInsightsLink(printer)
+            .padding()
+            .padding(.bottom, 32)
         }
     }
 
     /// Observe the persistent owner, never construct one inside a pager child.
-    /// Maintenance and NFC remain on Overview under their separate gates.
     @ViewBuilder
     private func controlsPage(_ printer: Printer) -> some View {
         GeometryReader { geometry in
@@ -494,16 +511,15 @@ struct PrinterDetailView: View {
                     if !controlsAvailable(for: printer) {
                         controlsUnavailable(printer)
                     } else if let controlsViewModel {
+                        safetyRefresh(controlsViewModel)
                         PrinterSetupControlsContent(
                             printer: printer,
                             viewModel: controlsViewModel,
                             usesColumns: PrinterDetailLayout.usesColumns(
                                 width: geometry.size.width, dynamicTypeSize: dynamicTypeSize
                             ),
-                            materialPresentation: filamentPresentation(printer),
-                            observesSafety: true,
-                            materialActions: filamentActions(printer),
-                            onMaterialAction: { handleFilamentAction($0) }
+                            showsMaterial: false,
+                            usesHeaterSteppers: true
                         )
                     } else if controlsComposition == nil
                         || controlsComposition?.identity != services.printerControlsComposition?.identity {
@@ -537,94 +553,104 @@ struct PrinterDetailView: View {
                     Label("Printer Safety Settings", systemImage: "gearshape")
                         .frame(minHeight: 44)
                 }
-                .accessibilityIdentifier("printer.detail.controls.settings")
+                .accessibilityIdentifier("printer.detail.control.settings")
             }
         }
         .fixedSize(horizontal: false, vertical: true)
         .padding()
         .operatorCard()
         .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("printer.detail.controls.unavailable")
+        .accessibilityIdentifier("printer.detail.control.unavailable")
     }
 
-    /// Retained physical-unload utility (issue #2522 preserve-before-cleanup
-    /// checklist, Hicks review finding 17). At the pre-#2522 baseline this
-    /// lived in the removed `activeSpoolContent` block with NO
-    /// `printer.isOnline` gate — only an active-spool visibility gate and a
-    /// pending-action disable gate — so it is rendered directly in
-    /// `overviewPage`, never folded into the online-gated
-    /// `setupActionsSection` below. Dispatches the ORIGINAL combined
-    /// operation (`ejectFilament()`: clears the assignment AND physically
-    /// unloads via `unloadFilament()`), preserved with truthful, distinct
-    /// wording — never to be confused with #2519's "Clear spool assignment"
-    /// action in `PrinterFilamentSection`, which is assignment-only
-    /// (`clearActiveSpoolAssignment()`, no physical unload).
+    private func safetyRefresh(_ owner: PrinterControlsViewModel) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let error = owner.safetyReadError {
+                Text(error).font(.footnote).foregroundStyle(Color.pfError)
+            }
+            ControlActionButton(title: "Refresh safety checks", identifier: "printer.detail.safety.refresh") {
+                let task = Task { await owner.refreshSafetyEvidence() }
+                activeTasks.append(task)
+            }
+            .disabled(owner.isRefreshingSafety || owner.isLoadingCapabilities)
+        }
+    }
+
+    private struct PrinterDetailSafetyDemand: Equatable {
+        let observes: Bool
+        let owner: ObjectIdentifier?
+        let loadingCapabilities: Bool
+    }
+
+    private struct PrinterDetailSafetyLifecycle: ViewModifier {
+        let viewModel: PrinterControlsViewModel?
+        let observes: Bool
+
+        func body(content: Content) -> some View {
+            content.background {
+                if let viewModel {
+                    Color.clear
+                        .modifier(ObservedPrinterDetailSafetyLifecycle(viewModel: viewModel, observes: observes))
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
+            }
+        }
+    }
+
+    // This legacy ObservableObject must be observed at the safety task's host,
+    // not merely by pager children, so capability completion restarts the task.
+    private struct ObservedPrinterDetailSafetyLifecycle: ViewModifier {
+        @ObservedObject var viewModel: PrinterControlsViewModel
+        let observes: Bool
+
+        func body(content: Content) -> some View {
+            content
+                .task(id: PrinterDetailSafetyDemand(
+                    observes: observes,
+                    owner: ObjectIdentifier(viewModel),
+                    loadingCapabilities: viewModel.isLoadingCapabilities
+                )) {
+                    guard observes else {
+                        viewModel.suspendSafetyObservation()
+                        return
+                    }
+                    guard !viewModel.isLoadingCapabilities else { return }
+                    await viewModel.refreshSafetyEvidence()
+                    while !Task.isCancelled && viewModel.isActive {
+                        do { try await Task.sleep(for: .seconds(5)) } catch { return }
+                        await viewModel.refreshSafetyEvidence()
+                    }
+                }
+                .onDisappear { viewModel.suspendSafetyObservation() }
+        }
+    }
+
+    /// Eject clears assignment and requests physical unload; Unassign only
+    /// clears inventory assignment.
     @ViewBuilder
     private func ejectFilamentUtility(_ printer: Printer) -> some View {
         if viewModel.effectiveSpoolInfo?.hasActiveSpool ?? false {
             PrinterDetailBorderedDestructiveButton(kind: .eject) {
-                UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
-                let task = Task { await viewModel.ejectFilament() }
-                activeTasks.append(task)
+                showsEjectConfirmation = true
             }
             .disabled(viewModel.isPerformingAction)
             .accessibilityLabel("Eject filament: clears the spool assignment and physically unloads")
-            .accessibilityIdentifier("printer.detail.overview.ejectFilament")
-        }
-    }
-
-    /// Retained-location setup actions (issue #2522 preserve-before-cleanup
-    /// checklist): the admin maintenance toggle and NFC printer-tag write,
-    /// both previously nested inside the old Advanced disclosure's Actions
-    /// block, which rendered `if printer.isOnline` regardless of the
-    /// Advanced Printer Controls safety preference. The caller
-    /// (`overviewPage`) reproduces that exact `printer.isOnline` gate; this
-    /// function itself only decides whether it has anything to show at all.
-    @ViewBuilder
-    private func setupActionsSection(_ printer: Printer) -> some View {
-        let showsMaintenanceToggle = authViewModel.currentUserRole == "farm_admin"
-        #if canImport(UIKit)
-        let showsWriteTag = true
-        #else
-        let showsWriteTag = false
-        #endif
-        if showsMaintenanceToggle || showsWriteTag {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Setup Actions")
-                    .font(.headline)
-
-                VStack(spacing: 10) {
-                    if showsMaintenanceToggle {
-                        Button {
-                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                            let task = Task { await viewModel.toggleMaintenance() }
-                            activeTasks.append(task)
-                        } label: {
-                            Label(
-                                printer.inMaintenance ? "Exit Maintenance" : "Enter Maintenance",
-                                systemImage: "wrench.and.screwdriver"
-                            )
-                            .fullWidthActionButton()
-                        }
-                        .buttonStyle(.bordered)
-                        .disabled(viewModel.isPerformingAction || viewModel.isPrinting || viewModel.isPaused)
-                        .accessibilityLabel(printer.inMaintenance ? "Exit maintenance mode" : "Enter maintenance mode")
+            .accessibilityIdentifier("printer.detail.filament.ejectFilament")
+            .confirmationDialog("Eject filament?", isPresented: $showsEjectConfirmation, titleVisibility: .visible) {
+                Button("Eject", role: .destructive) {
+                    guard viewModel.printer?.isOnline == true, !viewModel.isActivelyPrinting else {
+                        viewModel.actionError = "The printer must be online and idle to eject filament."
+                        return
                     }
-
-                    #if canImport(UIKit)
-                    Button {
-                        viewModel.writeNFCPrinterTag()
-                    } label: {
-                        Label("Write Tag", systemImage: "wave.3.right")
-                            .fullWidthActionButton()
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(viewModel.isPerformingAction)
-                    .accessibilityLabel("Write NFC printer identification tag")
-                    #endif
+                    UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+                    let task = Task { await viewModel.ejectFilament() }
+                    activeTasks.append(task)
                 }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Clears the spool assignment and requests physical unload. Check the printer before confirming.")
             }
-            .accessibilityIdentifier("printer.detail.overview.setupActions")
         }
     }
 
@@ -675,7 +701,13 @@ struct PrinterDetailView: View {
             if viewModel.isActivelyPrinting || jobName != nil {
                 VStack(alignment: .leading, spacing: 12) {
                     HStack(alignment: .top, spacing: 12) {
-                        remoteThumbnail(viewModel.currentJobThumbnailUrl, size: 56)
+                        remoteThumbnail(viewModel.currentJobThumbnailUrl, size: 72)
+                            .accessibilityIdentifier("printer.detail.job.thumbnail")
+                        if let progress = printer.progress, progress.isFinite {
+                            Text("\(Int((min(max(progress, 0), 1) * 100).rounded()))%")
+                                .font(.system(size: 40, weight: .bold, design: .rounded))
+                                .monospacedDigit()
+                        }
                         VStack(alignment: .leading, spacing: 6) {
                             Text(jobName ?? "Printing")
                                 .font(.subheadline.weight(.semibold))
@@ -689,8 +721,13 @@ struct PrinterDetailView: View {
                             .accessibilityLabel("Print progress \(Int((progress * 100).rounded())) percent")
                     }
 
-                    currentJobEtaRow()
+                    HStack(alignment: .top, spacing: 8) {
+                        statusFact("Left", value: viewModel.formattedTimeRemaining ?? "Unknown")
+                        statusFact("Done at", value: viewModel.formattedEtaClock ?? "Unknown")
+                        statusFact("Layer", value: "Unavailable")
+                    }
                 }
+
                 .padding()
                 .operatorCard()
             } else {
@@ -704,43 +741,28 @@ struct PrinterDetailView: View {
         .accessibilityIdentifier("printer.detail.job")
     }
 
-    @ViewBuilder
-    private func currentJobEtaRow() -> some View {
-        if let remaining = viewModel.formattedTimeRemaining {
-            let clock = viewModel.formattedEtaClock
-            HStack(spacing: 6) {
-                Image(systemName: "clock")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .accessibilityHidden(true)
-                Text(clock.map { "Done in \(remaining) · \($0)" } ?? "Done in \(remaining)")
-                    .font(.subheadline)
-                    .monospacedDigit()
-                    .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 0)
-            }
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel(
-                clock.map { "Estimated completion in \(remaining), at \($0)" }
-                    ?? "Estimated time remaining \(remaining)"
-            )
-            .accessibilityIdentifier("printer.detail.job.eta")
+    private func statusFact(_ title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title).font(.caption).foregroundStyle(Color.pfTextSecondary)
+            Text(value).font(.subheadline.weight(.semibold)).monospacedDigit()
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
     }
 
-    // MARK: - Queue (next 3 assigned jobs + match state + dispatch-to)
+    // MARK: - Queue (server-ordered assigned jobs + reviewed-head start)
 
     private func queueSection(_ printer: Printer) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Queue")
                 .font(.headline)
 
-            if viewModel.nextQueuedJobs.isEmpty {
-                operatorEmptyState(icon: "tray", message: "No jobs queued for this printer")
+            if viewModel.displayedQueueJobs.isEmpty {
+                operatorEmptyState(icon: "tray", message: "No active or queued jobs for this printer")
             } else {
                 VStack(spacing: 10) {
-                    ForEach(viewModel.nextQueuedJobs) { job in
-                        queueRow(job)
+                    ForEach(viewModel.displayedQueueJobs) { job in
+                        queueRow(job, isNext: job.id == viewModel.nextQueuedJobs.first?.id, printer: printer)
                     }
                 }
             }
@@ -748,10 +770,12 @@ struct PrinterDetailView: View {
         .accessibilityIdentifier("printer.detail.queue")
     }
 
-    private func queueRow(_ job: QueuedPrintJobResponse) -> some View {
+    private func queueRow(_ job: QueuedPrintJobResponse, isNext: Bool, printer: Printer) -> some View {
         let match = viewModel.matchState(for: job)
         let title = job.gcodeFile?.name ?? job.job.name
         return VStack(alignment: .leading, spacing: 8) {
+            Text(job.job.status.lowercased() == "queued" ? (isNext ? "Up next" : "Later") : job.job.status)
+                .font(.caption).foregroundStyle(Color.pfTextSecondary)
             HStack(alignment: .top, spacing: 12) {
                 remoteThumbnail(job.gcodeFile?.thumbnailUrl ?? job.job.thumbnailUrl, size: 44)
                 VStack(alignment: .leading, spacing: 4) {
@@ -772,21 +796,33 @@ struct PrinterDetailView: View {
                 Spacer(minLength: 0)
             }
 
+            if isNext {
             Button {
-                let task = Task { await viewModel.beginDispatch(for: job) }
+                let task = Task { await viewModel.startNextJob(job) }
                 activeTasks.append(task)
             } label: {
-                Label("Dispatch to…", systemImage: "paperplane")
+                Label("Start next job", systemImage: "play.fill")
                     .font(.subheadline)
                     .frame(maxWidth: .infinity, minHeight: 44)
             }
             .buttonStyle(.bordered)
+            .disabled(!printer.isOnline || !viewModel.isIdle
+                      || viewModel.isDispatching || viewModel.isPerformingAction
+                      || job.job.rowVersion?.isEmpty != false)
+            .disabled(!(authViewModel.currentUser?.permissions.contains("queue:start") == true
+                        || authViewModel.currentUser?.roles.contains("farm_admin") == true))
             .accessibilityIdentifier("printer.detail.queue.dispatch.\(job.id)")
-            .accessibilityLabel("Dispatch \(title) to another printer")
+            .accessibilityLabel("Start \(title) on this printer")
+            }
         }
         .padding()
         .operatorCard()
         .accessibilityIdentifier("printer.detail.queue.row.\(job.id)")
+    }
+
+    static func returnToFarm(router: AppRouter, capabilities: ResolvedSystemCapabilities) {
+        router.invalidatePendingNavigation()
+        router.selectTab(.farm, capabilities: capabilities)
     }
 
     private func matchTint(_ state: PrinterDetailViewModel.QueueMatchState) -> Color {
@@ -795,219 +831,6 @@ struct PrinterDetailView: View {
         case .mismatch: Color.pfError
         case .unknown: Color.pfTextSecondary
         }
-    }
-
-    // MARK: - Maintenance Odometer
-
-    private func maintenanceSection(_ printer: Printer) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("Maintenance")
-                    .font(.headline)
-                Spacer()
-                if let hours = viewModel.printerStatistics?.totalPrintHours {
-                    Text("\(Int(hours.rounded())) h total")
-                        .font(.caption)
-                        .monospacedDigit()
-                        .foregroundStyle(Color.pfTextSecondary)
-                        .accessibilityLabel("\(Int(hours.rounded())) total print hours")
-                }
-            }
-
-            if viewModel.odometerRows.isEmpty {
-                operatorEmptyState(icon: "wrench.and.screwdriver", message: "No scheduled maintenance")
-            } else {
-                VStack(spacing: 8) {
-                    ForEach(viewModel.odometerRows) { row in
-                        odometerRow(row)
-                    }
-                }
-            }
-        }
-        .accessibilityIdentifier("printer.detail.maintenance")
-    }
-
-    private func odometerRow(_ row: PrinterDetailViewModel.OdometerRow) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(row.title)
-                        .font(.subheadline.weight(.medium))
-                        .fixedSize(horizontal: false, vertical: true)
-                    if let component = row.component, !component.isEmpty {
-                        Text(component)
-                            .font(.caption)
-                            .foregroundStyle(Color.pfTextSecondary)
-                    }
-                }
-                Spacer(minLength: 8)
-                Text(row.stateLabel)
-                    .font(.caption.weight(.semibold))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(
-                        row.isDue ? Color.pfError.opacity(0.15) : Color.pfBackgroundTertiary,
-                        in: Capsule()
-                    )
-                    .foregroundStyle(row.isDue ? Color.pfError : Color.pfTextSecondary)
-            }
-
-            if let threshold = row.thresholdHours {
-                Text("\(Int(row.currentHours.rounded())) / \(Int(threshold.rounded())) h")
-                    .font(.caption)
-                    .monospacedDigit()
-                    .foregroundStyle(Color.pfTextSecondary)
-            }
-
-            if row.isDue {
-                Button {
-                    let performedBy = authViewModel.currentUser?.username ?? "operator"
-                    let task = Task { await viewModel.logMaintenanceCompletion(row, performedBy: performedBy) }
-                    activeTasks.append(task)
-                } label: {
-                    Label("Log Completed", systemImage: "checkmark.circle")
-                        .font(.subheadline)
-                        .frame(maxWidth: .infinity, minHeight: 44)
-                }
-                .buttonStyle(.bordered)
-                .disabled(viewModel.isPerformingAction)
-                .accessibilityIdentifier("printer.detail.maintenance.log.\(row.id)")
-                .accessibilityLabel("Log \(row.title) as completed")
-            }
-        }
-        .padding()
-        .operatorCard()
-        .accessibilityIdentifier("printer.detail.maintenance.row.\(row.id)")
-    }
-
-    // MARK: - History Tail
-
-    private func historySection(_ printer: Printer) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("History")
-                .font(.headline)
-
-            if viewModel.historyTail.isEmpty {
-                operatorEmptyState(icon: "clock.arrow.circlepath", message: "No recent jobs")
-            } else {
-                VStack(spacing: 8) {
-                    ForEach(viewModel.historyTail) { job in
-                        historyRow(job)
-                    }
-                }
-                .padding()
-                .operatorCard()
-            }
-        }
-        .accessibilityIdentifier("printer.detail.history")
-    }
-
-    private func historyRow(_ job: PrinterHistoryJob) -> some View {
-        let outcome = job.outcome
-        let name = job.filename.isEmpty ? "Job" : job.filename
-        return HStack(spacing: 12) {
-            Image(systemName: historyIcon(outcome))
-                .font(.subheadline)
-                .foregroundStyle(historyTint(outcome))
-                .frame(width: 24)
-                .accessibilityHidden(true)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(name)
-                    .font(.subheadline)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                Text(outcome.label)
-                    .font(.caption)
-                    .foregroundStyle(Color.pfTextSecondary)
-            }
-
-            Spacer(minLength: 8)
-
-            if let end = job.endDate {
-                Text(end, format: .relative(presentation: .named))
-                    .font(.caption)
-                    .foregroundStyle(Color.pfTextTertiary)
-            }
-        }
-        .frame(minHeight: 44)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(name), \(outcome.label)")
-        .accessibilityIdentifier("printer.detail.history.row.\(job.id)")
-    }
-
-    private func historyIcon(_ outcome: PrinterHistoryJob.Outcome) -> String {
-        switch outcome {
-        case .completed: "checkmark.circle.fill"
-        case .cancelled: "xmark.circle.fill"
-        case .failed: "exclamationmark.triangle.fill"
-        case .inProgress: "arrow.triangle.2.circlepath"
-        case .unknown: "questionmark.circle"
-        }
-    }
-
-    private func historyTint(_ outcome: PrinterHistoryJob.Outcome) -> Color {
-        switch outcome {
-        case .completed: Color.green
-        case .cancelled: Color.pfTextSecondary
-        case .failed: Color.pfError
-        case .inProgress: Color.pfAccent
-        case .unknown: Color.pfTextTertiary
-        }
-    }
-
-    // MARK: - Open in Mainsail
-
-    @ViewBuilder
-    private func mainsailLinkSection(_ printer: Printer) -> some View {
-        if let url = viewModel.mainsailUrl {
-            Link(destination: url) {
-                HStack(spacing: 12) {
-                    Image(systemName: "safari")
-                        .font(.headline)
-                        .foregroundStyle(Color.pfAccent)
-                        .frame(width: 32)
-                        .accessibilityHidden(true)
-                    Text("Open in Mainsail")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(Color.pfTextPrimary)
-                    Spacer(minLength: 8)
-                    Image(systemName: "arrow.up.right.square")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                        .accessibilityHidden(true)
-                }
-                .padding()
-                .frame(minHeight: 44)
-                .operatorCard()
-            }
-            .accessibilityIdentifier("printer.detail.mainsail")
-            .accessibilityLabel("Open in Mainsail")
-            .accessibilityHint("Opens the printer's web interface in your browser.")
-            .accessibilityAddTraits(.isButton)
-        }
-    }
-
-    private func predictiveInsightsLink(_ printer: Printer) -> some View {
-        NavigationLink(value: AppDestination.predictiveInsights(printerId: printer.id)) {
-            HStack {
-                Label("Predictive Insights", systemImage: "gauge.with.dots.needle.33percent")
-                    .font(.subheadline.weight(.medium))
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-            }
-            .padding()
-            .frame(minHeight: 44)
-            .background(Color.pfCard, in: RoundedRectangle(cornerRadius: 12))
-            .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .strokeBorder(Color.pfBorder, lineWidth: 1)
-            )
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("printer.detail.predictive")
     }
 
     // MARK: - Shared operator helpers
@@ -1047,132 +870,6 @@ struct PrinterDetailView: View {
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .accessibilityHidden(true)
         }
-    }
-
-    // MARK: - Dispatch-to sheet
-
-    private func dispatchSheet(_ job: QueuedPrintJobResponse) -> some View {
-        NavigationStack {
-            Group {
-                if viewModel.isLoadingCandidates {
-                    ProgressView("Finding printers…")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if let error = viewModel.dispatchError {
-                    ContentUnavailableView(
-                        "Couldn’t load candidates",
-                        systemImage: "exclamationmark.triangle",
-                        description: Text(error)
-                    )
-                } else if viewModel.dispatchCandidates.isEmpty {
-                    ContentUnavailableView(
-                        "No eligible printers",
-                        systemImage: "printer.dotmatrix",
-                        description: Text("No other printer can take this job right now.")
-                    )
-                } else {
-                    List(viewModel.dispatchCandidates) { candidate in
-                        Button {
-                            let task = Task { await viewModel.dispatch(job, to: candidate.printerId) }
-                            activeTasks.append(task)
-                        } label: {
-                            dispatchCandidateRow(candidate)
-                        }
-                        .disabled(candidate.eliminated || viewModel.isDispatching)
-                        .accessibilityIdentifier(
-                            "printer.detail.dispatch.candidate.\(candidate.printerId.uuidString.lowercased())"
-                        )
-                    }
-                }
-            }
-            .navigationTitle("Dispatch Job")
-            #if os(iOS)
-            .navigationBarTitleDisplayMode(.inline)
-            #endif
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { viewModel.cancelDispatch() }
-                        .accessibilityIdentifier("printer.detail.dispatch.cancel")
-                }
-            }
-        }
-        .presentationDetents([.medium, .large])
-        .accessibilityIdentifier("printer.detail.dispatch.sheet")
-    }
-
-    private func dispatchCandidateRow(_ candidate: DispatchCandidate) -> some View {
-        let name = candidate.printerName.isEmpty ? "Printer" : candidate.printerName
-        return HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(name)
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(candidate.eliminated ? Color.pfTextTertiary : Color.pfTextPrimary)
-                if candidate.eliminated, let reason = candidate.eliminationReasons.first {
-                    Text(reason)
-                        .font(.caption)
-                        .foregroundStyle(Color.pfError)
-                } else {
-                    Text("Score \(Int(candidate.score.rounded()))")
-                        .font(.caption)
-                        .monospacedDigit()
-                        .foregroundStyle(Color.pfTextSecondary)
-                }
-            }
-            .fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 8)
-            Image(systemName: candidate.eliminated ? "slash.circle" : "paperplane.fill")
-                .foregroundStyle(candidate.eliminated ? Color.pfError : Color.pfAccent)
-                .accessibilityHidden(true)
-        }
-        .frame(minHeight: 44)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(
-            candidate.eliminated
-                ? "\(name), not eligible. \(candidate.eliminationReasons.first ?? "")"
-                : "\(name), eligible, score \(Int(candidate.score.rounded()))"
-        )
-    }
-
-    // MARK: - Homed Axes
-
-    /// The list DTO can carry an empty homing string while `/status` carries the real
-    /// one, and `??` only falls through on `nil` — so a stale empty value used to win
-    /// and badge a homed printer as unhomed. Prefer the first value that names an axis,
-    /// and fall back to an empty-but-present value so "nothing is homed" still renders.
-    static func resolveHomedAxes(_ candidates: [String?]) -> String? {
-        let present = candidates.compactMap { $0 }
-        return present.first { !$0.isEmpty } ?? present.first
-    }
-
-    private func resolvedHomedAxes(_ printer: Printer) -> String? {
-        Self.resolveHomedAxes([printer.homedAxes, viewModel.statusDetail?.homedAxes])
-    }
-
-    /// Compact X/Y/Z badges showing which axes have been homed. Hidden entirely when
-    /// the backend doesn't supply the field (older backend or unsupported printer).
-    @ViewBuilder
-    private func homedAxesBadges(_ homedAxes: String) -> some View {
-        let normalized = homedAxes.lowercased()
-        HStack(spacing: 8) {
-            Text("Homed axes")
-                .font(.caption)
-                .foregroundStyle(Color.pfTextSecondary)
-            HStack(spacing: 4) {
-                ForEach(["x", "y", "z"], id: \.self) { axis in
-                    let isHomed = normalized.contains(axis)
-                    Text(axis.uppercased())
-                        .font(.caption2.weight(.bold))
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 3)
-                        .background(
-                            isHomed ? Color.pfSuccess.opacity(0.12) : Color.pfBackgroundTertiary,
-                            in: Capsule()
-                        )
-                        .foregroundStyle(isHomed ? Color.pfSuccess : Color.pfTextSecondary)
-                        .accessibilityLabel("\(axis.uppercased()) axis \(isHomed ? "homed" : "not homed")")
-                }
-            }
-        }
-        .accessibilityElement(children: .combine)
     }
 
     // MARK: - Temperatures
@@ -1249,7 +946,13 @@ struct PrinterDetailView: View {
             }
 
             Group {
-                cameraPreview(printer)
+                if let thumbnail = viewModel.currentJobThumbnailUrl,
+                   viewModel.cameraPreviewMode == .none || viewModel.cameraPreviewMode == .unsupported {
+                    remoteThumbnail(thumbnail, size: 168)
+                        .frame(maxWidth: .infinity)
+                } else {
+                    cameraPreview(printer)
+                }
             }
             .frame(maxWidth: .infinity)
             .background(Color.pfCard, in: RoundedRectangle(cornerRadius: 12))
@@ -1265,7 +968,7 @@ struct PrinterDetailView: View {
         switch viewModel.cameraPreviewMode {
         case .mjpegStream:
             #if canImport(UIKit)
-            // `isOverviewPageForeground` (issue #2522, Hicks review finding
+            // `isStatusPageForeground` (issue #2522, Hicks review finding
             // 19): native `TabView` paging keeps this page mounted
             // alongside Controls for swipe animation, so without this gate
             // the live `MJPEGStreamContainer` (a `UIViewRepresentable`
@@ -1273,10 +976,10 @@ struct PrinterDetailView: View {
             // streaming off-screen. Falling through to the snapshot/
             // placeholder branches when not foreground tears the stream
             // down without touching `viewModel.showLivestream` or
-            // `cameraRotation`, so returning to Overview resumes the SAME
+            // `cameraRotation`, so returning to Status resumes the SAME
             // camera state the user left, not a reset one.
             if viewModel.showLivestream,
-               isOverviewPageForeground,
+               isStatusPageForeground,
                let streamUrlString = printer.cameraStreamUrl,
                let streamUrl = URL(string: streamUrlString) {
                 MJPEGStreamContainer(url: streamUrl, rotation: viewModel.cameraRotation)
@@ -1557,9 +1260,9 @@ enum PrinterDetailViewLifecycle {
     ///   gate eagerly at the call site — as a plain `Bool` argument would —
     ///   captures whatever page/scene state was current when refresh
     ///   STARTED, not when it actually applies the result. If the operator
-    ///   switches pages mid-refresh (Overview → Controls or back), that stale
+    ///   switches pages mid-refresh (Status → Control or back), that stale
     ///   snapshot would restart polling on a now-hidden Controls page, or
-    ///   stop it on a now-visible Overview page — the opposite of current
+    ///   stop it on a now-visible Status page — the opposite of current
     ///   reality. A closure re-reads the caller's live state at the exact
     ///   moment it is invoked, below.
     static func refresh(

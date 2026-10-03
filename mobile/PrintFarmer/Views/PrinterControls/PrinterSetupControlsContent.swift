@@ -9,6 +9,8 @@ struct PrinterSetupControlsContent: View {
     var usesColumns: Bool? = nil
     var materialPresentation: PrinterFilamentPresentation? = nil
     var observesSafety = false
+    var showsMaterial = true
+    var usesHeaterSteppers = false
     var materialActions: [PrinterFilamentAction] = []
     var onMaterialAction: @MainActor (PrinterFilamentAction) -> Void = { _ in }
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -105,16 +107,26 @@ struct PrinterSetupControlsContent: View {
                                 identifier: "printer.controls.temperatures", essentialControls: true
                             )
                         }
-                        insetGroup { PreheatSubgroup(viewModel: viewModel) }
+                        insetGroup { PreheatSubgroup(viewModel: viewModel, usesSteppers: usesHeaterSteppers) }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     insetGroup { PrinterMotionControls(viewModel: viewModel) }
-                    insetGroup {
+                    if !showsMaterial {
+                        insetGroup {
+                            VStack(alignment: .leading, spacing: 8) {
+                                EssentialControlHeading(title: "Fans")
+                                Text("Fan control is not available through the current mobile API. Use Open in web.")
+                                    .font(.footnote)
+                                    .foregroundStyle(Color.pfTextSecondary)
+                            }
+                        }
+                    }
+                    if showsMaterial { insetGroup {
                         PrinterMaterialControls(
                             viewModel: viewModel, materialPresentation: materialPresentation,
                             materialActions: materialActions, onMaterialAction: onMaterialAction
                         )
-                    }
+                    } }
                 }
 
             }
