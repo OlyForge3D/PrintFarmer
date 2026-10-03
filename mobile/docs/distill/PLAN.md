@@ -76,15 +76,22 @@ The detail view has a segmented header and a page indicator. The toolbar shows "
 **Request**
 
 - An `If-Match` header carrying the moved job's ETag, read with the controller's existing `ReadIfMatch()` helper.
-- The body is either `{ beforeJobId, beforeJobETag }` or `{ afterJobId, afterJobETag }`. Exactly one neighbour must be set, and each neighbour ID needs its matching ETag. If neither or both are set, the endpoint returns 400.
+- The body is either `{ beforeJobId, beforeJobETag }` or `{ afterJobId, afterJobETag }`. Exactly one neighbour must be set, and each neighbour ID needs its matching ETag. If neither or both neighbours are set, or a neighbour ID arrives without its ETag, the endpoint returns 400.
 
 **Authoritative ordering**
 
-Reordering changes the actual dispatch order, not just the list on screen.
+Reordering changes the actual dispatch order, not just the list on screen. `QueuePosition` is **only comparable within a queue scope**: one assigned printer, or the unassigned scope. Values from two different scopes are independent counters and must never be compared.
 
-- `QueueOrdering.OrderByPriorityDescending()`, both its `IQueryable` and `IEnumerable` forms, becomes `Priority desc → QueuePosition asc → QueuedAt asc → Id asc`.
-- Dispatch, ready-head, batch, skip, cancellation, bed-clear and the queue list already share that selector, so the queue list and dispatch can't disagree.
+- `QueueOrdering.OrderByPriorityDescending()` keeps its current cross-scope order: `Priority desc → QueuedAt asc → Id asc`. Lists that span scopes stay FIFO within a priority band. This covers the general job list (`EfPrintJobManagementRepository` default sort) and any all-printer view.
+- A new `QueueOrdering.OrderWithinScope()`, in both its `IQueryable` and `IEnumerable` forms, sorts by `Priority desc → QueuePosition asc → QueuedAt asc → Id asc`. Callers must first filter to a single scope.
+- Every scope-coherent consumer switches to `OrderWithinScope()`:
+  - per-printer auto-dispatch and ready-head (`AutoDispatchService`);
+  - batch dispatch over the unassigned scope (`BatchDispatchService`);
+  - skip, cancellation and bed-clear head selection;
+  - the per-printer queue (`GetJobsByPrinterAsync`), applied only to its `Queued` rows. `Printing` rows are listed separately, ahead of the queued rows.
+- The queue list API returns queued jobs grouped by scope, each group in `OrderWithinScope()` order. The UI and dispatch therefore agree inside every scope, which is the only place a reorder can apply.
 - Existing rows already have a `QueuePosition` value from `QueuePositionAllocator`, so no migration is needed. Any ties are still broken by `QueuedAt` and then `Id`, so the current order is kept.
+- The `QueueOrdering` class doc comment is updated to state both invariants.
 
 **Mutation**
 
@@ -101,12 +108,18 @@ All of this happens in one transaction.
 
 - `UX_PrintJobs_Printer_QueuePosition` is a unique index on `(AssignedPrinterId, QueuePosition)`, filtered to `AssignedPrinterId IS NOT NULL AND Status IN (0, 1)`. `QueuePositionAllocator` hands out monotonic values per printer from the `QueuePositionState.NextPosition` watermark, using `Guid.Empty` as the scope for unassigned jobs.
 - The queue scope is the moved job's `AssignedPrinterId`, or the unassigned scope. The neighbour must be in the same scope; otherwise the request gets 409.
-- The service **permutes the scope's existing position values**; it does not invent new ones. It takes the queued jobs in the scope in authoritative order, applies the move, and hands the same sorted set of position values back out in the new order.
-  - Printing (`Status = 1`) rows are untouched, so they keep their values.
+- The indexed set for a scope is its `Status IN (0, 1)` rows: `Queued (Status = 0)` and `Assigned (Status = 1)`. `Printing (Status = 3)` and later statuses are outside the filter and play no part in reordering.
+- **Assigned rows are held fixed.** They keep their values and never move.
+- **Only the scope's Queued rows are permuted, and only among the values they already hold.** The service takes those rows in `OrderWithinScope()` order, applies the move, and hands the same sorted set of values back out in the new order. It does not invent new values.
+  - The permuted values were already disjoint from the Assigned rows' values, so the final write cannot collide with an Assigned row.
   - No value exceeds the current maximum, so the `NextPosition` watermark stays ahead of every assigned position and needs no reconciliation. The next enqueue cannot collide.
 - Writes are two-phase inside the transaction, so the unique index never sees a transient duplicate. Phase 1 moves each affected row to a negative temporary value (`-QueuePosition`) and saves. Phase 2 writes the final values and saves.
 - Unassigned jobs are outside the filtered index, so nothing enforces their uniqueness. They use the same permutation, and ordering ties still fall back to `QueuedAt` and then `Id`.
-- Tests cover a move on an assigned printer that holds a Printing job, a move in the unassigned scope, and an enqueue after a reorder that gets a fresh, non-colliding position.
+- Tests cover:
+  - a move in a printer scope where an untouched **Assigned** row holds a position between the moved job and its neighbour; the Assigned row keeps its value and the move saves without a unique-index violation;
+  - a move in a scope that also has a Printing row, which is ignored;
+  - a move in the unassigned scope;
+  - an enqueue after a reorder that gets a fresh, non-colliding position.
 
 **Status codes**
 
@@ -114,15 +127,17 @@ These follow the controller's existing `MapRevisionException` mapping.
 
 | Status | When |
 |---|---|
-| 428 | The `If-Match` header or a neighbour ETag is missing. |
+| 428 | The `If-Match` header is missing. This is the only cause of 428. |
 | 412 | The moved job's or the neighbour's ETag is stale, or EF raises `DbUpdateConcurrencyException`. The response includes the current ETags. |
-| 409 | A semantic conflict: the moved job or the neighbour isn't `Queued`, the neighbour is the moved job, or the neighbour is outside the moved job's queue scope. |
-| 404 | The moved job or the neighbour doesn't exist. |
-| 400 | The neighbour fields are malformed. |
+| 409 | A semantic or stale-ordering conflict: the moved job or the neighbour isn't `Queued`, the neighbour is the moved job, the neighbour is outside the moved job's queue scope, or **the neighbour no longer exists**. |
+| 404 | The moved job doesn't exist. |
+| 400 | The body is malformed: no neighbour, both neighbours, or a neighbour ID without its ETag. |
 
 **Tests**
 
-- `PriorityQueueOrderingTests`: `QueuePosition` breaks ties within a priority band, and both overloads agree.
+- `PriorityQueueOrderingTests`:
+  - `OrderWithinScope()` uses `QueuePosition` to break ties within a priority band, and its two overloads agree.
+  - Over a list that spans several printers, `OrderByPriorityDescending()` still orders by `QueuedAt` within a band, regardless of `QueuePosition`.
 - Dispatch and ready-head tests: after a reorder, the next job dispatched matches the order shown in the UI.
 - Controller and service tests: every status code above, plus two concurrent moves where the second gets 412.
 
@@ -130,9 +145,11 @@ These follow the controller's existing `MapRevisionException` mapping.
 
 `.onMove` applies the move immediately and sends the ETags it saw in the list.
 
-- On 412 or 409, it rolls back, refetches the queue and shows "Queue changed — refreshed".
+- Drag is limited to a single scope group: one printer, or Any printer. A job can't be dropped into a different group.
+- On 412 or 409, including a neighbour that was deleted, it rolls back, refetches the queue and shows "Queue changed — refreshed".
+- On 404 (the moved job is gone), it also refetches.
 - On any other failure, it rolls back and shows an error.
-- Unit tests cover the rollback paths.
+- Unit tests cover the rollback-and-refetch path for a deleted neighbour (409), a stale ETag (412), and a generic failure.
 
 ## Issues
 
