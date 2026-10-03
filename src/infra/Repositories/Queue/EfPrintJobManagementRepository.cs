@@ -204,16 +204,26 @@ public class EfPrintJobManagementRepository(AppDbContext context, TimeProvider? 
                 .ThenInclude(p => p!.Model)
             .Where(pj => pj.AssignedPrinterId == printerId);
 
-        List<PrintJob> printingJobs = await printerJobs
-            .Where(pj => pj.Status == PrintJobStatus.Printing)
-            .OrderBy(pj => pj.QueuedAt)
-            .ThenBy(pj => pj.Id)
+        List<PrintJob> occupyingJobs = await printerJobs
+            .WhereOccupiesPrinter()
+            .OrderByPriorityDescending()
             .Take(limit)
             .ToListAsync(ct);
-        int remainingLimit = limit - printingJobs.Count;
+        int remainingLimit = limit - occupyingJobs.Count;
         if (remainingLimit <= 0)
         {
-            return printingJobs;
+            return occupyingJobs;
+        }
+
+        List<PrintJob> assignedJobs = await printerJobs
+            .Where(pj => pj.Status == PrintJobStatus.Assigned)
+            .OrderByPriorityDescending()
+            .Take(remainingLimit)
+            .ToListAsync(ct);
+        remainingLimit -= assignedJobs.Count;
+        if (remainingLimit <= 0)
+        {
+            return [.. occupyingJobs, .. assignedJobs];
         }
 
         List<PrintJob> queuedJobs = await printerJobs
@@ -221,7 +231,7 @@ public class EfPrintJobManagementRepository(AppDbContext context, TimeProvider? 
             .OrderWithinScope()
             .Take(remainingLimit)
             .ToListAsync(ct);
-        return [.. printingJobs, .. queuedJobs];
+        return [.. occupyingJobs, .. assignedJobs, .. queuedJobs];
     }
 
     /// <summary>

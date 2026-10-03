@@ -35,6 +35,72 @@ namespace Farm.Modules.PrintQueue.Tests.Services;
 
 public class PrintJobManagementServiceQueuePositionTests
 {
+    [Fact]
+    public async Task GetPrinterQueue_ActiveBands_PreservesQueuedHeadAndPersistedRevisionsAsync()
+    {
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using AppDbContext db = await CreateContextAsync(connection);
+        Guid printerId = await SeedPrinterAsync(db);
+        Guid otherPrinterId = await SeedPrinterAsync(db);
+        PrintJob starting = CreateJob(90, PrintJobPriority.Normal, printerId);
+        starting.Status = PrintJobStatus.Starting;
+        PrintJob printing = CreateJob(80, PrintJobPriority.High, printerId);
+        printing.Status = PrintJobStatus.Printing;
+        PrintJob paused = CreateJob(70, PrintJobPriority.Normal, printerId);
+        paused.Status = PrintJobStatus.Paused;
+        paused.QueuedAt = starting.QueuedAt.AddMinutes(1);
+        PrintJob assigned = CreateJob(1, PrintJobPriority.Urgent, printerId);
+        assigned.Status = PrintJobStatus.Assigned;
+        PrintJob assignedTail = CreateJob(2, PrintJobPriority.Normal, printerId);
+        assignedTail.Status = PrintJobStatus.Assigned;
+        PrintJob queuedHead = CreateJob(10, PrintJobPriority.Normal, printerId);
+        PrintJob queuedTail = CreateJob(20, PrintJobPriority.Normal, printerId);
+        queuedTail.QueuedAt = queuedHead.QueuedAt.AddMinutes(-1);
+        PrintJob completed = CreateJob(3, PrintJobPriority.Urgent, printerId);
+        completed.Status = PrintJobStatus.Completed;
+        PrintJob failed = CreateJob(4, PrintJobPriority.Urgent, printerId);
+        failed.Status = PrintJobStatus.Failed;
+        PrintJob cancelled = CreateJob(5, PrintJobPriority.Urgent, printerId);
+        cancelled.Status = PrintJobStatus.Cancelled;
+        PrintJob otherPrinterJob = CreateJob(1, PrintJobPriority.Urgent, otherPrinterId);
+        db.PrintJobs.AddRange(
+            starting, printing, paused, assigned, assignedTail, queuedHead, queuedTail,
+            completed, failed, cancelled, otherPrinterJob);
+        await db.SaveChangesAsync();
+        var original = await db.PrintJobs.AsNoTracking().ToDictionaryAsync(
+            job => job.Id,
+            job => (job.QueuePosition, job.Priority, Version: ETag(job)));
+        db.ChangeTracker.Clear();
+        JobQueueAnalyticsController analytics = new(
+            CreateService(db),
+            Mock.Of<IJobCostCalculationService>(),
+            NullLogger<JobQueueAnalyticsController>.Instance);
+        Guid[] expected =
+        [
+            printing.Id, starting.Id, paused.Id, assigned.Id, assignedTail.Id,
+            queuedHead.Id, queuedTail.Id,
+        ];
+
+        for (int limit = 1; limit <= expected.Length + 1; limit++)
+        {
+            var rows = Assert.IsType<List<Farm.Infrastructure.Dtos.PrintQueue.QueuedPrintJobDto>>(
+                Assert.IsType<OkObjectResult>(await analytics.GetPrinterQueueAsync(
+                    printerId.ToString(), limit)).Value);
+            Assert.Equal(expected.Take(limit).Select(id => id.ToString()), rows.Select(row => row.Id));
+            Assert.All(rows, row => Assert.Equal(original[Guid.Parse(row.Id)].Version, row.RowVersion));
+        }
+        var allRows = Assert.IsType<List<Farm.Infrastructure.Dtos.PrintQueue.QueuedPrintJobDto>>(
+            Assert.IsType<OkObjectResult>(await analytics.GetPrinterQueueAsync(
+                printerId.ToString())).Value);
+        Assert.Equal(
+            ["Assigned", "Paused", "Printing", "Queued", "Starting"],
+            allRows.Select(row => row.Status).Distinct().OrderBy(status => status));
+        Assert.Equal(queuedHead.Id.ToString(), allRows.First(row => row.Status == "Queued").Id);
+        Assert.All(await db.PrintJobs.AsNoTracking().ToListAsync(), job =>
+            Assert.Equal(original[job.Id], (job.QueuePosition, job.Priority, ETag(job))));
+    }
+
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
@@ -310,14 +376,18 @@ public class PrintJobManagementServiceQueuePositionTests
             job => Assert.InRange(job.QueuePosition, 1, 3));
     }
 
-    [Fact]
-    public async Task MoveQueuedJob_NonQueuedJob_ReturnsSemanticConflictAsync()
+    [Theory]
+    [InlineData(PrintJobStatus.Assigned)]
+    [InlineData(PrintJobStatus.Starting)]
+    [InlineData(PrintJobStatus.Printing)]
+    [InlineData(PrintJobStatus.Paused)]
+    public async Task MoveQueuedJob_NonQueuedJob_ReturnsSemanticConflictAsync(PrintJobStatus status)
     {
         await using SqliteConnection connection = new("Data Source=:memory:");
         await connection.OpenAsync();
         await using AppDbContext db = await CreateContextAsync(connection);
         PrintJob moved = CreateJob(1, PrintJobPriority.Normal);
-        moved.Status = PrintJobStatus.Printing;
+        moved.Status = status;
         PrintJob neighbor = CreateJob(2, PrintJobPriority.Normal);
         db.PrintJobs.AddRange(moved, neighbor);
         await db.SaveChangesAsync();

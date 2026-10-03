@@ -139,7 +139,8 @@ public class JobQueueAnalyticsController(
     }
 
     /// <summary>
-    /// Get print jobs for a specific printer
+    /// Get active print jobs for a specific printer: occupying, assigned, then queued.
+    /// Only queued rows use queue-position ordering and are eligible for reorder.
     /// </summary>
     /// <param name="printerId">The unique identifier of the printer</param>
     /// <param name="limit">Maximum number of jobs to return (default 50)</param>

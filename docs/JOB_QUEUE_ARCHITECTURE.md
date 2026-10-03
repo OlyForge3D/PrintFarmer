@@ -118,8 +118,15 @@ comparison or client sorting is involved. Groups can span pages; clients
 append pages, preserve response order within groups, and restrict drag to one
 group. Printing and other active rows may also appear; clients filter queued
 rows without reordering them. Deadline and terminal-status views are reporting
-views, not drag order. The per-printer endpoint lists printing rows first and
-then queued rows in that same scope-local order.
+views, not drag order. The per-printer endpoint returns flat job DTOs in three
+active bands: Starting/Printing/Paused occupying rows, then Assigned
+committed-handoff rows, then Queued rows. The first two bands use priority/time/ID
+order, never queue position; only the Queued band uses scope-local position.
+The limit applies across all bands and no terminal rows are included.
+This coordinator-authorized PLAN clarification preserves queued/in-progress
+visibility rather than treating the original Printing/Queued wording as
+permission to hide active states. It changes read membership only: Assigned,
+Starting, Printing and Paused remain ineligible for reorder or new dispatch.
 
 `PUT /api/job-queue/jobs/{id}/position` requires `Queue.Write`, the moved job's
 `If-Match` ETag, and exactly one neighbor ID plus its matching body ETag. The

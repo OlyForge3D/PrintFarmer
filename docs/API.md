@@ -974,8 +974,22 @@ Web and iOS queue clients must preserve the server order, group by
 to a single group. Refetch this same endpoint after a successful move or a
 409/412. Do not sort by creation time or compare positions across scopes.
 `GET /api/job-queue-analytics/printer/{printerId}` remains the authoritative
-single-printer view: printing rows first, followed by queued rows in the same
-scope-local order.
+single-printer view, returning a flat array of `QueuedPrintJobDto` (no `job`
+wrapper). It includes exactly these active bands, sharing the requested limit:
+
+- Printer-occupying `Starting`, `Printing`, `Paused` rows first, ordered by
+  `Priority desc → QueuedAt asc → Id asc`.
+- `Assigned` committed-handoff rows next, with the same priority/time/ID order.
+- `Queued` rows last, in scope-local priority/position/time/ID order.
+
+Terminal rows are excluded. This explicitly clarifies PLAN.md's former
+Printing/Queued-only wording to preserve queued **and in-progress** visibility.
+Only Queued rows are reorderable or candidates for a new dispatch; the active
+bands are read-only visibility, not additional dispatch candidates.
+Read `name` as the display filename, `queuedAtUtc` as queue time,
+`queuePosition` as the scope-local position, and Base64 `rowVersion` as the
+job ETag. Clients retain all active rows and filter Queued for next-job/drag
+without locally sorting the array.
 
 The general repository priority/FIFO order is retained for job reporting and
 cross-scope eligible-head comparison. Terminal-status and deadline-sorted
