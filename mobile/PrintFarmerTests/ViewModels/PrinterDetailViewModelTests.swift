@@ -1822,7 +1822,7 @@ extension PrinterDetailViewModelTests {
         material: String? = nil,
         revision: String? = nil,
         priority: PrintJobPriority = .normal,
-        createdAt: Date = Self.fixedNow
+        createdAt: Date? = nil
     ) -> QueuedPrintJobResponse {
         var job = QueuedJobInfo(
             id: id,
@@ -1839,7 +1839,7 @@ extension PrinterDetailViewModelTests {
             actualEndTimeUtc: nil,
             actualPrintTimeSeconds: nil,
             failureReason: nil,
-            createdAtUtc: createdAt,
+            createdAtUtc: createdAt ?? Self.fixedNow,
             updatedAtUtc: nil,
             thumbnailUrl: nil,
             filamentName: nil,
