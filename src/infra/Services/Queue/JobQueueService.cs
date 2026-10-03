@@ -1800,7 +1800,7 @@ public class JobQueueService : IJobQueueService
                 candidate.AssignedPrinterId == command.PrinterId &&
                 (candidate.Status == PrintJobStatus.Queued ||
                  candidate.Status == PrintJobStatus.Assigned))
-            .OrderByPriorityDescending()
+            .OrderWithinScope()
             .Select(candidate => (Guid?)candidate.Id)
             .FirstOrDefaultAsync(ct);
         long? currentPrinterConfigRevision = await _db.Printers

@@ -594,6 +594,9 @@ public class JobQueueController(
                 jobETag = rev.CurrentJobRowVersion is null
                     ? null
                     : Convert.ToBase64String(rev.CurrentJobRowVersion),
+                neighborETag = rev.CurrentNeighborRowVersion is null
+                    ? null
+                    : Convert.ToBase64String(rev.CurrentNeighborRowVersion),
                 dispatchStateETag = rev.CurrentDispatchStateRowVersion is null
                     ? null
                     : Convert.ToBase64String(rev.CurrentDispatchStateRowVersion),
@@ -680,12 +683,14 @@ public class JobQueueController(
     /// </summary>
     /// <param name="id">The unique identifier of the job to move.</param>
     /// <param name="request">The target neighbor that defines the new position.</param>
-    [HttpPut("{id:guid}/position")]
+    [HttpPut("jobs/{id:guid}/position")]
     [RequirePermission(PrintFarmerPermissions.Queue.Write)]
     [ProducesResponseType(typeof(QueuedPrintJobDto), 200)]
     [ProducesResponseType(400)]
     [ProducesResponseType(404)]
     [ProducesResponseType(409)]
+    [ProducesResponseType(412)]
+    [ProducesResponseType(428)]
     [ProducesResponseType(500)]
     public async Task<ActionResult<QueuedPrintJobDto>> MoveQueuedJobAsync(
         Guid id,
@@ -696,9 +701,15 @@ public class JobQueueController(
             return BadRequest("Request body is required.");
         }
 
-        if (request.BeforeJobId.HasValue == request.AfterJobId.HasValue)
+        bool hasBefore = request.BeforeJobId.HasValue;
+        bool hasAfter = request.AfterJobId.HasValue;
+        if (hasBefore == hasAfter ||
+            (hasBefore && string.IsNullOrWhiteSpace(request.BeforeJobETag)) ||
+            (hasAfter && string.IsNullOrWhiteSpace(request.AfterJobETag)) ||
+            (hasBefore && request.AfterJobETag is not null) ||
+            (hasAfter && request.BeforeJobETag is not null))
         {
-            return BadRequest("Exactly one of beforeJobId or afterJobId must be provided.");
+            return BadRequest("Provide exactly one neighbour ID with its matching ETag.");
         }
 
         try
@@ -707,6 +718,8 @@ public class JobQueueController(
                 id,
                 request.BeforeJobId,
                 request.AfterJobId,
+                ReadIfMatch() ?? string.Empty,
+                request.BeforeJobETag ?? request.AfterJobETag!,
                 QueueActorIdentity.Resolve(User) ?? string.Empty,
                 CancellationToken.None);
             return Ok(moved);
@@ -715,7 +728,10 @@ public class JobQueueController(
         {
             return NotFound(new { error = ex.Message });
         }
-        catch (Exception ex) when (ex is QueueSemanticConflictException or DbUpdateConcurrencyException)
+        catch (Exception ex) when (ex is QueuePreconditionRequiredException
+            or QueueRevisionConflictException
+            or QueueSemanticConflictException
+            or DbUpdateConcurrencyException)
         {
             return MapRevisionException(ex);
         }

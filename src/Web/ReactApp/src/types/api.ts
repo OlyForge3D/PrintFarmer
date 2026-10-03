@@ -3082,7 +3082,9 @@ export interface UpdateQueueJobRequest {
 
 export interface MoveQueuedJobRequest {
   beforeJobId?: string;
+  beforeJobETag?: string;
   afterJobId?: string;
+  afterJobETag?: string;
 }
 
 export interface BulkCancelQueueJobsRequest {

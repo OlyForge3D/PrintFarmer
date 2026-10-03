@@ -937,26 +937,32 @@ Authorization: Bearer <token>
 
 ### Move a queued job
 
-`PUT /api/job-queue/{id}/position` requires the `Queue.Write` permission. Supply
-exactly one neighbor ID to place the queued job immediately before or after that
-neighbor:
+`PUT /api/job-queue/jobs/{id}/position` requires the `Queue.Write` permission
+and an `If-Match` header containing the moved job's ETag. Supply exactly one
+neighbor ID and its ETag to place the queued job immediately before or after
+that neighbor:
 
 ```http
-PUT /api/job-queue/{id}/position
+PUT /api/job-queue/jobs/{id}/position
+If-Match: "moved-job-etag"
 Content-Type: application/json
 
-{ "beforeJobId": "neighbor-guid" }
+{ "beforeJobId": "neighbor-guid", "beforeJobETag": "neighbor-etag" }
 ```
 
-Use `afterJobId` instead of `beforeJobId` to place the job after the neighbor.
+Use `afterJobId` and `afterJobETag` instead to place the job after the neighbor.
 The moved job adopts the neighbor's priority. Reordering is limited to queued
-jobs in the same assigned-printer queue (or the unassigned queue) and is
-persisted transactionally.
+jobs in the same assigned-printer queue (or the unassigned queue), preserves
+assigned jobs' positions, and is persisted transactionally. Queue positions are
+only compared within a queue scope; cross-scope ordering remains priority then
+FIFO by queued time and job ID.
 
-Responses: `200` with the moved job, `400` for a non-queued job or malformed
-neighbor selection, `404` when the moved job or neighbor is missing, and `409`
-when the neighbor is no longer queued in the same queue or a concurrent update
-changes the queue during the move.
+Responses: `200` with the moved job; `428` when `If-Match` is missing; `412`
+when either ETag is stale or a concurrent row-version update occurs (the body
+includes the current moved-job and neighbor ETags); `409` when either job is no
+longer queued, the neighbor is the moved job or is outside the moved job's
+queue scope, or the neighbor no longer exists; `404` when the moved job is
+missing; and `400` for malformed neighbor fields or invalid ETags.
 
 ## Auto-Dispatch API
 

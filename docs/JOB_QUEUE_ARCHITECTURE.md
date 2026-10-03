@@ -98,6 +98,29 @@ map to `Low`; values above `3` map to `Urgent`. This clamps malformed rows to
 the nearest conservative boundary without promoting an old low-priority job
 or demoting an old high-priority job.
 
+### Queue ordering and drag-to-reorder
+
+`QueuePosition` is comparable only within one assigned-printer queue or the
+unassigned queue. Cross-scope lists retain `Priority desc → QueuedAt asc → Id
+asc`; single-scope lists and ready-head consumers use `Priority desc →
+QueuePosition asc → QueuedAt asc → Id asc`. Mixed-scope dispatch evaluates
+each scope independently, skips ineligible jobs until it finds that scope's
+eligible head, then compares the two heads using the cross-scope ordering.
+
+`PUT /api/job-queue/jobs/{id}/position` requires `Queue.Write`, the moved job's
+`If-Match` ETag, and exactly one neighbor ID plus its matching body ETag. The
+moved job adopts the neighbor's priority. In one transaction, only queued
+positions in the moved job's scope are permuted among their existing values;
+assigned rows remain fixed and the allocator's `NextPosition` watermark is not
+changed. Updated rows receive new row versions. A successful reorder broadcasts
+the existing lowercase `jobqueueupdate` event.
+
+The endpoint returns 428 only when the moved-job `If-Match` header is missing,
+412 with current moved-job and neighbor ETags for stale revisions or row-version
+conflicts, 409 for semantic conflicts (including a missing neighbor), 404 when
+the moved job is missing, and 400 for malformed neighbor fields or invalid
+ETags. See [Queue Position API](API.md#queue-position-api) for the wire shape.
+
 ### Calibration dispatch safety contract
 
 Generated calibration G-code has one execution path: immutable artifact
@@ -572,7 +595,7 @@ exception text.
 | POST | `/` | Queue a new print job |
 | GET | `/{id}` | Get single job details |
 | PUT | `/{id}` | Update job (status/priority/printer assignment) |
-| PUT | `/{id}/position` | Move a queued job before or after a neighbor in the same queue |
+| PUT | `/jobs/{id}/position` | Move a queued job before or after a neighbor in the same queue |
 | DELETE | `/{id}` | Remove job from queue |
 
 #### Authoritative Job Read

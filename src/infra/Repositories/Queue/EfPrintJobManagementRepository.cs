@@ -196,16 +196,31 @@ public class EfPrintJobManagementRepository(AppDbContext context, TimeProvider? 
 
     public async Task<List<PrintJob>> GetJobsByPrinterAsync(Guid printerId, int limit = 50, CancellationToken ct = default)
     {
-        return await _context.PrintJobs
+        IQueryable<PrintJob> printerJobs = _context.PrintJobs
             .AsNoTracking()
             .Include(pj => pj.GcodeFile)
             .Include(pj => pj.AssignedPrinter)
                 .ThenInclude(p => p!.Model)
-            .Where(pj => pj.AssignedPrinterId == printerId &&
-                (pj.Status == PrintJobStatus.Queued || pj.Status == PrintJobStatus.Printing))
-            .OrderByPriorityDescending()
+            .Where(pj => pj.AssignedPrinterId == printerId);
+
+        List<PrintJob> printingJobs = await printerJobs
+            .Where(pj => pj.Status == PrintJobStatus.Printing)
+            .OrderBy(pj => pj.QueuedAt)
+            .ThenBy(pj => pj.Id)
             .Take(limit)
             .ToListAsync(ct);
+        int remainingLimit = limit - printingJobs.Count;
+        if (remainingLimit <= 0)
+        {
+            return printingJobs;
+        }
+
+        List<PrintJob> queuedJobs = await printerJobs
+            .Where(pj => pj.Status == PrintJobStatus.Queued)
+            .OrderWithinScope()
+            .Take(remainingLimit)
+            .ToListAsync(ct);
+        return [.. printingJobs, .. queuedJobs];
     }
 
     /// <summary>

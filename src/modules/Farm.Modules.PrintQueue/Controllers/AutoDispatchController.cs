@@ -531,7 +531,7 @@ public class AutoDispatchController(
                 job.AssignedPrinterId == printerId &&
                 (job.Status == PrintJobStatus.Queued ||
                  job.Status == PrintJobStatus.Assigned))
-            .OrderByPriorityDescending()
+            .OrderWithinScope()
             .Select(job => (long?)job.Revision)
             .FirstOrDefaultAsync(ct);
         if (actualRevision is null)

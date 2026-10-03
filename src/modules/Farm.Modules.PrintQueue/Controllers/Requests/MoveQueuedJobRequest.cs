@@ -9,6 +9,12 @@ public sealed class MoveQueuedJobRequest
     /// <summary>The queued job the moved job should immediately precede.</summary>
     public Guid? BeforeJobId { get; init; }
 
+    /// <summary>The ETag of the queued job the moved job should immediately precede.</summary>
+    public string? BeforeJobETag { get; init; }
+
     /// <summary>The queued job the moved job should immediately follow.</summary>
     public Guid? AfterJobId { get; init; }
+
+    /// <summary>The ETag of the queued job the moved job should immediately follow.</summary>
+    public string? AfterJobETag { get; init; }
 }

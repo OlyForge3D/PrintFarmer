@@ -1009,6 +1009,8 @@ public class PrintJobManagementService(
         Guid jobId,
         Guid? beforeJobId,
         Guid? afterJobId,
+        string ifMatchJobRowVersion,
+        string neighborRowVersion,
         string userId,
         CancellationToken cancellationToken = default)
     {
@@ -1042,25 +1044,44 @@ public class PrintJobManagementService(
                 throw new KeyNotFoundException($"Print job {jobId} not found.");
             }
 
+            byte[]? expectedJobRowVersion = QueueRevisionGuard.DecodeIfMatch(
+                ifMatchJobRowVersion,
+                "queue position update");
             await EnsureActorCanAccessJobAsync(userId, job.Id, cancellationToken);
-            if (job.Status != PrintJobStatus.Queued)
-            {
-                throw new ValidationException("Only queued jobs can be reordered.");
-            }
 
             PrintJob? neighbor = await db.PrintJobs
                 .FirstOrDefaultAsync(candidate => candidate.Id == neighborId, cancellationToken);
             if (neighbor is null)
             {
-                throw new KeyNotFoundException($"Neighbor job {neighborId} not found.");
+                throw new QueueSemanticConflictException("The neighbour no longer exists.");
             }
 
             await EnsureActorCanAccessJobAsync(userId, neighbor.Id, cancellationToken);
+            byte[]? expectedNeighborRowVersion = QueueRevisionGuard.DecodeIfMatch(
+                neighborRowVersion,
+                "queue position neighbour");
+            if (expectedJobRowVersion is null ||
+                !expectedJobRowVersion.SequenceEqual(job.RowVersion ?? []) ||
+                expectedNeighborRowVersion is null ||
+                !expectedNeighborRowVersion.SequenceEqual(neighbor.RowVersion ?? []))
+            {
+                throw new QueueRevisionConflictException(
+                    "The moved job or neighbour changed since the request was prepared.",
+                    job.RowVersion,
+                    null,
+                    neighbor.RowVersion);
+            }
+
+            if (job.Status != PrintJobStatus.Queued)
+            {
+                throw new QueueSemanticConflictException("Only queued jobs can be reordered.");
+            }
+
             if (neighbor.Status != PrintJobStatus.Queued ||
                 neighbor.AssignedPrinterId != job.AssignedPrinterId)
             {
                 throw new QueueSemanticConflictException(
-                    "The neighbor is no longer queued in the same queue.");
+                    "The neighbour is no longer queued in the same queue.");
             }
 
             List<PrintJob> scopedJobs = await db.PrintJobs
@@ -1070,6 +1091,7 @@ public class PrintJobManagementService(
                 .Where(candidate =>
                     candidate.Status == PrintJobStatus.Queued &&
                     candidate.AssignedPrinterId == job.AssignedPrinterId)
+                .OrderWithinScope()
                 .ToListAsync(cancellationToken);
             if (!scopedJobs.Any(candidate => candidate.Id == job.Id) ||
                 !scopedJobs.Any(candidate => candidate.Id == neighbor.Id))
@@ -1081,35 +1103,35 @@ public class PrintJobManagementService(
             int targetPriority = neighbor.Priority;
             List<PrintJob> targetBand = scopedJobs
                 .Where(candidate => candidate.Id != job.Id && candidate.Priority == targetPriority)
-                .OrderBy(candidate => candidate.QueuePosition)
-                .ThenBy(candidate => candidate.QueuedAt)
-                .ThenBy(candidate => candidate.Id)
                 .ToList();
             int neighborIndex = targetBand.FindIndex(candidate => candidate.Id == neighbor.Id);
             if (neighborIndex < 0)
             {
                 throw new QueueSemanticConflictException(
-                    "The neighbor is no longer in the target priority bucket.");
+                    "The neighbour is no longer in the moved job's queue scope.");
             }
 
             targetBand.Insert(
                 beforeJobId.HasValue ? neighborIndex : neighborIndex + 1,
                 job);
-            Dictionary<Guid, int> targetBandOrder = targetBand
-                .Select((candidate, index) => (candidate.Id, index))
-                .ToDictionary(pair => pair.Id, pair => pair.index);
-
-            List<PrintJob> reorderedJobs = scopedJobs
-                .OrderByDescending(candidate => candidate.Id == job.Id
-                    ? targetPriority
-                    : candidate.Priority)
-                .ThenBy(candidate =>
-                    (candidate.Id == job.Id || candidate.Priority == targetPriority)
-                        ? targetBandOrder[candidate.Id]
-                        : candidate.QueuePosition)
-                .ThenBy(candidate => candidate.QueuedAt)
-                .ThenBy(candidate => candidate.Id)
-                .ToList();
+            bool priorityChanged = job.Priority != targetPriority;
+            job.Priority = targetPriority;
+            List<PrintJob> reorderedJobs = [];
+            foreach (int priority in scopedJobs
+                .Select(candidate => candidate.Id == job.Id ? targetPriority : candidate.Priority)
+                .Distinct()
+                .OrderByDescending(priority => priority))
+            {
+                if (priority == targetPriority)
+                {
+                    reorderedJobs.AddRange(targetBand);
+                }
+                else
+                {
+                    reorderedJobs.AddRange(scopedJobs.Where(candidate =>
+                        candidate.Id != job.Id && candidate.Priority == priority));
+                }
+            }
 
             int[] existingQueuePositions = scopedJobs
                 .Select(candidate => candidate.QueuePosition)
@@ -1120,6 +1142,9 @@ public class PrintJobManagementService(
                 throw new InvalidOperationException("Queue positions could not be reconciled.");
             }
 
+            Dictionary<Guid, int> newPositions = reorderedJobs
+                .Select((candidate, index) => (candidate.Id, Position: existingQueuePositions[index]))
+                .ToDictionary(pair => pair.Id, pair => pair.Position);
             HashSet<int> occupiedPositions = await db.PrintJobs
                 .Where(candidate =>
                     candidate.AssignedPrinterId == job.AssignedPrinterId &&
@@ -1127,17 +1152,9 @@ public class PrintJobManagementService(
                 .Select(candidate => candidate.QueuePosition)
                 .ToHashSetAsync(cancellationToken);
             occupiedPositions.UnionWith(existingQueuePositions);
-            Dictionary<Guid, int> newPositions = reorderedJobs
-                .Select((candidate, index) => (candidate.Id, Position: existingQueuePositions[index]))
-                .ToDictionary(pair => pair.Id, pair => pair.Position);
 
             DateTime now = _timeProvider.GetUtcNow().UtcDateTime;
-            bool changed = job.Priority != targetPriority;
-            if (changed)
-            {
-                job.Priority = targetPriority;
-                job.UpdatedAt = now;
-            }
+            bool changed = false;
 
             for (int index = 0; index < reorderedJobs.Count; index++)
             {
@@ -1152,13 +1169,18 @@ public class PrintJobManagementService(
                 changed = true;
             }
 
+            if (priorityChanged)
+            {
+                job.UpdatedAt = now;
+                changed = true;
+            }
+
             if (!changed)
             {
                 await transaction.CommitAsync(cancellationToken);
                 return MapToQueuedPrintJobDto(job);
             }
 
-            int temporaryPosition = -1;
             foreach (PrintJob candidate in reorderedJobs)
             {
                 int finalPosition = newPositions[candidate.Id];
@@ -1167,6 +1189,9 @@ public class PrintJobManagementService(
                     continue;
                 }
 
+                int temporaryPosition = candidate.QueuePosition > 0
+                    ? -candidate.QueuePosition
+                    : -1;
                 while (occupiedPositions.Contains(temporaryPosition))
                 {
                     temporaryPosition = checked(temporaryPosition - 1);
@@ -1174,7 +1199,6 @@ public class PrintJobManagementService(
 
                 candidate.QueuePosition = temporaryPosition;
                 occupiedPositions.Add(temporaryPosition);
-                temporaryPosition = checked(temporaryPosition - 1);
             }
 
             if (job.AssignedPrinterId.HasValue)
@@ -1226,9 +1250,21 @@ public class PrintJobManagementService(
         catch (DbUpdateConcurrencyException ex)
         {
             _logger.LogWarning(ex, "Concurrent queue position update conflicted for job {JobId}", jobId);
-            throw new QueueSemanticConflictException(
-                "The queue changed during the reorder. Refresh the queue and retry.",
-                ex);
+            byte[]? currentJobRowVersion = await db.PrintJobs
+                .AsNoTracking()
+                .Where(candidate => candidate.Id == jobId)
+                .Select(candidate => candidate.RowVersion)
+                .SingleOrDefaultAsync(cancellationToken);
+            byte[]? currentNeighborRowVersion = await db.PrintJobs
+                .AsNoTracking()
+                .Where(candidate => candidate.Id == neighborId)
+                .Select(candidate => candidate.RowVersion)
+                .SingleOrDefaultAsync(cancellationToken);
+            throw new QueueRevisionConflictException(
+                "The queue changed during the reorder. Refresh the ETags and retry.",
+                currentJobRowVersion,
+                null,
+                currentNeighborRowVersion);
         }
         catch (Exception ex)
         {
