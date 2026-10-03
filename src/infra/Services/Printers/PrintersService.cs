@@ -664,8 +664,8 @@ public class PrintersService(
         if (cacheToken is not null &&
             !string.Equals(
                 cacheToken,
-                PrinterThumbnailUrl.GetCacheToken(job.JobName, job.ThumbnailUrl),
-                StringComparison.Ordinal))
+                PrinterThumbnailUrl.GetCacheToken(job.JobName, job.ThumbnailUrl, job.ThumbnailCacheIdentity),
+                StringComparison.OrdinalIgnoreCase))
         {
             return null;
         }
@@ -1186,7 +1186,8 @@ public class PrintersService(
                     dto.Id,
                     dto.State,
                     dto.JobName,
-                    dto.ThumbnailUrl),
+                    dto.ThumbnailUrl,
+                    dto.ThumbnailCacheIdentity),
             };
             return ApplyCameraContract(dto);
         }

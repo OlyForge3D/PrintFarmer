@@ -27,6 +27,7 @@ public partial class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
     ISupportsFilamentUsageQuery,
     ISupportsHistory,
     ISupportsHistoryThumbnail,
+    ISupportsJobControl,
     ISupportsCurrentJobThumbnail
 {
     [SuppressMessage(
@@ -143,7 +144,8 @@ public partial class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
                 status?.Printer?.AxisY,
                 status?.Printer?.AxisZ,
                 job?.TimeRemaining,
-                status?.Printer?.Speed);
+                status?.Printer?.Speed,
+                ThumbnailCacheIdentity: CreateThumbnailCacheIdentity(job));
         }
         catch (Exception ex)
         {
@@ -231,7 +233,8 @@ public partial class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
                 job.File?.Name,
                 thumbnailUrl,
                 null, // Camera stream URL would need camera configuration
-                null);  // Camera snapshot URL would need camera configuration
+                null,  // Camera snapshot URL would need camera configuration
+                CreateThumbnailCacheIdentity(job));
         }
         catch (Exception ex)
         {
@@ -244,6 +247,23 @@ public partial class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
     {
         ArgumentNullException.ThrowIfNull(baseUrl);
         return GetJobAsync(baseUrl.ToString().TrimEnd('/'), credential, ct);
+    }
+
+    /// <inheritdoc />
+    async Task<PrinterJob?> ISupportsJobControl.GetJobAsync(
+        string baseUrl,
+        PrinterCredential? credential,
+        CancellationToken ct)
+    {
+        PrusaJob? job = await GetJobAsync(baseUrl, credential, ct).ConfigureAwait(false);
+        return job is null
+            ? null
+            : new PrinterJob(
+                job.PrintState,
+                job.Progress,
+                job.JobName,
+                job.ThumbnailUrl,
+                ThumbnailCacheIdentity: job.ThumbnailCacheIdentity);
     }
 
     public async Task<PrinterDto> CreatePrinterDtoAsync(
@@ -280,8 +300,14 @@ public partial class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
             BackendUrl: printer.BackendUrl,
             FrontendUrl: printer.FrontendUrl,
             Location: printer.Location == null ? null : new LocationSummaryDto(printer.Location.Id, printer.Location.Name, printer.Location.Description),
-            ObicoEnabled: printer.ObicoEnabled);
+            ObicoEnabled: printer.ObicoEnabled,
+            ThumbnailCacheIdentity: status.ThumbnailCacheIdentity);
     }
+
+    private static string? CreateThumbnailCacheIdentity(Job? job) =>
+        job is null
+            ? null
+            : $"job:{job.Id}:file:{job.File?.Size}:{job.File?.MTimestamp}";
 
     public Task<string?> GetCameraSnapshotUrlAsync(string baseUrl, int? frontendPort = null, CancellationToken ct = default)
     {

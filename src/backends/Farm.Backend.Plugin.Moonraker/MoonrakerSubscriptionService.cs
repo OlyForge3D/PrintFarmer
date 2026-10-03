@@ -204,7 +204,10 @@ public sealed class MoonrakerSubscriptionService(
             }
 
             IMoonrakerClient moonrakerClient = scope.ServiceProvider.GetRequiredService<IMoonrakerClient>();
-            PrinterCompositeStatus compositeStatus = await moonrakerClient.GetCompositeStatusAsync(printer.BackendUrl, ct);
+            PrinterCompositeStatus compositeStatus = await moonrakerClient.GetCompositeStatusAsync(
+                printer.BackendUrl,
+                printer.Credential,
+                ct);
 
             if (compositeStatus is not { IsOnline: true })
             {
@@ -232,7 +235,8 @@ public sealed class MoonrakerSubscriptionService(
                 compositeStatus.BedTarget,
                 null,
                 spoolInfo,
-                FileName: PrinterStatusDto.ExtractFileName(compositeStatus.JobName));
+                FileName: PrinterStatusDto.ExtractFileName(compositeStatus.JobName),
+                ThumbnailCacheIdentity: compositeStatus.ThumbnailCacheIdentity);
 
             await hub!.Clients.Group(
                     Farm.Infrastructure.Security.AuthorizedHubGroups.Printer(printerId))
@@ -2578,6 +2582,8 @@ public sealed class MoonrakerSubscriptionService(
         string? stateValue = null;
         double? progress = null;
         string? jobName = null;
+        double? totalDuration = null;
+        double? startTime = null;
 
         // Display status (progress)
         if (statusObj.TryGetProperty("display_status", out JsonElement ds) &&
@@ -2617,6 +2623,22 @@ public sealed class MoonrakerSubscriptionService(
                 {
                 }
             }
+
+            if (ps.TryGetProperty("total_duration", out JsonElement td) &&
+                td.ValueKind == JsonValueKind.Number &&
+                td.TryGetDouble(out double totalDurationValue) &&
+                double.IsFinite(totalDurationValue))
+            {
+                totalDuration = totalDurationValue;
+            }
+
+            if (ps.TryGetProperty("start_time", out JsonElement startNode) &&
+                startNode.ValueKind == JsonValueKind.Number &&
+                startNode.TryGetDouble(out double startTimeValue) &&
+                double.IsFinite(startTimeValue))
+            {
+                startTime = startTimeValue;
+            }
         }
 
         // Webhooks state (Klipper system state)
@@ -2642,6 +2664,22 @@ public sealed class MoonrakerSubscriptionService(
         else if (!string.IsNullOrEmpty(webhooksState))
         {
             stateValue = webhooksState;
+        }
+
+        if (startTime is { } jobStartTime)
+        {
+            state.ThumbnailCacheIdentity = $"start:{Math.Round(jobStartTime, MidpointRounding.AwayFromZero):0}";
+        }
+        else if (totalDuration is { } elapsed)
+        {
+            state.ThumbnailCacheIdentity =
+                $"start:{Math.Round(DateTimeOffset.UtcNow.ToUnixTimeSeconds() - elapsed, MidpointRounding.AwayFromZero):0}";
+        }
+        else if (stateValue is not null &&
+                 !string.Equals(stateValue, "printing", StringComparison.OrdinalIgnoreCase) &&
+                 !string.Equals(stateValue, "paused", StringComparison.OrdinalIgnoreCase))
+        {
+            state.ThumbnailCacheIdentity = null;
         }
 
         // Detect state transitions for job completion synchronization
@@ -2758,7 +2796,8 @@ public sealed class MoonrakerSubscriptionService(
                 SpoolInfo: spoolInfo,
                 MmuStatus: mmuStatus,
                 FileName: PrinterStatusDto.ExtractFileName(state.JobName),
-                SafetyTelemetry: safetyTelemetry);
+                SafetyTelemetry: safetyTelemetry,
+                ThumbnailCacheIdentity: state.ThumbnailCacheIdentity);
 
             _logger.LogDebug("Emitting consolidated status for printer {PrinterId}: IsOnline={IsOnline}, X={StateX}, Y={StateY}, Z={StateZ}, HotendTemp={StateHotendTemp}, HotendTarget={StateHotendTarget}, BedTemp={StateBedTemp}, BedTarget={StateBedTarget}, HomedAxes={StateHomedAxes}", printerId, isOnline, state.X, state.Y, state.Z, state.HotendTemp, state.HotendTarget, state.BedTemp, state.BedTarget, state.HomedAxes);
 
@@ -2791,7 +2830,8 @@ public sealed class MoonrakerSubscriptionService(
                 MmuStatus: mmuStatus,
                 PrintTimeLeftSeconds: printTimeLeftSeconds,
                 HomedAxes: state.HomedAxes,
-                SafetyTelemetry: safetyTelemetry);
+                SafetyTelemetry: safetyTelemetry,
+                ThumbnailCacheIdentity: state.ThumbnailCacheIdentity);
             _statusCacheWriter.UpdateStatus(cacheUpdate, state.OriginWatermark);
 
             _logger.LogDebug("[MoonrakerSubscriptionService] Broadcasting printerupdated for {PrinterId} via SignalR", printerId);
@@ -3258,7 +3298,10 @@ public sealed class MoonrakerSubscriptionService(
             long? originWatermark = await OriginWatermark
                 .CaptureAsync(watermarkReader, _logger, "Moonraker HTTP status", ct)
                 .ConfigureAwait(false);
-            PrinterCompositeStatus compositeStatus = await moonrakerClient.GetCompositeStatusAsync(printer.BackendUrl, ct);
+            PrinterCompositeStatus compositeStatus = await moonrakerClient.GetCompositeStatusAsync(
+                printer.BackendUrl,
+                printer.Credential,
+                ct);
 
             if (compositeStatus != null && compositeStatus.IsOnline)
             {
@@ -3285,7 +3328,8 @@ public sealed class MoonrakerSubscriptionService(
                     compositeStatus.BedTarget,
                     null, // HomedAxes - Not available in CompositeStatus
                     spoolInfo,
-                    FileName: PrinterStatusDto.ExtractFileName(compositeStatus.JobName));
+                    FileName: PrinterStatusDto.ExtractFileName(compositeStatus.JobName),
+                    ThumbnailCacheIdentity: compositeStatus.ThumbnailCacheIdentity);
 
                 try
                 {

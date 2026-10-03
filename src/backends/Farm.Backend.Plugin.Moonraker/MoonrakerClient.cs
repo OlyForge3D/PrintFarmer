@@ -21,8 +21,10 @@ public partial class MoonrakerClient(
     HttpClient http,
     ILogger<MoonrakerClient> logger,
     BackendTimeoutSettings timeouts,
-    ISnapmakerU1CameraMonitorManager? snapmakerU1CameraMonitorManager = null) : PrinterClientBase, IMoonrakerClient,
+    ISnapmakerU1CameraMonitorManager? snapmakerU1CameraMonitorManager = null,
+    HttpClient? thumbnailHttp = null) : PrinterClientBase, IMoonrakerClient,
     ISupportsFileDownload,
+    ISupportsJobControl,
     ISupportsCurrentJobThumbnail,
     ISupportsFileList,
     ISupportsFileUpload,
@@ -67,6 +69,7 @@ public partial class MoonrakerClient(
         new(JsonSerializerDefaults.Web);
 
     private readonly HttpClient _http = http;
+    private readonly HttpClient _thumbnailHttp = thumbnailHttp ?? http;
     private readonly ILogger<MoonrakerClient> _logger = logger;
     private readonly BackendTimeoutSettings _timeouts = timeouts;
     private readonly ISnapmakerU1CameraMonitorManager _snapmakerU1CameraMonitorManager =
@@ -188,7 +191,14 @@ public partial class MoonrakerClient(
         }
     }
 
-    public async Task<PrinterJob?> GetJobAsync(string baseUrl, CancellationToken ct = default)
+    public Task<PrinterJob?> GetJobAsync(string baseUrl, CancellationToken ct = default) =>
+        GetJobAsync(baseUrl, null, ct);
+
+    /// <inheritdoc />
+    public async Task<PrinterJob?> GetJobAsync(
+        string baseUrl,
+        PrinterCredential? credential,
+        CancellationToken ct = default)
     {
         try
         {
@@ -196,7 +206,13 @@ public partial class MoonrakerClient(
             cts.CancelAfter(_timeouts.StatusPollTimeout);
             Uri baseUri = new(baseUrl);
             Uri uri = new(baseUri, "printer/objects/query?print_stats&display_status&job_queue");
-            using HttpResponseMessage resp = await _http.GetAsync(uri, cts.Token);
+            using HttpRequestMessage request = new(HttpMethod.Get, uri);
+            if (!string.IsNullOrWhiteSpace(credential?.ApiKey))
+            {
+                request.Headers.Add("X-Api-Key", credential.ApiKey);
+            }
+
+            using HttpResponseMessage resp = await _http.SendAsync(request, cts.Token);
             if (!resp.IsSuccessStatusCode)
             {
                 return null;
@@ -232,6 +248,9 @@ public partial class MoonrakerClient(
             string? jobName = null;
             string? thumb = null;
             double? printDuration = null;
+            double? totalDuration = null;
+            double? startTime = null;
+            string? thumbnailCacheIdentity;
 
             if (result.TryGetProperty("status", out JsonElement statusEl))
             {
@@ -267,8 +286,30 @@ public partial class MoonrakerClient(
                         {
                         }
                     }
+
+                    if (ps.TryGetProperty("total_duration", out JsonElement td) &&
+                        td.ValueKind == JsonValueKind.Number &&
+                        td.TryGetDouble(out double totalDurationValue) &&
+                        double.IsFinite(totalDurationValue))
+                    {
+                        totalDuration = totalDurationValue;
+                    }
+
+                    if (ps.TryGetProperty("start_time", out JsonElement st) &&
+                        st.ValueKind == JsonValueKind.Number &&
+                        st.TryGetDouble(out double startTimeValue) &&
+                        double.IsFinite(startTimeValue))
+                    {
+                        startTime = startTimeValue;
+                    }
                 }
             }
+
+            thumbnailCacheIdentity = startTime is { } jobStartTime
+                ? $"start:{Math.Round(jobStartTime, MidpointRounding.AwayFromZero):0}"
+                : totalDuration is { } elapsed
+                    ? $"start:{Math.Round(DateTimeOffset.UtcNow.ToUnixTimeSeconds() - elapsed, MidpointRounding.AwayFromZero):0}"
+                    : null;
 
             // Try Klipper job queue for thumbnail path
             if (result.TryGetProperty("job_queue", out JsonElement jq) && jq.ValueKind == JsonValueKind.Object &&
@@ -284,29 +325,52 @@ public partial class MoonrakerClient(
                 }
             }
 
-            // Fallback: query file metadata for thumbnails if not found yet
-            if (thumb is null && !string.IsNullOrWhiteSpace(jobName))
+            // File metadata differentiates overwritten files at the same path. Job start identity
+            // above also distinguishes separate runs of an unchanged file.
+            if (!string.IsNullOrWhiteSpace(jobName))
             {
                 try
                 {
                     Uri baseUri3 = new(baseUrl);
                     Uri metaUri = new(baseUri3, $"server/files/metadata?filename={Uri.EscapeDataString(jobName)}");
-                    using HttpResponseMessage mresp = await _http.GetAsync(metaUri, cts.Token);
+                    using HttpRequestMessage metaRequest = new(HttpMethod.Get, metaUri);
+                    if (!string.IsNullOrWhiteSpace(credential?.ApiKey))
+                    {
+                        metaRequest.Headers.Add("X-Api-Key", credential.ApiKey);
+                    }
+
+                    using HttpResponseMessage mresp = await _http.SendAsync(metaRequest, cts.Token);
                     if (mresp.IsSuccessStatusCode)
                     {
                         await using Stream mstream = await mresp.Content.ReadAsStreamAsync(cts.Token);
                         using JsonDocument mdoc = await JsonDocument.ParseAsync(mstream, cancellationToken: cts.Token);
                         JsonElement mroot = mdoc.RootElement;
                         if (mroot.TryGetProperty("result", out JsonElement mres) &&
-                            mres.TryGetProperty("thumbnails", out JsonElement mthumbs) &&
-                            mthumbs.ValueKind == JsonValueKind.Array && mthumbs.GetArrayLength() > 0)
+                            mres.ValueKind == JsonValueKind.Object)
                         {
-                            JsonElement first = mthumbs[0];
-                            if (first.TryGetProperty("relative_path", out JsonElement rp) && rp.ValueKind == JsonValueKind.String)
+                            string? fileSize = mres.TryGetProperty("size", out JsonElement size) && size.ValueKind == JsonValueKind.Number
+                                ? size.GetRawText()
+                                : null;
+                            string? modified = mres.TryGetProperty("modified", out JsonElement modifiedNode) &&
+                                modifiedNode.ValueKind == JsonValueKind.Number
+                                    ? modifiedNode.GetRawText()
+                                    : null;
+                            if (fileSize is not null || modified is not null)
                             {
-                                Uri baseUriX = new(baseUrl);
-                                Uri thumbUri2 = new(baseUriX, $"server/files/gcodes/{Uri.EscapeDataString(rp.GetString()!)}");
-                                thumb = thumbUri2.ToString();
+                                thumbnailCacheIdentity = $"{thumbnailCacheIdentity}|file:{fileSize}:{modified}";
+                            }
+
+                            if (thumb is null &&
+                                mres.TryGetProperty("thumbnails", out JsonElement mthumbs) &&
+                                mthumbs.ValueKind == JsonValueKind.Array && mthumbs.GetArrayLength() > 0)
+                            {
+                                JsonElement first = mthumbs[0];
+                                if (first.TryGetProperty("relative_path", out JsonElement rp) && rp.ValueKind == JsonValueKind.String)
+                                {
+                                    Uri baseUriX = new(baseUrl);
+                                    Uri thumbUri2 = new(baseUriX, $"server/files/gcodes/{Uri.EscapeDataString(rp.GetString()!)}");
+                                    thumb = thumbUri2.ToString();
+                                }
                             }
                         }
                     }
@@ -316,7 +380,7 @@ public partial class MoonrakerClient(
                 }
             }
 
-            return new PrinterJob(state, progress, jobName, thumb, printDuration);
+            return new PrinterJob(state, progress, jobName, thumb, printDuration, thumbnailCacheIdentity);
         }
         catch
         {
@@ -491,12 +555,19 @@ public partial class MoonrakerClient(
         }
     }
 
-    public async Task<PrinterCompositeStatus> GetCompositeStatusAsync(string baseUrl, CancellationToken ct = default)
+    public Task<PrinterCompositeStatus> GetCompositeStatusAsync(string baseUrl, CancellationToken ct = default) =>
+        GetCompositeStatusAsync(baseUrl, null, ct);
+
+    /// <inheritdoc />
+    public async Task<PrinterCompositeStatus> GetCompositeStatusAsync(
+        string baseUrl,
+        PrinterCredential? credential,
+        CancellationToken ct = default)
     {
         _logger.LogDebug("[Moonraker] GetCompositeStatusAsync: baseUrl={BaseUrl}", baseUrl);
         PrinterStatus status = await GetStatusAsync(baseUrl, ct);
         _logger.LogDebug("[Moonraker] GetCompositeStatusAsync: status.IsOnline={StatusIsOnline}, status.State={StatusState}", status.IsOnline, status.State);
-        PrinterJob? job = await GetJobAsync(baseUrl, ct);
+        PrinterJob? job = await GetJobAsync(baseUrl, credential, ct);
 
         // Try to read current position
         double? x = null, y = null, z = null;
@@ -665,7 +736,10 @@ public partial class MoonrakerClient(
         }
 
         return new PrinterCompositeStatus(status.IsOnline, state, job?.Progress, job?.JobName, job?.ThumbnailUrl, cam, snap, x, y, z, hotend, bed, hotendT, bedT,
-            PrintTimeLeftSeconds: printTimeLeftSeconds, HomedAxes: homedAxes, HomedAxesObservedAtUtc: homedAxesObservedAtUtc);
+            PrintTimeLeftSeconds: printTimeLeftSeconds,
+            HomedAxes: homedAxes,
+            HomedAxesObservedAtUtc: homedAxesObservedAtUtc,
+            ThumbnailCacheIdentity: job?.ThumbnailCacheIdentity);
     }
 
     private static bool TryGetFinitePosition(
@@ -733,7 +807,8 @@ public partial class MoonrakerClient(
             BackendUrl: printer.BackendUrl,
             FrontendUrl: printer.FrontendUrl,
             Location: printer.Location == null ? null : new LocationSummaryDto(printer.Location.Id, printer.Location.Name, printer.Location.Description),
-            ObicoEnabled: printer.ObicoEnabled));
+            ObicoEnabled: printer.ObicoEnabled,
+            ThumbnailCacheIdentity: status.ThumbnailCacheIdentity));
     }
 
     public async Task<bool> SendHomeAsync(string baseUrl, CancellationToken ct = default)
@@ -3571,20 +3646,28 @@ public partial class MoonrakerClient(
             !string.Equals(baseUri.Scheme, thumbnailUri.Scheme, StringComparison.OrdinalIgnoreCase) ||
             !string.Equals(baseUri.Host, thumbnailUri.Host, StringComparison.OrdinalIgnoreCase) ||
             baseUri.Port != thumbnailUri.Port ||
-            !string.IsNullOrEmpty(thumbnailUri.UserInfo))
+            !string.IsNullOrEmpty(thumbnailUri.UserInfo) ||
+            !string.IsNullOrEmpty(baseUri.Query) ||
+            !string.IsNullOrEmpty(baseUri.Fragment) ||
+            !string.IsNullOrEmpty(thumbnailUri.Query) ||
+            !string.IsNullOrEmpty(thumbnailUri.Fragment))
         {
             throw new InvalidDataException("Moonraker returned a thumbnail outside the configured printer endpoint.");
         }
 
-        const string filesPathMarker = "/server/files/";
-        int markerIndex = thumbnailUri.AbsolutePath.LastIndexOf(filesPathMarker, StringComparison.OrdinalIgnoreCase);
-        if (markerIndex < 0)
+        string expectedFilesPrefix = $"{baseUri.AbsolutePath.TrimEnd('/')}/server/files/";
+        if (!expectedFilesPrefix.StartsWith('/'))
+        {
+            expectedFilesPrefix = $"/{expectedFilesPrefix}";
+        }
+
+        if (!thumbnailUri.AbsolutePath.StartsWith(expectedFilesPrefix, StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidDataException("Moonraker returned an unsupported thumbnail path.");
         }
 
-        string filePath = Uri.UnescapeDataString(thumbnailUri.AbsolutePath[(markerIndex + filesPathMarker.Length)..]);
-        if (string.IsNullOrWhiteSpace(filePath) ||
+        string filePath = Uri.UnescapeDataString(thumbnailUri.AbsolutePath[expectedFilesPrefix.Length..]);
+        if (!filePath.StartsWith("gcodes/", StringComparison.OrdinalIgnoreCase) ||
             filePath.Split('/').Any(segment => segment is "." or ".."))
         {
             throw new InvalidDataException("Moonraker returned an invalid thumbnail path.");
@@ -3601,11 +3684,20 @@ public partial class MoonrakerClient(
 
         using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         cts.CancelAfter(_timeouts.FileDownloadTimeout);
-        using HttpResponseMessage response = await _http.GetAsync(
-            thumbnailUri,
+        Uri safeThumbnailUri = new(
+            baseUri,
+            $"server/files/gcodes/{Uri.EscapeDataString(filePath["gcodes/".Length..])}");
+        using HttpRequestMessage request = new(HttpMethod.Get, safeThumbnailUri);
+        if (!string.IsNullOrWhiteSpace(credential?.ApiKey))
+        {
+            request.Headers.Add("X-Api-Key", credential.ApiKey);
+        }
+
+        using HttpResponseMessage response = await _thumbnailHttp.SendAsync(
+            request,
             HttpCompletionOption.ResponseHeadersRead,
             cts.Token).ConfigureAwait(false);
-        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+        if (response.StatusCode is System.Net.HttpStatusCode.NoContent or System.Net.HttpStatusCode.NotFound)
         {
             return null;
         }

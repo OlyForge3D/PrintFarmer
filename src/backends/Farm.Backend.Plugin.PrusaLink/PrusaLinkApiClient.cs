@@ -1136,7 +1136,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient, IDisposable
             request,
             HttpCompletionOption.ResponseHeadersRead,
             ct);
-        if (response.StatusCode == HttpStatusCode.NotFound)
+        if (response.StatusCode is HttpStatusCode.NoContent or HttpStatusCode.NotFound)
         {
             return null;
         }

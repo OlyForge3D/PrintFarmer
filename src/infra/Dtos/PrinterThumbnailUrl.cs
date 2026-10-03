@@ -12,7 +12,12 @@ public static class PrinterThumbnailUrl
     /// Returns a relative URL only when an active job has a thumbnail target.
     /// The target is hashed and is never included in the returned URL.
     /// </summary>
-    public static string? Create(Guid printerId, string? state, string? jobName, string? thumbnailUrl)
+    public static string? Create(
+        Guid printerId,
+        string? state,
+        string? jobName,
+        string? thumbnailUrl,
+        string? cacheIdentity = null)
     {
         if ((state is null ||
              (!state.Equals("printing", StringComparison.OrdinalIgnoreCase) &&
@@ -23,13 +28,13 @@ public static class PrinterThumbnailUrl
             return null;
         }
 
-        return $"/api/printers/{printerId:D}/current-job/thumbnail?v={GetCacheToken(jobName, thumbnailUrl)}";
+        return $"/api/printers/{printerId:D}/current-job/thumbnail?v={GetCacheToken(jobName, thumbnailUrl, cacheIdentity)}";
     }
 
     /// <summary>
     /// Returns the opaque cache token for a private backend thumbnail target.
     /// </summary>
-    public static string GetCacheToken(string jobName, string thumbnailUrl) =>
-        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{jobName}\n{thumbnailUrl}")))[..16]
+    public static string GetCacheToken(string jobName, string thumbnailUrl, string? cacheIdentity = null) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{cacheIdentity}\n{jobName}\n{thumbnailUrl}")))[..16]
             .ToLowerInvariant();
 }

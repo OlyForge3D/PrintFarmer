@@ -29,4 +29,12 @@ public record PrinterStatusUpdate(
     PrinterSpoolInfoDto? SpoolInfo,
     MmuStatusDto? MmuStatus = null,
     string? FileName = null,
-    PrinterSafetyTelemetryDto? SafetyTelemetry = null);
+    PrinterSafetyTelemetryDto? SafetyTelemetry = null,
+    [property: JsonIgnore] string? ThumbnailCacheIdentity = null)
+{
+    /// <summary>
+    /// Relative authenticated proxy URL for the active job thumbnail.
+    /// </summary>
+    public string? CurrentJobThumbnailUrl =>
+        PrinterThumbnailUrl.Create(Id, State, JobName, ThumbnailUrl, ThumbnailCacheIdentity);
+}
