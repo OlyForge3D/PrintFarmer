@@ -36,4 +36,33 @@ final class PartsInventoryUITests: PrintFarmerUITestCase {
         XCTAssertTrue(app.buttons["inventory.addSpool"].waitForExistence(timeout: 8))
         XCTAssertFalse(app.buttons["filament.printedParts"].exists)
     }
+
+    func testReorderWarningAndFilterRemainAvailableInSecondaryStockList() {
+        shellDestinationButton(tabIdentifier: "tab.filament", timeout: 8).tap()
+        let parts = app.buttons["filament.printedParts"]
+        XCTAssertTrue(parts.waitForExistence(timeout: 8))
+        parts.tap()
+        let bracket = app.buttons["partsInventory.row.BRKT-01"]
+        let clip = app.buttons["partsInventory.row.CLIP-02"]
+        XCTAssertTrue(bracket.waitForExistence(timeout: 8))
+        XCTAssertTrue(clip.exists)
+        XCTAssertTrue(bracket.label.contains("needs reorder"))
+        XCTAssertFalse(clip.label.contains("needs reorder"))
+        let reorder = app.switches["partsInventory.reorderToggle"]
+        XCTAssertTrue(reorder.exists)
+        reorder.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+        let activated = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == '1'"), object: reorder
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [activated], timeout: 3), .completed)
+        let clipRemoved = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == false"), object: clip
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [clipRemoved], timeout: 3), .completed)
+        XCTAssertTrue(bracket.exists)
+        XCTAssertFalse(clip.exists)
+        bracket.tap()
+        XCTAssertTrue(app.staticTexts["partScan.reorderWarning"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.steppers["partScan.deltaStepper"].exists)
+    }
 }

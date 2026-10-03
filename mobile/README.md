@@ -41,6 +41,16 @@ server switching, and real-time updates via SignalR.
 
 ## Testing
 
+The iOS CI matrix selects shipping Login, three-tab shell, Scan, harvest,
+printed-parts stock, printer/coverage and cached-Farm suites on both device
+families, with extra regular-width Queue navigation on iPad. Printed-parts
+coverage includes capability gating, reorder warnings/filtering and adjustment
+sheets. Retired Attention/Tasks grouping and Two-modes/promotion screens have
+no shipping entry points, so their selectors (including Attention-only Dynamic
+Type assertions) are intentionally removed rather than mapped to empty suites.
+`scripts/tests/test_run_tests.py` checks every selected class/method against
+Swift sources and rejects selected classes without real test methods.
+
 Use **iOS 26.5 (23F77)**, the unchanged-snapshot default supported by
 [the original evidence](https://github.com/OlyForge3D/PrintFarmer/issues/2536#issuecomment-5573657441).
 Install it in Xcode Settings > Components and create an available iPhone

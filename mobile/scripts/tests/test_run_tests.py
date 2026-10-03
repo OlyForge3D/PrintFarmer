@@ -95,29 +95,17 @@ class EventTests(unittest.TestCase):
             selectors_by_family[family].extend(shard_selectors)
 
         shared = [
-            "PrintFarmerUITests/AttentionActionsUITests",
             "PrintFarmerUITests/LoginFlowUITests",
             "PrintFarmerUITests/OperatorShellUITests",
-            "PrintFarmerUITests/TwoModesOperatorShellUITests/testFloorModeShowsRequiredCompactDestinations",
-            "PrintFarmerUITests/OperatorFeatureVisibilityUITests",
             "PrintFarmerUITests/ScanStationUITests",
             "PrintFarmerUITests/HarvestUITests",
-            "PrintFarmerUITests/PartsInventoryUITests/testReorderNeededPartExposesWarningInAccessibilityLabel",
-            "PrintFarmerUITests/PartsInventoryUITests/testTappingPartRowOpensAdjustmentSheet",
-            "PrintFarmerUITests/PartsInventoryUITests/testInventoryTabDefaultsToSpoolsSegment",
-            "PrintFarmerUITests/PartsInventoryUITests/testReorderOnlyToggleFiltersList",
+            "PrintFarmerUITests/PartsInventoryUITests",
             "PrintFarmerUITests/PrinterListUITests",
             "PrintFarmerUITests/FilamentCoverageUITests",
             "PrintFarmerUITests/ColdOfflineShellUITests",
-            "PrintFarmerUITests/TaskActionRoutingUITests",
-            "PrintFarmerUITests/ShiftTasksUITests",
             "PrintFarmerUITests/UIWaitBudgetTests",
-            "PrintFarmerUITests/ShiftTasksGroupedUITests",
         ]
-        self.assertEqual(
-            Counter(selectors_by_family["iPhone"]),
-            Counter(shared + ["PrintFarmerUITests/ShiftTasksFailedRefreshUITests"]),
-        )
+        self.assertEqual(Counter(selectors_by_family["iPhone"]), Counter(shared))
         self.assertEqual(
             Counter(selectors_by_family["iPad"]),
             Counter(shared + ["PrintFarmerUITests/JobDetailIPadNavigationUITests"]),
@@ -149,9 +137,7 @@ class EventTests(unittest.TestCase):
                 self.assertEqual(
                     selectors_by_shard[key][1:],
                     [
-                        "PrintFarmerUITests/AttentionActionsUITests",
                         "PrintFarmerUITests/OperatorShellUITests",
-                        "PrintFarmerUITests/TwoModesOperatorShellUITests/testFloorModeShowsRequiredCompactDestinations",
                     ],
                 )
 
@@ -175,6 +161,12 @@ class EventTests(unittest.TestCase):
                 suite = selector_parts[1]
                 with self.subTest(suite=suite):
                     self.assertIn(suite, declarations, "A stale class selector executes zero XCTest cases")
+                    if suite in sources_by_suite:
+                        self.assertRegex(
+                            sources_by_suite[suite],
+                            r"\bfunc\s+test\w+\s*\(",
+                            "A selected XCUI class must contain real tests, not an empty compatibility stub",
+                        )
                 if len(selector_parts) == 3:
                     with self.subTest(selector=selector):
                         self.assertRegex(
@@ -206,10 +198,6 @@ class EventTests(unittest.TestCase):
                             source_methods,
                             "Method-selected XCUI suites must select every source test method",
                         )
-        self.assertIn(
-            "UICTContentSizeCategoryAccessibilityExtraExtraExtraLarge",
-            (mobile / "PrintFarmerUITests/AttentionActionsUITests.swift").read_text(),
-        )
 
 
 class RunnerTests(unittest.TestCase):
