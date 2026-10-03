@@ -63,6 +63,7 @@ import {
   PrinterVersionInfo,
   QueuedPrintJobWithFileMetaDto,
   QueuedPrintJobDto,
+  MoveQueuedJobPositionRequest,
   DispatchClientResult,
   QueueHistoryPageDto,
   QueueOverviewDto,
@@ -3003,11 +3004,17 @@ export class ApiClient {
    * Uses the job-queue-analytics endpoint which returns actual job data.
    * @param printerId Optional printer ID to filter jobs by printer
    */
-  async getJobQueue(printerId?: string): Promise<QueuedPrintJobWithFileMetaDto[]> {
+  async getJobQueue(): Promise<QueuedPrintJobWithFileMetaDto[]>;
+  async getJobQueue(printerId: string): Promise<QueuedPrintJobDto[]>;
+  async getJobQueue(
+    printerId?: string
+  ): Promise<QueuedPrintJobWithFileMetaDto[] | QueuedPrintJobDto[]>;
+  async getJobQueue(
+    printerId?: string
+  ): Promise<QueuedPrintJobWithFileMetaDto[] | QueuedPrintJobDto[]> {
     const params: Record<string, string | number> = { limit: 100 };
     if (printerId) {
-      // Use the printer-specific endpoint
-      const response = await this.client.get<QueuedPrintJobWithFileMetaDto[]>(
+      const response = await this.client.get<QueuedPrintJobDto[]>(
         `/job-queue-analytics/printer/${printerId}`,
         { params: { limit: 100 } }
       );
@@ -3049,6 +3056,29 @@ export class ApiClient {
     await this.client.delete(`/job-queue/${jobId}`, {
       headers: { "If-Match": etag },
     });
+  }
+
+  async moveQueuedJob(
+    jobId: string,
+    request: MoveQueuedJobPositionRequest,
+    reviewedRowVersion: string
+  ): Promise<QueuedPrintJobDto> {
+    const requestWithNormalizedEtag =
+      request.beforeJobId !== undefined
+        ? {
+            beforeJobId: request.beforeJobId,
+            beforeJobETag: this.normalizeQueueJobEtagForBody(request.beforeJobETag),
+          }
+        : {
+            afterJobId: request.afterJobId,
+            afterJobETag: this.normalizeQueueJobEtagForBody(request.afterJobETag),
+          };
+    const response = await this.client.put<QueuedPrintJobDto>(
+      `/job-queue/jobs/${jobId}/position`,
+      requestWithNormalizedEtag,
+      { headers: { "If-Match": this.queueJobIfMatch(reviewedRowVersion) } }
+    );
+    return response.data;
   }
 
   /**
@@ -4366,7 +4396,7 @@ export class ApiClient {
     offset: number = 0,
     queuedFrom?: Date,
     queuedTo?: Date
-  ): Promise<unknown[]> {
+  ): Promise<QueuedPrintJobWithFileMetaDto[]> {
     const params = new URLSearchParams();
     if (filterStatus) params.append("filterStatus", filterStatus);
     if (filterModel) params.append("filterModel", filterModel);
@@ -4387,8 +4417,8 @@ export class ApiClient {
   async getAnalyticsPrinterQueue(
     printerId: string,
     limit: number = 50
-  ): Promise<unknown[]> {
-    const response = await this.client.get(`/job-queue-analytics/printer/${printerId}`, {
+  ): Promise<QueuedPrintJobDto[]> {
+    const response = await this.client.get<QueuedPrintJobDto[]>(`/job-queue-analytics/printer/${printerId}`, {
       params: { limit },
     });
     return response.data;

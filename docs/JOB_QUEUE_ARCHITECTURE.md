@@ -129,6 +129,17 @@ assigned rows remain fixed and the allocator's `NextPosition` watermark is not
 changed. Updated rows receive new row versions. A successful reorder broadcasts
 the existing lowercase `jobqueueupdate` event.
 
+The React active-queue dashboard offers Move up/Move down buttons and native
+pointer drag in table, list, and card views. Reordering is available only to
+users with `Queue.Write` while the dashboard shows the unfiltered priority
+queue. Each interaction moves a queued job within its assigned-printer or Any
+printer group; printing, starting, paused, and assigned rows stay pinned.
+Keyboard button moves announce the resulting position. The client preserves
+the analytics response order, applies a temporary optimistic move, then
+refreshes from the server. A stale revision or semantic conflict rolls back to
+the refreshed queue with a queue-changed message; other failures remain
+visible.
+
 The endpoint returns 428 only when the moved-job `If-Match` header is missing,
 412 with current moved-job and neighbor ETags for stale revisions or row-version
 conflicts, 409 for semantic conflicts (including a missing neighbor), 404 when
