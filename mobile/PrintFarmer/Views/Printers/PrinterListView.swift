@@ -111,13 +111,13 @@ struct PrinterListView: View {
             if newCount == 0 {
                 Task { await viewModel.loadAutoDispatchStatuses() }
             }
-            .onChange(of: router.pendingNeedsAttentionFilter, initial: true) { _, needsAttention in
-                guard needsAttention else { return }
-                viewModel.selectedStatus = .needsAttention
-                viewModel.searchText = ""
-                viewModel.selectedLocationId = nil
-                router.pendingNeedsAttentionFilter = false
-            }
+        }
+        .onChange(of: router.pendingNeedsAttentionFilter, initial: true) { _, needsAttention in
+            guard needsAttention else { return }
+            viewModel.selectedStatus = .needsAttention
+            viewModel.searchText = ""
+            viewModel.selectedLocationId = nil
+            router.pendingNeedsAttentionFilter = false
         }
         .accessibilityIdentifier(navigationContext.accessibilityIdentifier)
     }

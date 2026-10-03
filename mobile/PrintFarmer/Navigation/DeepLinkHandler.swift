@@ -31,10 +31,10 @@ struct DeepLinkHandler {
 
         switch url.host {
         case "dashboard", "overview", "fleet", "oversight", "upkeep", "reports",
-             "maintenance", "maintenanceAnalytics", "maintenance-analytics",
-             "uptimeReliability", "uptime-reliability", "filamentCoverage",
-             "filament-coverage", "predictive", "predictiveInsights",
-             "dispatchDashboard", "dispatch", "locations", "jobHistory",
+             "maintenance", "analytics", "maintenanceAnalytics", "maintenance-analytics",
+             "uptime", "uptimeReliability", "uptime-reliability", "filamentCoverage",
+             "coverage", "filament-coverage", "predictive", "predictiveInsights", "predictive-insights",
+             "dispatchDashboard", "dispatch-dashboard", "dispatch", "locations", "jobHistory",
              "job-history", "jobTimeline", "job-timeline", "tasks":
             return .farm
         case "scan":

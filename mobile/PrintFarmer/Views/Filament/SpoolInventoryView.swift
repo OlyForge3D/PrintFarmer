@@ -195,6 +195,11 @@ struct SpoolInventoryView: View {
                 }
             }
             .onAppear { viewModel.isViewActive = true }
+            .onChange(of: router.pendingSpoolHighlightId) { _, spoolId in
+                guard let spoolId else { return }
+                router.pendingSpoolHighlightId = nil
+                viewModel.setHighlight(spoolId: spoolId)
+            }
             .onDisappear {
                 viewModel.isViewActive = false
                 viewModel.invalidateHighlightOwnership()

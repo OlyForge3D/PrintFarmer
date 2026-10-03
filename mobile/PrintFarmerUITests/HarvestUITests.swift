@@ -17,9 +17,9 @@ final class HarvestUITests: QueueUITestBase {
     private let failedJobIdentifier = "job.row.30000000-0003-0000-0000-000000000009"
     private let cancelledJobIdentifier = "job.row.30000000-0003-0000-0000-000000000011"
 
-    func testTasksDestinationSurvivesIdentifierPromotionAndChangedBadgeLabel() throws {
-        let tasks = shellDestinationButton(tabIdentifier: "tab.queue", timeout: 8)
-        let captured = ShellNode(try tasks.snapshot())
+    func testQueueDestinationSurvivesIdentifierPromotionAndChangedBadgeLabel() throws {
+        let queue = shellDestinationButton(tabIdentifier: "tab.queue", timeout: 8)
+        let captured = ShellNode(try queue.snapshot())
         let observation = ShellObservation(ShellNode(try app.snapshot()))
         let destination = try XCTUnwrap(observation.destination(
             tab: "tab.queue", sidebar: "sidebar.queue", title: "Queue"
@@ -39,16 +39,13 @@ final class HarvestUITests: QueueUITestBase {
         XCTAssertTrue(promoted.isHittable)
         promoted.tap()
         XCTAssertTrue(app.descendants(matching: .any)["jobList.root"].waitForExistence(timeout: 8),
-                      "The promoted identity must navigate to the actual Tasks destination")
+                      "The promoted identity must navigate to the actual Queue destination")
     }
 
     /// Navigates the operator shell to the seeded completed demo job's
     /// detail view, device-adaptively:
-    /// Tasks destination → Print queue (`JobListView`) → Recent → the
-    /// seeded completed job. Since #782 the Tasks destination presents the
-    /// anchor-grouped checklist (`ShiftTasksView`), so the preserved queue
-    /// is reached through the explicit `shiftTasks.printQueue` link on both
-    /// iPhone (tab bar) and iPad (sidebar). The final `jobDetail.*` assertion
+    /// Queue → Recent → the seeded completed job. Queue opens `JobListView`
+    /// directly on iPhone (tab bar) and iPad (sidebar). The `jobDetail.*` assertion
     /// proves `JobDetailView` is presented in the FOREGROUND navigation
     /// context on both device classes (issue #794).
     func openCompletedJobDetail(
@@ -69,7 +66,6 @@ final class HarvestUITests: QueueUITestBase {
         line: UInt = #line
     ) {
         openQueueDestination(file: file, line: line)
-
 
         // iPhone paginates the queue and exposes a Recent page control;
         // iPad renders a single List with an always-visible Recent section.

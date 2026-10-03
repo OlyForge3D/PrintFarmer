@@ -7,7 +7,7 @@ import XCTest
 /// The `--uitesting-cold-offline-shell` bootstrap seeds a present cached
 /// snapshot of the demo fleet (fixed last-confirmed timestamp) into a stub
 /// `FarmSnapshotStoring` and forces the printer service offline. Dashboard is
-/// opened from its Oversight destination; it hydrates the cached fleet,
+/// opened from Farm; it hydrates the cached fleet,
 /// the canonical load then fails offline, and the cache is preserved as the
 /// read-only stale shell.
 ///
@@ -23,7 +23,7 @@ final class ColdOfflineShellUITests: PrintFarmerUITestCase {
     }
 
     /// Opens the read-only `DashboardView` cold-offline shell through
-    /// Oversight. Returns the stale connection banner, which the
+    /// Farm. Returns the stale connection banner, which the
     /// read-only shell always mounts.
     @discardableResult
     private func openColdOfflineShell() -> XCUIElement {
