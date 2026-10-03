@@ -2412,6 +2412,24 @@ case_workflow_dependency_compliance_uses_own_output() {
   assert_eq "summary env bindings" "$wanted_env_count" "2" || return 1
 }
 
+case_workflow_fixture_migrations_follow_dotnet_build_selection() {
+  local workflow="$REPO_ROOT/.github/workflows/ci.yml" body block
+  body="$(tr -d '\r' < "$workflow")"
+  block="$(printf '%s\n' "$body" | awk '
+    /^  recovery-matrix-fixture-migrations:$/ { f=1; print; next }
+    f && /^  [A-Za-z_][A-Za-z0-9_-]*:$/ { exit }
+    f { print }
+  ')"
+  assert_contains "fixture migration depends on selector" "$block" \
+    'needs: [ci-tools, select]' || return 1
+  assert_contains "fixture migration selection gate" "$block" \
+    "if: \${{ needs.select.outputs.want_dotnet_build == 'true' }}" || return 1
+  assert_contains "fixture migration conditional summary check" "$body" \
+    'check_conditional recovery-matrix-fixture-migrations "$FIXTURE_MIG_RESULT" "$WANT_DOTNET_BUILD"' || return 1
+  assert_not_contains "fixture migration not unconditionally required" "$body" \
+    'require_success recovery-matrix-fixture-migrations' || return 1
+}
+
 case_workflow_ci_tools_runs_restore_free_compliance() {
   # The licensing policy reads repository paths (LICENSE, notices, docs,
   # Dockerfiles, release workflows, package manifests) that no selector
@@ -4184,6 +4202,7 @@ TESTS=(
   case_nested_package_json_lookalikes_skip_dependency_compliance
   case_policy_npm_lockfiles_trigger_dependency_compliance
   case_workflow_dependency_compliance_uses_own_output
+  case_workflow_fixture_migrations_follow_dotnet_build_selection
   case_workflow_ci_tools_runs_restore_free_compliance
   case_merge_base_diverged_pr_base_sha_mobile_only
   case_push_to_development_full_safe
