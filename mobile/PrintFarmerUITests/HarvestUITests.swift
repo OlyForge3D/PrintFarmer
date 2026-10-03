@@ -10,7 +10,7 @@ import XCTest
 /// Demo job `30000000-0003-0000-0000-000000000007` (`DemoData.job7ID`) is
 /// seeded as `Completed`, giving a deterministic target without depending
 /// on Recent-page sort order.
-final class HarvestUITests: ShiftTasksUITestBase {
+final class HarvestUITests: QueueUITestBase {
     override var waitsForNavigationReadiness: Bool { true }
 
     private let completedJobIdentifier = "job.row.30000000-0003-0000-0000-000000000007"
@@ -18,13 +18,13 @@ final class HarvestUITests: ShiftTasksUITestBase {
     private let cancelledJobIdentifier = "job.row.30000000-0003-0000-0000-000000000011"
 
     func testTasksDestinationSurvivesIdentifierPromotionAndChangedBadgeLabel() throws {
-        let tasks = shellDestinationButton(tabIdentifier: "tab.tasks", timeout: 8)
+        let tasks = shellDestinationButton(tabIdentifier: "tab.queue", timeout: 8)
         let captured = ShellNode(try tasks.snapshot())
         let observation = ShellObservation(ShellNode(try app.snapshot()))
         let destination = try XCTUnwrap(observation.destination(
-            tab: "tab.tasks", sidebar: "sidebar.tasks", title: "Tasks"
+            tab: "tab.queue", sidebar: "sidebar.queue", title: "Queue"
         ))
-        let expectedID = destination.surface == .tabBar ? "tab.tasks" : "sidebar.tasks"
+        let expectedID = destination.surface == .tabBar ? "tab.queue" : "sidebar.queue"
         let scope = destination.surface == .tabBar
             ? app.tabBars.descendants(matching: captured.type)
             : app.descendants(matching: captured.type)
@@ -33,12 +33,12 @@ final class HarvestUITests: ShiftTasksUITestBase {
         // Recreate the earlier identifierless snapshot without changing app state.
         var earlier = captured
         earlier.identifier = ""
-        earlier.label = "Tasks, obsolete badge count"
+        earlier.label = "Queue, obsolete badge count"
         let promoted = observedElement(earlier, within: scope, allowingPromotionTo: expectedID)
         XCTAssertEqual(promoted.identifier, expectedID)
         XCTAssertTrue(promoted.isHittable)
         promoted.tap()
-        XCTAssertTrue(app.buttons["shiftTasks.printQueue"].waitForExistence(timeout: 8),
+        XCTAssertTrue(app.descendants(matching: .any)["jobList.root"].waitForExistence(timeout: 8),
                       "The promoted identity must navigate to the actual Tasks destination")
     }
 
@@ -68,13 +68,8 @@ final class HarvestUITests: ShiftTasksUITestBase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        openTasksDestination(file: file, line: line)
+        openQueueDestination(file: file, line: line)
 
-        let printQueue = app.buttons["shiftTasks.printQueue"]
-        XCTAssertTrue(printQueue.waitForExistence(timeout: 8),
-                      "Tasks destination must expose the preserved Print queue link",
-                      file: file, line: line)
-        printQueue.tap()
 
         // iPhone paginates the queue and exposes a Recent page control;
         // iPad renders a single List with an always-visible Recent section.

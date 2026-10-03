@@ -37,34 +37,10 @@ final class UITestBootstrapTests: XCTestCase {
         XCTAssertEqual(UITestBootstrap.unauthenticatedLaunchArgument, "--uitesting-unauthenticated")
     }
 
-    func test_twoModesNavigationLaunchArgument_matchesUITestsHarness() {
-        XCTAssertEqual(UITestBootstrap.twoModesNavigationLaunchArgument, "--uitesting-two-modes")
-    }
-
-    func test_oversightNavigationModeLaunchArgument_matchesUITestsHarness() {
-        XCTAssertEqual(UITestBootstrap.oversightNavigationModeLaunchArgument, "--uitesting-oversight-mode")
-    }
-
-    func test_startsInOversightMode_requiresLaunchArgument() {
-        XCTAssertFalse(UITestBootstrap.startsInOversightMode(arguments: ["--uitesting"]))
-        XCTAssertTrue(
-            UITestBootstrap.startsInOversightMode(
-                arguments: ["--uitesting", "--uitesting-oversight-mode"]
-            )
-        )
-    }
-
     func test_navigationChromeLaunchArgument_matchesUITestsHarness() {
         XCTAssertEqual(
             UITestBootstrap.navigationChromeLaunchArgument,
             "--uitesting-navigation-chrome"
-        )
-    }
-
-    func test_oversightUpgradeOfferLaunchArgument_matchesUITestsHarness() {
-        XCTAssertEqual(
-            UITestBootstrap.oversightUpgradeOfferLaunchArgument,
-            "--uitesting-oversight-upgrade-offer"
         )
     }
 
@@ -132,16 +108,6 @@ final class UITestBootstrapTests: XCTestCase {
         XCTAssertEqual(
             UITestBootstrap.mode(in: ["--uitesting", "--uitesting-unauthenticated"]),
             .unauthenticated
-        )
-    }
-
-    func test_mode_isOversightUpgradeOffer_whenArgumentPresent() {
-        XCTAssertEqual(
-            UITestBootstrap.mode(in: [
-                "--uitesting",
-                "--uitesting-oversight-upgrade-offer",
-            ]),
-            .authenticatedOversightUpgradeOffer
         )
     }
 
@@ -487,16 +453,6 @@ final class UITestBootstrapTests: XCTestCase {
                        bundle.serverRegistry.servers.first?.id)
     }
 
-    func test_makeBundle_twoModesArgument_setsNavigationPreference() throws {
-        let defaults = try makeEphemeralDefaults()
-        let bundle = UITestBootstrap.makeBundle(
-            defaults: defaults,
-            arguments: ["--uitesting", "--uitesting-two-modes"]
-        )
-
-        XCTAssertEqual(bundle.serverRegistry.navigationLayoutPreference, .twoModes)
-    }
-
     func test_makeBundle_navigationChromeArgument_seedsVisibleServerSwitcher() throws {
         let defaults = try makeEphemeralDefaults()
         let bundle = UITestBootstrap.makeBundle(
@@ -519,19 +475,6 @@ final class UITestBootstrapTests: XCTestCase {
         // `hasCheckedAuth` gates RootView past the launch splash.
         // Without it the app renders the launch screen forever.
         // (Verified indirectly by the second restoreSession call being a no-op below.)
-    }
-
-    func test_makeBundle_oversightUpgradeOffer_authenticatesAndPinsOfferInputs() throws {
-        let defaults = try makeEphemeralDefaults()
-        let bundle = UITestBootstrap.makeBundle(
-            mode: .authenticatedOversightUpgradeOffer,
-            defaults: defaults
-        )
-
-        XCTAssertTrue(bundle.authViewModel.isAuthenticated)
-        XCTAssertEqual(bundle.authViewModel.currentUser?.roles, ["farm_admin"])
-        XCTAssertTrue(bundle.services.capabilitiesService.resolved.shiftPlanEnabled)
-        XCTAssertTrue(bundle.services.farmShapeService is StubFarmShapeService)
     }
 
     func test_makeBundle_usesDemoServices() throws {

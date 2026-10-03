@@ -59,7 +59,7 @@ struct PartsInventoryListView: View {
         #if os(iOS)
         .navigationBarTitleDisplayMode(.large)
         #endif
-        .rootNavigationChrome(for: .inventory) {
+        .rootNavigationChrome(for: .filament) {
             Menu {
                 Button {
                     showScanFlow = true

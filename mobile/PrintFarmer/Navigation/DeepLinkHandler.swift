@@ -1,6 +1,7 @@
 import Foundation
 
 enum DeepLinkDestination: Equatable {
+    case farm
     case scan
     case printerDetail(id: UUID)
     case printerReady(id: UUID)
@@ -21,13 +22,21 @@ struct DeepLinkHandler {
     ///   `{id}` must be a positive integer — zero/negative values are
     ///   rejected (`nil`) rather than treated as a valid spool ID (#714
     ///   Item C).
-    /// - `printfarmer://attention/{itemId}` → exact attention item
+    /// - `printfarmer://attention/{itemId}` → Farm's Needs attention filter
+    /// - Retired Oversight routes → Farm
     static func parse(url: URL) -> DeepLinkDestination? {
         guard url.scheme == "printfarmer" else { return nil }
 
         let pathComponents = url.pathComponents.filter { $0 != "/" }
 
         switch url.host {
+        case "dashboard", "overview", "fleet", "oversight", "upkeep", "reports",
+             "maintenance", "maintenanceAnalytics", "maintenance-analytics",
+             "uptimeReliability", "uptime-reliability", "filamentCoverage",
+             "filament-coverage", "predictive", "predictiveInsights",
+             "dispatchDashboard", "dispatch", "locations", "jobHistory",
+             "job-history", "jobTimeline", "job-timeline", "tasks":
+            return .farm
         case "scan":
             guard pathComponents.isEmpty else { return nil }
             return .scan

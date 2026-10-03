@@ -27,17 +27,12 @@ final class ColdOfflineShellUITests: PrintFarmerUITestCase {
     /// read-only shell always mounts.
     @discardableResult
     private func openColdOfflineShell() -> XCUIElement {
-        let hasTabBar = app.tabBars.firstMatch.waitForExistence(timeout: 3)
-        let oversight = shellDestinationButton(
-            tabIdentifier: hasTabBar ? "tab.oversight" : "tab.overview",
+        let farm = shellDestinationButton(
+            tabIdentifier: "tab.farm",
             timeout: 8
         )
-        XCTAssertTrue(oversight.exists)
-        oversight.tap()
-
-        let dashboardButton = app.buttons["oversight.destination.dashboard"]
-        XCTAssertTrue(dashboardButton.waitForExistence(timeout: 5))
-        dashboardButton.tap()
+        XCTAssertTrue(farm.exists)
+        farm.tap()
 
         let staleBanner = app.buttons["connection-status-bar-stale"]
         if !staleBanner.waitForExistence(timeout: 15) {
@@ -137,7 +132,7 @@ final class ColdOfflineShellUITests: PrintFarmerUITestCase {
 
     func testOfflineQueueRemainsReachableFromAccountWhileOffline() {
         let attention = shellDestinationButton(
-            tabIdentifier: "tab.attention",
+            tabIdentifier: "tab.farm",
             timeout: 8
         )
         XCTAssertTrue(attention.exists)

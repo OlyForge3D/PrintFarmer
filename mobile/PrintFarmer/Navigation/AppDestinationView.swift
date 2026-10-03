@@ -22,34 +22,12 @@ func destinationView(for destination: AppDestination) -> some View {
         }
     case .account:
         AccountView()
-    case .dashboard:
-        DashboardView(ownsNavigationStack: false)
-    case .maintenance:
-        MaintenanceView(ownsNavigationStack: false)
     case .notifications:
         NotificationsView(ownsNavigationStack: false)
     case .settings:
         SettingsView(ownsNavigationStack: false)
-    case .navigationSettings:
-        NavigationSettingsView()
-    case .maintenanceAnalytics:
-        MaintenanceAnalyticsView()
-    case .uptimeReliability:
-        UptimeView()
-    case .filamentCoverage:
-        FilamentCoverageView()
-    case .predictiveInsights(let printerId):
-        PredictiveInsightsView(printerId: printerId)
     case .jobQueue:
         JobListView(ownsNavigationStack: false)
-    case .jobHistory:
-        JobHistoryView()
-    case .jobTimeline:
-        JobTimelineView()
-    case .dispatchDashboard:
-        DispatchDashboardView()
-    case .locations:
-        LocationListView()
     case .offlineQueue:
         OfflineQueueStatusView()
     case .manageServers:

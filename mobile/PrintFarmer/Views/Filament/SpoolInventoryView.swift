@@ -75,11 +75,11 @@ struct SpoolInventoryView: View {
                     }
                 }
             }
-            .navigationTitle("Spool Inventory")
+            .navigationTitle("Filament")
             #if os(iOS)
             .navigationBarTitleDisplayMode(.large)
             #endif
-            .rootNavigationChrome(for: .inventory) {
+            .rootNavigationChrome(for: .filament) {
                 Menu {
                     Button {
                         showScanFlow = true

@@ -83,7 +83,8 @@ struct JobListView: View {
                 jobList
             }
         }
-        .navigationTitle("Print Queue")
+        .navigationTitle("Queue")
+        .rootNavigationChrome(for: .queue)
         .refreshable {
             await viewModel.loadJobs()
         }

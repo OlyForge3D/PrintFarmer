@@ -3,7 +3,6 @@ import SwiftUI
 enum RootNavigationChrome {
     static let minimumTouchTarget: CGFloat = 44
     static let serverSwitcherIdentifier = "navigation.serverSwitcher"
-    static let modeControlIdentifier = "navigation.modeControl"
     static let accountButtonIdentifier = "navigation.account"
     static let accountContainerIdentifier = "account.root"
 }
@@ -35,25 +34,14 @@ extension View {
 
 private struct RootNavigationChromeModifier<ScreenActions: View>: ViewModifier {
     @Environment(AppRouter.self) private var router
-    @Environment(ServiceContainer.self) private var services
 
     let tab: AppTab
     let screenActions: ScreenActions
 
     func body(content: Content) -> some View {
         content
-            .safeAreaInset(edge: .top, spacing: 0) {
-                if router.shouldShowModeControl(for: tab) {
-                    modeControl
-                }
-            }
-
             .toolbar {
                 if router.isAtRoot(tab) {
-                    ToolbarItem(placement: .topBarLeading) {
-                        ServerSwitcherMenu(style: .toolbar)
-                    }
-
                     ToolbarItem(placement: .topBarTrailing) {
                         HStack(spacing: 4) {
                             screenActions
@@ -62,34 +50,6 @@ private struct RootNavigationChromeModifier<ScreenActions: View>: ViewModifier {
                     }
                 }
             }
-    }
-
-    private var modeControl: some View {
-        Picker(
-            "Navigation mode",
-            selection: Binding(
-                get: { router.activeMode },
-                set: {
-                    router.setNavigationMode(
-                        $0,
-                        capabilities: services.capabilitiesService.resolved
-                    )
-                }
-            )
-        ) {
-            Text("Floor").tag(OversightMode.floor)
-            Text("Oversight").tag(OversightMode.oversight)
-        }
-        .pickerStyle(.segmented)
-        .frame(minHeight: RootNavigationChrome.minimumTouchTarget)
-        .padding(.horizontal)
-        .background(.bar)
-        .overlay(alignment: .bottom) {
-            Divider()
-        }
-        .accessibilityLabel("Navigation mode")
-        .accessibilityHint("Switches between Floor work and Oversight.")
-        .accessibilityIdentifier(RootNavigationChrome.modeControlIdentifier)
     }
 
     private var accountButton: some View {

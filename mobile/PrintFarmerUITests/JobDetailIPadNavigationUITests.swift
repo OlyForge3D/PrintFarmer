@@ -21,7 +21,7 @@ import XCTest
 /// intentionally skipped here: this suite asserts the regular-width shell
 /// specifically, so it no-ops on the compact (iPhone) layout.
 @MainActor
-final class JobDetailIPadNavigationUITests: ShiftTasksUITestBase {
+final class JobDetailIPadNavigationUITests: QueueUITestBase {
 
     private let completedJobIdentifier = "job.row.30000000-0003-0000-0000-000000000007"
 
@@ -30,7 +30,7 @@ final class JobDetailIPadNavigationUITests: ShiftTasksUITestBase {
     /// by layout, not best-effort: on iPad every assertion on the core path
     /// is required. The regular-width shell is identified by the absence of
     /// the compact tab-bar surface; sidebar navigation itself is exercised
-    /// by `openTasksDestination()`, which handles a collapsed iPad sidebar.
+    /// by `openQueueDestination()`, which handles a collapsed iPad sidebar.
     private func requireRegularWidthShell() throws {
         if UIDevice.current.userInterfaceIdiom == .phone || app.tabBars.firstMatch.waitForExistence(timeout: 8) {
             throw XCTSkip("iPad-only navigation coverage; compact (iPhone) shell is covered by HarvestUITests")
@@ -45,14 +45,14 @@ final class JobDetailIPadNavigationUITests: ShiftTasksUITestBase {
         XCTAssertTrue(revealSidebarFromLeadingEdge(timeout: 8),
                       "The leading-edge gesture must reveal the collapsed iPad sidebar")
 
-        let tasks = app.buttons["sidebar.tasks"]
+        let tasks = app.buttons["sidebar.queue"]
         XCTAssertTrue(tasks.waitForExistence(timeout: 8))
         XCTAssertTrue(revealSidebarIfCollapsed(),
                       "Revealing an already-visible sidebar must succeed without closing it")
         XCTAssertTrue(tasks.isHittable,
                       "The existing sidebar must remain visible and interactive")
         tasks.tap()
-        XCTAssertTrue(app.buttons["shiftTasks.printQueue"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.descendants(matching: .any)["jobList.root"].waitForExistence(timeout: 8))
     }
 
     /// #794 core path: the completed job must be reachable in the iPad
@@ -61,12 +61,8 @@ final class JobDetailIPadNavigationUITests: ShiftTasksUITestBase {
     func testIPadCompletedJobPresentsHarvestActionInForeground() throws {
         try requireRegularWidthShell()
 
-        openTasksDestination()
+        openQueueDestination()
 
-        let printQueue = app.buttons["shiftTasks.printQueue"]
-        XCTAssertTrue(printQueue.waitForExistence(timeout: 8),
-                      "The iPad Tasks destination must expose the preserved Print queue link")
-        printQueue.tap()
 
         // Regression guard: the completed job must be reachable directly in
         // the Recent section with NO expansion tap. Before the fix this row
@@ -93,11 +89,8 @@ final class JobDetailIPadNavigationUITests: ShiftTasksUITestBase {
     func testIPadHarvestActionPresentsHarvestSheet() throws {
         try requireRegularWidthShell()
 
-        openTasksDestination()
+        openQueueDestination()
 
-        let printQueue = app.buttons["shiftTasks.printQueue"]
-        XCTAssertTrue(printQueue.waitForExistence(timeout: 8))
-        printQueue.tap()
 
         let jobRow = app.buttons[completedJobIdentifier]
         XCTAssertTrue(jobRow.waitForExistence(timeout: 8),

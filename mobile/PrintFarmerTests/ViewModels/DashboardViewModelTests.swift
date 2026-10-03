@@ -47,6 +47,26 @@ final class DashboardViewModelTests: XCTestCase {
 
     // MARK: - Initial State
 
+    func testFarmFloorLoadsAndCachesFleetWithoutAnalyticalOrJobEndpoints() async throws {
+        mockPrinterService.printersToReturn = [try TestData.decodePrinter()]
+        mockJobService.errorToThrow = NetworkError.forbidden
+        viewModel.configure(
+            printerService: mockPrinterService,
+            jobService: mockJobService,
+            statisticsService: mockStatsService,
+            jobAnalyticsService: mockJobAnalyticsService,
+            farmOnly: true
+        )
+        await viewModel.loadDashboard()
+        XCTAssertEqual(viewModel.farmSource, .live)
+        XCTAssertEqual(viewModel.printers.count, 1)
+        XCTAssertFalse(mockJobService.listJobsCalled)
+        XCTAssertFalse(mockJobService.listAllJobsCalled)
+        XCTAssertNil(viewModel.summary)
+        XCTAssertTrue(viewModel.modelStats.isEmpty)
+        XCTAssertNil(viewModel.errorMessage)
+    }
+
     func testInitialState() {
         XCTAssertTrue(viewModel.printers.isEmpty)
         XCTAssertTrue(viewModel.queueOverview.isEmpty)
