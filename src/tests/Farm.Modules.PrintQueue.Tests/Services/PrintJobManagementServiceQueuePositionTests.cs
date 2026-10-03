@@ -1,4 +1,4 @@
-using Farm.Infrastructure;
+﻿using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Queue;
@@ -342,18 +342,19 @@ public class PrintJobManagementServiceQueuePositionTests
     private static PrintJob CreateJob(
         int queuePosition,
         PrintJobPriority priority,
-        Guid? printerId = null) => new()
-    {
-        Id = Guid.NewGuid(),
-        Name = $"job-{queuePosition}.gcode",
-        Status = PrintJobStatus.Queued,
-        Priority = (int)priority,
-        AssignedPrinterId = printerId,
-        QueuePosition = queuePosition,
-        QueuedAt = DateTime.UtcNow.AddMinutes(queuePosition),
-        CreatedAt = DateTime.UtcNow,
-        UpdatedAt = DateTime.UtcNow,
-    };
+        Guid? printerId = null) =>
+        new()
+        {
+            Id = Guid.NewGuid(),
+            Name = $"job-{queuePosition}.gcode",
+            Status = PrintJobStatus.Queued,
+            Priority = (int)priority,
+            AssignedPrinterId = printerId,
+            QueuePosition = queuePosition,
+            QueuedAt = DateTime.UtcNow.AddMinutes(queuePosition),
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
 
     private static PrintJobManagementService CreateService(AppDbContext db)
     {
