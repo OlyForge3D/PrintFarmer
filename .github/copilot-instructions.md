@@ -503,9 +503,11 @@ following **always** take the full gate, even when the only change is markdown:
 
 Whether a given edit moves an agent's safety boundary cannot be judged from the path, so a
 single review record must never be able to rewrite these. Prose is matched by extension
-(`.md`, `.markdown`, `.rst`, `.adoc`, `.txt`), so binary or image assets under `docs/`
-correctly take the full gate. If a change is misclassified as full-gate, the cost is one extra
-review record; the reverse would be a real review gap.
+(`.md`, `.markdown`, `.rst`, `.adoc`, `.txt`). Static HTML design mockups under `docs/**`
+and `mobile/docs/**` are also documentation; product workflows do not execute them. Other
+non-prose assets under `docs/`, such as binary or image files, correctly take the full gate.
+If a change is misclassified as full-gate, the cost is one extra review record; the reverse
+would be a real review gap.
 
 This list is exported from the module as `fullGatePrefixes` / `fullGateFiles`, and a test
 asserts that this section enumerates exactly it — the code and this documentation drifted apart

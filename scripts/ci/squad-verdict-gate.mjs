@@ -595,6 +595,10 @@ function isProse(path) {
   return proseExtensions.some((extension) => lower.endsWith(extension));
 }
 
+function isStaticDocumentationHtml(path) {
+  return /^(?:docs|mobile\/docs)\/.+\.html$/i.test(path);
+}
+
 function isDependencyManifest(path, basename) {
   return manifestBasenames.has(basename) ||
     /^appsettings(?:\.[^.]+)?\.json$/i.test(basename) ||
@@ -655,10 +659,11 @@ export function classifyChangeScope(paths) {
     if (highRiskPaths.test(normalizedPath)) {
       return { docsOnly: false, highRisk: true, reason: `${path} is high-risk infrastructure or access-control code` };
     }
-    if (normalizedPath.startsWith('docs/') && !isProse(normalizedPath)) {
+    const staticDocumentationHtml = isStaticDocumentationHtml(normalizedPath);
+    if (normalizedPath.startsWith('docs/') && !isProse(normalizedPath) && !staticDocumentationHtml) {
       return { docsOnly: false, highRisk: true, reason: `${path} is a non-prose documentation asset` };
     }
-    if (!isProse(normalizedPath)) {
+    if (!isProse(normalizedPath) && !staticDocumentationHtml) {
       if (!isKnownLowRiskPath(normalizedPath)) {
         return { docsOnly: false, highRisk: true, reason: `${path} is not a known low-risk path` };
       }
