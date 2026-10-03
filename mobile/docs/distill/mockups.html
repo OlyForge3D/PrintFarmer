@@ -1,0 +1,572 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PrintFarmer iOS — Distill mockups (Farm · Queue · Filament)</title>
+<style>
+  /* Tokens mirror mobile/PrintFarmer/Theme/ThemeColors.swift (dark). */
+  :root {
+    --bg: #0b1020;
+    --card: #0f172a;
+    --raised: #16213a;
+    --text: #e5e7eb;
+    --secondary: #9ca3af;
+    --tertiary: #6b7280;
+    --accent: #10b981;
+    --accent2: #1d4ed8;
+    --border: #243145;
+    --success: #10b981;
+    --error: #f87171;
+    --warning: #d97706;
+    --btn: #047857;
+    --maintenance: #a78bfa;
+    --assigned: #22d3ee;
+    --temp: #facc15;
+    --page: #060a15;
+    --radius: 14px;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", system-ui, sans-serif;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--page); color: var(--text); line-height: 1.45; }
+  .num { font-variant-numeric: tabular-nums; }
+  main { max-width: 1480px; margin: 0 auto; padding: 48px 32px 96px; }
+  header.doc h1 { font-size: 34px; letter-spacing: -0.02em; margin: 0 0 8px; }
+  header.doc p { color: var(--secondary); max-width: 72ch; margin: 0 0 6px; }
+  header.doc a { color: var(--assigned); }
+  section.doc { margin-top: 64px; }
+  section.doc > h2 { font-size: 22px; margin: 0 0 6px; letter-spacing: -0.01em; }
+  section.doc > p.lede { color: var(--secondary); margin: 0 0 24px; max-width: 80ch; }
+  .row { display: flex; flex-wrap: wrap; gap: 36px; align-items: flex-start; }
+  figure { margin: 0; }
+  figcaption { margin-top: 12px; font-size: 13px; color: var(--secondary); max-width: 320px; }
+  figcaption strong { color: var(--text); font-weight: 600; }
+
+  /* ---------- Phone frame ---------- */
+  .phone {
+    width: 320px; height: 690px; border-radius: 44px; background: var(--bg);
+    border: 1px solid #2b3a55; box-shadow: 0 0 0 8px #0d1322, 0 30px 60px -20px rgba(0,0,0,.6);
+    position: relative; overflow: hidden; display: flex; flex-direction: column;
+  }
+  .status-bar { height: 40px; flex: none; display: flex; justify-content: space-between; align-items: flex-end;
+    padding: 0 26px 4px; font-size: 13px; font-weight: 600; }
+  .status-bar .island { position: absolute; left: 50%; top: 10px; transform: translateX(-50%);
+    width: 96px; height: 26px; border-radius: 14px; background: #000; }
+  .navbar { flex: none; padding: 6px 16px 10px; display: flex; align-items: center; justify-content: space-between; }
+  .navbar h3 { margin: 0; font-size: 28px; font-weight: 700; letter-spacing: -0.02em; }
+  .avatar { width: 30px; height: 30px; border-radius: 50%; background: var(--raised); border: 1px solid var(--border);
+    display: grid; place-items: center; font-size: 12px; font-weight: 600; color: var(--secondary); }
+  .content { flex: 1; overflow: hidden; padding: 0 12px; position: relative; }
+  .content:has(.scan-fab)::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 84px; pointer-events: none;
+    background: linear-gradient(to bottom, transparent, var(--bg) 70%); z-index: 1; }
+  .content .scan-fab { z-index: 2; }
+  .chips { display: flex; gap: 6px; padding: 0 4px 10px; }
+  .chip { font-size: 12px; padding: 5px 10px; border-radius: 999px; background: var(--card); border: 1px solid var(--border);
+    color: var(--secondary); white-space: nowrap; }
+  .chip.on { background: #12324a; border-color: #1f5f86; color: var(--text); }
+  .chip .n { color: var(--warning); font-weight: 600; margin-left: 4px; }
+
+  .tabbar { flex: none; height: 78px; border-top: 1px solid var(--border); background: rgba(11,16,32,.96);
+    display: flex; justify-content: space-around; padding-top: 8px; }
+  .tab { display: flex; flex-direction: column; align-items: center; gap: 3px; font-size: 10.5px; color: var(--tertiary); width: 80px; }
+  .tab svg { width: 24px; height: 24px; }
+  .tab.on { color: var(--accent); }
+  .scan-fab { position: absolute; right: 14px; bottom: 92px; height: 48px; padding: 0 18px 0 14px; border-radius: 24px;
+    background: var(--btn); color: #fff; display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 15px;
+    box-shadow: 0 8px 18px -6px rgba(0,0,0,.7), 0 0 0 1px rgba(255,255,255,.08) inset; }
+  .scan-fab svg { width: 20px; height: 20px; }
+
+  /* ---------- Printer card ---------- */
+  .pcard { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px;
+    display: grid; grid-template-columns: 60px 1fr; gap: 10px; margin-bottom: 8px; }
+  .thumb { width: 60px; height: 60px; border-radius: 10px; background: #0a1224; border: 1px solid var(--border);
+    overflow: hidden; display: grid; place-items: center; }
+  .thumb svg { width: 100%; height: 100%; }
+  .pc-top { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+  .pc-name { font-weight: 600; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pill { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
+  .pill.printing { background: rgba(16,185,129,.16); color: #34d399; }
+  .pill.idle { background: rgba(156,163,175,.14); color: var(--secondary); }
+  .pill.paused { background: rgba(217,119,6,.18); color: #fbbf24; }
+  .pill.error { background: rgba(248,113,113,.16); color: var(--error); }
+  .pill.ready { background: rgba(34,211,238,.14); color: var(--assigned); }
+  .pill.offline { background: rgba(107,114,128,.18); color: var(--tertiary); }
+  .pc-job { font-size: 12.5px; color: var(--secondary); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bar { height: 4px; border-radius: 2px; background: #1c2840; margin-top: 7px; overflow: hidden; }
+  .bar > i { display: block; height: 100%; background: var(--accent); border-radius: 2px; }
+  .bar.paused > i { background: var(--warning); }
+  .pc-meta { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--secondary); margin-top: 5px; }
+  .pc-meta b { color: var(--text); font-weight: 600; }
+  .pc-foot { display: flex; align-items: center; gap: 10px; font-size: 11.5px; color: var(--secondary); margin-top: 6px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; vertical-align: -1px; box-shadow: 0 0 0 1px rgba(255,255,255,.18); }
+  .t-hot { color: var(--temp); }
+  .attn { margin-left: auto; font-size: 11px; font-weight: 600; color: #fbbf24; background: rgba(217,119,6,.16);
+    padding: 2px 7px; border-radius: 999px; }
+  .attn.red { color: var(--error); background: rgba(248,113,113,.14); }
+
+  /* ---------- Queue ---------- */
+  .group-h { font-size: 13px; font-weight: 600; color: var(--secondary); margin: 6px 4px 6px; display: flex; justify-content: space-between; }
+  .group-h span { color: var(--tertiary); font-weight: 500; }
+  .list { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; margin-bottom: 14px; }
+  .qrow { display: grid; grid-template-columns: 40px 1fr auto; gap: 10px; align-items: center; padding: 9px 10px;
+    border-top: 1px solid var(--border); background: var(--card); }
+  .qrow:first-child { border-top: 0; }
+  .qrow .mini { width: 40px; height: 40px; border-radius: 8px; background: #0a1224; border: 1px solid var(--border); overflow: hidden; }
+  .qrow .t { font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .qrow .s { font-size: 11.5px; color: var(--secondary); }
+  .grip { color: var(--tertiary); width: 20px; height: 20px; }
+  .qrow.lift { position: relative; z-index: 2; transform: scale(1.03) translateY(-2px); background: var(--raised);
+    border: 1px solid #2f4b74; border-radius: 12px; box-shadow: 0 16px 30px -10px rgba(0,0,0,.8); }
+  .qrow.gap { height: 10px; padding: 0; background: rgba(16,185,129,.07); border-top: 1px dashed #1f6f55; }
+  .prio { font-size: 10.5px; font-weight: 600; color: var(--maintenance); }
+  .badge-n { font-size: 11px; color: var(--secondary); }
+
+  /* ---------- Filament ---------- */
+  .spool { display: grid; grid-template-columns: 40px 1fr auto; gap: 10px; align-items: center; padding: 10px; border-top: 1px solid var(--border); }
+  .spool:first-child { border-top: 0; }
+  .reel { width: 36px; height: 36px; border-radius: 50%; position: relative; }
+  .reel::after { content: ""; position: absolute; inset: 11px; border-radius: 50%; background: var(--card); box-shadow: 0 0 0 1px rgba(255,255,255,.12); }
+  .gram { font-size: 13px; font-weight: 600; text-align: right; }
+  .gram small { display: block; font-size: 11px; color: var(--secondary); font-weight: 500; }
+  .low { color: var(--warning); }
+  .on-printer { font-size: 11px; color: var(--assigned); }
+  .addbtn { display: flex; align-items: center; justify-content: center; gap: 6px; height: 40px; border-radius: 12px;
+    border: 1px dashed var(--border); color: var(--secondary); font-size: 14px; margin-bottom: 12px; }
+
+  /* ---------- Detail ---------- */
+  .dnav { flex: none; display: flex; justify-content: space-between; align-items: center; padding: 4px 14px 6px; font-size: 15px; }
+  .dnav .back { color: var(--accent); }
+  .dnav .web { color: var(--assigned); font-size: 13.5px; }
+  .dtitle { padding: 0 16px; display: flex; align-items: center; gap: 8px; }
+  .dtitle h4 { margin: 0; font-size: 22px; letter-spacing: -0.01em; }
+  .seg { margin: 10px 14px 4px; display: grid; grid-template-columns: repeat(4,1fr); background: var(--card);
+    border: 1px solid var(--border); border-radius: 10px; padding: 2px; }
+  .seg span { text-align: center; font-size: 12.5px; padding: 6px 0; border-radius: 8px; color: var(--secondary); }
+  .seg span.on { background: var(--raised); color: var(--text); font-weight: 600; box-shadow: 0 1px 0 rgba(255,255,255,.05) inset; }
+  .pager { display: flex; justify-content: center; gap: 6px; padding: 6px 0 10px; }
+  .pager i { width: 6px; height: 6px; border-radius: 50%; background: #2b3a55; }
+  .pager i.on { background: var(--text); }
+  .dbody { flex: 1; padding: 0 14px; overflow: hidden; }
+  .hero { height: 168px; border-radius: 16px; background: #0a1224; border: 1px solid var(--border); overflow: hidden; position: relative; }
+  .hero .live { position: absolute; left: 10px; top: 10px; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px;
+    background: rgba(0,0,0,.55); color: var(--text); }
+  .bigpct { display: flex; align-items: baseline; justify-content: space-between; margin-top: 12px; }
+  .bigpct .p { font-size: 40px; font-weight: 700; letter-spacing: -0.03em; }
+  .bigpct .job { font-size: 13px; color: var(--secondary); text-align: right; max-width: 60%; }
+  .facts { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; margin-top: 10px; }
+  .fact { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 8px 10px; }
+  .fact .k { font-size: 11px; color: var(--secondary); }
+  .fact .v { font-size: 15px; font-weight: 600; margin-top: 1px; }
+  .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
+  .btn { height: 42px; border-radius: 12px; display: grid; place-items: center; font-weight: 600; font-size: 15px;
+    background: var(--raised); border: 1px solid var(--border); color: var(--text); }
+  .btn.primary { background: var(--btn); border-color: transparent; color: #fff; }
+  .btn.danger { color: var(--error); }
+  .btn.ghost { background: transparent; }
+  .btn[aria-disabled="true"] { color: var(--tertiary); }
+  .temps { display: flex; justify-content: space-between; margin-top: 12px; font-size: 13px; color: var(--secondary);
+    padding: 10px 12px; background: var(--card); border: 1px solid var(--border); border-radius: 12px; }
+  .temps b { color: var(--text); font-weight: 600; }
+
+  .block { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 10px 12px; margin-bottom: 10px; }
+  .block h5 { margin: 0 0 8px; font-size: 13px; font-weight: 600; color: var(--secondary); display: flex; justify-content: space-between; }
+  .block h5 span { font-weight: 500; color: var(--tertiary); }
+  .stepper { display: flex; align-items: center; justify-content: space-between; padding: 5px 0; }
+  .stepper .lbl { font-size: 14px; }
+  .stepper .lbl small { display: block; font-size: 11.5px; color: var(--secondary); }
+  .stepper .ctl { display: flex; align-items: center; gap: 8px; }
+  .stepper .ctl i { width: 30px; height: 30px; border-radius: 9px; background: var(--raised); border: 1px solid var(--border);
+    display: grid; place-items: center; font-style: normal; font-size: 17px; color: var(--text); }
+  .stepper .ctl b { min-width: 52px; text-align: center; font-size: 15px; }
+  .jog { display: grid; grid-template-columns: 112px 1fr; gap: 12px; align-items: center; }
+  .pad { width: 112px; height: 112px; border-radius: 50%; background: var(--raised); border: 1px solid var(--border); position: relative; }
+  .pad span { position: absolute; font-size: 11px; color: var(--secondary); font-weight: 600; }
+  .pad .home { position: absolute; inset: 38px; border-radius: 50%; background: var(--card); border: 1px solid var(--border);
+    display: grid; place-items: center; font-size: 10px; color: var(--text); }
+  .zcol { display: grid; gap: 6px; }
+  .note { font-size: 11.5px; color: #fbbf24; background: rgba(217,119,6,.12); border-radius: 8px; padding: 5px 8px; margin-top: 8px; }
+  .steps { display: flex; gap: 4px; }
+  .steps span { font-size: 11.5px; padding: 3px 8px; border-radius: 7px; background: var(--raised); color: var(--secondary); border: 1px solid var(--border); }
+  .steps span.on { color: var(--text); border-color: #2f4b74; }
+  .estop { height: 44px; border-radius: 12px; background: rgba(248,113,113,.12); border: 1px solid rgba(248,113,113,.45);
+    color: var(--error); display: grid; place-items: center; font-weight: 700; letter-spacing: .02em; }
+  .loaded { display: grid; grid-template-columns: 64px 1fr; gap: 12px; align-items: center; }
+  .loaded .reel { width: 64px; height: 64px; }
+  .loaded .reel::after { inset: 20px; }
+  .meter { height: 6px; border-radius: 3px; background: #1c2840; margin-top: 6px; overflow: hidden; }
+  .meter i { display: block; height: 100%; background: var(--assigned); }
+  .warn { font-size: 12px; color: #fbbf24; margin-top: 8px; }
+
+  /* ---------- iPad ---------- */
+  .ipad { width: 1024px; height: 700px; border-radius: 36px; background: var(--bg); border: 1px solid #2b3a55;
+    box-shadow: 0 0 0 10px #0d1322, 0 30px 60px -20px rgba(0,0,0,.6); overflow: hidden; display: grid; grid-template-columns: 236px minmax(0,1fr); }
+  .side { background: #0a0f1d; border-right: 1px solid var(--border); padding: 28px 12px; }
+  .side h6 { margin: 0 10px 14px; font-size: 20px; letter-spacing: -0.01em; }
+  .side .it { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 10px; font-size: 15px; color: var(--secondary); }
+  .side .it svg { width: 20px; height: 20px; }
+  .side .it.on { background: rgba(16,185,129,.14); color: var(--text); }
+  .side .it.on svg { color: var(--accent); }
+  .side .it .c { margin-left: auto; font-size: 12px; color: var(--tertiary); }
+  .side .foot { margin-top: 380px; }
+  .imain { padding: 24px 24px; position: relative; min-width: 0; }
+  .imain .top { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 14px; }
+  .imain .top .chips { flex-wrap: nowrap; overflow: hidden; min-width: 0; }
+  .imain .top h3 { margin: 0; font-size: 30px; letter-spacing: -0.02em; }
+  .grid { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 10px; }
+  .grid .pcard > * { min-width: 0; }
+  .grid .pcard { margin: 0; }
+  .grid .pc-top { flex-wrap: wrap; row-gap: 4px; }
+  .imain .scan-fab { bottom: 22px; right: 22px; }
+
+  /* ---------- Removed vs kept ---------- */
+  .ledger { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; max-width: 1100px; }
+  .ledger .col { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 18px 20px; }
+  .ledger h3 { margin: 0 0 12px; font-size: 17px; }
+  .ledger ul { margin: 0; padding: 0; list-style: none; }
+  .ledger li { padding: 8px 0; border-top: 1px solid var(--border); font-size: 14px; display: flex; gap: 10px; }
+  .ledger li:first-child { border-top: 0; }
+  .ledger li .why { color: var(--secondary); font-size: 13px; margin-left: auto; text-align: right; max-width: 55%; }
+  .ledger .cut .mark { color: var(--error); font-weight: 700; }
+  .ledger .keep .mark { color: var(--accent); font-weight: 700; }
+  .ledger s { color: var(--secondary); text-decoration-color: rgba(248,113,113,.7); }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <!-- Tab and toolbar glyphs -->
+    <symbol id="i-farm" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="3" y="3" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="2"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="2"/></g></symbol>
+    <symbol id="i-queue" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M8 6h12M8 12h12M8 18h12"/><circle cx="4" cy="6" r="1.2" fill="currentColor"/><circle cx="4" cy="12" r="1.2" fill="currentColor"/><circle cx="4" cy="18" r="1.2" fill="currentColor"/></g></symbol>
+    <symbol id="i-fil" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3"/><path d="M12 3.5v5M12 15.5v5"/></g></symbol>
+    <symbol id="i-scan" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16M7 12h10"/></g></symbol>
+    <symbol id="i-grip" viewBox="0 0 20 20"><g fill="currentColor"><circle cx="7" cy="5" r="1.4"/><circle cx="13" cy="5" r="1.4"/><circle cx="7" cy="10" r="1.4"/><circle cx="13" cy="10" r="1.4"/><circle cx="7" cy="15" r="1.4"/><circle cx="13" cy="15" r="1.4"/></g></symbol>
+    <!-- Print thumbnails -->
+    <symbol id="th-benchy" viewBox="0 0 60 60"><rect width="60" height="60" fill="#0a1224"/><path d="M10 40h40l-5 8H16z" fill="#ef6b4a"/><path d="M18 40V28h18v12" fill="#f08a6d"/><rect x="22" y="20" width="10" height="8" fill="#ef6b4a"/><rect x="24" y="31" width="5" height="5" fill="#0a1224"/><rect x="31" y="31" width="4" height="5" fill="#0a1224"/></symbol>
+    <symbol id="th-gear" viewBox="0 0 60 60"><rect width="60" height="60" fill="#0a1224"/><circle cx="30" cy="30" r="15" fill="none" stroke="#60a5fa" stroke-width="7" stroke-dasharray="5 3"/><circle cx="30" cy="30" r="11" fill="#3b82f6"/><circle cx="30" cy="30" r="4" fill="#0a1224"/></symbol>
+    <symbol id="th-vase" viewBox="0 0 60 60"><rect width="60" height="60" fill="#0a1224"/><path d="M22 12h16c-3 6-2 10 3 16s3 18-5 20H24c-8-2-10-14-5-20s6-10 3-16z" fill="#a78bfa"/><path d="M24 20h12M22 30h16M23 40h14" stroke="#7c5bd6" stroke-width="1.5"/></symbol>
+    <symbol id="th-bracket" viewBox="0 0 60 60"><rect width="60" height="60" fill="#0a1224"/><path d="M14 16h10v20h22v10H14z" fill="#e5e7eb"/><circle cx="19" cy="22" r="2.2" fill="#0a1224"/><circle cx="40" cy="41" r="2.2" fill="#0a1224"/></symbol>
+    <symbol id="th-clip" viewBox="0 0 60 60"><rect width="60" height="60" fill="#0a1224"/><path d="M16 38a14 14 0 1 1 28 0" fill="none" stroke="#34d399" stroke-width="7" stroke-linecap="round"/></symbol>
+    <symbol id="th-idle" viewBox="0 0 60 60"><rect width="60" height="60" fill="#0a1224"/><g fill="none" stroke="#3a4a66" stroke-width="2" stroke-linejoin="round"><rect x="15" y="14" width="30" height="32" rx="3"/><path d="M15 22h30M24 22v8h12v-8M20 40h20"/></g></symbol>
+  </defs>
+</svg>
+
+<main>
+<header class="doc">
+  <h1>Distill: Farm · Queue · Filament</h1>
+  <p>Design reference for epic <a href="https://github.com/OlyForge3D/PrintFarmer/issues/3236">#3236</a>. On the farm floor, the phone shows the farm, runs the queue, handles filament and scans tags. Analytics, upkeep and reporting stay on the web.</p>
+  <p>All colours are the dark-mode <code>pf*</code> tokens from <code>Theme/ThemeColors.swift</code>. Light mode uses the same layout with the light tokens.</p>
+</header>
+
+<!-- ============ TABS ============ -->
+<section class="doc">
+  <h2>The three tabs</h2>
+  <p class="lede">The app has one shell with no Floor/Oversight split. Scan floats above every tab. Settings, Account and Servers sit behind the avatar. Printers that need attention show a badge on their own card, so the separate Attention and Tasks hubs are no longer needed.</p>
+  <div class="row">
+
+    <!-- FARM -->
+    <figure>
+      <div class="phone">
+        <div class="status-bar"><span class="num">9:41</span><i class="island"></i><span>􀙇 100%</span></div>
+        <div class="navbar"><h3>Farm</h3><div class="avatar">JP</div></div>
+        <div class="chips"><span class="chip on">All 12</span><span class="chip">Printing 5</span><span class="chip">Needs attention<span class="n num">2</span></span><span class="chip">Idle</span></div>
+        <div class="content">
+          <div class="pcard">
+            <div class="thumb"><svg><use href="#th-benchy"/></svg></div>
+            <div>
+              <div class="pc-top"><span class="pc-name">Prusa MK4 · 01</span><span class="pill printing">Printing</span></div>
+              <div class="pc-job">benchy_0.2mm_PLA.gcode</div>
+              <div class="bar"><i style="width:64%"></i></div>
+              <div class="pc-meta num"><span><b>64%</b> · 38m left</span><span>Done 10:19</span></div>
+              <div class="pc-foot num"><span class="dot" style="background:#ef6b4a"></span><span><span class="t-hot">215°</span> / 60°</span></div>
+            </div>
+          </div>
+          <div class="pcard">
+            <div class="thumb"><svg><use href="#th-gear"/></svg></div>
+            <div>
+              <div class="pc-top"><span class="pc-name">Voron 2.4</span><span class="pill error">Failure suspected</span></div>
+              <div class="pc-job">gear_set_v3.gcode</div>
+              <div class="bar"><i style="width:22%;background:var(--error)"></i></div>
+              <div class="pc-meta num"><span><b>22%</b> · 2h 41m left</span><span>Done 12:22</span></div>
+              <div class="pc-foot num"><span class="dot" style="background:#3b82f6"></span><span><span class="t-hot">250°</span> / 100°</span><span class="attn red">Check print</span></div>
+            </div>
+          </div>
+          <div class="pcard">
+            <div class="thumb"><svg><use href="#th-idle"/></svg></div>
+            <div>
+              <div class="pc-top"><span class="pc-name">Bambu X1C</span><span class="pill ready">Bed clear?</span></div>
+              <div class="pc-job">Finished clip_holder · 14m ago</div>
+              <div class="pc-foot num" style="margin-top:9px"><span class="dot" style="background:#34d399"></span><span>32° / 41°</span><span class="attn">Clear bed</span></div>
+            </div>
+          </div>
+          <div class="pcard">
+            <div class="thumb"><svg><use href="#th-vase"/></svg></div>
+            <div>
+              <div class="pc-top"><span class="pc-name">Ender 3 S1</span><span class="pill paused">Paused</span></div>
+              <div class="pc-job">spiral_vase.gcode</div>
+              <div class="bar paused"><i style="width:81%"></i></div>
+              <div class="pc-meta num"><span><b>81%</b> · paused</span><span>—</span></div>
+              <div class="pc-foot num"><span class="dot" style="background:#a78bfa"></span><span>170° / 60°</span></div>
+            </div>
+          </div>
+          <div class="pcard">
+            <div class="thumb"><svg><use href="#th-idle"/></svg></div>
+            <div>
+              <div class="pc-top"><span class="pc-name">Prusa MK4 · 02</span><span class="pill idle">Idle</span></div>
+              <div class="pc-job">Ready for the next job</div>
+              <div class="pc-foot num" style="margin-top:9px"><span class="dot" style="background:#e5e7eb"></span><span>24° / 23°</span></div>
+            </div>
+          </div>
+          <div class="scan-fab"><svg><use href="#i-scan"/></svg>Scan</div>
+        </div>
+        <nav class="tabbar"><span class="tab on"><svg><use href="#i-farm"/></svg>Farm</span><span class="tab"><svg><use href="#i-queue"/></svg>Queue</span><span class="tab"><svg><use href="#i-fil"/></svg>Filament</span></nav>
+      </div>
+      <figcaption><strong>Farm.</strong> Fleet merges into this one list. Each card shows the thumbnail, the name and a state pill, the progress with time left and done-at time, and a line with the temperatures and the filament colour. An Obico failure appears in the state pill. The location line, coverage badge and homed-axis badges are gone.</figcaption>
+    </figure>
+
+    <!-- QUEUE -->
+    <figure>
+      <div class="phone">
+        <div class="status-bar"><span class="num">9:41</span><i class="island"></i><span>􀙇 100%</span></div>
+        <div class="navbar"><h3>Queue</h3><div class="avatar">JP</div></div>
+        <div class="content">
+          <div class="group-h"><span style="color:var(--secondary);font-weight:600">Printing</span><span class="num">3</span></div>
+          <div class="list">
+            <div class="qrow"><div class="mini"><svg viewBox="0 0 60 60"><use href="#th-benchy"/></svg></div><div><div class="t">benchy_0.2mm_PLA</div><div class="s num">MK4 · 01 · 64% · 38m left</div></div><span class="badge-n num">10:19</span></div>
+            <div class="qrow"><div class="mini"><svg viewBox="0 0 60 60"><use href="#th-gear"/></svg></div><div><div class="t">gear_set_v3</div><div class="s num">Voron 2.4 · 22%</div></div><span class="badge-n num">12:22</span></div>
+          </div>
+          <div class="group-h"><span style="color:var(--secondary);font-weight:600">Queued</span><span>Drag to reorder</span></div>
+          <div class="list" style="overflow:visible">
+            <div class="qrow"><div class="mini"><svg viewBox="0 0 60 60"><use href="#th-clip"/></svg></div><div><div class="t">clip_holder ×4</div><div class="s">Any PLA printer</div></div><svg class="grip"><use href="#i-grip"/></svg></div>
+            <div class="qrow lift"><div class="mini"><svg viewBox="0 0 60 60"><use href="#th-bracket"/></svg></div><div><div class="t">shelf_bracket ×6</div><div class="s"><span class="prio">High</span> · PETG · MK4</div></div><svg class="grip" style="color:var(--text)"><use href="#i-grip"/></svg></div>
+            <div class="qrow gap"></div>
+            <div class="qrow"><div class="mini"><svg viewBox="0 0 60 60"><use href="#th-vase"/></svg></div><div><div class="t">spiral_vase</div><div class="s">Ender 3 S1</div></div><svg class="grip"><use href="#i-grip"/></svg></div>
+            <div class="qrow"><div class="mini"><svg viewBox="0 0 60 60"><use href="#th-gear"/></svg></div><div><div class="t">gear_set_v4</div><div class="s">Voron 2.4</div></div><svg class="grip"><use href="#i-grip"/></svg></div>
+          </div>
+          <div class="group-h"><span style="color:var(--secondary);font-weight:600">Recent failures</span><span class="num">1</span></div>
+          <div class="list">
+            <div class="qrow"><div class="mini"><svg viewBox="0 0 60 60"><use href="#th-idle"/></svg></div><div><div class="t">cable_chain</div><div class="s" style="color:var(--error)">Failed at 12% · Retry</div></div><span class="badge-n num">08:02</span></div>
+          </div>
+          <div class="scan-fab"><svg><use href="#i-scan"/></svg>Scan</div>
+        </div>
+        <nav class="tabbar"><span class="tab"><svg><use href="#i-farm"/></svg>Farm</span><span class="tab on"><svg><use href="#i-queue"/></svg>Queue</span><span class="tab"><svg><use href="#i-fil"/></svg>Filament</span></nav>
+      </div>
+      <figcaption><strong>Queue.</strong> The list is grouped into Printing, Queued and Recent failures. Queued jobs can be dragged into a new order (shown mid-lift). The new order is saved through <code>PUT /api/job-queue/jobs/{id}/position</code> (#3228). If the save fails, the list returns to its previous order. Only users with <code>Queue.Write</code> see the drag handles.</figcaption>
+    </figure>
+
+    <!-- FILAMENT -->
+    <figure>
+      <div class="phone">
+        <div class="status-bar"><span class="num">9:41</span><i class="island"></i><span>􀙇 100%</span></div>
+        <div class="navbar"><h3>Filament</h3><div class="avatar">JP</div></div>
+        <div class="chips"><span class="chip on">All 24</span><span class="chip">Loaded 9</span><span class="chip">Low<span class="n num">3</span></span><span class="chip">PLA</span><span class="chip">PETG</span></div>
+        <div class="content">
+          <div class="addbtn">＋ Add spool</div>
+          <div class="list">
+            <div class="spool"><span class="reel" style="background:#ef6b4a"></span><div><div class="t" style="font-size:14px;font-weight:500">Prusament PLA · Lipstick Red</div><div class="on-printer">On Prusa MK4 · 01</div></div><div class="gram num">612 g<small>of 1000</small></div></div>
+            <div class="spool"><span class="reel" style="background:#3b82f6"></span><div><div class="t" style="font-size:14px;font-weight:500">Polymaker ABS · Blue</div><div class="on-printer">On Voron 2.4</div></div><div class="gram num low">84 g<small>Low</small></div></div>
+            <div class="spool"><span class="reel" style="background:#34d399"></span><div><div class="t" style="font-size:14px;font-weight:500">Bambu PLA Basic · Mint</div><div class="on-printer">On Bambu X1C</div></div><div class="gram num">905 g<small>of 1000</small></div></div>
+            <div class="spool"><span class="reel" style="background:#a78bfa"></span><div><div class="t" style="font-size:14px;font-weight:500">eSun Silk PLA · Purple</div><div class="on-printer">On Ender 3 S1</div></div><div class="gram num">340 g<small>of 1000</small></div></div>
+            <div class="spool"><span class="reel" style="background:#e5e7eb"></span><div><div class="t" style="font-size:14px;font-weight:500">Prusament PETG · Signal White</div><div class="s" style="font-size:11.5px;color:var(--secondary)">Shelf B · unassigned</div></div><div class="gram num">1000 g<small>New</small></div></div>
+            <div class="spool"><span class="reel" style="background:#1f2937"></span><div><div class="t" style="font-size:14px;font-weight:500">Overture PETG · Black</div><div class="s" style="font-size:11.5px;color:var(--secondary)">Shelf A · unassigned</div></div><div class="gram num low">120 g<small>Low</small></div></div>
+          </div>
+          <div class="scan-fab"><svg><use href="#i-scan"/></svg>Scan</div>
+        </div>
+        <nav class="tabbar"><span class="tab"><svg><use href="#i-farm"/></svg>Farm</span><span class="tab"><svg><use href="#i-queue"/></svg>Queue</span><span class="tab on"><svg><use href="#i-fil"/></svg>Filament</span></nav>
+      </div>
+      <figcaption><strong>Filament.</strong> The spool list keeps add, assign and unassign. Scan reads spool barcodes and NFC tags. The same Scan button on the Farm tab opens a printer. Scanning a spool and then a printer assigns that spool to that printer.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- ============ DETAIL ============ -->
+<section class="doc">
+  <h2>Printer detail: four swipeable pages</h2>
+  <p class="lede">The detail view has four pages: Status, Control, Filament and Queue. You can swipe between them or use the segmented header to jump to one. Odometer, history, the Mainsail link, auto-dispatch and setup move to the web, reached through “Open in web ↗”. The homed-axis X/Y/Z badges are removed. A note that the printer isn't homed appears only on the jog pad, where it matters.</p>
+  <div class="row">
+
+    <!-- STATUS -->
+    <figure>
+      <div class="phone">
+        <div class="status-bar"><span class="num">9:41</span><i class="island"></i><span>􀙇 100%</span></div>
+        <div class="dnav"><span class="back">‹ Farm</span><span class="web">Open in web ↗</span></div>
+        <div class="dtitle"><h4>Prusa MK4 · 01</h4><span class="pill printing">Printing</span></div>
+        <div class="seg"><span class="on">Status</span><span>Control</span><span>Filament</span><span>Queue</span></div>
+        <div class="pager"><i class="on"></i><i></i><i></i><i></i></div>
+        <div class="dbody">
+          <div class="hero"><svg viewBox="0 0 60 60" preserveAspectRatio="xMidYMid slice" style="width:100%;height:100%"><use href="#th-benchy"/></svg><span class="live">● Camera</span></div>
+          <div class="bigpct"><span class="p num">64%</span><span class="job">benchy_0.2mm_PLA.gcode</span></div>
+          <div class="bar" style="height:6px;margin-top:4px"><i style="width:64%"></i></div>
+          <div class="facts num">
+            <div class="fact"><div class="k">Left</div><div class="v">38m</div></div>
+            <div class="fact"><div class="k">Done at</div><div class="v">10:19</div></div>
+            <div class="fact"><div class="k">Layer</div><div class="v">142/221</div></div>
+          </div>
+          <div class="actions"><span class="btn">Pause</span><span class="btn danger">Cancel</span></div>
+          <div class="temps num"><span>Nozzle <b>215°</b> / 215°</span><span>Bed <b>60°</b> / 60°</span></div>
+        </div>
+      </div>
+      <figcaption><strong>Status.</strong> At a glance you see the camera or job image, the progress, the time left and done-at time, Pause and Cancel, and read-only temperatures. Nothing on this page changes the printer's physical state, apart from Pause and Cancel.</figcaption>
+    </figure>
+
+    <!-- CONTROL -->
+    <figure>
+      <div class="phone">
+        <div class="status-bar"><span class="num">9:41</span><i class="island"></i><span>􀙇 100%</span></div>
+        <div class="dnav"><span class="back">‹ Farm</span><span class="web">Open in web ↗</span></div>
+        <div class="dtitle"><h4>Prusa MK4 · 02</h4><span class="pill idle">Idle</span></div>
+        <div class="seg"><span>Status</span><span class="on">Control</span><span>Filament</span><span>Queue</span></div>
+        <div class="pager"><i></i><i class="on"></i><i></i><i></i></div>
+        <div class="dbody">
+          <div class="block">
+            <h5>Heat <span>PLA · PETG · Off</span></h5>
+            <div class="stepper"><span class="lbl">Nozzle<small class="num">now 24°</small></span><span class="ctl num"><i>−</i><b>215°</b><i>+</i></span></div>
+            <div class="stepper"><span class="lbl">Bed<small class="num">now 23°</small></span><span class="ctl num"><i>−</i><b>60°</b><i>+</i></span></div>
+          </div>
+          <div class="block">
+            <h5>Move <span class="num">X 0.0 · Y 0.0 · Z 5.0</span></h5>
+            <div class="jog">
+              <div class="pad"><span style="left:50px;top:6px">Y+</span><span style="left:50px;bottom:6px">Y−</span><span style="left:8px;top:48px">X−</span><span style="right:8px;top:48px">X+</span><span class="home">Home</span></div>
+              <div class="zcol"><span class="btn" style="height:36px">Z ↑</span><span class="btn" style="height:36px">Z ↓</span><div class="steps num"><span>0.1</span><span class="on">1</span><span>10</span></div></div>
+            </div>
+            <div class="note">Not homed. Home all axes before moving.</div>
+          </div>
+          <div class="block" style="padding-bottom:8px">
+            <div class="stepper"><span class="lbl">Part fan</span><span class="ctl num"><i>−</i><b>0%</b><i>+</i></span></div>
+            <div class="stepper"><span class="lbl">Z-offset</span><span class="ctl num"><i>−</i><b>−0.02</b><i>+</i></span></div>
+          </div>
+          <div class="estop">Emergency stop</div>
+        </div>
+      </div>
+      <figcaption><strong>Control</strong> (renamed from “Controls”). It has heat with presets, a jog pad with Home and a compact position readout, the fan, Z-offset, and the emergency stop. The not-homed note sits on the jog pad, because that is the only place homing matters.</figcaption>
+    </figure>
+
+    <!-- FILAMENT -->
+    <figure>
+      <div class="phone">
+        <div class="status-bar"><span class="num">9:41</span><i class="island"></i><span>􀙇 100%</span></div>
+        <div class="dnav"><span class="back">‹ Farm</span><span class="web">Open in web ↗</span></div>
+        <div class="dtitle"><h4>Voron 2.4</h4><span class="pill printing">Printing</span></div>
+        <div class="seg"><span>Status</span><span>Control</span><span class="on">Filament</span><span>Queue</span></div>
+        <div class="pager"><i></i><i></i><i class="on"></i><i></i></div>
+        <div class="dbody">
+          <div class="block">
+            <h5>Loaded</h5>
+            <div class="loaded">
+              <span class="reel" style="background:#3b82f6"></span>
+              <div>
+                <div style="font-weight:600">Polymaker ABS · Blue</div>
+                <div class="s num" style="font-size:12px;color:var(--secondary)">84 g of 1000 g · 1.75 mm</div>
+                <div class="meter"><i style="width:8.4%"></i></div>
+              </div>
+            </div>
+            <div class="warn">About 84 g left. This job needs about 140 g.</div>
+            <div class="actions"><span class="btn">Swap spool</span><span class="btn"><span>Scan spool</span></span></div>
+          </div>
+          <div class="block">
+            <h5>Extruder <span>Not available while printing</span></h5>
+            <div class="actions" style="margin-top:0"><span class="btn" aria-disabled="true">Load</span><span class="btn" aria-disabled="true">Unload</span></div>
+          </div>
+          <div class="actions" style="grid-template-columns:1fr"><span class="btn ghost">Unassign spool</span></div>
+        </div>
+      </div>
+      <figcaption><strong>Filament.</strong> It shows the loaded spool and how much is left, compared with what the job needs. You can swap or scan a spool. Load and Unload are disabled while the printer is printing, and the page says why.</figcaption>
+    </figure>
+
+    <!-- QUEUE -->
+    <figure>
+      <div class="phone">
+        <div class="status-bar"><span class="num">9:41</span><i class="island"></i><span>􀙇 100%</span></div>
+        <div class="dnav"><span class="back">‹ Farm</span><span class="web">Open in web ↗</span></div>
+        <div class="dtitle"><h4>Prusa MK4 · 02</h4><span class="pill idle">Idle</span></div>
+        <div class="seg"><span>Status</span><span>Control</span><span>Filament</span><span class="on">Queue</span></div>
+        <div class="pager"><i></i><i></i><i></i><i class="on"></i></div>
+        <div class="dbody">
+          <div class="block">
+            <h5>Up next</h5>
+            <div class="qrow" style="padding:0;border:0;background:none"><div class="mini"><svg viewBox="0 0 60 60"><use href="#th-bracket"/></svg></div><div><div class="t">shelf_bracket ×6</div><div class="s num">PETG · ~3h 10m</div></div><span class="prio">High</span></div>
+            <div class="actions" style="grid-template-columns:1fr"><span class="btn primary">Start next job</span></div>
+          </div>
+          <div class="group-h"><span style="color:var(--secondary);font-weight:600">Then</span><span class="num">2</span></div>
+          <div class="list">
+            <div class="qrow"><div class="mini"><svg viewBox="0 0 60 60"><use href="#th-clip"/></svg></div><div><div class="t">clip_holder ×4</div><div class="s">Any PLA printer</div></div><span class="badge-n num">~45m</span></div>
+            <div class="qrow"><div class="mini"><svg viewBox="0 0 60 60"><use href="#th-vase"/></svg></div><div><div class="t">tool_tray</div><div class="s">PLA</div></div><span class="badge-n num">~2h</span></div>
+          </div>
+          <p style="font-size:12px;color:var(--tertiary);margin:4px 4px 0">Reorder in the Queue tab.</p>
+        </div>
+      </div>
+      <figcaption><strong>Queue.</strong> It shows what this printer will print next, with a single action to start it (<code>POST /api/job-queue/{id}/dispatch</code>). Reordering stays in one place, the Queue tab.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- ============ IPAD ============ -->
+<section class="doc">
+  <h2>iPad</h2>
+  <p class="lede">iPad uses a sidebar with the same three destinations. It has no Floor/Oversight groups and no shell picker. The cards use the same adaptive layout as on iPhone, arranged in a grid.</p>
+  <figure>
+    <div class="ipad">
+      <aside class="side">
+        <h6>PrintFarmer</h6>
+        <div class="it on"><svg><use href="#i-farm"/></svg>Farm<span class="c num">12</span></div>
+        <div class="it"><svg><use href="#i-queue"/></svg>Queue<span class="c num">7</span></div>
+        <div class="it"><svg><use href="#i-fil"/></svg>Filament<span class="c num">24</span></div>
+        <div class="foot"><div class="it"><span class="avatar" style="width:22px;height:22px;font-size:10px">JP</span>Settings &amp; servers</div></div>
+      </aside>
+      <div class="imain">
+        <div class="top"><h3>Farm</h3><div class="chips" style="padding:0"><span class="chip on">All 12</span><span class="chip">Printing 5</span><span class="chip">Needs attention<span class="n num">2</span></span><span class="chip">Idle</span></div></div>
+        <div class="grid">
+          <div class="pcard"><div class="thumb"><svg><use href="#th-benchy"/></svg></div><div><div class="pc-top"><span class="pc-name">Prusa MK4 · 01</span><span class="pill printing">Printing</span></div><div class="pc-job">benchy_0.2mm_PLA</div><div class="bar"><i style="width:64%"></i></div><div class="pc-meta num"><span><b>64%</b> · 38m</span><span>10:19</span></div><div class="pc-foot num"><span class="dot" style="background:#ef6b4a"></span><span><span class="t-hot">215°</span> / 60°</span></div></div></div>
+          <div class="pcard"><div class="thumb"><svg><use href="#th-gear"/></svg></div><div><div class="pc-top"><span class="pc-name">Voron 2.4</span><span class="pill error">Failure suspected</span></div><div class="pc-job">gear_set_v3</div><div class="bar"><i style="width:22%;background:var(--error)"></i></div><div class="pc-meta num"><span><b>22%</b> · 2h 41m</span><span>12:22</span></div><div class="pc-foot num"><span class="dot" style="background:#3b82f6"></span><span><span class="t-hot">250°</span> / 100°</span><span class="attn red">Check</span></div></div></div>
+          <div class="pcard"><div class="thumb"><svg><use href="#th-idle"/></svg></div><div><div class="pc-top"><span class="pc-name">Bambu X1C</span><span class="pill ready">Bed clear?</span></div><div class="pc-job">Finished · 14m ago</div><div class="pc-foot num" style="margin-top:9px"><span class="dot" style="background:#34d399"></span><span>32° / 41°</span><span class="attn">Clear bed</span></div></div></div>
+          <div class="pcard"><div class="thumb"><svg><use href="#th-vase"/></svg></div><div><div class="pc-top"><span class="pc-name">Ender 3 S1</span><span class="pill paused">Paused</span></div><div class="pc-job">spiral_vase</div><div class="bar paused"><i style="width:81%"></i></div><div class="pc-meta num"><span><b>81%</b> · paused</span><span>—</span></div><div class="pc-foot num"><span class="dot" style="background:#a78bfa"></span><span>170° / 60°</span></div></div></div>
+          <div class="pcard"><div class="thumb"><svg><use href="#th-clip"/></svg></div><div><div class="pc-top"><span class="pc-name">Prusa Mini</span><span class="pill printing">Printing</span></div><div class="pc-job">clip_holder ×4</div><div class="bar"><i style="width:47%"></i></div><div class="pc-meta num"><span><b>47%</b> · 22m</span><span>10:03</span></div><div class="pc-foot num"><span class="dot" style="background:#34d399"></span><span><span class="t-hot">210°</span> / 60°</span></div></div></div>
+          <div class="pcard"><div class="thumb"><svg><use href="#th-idle"/></svg></div><div><div class="pc-top"><span class="pc-name">Prusa MK4 · 02</span><span class="pill idle">Idle</span></div><div class="pc-job">Ready for the next job</div><div class="pc-foot num" style="margin-top:9px"><span class="dot" style="background:#e5e7eb"></span><span>24° / 23°</span></div></div></div>
+          <div class="pcard"><div class="thumb"><svg><use href="#th-bracket"/></svg></div><div><div class="pc-top"><span class="pc-name">Bambu P1S</span><span class="pill printing">Printing</span></div><div class="pc-job">shelf_bracket ×6</div><div class="bar"><i style="width:9%"></i></div><div class="pc-meta num"><span><b>9%</b> · 2h 52m</span><span>12:33</span></div><div class="pc-foot num"><span class="dot" style="background:#e5e7eb"></span><span><span class="t-hot">245°</span> / 80°</span></div></div></div>
+          <div class="pcard"><div class="thumb"><svg><use href="#th-idle"/></svg></div><div><div class="pc-top"><span class="pc-name">Sovol SV06</span><span class="pill offline">Offline</span></div><div class="pc-job">Last seen 2h ago</div></div></div>
+          <div class="pcard"><div class="thumb"><svg><use href="#th-idle"/></svg></div><div><div class="pc-top"><span class="pc-name">Ender 3 V3</span><span class="pill idle">Idle</span></div><div class="pc-job">Ready for the next job</div><div class="pc-foot num" style="margin-top:9px"><span class="dot" style="background:#1f2937"></span><span>22° / 22°</span></div></div></div>
+        </div>
+        <div class="scan-fab"><svg><use href="#i-scan"/></svg>Scan</div>
+      </div>
+    </div>
+    <figcaption style="max-width:none"><strong>iPad Farm.</strong> Same cards, three columns, with a sidebar of three items. Settings and Servers sit at the bottom of the sidebar.</figcaption>
+  </figure>
+</section>
+
+<!-- ============ LEDGER ============ -->
+<section class="doc">
+  <h2>What goes, what stays</h2>
+  <p class="lede">Removed code is deleted, not hidden behind flags. Deep links to removed destinations open Farm instead.</p>
+  <div class="ledger">
+    <div class="col cut">
+      <h3>Removed</h3>
+      <ul>
+        <li><span class="mark">−</span><s>Floor / Oversight split, shell picker, “Two modes” promo</s><span class="why">One shell</span></li>
+        <li><span class="mark">−</span><s>Fleet</s><span class="why">Duplicates Farm</span></li>
+        <li><span class="mark">−</span><s>Overview, Upkeep, Reports</s><span class="why">Analytics live on the web</span></li>
+        <li><span class="mark">−</span><s>Filament coverage, Predictive, Dispatch dashboard</s><span class="why">Web</span></li>
+        <li><span class="mark">−</span><s>Locations, Job history, Job timeline</s><span class="why">Web</span></li>
+        <li><span class="mark">−</span><s>Attention and Tasks tabs</s><span class="why">Badges on cards and a filter on Farm</span></li>
+        <li><span class="mark">−</span><s>Homed X/Y/Z badges on Overview</s><span class="why">Note on the jog pad only</span></li>
+        <li><span class="mark">−</span><s>Location line, coverage badge, Obico shield on cards</s><span class="why">Shown in the state pill</span></li>
+        <li><span class="mark">−</span><s>Odometer, history tail, Mainsail, auto-dispatch, setup on detail</s><span class="why">Open in web ↗</span></li>
+      </ul>
+    </div>
+    <div class="col keep">
+      <h3>Kept, or new</h3>
+      <ul>
+        <li><span class="mark">+</span>Farm: unified adaptive printer card<span class="why">#3232</span></li>
+        <li><span class="mark">+</span>Current-job thumbnail on cards<span class="why">#3230</span></li>
+        <li><span class="mark">+</span>Queue: grouped list with drag-to-reorder<span class="why">#3228 · #3234</span></li>
+        <li><span class="mark">+</span>Filament: spools, add, assign<span class="why">Kept</span></li>
+        <li><span class="mark">+</span>Floating Scan for barcodes and NFC tags (printers and spools)<span class="why">#3231</span></li>
+        <li><span class="mark">+</span>Detail: Status · Control · Filament · Queue<span class="why">#3233</span></li>
+        <li><span class="mark">+</span>Settings, account and servers behind the avatar<span class="why">#3231</span></li>
+        <li><span class="mark">+</span>Pending-ready local notifications<span class="why">Kept</span></li>
+      </ul>
+    </div>
+  </div>
+</section>
+</main>
+</body>
+</html>
