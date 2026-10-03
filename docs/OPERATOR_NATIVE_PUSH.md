@@ -211,8 +211,9 @@ first use and persisted server-side (see below), so every push this server sends
 restarts. It is present on every envelope, including resolved/dismissal pushes, and
 is never a fabricated or empty value: if the server cannot resolve its own identity,
 that device's send is skipped and logged rather than going out without an origin.
-The mobile app uses this value to bind a delayed notification tap to the correct
-locally-registered server after the user has switched servers.
+A custom native-push client can use this value to associate a delayed payload
+with the correct server registration after its user switches servers. The
+official v1 App Store client does not store or consume `originServerId`.
 
 ## 3. Double gate on `nativePushEnabled`
 
@@ -243,11 +244,13 @@ take effect on the next request without a restart.
 ```
 
 `serverId` is the same value emitted as `originServerId` on push payloads, so a
-successful registration response is sufficient for the mobile app to bind that
-registration to the correct locally-registered server entry without waiting for a
-push to arrive. It is stable across repeated registrations against the same
-server. `DELETE /api/notifications/device-tokens` (unregister) is unaffected and
-still returns `204 No Content`.
+successful registration response is sufficient for a custom native-push client
+to bind that registration to its corresponding server entry without waiting
+for a push to arrive. The official v1 App Store client does not call this
+endpoint or persist the returned identity. The value is stable across repeated
+registrations against the same server.
+`DELETE /api/notifications/device-tokens` (unregister) is unaffected and still
+returns `204 No Content`.
 
 `ServerIdentityService` generates this identity once and persists it in the
 existing generic `AppSettingsEntity` table (`Key="ServerIdentity"`) rather than a
