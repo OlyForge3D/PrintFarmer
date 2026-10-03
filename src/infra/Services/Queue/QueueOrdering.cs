@@ -6,9 +6,10 @@ namespace Farm.Infrastructure.Services.Queue;
 /// Shared ordering selectors for cross-scope and single-scope queue consumers.
 ///
 /// Semantics: higher <see cref="PrintJob.Priority"/> runs first
-/// (<c>Urgent(3) → High(2) → Normal(1) → Low(0)</c>). Cross-scope consumers use FIFO
-/// by queued timestamp because queue positions are only comparable within a scope.
-/// Single-scope consumers use queue position, then queued timestamp and job id.
+/// (<c>Urgent(3) → High(2) → Normal(1) → Low(0)</c>). General reporting and cross-scope
+/// dispatch-head comparisons use FIFO by queued timestamp. Queue positions are only
+/// comparable within a scope: queue-client lists group by scope before sorting its
+/// rows by priority, position, queued timestamp and job id.
 /// </summary>
 public static class QueueOrdering
 {
@@ -65,6 +66,24 @@ public static class QueueOrdering
 
         return jobs
             .OrderByDescending(j => j.Priority)
+            .ThenBy(j => j.QueuePosition)
+            .ThenBy(j => j.QueuedAt)
+            .ThenBy(j => j.Id);
+    }
+
+    /// <summary>
+    /// Flattens queue scope groups for display: unassigned first, then printer id.
+    /// Priority and position are compared only after the scope key, never across scopes.
+    /// This presentation order does not rank scopes for dispatch.
+    /// </summary>
+    public static IOrderedQueryable<PrintJob> OrderGroupedByScope(this IQueryable<PrintJob> jobs)
+    {
+        ArgumentNullException.ThrowIfNull(jobs);
+
+        return jobs
+            .OrderBy(j => j.AssignedPrinterId.HasValue ? 1 : 0)
+            .ThenBy(j => j.AssignedPrinterId)
+            .ThenByDescending(j => j.Priority)
             .ThenBy(j => j.QueuePosition)
             .ThenBy(j => j.QueuedAt)
             .ThenBy(j => j.Id);

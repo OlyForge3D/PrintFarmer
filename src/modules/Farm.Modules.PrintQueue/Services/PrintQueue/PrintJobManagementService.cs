@@ -238,7 +238,7 @@ public class PrintJobManagementService(
     /// <param name="filterMaterial">Optional filter by required material type.</param>
     /// <param name="deadlineStart">Optional inclusive lower bound for job deadlines.</param>
     /// <param name="deadlineEnd">Optional inclusive upper bound for job deadlines.</param>
-    /// <param name="sortBy">Sort mode (priority, deadline, deadline_desc).</param>
+    /// <param name="sortBy">Sort mode (priority groups the active queue by scope; deadline and deadline_desc are reporting views).</param>
     /// <param name="limit">Maximum number of jobs to return.</param>
     /// <param name="offset">Number of jobs to skip for pagination.</param>
     /// <param name="queuedFrom">Optional inclusive lower bound for when the job was queued.</param>
@@ -274,8 +274,14 @@ public class PrintJobManagementService(
             DateTime? effectiveQueuedFrom = isTerminalView ? queuedFrom : null;
             DateTime? effectiveQueuedTo = isTerminalView ? queuedTo : null;
 
+            // The queue client needs persisted scope-local order, unlike general job
+            // reporting and cross-scope dispatch head comparison, which stay priority/FIFO.
+            string effectiveSortBy = !isTerminalView &&
+                string.Equals(sortBy, "priority", StringComparison.OrdinalIgnoreCase)
+                ? "queue"
+                : sortBy;
             List<PrintJob> jobs = await _repository.GetFilteredJobsAsync(
-                status, filterModel, filterMaterial, deadlineStart, deadlineEnd, sortBy, limit, offset, effectiveQueuedFrom, effectiveQueuedTo, cancellationToken);
+                status, filterModel, filterMaterial, deadlineStart, deadlineEnd, effectiveSortBy, limit, offset, effectiveQueuedFrom, effectiveQueuedTo, cancellationToken);
 
             Dictionary<Guid, string?> dispatchVersions = [];
             Dictionary<Guid, QueueDispatchAttempt> latestAttempts = [];
@@ -1021,7 +1027,7 @@ public class PrintJobManagementService(
 
         if (beforeJobId == jobId || afterJobId == jobId)
         {
-            throw new ValidationException("A queued job cannot be moved relative to itself.");
+            throw new QueueSemanticConflictException("A queued job cannot be moved relative to itself.");
         }
 
         AppDbContext db = _appDbContext

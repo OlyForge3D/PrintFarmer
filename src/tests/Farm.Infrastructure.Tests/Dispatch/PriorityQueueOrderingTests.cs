@@ -83,7 +83,7 @@ public sealed class PriorityQueueOrderingTests
     }
 
     [Fact]
-    public async Task GetFilteredJobsAsync_UsesCrossScopeOrderWhileBatchDispatchUsesScopePositions()
+    public async Task GetFilteredJobsAsync_QueueSortMatchesDispatchWhileReportingKeepsFifo()
     {
         await using SqliteConnection connection = new("Data Source=:memory:");
         await connection.OpenAsync();
@@ -101,6 +101,9 @@ public sealed class PriorityQueueOrderingTests
         EfPrintJobManagementRepository repository = new(db);
         List<PrintJob> displayJobs = await repository.GetFilteredJobsAsync(
             filterStatus: PrintJobStatus.Queued);
+        List<PrintJob> queueJobs = await repository.GetFilteredJobsAsync(
+            filterStatus: PrintJobStatus.Queued,
+            sortBy: "queue");
         BatchDispatchResult dispatchResult = await CreateBatchDispatchService(db)
             .BatchDispatchAsync(CreateRequest(jobs), "operator");
 
@@ -109,6 +112,9 @@ public sealed class PriorityQueueOrderingTests
             displayJobs.Select(job => job.Id));
         Assert.Equal(
             [jobs[1].Id, jobs[2].Id, jobs[0].Id, jobs[3].Id],
+            dispatchResult.Results.Select(item => item.JobId));
+        Assert.Equal(
+            queueJobs.Select(job => job.Id),
             dispatchResult.Results.Select(item => item.JobId));
     }
 

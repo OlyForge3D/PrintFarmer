@@ -175,6 +175,7 @@ public class EfPrintJobManagementRepository(AppDbContext context, TimeProvider? 
 
         query = sortBy.ToLowerInvariant() switch
         {
+            "queue" => query.OrderGroupedByScope(),
             "deadline" => query
                 .OrderBy(pj => pj.DeadlineAtUtc.HasValue ? 0 : 1)
                 .ThenBy(pj => pj.DeadlineAtUtc)

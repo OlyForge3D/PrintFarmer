@@ -1,18 +1,28 @@
-﻿using Farm.Infrastructure;
+﻿using System.Security.Claims;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Queue;
+using Farm.Infrastructure.Services.AutoDispatch;
 using Farm.Infrastructure.Services.Cameras;
 using Farm.Infrastructure.Services.Cost;
 using Farm.Infrastructure.Services.FileManagement;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Notifications;
+using Farm.Infrastructure.Services.OperatorFeatures;
+using Farm.Infrastructure.Services.PartsInventory;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Infrastructure.Services.SignalR;
+using Farm.Infrastructure.Services.Spoolman;
 using Farm.Infrastructure.Services.StorageManagement;
+using Farm.Infrastructure.Telemetry;
+using Farm.Modules.PrintQueue.Controllers;
+using Farm.Modules.PrintQueue.Controllers.Requests;
 using Farm.Modules.PrintQueue.Services.PrintQueue;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -25,6 +35,203 @@ namespace Farm.Modules.PrintQueue.Tests.Services;
 
 public class PrintJobManagementServiceQueuePositionTests
 {
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task MoveQueuedJob_SelfNeighbor_Returns409WithoutChangingJobAsync(bool before)
+    {
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using AppDbContext db = await CreateContextAsync(connection);
+        PrintJob job = CreateJob(1, PrintJobPriority.Normal);
+        db.PrintJobs.Add(job);
+        await db.SaveChangesAsync();
+        string initialETag = ETag(job);
+        JobQueueController controller = CreateQueueController(CreateService(db));
+        controller.Request.Headers.IfMatch = $"\"{initialETag}\"";
+
+        var result = await controller.MoveQueuedJobAsync(
+            job.Id,
+            new MoveQueuedJobRequest
+            {
+                BeforeJobId = before ? job.Id : null,
+                BeforeJobETag = before ? initialETag : null,
+                AfterJobId = before ? null : job.Id,
+                AfterJobETag = before ? null : initialETag,
+            });
+
+        Assert.IsType<ConflictObjectResult>(result.Result);
+        db.ChangeTracker.Clear();
+        PrintJob persisted = await db.PrintJobs.SingleAsync();
+        Assert.Equal(1, persisted.QueuePosition);
+        Assert.Equal((int)PrintJobPriority.Normal, persisted.Priority);
+        Assert.Equal(initialETag, ETag(persisted));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task MoveQueuedJob_DifferentPrinterScopes_Returns409WithoutChangingEitherScopeAsync(bool before)
+    {
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using AppDbContext db = await CreateContextAsync(connection);
+        Guid printerA = await SeedPrinterAsync(db);
+        Guid printerB = await SeedPrinterAsync(db);
+        PrintJob moved = CreateJob(1, PrintJobPriority.Normal, printerA);
+        PrintJob sameScope = CreateJob(2, PrintJobPriority.Normal, printerA);
+        PrintJob neighbor = CreateJob(1, PrintJobPriority.High, printerB);
+        PrintJob otherScope = CreateJob(2, PrintJobPriority.High, printerB);
+        db.PrintJobs.AddRange(moved, sameScope, neighbor, otherScope);
+        await db.SaveChangesAsync();
+        var original = await db.PrintJobs.AsNoTracking().ToDictionaryAsync(
+            job => job.Id,
+            job => (job.QueuePosition, job.Priority, Version: ETag(job)));
+        JobQueueController controller = CreateQueueController(CreateService(db));
+        controller.Request.Headers.IfMatch = $"\"{ETag(moved)}\"";
+
+        var result = await controller.MoveQueuedJobAsync(
+            moved.Id,
+            new MoveQueuedJobRequest
+            {
+                BeforeJobId = before ? neighbor.Id : null,
+                BeforeJobETag = before ? ETag(neighbor) : null,
+                AfterJobId = before ? null : neighbor.Id,
+                AfterJobETag = before ? null : ETag(neighbor),
+            });
+
+        Assert.IsType<ConflictObjectResult>(result.Result);
+        db.ChangeTracker.Clear();
+        Assert.All(await db.PrintJobs.AsNoTracking().ToListAsync(), job =>
+            Assert.Equal(original[job.Id], (job.QueuePosition, job.Priority, ETag(job))));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task MoveQueuedJob_RefetchedQueueEndpoint_MatchesReadyHeadAndDispatchedJobAsync(bool assignedScope)
+    {
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using AppDbContext db = await CreateContextAsync(connection);
+        Guid printerId = await SeedPrinterAsync(db);
+        Guid otherPrinterId = await SeedPrinterAsync(db);
+        Printer printer = await db.Printers.SingleAsync(value => value.Id == printerId);
+        printer.AutoDispatchEnabled = true;
+        printer.IsAvailable = true;
+        printer.CurrentSpoolId = 42;
+        printer.DispatchState = new PrinterDispatchState
+        {
+            PrinterId = printerId,
+            AutoDispatchState = AutoDispatchState.PendingReady,
+        };
+        Guid? scopeId = assignedScope ? printerId : null;
+        PrintJob first = CreateJob(10, PrintJobPriority.Normal, scopeId);
+        PrintJob moved = CreateJob(20, PrintJobPriority.Normal, scopeId);
+        first.RequiredMaterialType = moved.RequiredMaterialType = "PLA";
+        first.EstimatedFilamentUsage = moved.EstimatedFilamentUsage = 10;
+        PrintJob unrelated = CreateJob(1, PrintJobPriority.Urgent, otherPrinterId);
+        PrintJob unrelatedTail = CreateJob(2, PrintJobPriority.Low, otherPrinterId);
+        db.PrintJobs.AddRange(first, moved, unrelated, unrelatedTail);
+        await db.SaveChangesAsync();
+        PrintJobManagementService service = CreateService(db);
+        JobQueueAnalyticsController analytics = new(
+            service,
+            Mock.Of<IJobCostCalculationService>(),
+            NullLogger<JobQueueAnalyticsController>.Instance)
+        {
+            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
+        };
+        var initial = Assert.IsType<List<Farm.Infrastructure.Dtos.PrintQueue.QueuedPrintJobWithFileMetaDto>>(
+            Assert.IsType<OkObjectResult>(await analytics.GetAllQueueAsync("Queued", null, null)).Value);
+        var movedDto = initial.Single(row => row.Job.Id == moved.Id.ToString()).Job;
+        var neighborDto = initial.Single(row => row.Job.Id == first.Id.ToString()).Job;
+        JobQueueController controller = CreateQueueController(service);
+        controller.Request.Headers.IfMatch = $"\"{movedDto.RowVersion}\"";
+
+        var moveResult = await controller.MoveQueuedJobAsync(
+            moved.Id,
+            new MoveQueuedJobRequest
+            {
+                BeforeJobId = first.Id,
+                BeforeJobETag = neighborDto.RowVersion,
+            });
+
+        Assert.IsType<OkObjectResult>(moveResult.Result);
+        db.ChangeTracker.Clear();
+        foreach (string? statusFilter in new[] { null, "Queued" })
+        {
+            var refreshed = Assert.IsType<List<Farm.Infrastructure.Dtos.PrintQueue.QueuedPrintJobWithFileMetaDto>>(
+                Assert.IsType<OkObjectResult>(await analytics.GetAllQueueAsync(statusFilter, null, null)).Value);
+            Assert.Equal(
+                [moved.Id.ToString(), first.Id.ToString()],
+                refreshed.Where(row => row.Job.AssignedPrinterId == scopeId?.ToString())
+                    .Select(row => row.Job.Id));
+            var scopes = refreshed.Select(row => row.Job.AssignedPrinterId).ToList();
+            int scopeGroups = 1 + scopes.Zip(scopes.Skip(1)).Count(pair => pair.First != pair.Second);
+            Assert.Equal(scopes.Distinct().Count(), scopeGroups);
+            if (!assignedScope)
+            {
+                Assert.Null(scopes[0]);
+            }
+            for (int offset = 0; offset < refreshed.Count; offset++)
+            {
+                var page = Assert.IsType<List<Farm.Infrastructure.Dtos.PrintQueue.QueuedPrintJobWithFileMetaDto>>(
+                    Assert.IsType<OkObjectResult>(await analytics.GetAllQueueAsync(
+                        statusFilter, null, null, limit: 1, offset: offset)).Value);
+                Assert.Equal(refreshed[offset].Job.Id, Assert.Single(page).Job.Id);
+            }
+        }
+
+        // The general reporting query still uses FIFO, not persisted scope position.
+        List<PrintJob> reporting = await new EfPrintJobManagementRepository(db).GetFilteredJobsAsync(
+            filterStatus: PrintJobStatus.Queued);
+        Assert.Equal(
+            [first.Id, moved.Id],
+            reporting.Where(job => job.AssignedPrinterId == scopeId).Select(job => job.Id));
+
+        Mock<IHubContext<PrinterHub>> hub = new();
+        hub.Setup(value => value.Clients.Group(It.IsAny<string>()))
+            .Returns(Mock.Of<IClientProxy>());
+        Mock<IDispatchScorer> scorer = new();
+        scorer.Setup(value => value.ScorePrintersForJobAsync(
+                It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new DispatchScore(
+                printerId, "Queue test printer", 100, new Dictionary<string, FactorScore>(), false, [])]);
+        Mock<ISpoolmanService> spoolman = new();
+        spoolman.Setup(value => value.GetSpoolByIdAsync(42, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SpoolmanSpoolDto(42, "PLA spool", "PLA", 1000, null, false));
+        Mock<IJobDispatchService> dispatch = new();
+        dispatch.Setup(value => value.DispatchReviewedJobAsync(
+                moved.Id,
+                printerId,
+                QueueActorIdentity.AutoDispatch,
+                It.IsAny<string>(),
+                It.IsAny<byte[]>(),
+                It.IsAny<FilamentOverrideAuthorization>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Farm.Infrastructure.Dtos.PrintQueue.QueuedPrintJobDto
+            {
+                Id = moved.Id.ToString(),
+                AssignedPrinterId = printerId.ToString(),
+                Status = nameof(PrintJobStatus.Printing),
+                DispatchResult = new Farm.Infrastructure.Dtos.PrintQueue.DispatchAttemptResultDto
+                {
+                    Outcome = DispatchAttemptOutcome.Accepted,
+                },
+            });
+        AutoDispatchService ready = new(
+            db, hub.Object, NullLogger<AutoDispatchService>.Instance,
+            spoolmanService: spoolman.Object, dispatchScorer: scorer.Object,
+            jobDispatchService: dispatch.Object);
+
+        Assert.Equal(moved.Id, (await ready.GetStatusAsync(printerId)).NextJobId);
+        AutoDispatchReadyResult result = await ready.MarkReadyAsync(printerId);
+        Assert.Equal(moved.Id, result.NextJob!.Id);
+        Assert.True(result.DispatchInitiated);
+        dispatch.VerifyAll();
+    }
+
     [Fact]
     public async Task MoveQueuedJob_BeforeNeighbor_ReordersPositionsAndAdoptsPriorityAsync()
     {
@@ -315,7 +522,7 @@ public class PrintJobManagementServiceQueuePositionTests
             new Manufacturer
             {
                 Id = manufacturerId,
-                Name = "Queue test manufacturer",
+                Name = $"Queue test manufacturer {manufacturerId:N}",
             },
             new PrinterModel
             {
@@ -371,7 +578,7 @@ public class PrintJobManagementServiceQueuePositionTests
         hub.SetupGet(value => value.Clients).Returns(clients.Object);
 
         return new PrintJobManagementService(
-            Mock.Of<IPrintJobManagementRepository>(),
+            new EfPrintJobManagementRepository(db),
             NullLogger<PrintJobManagementService>.Instance,
             Mock.Of<IPrintersService>(),
             Mock.Of<IStoragePathService>(),
@@ -385,5 +592,30 @@ public class PrintJobManagementServiceQueuePositionTests
             cameraSnapshotService: Mock.Of<ICameraSnapshotService>(),
             serviceScopeFactory: Mock.Of<IServiceScopeFactory>(),
             appDbContext: db);
+    }
+
+    private static JobQueueController CreateQueueController(IPrintJobManagementService service)
+    {
+        JobQueueController controller = new(
+            Mock.Of<IJobQueueService>(),
+            service,
+            Mock.Of<IPrintJobCompletionService>(),
+            Mock.Of<IJobDispatchService>(),
+            Mock.Of<IBatchDispatchService>(),
+            Mock.Of<IBedClearAcknowledgementService>(),
+            Mock.Of<IPrinterStatusCacheReader>(),
+            Mock.Of<IPrintFarmerTelemetryService>(),
+            Mock.Of<IPartHarvestService>(),
+            Mock.Of<IOperatorFeatureGate>(),
+            NullLogger<JobQueueController>.Instance);
+        controller.ControllerContext = new ControllerContext
+        {
+            HttpContext = new DefaultHttpContext
+            {
+                User = new ClaimsPrincipal(new ClaimsIdentity(
+                    [new Claim(ClaimTypes.NameIdentifier, Guid.NewGuid().ToString())], "TestAuth")),
+            },
+        };
+        return controller;
     }
 }

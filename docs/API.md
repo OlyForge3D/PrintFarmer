@@ -955,7 +955,33 @@ The moved job adopts the neighbor's priority. Reordering is limited to queued
 jobs in the same assigned-printer queue (or the unassigned queue), preserves
 assigned jobs' positions, and is persisted transactionally. Queue positions are
 only compared within a queue scope; cross-scope ordering remains priority then
-FIFO by queued time and job ID.
+FIFO by queued time and job ID **when comparing eligible dispatch heads**, not
+when flattening queue scope groups for display.
+
+### Refetch the authoritative queue order
+
+`GET /api/job-queue-analytics?sortBy=priority` (the default), with no status filter
+or `filterStatus=Queued`, returns a **flat array of scope groups**: unassigned
+(`job.assignedPrinterId = null`, "Any printer") first, then assigned-printer
+groups by printer ID. Inside each group the queued rows follow
+`Priority desc → QueuePosition asc → QueuedAt asc → Id asc`.
+Scope grouping and ordering happen **before** `offset`/`limit` pagination.
+A group can span pages; append pages in response order, using `X-Has-More`
+to continue even when authorization filtering yields a short page.
+
+Web and iOS queue clients must preserve the server order, group by
+`job.assignedPrinterId`, filter queued rows within those groups, and limit drag
+to a single group. Refetch this same endpoint after a successful move or a
+409/412. Do not sort by creation time or compare positions across scopes.
+`GET /api/job-queue-analytics/printer/{printerId}` remains the authoritative
+single-printer view: printing rows first, followed by queued rows in the same
+scope-local order.
+
+The general repository priority/FIFO order is retained for job reporting and
+cross-scope eligible-head comparison. Terminal-status and deadline-sorted
+analytics are reporting views, not reorderable queue order. The first eligible
+queued row of each scope, rather than the first group displayed, competes for
+dispatch using `Priority desc → QueuedAt asc → Id asc`.
 
 Responses: `200` with the moved job; `428` when `If-Match` is missing; `412`
 when either ETag is stale or a concurrent row-version update occurs (the body

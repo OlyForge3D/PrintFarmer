@@ -101,11 +101,25 @@ or demoting an old high-priority job.
 ### Queue ordering and drag-to-reorder
 
 `QueuePosition` is comparable only within one assigned-printer queue or the
-unassigned queue. Cross-scope lists retain `Priority desc → QueuedAt asc → Id
-asc`; single-scope lists and ready-head consumers use `Priority desc →
-QueuePosition asc → QueuedAt asc → Id asc`. Mixed-scope dispatch evaluates
+unassigned queue. General job reporting and cross-scope eligible-head comparison
+retain `Priority desc → QueuedAt asc → Id asc`; single-scope lists and
+ready-head consumers use `Priority desc → QueuePosition asc → QueuedAt asc →
+Id asc`. Mixed-scope dispatch evaluates
 each scope independently, skips ineligible jobs until it finds that scope's
 eligible head, then compares the two heads using the cross-scope ordering.
+
+The active queue client API (`GET /api/job-queue-analytics`, default
+`sortBy=priority`) is distinct from general reporting: it returns a flat array
+grouped by `job.assignedPrinterId`, unassigned first then printer ID, with queued
+rows in each group in scope-local order. The repository's internal `queue`
+sort applies the scope key before priority/position and before pagination;
+its general `priority` sort stays cross-scope FIFO. No cross-scope position
+comparison or client sorting is involved. Groups can span pages; clients
+append pages, preserve response order within groups, and restrict drag to one
+group. Printing and other active rows may also appear; clients filter queued
+rows without reordering them. Deadline and terminal-status views are reporting
+views, not drag order. The per-printer endpoint lists printing rows first and
+then queued rows in that same scope-local order.
 
 `PUT /api/job-queue/jobs/{id}/position` requires `Queue.Write`, the moved job's
 `If-Match` ETag, and exactly one neighbor ID plus its matching body ETag. The
