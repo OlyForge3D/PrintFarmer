@@ -1,107 +1,45 @@
 #if canImport(UIKit)
 import Foundation
-import UIKit
 @preconcurrency import UserNotifications
 import os
 
 // MARK: - Push Notification Manager
 
-/// Manages APNs registration, permission requests, and foreground notification display.
+/// Manages local notification categories, actions, presentation, and tap routing.
 /// Singleton accessed via `PushNotificationManager.shared`.
 @MainActor @Observable
 final class PushNotificationManager: NSObject, @unchecked Sendable {
     static let shared = PushNotificationManager()
 
-    // MARK: - State
-
-    enum PermissionStatus: String, Sendable {
-        case notDetermined
-        case authorized
-        case denied
-        case provisional
-    }
-
-    private(set) var permissionStatus: PermissionStatus = .notDetermined
-    private(set) var deviceToken: String?
-    private(set) var registrationError: String?
-    var notificationAuthorizationRequester: any NotificationAuthorizationRequesting = LiveNotificationAuthorizationRequester()
-    var remoteNotificationRegistrar: @Sendable @MainActor () -> Void = {
-        UIApplication.shared.registerForRemoteNotifications()
-    }
-
-    /// Issue #818: `true` when the currently selected server reported native push
-    /// as disabled (`code == "featureDisabled"`) on the last device-token
-    /// registration attempt. This is a benign, expected state — the beta ships
-    /// with push off by default — not an error: alerts continue to arrive via
-    /// SignalR + on-device local notifications. Exposed as a lightweight
-    /// "local-only alerting" signal for support/diagnostics; it never drives a
-    /// user-facing error and is re-evaluated per server on the next registration.
-    private(set) var localOnlyAlerting: Bool = false
-    var pushEnabled: Bool {
-        get { UserDefaults.standard.bool(forKey: Self.pushEnabledKey) }
-        set {
-            UserDefaults.standard.set(newValue, forKey: Self.pushEnabledKey)
-            if newValue {
-                Task { await requestPermissionAndRegister() }
-            }
-        }
-    }
-
-    private static let pushEnabledKey = "pf_push_notifications_enabled"
-    private static let deviceTokenKey = "pf_device_token"
     private let logger = Logger(subsystem: "com.printfarmer.ios", category: "PushNotifications")
 
     // MARK: - Dependencies
 
-    /// Set after login to enable server-side token registration.
-    private var notificationService: (any NotificationServiceProtocol)?
     private var serverRegistry: ServerRegistry?
     private var configuredServerID: UUID?
     private var configurationEpoch = 0
-    private var allowsUnscopedRegistration = true
-    private var registrationTask: Task<Void, Never>?
-    private var registrationEpoch: UInt64 = 0
-    private var pendingRemoteTap: [AnyHashable: Any]?
+    private var pendingNotificationTap: [AnyHashable: Any]?
     private var pendingLocalTap: [AnyHashable: Any]?
 
     // Issue #1321: services needed to execute lock-screen/notification-center
-    // actions (Pause/Resume/Cancel/Snooze) without opening the app. Kept
-    // separate from `notificationService` so tests can configure only what a
-    // given scenario needs.
+    // actions (Pause/Resume/Cancel/Snooze) without opening the app.
     private var jobAttentionPrinterService: (any PrinterServiceProtocol)?
     private var jobAttentionAttentionService: (any AttentionServiceProtocol)?
-
-    // MARK: - Init
-
-    private override init() {
-        super.init()
-        // Restore cached token
-        deviceToken = UserDefaults.standard.string(forKey: Self.deviceTokenKey)
-    }
 
     // MARK: - Configuration
 
     func configure(
-        notificationService: any NotificationServiceProtocol,
         serverRegistry: ServerRegistry? = nil,
-        serverID: UUID? = nil,
-        allowsUnscopedRegistration: Bool = true
+        serverID: UUID? = nil
     ) {
-        self.notificationService = notificationService
         self.serverRegistry = serverRegistry
         self.configuredServerID = serverID
-        self.allowsUnscopedRegistration = allowsUnscopedRegistration
         configurationEpoch &+= 1
-        // #818: the disabled-push state is per-server. When the active server
-        // changes (ServiceContainer reconfigures us with the new server's
-        // service), clear the local-only signal so it is re-derived from the
-        // next registration attempt rather than leaking across servers.
-        self.localOnlyAlerting = false
     }
 
     /// Wires the services needed to execute job-attention notification
     /// actions (issue #1321). Call once services are available (e.g. after
-    /// login / server selection), mirroring `configure(notificationService:)`.
+    /// login or server selection).
     func configureActionHandling(
         printerService: any PrinterServiceProtocol,
         attentionService: any AttentionServiceProtocol
@@ -119,7 +57,7 @@ final class PushNotificationManager: NSObject, @unchecked Sendable {
     // `setNotificationCategories` — no notification permission is needed — so
     // this can and should run unconditionally at launch (`AppDelegate`).
 
-    /// Category identifier stamped on job-attention push/local notifications.
+    /// Category identifier stamped on job-attention local notifications.
     nonisolated static let jobAttentionCategory = "JOB_ATTENTION"
 
     /// Registers `UNNotificationCategory`/`UNNotificationAction`s for the
@@ -190,11 +128,7 @@ final class PushNotificationManager: NSObject, @unchecked Sendable {
             let actionEpoch = configurationEpoch
             guard isNotificationOriginValid(userInfo, requireOrigin: true),
                   configurationEpoch == actionEpoch else { return }
-            NotificationCenter.default.post(
-                name: .pushNotificationTapped,
-                object: nil,
-                userInfo: userInfo
-            )
+            enqueueNotificationTap(userInfo)
         }
     }
 
@@ -281,206 +215,28 @@ final class PushNotificationManager: NSObject, @unchecked Sendable {
     /// One hour, matching the in-app Attention feed's default snooze duration.
     private static let defaultSnoozeInterval: TimeInterval = 60 * 60
 
-    // MARK: - Permission & Registration
-
-    func requestPermissionAndRegister() async {
-        do {
-            let granted = try await notificationAuthorizationRequester.requestAuthorization(
-                options: [.alert, .badge, .sound]
-            )
-            if granted {
-                permissionStatus = .authorized
-                registrationError = nil
-                logger.info("Notification permission granted")
-                remoteNotificationRegistrar()
-            } else {
-                permissionStatus = .denied
-                logger.info("Notification permission denied by user")
-            }
-        } catch {
-            permissionStatus = .denied
-            registrationError = error.localizedDescription
-            logger.error("Failed to request notification permission: \(error.localizedDescription)")
-        }
-    }
-
-    /// Check current authorization status without prompting.
-    func refreshPermissionStatus() async {
-        let settings = await UNUserNotificationCenter.current().notificationSettings()
-        switch settings.authorizationStatus {
-        case .authorized: permissionStatus = .authorized
-        case .denied: permissionStatus = .denied
-        case .provisional: permissionStatus = .provisional
-        case .notDetermined: permissionStatus = .notDetermined
-        case .ephemeral: permissionStatus = .authorized
-        @unknown default: permissionStatus = .notDetermined
-        }
-    }
-
-    // MARK: - Token Handling
-
-    func didRegisterForRemoteNotifications(deviceToken data: Data) {
-        let token = data.map { String(format: "%02.2hhx", $0) }.joined()
-        self.deviceToken = token
-        self.registrationError = nil
-        UserDefaults.standard.set(token, forKey: Self.deviceTokenKey)
-        logger.info("APNs device token received: \(token.prefix(8))...")
-
-        startTokenRegistration(token)
-    }
-
-    func didFailToRegisterForRemoteNotifications(error: Error) {
-        registrationEpoch &+= 1
-        registrationTask?.cancel()
-        registrationTask = nil
-        self.registrationError = error.localizedDescription
-        self.deviceToken = nil
-        UserDefaults.standard.removeObject(forKey: Self.deviceTokenKey)
-        logger.error("APNs registration failed: \(error.localizedDescription)")
-    }
-
-    // MARK: - Server Registration
-
-    /// Register the APNs token with the backend. Awaitable so callers (and tests)
-    /// can observe completion deterministically; `didRegisterForRemoteNotifications`
-    /// drives it from a detached Task.
-    ///
-    /// #818: a `NetworkError.featureDisabled` response (native push off on this
-    /// server) is treated as a normal "push not configured" outcome — no
-    /// user-visible error, no retry — and flips the app into local-only alerting
-    /// mode. A successful registration clears that signal (clean re-enable path).
-    func registerTokenWithServer(
-        _ token: String,
-        expectedRegistrationEpoch: UInt64? = nil
-    ) async {
-        if let expectedRegistrationEpoch,
-           expectedRegistrationEpoch != registrationEpoch {
-            return
-        }
-        guard let service = notificationService else {
-            logger.warning("No notification service configured — device token not sent to server")
-            return
-        }
-
-        if let serverRegistry {
-            guard let configuredServerID,
-                  serverRegistry.activeServerID == configuredServerID else {
-                logger.warning("Device token registration ignored — no active server context")
-                return
-            }
-        } else {
-            guard allowsUnscopedRegistration else {
-                logger.warning("Device token registration ignored — no active server context")
-                return
-            }
-        }
-        let initiatingServerID = configuredServerID
-        let initiatingConfigurationEpoch = configurationEpoch
-        do {
-            let originServerId = try await service.registerDeviceToken(token, platform: "ios")
-            if let expectedRegistrationEpoch,
-               expectedRegistrationEpoch != registrationEpoch {
-                return
-            }
-            guard deviceToken == nil || deviceToken == token else { return }
-            if let serverRegistry,
-               let initiatingServerID,
-               configurationEpoch == initiatingConfigurationEpoch,
-               configuredServerID == initiatingServerID,
-               serverRegistry.activeServerID == initiatingServerID {
-                try serverRegistry.associateOriginServerId(originServerId, with: initiatingServerID)
-            }
-            guard configurationEpoch == initiatingConfigurationEpoch,
-                  configuredServerID == initiatingServerID,
-                  serverRegistry?.activeServerID == initiatingServerID else {
-                return
-            }
-            localOnlyAlerting = false
-            registrationError = nil
-            logger.info("Device token registered with server")
-        } catch NetworkError.featureDisabled {
-            guard configurationEpoch == initiatingConfigurationEpoch,
-                  expectedRegistrationEpoch == nil || expectedRegistrationEpoch == registrationEpoch,
-                  (deviceToken == nil || deviceToken == token),
-                  configuredServerID == initiatingServerID,
-                  serverRegistry?.activeServerID == initiatingServerID else {
-                return
-            }
-            // Expected on the push-disabled beta default. Benign, not an error.
-            localOnlyAlerting = true
-            registrationError = nil
-            logger.info("Native push disabled on this server; operating in local-only alerting mode (SignalR + local notifications)")
-        } catch {
-            logger.error("Failed to register device token with server: \(error.localizedDescription)")
-        }
-    }
-
-    func startTokenRegistration(_ token: String) {
-        registrationTask?.cancel()
-        registrationEpoch &+= 1
-        let expectedRegistrationEpoch = registrationEpoch
-        registrationTask = Task { [weak self] in
-            await self?.registerTokenWithServer(
-                token,
-                expectedRegistrationEpoch: expectedRegistrationEpoch
-            )
-        }
-    }
-
     @MainActor
-    func consumePendingRemoteTap() -> [AnyHashable: Any]? {
-            defer { pendingRemoteTap = nil }
-            return pendingRemoteTap
-        }
+    func consumePendingNotificationTap() -> [AnyHashable: Any]? {
+        defer { pendingNotificationTap = nil }
+        return pendingNotificationTap
+    }
 
     @MainActor
     func consumePendingLocalTap() -> [AnyHashable: Any]? {
-            defer { pendingLocalTap = nil }
-            return pendingLocalTap
-        }
+        defer { pendingLocalTap = nil }
+        return pendingLocalTap
+    }
 
     @MainActor
-    private func enqueueRemoteTap(_ userInfo: [AnyHashable: Any]) {
-            pendingRemoteTap = userInfo
-            NotificationCenter.default.post(name: .pushNotificationTapped, object: nil, userInfo: userInfo)
-        }
+    private func enqueueNotificationTap(_ userInfo: [AnyHashable: Any]) {
+        pendingNotificationTap = userInfo
+        NotificationCenter.default.post(name: .notificationTapped, object: nil, userInfo: userInfo)
+    }
 
     @MainActor
     private func enqueueLocalTap(_ userInfo: [AnyHashable: Any]) {
-            pendingLocalTap = userInfo
-            NotificationCenter.default.post(name: .localNotificationTapped, object: nil, userInfo: userInfo)
-    }
-
-    /// Unregister the device token from the server (e.g., on logout).
-    @discardableResult
-    func unregisterFromServer(clearLocalToken: Bool = true) async -> Bool {
-        registrationTask?.cancel()
-        await registrationTask?.value
-        registrationTask = nil
-        guard let token = deviceToken else { return true }
-        guard let service = notificationService else { return false }
-        let unregisterEpoch = configurationEpoch
-        var succeeded = true
-
-        do {
-            try await service.unregisterDeviceToken(token)
-            logger.info("Device token unregistered from server")
-        } catch NetworkError.featureDisabled {
-            // #818: server has native push disabled — nothing was registered, so
-            // a no-op unregister is expected. Not an error.
-            logger.info("Native push disabled on this server; skipping token unregistration (nothing to remove)")
-        } catch {
-            succeeded = false
-            logger.error("Failed to unregister device token: \(error.localizedDescription)")
-        }
-
-        if succeeded && clearLocalToken,
-           configurationEpoch == unregisterEpoch,
-           deviceToken == token {
-            UserDefaults.standard.removeObject(forKey: Self.deviceTokenKey)
-            self.deviceToken = nil
-        }
-        return succeeded
+        pendingLocalTap = userInfo
+        NotificationCenter.default.post(name: .localNotificationTapped, object: nil, userInfo: userInfo)
     }
 }
 
@@ -488,11 +244,8 @@ final class PushNotificationManager: NSObject, @unchecked Sendable {
 
 extension PushNotificationManager: UNUserNotificationCenterDelegate {
     /// Foreground presentation options for an incoming notification. Held as a
-    /// pure, `nonisolated` helper so tests can assert (issue #818) that live
-    /// foreground alerting — banner/badge/sound — is always presented regardless
-    /// of whether remote native push is disabled on the server. Local
-    /// notifications (SignalR-driven bed-clear alerts, `PendingReadyMonitor`) and
-    /// foreground presentation never depend on device-token registration.
+    /// pure, `nonisolated` helper so tests can assert that local notifications
+    /// remain visible while the app is in the foreground.
     nonisolated static func foregroundPresentationOptions() -> UNNotificationPresentationOptions {
         [.banner, .badge, .sound]
     }
@@ -546,23 +299,21 @@ extension PushNotificationManager: UNUserNotificationCenterDelegate {
             }
             return
         } else {
-            // Remote push notification — deep-link handling
+            // Other local notification — use the shared deep-link handling.
             Task { @MainActor in
-                PushNotificationManager.shared.enqueueRemoteTap(userInfo)
+                PushNotificationManager.shared.enqueueNotificationTap(userInfo)
                 completionHandler()
             }
             return
         }
-
-        completionHandler()
     }
 }
 
 // MARK: - Job Attention Actions (issue #1321)
 
 /// Notification action identifiers registered on `PushNotificationManager
-/// .jobAttentionCategory`. Raw values match the wire identifiers the backend
-/// push payload is expected to use, and the ones referenced by issue #1321.
+/// .jobAttentionCategory`. Raw values match the notification action identifiers
+/// referenced by issue #1321.
 enum JobAttentionAction: String, Sendable {
     case pauseJob = "PAUSE_JOB"
     case resumeJob = "RESUME_JOB"
@@ -574,7 +325,7 @@ enum JobAttentionAction: String, Sendable {
 // MARK: - Notification Names
 
 extension Notification.Name {
-    static let pushNotificationTapped = Notification.Name("PFPushNotificationTapped")
+    static let notificationTapped = Notification.Name("PFNotificationTapped")
     static let localNotificationTapped = Notification.Name("PFLocalNotificationTapped")
 }
 #endif

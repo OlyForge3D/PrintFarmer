@@ -24,7 +24,7 @@ tags or dispatches a beta automatically.
 | Bishop/Hicks/Vasquez unanimous approval on every release-bound PR | Required per PR | Re-verify per `squad/pre-pr-verdict` status, not by memory. This is a self-attested agent review record, not independent approval — see `.github/copilot-instructions.md` |
 | Jeff's explicit release-execution request | Not yet given | **Hard stop until given** |
 
-## 2. Alerts and native push configuration
+## 2. Alerts and notification configuration
 
 Architecture reference: [`docs/OPERATOR_NATIVE_PUSH.md`](./OPERATOR_NATIVE_PUSH.md).
 
@@ -32,6 +32,8 @@ Architecture reference: [`docs/OPERATOR_NATIVE_PUSH.md`](./OPERATOR_NATIVE_PUSH.
   deployment. OlyForge3D does not operate a backend or notification relay.
 - [ ] Confirm normal alerts arrive directly from the user-selected self-hosted
   server over SignalR and are presented using on-device local notifications.
+- [ ] Confirm the iOS client does not call
+  `POST/DELETE /api/notifications/device-tokens`.
 - [ ] Confirm no `NativePush__Relay__*` or `NativePush__Apns__*` credentials are
   required or provisioned for the shipped v1 release.
 - [ ] `NativePushSettingsValidator` startup validation passes in the target
@@ -40,50 +42,14 @@ Architecture reference: [`docs/OPERATOR_NATIVE_PUSH.md`](./OPERATOR_NATIVE_PUSH.
   `OperatorFeatures__nativePushEnabled=false` wins over the DB-backed flag.
 - [ ] `GET /api/system/capabilities` reports native push disabled.
 
-### Rollback rehearsal (run in staging before beta trigger)
+## 3. iOS entitlements, bundle ID, and signing
 
-Per Dallas's #708 acceptance addendum, rehearse the disabled-only native-push
-configuration in staging and record the result here or in the release run notes:
-
-1. Disable: flip `nativePushEnabled` off (Unified Settings or
-   `OperatorFeatures__nativePushEnabled=false` + restart).
-2. Create an attention-triggering event (e.g. a simulated print failure).
-3. Verify **zero** relay/APNs calls were made (check
-   `NativePushDirect`/`NativePushRelay` HTTP client telemetry and sender
-   logs) and that `POST/DELETE /api/notifications/device-tokens` returns
-   `404 ProblemDetails{code="featureDisabled"}`.
-4. Leave native push disabled for the shipped v1 configuration.
-5. Verify SignalR updates and on-device local notifications continue without
-   native-push registration.
-
-Record pass/fail here before proceeding:
-
-- [ ] Disable → zero provider calls confirmed
-- [ ] SignalR/local alerts continue without native-push registration
-
-## 3. iOS entitlements, bundle ID, APNs environment, signing
-
-- [ ] `mobile/PrintFarmer/PrintFarmer.entitlements` declares
-  `aps-environment` (via the `APS_ENVIRONMENT` build setting: `development`
-  for Debug, `production` for Release/App Store archives) alongside the
-  existing NFC entitlement. Verify with:
-  ```bash
-  /usr/libexec/PlistBuddy -c "Print :aps-environment" \
-    build/PrintFarmer.xcarchive/Products/Applications/PrintFarmer.app/PrintFarmer.app.dSYM/../embedded.mobileprovision 2>/dev/null || \
-  codesign -d --entitlements :- build/PrintFarmer.xcarchive/Products/Applications/PrintFarmer.app | grep -A1 aps-environment
-  ```
-  Expect `production` for a TestFlight/App Store archive.
+- [ ] `mobile/PrintFarmer/PrintFarmer.entitlements` does not declare
+  `aps-environment`, and the app target has no `APS_ENVIRONMENT` build setting.
+  Local notifications do not require the APNs entitlement.
 - [ ] Bundle identifier is `com.olyforge3d.printfarmer.ios` in
   `PRODUCT_BUNDLE_IDENTIFIER` (both Debug/Release app-target configs) and
   matches `ExportOptions.plist` and `Matchfile`'s `app_identifier`.
-- [ ] Apple Developer Portal App ID `com.olyforge3d.printfarmer.ios` has the
-  **Push Notifications** capability enabled (portal-side; not tracked in this
-  repo) so the provisioning profile pulled by `fastlane match` actually
-  authorizes push. A build can compile and archive successfully with the
-  entitlement present in source yet still be rejected/silently non-functional
-  for push if the portal capability or profile is stale — re-run
-  `fastlane match appstore` (not `--readonly`) after enabling the capability
-  so `PrintFarmerApp-certificates` picks up a regenerated profile.
 - [ ] `DEVELOPMENT_TEAM = ZPKA84F3TY` matches `ExportOptions.plist`'s
   `teamID` and the `fastlane match` team.
 - [ ] TestFlight signing: `testflight-beta.yml` uses
@@ -96,7 +62,7 @@ Record pass/fail here before proceeding:
 - [ ] `./scripts/verify-marketing-version.sh` passes for the target tag (CI
   already gates this in both `ios-pr-ci.yml` and `testflight-beta.yml`).
 
-## 4. Server configuration and health checks for push delivery
+## 4. Server configuration and health checks
 
 - [ ] Deployment docs (`docs/OPERATOR_NATIVE_PUSH.md` §8, `.env.template`)
   are current for the chosen topology.

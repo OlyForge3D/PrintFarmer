@@ -460,7 +460,6 @@ final class ServiceContainer: @unchecked Sendable {
         self.barcodeScannerService = BarcodeScannerService()
         self.nfcService = NFCService()
         PushNotificationManager.shared.configure(
-            notificationService: self.notificationService,
             serverRegistry: serverRegistry,
             serverID: activeServer?.id
         )
@@ -472,9 +471,6 @@ final class ServiceContainer: @unchecked Sendable {
             printerService: self.printerService,
             attentionService: self.attentionService
         )
-        if let token = PushNotificationManager.shared.deviceToken, activeServer != nil {
-            PushNotificationManager.shared.startTokenRegistration(token)
-        }
         #endif
 
         if let activeServer {
@@ -608,19 +604,11 @@ final class ServiceContainer: @unchecked Sendable {
         recordTarget(.demo)
         let epoch = transitionEpoch.current
         authOperationEpoch.advance()
-        if activeServerID != nil {
-            guard await unregisterNotificationToken(clearLocalToken: false) else {
-                return false
-            }
-            guard transitionEpoch.isCurrent(epoch) else { return false }
-        }
         #if canImport(UIKit)
         // Invalidate real-server notification actions before the first await.
         PushNotificationManager.shared.configure(
-            notificationService: self.notificationService,
             serverRegistry: nil,
-            serverID: nil,
-            allowsUnscopedRegistration: false
+            serverID: nil
         )
         #endif
         // Revoke synchronously before advancing the generation so no stale
@@ -661,10 +649,8 @@ final class ServiceContainer: @unchecked Sendable {
         self.activeServerGeneration = activeGeneration.advance()
         #if canImport(UIKit)
         PushNotificationManager.shared.configure(
-            notificationService: self.notificationService,
             serverRegistry: nil,
-            serverID: nil,
-            allowsUnscopedRegistration: false
+            serverID: nil
         )
         PushNotificationManager.shared.configureActionHandling(
             printerService: self.printerService,
@@ -1112,12 +1098,6 @@ final class ServiceContainer: @unchecked Sendable {
 
     private func switchToActiveServer(_ server: RegisteredServer, epoch: Int) async {
         offlineWriteReplayAuthority.invalidate()
-        if activeServerID != nil {
-            guard await unregisterNotificationToken(clearLocalToken: false) else {
-                scheduleNotificationHandoffRetry(.server(server), epoch: epoch)
-                return
-            }
-        }
         // Capture immutable target + outgoing service/session BEFORE any await (H1).
         let outgoingSignalR = signalRService
         let outgoingSession = farmSnapshotAuthority.currentSession()
@@ -1237,10 +1217,6 @@ final class ServiceContainer: @unchecked Sendable {
             return
         }
         guard activeServerID != nil else { return }
-        guard await unregisterNotificationToken() else {
-            scheduleNotificationHandoffRetry(.none, epoch: epoch)
-            return
-        }
         let outgoingSignalR = signalRService
         let outgoingSession = farmSnapshotAuthority.currentSession()
         await outgoingSignalR.disconnect()
@@ -1256,26 +1232,6 @@ final class ServiceContainer: @unchecked Sendable {
         startupPrefetchStore.removeAll()
         activeServerGeneration = activeGeneration.advance()
         _ = rebuildRealServices(baseURL: APIClient.savedBaseURL() ?? AppConfig.baseURL, server: nil, accessToken: nil)
-    }
-
-    private func scheduleNotificationHandoffRetry(
-        _ target: DesiredTarget,
-        epoch: Int
-    ) {
-        Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .seconds(5))
-            guard let self,
-                  self.transitionEpoch.isCurrent(epoch) else { return }
-            self.requestTarget(target)
-        }
-    }
-
-    private func unregisterNotificationToken(clearLocalToken: Bool = true) async -> Bool {
-            #if canImport(UIKit)
-            return await PushNotificationManager.shared.unregisterFromServer(clearLocalToken: clearLocalToken)
-            #else
-            return true
-            #endif
     }
 
     /// After a superseded switch (which must not rebuild/publish), replace the
@@ -1340,7 +1296,6 @@ final class ServiceContainer: @unchecked Sendable {
         self.barcodeScannerService = BarcodeScannerService()
         self.nfcService = NFCService()
         PushNotificationManager.shared.configure(
-            notificationService: self.notificationService,
             serverRegistry: serverRegistry,
             serverID: server?.id
         )
@@ -1353,9 +1308,6 @@ final class ServiceContainer: @unchecked Sendable {
             printerService: self.printerService,
             attentionService: self.attentionService
         )
-        if let token = PushNotificationManager.shared.deviceToken, server != nil {
-            PushNotificationManager.shared.startTokenRegistration(token)
-        }
         #endif
         return client
     }

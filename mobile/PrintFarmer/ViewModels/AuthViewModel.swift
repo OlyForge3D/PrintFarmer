@@ -315,14 +315,6 @@ final class AuthViewModel {
         guard services.authOperationEpoch.isCurrent(token.value) else { return }
         await services.revokeFarmSnapshot()
         guard services.authOperationEpoch.isCurrent(token.value) else { return }
-        #if canImport(UIKit)
-        guard await PushNotificationManager.shared.unregisterFromServer() else {
-            errorMessage = "Could not disconnect notifications from this server. Try again when online."
-            isLoading = false
-            return
-        }
-        #endif
-        guard services.authOperationEpoch.isCurrent(token.value) else { return }
         services.resetAuthenticatedStartupState()
         await services.authService.logout(operation: token)
         guard services.authOperationEpoch.isCurrent(token.value) else { return }

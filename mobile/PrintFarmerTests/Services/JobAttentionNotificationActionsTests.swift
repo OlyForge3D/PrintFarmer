@@ -38,7 +38,6 @@ final class JobAttentionNotificationActionsTests: XCTestCase {
             with: server.id
         )
         PushNotificationManager.shared.configure(
-            notificationService: MockNotificationService(),
             serverRegistry: testRegistry,
             serverID: server.id
         )
@@ -49,9 +48,7 @@ final class JobAttentionNotificationActionsTests: XCTestCase {
     }
 
     override func tearDown() {
-        PushNotificationManager.shared.configure(
-            notificationService: MockNotificationService()
-        )
+        PushNotificationManager.shared.configure()
         testDefaults.removePersistentDomain(forName: testSuiteName)
         testSuiteName = nil
         testDefaults = nil
@@ -191,7 +188,6 @@ final class JobAttentionNotificationActionsTests: XCTestCase {
         let expectedOrigin = UUID(uuidString: "00000000-0000-0000-0000-000000000010")!
         try registry.associateOriginServerId(expectedOrigin, with: server.id)
         PushNotificationManager.shared.configure(
-            notificationService: MockNotificationService(),
             serverRegistry: registry,
             serverID: server.id
         )
@@ -257,7 +253,7 @@ final class JobAttentionNotificationActionsTests: XCTestCase {
 
     // MARK: - Open Swap forwards to existing deep-link routing
 
-    func testOpenSwapActionPostsPushNotificationTappedWithSameUserInfo() async {
+    func testOpenSwapActionPostsNotificationTappedWithSameUserInfo() async {
         let printerId = UUID()
         let userInfo: [AnyHashable: Any] = [
             "deepLink": "printfarmer://printer/\(printerId.uuidString)",
@@ -266,7 +262,7 @@ final class JobAttentionNotificationActionsTests: XCTestCase {
 
         var receivedLink: String?
         let observer = NotificationCenter.default.addObserver(
-            forName: .pushNotificationTapped,
+            forName: .notificationTapped,
             object: nil,
             queue: nil
         ) { notification in
@@ -277,7 +273,7 @@ final class JobAttentionNotificationActionsTests: XCTestCase {
         await PushNotificationManager.shared.handleJobAttentionAction(.openSwap, userInfo: userInfo)
 
         XCTAssertEqual(receivedLink, userInfo["deepLink"] as? String,
-                       "Open Swap must forward through the existing tap-routing notification.")
+                       "Open Swap must forward through the shared tap-routing notification.")
     }
 
     // MARK: - Missing services degrade gracefully

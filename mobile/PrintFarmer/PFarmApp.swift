@@ -76,8 +76,8 @@ struct PFarmApp: App {
                     router.invalidatePendingNavigation()
                 }
                 #if canImport(UIKit)
-                .onReceive(NotificationCenter.default.publisher(for: .pushNotificationTapped)) { notification in
-                    let userInfo = PushNotificationManager.shared.consumePendingRemoteTap()
+                .onReceive(NotificationCenter.default.publisher(for: .notificationTapped)) { notification in
+                    let userInfo = PushNotificationManager.shared.consumePendingNotificationTap()
                         ?? notification.userInfo
                     if !DemoMode.shared.isActive {
                         router.routeNotification(
@@ -126,10 +126,8 @@ struct PFarmApp: App {
                     #if canImport(UIKit)
                     if !UITestBootstrap.isEnabled {
                         PushNotificationManager.shared.configure(
-                            notificationService: services.notificationService,
                             serverRegistry: DemoMode.shared.isActive ? nil : serverRegistry,
-                            serverID: DemoMode.shared.isActive ? nil : serverRegistry.activeServerID,
-                            allowsUnscopedRegistration: !DemoMode.shared.isActive
+                            serverID: DemoMode.shared.isActive ? nil : serverRegistry.activeServerID
                         )
                         // Issue #1321: wire the services job-attention lock-screen
                         // actions (Pause/Resume/Cancel/Snooze) execute against.
@@ -137,8 +135,8 @@ struct PFarmApp: App {
                             printerService: services.printerService,
                             attentionService: services.attentionService
                         )
-                        let pendingRemoteTap = PushNotificationManager.shared.consumePendingRemoteTap()
-                        if !DemoMode.shared.isActive, let userInfo = pendingRemoteTap {
+                        let pendingNotificationTap = PushNotificationManager.shared.consumePendingNotificationTap()
+                        if !DemoMode.shared.isActive, let userInfo = pendingNotificationTap {
                             router.routeNotification(
                                 userInfo: userInfo,
                                 activeOriginServerId: serverRegistry.activeServer?.originServerId,
@@ -153,10 +151,6 @@ struct PFarmApp: App {
                                 to: .printerReady(id: printerId),
                                 capabilities: services.capabilitiesService.resolved
                             )
-                        }
-                        await PushNotificationManager.shared.refreshPermissionStatus()
-                        if PushNotificationManager.shared.pushEnabled {
-                            await PushNotificationManager.shared.requestPermissionAndRegister()
                         }
                     }
                     #endif

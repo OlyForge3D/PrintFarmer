@@ -3,8 +3,9 @@
 Status: **optional backend capability; disabled in the shipped v1 mobile
 architecture**. OlyForge3D does not operate a notification relay. The App Store
 build uses SignalR updates and on-device local notifications for normal alerts.
+It does not request an APNs token or call the device-token registration API.
 This document covers server-side infrastructure that operators of custom
-deployments may configure.
+deployments and custom clients may configure.
 
 ## 1. Constraints and the topology decision
 
@@ -25,6 +26,11 @@ The default and shipped v1 topology is **disabled**. Normal mobile alerts use
 SignalR and on-device local notifications. Relay and direct modes are optional
 building blocks for operators who own the required service and signing
 credentials; OlyForge3D does not host or recommend a relay endpoint.
+
+> **Official v1 mobile-client boundary:** the App Store client does not include
+> APNs registration, token persistence, token upload, or the APNs entitlement.
+> The registration endpoints and sender modes below are available only to
+> custom clients whose operators provide their own complete push topology.
 
 > **All `NativePushSettings` values are startup-bound and require a process
 > restart after changes.** The options are validated with `ValidateOnStart()`,
@@ -159,10 +165,9 @@ the server. String enum wire values are PascalCase per the API contract.
 | `harvest`       | `HARVEST_READY`     | (tap only)                          | `printfarmer://attention/{attentionItemId}`                                           |
 | `runout`        | `FILAMENT_RUNOUT`   | `OPEN_SWAP`, `SNOOZE_15`            | `printfarmer://printer/{printerId}/swap/{toolheadIndex}?jobId={jobId}`                |
 
-Categories and action ids are also exposed at `GET /api/notifications/attention-categories`
-so the mobile client can register `UNNotificationCategory`s from server metadata
-rather than a hard-coded list. That endpoint is the authoritative contract used
-by #716 (React preferences) and by Gorman/Hudson's iOS stages.
+Categories and action ids are also exposed at
+`GET /api/notifications/attention-categories` for custom native-push clients.
+The official v1 App Store client does not consume this native-push catalog.
 
 APS payload shape (identical across relay and direct modes):
 

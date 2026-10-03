@@ -34,7 +34,7 @@ public sealed class DeviceToken
     public User? User { get; set; }
 
     /// <summary>
-    /// Per-installation identifier supplied by the mobile app. Active ownership
+    /// Per-installation identifier supplied by an optional native-push client. Active ownership
     /// is global: a registration upsert updates the current active owner or inserts
     /// a new active row when only inactive history remains.
     /// </summary>
