@@ -1624,13 +1624,6 @@ final class PrinterDetailViewModel {
         let pollGeneration: UInt64?
     }
 
-    /// Keep the UI-facing printer state aligned with the dedicated status endpoint.
-    /// This prevents detail/list mismatches when `/api/printers/{id}` and `/status` are briefly out of sync.
-    private func applyStatusDetail(_ detail: PrinterStatusDetail) {
-        guard let current = printer else { return }
-        printer = Self.applying(detail, to: current)
-    }
-
     nonisolated private static func applying(_ detail: PrinterStatusDetail, to printer: Printer) -> Printer {
         var current = printer
         current.isOnline = detail.isOnline
@@ -1650,11 +1643,6 @@ final class PrinterDetailViewModel {
         if let homed = detail.homedAxes { current.homedAxes = homed }
         current.spoolInfo = detail.spoolInfo
         return current
-    }
-
-    private func applyCameraUrl(_ cameraUrl: PrinterCameraUrl) {
-        guard let current = printer else { return }
-        printer = Self.applying(cameraUrl, to: current)
     }
 
     nonisolated private static func applying(_ cameraUrl: PrinterCameraUrl, to printer: Printer) -> Printer {
@@ -2177,17 +2165,6 @@ final class PrinterDetailViewModel {
 
     var isSnapshotPollingActive: Bool {
         snapshotPollingTask != nil
-    }
-
-    private var shouldLoadInitialSnapshot: Bool {
-        switch cameraPreviewMode {
-        case .snapshotPolling:
-            return true
-        case .directSnapshot:
-            return snapshotData == nil
-        case .mjpegStream, .none, .unsupported:
-            return false
-        }
     }
 
     nonisolated private static func hasUsableMjpegStream(_ printer: Printer) -> Bool {

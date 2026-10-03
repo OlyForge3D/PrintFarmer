@@ -50,12 +50,6 @@ struct AttentionCacheSnapshot: Codable, Sendable, Equatable {
     let items: [AttentionItem]
     let nextCursor: String?
     let healthyPrinterCount: Int
-
-    init(items: [AttentionItem], nextCursor: String?, healthyPrinterCount: Int) {
-        self.items = items
-        self.nextCursor = nextCursor
-        self.healthyPrinterCount = healthyPrinterCount
-    }
 }
 
 /// Read-cache adapter for the Attention feed (#779).

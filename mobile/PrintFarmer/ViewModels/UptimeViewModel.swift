@@ -1,5 +1,4 @@
 import Foundation
-import os
 
 @MainActor @Observable
 final class UptimeViewModel {
@@ -9,7 +8,6 @@ final class UptimeViewModel {
     var error: String?
     var isViewActive = true
 
-    private let logger = Logger(subsystem: "com.printfarmer.ios", category: "Uptime")
     private var maintenanceService: (any MaintenanceServiceProtocol)?
 
     func configure(maintenanceService: any MaintenanceServiceProtocol) {
