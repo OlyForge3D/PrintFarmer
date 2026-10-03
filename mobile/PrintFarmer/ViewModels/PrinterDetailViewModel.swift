@@ -1771,7 +1771,26 @@ final class PrinterDetailViewModel {
                 guard assigned == target else { return false }
                 return !terminal.contains(response.job.status.lowercased())
             }
-            .sorted { $0.job.queuePosition < $1.job.queuePosition }
+            .sorted { lhs, rhs in
+                func rank(_ priority: PrintJobPriority) -> Int {
+                    switch priority {
+                    case .urgent: return 3
+                    case .high: return 2
+                    case .normal: return 1
+                    case .low: return 0
+                    }
+                }
+                if lhs.job.priority != rhs.job.priority {
+                    return rank(lhs.job.priority) > rank(rhs.job.priority)
+                }
+                if lhs.job.queuePosition != rhs.job.queuePosition {
+                    return lhs.job.queuePosition < rhs.job.queuePosition
+                }
+                if lhs.job.createdAtUtc != rhs.job.createdAtUtc {
+                    return lhs.job.createdAtUtc < rhs.job.createdAtUtc
+                }
+                return lhs.id < rhs.id
+            }
     }
 
     nonisolated static func sortedHistory(_ jobs: [PrinterHistoryJob]) -> [PrinterHistoryJob] {
@@ -1782,10 +1801,11 @@ final class PrinterDetailViewModel {
 
     // MARK: - Dispatch-to
 
-    func startNextJob() async {
+    func startNextJob(_ reviewedJob: QueuedPrintJobResponse) async {
         guard !isDispatching, !isPerformingAction else { return }
         guard isViewActive, let printer, printer.isOnline,
               !isActivelyPrinting, let job = nextQueuedJobs.first,
+              job.id == reviewedJob.id, job.job.rowVersion == reviewedJob.job.rowVersion,
               let jobService, let printerService, let id = job.job.jobUUID,
               let revision = job.job.rowVersion, !revision.isEmpty else {
             dispatchError = "Refresh this printer and its queue before starting the next job. The printer must be idle and the job must have a revision."

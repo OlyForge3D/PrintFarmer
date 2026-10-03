@@ -253,6 +253,7 @@ private final class NativeControlButton: UIButton {
 struct PreheatSubgroup: View {
 
     @ObservedObject var viewModel: PrinterControlsViewModel
+    var usesSteppers = false
 
     /// Transient caption shown when the user taps a button while controls are
     /// disabled (offline / mid-print). Cleared after a few seconds. Phone
@@ -281,7 +282,7 @@ struct PreheatSubgroup: View {
                 .padding(.bottom, 14)
             PrinterControlCommandFeedback(viewModel: viewModel, section: .heat)
 
-            IndividualHeaterControls(viewModel: viewModel)
+            IndividualHeaterControls(viewModel: viewModel, usesSteppers: usesSteppers)
 
             grid.padding(.top, 14).padding(.bottom, 8)
 
@@ -362,6 +363,7 @@ struct PreheatSubgroup: View {
 
     struct IndividualHeaterControls: View {
         @ObservedObject var viewModel: PrinterControlsViewModel
+        var usesSteppers = false
         @State private var hotend = ""
         @State private var bed = ""
         @State private var inputError: String?
@@ -369,14 +371,14 @@ struct PreheatSubgroup: View {
 
         var body: some View {
             VStack(alignment: .leading, spacing: 14) {
-                let layout = dynamicTypeSize.isAccessibilitySize
+                let layout = dynamicTypeSize.isAccessibilitySize || usesSteppers
                     ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
                     : AnyLayout(HStackLayout(alignment: .bottom, spacing: 12))
                 layout {
-                    HeaterTargetEditor(viewModel: viewModel, heater: .hotend, target: $hotend)
-                    HeaterTargetEditor(viewModel: viewModel, heater: .bed, target: $bed)
+                    HeaterTargetEditor(viewModel: viewModel, heater: .hotend, target: $hotend, usesStepper: usesSteppers)
+                    HeaterTargetEditor(viewModel: viewModel, heater: .bed, target: $bed, usesStepper: usesSteppers)
                     setTargetsButton
-                        .frame(width: dynamicTypeSize.isAccessibilitySize ? nil : 52)
+                        .frame(width: dynamicTypeSize.isAccessibilitySize || usesSteppers ? nil : 52)
                 }
                 if let inputError {
                     Text(inputError).font(.footnote).foregroundStyle(Color.pfError)
@@ -418,6 +420,7 @@ struct PreheatSubgroup: View {
         @ObservedObject var viewModel: PrinterControlsViewModel
         let heater: Heater
         @Binding var target: String
+        var usesStepper = false
 
         static func temperatureText(_ value: Double?) -> String {
             guard let value, value.isFinite else { return "Unknown" }
@@ -446,6 +449,7 @@ struct PreheatSubgroup: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(minHeight: 20, alignment: .leading)
                 HStack(spacing: 6) {
+                    if usesStepper { stepButton(delta: -5, symbol: "minus") }
                     ControlNumberField(
                         placeholder: placeholder, text: $target,
                         label: "\(heater.title) target in degrees Celsius",
@@ -455,9 +459,34 @@ struct PreheatSubgroup: View {
                     )
                     Text("°C").font(.footnote).foregroundStyle(Color.pfTextSecondary)
                         .accessibilityHidden(true)
+                    if usesStepper { stepButton(delta: 5, symbol: "plus") }
                 }
                 .disabled(!viewModel.supports(heater))
             }
+        }
+
+        static func steppedTarget(draft: String, current: Double?, maximum: Double?, delta: Double) -> Double? {
+            let value = draft.isEmpty ? current : Double(draft)
+            guard let value, value.isFinite, value >= 0, delta.isFinite,
+                  let maximum, maximum.isFinite, maximum > 0, value <= maximum else { return nil }
+            let next = min(max(value + delta, 0), maximum)
+            return next == value ? nil : next
+        }
+
+        private func stepButton(delta: Double, symbol: String) -> some View {
+            let next = Self.steppedTarget(
+                draft: target, current: currentTarget, maximum: viewModel.maximum(for: heater), delta: delta
+            )
+            return Button {
+                if let next { target = next.formatted(.number.locale(Locale(identifier: "en_US_POSIX")).grouping(.never)) }
+            } label: {
+                Image(systemName: symbol).frame(width: 44, height: 44)
+            }
+            .buttonStyle(.bordered)
+            .disabled(next == nil)
+            .accessibilityLabel("\(delta > 0 ? "Increase" : "Decrease") \(heater.title) target by 5 degrees")
+            .accessibilityHint("Changes the draft only. Choose Go to apply heater targets.")
+            .accessibilityIdentifier("printer.controls.\(heater.rawValue).\(delta > 0 ? "increase" : "decrease")")
         }
 
         private var targetHint: String {

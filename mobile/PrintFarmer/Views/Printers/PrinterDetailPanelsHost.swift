@@ -2,7 +2,7 @@ import SwiftUI
 
 // MARK: - Panel identity (issue #2522)
 
-/// Stable identifier for the two printer-detail pages. Transient UI state
+/// Stable identifier for the four printer-detail pages. Transient UI state
 /// only — never persisted, never part of the routing/deep-link vocabulary.
 /// Session identity remains registered server + printer UUID; this enum only
 /// tracks which page is currently on screen.
@@ -29,11 +29,10 @@ enum PrinterDetailPanel: String, CaseIterable, Hashable, Sendable {
 
 // MARK: - Panels host (pure paging shell)
 
-/// Narrowly scoped host for the printer-detail Overview/Controls paging
-/// (issue #2522).
+/// Paging shell for Status, Control, Filament and Queue.
 ///
 /// Purely a layout shell: a labeled selector plus native horizontal paging
-/// over the two pages the caller supplies. The host owns NO models,
+/// over the pages the caller supplies. The host owns NO models,
 /// services, camera, sheets, or confirmations — those stay in
 /// `PrinterDetailView` per the epic's "page selection sits above ownership"
 /// contract. Both the selector tap and a horizontal swipe update the same
@@ -100,9 +99,23 @@ struct PrinterDetailPanelsHost<Status: View, Control: View, Filament: View, Queu
                     page(queue(), panel: .queue).tag(PrinterDetailPanel.queue)
                 }
                 #if os(iOS)
-                .tabViewStyle(.page(indexDisplayMode: .always))
-                .indexViewStyle(.page(backgroundDisplayMode: .always))
+                .tabViewStyle(.page(indexDisplayMode: .never))
                 #endif
+                HStack(spacing: 0) {
+                    ForEach(PrinterDetailPanel.allCases, id: \.self) { panel in
+                        Button { selection = panel } label: {
+                            Circle()
+                                .fill(selection == panel ? Color.pfTextPrimary : Color.pfTextTertiary)
+                                .frame(width: 6, height: 6)
+                                .frame(width: 44, height: 44)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(panel.title)
+                        .accessibilityValue(selection == panel ? "Selected" : "")
+                        .accessibilityIdentifier("printer.detail.pageIndicator.\(panel.rawValue)")
+                    }
+                }
             }
         }
         .onChange(of: controlsAvailable) { _, newValue in
@@ -179,7 +192,7 @@ struct PrinterDetailPanelsHost<Status: View, Control: View, Filament: View, Queu
 
         func makeCoordinator() -> Coordinator { Coordinator(selection: $selection) }
 
-        final class Coordinator: NSObject {
+        @MainActor final class Coordinator: NSObject {
             var selection: Binding<PrinterDetailPanel>
             init(selection: Binding<PrinterDetailPanel>) { self.selection = selection }
 

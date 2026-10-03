@@ -1820,7 +1820,8 @@ extension PrinterDetailViewModelTests {
         status: String,
         position: Int,
         material: String? = nil,
-        revision: String? = nil
+        revision: String? = nil,
+        priority: PrintJobPriority = .normal
     ) -> QueuedPrintJobResponse {
         var job = QueuedJobInfo(
             id: id,
@@ -1830,7 +1831,7 @@ extension PrinterDetailViewModelTests {
             printerName: nil,
             printerModel: nil,
             status: status,
-            priority: .normal,
+            priority: priority,
             queuePosition: position,
             estimatedPrintTimeSeconds: nil,
             actualStartTimeUtc: nil,
@@ -1942,6 +1943,18 @@ extension PrinterDetailViewModelTests {
             makeQueuedJob(id: "active", assignedTo: TestData.testUUID, status: "Printing", position: 6)
         )
         XCTAssertEqual(vm.nextQueuedJobs.map(\.id), ["0", "1", "2", "3", "4"])
+    }
+
+    func testAssignedQueueOrdersPriorityBeforePositionWithinPrinterScope() {
+        let jobs = [
+            makeQueuedJob(id: "normal", assignedTo: TestData.testUUID, status: "Queued", position: 1),
+            makeQueuedJob(id: "high-later", assignedTo: TestData.testUUID, status: "Queued", position: 4, priority: .high),
+            makeQueuedJob(id: "high-next", assignedTo: TestData.testUUID, status: "Queued", position: 3, priority: .high)
+        ]
+        XCTAssertEqual(
+            PrinterDetailViewModel.filterAssignedQueue(jobs, printerId: TestData.testUUID).map(\.id),
+            ["high-next", "high-later", "normal"]
+        )
     }
 
     func testMatchStateMatchMismatchUnknown() {
@@ -2116,7 +2129,7 @@ extension PrinterDetailViewModelTests {
             makeQueuedJob(id: id.uuidString, assignedTo: printer.id, status: "Queued",
                           position: 1, revision: "reviewed-revision")
         ]
-        await vm.startNextJob()
+        await vm.startNextJob(vm.assignedQueue[0])
         XCTAssertEqual(service.dispatchCalledWith, id)
         XCTAssertEqual(service.dispatchReviewedRowVersion, "reviewed-revision")
         XCTAssertNil(service.dispatchToCalledWith, "Starting an assigned job must not reassign it")
@@ -2135,7 +2148,7 @@ extension PrinterDetailViewModelTests {
         vm.assignedQueue = [
             makeQueuedJob(id: UUID().uuidString, assignedTo: printer.id, status: "Queued", position: 1)
         ]
-        await vm.startNextJob()
+        await vm.startNextJob(vm.assignedQueue[0])
         XCTAssertNil(service.dispatchCalledWith)
         XCTAssertNotNil(vm.dispatchError)
         printer.state = "printing"
@@ -2144,7 +2157,7 @@ extension PrinterDetailViewModelTests {
             makeQueuedJob(id: UUID().uuidString, assignedTo: printer.id, status: "Queued",
                           position: 1, revision: "revision")
         ]
-        await vm.startNextJob()
+        await vm.startNextJob(vm.assignedQueue[0])
         XCTAssertNil(service.dispatchCalledWith)
         XCTAssertNotNil(vm.dispatchError)
     }
@@ -2161,9 +2174,27 @@ extension PrinterDetailViewModelTests {
             makeQueuedJob(id: UUID().uuidString, assignedTo: printer.id, status: "Queued",
                           position: 1, revision: "revision")
         ]
-        await vm.startNextJob()
+        await vm.startNextJob(vm.assignedQueue[0])
         XCTAssertNotNil(vm.dispatchError)
         XCTAssertFalse(vm.isDispatching)
+    }
+
+    func testStartNextJobDoesNotSubstituteNewHeadForReviewedJob() async throws {
+        let service = MockJobService()
+        let vm = makeOperatorViewModel(jobService: service)
+        var printer = try TestData.decodePrinter()
+        printer.isOnline = true
+        printer.state = "idle"
+        vm.printer = printer
+        let reviewed = makeQueuedJob(id: UUID().uuidString, assignedTo: printer.id,
+                                     status: "Queued", position: 1, revision: "old")
+        vm.assignedQueue = [
+            makeQueuedJob(id: UUID().uuidString, assignedTo: printer.id,
+                          status: "Queued", position: 1, revision: "new")
+        ]
+        await vm.startNextJob(reviewed)
+        XCTAssertNil(service.dispatchCalledWith)
+        XCTAssertNotNil(vm.dispatchError)
     }
 
     func testBeginDispatchLoadsCandidatesSortedByScore() async {

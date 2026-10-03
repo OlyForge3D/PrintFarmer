@@ -378,6 +378,30 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
 
     // MARK: - Native horizontal swipe (Hicks review finding 11)
 
+    func testSwipingTraversesAllFourPagesWithoutStatusMotionBadges() {
+        openFirstPrinterDetail()
+        let selector = app.segmentedControls["printer.detail.panel.selector"]
+        XCTAssertTrue(selector.waitForExistence(timeout: 8))
+        for (current, next) in [("status", "Control"), ("control", "Filament"), ("filament", "Queue")] {
+            let page = app.descendants(matching: .any)["printer.detail.panel.\(current)"]
+            XCTAssertTrue(page.waitForExistence(timeout: 5))
+            if current == "status" {
+                XCTAssertFalse(app.staticTexts["Homed axes"].exists)
+                XCTAssertFalse(app.staticTexts["Not homed"].exists)
+            }
+            page.swipeLeft()
+            XCTAssertTrue(app.descendants(matching: .any)["printer.detail.panel.\(next.lowercased())"]
+                .waitForExistence(timeout: 5))
+            XCTAssertTrue(selector.buttons[next].isSelected)
+        }
+        for (current, next) in [("queue", "Filament"), ("filament", "Control"), ("control", "Status")] {
+            app.descendants(matching: .any)["printer.detail.panel.\(current)"].swipeRight()
+            XCTAssertTrue(app.descendants(matching: .any)["printer.detail.panel.\(next.lowercased())"]
+                .waitForExistence(timeout: 5))
+            XCTAssertTrue(selector.buttons[next].isSelected)
+        }
+    }
+
     func testSwipeLeftToControlsPageSyncsSelectorAndExcludesStatusFromAccessibility() {
         enableAdvancedPrinterControls()
         openFirstPrinterDetail()

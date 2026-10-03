@@ -12,6 +12,7 @@ struct PrinterDetailView: View {
     @State private var coverageViewModel: PrinterFilamentCoverageViewModel
     @State private var activeTasks: [Task<Void, Never>] = []
     @State private var guidedSwapTarget: AppRouter.FilamentSwapDeepLink?
+    @State private var showsEjectConfirmation = false
     // Transient UI state only (issue #2522) — never persisted, resets to
     // `.status` whenever this view is (re)constructed for a printer/server,
     // matching `viewModel`/`coverageViewModel`'s own per-identity lifetime.
@@ -155,11 +156,11 @@ struct PrinterDetailView: View {
             if let error = viewModel.actionError {
                 Text(error)
             }
-            .alert("Dispatch Failed", isPresented: .constant(viewModel.dispatchError != nil && viewModel.dispatchTargetJob == nil)) {
-                Button("OK") { viewModel.dispatchError = nil }
-            } message: {
-                Text(viewModel.dispatchError ?? "")
-            }
+        }
+        .alert("Dispatch Failed", isPresented: .constant(viewModel.dispatchError != nil && viewModel.dispatchTargetJob == nil)) {
+            Button("OK") { viewModel.dispatchError = nil }
+        } message: {
+            Text(viewModel.dispatchError ?? "")
         }
         .task {
             let generation = services.activeServerGeneration
@@ -505,8 +506,8 @@ struct PrinterDetailView: View {
                     controlsUnavailable(printer)
                 }
                 ejectFilamentUtility(printer)
-                    .disabled(!printer.isOnline || viewModel.isPrinting || viewModel.isPaused)
-                if viewModel.isPrinting || viewModel.isPaused {
+                    .disabled(!printer.isOnline || viewModel.isActivelyPrinting)
+                if viewModel.isActivelyPrinting {
                     Text("Load, Unload and Eject are disabled while a print is active.")
                         .font(.footnote).foregroundStyle(Color.pfTextSecondary)
                 }
@@ -593,13 +594,25 @@ struct PrinterDetailView: View {
     private func ejectFilamentUtility(_ printer: Printer) -> some View {
         if viewModel.effectiveSpoolInfo?.hasActiveSpool ?? false {
             PrinterDetailBorderedDestructiveButton(kind: .eject) {
-                UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
-                let task = Task { await viewModel.ejectFilament() }
-                activeTasks.append(task)
+                showsEjectConfirmation = true
             }
             .disabled(viewModel.isPerformingAction)
             .accessibilityLabel("Eject filament: clears the spool assignment and physically unloads")
             .accessibilityIdentifier("printer.detail.filament.ejectFilament")
+            .confirmationDialog("Eject filament?", isPresented: $showsEjectConfirmation, titleVisibility: .visible) {
+                Button("Eject", role: .destructive) {
+                    guard viewModel.printer?.isOnline == true, !viewModel.isActivelyPrinting else {
+                        viewModel.actionError = "The printer must be online and idle to eject filament."
+                        return
+                    }
+                    UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+                    let task = Task { await viewModel.ejectFilament() }
+                    activeTasks.append(task)
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Clears the spool assignment and requests physical unload. Check the printer before confirming.")
+            }
         }
     }
 
@@ -823,7 +836,7 @@ struct PrinterDetailView: View {
 
             if isNext {
             Button {
-                let task = Task { await viewModel.startNextJob() }
+                let task = Task { await viewModel.startNextJob(job) }
                 activeTasks.append(task)
             } label: {
                 Label("Start next job", systemImage: "play.fill")

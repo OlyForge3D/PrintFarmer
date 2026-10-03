@@ -106,7 +106,7 @@ struct PrinterSetupControlsContent: View {
                                 identifier: "printer.controls.temperatures", essentialControls: true
                             )
                         }
-                        insetGroup { PreheatSubgroup(viewModel: viewModel) }
+                        insetGroup { PreheatSubgroup(viewModel: viewModel, usesSteppers: !showsMaterial) }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     insetGroup { PrinterMotionControls(viewModel: viewModel) }

@@ -351,6 +351,18 @@ final class PrinterDetailPanelsTests: XCTestCase {
         XCTAssertEqual(missing.targetText, Double(200).temperatureFormatted)
     }
 
+    func testHeaterStepperEditsOnlyKnownBoundedDraftTargets() {
+        typealias Editor = PreheatSubgroup.HeaterTargetEditor
+        XCTAssertEqual(Editor.steppedTarget(draft: "", current: 200, maximum: 260, delta: 5), 205)
+        XCTAssertEqual(Editor.steppedTarget(draft: "258", current: 200, maximum: 260, delta: 5), 260)
+        XCTAssertEqual(Editor.steppedTarget(draft: "2", current: 200, maximum: 260, delta: -5), 0)
+        XCTAssertNil(Editor.steppedTarget(draft: "invalid", current: 200, maximum: 260, delta: 5))
+        XCTAssertNil(Editor.steppedTarget(draft: "", current: nil, maximum: 260, delta: 5))
+        XCTAssertNil(Editor.steppedTarget(draft: "", current: 200, maximum: nil, delta: 5))
+        XCTAssertNil(Editor.steppedTarget(draft: "260", current: 200, maximum: 260, delta: 5))
+        XCTAssertNil(Editor.steppedTarget(draft: "nan", current: 200, maximum: 260, delta: 5))
+    }
+
     func testOfflineTemperaturesDoNotPresentRetainedValuesAsLive() {
         let reading = PrinterDetailTemperatureReading(measured: 210, target: 220, isOnline: false)
         XCTAssertEqual(reading.measuredText, "Unavailable")
