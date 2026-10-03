@@ -34,50 +34,7 @@ final class ServerRegistry {
     static let corruptBackupKey = "pf_server_registry_corrupt_backup"
     static let legacyMigrationCompletedKey = "pf_server_registry_legacy_migration_completed"
     private static let advancedPrinterControlsPreferenceKeyPrefix = "pf_advanced_printer_controls_enabled"
-    private static let navigationLayoutPreferenceKeyPrefix = "pf_navigation_layout"
-    private static let oversightUpgradeOfferStateKeyPrefix = "pf_oversight_upgrade_offer"
-    private static let establishedAutomaticShellKeyPrefix = "pf_navigation_established_shell"
-
-    private struct OversightUpgradeOfferState: Codable {
-        var lastObserved: OversightUpgradeOfferSignature?
-        /// A dismissal latches each threshold category so the same category
-        /// cannot re-offer after later farm-size fluctuations.
-        var dismissedThresholds: Set<OversightUpgradeThreshold> = []
-        var pendingThresholds: Set<OversightUpgradeThreshold> = []
-        var hasAccepted = false
-    }
-
-    private struct OversightUpgradeOfferSignature: Codable {
-        let accountCount: Int
-        let locationCount: Int
-        let shiftPlanEnabled: Bool
-
-        init(farmShape: FarmShape, shiftPlanEnabled: Bool) {
-            accountCount = farmShape.accountCount
-            locationCount = farmShape.locationCount
-            self.shiftPlanEnabled = shiftPlanEnabled
-        }
-
-        var activeThresholds: Set<OversightUpgradeThreshold> {
-            var thresholds: Set<OversightUpgradeThreshold> = []
-            if accountCount >= 2 {
-                thresholds.insert(.accounts)
-            }
-            if locationCount >= 2 {
-                thresholds.insert(.locations)
-            }
-            if shiftPlanEnabled {
-                thresholds.insert(.shiftPlan)
-            }
-            return thresholds
-        }
-    }
-
-    private enum OversightUpgradeThreshold: String, Codable, Hashable {
-        case accounts
-        case locations
-        case shiftPlan
-    }
+    static let navigationCleanupCompletedKey = "pf_navigation_distill_cleanup_completed"
 
     private struct PersistedRegistry: Codable {
         var servers: [RegisteredServer]
@@ -89,11 +46,9 @@ final class ServerRegistry {
         didSet {
             guard activeServerID != oldValue else { return }
             reloadAdvancedPrinterControlsPreference()
-            reloadNavigationLayoutPreference()
         }
     }
     private(set) var advancedPrinterControlsEnabled = false
-    private(set) var navigationLayoutPreference: NavigationLayoutPreference = .automatic
 
     /// Awaited snapshot purge authority, wired by `ServiceContainer`. Server
     /// removal is gated on this: a successful purge must complete before the
@@ -167,6 +122,7 @@ final class ServerRegistry {
     ) {
         self.userDefaults = userDefaults
         self.now = now
+        Self.cleanUpRetiredNavigationPreferences(in: userDefaults)
 
         if let data = userDefaults.data(forKey: Self.storageKey) {
             do {
@@ -191,7 +147,6 @@ final class ServerRegistry {
         }
         sanitizeActiveSelection()
         reloadAdvancedPrinterControlsPreference()
-        reloadNavigationLayoutPreference()
     }
 
     var activeServer: RegisteredServer? {
@@ -242,8 +197,6 @@ final class ServerRegistry {
         servers[index] = updated
         if endpointChanged {
             clearAdvancedPrinterControlsPreference(for: server.id)
-            clearNavigationLayoutPreference(for: server.id)
-            clearOversightUpgradeOfferState(for: server.id)
         }
         persist()
     }
@@ -261,8 +214,6 @@ final class ServerRegistry {
             activeServerID = servers.first?.id
         }
         clearAdvancedPrinterControlsPreference(for: id)
-        clearNavigationLayoutPreference(for: id)
-        clearOversightUpgradeOfferState(for: id)
         persist()
     }
 
@@ -303,8 +254,6 @@ final class ServerRegistry {
         guard Self.consumeAddRevision(candidate.id, expected: expectedRevision) else { return false }
         servers.remove(at: index)
         clearAdvancedPrinterControlsPreference(for: candidate.id)
-        clearNavigationLayoutPreference(for: candidate.id)
-        clearOversightUpgradeOfferState(for: candidate.id)
         persist()
         return true
     }
@@ -361,184 +310,6 @@ final class ServerRegistry {
             forKey: Self.advancedPrinterControlsPreferenceKey(for: activeServerID)
         )
         advancedPrinterControlsEnabled = enabled
-    }
-
-    func setNavigationLayoutPreference(_ preference: NavigationLayoutPreference) {
-        guard let activeServerID else {
-            navigationLayoutPreference = .automatic
-            return
-        }
-
-        userDefaults.set(
-            preference.rawValue,
-            forKey: Self.navigationLayoutPreferenceKey(for: activeServerID)
-        )
-        // An explicit override replaces the latched Automatic layout: choosing
-        // Automatic again later is a deliberate act and re-derives from the
-        // server's current shape (#2478).
-        if preference != .automatic {
-            userDefaults.removeObject(
-                forKey: Self.establishedAutomaticShellKey(for: activeServerID)
-            )
-        }
-        navigationLayoutPreference = preference
-    }
-
-    /// The Automatic layout this installation has already settled on for a
-    /// server, or `nil` when nothing has been established yet.
-    ///
-    /// Installations that ran Automatic before this latch existed have no
-    /// stored value, so the baseline recorded by the upgrade-offer state is
-    /// used instead: it is the shape this installation was last observed on,
-    /// which is exactly the shape its layout was derived from (#2478).
-    func establishedAutomaticShell(
-        for serverID: UUID,
-        isFarmAdmin: Bool
-    ) -> NavigationShell? {
-        if let raw = userDefaults.string(
-            forKey: Self.establishedAutomaticShellKey(for: serverID)
-        ),
-           let shell = NavigationShell(rawValue: raw) {
-            return shell
-        }
-
-        let state = oversightUpgradeOfferState(for: serverID)
-        if state.hasAccepted {
-            return .twoModes
-        }
-        guard let baseline = state.lastObserved else { return nil }
-        // A dismissed or still-pending offer both mean the user has been shown
-        // Two modes and has not taken it, so the layout they are actually on is
-        // Simple. Without the pending case, an install with no stored latch
-        // would derive `.twoModes` from the very growth the offer is still
-        // asking about, imposing the switch it was meant to offer (#2478).
-        if !state.dismissedThresholds.isEmpty || !state.pendingThresholds.isEmpty {
-            return .simple
-        }
-        return NavigationShellDerivation.automatic(
-            farmShape: FarmShape(
-                accountCount: baseline.accountCount,
-                locationCount: baseline.locationCount,
-                printerCount: 0
-            ),
-            shiftPlanEnabled: baseline.shiftPlanEnabled,
-            isFarmAdmin: isFarmAdmin
-        ).shell
-    }
-
-    /// Drops a latch that a role or capability reading has just contradicted.
-    ///
-    /// A latch is only ever written from a farm-shape reading, so once the
-    /// session derives Simple purely because the account is not a farm
-    /// administrator, or because the server stopped running shifts, whatever is
-    /// stored describes a world that no longer exists. Leaving it in place lets
-    /// a stale `.simple` permanently outrank the `.twoModes` derivation the
-    /// user earns back on promotion (#2478).
-    func clearEstablishedAutomaticShell(for serverID: UUID) {
-        userDefaults.removeObject(
-            forKey: Self.establishedAutomaticShellKey(for: serverID)
-        )
-    }
-
-    /// Latches the Automatic layout in use for a server so a later launch
-    /// cannot silently change it after the farm grows.
-    func recordEstablishedAutomaticShell(
-        _ shell: NavigationShell,
-        for serverID: UUID
-    ) {
-        guard activeServerID == serverID,
-              shell == .simple || shell == .twoModes,
-              navigationLayoutPreference == .automatic else {
-            return
-        }
-
-        userDefaults.set(
-            shell.rawValue,
-            forKey: Self.establishedAutomaticShellKey(for: serverID)
-        )
-    }
-
-    /// Records an observed farm shape and returns whether it newly qualifies for
-    /// the inline Oversight-mode offer. The first observation only establishes a
-    /// baseline, so it can never prompt during first run.
-    func observeOversightUpgradeOffer(
-        farmShape: FarmShape?,
-        shiftPlanEnabled: Bool,
-        isFarmAdmin: Bool
-    ) -> Bool {
-        guard let activeServerID,
-              let farmShape,
-              navigationLayoutPreference == .automatic,
-              isFarmAdmin else {
-            return false
-        }
-
-        let signature = OversightUpgradeOfferSignature(
-            farmShape: farmShape,
-            shiftPlanEnabled: shiftPlanEnabled
-        )
-        var state = oversightUpgradeOfferState(for: activeServerID)
-        defer {
-            state.lastObserved = signature
-            setOversightUpgradeOfferState(state, for: activeServerID)
-        }
-
-        guard !state.hasAccepted else {
-            return false
-        }
-        if !state.pendingThresholds.isEmpty {
-            state.pendingThresholds.formIntersection(signature.activeThresholds)
-        }
-        guard let previous = state.lastObserved else {
-            return false
-        }
-
-        var newlyCrossed: Set<OversightUpgradeThreshold> = []
-        if previous.accountCount < 2, signature.accountCount >= 2 {
-            newlyCrossed.insert(.accounts)
-        }
-        if previous.locationCount < 2, signature.locationCount >= 2 {
-            newlyCrossed.insert(.locations)
-        }
-        if !previous.shiftPlanEnabled, signature.shiftPlanEnabled {
-            newlyCrossed.insert(.shiftPlan)
-        }
-
-        state.pendingThresholds.formUnion(
-            newlyCrossed.subtracting(state.dismissedThresholds)
-        )
-        return !state.pendingThresholds.isEmpty
-    }
-
-    func dismissOversightUpgradeOffer(for serverID: UUID) {
-        guard let activeServerID, activeServerID == serverID else { return }
-        var state = oversightUpgradeOfferState(for: activeServerID)
-        state.dismissedThresholds.formUnion(state.pendingThresholds)
-        state.pendingThresholds = []
-        setOversightUpgradeOfferState(state, for: activeServerID)
-        // "Not now" is only meaningful if the layout it declines stays put
-        // across relaunches (#2478).
-        recordEstablishedAutomaticShell(.simple, for: activeServerID)
-    }
-
-    @discardableResult
-    func acceptOversightUpgradeOffer(
-        for serverID: UUID,
-        isFarmAdmin: Bool
-    ) -> Bool {
-        guard let activeServerID,
-              activeServerID == serverID,
-              navigationLayoutPreference == .automatic,
-              isFarmAdmin else {
-            return false
-        }
-        var state = oversightUpgradeOfferState(for: activeServerID)
-        guard !state.pendingThresholds.isEmpty else { return false }
-        state.hasAccepted = true
-        state.pendingThresholds = []
-        setOversightUpgradeOfferState(state, for: activeServerID)
-        setNavigationLayoutPreference(.twoModes)
-        return true
     }
 
     static func normalizedURLString(for raw: String) throws -> String {
@@ -650,36 +421,6 @@ final class ServerRegistry {
         "\(advancedPrinterControlsPreferenceKeyPrefix).\(serverID.uuidString.lowercased())"
     }
 
-    private static func navigationLayoutPreferenceKey(for serverID: UUID) -> String {
-        "\(navigationLayoutPreferenceKeyPrefix).\(serverID.uuidString.lowercased())"
-    }
-
-    private static func oversightUpgradeOfferStateKey(for serverID: UUID) -> String {
-        "\(oversightUpgradeOfferStateKeyPrefix).\(serverID.uuidString.lowercased())"
-    }
-
-    private static func establishedAutomaticShellKey(for serverID: UUID) -> String {
-        "\(establishedAutomaticShellKeyPrefix).\(serverID.uuidString.lowercased())"
-    }
-
-    private func oversightUpgradeOfferState(for serverID: UUID) -> OversightUpgradeOfferState {
-        guard let data = userDefaults.data(
-            forKey: Self.oversightUpgradeOfferStateKey(for: serverID)
-        ),
-        let state = try? JSONDecoder().decode(OversightUpgradeOfferState.self, from: data) else {
-            return OversightUpgradeOfferState()
-        }
-        return state
-    }
-
-    private func setOversightUpgradeOfferState(
-        _ state: OversightUpgradeOfferState,
-        for serverID: UUID
-    ) {
-        guard let data = try? JSONEncoder().encode(state) else { return }
-        userDefaults.set(data, forKey: Self.oversightUpgradeOfferStateKey(for: serverID))
-    }
-
     private func reloadAdvancedPrinterControlsPreference() {
         guard let activeServerID else {
             advancedPrinterControlsEnabled = false
@@ -691,19 +432,6 @@ final class ServerRegistry {
         )
     }
 
-    private func reloadNavigationLayoutPreference() {
-        guard let activeServerID,
-              let rawPreference = userDefaults.string(
-                  forKey: Self.navigationLayoutPreferenceKey(for: activeServerID)
-              ),
-              let preference = NavigationLayoutPreference(rawValue: rawPreference) else {
-            navigationLayoutPreference = .automatic
-            return
-        }
-
-        navigationLayoutPreference = preference
-    }
-
     private func clearAdvancedPrinterControlsPreference(for serverID: UUID) {
         userDefaults.removeObject(
             forKey: Self.advancedPrinterControlsPreferenceKey(for: serverID)
@@ -713,22 +441,14 @@ final class ServerRegistry {
         }
     }
 
-    private func clearNavigationLayoutPreference(for serverID: UUID) {
-        userDefaults.removeObject(
-            forKey: Self.navigationLayoutPreferenceKey(for: serverID)
-        )
-        if activeServerID == serverID {
-            navigationLayoutPreference = .automatic
+    private static func cleanUpRetiredNavigationPreferences(in userDefaults: UserDefaults) {
+        guard !userDefaults.bool(forKey: Self.navigationCleanupCompletedKey) else { return }
+        let prefixes = ["pf_navigation_established_shell", "pf_navigation_layout", "pf_oversight_upgrade_offer"]
+        for key in userDefaults.dictionaryRepresentation().keys
+            where prefixes.contains(where: { key.hasPrefix($0) }) {
+            userDefaults.removeObject(forKey: key)
         }
-    }
-
-    private func clearOversightUpgradeOfferState(for serverID: UUID) {
-        userDefaults.removeObject(
-            forKey: Self.oversightUpgradeOfferStateKey(for: serverID)
-        )
-        userDefaults.removeObject(
-            forKey: Self.establishedAutomaticShellKey(for: serverID)
-        )
+        userDefaults.set(true, forKey: Self.navigationCleanupCompletedKey)
     }
 
     private func persist() {

@@ -61,11 +61,7 @@ enum UITestBootstrap {
     static let onboardingSeenLaunchArgument = "--uitesting-onboarding-seen"
     static let networkPermissionCompletedLaunchArgument =
         "--uitesting-network-permission-complete"
-    static let twoModesNavigationLaunchArgument = "--uitesting-two-modes"
-    static let oversightNavigationModeLaunchArgument =
-        "--uitesting-oversight-mode"
     static let navigationChromeLaunchArgument = "--uitesting-navigation-chrome"
-    static let oversightUpgradeOfferLaunchArgument = "--uitesting-oversight-upgrade-offer"
     #if DEBUG
     static let shiftTaskMutationErrorLaunchArgument =
         "--uitesting-shift-task-mutation-error"
@@ -130,7 +126,6 @@ enum UITestBootstrap {
         case authenticatedAttentionHarvestScan
         /// Authenticated compact shell with a persisted pre-shift-plan baseline
         /// that deterministically produces the inline Oversight upgrade offer.
-        case authenticatedOversightUpgradeOffer
         #if DEBUG
         case authenticatedShiftTaskMutationError
         case authenticatedShiftTaskInitialLoadFailure
@@ -175,14 +170,6 @@ enum UITestBootstrap {
         arguments.contains(launchArgument)
     }
 
-    static var startsInOversightMode: Bool {
-        startsInOversightMode(arguments: CommandLine.arguments)
-    }
-
-    static func startsInOversightMode(arguments: [String]) -> Bool {
-        arguments.contains(oversightNavigationModeLaunchArgument)
-    }
-
     /// The launch mode encoded in the current process arguments.
     static var mode: Mode {
         mode(in: CommandLine.arguments)
@@ -199,9 +186,6 @@ enum UITestBootstrap {
         }
         if arguments.contains(attentionActionsLaunchArgument) {
             return .authenticatedAttentionActions
-        }
-        if arguments.contains(oversightUpgradeOfferLaunchArgument) {
-            return .authenticatedOversightUpgradeOffer
         }
         if arguments.contains(filamentCoverageScenarioLaunchArgument) {
             return .authenticatedFilamentCoverageScenario
@@ -275,17 +259,6 @@ enum UITestBootstrap {
             arguments: arguments,
             registry: registry
         )
-        if arguments.contains(twoModesNavigationLaunchArgument) {
-            registry.setNavigationLayoutPreference(.twoModes)
-        }
-        if mode == .authenticatedOversightUpgradeOffer {
-            _ = registry.observeOversightUpgradeOffer(
-                farmShape: FarmShape(accountCount: 1, locationCount: 1, printerCount: 1),
-                shiftPlanEnabled: false,
-                isFarmAdmin: true
-            )
-        }
-
         // Demo services are already sufficient: they satisfy every
         // protocol the operator shell needs without hitting the network.
         // In the unauthenticated mode they also keep `LoginView`'s
@@ -301,35 +274,11 @@ enum UITestBootstrap {
         } else {
             injectedSnapshotStore = nil
         }
-        let testUser = mode == .authenticatedOversightUpgradeOffer
-            ? UserDTO(
-                id: DemoData.demoUser.id,
-                username: DemoData.demoUser.username,
-                email: DemoData.demoUser.email,
-                firstName: DemoData.demoUser.firstName,
-                lastName: DemoData.demoUser.lastName,
-                isActive: DemoData.demoUser.isActive,
-                emailConfirmed: DemoData.demoUser.emailConfirmed,
-                lastLogin: DemoData.demoUser.lastLogin,
-                createdAt: DemoData.demoUser.createdAt,
-                roles: ["farm_admin"],
-                permissions: DemoData.demoUser.permissions
-            )
-            : DemoData.demoUser
+        let testUser = DemoData.demoUser
         let services = ServiceContainer.demo(
             serverRegistry: registry,
             farmSnapshotStore: injectedSnapshotStore
         )
-        if mode == .authenticatedOversightUpgradeOffer {
-            services.authService = DemoAuthService(user: testUser)
-            services.farmShapeService = StubFarmShapeService(
-                shape: FarmShape(accountCount: 1, locationCount: 1, printerCount: 1)
-            )
-            var capabilities = ResolvedSystemCapabilities.defaults
-            capabilities.shiftPlanEnabled = true
-            services.capabilitiesService = StubSystemCapabilitiesService(resolved: capabilities)
-        }
-
         // #1353: `ResolvedSystemCapabilities.defaults.printedPartsInventoryEnabled`
         // is `false` in production so a freshly-provisioned server without any
         // configured SKUs/mappings does not surface the harvest flow (see
@@ -436,8 +385,7 @@ enum UITestBootstrap {
         switch mode {
         case .authenticated, .authenticatedOperatorFeaturesDisabled,
              .authenticatedAttentionActions,
-             .authenticatedAttentionHarvestScan,
-             .authenticatedOversightUpgradeOffer:
+             .authenticatedAttentionHarvestScan:
             auth.markAuthenticatedForUITesting(user: testUser)
         case .unauthenticated:
             break

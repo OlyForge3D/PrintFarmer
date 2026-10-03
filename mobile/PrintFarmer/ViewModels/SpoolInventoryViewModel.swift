@@ -248,6 +248,8 @@ final class SpoolInventoryViewModel {
 
     private func handleScanResult(_ result: SpoolScanResult) async {
         switch result {
+        case .printerId:
+            scanError = "This is a printer tag. Use Scan from the farm navigation to open it."
         case .spoolId(let id):
             if let existing = findSpool(byId: id) {
                 setHighlight(spoolId: existing.id)

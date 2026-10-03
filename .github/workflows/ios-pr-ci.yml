@@ -216,6 +216,8 @@ jobs:
     # Avoid allocating eight macOS runners until unit coverage passes; retain
     # the selector's fail-safe behavior by skipping only explicit false.
     if: ${{ !cancelled() && needs.test.result == 'success' && needs.select.outputs.should_run != 'false' }}
+    # Retired Attention/Tasks/Two-modes screens have no shipping destinations.
+    # Shell, capability-gated parts, Scan/harvest and offline suites cover retained flows.
     strategy:
       fail-fast: false
       matrix:
@@ -227,16 +229,13 @@ jobs:
             device_preference: iPhone 15,iPhone 16,iPhone 17,iPhone 17 Pro,iPhone 17e
             selectors: >-
               -only-testing:PrintFarmerUITests/LoginFlowUITests
-              -only-testing:PrintFarmerUITests/AttentionActionsUITests
               -only-testing:PrintFarmerUITests/OperatorShellUITests
-              -only-testing:PrintFarmerUITests/TwoModesOperatorShellUITests/testFloorModeShowsRequiredCompactDestinations
           - key: iphone-2
             family: iPhone
             shard: 2
             prefix: iPhone
             device_preference: iPhone 15,iPhone 16,iPhone 17,iPhone 17 Pro,iPhone 17e
             selectors: >-
-              -only-testing:PrintFarmerUITests/OperatorFeatureVisibilityUITests
               -only-testing:PrintFarmerUITests/ScanStationUITests
               -only-testing:PrintFarmerUITests/HarvestUITests
           - key: iphone-3
@@ -245,10 +244,7 @@ jobs:
             prefix: iPhone
             device_preference: iPhone 15,iPhone 16,iPhone 17,iPhone 17 Pro,iPhone 17e
             selectors: >-
-              -only-testing:PrintFarmerUITests/PartsInventoryUITests/testReorderNeededPartExposesWarningInAccessibilityLabel
-              -only-testing:PrintFarmerUITests/PartsInventoryUITests/testTappingPartRowOpensAdjustmentSheet
-              -only-testing:PrintFarmerUITests/PartsInventoryUITests/testInventoryTabDefaultsToSpoolsSegment
-              -only-testing:PrintFarmerUITests/PartsInventoryUITests/testReorderOnlyToggleFiltersList
+              -only-testing:PrintFarmerUITests/PartsInventoryUITests
               -only-testing:PrintFarmerUITests/PrinterListUITests
               -only-testing:PrintFarmerUITests/FilamentCoverageUITests
           - key: iphone-4
@@ -258,11 +254,7 @@ jobs:
             device_preference: iPhone 15,iPhone 16,iPhone 17,iPhone 17 Pro,iPhone 17e
             selectors: >-
               -only-testing:PrintFarmerUITests/ColdOfflineShellUITests
-              -only-testing:PrintFarmerUITests/TaskActionRoutingUITests
-              -only-testing:PrintFarmerUITests/ShiftTasksUITests
               -only-testing:PrintFarmerUITests/UIWaitBudgetTests
-              -only-testing:PrintFarmerUITests/ShiftTasksGroupedUITests
-              -only-testing:PrintFarmerUITests/ShiftTasksFailedRefreshUITests
           - key: ipad-1
             family: iPad
             shard: 1
@@ -270,16 +262,13 @@ jobs:
             device_preference: iPad Pro 13-inch (M5),iPad Pro 11-inch (M5),iPad Air 13-inch (M4),iPad Air 11-inch (M4),iPad (A16),iPad mini (A17 Pro)
             selectors: >-
               -only-testing:PrintFarmerUITests/LoginFlowUITests
-              -only-testing:PrintFarmerUITests/AttentionActionsUITests
               -only-testing:PrintFarmerUITests/OperatorShellUITests
-              -only-testing:PrintFarmerUITests/TwoModesOperatorShellUITests/testFloorModeShowsRequiredCompactDestinations
           - key: ipad-2
             family: iPad
             shard: 2
             prefix: iPad
             device_preference: iPad Pro 13-inch (M5),iPad Pro 11-inch (M5),iPad Air 13-inch (M4),iPad Air 11-inch (M4),iPad (A16),iPad mini (A17 Pro)
             selectors: >-
-              -only-testing:PrintFarmerUITests/OperatorFeatureVisibilityUITests
               -only-testing:PrintFarmerUITests/ScanStationUITests
               -only-testing:PrintFarmerUITests/HarvestUITests
           - key: ipad-3
@@ -288,10 +277,7 @@ jobs:
             prefix: iPad
             device_preference: iPad Pro 13-inch (M5),iPad Pro 11-inch (M5),iPad Air 13-inch (M4),iPad Air 11-inch (M4),iPad (A16),iPad mini (A17 Pro)
             selectors: >-
-              -only-testing:PrintFarmerUITests/PartsInventoryUITests/testReorderNeededPartExposesWarningInAccessibilityLabel
-              -only-testing:PrintFarmerUITests/PartsInventoryUITests/testTappingPartRowOpensAdjustmentSheet
-              -only-testing:PrintFarmerUITests/PartsInventoryUITests/testInventoryTabDefaultsToSpoolsSegment
-              -only-testing:PrintFarmerUITests/PartsInventoryUITests/testReorderOnlyToggleFiltersList
+              -only-testing:PrintFarmerUITests/PartsInventoryUITests
               -only-testing:PrintFarmerUITests/PrinterListUITests
               -only-testing:PrintFarmerUITests/FilamentCoverageUITests
           - key: ipad-4
@@ -301,10 +287,7 @@ jobs:
             device_preference: iPad Pro 13-inch (M5),iPad Pro 11-inch (M5),iPad Air 13-inch (M4),iPad Air 11-inch (M4),iPad (A16),iPad mini (A17 Pro)
             selectors: >-
               -only-testing:PrintFarmerUITests/ColdOfflineShellUITests
-              -only-testing:PrintFarmerUITests/TaskActionRoutingUITests
-              -only-testing:PrintFarmerUITests/ShiftTasksUITests
               -only-testing:PrintFarmerUITests/UIWaitBudgetTests
-              -only-testing:PrintFarmerUITests/ShiftTasksGroupedUITests
               -only-testing:PrintFarmerUITests/JobDetailIPadNavigationUITests
     defaults:
       run:

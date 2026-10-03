@@ -14,6 +14,7 @@ struct SpoolInventoryView: View {
     @State private var showAddSpool = false
     @State private var showScanFlow = false
     @State private var showBarcodeIntake = false
+    @State private var showPrintedParts = false
     @State private var nfcWriteTarget: NFCWriteTarget?
     @State private var activeTasks: [Task<Void, Never>] = []
 
@@ -75,11 +76,25 @@ struct SpoolInventoryView: View {
                     }
                 }
             }
-            .navigationTitle("Spool Inventory")
+            .navigationTitle("Filament")
             #if os(iOS)
             .navigationBarTitleDisplayMode(.large)
             #endif
-            .rootNavigationChrome(for: .inventory) {
+            .rootNavigationChrome(for: .filament) {
+                if services.capabilitiesService.resolved.printedPartsInventoryEnabled {
+                    Button {
+                        showPrintedParts = true
+                    } label: {
+                        Image(systemName: "cube.box")
+                            .frame(
+                                minWidth: RootNavigationChrome.minimumTouchTarget,
+                                minHeight: RootNavigationChrome.minimumTouchTarget
+                            )
+                    }
+                    .accessibilityLabel("Printed parts")
+                    .accessibilityHint("Opens printed-part stock and quantity adjustments.")
+                    .accessibilityIdentifier("filament.printedParts")
+                }
                 Menu {
                     Button {
                         showScanFlow = true
@@ -167,6 +182,24 @@ struct SpoolInventoryView: View {
                         activeTasks.append(task)
                     }
             }
+            .sheet(isPresented: $showPrintedParts) {
+                NavigationStack {
+                    if services.capabilitiesService.resolved.printedPartsInventoryEnabled {
+                        PartsInventoryListView()
+                            .navigationDestination(for: AppDestination.self) { destination in
+                                destinationView(for: destination)
+                            }
+                            .toolbar {
+                                ToolbarItem(placement: .cancellationAction) {
+                                    Button("Done") { showPrintedParts = false }
+                                }
+                            }
+                    }
+                }
+            }
+            .onChange(of: services.capabilitiesService.resolved.printedPartsInventoryEnabled) { _, enabled in
+                if !enabled { showPrintedParts = false }
+            }
             .sheet(isPresented: $viewModel.showScannedDataSheet) {
                 if let data = viewModel.scannedSpoolData {
                     AddSpoolView(scannedData: data)
@@ -195,6 +228,11 @@ struct SpoolInventoryView: View {
                 }
             }
             .onAppear { viewModel.isViewActive = true }
+            .onChange(of: router.pendingSpoolHighlightId) { _, spoolId in
+                guard let spoolId else { return }
+                router.pendingSpoolHighlightId = nil
+                viewModel.setHighlight(spoolId: spoolId)
+            }
             .onDisappear {
                 viewModel.isViewActive = false
                 viewModel.invalidateHighlightOwnership()

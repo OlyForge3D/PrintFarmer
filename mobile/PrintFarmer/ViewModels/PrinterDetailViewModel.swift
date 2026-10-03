@@ -598,6 +598,8 @@ final class PrinterDetailViewModel {
             let result = await nfcScanner.scan()
             guard self.isViewActive else { return }
             switch result {
+            case .printerId:
+                nfcScanError = "This is a printer tag, not a filament spool."
             case .spoolId(let id):
                 await loadSpoolById(id)
             case .newSpoolData(let data):
