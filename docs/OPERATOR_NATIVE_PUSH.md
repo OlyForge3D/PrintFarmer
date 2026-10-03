@@ -2,8 +2,10 @@
 
 Status: **optional backend capability; disabled in the shipped v1 mobile
 architecture**. OlyForge3D does not operate a notification relay. The App Store
-build uses SignalR updates and on-device local notifications for normal alerts.
-It does not request an APNs token or call the device-token registration API.
+build uses SignalR for live in-app updates and has one on-device local
+notification path: a bed-clear reminder when `PendingReadyMonitor` observes a
+printer newly enter `PendingReady`. It does not request an APNs token or call
+the device-token registration API.
 This document covers server-side infrastructure that operators of custom
 deployments and custom clients may configure.
 
@@ -22,10 +24,11 @@ We resolve this with a **provider-abstract sender** chosen by configuration:
 | `relay`    | `relay`            | operator-selected relay (backend never sees) | optional custom deployment |
 | `direct`   | `direct`           | local backend `.p8` (path or PEM)            | custom-signed enterprise/development build |
 
-The default and shipped v1 topology is **disabled**. Normal mobile alerts use
-SignalR and on-device local notifications. Relay and direct modes are optional
-building blocks for operators who own the required service and signing
-credentials; OlyForge3D does not host or recommend a relay endpoint.
+The default and shipped v1 topology is **disabled**. SignalR supplies live
+in-app updates; the shipped local-notification scope is limited to the
+`PendingReady` bed-clear reminder described above. Relay and direct modes are
+optional building blocks for operators who own the required service and
+signing credentials; OlyForge3D does not host or recommend a relay endpoint.
 
 > **Official v1 mobile-client boundary:** the App Store client does not include
 > APNs registration, token persistence, token upload, or the APNs entitlement.
@@ -152,10 +155,12 @@ invoked:
 
 Both guards emit metrics (`native_push_deduplicated`, `native_push_rate_limited`).
 
-## 2. Actionable categories and deep links
+## 2. Custom-client actionable categories and deep links
 
-The category identifiers and action ids are stable across the mobile app and
-the server. String enum wire values are PascalCase per the API contract.
+The category identifiers and action ids below are a server contract for custom
+native-push clients. The official v1 App Store client does not register these
+categories or route these payload deep links. String enum wire values are
+PascalCase per the API contract.
 
 | `attentionKind` | APNs `category`     | actions on lock-screen              | primary deep link                                                                     |
 |-----------------|---------------------|-------------------------------------|---------------------------------------------------------------------------------------|
@@ -466,10 +471,11 @@ Health probing: `GET /api/system/capabilities` continues to expose
 
 ## 10. Shared notification-preference contract (dependency of #716)
 
-The React and mobile clients share one preference matrix — one row per
+The API and web client share one preference matrix — one row per
 `NotificationPreferenceEventType` × four channels
 (`inApp`, `email`, `push`, `telegram`). Native push is the `push` column
-for the attention rows added in this stage.
+for the attention rows added in this stage; a custom native-push client may
+consume it, but the official v1 App Store client does not.
 
 ### Wire enum tokens
 

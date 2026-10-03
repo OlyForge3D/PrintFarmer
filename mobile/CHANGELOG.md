@@ -8,8 +8,10 @@ All notable changes to PrintFarmer iOS will be documented in this file.
 
 - **APNs registration from the v1 mobile client** — Removed remote-notification
   registration callbacks, device-token persistence/upload, the in-app push
-  toggle, and the APNs entitlement/build setting. SignalR updates and
-  `UNUserNotificationCenter` local notifications remain available.
+  toggle, APNs entitlement/build setting, and unreachable actionable
+  `JOB_ATTENTION` category/deep-link handling. SignalR remains available for
+  live in-app updates; v1 system notifications are limited to the on-device
+  `PendingReady` bed-clear reminder.
 - Remove tracked manual-motion receipts, operation polling, journals, SignalR
   listeners and recovery/admission UI. Home, jog and absolute positioning use
   ordinary direct commands with capability, authorization and safety checks.

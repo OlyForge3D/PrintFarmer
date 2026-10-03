@@ -12,6 +12,36 @@ final class LocalNotificationTests: XCTestCase {
         XCTAssertTrue(options.contains(.badge))
     }
 
+    func testPendingReadyTapRoutesValidPrinterIdentifier() {
+        let printerId = UUID()
+
+        XCTAssertEqual(
+            PushNotificationManager.pendingReadyPrinterId(
+                categoryIdentifier: "PENDING_READY",
+                requestIdentifier: "pending-ready-\(printerId.uuidString)"
+            ),
+            printerId.uuidString
+        )
+    }
+
+    func testJobAttentionTapIsIgnored() {
+        XCTAssertNil(
+            PushNotificationManager.pendingReadyPrinterId(
+                categoryIdentifier: "JOB_ATTENTION",
+                requestIdentifier: "pending-ready-\(UUID().uuidString)"
+            )
+        )
+    }
+
+    func testPendingReadyTapRejectsMalformedPrinterIdentifier() {
+        XCTAssertNil(
+            PushNotificationManager.pendingReadyPrinterId(
+                categoryIdentifier: "PENDING_READY",
+                requestIdentifier: "pending-ready-not-a-uuid"
+            )
+        )
+    }
+
     func testPendingReadyPermissionRequestUsesLocalNotificationAuthorization() async {
         let requester = StubNotificationAuthorizationRequester(decision: true)
         let monitor = PendingReadyMonitor(notificationAuthorizationRequester: requester)

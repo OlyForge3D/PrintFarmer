@@ -459,18 +459,6 @@ final class ServiceContainer: @unchecked Sendable {
         self.qrScannerService = QRSpoolScannerService()
         self.barcodeScannerService = BarcodeScannerService()
         self.nfcService = NFCService()
-        PushNotificationManager.shared.configure(
-            serverRegistry: serverRegistry,
-            serverID: activeServer?.id
-        )
-        // Issue #1321: keep lock-screen/Notification Center action handling
-        // wired to whichever services are currently live (not just at first
-        // launch) so job-attention actions never execute against stale
-        // service instances from a previous server/session.
-        PushNotificationManager.shared.configureActionHandling(
-            printerService: self.printerService,
-            attentionService: self.attentionService
-        )
         #endif
 
         if let activeServer {
@@ -604,13 +592,6 @@ final class ServiceContainer: @unchecked Sendable {
         recordTarget(.demo)
         let epoch = transitionEpoch.current
         authOperationEpoch.advance()
-        #if canImport(UIKit)
-        // Invalidate real-server notification actions before the first await.
-        PushNotificationManager.shared.configure(
-            serverRegistry: nil,
-            serverID: nil
-        )
-        #endif
         // Revoke synchronously before advancing the generation so no stale
         // snapshot commit can apply across the demo transition.
         farmSnapshotAuthority.revoke()
@@ -648,14 +629,6 @@ final class ServiceContainer: @unchecked Sendable {
         self.activeServerID = nil
         self.activeServerGeneration = activeGeneration.advance()
         #if canImport(UIKit)
-        PushNotificationManager.shared.configure(
-            serverRegistry: nil,
-            serverID: nil
-        )
-        PushNotificationManager.shared.configureActionHandling(
-            printerService: self.printerService,
-            attentionService: self.attentionService
-        )
         self.qrScannerService = nil
         self.barcodeScannerService = nil
         self.nfcService = nil
@@ -1295,19 +1268,6 @@ final class ServiceContainer: @unchecked Sendable {
         self.qrScannerService = QRSpoolScannerService()
         self.barcodeScannerService = BarcodeScannerService()
         self.nfcService = NFCService()
-        PushNotificationManager.shared.configure(
-            serverRegistry: serverRegistry,
-            serverID: server?.id
-        )
-        // Issue #1321: re-wire lock-screen/Notification Center action handling
-        // to the freshly rebuilt services on every rebuild (server switch,
-        // re-login, logout->login), not just at initial launch. Without this,
-        // job-attention notification actions would keep executing against the
-        // previous server's (possibly now-invalid) service instances.
-        PushNotificationManager.shared.configureActionHandling(
-            printerService: self.printerService,
-            attentionService: self.attentionService
-        )
         #endif
         return client
     }

@@ -76,17 +76,6 @@ struct PFarmApp: App {
                     router.invalidatePendingNavigation()
                 }
                 #if canImport(UIKit)
-                .onReceive(NotificationCenter.default.publisher(for: .notificationTapped)) { notification in
-                    let userInfo = PushNotificationManager.shared.consumePendingNotificationTap()
-                        ?? notification.userInfo
-                    if !DemoMode.shared.isActive {
-                        router.routeNotification(
-                            userInfo: userInfo ?? [:],
-                            activeOriginServerId: serverRegistry.activeServer?.originServerId,
-                            capabilities: services.capabilitiesService.resolved
-                        )
-                    }
-                }
                 .onReceive(NotificationCenter.default.publisher(for: .localNotificationTapped)) { notification in
                     let userInfo = PushNotificationManager.shared.consumePendingLocalTap()
                         ?? notification.userInfo
@@ -96,13 +85,6 @@ struct PFarmApp: App {
                        let printerId = UUID(uuidString: printerIdString) {
                         router.navigate(
                             to: .printerReady(id: printerId),
-                            capabilities: services.capabilitiesService.resolved
-                        )
-                    } else {
-                        // F1 (#706): notification-tap without a printer ID lands
-                        // on Attention where the notification itself lives.
-                        router.selectTab(
-                            .attention,
                             capabilities: services.capabilitiesService.resolved
                         )
                     }
@@ -125,24 +107,6 @@ struct PFarmApp: App {
                     await authViewModel.restoreSession()
                     #if canImport(UIKit)
                     if !UITestBootstrap.isEnabled {
-                        PushNotificationManager.shared.configure(
-                            serverRegistry: DemoMode.shared.isActive ? nil : serverRegistry,
-                            serverID: DemoMode.shared.isActive ? nil : serverRegistry.activeServerID
-                        )
-                        // Issue #1321: wire the services job-attention lock-screen
-                        // actions (Pause/Resume/Cancel/Snooze) execute against.
-                        PushNotificationManager.shared.configureActionHandling(
-                            printerService: services.printerService,
-                            attentionService: services.attentionService
-                        )
-                        let pendingNotificationTap = PushNotificationManager.shared.consumePendingNotificationTap()
-                        if !DemoMode.shared.isActive, let userInfo = pendingNotificationTap {
-                            router.routeNotification(
-                                userInfo: userInfo,
-                                activeOriginServerId: serverRegistry.activeServer?.originServerId,
-                                capabilities: services.capabilitiesService.resolved
-                            )
-                        }
                         let pendingLocalTap = PushNotificationManager.shared.consumePendingLocalTap()
                         if !DemoMode.shared.isActive, let userInfo = pendingLocalTap,
                            let printerIdString = userInfo["printerId"] as? String,

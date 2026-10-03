@@ -30,8 +30,11 @@ Architecture reference: [`docs/OPERATOR_NATIVE_PUSH.md`](./OPERATOR_NATIVE_PUSH.
 
 - [ ] Confirm `NativePush__Mode=disabled` for the shipped v1 App Store
   deployment. OlyForge3D does not operate a backend or notification relay.
-- [ ] Confirm normal alerts arrive directly from the user-selected self-hosted
-  server over SignalR and are presented using on-device local notifications.
+- [ ] Confirm live in-app status updates arrive directly from the user-selected
+  self-hosted server over SignalR.
+- [ ] Confirm the only shipped v1 system-notification path is the on-device
+  `PendingReadyMonitor` scheduling a `PENDING_READY` / **Bed Clear Required**
+  reminder; there is no `JOB_ATTENTION` category or action handler.
 - [ ] Confirm the iOS client does not call
   `POST/DELETE /api/notifications/device-tokens`.
 - [ ] Confirm no `NativePush__Relay__*` or `NativePush__Apns__*` credentials are
@@ -96,8 +99,8 @@ Architecture reference: [`docs/OPERATOR_NATIVE_PUSH.md`](./OPERATOR_NATIVE_PUSH.
    `workflow_dispatch` with `environment=internal` for the first beta ring).
 4. After upload succeeds, verify the TestFlight build appears in App Store
    Connect and the auto-created GitHub Release is `prerelease: true`.
-5. Smoke-test SignalR-driven in-app alerts and on-device local notifications
-   before widening distribution to `external` groups.
+5. Smoke-test SignalR-driven in-app updates and the `PendingReady` bed-clear
+   local notification before widening distribution to `external` groups.
 
 ## 7. Disable/rollback controls summary
 

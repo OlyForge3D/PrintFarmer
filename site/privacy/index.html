@@ -221,15 +221,18 @@
       and does not record, store, or forward that video anywhere else.</p>
 
     <h2>Alerts and notifications</h2>
-    <p>Normal app alerts come from the PrintFarmer server you selected and are handled on
-      your device. The app may ask for iOS notification permission so it can present local
-      alerts, but it does not register for Apple Push Notification service (APNs), obtain an
-      APNs device token, or upload a device token to any server.</p>
+    <p>The app may ask for iOS notification permission so it can present a local
+      <strong>Bed Clear Required</strong> reminder when its on-device monitor observes that
+      a printer on your selected server has newly entered the <strong>PendingReady</strong>
+      state. The shipped v1 app does not register for Apple Push Notification service
+      (APNs), obtain an APNs device token, or upload a device token to any server.</p>
     <ul>
       <li><strong>Live updates</strong> — while connected, the app receives server events
         directly from your selected server over SignalR.</li>
-      <li><strong>Local notifications</strong> — the app can schedule alerts through iOS on
-        the device, based on those server events and app monitoring.</li>
+      <li><strong>Local notifications</strong> — the shipped v1 notification is the
+        on-device <strong>Bed Clear Required</strong> reminder described above. SignalR
+        updates remain in-app live updates and are not converted into general-purpose
+        system notifications.</li>
     </ul>
     <p>The shipped v1 app does not use an OlyForge3D backend or notification relay.
       OlyForge3D does not receive device tokens, notification contents, printer identifiers,
