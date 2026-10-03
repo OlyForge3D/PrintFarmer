@@ -1,5 +1,6 @@
 ﻿using System.Collections.Concurrent;
 using System.ComponentModel.DataAnnotations;
+using System.Data;
 using System.Text.Json;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
@@ -999,6 +1000,239 @@ public class PrintJobManagementService(
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error updating priority for print job {JobId}", LogSanitizer.Sanitize(jobId));
+            throw;
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<QueuedPrintJobDto> MoveQueuedJobAsync(
+        Guid jobId,
+        Guid? beforeJobId,
+        Guid? afterJobId,
+        string userId,
+        CancellationToken cancellationToken = default)
+    {
+        if (beforeJobId.HasValue == afterJobId.HasValue)
+        {
+            throw new ValidationException("Exactly one of beforeJobId or afterJobId must be provided.");
+        }
+
+        if (beforeJobId == jobId || afterJobId == jobId)
+        {
+            throw new ValidationException("A queued job cannot be moved relative to itself.");
+        }
+
+        AppDbContext db = _appDbContext
+            ?? throw new InvalidOperationException("Queue position updates require the application database context.");
+        Guid neighborId = beforeJobId ?? afterJobId!.Value;
+
+        try
+        {
+            await using var transaction = await db.Database.BeginTransactionAsync(
+                IsolationLevel.Serializable,
+                cancellationToken);
+
+            PrintJob? job = await db.PrintJobs
+                .Include(candidate => candidate.GcodeFile)
+                .Include(candidate => candidate.AssignedPrinter)
+                    .ThenInclude(printer => printer!.Model)
+                .FirstOrDefaultAsync(candidate => candidate.Id == jobId, cancellationToken);
+            if (job is null)
+            {
+                throw new KeyNotFoundException($"Print job {jobId} not found.");
+            }
+
+            await EnsureActorCanAccessJobAsync(userId, job.Id, cancellationToken);
+            if (job.Status != PrintJobStatus.Queued)
+            {
+                throw new ValidationException("Only queued jobs can be reordered.");
+            }
+
+            PrintJob? neighbor = await db.PrintJobs
+                .FirstOrDefaultAsync(candidate => candidate.Id == neighborId, cancellationToken);
+            if (neighbor is null)
+            {
+                throw new KeyNotFoundException($"Neighbor job {neighborId} not found.");
+            }
+
+            await EnsureActorCanAccessJobAsync(userId, neighbor.Id, cancellationToken);
+            if (neighbor.Status != PrintJobStatus.Queued ||
+                neighbor.AssignedPrinterId != job.AssignedPrinterId)
+            {
+                throw new QueueSemanticConflictException(
+                    "The neighbor is no longer queued in the same queue.");
+            }
+
+            List<PrintJob> scopedJobs = await db.PrintJobs
+                .Include(candidate => candidate.GcodeFile)
+                .Include(candidate => candidate.AssignedPrinter)
+                    .ThenInclude(printer => printer!.Model)
+                .Where(candidate =>
+                    candidate.Status == PrintJobStatus.Queued &&
+                    candidate.AssignedPrinterId == job.AssignedPrinterId)
+                .ToListAsync(cancellationToken);
+            if (!scopedJobs.Any(candidate => candidate.Id == job.Id) ||
+                !scopedJobs.Any(candidate => candidate.Id == neighbor.Id))
+            {
+                throw new QueueSemanticConflictException(
+                    "The queue changed while the reorder was being prepared.");
+            }
+
+            int targetPriority = neighbor.Priority;
+            List<PrintJob> targetBand = scopedJobs
+                .Where(candidate => candidate.Id != job.Id && candidate.Priority == targetPriority)
+                .OrderBy(candidate => candidate.QueuePosition)
+                .ThenBy(candidate => candidate.QueuedAt)
+                .ThenBy(candidate => candidate.Id)
+                .ToList();
+            int neighborIndex = targetBand.FindIndex(candidate => candidate.Id == neighbor.Id);
+            if (neighborIndex < 0)
+            {
+                throw new QueueSemanticConflictException(
+                    "The neighbor is no longer in the target priority bucket.");
+            }
+
+            targetBand.Insert(
+                beforeJobId.HasValue ? neighborIndex : neighborIndex + 1,
+                job);
+            Dictionary<Guid, int> targetBandOrder = targetBand
+                .Select((candidate, index) => (candidate.Id, index))
+                .ToDictionary(pair => pair.Id, pair => pair.index);
+
+            List<PrintJob> reorderedJobs = scopedJobs
+                .OrderByDescending(candidate => candidate.Id == job.Id
+                    ? targetPriority
+                    : candidate.Priority)
+                .ThenBy(candidate =>
+                    (candidate.Id == job.Id || candidate.Priority == targetPriority)
+                        ? targetBandOrder[candidate.Id]
+                        : candidate.QueuePosition)
+                .ThenBy(candidate => candidate.QueuedAt)
+                .ThenBy(candidate => candidate.Id)
+                .ToList();
+
+            int[] existingQueuePositions = scopedJobs
+                .Select(candidate => candidate.QueuePosition)
+                .OrderBy(position => position)
+                .ToArray();
+            if (existingQueuePositions.Length != reorderedJobs.Count)
+            {
+                throw new InvalidOperationException("Queue positions could not be reconciled.");
+            }
+
+            HashSet<int> occupiedPositions = await db.PrintJobs
+                .Where(candidate =>
+                    candidate.AssignedPrinterId == job.AssignedPrinterId &&
+                    candidate.Status == PrintJobStatus.Assigned)
+                .Select(candidate => candidate.QueuePosition)
+                .ToHashSetAsync(cancellationToken);
+            occupiedPositions.UnionWith(existingQueuePositions);
+            Dictionary<Guid, int> newPositions = reorderedJobs
+                .Select((candidate, index) => (candidate.Id, Position: existingQueuePositions[index]))
+                .ToDictionary(pair => pair.Id, pair => pair.Position);
+
+            DateTime now = _timeProvider.GetUtcNow().UtcDateTime;
+            bool changed = job.Priority != targetPriority;
+            if (changed)
+            {
+                job.Priority = targetPriority;
+                job.UpdatedAt = now;
+            }
+
+            for (int index = 0; index < reorderedJobs.Count; index++)
+            {
+                PrintJob candidate = reorderedJobs[index];
+                int finalPosition = existingQueuePositions[index];
+                if (candidate.QueuePosition == finalPosition)
+                {
+                    continue;
+                }
+
+                candidate.UpdatedAt = now;
+                changed = true;
+            }
+
+            if (!changed)
+            {
+                await transaction.CommitAsync(cancellationToken);
+                return MapToQueuedPrintJobDto(job);
+            }
+
+            int temporaryPosition = -1;
+            foreach (PrintJob candidate in reorderedJobs)
+            {
+                int finalPosition = newPositions[candidate.Id];
+                if (candidate.QueuePosition == finalPosition)
+                {
+                    continue;
+                }
+
+                while (occupiedPositions.Contains(temporaryPosition))
+                {
+                    temporaryPosition = checked(temporaryPosition - 1);
+                }
+
+                candidate.QueuePosition = temporaryPosition;
+                occupiedPositions.Add(temporaryPosition);
+                temporaryPosition = checked(temporaryPosition - 1);
+            }
+
+            if (job.AssignedPrinterId.HasValue)
+            {
+                await AdvanceQueueRevisionAsync(
+                    job.AssignedPrinterId.Value,
+                    "queue position update",
+                    cancellationToken);
+            }
+
+            await db.SaveChangesAsync(cancellationToken);
+
+            for (int index = 0; index < reorderedJobs.Count; index++)
+            {
+                reorderedJobs[index].QueuePosition = newPositions[reorderedJobs[index].Id];
+            }
+
+            await db.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+
+            try
+            {
+                await _hubContext.Clients.Group(
+                        Farm.Infrastructure.Security.AuthorizedHubGroups.Farm)
+                    .SendAsync(
+                        "jobqueueupdate",
+                        new
+                        {
+                            PrinterId = job.AssignedPrinterId,
+                            Jobs = reorderedJobs.Select(MapToQueuedPrintJobDto).ToList(),
+                        },
+                        cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Queue position update for job {JobId} persisted, but the queue-changed event could not be broadcast",
+                    jobId);
+            }
+
+            _logger.LogInformation(
+                "Queued job {JobId} moved relative to {NeighborJobId} by user {UserId}",
+                jobId,
+                neighborId,
+                LogSanitizer.Sanitize(userId));
+            return MapToQueuedPrintJobDto(job);
+        }
+        catch (DbUpdateConcurrencyException ex)
+        {
+            _logger.LogWarning(ex, "Concurrent queue position update conflicted for job {JobId}", jobId);
+            throw new QueueSemanticConflictException(
+                "The queue changed during the reorder. Refresh the queue and retry.",
+                ex);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error moving queued job {JobId}", jobId);
             throw;
         }
     }

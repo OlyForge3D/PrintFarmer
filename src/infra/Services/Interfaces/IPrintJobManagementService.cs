@@ -141,6 +141,21 @@ public interface IPrintJobManagementService
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Moves a queued job immediately before or after another queued job in the same queue.
+    /// </summary>
+    /// <param name="jobId">The job to move.</param>
+    /// <param name="beforeJobId">The job to place the moved job before, when set.</param>
+    /// <param name="afterJobId">The job to place the moved job after, when set.</param>
+    /// <param name="userId">The unique identifier of the user performing the update.</param>
+    /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
+    Task<QueuedPrintJobDto> MoveQueuedJobAsync(
+        Guid jobId,
+        Guid? beforeJobId,
+        Guid? afterJobId,
+        string userId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Pause a printing job
     /// </summary>
     /// <param name="jobId">The unique identifier of the print job.</param>

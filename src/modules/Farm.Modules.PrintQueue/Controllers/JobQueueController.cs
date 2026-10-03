@@ -676,6 +676,61 @@ public class JobQueueController(
     }
 
     /// <summary>
+    /// Move a queued job immediately before or after another queued job in the same queue.
+    /// </summary>
+    /// <param name="id">The unique identifier of the job to move.</param>
+    /// <param name="request">The target neighbor that defines the new position.</param>
+    [HttpPut("{id:guid}/position")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Write)]
+    [ProducesResponseType(typeof(QueuedPrintJobDto), 200)]
+    [ProducesResponseType(400)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(409)]
+    [ProducesResponseType(500)]
+    public async Task<ActionResult<QueuedPrintJobDto>> MoveQueuedJobAsync(
+        Guid id,
+        [FromBody] MoveQueuedJobRequest request)
+    {
+        if (request is null)
+        {
+            return BadRequest("Request body is required.");
+        }
+
+        if (request.BeforeJobId.HasValue == request.AfterJobId.HasValue)
+        {
+            return BadRequest("Exactly one of beforeJobId or afterJobId must be provided.");
+        }
+
+        try
+        {
+            QueuedPrintJobDto moved = await printJobManagementService.MoveQueuedJobAsync(
+                id,
+                request.BeforeJobId,
+                request.AfterJobId,
+                QueueActorIdentity.Resolve(User) ?? string.Empty,
+                CancellationToken.None);
+            return Ok(moved);
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new { error = ex.Message });
+        }
+        catch (Exception ex) when (ex is QueueSemanticConflictException or DbUpdateConcurrencyException)
+        {
+            return MapRevisionException(ex);
+        }
+        catch (ValidationException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error moving queued job {JobId}", id);
+            return Problem("An error occurred while moving the queued job.", statusCode: 500);
+        }
+    }
+
+    /// <summary>
     /// Dispatch a queued/assigned job to its printer to start printing.
     /// The job must have an assigned printer and be in Queued or Assigned status.
     /// </summary>

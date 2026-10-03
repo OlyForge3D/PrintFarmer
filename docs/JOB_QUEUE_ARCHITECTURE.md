@@ -572,6 +572,7 @@ exception text.
 | POST | `/` | Queue a new print job |
 | GET | `/{id}` | Get single job details |
 | PUT | `/{id}` | Update job (status/priority/printer assignment) |
+| PUT | `/{id}/position` | Move a queued job before or after a neighbor in the same queue |
 | DELETE | `/{id}` | Remove job from queue |
 
 #### Authoritative Job Read

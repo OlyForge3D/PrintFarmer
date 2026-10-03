@@ -3,6 +3,7 @@ using System.Security.Claims;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Dtos.PrintQueue;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Services.Printers;
@@ -11,6 +12,7 @@ using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Telemetry;
 using Farm.Modules.PrintQueue.Controllers;
+using Farm.Modules.PrintQueue.Controllers.Requests;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -533,6 +535,97 @@ public class JobQueueControllerTests
             Status = QueueOutboxEventStatus.Pending,
             CreatedAtUtc = DateTime.UtcNow,
         };
+
+    [Fact]
+    public async Task MoveQueuedJob_WithValidRequest_ReturnsMovedJobAsync()
+    {
+        Guid jobId = Guid.NewGuid();
+        Guid neighborId = Guid.NewGuid();
+        var request = new MoveQueuedJobRequest { BeforeJobId = neighborId };
+        var movedJob = new QueuedPrintJobDto { Id = jobId.ToString() };
+        _printJobManagementServiceMock
+            .Setup(service => service.MoveQueuedJobAsync(
+                jobId,
+                neighborId,
+                null,
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(movedJob);
+
+        ActionResult<QueuedPrintJobDto> result = await _controller.MoveQueuedJobAsync(jobId, request);
+
+        OkObjectResult ok = Assert.IsType<OkObjectResult>(result.Result);
+        Assert.Same(movedJob, ok.Value);
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, true)]
+    public async Task MoveQueuedJob_WithInvalidNeighborFields_ReturnsBadRequestAsync(
+        bool setBefore,
+        bool setAfter)
+    {
+        var request = new MoveQueuedJobRequest
+        {
+            BeforeJobId = setBefore ? Guid.NewGuid() : null,
+            AfterJobId = setAfter ? Guid.NewGuid() : null,
+        };
+
+        ActionResult<QueuedPrintJobDto> result =
+            await _controller.MoveQueuedJobAsync(Guid.NewGuid(), request);
+
+        Assert.IsType<BadRequestObjectResult>(result.Result);
+        _printJobManagementServiceMock.Verify(
+            service => service.MoveQueuedJobAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<Guid?>(),
+                It.IsAny<Guid?>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task MoveQueuedJob_WhenJobOrNeighborIsMissing_ReturnsNotFoundAsync()
+    {
+        Guid jobId = Guid.NewGuid();
+        Guid neighborId = Guid.NewGuid();
+        _printJobManagementServiceMock
+            .Setup(service => service.MoveQueuedJobAsync(
+                jobId,
+                neighborId,
+                null,
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new KeyNotFoundException("Neighbor job not found."));
+
+        ActionResult<QueuedPrintJobDto> result = await _controller.MoveQueuedJobAsync(
+            jobId,
+            new MoveQueuedJobRequest { BeforeJobId = neighborId });
+
+        Assert.IsType<NotFoundObjectResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task MoveQueuedJob_WhenQueueChanged_ReturnsConflictAsync()
+    {
+        Guid jobId = Guid.NewGuid();
+        Guid neighborId = Guid.NewGuid();
+        _printJobManagementServiceMock
+            .Setup(service => service.MoveQueuedJobAsync(
+                jobId,
+                neighborId,
+                null,
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new QueueSemanticConflictException("Neighbor is stale."));
+
+        ActionResult<QueuedPrintJobDto> result = await _controller.MoveQueuedJobAsync(
+            jobId,
+            new MoveQueuedJobRequest { BeforeJobId = neighborId });
+
+        Assert.IsType<ConflictObjectResult>(result.Result);
+    }
 
     [Fact]
     public async Task QueueJobAsync_WithNullRequest_ReturnsBadRequest()

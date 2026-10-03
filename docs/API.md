@@ -933,6 +933,31 @@ Authorization: Bearer <token>
 - `404` - Location not found
 - `503` - System initializing
 
+## Queue Position API
+
+### Move a queued job
+
+`PUT /api/job-queue/{id}/position` requires the `Queue.Write` permission. Supply
+exactly one neighbor ID to place the queued job immediately before or after that
+neighbor:
+
+```http
+PUT /api/job-queue/{id}/position
+Content-Type: application/json
+
+{ "beforeJobId": "neighbor-guid" }
+```
+
+Use `afterJobId` instead of `beforeJobId` to place the job after the neighbor.
+The moved job adopts the neighbor's priority. Reordering is limited to queued
+jobs in the same assigned-printer queue (or the unassigned queue) and is
+persisted transactionally.
+
+Responses: `200` with the moved job, `400` for a non-queued job or malformed
+neighbor selection, `404` when the moved job or neighbor is missing, and `409`
+when the neighbor is no longer queued in the same queue or a concurrent update
+changes the queue during the move.
+
 ## Auto-Dispatch API
 
 The auto-dispatch system scores all available printers against job requirements using a 9-factor algorithm (4 hard filters + 5 soft scoring factors). This enables intelligent printer selection and automated job assignment.
