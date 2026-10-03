@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -8,6 +9,7 @@ import {
 import { QueueViewModeSelector } from "../QueueViewModeSelector";
 import type { QueuedPrintJobWithFileMetaDto } from "@/services/printQueueService";
 import { PrintJobPriority } from "@/types/api";
+import { getQueueMoveNeighbors } from "@/features/queue/utils/queueReordering";
 
 function createMockJob(
   overrides?: Partial<QueuedPrintJobWithFileMetaDto>,
@@ -85,6 +87,62 @@ describe("Queue view mode + collection renderers", () => {
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
     expect(onCancel).toHaveBeenCalledWith("job-1");
+  });
+
+  it("supports keyboard Move up and pointer drag in collection views", async () => {
+    const firstBase = createMockJob();
+    const first = createMockJob({
+      job: { ...firstBase.job, rowVersion: "etag-job-1" },
+    });
+    const second = createMockJob({
+      job: { ...first.job, id: "job-2", name: "next-print", rowVersion: "etag-job-2" },
+      gcodeFile: { ...first.gcodeFile!, id: "file-2", name: "next.gcode", fileName: "next.gcode" },
+    });
+    const jobs = [first, second];
+    const onMoveJob = vi.fn();
+    const onDragStartJob = vi.fn();
+    const user = userEvent.setup();
+
+    const { rerender } = render(
+      <QueueJobsListView
+        jobs={jobs}
+        canReorder
+        reorderNeighbors={getQueueMoveNeighbors(jobs)}
+        onMoveJob={onMoveJob}
+      />,
+    );
+    const moveUp = screen.getByRole("button", { name: "Move next.gcode up" });
+    moveUp.focus();
+    await user.keyboard("{Enter}");
+    expect(onMoveJob).toHaveBeenCalledWith("job-2", "job-1", "before");
+
+    onMoveJob.mockClear();
+    rerender(
+      <QueueJobsCardView
+        jobs={jobs}
+        canReorder
+        draggedJobId="job-2"
+        reorderNeighbors={getQueueMoveNeighbors(jobs)}
+        onMoveJob={onMoveJob}
+        onDragStartJob={onDragStartJob}
+        canDropOnJob={(movedId, neighborId) => movedId !== neighborId}
+      />,
+    );
+    const source = screen.getByRole("listitem", { name: /next\.gcode/i });
+    const target = screen.getByRole("listitem", { name: /benchy\.gcode/i });
+    const dataTransfer = {
+      effectAllowed: "",
+      dropEffect: "",
+      setData: vi.fn(),
+      getData: vi.fn().mockReturnValue("job-2"),
+    } as unknown as DataTransfer;
+    vi.spyOn(target, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 100, 100));
+
+    fireEvent.dragStart(source, { dataTransfer });
+    fireEvent.drop(target, { dataTransfer, clientY: 5 });
+
+    expect(onDragStartJob).toHaveBeenCalledWith("job-2");
+    expect(onMoveJob).toHaveBeenCalledWith("job-2", "job-1", "after");
   });
 
   it.each([

@@ -5,10 +5,12 @@ import { AlertTriangle, Clock, DollarSign, FolderOpen, Layers, Palette, Timer } 
 import type { QueuedPrintJobWithFileMetaDto } from "@/services/printQueueService";
 import { PrintJobPriority, type DispatchUploadProgressDto } from "@/types/api";
 import { isDispatchIndeterminate, isRecoveryBlocked } from "@/features/dispatch-recovery/utils";
+import { QueueJobReorderControls } from "@/features/queue/components/QueueJobReorderControls";
+import type { QueueReorderInteractions } from "@/features/queue/components/QueueJobReorderControls";
 
 const DUE_SOON_HOURS = 24;
 
-interface QueueJobsCollectionViewProps {
+interface QueueJobsCollectionViewProps extends QueueReorderInteractions {
   jobs: QueuedPrintJobWithFileMetaDto[];
   dispatchingJobId?: string | null;
   cancelingJobId?: string | null;
@@ -222,12 +224,38 @@ function QueueJobCommon({
   onSchedule,
   onEdit,
   compact = false,
+  canReorder = false,
+  isReordering = false,
+  draggedJobId = null,
+  onMoveJob,
+  onDragStartJob,
+  onDragEndJob,
+  canDropOnJob,
+  reorderNeighbors,
 }: QueueJobsCollectionViewProps & { jobWrapper: QueuedPrintJobWithFileMetaDto; compact?: boolean }) {
   const job = jobWrapper.job;
   const jobId = job.id;
   const fileName = jobWrapper.gcodeFile?.name || jobWrapper.gcodeFile?.fileName || job.name || "Unknown File";
   const printerName = jobWrapper.assignedPrinter?.name || "Unknown Printer";
   const status = job.status || "Unknown";
+  const moveNeighbors = reorderNeighbors?.get(jobId);
+  const hasJobRevision = typeof job.rowVersion === "string" && job.rowVersion.trim().length > 0;
+  const canMoveUp =
+    canReorder &&
+    status === "Queued" &&
+    hasJobRevision &&
+    Boolean(moveNeighbors?.previous?.job.rowVersion?.trim());
+  const canMoveDown =
+    canReorder &&
+    status === "Queued" &&
+    hasJobRevision &&
+    Boolean(moveNeighbors?.next?.job.rowVersion?.trim());
+  const canDrag =
+    canReorder &&
+    !isReordering &&
+    status === "Queued" &&
+    hasJobRevision &&
+    Boolean(moveNeighbors?.previous || moveNeighbors?.next);
   const priority = job.priority;
   const projectName = job.projectName;
   const material = jobWrapper.gcodeFile?.materialType || job.requiredMaterialType || "";
@@ -257,8 +285,35 @@ function QueueJobCommon({
       role="listitem"
       aria-label={`Print job: ${fileName}${deadlineState === "overdue" ? ", overdue deadline" : deadlineState === "due-soon" ? ", due soon" : ""}`}
       tabIndex={0}
+      {...(canDrag ? { draggable: true } : {})}
+      onDragStart={(event) => {
+        if (!canDrag) {
+          event.preventDefault();
+          return;
+        }
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData("text/plain", jobId);
+        onDragStartJob?.(jobId);
+      }}
+      onDragOver={(event) => {
+        if (draggedJobId && canDropOnJob?.(draggedJobId, jobId)) {
+          event.preventDefault();
+          event.dataTransfer.dropEffect = "move";
+        }
+      }}
+      onDrop={(event) => {
+        event.preventDefault();
+        const sourceId = draggedJobId || event.dataTransfer.getData("text/plain");
+        if (!sourceId || !canDropOnJob?.(sourceId, jobId)) return;
+        const bounds = event.currentTarget.getBoundingClientRect();
+        const placement = event.clientY < bounds.top + bounds.height / 2 ? "before" : "after";
+        onMoveJob?.(sourceId, jobId, placement);
+        onDragEndJob?.();
+      }}
+      onDragEnd={onDragEndJob}
       onClick={() => onEdit?.(jobId)}
       onKeyDown={(e) => {
+        if (e.target !== e.currentTarget) return;
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
           onEdit?.(jobId);
@@ -324,6 +379,25 @@ function QueueJobCommon({
           </div>
 
           <div className="flex items-center gap-2 flex-wrap" onClick={(e) => e.stopPropagation()}>
+            {canReorder && status === "Queued" && (
+              <QueueJobReorderControls
+                fileName={fileName}
+                enabled
+                busy={isReordering}
+                canMoveUp={canMoveUp}
+                canMoveDown={canMoveDown}
+                onMoveUp={
+                  moveNeighbors?.previous
+                    ? () => onMoveJob?.(jobId, moveNeighbors.previous!.job.id, "before")
+                    : undefined
+                }
+                onMoveDown={
+                  moveNeighbors?.next
+                    ? () => onMoveJob?.(jobId, moveNeighbors.next!.job.id, "after")
+                    : undefined
+                }
+              />
+            )}
             <Select
               value={priority}
               onChange={(e) => onPriority?.(jobId, e.target.value as PrintJobPriority)}
