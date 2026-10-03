@@ -29,7 +29,7 @@ final class PartsInventoryUITests: PrintFarmerUITestCase {
     func testDisabledCapabilityHidesPrintedPartsEntry() {
         app.terminate()
         app.launchArguments.append("--uitesting-operator-features-disabled")
-        app.launch()
+        app.launchForPrintFarmerUITest()
         let filament = shellDestinationButton(tabIdentifier: "tab.filament", timeout: 8)
         XCTAssertTrue(filament.exists)
         filament.tap()
