@@ -23,6 +23,7 @@ public partial class MoonrakerClient(
     BackendTimeoutSettings timeouts,
     ISnapmakerU1CameraMonitorManager? snapmakerU1CameraMonitorManager = null) : PrinterClientBase, IMoonrakerClient,
     ISupportsFileDownload,
+    ISupportsCurrentJobThumbnail,
     ISupportsFileList,
     ISupportsFileUpload,
     ISupportsFileDelete,
@@ -50,6 +51,7 @@ public partial class MoonrakerClient(
     ISupportsVerifiedSafetyDiscovery
 {
     private const int MaxExcludeObjectNameLength = 256;
+    private const int MaxCurrentJobThumbnailBytes = 10 * 1024 * 1024;
 
     /// <summary>
     /// Maximum number of concurrent per-file thumbnail-path lookups issued while building the
@@ -3556,6 +3558,113 @@ public partial class MoonrakerClient(
     /// <param name="ct">Cancellation token to cancel the operation.</param>
     async Task<byte[]?> ISupportsFileDownload.DownloadFileAsync(string baseUrl, string filePath, CancellationToken ct)
         => await DownloadFileAsync(baseUrl, filePath, ct);
+
+    /// <inheritdoc />
+    public async Task<HistoryThumbnailContent?> GetCurrentJobThumbnailAsync(
+        string baseUrl,
+        string thumbnailUrl,
+        PrinterCredential? credential = null,
+        CancellationToken ct = default)
+    {
+        if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out Uri? baseUri) ||
+            !Uri.TryCreate(thumbnailUrl, UriKind.Absolute, out Uri? thumbnailUri) ||
+            !string.Equals(baseUri.Scheme, thumbnailUri.Scheme, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(baseUri.Host, thumbnailUri.Host, StringComparison.OrdinalIgnoreCase) ||
+            baseUri.Port != thumbnailUri.Port ||
+            !string.IsNullOrEmpty(thumbnailUri.UserInfo))
+        {
+            throw new InvalidDataException("Moonraker returned a thumbnail outside the configured printer endpoint.");
+        }
+
+        const string filesPathMarker = "/server/files/";
+        int markerIndex = thumbnailUri.AbsolutePath.LastIndexOf(filesPathMarker, StringComparison.OrdinalIgnoreCase);
+        if (markerIndex < 0)
+        {
+            throw new InvalidDataException("Moonraker returned an unsupported thumbnail path.");
+        }
+
+        string filePath = Uri.UnescapeDataString(thumbnailUri.AbsolutePath[(markerIndex + filesPathMarker.Length)..]);
+        if (string.IsNullOrWhiteSpace(filePath) ||
+            filePath.Split('/').Any(segment => segment is "." or ".."))
+        {
+            throw new InvalidDataException("Moonraker returned an invalid thumbnail path.");
+        }
+
+        string contentType = Path.GetExtension(filePath).ToLowerInvariant() switch
+        {
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".png" => "image/png",
+            ".gif" => "image/gif",
+            ".webp" => "image/webp",
+            _ => throw new InvalidDataException("Moonraker returned an unsupported thumbnail image type."),
+        };
+
+        using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(_timeouts.FileDownloadTimeout);
+        using HttpResponseMessage response = await _http.GetAsync(
+            thumbnailUri,
+            HttpCompletionOption.ResponseHeadersRead,
+            cts.Token).ConfigureAwait(false);
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            return null;
+        }
+
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new HttpRequestException(
+                "Moonraker thumbnail request failed.",
+                inner: null,
+                response.StatusCode);
+        }
+
+        if (response.Content.Headers.ContentLength is > MaxCurrentJobThumbnailBytes)
+        {
+            throw new InvalidDataException("Moonraker thumbnail response exceeded the size limit.");
+        }
+
+        await using Stream stream = await response.Content.ReadAsStreamAsync(cts.Token).ConfigureAwait(false);
+        using var buffer = new MemoryStream();
+        byte[] chunk = new byte[81920];
+        while (true)
+        {
+            int read = await stream.ReadAsync(chunk, cts.Token).ConfigureAwait(false);
+            if (read == 0)
+            {
+                break;
+            }
+
+            if (buffer.Length + read > MaxCurrentJobThumbnailBytes)
+            {
+                throw new InvalidDataException("Moonraker thumbnail response exceeded the size limit.");
+            }
+
+            await buffer.WriteAsync(chunk.AsMemory(0, read), cts.Token).ConfigureAwait(false);
+        }
+
+        byte[] content = buffer.ToArray();
+        if (!HasValidCurrentJobThumbnailSignature(contentType, content))
+        {
+            throw new InvalidDataException("Moonraker thumbnail response did not contain a valid image.");
+        }
+
+        return new HistoryThumbnailContent(content, contentType);
+    }
+
+    private static bool HasValidCurrentJobThumbnailSignature(string contentType, byte[] content) =>
+        contentType switch
+        {
+            "image/jpeg" => content.Length >= 3 &&
+                            content[0] == 0xFF && content[1] == 0xD8 && content[2] == 0xFF,
+            "image/png" => content.AsSpan().StartsWith(
+                new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A }),
+            "image/gif" => content.AsSpan().StartsWith("GIF87a"u8) ||
+                            content.AsSpan().StartsWith("GIF89a"u8),
+            "image/webp" => content.Length >= 12 &&
+                            content.AsSpan(0, 4).SequenceEqual("RIFF"u8) &&
+                            content.AsSpan(8, 4).SequenceEqual("WEBP"u8),
+            _ => false,
+        };
 
     /// <summary>
     /// ISupportsFileList implementation - gets the list of files on the printer.

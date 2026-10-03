@@ -376,6 +376,14 @@ public interface IPrintersService
         CancellationToken ct);
 
     /// <summary>
+    /// Retrieves the active print job thumbnail when the supplied cache token matches the current image.
+    /// </summary>
+    Task<HistoryThumbnailContent?> GetCurrentJobThumbnailAsync(
+        Guid printerId,
+        string? cacheToken,
+        CancellationToken ct);
+
+    /// <summary>
     /// Probes one exact backend history ID without treating malformed, unavailable,
     /// or unsupported responses as authoritative absence.
     /// </summary>

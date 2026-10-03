@@ -38,6 +38,12 @@ public record PrinterStatusDto(
     PrinterSafetyTelemetryDto? SafetyTelemetry = null)
 {
     /// <summary>
+    /// Relative authenticated proxy URL for the active job thumbnail.
+    /// </summary>
+    public string? CurrentJobThumbnailUrl =>
+        PrinterThumbnailUrl.Create(Id, State, JobName, ThumbnailUrl);
+
+    /// <summary>
     /// Returns a copy with FileName derived from JobName (path stripped) and JobName preserved as-is.
     /// </summary>
     public PrinterStatusDto WithNormalizedFileName() =>

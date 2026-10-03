@@ -26,7 +26,8 @@ public partial class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
     ISupportsTemperatureControl,
     ISupportsFilamentUsageQuery,
     ISupportsHistory,
-    ISupportsHistoryThumbnail
+    ISupportsHistoryThumbnail,
+    ISupportsCurrentJobThumbnail
 {
     [SuppressMessage(
         "IDisposableAnalyzers.Correctness",
@@ -80,6 +81,18 @@ public partial class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
         PrinterCredential? credential = null,
         CancellationToken ct = default)
         => await _apiClient.GetHistoryThumbnailAsync(baseUrl, jobId, credential, ct);
+
+    /// <inheritdoc />
+    public async Task<HistoryThumbnailContent?> GetCurrentJobThumbnailAsync(
+        string baseUrl,
+        string thumbnailUrl,
+        PrinterCredential? credential = null,
+        CancellationToken ct = default)
+        => await _apiClient.GetCurrentJobThumbnailAsync(
+            baseUrl,
+            thumbnailUrl,
+            credential,
+            ct);
 
     public async Task<HistoryTotals?> GetHistoryTotalsAsync(
         string baseUrl,

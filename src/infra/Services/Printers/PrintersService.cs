@@ -628,6 +628,55 @@ public class PrintersService(
             ct).ConfigureAwait(false);
     }
 
+    /// <inheritdoc />
+    public async Task<HistoryThumbnailContent?> GetCurrentJobThumbnailAsync(
+        Guid printerId,
+        string? cacheToken,
+        CancellationToken ct)
+    {
+        Printer? printer = await FindByIdAsync(printerId, ct).ConfigureAwait(false);
+        if (printer is null)
+        {
+            throw new KeyNotFoundException($"Printer {printerId} was not found.");
+        }
+
+        IBackendClient client = GetBackendClient((PrinterBackend)printer.Backend);
+        if (client is not ISupportsJobControl jobClient ||
+            client is not ISupportsCurrentJobThumbnail thumbnailClient)
+        {
+            return null;
+        }
+
+        PrinterJob? job = await jobClient.GetJobAsync(
+            printer.BackendUrl,
+            printer.Credential,
+            ct).ConfigureAwait(false);
+        if (job is null ||
+            (job.PrintState is null ||
+             (!job.PrintState.Equals("printing", StringComparison.OrdinalIgnoreCase) &&
+              !job.PrintState.Equals("paused", StringComparison.OrdinalIgnoreCase))) ||
+            string.IsNullOrWhiteSpace(job.JobName) ||
+            string.IsNullOrWhiteSpace(job.ThumbnailUrl))
+        {
+            return null;
+        }
+
+        if (cacheToken is not null &&
+            !string.Equals(
+                cacheToken,
+                PrinterThumbnailUrl.GetCacheToken(job.JobName, job.ThumbnailUrl),
+                StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        return await thumbnailClient.GetCurrentJobThumbnailAsync(
+            printer.BackendUrl,
+            job.ThumbnailUrl,
+            printer.Credential,
+            ct).ConfigureAwait(false);
+    }
+
     private string? GetHistoryThumbnailUrl(
         Printer printer,
         PrinterBackend backend,
@@ -1133,6 +1182,11 @@ public class PrintersService(
                     ? Convert.ToBase64String(p.RowVersion)
                     : null,
                 ConfigurationRevision = p.ConfigurationRevision,
+                CurrentJobThumbnailUrl = PrinterThumbnailUrl.Create(
+                    dto.Id,
+                    dto.State,
+                    dto.JobName,
+                    dto.ThumbnailUrl),
             };
             return ApplyCameraContract(dto);
         }
@@ -2115,7 +2169,8 @@ public class PrintersService(
                     BedTypeName: p.BedType?.Name,
                     BedTypeColor: p.BedType?.Color,
                     UseModelDispatchDefaults: p.UseModelDispatchDefaults,
-                    RowVersion: p.RowVersion is { Length: > 0 } ? Convert.ToBase64String(p.RowVersion) : null));
+                    RowVersion: p.RowVersion is { Length: > 0 } ? Convert.ToBase64String(p.RowVersion) : null,
+                    CurrentJobThumbnailUrl: status.CurrentJobThumbnailUrl));
             }
             catch (Exception ex)
             {
@@ -5835,7 +5890,12 @@ public class PrintersService(
                     State = job.PrintState,
                     Progress = job.Progress,
                     JobName = job.JobName,
-                    ThumbnailUrl = job.ThumbnailUrl
+                    ThumbnailUrl = job.ThumbnailUrl,
+                    CurrentJobThumbnailUrl = PrinterThumbnailUrl.Create(
+                        id,
+                        job.PrintState,
+                        job.JobName,
+                        job.ThumbnailUrl)
                 }
                 : null;
         }

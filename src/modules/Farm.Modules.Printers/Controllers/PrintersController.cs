@@ -5485,6 +5485,70 @@ public class PrintersController(
                 ["code"] = code,
             });
 
+    /// <summary>
+    /// Returns the authenticated same-origin image for a printer's active job.
+    /// </summary>
+    [HttpGet("{id:guid}/current-job/thumbnail")]
+    [ProducesResponseType(typeof(FileContentResult), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status408RequestTimeout)]
+    [ProducesResponseType(StatusCodes.Status502BadGateway)]
+    public async Task<IActionResult> GetCurrentJobThumbnailAsync(
+        Guid id,
+        [FromQuery(Name = "v")] string? cacheToken,
+        CancellationToken ct)
+    {
+        if (!await CanAccessPrinterAsync(id, PrinterGroupAccessLevel.View, ct))
+        {
+            return NotFound();
+        }
+
+        if (cacheToken is not null &&
+            (cacheToken.Length != 16 || cacheToken.Any(character => !char.IsAsciiHexDigit(character))))
+        {
+            return BadRequest();
+        }
+
+        try
+        {
+            HistoryThumbnailContent? thumbnail =
+                await _printersService.GetCurrentJobThumbnailAsync(id, cacheToken, ct);
+            if (thumbnail is null)
+            {
+                return NotFound();
+            }
+
+            Response.Headers.CacheControl = cacheToken is null
+                ? "private, no-cache"
+                : "private, max-age=300";
+            if (cacheToken is not null)
+            {
+                Response.Headers.ETag = $"\"{cacheToken}\"";
+            }
+
+            Response.Headers.XContentTypeOptions = "nosniff";
+            return File(thumbnail.Content, thumbnail.ContentType);
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound();
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            return StatusCode(StatusCodes.Status408RequestTimeout);
+        }
+        catch (TimeoutException)
+        {
+            return StatusCode(StatusCodes.Status408RequestTimeout);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or SocketException or IOException or InvalidDataException)
+        {
+            _logger.LogWarning(ex, "Current job thumbnail request failed for printer {PrinterId}", id);
+            return StatusCode(StatusCodes.Status502BadGateway);
+        }
+    }
+
     [HttpGet("{id}/history/totals")]
     [ProducesResponseType(typeof(HistoryTotals), 200)]
     [ProducesResponseType(404)]

@@ -1075,8 +1075,54 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient, IDisposable
                 $"PrusaLink history job {jobId} does not have a thumbnail.");
         }
 
-        Uri configuredEndpoint = EnsureBaseUri(normalizedBaseUrl);
-        if (!Uri.TryCreate(job.ThumbnailUrl, UriKind.Absolute, out Uri? thumbnailUri) ||
+        return await FetchThumbnailContentAsync(
+            normalizedBaseUrl,
+            job.ThumbnailUrl,
+            credentials,
+            ct) ?? throw new KeyNotFoundException(
+                $"PrusaLink history thumbnail for job {jobId} was not found.");
+    }
+
+    public async Task<HistoryThumbnailContent?> GetCurrentJobThumbnailAsync(
+        string baseUrl,
+        string thumbnailUrl,
+        PrinterCredential? credentials = null,
+        CancellationToken ct = default)
+    {
+        try
+        {
+            return await FetchThumbnailContentAsync(
+                baseUrl.TrimEnd('/'),
+                thumbnailUrl,
+                credentials,
+                ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException ex)
+        {
+            throw new TimeoutException("PrusaLink thumbnail request timed out.", ex);
+        }
+        catch (SocketException ex)
+        {
+            throw new HttpRequestException("PrusaLink thumbnail transport failed.", ex);
+        }
+        catch (IOException ex)
+        {
+            throw new HttpRequestException("PrusaLink thumbnail transport failed.", ex);
+        }
+    }
+
+    private async Task<HistoryThumbnailContent?> FetchThumbnailContentAsync(
+        string baseUrl,
+        string thumbnailUrl,
+        PrinterCredential? credentials,
+        CancellationToken ct)
+    {
+        Uri configuredEndpoint = EnsureBaseUri(baseUrl.TrimEnd('/'));
+        if (!Uri.TryCreate(thumbnailUrl, UriKind.Absolute, out Uri? thumbnailUri) ||
             !IsSameOrigin(configuredEndpoint, thumbnailUri) ||
             !string.IsNullOrEmpty(thumbnailUri.UserInfo))
         {
@@ -1092,8 +1138,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient, IDisposable
             ct);
         if (response.StatusCode == HttpStatusCode.NotFound)
         {
-            throw new KeyNotFoundException(
-                $"PrusaLink history thumbnail for job {jobId} was not found.");
+            return null;
         }
 
         if (!response.IsSuccessStatusCode)
