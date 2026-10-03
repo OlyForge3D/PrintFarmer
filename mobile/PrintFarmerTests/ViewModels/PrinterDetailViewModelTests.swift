@@ -2162,6 +2162,29 @@ extension PrinterDetailViewModelTests {
         XCTAssertNotNil(vm.dispatchError)
     }
 
+    func testStartNextJobRejectsEveryOnlineNonIdleState() async throws {
+        for state: String? in ["error", "maintenance", "busy", "unknown", "printing", "starting", "paused", nil] {
+            let service = MockJobService()
+            let vm = makeOperatorViewModel(jobService: service)
+            var printer = try TestData.decodePrinter()
+            printer.isOnline = true
+            printer.state = state
+            vm.printer = printer
+            vm.assignedQueue = [
+                makeQueuedJob(id: UUID().uuidString, assignedTo: printer.id, status: "Queued",
+                              position: 1, revision: "revision")
+            ]
+
+            XCTAssertFalse(vm.isIdle, "\(state ?? "nil") must disable Start next job")
+            await vm.startNextJob(vm.assignedQueue[0])
+
+            XCTAssertNil(service.dispatchCalledWith, "\(state ?? "nil") must not dispatch")
+            XCTAssertNil(service.dispatchToCalledWith)
+            XCTAssertEqual(vm.dispatchError, "The printer must be online and idle before starting the next job.")
+            XCTAssertFalse(vm.isDispatching)
+        }
+    }
+
     func testStartNextJobSurfacesServiceFailure() async throws {
         let service = MockJobService()
         service.actionErrorToThrow = NetworkError.forbidden

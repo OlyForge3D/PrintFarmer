@@ -7,7 +7,6 @@ struct PrinterDetailView: View {
     @Environment(ServerRegistry.self) private var serverRegistry
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.scenePhase) private var scenePhase
-    @Environment(\.dismiss) private var dismiss
     @State private var viewModel: PrinterDetailViewModel
     @State private var coverageViewModel: PrinterFilamentCoverageViewModel
     @State private var activeTasks: [Task<Void, Never>] = []
@@ -112,7 +111,9 @@ struct PrinterDetailView: View {
         .navigationBarBackButtonHidden()
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
-                Button { dismiss() } label: { Label("Farm", systemImage: "chevron.left") }
+                Button {
+                    Self.returnToFarm(router: router, capabilities: services.capabilitiesService.resolved)
+                } label: { Label("Farm", systemImage: "chevron.left") }
                     .accessibilityIdentifier("printer.detail.farm")
             }
             ToolbarItem(placement: .topBarTrailing) {
@@ -844,7 +845,7 @@ struct PrinterDetailView: View {
                     .frame(maxWidth: .infinity, minHeight: 44)
             }
             .buttonStyle(.bordered)
-            .disabled(!printer.isOnline || viewModel.isActivelyPrinting
+            .disabled(!printer.isOnline || !viewModel.isIdle
                       || viewModel.isDispatching || viewModel.isPerformingAction
                       || job.job.rowVersion?.isEmpty != false)
             .disabled(!(authViewModel.currentUser?.permissions.contains("queue:start") == true
@@ -856,6 +857,11 @@ struct PrinterDetailView: View {
         .padding()
         .operatorCard()
         .accessibilityIdentifier("printer.detail.queue.row.\(job.id)")
+    }
+
+    static func returnToFarm(router: AppRouter, capabilities: ResolvedSystemCapabilities) {
+        router.invalidatePendingNavigation()
+        router.selectTab(.farm, capabilities: capabilities)
     }
 
     private func matchTint(_ state: PrinterDetailViewModel.QueueMatchState) -> Color {

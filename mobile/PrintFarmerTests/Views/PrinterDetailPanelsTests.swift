@@ -16,6 +16,27 @@ final class PrinterDetailPanelsTests: XCTestCase {
         }
     }
 
+    func testFarmToolbarReturnsToFarmRootFromNonFarmOrigins() {
+        let router = AppRouter()
+        for origin in router.visibleTabs(for: .defaults) where origin != .farm {
+            router.selectTab(origin, capabilities: .defaults)
+            router.printersPath.append(AppDestination.printerDetail(id: UUID()))
+            router.inventoryPath.append(AppDestination.printerDetail(id: UUID()))
+            router.jobsPath.append(AppDestination.printerDetail(id: UUID()))
+            router.notificationsPath.append(AppDestination.printerDetail(id: UUID()))
+            router.pendingFilamentSwap = .init(printerId: UUID(), toolheadIndex: 0, jobId: nil)
+
+            PrinterDetailView.returnToFarm(router: router, capabilities: .defaults)
+
+            XCTAssertEqual(router.selectedTab, .farm, "Origin \(origin)")
+            XCTAssertTrue(router.printersPath.isEmpty)
+            XCTAssertTrue(router.inventoryPath.isEmpty)
+            XCTAssertTrue(router.jobsPath.isEmpty)
+            XCTAssertTrue(router.notificationsPath.isEmpty)
+            XCTAssertNil(router.pendingFilamentSwap)
+        }
+    }
+
     func testProductionDetailHostCreatesControlsWhenPendingCompositionSettles() async throws {
         executionTimeAllowance = 60
         let fixture = try detailHostFixture()

@@ -1803,8 +1803,12 @@ final class PrinterDetailViewModel {
 
     func startNextJob(_ reviewedJob: QueuedPrintJobResponse) async {
         guard !isDispatching, !isPerformingAction else { return }
+        guard isOnline, isIdle else {
+            dispatchError = "The printer must be online and idle before starting the next job."
+            return
+        }
         guard isViewActive, let printer, printer.isOnline,
-              !isActivelyPrinting, let job = nextQueuedJobs.first,
+              isIdle, let job = nextQueuedJobs.first,
               job.id == reviewedJob.id, job.job.rowVersion == reviewedJob.job.rowVersion,
               let jobService, let printerService, let id = job.job.jobUUID,
               let revision = job.job.rowVersion, !revision.isEmpty else {
