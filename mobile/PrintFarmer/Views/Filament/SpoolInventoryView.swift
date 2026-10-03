@@ -14,6 +14,7 @@ struct SpoolInventoryView: View {
     @State private var showAddSpool = false
     @State private var showScanFlow = false
     @State private var showBarcodeIntake = false
+    @State private var showPrintedParts = false
     @State private var nfcWriteTarget: NFCWriteTarget?
     @State private var activeTasks: [Task<Void, Never>] = []
 
@@ -80,6 +81,20 @@ struct SpoolInventoryView: View {
             .navigationBarTitleDisplayMode(.large)
             #endif
             .rootNavigationChrome(for: .filament) {
+                if services.capabilitiesService.resolved.printedPartsInventoryEnabled {
+                    Button {
+                        showPrintedParts = true
+                    } label: {
+                        Image(systemName: "cube.box")
+                            .frame(
+                                minWidth: RootNavigationChrome.minimumTouchTarget,
+                                minHeight: RootNavigationChrome.minimumTouchTarget
+                            )
+                    }
+                    .accessibilityLabel("Printed parts")
+                    .accessibilityHint("Opens printed-part stock and quantity adjustments.")
+                    .accessibilityIdentifier("filament.printedParts")
+                }
                 Menu {
                     Button {
                         showScanFlow = true
@@ -166,6 +181,24 @@ struct SpoolInventoryView: View {
                         let task = Task { await viewModel.loadSpools() }
                         activeTasks.append(task)
                     }
+            }
+            .sheet(isPresented: $showPrintedParts) {
+                NavigationStack {
+                    if services.capabilitiesService.resolved.printedPartsInventoryEnabled {
+                        PartsInventoryListView()
+                            .navigationDestination(for: AppDestination.self) { destination in
+                                destinationView(for: destination)
+                            }
+                            .toolbar {
+                                ToolbarItem(placement: .cancellationAction) {
+                                    Button("Done") { showPrintedParts = false }
+                                }
+                            }
+                    }
+                }
+            }
+            .onChange(of: services.capabilitiesService.resolved.printedPartsInventoryEnabled) { _, enabled in
+                if !enabled { showPrintedParts = false }
             }
             .sheet(isPresented: $viewModel.showScannedDataSheet) {
                 if let data = viewModel.scannedSpoolData {

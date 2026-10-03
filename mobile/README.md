@@ -139,6 +139,10 @@ printer and spool tags. Filament retains Add spool and continuous barcode
 intake. The toolbar avatar opens **Account**, including **Settings**, **Manage
 Servers**, notifications and offline activity.
 
+When the server enables printed-parts inventory, the **Printed parts** toolbar
+button in Filament opens stock browsing and quantity adjustment as a secondary
+sheet. This does not add a tab or restore the old inventory segment picker.
+
 Analytics, maintenance planning, reporting, locations and history belong on
 the web. Retired analytical deep links open Farm; native attention
 notifications still parse and apply Farm's **Needs attention** filter.
@@ -149,6 +153,14 @@ There is no shell preference or Two-modes upgrade promotion. Existing
 once by `ServerRegistry`, without clearing server registrations or safety
 preferences. Farm preserves the exact-owner read-only cached fleet and honest
 last-confirmed timestamp when offline.
+
+Farm's authorized offline snapshot is refreshed by the canonical Farm loader,
+not by the live list's pull-to-refresh. Its displayed last-confirmed timestamp
+is the stale bound; it must not be interpreted as the last live-list refresh.
+The snapshot host and live list currently both fetch/subscribe on Farm
+appearance. Moving between cached and live content can reset the active Farm
+navigation stack. Consolidating that ownership without losing offline safety
+is follow-on work in #3235.
 
 ### Printer Detail: Overview / Controls
 

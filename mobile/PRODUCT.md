@@ -27,7 +27,9 @@ The mobile app is not a second web console.
 - **Farm**: one printer list and printer detail. Notification attention links
   open Farm with its Needs attention filter applied.
 - **Queue**: print jobs and their actionable detail.
-- **Filament**: spool inventory, add spool and assignment.
+- **Filament**: spool inventory, add spool and assignment. Capability-enabled
+  printed-part stock and quantity adjustments remain a secondary toolbar entry,
+  not a fourth tab.
 - **Scan**: a floating button above the tab bar on every tab. The shared
   scanner reads barcode/QR and NFC printer and spool tags. Existing barcode
   intake and tagged-spool creation flows are reused.

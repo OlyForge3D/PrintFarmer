@@ -2,8 +2,8 @@ import SwiftUI
 
 /// Printed-parts inventory list (#714, F9): on-hand/reorder state for every
 /// active SKU, with unified scan history feeding recognition. Distinct from
-/// `SpoolInventoryView` (filament spools) — see `InventoryView` for the
-/// tab-level wrapper combining both.
+/// `SpoolInventoryView` (filament spools), which exposes this as a secondary
+/// capability-gated sheet rather than a separate tab.
 struct PartsInventoryListView: View {
     @Environment(ServiceContainer.self) private var services
     @Environment(AppRouter.self) private var router
