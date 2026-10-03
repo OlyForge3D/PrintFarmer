@@ -9,6 +9,7 @@ struct PrinterSetupControlsContent: View {
     var usesColumns: Bool? = nil
     var materialPresentation: PrinterFilamentPresentation? = nil
     var observesSafety = false
+    var showsMaterial = true
     var materialActions: [PrinterFilamentAction] = []
     var onMaterialAction: @MainActor (PrinterFilamentAction) -> Void = { _ in }
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -109,12 +110,22 @@ struct PrinterSetupControlsContent: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     insetGroup { PrinterMotionControls(viewModel: viewModel) }
-                    insetGroup {
+                    if !showsMaterial {
+                        insetGroup {
+                            VStack(alignment: .leading, spacing: 8) {
+                                EssentialControlHeading(title: "Fans")
+                                Text("Fan control is not available through the current mobile API. Use Open in web.")
+                                    .font(.footnote)
+                                    .foregroundStyle(Color.pfTextSecondary)
+                            }
+                        }
+                    }
+                    if showsMaterial { insetGroup {
                         PrinterMaterialControls(
                             viewModel: viewModel, materialPresentation: materialPresentation,
                             materialActions: materialActions, onMaterialAction: onMaterialAction
                         )
-                    }
+                    } }
                 }
 
             }

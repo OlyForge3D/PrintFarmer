@@ -26,6 +26,26 @@ final class PrinterDetailViewModelTests: XCTestCase {
 
     // MARK: - Load Printer Detail
 
+    func testEveryDetailPageTransitionStopsAndRestartsStatusCameraPolling() async throws {
+        mockService.printerToReturn = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        mockService.cameraUrlToReturn = PrinterCameraUrl(
+            streamUrl: nil, snapshotUrl: nil, accessMode: .snapshotOnly,
+            streamFormat: .unknown, snapshotStrategy: .snapmakerU1MonitorJpeg
+        )
+        await viewModel.loadPrinter()
+        for destination in [PrinterDetailPanel.control, .filament, .queue] {
+            viewModel.setSnapshotPollingAllowed(PrinterDetailCameraLifecycleMapping.isForeground(
+                scenePhase: .active, selectedPanel: destination
+            ))
+            XCTAssertFalse(viewModel.isSnapshotPollingActive, "\(destination) must stop the camera")
+            viewModel.setSnapshotPollingAllowed(PrinterDetailCameraLifecycleMapping.isForeground(
+                scenePhase: .active, selectedPanel: .status
+            ))
+            XCTAssertTrue(viewModel.isSnapshotPollingActive, "Returning to Status must restart the camera")
+        }
+        viewModel.stopSnapshotPolling()
+    }
+
     func testLoadPrinterSuccess() async throws {
         let printer = try TestData.decodePrinter()
         mockService.printerToReturn = printer
@@ -1799,9 +1819,10 @@ extension PrinterDetailViewModelTests {
         assignedTo: UUID?,
         status: String,
         position: Int,
-        material: String? = nil
+        material: String? = nil,
+        revision: String? = nil
     ) -> QueuedPrintJobResponse {
-        let job = QueuedJobInfo(
+        var job = QueuedJobInfo(
             id: id,
             name: "job-\(id)",
             fileName: "job-\(id).gcode",
@@ -1825,6 +1846,7 @@ extension PrinterDetailViewModelTests {
             completedCopies: 0,
             remainingCopies: 1
         )
+        job.rowVersion = revision
         let gcode = material.map { material in
             QueueGcodeFileMeta(
                 id: "g-\(id)",
@@ -1911,12 +1933,15 @@ extension PrinterDetailViewModelTests {
         XCTAssertEqual(filtered.map(\.id), ["mine"], "Only non-terminal jobs assigned to this printer survive")
     }
 
-    func testNextQueuedJobsCapsAtThree() {
+    func testNextQueuedJobsIncludesAllWaitingJobsAndExcludesActiveJobs() {
         let vm = makeOperatorViewModel()
         vm.assignedQueue = (0..<5).map {
             makeQueuedJob(id: "\($0)", assignedTo: TestData.testUUID, status: "Queued", position: $0)
         }
-        XCTAssertEqual(vm.nextQueuedJobs.count, 3, "Queue section shows at most three jobs")
+        vm.assignedQueue.append(
+            makeQueuedJob(id: "active", assignedTo: TestData.testUUID, status: "Printing", position: 6)
+        )
+        XCTAssertEqual(vm.nextQueuedJobs.map(\.id), ["0", "1", "2", "3", "4"])
     }
 
     func testMatchStateMatchMismatchUnknown() {
@@ -2077,6 +2102,69 @@ extension PrinterDetailViewModelTests {
     }
 
     // MARK: Dispatch-to action
+
+    func testStartNextJobUsesAssignedHeadAndReviewedRevision() async throws {
+        let service = MockJobService()
+        let vm = makeOperatorViewModel(jobService: service)
+        var printer = try TestData.decodePrinter()
+        printer.isOnline = true
+        printer.state = "idle"
+        vm.printer = printer
+        mockService.printerToReturn = printer
+        let id = UUID()
+        vm.assignedQueue = [
+            makeQueuedJob(id: id.uuidString, assignedTo: printer.id, status: "Queued",
+                          position: 1, revision: "reviewed-revision")
+        ]
+        await vm.startNextJob()
+        XCTAssertEqual(service.dispatchCalledWith, id)
+        XCTAssertEqual(service.dispatchReviewedRowVersion, "reviewed-revision")
+        XCTAssertNil(service.dispatchToCalledWith, "Starting an assigned job must not reassign it")
+        XCTAssertNil(vm.dispatchError)
+        XCTAssertFalse(vm.isDispatching)
+        XCTAssertFalse(vm.isPerformingAction)
+    }
+
+    func testStartNextJobBlocksMissingRevisionAndActivePrinter() async throws {
+        let service = MockJobService()
+        let vm = makeOperatorViewModel(jobService: service)
+        var printer = try TestData.decodePrinter()
+        printer.isOnline = true
+        printer.state = "idle"
+        vm.printer = printer
+        vm.assignedQueue = [
+            makeQueuedJob(id: UUID().uuidString, assignedTo: printer.id, status: "Queued", position: 1)
+        ]
+        await vm.startNextJob()
+        XCTAssertNil(service.dispatchCalledWith)
+        XCTAssertNotNil(vm.dispatchError)
+        printer.state = "printing"
+        vm.printer = printer
+        vm.assignedQueue = [
+            makeQueuedJob(id: UUID().uuidString, assignedTo: printer.id, status: "Queued",
+                          position: 1, revision: "revision")
+        ]
+        await vm.startNextJob()
+        XCTAssertNil(service.dispatchCalledWith)
+        XCTAssertNotNil(vm.dispatchError)
+    }
+
+    func testStartNextJobSurfacesServiceFailure() async throws {
+        let service = MockJobService()
+        service.actionErrorToThrow = NetworkError.forbidden
+        let vm = makeOperatorViewModel(jobService: service)
+        var printer = try TestData.decodePrinter()
+        printer.isOnline = true
+        printer.state = "idle"
+        vm.printer = printer
+        vm.assignedQueue = [
+            makeQueuedJob(id: UUID().uuidString, assignedTo: printer.id, status: "Queued",
+                          position: 1, revision: "revision")
+        ]
+        await vm.startNextJob()
+        XCTAssertNotNil(vm.dispatchError)
+        XCTAssertFalse(vm.isDispatching)
+    }
 
     func testBeginDispatchLoadsCandidatesSortedByScore() async {
         let jobService = MockJobService()

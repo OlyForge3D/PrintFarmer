@@ -1782,6 +1782,41 @@ final class PrinterDetailViewModel {
 
     // MARK: - Dispatch-to
 
+    func startNextJob() async {
+        guard !isDispatching, !isPerformingAction else { return }
+        guard isViewActive, let printer, printer.isOnline,
+              !isActivelyPrinting, let job = nextQueuedJobs.first,
+              let jobService, let printerService, let id = job.job.jobUUID,
+              let revision = job.job.rowVersion, !revision.isEmpty else {
+            dispatchError = "Refresh this printer and its queue before starting the next job. The printer must be idle and the job must have a revision."
+            return
+        }
+        let authority = beginActionAuthority(for: printerService)
+        isDispatching = true
+        dispatchError = nil
+        defer {
+            isDispatching = false
+            endBusyToken(authority.busyToken)
+        }
+        do {
+            let result = try await jobService.dispatch(id: id, reviewedRowVersion: revision)
+            guard hasActionAuthority(authority) else { return }
+            switch result {
+            case .accepted:
+                break
+            case .reconciliation(let response):
+                dispatchError = response.dispatchResult?.errorDetail
+                    ?? "Dispatch outcome is being reconciled. Do not dispatch again."
+            case .rejected(let response):
+                dispatchError = response.dispatchResult?.errorDetail ?? "The printer rejected the dispatch."
+            }
+            await loadPrinter()
+        } catch {
+            guard hasActionAuthority(authority) else { return }
+            dispatchError = error.localizedDescription
+        }
+    }
+
     func beginDispatch(for job: QueuedPrintJobResponse) async {
         guard isViewActive, let jobService, let jobUUID = job.job.jobUUID else { return }
         dispatchTargetJob = job
@@ -2267,7 +2302,7 @@ final class PrinterDetailViewModel {
 
     /// The operator queue section shows at most three assigned jobs.
     var nextQueuedJobs: [QueuedPrintJobResponse] {
-        Array(assignedQueue.prefix(3))
+        assignedQueue.filter { ["queued", "assigned"].contains($0.job.status.lowercased()) }
     }
 
     /// Per-job compatibility verdict derived read-only from the loaded

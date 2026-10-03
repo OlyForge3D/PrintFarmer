@@ -6,6 +6,7 @@ struct PrinterFilamentSection: View {
     let actions: [PrinterFilamentAction]
     let onAction: @MainActor (PrinterFilamentAction) -> Void
     var embedded = false
+    var showsAllActions = false
     @State var detailsExpanded = false
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
@@ -65,7 +66,9 @@ struct PrinterFilamentSection: View {
             if !embedded, let action = primaryAction {
                 actionButton(action)
             }
-            if !embedded {
+            if !embedded, showsAllActions {
+                details
+            } else if !embedded {
                 DisclosureGroup(isExpanded: $detailsExpanded) {
                     details
                 } label: {
@@ -158,15 +161,26 @@ struct PrinterFilamentSection: View {
 
     private func actionButton(_ action: PrinterFilamentAction) -> some View {
         Button { select(action) } label: {
-            Text(action.kind.title)
+            Text(actionTitle(action))
                 .frame(minHeight: 44, alignment: .leading)
                 .contentShape(Rectangle())
         }
+
         .buttonStyle(.borderless)
         .disabled(presentation.disabledReason(for: action) != nil)
         .accessibilityLabel("\(action.kind.title), \(action.target.label)")
         .accessibilityHint(presentation.disabledReason(for: action) ?? "")
         .accessibilityIdentifier("printer.filament.action.\(action.id)")
+    }
+
+    private func actionTitle(_ action: PrinterFilamentAction) -> String {
+        guard showsAllActions else { return action.kind.title }
+        switch action.kind {
+        case .change: return "Swap"
+        case .scanNFC: return "Scan spool"
+        case .clearAssignment: return "Unassign"
+        default: return action.kind.title
+        }
     }
 
     private func rowDetails(_ row: PrinterFilamentPresentation.Row) -> some View {

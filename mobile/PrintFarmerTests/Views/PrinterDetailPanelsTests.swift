@@ -409,50 +409,52 @@ final class PrinterDetailPanelsTests: XCTestCase {
 
     func testAvailablePanelsAlwaysIncludesControlsRegardlessOfAuthorization() {
         XCTAssertEqual(
-            PrinterDetailPanelsHost<EmptyView, EmptyView>.availablePanels(controlsAvailable: true),
-            [.overview, .controls]
+            PrinterDetailPanelsHost<EmptyView, EmptyView, EmptyView, EmptyView>.availablePanels(controlsAvailable: true),
+            [.status, .control, .filament, .queue]
         )
         XCTAssertEqual(
-            PrinterDetailPanelsHost<EmptyView, EmptyView>.availablePanels(controlsAvailable: false),
-            [.overview, .controls]
+            PrinterDetailPanelsHost<EmptyView, EmptyView, EmptyView, EmptyView>.availablePanels(controlsAvailable: false),
+            [.status, .control, .filament, .queue]
         )
     }
 
     func testResolvedSelectionKeepsControlsWhenStillAvailable() {
-        let resolved = PrinterDetailPanelsHost<EmptyView, EmptyView>.resolvedSelection(
-            current: .controls,
+        let resolved = PrinterDetailPanelsHost<EmptyView, EmptyView, EmptyView, EmptyView>.resolvedSelection(
+            current: .control,
             controlsAvailable: true
         )
-        XCTAssertEqual(resolved, .controls)
+        XCTAssertEqual(resolved, .control)
     }
 
     func testResolvedSelectionRetainsControlsWhenAccessRevoked() {
-        let resolved = PrinterDetailPanelsHost<EmptyView, EmptyView>.resolvedSelection(
-            current: .controls,
+        let resolved = PrinterDetailPanelsHost<EmptyView, EmptyView, EmptyView, EmptyView>.resolvedSelection(
+            current: .control,
             controlsAvailable: false
         )
-        XCTAssertEqual(resolved, .controls)
+        XCTAssertEqual(resolved, .control)
     }
 
     func testResolvedSelectionLeavesStatusUnaffectedByControlsAvailability() {
         XCTAssertEqual(
-            PrinterDetailPanelsHost<EmptyView, EmptyView>.resolvedSelection(
-                current: .overview, controlsAvailable: true
+            PrinterDetailPanelsHost<EmptyView, EmptyView, EmptyView, EmptyView>.resolvedSelection(
+                current: .status, controlsAvailable: true
             ),
-            .overview
+            .status
         )
         XCTAssertEqual(
-            PrinterDetailPanelsHost<EmptyView, EmptyView>.resolvedSelection(
-                current: .overview, controlsAvailable: false
+            PrinterDetailPanelsHost<EmptyView, EmptyView, EmptyView, EmptyView>.resolvedSelection(
+                current: .status, controlsAvailable: false
             ),
-            .overview
+            .status
         )
     }
 
     func testPanelAccessibilityIdentifiersMatchEpicReservation() {
-        // Reserved by epic #2518: printer.detail.panel.selector / .overview / .controls.
-        XCTAssertEqual(PrinterDetailPanel.overview.accessibilityIdentifier, "printer.detail.panel.overview")
-        XCTAssertEqual(PrinterDetailPanel.controls.accessibilityIdentifier, "printer.detail.panel.controls")
+        // Reserved by epic #2518: printer.detail.panel.selector / .status / .control.
+        XCTAssertEqual(PrinterDetailPanel.status.accessibilityIdentifier, "printer.detail.panel.status")
+        XCTAssertEqual(PrinterDetailPanel.control.accessibilityIdentifier, "printer.detail.panel.control")
+        XCTAssertEqual(PrinterDetailPanel.filament.accessibilityIdentifier, "printer.detail.panel.filament")
+        XCTAssertEqual(PrinterDetailPanel.queue.accessibilityIdentifier, "printer.detail.panel.queue")
     }
 
     // MARK: - Run-action presentation mapping
@@ -818,7 +820,7 @@ final class PrinterDetailPanelsTests: XCTestCase {
 
     func testCameraForegroundTrueOnlyWhenSceneActiveAndStatusSelected() {
         XCTAssertTrue(PrinterDetailCameraLifecycleMapping.isForeground(
-            scenePhase: .active, selectedPanel: .overview
+            scenePhase: .active, selectedPanel: .status
         ))
     }
 
@@ -828,37 +830,23 @@ final class PrinterDetailPanelsTests: XCTestCase {
         // `scenePhase == .active` alone is not sufficient once Controls is
         // the page actually on screen.
         XCTAssertFalse(PrinterDetailCameraLifecycleMapping.isForeground(
-            scenePhase: .active, selectedPanel: .controls
+            scenePhase: .active, selectedPanel: .control
+        ))
+        XCTAssertFalse(PrinterDetailCameraLifecycleMapping.isForeground(
+            scenePhase: .active, selectedPanel: .filament
+        ))
+        XCTAssertFalse(PrinterDetailCameraLifecycleMapping.isForeground(
+            scenePhase: .active, selectedPanel: .queue
         ))
     }
 
     func testCameraNotForegroundWhenSceneInactiveOrBackgroundedEvenOnStatusPage() {
         XCTAssertFalse(PrinterDetailCameraLifecycleMapping.isForeground(
-            scenePhase: .inactive, selectedPanel: .overview
+            scenePhase: .inactive, selectedPanel: .status
         ))
         XCTAssertFalse(PrinterDetailCameraLifecycleMapping.isForeground(
-            scenePhase: .background, selectedPanel: .overview
+            scenePhase: .background, selectedPanel: .status
         ))
-    }
-
-    // MARK: - Homed-axes badge source resolution
-
-    func test_resolveHomedAxes_prefersPopulatedSourceOverStaleEmptyString() {
-        // The list DTO can carry "" while /status carries the real string. `??`
-        // only falls through on nil, so the empty value used to win and badge a
-        // homed printer as unhomed.
-        XCTAssertEqual(PrinterDetailView.resolveHomedAxes(["", "xyz"]), "xyz")
-        XCTAssertEqual(PrinterDetailView.resolveHomedAxes([nil, "xyz"]), "xyz")
-        XCTAssertEqual(PrinterDetailView.resolveHomedAxes(["xy", "xyz"]), "xy")
-    }
-
-    func test_resolveHomedAxes_keepsEmptyWhenThatIsAllTheBackendReports() {
-        // An empty string is a real "nothing is homed" signal; only a total
-        // absence of the field should hide the badges.
-        XCTAssertEqual(PrinterDetailView.resolveHomedAxes(["", nil]), "")
-        XCTAssertEqual(PrinterDetailView.resolveHomedAxes([nil, ""]), "")
-        XCTAssertNil(PrinterDetailView.resolveHomedAxes([nil, nil]))
-        XCTAssertNil(PrinterDetailView.resolveHomedAxes([]))
     }
 
 }

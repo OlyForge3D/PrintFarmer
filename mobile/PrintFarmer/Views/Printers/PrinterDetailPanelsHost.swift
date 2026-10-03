@@ -7,22 +7,23 @@ import SwiftUI
 /// Session identity remains registered server + printer UUID; this enum only
 /// tracks which page is currently on screen.
 enum PrinterDetailPanel: String, CaseIterable, Hashable, Sendable {
-    case overview
-    case controls
+    case status
+    case control
+    case filament
+    case queue
 
     var title: String {
         switch self {
-        case .overview: return String(localized: "Overview")
-        case .controls: return "Controls"
+        case .status: return "Status"
+        case .control: return "Control"
+        case .filament: return "Filament"
+        case .queue: return "Queue"
         }
     }
 
-    /// Reserved by epic #2518: `printer.detail.panel.overview` / `.controls`.
+    /// Reserved by epic #2518: `printer.detail.panel.status` / `.control`.
     var accessibilityIdentifier: String {
-        switch self {
-        case .overview: return "printer.detail.panel.overview"
-        case .controls: return "printer.detail.panel.controls"
-        }
+        "printer.detail.panel.\(rawValue)"
     }
 }
 
@@ -37,12 +38,14 @@ enum PrinterDetailPanel: String, CaseIterable, Hashable, Sendable {
 /// `PrinterDetailView` per the epic's "page selection sits above ownership"
 /// contract. Both the selector tap and a horizontal swipe update the same
 /// `selection` binding, so the two can never disagree.
-struct PrinterDetailPanelsHost<Overview: View, Controls: View>: View {
+struct PrinterDetailPanelsHost<Status: View, Control: View, Filament: View, Queue: View>: View {
     @Binding var selection: PrinterDetailPanel
     let controlsAvailable: Bool
     var printer: Printer? = nil
-    @ViewBuilder let overview: () -> Overview
-    @ViewBuilder let controls: () -> Controls
+    @ViewBuilder let status: () -> Status
+    @ViewBuilder let control: () -> Control
+    @ViewBuilder let filament: () -> Filament
+    @ViewBuilder let queue: () -> Queue
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     /// Discoverability is independent of command authorization. The Controls
@@ -82,7 +85,7 @@ struct PrinterDetailPanelsHost<Overview: View, Controls: View>: View {
                         }
                     }
                     PrinterDetailPanelPicker(selection: $selection)
-                    .frame(maxWidth: dynamicTypeSize.isAccessibilitySize ? .infinity : 380)
+                    .frame(maxWidth: .infinity)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, inset)
@@ -91,14 +94,14 @@ struct PrinterDetailPanelsHost<Overview: View, Controls: View>: View {
                 .background(Color.pfBackground)
 
                 TabView(selection: $selection) {
-                    page(overview(), panel: .overview)
-                        .tag(PrinterDetailPanel.overview)
-
-                    page(controls(), panel: .controls)
-                        .tag(PrinterDetailPanel.controls)
+                    page(status(), panel: .status).tag(PrinterDetailPanel.status)
+                    page(control(), panel: .control).tag(PrinterDetailPanel.control)
+                    page(filament(), panel: .filament).tag(PrinterDetailPanel.filament)
+                    page(queue(), panel: .queue).tag(PrinterDetailPanel.queue)
                 }
                 #if os(iOS)
-                .tabViewStyle(.page(indexDisplayMode: .never))
+                .tabViewStyle(.page(indexDisplayMode: .always))
+                .indexViewStyle(.page(backgroundDisplayMode: .always))
                 #endif
             }
         }
@@ -109,7 +112,7 @@ struct PrinterDetailPanelsHost<Overview: View, Controls: View>: View {
 
     private struct PrinterDetailPanelPicker: View {
         @Binding var selection: PrinterDetailPanel
-        @ScaledMetric(relativeTo: .subheadline) private var fontSize: CGFloat = 15
+        @ScaledMetric(relativeTo: .subheadline) private var fontSize: CGFloat = 13
 
         private var minimumWidth: CGFloat {
             let titleWidth = PrinterDetailPanel.allCases.flatMap { panel in
@@ -119,7 +122,7 @@ struct PrinterDetailPanelsHost<Overview: View, Controls: View>: View {
                     ]).width
                 }
             }.max() ?? 0
-            return CGFloat(PrinterDetailPanel.allCases.count) * (ceil(titleWidth) + 32)
+            return CGFloat(PrinterDetailPanel.allCases.count) * (ceil(titleWidth) + 16)
         }
 
         var body: some View {
@@ -518,7 +521,7 @@ enum PrinterDetailFilamentStaleMapping {
 
 // MARK: - Camera lifecycle mapping (issue #2522, Hicks review finding 19)
 
-/// Pure mirror of `PrinterDetailView.isOverviewPageForeground`, extracted so
+/// Pure mirror of `PrinterDetailView.isStatusPageForeground`, extracted so
 /// the exact gate deciding whether camera snapshot polling/the MJPEG live
 /// stream may run is unit-testable without hosting a view.
 ///
@@ -532,7 +535,7 @@ enum PrinterDetailCameraLifecycleMapping {
         scenePhase: ScenePhase,
         selectedPanel: PrinterDetailPanel
     ) -> Bool {
-        scenePhase == .active && selectedPanel == .overview
+        scenePhase == .active && selectedPanel == .status
     }
 }
 

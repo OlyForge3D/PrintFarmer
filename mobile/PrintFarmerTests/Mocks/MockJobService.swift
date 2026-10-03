@@ -18,6 +18,7 @@ final class MockJobService: JobServiceProtocol, @unchecked Sendable {
     var deleteCalledWith: UUID?
     var cancelCalledWith: UUID?
     var dispatchCalledWith: UUID?
+    var dispatchReviewedRowVersion: String?
     var abortCalledWith: UUID?
     var pauseCalledWith: UUID?
     var resumeCalledWith: UUID?
@@ -79,6 +80,7 @@ final class MockJobService: JobServiceProtocol, @unchecked Sendable {
         reviewedRowVersion: String
     ) async throws -> JobDispatchResult {
         dispatchCalledWith = id
+        dispatchReviewedRowVersion = reviewedRowVersion
         if let error = actionErrorToThrow ?? errorToThrow { throw error }
         if let dispatchResultToReturn {
             return dispatchResultToReturn

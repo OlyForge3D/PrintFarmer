@@ -69,6 +69,17 @@ The detail view has a segmented header and a page indicator. The toolbar shows "
 - The homed-axes badges on Overview (`homedAxesBadges`, `resolvedHomedAxes`) and their tests are removed.
 - Odometer, history tail, the Mainsail link, auto-dispatch and setup actions move behind "Open in web".
 
+### Detail implementation constraints
+
+The mobile printer/current-job contracts currently contain no layer counters,
+so Status reports **Layer unavailable** rather than inferring a layer from Z.
+The mobile service also has no fan command; Control directs operators to
+**Open in web** for fans. Heater, motion, Z-offset and physical filament
+commands retain the registered-server safety preference and verified capability
+gates. Starting the assigned queue head uses the existing dispatch endpoint
+with that job's reviewed revision; it never reassigns the job or silently
+retries a stale revision.
+
 ## Queue reorder endpoint
 
 `PUT /api/job-queue/jobs/{id}/position` requires `Queue.Write`.
