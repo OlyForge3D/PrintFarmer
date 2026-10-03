@@ -97,6 +97,8 @@ rows from older servers and must not guess from a truncated global list.
 Control and Filament share one parent-owned safety observation loop while
 either page is foreground. Both provide **Refresh safety checks**; leaving
 both pages or backgrounding invalidates evidence until a fresh read succeeds.
+The safety task host observes the legacy controls owner directly, so delayed
+capability completion starts and repeats refresh without changing pages.
 **Start next job** requires the established online/idle state, not merely the
 absence of a print. **Farm** clears pending detail routing and returns to the
 Farm root even when detail was opened from another destination.

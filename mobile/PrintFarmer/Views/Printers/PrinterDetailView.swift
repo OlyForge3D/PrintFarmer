@@ -417,24 +417,10 @@ struct PrinterDetailView: View {
             controlsViewModel?.handlePrinterUpdate(printer)
         }
         .modifier(PrinterControlsAccessLifecycle(viewModel: controlsViewModel))
-        .task(id: PrinterDetailSafetyDemand(
-            observes: scenePhase == .active && (selectedPanel == .control || selectedPanel == .filament),
-            owner: controlsViewModel.map(ObjectIdentifier.init),
-            loadingCapabilities: controlsViewModel?.isLoadingCapabilities ?? false
-        )) {
-            guard let controlsViewModel else { return }
-            guard scenePhase == .active && (selectedPanel == .control || selectedPanel == .filament) else {
-                controlsViewModel.suspendSafetyObservation()
-                return
-            }
-            guard !controlsViewModel.isLoadingCapabilities else { return }
-            await controlsViewModel.refreshSafetyEvidence()
-            while !Task.isCancelled && controlsViewModel.isActive {
-                do { try await Task.sleep(for: .seconds(5)) } catch { return }
-                await controlsViewModel.refreshSafetyEvidence()
-            }
-        }
-        .onDisappear { controlsViewModel?.suspendSafetyObservation() }
+        .modifier(PrinterDetailSafetyLifecycle(
+            viewModel: controlsViewModel,
+            observes: scenePhase == .active && (selectedPanel == .control || selectedPanel == .filament)
+        ))
         .safeAreaInset(edge: .top, spacing: 0) {
             if selectedPanel == .control {
             let presentation = runActionPresentation(for: printer)
@@ -594,6 +580,50 @@ struct PrinterDetailView: View {
         let observes: Bool
         let owner: ObjectIdentifier?
         let loadingCapabilities: Bool
+    }
+
+    private struct PrinterDetailSafetyLifecycle: ViewModifier {
+        let viewModel: PrinterControlsViewModel?
+        let observes: Bool
+
+        func body(content: Content) -> some View {
+            content.background {
+                if let viewModel {
+                    Color.clear
+                        .modifier(ObservedPrinterDetailSafetyLifecycle(viewModel: viewModel, observes: observes))
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
+            }
+        }
+    }
+
+    // This legacy ObservableObject must be observed at the safety task's host,
+    // not merely by pager children, so capability completion restarts the task.
+    private struct ObservedPrinterDetailSafetyLifecycle: ViewModifier {
+        @ObservedObject var viewModel: PrinterControlsViewModel
+        let observes: Bool
+
+        func body(content: Content) -> some View {
+            content
+                .task(id: PrinterDetailSafetyDemand(
+                    observes: observes,
+                    owner: ObjectIdentifier(viewModel),
+                    loadingCapabilities: viewModel.isLoadingCapabilities
+                )) {
+                    guard observes else {
+                        viewModel.suspendSafetyObservation()
+                        return
+                    }
+                    guard !viewModel.isLoadingCapabilities else { return }
+                    await viewModel.refreshSafetyEvidence()
+                    while !Task.isCancelled && viewModel.isActive {
+                        do { try await Task.sleep(for: .seconds(5)) } catch { return }
+                        await viewModel.refreshSafetyEvidence()
+                    }
+                }
+                .onDisappear { viewModel.suspendSafetyObservation() }
+        }
     }
 
     /// Eject clears assignment and requests physical unload; Unassign only

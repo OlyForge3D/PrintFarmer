@@ -68,9 +68,9 @@ final class PrinterDetailPanelsTests: XCTestCase {
         await fixture.services.awaitActiveServerSettled()
         XCTAssertEqual(fixture.services.activeServerGeneration, generation, "Settlement must not need a remount")
         try await waitForHost("The existing controls page must replace its connection fallback", in: controller.view) {
-            self.heaterTarget(in: controller.view)?.isEnabled == true
+            self.heaterTarget(in: controller.view)?.isEnabled == true && self.capabilityRequests(fixture.api).count == 2
         }
-        XCTAssertEqual(capabilityRequests(fixture.api).count, 1)
+        XCTAssertEqual(capabilityRequests(fixture.api).count, 2, "Owner load plus foreground safety discovery")
         XCTAssertEqual(capabilityRequests(fixture.api).first?.url?.host, fixture.second.baseURL.host)
         XCTAssertFalse(fixture.api.capturedRequests.contains { $0.url?.path.contains("control-operations") == true },
                        "Controls must not query the removed tracking API")
@@ -85,16 +85,20 @@ final class PrinterDetailPanelsTests: XCTestCase {
         let selector = try XCTUnwrap(views(UISegmentedControl.self, in: controller.view).first)
         selector.selectedSegmentIndex = 0
         selector.sendActions(for: .valueChanged)
+        await Task.yield()
         try await selectControls(in: controller)
+        try await waitForHost("Returning to Control must refresh discovery on the retained owner", in: controller.view) {
+            self.capabilityRequests(fixture.api).count == 3
+        }
         XCTAssertTrue(heaterTarget(in: controller.view) === field, "Page changes must retain the single owner/editor")
-        XCTAssertEqual(capabilityRequests(fixture.api).count, 1, "No capability refetch on repeated lifecycle triggers")
+        XCTAssertEqual(capabilityRequests(fixture.api).count, 3, "One new safety discovery on page return")
 
         try fixture.registry.setActive(id: fixture.first.id)
         XCTAssertNil(fixture.services.printerControlsComposition)
         try await waitForHost("A retained old-server editor must fail closed", in: controller.view) {
             self.heaterTarget(in: controller.view)?.isEnabled != true
         }
-        XCTAssertEqual(capabilityRequests(fixture.api).count, 1, "Identity churn cannot rebind or replace this host's owner")
+        XCTAssertEqual(capabilityRequests(fixture.api).count, 3, "Identity churn cannot rebind or replace this host's owner")
         XCTAssertTrue(detailRequests(fixture.api).allSatisfy { $0.httpMethod == "GET" })
         XCTAssertFalse(fixture.api.capturedRequests.contains { $0.url?.path == Self.deviceTokensPath })
     }
@@ -110,9 +114,9 @@ final class PrinterDetailPanelsTests: XCTestCase {
         defer { window.isHidden = true; window.rootViewController = nil }
         try await selectControls(in: controller)
         try await waitForHost("Initial detail load must expose the native heater editor", in: controller.view) {
-            self.heaterTarget(in: controller.view)?.isEnabled == true
+            self.heaterTarget(in: controller.view)?.isEnabled == true && self.capabilityRequests(fixture.api).count == 2
         }
-        XCTAssertEqual(capabilityRequests(fixture.api).count, 1)
+        XCTAssertEqual(capabilityRequests(fixture.api).count, 2, "Owner load plus foreground safety discovery")
         XCTAssertEqual(capabilityRequests(fixture.api).first?.url?.host, fixture.first.baseURL.host)
         XCTAssertFalse(fixture.api.capturedRequests.contains { $0.url?.path.contains("control-operations") == true },
                        "Controls must not query the removed tracking API")
@@ -125,6 +129,46 @@ final class PrinterDetailPanelsTests: XCTestCase {
     }
 
     private static let deviceTokensPath = "/api/notifications/device-tokens"
+
+    func testDelayedCapabilitiesStartAndRepeatSafetyWhileStayingOnControl() async throws {
+        try await assertDelayedCapabilitiesStartSafety(on: 1)
+    }
+
+    func testDelayedCapabilitiesStartAndRepeatSafetyWhileStayingOnFilament() async throws {
+        try await assertDelayedCapabilitiesStartSafety(on: 2)
+    }
+
+    private func assertDelayedCapabilitiesStartSafety(on panel: Int) async throws {
+        let barrier = AsyncBarrier()
+        defer { barrier.close() }
+        let fixture = try detailHostFixture(verifiedMaterial: true, capabilityBarrier: barrier)
+        fixture.registry.setAdvancedPrinterControlsEnabled(true)
+        let controller = DetailHostingController(rootView: try host(
+            PrinterDetailView(printerId: fixture.printer.id),
+            services: fixture.services, registry: fixture.registry
+        ))
+        let window = show(controller)
+        defer { window.isHidden = true; window.rootViewController = nil }
+        try await selectControls(in: controller)
+        let selector = try XCTUnwrap(views(UISegmentedControl.self, in: controller.view).first)
+        selector.selectedSegmentIndex = panel
+        selector.sendActions(for: .valueChanged)
+        try await waitForHost("Capability request must be held while the selected page is mounted", in: controller.view) {
+            !self.capabilityRequests(fixture.api).isEmpty
+                && self.views(UIButton.self, in: controller.view).contains {
+                    $0.accessibilityIdentifier == "printer.detail.safety.refresh" && !$0.isEnabled
+                }
+        }
+        let initialStatusReads = fixture.api.capturedRequests.filter { $0.url?.path.hasSuffix("/status") == true }.count
+        barrier.release()
+        // One read comes from loadCapabilities, one from the observation task,
+        // and a third proves its five-second loop continues without navigation.
+        try await waitForHost("Capability completion alone must start and repeat safety refresh", in: controller.view, timeout: .seconds(9)) {
+            fixture.api.capturedRequests.filter { $0.url?.path.hasSuffix("/status") == true }.count >= initialStatusReads + 3
+        }
+        XCTAssertEqual(selector.selectedSegmentIndex, panel)
+        XCTAssertFalse(fixture.api.capturedRequests.contains { $0.httpMethod != "GET" })
+    }
 
     func testFilamentSafetyRefreshSurvivesStatusQueueAndControlTraversal() async throws {
         let fixture = try detailHostFixture(verifiedMaterial: true)
@@ -173,7 +217,7 @@ final class PrinterDetailPanelsTests: XCTestCase {
         XCTAssertFalse(fixture.api.capturedRequests.contains { $0.httpMethod != "GET" })
     }
 
-    private func detailHostFixture(verifiedMaterial: Bool = false) throws -> (
+    private func detailHostFixture(verifiedMaterial: Bool = false, capabilityBarrier: AsyncBarrier? = nil) throws -> (
         services: ServiceContainer, registry: ServerRegistry, printer: Printer,
         first: RegisteredServer, second: RegisteredServer, api: MockAPIClient,
         disconnect: AsyncBarrier, connect: AsyncBarrier
@@ -197,21 +241,23 @@ final class PrinterDetailPanelsTests: XCTestCase {
         let printerData = try encoder.encode(printer)
         let details = try encoder.encode(PrinterDetails.controlsLimitsFixture(for: printer))
         let printerPath = "/api/printers/\(printer.id)"
+        let printerID = printer.id
         let capabilities = Data("""
-        {"printerId":"\(printer.id)","backend":"Moonraker",
+        {"printerId":"\(printerID)","backend":"Moonraker",
          "supportsHotendTemperature":true,"supportsBedTemperature":true}
         """.utf8)
         let api = MockAPIClient()
-        api.requestHandler = { request in
+        api.asyncRequestHandler = { request in
             let path = request.url?.path ?? ""
             let data: Data
             if path == printerPath {
                 data = printerData
             } else if path.hasSuffix("/backend-capabilities") {
+                await capabilityBarrier?.arriveAndWait()
                 if verifiedMaterial {
                     let safety = String(decoding: try encoder.encode(VerifiedSafetyFixtures.discovery()), as: UTF8.self)
                     data = Data("""
-                    {"printerId":"\(printer.id)","backend":"Moonraker",
+                    {"printerId":"\(printerID)","backend":"Moonraker",
                      "supportsHotendTemperature":true,"supportsBedTemperature":true,
                      "supportsFilamentLoad":true,"supportsFilamentUnload":true,
                      "supportsFilamentChange":true,"verifiedSafety":\(safety)}
@@ -220,7 +266,7 @@ final class PrinterDetailPanelsTests: XCTestCase {
                     data = capabilities
                 }
             } else if path.hasSuffix("/status") && verifiedMaterial {
-                data = try encoder.encode(VerifiedSafetyFixtures.status(id: printer.id))
+                data = try encoder.encode(VerifiedSafetyFixtures.status(id: printerID))
             } else if path.hasSuffix("/details") {
                 data = details
             } else {
@@ -331,13 +377,13 @@ final class PrinterDetailPanelsTests: XCTestCase {
         controller.view.layoutIfNeeded()
     }
 
-    private func waitForHost(_ message: String, in view: UIView, condition: () -> Bool) async throws {
+    private func waitForHost(_ message: String, in view: UIView, timeout: Duration = .seconds(5), condition: () -> Bool) async throws {
         func layout(_ view: UIView) {
             view.setNeedsLayout()
             view.layoutIfNeeded()
             view.subviews.forEach(layout)
         }
-        let deadline = ContinuousClock.now + .seconds(5)
+        let deadline = ContinuousClock.now + timeout
         repeat {
             layout(view)
             if condition() { return }
