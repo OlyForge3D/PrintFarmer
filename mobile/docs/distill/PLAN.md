@@ -90,8 +90,8 @@ Reordering changes the actual dispatch order, not just the list on screen. `Queu
   - skip, cancellation and bed-clear head selection;
   - the per-printer queue (`GetJobsByPrinterAsync`), applied only to its `Queued` rows. `Printing` rows are listed separately, ahead of the queued rows.
 - **Mixed-scope selections are cross-scope consumers and never call `OrderWithinScope()` over the combined set.** This covers the auto-dispatch candidate selection that combines a printer's assigned jobs with unassigned jobs (`AutoDispatchService`, and `AutoDispatchBackgroundService`'s `AssignedPrinterId == null || AssignedPrinterId == printerId` query). These selections:
-  1. take the head of each scope separately with `OrderWithinScope()`, so a reorder still decides which job leads its own scope; then
-  2. choose between those heads with the unchanged `OrderByPriorityDescending()`.
+  1. order each scope separately with `OrderWithinScope()` and scan it until the first **eligible** candidate, applying the existing scoring, claim, elimination and recovery-block filters exactly as today. That candidate is the scope's head, so a reorder still decides which job leads its own scope, and an ineligible raw head never hides the next compatible job; then
+  2. choose between those eligible heads with the unchanged `OrderByPriorityDescending()`. If neither scope yields an eligible head, the result is `NoCompatibleJob`, as today.
 
   Positions from the two scopes are never compared.
 - The queue list API returns queued jobs grouped by scope, each group in `OrderWithinScope()` order. The UI and dispatch therefore agree inside every scope, which is the only place a reorder can apply.
@@ -147,7 +147,8 @@ These follow the controller's existing `MapRevisionException` mapping.
 - Mixed-scope auto-dispatch regression, in both `AutoDispatchService` and `AutoDispatchBackgroundService`:
   - a printer's assigned jobs and the unassigned jobs hold conflicting `QueuePosition` values (an unassigned job has a lower position than the printer's head);
   - selection still picks each scope's head by `OrderWithinScope()`, then chooses between heads by `Priority desc → QueuedAt → Id`;
-  - no cross-scope position comparison changes the result.
+  - no cross-scope position comparison changes the result;
+  - when one scope's raw head is ineligible (eliminated, claimed, below the score threshold or recovery-blocked) but its second job is eligible, that second job becomes the scope's head and can still be dispatched.
 - Controller and service tests: every status code above, plus two concurrent moves where the second gets 412.
 
 **Mobile**
