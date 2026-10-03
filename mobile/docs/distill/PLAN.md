@@ -78,7 +78,27 @@ The mobile service also has no fan command; Control directs operators to
 commands retain the registered-server safety preference and verified capability
 gates. Starting the assigned queue head uses the existing dispatch endpoint
 with that job's reviewed revision; it never reassigns the job or silently
-retries a stale revision.
+retries a stale revision. Printer detail loads the existing **printer-scoped**
+analytics endpoint and preserves its response order; it does not infer a head
+from the first 200 cross-scope jobs or use creation time as queue time. Before
+#3228 lands this preserves the server's existing order; after #3228 it follows
+the authoritative scoped reorder automatically.
+
+Control and Filament share one parent-owned safety observation loop while
+either page is foreground. Both provide **Refresh safety checks**; leaving
+both pages or backgrounding invalidates evidence until a fresh read succeeds.
+**Start next job** requires the established online/idle state, not merely the
+absence of a print. **Farm** clears pending detail routing and returns to the
+Farm root even when detail was opened from another destination.
+
+The distilled detail deliberately replaces dispatch-to-another-printer with
+revision-bound **Start next job** on the assigned printer; cross-printer
+dispatch is not offered here. Maintenance/history, NFC tag writing, Mainsail
+and AutoDispatch are not detail pages. Dead private view helpers are removed;
+legacy view-model operations and their existing tests remain for #3235's
+coordinated orphan cleanup. The explicit Farm-root toolbar replaces the native
+back affordance; horizontal swipes navigate the four pages, with no custom
+interactive-pop gesture shim.
 
 ## Queue reorder endpoint
 

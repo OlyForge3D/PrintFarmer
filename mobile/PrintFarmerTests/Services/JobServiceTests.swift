@@ -18,6 +18,33 @@ final class JobServiceTests: XCTestCase {
         super.tearDown()
     }
 
+    func testPrinterQueueUsesScopedEndpointAndPreservesServerOrderWithConflictingTimestamps() async throws {
+        let printerId = UUID()
+        let firstId = UUID()
+        let secondId = UUID()
+        let entries = [
+            (firstId, 2, "2026-10-01T00:00:00Z"),
+            (secondId, 1, "2026-10-02T00:00:00Z")
+        ].map { id, position, timestamp in
+            """
+            {"job":{"id":"\(id)","name":"Scoped job","assignedPrinterId":"\(printerId)",
+            "status":"Queued","priority":"Normal","queuePosition":\(position),
+            "queuedAtUtc":"\(timestamp)","createdAtUtc":"\(timestamp)",
+            "rowVersion":"revision-\(position)","copies":1,"completedCopies":0,"remainingCopies":1}}
+            """
+        }
+        mockAPIClient.stubResponse(json: "[\(entries.joined(separator: ","))]")
+
+        let jobs = try await service.listPrinterQueue(printerId: printerId)
+
+        XCTAssertEqual(jobs.map(\.id), [firstId.uuidString, secondId.uuidString])
+        XCTAssertEqual(jobs.map(\.job.queuePosition), [2, 1])
+        let request = try XCTUnwrap(mockAPIClient.capturedRequests.last)
+        XCTAssertEqual(request.url?.path, "/api/job-queue-analytics/printer/\(printerId)")
+        XCTAssertEqual(request.url?.query, "limit=200")
+        XCTAssertEqual(request.httpMethod, "GET")
+    }
+
     func testDispatchAcceptedUsesReviewedETagAndTypedBody() async throws {
         stubDispatch(statusCode: 200, outcome: "Accepted")
 

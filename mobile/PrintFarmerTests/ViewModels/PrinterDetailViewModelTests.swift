@@ -1821,7 +1821,8 @@ extension PrinterDetailViewModelTests {
         position: Int,
         material: String? = nil,
         revision: String? = nil,
-        priority: PrintJobPriority = .normal
+        priority: PrintJobPriority = .normal,
+        createdAt: Date = Self.fixedNow
     ) -> QueuedPrintJobResponse {
         var job = QueuedJobInfo(
             id: id,
@@ -1838,7 +1839,7 @@ extension PrinterDetailViewModelTests {
             actualEndTimeUtc: nil,
             actualPrintTimeSeconds: nil,
             failureReason: nil,
-            createdAtUtc: Self.fixedNow,
+            createdAtUtc: createdAt,
             updatedAtUtc: nil,
             thumbnailUrl: nil,
             filamentName: nil,
@@ -1912,14 +1913,14 @@ extension PrinterDetailViewModelTests {
 
     // MARK: Queue filtering + match state
 
-    func testFilterAssignedQueueKeepsAssignedNonTerminalSortedByPosition() {
+    func testFilterAssignedQueueKeepsAssignedNonTerminalInServerOrder() {
         let jobs = [
             makeQueuedJob(id: "a", assignedTo: TestData.testUUID, status: "Queued", position: 3),
             makeQueuedJob(id: "b", assignedTo: TestData.testUUID, status: "Printing", position: 1),
             makeQueuedJob(id: "c", assignedTo: TestData.testUUID, status: "Queued", position: 2)
         ]
         let filtered = PrinterDetailViewModel.filterAssignedQueue(jobs, printerId: TestData.testUUID)
-        XCTAssertEqual(filtered.map(\.id), ["b", "c", "a"], "Assigned jobs must sort by queue position")
+        XCTAssertEqual(filtered.map(\.id), ["a", "b", "c"], "Filtering must not replace server scope order")
     }
 
     func testFilterAssignedQueueExcludesTerminalAndForeign() {
@@ -1945,7 +1946,7 @@ extension PrinterDetailViewModelTests {
         XCTAssertEqual(vm.nextQueuedJobs.map(\.id), ["0", "1", "2", "3", "4"])
     }
 
-    func testAssignedQueueOrdersPriorityBeforePositionWithinPrinterScope() {
+    func testAssignedQueueDoesNotReinterpretServerPriorityOrPositionOrder() {
         let jobs = [
             makeQueuedJob(id: "normal", assignedTo: TestData.testUUID, status: "Queued", position: 1),
             makeQueuedJob(id: "high-later", assignedTo: TestData.testUUID, status: "Queued", position: 4, priority: .high),
@@ -1953,7 +1954,7 @@ extension PrinterDetailViewModelTests {
         ]
         XCTAssertEqual(
             PrinterDetailViewModel.filterAssignedQueue(jobs, printerId: TestData.testUUID).map(\.id),
-            ["high-next", "high-later", "normal"]
+            ["normal", "high-later", "high-next"]
         )
     }
 
@@ -2116,6 +2117,36 @@ extension PrinterDetailViewModelTests {
 
     // MARK: Dispatch-to action
 
+    func testPrinterScopedServerHeadWinsWhenTimestampAndPositionDisagree() async throws {
+        for reorderedServer in [false, true] {
+            let service = MockJobService()
+            let vm = makeOperatorViewModel(jobService: service)
+            var printer = try TestData.decodePrinter()
+            printer.isOnline = true
+            printer.state = "idle"
+            mockService.printerToReturn = printer
+            let older = makeQueuedJob(
+                id: UUID().uuidString, assignedTo: printer.id, status: "Queued",
+                position: 2, revision: "older-revision", createdAt: Self.fixedNow.addingTimeInterval(-3600)
+            )
+            let moved = makeQueuedJob(
+                id: UUID().uuidString, assignedTo: printer.id, status: "Queued",
+                position: 1, revision: "moved-revision", createdAt: Self.fixedNow
+            )
+            service.queuedJobResponsesToReturn = reorderedServer ? [moved, older] : [older, moved]
+
+            await vm.loadPrinter()
+            let reviewed = try XCTUnwrap(vm.nextQueuedJobs.first)
+            XCTAssertEqual(service.listPrinterQueueCalledWith, printer.id)
+            XCTAssertFalse(service.listAllJobsCalled, "A cross-scope 200-row list cannot establish this printer's head")
+            XCTAssertEqual(vm.nextQueuedJobs.map(\.id), service.queuedJobResponsesToReturn.map(\.id))
+            await vm.startNextJob(reviewed)
+
+            XCTAssertEqual(service.dispatchCalledWith, reorderedServer ? moved.job.jobUUID : older.job.jobUUID)
+            XCTAssertEqual(service.dispatchReviewedRowVersion, reorderedServer ? "moved-revision" : "older-revision")
+        }
+    }
+
     func testStartNextJobUsesAssignedHeadAndReviewedRevision() async throws {
         let service = MockJobService()
         let vm = makeOperatorViewModel(jobService: service)
@@ -2180,7 +2211,7 @@ extension PrinterDetailViewModelTests {
 
             XCTAssertNil(service.dispatchCalledWith, "\(state ?? "nil") must not dispatch")
             XCTAssertNil(service.dispatchToCalledWith)
-            XCTAssertEqual(vm.dispatchError, "The printer must be online and idle before starting the next job.")
+            XCTAssertEqual(vm.dispatchError, "The printer must be idle before starting the next job.")
             XCTAssertFalse(vm.isDispatching)
         }
     }

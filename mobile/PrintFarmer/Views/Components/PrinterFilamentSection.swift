@@ -168,7 +168,7 @@ struct PrinterFilamentSection: View {
 
         .buttonStyle(.borderless)
         .disabled(presentation.disabledReason(for: action) != nil)
-        .accessibilityLabel("\(action.kind.title), \(action.target.label)")
+        .accessibilityLabel("\(actionTitle(action)), \(action.target.label)")
         .accessibilityHint(presentation.disabledReason(for: action) ?? "")
         .accessibilityIdentifier("printer.filament.action.\(action.id)")
     }

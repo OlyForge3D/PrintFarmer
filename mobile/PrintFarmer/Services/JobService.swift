@@ -17,6 +17,10 @@ actor JobService: JobServiceProtocol {
         try await apiClient.get("/api/job-queue-analytics?limit=200&offset=0")
     }
 
+    func listPrinterQueue(printerId: UUID) async throws -> [QueuedPrintJobResponse] {
+        try await apiClient.get("/api/job-queue-analytics/printer/\(printerId)?limit=200")
+    }
+
     func get(id: UUID) async throws -> PrintJob {
         try await apiClient.get("/api/job-queue/\(id)")
     }

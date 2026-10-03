@@ -10,6 +10,7 @@ struct PrinterSetupControlsContent: View {
     var materialPresentation: PrinterFilamentPresentation? = nil
     var observesSafety = false
     var showsMaterial = true
+    var usesHeaterSteppers = false
     var materialActions: [PrinterFilamentAction] = []
     var onMaterialAction: @MainActor (PrinterFilamentAction) -> Void = { _ in }
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -106,7 +107,7 @@ struct PrinterSetupControlsContent: View {
                                 identifier: "printer.controls.temperatures", essentialControls: true
                             )
                         }
-                        insetGroup { PreheatSubgroup(viewModel: viewModel, usesSteppers: !showsMaterial) }
+                        insetGroup { PreheatSubgroup(viewModel: viewModel, usesSteppers: usesHeaterSteppers) }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     insetGroup { PrinterMotionControls(viewModel: viewModel) }

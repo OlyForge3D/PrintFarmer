@@ -113,6 +113,7 @@ struct PrinterDetailPanelsHost<Status: View, Control: View, Filament: View, Queu
                         .buttonStyle(.plain)
                         .accessibilityLabel(panel.title)
                         .accessibilityValue(selection == panel ? "Selected" : "")
+                        .accessibilityAddTraits(selection == panel ? .isSelected : [])
                         .accessibilityIdentifier("printer.detail.pageIndicator.\(panel.rawValue)")
                     }
                 }

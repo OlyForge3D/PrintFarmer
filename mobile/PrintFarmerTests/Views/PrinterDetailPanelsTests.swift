@@ -126,7 +126,37 @@ final class PrinterDetailPanelsTests: XCTestCase {
 
     private static let deviceTokensPath = "/api/notifications/device-tokens"
 
-    private func detailHostFixture() throws -> (
+    func testFilamentSafetyRefreshSurvivesStatusQueueAndControlTraversal() async throws {
+        let fixture = try detailHostFixture(verifiedMaterial: true)
+        fixture.registry.setAdvancedPrinterControlsEnabled(true)
+        let controller = DetailHostingController(rootView: try host(
+            PrinterDetailView(printerId: fixture.printer.id), services: fixture.services, registry: fixture.registry
+        ))
+        let window = show(controller)
+        defer { window.isHidden = true; window.rootViewController = nil }
+        try await selectControls(in: controller)
+        let selector = try XCTUnwrap(views(UISegmentedControl.self, in: controller.view).first)
+        for panels in [[0, 3, 2], [1, 2], [0, 2]] {
+            for panel in panels {
+                selector.selectedSegmentIndex = panel
+                selector.sendActions(for: .valueChanged)
+                await Task.yield()
+                controller.view.layoutIfNeeded()
+            }
+            try await waitForHost("Filament must reacquire fresh safety evidence after page traversal", in: controller.view) {
+                self.views(UIButton.self, in: controller.view).contains {
+                    $0.accessibilityIdentifier == "printer.controls.filament-load" && $0.isEnabled
+                }
+            }
+            XCTAssertTrue(views(UIButton.self, in: controller.view).contains {
+                $0.accessibilityIdentifier == "printer.detail.safety.refresh"
+            })
+        }
+        XCTAssertGreaterThanOrEqual(fixture.api.capturedRequests.filter { $0.url?.path.hasSuffix("/status") == true }.count, 2)
+        XCTAssertFalse(fixture.api.capturedRequests.contains { $0.httpMethod != "GET" })
+    }
+
+    private func detailHostFixture(verifiedMaterial: Bool = false) throws -> (
         services: ServiceContainer, registry: ServerRegistry, printer: Printer,
         first: RegisteredServer, second: RegisteredServer, api: MockAPIClient,
         disconnect: AsyncBarrier, connect: AsyncBarrier
@@ -161,7 +191,18 @@ final class PrinterDetailPanelsTests: XCTestCase {
             if path == printerPath {
                 data = printerData
             } else if path.hasSuffix("/backend-capabilities") {
-                data = capabilities
+                if verifiedMaterial {
+                    var supported = PrinterBackendCapabilities.allControlsFixture
+                    supported.supportsFilamentLoad = true
+                    supported.supportsFilamentUnload = true
+                    supported.supportsFilamentChange = true
+                    supported.verifiedSafety = VerifiedSafetyFixtures.discovery()
+                    data = try encoder.encode(supported)
+                } else {
+                    data = capabilities
+                }
+            } else if path.hasSuffix("/status") && verifiedMaterial {
+                data = try encoder.encode(VerifiedSafetyFixtures.status(id: printer.id))
             } else if path.hasSuffix("/details") {
                 data = details
             } else {

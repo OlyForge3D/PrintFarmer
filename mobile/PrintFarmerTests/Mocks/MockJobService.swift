@@ -12,6 +12,7 @@ final class MockJobService: JobServiceProtocol, @unchecked Sendable {
     // Call tracking
     var listJobsCalled = false
     var listAllJobsCalled = false
+    var listPrinterQueueCalledWith: UUID?
     var getJobCalledWith: UUID?
     var createCalledWith: CreatePrintJobRequest?
     var updateCalledWith: (id: UUID, request: UpdatePrintJobRequest)?
@@ -36,6 +37,12 @@ final class MockJobService: JobServiceProtocol, @unchecked Sendable {
 
     func listAllJobs() async throws -> [QueuedPrintJobResponse] {
         listAllJobsCalled = true
+        if let error = errorToThrow { throw error }
+        return queuedJobResponsesToReturn
+    }
+
+    func listPrinterQueue(printerId: UUID) async throws -> [QueuedPrintJobResponse] {
+        listPrinterQueueCalledWith = printerId
         if let error = errorToThrow { throw error }
         return queuedJobResponsesToReturn
     }
@@ -156,6 +163,7 @@ final class MockJobService: JobServiceProtocol, @unchecked Sendable {
         dispatchResultToReturn = nil
         listJobsCalled = false
         listAllJobsCalled = false
+        listPrinterQueueCalledWith = nil
         getJobCalledWith = nil
         createCalledWith = nil
         updateCalledWith = nil
