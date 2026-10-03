@@ -24,6 +24,10 @@ import UIKit
 /// Stop is likewise a deterministic `XCTAssertTrue`/`XCTAssertFalse`.
 @MainActor
 final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
+    override var waitsForNavigationReadiness: Bool { true }
+    override var additionalLaunchArguments: [String] {
+        ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryL"]
+    }
 
     // MARK: - Navigation helpers
 
@@ -60,12 +64,12 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
     /// Settings. Every step is a REQUIRED precondition of the deterministic
     /// bootstrap and is asserted, not silently tolerated.
     private func enableAdvancedPrinterControls() {
-        let attention = shellDestinationButton(tabIdentifier: "tab.attention", timeout: 5)
+        let farm = shellDestinationButton(tabIdentifier: "tab.farm", timeout: 5)
         XCTAssertTrue(
-            attention.exists,
-            "The Attention/Account destination must be reachable in the deterministic UI-test bootstrap"
+            farm.exists,
+            "The Farm destination must be reachable in the deterministic UI-test bootstrap"
         )
-        attention.tap()
+        farm.tap()
 
         // Matches `OperatorShellUITests.openAccount()`: tapping the Attention
         // tab reveals the Account entry point, which must itself be tapped
@@ -185,6 +189,9 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
 
     func testAccessibilityTextKeepsReadingColumnAndLabeledEmergencyOnBothPages() {
         app.terminate()
+        app.launchArguments.removeAll {
+            $0 == "-UIPreferredContentSizeCategoryName" || $0 == "UICTContentSizeCategoryL"
+        }
         app.launchArguments += [
             "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL",
             "-pf_theme_mode", "dark"

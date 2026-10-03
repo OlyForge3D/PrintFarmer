@@ -146,6 +146,23 @@ struct PrinterDetailPanelsHost<Status: View, Control: View, Filament: View, Queu
                 .frame(minWidth: minimumWidth)
 
                 VStack(spacing: 3) {
+                    HStack(spacing: 3) {
+                        panelButton(.status)
+                        panelButton(.control)
+                    }
+                    HStack(spacing: 3) {
+                        panelButton(.filament)
+                        panelButton(.queue)
+                    }
+                }
+                .frame(minWidth: minimumWidth / 2 + 3)
+                .padding(3)
+                .background(Color.pfBackgroundTertiary, in: RoundedRectangle(cornerRadius: 11))
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("printer.detail.panel.selector")
+                .accessibilityLabel("Printer detail panel")
+
+                VStack(spacing: 3) {
                     ForEach(PrinterDetailPanel.allCases, id: \.self) { panel in
                         ControlActionButton(
                             title: panel.title,
@@ -156,6 +173,7 @@ struct PrinterDetailPanelsHost<Status: View, Control: View, Filament: View, Queu
                             selection = panel
                         }
                     }
+
                 }
                 .padding(3)
                 .background(Color.pfBackgroundTertiary, in: RoundedRectangle(cornerRadius: 11))
@@ -163,6 +181,15 @@ struct PrinterDetailPanelsHost<Status: View, Control: View, Filament: View, Queu
                 .accessibilityIdentifier("printer.detail.panel.selector")
                 .accessibilityLabel("Printer detail panel")
             }
+        }
+
+        private func panelButton(_ panel: PrinterDetailPanel) -> some View {
+            ControlActionButton(
+                title: panel.title,
+                identifier: "printer.detail.panel.select.\(panel.rawValue)",
+                selected: selection == panel,
+                compact: true, textSize: 13, segmented: true
+            ) { selection = panel }
         }
     }
 
