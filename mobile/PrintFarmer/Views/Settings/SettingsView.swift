@@ -1,7 +1,4 @@
 import SwiftUI
-#if canImport(UIKit)
-import UserNotifications
-#endif
 
 struct SettingsView: View {
     @Environment(AuthViewModel.self) private var authViewModel
@@ -57,28 +54,6 @@ struct SettingsView: View {
                     .accessibilityHint("Choose the layout for the active server.")
                     .accessibilityIdentifier("settings.navigation")
                 }
-
-                #if canImport(UIKit)
-                Section("Notifications") {
-                    let pushManager = PushNotificationManager.shared
-                    Toggle("Push Notifications", isOn: Binding(
-                        get: { pushManager.pushEnabled },
-                        set: { pushManager.pushEnabled = $0 }
-                    ))
-
-                    if pushManager.permissionStatus == .denied {
-                        Label("Notifications are disabled in system Settings", systemImage: "exclamationmark.triangle")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    if let error = pushManager.registrationError {
-                        Label(error, systemImage: "xmark.circle")
-                            .font(.caption)
-                            .foregroundStyle(.red)
-                    }
-                }
-                #endif
 
                 Section {
                     Picker("Write Format", selection: $nfcTagFormat) {

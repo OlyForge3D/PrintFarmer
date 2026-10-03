@@ -76,17 +76,6 @@ struct PFarmApp: App {
                     router.invalidatePendingNavigation()
                 }
                 #if canImport(UIKit)
-                .onReceive(NotificationCenter.default.publisher(for: .pushNotificationTapped)) { notification in
-                    let userInfo = PushNotificationManager.shared.consumePendingRemoteTap()
-                        ?? notification.userInfo
-                    if !DemoMode.shared.isActive {
-                        router.routeNotification(
-                            userInfo: userInfo ?? [:],
-                            activeOriginServerId: serverRegistry.activeServer?.originServerId,
-                            capabilities: services.capabilitiesService.resolved
-                        )
-                    }
-                }
                 .onReceive(NotificationCenter.default.publisher(for: .localNotificationTapped)) { notification in
                     let userInfo = PushNotificationManager.shared.consumePendingLocalTap()
                         ?? notification.userInfo
@@ -96,13 +85,6 @@ struct PFarmApp: App {
                        let printerId = UUID(uuidString: printerIdString) {
                         router.navigate(
                             to: .printerReady(id: printerId),
-                            capabilities: services.capabilitiesService.resolved
-                        )
-                    } else {
-                        // F1 (#706): notification-tap without a printer ID lands
-                        // on Attention where the notification itself lives.
-                        router.selectTab(
-                            .attention,
                             capabilities: services.capabilitiesService.resolved
                         )
                     }
@@ -125,26 +107,6 @@ struct PFarmApp: App {
                     await authViewModel.restoreSession()
                     #if canImport(UIKit)
                     if !UITestBootstrap.isEnabled {
-                        PushNotificationManager.shared.configure(
-                            notificationService: services.notificationService,
-                            serverRegistry: DemoMode.shared.isActive ? nil : serverRegistry,
-                            serverID: DemoMode.shared.isActive ? nil : serverRegistry.activeServerID,
-                            allowsUnscopedRegistration: !DemoMode.shared.isActive
-                        )
-                        // Issue #1321: wire the services job-attention lock-screen
-                        // actions (Pause/Resume/Cancel/Snooze) execute against.
-                        PushNotificationManager.shared.configureActionHandling(
-                            printerService: services.printerService,
-                            attentionService: services.attentionService
-                        )
-                        let pendingRemoteTap = PushNotificationManager.shared.consumePendingRemoteTap()
-                        if !DemoMode.shared.isActive, let userInfo = pendingRemoteTap {
-                            router.routeNotification(
-                                userInfo: userInfo,
-                                activeOriginServerId: serverRegistry.activeServer?.originServerId,
-                                capabilities: services.capabilitiesService.resolved
-                            )
-                        }
                         let pendingLocalTap = PushNotificationManager.shared.consumePendingLocalTap()
                         if !DemoMode.shared.isActive, let userInfo = pendingLocalTap,
                            let printerIdString = userInfo["printerId"] as? String,
@@ -153,10 +115,6 @@ struct PFarmApp: App {
                                 to: .printerReady(id: printerId),
                                 capabilities: services.capabilitiesService.resolved
                             )
-                        }
-                        await PushNotificationManager.shared.refreshPermissionStatus()
-                        if PushNotificationManager.shared.pushEnabled {
-                            await PushNotificationManager.shared.requestPermissionAndRegister()
                         }
                     }
                     #endif

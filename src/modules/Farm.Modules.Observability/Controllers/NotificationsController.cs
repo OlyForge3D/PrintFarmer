@@ -360,6 +360,7 @@ public class NotificationsController(INotificationService notificationService, V
 
     /// <summary>
     /// Registers or updates the native-push device token for the current installation.
+    /// This optional endpoint is not used by the shipped v1 App Store client.
     /// Feature-gated by <c>OperatorFeatures.NativePushEnabled</c>; when disabled, returns
     /// 404 <c>ProblemDetails</c> with <c>code=featureDisabled</c> per issue #708 / #725.
     /// See <c>docs/OPERATOR_NATIVE_PUSH.md</c>.
@@ -1123,7 +1124,7 @@ public class UnsubscribePushRequest
 /// </summary>
 public class DeviceTokenRegistrationRequest
 {
-    /// <summary>Per-server installation identifier supplied by the mobile app.</summary>
+    /// <summary>Per-server installation identifier supplied by a custom native-push client.</summary>
     [Required]
     [StringLength(NativePushRegistrationContract.InstallationIdMaxLength)]
     [RegularExpression(
@@ -1153,7 +1154,7 @@ public class DeviceTokenRegistrationRequest
     [RegularExpression(NativePushRegistrationContract.EnvironmentPattern)]
     public string Environment { get; set; } = "production";
 
-    /// <summary>App bundle identifier reported by the mobile app (diagnostics only).</summary>
+    /// <summary>App bundle identifier reported by the native-push client (diagnostics only).</summary>
     [StringLength(NativePushRegistrationContract.AppBundleIdMaxLength)]
     [RegularExpression(
         NativePushRegistrationContract.AppBundleIdPattern,
@@ -1163,8 +1164,8 @@ public class DeviceTokenRegistrationRequest
 
 /// <summary>
 /// Response model for a successful native-push device-token registration. Carries this
-/// server's canonical, persisted <c>serverId</c> so the mobile app can bind this APNs
-/// registration to its local <c>RegisteredServer</c> entry. See
+/// server's canonical, persisted <c>serverId</c> so a custom client can bind the
+/// registration to its local server entry. See
 /// <c>docs/OPERATOR_NATIVE_PUSH.md</c> and issue #1407.
 /// </summary>
 public class DeviceTokenRegistrationResponse
@@ -1195,13 +1196,13 @@ public class AttentionCategoryDto
     /// <summary>The <see cref="AttentionKind"/> the category corresponds to.</summary>
     public AttentionKind Kind { get; set; }
 
-    /// <summary>APNs category identifier the mobile app registers at launch.</summary>
+    /// <summary>APNs category identifier a custom native-push client may register.</summary>
     public string Category { get; set; } = string.Empty;
 
     /// <summary>Ordered action ids the category advertises.</summary>
     public List<string> Actions { get; set; } = new();
 
-    /// <summary>Deep-link scheme the mobile app is expected to handle.</summary>
+    /// <summary>Deep-link scheme a custom native-push client is expected to handle.</summary>
     public string DeepLinkScheme { get; set; } = "printfarmer";
 }
 

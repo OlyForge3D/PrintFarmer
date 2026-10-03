@@ -233,7 +233,6 @@ final class ServerRegistry {
         var updated = server
         if endpointChanged {
             farmShapeResetHandler?(server.id)
-            updated.originServerId = nil
         }
         updated.displayName = normalizedDisplayName(updated.displayName, fallbackURL: updated.baseURL)
         updated.baseURL = URL(string: normalized)!
@@ -540,16 +539,6 @@ final class ServerRegistry {
         setOversightUpgradeOfferState(state, for: activeServerID)
         setNavigationLayoutPreference(.twoModes)
         return true
-    }
-
-    func associateOriginServerId(_ originServerId: UUID, with serverID: UUID) throws {
-        guard let index = servers.firstIndex(where: { $0.id == serverID }) else {
-            throw ServerRegistryError.serverNotFound(serverID)
-        }
-        guard servers[index].originServerId != originServerId else { return }
-        servers[index].originServerId = originServerId
-        servers[index].updatedAt = now()
-        persist()
     }
 
     static func normalizedURLString(for raw: String) throws -> String {

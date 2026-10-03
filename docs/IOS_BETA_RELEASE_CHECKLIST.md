@@ -16,7 +16,7 @@ tags or dispatches a beta automatically.
 
 | Dependency | Status at authoring time | Re-verify before triggering |
 |---|---|---|
-| [#708](https://github.com/OlyForge3D/PrintFarmer/issues/708) APNs topology decision | Closed — relay topology selected, backend merged (PR #750, #758) | Confirm no reopen |
+| [#708](https://github.com/OlyForge3D/PrintFarmer/issues/708) optional APNs backend capability | Closed — backend capability merged; shipped v1 remains disabled | Confirm no reopen |
 | F1–F10 (#706–#715) implementation | All closed | Confirm no reopen |
 | Required React follow-ups (#716–#722) | All closed | Confirm no reopen |
 | [#723](https://github.com/OlyForge3D/PrintFarmer/issues/723) QA beta qualification (Kane) | Open, in progress in a parallel session | **Must be closed with no open P0/P1 before trigger** |
@@ -24,77 +24,35 @@ tags or dispatches a beta automatically.
 | Bishop/Hicks/Vasquez unanimous approval on every release-bound PR | Required per PR | Re-verify per `squad/pre-pr-verdict` status, not by memory. This is a self-attested agent review record, not independent approval — see `.github/copilot-instructions.md` |
 | Jeff's explicit release-execution request | Not yet given | **Hard stop until given** |
 
-## 2. APNs / native push configuration
+## 2. Alerts and notification configuration
 
 Architecture reference: [`docs/OPERATOR_NATIVE_PUSH.md`](./OPERATOR_NATIVE_PUSH.md).
 
-- [ ] Confirm target topology for the beta: `NativePush__Mode=relay`
-  (recommended; OlyForge3D never distributes its `.p8` to self-hosted
-  installs) vs `direct` for an internal/enterprise-signed build. Do not mix —
-  pick one per environment.
-- [ ] Relay mode: `NativePush__Relay__Endpoint` and
-  `NativePush__Relay__ApiKey` are set as deployment secrets (env var, mounted
-  secret, or orchestrator secret store) — **never** in `.env`, compose files,
-  or source control. `.env.template` documents the keys with no live values;
-  diff any deployment `.env` against it before shipping to confirm no real
-  secret was accidentally committed.
-- [ ] Direct mode (if used): the `.p8` is P-256 ECDSA, mounted read-only
-  (`NativePush__Apns__P8KeyPath`) or injected as an inline PEM via secret
-  manager (`NativePush__Apns__P8KeyPem`); `TeamId`, `KeyId`, `BundleId`, and
-  `Environment` (`development`/`production`) match the target App ID exactly.
+- [ ] Confirm `NativePush__Mode=disabled` for the shipped v1 App Store
+  deployment. OlyForge3D does not operate a backend or notification relay.
+- [ ] Confirm live in-app status updates arrive directly from the user-selected
+  self-hosted server over SignalR.
+- [ ] Confirm the only shipped v1 system-notification path is the on-device
+  `PendingReadyMonitor` scheduling a `PENDING_READY` / **Bed Clear Required**
+  reminder; there is no `JOB_ATTENTION` category or action handler.
+- [ ] Confirm the iOS client does not call
+  `POST/DELETE /api/notifications/device-tokens`.
+- [ ] Confirm no `NativePush__Relay__*` or `NativePush__Apns__*` credentials are
+  required or provisioned for the shipped v1 release.
 - [ ] `NativePushSettingsValidator` startup validation passes in the target
-  environment (`ValidateOnStart()` fails fast on bad config — a clean pod/
-  container start is itself evidence).
+  environment with disabled mode.
 - [ ] Emergency kill switch documented and rehearsed:
   `OperatorFeatures__nativePushEnabled=false` wins over the DB-backed flag.
-- [ ] `GET /api/system/capabilities` reflects the expected `nativePushEnabled`
-  value in the target environment.
+- [ ] `GET /api/system/capabilities` reports native push disabled.
 
-### Rollback rehearsal (run in staging before beta trigger)
+## 3. iOS entitlements, bundle ID, and signing
 
-Per Dallas's #708 acceptance addendum, rehearse the full disable/enable cycle
-in staging and record the result here or in the release run notes:
-
-1. Disable: flip `nativePushEnabled` off (Unified Settings or
-   `OperatorFeatures__nativePushEnabled=false` + restart).
-2. Create an attention-triggering event (e.g. a simulated print failure).
-3. Verify **zero** relay/APNs calls were made (check
-   `NativePushDirect`/`NativePushRelay` HTTP client telemetry and sender
-   logs) and that `POST/DELETE /api/notifications/device-tokens` returns
-   `404 ProblemDetails{code="featureDisabled"}`.
-4. Re-enable the flag.
-5. Verify delivery resumes for a new attention event **without requiring
-   re-registration** (existing `DeviceToken` rows are retained across the
-   disable window).
-
-Record pass/fail here before proceeding:
-
-- [ ] Disable → zero provider calls confirmed
-- [ ] Re-enable → delivery resumes without re-registration
-
-## 3. iOS entitlements, bundle ID, APNs environment, signing
-
-- [ ] `mobile/PrintFarmer/PrintFarmer.entitlements` declares
-  `aps-environment` (via the `APS_ENVIRONMENT` build setting: `development`
-  for Debug, `production` for Release/App Store archives) alongside the
-  existing NFC entitlement. Verify with:
-  ```bash
-  /usr/libexec/PlistBuddy -c "Print :aps-environment" \
-    build/PrintFarmer.xcarchive/Products/Applications/PrintFarmer.app/PrintFarmer.app.dSYM/../embedded.mobileprovision 2>/dev/null || \
-  codesign -d --entitlements :- build/PrintFarmer.xcarchive/Products/Applications/PrintFarmer.app | grep -A1 aps-environment
-  ```
-  Expect `production` for a TestFlight/App Store archive.
+- [ ] `mobile/PrintFarmer/PrintFarmer.entitlements` does not declare
+  `aps-environment`, and the app target has no `APS_ENVIRONMENT` build setting.
+  Local notifications do not require the APNs entitlement.
 - [ ] Bundle identifier is `com.olyforge3d.printfarmer.ios` in
   `PRODUCT_BUNDLE_IDENTIFIER` (both Debug/Release app-target configs) and
   matches `ExportOptions.plist` and `Matchfile`'s `app_identifier`.
-- [ ] Apple Developer Portal App ID `com.olyforge3d.printfarmer.ios` has the
-  **Push Notifications** capability enabled (portal-side; not tracked in this
-  repo) so the provisioning profile pulled by `fastlane match` actually
-  authorizes push. A build can compile and archive successfully with the
-  entitlement present in source yet still be rejected/silently non-functional
-  for push if the portal capability or profile is stale — re-run
-  `fastlane match appstore` (not `--readonly`) after enabling the capability
-  so `PrintFarmerApp-certificates` picks up a regenerated profile.
 - [ ] `DEVELOPMENT_TEAM = ZPKA84F3TY` matches `ExportOptions.plist`'s
   `teamID` and the `fastlane match` team.
 - [ ] TestFlight signing: `testflight-beta.yml` uses
@@ -107,17 +65,15 @@ Record pass/fail here before proceeding:
 - [ ] `./scripts/verify-marketing-version.sh` passes for the target tag (CI
   already gates this in both `ios-pr-ci.yml` and `testflight-beta.yml`).
 
-## 4. Server configuration and health checks for push delivery
+## 4. Server configuration and health checks
 
 - [ ] Deployment docs (`docs/OPERATOR_NATIVE_PUSH.md` §8, `.env.template`)
   are current for the chosen topology.
 - [ ] `/healthz` and `/health` report healthy with the target `NativePush`
   configuration loaded (a misconfigured non-disabled mode fails startup
   validation, so a healthy process start is itself a signal).
-- [ ] Confirm outbound network egress to the selected APNs/relay host is
-  permitted from the deployment environment (firewall/NAT allowlist for
-  `api.push.apple.com` / `api.sandbox.push.apple.com` in direct mode, or the
-  configured relay hostname).
+- [ ] Confirm the shipped deployment does not require outbound egress to an
+  APNs provider or notification relay.
 
 ## 5. CI coverage
 
@@ -143,8 +99,8 @@ Record pass/fail here before proceeding:
    `workflow_dispatch` with `environment=internal` for the first beta ring).
 4. After upload succeeds, verify the TestFlight build appears in App Store
    Connect and the auto-created GitHub Release is `prerelease: true`.
-5. Smoke-test lock-screen actionable notifications end-to-end against the
-   production relay before widening distribution to `external` groups.
+5. Smoke-test SignalR-driven in-app updates and the `PendingReady` bed-clear
+   local notification before widening distribution to `external` groups.
 
 ## 7. Disable/rollback controls summary
 
@@ -154,7 +110,6 @@ Record pass/fail here before proceeding:
 | Offline write replay kill switch | `OperatorFeatures__offlineWriteReplayEnabled=false` | Disables idempotent write-queue replay per [`docs/OPERATOR_FEATURE_GATES.md`](./OPERATOR_FEATURE_GATES.md) |
 | Attention feed kill switch | `OperatorFeatures__attentionEnabled=false` | Disables the unified attention pipeline that triggers push |
 | TestFlight build pull | Remove/expire the build in App Store Connect | Stops new installs/updates; does not revoke already-installed builds |
-| Relay credential revoke | Rotate/revoke `NativePush__Relay__ApiKey` at the relay | Immediate hard-stop for relay-mode delivery, independent of app-side flags |
 
 See [`docs/OPERATOR_FEATURE_GATES.md`](./OPERATOR_FEATURE_GATES.md) for the
 full flag contract and [`docs/OFFLINE_WRITE_REPLAY.md`](./OFFLINE_WRITE_REPLAY.md)

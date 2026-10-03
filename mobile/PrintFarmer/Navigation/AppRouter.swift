@@ -231,23 +231,6 @@ final class AppRouter {
         reportsPath = NavigationPath()
     }
 
-    func routeNotification(
-        userInfo: [AnyHashable: Any],
-        activeOriginServerId: UUID? = nil,
-        capabilities: ResolvedSystemCapabilities
-    ) {
-        switch NotificationDeepLinkRouting.destination(
-            from: userInfo,
-            activeOriginServerId: activeOriginServerId
-        ) {
-        case .success(let destination):
-            notificationRoutingError = nil
-            navigate(to: destination, capabilities: capabilities)
-        case .failure(let failure):
-            notificationRoutingError = failure.message
-        }
-    }
-
     func visibleTabs(
         for capabilities: ResolvedSystemCapabilities
     ) -> [AppTab] {

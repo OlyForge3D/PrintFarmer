@@ -2135,37 +2135,6 @@ final class AppRouterTests: XCTestCase {
         XCTAssertNil(router.pendingFilamentSwap)
     }
 
-    func testNotificationRoutingSurfacesInvalidDestination() {
-        let router = AppRouter()
-
-        router.routeNotification(
-            userInfo: ["link": "printfarmer://attention"],
-            capabilities: capabilities
-        )
-
-        XCTAssertEqual(
-            router.notificationRoutingError,
-            "This notification's destination is invalid for the selected server."
-        )
-        XCTAssertEqual(router.selectedTab, .attention)
-    }
-
-    func testNotificationRoutingSurfacesWrongServerOrigin() {
-        let router = AppRouter()
-
-        router.routeNotification(
-            userInfo: [
-                "originServerId": "00000000-0000-0000-0000-000000000011",
-                "deepLink": "printfarmer://printer/\(printerId.uuidString)"
-            ],
-            activeOriginServerId: originServerId,
-            capabilities: capabilities
-        )
-
-        XCTAssertEqual(router.notificationRoutingError, "This notification belongs to a different server.")
-        XCTAssertEqual(router.selectedTab, .attention)
-    }
-
     // MARK: - Reset to root
 
     func testResetToRootClearsAttentionPath() {

@@ -58,7 +58,7 @@ final class PrinterDetailPanelsTests: XCTestCase {
             $0.value(forHTTPHeaderField: "Authorization") == "Bearer detail-host-test-token"
         })
         XCTAssertTrue(detailRequests(fixture.api).allSatisfy { $0.url?.host == fixture.second.baseURL.host })
-        assertIncidentalRegistrationRequests(fixture.api, servers: [fixture.first, fixture.second])
+        XCTAssertFalse(fixture.api.capturedRequests.contains { $0.url?.path == Self.deviceTokensPath })
 
         let field = try XCTUnwrap(heaterTarget(in: controller.view))
         let selector = try XCTUnwrap(views(UISegmentedControl.self, in: controller.view).first)
@@ -75,7 +75,7 @@ final class PrinterDetailPanelsTests: XCTestCase {
         }
         XCTAssertEqual(capabilityRequests(fixture.api).count, 1, "Identity churn cannot rebind or replace this host's owner")
         XCTAssertTrue(detailRequests(fixture.api).allSatisfy { $0.httpMethod == "GET" })
-        assertIncidentalRegistrationRequests(fixture.api, servers: [fixture.first, fixture.second])
+        XCTAssertFalse(fixture.api.capturedRequests.contains { $0.url?.path == Self.deviceTokensPath })
     }
 
     func testProductionDetailHostInitialLoadCreatesOneControlsOwner() async throws {
@@ -100,32 +100,7 @@ final class PrinterDetailPanelsTests: XCTestCase {
             $0.value(forHTTPHeaderField: "Authorization") == "Bearer detail-host-test-token"
         })
         XCTAssertTrue(detailRequests(fixture.api).allSatisfy { $0.url?.host == fixture.first.baseURL.host })
-        assertIncidentalRegistrationRequests(fixture.api, servers: [fixture.first])
-    }
-
-    func testDetailHostFixtureExplicitlyDisablesIncidentalDeviceRegistration() async throws {
-        let fixture = try detailHostFixture()
-        let token = String(repeating: "ab", count: 32)
-        for method in ["POST", "DELETE"] {
-            do {
-                if method == "POST" {
-                    _ = try await fixture.services.notificationService.registerDeviceToken(token, platform: "ios")
-                } else {
-                    try await fixture.services.notificationService.unregisterDeviceToken(token)
-                }
-                XCTFail("Expected explicit featureDisabled for device-token \(method)")
-            } catch let error as NetworkError {
-                guard case .featureDisabled(let problem) = error else {
-                    return XCTFail("Unexpected device-token \(method) error: \(error)")
-                }
-                XCTAssertEqual(problem.code, "featureDisabled")
-                XCTAssertEqual(problem.status, 404)
-            }
-            XCTAssertTrue(fixture.api.capturedRequests.contains {
-                $0.url?.path == Self.deviceTokensPath && $0.httpMethod == method
-            })
-        }
-        assertIncidentalRegistrationRequests(fixture.api, servers: [fixture.first])
+        XCTAssertFalse(fixture.api.capturedRequests.contains { $0.url?.path == Self.deviceTokensPath })
     }
 
     private static let deviceTokensPath = "/api/notifications/device-tokens"
@@ -158,19 +133,9 @@ final class PrinterDetailPanelsTests: XCTestCase {
         {"printerId":"\(printer.id)","backend":"Moonraker",
          "supportsHotendTemperature":true,"supportsBedTemperature":true}
         """.utf8)
-        // ServiceContainer shares the APNs manager, whose saved token varies by simulator.
-        // Model the documented push-disabled backend for both registration and handoff.
-        let pushDisabled = Data("""
-        {"type":"https://printfarmer/errors/feature-disabled","title":"Feature Disabled",
-         "status":404,"detail":"Native push is disabled on this server.","code":"featureDisabled"}
-        """.utf8)
-        let deviceTokensPath = Self.deviceTokensPath
         let api = MockAPIClient()
         api.requestHandler = { request in
             let path = request.url?.path ?? ""
-            if path == deviceTokensPath && ["POST", "DELETE"].contains(request.httpMethod ?? "") {
-                return (TestData.httpResponse(url: request.url, statusCode: 404), pushDisabled)
-            }
             let data: Data
             if path == printerPath {
                 data = printerData

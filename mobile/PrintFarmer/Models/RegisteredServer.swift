@@ -2,7 +2,6 @@ import Foundation
 
 struct RegisteredServer: Identifiable, Codable, Sendable, Equatable {
     var id: UUID
-    var originServerId: UUID?
     var displayName: String
     var baseURL: URL
     var normalizedURLString: String
@@ -14,7 +13,6 @@ struct RegisteredServer: Identifiable, Codable, Sendable, Equatable {
 
     init(
         id: UUID = UUID(),
-        originServerId: UUID? = nil,
         displayName: String,
         baseURL: URL,
         normalizedURLString: String,
@@ -25,7 +23,6 @@ struct RegisteredServer: Identifiable, Codable, Sendable, Equatable {
         updatedAt: Date = Date()
     ) {
         self.id = id
-        self.originServerId = originServerId
         self.displayName = displayName
         self.baseURL = baseURL
         self.normalizedURLString = normalizedURLString
@@ -38,7 +35,6 @@ struct RegisteredServer: Identifiable, Codable, Sendable, Equatable {
 
     private enum CodingKeys: String, CodingKey {
         case id
-        case originServerId
         case displayName
         case baseURL
         case normalizedURLString
@@ -52,7 +48,6 @@ struct RegisteredServer: Identifiable, Codable, Sendable, Equatable {
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         id = try values.decode(UUID.self, forKey: .id)
-        originServerId = try values.decodeIfPresent(UUID.self, forKey: .originServerId)
         displayName = try values.decode(String.self, forKey: .displayName)
         baseURL = try values.decode(URL.self, forKey: .baseURL)
         normalizedURLString = try values.decode(String.self, forKey: .normalizedURLString)
