@@ -84,11 +84,16 @@ Reordering changes the actual dispatch order, not just the list on screen. `Queu
 
 - `QueueOrdering.OrderByPriorityDescending()` keeps its current cross-scope order: `Priority desc → QueuedAt asc → Id asc`. Lists that span scopes stay FIFO within a priority band. This covers the general job list (`EfPrintJobManagementRepository` default sort) and any all-printer view.
 - A new `QueueOrdering.OrderWithinScope()`, in both its `IQueryable` and `IEnumerable` forms, sorts by `Priority desc → QueuePosition asc → QueuedAt asc → Id asc`. Callers must first filter to a single scope.
-- Every scope-coherent consumer switches to `OrderWithinScope()`:
-  - per-printer auto-dispatch and ready-head (`AutoDispatchService`);
+- Every query that is **already filtered to exactly one scope** switches to `OrderWithinScope()`:
+  - the printer-assigned job lookups in `AutoDispatchService` that filter to a single `AssignedPrinterId`;
   - batch dispatch over the unassigned scope (`BatchDispatchService`);
   - skip, cancellation and bed-clear head selection;
   - the per-printer queue (`GetJobsByPrinterAsync`), applied only to its `Queued` rows. `Printing` rows are listed separately, ahead of the queued rows.
+- **Mixed-scope selections are cross-scope consumers and never call `OrderWithinScope()` over the combined set.** This covers the auto-dispatch candidate selection that combines a printer's assigned jobs with unassigned jobs (`AutoDispatchService`, and `AutoDispatchBackgroundService`'s `AssignedPrinterId == null || AssignedPrinterId == printerId` query). These selections:
+  1. take the head of each scope separately with `OrderWithinScope()`, so a reorder still decides which job leads its own scope; then
+  2. choose between those heads with the unchanged `OrderByPriorityDescending()`.
+
+  Positions from the two scopes are never compared.
 - The queue list API returns queued jobs grouped by scope, each group in `OrderWithinScope()` order. The UI and dispatch therefore agree inside every scope, which is the only place a reorder can apply.
 - Existing rows already have a `QueuePosition` value from `QueuePositionAllocator`, so no migration is needed. Any ties are still broken by `QueuedAt` and then `Id`, so the current order is kept.
 - The `QueueOrdering` class doc comment is updated to state both invariants.
@@ -139,6 +144,10 @@ These follow the controller's existing `MapRevisionException` mapping.
   - `OrderWithinScope()` uses `QueuePosition` to break ties within a priority band, and its two overloads agree.
   - Over a list that spans several printers, `OrderByPriorityDescending()` still orders by `QueuedAt` within a band, regardless of `QueuePosition`.
 - Dispatch and ready-head tests: after a reorder, the next job dispatched matches the order shown in the UI.
+- Mixed-scope auto-dispatch regression, in both `AutoDispatchService` and `AutoDispatchBackgroundService`:
+  - a printer's assigned jobs and the unassigned jobs hold conflicting `QueuePosition` values (an unassigned job has a lower position than the printer's head);
+  - selection still picks each scope's head by `OrderWithinScope()`, then chooses between heads by `Priority desc → QueuedAt → Id`;
+  - no cross-scope position comparison changes the result.
 - Controller and service tests: every status code above, plus two concurrent moves where the second gets 412.
 
 **Mobile**
