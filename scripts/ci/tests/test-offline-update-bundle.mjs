@@ -1615,6 +1615,16 @@ test('recovery instructions are derived only from the signed release identity', 
     assert.deepEqual(byId[id].bash, [sh, ...bashArgs], `${id} Bash vector`);
     assert.deepEqual(byId[id].powershell, [...ps, ...powershellArgs], `${id} PowerShell vector`);
   }
+  const expectedDocumentedCommands = document.operations
+    .flatMap(operation => [operation.bash.join(' '), operation.powershell.join(' ')]);
+  for (const path of ['docs/OFFLINE_UPDATE_RECOVERY.md', 'docs/HOST_UPDATE_RUNBOOK.md']) {
+    const content = readFileSync(new URL(`../../../${path}`, import.meta.url), 'utf8');
+    const blocks = [...content.matchAll(
+      /<!-- packaged-command-vectors:start -->\r?\n```text\r?\n([\s\S]*?)\r?\n```\r?\n<!-- packaged-command-vectors:end -->/g)];
+    assert.equal(blocks.length, 1, `${path} must contain exactly one packaged command vector block`);
+    assert.deepEqual(blocks[0][1].split(/\r?\n/), expectedDocumentedCommands,
+      `${path} packaged command vectors must match the generated schema-2 document exactly`);
+  }
   // Schema 1 documents published before #2981 stay verifiable, byte for byte. The golden digest was
   // produced by the pre-#2981 generator, so it does not depend on the current implementation.
   const legacy = recoveryInstructionsDocument(identity, 1);
