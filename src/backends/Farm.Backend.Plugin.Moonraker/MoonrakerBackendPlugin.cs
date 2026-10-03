@@ -1,4 +1,5 @@
-﻿using Farm.Backend.Plugin.Core;
+﻿using System.Net.Http;
+using Farm.Backend.Plugin.Core;
 using Farm.Infrastructure.Contracts.Printers.Moonraker;
 using Farm.Infrastructure.Discovery;
 using Farm.Infrastructure.Services.Printers;
@@ -74,6 +75,9 @@ public class MoonrakerBackendPlugin : IExtendedBackendPlugin
     /// <param name="services">The service collection to register with.</param>
     public void RegisterAdditionalServices(IServiceCollection services)
     {
+        _ = services.AddHttpClient("MoonrakerThumbnail")
+            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+
         services.AddScoped<IPrinterCameraProbe, MoonrakerPrinterCameraProbe>();
         services.AddSingleton<IMoonrakerJsonRpcClient, MoonrakerJsonRpcClient>();
         services.AddSingleton<ISnapmakerU1CameraMonitorManager, SnapmakerU1CameraMonitorManager>();
@@ -91,7 +95,8 @@ public class MoonrakerBackendPlugin : IExtendedBackendPlugin
             httpClient.Timeout = timeouts.HttpClientTimeoutCeiling;
             ILogger<MoonrakerClient> logger = provider.GetRequiredService<ILoggerFactory>().CreateLogger<MoonrakerClient>();
             ISnapmakerU1CameraMonitorManager monitorManager = provider.GetRequiredService<ISnapmakerU1CameraMonitorManager>();
-            return new MoonrakerClient(httpClient, logger, timeouts, monitorManager);
+            HttpClient thumbnailHttpClient = httpClientFactory.CreateClient("MoonrakerThumbnail");
+            return new MoonrakerClient(httpClient, logger, timeouts, monitorManager, thumbnailHttpClient);
         });
 
         // NOTE: Status clients are NOT registered in DI container. They are instantiated

@@ -46,6 +46,8 @@ namespace Farm.Infrastructure;
 /// <param name="CameraSnapshotStrategy">Snapshot capture strategy required by the backend.</param>
 /// <param name="RowVersion">Base-64 public ETag for atomic printer mutations.</param>
 /// <param name="ConfigurationRevision">Logical safety-relevant printer configuration revision.</param>
+/// <param name="CurrentJobThumbnailUrl">Relative authenticated proxy URL for the active job thumbnail.</param>
+/// <param name="ThumbnailCacheIdentity">Internal provider job/file identity used only to rotate the cache token.</param>
 public record PrinterDto(
     Guid Id,
     string Name,
@@ -85,4 +87,6 @@ public record PrinterDto(
     CameraStreamFormat CameraStreamFormat = CameraStreamFormat.Unknown,
     CameraSnapshotStrategy CameraSnapshotStrategy = CameraSnapshotStrategy.None,
     string? RowVersion = null,
-    long ConfigurationRevision = 0);
+    long ConfigurationRevision = 0,
+    string? CurrentJobThumbnailUrl = null,
+    [property: JsonIgnore] string? ThumbnailCacheIdentity = null);

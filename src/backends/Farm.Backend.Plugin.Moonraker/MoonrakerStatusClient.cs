@@ -58,7 +58,7 @@ public class MoonrakerStatusClient : IPrinterStatusClient, IManagedSpoolProvider
             CircuitBreaker breaker = _circuitBreaker.GetCircuitBreaker($"moonraker-{printer.Id}");
 
             PrinterCompositeStatus status = await breaker.ExecuteAsync(
-                async ct => await _client.GetCompositeStatusAsync(printer.BackendUrl, ct),
+                async ct => await _client.GetCompositeStatusAsync(printer.BackendUrl, printer.Credential, ct),
                 ct);
             PrinterStatusDto movement = await _client.GetMovementStatusAsync(printer, ct);
 
@@ -82,7 +82,8 @@ public class MoonrakerStatusClient : IPrinterStatusClient, IManagedSpoolProvider
                 BedTarget: status.BedTarget,
                 PrintTimeLeftSeconds: status.PrintTimeLeftSeconds,
                 HomedAxes: movement.HomedAxes,
-                SafetyTelemetry: movement.SafetyTelemetry);
+                SafetyTelemetry: movement.SafetyTelemetry,
+                ThumbnailCacheIdentity: status.ThumbnailCacheIdentity);
         }
         catch (OperationCanceledException)
         {
@@ -107,7 +108,7 @@ public class MoonrakerStatusClient : IPrinterStatusClient, IManagedSpoolProvider
             CircuitBreaker breaker = _circuitBreaker.GetCircuitBreaker($"moonraker-{printer.Id}");
 
             PrinterCompositeStatus status = await breaker.ExecuteAsync(
-                async ct => await _client.GetCompositeStatusAsync(printer.BackendUrl, ct),
+                async ct => await _client.GetCompositeStatusAsync(printer.BackendUrl, printer.Credential, ct),
                 ct);
 
             // Get Spoolman integration info — try native Moonraker first, fall back to DB
