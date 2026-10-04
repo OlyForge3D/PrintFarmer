@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // </copyright>
 
-using System.Diagnostics;
 using Farm.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -21,11 +20,12 @@ public sealed class BedClearAcknowledgementExpiryService(
     BedClearAcknowledgementExpiryMetrics metrics,
     TimeProvider? timeProvider = null) : BackgroundService
 {
+    private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
+
     private static readonly TimeSpan ScanInterval = TimeSpan.FromSeconds(15);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _ = timeProvider;
         while (!stoppingToken.IsCancellationRequested)
         {
             try
@@ -43,13 +43,13 @@ public sealed class BedClearAcknowledgementExpiryService(
                     "Bed-clear acknowledgement lifecycle scan failed.");
             }
 
-            await Task.Delay(ScanInterval, stoppingToken);
+            await Task.Delay(ScanInterval, _timeProvider, stoppingToken);
         }
     }
 
     internal async Task ScanAsync(CancellationToken ct)
     {
-        var stopwatch = Stopwatch.StartNew();
+        long scanStarted = _timeProvider.GetTimestamp();
         await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         IBedClearAcknowledgementService service =
@@ -66,11 +66,11 @@ public sealed class BedClearAcknowledgementExpiryService(
             await service.InvalidateStaleAcknowledgementsAsync(printerId, ct);
         }
 
-        stopwatch.Stop();
-        metrics.RecordScan(printerIds.Count, stopwatch.Elapsed.TotalMilliseconds);
+        double elapsedMs = _timeProvider.GetElapsedTime(scanStarted).TotalMilliseconds;
+        metrics.RecordScan(printerIds.Count, elapsedMs);
         logger.LogInformation(
             "Bed-clear acknowledgement scan pass: {ScannedCount} acknowledged printers, {ElapsedMs}ms.",
             printerIds.Count,
-            stopwatch.Elapsed.TotalMilliseconds);
+            elapsedMs);
     }
 }

@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -126,7 +126,7 @@ public static partial class SignedUpdateManifestValidator
             errors.Add("source_commit_invalid");
         }
 
-        if (string.IsNullOrWhiteSpace(manifest.BuildId) || manifest.BuildId.Length > 128)
+        if (string.IsNullOrWhiteSpace(manifest.BuildId) || manifest.BuildId.Length > 128 || !PositiveDecimal().IsMatch(manifest.BuildId))
         {
             errors.Add("build_id_invalid");
         }

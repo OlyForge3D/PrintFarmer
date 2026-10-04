@@ -35,8 +35,11 @@ namespace Farm.Infrastructure.Services.Queue;
 public sealed class QueueRetentionPruneService(
     IServiceScopeFactory scopeFactory,
     IOptions<QueueRetentionSettings> options,
-    ILogger<QueueRetentionPruneService> logger) : BackgroundService
+    ILogger<QueueRetentionPruneService> logger,
+    TimeProvider? timeProvider = null) : BackgroundService
 {
+    private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
+
     private readonly QueueRetentionSettings _settings = options.Value;
 
     /// <inheritdoc/>
@@ -48,7 +51,7 @@ public sealed class QueueRetentionPruneService(
 
             try
             {
-                await Task.Delay(_settings.PruneInterval, stoppingToken);
+                await Task.Delay(_settings.PruneInterval, _timeProvider, stoppingToken);
             }
             catch (OperationCanceledException)
             {
@@ -68,7 +71,7 @@ public sealed class QueueRetentionPruneService(
             await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
             AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-            DateTime now = DateTime.UtcNow;
+            DateTime now = _timeProvider.GetUtcNow().UtcDateTime;
 
             int outboxDeleted = await PruneOutboxAsync(db, now, ct);
             int attemptsDeleted = await PruneDispatchAttemptsAsync(db, now, ct);

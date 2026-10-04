@@ -1,4 +1,4 @@
-namespace Farm.Infrastructure.Services.HostUpdates;
+﻿namespace Farm.Infrastructure.Services.HostUpdates;
 
 public interface IHostUpdateMetadataProvider
 {

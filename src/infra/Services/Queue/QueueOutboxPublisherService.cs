@@ -27,6 +27,8 @@ public sealed class QueueOutboxPublisherService(
     IQueueSubscriptionMembershipNotifier? membershipNotifier = null,
     TimeProvider? timeProvider = null) : BackgroundService
 {
+    private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
+
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan RetryBackoffBase = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan StaleLeaseAge = TimeSpan.FromMinutes(10);
@@ -67,7 +69,6 @@ public sealed class QueueOutboxPublisherService(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _ = timeProvider;
         logger.LogInformation("[OutboxPublisher] Queue outbox publisher (SignalR hints) started");
 
         await RecoverStaleLeasesAsync(stoppingToken);
@@ -88,7 +89,7 @@ public sealed class QueueOutboxPublisherService(
                 logger.LogError(ex, "[OutboxPublisher] Error processing outbox events");
             }
 
-            await Task.Delay(PollInterval, stoppingToken);
+            _ = await WaitForIntervalOrPauseAsync(stoppingToken).ConfigureAwait(false);
         }
     }
 
@@ -96,7 +97,7 @@ public sealed class QueueOutboxPublisherService(
     {
         await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        DateTime staleCutoff = DateTime.UtcNow - StaleLeaseAge;
+        DateTime staleCutoff = _timeProvider.GetUtcNow().UtcDateTime - StaleLeaseAge;
 
         List<QueueDispatchOutbox> stale = await db.QueueDispatchOutbox
             .Where(evt =>
@@ -110,7 +111,7 @@ public sealed class QueueOutboxPublisherService(
         {
             evt.Status = QueueOutboxEventStatus.Pending;
             evt.LastError = "Recovered after the publisher lease expired.";
-            evt.RetryAfterUtc = DateTime.UtcNow;
+            evt.RetryAfterUtc = _timeProvider.GetUtcNow().UtcDateTime;
         }
 
         if (stale.Count > 0)
@@ -127,7 +128,7 @@ public sealed class QueueOutboxPublisherService(
         await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-        DateTime now = DateTime.UtcNow;
+        DateTime now = _timeProvider.GetUtcNow().UtcDateTime;
         List<QueueDispatchOutbox> events = await db.QueueDispatchOutbox
             .Where(e =>
                 e.Status == QueueOutboxEventStatus.Pending &&
@@ -180,8 +181,13 @@ public sealed class QueueOutboxPublisherService(
 
     internal async Task<bool> WaitForIntervalOrPauseAsync(CancellationToken ct)
     {
-        await Task.Delay(PollInterval, timeProvider ?? TimeProvider.System, ct);
-        return true;
+        DateTimeOffset until = _timeProvider.GetUtcNow() + PollInterval;
+        while (_timeProvider.GetUtcNow() < until)
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(250), _timeProvider, ct).ConfigureAwait(false);
+        }
+
+        return false;
     }
 
     internal async Task ProcessSingleEventAsync(
@@ -273,7 +279,7 @@ public sealed class QueueOutboxPublisherService(
             await Task.WhenAll(sends);
 
             evt.Status = QueueOutboxEventStatus.Published;
-            evt.CompletedAtUtc = DateTime.UtcNow;
+            evt.CompletedAtUtc = _timeProvider.GetUtcNow().UtcDateTime;
 
             logger.LogDebug(
                 "[OutboxPublisher] Published event {EventId} type={EventType} seq={Seq}",
@@ -289,13 +295,13 @@ public sealed class QueueOutboxPublisherService(
             {
                 evt.Status = QueueOutboxEventStatus.DeadLettered;
                 evt.LastError = ex.Message[..Math.Min(ex.Message.Length, 2047)];
-                evt.CompletedAtUtc = DateTime.UtcNow;
+                evt.CompletedAtUtc = _timeProvider.GetUtcNow().UtcDateTime;
             }
             else
             {
                 evt.Status = QueueOutboxEventStatus.Pending;
                 evt.LastError = ex.Message[..Math.Min(ex.Message.Length, 2047)];
-                evt.RetryAfterUtc = DateTime.UtcNow + TimeSpan.FromSeconds(
+                evt.RetryAfterUtc = _timeProvider.GetUtcNow().UtcDateTime + TimeSpan.FromSeconds(
                     RetryBackoffBase.TotalSeconds * Math.Pow(2, evt.AttemptCount - 1));
             }
         }

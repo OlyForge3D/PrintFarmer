@@ -13,8 +13,11 @@ namespace Farm.Infrastructure.Services.Electricity;
 /// </summary>
 public class PowerReadingPruneService(
     IServiceScopeFactory scopeFactory,
-    ILogger<PowerReadingPruneService> logger) : BackgroundService
+    ILogger<PowerReadingPruneService> logger,
+    TimeProvider? timeProvider = null) : BackgroundService
 {
+    private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
+
     private const int RetentionDays = 90;
     private readonly TimeSpan _interval = TimeSpan.FromHours(24);
 
@@ -27,7 +30,7 @@ public class PowerReadingPruneService(
                 await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
                 AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-                DateTime cutoff = DateTime.UtcNow.AddDays(-RetentionDays);
+                DateTime cutoff = _timeProvider.GetUtcNow().UtcDateTime.AddDays(-RetentionDays);
                 int deleted = await db.PowerReadings
                     .Where(r => r.RecordedAt < cutoff)
                     .ExecuteDeleteAsync(stoppingToken);
@@ -49,7 +52,7 @@ public class PowerReadingPruneService(
                 logger.LogError(ex, "PowerReadingPruneService: error during prune");
             }
 
-            await Task.Delay(_interval, stoppingToken);
+            await Task.Delay(_interval, _timeProvider, stoppingToken);
         }
     }
 }
