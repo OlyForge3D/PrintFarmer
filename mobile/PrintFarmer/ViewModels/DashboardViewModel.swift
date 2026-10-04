@@ -97,6 +97,7 @@ final class DashboardViewModel {
     private var jobService: (any JobServiceProtocol)?
     private var statisticsService: (any StatisticsServiceProtocol)?
     private var jobAnalyticsService: (any JobAnalyticsServiceProtocol)?
+    private var farmOnly = false
     private var autoPrintService: (any AutoDispatchServiceProtocol)?
     private var signalRService: (any SignalRServiceProtocol)?
     @ObservationIgnored private var signalRSubscriptions: [SignalRSubscription] = []
@@ -137,12 +138,14 @@ final class DashboardViewModel {
         printerService: any PrinterServiceProtocol,
         jobService: any JobServiceProtocol,
         statisticsService: any StatisticsServiceProtocol,
-        jobAnalyticsService: any JobAnalyticsServiceProtocol
+        jobAnalyticsService: any JobAnalyticsServiceProtocol,
+        farmOnly: Bool = false
     ) {
         let changed = !Self.identical(self.printerService, printerService)
             || !Self.identical(self.jobService, jobService)
             || !Self.identical(self.statisticsService, statisticsService)
             || !Self.identical(self.jobAnalyticsService, jobAnalyticsService)
+            || self.farmOnly != farmOnly
         if changed {
             invalidateCanonicalLoad()
             // New data authority: nothing it said has been confirmed yet.
@@ -152,6 +155,7 @@ final class DashboardViewModel {
         self.jobService = jobService
         self.statisticsService = statisticsService
         self.jobAnalyticsService = jobAnalyticsService
+        self.farmOnly = farmOnly
     }
 
     /// Wire the published #816 snapshot store plus the auto-dispatch source
@@ -331,6 +335,7 @@ final class DashboardViewModel {
             return
         }
         let input = CanonicalLoadInput(
+            farmOnly: farmOnly,
             printerService: printerService,
             jobService: jobService,
             statisticsService: statisticsService,
@@ -419,14 +424,19 @@ final class DashboardViewModel {
         }
 
         do {
-            async let printersTask = input.printerService.list()
-            async let queueTask = input.jobService.list()
-            async let allJobsTask = input.jobService.listAllJobs()
-            let (loadedPrinters, loadedQueue, loadedJobs) = try await (
-                printersTask,
-                queueTask,
-                allJobsTask
-            )
+            let loadedPrinters: [Printer]
+            let loadedQueue: [QueueOverview]
+            let loadedJobs: [QueuedPrintJobResponse]
+            if input.farmOnly {
+                loadedPrinters = try await input.printerService.list()
+                loadedQueue = []
+                loadedJobs = []
+            } else {
+                async let printersTask = input.printerService.list()
+                async let queueTask = input.jobService.list()
+                async let allJobsTask = input.jobService.listAllJobs()
+                (loadedPrinters, loadedQueue, loadedJobs) = try await (printersTask, queueTask, allJobsTask)
+            }
             guard !Task.isCancelled else { return .superseded }
 
             var loadedPendingReady = input.pendingReadyPrinterIDs
@@ -444,7 +454,7 @@ final class DashboardViewModel {
             }
 
             var loadedSummary = input.summary
-            if let statisticsService = input.statisticsService {
+            if !input.farmOnly, let statisticsService = input.statisticsService {
                 do {
                     loadedSummary = try await statisticsService.getSummary()
                 } catch {
@@ -457,7 +467,7 @@ final class DashboardViewModel {
             var loadedQueueStats = input.queueStats
             var loadedModelStats = input.modelStats
             var loadedUpcomingJobs = input.upcomingJobs
-            if let jobAnalyticsService = input.jobAnalyticsService {
+            if !input.farmOnly, let jobAnalyticsService = input.jobAnalyticsService {
                 do {
                     async let statsTask = jobAnalyticsService.getStats()
                     async let modelStatsTask = jobAnalyticsService.getModelStats()
@@ -670,6 +680,7 @@ final class DashboardViewModel {
     }
 
     private struct CanonicalLoadInput: Sendable {
+        let farmOnly: Bool
         let printerService: any PrinterServiceProtocol
         let jobService: any JobServiceProtocol
         let statisticsService: (any StatisticsServiceProtocol)?

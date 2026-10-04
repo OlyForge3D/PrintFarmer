@@ -19,12 +19,14 @@ final class ScanViewModel {
         case bin(BinResponse)
         case part(PartInventoryResponse)
         case unknownCode(String)
+        case newSpool(ScannedSpoolData)
 
         var id: String {
             switch self {
             case .bin(let bin): "bin-\(bin.id.uuidString)"
             case .part(let part): "part-\(part.id.uuidString)"
             case .unknownCode(let code): "unknown-\(code)"
+            case .newSpool: "new-spool"
             }
         }
     }
@@ -79,6 +81,7 @@ final class ScanViewModel {
 
     private let logger = Logger(subsystem: "com.printfarmer.ios", category: "ScanStation")
     private var scanner: (any BarcodeScannerProtocol)?
+    private var nfcScanner: (any SpoolScannerProtocol)?
     private var waitForScannerPresentation: @MainActor () async -> Bool = { true }
     private var partsInventoryService: (any PartsInventoryServiceProtocol)?
     private var barcodeIntakeService: (any BarcodeIntakeServiceProtocol)?
@@ -116,7 +119,7 @@ final class ScanViewModel {
         switch pendingOutcome {
         case .some(.bin), .some(.part):
             pendingOutcome = nil
-        case .some(.unknownCode), .none:
+        case .some(.unknownCode), .some(.newSpool), .none:
             break
         }
         recentScans.removeAll(where: \.requiresPrintedPartsInventory)
@@ -125,6 +128,40 @@ final class ScanViewModel {
 
     var isScannerAvailable: Bool {
         scanner?.isAvailable ?? false
+    }
+
+    func configureNFC(scanner: any SpoolScannerProtocol) {
+        nfcScanner = scanner
+    }
+
+    func scanNFC() {
+        guard isViewActive, !isScanning, !hasFinishedNavigation,
+              !isAwaitingResultAcknowledgment else { return }
+        guard let nfcScanner, nfcScanner.isAvailable else {
+            errorMessage = "NFC scanning is not available on this device."
+            return
+        }
+        isScanning = true
+        Task {
+            defer {
+                isScanning = false
+                startQueuedExternalScanIfNeeded()
+            }
+            let result = await nfcScanner.scan()
+            guard isViewActive else { return }
+            switch result {
+            case .printerId(let id):
+                pendingDeepLinkDestination = .printerDetail(id: id)
+            case .spoolId(let id):
+                await routeToSpoolIfExists(id: id, subtitle: "Spool #\(id)")
+            case .newSpoolData(let data):
+                pendingOutcome = .newSpool(data)
+            case .cancelled:
+                break
+            case .error(let error):
+                errorMessage = error.localizedDescription
+            }
+        }
     }
 
     private var isAwaitingResultAcknowledgment: Bool {
@@ -221,7 +258,7 @@ final class ScanViewModel {
                 return
             case .spoolDetail(let id):
                 deferredSpoolId = id
-            case .scan, .attentionItem, .filamentSwap:
+            case .scan, .attentionItem, .filamentSwap, .farm:
                 break
             }
         }

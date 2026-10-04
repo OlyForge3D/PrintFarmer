@@ -2,14 +2,11 @@ import SwiftUI
 
 enum PrinterListNavigationContext: Equatable {
     case farm
-    case fleet
 
     var navigationTitle: String {
         switch self {
         case .farm:
             "Farm"
-        case .fleet:
-            "Fleet"
         }
     }
 
@@ -17,8 +14,6 @@ enum PrinterListNavigationContext: Equatable {
         switch self {
         case .farm:
             "farm.root"
-        case .fleet:
-            "oversight.root.fleet"
         }
     }
 
@@ -26,8 +21,6 @@ enum PrinterListNavigationContext: Equatable {
         switch self {
         case .farm:
             "farm"
-        case .fleet:
-            "oversight.fleet"
         }
     }
 
@@ -35,8 +28,6 @@ enum PrinterListNavigationContext: Equatable {
         switch self {
         case .farm:
             .farm
-        case .fleet:
-            .fleet
         }
     }
 }
@@ -71,8 +62,6 @@ struct PrinterListView: View {
             switch navigationContext {
             case .farm:
                 navigationStack(path: $router.printersPath)
-            case .fleet:
-                navigationStack(path: $router.fleetPath)
             }
         }
         .sheet(isPresented: $showingPrinterLookup) {
@@ -122,6 +111,13 @@ struct PrinterListView: View {
             if newCount == 0 {
                 Task { await viewModel.loadAutoDispatchStatuses() }
             }
+        }
+        .onChange(of: router.pendingNeedsAttentionFilter, initial: true) { _, needsAttention in
+            guard needsAttention else { return }
+            viewModel.selectedStatus = .needsAttention
+            viewModel.searchText = ""
+            viewModel.selectedLocationId = nil
+            router.pendingNeedsAttentionFilter = false
         }
         .accessibilityIdentifier(navigationContext.accessibilityIdentifier)
     }
@@ -200,8 +196,6 @@ struct PrinterListView: View {
         switch navigationContext {
         case .farm:
             router.printersPath.count
-        case .fleet:
-            router.fleetPath.count
         }
     }
 
@@ -332,8 +326,6 @@ struct PrinterListView: View {
         switch navigationContext {
         case .farm:
             "farm-card-\(printer.id.uuidString)"
-        case .fleet:
-            "oversight.fleet.printer.\(printer.id.uuidString)"
         }
     }
 }

@@ -10,21 +10,21 @@ import XCTest
 /// Demo job `30000000-0003-0000-0000-000000000007` (`DemoData.job7ID`) is
 /// seeded as `Completed`, giving a deterministic target without depending
 /// on Recent-page sort order.
-final class HarvestUITests: ShiftTasksUITestBase {
+final class HarvestUITests: QueueUITestBase {
     override var waitsForNavigationReadiness: Bool { true }
 
     private let completedJobIdentifier = "job.row.30000000-0003-0000-0000-000000000007"
     private let failedJobIdentifier = "job.row.30000000-0003-0000-0000-000000000009"
     private let cancelledJobIdentifier = "job.row.30000000-0003-0000-0000-000000000011"
 
-    func testTasksDestinationSurvivesIdentifierPromotionAndChangedBadgeLabel() throws {
-        let tasks = shellDestinationButton(tabIdentifier: "tab.tasks", timeout: 8)
-        let captured = ShellNode(try tasks.snapshot())
+    func testQueueDestinationSurvivesIdentifierPromotionAndChangedBadgeLabel() throws {
+        let queue = shellDestinationButton(tabIdentifier: "tab.queue", timeout: 8)
+        let captured = ShellNode(try queue.snapshot())
         let observation = ShellObservation(ShellNode(try app.snapshot()))
         let destination = try XCTUnwrap(observation.destination(
-            tab: "tab.tasks", sidebar: "sidebar.tasks", title: "Tasks"
+            tab: "tab.queue", sidebar: "sidebar.queue", title: "Queue"
         ))
-        let expectedID = destination.surface == .tabBar ? "tab.tasks" : "sidebar.tasks"
+        let expectedID = destination.surface == .tabBar ? "tab.queue" : "sidebar.queue"
         let scope = destination.surface == .tabBar
             ? app.tabBars.descendants(matching: captured.type)
             : app.descendants(matching: captured.type)
@@ -33,22 +33,19 @@ final class HarvestUITests: ShiftTasksUITestBase {
         // Recreate the earlier identifierless snapshot without changing app state.
         var earlier = captured
         earlier.identifier = ""
-        earlier.label = "Tasks, obsolete badge count"
+        earlier.label = "Queue, obsolete badge count"
         let promoted = observedElement(earlier, within: scope, allowingPromotionTo: expectedID)
         XCTAssertEqual(promoted.identifier, expectedID)
         XCTAssertTrue(promoted.isHittable)
         promoted.tap()
-        XCTAssertTrue(app.buttons["shiftTasks.printQueue"].waitForExistence(timeout: 8),
-                      "The promoted identity must navigate to the actual Tasks destination")
+        XCTAssertTrue(app.descendants(matching: .any)["jobList.root"].waitForExistence(timeout: 8),
+                      "The promoted identity must navigate to the actual Queue destination")
     }
 
     /// Navigates the operator shell to the seeded completed demo job's
     /// detail view, device-adaptively:
-    /// Tasks destination → Print queue (`JobListView`) → Recent → the
-    /// seeded completed job. Since #782 the Tasks destination presents the
-    /// anchor-grouped checklist (`ShiftTasksView`), so the preserved queue
-    /// is reached through the explicit `shiftTasks.printQueue` link on both
-    /// iPhone (tab bar) and iPad (sidebar). The final `jobDetail.*` assertion
+    /// Queue → Recent → the seeded completed job. Queue opens `JobListView`
+    /// directly on iPhone (tab bar) and iPad (sidebar). The `jobDetail.*` assertion
     /// proves `JobDetailView` is presented in the FOREGROUND navigation
     /// context on both device classes (issue #794).
     func openCompletedJobDetail(
@@ -68,13 +65,7 @@ final class HarvestUITests: ShiftTasksUITestBase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        openTasksDestination(file: file, line: line)
-
-        let printQueue = app.buttons["shiftTasks.printQueue"]
-        XCTAssertTrue(printQueue.waitForExistence(timeout: 8),
-                      "Tasks destination must expose the preserved Print queue link",
-                      file: file, line: line)
-        printQueue.tap()
+        openQueueDestination(file: file, line: line)
 
         // iPhone paginates the queue and exposes a Recent page control;
         // iPad renders a single List with an always-visible Recent section.

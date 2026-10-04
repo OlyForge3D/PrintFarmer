@@ -2,136 +2,84 @@
 
 <!-- impeccable:product-schema 1 -->
 
-Scope: the native iOS client in `mobile/`. The PrintFarmer backend and React web
-app share this product truth but keep their own design surfaces.
+Scope: the native iOS client in `mobile/`. The backend and React app share
+the API, but the phone and web serve different jobs.
 
 ## Platform
 
 ios
 
-## Users
+## Users and Purpose
 
-Two audiences of roughly equal weight, confirmed with the maintainer:
+**The phone is for the farm floor. The web is the full console.**
 
-- **Floor operators** working the farm physically — walking between printers,
-  phone in one hand, harvesting plates, loading filament, clearing failures,
-  scanning bins and parts. Hands are busy, attention is split, the device is
-  often held one-handed and sometimes with gloves.
-- **Farm owners and managers** checking status remotely and making decisions —
-  fleet health, dispatch, job history, uptime and reliability, maintenance
-  planning, predictive insights, inventory levels.
+Floor operators walk between printers, harvest plates, load filament and
+clear failures with one hand and divided attention. Success means seeing the
+farm, running its queue, handling filament or scanning a physical identifier
+without hunting through an analytical dashboard.
 
-Neither audience is primary. The app must serve floor work and oversight
-without favoring either.
+Owners and managers use the web for reporting, maintenance planning,
+reliability, predictive insights, dispatch analysis, locations and history.
+The mobile app is not a second web console.
 
-## Product Purpose
+## Navigation
 
-Monitor and manage 3D printer farms from iPhone and iPad, across one or more
-registered PrintFarmer servers. Success is an operator resolving what needs
-attention without hunting for the control, and an owner reading true fleet
-state without opening a laptop.
+- **Farm**: one printer list and printer detail. Notification attention links
+  open Farm with its Needs attention filter applied.
+- **Queue**: print jobs and their actionable detail.
+- **Filament**: spool inventory, add spool and assignment. Capability-enabled
+  printed-part stock and quantity adjustments remain a secondary toolbar entry,
+  not a fourth tab.
+- **Scan**: a floating button above the tab bar on every tab. The shared
+  scanner reads barcode/QR and NFC printer and spool tags. Existing barcode
+  intake and tagged-spool creation flows are reused.
+- **Account avatar**: notifications, Settings, Servers and offline activity.
 
-## Positioning
-
-PrintFarmer is a two-tier farm management system: the mobile client is a
-first-class operator surface on the same API the web app uses, not a status
-viewer bolted onto a dashboard. It is multi-server by design (one device, many
-farms/backends), capability-gated per server, and built to keep working on a
-shop-floor network that drops.
+iPhone has exactly three tabs: Farm, Queue and Filament. Regular-width iPad
+has the same three sidebar items. There are no shell preferences,
+Floor/Oversight groups, duplicate Fleet destination, Attention or Tasks tabs,
+or Two-modes promotion. Retired analytical deep links open Farm.
 
 ## Operating Context
 
-- Shop floor and workshop environments: motion, noise, variable lighting, and
-  physical tasks interleaved with the phone.
-- Local networks, often self-hosted, sometimes behind self-signed HTTPS.
-  Connectivity is unreliable; the app carries read caches, an offline action
-  queue, and honest staleness banners.
-- Real-time fleet events arrive over SignalR (printer status, discovery, slicer
-  jobs); the UI is expected to reflect them live.
-- Physical identifiers are part of the workflow: QR codes, barcodes, and NFC
-  tags on spools, bins, parts, and printers.
-- Servers advertise `operatorFeatures` capability flags. Features the server
-  disables are omitted from navigation entirely rather than shown disabled, so
-  the app's information architecture must survive destinations disappearing.
+- Shop floors have movement, noise, variable lighting and intermittent networks.
+- Read caches and the offline action queue must expose honest staleness.
+- SignalR supplies real-time printer and job events.
+- Physical labels use QR, barcode or NFC.
+- One device supports multiple registered servers; credentials are per-server
+  in Keychain and registrations are on-device.
+- Server capability flags still govern actions and data, not the three core tabs.
 
-## Capabilities and Constraints
+## Constraints
 
-Confirmed feature surface in the current build:
+- iOS 17+, SwiftUI, Swift Concurrency, MVVM and repository services; Xcode 26+.
+- Shared `/api/*` contract: camelCase JSON and string enums.
+- No mobile-only DTOs without a genuine contract need.
+- Native navigation and minimum 44-point targets on iPhone and iPad.
+- Analytical work belongs on the web, not another phone navigation group.
 
-- **Attention** — ranked feed of items needing operator action, with inline
-  actions, camera snapshots, and confirmation dialogs.
-- **Farm** — printer list with search, status filter, location filter chips,
-  filament-coverage badges; printer detail; advanced controls (jog, preheat,
-  home, z-offset, disable motors); predictive insights; auto-dispatch.
-- **Tasks** — shift task plan and job list.
-- **Scan** — barcode/QR/NFC intake, bin scan, part scan, harvest plate flow,
-  printer lookup, offline queue review and retry.
-- **Inventory** — filament spool inventory and printed-parts inventory, add
-  spool, barcode intake, NFC write.
-- **Oversight** — Dashboard, Dispatch dashboard, Maintenance, Maintenance
-  analytics, Uptime & reliability, Job history, Job timeline, Locations.
-- **Account and system** — Notifications, Settings (theme, push, NFC format,
-  account, about), multi-server registry, server editor, connection check,
-  certificate trust and pinning, demo mode, sign-out.
+## Brand and Accessibility
 
-Constraints:
-
-- iOS 17+, SwiftUI, Swift Concurrency, MVVM with a repository pattern.
-  Xcode 26+.
-- Consumes the shared `/api/*` contract: camelCase JSON, string enums. No
-  mobile-only DTOs; extend the shared API instead.
-- iPhone uses a tab-based compact layout; iPad uses `NavigationSplitView`. Both
-  must be served by any structural change.
-- Capability flags can remove any non-core destination at runtime.
-- Credentials are per-server in the Keychain; server registrations live in
-  UserDefaults on-device.
-
-Known problem this record exists to address: features are hard to discover.
-Oversight surfaces (Dashboard, Maintenance, Notifications, Settings) are hidden
-behind a `⋯` menu that only exists on the Attention screen, the server switcher
-sits top-leading on Attention but top-trailing on Farm, and roughly a dozen
-destinations have no entry point in the primary navigation at all.
-
-## Brand Commitments
-
-- Name: **PrintFarmer**.
-- Accent green `#10b981`, secondary blue `#1d4ed8`; light background `#ffffff`,
-  dark background `#0b1020`. Shared with the web app.
-- Status vocabulary: success green, warning amber `#d97706`, error red
-  `#dc2626`, maintenance purple, assigned teal, homed blue, not-homed orange.
-- Light and dark are both first-class; theme is user-selectable
-  (system/light/dark).
+- PrintFarmer accent green `#10b981`, secondary blue `#1d4ed8`; light background
+  `#ffffff`, dark background `#0b1020`.
+- Light, dark and system themes are first-class.
+- Status pairs color with text; no motion-status or homed-axes card badges.
+- Dynamic Type, VoiceOver labels/hints and stable navigation identifiers.
+- One-handed reach is the primary interaction constraint.
 - Licensed AGPL-3.0-only from PrintFarmer v0.2.3.
-
-## Evidence on Hand
-
-- Working app with the full feature surface listed above (`mobile/PrintFarmer/`).
-- Real API contract, SignalR event stream, and capability flags.
-- No customer names, testimonials, pricing, benchmarks, or case studies exist.
-  Future work must not invent them. Farm names, printer names, and job data used
-  in mockups are illustrative and must be labeled as such.
 
 ## Product Principles
 
-1. **Two jobs, one app.** Floor work and oversight are equals; neither may be
-   demoted to a submenu.
-2. **Nothing important lives only in an overflow menu.** If a feature matters,
-   it has a findable home.
-3. **Honest state over optimistic state.** Stale, offline, degraded, and
-   capability-disabled are shown as themselves, never hidden or faked.
-4. **Survive absent features.** Any structure must stay coherent when the server
-   disables destinations.
-5. **Native before novel.** Platform navigation, controls, and gestures win;
-   brand lives in tint, type, motion, and content.
+1. **Floor work first.** See printers, run the queue, handle filament, scan.
+2. **One home per job.** No duplicated Farm/Fleet or competing navigation shells.
+3. **Honest state.** Offline, stale and unavailable are not success.
+4. **Native before novel.** Platform controls and gestures carry the workflow.
+5. **Web for depth.** Analytics and administration stay in the full console.
 
-## Accessibility & Inclusion
+## Evidence
 
-- 44×44 pt minimum touch targets; the codebase already enforces `minHeight: 44`
-  on navigation controls.
-- Dynamic Type via system text styles; no hard-coded point sizes.
-- State is never carried by color alone — staleness and severity already pair
-  color with text and accessibility labels.
-- Every navigation control carries an accessibility label, hint, and identifier;
-  UI tests depend on those identifiers.
-- One-handed reach matters: the floor operator's dominant-hand thumb is the
-  primary input.
+The app consumes the real shared API, SignalR and capability flags.
+[The distill plan](docs/distill/PLAN.md) and
+[illustrative mockups](docs/distill/mockups.html) define the target surface.
+Mock farm names and job data are illustrative; no customer or performance
+claims should be invented.

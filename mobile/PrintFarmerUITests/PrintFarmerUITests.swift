@@ -2277,8 +2277,8 @@ class PrintFarmerUITestCase: XCTestCase {
         switch identifier {
         case "tab.attention": "Attention"
         case "tab.farm": "Farm"
-        case "tab.tasks": "Tasks"
-        case "tab.inventory": "Inventory"
+        case "tab.queue": "Queue"
+        case "tab.filament": "Filament"
         case "tab.oversight": "Oversight"
         case "tab.overview": "Overview"
         case "tab.fleet": "Fleet"

@@ -32,6 +32,7 @@ enum SpoolScanError: Error, LocalizedError, Sendable {
 
 enum SpoolScanResult: Sendable {
     case spoolId(Int)
+    case printerId(UUID)
     case newSpoolData(ScannedSpoolData)
     case cancelled
     case error(SpoolScanError)
