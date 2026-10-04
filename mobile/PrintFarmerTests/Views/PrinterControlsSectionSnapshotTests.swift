@@ -1104,8 +1104,12 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         heater.text = "0"
         heater.sendActions(for: .editingChanged)
         try await settle(controller)
+        let coolDownDispatched = expectation(description: "The UI's asynchronous zero-target command reaches the service")
+        service.afterSetTemperatures = { coolDownDispatched.fulfill() }
+        defer { service.afterSetTemperatures = nil }
         try control("printer.controls.heat.set-targets").sendActions(for: .touchUpInside)
-        try await settle(controller)
+        await fulfillment(of: [coolDownDispatched], timeout: 5)
+        service.afterSetTemperatures = nil
         XCTAssertEqual(service.setTemperaturesCalledWith?.hotend, 0)
         model.cancelPendingCommand()
         service.setTemperaturesCalledWith = nil
