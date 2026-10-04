@@ -25,6 +25,7 @@ public record PrusaCompositeStatus(
     double? AxisY = null,
     double? AxisZ = null,
     int? TimeRemainingSeconds = null,
-    int? SpeedMultiplier = null);
+    int? SpeedMultiplier = null,
+    string? ThumbnailCacheIdentity = null);
 
 #pragma warning restore CS1066

@@ -3,6 +3,7 @@
 // </copyright>
 
 using System.Net;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Printers;
 using FluentAssertions;
@@ -61,6 +62,63 @@ public sealed class PrintersControllerFileThumbnailContractTests : IAsyncLifetim
             $"/api/printers/{Guid.NewGuid()}/files/thumbnail?filename=thumbs%2Fbenchy-300x300.png");
 
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task CurrentJobThumbnail_AnonymousRequest_IsUnauthorizedAsync()
+    {
+        await using var productionAuthFactory =
+            new CustomWebApplicationFactory(
+                new Dictionary<string, string?>
+                {
+                    ["Security:DevModeBypassAuth"] = "false",
+                });
+        using HttpClient anonymousClient = productionAuthFactory.CreateClient();
+
+        HttpResponseMessage response = await anonymousClient.GetAsync(
+            $"/api/printers/{Guid.NewGuid()}/current-job/thumbnail");
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task CurrentJobThumbnail_IdlePrinter_ReturnsNotFoundAsync()
+    {
+        Guid printerId = Guid.NewGuid();
+        _printers.Setup(service => service.GetCurrentJobThumbnailAsync(
+                printerId,
+                null,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((HistoryThumbnailContent?)null);
+
+        HttpResponseMessage response = await _client.GetAsync(
+            $"/api/printers/{printerId}/current-job/thumbnail");
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task CurrentJobThumbnail_VersionedImage_ReturnsPrivateCachedContentAsync()
+    {
+        Guid printerId = Guid.NewGuid();
+        const string cacheToken = "0123456789abcdef";
+        _printers.Setup(service => service.GetCurrentJobThumbnailAsync(
+                printerId,
+                cacheToken,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new HistoryThumbnailContent([1, 2, 3], "image/png"));
+
+        HttpResponseMessage response = await _client.GetAsync(
+            $"/api/printers/{printerId}/current-job/thumbnail?v={cacheToken}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        response.Content.Headers.ContentType!.MediaType.Should().Be("image/png");
+        response.Headers.CacheControl!.Private.Should().BeTrue();
+        response.Headers.CacheControl.MaxAge.Should().Be(TimeSpan.FromSeconds(300));
+        response.Headers.ETag!.Tag.Should().Be($"\"{cacheToken}\"");
+        response.Headers.GetValues("X-Content-Type-Options")
+            .Should().ContainSingle("nosniff");
+        (await response.Content.ReadAsByteArrayAsync()).Should().Equal(1, 2, 3);
     }
 
     [Fact]
