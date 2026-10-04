@@ -61,6 +61,8 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
     }
 
     private func panelSelector() -> XCUIElement {
+        // The segmented selector reports a different accessibility element
+        // type on iPhone and iPad; its identifier is stable across both.
         app.descendants(matching: .any)["printer.detail.panel.selector"]
     }
 
@@ -98,10 +100,9 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
             app.navigationBars["Settings"].waitForExistence(timeout: 5),
             "The Settings screen must appear"
         )
-        // Settings is a lazy list; scroll the Printer Safety section into the
-        // realized accessibility tree before querying its switch.
-        app.swipeUp()
         let toggle = app.switches["settings.advancedPrinterControls"]
+        // Settings is a lazy list; scroll only if the target is not realized.
+        if !toggle.exists { app.swipeUp() }
         XCTAssertTrue(
             toggle.waitForExistence(timeout: 3),
             "Settings must expose the Advanced Printer Controls safety toggle"
@@ -127,6 +128,20 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
                 "Tapping the Advanced Printer Controls toggle must flip its own value to on"
             )
         }
+
+        // The Farm sidebar selection does not pop the Farm NavigationStack on
+        // iPad, so return from Settings through Account before reopening detail.
+        let settingsBack = app.navigationBars["Settings"].buttons["BackButton"]
+        XCTAssertTrue(settingsBack.waitForExistence(timeout: 3))
+        settingsBack.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["account.root"].waitForExistence(timeout: 3))
+        let accountBack = app.navigationBars["Account"].buttons["BackButton"]
+        XCTAssertTrue(accountBack.waitForExistence(timeout: 3))
+        accountBack.tap()
+        XCTAssertTrue(
+            app.buttons["navigation.account"].waitForExistence(timeout: 3),
+            "Returning from Settings must restore the Farm root before opening printer detail"
+        )
     }
 
     // MARK: - Default entry / gating
@@ -266,8 +281,8 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
         XCTAssertTrue(settings.waitForExistence(timeout: 5))
         settings.tap()
         XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
-        app.swipeUp()
         let toggle = app.switches["settings.advancedPrinterControls"]
+        if !toggle.exists { app.swipeUp() }
         XCTAssertTrue(
             toggle.waitForExistence(timeout: 5),
             "Settings must expose the Advanced Printer Controls safety toggle"

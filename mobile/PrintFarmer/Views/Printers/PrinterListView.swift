@@ -143,6 +143,8 @@ struct PrinterListView: View {
                     .foregroundStyle(Color.pfWarning)
                 }
                 Group {
+                    // This list is mounted inside the Farm navigation stack and
+                    // reads loading/error state from its canonical Dashboard owner.
                     if farmViewModel.isLoading && farmViewModel.printers.isEmpty {
                         ProgressView("Loading printers…")
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -204,10 +206,7 @@ struct PrinterListView: View {
     }
 
     private func synchronizeFarmData() {
-        viewModel.setFarmData(
-            farmViewModel.printers,
-            pendingReadyPrinterIDs: farmViewModel.pendingReadyPrinterIDs
-        )
+        farmViewModel.synchronizeFarmData(to: viewModel)
     }
 
     // MARK: - Printer List

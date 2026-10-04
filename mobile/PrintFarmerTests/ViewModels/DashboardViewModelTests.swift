@@ -9,73 +9,42 @@ final class CanonicalOwnerWeakReference<Value: AnyObject> {
     }
 }
 
-/// Tests for DashboardViewModel: loading states, data aggregation,
-/// refresh behavior, and error handling.
-/// Uses MockPrinterService and MockJobService via configure() DI pattern.
+/// Tests for DashboardViewModel's canonical Farm loading and snapshot behavior.
 @MainActor
 final class DashboardViewModelTests: XCTestCase {
 
     private var mockPrinterService: MockPrinterService!
-    private var mockJobService: MockJobService!
-    private var mockStatsService: MockStatisticsService!
-    private var mockJobAnalyticsService: MockJobAnalyticsService!
     private var viewModel: DashboardViewModel!
 
     override func setUp() async throws {
         try await super.setUp()
         mockPrinterService = MockPrinterService()
-        mockJobService = MockJobService()
-        mockStatsService = MockStatisticsService()
-        mockJobAnalyticsService = MockJobAnalyticsService()
         viewModel = DashboardViewModel()
         viewModel.configure(
-            printerService: mockPrinterService,
-            jobService: mockJobService,
-            statisticsService: mockStatsService,
-            jobAnalyticsService: mockJobAnalyticsService
+            printerService: mockPrinterService
         )
     }
 
     override func tearDown() async throws {
         viewModel = nil
         mockPrinterService = nil
-        mockJobService = nil
-        mockStatsService = nil
-        mockJobAnalyticsService = nil
         try await super.tearDown()
     }
 
     // MARK: - Initial State
 
-    func testFarmFloorLoadsAndCachesFleetWithoutAnalyticalOrJobEndpoints() async throws {
+    func testFarmLoadsCanonicalPrinterFleet() async throws {
         mockPrinterService.printersToReturn = [try TestData.decodePrinter()]
-        mockJobService.errorToThrow = NetworkError.forbidden
-        viewModel.configure(
-            printerService: mockPrinterService,
-            jobService: mockJobService,
-            statisticsService: mockStatsService,
-            jobAnalyticsService: mockJobAnalyticsService,
-            farmOnly: true
-        )
         await viewModel.loadDashboard()
         XCTAssertEqual(viewModel.farmSource, .live)
         XCTAssertEqual(viewModel.printers.count, 1)
-        XCTAssertFalse(mockJobService.listJobsCalled)
-        XCTAssertFalse(mockJobService.listAllJobsCalled)
-        XCTAssertFalse(mockStatsService.summaryCalled)
-        XCTAssertFalse(mockJobAnalyticsService.getStatsCalled)
-        XCTAssertFalse(mockJobAnalyticsService.getModelStatsCalled)
-        XCTAssertNil(viewModel.summary)
-        XCTAssertTrue(viewModel.modelStats.isEmpty)
         XCTAssertNil(viewModel.errorMessage)
     }
 
     func testInitialState() {
         XCTAssertTrue(viewModel.printers.isEmpty)
-        XCTAssertTrue(viewModel.queueOverview.isEmpty)
         XCTAssertFalse(viewModel.isLoading)
         XCTAssertNil(viewModel.errorMessage)
-        XCTAssertNil(viewModel.summary)
     }
 
     func testPrinterUpdateWithoutThumbnailClearsTheCurrentJobThumbnail() async throws {
@@ -102,6 +71,28 @@ final class DashboardViewModelTests: XCTestCase {
         XCTAssertEqual(vm.farmDataRevision, 1)
     }
 
+    func testServerReconfigurationClearsPriorFarmDataUntilNewAuthorityLoads() async throws {
+        let priorPrinter = try TestData.decodePrinter()
+        mockPrinterService.printersToReturn = [priorPrinter]
+        await viewModel.loadDashboard()
+        XCTAssertEqual(viewModel.printers.map(\.id), [priorPrinter.id])
+        XCTAssertEqual(viewModel.farmSource, .live)
+
+        let nextService = MockPrinterService()
+        viewModel.configure(printerService: nextService)
+
+        XCTAssertTrue(viewModel.printers.isEmpty)
+        XCTAssertTrue(viewModel.pendingReadyPrinterIDs.isEmpty)
+        XCTAssertEqual(viewModel.farmSource, .notLoaded)
+        XCTAssertNil(viewModel.lastUpdatedAt)
+        XCTAssertFalse(viewModel.hasConcludedCanonicalLoad)
+
+        nextService.printersToReturn = [try TestData.decodePrinter(from: TestJSON.printerMinimal)]
+        await viewModel.loadDashboard()
+        XCTAssertEqual(viewModel.printers.map(\.id), [nextService.printersToReturn[0].id])
+        XCTAssertEqual(viewModel.farmSource, .live)
+    }
+
     func testReconnectRecoveryRefreshesCanonicalDashboardOnceAndFencesStaleService() async throws {
         let callbackQueue = ShiftTaskCallbackQueue()
         let oldPrinterService = MockPrinterService()
@@ -114,10 +105,7 @@ final class DashboardViewModelTests: XCTestCase {
         let currentSignalR = MockSignalRService()
         let vm = DashboardViewModel(callbackEnqueuer: callbackQueue.enqueuer)
         vm.configure(
-            printerService: oldPrinterService,
-            jobService: mockJobService,
-            statisticsService: mockStatsService,
-            jobAnalyticsService: mockJobAnalyticsService
+            printerService: oldPrinterService
         )
         vm.configureSignalR(oldSignalR)
 
@@ -143,10 +131,7 @@ final class DashboardViewModelTests: XCTestCase {
         XCTAssertEqual(oldPrinterService.listPrintersCallCount, 1)
 
         vm.configure(
-            printerService: currentPrinterService,
-            jobService: mockJobService,
-            statisticsService: mockStatsService,
-            jobAnalyticsService: mockJobAnalyticsService
+            printerService: currentPrinterService
         )
         vm.configureSignalR(currentSignalR)
         oldSignalR.simulateCapturedConnectionStateChange(at: 0, state: .reconnecting)
@@ -203,10 +188,7 @@ final class DashboardViewModelTests: XCTestCase {
         await oldScript.waitForCallCount(1)
 
         viewModel.configure(
-            printerService: currentService,
-            jobService: mockJobService,
-            statisticsService: mockStatsService,
-            jobAnalyticsService: mockJobAnalyticsService
+            printerService: currentService
         )
         await viewModel.loadDashboard()
         XCTAssertEqual(viewModel.printers.first?.name, "Ender 3")
@@ -236,10 +218,7 @@ final class DashboardViewModelTests: XCTestCase {
         let oldRequest = Task { await viewModel.loadDashboard() }
         await oldScript.waitForCallCount(1)
         viewModel.configure(
-            printerService: currentService,
-            jobService: mockJobService,
-            statisticsService: mockStatsService,
-            jobAnalyticsService: mockJobAnalyticsService
+            printerService: currentService
         )
         await viewModel.loadDashboard()
         await oldGate.fail(.forced("stale dashboard failure"))
@@ -264,10 +243,7 @@ final class DashboardViewModelTests: XCTestCase {
         let signalR = MockSignalRService()
         let vm = DashboardViewModel(callbackEnqueuer: callbackQueue.enqueuer)
         vm.configure(
-            printerService: mockPrinterService,
-            jobService: mockJobService,
-            statisticsService: mockStatsService,
-            jobAnalyticsService: mockJobAnalyticsService
+            printerService: mockPrinterService
         )
         vm.configureSignalR(signalR)
 
@@ -302,10 +278,7 @@ final class DashboardViewModelTests: XCTestCase {
         let signalR = MockSignalRService()
         let vm = DashboardViewModel(callbackEnqueuer: callbackQueue.enqueuer)
         vm.configure(
-            printerService: mockPrinterService,
-            jobService: mockJobService,
-            statisticsService: mockStatsService,
-            jobAnalyticsService: mockJobAnalyticsService
+            printerService: mockPrinterService
         )
         vm.configureSignalR(signalR)
 
@@ -384,10 +357,7 @@ final class DashboardViewModelTests: XCTestCase {
         mockPrinterService.listHandler = { _ in try await script.next() }
         let vm = DashboardViewModel(callbackEnqueuer: callbackQueue.enqueuer)
         vm.configure(
-            printerService: mockPrinterService,
-            jobService: mockJobService,
-            statisticsService: mockStatsService,
-            jobAnalyticsService: mockJobAnalyticsService
+            printerService: mockPrinterService
         )
 
         let caller = Task { await vm.loadDashboard() }
@@ -413,10 +383,7 @@ final class DashboardViewModelTests: XCTestCase {
         mockPrinterService.listHandler = { _ in try await script.next() }
         var vm: DashboardViewModel? = DashboardViewModel()
         vm?.configure(
-            printerService: mockPrinterService,
-            jobService: mockJobService,
-            statisticsService: mockStatsService,
-            jobAnalyticsService: mockJobAnalyticsService
+            printerService: mockPrinterService
         )
         let weakVM = CanonicalOwnerWeakReference(vm)
         let waiter = vm?.beginCanonicalLoadForTesting()
@@ -487,7 +454,6 @@ final class DashboardViewModelTests: XCTestCase {
 
         XCTAssertEqual(viewModel.printers.count, 1)
         XCTAssertTrue(mockPrinterService.listPrintersCalled)
-        XCTAssertTrue(mockJobService.listJobsCalled)
         XCTAssertFalse(viewModel.isLoading)
         XCTAssertNil(viewModel.errorMessage)
     }
@@ -519,7 +485,6 @@ final class DashboardViewModelTests: XCTestCase {
 
     func testLoadDashboardWithEmptyData() async {
         mockPrinterService.printersToReturn = []
-        mockJobService.queueOverviewsToReturn = []
 
         await viewModel.loadDashboard()
 
@@ -611,9 +576,6 @@ final class DashboardViewModelTests: XCTestCase {
 final class DashboardViewModelSnapshotTests: XCTestCase {
 
     private var mockPrinterService: MockPrinterService!
-    private var mockJobService: MockJobService!
-    private var mockStatsService: MockStatisticsService!
-    private var mockJobAnalyticsService: MockJobAnalyticsService!
     private var mockAutoDispatch: MockAutoDispatchService!
     private var store: FakeFarmSnapshotStore!
     private var viewModel: DashboardViewModel!
@@ -624,17 +586,11 @@ final class DashboardViewModelSnapshotTests: XCTestCase {
     override func setUp() async throws {
         try await super.setUp()
         mockPrinterService = MockPrinterService()
-        mockJobService = MockJobService()
-        mockStatsService = MockStatisticsService()
-        mockJobAnalyticsService = MockJobAnalyticsService()
         mockAutoDispatch = MockAutoDispatchService()
         store = FakeFarmSnapshotStore(session: FarmSnapshotSession(namespace: namespace, generation: 1, token: 1))
         viewModel = DashboardViewModel()
         viewModel.configure(
-            printerService: mockPrinterService,
-            jobService: mockJobService,
-            statisticsService: mockStatsService,
-            jobAnalyticsService: mockJobAnalyticsService
+            printerService: mockPrinterService
         )
         viewModel.configureSnapshot(
             store: store,
@@ -647,9 +603,6 @@ final class DashboardViewModelSnapshotTests: XCTestCase {
         viewModel = nil
         store = nil
         mockAutoDispatch = nil
-        mockJobAnalyticsService = nil
-        mockStatsService = nil
-        mockJobService = nil
         mockPrinterService = nil
         try await super.tearDown()
     }
@@ -912,10 +865,7 @@ final class DashboardViewModelSnapshotTests: XCTestCase {
         mockPrinterService.listHandler = { _ in try await script.next() }
         let vm = DashboardViewModel()
         vm.configure(
-            printerService: mockPrinterService,
-            jobService: mockJobService,
-            statisticsService: mockStatsService,
-            jobAnalyticsService: mockJobAnalyticsService
+            printerService: mockPrinterService
         )
         vm.configureSnapshot(
             store: realStore,
@@ -983,10 +933,7 @@ final class DashboardViewModelSnapshotTests: XCTestCase {
         mockPrinterService.listHandler = { _ in try await script.next() }
         let vm = DashboardViewModel()
         vm.configure(
-            printerService: mockPrinterService,
-            jobService: mockJobService,
-            statisticsService: mockStatsService,
-            jobAnalyticsService: mockJobAnalyticsService
+            printerService: mockPrinterService
         )
         vm.configureSnapshot(
             store: realStore,
@@ -1037,10 +984,7 @@ final class DashboardViewModelSnapshotTests: XCTestCase {
         let reports = CommitReportRecorder()
         let vm = DashboardViewModel()
         vm.configure(
-            printerService: mockPrinterService,
-            jobService: mockJobService,
-            statisticsService: mockStatsService,
-            jobAnalyticsService: mockJobAnalyticsService
+            printerService: mockPrinterService
         )
         vm.configureSnapshot(
             store: realStore,
@@ -1153,10 +1097,7 @@ final class DashboardViewModelSnapshotTests: XCTestCase {
         )
         let vmB = DashboardViewModel()
         vmB.configure(
-            printerService: mockPrinterService,
-            jobService: mockJobService,
-            statisticsService: mockStatsService,
-            jobAnalyticsService: mockJobAnalyticsService
+            printerService: mockPrinterService
         )
         vmB.configureSnapshot(store: storeB, autoPrintService: mockAutoDispatch, now: { [fixedNow] in fixedNow })
 
@@ -1182,6 +1123,82 @@ final class DashboardViewModelSnapshotTests: XCTestCase {
         let committed = try XCTUnwrap(store.committedEnvelopes.first)
         let projected = try XCTUnwrap(committed.payload.first { $0.id == printer.id })
         XCTAssertTrue(projected.isPendingReady)
+    }
+
+    func testFarmProjectionRevisionPublishesPrintersAndPendingReadyIDs() async throws {
+        let printer = try TestData.decodePrinter()
+        mockPrinterService.printersToReturn = [printer]
+        mockAutoDispatch.globalStatusToReturn = AutoDispatchGlobalStatus(
+            globalEnabled: true,
+            printers: [AutoDispatchStatus(printerId: printer.id, enabled: true, queueDepth: 0, state: "PendingReady")]
+        )
+        let previousRevision = viewModel.farmDataRevision
+
+        await viewModel.loadDashboard()
+
+        XCTAssertGreaterThan(viewModel.farmDataRevision, previousRevision)
+        let projection = PrinterListViewModel()
+        viewModel.synchronizeFarmData(to: projection)
+        XCTAssertEqual(projection.printers.map(\.id), [printer.id])
+        XCTAssertEqual(projection.pendingReadyPrinterIDs, [printer.id])
+    }
+
+    func testOverlappingPendingReadyRefreshesKeepNewestResponse() async throws {
+        let olderPrinter = try TestData.decodePrinter()
+        let newerPrinter = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        let olderGate = ShiftTaskResultGate<AutoDispatchGlobalStatus>()
+        let newerGate = ShiftTaskResultGate<AutoDispatchGlobalStatus>()
+        let script = ScriptedCanonicalResult<AutoDispatchGlobalStatus>([
+            .gated(olderGate),
+            .gated(newerGate)
+        ])
+        mockAutoDispatch.getAllStatusHandler = { try await script.next() }
+
+        let olderRefresh = Task { await viewModel.refreshPendingReadyStatus() }
+        await script.waitForCallCount(1)
+        let newerRefresh = Task { await viewModel.refreshPendingReadyStatus() }
+        await script.waitForCallCount(2)
+
+        await newerGate.succeed(AutoDispatchGlobalStatus(
+            globalEnabled: true,
+            printers: [AutoDispatchStatus(printerId: newerPrinter.id, enabled: true, queueDepth: 0, state: "PendingReady")]
+        ))
+        await newerRefresh.value
+        XCTAssertEqual(viewModel.pendingReadyPrinterIDs, [newerPrinter.id])
+
+        await olderGate.succeed(AutoDispatchGlobalStatus(
+            globalEnabled: true,
+            printers: [AutoDispatchStatus(printerId: olderPrinter.id, enabled: true, queueDepth: 0, state: "PendingReady")]
+        ))
+        await olderRefresh.value
+        XCTAssertEqual(viewModel.pendingReadyPrinterIDs, [newerPrinter.id])
+    }
+
+    func testCanonicalPublishWinsOverOlderPendingReadyRefresh() async throws {
+        let stalePrinter = try TestData.decodePrinter()
+        let canonicalPrinter = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        let staleGate = ShiftTaskResultGate<AutoDispatchGlobalStatus>()
+        let script = ScriptedCanonicalResult<AutoDispatchGlobalStatus>([
+            .gated(staleGate),
+            .value(AutoDispatchGlobalStatus(
+                globalEnabled: true,
+                printers: [AutoDispatchStatus(printerId: canonicalPrinter.id, enabled: true, queueDepth: 0, state: "PendingReady")]
+            ))
+        ])
+        mockAutoDispatch.getAllStatusHandler = { try await script.next() }
+
+        let staleRefresh = Task { await viewModel.refreshPendingReadyStatus() }
+        await script.waitForCallCount(1)
+        mockPrinterService.printersToReturn = [canonicalPrinter]
+        await viewModel.loadDashboard()
+        XCTAssertEqual(viewModel.pendingReadyPrinterIDs, [canonicalPrinter.id])
+
+        await staleGate.succeed(AutoDispatchGlobalStatus(
+            globalEnabled: true,
+            printers: [AutoDispatchStatus(printerId: stalePrinter.id, enabled: true, queueDepth: 0, state: "PendingReady")]
+        ))
+        await staleRefresh.value
+        XCTAssertEqual(viewModel.pendingReadyPrinterIDs, [canonicalPrinter.id])
     }
 
     // MARK: Projection

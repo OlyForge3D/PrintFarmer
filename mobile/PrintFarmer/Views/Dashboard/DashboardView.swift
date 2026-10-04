@@ -11,13 +11,7 @@ struct DashboardView: View {
         farmFloorContent
             .task(id: services.activeServerGeneration) {
                 viewModel.isViewActive = true
-                viewModel.configure(
-                    printerService: services.printerService,
-                    jobService: services.jobService,
-                    statisticsService: services.statisticsService,
-                    jobAnalyticsService: services.jobAnalyticsService,
-                    farmOnly: true
-                )
+                viewModel.configure(printerService: services.printerService)
                 viewModel.configureSnapshot(
                     store: services.farmSnapshotStore,
                     autoPrintService: services.autoPrintService

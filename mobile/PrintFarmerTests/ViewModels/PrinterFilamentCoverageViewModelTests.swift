@@ -3,9 +3,8 @@ import XCTest
 
 // MARK: - Printer Filament Coverage ViewModel Tests (F4-M / #778)
 //
-// Symmetric to `FarmFilamentCoverageViewModelTests` for the per-
-// printer VM. Same deterministic discipline (cycle-3 blocker C):
-// positive dispatches use `waitForCommittedGeneration`, absence
+// Deterministic dispatch discipline (cycle-3 blocker C): positive
+// dispatches use `waitForCommittedGeneration`, absence
 // dispatches use `waitForCallbackTick` (advanced INSIDE the callback
 // body), and post-teardown absence uses the structural
 // `subscriberCount == 0` proof.
