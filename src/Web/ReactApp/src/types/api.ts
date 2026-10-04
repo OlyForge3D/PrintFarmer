@@ -370,7 +370,7 @@ export interface MoveLocationRequest {
  * Extends all common base interfaces for a complete printer representation.
  * Use this as the base for DTOs that need most/all printer information.
  */
-export interface PrinterBase extends 
+export interface PrinterBase extends
   PrinterIdentity,
   PrinterCredentials,
   PrinterConnection,
@@ -389,7 +389,7 @@ export interface PrinterBase extends
  * Full printer DTO with all status and configuration information.
  * This is the most complete printer representation returned by the API.
  */
-export interface Printer extends 
+export interface Printer extends
   PrinterBase,
   PrinterLiveStatus,
   PrinterTemperatures,
@@ -466,7 +466,7 @@ export interface PrinterBackendCapabilitiesDto {
  * Lightweight printer DTO optimized for fast list retrieval.
  * Contains essential display info without full configuration details.
  */
-export interface PrinterFast extends 
+export interface PrinterFast extends
   PrinterBase,
   PrinterLiveStatus,
   PrinterTemperatures,
@@ -546,7 +546,7 @@ export interface PrinterSpoolInfo {
 /**
  * Combined printer identity with capabilities snapshot.
  * Used for export/import operations.
- * 
+ *
  * Note: Uses standard field names (id, name, modelName) for consistency.
  * Nullable types (| null) are used instead of optional (?) for explicit JSON serialization
  * in export/import scenarios, which is why this doesn't extend the base interfaces directly.
@@ -556,22 +556,22 @@ export interface PrinterWithCapabilitiesDto {
   id: string;
   name: string;
   backend?: PrinterBackend | null;
-  
+
   // Metadata (standard naming)
   modelName: string;
   manufacturerName?: string | null;
   notes?: string | null;
-  
+
   // Connection
   serverUrl?: string | null;
   backendPort?: number | null;
   frontendPort?: number | null;
-  
+
   // Credentials
   apiKey?: string | null;
   username?: string | null;
   password?: string | null;
-  
+
   // Capabilities (unique to export DTO)
   capabilities?: PrinterCapabilitiesExportDto | null;
 }
@@ -596,7 +596,7 @@ export interface VendorInfo {
  * Basic printer info without live status.
  * Used for configuration/management scenarios where real-time data isn't needed.
  */
-export interface PrinterBasic extends 
+export interface PrinterBasic extends
   PrinterIdentity,
   PrinterCredentials,
   PrinterMetadata {
@@ -612,7 +612,7 @@ export interface PrinterBasic extends
  * Live status info for real-time updates.
  * Contains only dynamic/changing printer state, no configuration.
  */
-export interface PrinterStatus extends 
+export interface PrinterStatus extends
   PrinterLiveStatus,
   PrinterCameraInfo,
   PrinterTemperatures,
@@ -765,7 +765,7 @@ export interface BulkImportResultItem {
 export interface BulkImportResponse {
   importedCount: number;
   skippedCount: number;
-  failureCount: number; 
+  failureCount: number;
   results: BulkImportResultItem[];
 }
 
@@ -2176,7 +2176,7 @@ export interface JobQueuePrintJob {
   dispatchResult?: {
     attemptId?: string | null;
     attemptNumber?: number | null;
-    outcome: "InProgress" | "Accepted" | "Rejected" | "FailedBeforeStart" | "Unknown";
+    outcome: "InProgress" | "Accepted" | "Rejected" | "FailedBeforeStart" | "Unknown" | "OperatorRecovered";
     backendAcceptedAtUtc?: string | null;
     errorCode?: string | null;
     isRetryable: boolean;
@@ -2798,7 +2798,8 @@ export type DispatchAttemptOutcome =
   | 'Rejected'
   | 'FailedBeforeStart'
   | 'Unknown'
-  | 'InProgress';
+  | 'InProgress'
+  | 'OperatorRecovered';
 
 export interface DispatchAttemptResultDto {
   attemptId?: string | null;
@@ -4990,59 +4991,6 @@ export interface UpdateChannelSettings {
   rowVersion?: string;
   channel: UpdateChannel;
   insiderAcknowledged: boolean;
-}
-
-export interface HostUpdateManualAuthorizationIntent {
-  authorizationId?: string | null;
-  expectedPolicyRevision?: number | null;
-  expectedPolicyFingerprint?: string | null;
-}
-
-export interface HostUpdateManualAuthorizationResponse {
-  authorizationId: string;
-  releaseId: string;
-  sequence: number;
-  channel: string;
-  candidateFingerprint: string;
-  policyRevision: number;
-  policyFingerprint: string;
-  expiresAt: string;
-}
-
-export type HostUpdateExecutionState =
-  | 'Accepted'
-  | 'Preflight'
-  | 'Draining'
-  | 'Fenced'
-  | 'BackedUp'
-  | 'Migrating'
-  | 'Applying'
-  | 'Verifying'
-  | 'Completed'
-  | 'RecoveryRequired'
-  | 'Refused';
-
-export interface HostUpdateExecutionActivity {
-  activityId: string;
-  releaseId: string;
-  state: HostUpdateExecutionState;
-  phase: string;
-  recordedAt: string;
-  requestFingerprint?: string | null;
-  requestBindingHash?: string | null;
-}
-
-export interface HostUpdateStatusResponse {
-  releaseId: string;
-  currentState: HostUpdateExecutionState;
-  activities: HostUpdateExecutionActivity[];
-}
-
-export type HostUpdateRecoveryOutcome = 'RolledBack' | 'NeedsOperator' | 'FenceReleasePending';
-
-export interface HostUpdateRecoveryResult {
-  outcome: HostUpdateRecoveryOutcome;
-  detail: string;
 }
 
 export type UpdateSchedulingBackoffState = 'Unknown' | 'None' | 'Waiting';

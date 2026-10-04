@@ -888,6 +888,7 @@ public class AutoDispatchService(
         // Find and cancel the printer queue's head using its within-scope order.
         PrintJob? nextJob = await db.PrintJobs
             .Where(j => j.AssignedPrinterId == printerId && j.Status == PrintJobStatus.Queued)
+            .WhereNotOperatorRecoveryBlocked()
             .OrderWithinScope()
             .FirstOrDefaultAsync(ct);
 
@@ -905,6 +906,7 @@ public class AutoDispatchService(
         // state can be persisted atomically below.
         Guid? skippedJobId = nextJob?.Id;
         bool hasMoreJobs = await db.PrintJobs
+            .WhereNotOperatorRecoveryBlocked()
             .AnyAsync(
                 j => j.AssignedPrinterId == printerId
                         && j.Status == PrintJobStatus.Queued
@@ -1615,6 +1617,7 @@ public class AutoDispatchService(
         IQueryable<PrintJob> assignedQuery = db.PrintJobs
             .AsNoTracking()
             .Where(j => j.AssignedPrinterId == printerId && j.Status == PrintJobStatus.Queued)
+            .WhereNotOperatorRecoveryBlocked()
             .OrderWithinScope();
 
         if (includeGcodeFile)
@@ -1692,6 +1695,7 @@ public class AutoDispatchService(
         IQueryable<PrintJob> unassignedQuery = db.PrintJobs
             .AsNoTracking()
             .Where(j => j.AssignedPrinterId == null && j.Status == PrintJobStatus.Queued)
+            .WhereNotOperatorRecoveryBlocked()
             .OrderWithinScope();
 
         if (includeGcodeFile)

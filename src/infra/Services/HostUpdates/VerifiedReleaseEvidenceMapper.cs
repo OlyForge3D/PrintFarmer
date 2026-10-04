@@ -1,16 +1,16 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 using Farm.Infrastructure.Dtos;
 
 namespace Farm.Infrastructure.Services.HostUpdates;
 
 /// <summary>
-/// Maps <see cref="SignedReleaseMetadata"/> (the host-update-domain shape produced by
+/// Maps <see cref="SignedReleaseMetadata"/> (the release-domain shape produced by
 /// <see cref="IHostUpdateMetadataProvider"/>/<see cref="VerifiedGitHubReleaseMetadataProvider"/>)
 /// to <see cref="VerifiedReleaseEvidenceDto"/> (the inventory/readiness-domain shape consumed by
 /// <c>ReleaseReadinessEvaluator.Evaluate</c>), for issue #2757's production discovery wiring.
 /// <para>
 /// These are two distinct, independently owned identity shapes:
-/// <see cref="CanonicalReleaseIdentity"/> (host-update domain, this project's
+/// <see cref="CanonicalReleaseIdentity"/> (release domain, this project's
 /// <c>HostUpdates</c> namespace) versus <see cref="CanonicalReleaseIdentityDto"/> (inventory
 /// domain, owned by issue #2668 and consumed by <c>ServiceInventoryEvaluator</c>). Only the
 /// fields <c>ReleaseReadinessEvaluator</c> actually reads are load-bearing here: it inspects

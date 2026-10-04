@@ -25,10 +25,10 @@ owner-manual build-and-release workflow. Old unsigned reservations do not block 
 New releases deliberately do not provide the old signed managed-update set.
 `container-images.json` is informational and marks managed-update eligibility
 false. Build metadata does not fabricate allocation/sequence authority. The
-existing inventory evaluator and host-update signature, authorization,
-active-print and runtime safety contracts remain unchanged; an incompatible or
-missing signed feed must not be advertised as ready. There is no production
-GitHub metadata-provider adapter in the current host-updater foundation.
+existing inventory evaluator and verified-release signature contracts remain
+unchanged; an incompatible or missing signed feed must not be advertised as
+ready. There is no production GitHub metadata-provider adapter for managed
+updates.
 Future updater work is separate and must not silently trust publication alone.
 
 The first signed managed-update release is a new boundary: it publishes

@@ -38,6 +38,7 @@ public class BatchDispatchService(
         {
             jobs = await db.PrintJobs
                 .Where(j => j.Status == PrintJobStatus.Queued && j.AssignedPrinterId == null)
+                .WhereNotOperatorRecoveryBlocked()
                 .OrderWithinScope()
                 .ToListAsync(ct);
         }
@@ -47,6 +48,7 @@ public class BatchDispatchService(
                 .Where(j => request.JobIds.Contains(j.Id)
                     && j.Status == PrintJobStatus.Queued
                     && j.AssignedPrinterId == null)
+                .WhereNotOperatorRecoveryBlocked()
                 .OrderWithinScope()
                 .ToListAsync(ct);
         }

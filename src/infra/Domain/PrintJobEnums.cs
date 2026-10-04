@@ -56,6 +56,13 @@ public enum JobBlockedReasonCode
 
     /// <summary>Required capability not advertised by the target printer.</summary>
     MissingRequiredCapability = 9,
+
+    /// <summary>
+    /// An operator released an indeterminate pre-start dispatch claim (issue #2859).
+    /// The job is never dispatchable (any job kind) until an operator deliberately clears
+    /// this block or cancels the job.
+    /// </summary>
+    OperatorRecoveryRequired = 10,
 }
 
 /// <summary>
@@ -81,6 +88,14 @@ public enum DispatchAttemptOutcome
     /// The job remains in Starting and must be reconciled against backend state.
     /// </summary>
     Unknown = 4,
+
+    /// <summary>
+    /// An operator released this indeterminate attempt through the recovery escape hatch
+    /// (issue #2859). This is NOT a backend rejection, cancellation, completion or acceptance:
+    /// the backend outcome stays unknown, the attempt is nonretryable, and the job carries
+    /// <see cref="JobBlockedReasonCode.OperatorRecoveryRequired"/> until an operator acts.
+    /// </summary>
+    OperatorRecovered = 5,
 }
 
 /// <summary>

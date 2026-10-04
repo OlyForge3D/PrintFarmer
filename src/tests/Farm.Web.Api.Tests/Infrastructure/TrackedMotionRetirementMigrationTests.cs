@@ -103,8 +103,16 @@ public sealed class TrackedMotionRetirementMigrationTests
             ClaimedAtUtc = DateTime.UtcNow,
         });
         released.Add(historyOnly);
+
+        // The fixture is seeded through the current model, which maps columns added by later
+        // migrations. Bridge them for the insert, then drop them so MigrateAsync still applies
+        // every later migration exactly as a real upgrade would.
+        _ = await context.Database.ExecuteSqlRawAsync(
+            """ALTER TABLE "QueueDispatchAttempts" ADD COLUMN "BackendSenderSettledAtUtc" TEXT NULL;""");
         await context.SaveChangesAsync();
         context.ChangeTracker.Clear();
+        _ = await context.Database.ExecuteSqlRawAsync(
+            """ALTER TABLE "QueueDispatchAttempts" DROP COLUMN "BackendSenderSettledAtUtc";""");
 
         await migrator.MigrateAsync();
 

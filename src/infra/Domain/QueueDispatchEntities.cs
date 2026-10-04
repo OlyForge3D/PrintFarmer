@@ -293,6 +293,13 @@ public sealed class QueueDispatchAttempt : IRevisionedEntity
 
     public DateTime? BackendResponseAtUtc { get; set; }
 
+    /// <summary>
+    /// UTC timestamp at which the backend start sender itself reported that its I/O ended
+    /// with an unknown outcome. Only the sender writes this (the reconciler never does), so it
+    /// is the only durable evidence that the start sender has ceased (issue #2859).
+    /// </summary>
+    public DateTime? BackendSenderSettledAtUtc { get; set; }
+
     public int ReconciliationCount { get; set; }
 
     public DateTime? LastReconciledAtUtc { get; set; }

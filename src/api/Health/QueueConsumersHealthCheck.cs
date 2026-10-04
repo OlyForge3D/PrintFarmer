@@ -12,8 +12,7 @@ namespace Farm.Web.Api.Health;
 /// these loops runs until the host stops, so a completed task always means the consumer is gone.
 /// </summary>
 /// <remarks>
-/// This proves hosted-service liveness only. A consumer that is paused by the host-update
-/// writer fence is still reported as running.
+/// This proves hosted-service liveness only. It does not inspect consumer throughput.
 /// </remarks>
 public sealed class QueueConsumersHealthCheck : IHealthCheck
 {

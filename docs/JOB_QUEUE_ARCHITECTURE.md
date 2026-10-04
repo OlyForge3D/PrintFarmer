@@ -1,7 +1,7 @@
 # PrintFarmer Job Queue System Architecture
 
-**Document Date:** January 16, 2026  
-**Version:** 1.0  
+**Document Date:** January 16, 2026
+**Version:** 1.0
 **Status:** NEEDS CONSOLIDATION
 
 ---
@@ -418,6 +418,63 @@ The safety invariants for this boundary are:
 - UI, API, and persistence tests prove both the positive recovery path and the
   negative path: unproven absence never releases the printer automatically.
 
+#### Implemented recovery disposition
+
+The implementation (`DispatchRecoveryService`, `DispatchRecoveryController`)
+resolves the open points of the contract above as follows:
+
+- **Distinct disposition.** An accepted recovery sets the attempt to the
+  terminal, non-retryable `DispatchAttemptOutcome.OperatorRecovered`
+  (`errorCode: "operator_recovery"`). It never records backend rejection,
+  cancellation, completion, or acceptance. Pending start-command outbox rows
+  for the attempt are dead-lettered (`operator_recovery`), pending control rows
+  are superseded (`superseded_by_operator_recovery`), and the attempt's
+  bed-clear record is invalidated. Successor barriers are untouched.
+- **Deliberate next action.** A job that was `Starting` returns to `Queued`
+  with `blockedReasonCode: "OperatorRecoveryRequired"`; `AssignedPrinterId` and
+  queue position are unchanged. The dispatch claim gate and every automatic
+  dispatch path (auto, batch, idle-window, startup requeue) skip such jobs
+  until an operator calls
+  `POST /api/dispatch/jobs/{jobId}/recovery/clear` with `If-Match: <job ETag>`
+  and `queue:reconcile`. Clearing is audited and emits
+  `PrintFarmer.Queue.DispatchRecoveryCleared.v1`.
+- **Sender cessation (fail closed).** Recovery is refused with `409
+  rejected_sender_live` while any sender for the attempt may still be live: a
+  foreign physical barrier, a `Processing` start command that has not recorded
+  `backend_outcome_unknown`, or a `Processing` control command. The start
+  sender records `BackendSenderSettledAtUtc` when its backend I/O ends; without
+  that evidence the request must also carry `"senderIsolationConfirmed": true`
+  (the operator attests the printer is isolated from the backend), otherwise it
+  returns `409 rejected_sender_isolation_required`. Unknown cessation never
+  releases.
+- **Request body.** Beyond the fields above, the body accepts optional
+  `senderIsolationConfirmed` and `clientReportedAtUtc`. Actor identity and
+  `actorRecordedAtUtc`/`serverRecordedAtUtc` are always server-derived; the
+  client time is stored only as client-reported. Notes are limited to 1000
+  characters.
+- **Protected journal.** Evidence lives in the append-only
+  `DispatchRecoveryJournalEntries` table (PostgreSQL and SQL Server
+  migrations), not `QueueOperationAudits` or the generic idempotency store. It
+  has no cascading relationships, is excluded from retention pruning, and
+  `AppDbContext` rejects any update or delete. Accepted and denied decisions
+  (`rejected_not_indeterminate` 409, `rejected_stale` 412, sender-live and
+  isolation 409) are journaled with their exact response for replay; key reuse
+  with a different fingerprint returns `409 idempotency_key_reused`.
+- **Revision churn.** The ETag is the printer dispatch-state revision. The
+  reconciliation scanner advances it on every pass, so clients must refetch
+  the resource and send a new `Idempotency-Key` after a `412`.
+- **Escalation.** `DispatchEscalationService` scans unresolved claims every
+  `Queue:DispatchEscalation:ScanInterval` (default 1 minute) and, for each due
+  threshold (`Warning` immediately, `Operational` 15 minutes, `Critical`
+  1 hour, `HardLimit` 24 hours, configurable and validated as positive and
+  strictly increasing, versioned by `PolicyRevision`), inserts one
+  `DispatchEscalationMarkers` row — unique per attempt, policy revision, and
+  threshold — plus a `PrintFarmer.Queue.DispatchIndeterminateEscalated.v1`
+  outbox event in the same transaction. Escalation never modifies the claim.
+- **Authorization scope.** Reads require printer `View` scope; recover requires
+  printer `Manage` scope and clear requires job `Manage` scope. Out-of-scope
+  resources return `404`.
+
 The minimum validation matrix covers authorization denial, wrong-printer and
 stale-revision conflicts, duplicate/replayed assertions, concurrent
 reconciliation, atomic rollback when audit or release persistence fails,
@@ -518,8 +575,8 @@ exception text.
 
 ### 1. JobQueueController (`/api/job-queue`)
 
-**Purpose:** Basic queue operations and printer management  
-**Status:** ✅ **ACTIVE & USED**  
+**Purpose:** Basic queue operations and printer management
+**Status:** ✅ **ACTIVE & USED**
 **Used By:** PrinterDashboard (simple queue view)
 
 #### Endpoints
@@ -578,9 +635,9 @@ revalidates every fence authoritatively.
 
 ### 2. JobQueueAnalyticsController (`/api/job-queue-analytics`)
 
-**Purpose:** Rich dashboard analytics, history, and advanced job management  
-**Status:** ✅ **ACTIVE & USED**  
-**Used By:** PrintQueueDashboard (advanced queue analytics)  
+**Purpose:** Rich dashboard analytics, history, and advanced job management
+**Status:** ✅ **ACTIVE & USED**
+**Used By:** PrintQueueDashboard (advanced queue analytics)
 **Previously Known As:** `PrintQueueController`
 
 #### Endpoints
@@ -657,8 +714,8 @@ public record DurationAnalyticsDto(
 
 ### 3. PrintJobQueueController (`/api/print-job-queue`)
 
-**Purpose:** Unknown (appears to be experimental or legacy)  
-**Status:** 🔴 **DEAD CODE - NOT REGISTERED**  
+**Purpose:** Unknown (appears to be experimental or legacy)
+**Status:** 🔴 **DEAD CODE - NOT REGISTERED**
 **Used By:** `QueueGcodeModal.tsx` (only component using `printJobQueueService`)
 
 #### Endpoints
@@ -693,8 +750,8 @@ public record DurationAnalyticsDto(
 
 ### 4. JobSchedulingController (`/api/jobscheduling`)
 
-**Purpose:** Schedule jobs for deferred/future execution with recurrence support  
-**Status:** ✅ **ACTIVE & USED**  
+**Purpose:** Schedule jobs for deferred/future execution with recurrence support
+**Status:** ✅ **ACTIVE & USED**
 **Used By:** Schedule features, recurring print jobs
 
 #### Endpoints
@@ -857,7 +914,7 @@ Dashboard displays statistics chart
 
 ### Issue #1: PrintJobQueueController is Dead Code
 
-**Severity:** Medium  
+**Severity:** Medium
 **Impact:** Maintenance burden, confusion, wasted developer time
 
 **Evidence:**
@@ -875,7 +932,7 @@ Dashboard displays statistics chart
 
 ### Issue #2: Frontend Service Disconnect
 
-**Severity:** Medium  
+**Severity:** Medium
 **Impact:** Frontend can't use the "new" PrintJobQueueController
 
 **Evidence:**
@@ -892,14 +949,14 @@ Dashboard displays statistics chart
 
 ### Issue #3: API Naming Ambiguity
 
-**Severity:** Low  
+**Severity:** Low
 **Impact:** Developer confusion, slow API integration, wrong endpoint selection
 
 **Current Confusion:**
 ```
 New developers see three endpoints:
 - /api/job-queue
-- /api/job-queue-analytics  
+- /api/job-queue-analytics
 - /api/print-job-queue
 
 Which should I use?
@@ -914,7 +971,7 @@ No clear guidance exists.
 
 ### Issue #4: No Documentation
 
-**Severity:** Medium  
+**Severity:** Medium
 **Impact:** Architectural knowledge only in developers' heads
 
 **Current State:**
@@ -945,8 +1002,8 @@ No clear guidance exists.
 5. Verify in tests that QueueGcodeModal still works
 6. Update `Program.cs` to remove any references (if any)
 
-**Effort:** 30 minutes  
-**Risk:** LOW (only QueueGcodeModal affected, easily testable)  
+**Effort:** 30 minutes
+**Risk:** LOW (only QueueGcodeModal affected, easily testable)
 **Benefit:** Reduced codebase complexity, clearer queue API
 
 ---
@@ -987,8 +1044,8 @@ Cons: Confusion about which to use
 Pros: Single source of truth, clear semantics
 Cons: One controller gets large (manageable with regions)
 
-**Effort:** 4-6 hours  
-**Risk:** MEDIUM (API contract change, need frontend updates)  
+**Effort:** 4-6 hours
+**Risk:** MEDIUM (API contract change, need frontend updates)
 **Benefit:** Simpler architecture, less confusion, easier to document
 
 ---
@@ -1030,8 +1087,8 @@ Cons: One controller gets large (manageable with regions)
 - Easier to monitor and debug
 - Better for API versioning
 
-**Effort:** 6-8 hours  
-**Risk:** MEDIUM (significant API restructuring)  
+**Effort:** 6-8 hours
+**Risk:** MEDIUM (significant API restructuring)
 **Benefit:** Production-grade architecture, better scalability
 
 ---
@@ -1076,8 +1133,8 @@ public async Task<IActionResult> EnqueueJobAsync(...)
 }
 ```
 
-**Effort:** 2 hours  
-**Risk:** LOW (output caching is safe with proper tags)  
+**Effort:** 2 hours
+**Risk:** LOW (output caching is safe with proper tags)
 **Benefit:** 10-50x faster analytics queries, reduced database load
 
 ---
@@ -1101,7 +1158,7 @@ CREATE INDEX idx_jobs_created ON Jobs(CreatedAt DESC);
 CREATE INDEX idx_jobs_status_created ON Jobs(Status, CreatedAt DESC);
 
 -- Composite for common analytics query
-CREATE INDEX idx_jobs_analytics 
+CREATE INDEX idx_jobs_analytics
     ON Jobs(Status, AssignedPrinterId, CreatedAt DESC);
 ```
 
@@ -1130,8 +1187,8 @@ var stats = await _context.Jobs
     .ToListAsync();
 ```
 
-**Effort:** 4 hours  
-**Risk:** LOW (indexes are non-breaking)  
+**Effort:** 4 hours
+**Risk:** LOW (indexes are non-breaking)
 **Benefit:** 50-100x faster complex queries, reduced CPU/memory
 
 ---
@@ -1161,8 +1218,8 @@ var stats = await _context.Jobs
 | Schedule future print | POST /api/jobscheduling/{id}/schedule | `{ scheduledTime, timezone }` |
 ```
 
-**Effort:** 3 hours  
-**Risk:** NONE (documentation only)  
+**Effort:** 3 hours
+**Risk:** NONE (documentation only)
 **Benefit:** Faster onboarding, fewer API misuses
 
 ---
@@ -1171,7 +1228,7 @@ var stats = await _context.Jobs
 
 ### Phase 1: Remove Dead Code (Week 1)
 
-**Priority:** HIGH  
+**Priority:** HIGH
 **Effort:** 2-4 hours
 
 ```
@@ -1194,7 +1251,7 @@ var stats = await _context.Jobs
 
 ### Phase 2: Document Current Architecture (Week 1-2)
 
-**Priority:** MEDIUM  
+**Priority:** MEDIUM
 **Effort:** 3-4 hours
 
 ```
@@ -1209,7 +1266,7 @@ var stats = await _context.Jobs
 
 ### Phase 3: Add Caching & Optimize (Week 2-3)
 
-**Priority:** MEDIUM  
+**Priority:** MEDIUM
 **Effort:** 4-6 hours
 
 ```
@@ -1230,8 +1287,8 @@ var stats = await _context.Jobs
 
 ### Phase 4: Consolidate Endpoints (Month 2)
 
-**Priority:** LOW (can wait)  
-**Effort:** 6-8 hours  
+**Priority:** LOW (can wait)
+**Effort:** 6-8 hours
 **Breaking Change:** YES
 
 ```
@@ -1291,6 +1348,6 @@ These changes will:
 
 ---
 
-**Document Version:** 1.0  
-**Last Updated:** January 16, 2026  
+**Document Version:** 1.0
+**Last Updated:** January 16, 2026
 **Next Review:** February 16, 2026

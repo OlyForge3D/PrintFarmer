@@ -344,6 +344,12 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     /// <summary>Provider-native per-printer queue position counters.</summary>
     public DbSet<QueuePositionState> QueuePositionStates => Set<QueuePositionState>();
 
+    /// <summary>Append-only indeterminate-claim recovery evidence journal (issue #2859).</summary>
+    public DbSet<DispatchRecoveryJournalEntry> DispatchRecoveryJournalEntries => Set<DispatchRecoveryJournalEntry>();
+
+    /// <summary>Durable once-only escalation markers for indeterminate claims (issue #2859).</summary>
+    public DbSet<DispatchEscalationMarker> DispatchEscalationMarkers => Set<DispatchEscalationMarker>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         ArgumentNullException.ThrowIfNull(modelBuilder);
@@ -695,6 +701,26 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         _ = modelBuilder.Entity<QueuePositionState>()
             .HasKey(state => state.ScopeId);
 
+        // Indeterminate-claim recovery journal (issue #2859): replay scope is unique so a
+        // concurrent duplicate request cannot write a second decision.
+        _ = modelBuilder.Entity<DispatchRecoveryJournalEntry>()
+            .HasIndex(entry => entry.ReplayScopeHash)
+            .IsUnique()
+            .HasDatabaseName("UX_DispatchRecoveryJournal_ReplayScope");
+
+        _ = modelBuilder.Entity<DispatchRecoveryJournalEntry>()
+            .HasIndex(entry => new { entry.PrinterId, entry.ServerRecordedAtUtc })
+            .HasDatabaseName("IX_DispatchRecoveryJournal_Printer_Recorded");
+
+        _ = modelBuilder.Entity<DispatchRecoveryJournalEntry>()
+            .HasIndex(entry => entry.DispatchAttemptId)
+            .HasDatabaseName("IX_DispatchRecoveryJournal_Attempt");
+
+        _ = modelBuilder.Entity<DispatchEscalationMarker>()
+            .HasIndex(marker => new { marker.DispatchAttemptId, marker.PolicyRevision, marker.Threshold })
+            .IsUnique()
+            .HasDatabaseName("UX_DispatchEscalationMarkers_Attempt_Policy_Threshold");
+
         string queuePositionFilter = Database.ProviderName == "Microsoft.EntityFrameworkCore.SqlServer"
             ? "[AssignedPrinterId] IS NOT NULL AND [Status] IN (0, 1)"
             : "\"AssignedPrinterId\" IS NOT NULL AND \"Status\" IN (0, 1)";
@@ -963,10 +989,6 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             nameof(Printer.MaxTravelSpeed) or
             nameof(Printer.MaxAcceleration) or
             nameof(Printer.MaxTravelAcceleration) or
-
-            // Cornering calibration (issue #2138): these three fields are motion-planner tunables
-            // recorded by the same admin-gated PUT as MaxAcceleration/MaxTravelAcceleration above,
-            // and are treated identically for revision-tracking purposes.
             nameof(Printer.MaxJerk) or
             nameof(Printer.JunctionDeviation) or
             nameof(Printer.SquareCornerVelocity) or
@@ -1023,6 +1045,15 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     private void EnsurePartInventoryLedgerIsAppendOnly()
     {
+        if (ChangeTracker.Entries<DispatchRecoveryJournalEntry>()
+                .Any(entry => entry.State is EntityState.Modified or EntityState.Deleted)
+            || ChangeTracker.Entries<DispatchEscalationMarker>()
+                .Any(entry => entry.State is EntityState.Modified or EntityState.Deleted))
+        {
+            throw new InvalidOperationException(
+                "Dispatch recovery journal and escalation markers are append-only evidence.");
+        }
+
         bool mutationRequested = ChangeTracker.Entries<PartInventoryAdjustment>()
             .Any(entry => entry.State is EntityState.Modified or EntityState.Deleted);
         if (mutationRequested)

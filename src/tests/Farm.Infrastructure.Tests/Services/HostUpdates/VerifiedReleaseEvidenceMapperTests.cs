@@ -7,7 +7,7 @@ namespace Farm.Infrastructure.Tests.Services.HostUpdates;
 
 /// <summary>
 /// Focused coverage for <see cref="VerifiedReleaseEvidenceMapper"/> (issue #2757
-/// item 4): translating the host-update-domain <see cref="SignedReleaseMetadata"/> shape into
+/// item 4): translating the release-domain <see cref="SignedReleaseMetadata"/> shape into
 /// the inventory-domain <see cref="VerifiedReleaseEvidenceDto"/> shape
 /// <c>ReleaseReadinessEvaluator</c> consumes, including splitting
 /// <c>ComponentPlatformDigests</c>' <c>"{serviceId}/{platform}"</c> keys.

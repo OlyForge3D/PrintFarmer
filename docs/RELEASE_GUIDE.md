@@ -193,9 +193,9 @@ stable sequence or signed release identity. Existing UI inventory consequently
 does not acquire managed readiness; its canonical identity fields may read
 `Unknown`. Informational version/source remain in `version.json` and
 `release-identity.json`, not a signed identity embedded in the UI.
-The host updater currently exposes a metadata
-provider interface, not a production GitHub-feed adapter; its signature, complete-set,
-installation approval, active-print and runtime safety checks are unchanged.
+The release metadata layer currently exposes a provider interface, not a
+production GitHub-feed adapter for managed updates; its signature and
+complete-set checks are unchanged.
 Any consumer requiring the old signed set must reject its absence, not treat
 ordinary GitHub release notes or `container-images.json` as an authorized plan.
 See [installation readiness](DEPLOYMENT_UPDATE_STRATEGY.md).

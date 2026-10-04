@@ -28,9 +28,9 @@ outputs in deployment CI, and HTTP discovery without container-control access.
 
 **Not implemented or enabled:** host enrollment, execution permissions/routes,
 signature verification, durable replay storage, update/channel-switch UI,
-host updater, pull reconciler, or privileged listener. Nothing in this document,
-a fixture, a selected channel, an environment variable, or an API setting
-enables those features. All new/existing installations remain unenrolled;
+pull reconciler, or privileged listener. Nothing in this document, a fixture,
+a selected channel, an environment variable, or an API setting enables those
+features. All new/existing installations remain unenrolled;
 future selected-channel initialization is stable without relabeling observed
 legacy builds. Native installations have visibility/discovery, not automatic
 container replacement. Current manual installation remains operator-owned.
@@ -44,11 +44,6 @@ container replacement. Current manual installation remains operator-owned.
 | Approve signing identity and offline verification implementation | #2660 plus security reviewer; pending |
 | Peer threat-model review and high-risk pre-PR panel | Bishop, Hicks and Vasquez, none implementation authors; pending |
 | Permit H pilot | Separate explicit maintainer/security approval after prerequisites; blocked |
-
-The enrolled pull-reconciler daemon's identity mechanism, enrollment lifecycle
-and grant separation are designed separately in the
-[host-update daemon security model](HOST_UPDATE_DAEMON_SECURITY.md) (#3113),
-which builds on this contract.
 
 Record reviewer/maintainer identity, exact reviewed SHA, decision, exceptions and
 date in #2665. An agent comment is progress evidence, not maintainer approval.

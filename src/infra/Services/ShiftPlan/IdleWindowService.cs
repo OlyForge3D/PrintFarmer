@@ -107,6 +107,7 @@ public sealed class IdleWindowService : IIdleWindowService
             globalCandidates = await db.PrintJobs
                 .AsNoTracking()
                 .Where(j => j.AssignedPrinterId == null && j.Status == PrintJobStatus.Queued)
+                .WhereNotOperatorRecoveryBlocked()
                 .OrderBy(j => j.Priority)
                 .ThenBy(j => j.QueuePosition)
                 .ThenBy(j => j.QueuedAt)
