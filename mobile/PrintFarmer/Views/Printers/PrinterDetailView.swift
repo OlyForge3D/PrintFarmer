@@ -480,7 +480,6 @@ struct PrinterDetailView: View {
             if printer.isOnline {
                 setupActionsSection(printer)
             }
-            predictiveInsightsLink(printer)
         }
     }
 
@@ -988,29 +987,6 @@ struct PrinterDetailView: View {
         }
     }
 
-    private func predictiveInsightsLink(_ printer: Printer) -> some View {
-        NavigationLink(value: AppDestination.predictiveInsights(printerId: printer.id)) {
-            HStack {
-                Label("Predictive Insights", systemImage: "gauge.with.dots.needle.33percent")
-                    .font(.subheadline.weight(.medium))
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-            }
-            .padding()
-            .frame(minHeight: 44)
-            .background(Color.pfCard, in: RoundedRectangle(cornerRadius: 12))
-            .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .strokeBorder(Color.pfBorder, lineWidth: 1)
-            )
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("printer.detail.predictive")
-    }
-
-    // MARK: - Shared operator helpers
 
     private func operatorEmptyState(icon: String, message: String) -> some View {
         HStack(spacing: 8) {

@@ -14,6 +14,9 @@ public sealed class QueueRevisionConflictException : InvalidOperationException
     /// <summary>Current printer dispatch-state row version, when available.</summary>
     public byte[]? CurrentDispatchStateRowVersion { get; }
 
+    /// <summary>Current neighbour job row version, when available.</summary>
+    public byte[]? CurrentNeighborRowVersion { get; }
+
     /// <summary>Initializes a new instance of the <see cref="QueueRevisionConflictException"/> class.</summary>
     public QueueRevisionConflictException()
     {
@@ -32,11 +35,13 @@ public sealed class QueueRevisionConflictException : InvalidOperationException
     public QueueRevisionConflictException(
         string message,
         byte[]? currentJobRowVersion,
-        byte[]? currentDispatchStateRowVersion)
+        byte[]? currentDispatchStateRowVersion,
+        byte[]? currentNeighborRowVersion = null)
         : base(message)
     {
         CurrentJobRowVersion = currentJobRowVersion?.ToArray();
         CurrentDispatchStateRowVersion = currentDispatchStateRowVersion?.ToArray();
+        CurrentNeighborRowVersion = currentNeighborRowVersion?.ToArray();
     }
 
     /// <summary>Initializes a new instance of the <see cref="QueueRevisionConflictException"/> class.</summary>

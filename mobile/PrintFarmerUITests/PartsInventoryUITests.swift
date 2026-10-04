@@ -1,108 +1,68 @@
 import XCTest
 
-/// UI tests for the F9 printed-parts inventory list (issue #714).
-///
-/// Verifies rendered segment, accessibility, and critical adjustment/filter
-/// interactions against the deterministic printed-parts catalog. Repository
-/// loading behavior is covered by `PartsInventoryViewModelTests`.
 @MainActor
 final class PartsInventoryUITests: PrintFarmerUITestCase {
     override var waitsForNavigationReadiness: Bool { true }
 
-    private func openInventory() {
-        let inventory = shellDestinationButton(
-            tabIdentifier: "tab.inventory",
-            timeout: 8
+    func testFilamentHasSpoolsWithoutTheRetiredInventorySegments() {
+        let filament = shellDestinationButton(tabIdentifier: "tab.filament", timeout: 8)
+        XCTAssertTrue(filament.exists)
+        filament.tap()
+        XCTAssertTrue(app.navigationBars["Filament"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.buttons["inventory.addSpool"].exists)
+        XCTAssertFalse(app.segmentedControls["inventory.segmentPicker"].exists)
+    }
+
+    func testPrintedPartsEntryOpensStockRowAndQuantityAdjustment() {
+        shellDestinationButton(tabIdentifier: "tab.filament", timeout: 8).tap()
+        let parts = app.buttons["filament.printedParts"]
+        XCTAssertTrue(parts.waitForExistence(timeout: 8))
+        parts.tap()
+        XCTAssertTrue(app.navigationBars["Printed Parts"].waitForExistence(timeout: 8))
+        let row = app.buttons["partsInventory.row.BRKT-01"]
+        XCTAssertTrue(row.waitForExistence(timeout: 8))
+        row.tap()
+        XCTAssertTrue(app.steppers["partScan.deltaStepper"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["partScan.applyAdjustment"].exists)
+    }
+
+    func testDisabledCapabilityHidesPrintedPartsEntry() {
+        app.terminate()
+        app.launchArguments.append("--uitesting-operator-features-disabled")
+        app.launchForPrintFarmerUITest()
+        let filament = shellDestinationButton(tabIdentifier: "tab.filament", timeout: 8)
+        XCTAssertTrue(filament.exists)
+        filament.tap()
+        XCTAssertTrue(app.buttons["inventory.addSpool"].waitForExistence(timeout: 8))
+        XCTAssertFalse(app.buttons["filament.printedParts"].exists)
+    }
+
+    func testReorderWarningAndFilterRemainAvailableInSecondaryStockList() {
+        shellDestinationButton(tabIdentifier: "tab.filament", timeout: 8).tap()
+        let parts = app.buttons["filament.printedParts"]
+        XCTAssertTrue(parts.waitForExistence(timeout: 8))
+        parts.tap()
+        let bracket = app.buttons["partsInventory.row.BRKT-01"]
+        let clip = app.buttons["partsInventory.row.CLIP-02"]
+        XCTAssertTrue(bracket.waitForExistence(timeout: 8))
+        XCTAssertTrue(clip.exists)
+        XCTAssertTrue(bracket.label.contains("needs reorder"))
+        XCTAssertFalse(clip.label.contains("needs reorder"))
+        let reorder = app.switches["partsInventory.reorderToggle"]
+        XCTAssertTrue(reorder.exists)
+        reorder.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+        let activated = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == '1'"), object: reorder
         )
-        XCTAssertTrue(inventory.exists)
-        inventory.tap()
-    }
-
-    private func openPrintedPartsSegment() {
-        openInventory()
-
-        let segmentPicker = app.segmentedControls["inventory.segmentPicker"]
-        XCTAssertTrue(segmentPicker.waitForExistence(timeout: 5),
-                      "Inventory tab should expose a Spools/Printed Parts segmented control")
-
-        let partsSegment = segmentPicker.buttons["Printed Parts"]
-        XCTAssertTrue(partsSegment.waitForExistence(timeout: 5))
-        partsSegment.tap()
-    }
-
-    func testInventoryTabDefaultsToSpoolsSegment() {
-        openInventory()
-
-        let segmentPicker = app.segmentedControls["inventory.segmentPicker"]
-        XCTAssertTrue(segmentPicker.waitForExistence(timeout: 5))
-        XCTAssertTrue(segmentPicker.buttons["Spools"].isSelected,
-                      "Inventory tab should default to the existing Spools segment")
-    }
-
-    func testReorderNeededPartExposesWarningInAccessibilityLabel() {
-        openPrintedPartsSegment()
-
-        let bracketRow = app.buttons["partsInventory.row.BRKT-01"]
-        XCTAssertTrue(bracketRow.waitForExistence(timeout: 5))
-        XCTAssertTrue(bracketRow.label.contains("needs reorder"),
-                     "BRKT-01 (onHand 4, reorderPoint 10) must surface a non-color-only reorder cue")
-
-        let clipRow = app.buttons["partsInventory.row.CLIP-02"]
-        XCTAssertTrue(clipRow.waitForExistence(timeout: 3))
-        XCTAssertFalse(clipRow.label.contains("needs reorder"),
-                      "CLIP-02 (onHand 32, reorderPoint 15) should not report a reorder cue")
-    }
-
-    func testTappingPartRowOpensAdjustmentSheet() {
-        openPrintedPartsSegment()
-
-        let bracketRow = app.buttons["partsInventory.row.BRKT-01"]
-        XCTAssertTrue(bracketRow.waitForExistence(timeout: 5))
-        bracketRow.tap()
-
-        let title = app.navigationBars["Mounting Bracket"]
-        XCTAssertTrue(title.waitForExistence(timeout: 5),
-                      "Tapping a part row should present its detail sheet titled with the part's name")
-
-        XCTAssertTrue(app.steppers["partScan.deltaStepper"].waitForExistence(timeout: 3),
-            "Part detail sheet should expose the manual adjustment stepper")
-
-        let applyButton = app.buttons["partScan.applyAdjustment"]
-        XCTAssertTrue(applyButton.waitForExistence(timeout: 3))
-    }
-
-    func testReorderOnlyToggleFiltersList() {
-        openPrintedPartsSegment()
-
-        let clipRow = app.buttons["partsInventory.row.CLIP-02"]
-        XCTAssertTrue(clipRow.waitForExistence(timeout: 5))
-
-        let toggle = app.switches["partsInventory.reorderToggle"]
-        XCTAssertTrue(toggle.waitForExistence(timeout: 3),
-                      "Needs Reorder Only must remain an accessible switch")
-        toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
-
-        let toggleActivated = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "value == '1'"),
-            object: toggle
-        )
-        XCTAssertEqual(
-            XCTWaiter.wait(for: [toggleActivated], timeout: 3),
-            .completed,
-            "Needs Reorder Only must expose its active accessibility value"
-        )
-
+        XCTAssertEqual(XCTWaiter.wait(for: [activated], timeout: 3), .completed)
         let clipRemoved = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "exists == false"),
-            object: clipRow
+            predicate: NSPredicate(format: "exists == false"), object: clip
         )
-        XCTAssertEqual(
-            XCTWaiter.wait(for: [clipRemoved], timeout: 3),
-            .completed,
-            "Filtering must hide non-reorder rows from the accessibility hierarchy"
-        )
-        XCTAssertTrue(app.buttons["partsInventory.row.BRKT-01"].exists,
-                      "BRKT-01 must remain visible because it needs reorder")
+        XCTAssertEqual(XCTWaiter.wait(for: [clipRemoved], timeout: 3), .completed)
+        XCTAssertTrue(bracket.exists)
+        XCTAssertFalse(clip.exists)
+        bracket.tap()
+        XCTAssertTrue(app.staticTexts["partScan.reorderWarning"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.steppers["partScan.deltaStepper"].exists)
     }
-
 }

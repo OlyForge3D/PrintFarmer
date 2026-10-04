@@ -885,12 +885,11 @@ public class AutoDispatchService(
 
         BindDispatchStateVersion(printer.DispatchState, expectedDispatchStateVersion);
 
-        // Find and cancel the next queued job, using the SINGLE shared ordering selector
-        // (Urgent first — an ascending sort would cancel the LOWEST-priority job).
+        // Find and cancel the printer queue's head using its within-scope order.
         PrintJob? nextJob = await db.PrintJobs
             .Where(j => j.AssignedPrinterId == printerId && j.Status == PrintJobStatus.Queued)
             .WhereNotOperatorRecoveryBlocked()
-            .OrderByPriorityDescending()
+            .OrderWithinScope()
             .FirstOrDefaultAsync(ct);
 
         if (nextJob != null)
@@ -1613,28 +1612,36 @@ public class AutoDispatchService(
         UnassignedJobScoringContext scoringContext,
         CancellationToken ct)
     {
-        // Ready-head selection MUST use the single shared ordering selector so the job the
-        // operator sees at the head of the queue is exactly the job that gets dispatched.
+        // Select each scope's eligible head in queue order, then compare those heads across
+        // scopes so queue positions are never compared between independent scopes.
         IQueryable<PrintJob> assignedQuery = db.PrintJobs
             .AsNoTracking()
             .Where(j => j.AssignedPrinterId == printerId && j.Status == PrintJobStatus.Queued)
             .WhereNotOperatorRecoveryBlocked()
-            .OrderByPriorityDescending();
+            .OrderWithinScope();
 
         if (includeGcodeFile)
         {
             assignedQuery = assignedQuery.Include(j => j.GcodeFile);
         }
 
-        List<PrintJob> eligibleJobs = await assignedQuery.ToListAsync(ct);
+        List<PrintJob> assignedJobs = await assignedQuery.ToListAsync(ct);
 
         if (dispatchScorer is null)
         {
+            List<PrintJob> heads = [];
+            if (assignedJobs.FirstOrDefault() is { } assignedHead)
+            {
+                heads.Add(assignedHead);
+            }
+
             return new QueuedJobSelection(
-                eligibleJobs.OrderByPriorityDescending().FirstOrDefault(),
-                eligibleJobs.Count);
+                heads.OrderByPriorityDescending().FirstOrDefault(),
+                assignedJobs.Count);
         }
 
+        PrintJob? assignedEligibleHead = assignedJobs.FirstOrDefault();
+        List<PrintJob> eligibleJobs = assignedJobs;
         foreach (PrintJob job in scoringContext.UnassignedJobs)
         {
             if (!scoringContext.ScoresByJobId.TryGetValue(job.Id, out Dictionary<Guid, DispatchScore>? printerScores))
@@ -1652,8 +1659,25 @@ public class AutoDispatchService(
             eligibleJobs.Add(job);
         }
 
+        List<PrintJob> eligibleHeads = [];
+        if (assignedEligibleHead is not null)
+        {
+            eligibleHeads.Add(assignedEligibleHead);
+        }
+
+        PrintJob? unassignedEligibleHead = scoringContext.UnassignedJobs.FirstOrDefault(job =>
+            scoringContext.ScoresByJobId.TryGetValue(job.Id, out Dictionary<Guid, DispatchScore>? printerScores) &&
+            printerScores.TryGetValue(printerId, out DispatchScore? printerScore) &&
+            printerScore is not null &&
+            !printerScore.Eliminated &&
+            printerScore.TotalScore >= scoringContext.MinimumScoreThreshold);
+        if (unassignedEligibleHead is not null)
+        {
+            eligibleHeads.Add(unassignedEligibleHead);
+        }
+
         return new QueuedJobSelection(
-            eligibleJobs.OrderByPriorityDescending().FirstOrDefault(),
+            eligibleHeads.OrderByPriorityDescending().FirstOrDefault(),
             eligibleJobs.Count);
     }
 
@@ -1672,7 +1696,7 @@ public class AutoDispatchService(
             .AsNoTracking()
             .Where(j => j.AssignedPrinterId == null && j.Status == PrintJobStatus.Queued)
             .WhereNotOperatorRecoveryBlocked()
-            .OrderByPriorityDescending();
+            .OrderWithinScope();
 
         if (includeGcodeFile)
         {

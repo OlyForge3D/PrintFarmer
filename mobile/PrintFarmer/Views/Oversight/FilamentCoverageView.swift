@@ -123,7 +123,7 @@ struct FilamentCoverageView: View {
                 retryTask = Task { await reload() }
             }
             .buttonStyle(.borderedProminent)
-            .frame(minHeight: OversightHubView.minimumRowHeight)
+            .frame(minHeight: ContentView.sidebarRowMinimumHeight)
             .accessibilityHint("Attempts to load filament coverage again.")
             .accessibilityIdentifier("oversight.filamentCoverage.retry")
         }
@@ -183,7 +183,7 @@ private struct FilamentCoveragePrinterRow: View {
                 .foregroundStyle(.secondary)
         }
         .padding(.vertical, 6)
-        .frame(minHeight: OversightHubView.minimumRowHeight)
+        .frame(minHeight: ContentView.sidebarRowMinimumHeight)
         .fixedSize(horizontal: false, vertical: true)
     }
 

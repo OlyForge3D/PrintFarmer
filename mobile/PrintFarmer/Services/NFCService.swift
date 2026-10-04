@@ -22,7 +22,7 @@ final class NFCService: SpoolScannerProtocol, @unchecked Sendable {
         return await withCheckedContinuation { continuation in
             let delegate = NFCReadDelegate(continuation: continuation)
             let session = NFCNDEFReaderSession(delegate: delegate, queue: nil, invalidateAfterFirstRead: true)
-            session.alertMessage = "Hold your iPhone near a filament spool tag."
+            session.alertMessage = "Hold your iPhone near a printer or filament spool tag."
             // Keep delegate alive for session duration
             objc_setAssociatedObject(session, &NFCReadDelegate.associatedKey, delegate, .OBJC_ASSOCIATION_RETAIN)
             session.begin()
@@ -170,11 +170,15 @@ private final class NFCReadDelegate: NSObject, NFCNDEFReaderSessionDelegate, @un
                 return
             }
         }
-        resume(with: .error(.invalidPayload("No recognized spool data on tag.")))
+        resume(with: .error(.invalidPayload("No recognized printer or spool data on tag.")))
     }
 
     private func parseMessage(_ message: NFCNDEFMessage) -> SpoolScanResult? {
         for record in message.records {
+            if let url = record.wellKnownTypeURIPayload(),
+               let result = NFCTagParser.parseNavigationURL(url) {
+                return result
+            }
             let typeString = String(data: record.type, encoding: .utf8) ?? ""
 
             if typeString == "application/openspool" {

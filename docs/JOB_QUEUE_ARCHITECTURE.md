@@ -98,6 +98,50 @@ map to `Low`; values above `3` map to `Urgent`. This clamps malformed rows to
 the nearest conservative boundary without promoting an old low-priority job
 or demoting an old high-priority job.
 
+### Queue ordering and drag-to-reorder
+
+`QueuePosition` is comparable only within one assigned-printer queue or the
+unassigned queue. General job reporting and cross-scope eligible-head comparison
+retain `Priority desc → QueuedAt asc → Id asc`; single-scope lists and
+ready-head consumers use `Priority desc → QueuePosition asc → QueuedAt asc →
+Id asc`. Mixed-scope dispatch evaluates
+each scope independently, skips ineligible jobs until it finds that scope's
+eligible head, then compares the two heads using the cross-scope ordering.
+
+The active queue client API (`GET /api/job-queue-analytics`, default
+`sortBy=priority`) is distinct from general reporting: it returns a flat array
+grouped by `job.assignedPrinterId`, unassigned first then printer ID, with queued
+rows in each group in scope-local order. The repository's internal `queue`
+sort applies the scope key before priority/position and before pagination;
+its general `priority` sort stays cross-scope FIFO. No cross-scope position
+comparison or client sorting is involved. Groups can span pages; clients
+append pages, preserve response order within groups, and restrict drag to one
+group. Printing and other active rows may also appear; clients filter queued
+rows without reordering them. Deadline and terminal-status views are reporting
+views, not drag order. The per-printer endpoint returns flat job DTOs in three
+active bands: Starting/Printing/Paused occupying rows, then Assigned
+committed-handoff rows, then Queued rows. The first two bands use priority/time/ID
+order, never queue position; only the Queued band uses scope-local position.
+The limit applies across all bands and no terminal rows are included.
+This coordinator-authorized PLAN clarification preserves queued/in-progress
+visibility rather than treating the original Printing/Queued wording as
+permission to hide active states. It changes read membership only: Assigned,
+Starting, Printing and Paused remain ineligible for reorder or new dispatch.
+
+`PUT /api/job-queue/jobs/{id}/position` requires `Queue.Write`, the moved job's
+`If-Match` ETag, and exactly one neighbor ID plus its matching body ETag. The
+moved job adopts the neighbor's priority. In one transaction, only queued
+positions in the moved job's scope are permuted among their existing values;
+assigned rows remain fixed and the allocator's `NextPosition` watermark is not
+changed. Updated rows receive new row versions. A successful reorder broadcasts
+the existing lowercase `jobqueueupdate` event.
+
+The endpoint returns 428 only when the moved-job `If-Match` header is missing,
+412 with current moved-job and neighbor ETags for stale revisions or row-version
+conflicts, 409 for semantic conflicts (including a missing neighbor), 404 when
+the moved job is missing, and 400 for malformed neighbor fields or invalid
+ETags. See [Queue Position API](API.md#queue-position-api) for the wire shape.
+
 ### Calibration dispatch safety contract
 
 Generated calibration G-code has one execution path: immutable artifact
@@ -572,6 +616,7 @@ exception text.
 | POST | `/` | Queue a new print job |
 | GET | `/{id}` | Get single job details |
 | PUT | `/{id}` | Update job (status/priority/printer assignment) |
+| PUT | `/jobs/{id}/position` | Move a queued job before or after a neighbor in the same queue |
 | DELETE | `/{id}` | Remove job from queue |
 
 #### Authoritative Job Read

@@ -25,6 +25,13 @@ enum NFCTagFormat: String, CaseIterable, Identifiable {
 
 /// Parses and creates NFC tag payloads for spool identification.
 enum NFCTagParser {
+    static func parseNavigationURL(_ url: URL) -> SpoolScanResult? {
+        switch DeepLinkHandler.parse(url: url) {
+        case .printerDetail(let id): .printerId(id)
+        case .spoolDetail(let id): .spoolId(id)
+        default: nil
+        }
+    }
 
     // MARK: - OpenSpool Format
 

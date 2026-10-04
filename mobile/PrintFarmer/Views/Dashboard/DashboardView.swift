@@ -5,19 +5,23 @@ struct DashboardView: View {
     @Environment(AppRouter.self) private var router
     @Environment(\.horizontalSizeClass) private var sizeClass
     private let ownsNavigationStack: Bool
+    private let farmOnly: Bool
     @State private var viewModel = DashboardViewModel()
     @State private var dispatchViewModel = DispatchViewModel()
     @State private var dispatchRetryTask: Task<Void, Never>?
     @State private var retryTask: Task<Void, Never>?
     @State private var currentPage = 0
 
-    init(ownsNavigationStack: Bool = true) {
+    init(ownsNavigationStack: Bool = true, farmOnly: Bool = false) {
         self.ownsNavigationStack = ownsNavigationStack
+        self.farmOnly = farmOnly
     }
 
     var body: some View {
         Group {
-            if ownsNavigationStack {
+            if farmOnly {
+                farmFloorContent
+            } else if ownsNavigationStack {
                 NavigationStack {
                     screenContent
                 }
@@ -31,7 +35,8 @@ struct DashboardView: View {
                 printerService: services.printerService,
                 jobService: services.jobService,
                 statisticsService: services.statisticsService,
-                jobAnalyticsService: services.jobAnalyticsService
+                jobAnalyticsService: services.jobAnalyticsService,
+                farmOnly: farmOnly
             )
             // Wire the published #816 snapshot store + auto-dispatch source, then
             // hydrate the active exact-owner cached snapshot BEFORE the canonical
@@ -45,10 +50,39 @@ struct DashboardView: View {
             await viewModel.hydrateFromCache()
             await viewModel.loadDashboard()
         }
+
         .onDisappear {
             viewModel.isViewActive = false
             dispatchRetryTask?.cancel()
             retryTask?.cancel()
+        }
+    }
+
+    @ViewBuilder
+    private var farmFloorContent: some View {
+        @Bindable var router = router
+        if viewModel.farmSource == .live {
+            PrinterListView()
+        } else {
+            NavigationStack(path: $router.printersPath) {
+                Group {
+                    if viewModel.isReadOnly {
+                        coldOfflineShell
+                    } else if viewModel.isAbsentFleetReportable {
+                        absentFleetState
+                    } else if let error = viewModel.errorMessage {
+                        errorState(error)
+                    } else {
+                        loadingState
+                    }
+                }
+                .navigationTitle("Farm")
+                .rootNavigationChrome(for: .farm)
+                .refreshable { await viewModel.loadDashboard() }
+                .navigationDestination(for: AppDestination.self) { destination in
+                    destinationView(for: destination)
+                }
+            }
         }
     }
 

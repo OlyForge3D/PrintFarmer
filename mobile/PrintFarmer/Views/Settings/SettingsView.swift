@@ -43,18 +43,6 @@ struct SettingsView: View {
                     }
                 }
 
-                Section("Navigation") {
-                    NavigationLink {
-                        NavigationSettingsView()
-                    } label: {
-                        Label("Navigation", systemImage: "rectangle.3.group")
-                            .frame(minHeight: 44)
-                    }
-                    .accessibilityLabel("Navigation")
-                    .accessibilityHint("Choose the layout for the active server.")
-                    .accessibilityIdentifier("settings.navigation")
-                }
-
                 Section {
                     Picker("Write Format", selection: $nfcTagFormat) {
                         ForEach(NFCTagFormat.allCases) { format in
