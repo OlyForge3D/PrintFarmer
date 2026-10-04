@@ -95,22 +95,16 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
             "The Settings screen must appear"
         )
         let toggle = app.switches["settings.advancedPrinterControls"]
-        if !toggle.waitForExistence(timeout: 3) {
+        XCTAssertTrue(toggle.waitForExistence(timeout: 3))
+        for _ in 0..<3 where !toggle.isHittable {
             app.swipeUp()
         }
         XCTAssertTrue(
-            toggle.waitForExistence(timeout: 3),
-            "The Advanced Printer Controls safety toggle must be discoverable in Settings"
+            toggle.isHittable,
+            "The Advanced Printer Controls safety toggle must be visible and hittable in Settings"
         )
         if toggle.value as? String != "1" {
-            // A plain `toggle.tap()` targets the center of the accessibility
-            // element's frame, which for a SwiftUI `Toggle` row spans the
-            // full row width (label text + switch combined into one
-            // accessibility element for VoiceOver). The center of that frame
-            // sits over the LABEL text, not the switch knob UIKit actually
-            // hit-tests against, so a center tap can silently land on inert
-            // text instead of flipping the switch. Target the right edge,
-            // where the switch control itself renders, instead.
+            // The SwiftUI switch element includes its label; target the knob.
             toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
             let becameOn = XCTNSPredicateExpectation(
                 predicate: NSPredicate(format: "value == '1'"),
