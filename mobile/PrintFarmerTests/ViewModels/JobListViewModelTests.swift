@@ -138,12 +138,275 @@ final class JobListViewModelTests: XCTestCase {
     func testQueuedJobsSortedByPosition() async throws {
         let queued = try TestData.decodeQueuedPrintJobResponse(from: TestJSON.queuedPrintJobResponseQueued)
         let assigned = try TestData.decodeQueuedPrintJobResponse(from: TestJSON.queuedPrintJobResponseAssigned)
-        mockJobService.queuedJobResponsesToReturn = [queued, assigned]
+        mockJobService.queuedJobResponsesToReturn = [assigned, queued]
 
         await viewModel.loadJobs()
 
-        let positions = viewModel.queuedJobs.map(\.job.queuePosition)
-        XCTAssertEqual(positions, positions.sorted())
+        XCTAssertEqual(viewModel.queuedJobs.map(\.id), [assigned.id, queued.id])
+    }
+
+    func testReorderGroupsPreserveServerOrderAndExcludePinnedRows() async throws {
+        let printerID = UUID()
+        let first = try makeQueueJob(
+            scope: printerID,
+            priority: .high,
+            queuePosition: 9,
+            name: "first"
+        )
+        let second = try makeQueueJob(
+            scope: printerID,
+            priority: .high,
+            queuePosition: 1,
+            name: "second"
+        )
+        let differentPriority = try makeQueueJob(
+            scope: printerID,
+            priority: .normal,
+            queuePosition: 2,
+            name: "normal"
+        )
+        let differentScope = try makeQueueJob(
+            scope: UUID(),
+            priority: .high,
+            queuePosition: 0,
+            name: "other printer"
+        )
+        let assigned = try makeQueueJob(
+            scope: printerID,
+            status: .assigned,
+            name: "assigned"
+        )
+        let printing = try makeQueueJob(
+            scope: printerID,
+            status: .printing,
+            name: "printing"
+        )
+        mockJobService.queuedJobResponsesToReturn = [
+            first, second, differentPriority, differentScope, assigned, printing
+        ]
+
+        await viewModel.loadJobs()
+
+        XCTAssertEqual(viewModel.reorderableQueueGroups.count, 3)
+        XCTAssertEqual(viewModel.reorderableQueueGroups[0].jobs.map(\.id), [first.id, second.id])
+        XCTAssertEqual(viewModel.reorderableQueueGroups[1].jobs.map(\.id), [differentPriority.id])
+        XCTAssertEqual(viewModel.reorderableQueueGroups[2].jobs.map(\.id), [differentScope.id])
+        XCTAssertEqual(viewModel.assignedJobs.map(\.id), [assigned.id])
+        XCTAssertEqual(viewModel.activeJobs.map(\.id), [printing.id])
+    }
+
+    // MARK: - Queue Reordering
+
+    func testMoveQueuedJobUsesSameGroupNeighborAndRefreshesAuthoritativeOrder() async throws {
+        let printerID = UUID()
+        let moved = try makeQueueJob(
+            scope: printerID,
+            priority: .high,
+            queuePosition: 1,
+            revision: "AQIDAA==",
+            name: "moved"
+        )
+        let neighbor = try makeQueueJob(
+            scope: printerID,
+            priority: .high,
+            queuePosition: 2,
+            revision: "AQIDAg==",
+            name: "neighbor"
+        )
+        let otherScope = try makeQueueJob(
+            scope: UUID(),
+            priority: .high,
+            name: "other"
+        )
+        let otherPriority = try makeQueueJob(
+            scope: printerID,
+            priority: .normal,
+            name: "other priority"
+        )
+        let initial = [moved, neighbor, otherScope, otherPriority]
+        let serverOrder = [neighbor, moved, otherScope, otherPriority]
+        mockJobService.queuedJobResponsesByLoad = [initial, serverOrder]
+        mockJobService.queuedJobResponsesToReturn = serverOrder
+        viewModel.setQueueWriteAuthorization(true)
+        viewModel.setNetworkReachability(true)
+        await viewModel.loadJobs()
+
+        let groupID = try XCTUnwrap(viewModel.reorderableQueueGroups.first?.id)
+        await viewModel.moveQueuedJobs(
+            fromOffsets: IndexSet(integer: 0),
+            toOffset: 2,
+            inGroup: groupID
+        )
+
+        XCTAssertEqual(mockJobService.moveQueuedJobCalledWith?.id, moved.job.jobUUID)
+        XCTAssertEqual(
+            mockJobService.moveQueuedJobCalledWith?.reviewedRowVersion,
+            "AQIDAA=="
+        )
+        XCTAssertEqual(
+            mockJobService.moveQueuedJobCalledWith?.neighbor,
+            .after(id: try XCTUnwrap(neighbor.job.jobUUID), rowVersion: "AQIDAg==")
+        )
+        XCTAssertEqual(viewModel.jobs.map(\.id), serverOrder.map(\.id))
+        XCTAssertEqual(
+            viewModel.jobs.first(where: { $0.id == moved.id })?.job.priority,
+            .high
+        )
+        XCTAssertEqual(
+            viewModel.jobs.first(where: { $0.id == otherPriority.id })?.job.priority,
+            .normal
+        )
+        XCTAssertTrue(viewModel.hasFreshQueueSnapshot)
+        XCTAssertFalse(viewModel.isReorderingQueue)
+    }
+
+    func testVoiceOverMovesRespectGroupBoundaries() async throws {
+        let printerID = UUID()
+        let highFirst = try makeQueueJob(scope: printerID, priority: .high, name: "high first")
+        let highSecond = try makeQueueJob(scope: printerID, priority: .high, name: "high second")
+        let normal = try makeQueueJob(scope: printerID, priority: .normal, name: "normal")
+        let anotherScope = try makeQueueJob(scope: UUID(), priority: .high, name: "other scope")
+        mockJobService.queuedJobResponsesToReturn = [highFirst, highSecond, normal, anotherScope]
+        viewModel.setQueueWriteAuthorization(true)
+        viewModel.setNetworkReachability(true)
+        await viewModel.loadJobs()
+
+        let groups = viewModel.reorderableQueueGroups
+        XCTAssertFalse(viewModel.canMoveQueuedJob(
+            id: try XCTUnwrap(highFirst.job.jobUUID),
+            direction: .up,
+            inGroup: groups[0].id
+        ))
+        XCTAssertTrue(viewModel.canMoveQueuedJob(
+            id: try XCTUnwrap(highFirst.job.jobUUID),
+            direction: .down,
+            inGroup: groups[0].id
+        ))
+        XCTAssertFalse(viewModel.canMoveQueuedJob(
+            id: try XCTUnwrap(normal.job.jobUUID),
+            direction: .down,
+            inGroup: groups[1].id
+        ))
+
+        await viewModel.moveQueuedJob(
+            id: try XCTUnwrap(highFirst.job.jobUUID),
+            direction: .down,
+            inGroup: groups[1].id
+        )
+
+        XCTAssertNil(mockJobService.moveQueuedJobCalledWith)
+        XCTAssertEqual(viewModel.jobs.map(\.id), [highFirst.id, highSecond.id, normal.id, anotherScope.id])
+    }
+
+    func testQueueMoveRequiresWritePermissionAndReachableNetwork() async throws {
+        let first = try makeQueueJob(name: "first")
+        let second = try makeQueueJob(name: "second")
+        mockJobService.queuedJobResponsesToReturn = [first, second]
+        await viewModel.loadJobs()
+        let groupID = try XCTUnwrap(viewModel.reorderableQueueGroups.first?.id)
+
+        await viewModel.moveQueuedJobs(
+            fromOffsets: IndexSet(integer: 0),
+            toOffset: 2,
+            inGroup: groupID
+        )
+        XCTAssertNil(mockJobService.moveQueuedJobCalledWith)
+        XCTAssertTrue(viewModel.errorMessage?.contains("Queue.Write") == true)
+
+        viewModel.setQueueWriteAuthorization(true)
+        viewModel.setNetworkReachability(false)
+        await viewModel.moveQueuedJobs(
+            fromOffsets: IndexSet(integer: 0),
+            toOffset: 2,
+            inGroup: groupID
+        )
+        XCTAssertNil(mockJobService.moveQueuedJobCalledWith)
+        XCTAssertTrue(viewModel.errorMessage?.contains("offline") == true)
+    }
+
+    func testQueueMoveConflictsRefreshAndReportVisibleErrors() async throws {
+        let cases: [(NetworkError, String)] = [
+            (.clientError(400, nil), "rejected"),
+            (.conflict(nil), "Queue changed"),
+            (.preconditionFailed(nil), "Queue changed"),
+            (.preconditionRequired(nil), "current job revision"),
+            (.noConnection, "Couldn't reorder"),
+            (.forbidden, "Queue.Write access was revoked")
+        ]
+
+        for (error, message) in cases {
+            let moved = try makeQueueJob(name: "moved")
+            let neighbor = try makeQueueJob(name: "neighbor")
+            mockJobService = MockJobService()
+            viewModel = JobListViewModel()
+            viewModel.configure(jobService: mockJobService)
+            mockJobService.queuedJobResponsesToReturn = [moved, neighbor]
+            mockJobService.actionErrorToThrow = error
+            viewModel.setQueueWriteAuthorization(true)
+            viewModel.setNetworkReachability(true)
+            await viewModel.loadJobs()
+            let groupID = try XCTUnwrap(viewModel.reorderableQueueGroups.first?.id)
+
+            await viewModel.moveQueuedJobs(
+                fromOffsets: IndexSet(integer: 0),
+                toOffset: 2,
+                inGroup: groupID
+            )
+
+            XCTAssertEqual(mockJobService.listAllJobsCallCount, 2)
+            XCTAssertEqual(viewModel.jobs.map(\.id), [moved.id, neighbor.id])
+            XCTAssertTrue(viewModel.errorMessage?.contains(message) == true)
+            XCTAssertTrue(viewModel.hasFreshQueueSnapshot)
+            if case .forbidden = error {
+                XCTAssertFalse(viewModel.queueWriteAuthorized)
+            }
+        }
+    }
+
+    func testSignalRRefreshDuringMoveCannotBeOverwrittenByStaleRollback() async throws {
+        let printerID = UUID()
+        let first = try makeQueueJob(scope: printerID, name: "first")
+        let second = try makeQueueJob(scope: printerID, name: "second")
+        let refreshedFirst = try makeQueueJob(
+            scope: printerID,
+            revision: "AQIDAw==",
+            name: "server-first"
+        )
+        let refreshedSecond = try makeQueueJob(
+            scope: printerID,
+            revision: "AQIDBA==",
+            name: "server-second"
+        )
+        let initial = [first, second]
+        let signalROrder = [refreshedSecond, refreshedFirst]
+        mockJobService.queuedJobResponsesByLoad = [initial, signalROrder]
+        mockJobService.queuedJobResponsesToReturn = signalROrder
+        mockJobService.actionErrorToThrow = NetworkError.preconditionFailed(nil)
+        let gate = QueueMoveGate()
+        mockJobService.beforeMoveQueuedJob = { await gate.suspend() }
+        viewModel.setQueueWriteAuthorization(true)
+        viewModel.setNetworkReachability(true)
+        await viewModel.loadJobs()
+        let signalR = MockSignalRService()
+        viewModel.configureSignalR(signalR)
+        let groupID = try XCTUnwrap(viewModel.reorderableQueueGroups.first?.id)
+
+        let moveTask = Task {
+            await viewModel.moveQueuedJobs(
+                fromOffsets: IndexSet(integer: 0),
+                toOffset: 2,
+                inGroup: groupID
+            )
+        }
+        await gate.waitUntilEntered()
+        signalR.simulateJobQueueUpdate(JobQueueUpdate(printerId: printerID, jobs: []))
+        await waitForJobIDs(signalROrder.map(\.id))
+        await gate.release()
+        await moveTask.value
+
+        XCTAssertEqual(viewModel.jobs.map(\.id), signalROrder.map(\.id))
+        XCTAssertEqual(viewModel.jobs.map(\.job.rowVersion), ["AQIDBA==", "AQIDAw=="])
+        XCTAssertEqual(viewModel.errorMessage, "Queue changed — refreshed.")
     }
 
     // MARK: - Grouped Jobs: Recent
@@ -289,5 +552,85 @@ final class JobListViewModelTests: XCTestCase {
         XCTAssertTrue(viewModel.activeJobs.isEmpty)
         XCTAssertTrue(viewModel.queuedJobs.isEmpty)
         XCTAssertTrue(viewModel.recentJobs.isEmpty)
+    }
+
+    private func makeQueueJob(
+        id: UUID = UUID(),
+        scope: UUID? = nil,
+        status: PrintJobStatus = .queued,
+        priority: PrintJobPriority = .normal,
+        queuePosition: Int = 1,
+        revision: String = "AQIDAA==",
+        name: String
+    ) throws -> QueuedPrintJobResponse {
+        let assignedPrinterID = scope.map { "\"\($0.uuidString)\"" } ?? "null"
+        let printerName = scope.map { "\"Printer \($0.uuidString.prefix(8))\"" } ?? "null"
+        return try TestData.decodeQueuedPrintJobResponse(
+            from: """
+            {
+              "job": {
+                "id": "\(id.uuidString)",
+                "rowVersion": "\(revision)",
+                "name": "\(name)",
+                "fileName": "\(name).gcode",
+                "assignedPrinterId": \(assignedPrinterID),
+                "printerName": \(printerName),
+                "status": "\(status.rawValue)",
+                "priority": "\(priority.rawValue)",
+                "queuePosition": \(queuePosition),
+                "createdAtUtc": "2025-07-17T09:00:00Z",
+                "copies": 1,
+                "completedCopies": 0,
+                "remainingCopies": 1
+              },
+              "gcodeFile": null,
+              "assignedPrinter": null,
+              "estimatedStartTime": null,
+              "estimatedCompletionTime": null
+            }
+            """
+        )
+    }
+
+    private func waitForJobIDs(_ expected: [String]) async {
+        for _ in 0..<500 {
+            if viewModel.jobs.map(\.id) == expected { return }
+            await Task.yield()
+        }
+    }
+}
+
+private actor QueueMoveGate {
+    private var isEntered = false
+    private var isReleased = false
+    private var moveContinuation: CheckedContinuation<Void, Never>?
+    private var entryWaiters: [CheckedContinuation<Void, Never>] = []
+
+    func suspend() async {
+        isEntered = true
+        let waiters = entryWaiters
+        entryWaiters.removeAll()
+        waiters.forEach { $0.resume() }
+        guard !isReleased else { return }
+        await withCheckedContinuation { continuation in
+            moveContinuation = continuation
+            if isReleased {
+                moveContinuation = nil
+                continuation.resume()
+            }
+        }
+    }
+
+    func waitUntilEntered() async {
+        guard !isEntered else { return }
+        await withCheckedContinuation { continuation in
+            entryWaiters.append(continuation)
+        }
+    }
+
+    func release() {
+        isReleased = true
+        moveContinuation?.resume()
+        moveContinuation = nil
     }
 }

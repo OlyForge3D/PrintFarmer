@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct JobListView: View {
+    @Environment(AuthViewModel.self) private var authViewModel
     @Environment(AppRouter.self) private var router
     @Environment(ServiceContainer.self) private var services
     @Environment(\.horizontalSizeClass) private var sizeClass
@@ -26,14 +27,31 @@ struct JobListView: View {
             }
         }
         .task {
-            viewModel.isViewActive = true
+            viewModel.activate()
             viewModel.configure(jobService: services.jobService)
+            viewModel.configureSignalR(services.signalRService)
+            viewModel.setQueueWriteAuthorization(canWriteQueue)
+            viewModel.startObservingNetworkPath()
             await viewModel.loadJobs()
+        }
+        .onChange(of: canWriteQueue) { _, isAuthorized in
+            viewModel.setQueueWriteAuthorization(isAuthorized)
         }
         .onDisappear {
             retryTask?.cancel()
-            viewModel.isViewActive = false
+            viewModel.deactivate()
         }
+    }
+
+    private var canWriteQueue: Bool {
+        guard authViewModel.isAuthenticated,
+              !authViewModel.snapshotActivationPending,
+              let user = authViewModel.currentUser,
+              user.isActive else {
+            return false
+        }
+        return user.permissions.contains("queue:write")
+            || user.roles.contains("farm_admin")
     }
 
     @ViewBuilder
@@ -125,19 +143,47 @@ struct JobListView: View {
     private func QueuePage() -> some View {
         Group {
             if viewModel.queuedJobs.isEmpty {
-                EmptyStateView(
-                    icon: "tray",
-                    title: "Queue Empty",
-                    message: "No jobs waiting to print."
-                )
+                VStack(spacing: 12) {
+                    if let message = viewModel.errorMessage {
+                        Label(message, systemImage: "exclamationmark.triangle")
+                            .foregroundStyle(Color.pfError)
+                    }
+                    EmptyStateView(
+                        icon: "tray",
+                        title: "Queue Empty",
+                        message: "No jobs waiting to print."
+                    )
+                }
                 .padding()
             } else {
                 List {
-                    ForEach(viewModel.queuedJobs) { item in
-                        queuedJobRow(item)
+                    if let message = viewModel.errorMessage {
+                        Section {
+                            Label(message, systemImage: "exclamationmark.triangle")
+                                .foregroundStyle(Color.pfError)
+                        }
+                    }
+                    if let message = offlineReorderMessage {
+                        Section {
+                            Label(message, systemImage: "wifi.slash")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    if !viewModel.assignedJobs.isEmpty {
+                        Section("Assigned") {
+                            ForEach(viewModel.assignedJobs) { item in
+                                queuedJobRow(item)
+                            }
+                        }
+                    }
+                    ForEach(viewModel.reorderableQueueGroups) { group in
+                        Section(group.title) {
+                            queueRows(group)
+                        }
                     }
                 }
                 .listStyle(.plain)
+                .environment(\.editMode, .constant(viewModel.canReorderQueue ? .active : .inactive))
                 .refreshable {
                     await viewModel.loadJobs()
                 }
@@ -174,13 +220,17 @@ struct JobListView: View {
 
     private var jobList: some View {
         List {
-            if !viewModel.queuedJobs.isEmpty {
+            if let message = viewModel.errorMessage {
                 Section {
-                    ForEach(viewModel.queuedJobs) { item in
-                        queuedJobRow(item)
-                    }
-                } header: {
-                    Label("In Queue", systemImage: "tray.full")
+                    Label(message, systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(Color.pfError)
+                }
+            }
+
+            if let message = offlineReorderMessage {
+                Section {
+                    Label(message, systemImage: "wifi.slash")
+                        .foregroundStyle(.secondary)
                 }
             }
 
@@ -191,6 +241,24 @@ struct JobListView: View {
                     }
                 } header: {
                     Label("Printing", systemImage: "printer.fill")
+                }
+            }
+
+            if !viewModel.assignedJobs.isEmpty {
+                Section {
+                    ForEach(viewModel.assignedJobs) { item in
+                        queuedJobRow(item)
+                    }
+                } header: {
+                    Label("Assigned", systemImage: "checkmark.circle")
+                }
+            }
+
+            ForEach(viewModel.reorderableQueueGroups) { group in
+                Section {
+                    queueRows(group)
+                } header: {
+                    Label(group.title, systemImage: "tray.full")
                 }
             }
 
@@ -214,7 +282,38 @@ struct JobListView: View {
             }
         }
         .listStyle(.plain)
+        .environment(\.editMode, .constant(viewModel.canReorderQueue ? .active : .inactive))
         .accessibilityIdentifier("jobList.combined.list")
+    }
+
+    private var offlineReorderMessage: String? {
+        guard viewModel.queueWriteAuthorized,
+              !viewModel.isNetworkReachable else {
+            return nil
+        }
+        return "Queue reordering is unavailable while offline."
+    }
+
+    @ViewBuilder
+    private func queueRows(_ group: QueueReorderGroup) -> some View {
+        if group.jobs.count > 1 {
+            ForEach(group.jobs) { item in
+                queuedJobRow(item, groupID: group.id)
+            }
+            .onMove { offsets, destination in
+                Task { @MainActor in
+                    await viewModel.moveQueuedJobs(
+                        fromOffsets: offsets,
+                        toOffset: destination,
+                        inGroup: group.id
+                    )
+                }
+            }
+        } else {
+            ForEach(group.jobs) { item in
+                queuedJobRow(item, groupID: group.id)
+            }
+        }
     }
 
     // MARK: - Active Job Row
@@ -268,8 +367,12 @@ struct JobListView: View {
 
     // MARK: - Queued Job Row
 
-    private func queuedJobRow(_ item: QueuedPrintJobResponse) -> some View {
-        jobDetailLink(for: item) {
+    private func queuedJobRow(
+        _ item: QueuedPrintJobResponse,
+        groupID: String? = nil
+    ) -> some View {
+        queueRowAccessibilityActions(item, groupID: groupID) {
+            jobDetailLink(for: item) {
             HStack(spacing: 12) {
                 jobThumbnail(for: item, size: 44)
                 VStack(alignment: .leading, spacing: 6) {
@@ -305,9 +408,6 @@ struct JobListView: View {
                 }
 
                 HStack {
-                    Text("#\(item.job.queuePosition) in queue")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
                     Spacer()
                     Text(item.job.createdAtUtc.relativeFormatted)
                         .font(.caption2)
@@ -316,8 +416,10 @@ struct JobListView: View {
             }
             }
             .padding(.vertical, 4)
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("job.row.\(item.job.jobUUID?.uuidString ?? "unknown")")
         }
-        .buttonStyle(.plain)
         .swipeActions(edge: .trailing) {
             if let uuid = item.job.jobUUID {
                 Button {
@@ -341,6 +443,47 @@ struct JobListView: View {
                 }
                 .tint(Color.pfAccent)
             }
+        }
+    }
+
+    @ViewBuilder
+    private func queueRowAccessibilityActions<Content: View>(
+        _ item: QueuedPrintJobResponse,
+        groupID: String?,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        if let groupID, let id = item.job.jobUUID,
+           viewModel.canMoveQueuedJob(id: id, direction: .up, inGroup: groupID),
+           viewModel.canMoveQueuedJob(id: id, direction: .down, inGroup: groupID) {
+           content()
+               .accessibilityAction(named: Text("Move up")) {
+                   Task { @MainActor in
+                       await viewModel.moveQueuedJob(id: id, direction: .up, inGroup: groupID)
+                   }
+               }
+               .accessibilityAction(named: Text("Move down")) {
+                   Task { @MainActor in
+                       await viewModel.moveQueuedJob(id: id, direction: .down, inGroup: groupID)
+                   }
+               }
+        } else if let groupID, let id = item.job.jobUUID,
+                  viewModel.canMoveQueuedJob(id: id, direction: .up, inGroup: groupID) {
+            content()
+                .accessibilityAction(named: Text("Move up")) {
+                    Task { @MainActor in
+                        await viewModel.moveQueuedJob(id: id, direction: .up, inGroup: groupID)
+                    }
+                }
+        } else if let groupID, let id = item.job.jobUUID,
+                  viewModel.canMoveQueuedJob(id: id, direction: .down, inGroup: groupID) {
+            content()
+                .accessibilityAction(named: Text("Move down")) {
+                    Task { @MainActor in
+                        await viewModel.moveQueuedJob(id: id, direction: .down, inGroup: groupID)
+                    }
+                }
+        } else {
+            content()
         }
     }
 

@@ -155,6 +155,14 @@ final class DemoJobService: JobServiceProtocol, @unchecked Sendable {
         }
     }
 
+    func moveQueuedJob(
+        id: UUID,
+        reviewedRowVersion: String,
+        neighbor: QueuePositionNeighbor
+    ) async throws -> MoveQueuedJobResponse {
+        throw ServiceError.notImplemented("reorder jobs — read-only in demo mode")
+    }
+
     func get(id: UUID) async throws -> PrintJob {
         guard let job = Self.jobs.first(where: { $0.id == id }) else {
             throw ServiceError.notImplemented("Job not found in demo data")

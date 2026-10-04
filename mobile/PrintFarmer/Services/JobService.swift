@@ -17,6 +17,18 @@ actor JobService: JobServiceProtocol {
         try await apiClient.get("/api/job-queue-analytics?limit=200&offset=0")
     }
 
+    func moveQueuedJob(
+        id: UUID,
+        reviewedRowVersion: String,
+        neighbor: QueuePositionNeighbor
+    ) async throws -> MoveQueuedJobResponse {
+        try await apiClient.put(
+            "/api/job-queue/jobs/\(id)/position",
+            body: MoveQueuedJobRequest(neighbor: neighbor),
+            headers: preconditionHeaders(reviewedRowVersion)
+        )
+    }
+
     func get(id: UUID) async throws -> PrintJob {
         try await apiClient.get("/api/job-queue/\(id)")
     }

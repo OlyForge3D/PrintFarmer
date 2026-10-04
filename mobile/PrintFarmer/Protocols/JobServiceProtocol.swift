@@ -1,10 +1,48 @@
 import Foundation
 
+enum QueuePositionNeighbor: Sendable, Equatable {
+    case before(id: UUID, rowVersion: String)
+    case after(id: UUID, rowVersion: String)
+}
+
+struct MoveQueuedJobRequest: Encodable, Sendable {
+    let neighbor: QueuePositionNeighbor
+
+    private enum CodingKeys: String, CodingKey {
+        case beforeJobId
+        case beforeJobETag
+        case afterJobId
+        case afterJobETag
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch neighbor {
+        case .before(let id, let rowVersion):
+            try container.encode(id, forKey: .beforeJobId)
+            try container.encode(rowVersion, forKey: .beforeJobETag)
+        case .after(let id, let rowVersion):
+            try container.encode(id, forKey: .afterJobId)
+            try container.encode(rowVersion, forKey: .afterJobETag)
+        }
+    }
+}
+
+struct MoveQueuedJobResponse: Decodable, Sendable, Equatable {
+    let id: String
+    let rowVersion: String?
+}
+
 // MARK: - Job Service Protocol
 
 protocol JobServiceProtocol: Sendable {
     func list() async throws -> [QueueOverview]
     func listAllJobs() async throws -> [QueuedPrintJobResponse]
+    func moveQueuedJob(
+        id: UUID,
+        reviewedRowVersion: String,
+        neighbor: QueuePositionNeighbor
+    ) async throws -> MoveQueuedJobResponse
     func get(id: UUID) async throws -> PrintJob
     func create(_ request: CreatePrintJobRequest) async throws -> PrintJob
     func update(
