@@ -117,18 +117,14 @@ final class FilamentCoverageUITests: PrintFarmerUITestCase {
     /// this card" becomes a real deterministic observation instead
     /// of a race.
     private func awaitFleetHasRendered() {
-        let sibling = badgeInsideCard(
-            cardUUID: prusaMK4_1_ID,
-            identifier: "filament-coverage-badge-covers",
-            expectedLabel: "Filament covers this job"
-        )
+        let sibling = card(uuid: prusaMK4_1_ID)
         XCTAssertTrue(sibling.waitForExistence(timeout: 10),
-                      "Sibling covers badge must render before absence assertions become meaningful.")
+                      "Fleet card must render before absence assertions become meaningful.")
     }
 
-    // MARK: - Per-state Farm-card scoped assertions
+    // MARK: - Farm cards no longer show coverage (#3232)
 
-    func testFarmCardShowsCoversBadgeForCoversPrinter() {
+    func testFarmCardOmitsCoversBadgeForCoversPrinter() {
         enterFarmView()
         XCTAssertTrue(card(uuid: prusaMK4_1_ID).waitForExistence(timeout: 10))
 
@@ -137,11 +133,10 @@ final class FilamentCoverageUITests: PrintFarmerUITestCase {
             identifier: "filament-coverage-badge-covers",
             expectedLabel: "Filament covers this job"
         )
-        XCTAssertTrue(coversBadge.waitForExistence(timeout: 5),
-                      "Covers badge with exact a11y label must render inside the covers printer's card.")
+        XCTAssertFalse(coversBadge.exists, "Coverage belongs in Filament detail, not the farm card.")
     }
 
-    func testFarmCardShowsRunoutETABadgeForRunoutWithETAPrinter() {
+    func testFarmCardOmitsRunoutETABadgeForRunoutWithETAPrinter() {
         enterFarmView()
         XCTAssertTrue(card(uuid: prusaMK4_2_ID).waitForExistence(timeout: 10))
 
@@ -150,11 +145,10 @@ final class FilamentCoverageUITests: PrintFarmerUITestCase {
             identifier: "filament-coverage-badge-runout-eta",
             expectedLabelPrefix: "Filament will run out at "
         )
-        XCTAssertTrue(etaBadge.waitForExistence(timeout: 5),
-                      "Runout-ETA badge (label prefix 'Filament will run out at ') must render inside the runout-with-ETA printer's card.")
+        XCTAssertFalse(etaBadge.exists, "Coverage belongs in Filament detail, not the farm card.")
     }
 
-    func testFarmCardShowsRunoutMidJobBadgeForRunoutWithoutETAPrinter() {
+    func testFarmCardOmitsRunoutMidJobBadgeForRunoutWithoutETAPrinter() {
         enterFarmView()
         XCTAssertTrue(card(uuid: bambuX1C_ID).waitForExistence(timeout: 10))
 
@@ -163,8 +157,7 @@ final class FilamentCoverageUITests: PrintFarmerUITestCase {
             identifier: "filament-coverage-badge-runout-no-eta",
             expectedLabel: "Filament will run out before the job finishes"
         )
-        XCTAssertTrue(noETABadge.waitForExistence(timeout: 5),
-                      "Runout-mid-job badge with exact a11y label must render inside the runout-without-ETA printer's card.")
+        XCTAssertFalse(noETABadge.exists, "Coverage belongs in Filament detail, not the farm card.")
     }
 
     func testFarmCardHasNoCoverageBadgeForUnknownPrinter() {
@@ -198,11 +191,9 @@ final class FilamentCoverageUITests: PrintFarmerUITestCase {
 
     // MARK: - Duplicate-display-name printers (reviewer blocker D)
 
-    /// TWO Farm cards share the display name "Prusa MK4 #1" but
-    /// have DIFFERENT stable UUIDs and DIFFERENT coverage badges
-    /// (covers vs runout-no-ETA). Each card's scoped badge query
-    /// finds ITS badge and NOT the sibling's.
-    func testDuplicateDisplayNamePrintersHaveDistinctScopedBadges() {
+    /// Duplicate names remain distinct stable-ID navigation targets, with
+    /// coverage intentionally absent from both cards.
+    func testDuplicateDisplayNamePrintersRemainDistinctWithoutCoverageBadges() {
         enterFarmView()
 
         let originalCard = card(uuid: prusaMK4_1_ID)
@@ -212,27 +203,22 @@ final class FilamentCoverageUITests: PrintFarmerUITestCase {
         XCTAssertTrue(duplicateCard.waitForExistence(timeout: 10),
                       "Duplicate 'Prusa MK4 #1' card must render as a distinct element (keyed by UUID, not name).")
 
-        // Original: covers.
+        // Coverage is still present in the fixture, but not on the card.
         let originalCovers = badgeInsideCard(
             cardUUID: prusaMK4_1_ID,
             identifier: "filament-coverage-badge-covers",
             expectedLabel: "Filament covers this job"
         )
-        XCTAssertTrue(originalCovers.waitForExistence(timeout: 5),
-                      "Original 'Prusa MK4 #1' must show its covers badge.")
+        XCTAssertFalse(originalCovers.exists)
 
-        // Duplicate: runout without ETA.
         let duplicateRunout = badgeInsideCard(
             cardUUID: duplicateID,
             identifier: "filament-coverage-badge-runout-no-eta",
             expectedLabel: "Filament will run out before the job finishes"
         )
-        XCTAssertTrue(duplicateRunout.waitForExistence(timeout: 5),
-                      "Duplicate 'Prusa MK4 #1' must show its runout-mid-job badge (proves scoped query hits the intended card).")
+        XCTAssertFalse(duplicateRunout.exists)
 
-        // Cross-check absence: original has NO runout-no-eta badge,
-        // duplicate has NO covers badge. If per-card scoping were
-        // broken these would both fire.
+        // Both cards omit every coverage state.
         let originalNoETACount = originalCard.descendants(matching: .any)
             .matching(identifier: "filament-coverage-badge-runout-no-eta").count
         let duplicateCoversCount = duplicateCard.descendants(matching: .any)

@@ -409,6 +409,7 @@ struct PrinterSpoolInfo: Codable, Sendable {
 
 struct PrinterStatusDetail: Codable, Sendable {
     var safetyTelemetry: PrinterSafetyTelemetryDto?
+    var currentJobThumbnailUrl: String?
     let id: UUID
     let isOnline: Bool
     let state: String?
@@ -452,7 +453,8 @@ struct PrinterStatusDetail: Codable, Sendable {
         homedAxes: String? = nil,
         spoolInfo: PrinterSpoolInfo?,
         mmuStatus: MmuStatus?,
-        printTimeLeftSeconds: Double? = nil
+        printTimeLeftSeconds: Double? = nil,
+        currentJobThumbnailUrl: String? = nil
     ) {
         self.id = id
         self.isOnline = isOnline
@@ -473,6 +475,7 @@ struct PrinterStatusDetail: Codable, Sendable {
         self.spoolInfo = spoolInfo
         self.mmuStatus = mmuStatus
         self.printTimeLeftSeconds = printTimeLeftSeconds
+        self.currentJobThumbnailUrl = currentJobThumbnailUrl
     }
 }
 

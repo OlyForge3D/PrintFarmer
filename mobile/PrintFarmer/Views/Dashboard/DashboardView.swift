@@ -1003,9 +1003,7 @@ struct DashboardView: View {
         .accessibilityIdentifier("farm-absent-state")
     }
 
-    /// Adaptive read-only card grid reused for the cached shell. Uses the iPhone
-    /// (`PrinterCardView`) or iPad (`iPadPrinterCardView`) card exactly as the
-    /// live Farm tab does, so cached status projection matches online.
+    /// Cached cards use the same adaptive layout without authenticated media.
     private var farmCardsGrid: some View {
         let columns: [GridItem] = sizeClass == .compact
             ? [GridItem(.flexible())]
@@ -1013,21 +1011,11 @@ struct DashboardView: View {
         return ScrollView {
             LazyVGrid(columns: columns, spacing: 16) {
                 ForEach(viewModel.printers.sorted { sortPriority($0) < sortPriority($1) }) { printer in
-                    Group {
-                        if sizeClass == .compact {
-                            PrinterCardView(
-                                printer: printer,
-                                isPendingReady: viewModel.isPendingReady(printer),
-                                isReadOnly: true
-                            )
-                        } else {
-                            iPadPrinterCardView(
-                                printer: printer,
-                                isPendingReady: viewModel.isPendingReady(printer),
-                                isReadOnly: true
-                            )
-                        }
-                    }
+                    PrinterCardView(
+                        printer: printer,
+                        isPendingReady: viewModel.isPendingReady(printer),
+                        isReadOnly: true
+                    )
                     .accessibilityIdentifier("farm-card-\(printer.id.uuidString)")
                 }
             }

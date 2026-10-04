@@ -14,6 +14,7 @@ final class PrinterListViewModel {
     var searchText: String = ""
     var selectedStatus: StatusFilter = .all
     var selectedLocationId: UUID?
+    var attentionPrinterIDs: Set<UUID> = []
 
     enum StatusFilter: String, CaseIterable, Identifiable {
         case all = "All"
@@ -152,6 +153,8 @@ final class PrinterListViewModel {
         if let prog = update.progress { printers[idx].progress = prog / 100.0 }
         if let name = update.jobName { printers[idx].jobName = name }
         if let fn = update.fileName { printers[idx].fileName = fn }
+        // Nullable thumbnail fields are omitted by SignalR when the job ends.
+        printers[idx].currentJobThumbnailUrl = update.currentJobThumbnailUrl
         if let hotend = update.hotendTemp { printers[idx].hotendTemp = hotend }
         if let bed = update.bedTemp { printers[idx].bedTemp = bed }
         if let ht = update.hotendTarget { printers[idx].hotendTarget = ht }
@@ -503,7 +506,8 @@ final class PrinterListViewModel {
         case .offline: return !printer.isOnline
         case .error: return printer.state?.lowercased() == "error"
         case .needsAttention:
-            return isPendingReady(printer) || ["error", "paused"].contains(printer.state?.lowercased() ?? "")
+            return attentionPrinterIDs.contains(printer.id)
+                || isPendingReady(printer) || ["error", "paused"].contains(printer.state?.lowercased() ?? "")
         }
     }
 

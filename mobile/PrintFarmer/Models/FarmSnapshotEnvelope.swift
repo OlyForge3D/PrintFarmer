@@ -65,7 +65,7 @@ struct FarmSnapshotLocation: Codable, Sendable, Equatable {
 }
 
 /// Allow-list projection of a `Printer` carrying every non-secret field the
-/// iPhone (`PrinterCardView`) and iPad (`iPadPrinterCardView`) Farm cards render.
+/// iPhone and iPad Farm cards render through the shared `PrinterCardView`.
 ///
 /// Structurally absent (no property exists): `apiKey`, `originalServerUrl`,
 /// `backendUrl`, `frontendUrl`, `backendPort`, `frontendPort`, `thumbnailUrl`,
