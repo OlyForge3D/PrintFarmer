@@ -3,6 +3,7 @@ import Foundation
 
 final class MockAutoDispatchService: AutoDispatchServiceProtocol, @unchecked Sendable {
     var globalStatusToReturn: AutoDispatchGlobalStatus?
+    var getAllStatusHandler: (@Sendable () async throws -> AutoDispatchGlobalStatus)?
     var statusToReturn: AutoDispatchStatus?
     var readyResultToReturn: AutoDispatchReadyResult?
     var errorToThrow: Error?
@@ -20,6 +21,7 @@ final class MockAutoDispatchService: AutoDispatchServiceProtocol, @unchecked Sen
     func getAllStatus() async throws -> AutoDispatchGlobalStatus {
         getAllStatusCalled = true
         if let error = errorToThrow { throw error }
+        if let getAllStatusHandler { return try await getAllStatusHandler() }
         return globalStatusToReturn ?? AutoDispatchGlobalStatus(globalEnabled: true, printers: [])
     }
 

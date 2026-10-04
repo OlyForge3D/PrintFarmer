@@ -3,10 +3,6 @@ import SwiftUI
 struct ContentView: View {
     static let sidebarRowMinimumHeight: CGFloat = 44
 
-    static func shippingTabs(for capabilities: ResolvedSystemCapabilities) -> [AppTab] {
-        AppTab.allCases
-    }
-
     @Environment(AppRouter.self) private var router
     @Environment(ServiceContainer.self) private var services
     @Environment(\.horizontalSizeClass) private var sizeClass
@@ -106,7 +102,7 @@ struct ContentView: View {
     @ViewBuilder
     private func tabContentView(for tab: AppTab) -> some View {
         switch tab {
-        case .farm: DashboardView(farmOnly: true)
+        case .farm: DashboardView()
         case .queue: JobListView()
         case .filament: SpoolInventoryView()
         }

@@ -8,12 +8,6 @@ final class DashboardViewModel {
     ) -> Void
 
     var printers: [Printer] = []
-    var queueOverview: [QueueOverview] = []
-    var activeJobs: [QueuedPrintJobResponse] = []
-    var summary: StatisticsSummary?
-    var queueStats: QueueStats?
-    var modelStats: [QueuePrinterModelStats] = []
-    var upcomingJobs: [QueuedJobWithMeta] = []
     var isLoading = false
     var errorMessage: String?
     var isViewActive = true {
@@ -86,6 +80,7 @@ final class DashboardViewModel {
     /// on screen (live) or backing the cached snapshot (stale). `nil` until the
     /// first hydrate/commit resolves.
     private(set) var lastUpdatedAt: Date?
+    private(set) var farmDataRevision: UInt64 = 0
 
     /// True once an authoritative session exists but its record is absent — the
     /// "no cached data yet" state, distinct from a present-but-empty fleet.
@@ -94,14 +89,12 @@ final class DashboardViewModel {
     private let logger = Logger(subsystem: "com.printfarmer.ios", category: "Dashboard")
 
     private var printerService: (any PrinterServiceProtocol)?
-    private var jobService: (any JobServiceProtocol)?
-    private var statisticsService: (any StatisticsServiceProtocol)?
-    private var jobAnalyticsService: (any JobAnalyticsServiceProtocol)?
-    private var farmOnly = false
     private var autoPrintService: (any AutoDispatchServiceProtocol)?
     private var signalRService: (any SignalRServiceProtocol)?
     @ObservationIgnored private var signalRSubscriptions: [SignalRSubscription] = []
     @ObservationIgnored private var signalRServiceIdentity: ObjectIdentifier?
+    @ObservationIgnored private var printerSubscriptionSyncGeneration: UInt64 = 0
+    @ObservationIgnored private var pendingReadyRefreshGeneration: UInt64 = 0
     @ObservationIgnored private var signalRAuthorityEpoch: UInt64 = 0
     @ObservationIgnored private var lastObservedConnectionState: SignalRConnectionState?
     @ObservationIgnored private let callbackEnqueuer: CallbackEnqueuer
@@ -135,27 +128,14 @@ final class DashboardViewModel {
     }
 
     func configure(
-        printerService: any PrinterServiceProtocol,
-        jobService: any JobServiceProtocol,
-        statisticsService: any StatisticsServiceProtocol,
-        jobAnalyticsService: any JobAnalyticsServiceProtocol,
-        farmOnly: Bool = false
+        printerService: any PrinterServiceProtocol
     ) {
         let changed = !Self.identical(self.printerService, printerService)
-            || !Self.identical(self.jobService, jobService)
-            || !Self.identical(self.statisticsService, statisticsService)
-            || !Self.identical(self.jobAnalyticsService, jobAnalyticsService)
-            || self.farmOnly != farmOnly
         if changed {
             invalidateCanonicalLoad()
-            // New data authority: nothing it said has been confirmed yet.
-            hasConcludedCanonicalLoad = false
+            clearFarmDataForNewAuthority()
         }
         self.printerService = printerService
-        self.jobService = jobService
-        self.statisticsService = statisticsService
-        self.jobAnalyticsService = jobAnalyticsService
-        self.farmOnly = farmOnly
     }
 
     /// Wire the published #816 snapshot store plus the auto-dispatch source
@@ -172,13 +152,23 @@ final class DashboardViewModel {
             || !Self.identical(self.autoPrintService, autoPrintService)
         if changed {
             invalidateCanonicalLoad()
-            // New snapshot authority: its cache provenance is unconfirmed.
-            hasConcludedCanonicalLoad = false
+            clearFarmDataForNewAuthority()
         }
         self.snapshotStore = store
         self.autoPrintService = autoPrintService
         self.now = now
         self.reportCommit = reportCommit
+    }
+
+    private func clearFarmDataForNewAuthority() {
+        invalidatePendingReadyRefresh()
+        printers = []
+        pendingReadyPrinterIDs = []
+        lastUpdatedAt = nil
+        farmSource = .notLoaded
+        hasConcludedCanonicalLoad = false
+        errorMessage = nil
+        farmDataRevision &+= 1
     }
 
     func configureSignalR(_ service: any SignalRServiceProtocol) {
@@ -224,10 +214,12 @@ final class DashboardViewModel {
         }
         lastObservedConnectionState = connectionRegistration.initial
         signalRSubscriptions.append(connectionRegistration.subscription)
+        synchronizePrinterSubscriptions(for: printers)
     }
 
     private func tearDownSignalR() {
         signalRAuthorityEpoch &+= 1
+        printerSubscriptionSyncGeneration &+= 1
         for subscription in signalRSubscriptions { subscription.cancel() }
         signalRSubscriptions.removeAll(keepingCapacity: true)
         signalRService = nil
@@ -251,11 +243,29 @@ final class DashboardViewModel {
         if let prog = update.progress { printers[idx].progress = prog / 100.0 }
         if let name = update.jobName { printers[idx].jobName = name }
         if let fn = update.fileName { printers[idx].fileName = fn }
+        // SignalR omits nullable thumbnail fields when a job ends.
+        printers[idx].currentJobThumbnailUrl = update.currentJobThumbnailUrl
         if let hotend = update.hotendTemp { printers[idx].hotendTemp = hotend }
         if let bed = update.bedTemp { printers[idx].bedTemp = bed }
         if let ht = update.hotendTarget { printers[idx].hotendTarget = ht }
         if let bt = update.bedTarget { printers[idx].bedTarget = bt }
         if let spool = update.spoolInfo { printers[idx].spoolInfo = spool }
+        farmDataRevision &+= 1
+    }
+
+    private func synchronizePrinterSubscriptions(for printers: [Printer]) {
+        guard let signalRService, let signalRServiceIdentity else { return }
+        printerSubscriptionSyncGeneration &+= 1
+        let syncGeneration = printerSubscriptionSyncGeneration
+        let printerIDs = printers.map(\.id)
+        Task { @MainActor [weak self] in
+            guard let self,
+                  self.printerSubscriptionSyncGeneration == syncGeneration,
+                  self.signalRServiceIdentity == signalRServiceIdentity else {
+                return
+            }
+            await signalRService.replacePrinterSubscriptions(printerIDs)
+        }
     }
 
     /// Hydrate the ACTIVE exact-owner snapshot from the #816 store. Called
@@ -265,8 +275,14 @@ final class DashboardViewModel {
     /// enforces which namespace's record (if any) is authoritative.
     func hydrateFromCache() async {
         guard let store = snapshotStore, isViewActive else { return }
+        let lifecycleEpoch = canonicalLifecycleEpoch
+        let storeIdentity = Self.identity(store)
         let hydration = await store.hydrateActive()
-        guard isViewActive else { return }
+        guard isViewActive,
+              canonicalLifecycleEpoch == lifecycleEpoch,
+              Self.identity(snapshotStore) == storeIdentity else {
+            return
+        }
         // A canonical load may have already published live data during the await;
         // never downgrade a confirmed live fleet back to cached.
         guard farmSource != .live else { return }
@@ -276,6 +292,7 @@ final class DashboardViewModel {
             pendingReadyPrinterIDs = Set(envelope.payload.filter(\.isPendingReady).map(\.id))
             lastUpdatedAt = Date(timeIntervalSince1970: Double(envelope.lastUpdatedAtMillis) / 1000.0)
             farmSource = .cached
+            farmDataRevision &+= 1
         case .absent:
             // Authoritative session but no record was ever written: the
             // distinct "no cached data" state, not a present-but-empty fleet.
@@ -305,11 +322,12 @@ final class DashboardViewModel {
     }
 
     private var canLoadDashboard: Bool {
-        isViewActive && printerService != nil && jobService != nil
+        isViewActive && printerService != nil
     }
 
     private func requestCanonicalLoad(isRecovery: Bool = false) {
         guard canLoadDashboard else { return }
+        invalidatePendingReadyRefresh()
         canonicalLoadRequested = true
         if isRecovery {
             canonicalPendingRecoveryDemand = true
@@ -330,23 +348,15 @@ final class DashboardViewModel {
 
     private func startCanonicalPass(authority: CanonicalAuthority) {
         guard isCanonicalLoadCurrent(authority),
-              let printerService,
-              let jobService else {
+              let printerService else {
             return
         }
+        invalidatePendingReadyRefresh()
         let input = CanonicalLoadInput(
-            farmOnly: farmOnly,
             printerService: printerService,
-            jobService: jobService,
-            statisticsService: statisticsService,
-            jobAnalyticsService: jobAnalyticsService,
             autoPrintService: autoPrintService,
             snapshotStore: snapshotStore,
             pendingReadyPrinterIDs: pendingReadyPrinterIDs,
-            summary: summary,
-            queueStats: queueStats,
-            modelStats: modelStats,
-            upcomingJobs: upcomingJobs,
             now: now,
             reportCommit: reportCommit,
             logger: logger
@@ -424,19 +434,7 @@ final class DashboardViewModel {
         }
 
         do {
-            let loadedPrinters: [Printer]
-            let loadedQueue: [QueueOverview]
-            let loadedJobs: [QueuedPrintJobResponse]
-            if input.farmOnly {
-                loadedPrinters = try await input.printerService.list()
-                loadedQueue = []
-                loadedJobs = []
-            } else {
-                async let printersTask = input.printerService.list()
-                async let queueTask = input.jobService.list()
-                async let allJobsTask = input.jobService.listAllJobs()
-                (loadedPrinters, loadedQueue, loadedJobs) = try await (printersTask, queueTask, allJobsTask)
-            }
+            let loadedPrinters = try await input.printerService.list()
             guard !Task.isCancelled else { return .superseded }
 
             var loadedPendingReady = input.pendingReadyPrinterIDs
@@ -450,46 +448,6 @@ final class DashboardViewModel {
                 } catch {
                     guard !Task.isCancelled else { return .superseded }
                     input.logger.info("Auto-dispatch status unavailable: \(error.localizedDescription)")
-                }
-            }
-
-            var loadedSummary = input.summary
-            if !input.farmOnly, let statisticsService = input.statisticsService {
-                do {
-                    loadedSummary = try await statisticsService.getSummary()
-                } catch {
-                    guard !Task.isCancelled else { return .superseded }
-                    input.logger.warning("Failed to load statistics summary: \(error.localizedDescription)")
-                }
-                guard !Task.isCancelled else { return .superseded }
-            }
-
-            var loadedQueueStats = input.queueStats
-            var loadedModelStats = input.modelStats
-            var loadedUpcomingJobs = input.upcomingJobs
-            if !input.farmOnly, let jobAnalyticsService = input.jobAnalyticsService {
-                do {
-                    async let statsTask = jobAnalyticsService.getStats()
-                    async let modelStatsTask = jobAnalyticsService.getModelStats()
-                    async let upcomingTask = jobAnalyticsService.getQueuedJobs(
-                        filterStatus: "queued",
-                        filterModel: nil,
-                        filterMaterial: nil,
-                        limit: 5,
-                        offset: 0
-                    )
-                    let (stats, models, upcoming) = try await (
-                        statsTask,
-                        modelStatsTask,
-                        upcomingTask
-                    )
-                    guard !Task.isCancelled else { return .superseded }
-                    loadedQueueStats = stats
-                    loadedModelStats = models
-                    loadedUpcomingJobs = upcoming
-                } catch {
-                    guard !Task.isCancelled else { return .superseded }
-                    input.logger.warning("Failed to load farm status data: \(error.localizedDescription)")
                 }
             }
 
@@ -522,15 +480,6 @@ final class DashboardViewModel {
             return .success(
                 CanonicalSnapshot(
                     printers: loadedPrinters,
-                    queueOverview: loadedQueue,
-                    activeJobs: loadedJobs.filter {
-                        guard let status = $0.job.jobStatus else { return false }
-                        return [.printing, .starting, .paused].contains(status)
-                    },
-                    summary: loadedSummary,
-                    queueStats: loadedQueueStats,
-                    modelStats: loadedModelStats,
-                    upcomingJobs: loadedUpcomingJobs,
                     pendingReadyPrinterIDs: loadedPendingReady,
                     lastUpdatedAt: instant
                 )
@@ -550,16 +499,43 @@ final class DashboardViewModel {
 
     private func publish(_ snapshot: CanonicalSnapshot) {
         printers = snapshot.printers
-        queueOverview = snapshot.queueOverview
-        activeJobs = snapshot.activeJobs
-        summary = snapshot.summary
-        queueStats = snapshot.queueStats
-        modelStats = snapshot.modelStats
-        upcomingJobs = snapshot.upcomingJobs
+        invalidatePendingReadyRefresh()
         pendingReadyPrinterIDs = snapshot.pendingReadyPrinterIDs
         lastUpdatedAt = snapshot.lastUpdatedAt
         farmSource = .live
         errorMessage = nil
+        farmDataRevision &+= 1
+        synchronizePrinterSubscriptions(for: snapshot.printers)
+    }
+
+    func refreshPendingReadyStatus() async {
+        guard isViewActive, let autoPrintService else { return }
+        pendingReadyRefreshGeneration &+= 1
+        let refreshGeneration = pendingReadyRefreshGeneration
+        let serviceIdentity = Self.identity(autoPrintService)
+        do {
+            let statuses = try await autoPrintService.getAllStatus()
+            guard isViewActive,
+                  pendingReadyRefreshGeneration == refreshGeneration,
+                  Self.identity(self.autoPrintService) == serviceIdentity else {
+                return
+            }
+            pendingReadyPrinterIDs = Set(
+                statuses.printers.filter { $0.state == "PendingReady" }.map(\.printerId)
+            )
+            farmDataRevision &+= 1
+        } catch {
+            guard isViewActive,
+                  pendingReadyRefreshGeneration == refreshGeneration,
+                  Self.identity(self.autoPrintService) == serviceIdentity else {
+                return
+            }
+            logger.info("Auto-dispatch status unavailable: \(error.localizedDescription)")
+        }
+    }
+
+    private func invalidatePendingReadyRefresh() {
+        pendingReadyRefreshGeneration &+= 1
     }
 
     private func finishCanonicalLoad(authority: CanonicalAuthority) {
@@ -576,6 +552,7 @@ final class DashboardViewModel {
 
     private func invalidateCanonicalLoad() {
         canonicalLifecycleEpoch &+= 1
+        invalidatePendingReadyRefresh()
         canonicalCommitAuthorization?.invalidate()
         canonicalCommitAuthorization = nil
         canonicalLoadTask?.cancel()
@@ -602,9 +579,6 @@ final class DashboardViewModel {
             token: token,
             lifecycleEpoch: canonicalLifecycleEpoch,
             printerServiceIdentity: Self.identity(printerService),
-            jobServiceIdentity: Self.identity(jobService),
-            statisticsServiceIdentity: Self.identity(statisticsService),
-            jobAnalyticsServiceIdentity: Self.identity(jobAnalyticsService),
             autoPrintServiceIdentity: Self.identity(autoPrintService),
             snapshotStoreIdentity: Self.identity(snapshotStore)
         )
@@ -615,9 +589,6 @@ final class DashboardViewModel {
             && canonicalLoadToken == authority.token
             && canonicalLifecycleEpoch == authority.lifecycleEpoch
             && Self.identity(printerService) == authority.printerServiceIdentity
-            && Self.identity(jobService) == authority.jobServiceIdentity
-            && Self.identity(statisticsService) == authority.statisticsServiceIdentity
-            && Self.identity(jobAnalyticsService) == authority.jobAnalyticsServiceIdentity
             && Self.identity(autoPrintService) == authority.autoPrintServiceIdentity
             && Self.identity(snapshotStore) == authority.snapshotStoreIdentity
     }
@@ -660,38 +631,21 @@ final class DashboardViewModel {
         let token: UUID
         let lifecycleEpoch: UInt64
         let printerServiceIdentity: ObjectIdentifier?
-        let jobServiceIdentity: ObjectIdentifier?
-        let statisticsServiceIdentity: ObjectIdentifier?
-        let jobAnalyticsServiceIdentity: ObjectIdentifier?
         let autoPrintServiceIdentity: ObjectIdentifier?
         let snapshotStoreIdentity: ObjectIdentifier?
     }
 
     private struct CanonicalSnapshot {
         let printers: [Printer]
-        let queueOverview: [QueueOverview]
-        let activeJobs: [QueuedPrintJobResponse]
-        let summary: StatisticsSummary?
-        let queueStats: QueueStats?
-        let modelStats: [QueuePrinterModelStats]
-        let upcomingJobs: [QueuedJobWithMeta]
         let pendingReadyPrinterIDs: Set<UUID>
         let lastUpdatedAt: Date
     }
 
     private struct CanonicalLoadInput: Sendable {
-        let farmOnly: Bool
         let printerService: any PrinterServiceProtocol
-        let jobService: any JobServiceProtocol
-        let statisticsService: (any StatisticsServiceProtocol)?
-        let jobAnalyticsService: (any JobAnalyticsServiceProtocol)?
         let autoPrintService: (any AutoDispatchServiceProtocol)?
         let snapshotStore: (any FarmSnapshotStoring)?
         let pendingReadyPrinterIDs: Set<UUID>
-        let summary: StatisticsSummary?
-        let queueStats: QueueStats?
-        let modelStats: [QueuePrinterModelStats]
-        let upcomingJobs: [QueuedJobWithMeta]
         let now: @Sendable () -> Date
         let reportCommit: FarmSnapshotCommitReporter
         let logger: Logger
@@ -746,6 +700,10 @@ final class DashboardViewModel {
 
     func isPendingReady(_ printer: Printer) -> Bool {
         pendingReadyPrinterIDs.contains(printer.id)
+    }
+
+    func synchronizeFarmData(to projection: PrinterListViewModel) {
+        projection.setFarmData(printers, pendingReadyPrinterIDs: pendingReadyPrinterIDs)
     }
 
     // MARK: - Snapshot → Printer projection
@@ -822,25 +780,10 @@ final class DashboardViewModel {
         printers.filter(\.inMaintenance).count
     }
 
-    var activeJobCount: Int {
-        queueOverview.filter { $0.currentJobId != nil }.count
-    }
-
-    var queuedJobCount: Int {
-        queueOverview.reduce(0) { $0 + $1.queuedJobsCount }
-    }
-
     var hasMaintenanceAlerts: Bool { maintenanceCount > 0 }
 
     var printersInMaintenance: [Printer] {
         printers.filter(\.inMaintenance)
-    }
-
-    // MARK: - Farm Status Helpers
-
-    func activeJobForPrinter(_ printerId: UUID) -> QueuedPrintJobResponse? {
-        let idString = printerId.uuidString
-        return activeJobs.first { $0.job.assignedPrinterId?.caseInsensitiveCompare(idString) == .orderedSame }
     }
 
     var activePrintingPrinters: [Printer] {

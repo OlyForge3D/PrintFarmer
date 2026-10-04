@@ -34,6 +34,7 @@ enum PrinterListNavigationContext: Equatable {
 
 struct PrinterListView: View {
     let navigationContext: PrinterListNavigationContext
+    let farmViewModel: DashboardViewModel
 
     @Environment(AppRouter.self) private var router
     @Environment(ServiceContainer.self) private var services
@@ -50,8 +51,18 @@ struct PrinterListView: View {
             : [GridItem(.flexible())]
     }
 
-    init(navigationContext: PrinterListNavigationContext = .farm) {
+    init(
+        navigationContext: PrinterListNavigationContext = .farm,
+        farmViewModel: DashboardViewModel
+    ) {
         self.navigationContext = navigationContext
+        self.farmViewModel = farmViewModel
+        _viewModel = State(
+            initialValue: PrinterListViewModel(
+                initialPrinters: farmViewModel.printers,
+                pendingReadyPrinterIDs: farmViewModel.pendingReadyPrinterIDs
+            )
+        )
     }
 
     var body: some View {
@@ -70,13 +81,10 @@ struct PrinterListView: View {
             }
         }
         .task(id: services.activeServerGeneration) {
-            PrinterListViewLifecycle.taskActivate(
-                viewModel: viewModel,
-                printerService: services.printerService,
-                autoPrintService: services.autoPrintService,
-                signalRService: services.signalRService
-            )
-            await viewModel.bootstrap(startupPrefetchStore: services.startupPrefetchStore)
+            synchronizeFarmData()
+        }
+        .onChange(of: farmViewModel.farmDataRevision) { _, _ in
+            synchronizeFarmData()
         }
         .task(id: attentionAuthority) {
             await attentionViewModel.bootstrap(
@@ -93,23 +101,17 @@ struct PrinterListView: View {
             viewModel.attentionPrinterIDs = Set(attentionViewModel.snapshot?.items.map(\.printerId) ?? [])
         }
         .onDisappear {
-            PrinterListViewLifecycle.onDisappear(
-                viewModel: viewModel,
-                retryTask: retryTask
-            )
+            retryTask?.cancel()
             attentionViewModel.deactivate()
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
             Task {
-                await PrinterListViewLifecycle.willEnterForeground(
-                    viewModel: viewModel
-                )
                 _ = await attentionViewModel.refresh()
             }
         }
         .onChange(of: activeNavigationPathCount) { _, newCount in
             if newCount == 0 {
-                Task { await viewModel.loadAutoDispatchStatuses() }
+                Task { await farmViewModel.refreshPendingReadyStatus() }
             }
         }
         .onChange(of: router.pendingNeedsAttentionFilter, initial: true) { _, needsAttention in
@@ -141,17 +143,19 @@ struct PrinterListView: View {
                     .foregroundStyle(Color.pfWarning)
                 }
                 Group {
-                    if viewModel.isLoading && viewModel.printers.isEmpty {
+                    // This list is mounted inside the Farm navigation stack and
+                    // reads loading/error state from its canonical Dashboard owner.
+                    if farmViewModel.isLoading && farmViewModel.printers.isEmpty {
                         ProgressView("Loading printers…")
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    } else if let error = viewModel.errorMessage, viewModel.printers.isEmpty {
+                    } else if let error = farmViewModel.errorMessage, farmViewModel.printers.isEmpty {
                         ContentUnavailableView {
                             Label("Error", systemImage: "exclamationmark.triangle")
                         } description: {
                             Text(error)
                         } actions: {
                             Button("Retry") {
-                                retryTask = Task { await viewModel.loadPrinters() }
+                                retryTask = Task { await farmViewModel.loadDashboard() }
                             }
                         }
                     } else if viewModel.printers.isEmpty {
@@ -168,7 +172,7 @@ struct PrinterListView: View {
             .navigationTitle(navigationContext.navigationTitle)
             .searchable(text: $viewModel.searchText, prompt: "Search printers")
             .refreshable {
-                await viewModel.loadPrinters()
+                await farmViewModel.loadDashboard()
                 _ = await attentionViewModel.refresh()
             }
             .rootNavigationChrome(for: navigationContext.appTab) {
@@ -199,6 +203,10 @@ struct PrinterListView: View {
         case .farm:
             router.printersPath.count
         }
+    }
+
+    private func synchronizeFarmData() {
+        farmViewModel.synchronizeFarmData(to: viewModel)
     }
 
     // MARK: - Printer List
@@ -394,53 +402,6 @@ struct PrinterLookupView: View {
                 }
                 isLoading = false
             }
-        }
-    }
-}
-
-@MainActor
-enum PrinterListViewLifecycle {
-    static func taskActivate(
-        viewModel: PrinterListViewModel,
-        printerService: any PrinterServiceProtocol,
-        autoPrintService: any AutoDispatchServiceProtocol,
-        signalRService: any SignalRServiceProtocol
-    ) {
-        viewModel.activate()
-        viewModel.configure(
-            printerService: printerService,
-            autoPrintService: autoPrintService
-        )
-        viewModel.configureSignalR(signalRService)
-    }
-
-    static func onDisappear(
-        viewModel: PrinterListViewModel,
-        retryTask: Task<Void, Never>?
-    ) {
-        retryTask?.cancel()
-        viewModel.deactivate()
-    }
-
-    static func willEnterForeground(
-        viewModel: PrinterListViewModel,
-        coverageViewModel: FarmFilamentCoverageViewModel? = nil,
-        refreshCoverage: Bool = false
-    ) async {
-        await viewModel.loadAutoDispatchStatuses()
-        if refreshCoverage {
-            await coverageViewModel?.load()
-        }
-    }
-
-    static func refresh(
-        viewModel: PrinterListViewModel,
-        coverageViewModel: FarmFilamentCoverageViewModel,
-        refreshCoverage: Bool
-    ) async {
-        await viewModel.loadPrinters()
-        if refreshCoverage {
-            await coverageViewModel.load()
         }
     }
 }

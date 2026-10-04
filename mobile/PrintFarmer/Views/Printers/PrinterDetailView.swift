@@ -1,5 +1,47 @@
 import SwiftUI
 
+@MainActor
+struct PrinterDetailSafetyRefresh: View {
+    @ObservedObject var owner: PrinterControlsViewModel
+    let onRefresh: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let error = owner.safetyReadError {
+                Text(error)
+                    .font(.footnote)
+                    .foregroundStyle(Color.pfError)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(error)
+                    .accessibilityIdentifier("printer.detail.safety.error")
+            }
+            ControlActionButton(
+                title: "Refresh safety checks",
+                identifier: "printer.detail.safety.refresh",
+                action: onRefresh
+            )
+            .disabled(owner.isRefreshingSafety || owner.isLoadingCapabilities)
+        }
+    }
+}
+
+struct PrinterDetailSafetyRefreshCadence {
+    static let statusInterval: Duration = .seconds(5)
+    static let discoveryInterval: Duration = .seconds(60)
+
+    private var lastDiscoveryAt: ContinuousClock.Instant
+
+    init(now: ContinuousClock.Instant = .now) {
+        lastDiscoveryAt = now
+    }
+
+    mutating func shouldRefreshDiscovery(at now: ContinuousClock.Instant) -> Bool {
+        guard now - lastDiscoveryAt >= Self.discoveryInterval else { return false }
+        lastDiscoveryAt = now
+        return true
+    }
+}
+
 struct PrinterDetailView: View {
     @Environment(ServiceContainer.self) private var services
     @Environment(AppRouter.self) private var router
@@ -104,7 +146,7 @@ struct PrinterDetailView: View {
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 Button {
-                    Self.returnToFarm(router: router, capabilities: services.capabilitiesService.resolved)
+                    Self.returnToFarm(router: router)
                 } label: { Label("Farm", systemImage: "chevron.left") }
                     .accessibilityIdentifier("printer.detail.farm")
             }
@@ -564,15 +606,9 @@ struct PrinterDetailView: View {
     }
 
     private func safetyRefresh(_ owner: PrinterControlsViewModel) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if let error = owner.safetyReadError {
-                Text(error).font(.footnote).foregroundStyle(Color.pfError)
-            }
-            ControlActionButton(title: "Refresh safety checks", identifier: "printer.detail.safety.refresh") {
-                let task = Task { await owner.refreshSafetyEvidence() }
-                activeTasks.append(task)
-            }
-            .disabled(owner.isRefreshingSafety || owner.isLoadingCapabilities)
+        PrinterDetailSafetyRefresh(owner: owner) {
+            let task = Task { await owner.refreshSafetyEvidence() }
+            activeTasks.append(task)
         }
     }
 
@@ -617,9 +653,11 @@ struct PrinterDetailView: View {
                     }
                     guard !viewModel.isLoadingCapabilities else { return }
                     await viewModel.refreshSafetyEvidence()
+                    var cadence = PrinterDetailSafetyRefreshCadence()
                     while !Task.isCancelled && viewModel.isActive {
-                        do { try await Task.sleep(for: .seconds(5)) } catch { return }
-                        await viewModel.refreshSafetyEvidence()
+                        do { try await Task.sleep(for: PrinterDetailSafetyRefreshCadence.statusInterval) } catch { return }
+                        let refreshDiscovery = cadence.shouldRefreshDiscovery(at: .now)
+                        await viewModel.refreshSafetyEvidence(refreshDiscovery: refreshDiscovery)
                     }
                 }
                 .onDisappear { viewModel.suspendSafetyObservation() }
@@ -820,9 +858,9 @@ struct PrinterDetailView: View {
         .accessibilityIdentifier("printer.detail.queue.row.\(job.id)")
     }
 
-    static func returnToFarm(router: AppRouter, capabilities: ResolvedSystemCapabilities) {
+    static func returnToFarm(router: AppRouter) {
         router.invalidatePendingNavigation()
-        router.selectTab(.farm, capabilities: capabilities)
+        router.selectedTab = .farm
     }
 
     private func matchTint(_ state: PrinterDetailViewModel.QueueMatchState) -> Color {
