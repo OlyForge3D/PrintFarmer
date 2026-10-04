@@ -54,25 +54,35 @@ export function getQueueJobScope(
 export function getQueueMoveNeighbors(
   jobs: QueuedPrintJobWithFileMetaDto[]
 ): Map<string, QueueMoveNeighbors> {
-  const queuedByScope = new Map<string | null, QueuedPrintJobWithFileMetaDto[]>();
+  const queuedByScopeAndPriority = new Map<
+    string | null,
+    Map<
+      QueuedPrintJobWithFileMetaDto['job']['priority'],
+      QueuedPrintJobWithFileMetaDto[]
+    >
+  >();
 
   for (const job of jobs) {
     if (job.job.status !== 'Queued') continue;
     const scope = getQueueJobScope(job);
     if (scope === undefined) continue;
-    const scopedJobs = queuedByScope.get(scope) ?? [];
-    scopedJobs.push(job);
-    queuedByScope.set(scope, scopedJobs);
+    const jobsByPriority = queuedByScopeAndPriority.get(scope) ?? new Map();
+    const samePriorityJobs = jobsByPriority.get(job.job.priority) ?? [];
+    samePriorityJobs.push(job);
+    jobsByPriority.set(job.job.priority, samePriorityJobs);
+    queuedByScopeAndPriority.set(scope, jobsByPriority);
   }
 
   const neighborsByJobId = new Map<string, QueueMoveNeighbors>();
-  for (const scopedJobs of queuedByScope.values()) {
-    scopedJobs.forEach((job, index) => {
-      neighborsByJobId.set(job.job.id, {
-        previous: scopedJobs[index - 1],
-        next: scopedJobs[index + 1],
+  for (const jobsByPriority of queuedByScopeAndPriority.values()) {
+    for (const samePriorityJobs of jobsByPriority.values()) {
+      samePriorityJobs.forEach((job, index) => {
+        neighborsByJobId.set(job.job.id, {
+          previous: samePriorityJobs[index - 1],
+          next: samePriorityJobs[index + 1],
+        });
       });
-    });
+    }
   }
 
   return neighborsByJobId;
@@ -92,7 +102,11 @@ export function canDropQueueJob(
 
   const movedScope = getQueueJobScope(moved);
   const neighborScope = getQueueJobScope(neighbor);
-  return movedScope !== undefined && movedScope === neighborScope;
+  return (
+    movedScope !== undefined &&
+    movedScope === neighborScope &&
+    moved.job.priority === neighbor.job.priority
+  );
 }
 
 export function moveQueuedJobInList(
@@ -109,7 +123,11 @@ export function moveQueuedJobInList(
   const scope = getQueueJobScope(moved);
   if (scope === undefined) return undefined;
   const scopedQueuedIndices = jobs.flatMap((entry, index) =>
-    entry.job.status === 'Queued' && getQueueJobScope(entry) === scope ? [index] : []
+    entry.job.status === 'Queued' &&
+    getQueueJobScope(entry) === scope &&
+    entry.job.priority === moved.job.priority
+      ? [index]
+      : []
   );
   const scopedQueuedJobs = scopedQueuedIndices.map((index) => jobs[index]);
   const movedIndex = scopedQueuedJobs.findIndex((entry) => entry.job.id === movedJobId);
@@ -124,10 +142,7 @@ export function moveQueuedJobInList(
   const reorderedScope = scopedQueuedJobs.filter((entry) => entry.job.id !== movedJobId);
   const targetIndex = reorderedScope.findIndex((entry) => entry.job.id === neighborJobId);
   const insertionIndex = placement === 'before' ? targetIndex : targetIndex + 1;
-  reorderedScope.splice(insertionIndex, 0, {
-    ...moved,
-    job: { ...moved.job, priority: neighbor.job.priority },
-  });
+  reorderedScope.splice(insertionIndex, 0, moved);
   const reordered = [...jobs];
   scopedQueuedIndices.forEach((index, scopeIndex) => {
     reordered[index] = reorderedScope[scopeIndex];

@@ -9,7 +9,10 @@ import {
 import { QueueViewModeSelector } from "../QueueViewModeSelector";
 import type { QueuedPrintJobWithFileMetaDto } from "@/services/printQueueService";
 import { PrintJobPriority } from "@/types/api";
-import { getQueueMoveNeighbors } from "@/features/queue/utils/queueReordering";
+import {
+  canDropQueueJob,
+  getQueueMoveNeighbors,
+} from "@/features/queue/utils/queueReordering";
 
 function createMockJob(
   overrides?: Partial<QueuedPrintJobWithFileMetaDto>,
@@ -89,7 +92,7 @@ describe("Queue view mode + collection renderers", () => {
     expect(onCancel).toHaveBeenCalledWith("job-1");
   });
 
-  it("supports keyboard Move up and pointer drag in collection views", async () => {
+  it("supports both keyboard reorder buttons and restricts pointer drops to the same priority", async () => {
     const firstBase = createMockJob();
     const first = createMockJob({
       job: { ...firstBase.job, rowVersion: "etag-job-1" },
@@ -98,7 +101,22 @@ describe("Queue view mode + collection renderers", () => {
       job: { ...first.job, id: "job-2", name: "next-print", rowVersion: "etag-job-2" },
       gcodeFile: { ...first.gcodeFile!, id: "file-2", name: "next.gcode", fileName: "next.gcode" },
     });
-    const jobs = [first, second];
+    const differentPriority = createMockJob({
+      job: {
+        ...first.job,
+        id: "job-3",
+        name: "urgent-print",
+        rowVersion: "etag-job-3",
+        priority: PrintJobPriority.Urgent,
+      },
+      gcodeFile: {
+        ...first.gcodeFile!,
+        id: "file-3",
+        name: "urgent.gcode",
+        fileName: "urgent.gcode",
+      },
+    });
+    const jobs = [first, second, differentPriority];
     const onMoveJob = vi.fn();
     const onDragStartJob = vi.fn();
     const user = userEvent.setup();
@@ -112,9 +130,16 @@ describe("Queue view mode + collection renderers", () => {
       />,
     );
     const moveUp = screen.getByRole("button", { name: "Move next.gcode up" });
+    const moveDown = screen.getByRole("button", { name: "Move benchy.gcode down" });
     moveUp.focus();
     await user.keyboard("{Enter}");
     expect(onMoveJob).toHaveBeenCalledWith("job-2", "job-1", "before");
+    expect(moveDown).toBeEnabled();
+    await user.click(moveDown);
+    expect(onMoveJob).toHaveBeenLastCalledWith("job-1", "job-2", "after");
+    expect(screen.getByRole("button", { name: "Move next.gcode down" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Move urgent.gcode up" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Move urgent.gcode down" })).toBeDisabled();
 
     onMoveJob.mockClear();
     rerender(
@@ -125,21 +150,25 @@ describe("Queue view mode + collection renderers", () => {
         reorderNeighbors={getQueueMoveNeighbors(jobs)}
         onMoveJob={onMoveJob}
         onDragStartJob={onDragStartJob}
-        canDropOnJob={(movedId, neighborId) => movedId !== neighborId}
+        canDropOnJob={(movedId, neighborId) => canDropQueueJob(jobs, movedId, neighborId)}
       />,
     );
     const source = screen.getByRole("listitem", { name: /next\.gcode/i });
-    const target = screen.getByRole("listitem", { name: /benchy\.gcode/i });
+    const samePriorityTarget = screen.getByRole("listitem", { name: /benchy\.gcode/i });
+    const otherPriorityTarget = screen.getByRole("listitem", { name: /urgent\.gcode/i });
     const dataTransfer = {
       effectAllowed: "",
       dropEffect: "",
       setData: vi.fn(),
       getData: vi.fn().mockReturnValue("job-2"),
     } as unknown as DataTransfer;
-    vi.spyOn(target, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 100, 100));
+    vi.spyOn(samePriorityTarget, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 100, 100));
 
     fireEvent.dragStart(source, { dataTransfer });
-    fireEvent.drop(target, { dataTransfer, clientY: 5 });
+    fireEvent.drop(otherPriorityTarget, { dataTransfer, clientY: 5 });
+    expect(onMoveJob).not.toHaveBeenCalled();
+
+    fireEvent.drop(samePriorityTarget, { dataTransfer, clientY: 95 });
 
     expect(onDragStartJob).toHaveBeenCalledWith("job-2");
     expect(onMoveJob).toHaveBeenCalledWith("job-2", "job-1", "after");
