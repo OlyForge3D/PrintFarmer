@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { useSearchParams, useParams, useNavigate } from "react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { PageTemplate } from "@/common/components/PageTemplate";
@@ -31,6 +31,7 @@ import { ScheduleModal } from "@/features/scheduling/components/ScheduleModal";
 import { apiClient } from "@/services/api";
 import { printerSignalRService } from "@/services/printer-signalr";
 import { usePageTour } from "@/common/hooks/usePageTour";
+import { useAuth } from "@/features/auth/hooks/useAuth";
 import { printQueueTour } from "@/features/queue/tours/print-queue.tour";
 import { HelpButton } from "@/common/components/HelpButton";
 import { mergePrinterProgress, mergePrinterThumbnail } from "@/features/queue/utils/printerProgress";
@@ -39,6 +40,8 @@ import {
   mutationErrorStatus,
 } from "@/common/utils/mutationError";
 import { queueSummariesFleetQueryKey } from "@/features/printers/hooks/useQueueSummariesFleet";
+import { useQueueReordering } from "@/features/queue/hooks/useQueueReordering";
+import { canReorderQueueView } from "@/features/queue/utils/queueReordering";
 import { PrintJobPriority, type DispatchUploadProgressDto } from "@/types/api";
 import type {
   QueuedPrintJobWithFileMetaDto,
@@ -56,6 +59,7 @@ export function PrintQueueDashboardPage() {
   const [searchParams] = useSearchParams();
   const { tabId } = useParams<{ tabId?: string }>();
   const navigate = useNavigate();
+  const { hasPermission } = useAuth();
   const { startTour } = usePageTour({ tourId: 'print-queue', steps: printQueueTour });
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
@@ -112,12 +116,16 @@ export function PrintQueueDashboardPage() {
     useState<string | null>(null);
   const [spoolValidationCtx, setSpoolValidationCtx] = useState<SpoolValidationContext | null>(null);
 
+  const queueJobsQueryKey = useMemo(
+    () => ['queue-jobs', statusFilter, modelFilter, materialFilter, sortBy] as const,
+    [statusFilter, modelFilter, materialFilter, sortBy]
+  );
   const { data: jobs = [], isLoading: loading, isFetching: isRefreshing, error: jobsError } = useQuery({
     // The active Print Queue reflects current state, so it is intentionally NOT
     // constrained by the page date range (which applies to Timeline/History/Dispatch Log).
     // Date-filtering active jobs previously hid still-queued/assigned jobs older than the
     // window while the stats chiclet still counted them, causing a count/list mismatch.
-    queryKey: ['queue-jobs', statusFilter, modelFilter, materialFilter, sortBy],
+    queryKey: queueJobsQueryKey,
     queryFn: () => apiClient.getAnalyticsQueueJobs(
       statusFilter || undefined,
       modelFilter || undefined,
@@ -127,7 +135,7 @@ export function PrintQueueDashboardPage() {
       0,
       undefined,
       undefined,
-    ) as Promise<QueuedPrintJobWithFileMetaDto[]>,
+    ),
     staleTime: 10_000,
     refetchInterval: 10_000,
   });
@@ -152,6 +160,31 @@ export function PrintQueueDashboardPage() {
       queryClient.invalidateQueries({ queryKey: queueSummariesFleetQueryKey }),
     ]);
   }, [queryClient]);
+
+  const refreshQueueAfterMove = useCallback(async () => {
+    await queryClient.invalidateQueries(
+      { queryKey: queueJobsQueryKey, exact: true },
+      { throwOnError: true }
+    );
+  }, [queryClient, queueJobsQueryKey]);
+
+  const queueReorderingEnabled = canReorderQueueView({
+    canWrite: hasPermission('queue', 'write'),
+    isLoading: loading,
+    activeTab,
+    sortBy,
+    statusFilter,
+    modelFilter,
+    materialFilter,
+  });
+  const queueReordering = useQueueReordering({
+    jobs,
+    queryKey: queueJobsQueryKey,
+    enabled: queueReorderingEnabled,
+    onRefresh: refreshQueueAfterMove,
+    onError: setError,
+  });
+  const displayedJobs = queueReordering.jobs;
 
   const requireFreshReview = useCallback(async (
     jobIds: string[],
@@ -717,10 +750,21 @@ export function PrintQueueDashboardPage() {
 
               {/* Queue Jobs */}
               <div data-tour="queue-jobs-table" className="flex-1 overflow-auto bg-pf-bg-1 p-4 min-h-0">
+                <span className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+                  {queueReordering.announcement}
+                </span>
                 <DispatchRecoveryQueueSection jobs={jobs} />
                 {queueViewMode === "table" ? (
                   <QueueJobsTable
-                    jobs={jobs}
+                    jobs={displayedJobs}
+                    canReorder={queueReorderingEnabled}
+                    isReordering={queueReordering.isMoving}
+                    draggedJobId={queueReordering.draggedJobId}
+                    onMoveJob={queueReordering.moveJob}
+                    onDragStartJob={queueReordering.startDraggingJob}
+                    onDragEndJob={queueReordering.stopDraggingJob}
+                    canDropOnJob={queueReordering.canDropOnJob}
+                    reorderNeighbors={queueReordering.reorderNeighbors}
                     isLoading={loading}
                     dispatchingJobId={dispatchingJobId}
                     cancelingJobId={cancelingJobId}
@@ -743,11 +787,19 @@ export function PrintQueueDashboardPage() {
                   <div className="flex justify-center items-center py-12 bg-pf-bg-1 border border-pf-border rounded-lg">
                     <div className="text-pf-text-secondary">Loading jobs...</div>
                   </div>
-                ) : jobs.length === 0 ? (
+                ) : displayedJobs.length === 0 ? (
                   <QueueJobsTable jobs={[]} />
                 ) : queueViewMode === "list" ? (
                   <QueueJobsListView
-                    jobs={jobs}
+                    jobs={displayedJobs}
+                    canReorder={queueReorderingEnabled}
+                    isReordering={queueReordering.isMoving}
+                    draggedJobId={queueReordering.draggedJobId}
+                    onMoveJob={queueReordering.moveJob}
+                    onDragStartJob={queueReordering.startDraggingJob}
+                    onDragEndJob={queueReordering.stopDraggingJob}
+                    canDropOnJob={queueReordering.canDropOnJob}
+                    reorderNeighbors={queueReordering.reorderNeighbors}
                     dispatchingJobId={dispatchingJobId}
                     cancelingJobId={cancelingJobId}
                     dispatchUploadProgressByJobId={dispatchUploadProgressByJobId}
@@ -767,7 +819,15 @@ export function PrintQueueDashboardPage() {
                   />
                 ) : (
                   <QueueJobsCardView
-                    jobs={jobs}
+                    jobs={displayedJobs}
+                    canReorder={queueReorderingEnabled}
+                    isReordering={queueReordering.isMoving}
+                    draggedJobId={queueReordering.draggedJobId}
+                    onMoveJob={queueReordering.moveJob}
+                    onDragStartJob={queueReordering.startDraggingJob}
+                    onDragEndJob={queueReordering.stopDraggingJob}
+                    canDropOnJob={queueReordering.canDropOnJob}
+                    reorderNeighbors={queueReordering.reorderNeighbors}
                     dispatchingJobId={dispatchingJobId}
                     cancelingJobId={cancelingJobId}
                     dispatchUploadProgressByJobId={dispatchUploadProgressByJobId}

@@ -336,6 +336,7 @@ GET /api/printers/{id:guid}/camera/snapshot -> Farm.Modules.Printers::Farm.Modul
 GET /api/printers/{id:guid}/camera/stream -> Farm.Modules.Printers::Farm.Modules.Printers.Controllers.PrintersController.ProxyCameraStreamAsync [auth=policy=;roles=;schemes=]
 GET /api/printers/{id:guid}/camera/url -> Farm.Modules.Printers::Farm.Modules.Printers.Controllers.PrintersController.GetCameraUrlAsync [auth=policy=;roles=;schemes=]
 GET /api/printers/{id:guid}/config -> Farm.Modules.Printers::Farm.Modules.Printers.Controllers.PrintersController.GetPrinterConfigAsync [auth=policy=;roles=;schemes=|policy=;roles=;schemes=|permission=printers:admin]
+GET /api/printers/{id:guid}/current-job/thumbnail -> Farm.Modules.Printers::Farm.Modules.Printers.Controllers.PrintersController.GetCurrentJobThumbnailAsync [auth=policy=;roles=;schemes=]
 GET /api/printers/{id:guid}/details -> Farm.Modules.Printers::Farm.Modules.Printers.Controllers.PrintersController.GetDetailsAsync [auth=policy=;roles=;schemes=]
 GET /api/printers/{id:guid}/filament-coverage -> Farm.Modules.Inventory::Farm.Modules.Inventory.Controllers.FilamentCoverageController.GetForPrinterAsync [auth=policy=;roles=;schemes=]
 GET /api/printers/{id:guid}/files -> Farm.Modules.Printers::Farm.Modules.Printers.Controllers.PrintersController.GetFileListAsync [auth=policy=;roles=;schemes=|policy=;roles=;schemes=|permission=queue:read]

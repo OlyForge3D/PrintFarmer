@@ -60,6 +60,7 @@ export interface PrintJobStatusDto {
   progress?: number;
   jobName?: string;
   thumbnailUrl?: string;
+  currentJobThumbnailUrl?: string;
   error?: string;
 }
 
@@ -246,6 +247,8 @@ export interface PrinterJobInfo {
   fileName?: string;
   /** Thumbnail URL for the current job */
   thumbnailUrl?: string;
+  /** Relative authenticated proxy URL for the current job thumbnail */
+  currentJobThumbnailUrl?: string;
   /** Speed multiplier percentage (0-999, 100 = normal speed). PrusaLink only. */
   speedMultiplier?: number;
   /** Active spool identifier persisted in the PrintFarmer database */
@@ -2728,6 +2731,20 @@ export interface QueuedPrintJobDto {
   /** Typed reason the job is held from dispatch (e.g. `OperatorRecoveryRequired`). */
   blockedReasonCode?: JobBlockedReasonCode | null;
 }
+
+export type MoveQueuedJobPositionRequest =
+  | {
+      beforeJobId: string;
+      beforeJobETag: string;
+      afterJobId?: never;
+      afterJobETag?: never;
+    }
+  | {
+      afterJobId: string;
+      afterJobETag: string;
+      beforeJobId?: never;
+      beforeJobETag?: never;
+    };
 
 /** Mirrors backend `JobBlockedReasonCode` (serialized as a string enum). */
 export type JobBlockedReasonCode =

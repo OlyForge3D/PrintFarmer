@@ -1439,7 +1439,7 @@ final class PrinterDetailViewModel {
         guard let service else { return nil }
         do {
             return Self.filterAssignedQueue(
-                try await service.listAllJobs(),
+                try await service.listPrinterQueue(printerId: printerId),
                 printerId: printerId
             )
         } catch {
@@ -1720,7 +1720,7 @@ final class PrinterDetailViewModel {
     private func loadAssignedQueue() async {
         guard let jobService else { return }
         do {
-            let all = try await jobService.listAllJobs()
+            let all = try await jobService.listPrinterQueue(printerId: printerId)
             guard isViewActive else { return }
             assignedQueue = Self.filterAssignedQueue(all, printerId: printerId)
         } catch {
@@ -1759,7 +1759,7 @@ final class PrinterDetailViewModel {
     }
 
     /// Queue scope per triage: jobs explicitly assigned to *this* printer that
-    /// are still active or waiting (not terminal), ordered by queue position.
+    /// are still active or waiting (not terminal), preserving server scope order.
     /// Pure/static so it is unit-testable without a live service.
     nonisolated static func filterAssignedQueue(
         _ all: [QueuedPrintJobResponse],
@@ -1773,7 +1773,6 @@ final class PrinterDetailViewModel {
                 guard assigned == target else { return false }
                 return !terminal.contains(response.job.status.lowercased())
             }
-            .sorted { $0.job.queuePosition < $1.job.queuePosition }
     }
 
     nonisolated static func sortedHistory(_ jobs: [PrinterHistoryJob]) -> [PrinterHistoryJob] {
@@ -1783,6 +1782,65 @@ final class PrinterDetailViewModel {
     }
 
     // MARK: - Dispatch-to
+
+    func startNextJob(_ reviewedJob: QueuedPrintJobResponse) async {
+        guard !isDispatching, !isPerformingAction else {
+            dispatchError = "Wait for the current printer action to finish before starting a job."
+            return
+        }
+        guard isOnline else {
+            dispatchError = "Reconnect this printer before starting the next job."
+            return
+        }
+        guard isIdle else {
+            dispatchError = "The printer must be idle before starting the next job."
+            return
+        }
+        guard isViewActive, let jobService, let printerService else {
+            dispatchError = "Reopen this printer after its server connection settles."
+            return
+        }
+        guard let job = nextQueuedJobs.first else {
+            dispatchError = "There is no waiting job assigned to this printer. Refresh the queue."
+            return
+        }
+        guard job.id == reviewedJob.id, job.job.rowVersion == reviewedJob.job.rowVersion else {
+            dispatchError = "The next job changed. Refresh the queue and review the new head before starting it."
+            return
+        }
+        guard let id = job.job.jobUUID else {
+            dispatchError = "The next job has an invalid identifier. Refresh the queue before starting it."
+            return
+        }
+        guard let revision = job.job.rowVersion, !revision.isEmpty else {
+            dispatchError = "The next job has no revision. Refresh the queue before starting it."
+            return
+        }
+        let authority = beginActionAuthority(for: printerService)
+        isDispatching = true
+        dispatchError = nil
+        defer {
+            isDispatching = false
+            endBusyToken(authority.busyToken)
+        }
+        do {
+            let result = try await jobService.dispatch(id: id, reviewedRowVersion: revision)
+            guard hasActionAuthority(authority) else { return }
+            switch result {
+            case .accepted:
+                break
+            case .reconciliation(let response):
+                dispatchError = response.dispatchResult?.errorDetail
+                    ?? "Dispatch outcome is being reconciled. Do not dispatch again."
+            case .rejected(let response):
+                dispatchError = response.dispatchResult?.errorDetail ?? "The printer rejected the dispatch."
+            }
+            await loadPrinter()
+        } catch {
+            guard hasActionAuthority(authority) else { return }
+            dispatchError = error.localizedDescription
+        }
+    }
 
     func beginDispatch(for job: QueuedPrintJobResponse) async {
         guard isViewActive, let jobService, let jobUUID = job.job.jobUUID else { return }
@@ -2267,9 +2325,15 @@ final class PrinterDetailViewModel {
             .first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     }
 
-    /// The operator queue section shows at most three assigned jobs.
+    /// Only Queued is eligible for a new dispatch; Assigned is a committed handoff.
     var nextQueuedJobs: [QueuedPrintJobResponse] {
-        Array(assignedQueue.prefix(3))
+        assignedQueue.filter { $0.job.status.lowercased() == "queued" }
+    }
+
+    var displayedQueueJobs: [QueuedPrintJobResponse] {
+        assignedQueue.filter {
+            ["starting", "printing", "paused", "assigned", "queued"].contains($0.job.status.lowercased())
+        }
     }
 
     /// Per-job compatibility verdict derived read-only from the loaded

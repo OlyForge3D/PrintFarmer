@@ -37,6 +37,10 @@ final class ModelDecodingTests: XCTestCase {
         // PrinterProgressContractTests (issue #277).
         XCTAssertEqual(printer.progress, 0.455)
         XCTAssertEqual(printer.jobName, "benchy.gcode")
+        XCTAssertEqual(
+            printer.currentJobThumbnailUrl,
+            "/api/printers/550e8400-e29b-41d4-a716-446655440000/current-job/thumbnail?v=0123456789abcdef"
+        )
     }
 
     func testPrinterDecodesTemperatures() throws {
@@ -642,6 +646,7 @@ final class ModelDecodingTests: XCTestCase {
             "state": "printing",
             "progress": 55.0,
             "jobName": "benchy.gcode",
+            "currentJobThumbnailUrl": "/api/printers/550e8400-e29b-41d4-a716-446655440000/current-job/thumbnail?v=0123456789abcdef",
             "hotendTemp": 215.0,
             "bedTemp": 60.0,
             "hotendTarget": 215.0,
@@ -662,6 +667,10 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertEqual(update.state, "printing")
         XCTAssertEqual(update.progress, 55.0)
         XCTAssertEqual(update.hotendTemp, 215.0)
+        XCTAssertEqual(
+            update.currentJobThumbnailUrl,
+            "/api/printers/550e8400-e29b-41d4-a716-446655440000/current-job/thumbnail?v=0123456789abcdef"
+        )
     }
 
     func testPrinterStateChangeDecodes() throws {

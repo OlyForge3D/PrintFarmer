@@ -2,6 +2,7 @@ import { apiClient } from '@/services/api';
 import { PrintJobPriority } from '@/types/api';
 import type {
   JobQueuePrintJob,
+  QueuedPrintJobDto,
   QueuedPrintJobWithFileMetaDto,
   QueueHistoryPageDto,
   QueueOverviewDto,
@@ -14,6 +15,18 @@ import type {
  * Delegates to the apiClient singleton which handles auth, correlation IDs,
  * and error handling automatically.
  */
+async function getJobQueue(): Promise<QueuedPrintJobWithFileMetaDto[]>;
+async function getJobQueue(printerId: string): Promise<QueuedPrintJobDto[]>;
+async function getJobQueue(
+  printerId?: string
+): Promise<QueuedPrintJobWithFileMetaDto[] | QueuedPrintJobDto[]>;
+async function getJobQueue(
+  printerId?: string
+): Promise<QueuedPrintJobWithFileMetaDto[] | QueuedPrintJobDto[]> {
+  if (printerId) return apiClient.getJobQueue(printerId);
+  return apiClient.getJobQueue();
+}
+
 export const jobQueueService = {
   // ── Queue Overview & Listing ──────────────────────────────────────────
 
@@ -25,9 +38,7 @@ export const jobQueueService = {
     return apiClient.getQueueOverview(model, nozzle, material);
   },
 
-  async getJobQueue(printerId?: string): Promise<QueuedPrintJobWithFileMetaDto[]> {
-    return apiClient.getJobQueue(printerId);
-  },
+  getJobQueue,
 
   // ── Queue Operations ──────────────────────────────────────────────────
 

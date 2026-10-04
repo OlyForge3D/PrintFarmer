@@ -43,6 +43,7 @@ protocol JobServiceProtocol: Sendable {
         reviewedRowVersion: String,
         neighbor: QueuePositionNeighbor
     ) async throws -> MoveQueuedJobResponse
+    func listPrinterQueue(printerId: UUID) async throws -> [QueuedPrintJobResponse]
     func get(id: UUID) async throws -> PrintJob
     func create(_ request: CreatePrintJobRequest) async throws -> PrintJob
     func update(
