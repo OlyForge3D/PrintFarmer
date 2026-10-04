@@ -47,7 +47,7 @@ Removed code is deleted, not hidden behind flags. Deep links to removed destinat
 
 - A 60pt thumbnail (or a printer glyph while idle), the name and a state pill.
   - The image does **not** come from `thumbnailUrl`. That field is `[JsonIgnore]` on `PrinterDto` and `PrinterStatusDto` because it is an internal-network URL, and `SensitiveSerializationTests` asserts it never reaches JSON.
-  - #3230 adds an authenticated proxy, `GET /api/printers/{id}/current-job/thumbnail`, in the same style as the camera-snapshot route, and serializes only a relative `currentJobThumbnailUrl` with a cache-bust token. The card loads that URL with the session's auth.
+  - #3230's authenticated proxy shipped in #3243: `GET /api/printers/{id}/current-job/thumbnail`, in the same style as the camera-snapshot route, serializes only a relative `currentJobThumbnailUrl` with a cache-bust token. The card loads that URL with the session's auth.
   - #3232 therefore has a **hard** dependency on #3230.
 - The job name, a progress bar, the %, and the time left with the done-at time.
 - One compact line with nozzle and bed temperatures and the loaded filament's colour dot.
@@ -59,7 +59,9 @@ Removed code is deleted, not hidden behind flags. Deep links to removed destinat
 `PrinterCardView` now supplies the same 60pt, token-based layout in the phone
 list, iPad grid and read-only cached farm. Active cards fetch authenticated
 current-job media through `PrinterService`/`APIClient`; the exact relative
-versioned URL is the revision key. Media never uses a camera URL or the
+versioned URL is the revision key. List, status and SignalR models decode the
+optional camelCase field; omission in a SignalR update clears stale media.
+Media never uses a camera URL or the
 internal `thumbnailUrl`, follows no redirects, and bypasses the shared URL
 cache. A missing/unsupported thumbnail leaves a neutral printer glyph.
 ETA comes from `/api/printers/{id}/status` `printTimeLeftSeconds`, refreshed
