@@ -175,6 +175,55 @@ final class JobServiceTests: XCTestCase {
         )
     }
 
+    func testMoveQueuedJobEncodesBeforeNeighborAndDecodesFlatResponse() async throws {
+        mockAPIClient.stubResponse(
+            json: """
+            {"id":"\(jobId)","rowVersion":"AQIDBA==","status":"Queued","priority":"High","queuePosition":2}
+            """
+        )
+
+        let response = try await service.moveQueuedJob(
+            id: jobId,
+            reviewedRowVersion: "moved-etag",
+            neighbor: .before(id: UUID(), rowVersion: "neighbor-etag")
+        )
+
+        XCTAssertEqual(response.id, jobId.uuidString)
+        XCTAssertEqual(response.rowVersion, "AQIDBA==")
+        let request = try XCTUnwrap(mockAPIClient.capturedRequests.last)
+        XCTAssertEqual(request.httpMethod, "PUT")
+        XCTAssertEqual(request.url?.path, "/api/job-queue/jobs/\(jobId)/position")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "If-Match"), "\"moved-etag\"")
+        let body = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: try XCTUnwrap(request.capturedHTTPBody())) as? [String: String]
+        )
+        XCTAssertEqual(Set(body.keys), ["beforeJobId", "beforeJobETag"])
+        XCTAssertEqual(body["beforeJobETag"], "neighbor-etag")
+    }
+
+    func testMoveQueuedJobEncodesAfterNeighborWithoutBeforeFields() async throws {
+        let neighborID = UUID()
+        mockAPIClient.stubResponse(
+            json: """
+            {"id":"\(jobId)","rowVersion":"AQIDBA=="}
+            """
+        )
+
+        _ = try await service.moveQueuedJob(
+            id: jobId,
+            reviewedRowVersion: "moved-etag",
+            neighbor: .after(id: neighborID, rowVersion: "neighbor-etag")
+        )
+
+        let request = try XCTUnwrap(mockAPIClient.capturedRequests.last)
+        let body = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: try XCTUnwrap(request.capturedHTTPBody())) as? [String: String]
+        )
+        XCTAssertEqual(Set(body.keys), ["afterJobId", "afterJobETag"])
+        XCTAssertEqual(body["afterJobId"], neighborID.uuidString)
+        XCTAssertEqual(body["afterJobETag"], "neighbor-etag")
+    }
+
     func testGetHydratesLatestAttemptFromAuthoritativeRecoveryBody() async throws {
         let attemptB = UUID()
         mockAPIClient.stubResponse(

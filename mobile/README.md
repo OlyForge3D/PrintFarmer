@@ -7,6 +7,7 @@ iOS app for managing 3D printer farms.
 PrintFarmer is a SwiftUI-based iOS application for monitoring and managing
 multiple 3D printers across one or more registered PrintFarmer servers. Features
 include printer status monitoring, filament/spool management, job queue viewing,
+same-printer and same-priority queue reordering for users with `Queue.Write`,
 server switching, and real-time updates via SignalR.
 
 ## Tech Stack

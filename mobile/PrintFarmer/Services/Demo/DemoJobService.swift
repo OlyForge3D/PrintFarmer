@@ -2,7 +2,7 @@ import Foundation
 
 // MARK: - Demo Job Service
 
-final class DemoJobService: JobServiceProtocol, @unchecked Sendable {
+class DemoJobService: JobServiceProtocol, @unchecked Sendable {
 
     private static let jobs: [PrintJob] = {
         let now = Date()
@@ -153,6 +153,14 @@ final class DemoJobService: JobServiceProtocol, @unchecked Sendable {
                 gcodeFile: nil, assignedPrinter: nil,
                 estimatedStartTime: nil, estimatedCompletionTime: nil)
         }
+    }
+
+    func moveQueuedJob(
+        id: UUID,
+        reviewedRowVersion: String,
+        neighbor: QueuePositionNeighbor
+    ) async throws -> MoveQueuedJobResponse {
+        throw ServiceError.notImplemented("reorder jobs — read-only in demo mode")
     }
 
     func listPrinterQueue(printerId: UUID) async throws -> [QueuedPrintJobResponse] {

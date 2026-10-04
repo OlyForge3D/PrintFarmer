@@ -23,6 +23,14 @@ final class MockJobService: JobServiceProtocol, @unchecked Sendable {
     var abortCalledWith: UUID?
     var pauseCalledWith: UUID?
     var resumeCalledWith: UUID?
+    var moveQueuedJobCalledWith: (
+        id: UUID,
+        reviewedRowVersion: String,
+        neighbor: QueuePositionNeighbor
+    )?
+    var moveQueuedJobResponseToReturn: MoveQueuedJobResponse?
+    var beforeMoveQueuedJob: (@Sendable () async -> Void)?
+    private(set) var listAllJobsCallCount = 0
 
     // Dispatch (issue #712)
     var candidatesToReturn: [DispatchCandidate] = []
@@ -37,8 +45,26 @@ final class MockJobService: JobServiceProtocol, @unchecked Sendable {
 
     func listAllJobs() async throws -> [QueuedPrintJobResponse] {
         listAllJobsCalled = true
+        listAllJobsCallCount += 1
         if let error = errorToThrow { throw error }
+        if !queuedJobResponsesByLoad.isEmpty {
+            return queuedJobResponsesByLoad.removeFirst()
+        }
         return queuedJobResponsesToReturn
+    }
+
+    var queuedJobResponsesByLoad: [[QueuedPrintJobResponse]] = []
+
+    func moveQueuedJob(
+        id: UUID,
+        reviewedRowVersion: String,
+        neighbor: QueuePositionNeighbor
+    ) async throws -> MoveQueuedJobResponse {
+        moveQueuedJobCalledWith = (id, reviewedRowVersion, neighbor)
+        if let beforeMoveQueuedJob { await beforeMoveQueuedJob() }
+        if let error = actionErrorToThrow ?? errorToThrow { throw error }
+        return moveQueuedJobResponseToReturn
+            ?? MoveQueuedJobResponse(id: id.uuidString, rowVersion: reviewedRowVersion)
     }
 
     func listPrinterQueue(printerId: UUID) async throws -> [QueuedPrintJobResponse] {
@@ -157,6 +183,7 @@ final class MockJobService: JobServiceProtocol, @unchecked Sendable {
     func reset() {
         queueOverviewsToReturn = []
         queuedJobResponsesToReturn = []
+        queuedJobResponsesByLoad = []
         jobToReturn = nil
         errorToThrow = nil
         actionErrorToThrow = nil
@@ -173,6 +200,10 @@ final class MockJobService: JobServiceProtocol, @unchecked Sendable {
         abortCalledWith = nil
         pauseCalledWith = nil
         resumeCalledWith = nil
+        moveQueuedJobCalledWith = nil
+        moveQueuedJobResponseToReturn = nil
+        beforeMoveQueuedJob = nil
+        listAllJobsCallCount = 0
         candidatesToReturn = []
         getCandidatesCalledWith = nil
         dispatchToCalledWith = nil

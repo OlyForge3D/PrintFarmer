@@ -1,5 +1,16 @@
 import Foundation
 
+enum QueueReorderDirection: Sendable, Equatable {
+    case up
+    case down
+}
+
+struct QueueReorderGroup: Identifiable, Sendable {
+    let id: String
+    let title: String
+    let jobs: [QueuedPrintJobResponse]
+}
+
 @MainActor @Observable
 final class JobListViewModel {
     var jobs: [QueuedPrintJobResponse] = []
@@ -7,27 +18,153 @@ final class JobListViewModel {
     var errorMessage: String?
     var showRecentJobs = false
     var isViewActive = true
+    private(set) var queueWriteAuthorized = false
+    private(set) var isNetworkReachable = false
+    private(set) var hasFreshQueueSnapshot = false
+    private(set) var isReorderingQueue = false
 
     private var jobService: (any JobServiceProtocol)?
+    @ObservationIgnored private var queueUpdateSubscription: SignalRSubscription?
+    @ObservationIgnored private var connectionStateSubscription: SignalRSubscription?
+    @ObservationIgnored private var signalRServiceIdentity: ObjectIdentifier?
+    @ObservationIgnored private var lastSignalRState: SignalRConnectionState?
+    @ObservationIgnored private var pathObserver: (any NetworkPathObserving)?
+    @ObservationIgnored private var queueStateEpoch: UInt64 = 0
+    @ObservationIgnored private var loadGeneration: UInt64 = 0
+    @ObservationIgnored private var activeLoadCount = 0
 
     func configure(jobService: any JobServiceProtocol) {
         self.jobService = jobService
     }
 
-    func loadJobs() async {
-        guard let jobService, isViewActive else { return }
-        isLoading = true
-        defer { isLoading = false }
-        errorMessage = nil
+    var canReorderQueue: Bool {
+        queueWriteAuthorized
+            && isNetworkReachable
+            && hasFreshQueueSnapshot
+            && !isReorderingQueue
+            && isViewActive
+    }
 
+    func setQueueWriteAuthorization(_ isAuthorized: Bool) {
+        queueWriteAuthorized = isAuthorized
+    }
+
+    func setNetworkReachability(_ isReachable: Bool) {
+        isNetworkReachable = isReachable
+    }
+
+    func startObservingNetworkPath(
+        with observer: (any NetworkPathObserving)? = nil
+    ) {
+        guard pathObserver == nil else { return }
+        let observer = observer ?? NWPathMonitorObserver()
+        pathObserver = observer
+        observer.start { [weak self] snapshot in
+            guard let self else { return }
+            self.isNetworkReachable = snapshot.reachability == .satisfied
+        }
+    }
+
+    func configureSignalR(_ service: any SignalRServiceProtocol) {
+        guard isViewActive else { return }
+        let serviceIdentity = ObjectIdentifier(service as AnyObject)
+        if signalRServiceIdentity == serviceIdentity,
+           queueUpdateSubscription != nil,
+           connectionStateSubscription != nil {
+            return
+        }
+
+        tearDownSignalR()
+        signalRServiceIdentity = serviceIdentity
+        queueUpdateSubscription = service.onJobQueueUpdated { [weak self] _ in
+            Task { @MainActor [weak self] in
+                await self?.handleQueueInvalidation()
+            }
+        }
+
+        let registration = service.onConnectionStateChanged { [weak self] state in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                let wasConnected = self.lastSignalRState == .connected
+                self.lastSignalRState = state
+                if state == .connected && !wasConnected {
+                    await self.handleQueueInvalidation()
+                }
+            }
+        }
+        lastSignalRState = registration.initial
+        connectionStateSubscription = registration.subscription
+    }
+
+    func activate() {
+        isViewActive = true
+    }
+
+    func deactivate() {
+        guard isViewActive else { return }
+        isViewActive = false
+        queueStateEpoch &+= 1
+        loadGeneration &+= 1
+        tearDownSignalR()
+        pathObserver?.cancel()
+        pathObserver = nil
+        isNetworkReachable = false
+    }
+
+    private func tearDownSignalR() {
+        queueUpdateSubscription?.cancel()
+        connectionStateSubscription?.cancel()
+        queueUpdateSubscription = nil
+        connectionStateSubscription = nil
+        signalRServiceIdentity = nil
+        lastSignalRState = nil
+    }
+
+    func loadJobs() async {
+        _ = await refreshQueue()
+    }
+
+    @discardableResult
+    private func refreshQueue() async -> Bool {
+        guard let jobService, isViewActive else { return false }
+        loadGeneration &+= 1
+        let requestGeneration = loadGeneration
+        let stateEpoch = queueStateEpoch
+        activeLoadCount += 1
+        isLoading = true
+        defer {
+            activeLoadCount -= 1
+            isLoading = activeLoadCount > 0
+        }
+        errorMessage = nil
         do {
             let result = try await jobService.listAllJobs()
-            guard isViewActive else { return }
+            guard isViewActive,
+                  requestGeneration == loadGeneration,
+                  stateEpoch == queueStateEpoch else {
+                return false
+            }
             jobs = result
+            hasFreshQueueSnapshot = true
+            queueStateEpoch &+= 1
+            return true
         } catch {
-            guard isViewActive else { return }
+            guard isViewActive,
+                  requestGeneration == loadGeneration,
+                  stateEpoch == queueStateEpoch else {
+                return false
+            }
+            hasFreshQueueSnapshot = false
             errorMessage = error.localizedDescription
+            return false
         }
+    }
+
+    private func handleQueueInvalidation() async {
+        guard isViewActive else { return }
+        queueStateEpoch &+= 1
+        hasFreshQueueSnapshot = false
+        _ = await refreshQueue()
     }
 
     func cancelJob(id: UUID) async {
@@ -99,7 +236,6 @@ final class JobListViewModel {
             guard let status = $0.job.jobStatus else { return false }
             return [.printing, .starting, .paused].contains(status)
         }
-        .sorted { ($0.job.actualStartTimeUtc ?? .distantPast) > ($1.job.actualStartTimeUtc ?? .distantPast) }
     }
 
     /// Jobs waiting in the queue (queued or assigned but not yet started)
@@ -108,7 +244,234 @@ final class JobListViewModel {
             guard let status = $0.job.jobStatus else { return false }
             return [.queued, .assigned].contains(status)
         }
-        .sorted { $0.job.queuePosition < $1.job.queuePosition }
+    }
+
+    var assignedJobs: [QueuedPrintJobResponse] {
+        queuedJobs.filter { $0.job.jobStatus == .assigned }
+    }
+
+    var reorderableQueueGroups: [QueueReorderGroup] {
+        var groups: [QueueReorderGroup] = []
+        var groupIndices: [String: Int] = [:]
+
+        for item in jobs where item.job.jobStatus == .queued {
+            let key = reorderGroupID(for: item)
+            if let index = groupIndices[key] {
+                let current = groups[index]
+                groups[index] = QueueReorderGroup(
+                    id: current.id,
+                    title: current.title,
+                    jobs: current.jobs + [item]
+                )
+            } else {
+                groupIndices[key] = groups.count
+                groups.append(
+                    QueueReorderGroup(
+                        id: key,
+                        title: reorderGroupTitle(for: item),
+                        jobs: [item]
+                    )
+                )
+            }
+        }
+        return groups
+    }
+
+    func canMoveQueuedJob(
+        id: UUID,
+        direction: QueueReorderDirection,
+        inGroup groupID: String
+    ) -> Bool {
+        guard canReorderQueue,
+              let group = reorderableQueueGroups.first(where: { $0.id == groupID }),
+              let index = group.jobs.firstIndex(where: { $0.job.jobUUID == id }) else {
+            return false
+        }
+        switch direction {
+        case .up:
+            return index > 0
+        case .down:
+            return index + 1 < group.jobs.count
+        }
+    }
+
+    func moveQueuedJob(
+        id: UUID,
+        direction: QueueReorderDirection,
+        inGroup groupID: String
+    ) async {
+        guard let group = reorderableQueueGroups.first(where: { $0.id == groupID }),
+              let index = group.jobs.firstIndex(where: { $0.job.jobUUID == id }) else {
+            return
+        }
+        let destination = direction == .up ? index - 1 : index + 2
+        await moveQueuedJobs(
+            fromOffsets: IndexSet(integer: index),
+            toOffset: destination,
+            inGroup: groupID
+        )
+    }
+
+    func moveQueuedJobs(
+        fromOffsets offsets: IndexSet,
+        toOffset destination: Int,
+        inGroup groupID: String
+    ) async {
+        guard isViewActive else { return }
+        guard queueWriteAuthorized else {
+            errorMessage = "Queue.Write permission is required to reorder jobs."
+            return
+        }
+        guard isNetworkReachable else {
+            errorMessage = "Reordering is unavailable while offline. Connect to the network before moving jobs."
+            return
+        }
+        guard hasFreshQueueSnapshot else {
+            errorMessage = "Refresh the queue before reordering to load current revisions."
+            return
+        }
+        guard !isReorderingQueue,
+              offsets.count == 1,
+              let service = jobService,
+              let group = reorderableQueueGroups.first(where: { $0.id == groupID }),
+              let source = offsets.first,
+              group.jobs.indices.contains(source),
+              (0...group.jobs.count).contains(destination) else {
+            return
+        }
+
+        let moved = group.jobs[source]
+        guard moved.job.jobStatus == .queued,
+              let movedID = moved.job.jobUUID,
+              let movedRowVersion = nonempty(moved.job.rowVersion) else {
+            errorMessage = "Refresh the queue to get a current revision before moving this job."
+            return
+        }
+
+        var reordered = group.jobs
+        let item = reordered.remove(at: source)
+        let insertionIndex = destination > source ? destination - 1 : destination
+        reordered.insert(item, at: min(max(insertionIndex, 0), reordered.count))
+        guard reordered.map(\.id) != group.jobs.map(\.id) else { return }
+
+        guard let movedIndex = reordered.firstIndex(where: { $0.id == moved.id }) else { return }
+        let neighbor: QueuePositionNeighbor
+        if movedIndex + 1 < reordered.count {
+            let next = reordered[movedIndex + 1]
+            guard let neighborID = next.job.jobUUID,
+                  let rowVersion = nonempty(next.job.rowVersion) else {
+                errorMessage = "Refresh the queue to get current neighbor revisions before moving."
+                return
+            }
+            neighbor = .before(id: neighborID, rowVersion: rowVersion)
+        } else if movedIndex > 0 {
+            let previous = reordered[movedIndex - 1]
+            guard let neighborID = previous.job.jobUUID,
+                  let rowVersion = nonempty(previous.job.rowVersion) else {
+                errorMessage = "Refresh the queue to get current neighbor revisions before moving."
+                return
+            }
+            neighbor = .after(id: neighborID, rowVersion: rowVersion)
+        } else {
+            return
+        }
+
+        let previousJobs = jobs
+        queueStateEpoch &+= 1
+        let mutationEpoch = queueStateEpoch
+        loadGeneration &+= 1
+        jobs = replacingGroup(groupID, with: reordered, in: jobs)
+        hasFreshQueueSnapshot = false
+        isReorderingQueue = true
+        defer { isReorderingQueue = false }
+
+        do {
+            _ = try await service.moveQueuedJob(
+                id: movedID,
+                reviewedRowVersion: movedRowVersion,
+                neighbor: neighbor
+            )
+            guard isViewActive else { return }
+            let refreshed = await refreshQueue()
+            if !refreshed {
+                errorMessage =
+                    "The job moved, but the current queue couldn't be confirmed. Refresh before moving another job."
+            }
+        } catch {
+            guard isViewActive else { return }
+            if queueStateEpoch == mutationEpoch {
+                jobs = previousJobs
+                queueStateEpoch &+= 1
+            }
+            hasFreshQueueSnapshot = false
+            if case .forbidden? = error as? NetworkError {
+                queueWriteAuthorized = false
+            }
+            let refreshed = await refreshQueue()
+            errorMessage = queueMoveErrorMessage(error, refreshed: refreshed)
+        }
+    }
+
+    private func replacingGroup(
+        _ groupID: String,
+        with reordered: [QueuedPrintJobResponse],
+        in values: [QueuedPrintJobResponse]
+    ) -> [QueuedPrintJobResponse] {
+        var result = values
+        let ids = Set(reordered.map(\.id))
+        let indices = result.indices.filter {
+            ids.contains(result[$0].id) && reorderGroupID(for: result[$0]) == groupID
+        }
+        for (index, item) in zip(indices, reordered) {
+            result[index] = item
+        }
+        return result
+    }
+
+    private func reorderGroupID(for item: QueuedPrintJobResponse) -> String {
+        "\(item.job.assignedPrinterId ?? "unassigned")|\(item.job.priority.rawValue)"
+    }
+
+    private func reorderGroupTitle(for item: QueuedPrintJobResponse) -> String {
+        let scope = item.job.assignedPrinterId == nil
+            ? "Any printer"
+            : (item.job.printerName ?? "Assigned printer")
+        let priority: String
+        switch item.job.priority {
+        case .low: priority = "Low"
+        case .normal: priority = "Normal"
+        case .high: priority = "High"
+        case .urgent: priority = "Urgent"
+        }
+        return "\(scope) · \(priority) priority"
+    }
+
+    private func nonempty(_ value: String?) -> String? {
+        guard let value, !value.isEmpty else { return nil }
+        return value
+    }
+
+    private func queueMoveErrorMessage(_ error: Error, refreshed: Bool) -> String {
+        let suffix = refreshed
+            ? "The queue was refreshed."
+            : "Pull to refresh before moving jobs again."
+        guard let networkError = error as? NetworkError else {
+            return "Couldn't reorder the queue: \(error.localizedDescription) \(suffix)"
+        }
+        switch networkError {
+        case .conflict, .preconditionFailed, .notFound:
+            return refreshed
+                ? "Queue changed — refreshed."
+                : "Queue changed, but the current order couldn't be loaded. \(suffix)"
+        case .preconditionRequired:
+            return "The server requires a current job revision. \(suffix)"
+        case .clientError(400, _):
+            return "The queue move was rejected. \(suffix)"
+        case .forbidden:
+            return "Queue.Write access was revoked. Reordering is unavailable."
+        default:
+            return "Couldn't reorder the queue: \(networkError.localizedDescription) \(suffix)"
+        }
     }
 
     /// Recently completed, failed, or cancelled jobs

@@ -97,6 +97,9 @@ enum UITestBootstrap {
     /// argument.
     static let coldOfflineShellLaunchArgument =
         "--uitesting-cold-offline-shell"
+    #if DEBUG
+    static let queueReorderLaunchArgument = "--uitesting-queue-reorder"
+    #endif
 
     #if DEBUG
     /// Seeds the #788 task-action routing scenario: a dedicated shift-task
@@ -140,6 +143,9 @@ enum UITestBootstrap {
         /// printer service so the cold-offline read-only stale shell renders
         /// (#817).
         case authenticatedColdOfflineShell
+        #if DEBUG
+        case authenticatedQueueReorder
+        #endif
     }
 
     /// Dedicated `UserDefaults` suite. Isolated from `.standard` so a
@@ -181,6 +187,11 @@ enum UITestBootstrap {
         if arguments.contains(coldOfflineShellLaunchArgument) {
             return .authenticatedColdOfflineShell
         }
+        #if DEBUG
+        if arguments.contains(queueReorderLaunchArgument) {
+            return .authenticatedQueueReorder
+        }
+        #endif
         if arguments.contains(attentionHarvestScanLaunchArgument) {
             return .authenticatedAttentionHarvestScan
         }
@@ -274,11 +285,22 @@ enum UITestBootstrap {
         } else {
             injectedSnapshotStore = nil
         }
+        #if DEBUG
+        let testUser = mode == .authenticatedQueueReorder
+            ? Self.queueWritableDemoUser()
+            : DemoData.demoUser
+        #else
         let testUser = DemoData.demoUser
+        #endif
         let services = ServiceContainer.demo(
             serverRegistry: registry,
             farmSnapshotStore: injectedSnapshotStore
         )
+        #if DEBUG
+        if mode == .authenticatedQueueReorder {
+            services.jobService = QueueReorderUITestJobService()
+        }
+        #endif
         // #1353: `ResolvedSystemCapabilities.defaults.printedPartsInventoryEnabled`
         // is `false` in production so a freshly-provisioned server without any
         // configured SKUs/mappings does not surface the harvest flow (see
@@ -401,12 +423,32 @@ enum UITestBootstrap {
             auth.markAuthenticatedForUITesting(user: DemoData.demoUser)
         case .authenticatedColdOfflineShell:
             auth.markAuthenticatedForUITesting(user: DemoData.demoUser)
+        #if DEBUG
+        case .authenticatedQueueReorder:
+            auth.markAuthenticatedForUITesting(user: testUser)
+        #endif
         }
 
         return Environment(
             serverRegistry: registry,
             services: services,
             authViewModel: auth
+        )
+    }
+
+    private static func queueWritableDemoUser() -> UserDTO {
+        UserDTO(
+            id: DemoData.demoUser.id,
+            username: DemoData.demoUser.username,
+            email: DemoData.demoUser.email,
+            firstName: DemoData.demoUser.firstName,
+            lastName: DemoData.demoUser.lastName,
+            isActive: DemoData.demoUser.isActive,
+            emailConfirmed: DemoData.demoUser.emailConfirmed,
+            lastLogin: DemoData.demoUser.lastLogin,
+            createdAt: DemoData.demoUser.createdAt,
+            roles: DemoData.demoUser.roles,
+            permissions: DemoData.demoUser.permissions + ["queue:write"]
         )
     }
 
@@ -994,3 +1036,178 @@ private final class UITestMainThreadWatchdog: @unchecked Sendable {
         )
     }
 }
+
+#if DEBUG
+private final class QueueReorderUITestJobService: DemoJobService, @unchecked Sendable {
+    private let lock = NSLock()
+    private var queueJobs = QueueReorderUITestJobService.makeQueueJobs()
+
+    override func listAllJobs() async throws -> [QueuedPrintJobResponse] {
+        lock.withLock { queueJobs }
+    }
+
+    override func moveQueuedJob(
+        id: UUID,
+        reviewedRowVersion: String,
+        neighbor: QueuePositionNeighbor
+    ) async throws -> MoveQueuedJobResponse {
+        try lock.withLock {
+            guard let source = queueJobs.firstIndex(where: { $0.job.jobUUID == id }),
+                  let neighborIndex = queueJobs.firstIndex(where: {
+                      switch neighbor {
+                      case .before(let neighborID, _), .after(let neighborID, _):
+                          $0.job.jobUUID == neighborID
+                      }
+                  }) else {
+                throw NetworkError.conflict(nil)
+            }
+            let sourceJob = queueJobs[source]
+            let neighborJob = queueJobs[neighborIndex]
+            guard sourceJob.job.jobStatus == .queued,
+                  sourceJob.job.rowVersion == reviewedRowVersion,
+                  neighborJob.job.jobStatus == .queued,
+                  neighborJob.job.assignedPrinterId == sourceJob.job.assignedPrinterId,
+                  neighborJob.job.priority == sourceJob.job.priority else {
+                throw NetworkError.conflict(nil)
+            }
+
+            let neighborRevision: String
+            switch neighbor {
+            case .before(_, let rowVersion), .after(_, let rowVersion):
+                neighborRevision = rowVersion
+            }
+            guard neighborJob.job.rowVersion == neighborRevision else {
+                throw NetworkError.preconditionFailed(nil)
+            }
+
+            let moved = queueJobs.remove(at: source)
+            guard let updatedNeighborIndex = queueJobs.firstIndex(where: {
+                $0.job.jobUUID == neighborJob.job.jobUUID
+            }) else {
+                throw NetworkError.conflict(nil)
+            }
+            let insertionIndex: Int
+            switch neighbor {
+            case .before:
+                insertionIndex = updatedNeighborIndex
+            case .after:
+                insertionIndex = updatedNeighborIndex + 1
+            }
+            queueJobs.insert(moved, at: insertionIndex)
+            return MoveQueuedJobResponse(id: id.uuidString, rowVersion: reviewedRowVersion)
+        }
+    }
+
+    private static func makeQueueJobs() -> [QueuedPrintJobResponse] {
+        let printerID = DemoData.prusaMK4_1_ID
+        let otherPrinterID = DemoData.bambuX1C_ID
+        return [
+            queueRow(
+                id: "32340000-0000-0000-0000-000000000001",
+                name: "Queue pinned printing.gcode",
+                status: .printing,
+                priority: .high,
+                printerID: printerID,
+                rowVersion: "AQIDAA==",
+                position: 0
+            ),
+            queueRow(
+                id: "32340000-0000-0000-0000-000000000002",
+                name: "Queue pinned assigned.gcode",
+                status: .assigned,
+                priority: .high,
+                printerID: printerID,
+                rowVersion: "AQIDAg==",
+                position: 0
+            ),
+            queueRow(
+                id: "32340000-0000-0000-0000-000000000003",
+                name: "Queue reorder alpha.gcode",
+                status: .queued,
+                priority: .high,
+                printerID: printerID,
+                rowVersion: "AQIDAw==",
+                position: 1
+            ),
+            queueRow(
+                id: "32340000-0000-0000-0000-000000000004",
+                name: "Queue reorder beta.gcode",
+                status: .queued,
+                priority: .high,
+                printerID: printerID,
+                rowVersion: "AQIDBA==",
+                position: 2
+            ),
+            queueRow(
+                id: "32340000-0000-0000-0000-000000000007",
+                name: "Queue reorder gamma.gcode",
+                status: .queued,
+                priority: .high,
+                printerID: printerID,
+                rowVersion: "AQIDBw==",
+                position: 3
+            ),
+            queueRow(
+                id: "32340000-0000-0000-0000-000000000005",
+                name: "Queue priority boundary.gcode",
+                status: .queued,
+                priority: .normal,
+                printerID: printerID,
+                rowVersion: "AQIDBQ==",
+                position: 1
+            ),
+            queueRow(
+                id: "32340000-0000-0000-0000-000000000006",
+                name: "Queue printer boundary.gcode",
+                status: .queued,
+                priority: .high,
+                printerID: otherPrinterID,
+                rowVersion: "AQIDBg==",
+                position: 1
+            )
+        ]
+    }
+
+    private static func queueRow(
+        id: String,
+        name: String,
+        status: PrintJobStatus,
+        priority: PrintJobPriority,
+        printerID: UUID,
+        rowVersion: String,
+        position: Int
+    ) -> QueuedPrintJobResponse {
+        QueuedPrintJobResponse(
+            job: QueuedJobInfo(
+                id: id,
+                rowVersion: rowVersion,
+                name: name,
+                fileName: name,
+                assignedPrinterId: printerID.uuidString,
+                printerName: printerID == DemoData.prusaMK4_1_ID ? "Prusa MK4 #1" : "Bambu X1C",
+                printerModel: nil,
+                status: status.rawValue,
+                priority: priority,
+                queuePosition: position,
+                estimatedPrintTimeSeconds: nil,
+                actualStartTimeUtc: nil,
+                actualEndTimeUtc: nil,
+                actualPrintTimeSeconds: nil,
+                failureReason: nil,
+                createdAtUtc: Date(timeIntervalSince1970: 1_728_000_000 + TimeInterval(position)),
+                updatedAtUtc: nil,
+                thumbnailUrl: nil,
+                filamentName: "PLA",
+                filamentColor: "#336699",
+                copies: 1,
+                completedCopies: 0,
+                remainingCopies: 1
+            ),
+            gcodeFile: nil,
+            assignedPrinter: nil,
+            estimatedStartTime: nil,
+            estimatedCompletionTime: nil
+        )
+    }
+}
+#endif
