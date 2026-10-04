@@ -41,6 +41,16 @@ server switching, and real-time updates via SignalR.
 
 ## Testing
 
+The iOS CI matrix selects shipping Login, three-tab shell, Scan, harvest,
+printed-parts stock, printer/coverage and cached-Farm suites on both device
+families, with extra regular-width Queue navigation on iPad. Printed-parts
+coverage includes capability gating, reorder warnings/filtering and adjustment
+sheets. Retired Attention/Tasks grouping and Two-modes/promotion screens have
+no shipping entry points, so their selectors (including Attention-only Dynamic
+Type assertions) are intentionally removed rather than mapped to empty suites.
+`scripts/tests/test_run_tests.py` checks every selected class/method against
+Swift sources and rejects selected classes without real test methods.
+
 Use **iOS 26.5 (23F77)**, the unchanged-snapshot default supported by
 [the original evidence](https://github.com/OlyForge3D/PrintFarmer/issues/2536#issuecomment-5573657441).
 Install it in Xcode Settings > Components and create an available iPhone
@@ -114,7 +124,7 @@ remain available; calibration still requires fresh safety evidence.
 ### Managing Servers
 
 - On first launch, register a PrintFarmer server before signing in.
-- After setup, open **Settings** → **Manage Servers** to add, edit, or delete servers.
+- After setup, open the **Account avatar** → **Manage Servers** to add, edit, or delete servers.
 - The server editor normalizes URLs and rejects duplicates.
 - Use **Check Connection** to verify reachability. The app checks `/health` and
   `/healthz`; network failures are shown in the editor and saved status appears
@@ -122,109 +132,45 @@ remain available; calibration still requires fresh safety evidence.
 
 ### Switching Servers
 
-- On iPhone, use the toolbar server switcher from the main app screens.
-- On iPad, use the server switcher in the sidebar.
+- On iPhone and iPad, open the **Account avatar** → **Manage Servers**.
 - Switching servers rebuilds the app's API, authentication, and SignalR services
   for the newly active server.
 
-### Navigation Shell
+### Navigation
 
-The compact (iPhone) layout picks one of two shells depending on the size and
-staffing of the connected server. Both shells reach the same destinations —
-growth expands the layout, it does not relocate features.
+The phone is for the farm floor; the web is the full console. iPhone has
+exactly three tabs: **Farm · Queue · Filament**. Regular-width iPad presents
+those same items in a `NavigationSplitView` sidebar, without Floor/Oversight
+sections or a duplicate Fleet destination.
 
-- **Simple** (solo / owner-operator). **Attention · Farm · Tasks · Inventory
-  · Oversight**. There is no mode control. Tasks is capability-gated on
-  `shiftPlanEnabled` exactly as it is in Two modes, so a server with shift
-  planning switched off shows four tabs and one with it on shows five.
-  Oversight is a single hub tab that
-  groups Dashboard, Dispatch, Filament Coverage, Maintenance, Analytics,
-  Predictive Insights, Job History, Job Timeline, Locations, Uptime & Reliability
-  and a row into the Navigation setting.
-- **Two modes** (staffed farm). A **Floor | Oversight** control is pinned at the
-  top of every tab root of both modes.
-  - Floor tabs: **Attention · Farm · Tasks · Inventory**.
-  - Oversight tabs: **Overview · Fleet · Jobs · Upkeep · Reports**.
+A floating **Scan** button is available above the tab bar (or at the bottom of
+the iPad detail column). It opens the existing barcode/QR and NFC flows for
+printer and spool tags. Filament retains Add spool and continuous barcode
+intake. The toolbar avatar opens **Account**, including **Settings**, **Manage
+Servers**, notifications and offline activity.
 
-The regular-width iPad layout shows the operator destinations as a
-`NavigationSplitView` sidebar.
+When the server enables printed-parts inventory, the **Printed parts** toolbar
+button in Filament opens stock browsing and quantity adjustment as a secondary
+sheet. This does not add a tab or restore the old inventory segment picker.
 
-#### How the shell is chosen
+Analytics, maintenance planning, reporting, locations and history belong on
+the web. Retired analytical deep links open Farm; native attention
+notifications still parse and apply Farm's **Needs attention** filter.
+Server capabilities govern actions/data but do not remove the three tabs.
 
-The app derives the shell from server-observed farm counts returned by the
-authenticated endpoint **`GET /api/system/farm-shape`**
-(`{ accountCount, locationCount, printerCount }`, sent with `Cache-Control:
-no-store`). This is a separate endpoint from
-`GET /api/system/capabilities`, which stays anonymous and unchanged.
+There is no shell preference or Two-modes upgrade promotion. Existing
+`pf_navigation_established_shell*`, layout and promotion defaults are removed
+once by `ServerRegistry`, without clearing server registrations or safety
+preferences. Farm preserves the exact-owner read-only cached fleet and honest
+last-confirmed timestamp when offline.
 
-An **absent response** — a 401, 404, timeout, or an older server that does not
-expose the endpoint — is treated as *shape unknown ⇒ Simple shell*, and the
-in-context upgrade offer is suppressed entirely: the app never offers an
-upgrade on evidence it does not have.
-
-> **⚠️ `shiftPlanEnabled` is a *negative* signal only.** The flag defaults to
-> `true`, so a stock server reads as "on" whether an admin has thought about
-> shifts or not. Only an explicit `shiftPlanEnabled == false` is used as
-> evidence — a `true` value never demonstrates a staffed farm. Fleet size
-> (`printerCount`) is deliberately not a signal either: a solo owner running a
-> 40-printer farm would otherwise read as staffed. Reading either signal
-> "positively" is the fastest way to reintroduce the bug the redesign closed.
-
-The rule the app applies in `Automatic` mode:
-
-| Condition (evaluated in order) | Result |
-|---|---|
-| Farm shape unknown (endpoint absent / error) | **Simple** — and no upgrade offer |
-| `shiftPlanEnabled == false` | **Simple** — server explicitly says no shifts |
-| Signed-in user is not `farm_admin` | **Simple** — no upgrade offer |
-| `accountCount >= 2` | **Two modes** |
-| `locationCount >= 2` | **Two modes** |
-| otherwise | **Simple** |
-
-Role gating only affects the initial shell; it does **not** remove the
-Oversight destinations. Content inside every destination remains
-permission-gated by the API, unchanged from today.
-
-The Tasks tab's visibility is a separate concern from the shell choice: Tasks
-continues to be governed purely by `shiftPlanEnabled`.
-
-#### Overriding the shell — Settings → Navigation
-
-Open **Settings → Navigation** to override the derived layout:
-
-- **Automatic** (default) — matches the layout to this server, and explains in
-  plain language which counts and flags drove the choice.
-- **Simple** — force the Simple shell.
-- **Two modes** — force the Two modes shell.
-
-The preference is stored **per server** (keyed on the server registry
-identity), because the app is multi-server by design. Choosing an explicit
-override suppresses the in-context upgrade offer permanently for that server.
-
-When a farm grows past a threshold (a second account, a second bay, or shift
-planning switched on after having been off), the Oversight tab root shows a
-one-time, dismissible **upgrade offer card**: *"Your farm grew — Oversight can
-become its own mode..."*. It is never a modal, never a toast, and never part
-of onboarding. The app never auto-switches shells; changing shells always
-requires an explicit user action.
-
-Automatic therefore **latches** the layout it settles on for a server, and the
-latch is persisted alongside the per-server preference. Once Automatic has
-settled on Simple, later farm growth can only raise the upgrade offer — it can
-never move the app to Two modes on a subsequent launch, and declining the offer
-with **Not now** survives relaunch. The latch is one-directional: a derivation
-that lands on Simple (shift planning switched off, the signed-in user is not a
-`farm_admin`, the farm shape is unknown, or the farm shrank back below every
-threshold) still applies immediately, because those are explicit negative
-signals rather than growth. Choosing an explicit **Simple** or **Two modes**
-override clears the latch, so returning to Automatic re-derives from the
-server's current shape.
-
-### iPad Layout
-
-On iPad, the app uses a `NavigationSplitView`. Server switching lives in the
-sidebar and the destination list is scoped to the operator set for the
-active server.
+Farm's authorized offline snapshot is refreshed by the canonical Farm loader,
+not by the live list's pull-to-refresh. Its displayed last-confirmed timestamp
+is the stale bound; it must not be interpreted as the last live-list refresh.
+The snapshot host and live list currently both fetch/subscribe on Farm
+appearance. Moving between cached and live content can reset the active Farm
+navigation stack. Consolidating that ownership without losing offline safety
+is follow-on work in #3235.
 
 ### Printer Detail: Overview / Controls
 
@@ -246,7 +192,7 @@ A compact labeled **Emergency Stop** stays above the selector on both pages,
 with confirmation, its own pending guard, and an offline explanation. It never
 requires a timed hold and is not disabled by an unrelated pending command.
 Pause/Resume/Cancel/Stop stay with **Current Job** on Overview. Camera/live view,
-queue, history, maintenance, Mainsail, auto-dispatch, predictive/failure detection,
+queue, history, maintenance, Mainsail, auto-dispatch, failure detection,
 NFC and spool assignment/Eject utilities remain available under their existing gates.
 
 ### Native control transport contract

@@ -60,7 +60,7 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
     /// Settings. Every step is a REQUIRED precondition of the deterministic
     /// bootstrap and is asserted, not silently tolerated.
     private func enableAdvancedPrinterControls() {
-        let attention = shellDestinationButton(tabIdentifier: "tab.attention", timeout: 5)
+        let attention = shellDestinationButton(tabIdentifier: "tab.farm", timeout: 5)
         XCTAssertTrue(
             attention.exists,
             "The Attention/Account destination must be reachable in the deterministic UI-test bootstrap"
