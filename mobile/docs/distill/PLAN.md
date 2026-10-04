@@ -91,6 +91,49 @@ The detail view has a segmented header and a page indicator. The toolbar shows "
 - The homed-axes badges on Overview (`homedAxesBadges`, `resolvedHomedAxes`) and their tests are removed.
 - Odometer, history tail, the Mainsail link, auto-dispatch and setup actions move behind "Open in web".
 
+### Detail implementation constraints
+
+The mobile printer/current-job contracts currently contain no layer counters,
+so Status reports **Layer unavailable** rather than inferring a layer from Z.
+The mobile service also has no fan command; Control directs operators to
+**Open in web** for fans. Heater, motion, Z-offset and physical filament
+commands retain the registered-server safety preference and verified capability
+gates. Starting the assigned queue head uses the existing dispatch endpoint
+with that job's reviewed revision; it never reassigns the job or silently
+retries a stale revision. Printer detail loads the existing **printer-scoped**
+analytics endpoint and preserves its response order; it does not infer a head
+from the first 200 cross-scope jobs or use creation time as queue time. Before
+#3228 lands this preserves the server's existing order; after #3228 it follows
+the authoritative scoped reorder automatically.
+
+The printer-scoped response is a **flat** `QueuedPrintJobDto` array, not the
+cross-scope analytics wrapper. The client decodes existing `QueuedJobInfo`
+and adapts it to detail presentation without inventing G-code/navigation
+metadata. Name, ID and reviewed revision remain observable. The #3242
+active-state correction supplies Starting/Printing/Paused, then Assigned
+committed handoffs, then Queued jobs in authoritative server order. All bands
+remain visible; only **Queued** is eligible for Start next job. Integration
+requires that backend correction; the client cannot recover omitted active
+rows from older servers and must not guess from a truncated global list.
+
+Control and Filament share one parent-owned safety observation loop while
+either page is foreground. Both provide **Refresh safety checks**; leaving
+both pages or backgrounding invalidates evidence until a fresh read succeeds.
+The safety task host observes the legacy controls owner directly, so delayed
+capability completion starts and repeats refresh without changing pages.
+**Start next job** requires the established online/idle state, not merely the
+absence of a print. **Farm** clears pending detail routing and returns to the
+Farm root even when detail was opened from another destination.
+
+The distilled detail deliberately replaces dispatch-to-another-printer with
+revision-bound **Start next job** on the assigned printer; cross-printer
+dispatch is not offered here. Maintenance/history, NFC tag writing, Mainsail
+and AutoDispatch are not detail pages. Dead private view helpers are removed;
+legacy view-model operations and their existing tests remain for #3235's
+coordinated orphan cleanup. The explicit Farm-root toolbar replaces the native
+back affordance; horizontal swipes navigate the four pages, with no custom
+interactive-pop gesture shim.
+
 ## Queue reorder endpoint
 
 `PUT /api/job-queue/jobs/{id}/position` requires `Queue.Write`.
