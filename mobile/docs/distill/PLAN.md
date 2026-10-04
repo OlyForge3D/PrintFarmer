@@ -72,6 +72,12 @@ exhausting its pages before displaying exact per-printer counts. Failure
 items contribute the red state pill and reason. No coverage request is made
 by the Farm cards; coverage remains available in Filament detail.
 
+The authenticated HTTP-factory integration test reads the actual list URL,
+fetches PNG bytes through the proxy, checks private caching/ETag, rotates the
+provider revision and clears idle media. It uses synthetic test authentication
+and a service fixture, not a physical farm; native client tests separately
+verify auth/session and card-revision fencing.
+
 ## Printer detail: swipeable pages
 
 The detail view has a segmented header and a page indicator. The toolbar shows "‹ Farm" and "Open in web ↗".

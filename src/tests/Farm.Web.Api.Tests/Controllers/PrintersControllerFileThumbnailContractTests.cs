@@ -3,6 +3,7 @@
 // </copyright>
 
 using System.Net;
+using System.Text.Json;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Printers;
@@ -95,6 +96,68 @@ public sealed class PrintersControllerFileThumbnailContractTests : IAsyncLifetim
             $"/api/printers/{printerId}/current-job/thumbnail");
 
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task CurrentJobThumbnail_ListUrlRoundTrip_RotatesAndClearsAsync()
+    {
+        Guid printerId = Guid.NewGuid();
+        const string privateTarget = "http://printer.internal/thumb.png";
+        byte[] image = Convert.FromBase64String(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aGZkAAAAASUVORK5CYII=");
+        var printer = new CompletePrinterDto(
+            Id: printerId, Name: "Card fixture", Notes: null,
+            ManufacturerId: null, ManufacturerName: null, ModelId: null, ModelName: null,
+            MotionType: null, Backend: PrinterBackend.Moonraker, ApiKey: null,
+            OriginalServerUrl: null, BackendPort: 7125, FrontendPort: null,
+            InMaintenance: false, IsEnabled: true, IsOnline: true, State: "printing",
+            Progress: 50, JobName: "card.gcode", FileName: "card.gcode",
+            ThumbnailUrl: privateTarget, CameraStreamUrl: null,
+            X: null, Y: null, Z: null, HotendTemp: 210, BedTemp: 60,
+            HotendTarget: 210, BedTarget: 60, HomedAxes: null, SpoolInfo: null);
+        _printers.Setup(service => service.GetAllCompleteDtosAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => [printer]);
+
+        string? previousPath = null;
+        foreach (string identity in new[] { "file-revision-1", "file-revision-2" })
+        {
+            string cacheToken = PrinterThumbnailUrl.GetCacheToken(
+                printer.JobName!, privateTarget, identity);
+            printer = printer with
+            {
+                CurrentJobThumbnailUrl = PrinterThumbnailUrl.Create(
+                    printerId, printer.State, printer.JobName, privateTarget, identity),
+            };
+            _printers.Setup(service => service.GetCurrentJobThumbnailAsync(
+                    printerId, cacheToken, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new HistoryThumbnailContent(image, "image/png"));
+
+            using HttpResponseMessage list = await _client.GetAsync("/api/printers");
+            list.StatusCode.Should().Be(HttpStatusCode.OK);
+            string json = await list.Content.ReadAsStringAsync();
+            json.Should().NotContain(privateTarget);
+            using JsonDocument document = JsonDocument.Parse(json);
+            string path = document.RootElement[0].GetProperty("currentJobThumbnailUrl").GetString()!;
+            path.Should().Be(printer.CurrentJobThumbnailUrl);
+            path.Should().NotBe(previousPath);
+            previousPath = path;
+
+            using HttpResponseMessage thumbnail = await _client.GetAsync(path);
+            thumbnail.StatusCode.Should().Be(HttpStatusCode.OK);
+            thumbnail.Content.Headers.ContentType!.MediaType.Should().Be("image/png");
+            thumbnail.Headers.ETag!.Tag.Should().Be($"\"{cacheToken}\"");
+            thumbnail.Headers.CacheControl!.Private.Should().BeTrue();
+            thumbnail.Headers.CacheControl.MaxAge.Should().Be(TimeSpan.FromSeconds(300));
+            thumbnail.Headers.GetValues("X-Content-Type-Options").Should().ContainSingle("nosniff");
+            (await thumbnail.Content.ReadAsByteArrayAsync()).Should().Equal(image);
+        }
+
+        printer = printer with { State = "idle", JobName = null, CurrentJobThumbnailUrl = null };
+        using HttpResponseMessage idleList = await _client.GetAsync("/api/printers");
+        idleList.StatusCode.Should().Be(HttpStatusCode.OK);
+        using JsonDocument idleDocument = JsonDocument.Parse(await idleList.Content.ReadAsStringAsync());
+        bool present = idleDocument.RootElement[0].TryGetProperty("currentJobThumbnailUrl", out JsonElement value);
+        (present && value.ValueKind != JsonValueKind.Null).Should().BeFalse();
     }
 
     [Fact]
