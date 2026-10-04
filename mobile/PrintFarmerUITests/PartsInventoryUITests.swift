@@ -26,6 +26,22 @@ final class PartsInventoryUITests: PrintFarmerUITestCase {
         XCTAssertTrue(app.buttons["partScan.applyAdjustment"].exists)
     }
 
+    func testScanFromPrintedPartsSheetReturnsInPlace() {
+        shellDestinationButton(tabIdentifier: "tab.filament", timeout: 8).tap()
+        app.buttons["filament.printedParts"].tap()
+        XCTAssertTrue(app.navigationBars["Printed Parts"].waitForExistence(timeout: 8))
+
+        let scanMenu = app.navigationBars["Printed Parts"].buttons["inventory.scan"]
+        XCTAssertTrue(scanMenu.waitForExistence(timeout: 5))
+        scanMenu.tap()
+        app.buttons["Scan code"].tap()
+        XCTAssertTrue(app.navigationBars["Scan"].waitForExistence(timeout: 5))
+        app.navigationBars["Scan"].buttons["Done"].tap()
+
+        XCTAssertTrue(app.navigationBars["Printed Parts"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["partsInventory.row.BRKT-01"].exists)
+    }
+
     func testDisabledCapabilityHidesPrintedPartsEntry() {
         app.terminate()
         app.launchArguments.append("--uitesting-operator-features-disabled")

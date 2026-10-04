@@ -8,18 +8,6 @@ func destinationView(for destination: AppDestination) -> some View {
         PrinterDetailView(printerId: id)
     case .jobDetail(let id):
         JobDetailView(jobId: id)
-    case .createJob:
-        ContentUnavailableView {
-            Label("Coming Soon", systemImage: "plus.circle")
-        } description: {
-            Text("Job creation will be available in a future update.")
-        }
-    case .createPrinter:
-        ContentUnavailableView {
-            Label("Coming Soon", systemImage: "printer.fill.and.paper")
-        } description: {
-            Text("Printer setup will be available in a future update.")
-        }
     case .account:
         AccountView()
     case .notifications:

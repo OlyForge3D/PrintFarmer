@@ -801,13 +801,8 @@ final class AppRouterTests: XCTestCase {
         )
     }
 
-    func testCoreTabsSurviveDisabledOperatorFeatures() {
-        var disabled = capabilities
-        disabled.attentionEnabled = false
-        disabled.shiftPlanEnabled = false
-
-        XCTAssertEqual(AppTab.visibleTabs(for: disabled), [.farm, .queue, .filament])
-        XCTAssertEqual(AppTab.fallbackTab(for: disabled), .farm)
+    func testCoreTabsAreFarmQueueAndFilament() {
+        XCTAssertEqual(AppTab.allCases, [.farm, .queue, .filament])
     }
 
     // MARK: - Tasks reachability (#2479)

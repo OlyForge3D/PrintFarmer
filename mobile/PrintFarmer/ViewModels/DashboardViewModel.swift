@@ -86,6 +86,7 @@ final class DashboardViewModel {
     /// on screen (live) or backing the cached snapshot (stale). `nil` until the
     /// first hydrate/commit resolves.
     private(set) var lastUpdatedAt: Date?
+    private(set) var farmDataRevision: UInt64 = 0
 
     /// True once an authoritative session exists but its record is absent — the
     /// "no cached data yet" state, distinct from a present-but-empty fleet.
@@ -102,6 +103,7 @@ final class DashboardViewModel {
     private var signalRService: (any SignalRServiceProtocol)?
     @ObservationIgnored private var signalRSubscriptions: [SignalRSubscription] = []
     @ObservationIgnored private var signalRServiceIdentity: ObjectIdentifier?
+    @ObservationIgnored private var printerSubscriptionSyncGeneration: UInt64 = 0
     @ObservationIgnored private var signalRAuthorityEpoch: UInt64 = 0
     @ObservationIgnored private var lastObservedConnectionState: SignalRConnectionState?
     @ObservationIgnored private let callbackEnqueuer: CallbackEnqueuer
@@ -224,10 +226,12 @@ final class DashboardViewModel {
         }
         lastObservedConnectionState = connectionRegistration.initial
         signalRSubscriptions.append(connectionRegistration.subscription)
+        synchronizePrinterSubscriptions(for: printers)
     }
 
     private func tearDownSignalR() {
         signalRAuthorityEpoch &+= 1
+        printerSubscriptionSyncGeneration &+= 1
         for subscription in signalRSubscriptions { subscription.cancel() }
         signalRSubscriptions.removeAll(keepingCapacity: true)
         signalRService = nil
@@ -251,11 +255,29 @@ final class DashboardViewModel {
         if let prog = update.progress { printers[idx].progress = prog / 100.0 }
         if let name = update.jobName { printers[idx].jobName = name }
         if let fn = update.fileName { printers[idx].fileName = fn }
+        // SignalR omits nullable thumbnail fields when a job ends.
+        printers[idx].currentJobThumbnailUrl = update.currentJobThumbnailUrl
         if let hotend = update.hotendTemp { printers[idx].hotendTemp = hotend }
         if let bed = update.bedTemp { printers[idx].bedTemp = bed }
         if let ht = update.hotendTarget { printers[idx].hotendTarget = ht }
         if let bt = update.bedTarget { printers[idx].bedTarget = bt }
         if let spool = update.spoolInfo { printers[idx].spoolInfo = spool }
+        farmDataRevision &+= 1
+    }
+
+    private func synchronizePrinterSubscriptions(for printers: [Printer]) {
+        guard let signalRService, let signalRServiceIdentity else { return }
+        printerSubscriptionSyncGeneration &+= 1
+        let syncGeneration = printerSubscriptionSyncGeneration
+        let printerIDs = printers.map(\.id)
+        Task { @MainActor [weak self] in
+            guard let self,
+                  self.printerSubscriptionSyncGeneration == syncGeneration,
+                  self.signalRServiceIdentity == signalRServiceIdentity else {
+                return
+            }
+            await signalRService.replacePrinterSubscriptions(printerIDs)
+        }
     }
 
     /// Hydrate the ACTIVE exact-owner snapshot from the #816 store. Called
@@ -276,6 +298,7 @@ final class DashboardViewModel {
             pendingReadyPrinterIDs = Set(envelope.payload.filter(\.isPendingReady).map(\.id))
             lastUpdatedAt = Date(timeIntervalSince1970: Double(envelope.lastUpdatedAtMillis) / 1000.0)
             farmSource = .cached
+            farmDataRevision &+= 1
         case .absent:
             // Authoritative session but no record was ever written: the
             // distinct "no cached data" state, not a present-but-empty fleet.
@@ -560,6 +583,33 @@ final class DashboardViewModel {
         lastUpdatedAt = snapshot.lastUpdatedAt
         farmSource = .live
         errorMessage = nil
+        farmDataRevision &+= 1
+        synchronizePrinterSubscriptions(for: snapshot.printers)
+    }
+
+    func refreshPendingReadyStatus() async {
+        guard isViewActive, let autoPrintService else { return }
+        let lifecycleEpoch = canonicalLifecycleEpoch
+        let serviceIdentity = Self.identity(autoPrintService)
+        do {
+            let statuses = try await autoPrintService.getAllStatus()
+            guard isViewActive,
+                  canonicalLifecycleEpoch == lifecycleEpoch,
+                  Self.identity(self.autoPrintService) == serviceIdentity else {
+                return
+            }
+            pendingReadyPrinterIDs = Set(
+                statuses.printers.filter { $0.state == "PendingReady" }.map(\.printerId)
+            )
+            farmDataRevision &+= 1
+        } catch {
+            guard isViewActive,
+                  canonicalLifecycleEpoch == lifecycleEpoch,
+                  Self.identity(self.autoPrintService) == serviceIdentity else {
+                return
+            }
+            logger.info("Auto-dispatch status unavailable: \(error.localizedDescription)")
+        }
     }
 
     private func finishCanonicalLoad(authority: CanonicalAuthority) {

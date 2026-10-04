@@ -21,6 +21,7 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
     var printersToReturn: [Printer] = []
     var printerToReturn: Printer?
     var statusToReturn: PrinterStatusDetail?
+    var statusErrorToThrow: Error?
     var cameraUrlsToReturn: [PrinterCameraUrls] = []
     var cameraUrlToReturn: PrinterCameraUrl?
     var currentJobToReturn: PrintJobStatusInfo?
@@ -116,6 +117,7 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
     func getStatus(id: UUID) async throws -> PrinterStatusDetail {
         getStatusCalledWith = id
         if let beforeSafetyStatus { await beforeSafetyStatus() }
+        if let error = statusErrorToThrow { throw error }
         if let error = errorToThrow { throw error }
         guard let status = statusToReturn else { throw NetworkError.notFound }
         return status

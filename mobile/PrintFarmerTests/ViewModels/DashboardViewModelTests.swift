@@ -78,6 +78,30 @@ final class DashboardViewModelTests: XCTestCase {
         XCTAssertNil(viewModel.summary)
     }
 
+    func testPrinterUpdateWithoutThumbnailClearsTheCurrentJobThumbnail() async throws {
+        let callbackQueue = ShiftTaskCallbackQueue()
+        let printer = try TestData.decodePrinter()
+        var seededPrinter = printer
+        seededPrinter.currentJobThumbnailUrl = "/old-revision"
+        let signalR = MockSignalRService()
+        let vm = DashboardViewModel(callbackEnqueuer: callbackQueue.enqueuer)
+        vm.printers = [seededPrinter]
+        vm.configureSignalR(signalR)
+        await signalR.waitForPrinterSubscriptionCallCount(1)
+        XCTAssertEqual(signalR.printerSubscriptionCalls.first, [printer.id])
+
+        let update = try JSONDecoder().decode(PrinterStatusUpdate.self, from: Data("""
+        {"id":"\(printer.id)","isOnline":true,"state":"idle"}
+        """.utf8))
+        signalR.simulatePrinterUpdate(update)
+        XCTAssertEqual(callbackQueue.count, 1)
+
+        await callbackQueue.runNext()
+
+        XCTAssertNil(vm.printers.first?.currentJobThumbnailUrl)
+        XCTAssertEqual(vm.farmDataRevision, 1)
+    }
+
     func testReconnectRecoveryRefreshesCanonicalDashboardOnceAndFencesStaleService() async throws {
         let callbackQueue = ShiftTaskCallbackQueue()
         let oldPrinterService = MockPrinterService()

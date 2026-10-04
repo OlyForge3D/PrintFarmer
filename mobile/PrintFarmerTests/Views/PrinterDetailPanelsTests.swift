@@ -18,14 +18,14 @@ final class PrinterDetailPanelsTests: XCTestCase {
 
     func testFarmToolbarReturnsToFarmRootFromNonFarmOrigins() {
         let router = AppRouter()
-        for origin in router.visibleTabs(for: .defaults) where origin != .farm {
-            router.selectTab(origin, capabilities: .defaults)
+        for origin in AppTab.allCases where origin != .farm {
+            router.selectedTab = origin
             router.printersPath.append(AppDestination.printerDetail(id: UUID()))
             router.inventoryPath.append(AppDestination.printerDetail(id: UUID()))
             router.jobsPath.append(AppDestination.printerDetail(id: UUID()))
             router.pendingFilamentSwap = .init(printerId: UUID(), toolheadIndex: 0, jobId: nil)
 
-            PrinterDetailView.returnToFarm(router: router, capabilities: .defaults)
+            PrinterDetailView.returnToFarm(router: router)
 
             XCTAssertEqual(router.selectedTab, .farm, "Origin \(origin)")
             XCTAssertTrue(router.printersPath.isEmpty)
@@ -33,6 +33,18 @@ final class PrinterDetailPanelsTests: XCTestCase {
             XCTAssertTrue(router.jobsPath.isEmpty)
             XCTAssertNil(router.pendingFilamentSwap)
         }
+    }
+
+    func testSafetyRefreshCadenceKeepsStatusFastAndDiscoveryBounded() {
+        let start = ContinuousClock.now
+        var cadence = PrinterDetailSafetyRefreshCadence(now: start)
+
+        XCTAssertEqual(PrinterDetailSafetyRefreshCadence.statusInterval, .seconds(5))
+        XCTAssertEqual(PrinterDetailSafetyRefreshCadence.discoveryInterval, .seconds(60))
+        XCTAssertFalse(cadence.shouldRefreshDiscovery(at: start.advanced(by: .seconds(59))))
+        XCTAssertTrue(cadence.shouldRefreshDiscovery(at: start.advanced(by: .seconds(60))))
+        XCTAssertFalse(cadence.shouldRefreshDiscovery(at: start.advanced(by: .seconds(119))))
+        XCTAssertTrue(cadence.shouldRefreshDiscovery(at: start.advanced(by: .seconds(120))))
     }
 
     func testProductionDetailHostCreatesControlsWhenPendingCompositionSettles() async throws {
@@ -215,7 +227,53 @@ final class PrinterDetailPanelsTests: XCTestCase {
         XCTAssertFalse(fixture.api.capturedRequests.contains { $0.httpMethod != "GET" })
     }
 
-    private func detailHostFixture(verifiedMaterial: Bool = false, capabilityBarrier: AsyncBarrier? = nil) throws -> (
+    func testStationarySafetyReadFailureShowsAndClearsRetryAffordance() async throws {
+        let printer = try TestData.decodePrinter()
+        let service = MockPrinterService()
+        let statusBarrier = AsyncBarrier()
+        service.capabilitiesToReturn = .allControlsFixture
+        service.statusToReturn = VerifiedSafetyFixtures.status(id: printer.id)
+        service.statusErrorToThrow = NSError(domain: "PrinterDetailPanelsTests", code: 503)
+        service.beforeSafetyStatus = { await statusBarrier.arriveAndWait() }
+        let owner = PrinterControlsViewModel(printerService: service, printer: printer)
+        let controller = DetailHostingController(rootView: PrinterDetailSafetyRefresh(owner: owner) {
+            Task { await owner.refreshSafetyEvidence() }
+        })
+        let window = show(controller)
+        defer { statusBarrier.close(); window.isHidden = true; window.rootViewController = nil }
+
+        func refreshButton() -> UIButton? {
+            views(UIButton.self, in: controller.view).first {
+                $0.accessibilityIdentifier == "printer.detail.safety.refresh"
+            }
+        }
+
+        try await waitForHost("The safety retry action must render", in: controller.view) {
+            refreshButton() != nil
+        }
+        try XCTUnwrap(refreshButton()).sendActions(for: .touchUpInside)
+        await statusBarrier.waitUntilArrived()
+        XCTAssertFalse(try XCTUnwrap(refreshButton()).isEnabled, "Retry must be disabled while a safety read is pending")
+        statusBarrier.release()
+        try await waitForHost("A stationary safety read failure must render its recovery message and enable retry", in: controller.view) {
+            owner.safetyReadError != nil && refreshButton()?.isEnabled == true
+        }
+        XCTAssertTrue(
+            owner.safetyReadError?.contains("Safety evidence could not be read") == true,
+            "The recovery message must explain that the safety read failed"
+        )
+
+        service.statusErrorToThrow = nil
+        service.beforeSafetyStatus = nil
+        try XCTUnwrap(refreshButton()).sendActions(for: .touchUpInside)
+        try await waitForHost("Successful refresh must clear the stationary error and re-enable retry", in: controller.view) {
+            owner.safetyReadError == nil && owner.safetyStatus != nil && refreshButton()?.isEnabled == true
+        }
+    }
+    private func detailHostFixture(
+        verifiedMaterial: Bool = false,
+        capabilityBarrier: AsyncBarrier? = nil
+    ) throws -> (
         services: ServiceContainer, registry: ServerRegistry, printer: Printer,
         first: RegisteredServer, second: RegisteredServer, api: MockAPIClient,
         disconnect: AsyncBarrier, connect: AsyncBarrier
