@@ -113,7 +113,13 @@ public class PrintJobStatusDto
 
     public string? JobName { get; set; }
 
+    [JsonIgnore]
     public string? ThumbnailUrl { get; set; }
+
+    [JsonIgnore]
+    public string? ThumbnailCacheIdentity { get; set; }
+
+    public string? CurrentJobThumbnailUrl { get; set; }
 
     public string? Error { get; set; }
 }

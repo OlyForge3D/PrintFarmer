@@ -143,6 +143,39 @@ public sealed class PrinterStatusContractTests : IAsyncLifetime
             volatilePaths: volatilePaths);
     }
 
+    [Fact]
+    public async Task RequestPrinterStatus_ActiveThumbnail_EmitsOnlyRelativeProxyUrlAsync()
+    {
+        Guid printerId = Guid.NewGuid();
+        const string internalThumbnailUrl =
+            "http://printer.internal:7125/server/files/gcodes/.thumbs/benchy.png";
+
+        using (IServiceScope scope = _factory.Services.CreateScope())
+        {
+            IPrinterStatusCacheWriter statusWriter = scope.ServiceProvider.GetRequiredService<IPrinterStatusCacheWriter>();
+            statusWriter.UpdateStatus(new PrinterStatusDto(
+                printerId,
+                IsOnline: true,
+                State: "printing",
+                JobName: "benchy.gcode",
+                ThumbnailUrl: internalThumbnailUrl));
+        }
+
+        string token = await CreateFarmAdminTokenAsync();
+        var receivedTcs = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using HubConnection connection = BuildHubConnection(token);
+        _ = connection.On<JsonElement>("printerupdated", payload => receivedTcs.TrySetResult(payload));
+
+        await connection.StartAsync();
+        await connection.InvokeAsync("RequestPrinterStatus", printerId.ToString());
+
+        JsonElement received = await WaitForEventAsync(receivedTcs);
+        JsonContractAssertions.AssertMissingKey(received, "thumbnailUrl");
+        string proxyUrl = received.GetProperty("currentJobThumbnailUrl").GetString()!;
+        proxyUrl.Should().StartWith($"/api/printers/{printerId:D}/current-job/thumbnail?v=");
+        received.GetRawText().Should().NotContain("printer.internal");
+    }
+
     private HubConnection BuildHubConnection(string token) =>
         new HubConnectionBuilder()
             .WithUrl(

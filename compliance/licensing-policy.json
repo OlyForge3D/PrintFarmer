@@ -306,7 +306,7 @@
         "path": "src/tests/Farm.Web.Api.Tests/Security/SensitiveSerializationTests.cs",
         "pattern": "https?://[^\\s/:]+:[^\\s/@]+@",
         "matchSha256": "2b37ca011dc0baf5ac3ceff7569d873e97e370f6c6cfa28ebfdc8fba20ed280a",
-        "contentSha256": "3d25b1d4fd999194282d4691aedebba55077f47a6f00998b1745ff936db16e72",
+        "contentSha256": "d0a8b86f0072001a7dec25cdd3f2055d0f75eda1d1b3ca087a2896cdd7b869a0",
         "reason": "Synthetic printer URL tests removal of embedded credentials from computed URLs."
       }
     ]
