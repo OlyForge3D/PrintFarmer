@@ -55,8 +55,6 @@ public class JobQueueService : IJobQueueService
     private readonly IQueuePositionAllocator? _positionAllocator;
     private readonly IQueueResourceAuthorizationService? _resourceAuthorization;
     private readonly IQueueSubscriptionMembershipNotifier? _membershipNotifier;
-    private readonly Farm.Infrastructure.Services.HostUpdates.IHostUpdateAdmissionGate? _hostUpdateAdmissionGate;
-    private readonly TimeProvider _timeProvider;
 
     /// <summary>
     /// Initializes a new instance of the JobQueueService with required dependencies.
@@ -81,12 +79,7 @@ public class JobQueueService : IJobQueueService
     /// membership-changing job transition that needs a direct call here rather than relying
     /// on <see cref="QueueOutboxPublisherService"/>'s narrowed outbox-event handling.
     /// </param>
-    /// <param name="hostUpdateAdmissionGate">
-    /// Optional host-update admission gate (Kane audit follow-up, issue #2663): when closed by
-    /// a draining host update, <see cref="AddJobToQueueAsync"/> rejects new submissions rather
-    /// than admitting work the update's drain step believes has already stopped.
-    /// </param>
-    /// <param name="timeProvider">Clock used for dispatch audit creation.</param>
+    /// <param name="timeProvider">Optional clock used by queue deadline tests.</param>
     /// <exception cref="ArgumentNullException">Thrown when any required dependency is null</exception>
     public JobQueueService(
         IQueueRepository repo,
@@ -104,10 +97,8 @@ public class JobQueueService : IJobQueueService
         IQueuePositionAllocator? positionAllocator = null,
         IQueueResourceAuthorizationService? resourceAuthorization = null,
         IQueueSubscriptionMembershipNotifier? membershipNotifier = null,
-        Farm.Infrastructure.Services.HostUpdates.IHostUpdateAdmissionGate? hostUpdateAdmissionGate = null,
         TimeProvider? timeProvider = null)
     {
-        _timeProvider = timeProvider ?? TimeProvider.System;
         ArgumentNullException.ThrowIfNull(repo);
         ArgumentNullException.ThrowIfNull(dataService);
         ArgumentNullException.ThrowIfNull(logger);
@@ -126,7 +117,6 @@ public class JobQueueService : IJobQueueService
         _positionAllocator = positionAllocator;
         _resourceAuthorization = resourceAuthorization;
         _membershipNotifier = membershipNotifier;
-        _hostUpdateAdmissionGate = hostUpdateAdmissionGate;
     }
 
     /// <summary>
@@ -221,10 +211,7 @@ public class JobQueueService : IJobQueueService
                 QueuedJobsCount = queuedCount,
                 CurrentJobId = currentJob?.Id,
                 CurrentJobName = currentJob?.Name,
-                EstimatedCompletionTime = CalculateEstimatedCompletionTime(
-                    allJobs,
-                    currentJob,
-                    _timeProvider.GetUtcNow().UtcDateTime),
+                EstimatedCompletionTime = CalculateEstimatedCompletionTime(allJobs, currentJob),
                 NozzleDiameter = primaryToolhead?.NozzleModel?.Diameter,
                 SupportedMaterials = supportedMaterials
             });
@@ -280,16 +267,6 @@ public class JobQueueService : IJobQueueService
     public async Task<JobQueuePrintJobDto?> AddJobToQueueAsync(QueuePrintJobDto request, Guid? userId, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
-
-        if (_hostUpdateAdmissionGate is not null && await _hostUpdateAdmissionGate.IsClosedAsync(ct).ConfigureAwait(false))
-        {
-            // Kane audit follow-up (issue #2663): a host update's drain step closes this gate
-            // and then waits for active work to finish naturally -- if new submissions kept
-            // being admitted here, the drain would never observe true quiescence. Fail closed
-            // rather than silently admitting a new job while the host is being updated.
-            _logger.LogWarning("queue_writer_rejected_host_update_fence");
-            throw new Farm.Infrastructure.Services.HostUpdates.HostUpdateAdmissionClosedException();
-        }
 
         GcodeFile? gcode = await _dataService.GetGcodeFileAsync(request.GcodeFileId, ct);
         if (gcode == null)
@@ -464,8 +441,8 @@ public class JobQueueService : IJobQueueService
         }
 
         QueuePlanningSettings queuePlanningSettings = GetQueuePlanningSettings();
-        DateTime utcNow = _timeProvider.GetUtcNow().UtcDateTime;
-        DateTime? resolvedDeadline = ResolveEnqueueDeadline(request.DeadlineAtUtc, queuePlanningSettings, utcNow);
+        DateTime? resolvedDeadline = ResolveEnqueueDeadline(request.DeadlineAtUtc, queuePlanningSettings);
+        DateTime utcNow = DateTime.UtcNow;
         string idempotencyScope = isCalibrationJob
             ? $"calibration-project:{canonicalCalibration!.CalibrationProjectId:N}"
             : string.Empty;
@@ -1018,7 +995,7 @@ public class JobQueueService : IJobQueueService
         }
 
         job.Priority = (int)request.Priority;
-        job.UpdatedAt = _timeProvider.GetUtcNow().UtcDateTime;
+        job.UpdatedAt = DateTime.UtcNow;
         await _repo.SaveChangesAsync(ct);
 
         JobQueuePrintJobDto dto = MapToJobQueuePrintJobDto(
@@ -1231,10 +1208,7 @@ public class JobQueueService : IJobQueueService
 
         if (request.DeadlineAtUtc.HasValue)
         {
-            job.DeadlineAtUtc = ValidateProvidedDeadline(
-                request.DeadlineAtUtc,
-                GetQueuePlanningSettings(),
-                _timeProvider.GetUtcNow().UtcDateTime);
+            job.DeadlineAtUtc = ValidateProvidedDeadline(request.DeadlineAtUtc, GetQueuePlanningSettings());
         }
 
         if (!string.IsNullOrEmpty(request.Name))
@@ -1261,7 +1235,7 @@ public class JobQueueService : IJobQueueService
             }
         }
 
-        job.UpdatedAt = _timeProvider.GetUtcNow().UtcDateTime;
+        job.UpdatedAt = DateTime.UtcNow;
 
         if (queueShapeChanged)
         {
@@ -1323,11 +1297,11 @@ public class JobQueueService : IJobQueueService
             return;
         }
 
-        DateTime now = _timeProvider.GetUtcNow().UtcDateTime;
+        DateTime now = DateTime.UtcNow;
         job.DispatchedAt ??= now;
         job.DispatchMode ??= (int)DispatchMode.Manual;
         _ = await _partOutputSnapshotService.CaptureJobSnapshotIfAbsentAsync(job, ct);
-        _repo.AddDispatchLog(new DispatchLog(now)
+        _repo.AddDispatchLog(new DispatchLog(new DateTimeOffset(now, TimeSpan.Zero))
         {
             Id = Guid.NewGuid(),
             PrintJobId = job.Id,
@@ -1337,6 +1311,7 @@ public class JobQueueService : IJobQueueService
             DispatchedAt = new DateTimeOffset(now, TimeSpan.Zero),
             DispatchedByUserId = userId,
             Reason = "Assigned during queue operation.",
+            CreatedAtUtc = now,
         });
     }
 
@@ -1431,16 +1406,13 @@ public class JobQueueService : IJobQueueService
         }
     }
 
-    private static DateTime? CalculateEstimatedCompletionTime(
-        List<PrintJob> queuedJobs,
-        PrintJob? currentJob,
-        DateTime nowUtc)
+    private static DateTime? CalculateEstimatedCompletionTime(List<PrintJob> queuedJobs, PrintJob? currentJob)
     {
         double totalMinutes = 0.0;
 
         if (currentJob?.EstimatedPrintTime.HasValue == true)
         {
-            TimeSpan elapsed = currentJob.ActualStartTime.HasValue ? nowUtc - currentJob.ActualStartTime.Value : TimeSpan.Zero;
+            TimeSpan elapsed = currentJob.ActualStartTime.HasValue ? DateTime.UtcNow - currentJob.ActualStartTime.Value : TimeSpan.Zero;
             TimeSpan remaining = currentJob.EstimatedPrintTime.Value - elapsed;
             totalMinutes += Math.Max(0, remaining.TotalMinutes);
         }
@@ -1449,7 +1421,7 @@ public class JobQueueService : IJobQueueService
             .Where(j => j.EstimatedPrintTime.HasValue && j != currentJob)
             .Sum(j => j.EstimatedPrintTime!.Value.TotalMinutes);
 
-        return totalMinutes > 0 ? nowUtc.AddMinutes(totalMinutes) : null;
+        return totalMinutes > 0 ? DateTime.UtcNow.AddMinutes(totalMinutes) : null;
     }
 
     private static List<PrintJobToolheadUsageDto> MapToolheadUsages(PrintJob job) =>
@@ -1800,7 +1772,7 @@ public class JobQueueService : IJobQueueService
                 candidate.AssignedPrinterId == command.PrinterId &&
                 (candidate.Status == PrintJobStatus.Queued ||
                  candidate.Status == PrintJobStatus.Assigned))
-            .OrderWithinScope()
+            .OrderByPriorityDescending()
             .Select(candidate => (Guid?)candidate.Id)
             .FirstOrDefaultAsync(ct);
         long? currentPrinterConfigRevision = await _db.Printers
@@ -1814,7 +1786,7 @@ public class JobQueueService : IJobQueueService
             commandDispatchState,
             currentQueueHeadId,
             currentPrinterConfigRevision,
-            _timeProvider.GetUtcNow().UtcDateTime)
+            DateTime.UtcNow)
                 ? BedClearState.Acknowledged
                 : BedClearState.Invalidated;
     }
@@ -1871,11 +1843,9 @@ public class JobQueueService : IJobQueueService
         }
     }
 
-    private static DateTime? ResolveEnqueueDeadline(
-        DateTime? requestedDeadlineAtUtc,
-        QueuePlanningSettings settings,
-        DateTime nowUtc)
+    private static DateTime? ResolveEnqueueDeadline(DateTime? requestedDeadlineAtUtc, QueuePlanningSettings settings)
     {
+        DateTime nowUtc = DateTime.UtcNow;
         DateTime? normalizedDeadline = NormalizeUtcDeadline(requestedDeadlineAtUtc);
         if (!normalizedDeadline.HasValue)
         {
@@ -1894,10 +1864,7 @@ public class JobQueueService : IJobQueueService
         return normalizedDeadline;
     }
 
-    private static DateTime ValidateProvidedDeadline(
-        DateTime? requestedDeadlineAtUtc,
-        QueuePlanningSettings settings,
-        DateTime nowUtc)
+    private static DateTime ValidateProvidedDeadline(DateTime? requestedDeadlineAtUtc, QueuePlanningSettings settings)
     {
         DateTime? normalized = NormalizeUtcDeadline(requestedDeadlineAtUtc);
         if (!normalized.HasValue)
@@ -1905,7 +1872,7 @@ public class JobQueueService : IJobQueueService
             throw new ValidationException("Deadline is required by queue policy.");
         }
 
-        ValidateDeadlineLeadTime(normalized, settings.MinimumLeadHours, nowUtc);
+        ValidateDeadlineLeadTime(normalized, settings.MinimumLeadHours, DateTime.UtcNow);
         return normalized.Value;
     }
 

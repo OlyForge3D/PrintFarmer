@@ -35,60 +35,26 @@ namespace Farm.Infrastructure.Services.Queue;
 public sealed class QueueRetentionPruneService(
     IServiceScopeFactory scopeFactory,
     IOptions<QueueRetentionSettings> options,
-    ILogger<QueueRetentionPruneService> logger,
-    Farm.Infrastructure.Services.HostUpdates.QueueRetentionPruneFenceFlag? hostUpdateFence = null,
-    TimeProvider? timeProvider = null) : BackgroundService
+    ILogger<QueueRetentionPruneService> logger) : BackgroundService
 {
     private readonly QueueRetentionSettings _settings = options.Value;
-    private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
 
     /// <inheritdoc/>
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         while (!stoppingToken.IsCancellationRequested)
         {
-            // Host-update fence (issue #2663): skip this pass's deletes while a coordinated
-            // backup/migration is in progress, and acknowledge quiescence to the fence
-            // coordinator. RunOnceAsync itself is left untouched (and unfenced) because tests
-            // call it directly to avoid waiting on the timer.
-            if (hostUpdateFence is not null && await hostUpdateFence.IsPauseRequestedAsync(stoppingToken))
-            {
-                await hostUpdateFence.AcknowledgePausedAsync(stoppingToken);
-                await Task.Delay(TimeSpan.FromMilliseconds(250), _timeProvider, stoppingToken).ConfigureAwait(false);
-            }
-            else
-            {
-                await RunOnceAsync(stoppingToken);
-            }
+            await RunOnceAsync(stoppingToken);
 
             try
             {
-                if (await WaitForIntervalOrPauseAsync(stoppingToken).ConfigureAwait(false))
-                {
-                    await hostUpdateFence!.AcknowledgePausedAsync(stoppingToken).ConfigureAwait(false);
-                }
+                await Task.Delay(_settings.PruneInterval, stoppingToken);
             }
             catch (OperationCanceledException)
             {
                 return;
             }
         }
-    }
-
-    private async Task<bool> WaitForIntervalOrPauseAsync(CancellationToken stoppingToken)
-    {
-        DateTimeOffset until = _timeProvider.GetUtcNow() + _settings.PruneInterval;
-        while (_timeProvider.GetUtcNow() < until)
-        {
-            if (hostUpdateFence is not null && await hostUpdateFence.IsPauseRequestedAsync(stoppingToken).ConfigureAwait(false))
-            {
-                return true;
-            }
-
-            await Task.Delay(TimeSpan.FromMilliseconds(250), _timeProvider, stoppingToken).ConfigureAwait(false);
-        }
-
-        return false;
     }
 
     /// <summary>
@@ -102,7 +68,7 @@ public sealed class QueueRetentionPruneService(
             await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
             AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-            DateTime now = _timeProvider.GetUtcNow().UtcDateTime;
+            DateTime now = DateTime.UtcNow;
 
             int outboxDeleted = await PruneOutboxAsync(db, now, ct);
             int attemptsDeleted = await PruneDispatchAttemptsAsync(db, now, ct);

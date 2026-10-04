@@ -1,6 +1,5 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import {
-  copyFileSync,
   mkdirSync,
   readFileSync,
   renameSync,
@@ -202,19 +201,6 @@ export function packageFixtureHostUpdateCli({ source, assets, release, run, scra
   return completeHostUpdateCliSums({ assets, version: release.version });
 }
 
-// Extra import-cell releases reuse an already packaged CLI archive under the new version's name
-// instead of publishing the CLI again; only the signed checksum list binds the archive bytes.
-export function reuseFixtureHostUpdateCli({ from, assets, release, runtimes = ['linux-x64'] }) {
-  for (const rid of runtimes) {
-    copyFileSync(join(from.assets, hostUpdateCliArchiveName(from.version, rid)),
-      join(assets, hostUpdateCliArchiveName(release.version, rid)));
-    const sbomPath = join(assets, hostUpdateCliSbomName(release.version, rid));
-    writeJson(sbomPath, dummySpdxDocument({ name: 'printfarmer-host-update-cli', version: release.version, rid }));
-    validateHostUpdateCliSbom(readFileSync(sbomPath, 'utf8'), sbomPath);
-  }
-  return completeHostUpdateCliSums({ assets, version: release.version });
-}
-
 export function buildFixtureRelease({
   source,
   output,
@@ -225,7 +211,6 @@ export function buildFixtureRelease({
   run,
   scratch,
   runtimes = ['linux-x64'],
-  cliFrom,
 }) {
   requireThat(typeof source === 'string' && source.length > 0, 'source is required');
   requireThat(typeof output === 'string' && output.length > 0, 'output is required');
@@ -234,11 +219,7 @@ export function buildFixtureRelease({
   requireCompleteImageDetails(imageDetails);
   const assets = resolve(output);
   mkdirSync(assets, { recursive: true });
-  if (cliFrom) {
-    reuseFixtureHostUpdateCli({ from: cliFrom, assets, release, runtimes });
-  } else {
-    packageFixtureHostUpdateCli({ source, assets, release, run, scratch, runtimes });
-  }
+  packageFixtureHostUpdateCli({ source, assets, release, run, scratch, runtimes });
 
   const manifest = buildManifest(release, imageDetails);
   writeFileSync(join(assets, 'update-manifest.json'), manifest);

@@ -29,7 +29,6 @@ export const faultKinds = Object.freeze([
   'corrupt-journal',
   'corrupt-replay',
   'fence-release',
-  'emulated-printer-reconciliation',
 ]);
 
 // Migration cells run against the #3167 N -> N+1 fixture target so the interruption lands
@@ -131,14 +130,6 @@ export const faultCells = Object.freeze([
   defineFaultCell({
     id: 'fault-fence-release',
     fault: { kind: 'fence-release', point: 'fence-release:pending' },
-    expected: { outcome: 'RolledBack' },
-  }),
-  // Issue #3103: the same fence-release path with a registered printer backed by the Moonraker
-  // emulator, so the cell can prove recovery never commands a printer and dispatch stays fenced
-  // until the operator confirms physical reconciliation.
-  defineFaultCell({
-    id: 'fault-emulated-printer-reconciliation',
-    fault: { kind: 'emulated-printer-reconciliation', point: 'fence-release:pending' },
     expected: { outcome: 'RolledBack' },
   }),
 ]);

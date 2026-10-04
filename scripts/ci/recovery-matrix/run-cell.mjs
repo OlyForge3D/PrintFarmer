@@ -12,24 +12,10 @@ import { schemaDeltaFixtureStateSql } from './schema-delta-fixture.mjs';
 import { writeRecoveryCompose } from './compose-config.mjs';
 import { dockerFaultFiles, wrapToolWithPauseGate, writeDockerShim } from './docker-shim.mjs';
 import { runFaultScenario } from './fault-scenarios.mjs';
-import {
-  classifyDispatchProbe,
-  emulatorIpFor,
-  emulatorPort,
-  mintHarnessJwt,
-  networkRequestScript,
-  parseEmulatorRequests,
-  parseNetworkResponse,
-  pointPrinterAtEmulatorSql,
-  queuedAutoDispatchFileName,
-  queuedAutoDispatchGcode,
-  queuedAutoDispatchWork,
-  queuedAutoDispatchWorkSql,
-} from './emulated-printer.mjs';
 import { runImportScenario } from './import-scenarios.mjs';
 import { hasFaultHooks, invokeFaultHook, parseFaultHooks } from './fault-hooks.mjs';
 import { assertHostStateContinuity, readHostStateSnapshotFromBoundary } from './host-state-continuity.mjs';
-import { canaryDnsQuery, hasCanaryAttempt } from './network-denial.mjs';
+import { canaryDnsName, hasCanaryAttempt } from './network-denial.mjs';
 import { providerFor } from './providers.mjs';
 import { redactSecrets, secretValuesFrom } from './redaction.mjs';
 import { serviceMappingsFor, topologyFor } from './topologies.mjs';
@@ -43,7 +29,6 @@ import {
 } from './runtime-assertions.mjs';
 import {
   baseEvidence,
-  containerizedDotnetArgs,
   createCheckpoints,
   detectUbuntuHost,
   lastJournalPhase,
@@ -89,8 +74,6 @@ const priorCell = cellSpec.id === 'split-database'
   ? { ...cell, databaseLayout: 'shared' }
   : cell;
 const faultState = { injected: false };
-// Name of the #3103 emulated-printer container once started, so cleanup always removes it.
-let emulatedPrinterContainer = null;
 
 const run = {
   id: runRoot.split(/[\\/]/).at(-1),
@@ -156,11 +139,15 @@ try {
     }
     if (name === 'dotnet' && !commandExists('dotnet')) {
       const cwd = options.cwd ?? repo;
-      return execFileSync('docker', containerizedDotnetArgs({
-        commandArgs,
-        cwd,
-        mounts: [repo, runRoot],
-      }), { encoding: 'utf8', stdio: options.stdio, env: options.env });
+      return execFileSync('docker', [
+        'run',
+        '--rm',
+        '-v', `${repo}:${repo}`,
+        '-w', cwd,
+        'mcr.microsoft.com/dotnet/sdk:10.0-noble',
+        'dotnet',
+        ...commandArgs,
+      ], { encoding: 'utf8', stdio: options.stdio, env: options.env });
     }
     return execFileSync(name, commandArgs, { encoding: 'utf8', ...options });
   };
@@ -239,10 +226,6 @@ try {
   const hostStateRoot = recoveryHostStateRoot(runRoot, { hostBoundary: true });
   provisionBoundaryHostState(hostContainer, repo, hostStateRoot, { channel: 'insider' });
   const dockerShim = writeDockerShim(runRoot, deploymentRoot, networkAttemptsPath);
-  // Pre-create the executor state directory so the app containers' read-only admission mount
-  // binds the harness-owned directory rather than one Docker would create as root (#3207).
-  const hostUpdateStateDirectory = join(runRoot, 'host-update', 'state');
-  mkdirSync(hostUpdateStateDirectory, { recursive: true });
   writeRecoveryCompose({
     deploymentRoot,
     network,
@@ -253,7 +236,6 @@ try {
     runId: run.id,
     cell: priorCell,
     hostUpdateBackupsRoot: join(runRoot, 'host-update', 'backups'),
-    hostUpdateStateDirectory,
   });
   const databaseTools = provider.writeToolShims({ runRoot, databaseContainer });
   const toolGates = cellSpec.scenario === 'fault' && databaseTools.pgDump && databaseTools.pgRestore
@@ -353,15 +335,6 @@ try {
     },
   });
 
-  if (cellSpec.id === 'fault-emulated-printer-reconciliation') {
-    writeQueuedAutoDispatchArtifactToApp({
-      env,
-      deploymentRoot,
-      appComposeService: topologyFor(priorCell.topology).healthComposeService,
-    });
-    checkpoints.ok(`queued-auto-dispatch-artifact-preseeded:file=${queuedAutoDispatchFileName}`);
-  }
-
   const beforeRecovery = stateContinuitySnapshot({ env, deploymentRoot, hostStateRoot, hostContainer, provider });
   if (cellSpec.scenario === 'import') {
     const importStarted = Date.now();
@@ -424,9 +397,6 @@ try {
   }
 
   if (cellSpec.id === 'split-database') {
-    // The split layout's slicer database must exist, as it would on a real split host, so the
-    // remote-worker guard can read it and the preflight fingerprint guard gets to refuse.
-    ensureHarnessDatabases(deploymentRoot, env, provider, cell);
     writeRecoveryCompose({
       deploymentRoot,
       network,
@@ -437,7 +407,6 @@ try {
       runId: run.id,
       cell,
       hostUpdateBackupsRoot: join(runRoot, 'host-update', 'backups'),
-      hostUpdateStateDirectory,
     });
   }
 
@@ -543,7 +512,6 @@ try {
         })),
       };
     };
-    const hostShell = (script) => hostExecFileSync(hostContainer, ['bash', '-lc', script], { cwd: repo });
     const fault = runFaultScenario({
       cellSpec,
       runRoot,
@@ -581,16 +549,12 @@ try {
         workRoot: join(runRoot, 'fault-ops'),
       }),
       restartHost: () => restartHostContainer(hostContainer),
-      hostShell,
+      hostShell: (script) => hostExecFileSync(hostContainer, ['bash', '-lc', script], { cwd: repo }),
       dbQuery: (sql) => databaseQuery(deploymentRoot, env, provider, sql),
       schemaDelta,
       schemaDeltaState: (context) => parseSchemaDeltaState(
         databaseQuery(deploymentRoot, env, provider, schemaDeltaFixtureStateSql(provider.id, context))),
       seedPrinter: () => databaseQuery(deploymentRoot, env, provider, seedPrinterSql()),
-      emulatedPrinter: createEmulatedPrinter({
-        env,
-        deploymentRoot,
-      }),
       snapshot: faultSnapshot,
       assertNoMutation,
       assertRolledBack: assertRecoveredToPrior,
@@ -940,7 +904,6 @@ try {
   process.exitCode = 1;
   }
 } finally {
-  disposeEmulatedPrinter();
   root.dispose();
 }
 
@@ -1646,7 +1609,7 @@ function proveNetworkDenialBoundary({ hostContainer, networkAttemptsPath }) {
       'set +e',
       "timeout 3 bash -lc 'cat </dev/null >/dev/tcp/1.1.1.1/443' >/dev/null 2>&1",
       'direct=$?',
-      `getent hosts ${canaryDnsQuery} >/dev/null 2>&1`,
+      `getent hosts ${canaryDnsName} >/dev/null 2>&1`,
       'dns=$?',
       'test "$direct" -ne 0',
       'test "$dns" -ne 0',
@@ -1867,20 +1830,21 @@ function assertInfrastructureLoadedFromBundle(decisionRecords, infrastructureLoc
 }
 
 function readImportDecisionRecords(directory) {
+  if (!existsSync(directory)) {
+    return [];
+  }
   const script = [
-    "const { existsSync, readdirSync, readFileSync, statSync } = require('fs');",
+    "const { readdirSync, readFileSync, statSync } = require('fs');",
     "const { join } = require('path');",
     "const root = process.argv[1];",
     "const files = [];",
     "function walk(dir) { for (const name of readdirSync(dir)) { const file = join(dir, name); const stat = statSync(file); if (stat.isDirectory()) walk(file); else if (name.endsWith('.json')) files.push(file); } }",
-    "if (existsSync(root)) walk(root);",
+    "walk(root);",
     "const records = files.map(file => { try { return JSON.parse(readFileSync(file, 'utf8')); } catch { return undefined; } }).filter(record => record && record.kind === 'printfarmer-offline-import-decision');",
     "records.sort((a, b) => String(a.decidedAt).localeCompare(String(b.decidedAt)));",
     "process.stdout.write(JSON.stringify(records));",
   ].join('\n');
-  // The CLI writes decision records as root inside the host container with owner-only
-  // permissions, so read them there rather than as a possibly non-root runner.
-  return JSON.parse(hostExecFileSync(hostContainer, ['node', '-e', script, directory]));
+  return JSON.parse(execFileSync('node', ['-e', script, directory], { encoding: 'utf8' }));
 }
 
 function waitForDatabaseReady(deploymentRoot, env, provider) {
@@ -2080,121 +2044,6 @@ function runningComposeImageDigest(env, service) {
   const container = `${env.COMPOSE_PROJECT_NAME}-${service}-1`;
   const image = execFileSync('/usr/bin/docker', ['inspect', container, '--format', '{{.Config.Image}}'], { encoding: 'utf8' }).trim();
   return image.includes('@') ? image.split('@').at(-1) : image;
-}
-
-// Issue #3103: the repository's Moonraker emulator, built from source and attached only to the
-// run's internal network, stands in for a physical printer. The container name is recorded so the
-// finally block (and run-cell.sh cleanup) always removes it.
-function writeQueuedAutoDispatchArtifactToApp({ env, deploymentRoot, appComposeService }) {
-  const gcodePath = `/app/gcode/${queuedAutoDispatchFileName}`;
-  execFileSync('/usr/bin/docker', [
-    'compose',
-    '-f', join(deploymentRoot, 'docker-compose.recovery.yml'),
-    '-p', env.COMPOSE_PROJECT_NAME,
-    'exec',
-    '-T',
-    appComposeService,
-    'sh',
-    '-ec',
-    `mkdir -p /app/gcode && base64 -d > ${shellQuote(gcodePath)} && test -s ${shellQuote(gcodePath)}`,
-  ], {
-    cwd: deploymentRoot,
-    encoding: 'utf8',
-    env: { ...process.env, ...env },
-    input: Buffer.from(queuedAutoDispatchGcode, 'utf8').toString('base64'),
-    stdio: ['pipe', 'pipe', 'pipe'],
-  });
-}
-
-function createEmulatedPrinter({ env, deploymentRoot }) {
-  const emulatorIp = emulatorIpFor(appStaticIp);
-  const container = `${run.id}-printer-emulator`;
-  const image = `printfarmer-${run.id.replace(/[^A-Za-z0-9_.-]/g, '-').toLowerCase()}-moonraker-emulator:recovery`;
-  const request = (spec) => {
-    const result = spawnSync('/usr/bin/docker', [
-      'run', '--rm', '--network', network, '--env', 'REQ', 'python:3.12-alpine', 'python', '-c', networkRequestScript,
-    ], { encoding: 'utf8', env: { ...process.env, REQ: JSON.stringify(spec) }, stdio: ['ignore', 'pipe', 'pipe'] });
-    if (result.status !== 0) throw new Error(`network_request_failed:${spec.method}:${spec.url}:${result.stderr}`);
-    return parseNetworkResponse(result.stdout);
-  };
-  const emulatorGet = (path) => request({ url: `http://${emulatorIp}:${emulatorPort}${path}`, method: 'GET' });
-  return {
-    start() {
-      execFileSync('/usr/bin/docker', [
-        'build', repo,
-        '--file', join(repo, 'scripts/docker/dockerfiles/Dockerfile.multistage'),
-        '--target', 'moonraker-emulator-runtime',
-        '--tag', image,
-      ], { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'inherit', 'pipe'] });
-      emulatedPrinterContainer = container;
-      execFileSync('/usr/bin/docker', [
-        'run', '--detach',
-        '--name', container,
-        '--label', `printfarmer.recovery-matrix.run=${run.id}`,
-        '--network', network,
-        '--ip', emulatorIp,
-        '--env', `ASPNETCORE_URLS=http://0.0.0.0:${emulatorPort}`,
-        '--env', 'Emulator__EnableControlApi=true',
-        image,
-      ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-      const deadline = Date.now() + 120_000;
-      for (;;) {
-        const health = emulatorGet('/healthz');
-        if (health.status === 200) break;
-        if (Date.now() > deadline) throw new Error(`emulator_not_healthy:status=${health.status}`);
-        execFileSync('/usr/bin/sleep', ['2'], { stdio: 'ignore' });
-      }
-    },
-    attach() {
-      const output = databaseQuery(deploymentRoot, env, provider, pointPrinterAtEmulatorSql(emulatorIp));
-      const ids = String(output).match(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi) ?? [];
-      if (ids.length !== 1) throw new Error(`emulated_printer_attach_expected_one_row:${output}`);
-      return ids[0];
-    },
-    seedQueuedAutoDispatchWork(printerId) {
-      const work = queuedAutoDispatchWork({ printerId });
-      const output = databaseQuery(deploymentRoot, env, provider, queuedAutoDispatchWorkSql({ printerId, ...work }));
-      if (!String(output).includes(work.jobId)) throw new Error(`queued_auto_dispatch_seed_missing_job:${output}`);
-      return work;
-    },
-    queuedAutoDispatchJobState(jobId) {
-      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(jobId)) {
-        throw new Error(`invalid_job_id:${jobId}`);
-      }
-      const sql = provider.id === 'postgres'
-        ? `SELECT "Status", ("AssignedPrinterId" IS NOT NULL)::int FROM "PrintJobs" WHERE "Id" = '${jobId}'::uuid;`
-        : `SET NOCOUNT ON; SELECT [Status], CASE WHEN [AssignedPrinterId] IS NULL THEN 0 ELSE 1 END FROM [PrintJobs] WHERE [Id] = CONVERT(uniqueidentifier, '${jobId}');`;
-      const raw = databaseQuery(deploymentRoot, env, provider, sql);
-      const values = String(raw).trim().split(/[\s|]+/).filter(Boolean);
-      if (values.length < 2) return { status: Number.NaN, assigned: false, raw: String(raw).trim() };
-      return {
-        status: Number(values[0]),
-        assigned: values[1] === '1' || values[1].toLowerCase() === 'true',
-        raw: String(raw).trim(),
-      };
-    },
-    requests() {
-      const response = emulatorGet('/__emulator/requests');
-      if (response.status !== 200) throw new Error(`emulator_request_log_unavailable:status=${response.status}`);
-      return parseEmulatorRequests(response.body);
-    },
-    dispatchProbe(printerId) {
-      const token = mintHarnessJwt({ key: env.Jwt__Key, issuer: env.Jwt__Issuer, audience: env.Jwt__Audience });
-      const response = request({
-        url: `http://${appStaticIp}:${appHealthPort}/api/auto-dispatch/${printerId}/ready`,
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: '{}',
-      });
-      return { status: response.status, classification: classifyDispatchProbe(response) };
-    },
-  };
-}
-
-function disposeEmulatedPrinter() {
-  if (!emulatedPrinterContainer) return;
-  spawnSync('/usr/bin/docker', ['rm', '--force', emulatedPrinterContainer], { stdio: 'ignore' });
-  emulatedPrinterContainer = null;
 }
 
 function httpGetFromNetwork(network, ip, path) {

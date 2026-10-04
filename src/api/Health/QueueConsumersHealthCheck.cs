@@ -43,7 +43,6 @@ public sealed class QueueConsumersHealthCheck : IHealthCheck
         new("queueReconciliation", typeof(QueueReconciliationService)),
         new("queueRetentionPrune", typeof(QueueRetentionPruneService)),
         new("bedClearAcknowledgementExpiry", typeof(BedClearAcknowledgementExpiryService)),
-        new("dispatchEscalation", typeof(DispatchEscalationService)),
     ];
 
     private readonly IEnumerable<IHostedService> _hostedServices;

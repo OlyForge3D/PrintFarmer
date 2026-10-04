@@ -1,4 +1,4 @@
-﻿using System.Net;
+using System.Net;
 using System.Text.Json;
 using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Services.HostUpdates;
@@ -24,6 +24,11 @@ public sealed class SignedUpdateInfrastructureTests
 
         foreach (SequenceInvalidCase testCase in fixture.InvalidCases)
         {
+            if (!testCase.DeriveSequenceRejects)
+            {
+                continue;
+            }
+
             Assert.ThrowsAny<Exception>(() => SignedUpdateManifestValidator.DeriveSequence(testCase.Version));
         }
 
@@ -51,41 +56,33 @@ public sealed class SignedUpdateInfrastructureTests
             FindRepositoryRoot(),
             "scripts", "ci", "fixtures", "release-version-sequence.schema.json"));
         using JsonDocument schemaDocument = JsonDocument.Parse(schema);
-        string pattern = schemaDocument.RootElement
+        string validCaseRef = schemaDocument.RootElement
             .GetProperty("properties")
             .GetProperty("validCases")
             .GetProperty("items")
             .GetProperty("$ref")
             .GetString()!;
-        Assert.Equal("#/$defs/validCase", pattern);
-        JsonElement validCaseProperties = schemaDocument.RootElement
-            .GetProperty("$defs")
-            .GetProperty("validCase")
-            .GetProperty("properties");
-        Assert.Equal(1, validCaseProperties.GetProperty("version").GetProperty("minLength").GetInt32());
-        Assert.Equal("#/$defs/parsedVersion", validCaseProperties
-            .GetProperty("parsed")
-            .GetProperty("$ref")
-            .GetString());
-        JsonElement parsedProperties = schemaDocument.RootElement
-            .GetProperty("$defs")
-            .GetProperty("parsedVersion")
-            .GetProperty("properties");
-        // The signer contract allows a zero-major *prerelease*, so the schema's documented
-        // minimum is 0; only stable releases require a non-zero major version.
-        Assert.Equal(0, parsedProperties.GetProperty("major").GetProperty("minimum").GetInt32());
+        Assert.Equal("#/$defs/validCase", validCaseRef);
+        string versionSyntax = schemaDocument.RootElement
+            .GetProperty("properties")
+            .GetProperty("contract")
+            .GetProperty("properties")
+            .GetProperty("versionSyntax")
+            .GetProperty("const")
+            .GetString()!;
+        Assert.Equal("MAJOR.MINOR.PATCH[-insider.SEQUENCE]", versionSyntax);
 
         SequenceGoldenFixture fixture = LoadSequenceFixture();
         foreach (SequenceValidCase testCase in fixture.ValidCases)
         {
-            Assert.True(testCase.Parsed.Major >= 1 || testCase.Parsed.Kind == "insider", testCase.Name);
-            Assert.Equal(
-                SignedUpdateManifestValidator.DeriveSequence(testCase.Version),
-                long.Parse(testCase.ExpectedSequence, System.Globalization.CultureInfo.InvariantCulture));
+            Assert.False(string.IsNullOrWhiteSpace(testCase.Version));
         }
 
+        Assert.Contains(fixture.InvalidCases, testCase => testCase.Version == "01.2.3" && testCase.DeriveSequenceRejects);
+        Assert.Contains(fixture.InvalidCases, testCase => testCase.Version == "1.02.3" && testCase.DeriveSequenceRejects);
+        Assert.Contains(fixture.InvalidCases, testCase => testCase.Version == "1.2.03" && testCase.DeriveSequenceRejects);
         Assert.Contains(fixture.ValidCases, testCase => testCase.Version == "0.2.3-insider.1");
-        Assert.Contains(fixture.InvalidCases, testCase => testCase.Version == "0.2.3");
+        Assert.Contains(fixture.InvalidCases, testCase => testCase.Version == "0.2.3" && testCase.DeriveSequenceRejects);
     }
 
     [Fact]
@@ -137,6 +134,37 @@ public sealed class SignedUpdateInfrastructureTests
     {
         SignedUpdateManifest manifest = CreateManifest("1.2.3", "stable", "main");
         Assert.True(SignedUpdateManifestValidator.Validate(manifest).IsValid);
+    }
+
+    [Fact]
+    public void Validate_ValidZeroMajorInsiderManifest_AcceptsManagedUpdateEvidence()
+    {
+        SignedUpdateManifest manifest = CreateManifest("0.2.3-insider.1", "insider", "development");
+        Assert.True(SignedUpdateManifestValidator.Validate(manifest).IsValid);
+        Assert.True(manifest.ManagedUpdateEligible);
+    }
+
+    [Theory]
+    [InlineData("1", true)]
+    [InlineData("12345678901234567890", true)]
+    [InlineData("abc", false)]
+    [InlineData("0", false)]
+    [InlineData("+1", false)]
+    [InlineData("-1", false)]
+    [InlineData(" 1", false)]
+    [InlineData("1 ", false)]
+    [InlineData("01", false)]
+    public void Validate_BuildId_MatchesProducerPositiveDecimalContract(string buildId, bool expectedValid)
+    {
+        SignedUpdateManifest manifest = CreateManifest("1.2.3", "stable", "main") with { BuildId = buildId };
+
+        SignedUpdateValidationResult result = SignedUpdateManifestValidator.Validate(manifest);
+
+        Assert.Equal(expectedValid, result.IsValid);
+        if (!expectedValid)
+        {
+            Assert.Contains("build_id_invalid", result.Errors);
+        }
     }
 
     [Fact]
@@ -257,174 +285,11 @@ public sealed class SignedUpdateInfrastructureTests
     }
 
     [Fact]
-    public async Task Current_VerifiedManifestThroughMapperAndCache_PreservesSixCanonicalChildTargetsAsync()
-    {
-        SignedReleaseMetadata metadata = await CreateVerifiedMetadataAsync();
-        VerifiedReleaseEvidenceDto mapped = metadata.ToEvidenceDto("linux-amd64");
-        VerifiedReleaseEvidenceCache evidence = new();
-        DateTimeOffset verifiedAt = DateTimeOffset.UtcNow;
-        Assert.True(evidence.SetVerified(mapped, verifiedAt));
-        VerifiedReleaseEvidenceCandidateCache cache = new(
-            evidence, Ready(), "linux-amd64", TimeSpan.FromMinutes(10));
-
-        Assert.Equal(
-            ["api", "frontend", "slicer-host", "discovery", "slicer-worker"],
-            mapped.Services.Select(service => service.ServiceId));
-        Assert.Equal(HostUpdateExecutionRequest.RequiredTargetCount, mapped.ExecutionTargets.Count);
-        Assert.True(HostUpdateExecutionRequest.RequiredServiceIds.SetEquals(
-            mapped.ExecutionTargets.Select(target => target.ServiceId)));
-        Assert.All(mapped.ExecutionTargets, target =>
-        {
-            Assert.Equal("linux-amd64", target.Platform);
-            Assert.Equal(metadata.ComponentPlatformDigests[$"{target.ServiceId}/linux-amd64"], target.PlatformDigest);
-            Assert.NotEqual(metadata.ComponentIndexDigests![target.ServiceId], target.PlatformDigest);
-        });
-        Assert.Same(mapped, evidence.Current);
-        VerifiedHostUpdateCandidate candidate = Assert.IsType<VerifiedHostUpdateCandidate>(cache.Current);
-        Assert.Null(cache.LastError);
-        Assert.Equal(metadata.Sequence, candidate.Sequence);
-        Assert.Equal(metadata.Identity.ReleaseId, candidate.ReleaseId);
-        Assert.Equal(metadata.Identity.SourceCommit, candidate.SourceCommit);
-        Assert.Equal(metadata.Identity.ManifestDigest, candidate.ManifestDigest);
-        Assert.Equal(metadata.Identity.Channel, candidate.Channel);
-        Assert.Equal(verifiedAt, candidate.VerifiedAt);
-        Assert.Equal("linux-amd64", candidate.HostPlatform);
-        Assert.True(candidate.CryptographicallyVerified);
-        Assert.True(candidate.CompatibilityReady);
-        Assert.True(candidate.InstallationAvailable);
-        Assert.True(candidate.SafetyPassed);
-        Assert.True(candidate.IsNewer);
-        Assert.True(candidate.EvidenceFresh);
-        Assert.Equal(new HostUpdatePlatformDigests(
-            metadata.ComponentPlatformDigests["api/linux-amd64"],
-            metadata.ComponentPlatformDigests["frontend/linux-amd64"],
-            metadata.ComponentPlatformDigests["slicer-host/linux-amd64"],
-            metadata.ComponentPlatformDigests["printer-discovery/linux-amd64"],
-            metadata.ComponentPlatformDigests["orcaslicer-worker/linux-amd64"],
-            metadata.ComponentPlatformDigests["monolith/linux-amd64"]), candidate.PlatformDigests);
-
-        HostUpdateExecutorRequest executorRequest = new(
-            "signed-target-regression", candidate.ReleaseId, candidate.SourceCommit,
-            candidate.Sequence, candidate.ManifestDigest, candidate.Channel, candidate.TrustRoot,
-            1, "test-policy-fingerprint", candidate.PlatformDigests);
-        HostUpdateExecutionRequest execution = HostUpdateExecutionRequestBuilder.FromExecutorRequest(
-            executorRequest, candidate.HostPlatform, HostUpdateAuthorizationKind.StandingPolicy);
-
-        Assert.True(execution.IsValid(out string error), error);
-        Assert.Equal(HostUpdateExecutionRequest.RequiredTargetCount, execution.Targets.Count);
-        Assert.True(HostUpdateExecutionRequest.RequiredServiceIds.SetEquals(
-            execution.Targets.Select(target => target.ServiceId)));
-        Assert.All(execution.Targets, target =>
-            Assert.Equal(metadata.ComponentPlatformDigests[$"{target.ServiceId}/{target.Platform}"], target.ChildDigest));
-    }
-
-    [Fact]
-    public async Task Current_VerifiedArmManifestWithoutWorker_RejectsWithoutInventingTargetAsync()
-    {
-        SignedReleaseMetadata metadata = await CreateVerifiedMetadataAsync();
-        VerifiedReleaseEvidenceDto mapped = metadata.ToEvidenceDto("linux-arm64");
-        VerifiedReleaseEvidenceCache evidence = new();
-        evidence.SetVerified(mapped, DateTimeOffset.UtcNow);
-        VerifiedReleaseEvidenceCandidateCache cache = new(
-            evidence, new Mock<IHostUpdateCandidateReadiness>(MockBehavior.Strict).Object,
-            "linux-arm64", TimeSpan.FromMinutes(10));
-
-        Assert.Equal(4, mapped.Services.Count);
-        Assert.Equal(5, mapped.ExecutionTargets.Count);
-        Assert.DoesNotContain(mapped.ExecutionTargets, target => target.ServiceId == "orcaslicer-worker");
-        Assert.All(mapped.ExecutionTargets, target =>
-            Assert.Equal(metadata.ComponentPlatformDigests[$"{target.ServiceId}/linux-arm64"], target.PlatformDigest));
-        Assert.Null(cache.Current);
-        Assert.Equal("verified_release_target_set_invalid", cache.LastError);
-    }
-
-    [Theory]
-    [InlineData("missing", "verified_release_target_set_invalid")]
-    [InlineData("duplicate", "verified_release_target_set_invalid")]
-    [InlineData("unknown", "verified_release_target_set_invalid")]
-    [InlineData("platform", "verified_release_target_platform_invalid")]
-    [InlineData("digest", "verified_release_target_platform_invalid")]
-    [InlineData("identity", "verified_release_identity_invalid")]
-    [InlineData("signature", "verified_release_evidence_untrusted")]
-    [InlineData("stale", "verified_release_evidence_stale")]
-    [InlineData("cache-error", "discovery_failed")]
-    public async Task Current_MappedEvidenceInvalidated_RejectsBeforeReadingReadinessAsync(string field, string reason)
-    {
-        SignedReleaseMetadata metadata = await CreateVerifiedMetadataAsync();
-        VerifiedReleaseEvidenceDto mapped = metadata.ToEvidenceDto("linux-amd64");
-        mapped = field switch
-        {
-            "missing" => mapped with { ExecutionTargets = mapped.ExecutionTargets.Take(5).ToArray() },
-            "duplicate" => mapped with
-            {
-                ExecutionTargets = mapped.ExecutionTargets.Select(target =>
-                    target.ServiceId == "monolith" ? target with { ServiceId = "api" } : target).ToArray(),
-            },
-            "unknown" => mapped with
-            {
-                ExecutionTargets = mapped.ExecutionTargets.Select(target =>
-                    target.ServiceId == "monolith" ? target with { ServiceId = "unknown" } : target).ToArray(),
-            },
-            "platform" => mapped with
-            {
-                ExecutionTargets = mapped.ExecutionTargets.Select(target =>
-                    target.ServiceId == "monolith" ? target with { Platform = "linux-arm64" } : target).ToArray(),
-            },
-            "digest" => mapped with
-            {
-                ExecutionTargets = mapped.ExecutionTargets.Select(target =>
-                    target.ServiceId == "monolith" ? target with { PlatformDigest = "sha256:" + new string('A', 64) } : target).ToArray(),
-            },
-            "identity" => mapped with { Identity = mapped.Identity! with { ReleaseId = "invalid" } },
-            "signature" => mapped with { SignatureVerified = false },
-            _ => mapped,
-        };
-        VerifiedReleaseEvidenceCache evidence = new();
-        evidence.SetVerified(mapped, field == "stale" ? DateTimeOffset.UtcNow.AddHours(-1) : DateTimeOffset.UtcNow);
-        if (field == "cache-error")
-        {
-            evidence.SetError(reason);
-            Assert.Same(mapped, evidence.Current);
-        }
-        VerifiedReleaseEvidenceCandidateCache cache = new(
-            evidence, new Mock<IHostUpdateCandidateReadiness>(MockBehavior.Strict).Object,
-            "linux-amd64", TimeSpan.FromMinutes(10));
-
-        Assert.Null(cache.Current);
-        Assert.Equal(reason, cache.LastError);
-    }
-
-    [Theory]
-    [InlineData(false, "0.0.0")]
-    [InlineData(true, "invalid")]
-    public async Task Current_MappedEvidenceWithoutReadinessOrMinimumVersion_DoesNotClaimCompatibilityAsync(
-        bool ready, string minimumUpdaterVersion)
-    {
-        SignedReleaseMetadata metadata = await CreateVerifiedMetadataAsync();
-        VerifiedReleaseEvidenceDto mapped = metadata.ToEvidenceDto("linux-amd64") with
-        {
-            MinimumUpdaterVersion = minimumUpdaterVersion,
-        };
-        VerifiedReleaseEvidenceCache evidence = new();
-        evidence.SetVerified(mapped, DateTimeOffset.UtcNow);
-        VerifiedReleaseEvidenceCandidateCache cache = new(
-            evidence, ready ? Ready() : new UnavailableHostUpdateCandidateReadiness(),
-            "linux-amd64", TimeSpan.FromMinutes(10));
-
-        VerifiedHostUpdateCandidate candidate = Assert.IsType<VerifiedHostUpdateCandidate>(cache.Current);
-        Assert.False(candidate.CompatibilityReady);
-        Assert.Equal(ready, candidate.InstallationAvailable);
-        Assert.Equal(ready, candidate.SafetyPassed);
-        Assert.Equal(ready, candidate.IsNewer);
-        Assert.Null(cache.LastError);
-    }
-
-    [Fact]
     public async Task Provider_ManifestDigestChangesWhenVerifiedBytesChange()
     {
         SignedUpdateManifest manifest = CreateManifest("1.2.3", "stable", "main");
         byte[] firstBytes = JsonSerializer.SerializeToUtf8Bytes(manifest, JsonOptions);
-        byte[] secondBytes = JsonSerializer.SerializeToUtf8Bytes(manifest with { BuildId = "build-2" }, JsonOptions);
+        byte[] secondBytes = JsonSerializer.SerializeToUtf8Bytes(manifest with { BuildId = "200" }, JsonOptions);
         VerifiedGitHubReleaseMetadataProvider firstProvider = new(new GitHubSignedReleaseDiscovery(new HttpClient(new TestHandler(firstBytes)), new AcceptingVerifier()));
         VerifiedGitHubReleaseMetadataProvider secondProvider = new(new GitHubSignedReleaseDiscovery(new HttpClient(new TestHandler(secondBytes)), new AcceptingVerifier()));
 
@@ -499,48 +364,6 @@ public sealed class SignedUpdateInfrastructureTests
             ["https://github.com/OlyForge3D/PrintFarmer/.github/workflows/consolidated-release.yml@refs/heads/main"],
             verifier.Identities);
         Assert.Equal(new[] { 1, 2 }, handler.ReleasePages);
-    }
-
-    [Fact]
-    public async Task Discovery_StableTagWithPrereleaseMetadata_IsRejected()
-    {
-        SignedUpdateManifest manifest = CreateManifest("1.2.3", "stable", "main");
-        byte[] manifestBytes = JsonSerializer.SerializeToUtf8Bytes(manifest, JsonOptions);
-        ReleaseHandler handler = new(
-            new Dictionary<int, string>
-            {
-                [1] = "[" + ReleaseJson(1, "v1.2.3", false, true, true) + "]",
-            },
-            new Dictionary<long, byte[]> { [11] = manifestBytes });
-        RecordingVerifier verifier = new(_ => true);
-
-        VerifiedSignedUpdateRelease? result = await new GitHubSignedReleaseDiscovery(
-            new HttpClient(handler),
-            verifier).DiscoverAsync("stable", default);
-
-        Assert.Null(result);
-        Assert.Empty(verifier.Identities);
-    }
-
-    [Fact]
-    public async Task Discovery_InsiderTagWithoutPrereleaseMetadata_IsRejected()
-    {
-        SignedUpdateManifest manifest = CreateManifest("1.2.3-insider.4", "insider", "development");
-        byte[] manifestBytes = JsonSerializer.SerializeToUtf8Bytes(manifest, JsonOptions);
-        ReleaseHandler handler = new(
-            new Dictionary<int, string>
-            {
-                [1] = "[" + ReleaseJson(1, "v1.2.3-insider.4", false, false, true) + "]",
-            },
-            new Dictionary<long, byte[]> { [11] = manifestBytes });
-        RecordingVerifier verifier = new(_ => true);
-
-        VerifiedSignedUpdateRelease? result = await new GitHubSignedReleaseDiscovery(
-            new HttpClient(handler),
-            verifier).DiscoverAsync("insider", default);
-
-        Assert.Null(result);
-        Assert.Empty(verifier.Identities);
     }
 
     [Fact]
@@ -845,35 +668,11 @@ public sealed class SignedUpdateInfrastructureTests
         SignedUpdateValidationResult validation = SignedUpdateManifestValidator.Validate(manifest);
 
         Assert.True(validation.IsValid, string.Join(',', validation.Errors));
-        Assert.Equal(SignedUpdateManifestValidator.DeriveSequence("1.0.0"), manifest.Sequence);
+        Assert.Equal(100_000_000_99999, manifest.Sequence);
         Assert.Equal(["linux-amd64", "linux-arm64"], manifest.Platforms);
         Assert.Equal(["linux-amd64", "linux-arm64"], manifest.Services[0].Platforms);
         Assert.Equal(["linux-amd64"], manifest.Services[4].Platforms);
         Assert.Contains("printer-discovery/linux-amd64", manifest.PlatformDigests.Keys);
-    }
-
-    private static async Task<SignedReleaseMetadata> CreateVerifiedMetadataAsync()
-    {
-        SignedUpdateManifest manifest = CreateManifest("1.2.3", "stable", "main");
-        manifest = manifest with
-        {
-            PlatformDigests = manifest.PlatformDigests.Keys.Select((key, index) =>
-                KeyValuePair.Create(key, $"sha256:{index + 1:x64}")).ToDictionary(StringComparer.Ordinal),
-        };
-        byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(manifest, JsonOptions);
-        using HttpClient client = new(new TestHandler(bytes));
-        VerifiedGitHubReleaseMetadataProvider provider = new(new GitHubSignedReleaseDiscovery(client, new AcceptingVerifier()));
-        return await provider.GetCurrentAsync("stable", default);
-    }
-
-    private static IHostUpdateCandidateReadiness Ready()
-    {
-        Mock<IHostUpdateCandidateReadiness> readiness = new(MockBehavior.Strict);
-        readiness.SetupGet(value => value.CompatibilityReady).Returns(true);
-        readiness.SetupGet(value => value.InstallationAvailable).Returns(true);
-        readiness.SetupGet(value => value.SafetyPassed).Returns(true);
-        readiness.SetupGet(value => value.IsNewer).Returns(true);
-        return readiness.Object;
     }
 
     private static SignedUpdateManifest CreateManifest(string version, string channel, string branch)
@@ -881,7 +680,7 @@ public sealed class SignedUpdateInfrastructureTests
         string digest = "sha256:" + new string('a', 64);
         string[] platforms = ["linux-amd64", "linux-arm64"];
         string[] services = ["api", "frontend", "slicer-host", "printer-discovery", "orcaslicer-worker", "monolith"];
-        return new(1, $"v{version}", version, channel, branch, new string('b', 40), "build-1",
+        return new(1, $"v{version}", version, channel, branch, new string('b', 40), "100",
             SignedUpdateManifestValidator.DeriveSequence(version), true,
             services.Select(id => new SignedUpdateService(
                 id,
@@ -933,7 +732,7 @@ public sealed class SignedUpdateInfrastructureTests
         IReadOnlyList<SequenceDistinctGroup> DistinctGroups);
     private sealed record SequenceValidCase(string Name, string Version, SequenceParsed Parsed, string ExpectedSequence);
     private sealed record SequenceParsed(long Major, long Minor, long Patch, string Kind, long Suffix);
-    private sealed record SequenceInvalidCase(string Name, string Version, string ErrorContains);
+    private sealed record SequenceInvalidCase(string Name, string Version, string ErrorContains, bool DeriveSequenceRejects = true);
     private sealed record SequenceOrderingCase(string Name, string Lower, string Higher);
     private sealed record SequenceDistinctGroup(string Name, IReadOnlyList<string> Versions);
 

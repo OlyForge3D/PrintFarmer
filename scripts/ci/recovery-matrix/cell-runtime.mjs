@@ -155,32 +155,6 @@ export function parseToolVersions({ cosign }) {
   };
 }
 
-// Runs dotnet in the SDK image when the runner has no SDK. A non-root runner maps its
-// own uid/gid so publish output and obj/bin stay removable by the harness cleanup.
-export function containerizedDotnetArgs({
-  commandArgs,
-  cwd,
-  mounts,
-  uid = process.getuid?.(),
-  gid = process.getgid?.(),
-  image = 'mcr.microsoft.com/dotnet/sdk:10.0-noble',
-}) {
-  const args = ['run', '--rm'];
-  if (Number.isInteger(uid) && uid !== 0) {
-    args.push(
-      '--user', `${uid}:${Number.isInteger(gid) ? gid : uid}`,
-      '-e', 'HOME=/tmp/pf-dotnet-home',
-      '-e', 'DOTNET_CLI_HOME=/tmp/pf-dotnet-home',
-      '-e', 'DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1',
-    );
-  }
-  for (const mount of [...new Set(mounts)]) {
-    args.push('-v', `${mount}:${mount}`);
-  }
-  args.push('-w', cwd, image, 'dotnet', ...commandArgs);
-  return args;
-}
-
 export function parseCosignGitVersion(output) {
   if (typeof output !== 'string' || output.length === 0 || output === 'unavailable') {
     return 'unavailable';
@@ -340,7 +314,34 @@ export function provisionFixtureHostState(rootPath, { channel = 'insider' } = {}
   mkdirSync(rootPath, { recursive: true, mode: 0o700 });
   chmodSync(rootPath, 0o700);
 
-  writeFixturePolicy(rootPath, { channel, revision: 0 });
+  const policy = {
+    Enabled: false,
+    KillSwitch: false,
+    Channel: channel,
+    InsiderAcknowledged: channel === 'insider',
+    PollIntervalSeconds: 3600,
+    InsiderPollIntervalSeconds: null,
+    MaintenanceWindowStartHour: 0,
+    MaintenanceWindowEndHour: 24,
+    Revision: 0,
+    Fingerprint: '',
+  };
+  policy.Fingerprint = sha256Json({
+    Enabled: policy.Enabled,
+    KillSwitch: policy.KillSwitch,
+    Channel: policy.Channel,
+    InsiderAcknowledged: policy.InsiderAcknowledged,
+    PollIntervalSeconds: policy.PollIntervalSeconds,
+    InsiderPollIntervalSeconds: policy.InsiderPollIntervalSeconds,
+    MaintenanceWindowStartHour: policy.MaintenanceWindowStartHour,
+    MaintenanceWindowEndHour: policy.MaintenanceWindowEndHour,
+    Revision: policy.Revision,
+  });
+  writeFileSync(join(rootPath, 'update-automation-policy.json'), JSON.stringify({
+    Version: 1,
+    Policy: policy,
+    Checksum: policy.Fingerprint,
+  }));
 
   const replayChecksum = sha256Json({
     Version: 1,
@@ -372,39 +373,6 @@ export function provisionFixtureHostState(rootPath, { channel = 'insider' } = {}
     Epoch: 0,
     StateHash: stateHash,
     Hash: anchorHash,
-  }));
-}
-
-// Writes the host-state automation policy exactly as the product persists it. An offline channel
-// switch is an operator policy edit, so the import cells call this to move between channels.
-export function writeFixturePolicy(rootPath, { channel, revision }) {
-  const policy = {
-    Enabled: false,
-    KillSwitch: false,
-    Channel: channel,
-    InsiderAcknowledged: channel === 'insider',
-    PollIntervalSeconds: 3600,
-    InsiderPollIntervalSeconds: null,
-    MaintenanceWindowStartHour: 0,
-    MaintenanceWindowEndHour: 24,
-    Revision: revision,
-    Fingerprint: '',
-  };
-  policy.Fingerprint = sha256Json({
-    Enabled: policy.Enabled,
-    KillSwitch: policy.KillSwitch,
-    Channel: policy.Channel,
-    InsiderAcknowledged: policy.InsiderAcknowledged,
-    PollIntervalSeconds: policy.PollIntervalSeconds,
-    InsiderPollIntervalSeconds: policy.InsiderPollIntervalSeconds,
-    MaintenanceWindowStartHour: policy.MaintenanceWindowStartHour,
-    MaintenanceWindowEndHour: policy.MaintenanceWindowEndHour,
-    Revision: policy.Revision,
-  });
-  writeFileSync(join(rootPath, 'update-automation-policy.json'), JSON.stringify({
-    Version: 1,
-    Policy: policy,
-    Checksum: policy.Fingerprint,
   }));
 }
 

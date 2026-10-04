@@ -198,7 +198,6 @@ jobs:
       want_dotnet_build: ${{ steps.selector.outputs.want_dotnet_build }}
       want_dotnet_test: ${{ steps.selector.outputs.want_dotnet_test }}
       want_mig_drift: ${{ steps.selector.outputs.want_mig_drift }}
-      want_dependency_compliance: ${{ steps.selector.outputs.want_dependency_compliance }}
       full_matrix: ${{ steps.selector.outputs.full_matrix }}
       matrix: ${{ steps.selector.outputs.matrix }}
       mig_matrix: ${{ steps.selector.outputs.mig_matrix }}
@@ -246,7 +245,6 @@ jobs:
           WANT_DOTNET_BUILD: ${{ steps.selector.outputs.want_dotnet_build }}
           WANT_DOTNET_TEST: ${{ steps.selector.outputs.want_dotnet_test }}
           WANT_MIG_DRIFT: ${{ steps.selector.outputs.want_mig_drift }}
-          WANT_DEPENDENCY_COMPLIANCE: ${{ steps.selector.outputs.want_dependency_compliance }}
           FULL_MATRIX: ${{ steps.selector.outputs.full_matrix }}
         run: |
           # Every `printf` whose format string begins with `-` uses the POSIX
@@ -260,7 +258,6 @@ jobs:
             printf -- '- want_dotnet_build: `%s`\n' "$WANT_DOTNET_BUILD"
             printf -- '- want_dotnet_test: `%s`\n' "$WANT_DOTNET_TEST"
             printf -- '- want_mig_drift: `%s`\n' "$WANT_MIG_DRIFT"
-            printf -- '- want_dependency_compliance: `%s`\n' "$WANT_DEPENDENCY_COMPLIANCE"
             printf -- '- full_matrix: `%s`\n' "$FULL_MATRIX"
             echo ""
             echo "### test matrix"
@@ -275,11 +272,7 @@ jobs:
   # summary because the selector's own correctness gates every scoped run.
   # Deliberately kept free of any .NET restore (see `dependency-compliance`
   # below, #1395) so this job stays fast and cheap on every PR, including
-  # mobile-only/docs-only changes. It does run the restore-free part of
-  # validate-compliance.mjs (`--skip-nuget`, #3150) on every PR, because the
-  # licensing policy reads repository paths (LICENSE, notices, docs,
-  # Dockerfiles, release workflows, package manifests) that no selector
-  # bucket tracks.
+  # mobile-only/docs-only changes.
   # ---------------------------------------------------------------------------
   ci-tools:
     name: CI tooling tests
@@ -358,31 +351,10 @@ jobs:
       - name: Test compliance controls
         run: node --test scripts/compliance/compliance.test.mjs
 
-      # Everything except the NuGet inventory, which needs a restore and runs
-      # in dependency-compliance. Unconditional so path-list drift in the
-      # selector can never skip licensing/npm validation (#3150).
-      - name: Validate compliance (restore-free)
-        run: node scripts/compliance/validate-compliance.mjs --skip-nuget
-
       - name: Test manual server release path
         run: >-
           node --test scripts/ci/tests/test-publish-release.mjs
           scripts/ci/tests/test-release-evidence.mjs
-          scripts/ci/tests/test-offline-update-bundle.mjs
-          scripts/ci/tests/test-recovery-matrix-evidence.mjs
-          scripts/ci/tests/test-recovery-matrix-fixture-sigstore.mjs
-          scripts/ci/tests/test-recovery-matrix-fixture-release-builder.mjs
-          scripts/ci/tests/test-recovery-matrix-cell-runtime.mjs
-          scripts/ci/tests/test-recovery-matrix-runtime-builders.mjs
-          scripts/ci/tests/test-recovery-matrix-schema-delta-fixture.mjs
-          scripts/ci/tests/test-recovery-matrix-published-bundle.mjs
-          scripts/ci/tests/test-recovery-matrix-workflow.mjs
-          scripts/ci/tests/test-recovery-matrix-catalog.mjs
-          scripts/ci/tests/test-recovery-matrix-entrypoint.mjs
-          scripts/ci/tests/test-recovery-matrix-fault-cells.mjs
-          scripts/ci/tests/test-recovery-matrix-import-cells.mjs
-          scripts/ci/tests/test-recovery-matrix-runtime-assertions.mjs
-          scripts/ci/tests/test-install-host-update-cli-trusted-root.mjs
 
       - name: Test daily development image-set policy
         run: node --test scripts/ci/tests/test-daily-development-images.mjs
@@ -421,36 +393,28 @@ jobs:
   # ---------------------------------------------------------------------------
   # dependency-compliance — full dependency-license/provenance validation.
   # Requires restored NuGet assets (project.assets.json under src/**/obj/);
-  # without a restore the validator emits NUGET_ASSETS_MISSING. Everything
-  # except the NuGet inventory also runs unconditionally in ci-tools
-  # (`--skip-nuget`), so this job exists for the NuGet graph and for policy
-  # changes that affect NuGet validation. Gated on the
-  # selector's `want_dependency_compliance` output, which is a strict
-  # superset of `want_dotnet_build` (see #1395, #3150):
-  #   - NuGet graph: can only change through a bucket that already sets
-  #     `want_dotnet_build` (every `src/**` .NET bucket, plus the
-  #     `shared_config` full-safe bucket for `Directory.Packages.props`,
-  #     `NuGet.Config`, and any `*.sln`). The restore below covers only
-  #     `farm-web.sln`'s project graph; adding a project to it requires
-  #     editing `farm-web.sln`, which is `shared_config` and full-safe.
-  #   - npm graph: changes through the `package.json`/`package-lock.json`
-  #     of every `npmLockFiles` entry in
-  #     compliance/dependency-license-policy.json (`npm_manifest`), which
-  #     never sets `want_dotnet_build` — so a frontend-only dependency bump
-  #     still validates its lock entries and reviewed npm fallbacks here.
-  #   - The policy/evidence/validators themselves (`compliance/**`,
-  #     `scripts/compliance/**`, the `compliance` bucket).
-  # A mobile-only or docs-only PR cannot change the NuGet graph or the
-  # dependency policy, and ci-tools still validates its licensing inputs.
-  # `want_dotnet_build` (and therefore this) is forced `true` (full-safe) on
-  # every trusted push to `main`/`development` or `release/**` (see
-  # select-dotnet-tests.sh `emit_full_safe "full-safe: trusted push to $base"`)
-  # and on `workflow_dispatch`.
+  # without a restore the validator emits NUGET_ASSETS_MISSING. Gated behind
+  # the SAME `want_dotnet_build` decision the `dotnet-build`/`dotnet-test`
+  # jobs use (see #1395): the dependency graph cannot have changed unless a
+  # bucket that feeds `want_dotnet_build` changed, so a mobile-only or
+  # docs-only PR provably has nothing new to validate. Coverage does not
+  # regress — `want_dotnet_build` is forced `true` (full-safe) on every
+  # trusted push to `main`/`development` or `release/**` (see
+  # select-dotnet-tests.sh `emit_full_safe "full-safe: trusted push to $base"`), on
+  # `workflow_dispatch`, and on any change to `Directory.Packages.props`,
+  # `NuGet.Config`, or any `*.sln` (the `shared_config` bucket). Any edit to
+  # an EXISTING `.csproj` that `farm-web.sln` actually references also lives
+  # under a `src/**` bucket (api/infra/backends/slicer/tools/etc.) that
+  # already sets `want_dotnet_build=true` on its own — the restore this job
+  # runs only ever covers `farm-web.sln`'s project graph, so a project file
+  # outside that graph was never covered by validation before this change
+  # either (adding one to the solution requires editing `farm-web.sln`
+  # itself, which is `shared_config` and always triggers full-safe).
   # ---------------------------------------------------------------------------
   dependency-compliance:
     name: Dependency license & provenance validation
     needs: [select, ci-tools]
-    if: ${{ needs.select.outputs.want_dependency_compliance == 'true' }}
+    if: ${{ needs.select.outputs.want_dotnet_build == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -556,13 +520,6 @@ jobs:
         working-directory: src/Web/ReactApp
         run: npm run build
 
-      # Mirrors the frontend Docker build's notices step (#3148): fails when a
-      # production npm package ships no license text and no reviewed fallback
-      # in compliance/dependency-license-policy.json matches its exact version,
-      # so a dependency bump fails here instead of in the deployment smoke.
-      - name: Generate npm license notices
-        run: node scripts/compliance/create-npm-notices.mjs
-
       - name: Test frontend (with coverage)
         working-directory: src/Web/ReactApp
         run: npm run test:coverage
@@ -667,21 +624,6 @@ jobs:
         with:
           name: Farm.Moonraker.Emulator.Tests
           path: src/tests/Farm.Moonraker.Emulator.Tests/bin/Debug/net10.0
-          retention-days: 1
-          if-no-files-found: error
-
-      - name: Upload Farm.HostUpdate.Cli.Tests build
-        if: >-
-          ${{
-            contains(
-              needs.select.outputs.matrix,
-              'Farm.HostUpdate.Cli.Tests.csproj'
-            )
-          }}
-        uses: actions/upload-artifact@v7
-        with:
-          name: Farm.HostUpdate.Cli.Tests
-          path: src/tests/Farm.HostUpdate.Cli.Tests/bin/Debug/net10.0
           retention-days: 1
           if-no-files-found: error
 
@@ -1398,91 +1340,6 @@ jobs:
           if-no-files-found: warn
 
   # ---------------------------------------------------------------------------
-  # recovery-matrix-fixture-migrations — the test-only schema-delta fixture
-  # (#3167) compiles into each PostgreSQL/SQL Server migrations assembly and is
-  # discovered by EF Core as the newest migration, with provider SQL generated
-  # for both Up and Down. Release builds never import the fixture targets.
-  # ---------------------------------------------------------------------------
-  recovery-matrix-fixture-migrations:
-    name: Recovery-matrix fixture migrations (${{ matrix.project }})
-    needs: [ci-tools]
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - project: Farm.Migrations.PostgreSQL
-            provider: postgres
-            context: AppDbContext
-            migration: 29990601000000_RecoveryMatrixFixtureSchemaDelta
-          - project: Farm.Migrations.SqlServer
-            provider: sqlserver
-            context: AppDbContext
-            migration: 29990601000000_RecoveryMatrixFixtureSchemaDelta
-          - project: Farm.Slicer.Migrations.PostgreSQL
-            provider: postgres
-            context: SlicerDbContext
-            migration: 29990601000001_RecoveryMatrixFixtureSlicerSchemaDelta
-          - project: Farm.Slicer.Migrations.SqlServer
-            provider: sqlserver
-            context: SlicerDbContext
-            migration: 29990601000001_RecoveryMatrixFixtureSlicerSchemaDelta
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-        with:
-          ref: ${{ env.CI_SOURCE_SHA }}
-
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v6
-        with:
-          dotnet-version: 10.0.x
-
-      - name: Install dotnet-ef
-        run: |
-          dotnet tool install -g dotnet-ef
-          echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
-
-      - name: Build with fixture migrations
-        working-directory: src
-        env:
-          MATRIX_PROJECT: ${{ matrix.project }}
-        run: |
-          set -euo pipefail
-          dotnet build "./migrations/$MATRIX_PROJECT" -c Debug -nologo \
-            "-p:CustomAfterMicrosoftCommonTargets=$GITHUB_WORKSPACE/scripts/ci/recovery-matrix/fixture-migrations/RecoveryMatrixFixture.targets"
-
-      - name: Verify EF discovers fixture and generates provider SQL
-        working-directory: src
-        env:
-          MATRIX_PROJECT: ${{ matrix.project }}
-          MATRIX_CONTEXT: ${{ matrix.context }}
-          MATRIX_MIGRATION: ${{ matrix.migration }}
-          DB_PROVIDER: ${{ matrix.provider }}
-        run: |
-          set -euo pipefail
-          ef_args=(--project "./migrations/$MATRIX_PROJECT"
-            --startup-project "./migrations/$MATRIX_PROJECT"
-            --context "$MATRIX_CONTEXT" --no-build)
-          mapfile -t ids < <(dotnet ef migrations list "${ef_args[@]}" \
-            --no-connect | grep -E '^[0-9]{14}_[A-Za-z0-9_]+$')
-          count="${#ids[@]}"
-          if [ "$count" -lt 2 ] || [ "${ids[count-1]}" != "$MATRIX_MIGRATION" ]; then
-            echo "::error::$MATRIX_PROJECT: expected $MATRIX_MIGRATION as newest of $count migrations; got '${ids[count-1]:-none}'"
-            exit 1
-          fi
-          previous="${ids[count-2]}"
-          dotnet ef migrations script "$previous" "$MATRIX_MIGRATION" \
-            "${ef_args[@]}" --output "$RUNNER_TEMP/up.sql"
-          dotnet ef migrations script "$MATRIX_MIGRATION" "$previous" \
-            "${ef_args[@]}" --output "$RUNNER_TEMP/down.sql"
-          grep -q "RecoveryMatrixFixture" "$RUNNER_TEMP/up.sql"
-          grep -q "$MATRIX_MIGRATION" "$RUNNER_TEMP/up.sql"
-          grep -q "$MATRIX_MIGRATION" "$RUNNER_TEMP/down.sql"
-          grep -qiE "DROP TABLE" "$RUNNER_TEMP/down.sql"
-          echo "$MATRIX_PROJECT: $MATRIX_MIGRATION discovered after $previous; Up/Down SQL generated."
-
-  # ---------------------------------------------------------------------------
   # summary — publishes an aggregate step summary and, most importantly,
   # fails the required CI check when any *selected* job failed or was
   # cancelled. Skipped-because-not-selected does not fail.
@@ -1497,7 +1354,6 @@ jobs:
       - frontend
       - dotnet-build
       - migration-drift
-      - recovery-matrix-fixture-migrations
       - dotnet-test
       - dotnet-test-providers
       - canonical-path-casing
@@ -1536,14 +1392,12 @@ jobs:
           FRONTEND_RESULT: ${{ needs.frontend.result }}
           DOTNET_BUILD_RESULT: ${{ needs.dotnet-build.result }}
           MIG_RESULT: ${{ needs.migration-drift.result }}
-          FIXTURE_MIG_RESULT: ${{ needs.recovery-matrix-fixture-migrations.result }}
           DOTNET_TEST_RESULT: ${{ needs.dotnet-test.result }}
           DOTNET_TEST_PROVIDERS_RESULT: ${{ needs.dotnet-test-providers.result }}
           WANT_FRONTEND: ${{ needs.select.outputs.want_frontend }}
           WANT_DOTNET_BUILD: ${{ needs.select.outputs.want_dotnet_build }}
           WANT_DOTNET_TEST: ${{ needs.select.outputs.want_dotnet_test }}
           WANT_MIG_DRIFT: ${{ needs.select.outputs.want_mig_drift }}
-          WANT_DEPENDENCY_COMPLIANCE: ${{ needs.select.outputs.want_dependency_compliance }}
           SELECTOR_REASON: ${{ needs.select.outputs.reason }}
         run: |
           # Every leading-dash format string is passed after the POSIX `--`
@@ -1555,12 +1409,11 @@ jobs:
             printf -- '- reason: `%s`\n' "$SELECTOR_REASON"
             printf -- '- select: `%s`\n' "$SELECT_RESULT"
             printf -- '- ci-tools: `%s`\n' "$CI_TOOLS_RESULT"
-            printf -- '- dependency-compliance: `%s` (wanted=`%s`)\n' "$DEPENDENCY_COMPLIANCE_RESULT" "$WANT_DEPENDENCY_COMPLIANCE"
+            printf -- '- dependency-compliance: `%s` (wanted=`%s`)\n' "$DEPENDENCY_COMPLIANCE_RESULT" "$WANT_DOTNET_BUILD"
             printf -- '- dotnet-format: `%s` (wanted=`%s`)\n' "$DOTNET_FORMAT_RESULT" "$WANT_DOTNET_BUILD"
             printf -- '- frontend: `%s` (wanted=`%s`)\n' "$FRONTEND_RESULT" "$WANT_FRONTEND"
             printf -- '- dotnet-build: `%s` (wanted=`%s`)\n' "$DOTNET_BUILD_RESULT" "$WANT_DOTNET_BUILD"
             printf -- '- migration-drift: `%s` (wanted=`%s`)\n' "$MIG_RESULT" "$WANT_MIG_DRIFT"
-            printf -- '- recovery-matrix-fixture-migrations: `%s`\n' "$FIXTURE_MIG_RESULT"
             printf -- '- dotnet-test: `%s` (wanted=`%s`)\n' "$DOTNET_TEST_RESULT" "$WANT_DOTNET_TEST"
             printf -- '- dotnet-test-providers: `%s` (wanted=`%s`)\n' "$DOTNET_TEST_PROVIDERS_RESULT" "$WANT_DOTNET_TEST"
           } >> "$GITHUB_STEP_SUMMARY"
@@ -1574,14 +1427,12 @@ jobs:
           FRONTEND_RESULT: ${{ needs.frontend.result }}
           DOTNET_BUILD_RESULT: ${{ needs.dotnet-build.result }}
           MIG_RESULT: ${{ needs.migration-drift.result }}
-          FIXTURE_MIG_RESULT: ${{ needs.recovery-matrix-fixture-migrations.result }}
           DOTNET_TEST_RESULT: ${{ needs.dotnet-test.result }}
           DOTNET_TEST_PROVIDERS_RESULT: ${{ needs.dotnet-test-providers.result }}
           WANT_FRONTEND: ${{ needs.select.outputs.want_frontend }}
           WANT_DOTNET_BUILD: ${{ needs.select.outputs.want_dotnet_build }}
           WANT_DOTNET_TEST: ${{ needs.select.outputs.want_dotnet_test }}
           WANT_MIG_DRIFT: ${{ needs.select.outputs.want_mig_drift }}
-          WANT_DEPENDENCY_COMPLIANCE: ${{ needs.select.outputs.want_dependency_compliance }}
         run: |
           set -euo pipefail
           fail=0
@@ -1595,7 +1446,6 @@ jobs:
           # Foundations always required.
           require_success select "$SELECT_RESULT"
           require_success ci-tools "$CI_TOOLS_RESULT"
-          require_success recovery-matrix-fixture-migrations "$FIXTURE_MIG_RESULT"
 
           # Conditional jobs: require success when wanted, require skipped
           # when not wanted.
@@ -1610,7 +1460,7 @@ jobs:
               fi
             fi
           }
-          check_conditional dependency-compliance "$DEPENDENCY_COMPLIANCE_RESULT" "$WANT_DEPENDENCY_COMPLIANCE"
+          check_conditional dependency-compliance "$DEPENDENCY_COMPLIANCE_RESULT" "$WANT_DOTNET_BUILD"
           check_conditional dotnet-format "$DOTNET_FORMAT_RESULT" "$WANT_DOTNET_BUILD"
           check_conditional frontend "$FRONTEND_RESULT" "$WANT_FRONTEND"
           check_conditional dotnet-build "$DOTNET_BUILD_RESULT" "$WANT_DOTNET_BUILD"

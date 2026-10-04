@@ -5,7 +5,6 @@
 using System.Text.Json;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Services.HostUpdates;
 using Farm.Infrastructure.Services.Printers;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -21,7 +20,7 @@ namespace Farm.Infrastructure.Services.Queue;
 public sealed class BackendControlCommandConsumerService(
     IServiceScopeFactory scopeFactory,
     ILogger<BackendControlCommandConsumerService> logger,
-    BackendControlCommandConsumerFenceFlag? hostUpdateFence = null,
+    object? hostUpdateFence = null,
     TimeProvider? timeProvider = null) : BackgroundService
 {
     public const string EventType = "PrintFarmer.Queue.BackendControlCommand.v1";
@@ -36,22 +35,14 @@ public sealed class BackendControlCommandConsumerService(
         PropertyNameCaseInsensitive = true,
     };
 
-    private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
-
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        _ = hostUpdateFence;
+        _ = timeProvider;
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
-                if (hostUpdateFence is not null &&
-                    await hostUpdateFence.IsPauseRequestedAsync(stoppingToken).ConfigureAwait(false))
-                {
-                    await hostUpdateFence.AcknowledgePausedAsync(stoppingToken).ConfigureAwait(false);
-                    await Task.Delay(TimeSpan.FromMilliseconds(250), _timeProvider, stoppingToken).ConfigureAwait(false);
-                    continue;
-                }
-
                 await RecoverStaleLeasesAsync(stoppingToken);
                 await ProcessPendingAsync(stoppingToken);
             }
@@ -64,35 +55,15 @@ public sealed class BackendControlCommandConsumerService(
                 logger.LogError(exception, "Backend control command scan failed.");
             }
 
-            if (await WaitForIntervalOrPauseAsync(stoppingToken).ConfigureAwait(false))
-            {
-                await hostUpdateFence!.AcknowledgePausedAsync(stoppingToken).ConfigureAwait(false);
-            }
+            await Task.Delay(PollInterval, stoppingToken);
         }
-    }
-
-    private async Task<bool> WaitForIntervalOrPauseAsync(CancellationToken stoppingToken)
-    {
-        DateTimeOffset until = _timeProvider.GetUtcNow() + PollInterval;
-        while (_timeProvider.GetUtcNow() < until)
-        {
-            if (hostUpdateFence is not null &&
-                await hostUpdateFence.IsPauseRequestedAsync(stoppingToken).ConfigureAwait(false))
-            {
-                return true;
-            }
-
-            await Task.Delay(TimeSpan.FromMilliseconds(250), _timeProvider, stoppingToken).ConfigureAwait(false);
-        }
-
-        return false;
     }
 
     internal async Task RecoverStaleLeasesAsync(CancellationToken ct)
     {
         await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        DateTime cutoff = _timeProvider.GetUtcNow().UtcDateTime - StaleLeaseAge;
+        DateTime cutoff = DateTime.UtcNow - StaleLeaseAge;
         List<Guid> stale = await db.QueueDispatchOutbox
             .AsNoTracking()
             .Where(command =>
@@ -112,7 +83,7 @@ public sealed class BackendControlCommandConsumerService(
     {
         await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        DateTime now = _timeProvider.GetUtcNow().UtcDateTime;
+        DateTime now = DateTime.UtcNow;
         List<Guid> commandIds = await db.QueueDispatchOutbox
             .AsNoTracking()
             .Where(command =>
@@ -169,7 +140,7 @@ public sealed class BackendControlCommandConsumerService(
                 command.Status = QueueOutboxEventStatus.DeadLettered;
                 command.FailureCode = "invalid_control_command";
                 command.LastError = exception.Message;
-                command.CompletedAtUtc = _timeProvider.GetUtcNow().UtcDateTime;
+                command.CompletedAtUtc = DateTime.UtcNow;
                 await leaseDb.SaveChangesAsync(ct);
                 return;
             }
@@ -182,7 +153,7 @@ public sealed class BackendControlCommandConsumerService(
                 command.Status = QueueOutboxEventStatus.DeadLettered;
                 command.FailureCode = "invalid_control_command";
                 command.LastError = "Control command identifiers, attempt, or operation are invalid.";
-                command.CompletedAtUtc = _timeProvider.GetUtcNow().UtcDateTime;
+                command.CompletedAtUtc = DateTime.UtcNow;
                 await leaseDb.SaveChangesAsync(ct);
                 return;
             }
@@ -197,7 +168,7 @@ public sealed class BackendControlCommandConsumerService(
                 command.Status = QueueOutboxEventStatus.DeadLettered;
                 command.FailureCode = "control_attempt_fence_conflict";
                 command.LastError = "The active dispatch attempt changed before hardware control.";
-                command.CompletedAtUtc = _timeProvider.GetUtcNow().UtcDateTime;
+                command.CompletedAtUtc = DateTime.UtcNow;
                 await leaseDb.SaveChangesAsync(ct);
                 return;
             }
@@ -218,12 +189,11 @@ public sealed class BackendControlCommandConsumerService(
             dispatchState.PhysicalControlAttemptId = payload.AttemptId;
             dispatchState.PhysicalControlOperation = payload.Operation;
             dispatchState.PhysicalControlActorSubject = payload.ActorSubject;
-            DateTime leasedAtUtc = _timeProvider.GetUtcNow().UtcDateTime;
-            dispatchState.PhysicalControlStartedAtUtc = leasedAtUtc;
+            dispatchState.PhysicalControlStartedAtUtc = DateTime.UtcNow;
             dispatchState.PhysicalControlRequiresReconciliation = false;
             command.Status = QueueOutboxEventStatus.Processing;
             command.AttemptCount++;
-            command.LastAttemptedAtUtc = leasedAtUtc;
+            command.LastAttemptedAtUtc = DateTime.UtcNow;
             command.LastError = null;
             try
             {
@@ -287,14 +257,14 @@ public sealed class BackendControlCommandConsumerService(
         }
     }
 
-    private async Task DeferFenceConflictAsync(
+    private static async Task DeferFenceConflictAsync(
         AppDbContext db,
         IDbOutboxSequenceAllocator allocator,
         QueueDispatchOutbox command,
         BackendControlPayload payload,
         CancellationToken ct)
     {
-        DateTime now = _timeProvider.GetUtcNow().UtcDateTime;
+        DateTime now = DateTime.UtcNow;
         command.AttemptCount++;
         command.LastAttemptedAtUtc = now;
         command.LastError = "Another physical command owns the printer barrier.";
@@ -339,8 +309,7 @@ public sealed class BackendControlCommandConsumerService(
                 }),
                 failureRetryable: false,
                 failureRequiresReconciliation: true,
-                ct: ct,
-                timeProvider: _timeProvider);
+                ct: ct);
         }
 
         await db.SaveChangesAsync(ct);
@@ -379,14 +348,14 @@ public sealed class BackendControlCommandConsumerService(
             command.Status = QueueOutboxEventStatus.DeadLettered;
             command.FailureCode = "control_attempt_fence_conflict";
             command.LastError = "The active dispatch attempt changed before control completion.";
-            command.CompletedAtUtc = _timeProvider.GetUtcNow().UtcDateTime;
+            command.CompletedAtUtc = DateTime.UtcNow;
             await db.SaveChangesAsync(ct);
             return;
         }
 
         await using QueueOutboxTransactionScope transaction =
             await QueueOutboxTransactionScope.BeginAsync(db, ct);
-        DateTime now = _timeProvider.GetUtcNow().UtcDateTime;
+        DateTime now = DateTime.UtcNow;
         PrintJobStatus fromStatus = job.Status;
         bool pause = string.Equals(payload.Operation, "pause", StringComparison.Ordinal);
         bool resume = string.Equals(payload.Operation, "resume", StringComparison.Ordinal);
@@ -464,8 +433,7 @@ public sealed class BackendControlCommandConsumerService(
             dispatchAttemptId: payload.AttemptId,
             jobRowVersion: job.RowVersion,
             dispatchStateRowVersion: dispatchState.RowVersion,
-            detail: new { commandId },
-            timeProvider: _timeProvider);
+            detail: new { commandId });
         string lifecycleEventType = payload.Operation switch
         {
             "pause" => QueueLifecycleEventWriter.EventTypeJobPaused,
@@ -489,8 +457,7 @@ public sealed class BackendControlCommandConsumerService(
                 job.Status.ToString(),
                 job.JobKind?.ToString() ?? nameof(JobKind.Standard),
                 payload.Operation == "cancel" ? "job_cancelled" : null),
-            ct: ct,
-            timeProvider: _timeProvider);
+            ct);
         await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
     }
@@ -526,7 +493,7 @@ public sealed class BackendControlCommandConsumerService(
         command.LastError = errorDetail[..Math.Min(errorDetail.Length, 2047)];
         command.FailureCode = errorCode;
         command.Status = QueueOutboxEventStatus.DeadLettered;
-        command.CompletedAtUtc = _timeProvider.GetUtcNow().UtcDateTime;
+        command.CompletedAtUtc = DateTime.UtcNow;
         _ = QueueAuditWriter.Add(
             db,
             payload.ActorSubject,
@@ -538,8 +505,7 @@ public sealed class BackendControlCommandConsumerService(
             printJobId: payload.JobId,
             dispatchAttemptId: payload.AttemptId,
             reasonCode: errorCode,
-            detail: new { commandId },
-            timeProvider: _timeProvider);
+            detail: new { commandId });
         PrintJob? job = await db.PrintJobs
             .FirstOrDefaultAsync(candidate => candidate.Id == payload.JobId, ct);
         if (job is not null)
@@ -563,8 +529,7 @@ public sealed class BackendControlCommandConsumerService(
                 }),
                 failureRetryable: false,
                 failureRequiresReconciliation: false,
-                ct: ct,
-                timeProvider: _timeProvider);
+                ct: ct);
         }
 
         await db.SaveChangesAsync(ct);
@@ -587,7 +552,7 @@ public sealed class BackendControlCommandConsumerService(
             return;
         }
 
-        DateTime now = _timeProvider.GetUtcNow().UtcDateTime;
+        DateTime now = DateTime.UtcNow;
         bool firstUnknown = command.FailureCode != "backend_control_unknown";
         PrinterDispatchState? dispatchState = await db.PrinterDispatchStates
             .FirstOrDefaultAsync(candidate => candidate.PrinterId == command.PrinterId, ct);
@@ -644,8 +609,7 @@ public sealed class BackendControlCommandConsumerService(
                     }),
                     failureRetryable: false,
                     failureRequiresReconciliation: true,
-                    ct: ct,
-                    timeProvider: _timeProvider);
+                    ct: ct);
             }
         }
 
@@ -681,7 +645,7 @@ public sealed class BackendControlCommandConsumerService(
                 command.Status = QueueOutboxEventStatus.DeadLettered;
                 command.FailureCode = "invalid_control_command";
                 command.LastError = exception.Message;
-                command.CompletedAtUtc = _timeProvider.GetUtcNow().UtcDateTime;
+                command.CompletedAtUtc = DateTime.UtcNow;
                 await db.SaveChangesAsync(ct);
                 return;
             }

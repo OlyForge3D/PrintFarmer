@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -232,12 +232,8 @@ public static partial class SignedUpdateManifestValidator
             throw new FormatException("Sequence version must use unsigned decimal components without leading zeros.");
         }
 
-        long major = ParseBounded(match.Groups["major"].Value, SequenceMajorMaximum, "Major version");
         Group insider = match.Groups["insider"];
-
-        // Mirrors the signer contract (scripts/ci/release-manifest.mjs): only a *stable* signed
-        // release must have a non-zero major version; a 0.x insider prerelease is legitimate and
-        // must stay derivable here, or the host would reject releases the signer can publish.
+        long major = ParseBounded(match.Groups["major"].Value, SequenceMajorMaximum, "Major version");
         if (!insider.Success && major < 1)
         {
             throw new FormatException("Stable major version must be greater than zero.");
@@ -397,6 +393,8 @@ public static partial class SignedUpdateManifestValidator
     private static partial Regex StableTag();
     [GeneratedRegex(@"^v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)-insider\.[1-9]\d*$", RegexOptions.CultureInvariant)]
     private static partial Regex InsiderTag();
+    [GeneratedRegex("^[1-9][0-9]*$", RegexOptions.CultureInvariant)]
+    private static partial Regex PositiveDecimal();
     [GeneratedRegex("^[0-9a-f]{40}$", RegexOptions.CultureInvariant)]
     private static partial Regex LowerHex40();
     [GeneratedRegex("^sha256:[0-9a-f]{64}$", RegexOptions.CultureInvariant)]
@@ -416,7 +414,7 @@ public interface ISignedReleaseVerifier
     Task<bool> VerifyAsync(ReadOnlyMemory<byte> manifest, ReadOnlyMemory<byte> bundle, string certificateIdentity, CancellationToken cancellationToken);
 }
 
-public sealed class GitHubSignedReleaseDiscovery(HttpClient httpClient, ISignedReleaseVerifier verifier) : IHostUpdateDaemonReleaseSource
+public sealed class GitHubSignedReleaseDiscovery(HttpClient httpClient, ISignedReleaseVerifier verifier)
 {
     private const string Repository = "OlyForge3D/PrintFarmer";
     private const int MaximumCandidates = 25;
@@ -466,7 +464,9 @@ public sealed class GitHubSignedReleaseDiscovery(HttpClient httpClient, ISignedR
             }
         }
 
-        string identity = HostUpdateTrustRoot.CertificateIdentity(channel);
+        string identity = channel == "stable"
+            ? "https://github.com/OlyForge3D/PrintFarmer/.github/workflows/consolidated-release.yml@refs/heads/main"
+            : "https://github.com/OlyForge3D/PrintFarmer/.github/workflows/consolidated-release.yml@refs/heads/development";
         List<ReleaseCandidate> candidates = [];
         foreach (GitHubRelease release in releases
             .Where(candidate => !candidate.Draft && candidate.Prerelease == (channel == "insider")
@@ -529,47 +529,6 @@ public sealed class GitHubSignedReleaseDiscovery(HttpClient httpClient, ISignedR
         }
 
         return null;
-    }
-
-    /// <summary>
-    /// Fetches the untrusted manifest and Sigstore bundle of exactly one published release tag for
-    /// the host daemon (#3116). Nothing is verified here; the daemon verifier does that. Drafts,
-    /// channel-mismatched tags and releases without exactly one of each asset yield <see langword="null"/>.
-    /// </summary>
-    public async Task<HostUpdateDaemonSignedArtifacts?> FetchAsync(string channel, string tag, CancellationToken cancellationToken)
-    {
-        if (channel is not ("stable" or "insider") || !SignedUpdateManifestValidator.IsTagForChannel(tag, channel))
-        {
-            return null;
-        }
-
-        using HttpRequestMessage request = new(HttpMethod.Get, $"https://api.github.com/repos/{Repository}/releases/tags/{Uri.EscapeDataString(tag)}");
-        request.Headers.UserAgent.Add(new ProductInfoHeaderValue("PrintFarmer", "1.0"));
-        using HttpResponseMessage response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-        if (response.StatusCode == HttpStatusCode.NotFound)
-        {
-            return null;
-        }
-
-        response.EnsureSuccessStatusCode();
-        byte[] releaseBytes = await ReadBoundedAsync(response.Content, MaximumReleaseListingBytes, "GitHub release", cancellationToken);
-        GitHubRelease? release = JsonSerializer.Deserialize<GitHubRelease>(releaseBytes, new JsonSerializerOptions(JsonSerializerDefaults.Web));
-        if (release is null || release.Draft || release.Prerelease != (channel == "insider") ||
-            !string.Equals(release.TagName, tag, StringComparison.Ordinal) || release.Assets is null)
-        {
-            return null;
-        }
-
-        GitHubReleaseAsset[] manifestAssets = release.Assets.Where(asset => asset?.Name == "update-manifest.json").ToArray();
-        GitHubReleaseAsset[] bundleAssets = release.Assets.Where(asset => asset?.Name == "update-manifest.sigstore.json").ToArray();
-        if (manifestAssets.Length != 1 || bundleAssets.Length != 1 || manifestAssets[0].Id <= 0 || bundleAssets[0].Id <= 0)
-        {
-            return null;
-        }
-
-        byte[] manifestBytes = await DownloadAssetAsync(manifestAssets[0].Id, MaximumManifestBytes, cancellationToken);
-        byte[] bundleBytes = await DownloadAssetAsync(bundleAssets[0].Id, MaximumBundleBytes, cancellationToken);
-        return new HostUpdateDaemonSignedArtifacts(manifestBytes, bundleBytes);
     }
 
     private async Task<byte[]> DownloadAssetAsync(long assetId, int maximumBytes, CancellationToken cancellationToken)
@@ -665,7 +624,7 @@ public sealed class GitHubSignedReleaseDiscovery(HttpClient httpClient, ISignedR
     private sealed record ReleaseCandidate(SignedUpdateManifest Manifest, byte[] ManifestBytes, long BundleAssetId);
 }
 
-public sealed record CosignVerifierOptions(string ExecutablePath, TimeSpan Timeout, int MaxDiagnostics = 8192, string? TrustedRootPath = null);
+public sealed record CosignVerifierOptions(string ExecutablePath, TimeSpan Timeout, int MaxDiagnostics = 8192);
 
 internal sealed record CosignProcessCommand(string ExecutablePath, IReadOnlyList<string> Arguments);
 internal sealed record CosignProcessResult(int ExitCode, string Diagnostics);
@@ -803,7 +762,7 @@ internal sealed class ProcessCosignRunner : ICosignProcessRunner
 
 public sealed class ProcessCosignVerifier : ISignedReleaseVerifier
 {
-    private const string Issuer = HostUpdateTrustRoot.CosignIssuer;
+    private const string Issuer = "https://token.actions.githubusercontent.com";
     private readonly CosignVerifierOptions options;
     private readonly ICosignProcessRunner runner;
     private readonly Func<string> directoryFactory;
@@ -834,12 +793,9 @@ public sealed class ProcessCosignVerifier : ISignedReleaseVerifier
         {
             await File.WriteAllBytesAsync(manifestPath, manifest.ToArray(), cancellationToken);
             await File.WriteAllBytesAsync(bundlePath, bundle.ToArray(), cancellationToken);
-
-            // An operator-supplied Sigstore trusted root makes verification network-free (#3064).
-            string[] offline = options.TrustedRootPath is { } trustedRoot ? ["--trusted-root", trustedRoot] : [];
             CosignProcessCommand command = new(
                 options.ExecutablePath,
-                ["verify-blob", .. offline, "--bundle", bundlePath, "--certificate-oidc-issuer", Issuer, "--certificate-identity", certificateIdentity, manifestPath]);
+                ["verify-blob", "--bundle", bundlePath, "--certificate-oidc-issuer", Issuer, "--certificate-identity", certificateIdentity, manifestPath]);
             return (await runner.RunAsync(command, options.Timeout, options.MaxDiagnostics, cancellationToken)).ExitCode == 0;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }

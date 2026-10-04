@@ -1,4 +1,4 @@
-﻿using System.Net;
+using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -9,14 +9,14 @@ using Farm.Infrastructure.Services.Background;
 using Farm.Infrastructure.Services.HostUpdates;
 using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Services.SystemStatus;
-using Farm.Slicer.Module.Data;
-using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Services.SystemInfo;
 using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
+using Farm.Slicer.Module.Data;
+using Farm.Slicer.Module.Domain;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
@@ -32,14 +32,13 @@ public class SystemInfoIntegrationTests : IClassFixture<SystemInfoIntegrationTes
     public class Factory : CustomWebApplicationFactory
     {
         private readonly bool _throwDiscoveryOptions;
-        private readonly bool _throwSchedulingStatus;
 
         public Factory()
-            : this(discoveryEnabled: true, throwDiscoveryOptions: false, throwSchedulingStatus: false)
+            : this(discoveryEnabled: true, throwDiscoveryOptions: false)
         {
         }
 
-        private Factory(bool discoveryEnabled, bool throwDiscoveryOptions, bool throwSchedulingStatus)
+        private Factory(bool discoveryEnabled, bool throwDiscoveryOptions)
             : base(new Dictionary<string, string?>
             {
                 ["Security:DevModeBypassAuth"] = "false",
@@ -47,30 +46,15 @@ public class SystemInfoIntegrationTests : IClassFixture<SystemInfoIntegrationTes
             })
         {
             _throwDiscoveryOptions = throwDiscoveryOptions;
-            _throwSchedulingStatus = throwSchedulingStatus;
         }
 
-        public static Factory WithDiscoveryDisabled() =>
-            new(discoveryEnabled: false, throwDiscoveryOptions: false, throwSchedulingStatus: false);
+        public static Factory WithDiscoveryDisabled() => new(discoveryEnabled: false, throwDiscoveryOptions: false);
 
-        public static Factory WithInvalidDiscoveryOptions() =>
-            new(discoveryEnabled: true, throwDiscoveryOptions: true, throwSchedulingStatus: false);
-
-        public static Factory WithThrowingSchedulingStatusProvider() =>
-            new(discoveryEnabled: true, throwDiscoveryOptions: false, throwSchedulingStatus: true);
+        public static Factory WithInvalidDiscoveryOptions() => new(discoveryEnabled: true, throwDiscoveryOptions: true);
 
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
             base.ConfigureWebHost(builder);
-            if (_throwSchedulingStatus)
-            {
-                builder.ConfigureTestServices(services =>
-                {
-                    services.RemoveAll<IHostUpdateSchedulingStatusProvider>();
-                    services.AddScoped<IHostUpdateSchedulingStatusProvider, ThrowingHostUpdateSchedulingStatusProvider>();
-                });
-            }
-
             if (!_throwDiscoveryOptions)
             {
                 return;
@@ -82,12 +66,6 @@ public class SystemInfoIntegrationTests : IClassFixture<SystemInfoIntegrationTes
                 services.AddSingleton<IOptionsMonitor<VerifiedReleaseDiscoveryOptions>>(
                     new ThrowingVerifiedReleaseDiscoveryOptionsMonitor());
             });
-        }
-
-        private sealed class ThrowingHostUpdateSchedulingStatusProvider : IHostUpdateSchedulingStatusProvider
-        {
-            public HostUpdateSchedulingStatusDto? GetStatus() =>
-                throw new InvalidOperationException("scheduling_status_provider_failed");
         }
     }
 
@@ -142,58 +120,6 @@ public class SystemInfoIntegrationTests : IClassFixture<SystemInfoIntegrationTes
         (string? version, string? commit) = ApplicationBuildObservation.FromAssembly(typeof(Program).Assembly);
         api.ApplicationVersion.Should().Be(version);
         api.SourceCommit.Should().Be(commit);
-    }
-
-    [Fact]
-    public async Task GetInfo_Admin_ReportsAutomaticUpdateSchedulingFromTheRegisteredProvider()
-    {
-        _factory.Services.GetRequiredService<HostUpdateSchedulerStatusHolder>().Update(new HostUpdateSchedulerStatus(
-            Enabled: false,
-            EffectiveEnabled: false,
-            KillSwitch: false,
-            Channel: "stable",
-            PolicyRevision: 0,
-            LastAttemptAt: null,
-            NextPollAt: null,
-            ConsecutiveFailures: 0,
-            Reason: HostUpdateSchedulerReason.Disabled));
-
-        HttpResponseMessage response = await _adminClient!.GetAsync("/api/system/info");
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-
-        SystemInfoDto? dto = await response.Content.ReadFromJsonAsync<SystemInfoDto>(JsonOptions);
-
-        // The scheduling status provider is registered in production DI, so an unprovisioned
-        // host reports an explicit "registered but not running" status rather than null.
-        dto!.UpdateScheduling.Should().NotBeNull();
-        dto.UpdateScheduling!.ConfiguredEnabled.Should().BeFalse();
-        dto.UpdateScheduling.EffectiveEnabled.Should().BeFalse();
-        dto.UpdateScheduling.EffectiveChannel.Should().BeNull();
-        dto.UpdateScheduling.Executor.State.Should().Be(HostUpdateExecutorState.Unavailable);
-        dto.UpdateScheduling.Executor.Reason.Should().Be(HostUpdateSchedulingAvailability.ExecutorAvailabilityUnknownReason);
-        dto.UpdateScheduling.Backoff.State.Should().Be(HostUpdateBackoffState.Unknown);
-        dto.UpdateScheduling.Reasons.Should().Equal(
-            "host_update_policy_repository_not_available",
-            "host_update_replay_anchor_not_available",
-            "host_update_replay_store_not_available",
-            HostUpdateSchedulingAvailability.AdmissionFenceReason,
-            HostUpdateSchedulingAvailability.ExecutorAvailabilityUnknownReason);
-        dto.UpdateScheduling.KillSwitch.Enabled.Should().BeFalse();
-    }
-
-    [Fact]
-    public async Task GetInfo_Admin_SurvivesAFailingSchedulingStatusProvider()
-    {
-        using Factory factory = Factory.WithThrowingSchedulingStatusProvider();
-        using HttpClient adminClient = await factory.CreateAdminClientAsync();
-        factory.Services.GetRequiredService<IMemoryCache>().Remove("SystemInfo:Snapshot");
-
-        HttpResponseMessage response = await adminClient.GetAsync("/api/system/info");
-
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-        SystemInfoDto? dto = await response.Content.ReadFromJsonAsync<SystemInfoDto>(JsonOptions);
-        dto!.UpdateScheduling.Should().BeNull();
-        dto.App.Version.Should().NotBeNullOrWhiteSpace();
     }
 
     [Fact]
@@ -312,17 +238,8 @@ public class SystemInfoIntegrationTests : IClassFixture<SystemInfoIntegrationTes
         {
             SlicerDbContext db = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
             db.SlicerServices.AddRange(
-                new SlicerService
-                {
-                    Id = first,
-                    Name = "first",
-                    Version = "2.4.2",
-                    Host = "http://private-worker.invalid",
-                    ApiKey = "never-return-registry-key",
-                    Status = "Online",
-                    LastSeen = DateTime.UtcNow,
-                    CapabilitiesJson = "{\"applicationBuild\":\"1.2.3\",\"slicerContainerDigest\":\"not-attestation\"}"
-                },
+                new SlicerService { Id = first, Name = "first", Version = "2.4.2", Host = "http://private-worker.invalid", ApiKey = "never-return-registry-key", Status = "Online", LastSeen = DateTime.UtcNow,
+                    CapabilitiesJson = "{\"applicationBuild\":\"1.2.3\",\"slicerContainerDigest\":\"not-attestation\"}" },
                 new SlicerService { Id = second, Name = "second", Version = "2.4.2", Host = "http://private-worker.invalid", Status = "Offline", LastSeen = DateTime.UtcNow.AddHours(-1) });
             await db.SaveChangesAsync();
         }

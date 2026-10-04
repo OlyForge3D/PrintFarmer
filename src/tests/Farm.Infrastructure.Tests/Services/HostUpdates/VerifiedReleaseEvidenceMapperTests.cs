@@ -198,9 +198,6 @@ public class VerifiedReleaseEvidenceMapperTests
             ["api", "frontend", "slicer-host", "discovery", "slicer-worker"]);
         dto.Services.Should().OnlyContain(service =>
             service.PlatformDigest == platformDigest && service.IndexDigest == indexDigest);
-        dto.ExecutionTargets.Select(target => target.ServiceId).Should().BeEquivalentTo(manifestServices);
-        dto.ExecutionTargets.Should().OnlyContain(target =>
-            target.Platform == "linux-amd64" && target.PlatformDigest == platformDigest);
     }
 
     public static IEnumerable<object[]> NoncanonicalDigests()

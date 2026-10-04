@@ -58,16 +58,8 @@ describe('ServiceVersionsTable', () => {
     expect(within(assets).getByText(/e{40}/)).toBeVisible();
     expect(within(assets).getByText('Frontend/API build mismatch — refresh required')).toBeVisible();
     expect(screen.getByText('Incompatible: CachedFrontendMismatch')).toBeVisible();
-    expect(screen.getByText('Blocked: CachedFrontendMismatch, ManagedEligibilityNotEstablished, ReadOnlyInventory')).toBeVisible();
+    expect(screen.getByText('Blocked: CachedFrontendMismatch, ReadOnlyInventory')).toBeVisible();
     expect(within(assets).getByText(/Compatibility is not established by refresh alone/)).toBeVisible();
-  });
-
-  it('preserves manual-only evidence when frontend/API skew is present', () => {
-    buildInfo.commit = 'e'.repeat(40);
-    render(<ServiceVersionsTable inventory={inventory({
-      eligibilityReasons: ['SignedReleaseEvidenceUnavailableManualOnly', 'ReadOnlyInventory'],
-    })} />);
-    expect(screen.getByText('Blocked: CachedFrontendMismatch, SignedReleaseEvidenceUnavailableManualOnly, ReadOnlyInventory')).toBeVisible();
   });
 
   it('displays its own canonical asset record rather than copying API version', () => {
@@ -76,12 +68,4 @@ describe('ServiceVersionsTable', () => {
     expect(screen.getByText(/Frontend canonical version: 1.2.3-insider.10/)).toBeVisible();
     expect(screen.getByText(/Frontend provenance: self-report/)).toBeVisible();
   });
-
-  it.each(['MixedRelease', 'Incompatible'] as const)('renders authoritative observed conflict detail for %s', (compatibilityState) => {
-    render(<ServiceVersionsTable inventory={inventory({ compatibilityState, compatibilityReasons: ['CanonicalReleaseDivergence'] })} />);
-    expect(screen.getByText('Observed compatibility state').parentElement).toHaveTextContent(compatibilityState);
-    expect(screen.getByText('Observed compatibility reasons').parentElement).toHaveTextContent('CanonicalReleaseDivergence');
-    expect(screen.getByText('Observed compatibility conflict')).toBeVisible();
-  });
-
 });

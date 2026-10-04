@@ -7,13 +7,6 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { composeUpTokens, faultCheckpointName, migrationApplyTokens } from './fault-cells.mjs';
-import {
-  autoDispatchDurableScanIntervalMs,
-  commandsSince,
-  fencedConsumerPollWindowMs,
-  postReconciliationDispatchWindowMs,
-  queuedAutoDispatchEvidenceSince,
-} from './emulated-printer.mjs';
 import { expectedSchemaDeltaFixtureState } from './schema-delta-fixture.mjs';
 
 export const faultExitCodes = Object.freeze({
@@ -29,28 +22,6 @@ export const faultExitCodes = Object.freeze({
 
 const knownExitCodes = new Set(Object.values(faultExitCodes));
 const physicalTokenPattern = /physical-[0-9a-f]{32}/;
-
-function waitMs(harness, ms) {
-  if (typeof harness.ctx.wait === 'function') {
-    harness.ctx.wait(ms);
-    return;
-  }
-
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-}
-
-function waitForEmulatorCommand(harness, printer, baseline, timeoutMs) {
-  let elapsedMs = 0;
-  let observed = commandsSince(baseline, printer.requests());
-  while (observed.count === 0 && elapsedMs < timeoutMs) {
-    const stepMs = Math.min(2_000, timeoutMs - elapsedMs);
-    waitMs(harness, stepMs);
-    elapsedMs += stepMs;
-    observed = commandsSince(baseline, printer.requests());
-  }
-
-  return observed;
-}
 
 export function parseCliText(stdout) {
   const fields = {};
@@ -582,93 +553,5 @@ const scenarios = {
     harness.require(!existsSync(harness.ctx.admissionClosedPath), 'fence-released');
     harness.ctx.assertRolledBack();
     return proveDurable(harness, released, () => harness.recover('offline-recover-confirm'));
-  },
-
-  // Issue #3103: a registered printer backed by the Moonraker emulator. Recovery must never
-  // command the printer, dispatch must stay fenced (including across a host restart) until the
-  // operator confirms physical reconciliation, and must reopen only after that confirmation.
-  'emulated-printer-reconciliation'(harness, spec) {
-    const printer = harness.ctx.emulatedPrinter;
-    printer.start();
-    harness.ok('emulated-printer-started');
-    harness.ctx.seedPrinter();
-    const printerId = printer.attach();
-    harness.ok('emulated-printer-registered');
-    const baseline = printer.requests();
-    harness.ok(`emulator-baseline:total=${baseline.total}:commands=${baseline.commands}`);
-    activateIntoRecoveryRequired(harness);
-    const preview = harness.recover('offline-recover-preview');
-    harness.expect('recover-preview', preview, { outcome: 'RecoveryRequired' });
-    const pending = harness.recover('offline-recover-confirm');
-    harness.injected(spec.fault);
-    harness.expect('recover-confirm-pending', pending, {
-      outcome: 'FenceReleasePending',
-      reason: 'physical_reconciliation_pending',
-      exitCode: faultExitCodes.physicalReconciliationPending,
-    });
-    harness.require(existsSync(harness.ctx.admissionClosedPath), 'fence-held-while-pending');
-    const queuedWork = printer.seedQueuedAutoDispatchWork(printerId);
-    harness.ok(`queued-auto-dispatch-work-seeded:job=${queuedWork.jobId}:file=${queuedWork.fileName}`);
-    harness.ok('emulator-commands-scope:pending-auto-dispatch-workload');
-    // A dispatch admitted while reconciliation is pending is recorded and the recovery flow is
-    // still driven to completion, so one run proves every other invariant before the cell fails.
-    const fenceGaps = [];
-    const requireFenced = (label) => {
-      const probe = printer.dispatchProbe(printerId);
-      if (probe.classification === 'admission-closed') {
-        harness.ok(`dispatch-fenced:${label}`);
-        return;
-      }
-      harness.failed(`dispatch-fenced:${label}`);
-      fenceGaps.push(`dispatch-fenced:${label}:${probe.classification}:status=${probe.status}`);
-    };
-    requireFenced('pending');
-    const restores = harness.restoreCalls();
-    harness.ctx.restartHost();
-    harness.ok('pending-host-restarted');
-    requireFenced('pending-after-restart');
-    waitMs(harness, fencedConsumerPollWindowMs);
-    harness.ok(`consumer-poll-window:${fencedConsumerPollWindowMs}ms>=auto-dispatch-scan:${autoDispatchDurableScanIntervalMs}ms`);
-    const pendingPreview = harness.recover('offline-recover-preview');
-    const token = physicalTokenPattern.exec(`${pendingPreview.stdout}\n${pendingPreview.stderr}`)?.[0];
-    harness.require(Boolean(token), 'physical-reconciliation-token-offered');
-    const duringRecovery = commandsSince(baseline, printer.requests());
-    harness.require(duringRecovery.count === 0, `emulator-commands-during-recovery:0:reads=${duringRecovery.reads}`,
-      duringRecovery.offenders.join(','));
-    const released = harness.recover('offline-recover-confirm', { extraArgs: ['--printers-reconciled', token] });
-    harness.expect('recover-confirm-release', released, { outcome: 'RolledBack', exitCode: 0 });
-    harness.require(harness.restoreCalls() === restores, 'release-redrive-no-restore-replay');
-    harness.require(!existsSync(harness.ctx.admissionClosedPath), 'fence-released');
-    harness.ctx.assertRolledBack();
-    const reopened = printer.dispatchProbe(printerId);
-    harness.require(reopened.classification === 'admitted', 'dispatch-reopened-after-reconciliation',
-      `${reopened.classification}:status=${reopened.status}`);
-    const afterRelease = waitForEmulatorCommand(
-      harness,
-      printer,
-      baseline,
-      postReconciliationDispatchWindowMs);
-    harness.require(
-      afterRelease.count > 0,
-      `queued-work-dispatched-after-reconciliation:commands=${afterRelease.count}:reads=${afterRelease.reads}`,
-      afterRelease.offenders.join(','));
-    const queuedDispatch = queuedAutoDispatchEvidenceSince(
-      baseline,
-      printer.requests(),
-      queuedWork.fileName,
-      queuedWork.backendFileNameSuffix);
-    harness.require(
-      queuedDispatch.matched,
-      `queued-work-dispatched-after-reconciliation:upload=${queuedDispatch.upload ?? 'missing'}:start=${queuedDispatch.start ?? 'missing'}:commands=${queuedDispatch.count}:reads=${queuedDispatch.reads}`,
-      queuedDispatch.offenders.join(','));
-    const queuedState = printer.queuedAutoDispatchJobState(queuedWork.jobId);
-    harness.require(
-      queuedState.status === 2 || queuedState.status === 3,
-      `queued-work-db-state:job=${queuedWork.jobId}:status=${queuedState.status}:assigned=${queuedState.assigned}`,
-      queuedState.raw);
-    harness.ok(`queued-work-db-state:job=${queuedWork.jobId}:status=${queuedState.status}:assigned=${queuedState.assigned}`);
-    const final = proveDurable(harness, released, () => harness.recover('offline-recover-confirm'));
-    if (fenceGaps.length > 0) throw faultScenarioFailure(fenceGaps.join('|'));
-    return final;
   },
 };

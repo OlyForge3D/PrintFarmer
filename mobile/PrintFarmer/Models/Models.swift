@@ -620,7 +620,6 @@ enum DispatchAttemptOutcome: String, Codable, Sendable {
     case failedBeforeStart = "FailedBeforeStart"
     case unknown = "Unknown"
     case inProgress = "InProgress"
-    case operatorRecovered = "OperatorRecovered"
 }
 
 struct DispatchAttemptResult: Codable, Sendable {

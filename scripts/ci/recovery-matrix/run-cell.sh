@@ -19,8 +19,7 @@ usage() {
 Usage: scripts/ci/recovery-matrix/run-cell.sh [OPTIONS]
 
 Options:
-  --cell <id|all|faults|imports>  Cell to run. Use all for every topology cell, faults for every fault cell,
-                            imports for every live import cell.
+  --cell <id|all|faults>    Cell to run. Use all for every topology cell, faults for every fault cell.
   --work-dir DIR            Repo-local scratch directory. Default: .recovery-matrix-work
   --evidence FILE           Evidence JSON output path.
   --cosign FILE             Cosign executable. Default: PF_COSIGN or ~/.cache/pf-cosign/cosign
@@ -67,9 +66,6 @@ CELL_IDS="$(
 FAULT_CELL_IDS="$(
   node --input-type=module -e "import { faultCellIds } from '$SCRIPT_DIR/fault-cells.mjs'; console.log(faultCellIds.join(' '));"
 )"
-IMPORT_CELL_IDS="$(
-  node --input-type=module -e "import { importCellIds } from '$SCRIPT_DIR/import-cells.mjs'; console.log(importCellIds.join(' '));"
-)"
 
 evidence_for_cell() {
   local evidence_path=$1
@@ -87,12 +83,10 @@ evidence_for_cell() {
   printf '%s/%s-%s%s\n' "$dir" "$stem" "$matrix_cell" "$ext"
 }
 
-if [[ "$CELL" == "all" || "$CELL" == "faults" || "$CELL" == "imports" ]]; then
+if [[ "$CELL" == "all" || "$CELL" == "faults" ]]; then
   group_ids="$CELL_IDS"
   if [[ "$CELL" == "faults" ]]; then
     group_ids="$FAULT_CELL_IDS"
-  elif [[ "$CELL" == "imports" ]]; then
-    group_ids="$IMPORT_CELL_IDS"
   fi
   status=0
   for matrix_cell in $group_ids; do
@@ -111,9 +105,9 @@ if [[ "$CELL" == "all" || "$CELL" == "faults" || "$CELL" == "imports" ]]; then
   exit "$status"
 fi
 
-case " $CELL_IDS $FAULT_CELL_IDS $IMPORT_CELL_IDS " in
+case " $CELL_IDS $FAULT_CELL_IDS " in
   *" $CELL "*) ;;
-  *) echo "Unknown recovery matrix cell: $CELL (expected one of: $CELL_IDS $FAULT_CELL_IDS $IMPORT_CELL_IDS, all, faults, imports)" >&2; exit 2 ;;
+  *) echo "Unknown recovery matrix cell: $CELL (expected one of: $CELL_IDS $FAULT_CELL_IDS, all, faults)" >&2; exit 2 ;;
 esac
 
 require_tool docker
@@ -148,18 +142,8 @@ cleanup() {
   if [[ -f "$RUN_ROOT/deployment/docker-compose.recovery.yml" ]]; then
     docker compose -f "$RUN_ROOT/deployment/docker-compose.recovery.yml" -p "$RUN_ID" down -v --remove-orphans >/dev/null 2>&1 || true
   fi
-  # The CLI runs as root inside the host container; hand its backups/staging back to a non-root
-  # runner so the retained scratch directory stays removable. Fall back to a throwaway container
-  # from the local host image when the host container is already gone.
-  if [[ "$(id -u)" != 0 ]]; then
-    docker exec "$HOST" chown -h -R "$(id -u):$(id -g)" "$RUN_ROOT" >/dev/null 2>&1 \
-      || docker run --rm --network none --user 0 --entrypoint chown \
-        -v "$RUN_ROOT:$RUN_ROOT" "$HOST_IMAGE" -h -R "$(id -u):$(id -g)" "$RUN_ROOT" >/dev/null 2>&1 \
-      || echo "Warning: could not restore ownership of $RUN_ROOT; remove it as root" >&2
-  fi
   docker rm -f "$HOST" >/dev/null 2>&1 || true
   docker rm -f "$SINK" >/dev/null 2>&1 || true
-  docker rm -f "$RUN_ID-printer-emulator" >/dev/null 2>&1 || true
   docker network rm "$NETWORK" >/dev/null 2>&1 || true
   docker image rm "$HOST_IMAGE" >/dev/null 2>&1 || true
   local leaks

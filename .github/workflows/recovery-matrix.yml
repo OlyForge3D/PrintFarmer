@@ -13,7 +13,7 @@ on:
       cell:
         description: Recovery matrix cell
         type: choice
-        options: [c2, monolith-sqlserver, split-postgres, split-postgres-no-worker, split-sqlserver, external-database, external-storage, remote-worker, split-database, all, faults, fault-power-loss-backup, fault-power-loss-migration-before, fault-power-loss-migration-after, fault-power-loss-apply-before, fault-power-loss-apply-after, fault-partial-migration, fault-partial-apply, fault-api-down, fault-missing-backup, fault-corrupt-journal, fault-corrupt-replay, fault-fence-release, fault-emulated-printer-reconciliation, imports, import-identity, import-channel-round-trips, import-adversarial, import-replay-supersede, published-bundle]
+        options: [c2, monolith-sqlserver, split-postgres, split-postgres-no-worker, split-sqlserver, external-database, external-storage, remote-worker, split-database, all, faults, fault-power-loss-backup, fault-power-loss-migration-before, fault-power-loss-migration-after, fault-power-loss-apply-before, fault-power-loss-apply-after, fault-partial-migration, fault-partial-apply, fault-api-down, fault-missing-backup, fault-corrupt-journal, fault-corrupt-replay, fault-fence-release, imports, import-identity, import-channel-round-trips, import-adversarial, import-replay-supersede, published-bundle]
         default: c2
 
 permissions:
@@ -53,26 +53,11 @@ jobs:
           set -euo pipefail
           config=/etc/docker/daemon.json
           current='{}'
-          # An empty or whitespace-only file is treated as {}; anything other than exactly one
-          # JSON object fails the step before the privileged config is touched.
-          if sudo test -s "$config"; then
-            current="$(sudo cat "$config" | jq -s 'if length == 0 then {}
-              elif length == 1 and (.[0] | type) == "object" then .[0]
-              else error("daemon.json must contain exactly one JSON object") end')"
-          fi
-          # Render and validate the complete config before replacing the privileged file.
-          rendered="$(mktemp)"
-          jq '.features = ((.features // {}) + {"containerd-snapshotter": true})' <<<"$current" > "$rendered"
-          jq -e 'type == "object" and .features["containerd-snapshotter"] == true' "$rendered" >/dev/null
-          sudo install -m 0644 -o root -g root "$rendered" "$config"
-          rm -f "$rendered"
+          if sudo test -s "$config"; then current="$(sudo cat "$config")"; fi
+          jq '.features = ((.features // {}) + {"containerd-snapshotter": true})' <<<"$current" \
+            | sudo tee "$config" >/dev/null
           sudo systemctl restart docker
-          ready=false
-          for _ in $(seq 1 30); do
-            if docker info >/dev/null 2>&1; then ready=true; break; fi
-            sleep 2
-          done
-          [ "$ready" = true ] || { echo "::error::docker daemon did not become ready after restart"; exit 1; }
+          for _ in $(seq 1 30); do docker info >/dev/null 2>&1 && break; sleep 2; done
           docker info --format '{{json .DriverStatus}}' \
             | jq -e 'any(.[]; .[0] == "driver-type" and .[1] == "io.containerd.snapshotter.v1")' >/dev/null \
             || { echo "::error::containerd image store is not active"; exit 1; }

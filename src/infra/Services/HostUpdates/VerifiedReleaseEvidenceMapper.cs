@@ -1,4 +1,4 @@
-﻿using System.Runtime.InteropServices;
+using System.Runtime.InteropServices;
 using Farm.Infrastructure.Dtos;
 
 namespace Farm.Infrastructure.Services.HostUpdates;
@@ -58,7 +58,6 @@ public static class VerifiedReleaseEvidenceMapper
         }
 
         List<ReleaseServiceRequirementDto> services = [];
-        List<VerifiedReleaseExecutionTargetDto> executionTargets = [];
         if (metadata.ComponentPlatforms is null
             || metadata.ComponentIndexDigests is null
             || metadata.ComponentPlatformDigests is null)
@@ -68,7 +67,7 @@ public static class VerifiedReleaseEvidenceMapper
 
         foreach ((string manifestServiceId, IReadOnlyList<string> platforms) in metadata.ComponentPlatforms)
         {
-            if (!HostUpdateExecutionRequest.RequiredServiceIds.Contains(manifestServiceId)
+            if ((!InventoryServiceIds.ContainsKey(manifestServiceId) && manifestServiceId != "monolith")
                 || platforms is null
                 || platforms.Count == 0
                 || platforms.Distinct(StringComparer.Ordinal).Count() != platforms.Count
@@ -92,13 +91,6 @@ public static class VerifiedReleaseEvidenceMapper
                 throw new InvalidDataException(
                     $"Verified release service '{manifestServiceId}' is missing immutable digest evidence for '{hostPlatform}'.");
             }
-
-            executionTargets.Add(new VerifiedReleaseExecutionTargetDto
-            {
-                ServiceId = manifestServiceId,
-                Platform = hostPlatform,
-                PlatformDigest = digest,
-            });
 
             // Monolith is an execution target, not an independently observed inventory service.
             if (InventoryServiceIds.TryGetValue(manifestServiceId, out string? inventoryServiceId))
@@ -152,7 +144,6 @@ public static class VerifiedReleaseEvidenceMapper
             Identity = identity,
             ManifestDigest = metadata.Identity.ManifestDigest,
             Services = services,
-            ExecutionTargets = executionTargets,
         };
     }
 
@@ -170,13 +161,7 @@ public static class VerifiedReleaseEvidenceMapper
         return version;
     }
 
-    private static string GetHostPlatform() => HostUpdateHostPlatform.Current();
-}
-
-/// <summary>The canonical <c>os-arch</c> platform of this process, shared by release discovery and the recovery CLI.</summary>
-public static class HostUpdateHostPlatform
-{
-    public static string Current()
+    private static string GetHostPlatform()
     {
         string operatingSystem = OperatingSystem.IsLinux() ? "linux"
             : OperatingSystem.IsWindows() ? "windows"

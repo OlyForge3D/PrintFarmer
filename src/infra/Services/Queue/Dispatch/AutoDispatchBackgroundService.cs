@@ -26,15 +26,14 @@ public sealed class AutoDispatchBackgroundService(
     DispatchConcurrencyCoordinator concurrencyCoordinator,
     IHubContext<PrinterHub> hub,
     ILogger<AutoDispatchBackgroundService> logger,
-    Farm.Infrastructure.Services.HostUpdates.AutoDispatchFenceFlag? hostUpdateFence = null,
     TimeProvider? timeProvider = null) : BackgroundService
 {
-    private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
     private readonly SemaphoreSlim _selectionLock = new(1, 1);
     private readonly object _workerSync = new();
     private readonly object _claimSync = new();
     private readonly HashSet<Task> _workers = [];
     private readonly HashSet<Guid> _claimedJobs = [];
+    private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
     private static readonly TimeSpan DurableScanInterval = TimeSpan.FromSeconds(30);
 
     /// <inheritdoc />
@@ -61,7 +60,7 @@ public sealed class AutoDispatchBackgroundService(
                     CancellationTokenSource.CreateLinkedTokenSource(stoppingToken))
                 {
                     Task<DispatchTriggerEvent> readTask = trigger.ReadAsync(readCts.Token).AsTask();
-                    Task scanDelay = Task.Delay(DurableScanInterval, _timeProvider, stoppingToken);
+                    Task scanDelay = Task.Delay(DurableScanInterval, stoppingToken);
                     Task completed = await Task.WhenAny(readTask, scanDelay);
 
                     if (completed == scanDelay)
@@ -69,25 +68,14 @@ public sealed class AutoDispatchBackgroundService(
                         await readCts.CancelAsync();
                         try
                         {
-                            // A trigger can arrive before cancellation wins. No worker owns
-                            // this read, so release it for the next durable reconciliation.
-                            DispatchTriggerEvent abandonedEvent = await readTask;
-                            _ = trigger.TryCompleteProcessing(abandonedEvent, allowRerun: false, out _);
+                            _ = await readTask;
                         }
                         catch (OperationCanceledException)
                         {
                             // Expected: the periodic durable scan won this wait.
                         }
 
-                        await scanDelay;
-
-                        // Idle channels must also observe the fence, even when no queued
-                        // work exists to generate a trigger during reconciliation (#2848).
-                        if (!await PauseForHostUpdateAsync(stoppingToken))
-                        {
-                            await ReconcileStartupEligiblePrintersAsync(stoppingToken);
-                        }
-
+                        await ReconcileStartupEligiblePrintersAsync(stoppingToken);
                         continue;
                     }
 
@@ -104,23 +92,6 @@ public sealed class AutoDispatchBackgroundService(
                 // Dispatch via a tracked worker so idle printers run concurrently under the
                 // configured capacity limit, with rerun coalescing and graceful drain on
                 // shutdown. The cross-process database claim prevents duplicates.
-                //
-                // Host-update fence (issue #2663 / Kane "physical admission barrier" finding):
-                // while fenced, stop *starting new dispatch workers* -- physically the same
-                // guarantee the drain step promises for active prints -- rather than merely
-                // ignoring the fence and letting new printer commands go out during a backup.
-                // Skipping this trigger event is safe: DurableScanInterval's periodic scan (see
-                // above) already re-discovers any eligible printer after a dropped event, so the
-                // same recovery path picks the printer back up once the fence is released.
-                // Acknowledge quiescence only once no dispatch worker is still in flight, so the
-                // fence coordinator cannot observe "paused" while a printer command is still
-                // physically executing.
-                if (await PauseForHostUpdateAsync(stoppingToken))
-                {
-                    _ = trigger.TryCompleteProcessing(triggerEvent, allowRerun: false, out _);
-                    continue;
-                }
-
                 StartTrackedWorker(triggerEvent, stoppingToken);
             }
         }
@@ -134,21 +105,6 @@ public sealed class AutoDispatchBackgroundService(
             await DrainWorkersAsync();
             logger.LogInformation("[AutoDispatch] Background service stopped");
         }
-    }
-
-    private async Task<bool> PauseForHostUpdateAsync(CancellationToken stoppingToken)
-    {
-        if (hostUpdateFence is null || !await hostUpdateFence.IsPauseRequestedAsync(stoppingToken))
-        {
-            return false;
-        }
-
-        if (TrackedWorkerCount == 0)
-        {
-            await hostUpdateFence.AcknowledgePausedAsync(stoppingToken);
-        }
-
-        return true;
     }
 
     private void StartTrackedWorker(
@@ -271,8 +227,6 @@ public sealed class AutoDispatchBackgroundService(
                 && db.PrintJobs.Any(j =>
                     j.Status == PrintJobStatus.Queued
                     && j.QueuedAt <= startupAt
-                    && (j.BlockedReasonCode == null
-                        || j.BlockedReasonCode != JobBlockedReasonCode.OperatorRecoveryRequired)
                     && (j.AssignedPrinterId == null || j.AssignedPrinterId == p.Id)))
             .Select(p => p.Id)
             .ToListAsync(ct);
@@ -486,13 +440,11 @@ public sealed class AutoDispatchBackgroundService(
         List<PrintJob> assignedJobs = await db.PrintJobs
             .AsNoTracking()
             .Where(job => job.Status == PrintJobStatus.Queued && job.AssignedPrinterId == printerId)
-            .WhereNotOperatorRecoveryBlocked()
             .OrderWithinScope()
             .ToListAsync(ct);
         List<PrintJob> unassignedJobs = await db.PrintJobs
             .AsNoTracking()
             .Where(job => job.Status == PrintJobStatus.Queued && job.AssignedPrinterId == null)
-            .WhereNotOperatorRecoveryBlocked()
             .OrderWithinScope()
             .ToListAsync(ct);
         HashSet<Guid> jobsThatCouldNotBeClaimed = [];

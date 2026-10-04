@@ -2,7 +2,6 @@
 using System.Data.Common;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Services.Electricity;
-using Farm.Infrastructure.Services.HostUpdates;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
@@ -15,26 +14,6 @@ namespace Farm.Infrastructure.Tests.Services.Electricity;
 public class PowerReadingPruneServiceTests
 {
     private static readonly TimeSpan s_testTimeout = TimeSpan.FromSeconds(10);
-
-    [Fact]
-    public async Task ExecuteAsync_ShutdownDuringPausedDelay_ExitsWithoutError()
-    {
-        using var stopping = new CancellationTokenSource();
-        var scopeFactory = new Mock<IServiceScopeFactory>(MockBehavior.Strict);
-        var logger = new Mock<ILogger<PowerReadingPruneService>>();
-        var fence = new PowerReadingPruneFenceFlag();
-        await fence.RequestPauseAsync(CancellationToken.None);
-        using var service = new TestablePowerReadingPruneService(scopeFactory.Object, logger.Object, fence);
-
-        // Run inline until the paused delay yields, rather than racing BackgroundService.StartAsync.
-        Task execution = service.RunAsync(stopping.Token);
-        stopping.Cancel();
-        await execution.WaitAsync(s_testTimeout);
-
-        Assert.True(await fence.IsPausedAsync(CancellationToken.None));
-        scopeFactory.Verify(factory => factory.CreateScope(), Times.Never);
-        VerifyNoErrors(logger);
-    }
 
     [Fact]
     public async Task ExecuteAsync_ShutdownDuringDelete_ExitsWithoutError()
@@ -108,8 +87,7 @@ public class PowerReadingPruneServiceTests
 
     private sealed class TestablePowerReadingPruneService(
         IServiceScopeFactory scopeFactory,
-        ILogger<PowerReadingPruneService> logger,
-        PowerReadingPruneFenceFlag? fence = null) : PowerReadingPruneService(scopeFactory, logger, fence)
+        ILogger<PowerReadingPruneService> logger) : PowerReadingPruneService(scopeFactory, logger)
     {
         public Task RunAsync(CancellationToken stoppingToken) => ExecuteAsync(stoppingToken);
     }

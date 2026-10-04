@@ -74,7 +74,7 @@ test('fault cells are runnable individually and as a group without changing `all
   assert.equal(resolveCellList('all').length, cellIds.length);
   assert.ok(cellIds.every((id) => !id.startsWith('fault-')));
   assert.deepEqual(resolveCellList('faults').map((entry) => entry.id), faultCellIds);
-  assert.deepEqual(runnableCellIds.slice(0, cellIds.length + faultCellIds.length), [...cellIds, ...faultCellIds]);
+  assert.deepEqual(runnableCellIds, [...cellIds, ...faultCellIds]);
   for (const id of faultCellIds) {
     assert.equal(resolveCell(id), cellsById[id]);
     assert.ok(resolveCell(id).fault);
