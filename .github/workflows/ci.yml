@@ -358,6 +358,12 @@ jobs:
       - name: Test compliance controls
         run: node --test scripts/compliance/compliance.test.mjs
 
+      # Everything except the NuGet inventory, which needs a restore and runs
+      # in dependency-compliance. Unconditional so path-list drift in the
+      # selector can never skip licensing/npm validation (#3150).
+      - name: Validate compliance (restore-free)
+        run: node scripts/compliance/validate-compliance.mjs --skip-nuget
+
       - name: Test manual server release path
         run: >-
           node --test scripts/ci/tests/test-publish-release.mjs
@@ -397,12 +403,6 @@ jobs:
       - name: Test squad triage routing
         run: node --test scripts/ci/tests/test-squad-routing.mjs
 
-      # Everything except the NuGet inventory, which needs a restore and runs
-      # in dependency-compliance. Unconditional so path-list drift in the
-      # selector can never skip licensing/npm validation (#3150).
-      - name: Validate compliance (restore-free)
-        run: node scripts/compliance/validate-compliance.mjs --skip-nuget
-
   # ---------------------------------------------------------------------------
   # dependency-compliance — full dependency-license/provenance validation.
   # Requires restored NuGet assets (project.assets.json under src/**/obj/);
@@ -415,10 +415,22 @@ jobs:
   #   - NuGet graph: can only change through a bucket that already sets
   #     `want_dotnet_build` (every `src/**` .NET bucket, plus the
   #     `shared_config` full-safe bucket for `Directory.Packages.props`,
-  #     `NuGet.Config`, or any `*.sln`).
-  #   - npm/compliance graph: can change through package manifests, npm
-  #     lockfiles, notices, or compliance policy/tooling paths that do not
-  #     require a .NET build.
+  #     `NuGet.Config`, and any `*.sln`). The restore below covers only
+  #     `farm-web.sln`'s project graph; adding a project to it requires
+  #     editing `farm-web.sln`, which is `shared_config` and full-safe.
+  #   - npm graph: changes through the `package.json`/`package-lock.json`
+  #     of every `npmLockFiles` entry in
+  #     compliance/dependency-license-policy.json (`npm_manifest`), which
+  #     never sets `want_dotnet_build` — so a frontend-only dependency bump
+  #     still validates its lock entries and reviewed npm fallbacks here.
+  #   - The policy/evidence/validators themselves (`compliance/**`,
+  #     `scripts/compliance/**`, the `compliance` bucket).
+  # A mobile-only or docs-only PR cannot change the NuGet graph or the
+  # dependency policy, and ci-tools still validates its licensing inputs.
+  # `want_dotnet_build` (and therefore this) is forced `true` (full-safe) on
+  # every trusted push to `main`/`development` or `release/**` (see
+  # select-dotnet-tests.sh `emit_full_safe "full-safe: trusted push to $base"`)
+  # and on `workflow_dispatch`.
   # ---------------------------------------------------------------------------
   dependency-compliance:
     name: Dependency license & provenance validation
@@ -528,6 +540,13 @@ jobs:
       - name: Build frontend
         working-directory: src/Web/ReactApp
         run: npm run build
+
+      # Mirrors the frontend Docker build's notices step (#3148): fails when a
+      # production npm package ships no license text and no reviewed fallback
+      # in compliance/dependency-license-policy.json matches its exact version,
+      # so a dependency bump fails here instead of in the deployment smoke.
+      - name: Generate npm license notices
+        run: node scripts/compliance/create-npm-notices.mjs
 
       - name: Test frontend (with coverage)
         working-directory: src/Web/ReactApp
