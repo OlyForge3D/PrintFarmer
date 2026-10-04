@@ -349,8 +349,8 @@ final class APIClientAuthSessionTests: XCTestCase {
         let transport = MockURLProtocol.makeSession()
         let client = await makeClient(gen: gen, transport: transport)
 
-        // Establish the reconstructed session identity (same primitive
-        // ServiceContainer.establishReconstructedAuthSession uses under the hood).
+        // Establish the reconstructed session identity through the same authenticated-session
+        // primitive used by the reconstructed client path.
         let established = epoch.advance()
         let ok = await client.applyAuthenticatedSessionIfCurrent(
             baseURL: nil, identity: AuthenticatedIdentity(accessToken: "bearer-established", serverID: Self.testServerID), epoch: epoch, token: established)
@@ -598,7 +598,7 @@ final class APIClientAuthSessionTests: XCTestCase {
     /// A2: an APIClient constructed with `authSessionToken: t` at INIT time
     /// publishes a session-expired event with EXACTLY that token on a 401.
     /// This proves the reconstructed-client path in ServiceContainer no longer
-    /// needs a fire-and-forget establishReconstructedAuthSession Task —
+    /// needs a fire-and-forget reconstructed-session task —
     /// bearer + identity are bound atomically at construction.
     func testInitBindsIdentityAtomicallyFromSynchronouslyCapturedToken() async throws {
         let observer = ExpiryObserver()

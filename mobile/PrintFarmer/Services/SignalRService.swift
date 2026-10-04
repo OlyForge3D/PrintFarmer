@@ -118,13 +118,8 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
     private let filamentCoverageChangedHub: SignalREventHub<FilamentCoverageChangedEvent>
 
     /// Race-free connection-state read. Delegates to the hub's serial
-    /// executor so any pending `setConnectionState` block has been applied
-    /// before the read returns.
+    /// executor so any pending state update has been applied before the read returns.
     var connectionState: SignalRConnectionState { connectionStateHub.snapshot() }
-
-    private func setConnectionState(_ newValue: SignalRConnectionState) {
-        connectionStateHub.setState(newValue)
-    }
 
     private let serverURL: URL
     private let tokenProvider: @Sendable () async -> String?
@@ -844,9 +839,9 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
         // immediately-failing receive would see the slot as still-owned
         // and drop, stranding the service in `.connected` with no live
         // receive loop and no scheduled retry. Clearing the slot here
-        // is safe: the reconnect task's outer
-        // `clearReconnectSlotIfOwned` becomes a no-op via its token
-        // guard, and a normal `connect()` cleared the slot already so
+        // is safe: the reconnect task's outer owner-token guard
+        // prevents it from clearing a newer slot, and a normal
+        // `connect()` cleared the slot already so
         // this is a redundant no-op there.
         //
         // r20 (F4-L #777 successor-ownership fix): the r10 clear was
@@ -856,12 +851,12 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
         // owner was still parked at `handoffOpen` to reserve a fresh
         // slot for a SECOND concurrent owner (violating
         // `maxReconnectOwners <= 1` and the frozen strict order
-        // `A.completed < B.created`). The slot is now released only
-        // on the owner's own clean exit paths
-        // (`clearReconnectSlotIfOwned` on retry-success return, and
-        // the retry-exhausted terminal below), and the deferred
-        // successor request is dispatched by the owner-scoped
-        // completion watcher AFTER `await owner.value` returns. See
+        // `A.completed < B.created`). The slot is retained while its
+        // owner task runs and released by the owner-scoped completion
+        // watcher after that task returns; the retry-exhausted terminal
+        // also clears the slot while clearing pending state. The deferred
+        // successor request is dispatched by the watcher AFTER
+        // `await owner.value` returns. See
         // the `scheduleReconnect` drop path for the pending-request
         // side.
         let started: Bool = lifecycleSync {
@@ -2004,9 +1999,9 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
         // r21 (F4-L #777) owner-scoped completion watcher.
         //
         // This Task runs in ALL build configurations. It is the SOLE
-        // authority that releases the reconnect slot for this owner
-        // (R1 correction: no in-body `clearReconnectSlotIfOwned`
-        // remains on the success or cancel-exit paths — see the
+        // authority that releases the reconnect slot on success or
+        // cancellation (R1 correction: no in-body slot release remains
+        // on those exit paths — see the
         // retry-loop above), and it enforces the receive-completion
         // happens-before edge required by the frozen strict order
         // `R1.completed < A.completed < B.created` (R2 correction).
@@ -2380,17 +2375,6 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
         }
         if !installed {
             reconnectTask.cancel()
-        }
-    }
-
-    /// Clear the reconnect slot if and only if this task still owns
-    /// it. Prevents a stale reconnect from wiping a newer owner.
-    private func clearReconnectSlotIfOwned(token: UUID) {
-        lifecycleSync {
-            if self.reconnectToken == token {
-                self.reconnectTask = nil
-                self.setReconnectTokenLocked(nil)
-            }
         }
     }
 

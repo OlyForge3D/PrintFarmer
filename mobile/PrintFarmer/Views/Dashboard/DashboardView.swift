@@ -479,56 +479,6 @@ struct DashboardView: View {
         )
     }
 
-    private var activePrintETAsSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Active Print ETAs")
-                .font(.title2.bold())
-
-            VStack(spacing: 8) {
-                ForEach(Array(viewModel.activePrintingPrinters.prefix(5)), id: \.id) { printer in
-                    activePrintRow(printer: printer)
-                }
-            }
-        }
-    }
-
-    private func activePrintRow(printer: Printer) -> some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(printer.fileName ?? printer.jobName ?? "Unknown Job")
-                    .font(.subheadline.weight(.medium))
-                    .lineLimit(1)
-                Label(printer.name, systemImage: "printer")
-                    .font(.caption2)
-                    .foregroundStyle(Color.pfTextSecondary)
-                    .lineLimit(1)
-            }
-
-            Spacer()
-
-            if let progress = printer.progress, progress > 0 {
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text("\(Int(progress * 100))%")
-                        .font(.subheadline.weight(.medium).monospacedDigit())
-                        .foregroundStyle(Color.pfAccent)
-                    Text("printing")
-                        .font(.caption2)
-                        .foregroundStyle(Color.pfTextSecondary)
-                }
-            } else {
-                Text("—")
-                    .font(.subheadline)
-                    .foregroundStyle(Color.pfTextTertiary)
-            }
-        }
-        .padding(12)
-        .background(Color.pfCard, in: RoundedRectangle(cornerRadius: 8))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .strokeBorder(Color.pfBorder, lineWidth: 1)
-        )
-    }
-
     private var upNextSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Up Next")
