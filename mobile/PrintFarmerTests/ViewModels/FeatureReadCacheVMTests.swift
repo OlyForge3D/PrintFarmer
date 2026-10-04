@@ -2,17 +2,16 @@ import XCTest
 @testable import PrintFarmer
 
 /// VM-level integration coverage for the F10-C2 (#789) read-cache wiring into the
-/// SHIPPED #779 Attention and #778 coverage view models. The adapter engine itself
-/// is proven in `FeatureReadCacheTests`; these tests prove the two behaviours that
-/// only exist once the adapters are wired into the real VMs:
+/// SHIPPED #779 Attention view model. The adapter engine itself is proven in
+/// `FeatureReadCacheTests`; these tests prove the behaviours that only exist once
+/// the adapter is wired into the real view model:
 ///
 ///  * criterion 3 — offline hydration reconstructs the #779 feed (ordering + id
 ///    dedupe + healthy count + cursor) AND pagination/load-more is refused while the
 ///    feed is unconfirmed-stale (never presented as a complete live feed);
 ///  * criterion 8 — the FIRST canonical refresh on reconnect routes through the
-///    real #779/#778 path EXACTLY ONCE, replaces the stale snapshot, and rewrites the
+///    real #779 path EXACTLY ONCE, replaces the stale snapshot, and rewrites the
 ///    cache exactly once; the pre-seeded cursor is never consumed by an offline call.
-///  * criterion 4 — offline coverage hydration preserves `unknown` HONESTLY.
 ///
 /// Every wait is barrier/ACK driven (scripted services, explicit `mint`) — no sleeps,
 /// no polling, no elapsed-time pass criteria.

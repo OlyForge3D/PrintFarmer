@@ -143,13 +143,11 @@ final class AttentionReadCacheAdapter: Sendable {
 
 // MARK: Filament coverage
 
-/// Read-cache adapter for filament coverage (#778): one fleet record plus a
-/// stable-id per-printer detail record. `unknown` coverage is preserved honestly
+/// Read-cache adapter for filament coverage (#778): a stable-id per-printer
+/// detail record. `unknown` coverage is preserved honestly
 /// because the canonical DTOs are stored verbatim. SignalR `filamentcoveragechanged`
-/// events are invalidation-only and are NEVER written here (criterion 4).
+/// events are invalidation-only and are NEVER written here.
 final class FilamentCoverageReadCacheAdapter: Sendable {
-    static let fleetRecordKey = "coverage-fleet"
-
     private let store: any FeatureReadCacheStoring
     private let now: @Sendable () -> Date
     private let reportCommit: FeatureReadCacheCommitReporter
@@ -170,45 +168,6 @@ final class FilamentCoverageReadCacheAdapter: Sendable {
 
     func currentSession() async -> FarmSnapshotSession? {
         await store.currentSession()
-    }
-
-    // Fleet ------------------------------------------------------------------
-
-    func loadCachedFleet() async -> FeatureReadCacheHydration<FleetFilamentCoverage> {
-        await store.hydrate(recordKey: Self.fleetRecordKey, as: FleetFilamentCoverage.self)
-    }
-
-    @discardableResult
-    func recordFleet(
-        _ fleet: FleetFilamentCoverage,
-        lastUpdatedAtMillis: Int64? = nil,
-        writeOrder: FeatureReadCacheWriteOrder = .next(),
-        capturedSession: FarmSnapshotSession
-    ) async -> FeatureReadCacheCommitResult {
-        let result = await store.commitSnapshot(
-            fleet,
-            recordKey: Self.fleetRecordKey,
-            lastUpdatedAtMillis: lastUpdatedAtMillis ?? Self.millis(now()),
-            writeOrder: writeOrder,
-            capturedSession: capturedSession
-        )
-        reportCommit(Self.fleetRecordKey, result)
-        return result
-    }
-
-    @discardableResult
-    func recordFleetDisabled(
-        writeOrder: FeatureReadCacheWriteOrder = .next(),
-        capturedSession: FarmSnapshotSession
-    ) async -> FeatureReadCacheCommitResult {
-        let result = await store.commitDisabled(
-            recordKey: Self.fleetRecordKey,
-            lastUpdatedAtMillis: Self.millis(now()),
-            writeOrder: writeOrder,
-            capturedSession: capturedSession
-        )
-        reportCommit(Self.fleetRecordKey, result)
-        return result
     }
 
     // Per-printer detail -----------------------------------------------------

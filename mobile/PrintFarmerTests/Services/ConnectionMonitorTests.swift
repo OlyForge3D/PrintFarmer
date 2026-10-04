@@ -2,6 +2,19 @@ import Foundation
 import XCTest
 @testable import PrintFarmer
 
+private actor ReadinessFilamentCoverageService: FilamentCoverageServiceProtocol {
+    private(set) var fleetRequestCount = 0
+
+    func getForPrinter(id: UUID) async throws -> PrinterFilamentCoverage {
+        throw NetworkError.notFound
+    }
+
+    func getForFleet() async throws -> FleetFilamentCoverage {
+        fleetRequestCount += 1
+        return FleetFilamentCoverage(printers: [], evaluatedAtUtc: Date(timeIntervalSince1970: 1_000))
+    }
+}
+
 /// Tests for ConnectionMonitor: the pure state-resolution matrix and the
 /// end-to-end `refresh()` path using a stubbed APIClient + mock SignalR hub.
 @MainActor
@@ -820,7 +833,7 @@ final class ConnectionMonitorTests: XCTestCase {
         XCTAssertEqual(capabilities.refreshCount, 2)
     }
 
-    func testSuccessfulReadinessPublishesAttentionCoverageAndPrinters() async throws {
+    func testSuccessfulReadinessPublishesAttentionAndPrintersAndProbesFleetCoverage() async throws {
         let root = FarmSnapshotFixtures.tempRoot()
         addTeardownBlock { try? FileManager.default.removeItem(at: root) }
         let authority = FarmSnapshotFixtures.makeAuthority(
@@ -831,10 +844,6 @@ final class ConnectionMonitorTests: XCTestCase {
             generation: 0
         ))
         let feed = makeAttentionFeed(healthyPrinterCount: 4)
-        let fleet = FleetFilamentCoverage(
-            printers: [],
-            evaluatedAtUtc: Date(timeIntervalSince1970: 1_000)
-        )
         let printers = [try TestData.decodePrinter()]
         let reachabilityFeed = makeAttentionFeed(healthyPrinterCount: 1)
         let container = ServiceContainer(
@@ -851,7 +860,8 @@ final class ConnectionMonitorTests: XCTestCase {
         printer.printersToReturn = printers
         let signalR = MockSignalRService()
         container.attentionService = attention
-        container.filamentCoverageService = StubFilamentCoverageService(fleet: fleet)
+        let coverageService = ReadinessFilamentCoverageService()
+        container.filamentCoverageService = coverageService
         container.printerService = printer
         container.signalRService = signalR
         container.capabilitiesService = TestCapabilitiesService()
@@ -873,19 +883,17 @@ final class ConnectionMonitorTests: XCTestCase {
         XCTAssertTrue(attentionCalls.allSatisfy { $0.cursor == nil })
         XCTAssertEqual(attentionCalls.filter { $0.limit == nil }.count, 1)
         XCTAssertEqual(attentionCalls.filter { $0.limit == 1 }.count, 1)
+        let fleetProbeCalls = await coverageService.fleetRequestCount
+        XCTAssertEqual(fleetProbeCalls, 1, "Readiness must continue probing fleet coverage")
         XCTAssertEqual(printer.listIncludeDisabledArg, false)
         XCTAssertEqual(signalR.printerSubscriptionCalls, [printers.map(\.id)])
         var consumedFeed: AttentionFeed?
-        var consumedFleet: FleetFilamentCoverage?
         var consumedPrinters: [Printer]?
         XCTAssertTrue(container.startupPrefetchStore.consumeAttention { consumedFeed = $0.value })
-        XCTAssertTrue(container.startupPrefetchStore.consumeFilamentCoverage { consumedFleet = $0.value })
         XCTAssertTrue(container.startupPrefetchStore.consumePrinters { consumedPrinters = $0.value })
         XCTAssertEqual(consumedFeed, feed)
-        XCTAssertEqual(consumedFleet, fleet)
         XCTAssertEqual(consumedPrinters?.map(\.id), printers.map(\.id))
         XCTAssertFalse(container.startupPrefetchStore.consumeAttention { _ in XCTFail("attention must be one-shot") })
-        XCTAssertFalse(container.startupPrefetchStore.consumeFilamentCoverage { _ in XCTFail("coverage must be one-shot") })
         XCTAssertFalse(container.startupPrefetchStore.consumePrinters { _ in XCTFail("printers must be one-shot") })
         XCTAssertTrue(authority.isCurrent(session))
     }

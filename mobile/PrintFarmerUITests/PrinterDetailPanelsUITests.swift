@@ -131,6 +131,7 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
 
         // The Farm sidebar selection does not pop the Farm NavigationStack on
         // iPad, so return from Settings through Account before reopening detail.
+        // BackButton is XCTest's platform navigation-item identifier, not an app-owned ID.
         let settingsBack = app.navigationBars["Settings"].buttons["BackButton"]
         XCTAssertTrue(settingsBack.waitForExistence(timeout: 3))
         settingsBack.tap()
