@@ -989,6 +989,10 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             nameof(Printer.MaxTravelSpeed) or
             nameof(Printer.MaxAcceleration) or
             nameof(Printer.MaxTravelAcceleration) or
+
+            // Cornering calibration (issue #2138): these three fields are motion-planner tunables
+            // recorded by the same admin-gated PUT as MaxAcceleration/MaxTravelAcceleration above,
+            // and are treated identically for revision-tracking purposes.
             nameof(Printer.MaxJerk) or
             nameof(Printer.JunctionDeviation) or
             nameof(Printer.SquareCornerVelocity) or

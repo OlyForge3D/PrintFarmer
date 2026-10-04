@@ -310,6 +310,52 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
     [Fact]
     [Trait("Category", "Dispatch")]
     [Trait("Phase", "2")]
+    public async Task OnPrinterIdle_RecoveryBlockedUnassignedJob_DoesNotDispatch()
+    {
+        SeedSettings(enabled: true, mode: AutoDispatchMode.Auto, idleThresholdSeconds: 0);
+        (Printer printer, Guid printerId) = SeedPrinter();
+        PrintJob job = SeedQueuedJob("operator-recovery-blocked");
+        job.BlockedReasonCode = JobBlockedReasonCode.OperatorRecoveryRequired;
+        _db.SaveChanges();
+
+        DispatchScore goodScore = new(
+            printerId, printer.Name, 85.0,
+            new Dictionary<string, FactorScore>(),
+            Eliminated: false,
+            EliminationReasons: []);
+
+        _scorerMock
+            .Setup(s => s.ScorePrinterForJobAsync(job.Id, printerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(goodScore);
+        _dispatchServiceMock
+            .Setup(d => d.DispatchJobAsync(job.Id, printerId, "system:auto-dispatch", It.IsAny<DispatchScore>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Farm.Infrastructure.Dtos.PrintQueue.QueuedPrintJobDto
+            {
+                DispatchResult = new Farm.Infrastructure.Dtos.PrintQueue.DispatchAttemptResultDto
+                {
+                    Outcome = DispatchAttemptOutcome.Accepted,
+                },
+            });
+
+        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(30));
+        AutoDispatchBackgroundService svc = CreateService();
+
+        await svc.ProcessPrinterIdleAsync(printerId, skipIdleThreshold: true, cts.Token);
+
+        _scorerMock.Verify(
+            s => s.ScorePrinterForJobAsync(job.Id, printerId, It.IsAny<CancellationToken>()),
+            Times.Never);
+        _dispatchServiceMock.Verify(
+            d => d.DispatchJobAsync(job.Id, printerId, "system:auto-dispatch", It.IsAny<DispatchScore>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        _clientProxyMock.Verify(
+            c => c.SendCoreAsync(It.IsAny<string>(), It.IsAny<object?[]>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    [Trait("Category", "Dispatch")]
+    [Trait("Phase", "2")]
     public async Task OnStartup_ReadyAutoDispatchPrinterWithQueuedJob_DispatchesWithoutExternalTrigger()
     {
         SeedSettings(enabled: true, mode: AutoDispatchMode.Auto, idleThresholdSeconds: 0);

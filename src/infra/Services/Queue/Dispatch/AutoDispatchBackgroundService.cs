@@ -448,6 +448,7 @@ public sealed class AutoDispatchBackgroundService(
         List<PrintJob> unassignedJobs = await db.PrintJobs
             .AsNoTracking()
             .Where(job => job.Status == PrintJobStatus.Queued && job.AssignedPrinterId == null)
+            .WhereNotOperatorRecoveryBlocked()
             .OrderWithinScope()
             .ToListAsync(ct);
         HashSet<Guid> jobsThatCouldNotBeClaimed = [];
