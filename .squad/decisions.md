@@ -244,3 +244,7 @@ Farm-shape counts (total printers, queued jobs, etc.) are exposed as a **nullabl
   - Kane (#2424, #2425): Analytics and telemetry
   - Newt (#2426): Documentation
 
+### 2026-10-04: Epics stay isolated until complete
+**By:** Lambert
+**What:** Epics live on their own feature branch; merge to development only when the epic is complete, so it can be dropped.
+**Why:** Keeping incomplete epic work off `development` makes it possible to abandon or remove the whole epic without unwinding interleaved commits.
