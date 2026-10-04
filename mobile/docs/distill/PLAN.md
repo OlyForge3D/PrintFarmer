@@ -56,6 +56,20 @@ Removed code is deleted, not hidden behind flags. Deep links to removed destinat
 - `PrinterCardView` and `iPadPrinterCardView` merge into one adaptive card that uses `pf*` tokens instead of hard-coded hex values.
 - Each card is a single VoiceOver element.
 
+`PrinterCardView` now supplies the same 60pt, token-based layout in the phone
+list, iPad grid and read-only cached farm. Active cards fetch authenticated
+current-job media through `PrinterService`/`APIClient`; the exact relative
+versioned URL is the revision key. Media never uses a camera URL or the
+internal `thumbnailUrl`, follows no redirects, and bypasses the shared URL
+cache. A missing/unsupported thumbnail leaves a neutral printer glyph.
+ETA comes from `/api/printers/{id}/status` `printTimeLeftSeconds`, refreshed
+every 30 seconds while the active card is visible; unknown ETA stays unknown,
+and paused jobs show remaining time without promising a completion time.
+Attention uses the existing canonical feed and invalidation lifecycle,
+exhausting its pages before displaying exact per-printer counts. Failure
+items contribute the red state pill and reason. No coverage request is made
+by the Farm cards; coverage remains available in Filament detail.
+
 ## Printer detail: swipeable pages
 
 The detail view has a segmented header and a page indicator. The toolbar shows "‹ Farm" and "Open in web ↗".

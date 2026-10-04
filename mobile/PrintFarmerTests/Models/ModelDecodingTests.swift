@@ -5,6 +5,23 @@ import XCTest
 /// the Printfarmer backend DTOs.
 final class ModelDecodingTests: XCTestCase {
 
+    func testCurrentJobThumbnailCamelCaseAndLegacyOmission() throws {
+        let path = "/api/printers/\(TestData.testUUID)/current-job/thumbnail?v=0123456789abcdef"
+        let json = TestJSON.printer.replacingOccurrences(
+            of: "\"name\":", with: "\"currentJobThumbnailUrl\": \"\(path)\", \"name\":"
+        )
+        XCTAssertEqual(try TestData.decodePrinter(from: json).currentJobThumbnailUrl, path)
+        XCTAssertNil(try TestData.decodePrinter().currentJobThumbnailUrl)
+        let data = Data("""
+        {"id":"\(TestData.testUUID)","isOnline":true,"currentJobThumbnailUrl":"\(path)"}
+        """.utf8)
+        XCTAssertEqual(try JSONDecoder().decode(PrinterStatusUpdate.self, from: data).currentJobThumbnailUrl, path)
+        let idle = Data("""
+        {"id":"\(TestData.testUUID)","isOnline":true,"state":"idle"}
+        """.utf8)
+        XCTAssertNil(try JSONDecoder().decode(PrinterStatusUpdate.self, from: idle).currentJobThumbnailUrl)
+    }
+
     private let decoder: JSONDecoder = {
         let d = JSONDecoder()
         d.dateDecodingStrategy = .iso8601

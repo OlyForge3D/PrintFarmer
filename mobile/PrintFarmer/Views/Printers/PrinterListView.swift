@@ -38,17 +38,16 @@ struct PrinterListView: View {
     @Environment(AppRouter.self) private var router
     @Environment(ServiceContainer.self) private var services
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var viewModel = PrinterListViewModel()
-    @State private var coverageViewModel = FarmFilamentCoverageViewModel()
+    @State private var attentionViewModel = AttentionFeedViewModel()
     @State private var retryTask: Task<Void, Never>?
     @State private var showingPrinterLookup = false
 
-    private var filamentCoverageEnabled: Bool {
-        services.capabilitiesService.resolved.filamentCoverageEnabled
-    }
-
     private var iPadColumns: [GridItem] {
-        [GridItem(.adaptive(minimum: 340))]
+        sizeClass == .regular && !dynamicTypeSize.isAccessibilitySize
+            ? [GridItem(.adaptive(minimum: 300))]
+            : [GridItem(.flexible())]
     }
 
     init(navigationContext: PrinterListNavigationContext = .farm) {
@@ -70,7 +69,7 @@ struct PrinterListView: View {
                 router.printersPath.append(AppDestination.printerDetail(id: printer.id))
             }
         }
-        .task {
+        .task(id: services.activeServerGeneration) {
             PrinterListViewLifecycle.taskActivate(
                 viewModel: viewModel,
                 printerService: services.printerService,
@@ -79,32 +78,33 @@ struct PrinterListView: View {
             )
             await viewModel.bootstrap(startupPrefetchStore: services.startupPrefetchStore)
         }
-        .task(id: filamentCoverageEnabled) {
-            guard filamentCoverageEnabled else {
-                coverageViewModel.disableForCapabilityGate()
-                return
+        .task(id: attentionAuthority) {
+            await attentionViewModel.bootstrap(
+                attentionService: services.attentionService,
+                signalRService: services.signalRService,
+                attentionEnabled: services.capabilitiesService.resolved.attentionEnabled,
+                startupPrefetchStore: services.startupPrefetchStore
+            )
+        }
+        .task(id: attentionViewModel.snapshot) {
+            if attentionViewModel.snapshot?.nextCursor != nil {
+                _ = await attentionViewModel.loadMore()
             }
-            coverageViewModel.configure(coverageService: services.filamentCoverageService)
-            coverageViewModel.configureSignalR(services.signalRService)
-            // #789: wire the read-cache before readiness-prefetch consumption or
-            // the hydrate-then-load fallback.
-            coverageViewModel.configureCache(services.filamentCoverageReadCache)
-            await coverageViewModel.bootstrap(startupPrefetchStore: services.startupPrefetchStore)
+            viewModel.attentionPrinterIDs = Set(attentionViewModel.snapshot?.items.map(\.printerId) ?? [])
         }
         .onDisappear {
             PrinterListViewLifecycle.onDisappear(
                 viewModel: viewModel,
                 retryTask: retryTask
             )
-            coverageViewModel.tearDownSignalR()
+            attentionViewModel.deactivate()
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
             Task {
                 await PrinterListViewLifecycle.willEnterForeground(
-                    viewModel: viewModel,
-                    coverageViewModel: coverageViewModel,
-                    refreshCoverage: filamentCoverageEnabled
+                    viewModel: viewModel
                 )
+                _ = await attentionViewModel.refresh()
             }
         }
         .onChange(of: activeNavigationPathCount) { _, newCount in
@@ -127,13 +127,18 @@ struct PrinterListView: View {
     ) -> some View {
         NavigationStack(path: path) {
             VStack(spacing: 0) {
-                // #789: shared stale banner — honest, read-only cached coverage.
-                if filamentCoverageEnabled && coverageViewModel.isStaleCacheReportable {
-                    ConnectionStatusBar(
-                        status: .offline,
-                        lastConfirmedAt: coverageViewModel.cacheLastUpdatedAt,
-                        hasCache: true
-                    )
+                if let failure = attentionViewModel.loadFailure {
+                    Text("Attention unavailable: \(failure.message)")
+                        .font(.caption)
+                        .foregroundStyle(Color.pfWarning)
+                        .padding(.horizontal)
+                }
+                if let failure = attentionViewModel.paginationFailure {
+                    Button("Attention count unavailable. Retry") {
+                        Task { _ = await attentionViewModel.retryLoadMore(failureID: failure.id) }
+                    }
+                    .font(.caption)
+                    .foregroundStyle(Color.pfWarning)
                 }
                 Group {
                     if viewModel.isLoading && viewModel.printers.isEmpty {
@@ -163,11 +168,8 @@ struct PrinterListView: View {
             .navigationTitle(navigationContext.navigationTitle)
             .searchable(text: $viewModel.searchText, prompt: "Search printers")
             .refreshable {
-                await PrinterListViewLifecycle.refresh(
-                    viewModel: viewModel,
-                    coverageViewModel: coverageViewModel,
-                    refreshCoverage: filamentCoverageEnabled
-                )
+                await viewModel.loadPrinters()
+                _ = await attentionViewModel.refresh()
             }
             .rootNavigationChrome(for: navigationContext.appTab) {
                 statusFilterMenu
@@ -212,55 +214,24 @@ struct PrinterListView: View {
                 if viewModel.filteredPrinters.isEmpty {
                     ContentUnavailableView.search(text: viewModel.searchText)
                         .padding(.top, 40)
-                } else if sizeClass == .regular {
-                    // iPad: adaptive grid of cards
+                } else {
                     LazyVGrid(columns: iPadColumns, spacing: 12) {
                         ForEach(viewModel.filteredPrinters) { printer in
                             NavigationLink(value: AppDestination.printerDetail(id: printer.id)) {
-                                iPadPrinterCardView(
+                                PrinterCardView(
                                     printer: printer,
                                     isPendingReady: viewModel.isPendingReady(printer),
-                                    coverage: filamentCoverageEnabled
-                                        ? coverageViewModel.coverage(for: printer.id)
-                                        : nil
+                                    attentionCount: attentionCount(for: printer.id),
+                                    failureReason: failureReason(for: printer.id),
+                                    printerService: services.printerService
                                 )
                             }
                             .buttonStyle(.plain)
-                            .accessibilityLabel(
-                                "\(printer.name), \(printer.state ?? "unknown") status"
-                                + "\(printer.isOnline ? ", online" : ", offline")"
-                            )
                             .accessibilityHint("Opens \(printer.name) printer details.")
-                            // Stable-id scoping (F4-M #778 cycle-3 review
-                            // blocker D): XCUI tests scope badge / absence
-                            // assertions beneath this identifier so a
-                            // sibling printer's badge cannot satisfy a
-                            // per-card assertion. The id is the backend
-                            // printer UUID, never the display name.
                             .accessibilityIdentifier(
                                 printerAccessibilityIdentifier(for: printer)
                             )
                         }
-                    }
-                } else {
-                    ForEach(viewModel.filteredPrinters) { printer in
-                        NavigationLink(value: AppDestination.printerDetail(id: printer.id)) {
-                            PrinterCardView(
-                                printer: printer,
-                                isPendingReady: viewModel.isPendingReady(printer),
-                                coverage: filamentCoverageEnabled
-                                    ? coverageViewModel.coverage(for: printer.id)
-                                    : nil
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("\(printer.name), \(printer.state ?? "unknown") status\(printer.isOnline ? ", online" : ", offline")")
-                        .accessibilityHint("Opens \(printer.name) printer details.")
-                        // Stable-id scoping (F4-M #778 cycle-3): same as
-                        // the iPad path above.
-                        .accessibilityIdentifier(
-                            printerAccessibilityIdentifier(for: printer)
-                        )
                     }
                 }
             }
@@ -270,6 +241,24 @@ struct PrinterListView: View {
     }
 
     // MARK: - Filters
+
+    private var attentionAuthority: String {
+        "\(services.activeServerGeneration)-\(services.capabilitiesService.resolved.attentionEnabled)"
+    }
+
+    private func attentionCount(for printerID: UUID) -> Int? {
+        guard attentionViewModel.phase == .loaded,
+              attentionViewModel.snapshot?.nextCursor == nil,
+              attentionViewModel.loadFailure == nil,
+              attentionViewModel.paginationFailure == nil else { return nil }
+        return attentionViewModel.snapshot?.items.filter { $0.printerId == printerID }.count
+    }
+
+    private func failureReason(for printerID: UUID) -> String? {
+        attentionViewModel.snapshot?.items.first {
+            $0.printerId == printerID && $0.kind == .failure
+        }?.detail
+    }
 
     private var statusFilterMenu: some View {
         Menu {

@@ -84,7 +84,7 @@
 		26F5D2EC28D2FD075AF12C08 /* AddSpoolViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34D860B7B852D3B6814A7CAF /* AddSpoolViewModel.swift */; };
 		2868397DE77379D694A2172C /* PFarmApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDDEAB7ED1DC689B3B4FB5FB /* PFarmApp.swift */; };
 		28BA0B7CD03B671FD7C439DE /* PartScanResultView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07D94FCFA57014B2932689A3 /* PartScanResultView.swift */; };
-		2B0A1CAE11FC88565FA288EA /* iPadPrinterCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B076B098F30F1506B8E1C983 /* iPadPrinterCardView.swift */; };
+		2B0A1CAE11FC88565FA288EA /* PrinterCardMediaModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B076B098F30F1506B8E1C983 /* PrinterCardMediaModel.swift */; };
 		2C6155264C934670F2278DC9 /* CustomIcons.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F15146257C59F44A210F002 /* CustomIcons.swift */; };
 		2C63FB5B0F84E05DBBED37FF /* NotificationsViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C832D8E0EECDD622BBEB9A68 /* NotificationsViewModelTests.swift */; };
 		2CB42A860B669F5B702F984D /* FilamentModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B4E2EE087E92C131271B37F /* FilamentModels.swift */; };
@@ -415,7 +415,7 @@
 		C0BEC42C218A8055A23740FD /* JobDetailViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB279A2CAF8BE1C1BD61D6B2 /* JobDetailViewModelTests.swift */; };
 		C0CF42E5C08F7567EDD6E459 /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5B16CA4D9FC52BF34ADB51B /* DashboardView.swift */; };
 		C36E71E0B8D651B87256150D /* PrinterCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57A3A3E21352CC6A4514221E /* PrinterCardView.swift */; };
-		2B0A1CAE11FC88565FA288EA /* iPadPrinterCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B076B098F30F1506B8E1C983 /* iPadPrinterCardView.swift */; };
+		2B0A1CAE11FC88565FA288EA /* PrinterCardMediaModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B076B098F30F1506B8E1C983 /* PrinterCardMediaModel.swift */; };
 		C3C22EFA772CBD5125E9F2FE /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 007F057316513D6585B3D53A /* NotificationService.swift */; };
 		C46CED04E8CBA839846568BC /* TemperatureView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97DEEFD9852661DAA2637C25 /* TemperatureView.swift */; };
 		77F7448C2D183C8F140C41CB /* MJPEGStreamView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DAFD389576B18CC0E5ADBB63 /* MJPEGStreamView.swift */; };
@@ -794,7 +794,7 @@
 		AD5B287E56228618B9E1A0C4 /* PrintFarmer.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PrintFarmer.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		AF81383E489642A1A80EE943 /* DeepLinkHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeepLinkHandler.swift; sourceTree = "<group>"; };
 		B0630DF455D4C1F4FA86F892 /* PrinterDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterDetailView.swift; sourceTree = "<group>"; };
-		B076B098F30F1506B8E1C983 /* iPadPrinterCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iPadPrinterCardView.swift; sourceTree = "<group>"; };
+		B076B098F30F1506B8E1C983 /* PrinterCardMediaModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterCardMediaModel.swift; sourceTree = "<group>"; };
 		B23554EB41DA88AD092EB5C1 /* LocationListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationListView.swift; sourceTree = "<group>"; };
 		B2C3D4E5F6A7B8C9D0E1F2A3 /* QRCodeParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QRCodeParser.swift; sourceTree = "<group>"; };
 		B61F8B5ADAF667F7D1B0CFFE /* JobTimelineView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JobTimelineView.swift; sourceTree = "<group>"; };
@@ -1523,7 +1523,7 @@ B67CDDC8FEB03EE83C0232BD /* ScanWidgets.swift */ = {isa = PBXFileReference; incl
 				96FDDDBE9704424E9A42D5A2 /* PageIndicator.swift */,
 				44789FEC15B2FCE4E3A02174 /* PrintProgressBar.swift */,
 				57A3A3E21352CC6A4514221E /* PrinterCardView.swift */,
-				B076B098F30F1506B8E1C983 /* iPadPrinterCardView.swift */,
+				B076B098F30F1506B8E1C983 /* PrinterCardMediaModel.swift */,
 				4E45A19848758E2DB8543C2A /* StatusBadge.swift */,
 				D610P5000000000000000003 /* ServerSwitcherMenu.swift */,
 				F24210000000000000000001 /* RootNavigationChrome.swift */,
@@ -2166,7 +2166,7 @@ FA9835EC3313360D4BC13824 /* PrintFarmerScanWidgets */ = {
 				7AE737FB217E411CA2B277FB /* PageIndicator.swift in Sources */,
 				977E6F182EC8F10888253205 /* PrintProgressBar.swift in Sources */,
 				C36E71E0B8D651B87256150D /* PrinterCardView.swift in Sources */,
-				2B0A1CAE11FC88565FA288EA /* iPadPrinterCardView.swift in Sources */,
+				2B0A1CAE11FC88565FA288EA /* PrinterCardMediaModel.swift in Sources */,
 				57E23E107ED77369284AF9D4 /* StatusBadge.swift in Sources */,
 				D610P5000000000000000004 /* ServerSwitcherMenu.swift in Sources */,
 				F24210000000000000000002 /* RootNavigationChrome.swift in Sources */,

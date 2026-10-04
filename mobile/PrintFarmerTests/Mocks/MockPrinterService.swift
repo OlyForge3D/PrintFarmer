@@ -28,6 +28,12 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
     var commandResultToReturn = CommandResult(success: true, message: nil)
     var snapshotDataToReturn = Data()
     var snapshotHandler: (@Sendable (UUID) async throws -> Data)?
+    var thumbnailHandler: (@Sendable (UUID, String) async throws -> Data)?
+
+    func getCurrentJobThumbnail(id: UUID, path: String) async throws -> Data {
+        if let thumbnailHandler { return try await thumbnailHandler(id, path) }
+        throw NetworkError.notFound
+    }
     var listHandler: (@Sendable (Bool) async throws -> [Printer])?
     var getHandler: (@Sendable (UUID) async throws -> Printer)?
     var queueOverviewToReturn: [QueueOverview] = []

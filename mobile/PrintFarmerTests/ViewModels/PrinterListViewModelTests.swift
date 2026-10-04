@@ -6,6 +6,30 @@ import XCTest
 @MainActor
 final class PrinterListViewModelTests: XCTestCase {
 
+    func testAttentionFilterIncludesFeedPrinterAndThumbnailOmissionClears() async throws {
+        var printer = try TestData.decodePrinter()
+        printer.state = "idle"
+        printer.currentJobThumbnailUrl = "/old-revision"
+        viewModel.printers = [printer]
+        viewModel.selectedStatus = .needsAttention
+        viewModel.attentionPrinterIDs = [printer.id]
+        XCTAssertEqual(viewModel.filteredPrinters.map(\.id), [printer.id])
+        let signalR = MockSignalRService()
+        let callback = expectation(description: "SignalR consumed")
+        let model = PrinterListViewModel(callbackEnqueuer: { operation in
+            Task { @MainActor in await operation(); callback.fulfill() }
+        })
+        model.printers = [printer]
+        model.configureSignalR(signalR)
+        let update = try JSONDecoder().decode(PrinterStatusUpdate.self, from: Data("""
+        {"id":"\(printer.id)","isOnline":true,"state":"idle"}
+        """.utf8))
+        signalR.simulatePrinterUpdate(update)
+        await fulfillment(of: [callback], timeout: 2)
+        XCTAssertNil(model.printers.first?.currentJobThumbnailUrl)
+        model.deactivate()
+    }
+
     private var mockService: MockPrinterService!
     private var mockAutoDispatchService: MockAutoDispatchService!
     private var viewModel: PrinterListViewModel!

@@ -25,6 +25,13 @@ final class PrinterListUITests: PrintFarmerUITestCase {
             "The deterministic UI-test fleet should expose its first printer card"
         )
         XCTAssertTrue(printerCard.label.contains("Prusa MK4 #1"))
+        XCTAssertTrue(printerCard.label.contains("complete"))
+        XCTAssertTrue(printerCard.label.contains("Nozzle"))
+        XCTAssertTrue(printerCard.label.contains("Bed"))
+        XCTAssertFalse(printerCard.label.lowercased().contains("homed"))
+        XCTAssertFalse(printerCard.label.lowercased().contains("coverage"))
+        XCTAssertEqual(printerCard.descendants(matching: .staticText).count, 0,
+                       "The entire farm card is one VoiceOver element")
     }
 
     func testTapPrinterNavigatesToDetail() {

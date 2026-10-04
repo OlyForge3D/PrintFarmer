@@ -3,6 +3,131 @@ import SwiftUI
 import SnapshotTesting
 @testable import PrintFarmer
 
+@MainActor
+final class PrinterCardSnapshotTests: XCTestCase {
+    func testCardSnapshotsAdaptToPhoneTabletAppearanceAndLargestType() throws {
+        let printer = try TestData.decodePrinter()
+        for width: CGFloat in [320, 390, 340] {
+            for scheme in [ColorScheme.light, .dark] {
+                for size in [DynamicTypeSize.large, .accessibility5] {
+                    let card = PrinterCardView(
+                        printer: printer, attentionCount: 3,
+                        failureReason: "Obico detected a possible spaghetti failure. Review the print."
+                    )
+                    .environment(\.colorScheme, scheme)
+                    .environment(\.dynamicTypeSize, size)
+                    .frame(width: width)
+                    .fixedSize(horizontal: false, vertical: true)
+                    let host = UIHostingController(rootView: card)
+                    host.safeAreaRegions = []
+                    let fitting = host.sizeThatFits(in: CGSize(width: width, height: 2000))
+                    XCTAssertGreaterThan(fitting.height, 60)
+                    XCTAssertLessThan(fitting.height, 1800)
+                    XCTAssertEqual(fitting.width, width, accuracy: 1)
+                    host.view.frame = CGRect(origin: .zero, size: fitting)
+                    host.view.backgroundColor = .clear
+                    let window = UIWindow(frame: host.view.frame)
+                    window.rootViewController = host
+                    window.isHidden = false
+                    host.view.layoutIfNeeded()
+                    let renderer = UIGraphicsImageRenderer(size: fitting)
+                    let image = renderer.image { _ in
+                        host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: true)
+                    }
+                    let attachment = XCTAttachment(image: image)
+                    attachment.name = "printer-card-\(Int(width))-\(scheme)-\(size)-\(UIDevice.current.userInterfaceIdiom)"
+                    attachment.lifetime = .keepAlways
+                    add(attachment)
+                    window.isHidden = true
+                }
+            }
+        }
+    }
+
+    func testCombinedVoiceOverIncludesJobProgressETAAndFailureWithoutRemovedBadges() throws {
+        let printer = try TestData.decodePrinter()
+        let presentation = PrinterCardPresentation(
+            printer: printer, isPendingReady: false, attentionCount: 2,
+            failureReason: "Spaghetti detected", printTimeLeftSeconds: 8100
+        )
+        XCTAssertEqual(presentation.stateLabel, "Failure?")
+        XCTAssertTrue(presentation.accessibilityLabel.contains("benchy.gcode"))
+        XCTAssertTrue(presentation.accessibilityLabel.contains("46% complete"))
+        XCTAssertTrue(presentation.accessibilityLabel.contains("2h 15m left"))
+        XCTAssertTrue(presentation.accessibilityLabel.contains("Done"))
+        XCTAssertTrue(presentation.accessibilityLabel.contains("2 attention items"))
+        XCTAssertTrue(presentation.accessibilityLabel.contains("Failure suspected: Spaghetti detected"))
+        XCTAssertFalse(presentation.accessibilityLabel.contains("homed"))
+        XCTAssertFalse(presentation.accessibilityLabel.contains("coverage"))
+    }
+
+    func testUnknownPausedOfflineAndPendingReadyStatesStayHonest() throws {
+        var printer = try TestData.decodePrinter()
+        func presentation(_ seconds: Double?) -> PrinterCardPresentation {
+            PrinterCardPresentation(printer: printer, isPendingReady: false,
+                                    attentionCount: nil, failureReason: nil, printTimeLeftSeconds: seconds)
+        }
+        XCTAssertEqual(presentation(nil).etaLabel, "ETA unavailable")
+        XCTAssertEqual(presentation(.nan).etaLabel, "ETA unavailable")
+        XCTAssertEqual(presentation(-1).etaLabel, "ETA unavailable")
+        printer.state = "paused"
+        XCTAssertEqual(presentation(60).etaLabel, "1m left · Paused")
+        printer.isOnline = false
+        XCTAssertEqual(presentation(60).stateLabel, "Offline")
+        XCTAssertFalse(presentation(60).isActiveJob)
+        let bed = PrinterCardPresentation(printer: printer, isPendingReady: true,
+                                         attentionCount: 1, failureReason: nil, printTimeLeftSeconds: nil)
+        XCTAssertEqual(bed.stateLabel, "Bed clear")
+        XCTAssertTrue(bed.jobLabel.contains("Clear bed"))
+    }
+
+    func testLateThumbnailFromOldRevisionCannotReplaceNewCard() async throws {
+        let service = MockPrinterService()
+        let barrier = AsyncBarrier()
+        defer { barrier.close() }
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 2, height: 2)).image { context in
+            UIColor.red.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 2, height: 2))
+        }
+        let data = try XCTUnwrap(image.pngData())
+        service.thumbnailHandler = { _, _ in await barrier.arriveAndWait(); return data }
+        let model = PrinterCardMediaModel()
+        let old = PrinterCardRequestID(printerID: TestData.testUUID, path: "/old",
+                                       jobName: "old", state: "printing", serviceID: ObjectIdentifier(service))
+        let task = Task { await model.load(request: old, service: service) }
+        await barrier.waitUntilArrived()
+        let new = PrinterCardRequestID(printerID: TestData.testUUID, path: nil,
+                                       jobName: nil, state: "idle", serviceID: ObjectIdentifier(service))
+        await model.load(request: new, service: service)
+        barrier.release()
+        await task.value
+        XCTAssertEqual(model.request, new)
+        XCTAssertNil(model.image)
+        XCTAssertNil(model.printTimeLeftSeconds)
+        model.cancel()
+        XCTAssertNil(model.request)
+    }
+
+    func testThumbnailMissingInvalidAndTransportFailureLeaveNeutralPlaceholder() async throws {
+        for error in [NetworkError.notFound, NetworkError.staleServerResponse] {
+            let service = MockPrinterService()
+            service.thumbnailHandler = { _, _ in throw error }
+            let model = PrinterCardMediaModel()
+            await model.load(request: .init(printerID: TestData.testUUID, path: "/thumbnail",
+                                            jobName: "benchy", state: "printing",
+                                            serviceID: ObjectIdentifier(service)), service: service)
+            XCTAssertNil(model.image)
+        }
+        let service = MockPrinterService()
+        service.thumbnailHandler = { _, _ in Data("not an image".utf8) }
+        let model = PrinterCardMediaModel()
+        await model.load(request: .init(printerID: TestData.testUUID, path: "/thumbnail",
+                                        jobName: "benchy", state: "printing",
+                                        serviceID: ObjectIdentifier(service)), service: service)
+        XCTAssertNil(model.image)
+    }
+}
+
 /// Snapshot tests for printer controls across backend capability profiles,
 /// loading and disabled states, and shared detail-screen control styles.
 ///

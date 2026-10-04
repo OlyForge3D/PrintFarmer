@@ -16,6 +16,7 @@ protocol PrinterServiceProtocol: Sendable {
     func listCameraUrls() async throws -> [PrinterCameraUrls]
     func getCameraUrl(id: UUID) async throws -> PrinterCameraUrl
     func getSnapshot(id: UUID) async throws -> Data
+    func getCurrentJobThumbnail(id: UUID, path: String) async throws -> Data
     func getCurrentJob(id: UUID) async throws -> PrintJobStatusInfo?
     /// Recent job history from `GET /api/printers/{id}/history` (Moonraker-style
     /// snake_case payload). Used by the Printer Detail v2 history tail (issue
@@ -100,6 +101,10 @@ protocol PrinterServiceProtocol: Sendable {
 
 // Convenience overload
 extension PrinterServiceProtocol {
+    func getCurrentJobThumbnail(id: UUID, path: String) async throws -> Data {
+        throw ServiceError.notImplemented("Current-job thumbnails are unavailable in this service")
+    }
+
     func list() async throws -> [Printer] {
         try await list(includeDisabled: false)
     }

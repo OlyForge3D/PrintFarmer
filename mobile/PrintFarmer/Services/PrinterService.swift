@@ -92,6 +92,10 @@ actor PrinterService: PrinterServiceProtocol {
         try await apiClient.getData("/api/printers/\(id)/snapshot")
     }
 
+    func getCurrentJobThumbnail(id: UUID, path: String) async throws -> Data {
+        try await apiClient.getCurrentJobThumbnail(printerID: id, path: path)
+    }
+
     func getCurrentJob(id: UUID) async throws -> PrintJobStatusInfo? {
         try await apiClient.get("/api/printers/\(id)/printjob")
     }

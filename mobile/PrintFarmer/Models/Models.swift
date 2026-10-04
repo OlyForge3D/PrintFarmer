@@ -171,6 +171,7 @@ struct Printer: Codable, Identifiable, Sendable {
     var jobName: String?
     var fileName: String?
     var thumbnailUrl: String?
+    var currentJobThumbnailUrl: String?
     var cameraStreamUrl: String?
     var cameraSnapshotUrl: String?
     var cameraAccessMode: CameraAccessMode
@@ -202,7 +203,7 @@ struct Printer: Codable, Identifiable, Sendable {
         case manufacturerId, manufacturerName, modelId, modelName, motionType
         case backend, apiKey, originalServerUrl, backendPort, frontendPort
         case inMaintenance, isEnabled, rowVersion, configurationRevision
-        case isOnline, state, progress, jobName, fileName, thumbnailUrl
+        case isOnline, state, progress, jobName, fileName, thumbnailUrl, currentJobThumbnailUrl
         case cameraStreamUrl, cameraSnapshotUrl
         case cameraAccessMode, cameraStreamFormat, cameraSnapshotStrategy
         case x, y, z, hotendTemp, bedTemp, hotendTarget, bedTarget, homedAxes
@@ -246,6 +247,7 @@ struct Printer: Codable, Identifiable, Sendable {
         jobName = try c.decodeIfPresent(String.self, forKey: .jobName)
         fileName = try c.decodeIfPresent(String.self, forKey: .fileName)
         thumbnailUrl = try c.decodeIfPresent(String.self, forKey: .thumbnailUrl)
+        currentJobThumbnailUrl = try c.decodeIfPresent(String.self, forKey: .currentJobThumbnailUrl)
         cameraStreamUrl = try c.decodeIfPresent(String.self, forKey: .cameraStreamUrl)
         cameraSnapshotUrl = try c.decodeIfPresent(String.self, forKey: .cameraSnapshotUrl)
         cameraAccessMode = try c.decodeIfPresent(CameraAccessMode.self, forKey: .cameraAccessMode) ?? .unknown
