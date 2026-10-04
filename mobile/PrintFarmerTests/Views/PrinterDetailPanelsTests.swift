@@ -23,7 +23,6 @@ final class PrinterDetailPanelsTests: XCTestCase {
             router.printersPath.append(AppDestination.printerDetail(id: UUID()))
             router.inventoryPath.append(AppDestination.printerDetail(id: UUID()))
             router.jobsPath.append(AppDestination.printerDetail(id: UUID()))
-            router.notificationsPath.append(AppDestination.printerDetail(id: UUID()))
             router.pendingFilamentSwap = .init(printerId: UUID(), toolheadIndex: 0, jobId: nil)
 
             PrinterDetailView.returnToFarm(router: router, capabilities: .defaults)
@@ -32,7 +31,6 @@ final class PrinterDetailPanelsTests: XCTestCase {
             XCTAssertTrue(router.printersPath.isEmpty)
             XCTAssertTrue(router.inventoryPath.isEmpty)
             XCTAssertTrue(router.jobsPath.isEmpty)
-            XCTAssertTrue(router.notificationsPath.isEmpty)
             XCTAssertNil(router.pendingFilamentSwap)
         }
     }

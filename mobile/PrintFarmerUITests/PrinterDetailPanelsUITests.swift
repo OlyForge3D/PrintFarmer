@@ -71,17 +71,11 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
         )
         farm.tap()
 
-        // Matches `OperatorShellUITests.openAccount()`: tapping the Attention
-        // tab reveals the Account entry point, which must itself be tapped
-        // to reach `account.root` before any `account.destination.*` button
-        // exists. Hard-asserting `enableAdvancedPrinterControls` (Hicks
-        // review finding 18) is what surfaced this step was missing here —
-        // the prior soft-skip silently returned instead of ever reaching
-        // Settings, letting every caller "pass" without exercising Controls.
+        // Account is shared root chrome; enter it before opening Settings.
         let account = app.buttons["navigation.account"]
         XCTAssertTrue(
             account.waitForExistence(timeout: 5),
-            "The Account entry point must be reachable from Attention in the deterministic UI-test bootstrap"
+            "The Account entry point must be reachable from Farm in the deterministic UI-test bootstrap"
         )
         account.tap()
         XCTAssertTrue(

@@ -1236,6 +1236,33 @@ describe("ApiClient", () => {
     });
   });
 
+  describe("move queued job", () => {
+    it.each([
+      [
+        { beforeJobId: "neighbor-before", beforeJobETag: 'W/"before-v2"' },
+        { beforeJobId: "neighbor-before", beforeJobETag: "before-v2" },
+      ],
+      [
+        { afterJobId: "neighbor-after", afterJobETag: '"after-v3"' },
+        { afterJobId: "neighbor-after", afterJobETag: "after-v3" },
+      ],
+    ] as const)("sends one normalized neighbor ETag and the moved row revision", async (request, body) => {
+      const movedJob = { id: "moved-job", rowVersion: "next-revision" };
+      const mockPut = vi.fn().mockResolvedValue({ data: movedJob });
+      (apiClient as unknown as { client: { put: typeof mockPut } }).client.put = mockPut;
+
+      await expect(
+        apiClient.moveQueuedJob("moved-job", request, 'W/"moved-v1"')
+      ).resolves.toEqual(movedJob);
+
+      expect(mockPut).toHaveBeenCalledWith(
+        "/job-queue/jobs/moved-job/position",
+        body,
+        { headers: { "If-Match": '"moved-v1"' } }
+      );
+    });
+  });
+
   // ---------------------------------------------------------------------------
   // Canonical wire-contract corpus (issue #2240): getQueueOverview() is driven
   // from the real serialized payloads captured in

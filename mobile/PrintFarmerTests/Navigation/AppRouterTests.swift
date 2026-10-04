@@ -11,17 +11,64 @@ final class AppRouterTests: XCTestCase {
     private let originServerId = UUID(uuidString: "00000000-0000-0000-0000-000000000010")!
     private let capabilities = ResolvedSystemCapabilities.defaults
 
-    // MARK: - Defaults
-
-    func testDefaultSelectedTabIsAttention() {
-        let router = AppRouter()
-        XCTAssertEqual(router.selectedTab, .attention)
-        XCTAssertEqual(router.activeShell, .current)
-        XCTAssertEqual(router.activeMode, .floor)
+    func testDefaultAndRetiredSelectionsFallBackToFarm() {
+        XCTAssertEqual(AppRouter().selectedTab, .farm)
+        for raw in [nil, "attention", "tasks", "oversight", "overview", "fleet", "upkeep", "reports", "unknown"] {
+            XCTAssertEqual(AppRouter.restoredTab(from: raw), .farm)
+        }
+        XCTAssertEqual(AppRouter.restoredTab(from: "inventory"), .filament)
+        XCTAssertEqual(AppRouter.restoredTab(from: "jobs"), .queue)
     }
 
+    func testThreeTabTitlesAndIdentifiers() {
+        XCTAssertEqual(AppTab.allCases, [.farm, .queue, .filament])
+        XCTAssertEqual(AppTab.allCases.map(\.title), ["Farm", "Queue", "Filament"])
+        XCTAssertEqual(AppTab.allCases.map(\.tabAccessibilityIdentifier), ["tab.farm", "tab.queue", "tab.filament"])
+        XCTAssertEqual(AppTab.allCases.map(\.sidebarAccessibilityIdentifier), ["sidebar.farm", "sidebar.queue", "sidebar.filament"])
+    }
+
+    func testAttentionPushRoutesToFarmFilterEvenWhenAttentionIsDisabled() {
+        var disabled = capabilities
+        disabled.attentionEnabled = false
+        let router = AppRouter()
+        router.selectedTab = .queue
+        router.printersPath.append(AppDestination.account)
+        router.navigate(to: .attentionItem(id: "failure:printer"), capabilities: disabled)
+        XCTAssertEqual(router.selectedTab, .farm)
+        XCTAssertTrue(router.printersPath.isEmpty)
+        XCTAssertTrue(router.pendingNeedsAttentionFilter)
+    }
+
+    func testRetiredDeepLinksOpenFarm() throws {
+        for host in ["upkeep", "reports", "maintenance", "maintenanceAnalytics", "uptimeReliability",
+                     "filamentCoverage", "predictive", "dispatchDashboard", "locations", "jobHistory", "jobTimeline"] {
+            let url = try XCTUnwrap(URL(string: "printfarmer://\(host)"))
+            XCTAssertEqual(DeepLinkHandler.parse(url: url), .farm, host)
+            let router = AppRouter()
+            router.selectedTab = .filament
+            router.navigate(to: .farm, capabilities: capabilities)
+            XCTAssertEqual(router.selectedTab, .farm)
+        }
+        XCTAssertEqual(DeepLinkHandler.parse(url: try XCTUnwrap(URL(string: "printfarmer://attention/item-1"))), .attentionItem(id: "item-1"))
+    }
+
+    func testQueueRoutingAndSessionResetClearOnlyOwnedState() {
+        let router = AppRouter()
+        router.printersPath.append(AppDestination.account)
+        router.jobsPath.append(AppDestination.jobDetail(id: printerId))
+        router.routeToJobQueue(capabilities: capabilities)
+        XCTAssertEqual(router.selectedTab, .queue)
+        XCTAssertTrue(router.jobsPath.isEmpty)
+        XCTAssertEqual(router.printersPath.count, 1)
+        router.resetAdaptiveShellSession()
+        XCTAssertEqual(router.selectedTab, .farm)
+        XCTAssertTrue(router.printersPath.isEmpty)
+    }
+
+    // MARK: - Defaults
+
     func testLegacyPersistedScanSelectionRestoresInventory() {
-        XCTAssertEqual(AppRouter.restoredTab(from: "scan"), .inventory)
+        XCTAssertEqual(AppRouter.restoredTab(from: "scan"), .filament)
     }
 
     func testScanDeepLinkSelectsInventoryAndCreatesConsumableRequest() {
@@ -29,7 +76,7 @@ final class AppRouterTests: XCTestCase {
 
         router.navigate(to: .scan, capabilities: capabilities)
 
-        XCTAssertEqual(router.selectedTab, .inventory)
+        XCTAssertEqual(router.selectedTab, .filament)
         XCTAssertNotNil(router.pendingExternalScanRequestID)
         XCTAssertTrue(router.consumeExternalScanRequest())
         XCTAssertNil(router.pendingExternalScanRequestID)
@@ -42,7 +89,7 @@ final class AppRouterTests: XCTestCase {
 
         router.invalidatePendingNavigation()
 
-        XCTAssertEqual(router.selectedTab, .inventory)
+        XCTAssertEqual(router.selectedTab, .filament)
         XCTAssertNotNil(router.pendingExternalScanRequestID)
         XCTAssertTrue(router.consumeExternalScanRequest())
     }
@@ -530,7 +577,7 @@ final class AppRouterTests: XCTestCase {
         )
 
         XCTAssertNil(ExternalScanRequestStore.pending(userDefaults: harness.defaults))
-        XCTAssertEqual(harness.router.selectedTab, .inventory)
+        XCTAssertEqual(harness.router.selectedTab, .filament)
     }
 
     func testBackgroundingThenExpiringStillDropsTheRequestOnReturn() throws {
@@ -655,7 +702,7 @@ final class AppRouterTests: XCTestCase {
 
         router.completeScanFlowDismissal(capabilities: capabilities)
 
-        XCTAssertEqual(router.selectedTab, .inventory)
+        XCTAssertEqual(router.selectedTab, .filament)
         XCTAssertEqual(router.pendingExternalScanRequestID, requestID)
         XCTAssertTrue(router.consumeExternalScanRequest())
         XCTAssertFalse(router.consumeExternalScanRequest())
@@ -705,21 +752,6 @@ final class AppRouterTests: XCTestCase {
         XCTAssertTrue(router.consumeExternalScanRequest())
     }
 
-    func testScanDeepLinkSwitchesFromOversightToFloorInventory() {
-        let router = AppRouter()
-        router.setNavigationShell(
-            .twoModes,
-            mode: .oversight,
-            capabilities: capabilities
-        )
-
-        router.navigate(to: .scan, capabilities: capabilities)
-
-        XCTAssertEqual(router.activeMode, .floor)
-        XCTAssertEqual(router.selectedTab, .inventory)
-        XCTAssertTrue(router.consumeExternalScanRequest())
-    }
-
     func testExternalScanRequestStoreConsumesPersistedRequestExactlyOnce() throws {
         let suiteName = "ExternalScanRequestStoreTests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
@@ -739,124 +771,12 @@ final class AppRouterTests: XCTestCase {
 
         let router = AppRouter(userDefaults: defaults)
 
-        XCTAssertEqual(router.selectedTab, .inventory)
+        XCTAssertEqual(router.selectedTab, .filament)
         router.selectedTab = .farm
         XCTAssertEqual(
             defaults.string(forKey: AppRouter.selectedTabDefaultsKey),
             AppTab.farm.rawValue
         )
-    }
-
-    func testTabModelEnumeratesCurrentAndAdaptiveSets() {
-        XCTAssertEqual(
-            AppTab.tabs(for: .current, mode: .floor),
-            [.attention, .farm, .tasks, .inventory]
-        )
-        XCTAssertEqual(
-            AppTab.tabs(for: .simple, mode: .floor),
-            [.attention, .farm, .tasks, .inventory, .oversight]
-        )
-        XCTAssertEqual(
-            AppTab.tabs(for: .twoModes, mode: .floor),
-            [.attention, .farm, .tasks, .inventory]
-        )
-        XCTAssertEqual(
-            AppTab.tabs(for: .twoModes, mode: .oversight),
-            [.overview, .fleet, .jobs, .upkeep, .reports]
-        )
-    }
-
-    func testAutomaticDerivationUsesSimpleWhenShapeIsUnknown() {
-        let result = NavigationShellDerivation.automatic(
-            farmShape: nil,
-            shiftPlanEnabled: true,
-            isFarmAdmin: true
-        )
-
-        XCTAssertEqual(result.shell, .simple)
-        XCTAssertEqual(
-            result.explanation,
-            "This server doesn't report its size. Using the simple layout."
-        )
-    }
-
-    func testAutomaticDerivationUsesShiftPlanningAsNegativeEvidenceOnly() {
-        let shiftDisabled = NavigationShellDerivation.automatic(
-            farmShape: FarmShape(accountCount: 4, locationCount: 3, printerCount: 40),
-            shiftPlanEnabled: false,
-            isFarmAdmin: true
-        )
-        let shiftEnabledAlone = NavigationShellDerivation.automatic(
-            farmShape: FarmShape(accountCount: 1, locationCount: 1, printerCount: 40),
-            shiftPlanEnabled: true,
-            isFarmAdmin: true
-        )
-
-        XCTAssertEqual(shiftDisabled.shell, .simple)
-        XCTAssertEqual(shiftEnabledAlone.shell, .simple)
-        XCTAssertTrue(shiftEnabledAlone.explanation.contains("printer count does not change"))
-    }
-
-    func testAutomaticDerivationUsesAccountAndLocationThresholds() {
-        let multipleAccounts = NavigationShellDerivation.automatic(
-            farmShape: FarmShape(accountCount: 2, locationCount: 1, printerCount: 1),
-            shiftPlanEnabled: true,
-            isFarmAdmin: true
-        )
-        let multipleLocations = NavigationShellDerivation.automatic(
-            farmShape: FarmShape(accountCount: 1, locationCount: 2, printerCount: 1),
-            shiftPlanEnabled: true,
-            isFarmAdmin: true
-        )
-
-        XCTAssertEqual(multipleAccounts.shell, .twoModes)
-        XCTAssertEqual(multipleLocations.shell, .twoModes)
-    }
-
-    func testAutomaticDerivationUsesSimpleForNonAdmin() {
-        let result = NavigationShellDerivation.automatic(
-            farmShape: FarmShape(accountCount: 4, locationCount: 3, printerCount: 40),
-            shiftPlanEnabled: true,
-            isFarmAdmin: false
-        )
-
-        XCTAssertEqual(result.shell, .simple)
-        XCTAssertTrue(result.explanation.contains("not a farm administrator"))
-    }
-
-    func testCurrentTabPresentationMatchesShippingUI() {
-        let tabs = ContentView.shippingTabs(for: capabilities)
-
-        XCTAssertEqual(tabs, [.attention, .farm, .tasks, .inventory])
-        XCTAssertEqual(tabs.map(\.title), ["Attention", "Farm", "Tasks", "Inventory"])
-        XCTAssertEqual(
-            tabs.map(\.systemImage),
-            ["bell.badge", "printer", "checklist", "cylinder.fill"]
-        )
-        XCTAssertEqual(
-            tabs.map(\.badgeKind),
-            [.notifications, .pendingReady, .none, .none]
-        )
-        XCTAssertEqual(
-            tabs.map(\.tabAccessibilityIdentifier),
-            ["tab.attention", "tab.farm", "tab.tasks", "tab.inventory"]
-        )
-        XCTAssertEqual(
-            tabs.map(\.sidebarAccessibilityIdentifier),
-            [
-                "sidebar.attention",
-                "sidebar.farm",
-                "sidebar.tasks",
-                "sidebar.inventory"
-            ]
-        )
-        XCTAssertEqual(ContentView.sidebarRowMinimumHeight, 44)
-        XCTAssertEqual(ContentView.modeControlMinimumHeight, 44)
-        XCTAssertEqual(RootNavigationChrome.minimumTouchTarget, 44)
-        XCTAssertEqual(RootNavigationChrome.serverSwitcherIdentifier, "navigation.serverSwitcher")
-        XCTAssertEqual(RootNavigationChrome.modeControlIdentifier, "navigation.modeControl")
-        XCTAssertEqual(RootNavigationChrome.accountButtonIdentifier, "navigation.account")
-        XCTAssertEqual(RootNavigationChrome.accountContainerIdentifier, "account.root")
     }
 
     func testAccountDestinationRowsPreserveCanonicalIdentifiersAndCapabilityGate() {
@@ -881,954 +801,18 @@ final class AppRouterTests: XCTestCase {
         )
     }
 
-    func testAdaptiveTabAccessibilityIdentifiersMatchSharedContract() {
-        XCTAssertEqual(
-            AppTab.tabs(for: .simple, mode: .floor).map(\.tabAccessibilityIdentifier),
-            ["tab.attention", "tab.farm", "tab.tasks", "tab.inventory", "tab.oversight"]
-        )
-        XCTAssertEqual(
-            AppTab.tabs(for: .twoModes, mode: .oversight)
-                .map(\.tabAccessibilityIdentifier),
-            [
-                "tab.overview",
-                "tab.fleet",
-                "tab.jobs",
-                "tab.upkeep",
-                "tab.reports"
-            ]
-        )
-    }
-
-    func testExpandedSidebarUsesExistingFloorAndOversightDestinationContracts() {
-        XCTAssertEqual(
-            AppTab.visibleTabs(
-                in: .floor,
-                for: .simple,
-                capabilities: capabilities
-            ),
-            [.attention, .farm, .tasks, .inventory]
-        )
-        XCTAssertEqual(
-            AppTab.visibleTabs(
-                in: .floor,
-                for: .twoModes,
-                capabilities: capabilities
-            ),
-            [.attention, .farm, .tasks, .inventory]
-        )
-        XCTAssertEqual(
-            AppTab.visibleTabs(
-                in: .oversight,
-                for: .simple,
-                capabilities: capabilities
-            ),
-            [.overview, .fleet, .jobs, .upkeep, .reports]
-        )
-    }
-
-    func testExpandedSidebarResolvesSelectionsAcrossBothSectionsWithoutModeControl() {
-        let router = AppRouter()
-        router.setNavigationShell(.simple, capabilities: capabilities)
-        router.setExpandedSidebarPresentation(
-            true,
-            capabilities: capabilities,
-            oversightAvailability: .fullyAvailable
-        )
-
-        XCTAssertEqual(
-            router.visibleTabs(for: capabilities),
-            [
-                .attention, .farm, .tasks, .inventory,
-                .overview, .fleet, .jobs, .upkeep, .reports
-            ]
-        )
-        router.selectTab(.reports, capabilities: capabilities)
-        XCTAssertEqual(router.resolvedTab(for: capabilities), .reports)
-        XCTAssertFalse(router.shouldShowModeControl(for: .reports))
-
-        router.setExpandedSidebarPresentation(
-            false,
-            capabilities: capabilities,
-            oversightAvailability: .fullyAvailable
-        )
-        XCTAssertEqual(router.resolvedTab(for: capabilities), .attention)
-    }
-
-    func testExpandedSidebarOmitsCapabilityGatedRowsAndEmptyOversightSection() {
-        var disabled = capabilities
-        disabled.attentionEnabled = false
-        disabled.shiftPlanEnabled = false
-        let unavailable = OversightNavigationAvailability(
-            hasVisibleHubDestinations: false,
-            visibleTabs: []
-        )
-        let router = AppRouter()
-        router.setNavigationShell(.simple, capabilities: disabled)
-        router.setExpandedSidebarPresentation(
-            true,
-            capabilities: disabled,
-            oversightAvailability: unavailable
-        )
-
-        XCTAssertEqual(
-            router.visibleTabs(in: .floor, for: disabled),
-            [.farm, .inventory]
-        )
-        XCTAssertTrue(router.visibleTabs(in: .oversight, for: disabled).isEmpty)
-        router.selectedTab = .reports
-        XCTAssertEqual(router.resolvedTab(for: disabled), .farm)
-    }
-
-    func testCollapsingExpandedSidebarDerivesOversightModeAndPreservesJobQueue() {
-        let router = AppRouter()
-        router.setNavigationShell(
-            .twoModes,
-            mode: .floor,
-            capabilities: capabilities
-        )
-        router.setExpandedSidebarPresentation(
-            true,
-            capabilities: capabilities,
-            oversightAvailability: .fullyAvailable
-        )
-        router.routeToJobQueue(capabilities: capabilities)
-
-        XCTAssertEqual(router.activeMode, .floor)
-        XCTAssertEqual(router.selectedTab, .jobs)
-        XCTAssertEqual(router.oversightJobsPath.count, 1)
-
-        router.setExpandedSidebarPresentation(
-            false,
-            capabilities: capabilities,
-            oversightAvailability: .fullyAvailable
-        )
-
-        XCTAssertEqual(router.activeMode, .oversight)
-        XCTAssertEqual(router.resolvedTab(for: capabilities), .jobs)
-        XCTAssertEqual(router.oversightJobsPath.count, 1)
-    }
-
-    func testCollapsingExpandedSidebarDerivesFloorModeAndPreservesFarmPath() {
-        let router = AppRouter()
-        router.setNavigationShell(
-            .twoModes,
-            mode: .oversight,
-            capabilities: capabilities
-        )
-        router.setExpandedSidebarPresentation(
-            true,
-            capabilities: capabilities,
-            oversightAvailability: .fullyAvailable
-        )
-        router.selectTab(.farm, capabilities: capabilities)
-        router.printersPath.append(AppDestination.printerDetail(id: printerId))
-
-        XCTAssertEqual(router.activeMode, .oversight)
-        XCTAssertEqual(router.selectedTab, .farm)
-
-        router.setExpandedSidebarPresentation(
-            false,
-            capabilities: capabilities,
-            oversightAvailability: .fullyAvailable
-        )
-
-        XCTAssertEqual(router.activeMode, .floor)
-        XCTAssertEqual(router.resolvedTab(for: capabilities), .farm)
-        XCTAssertEqual(router.printersPath.count, 1)
-    }
-
-    func testJobQueueRoutingUsesVisibleDestinationForEachShellPresentation() {
-        let router = AppRouter()
-
-        router.setNavigationShell(.simple, capabilities: capabilities)
-        router.routeToJobQueue(capabilities: capabilities)
-        XCTAssertEqual(router.selectedTab, .oversight)
-        XCTAssertEqual(router.oversightPath.count, 1)
-
-        router.setExpandedSidebarPresentation(
-            true,
-            capabilities: capabilities,
-            oversightAvailability: .fullyAvailable
-        )
-        router.routeToJobQueue(capabilities: capabilities)
-        XCTAssertEqual(router.selectedTab, .jobs)
-        XCTAssertEqual(router.oversightJobsPath.count, 1)
-        XCTAssertTrue(router.visibleTabs(in: .floor, for: capabilities).contains(.tasks))
-
-        router.setExpandedSidebarPresentation(
-            false,
-            capabilities: capabilities,
-            oversightAvailability: .fullyAvailable
-        )
-        router.setNavigationShell(
-            .twoModes,
-            mode: .oversight,
-            capabilities: capabilities
-        )
-        router.routeToJobQueue(capabilities: capabilities)
-        XCTAssertEqual(router.selectedTab, .jobs)
-        XCTAssertEqual(router.oversightJobsPath.count, 1)
-    }
-
-    func testVisibleTabsRemoveDisabledAttentionAndTasks() {
+    func testCoreTabsSurviveDisabledOperatorFeatures() {
         var disabled = capabilities
         disabled.attentionEnabled = false
         disabled.shiftPlanEnabled = false
 
-        XCTAssertEqual(AppTab.visibleTabs(for: disabled), [.farm, .inventory])
+        XCTAssertEqual(AppTab.visibleTabs(for: disabled), [.farm, .queue, .filament])
         XCTAssertEqual(AppTab.fallbackTab(for: disabled), .farm)
-    }
-
-    func testCapabilityGatingIsAppliedWithinEachAdaptiveSet() {
-        var disabled = capabilities
-        disabled.attentionEnabled = false
-        disabled.shiftPlanEnabled = false
-
-        XCTAssertEqual(
-            AppTab.visibleTabs(
-                for: .simple,
-                mode: .floor,
-                capabilities: disabled
-            ),
-            [.farm, .inventory, .oversight]
-        )
-        XCTAssertEqual(
-            AppTab.visibleTabs(
-                for: .twoModes,
-                mode: .floor,
-                capabilities: disabled
-            ),
-            [.farm, .inventory]
-        )
-        XCTAssertEqual(
-            AppTab.visibleTabs(
-                for: .twoModes,
-                mode: .oversight,
-                capabilities: disabled
-            ),
-            [.overview, .fleet, .jobs, .upkeep, .reports]
-        )
-    }
-
-    func testOversightAvailabilityOmitsEmptyHubAndFiltersModeTabs() {
-        let availability = OversightNavigationAvailability(
-            hasVisibleHubDestinations: false,
-            visibleTabs: [.fleet, .reports]
-        )
-
-        XCTAssertEqual(
-            AppTab.visibleTabs(
-                for: .simple,
-                mode: .floor,
-                capabilities: capabilities,
-                oversightAvailability: availability
-            ),
-            [.attention, .farm, .tasks, .inventory]
-        )
-        XCTAssertEqual(
-            AppTab.visibleTabs(
-                for: .twoModes,
-                mode: .oversight,
-                capabilities: capabilities,
-                oversightAvailability: availability
-            ),
-            [.fleet, .reports]
-        )
-    }
-
-    func testAttentionAndTasksGatesApplyIndependently() {
-        var attentionDisabled = capabilities
-        attentionDisabled.attentionEnabled = false
-        XCTAssertEqual(
-            AppTab.visibleTabs(
-                for: .twoModes,
-                mode: .floor,
-                capabilities: attentionDisabled
-            ),
-            [.farm, .tasks, .inventory]
-        )
-
-        var tasksDisabled = capabilities
-        tasksDisabled.shiftPlanEnabled = false
-        XCTAssertEqual(
-            AppTab.visibleTabs(
-                for: .twoModes,
-                mode: .floor,
-                capabilities: tasksDisabled
-            ),
-            [.attention, .farm, .inventory]
-        )
     }
 
     // MARK: - Tasks reachability (#2479)
 
-    func testEnabledTasksIsReachableInSimpleShellTabs() {
-        let router = AppRouter()
-        router.setNavigationShell(.simple, capabilities: capabilities)
-
-        let tabs = router.visibleTabs(for: capabilities)
-        XCTAssertEqual(tabs, [.attention, .farm, .tasks, .inventory, .oversight])
-
-        router.selectTab(.tasks, capabilities: capabilities)
-        XCTAssertEqual(router.resolvedTab(for: capabilities), .tasks)
-        XCTAssertFalse(
-            router.shouldShowModeControl(for: .tasks),
-            "Simple never shows the Floor/Oversight control"
-        )
-    }
-
-    func testEnabledTasksIsReachableWhenAutomaticDerivesSimple() {
-        let router = AppRouter()
-        let derivation = NavigationShellDerivation.automatic(
-            farmShape: FarmShape(accountCount: 1, locationCount: 1, printerCount: 6),
-            shiftPlanEnabled: capabilities.shiftPlanEnabled,
-            isFarmAdmin: true
-        )
-        XCTAssertEqual(derivation.shell, .simple)
-
-        router.configureAdaptiveShell(
-            serverID: UUID(),
-            userID: UUID(),
-            preference: .automatic,
-            farmShape: FarmShape(accountCount: 1, locationCount: 1, printerCount: 6),
-            isFarmAdmin: true,
-            capabilities: capabilities,
-            oversightAvailability: .fullyAvailable
-        )
-
-        XCTAssertEqual(router.activeShell, .simple)
-        XCTAssertTrue(router.visibleTabs(for: capabilities).contains(.tasks))
-    }
-
-    func testEnabledTasksIsReachableInExpandedSidebarForBothShells() {
-        for shell in [NavigationShell.simple, .twoModes] {
-            let router = AppRouter()
-            router.setNavigationShell(shell, capabilities: capabilities)
-            router.setExpandedSidebarPresentation(
-                true,
-                capabilities: capabilities,
-                oversightAvailability: .fullyAvailable
-            )
-
-            XCTAssertTrue(
-                router.visibleTabs(in: .floor, for: capabilities).contains(.tasks),
-                "\(shell) sidebar must expose enabled Tasks"
-            )
-            router.selectTab(.tasks, capabilities: capabilities)
-            XCTAssertEqual(router.resolvedTab(for: capabilities), .tasks)
-        }
-    }
-
-    func testDisabledTasksStaysGatedInEveryShellAndSidebarSection() {
-        var tasksDisabled = capabilities
-        tasksDisabled.shiftPlanEnabled = false
-
-        for (shell, mode) in [
-            (NavigationShell.simple, OversightMode.floor),
-            (.twoModes, .floor),
-            (.twoModes, .oversight),
-            (.current, .floor)
-        ] {
-            XCTAssertFalse(
-                AppTab.visibleTabs(
-                    for: shell,
-                    mode: mode,
-                    capabilities: tasksDisabled
-                ).contains(.tasks),
-                "\(shell)/\(mode) must hide Tasks when shift planning is off"
-            )
-        }
-
-        for shell in [NavigationShell.simple, .twoModes] {
-            for section in SidebarSection.allCases {
-                XCTAssertFalse(
-                    AppTab.visibleTabs(
-                        in: section,
-                        for: shell,
-                        capabilities: tasksDisabled
-                    ).contains(.tasks),
-                    "\(shell)/\(section) sidebar must hide disabled Tasks"
-                )
-            }
-        }
-
-        let router = AppRouter()
-        router.setNavigationShell(.simple, capabilities: tasksDisabled)
-        router.selectTab(.tasks, capabilities: tasksDisabled)
-        XCTAssertNotEqual(router.resolvedTab(for: tasksDisabled), .tasks)
-    }
-
-    func testEveryEnabledOperatorTabRemainsReachableInBothAdaptiveShells() {
-        let enabledOperatorTabs: [AppTab] = [.attention, .farm, .tasks, .inventory]
-
-        for shell in [NavigationShell.simple, .twoModes] {
-            let router = AppRouter()
-            router.setNavigationShell(shell, capabilities: capabilities)
-
-            for tab in enabledOperatorTabs {
-                XCTAssertTrue(
-                    router.makeTabVisibleIfPossible(tab, capabilities: capabilities),
-                    "\(tab) must stay reachable in the \(shell) shell"
-                )
-                router.selectTab(tab, capabilities: capabilities)
-                XCTAssertEqual(router.resolvedTab(for: capabilities), tab)
-            }
-        }
-    }
-
-    func testJobQueueRoutingStillPrefersOversightOverTasksInSimple() {
-        let router = AppRouter()
-        router.setNavigationShell(.simple, capabilities: capabilities)
-
-        router.routeToJobQueue(capabilities: capabilities)
-
-        XCTAssertEqual(router.selectedTab, .oversight)
-        XCTAssertEqual(router.oversightPath.count, 1)
-        XCTAssertTrue(router.tasksPath.isEmpty)
-    }
-
-    func testChangingShellFallsBackWithinTheNewActiveSet() {        let router = AppRouter()
-        router.selectedTab = .farm
-
-        router.setNavigationShell(
-            .twoModes,
-            mode: .oversight,
-            capabilities: capabilities
-        )
-
-        XCTAssertEqual(router.activeShell, .twoModes)
-        XCTAssertEqual(router.activeMode, .oversight)
-        XCTAssertEqual(router.selectedTab, .overview)
-    }
-
-    func testAutomaticShellDoesNotChangeWhenShapeChangesDuringSession() {
-        let router = AppRouter()
-        let serverID = UUID()
-        let userID = UUID()
-
-        XCTAssertFalse(
-            router.hasAdaptiveShellConfiguration(
-                serverID: serverID,
-                userID: userID
-            )
-        )
-        router.configureAdaptiveShell(
-            serverID: serverID,
-            userID: userID,
-            preference: .automatic,
-            farmShape: FarmShape(accountCount: 1, locationCount: 1, printerCount: 4),
-            isFarmAdmin: true,
-            capabilities: capabilities,
-            oversightAvailability: .fullyAvailable
-        )
-        let establishedExplanation = router.establishedAutomaticDerivation?.explanation
-        router.configureAdaptiveShell(
-            serverID: serverID,
-            userID: userID,
-            preference: .automatic,
-            farmShape: FarmShape(accountCount: 3, locationCount: 2, printerCount: 40),
-            isFarmAdmin: true,
-            capabilities: capabilities,
-            oversightAvailability: .fullyAvailable
-        )
-
-        XCTAssertEqual(router.requestedShell, .simple)
-        XCTAssertEqual(router.activeShell, .simple)
-        XCTAssertEqual(
-            router.establishedAutomaticDerivation?.explanation,
-            establishedExplanation
-        )
-        XCTAssertTrue(
-            router.hasAdaptiveShellConfiguration(
-                serverID: serverID,
-                userID: userID
-            )
-        )
-    }
-
-    func testAutomaticShellDoesNotChangeWhenShiftCapabilityChangesDuringSession() {
-        let router = AppRouter()
-        let serverID = UUID()
-        let userID = UUID()
-        let staffedShape = FarmShape(accountCount: 3, locationCount: 2, printerCount: 40)
-        var shiftsDisabled = capabilities
-        shiftsDisabled.shiftPlanEnabled = false
-
-        router.configureAdaptiveShell(
-            serverID: serverID,
-            userID: userID,
-            preference: .automatic,
-            farmShape: staffedShape,
-            isFarmAdmin: true,
-            capabilities: shiftsDisabled,
-            oversightAvailability: .fullyAvailable
-        )
-        router.configureAdaptiveShell(
-            serverID: serverID,
-            userID: userID,
-            preference: .automatic,
-            farmShape: staffedShape,
-            isFarmAdmin: true,
-            capabilities: capabilities,
-            oversightAvailability: .fullyAvailable
-        )
-
-        XCTAssertEqual(router.requestedShell, .simple)
-        XCTAssertEqual(router.activeShell, .simple)
-    }
-
-    func testExplicitPreferenceChangeUpdatesShellImmediately() {
-        let router = AppRouter()
-        let serverID = UUID()
-        let userID = UUID()
-
-        router.configureAdaptiveShell(
-            serverID: serverID,
-            userID: userID,
-            preference: .automatic,
-            farmShape: FarmShape(accountCount: 1, locationCount: 1, printerCount: 4),
-            isFarmAdmin: true,
-            capabilities: capabilities,
-            oversightAvailability: .fullyAvailable
-        )
-        router.configureAdaptiveShell(
-            serverID: serverID,
-            userID: userID,
-            preference: .twoModes,
-            farmShape: FarmShape(accountCount: 1, locationCount: 1, printerCount: 4),
-            isFarmAdmin: true,
-            capabilities: capabilities,
-            oversightAvailability: .fullyAvailable
-        )
-
-        XCTAssertEqual(router.requestedShell, .twoModes)
-        XCTAssertEqual(router.activeShell, .twoModes)
-        XCTAssertEqual(router.activeMode, .floor)
-    }
-
-    func testReturningToAutomaticRestoresTheSessionEstablishedDerivation() {
-        let router = AppRouter()
-        let serverID = UUID()
-        let userID = UUID()
-        let initialShape = FarmShape(accountCount: 1, locationCount: 1, printerCount: 4)
-        let changedShape = FarmShape(accountCount: 3, locationCount: 2, printerCount: 40)
-
-        router.configureAdaptiveShell(
-            serverID: serverID,
-            userID: userID,
-            preference: .automatic,
-            farmShape: initialShape,
-            isFarmAdmin: true,
-            capabilities: capabilities,
-            oversightAvailability: .fullyAvailable
-        )
-        let establishedDerivation = router.establishedAutomaticDerivation
-
-        router.configureAdaptiveShell(
-            serverID: serverID,
-            userID: userID,
-            preference: .twoModes,
-            farmShape: changedShape,
-            isFarmAdmin: true,
-            capabilities: capabilities,
-            oversightAvailability: .fullyAvailable
-        )
-        router.configureAdaptiveShell(
-            serverID: serverID,
-            userID: userID,
-            preference: .automatic,
-            farmShape: changedShape,
-            isFarmAdmin: true,
-            capabilities: capabilities,
-            oversightAvailability: .fullyAvailable
-        )
-
-        XCTAssertEqual(router.establishedAutomaticDerivation, establishedDerivation)
-        XCTAssertEqual(router.requestedShell, .simple)
-        XCTAssertEqual(router.activeShell, .simple)
-    }
-
-    func testServerChangeReplacesAutomaticDerivationWithVerifiedDestinationIdentity() {
-        let router = AppRouter()
-        let firstServerID = UUID()
-        let secondServerID = UUID()
-
-        router.configureAdaptiveShell(
-            serverID: firstServerID,
-            userID: UUID(),
-            preference: .automatic,
-            farmShape: FarmShape(accountCount: 3, locationCount: 2, printerCount: 40),
-            isFarmAdmin: true,
-            capabilities: capabilities,
-            oversightAvailability: .fullyAvailable
-        )
-        XCTAssertEqual(router.establishedAutomaticDerivation?.shell, .twoModes)
-
-        router.configureAdaptiveShell(
-            serverID: secondServerID,
-            userID: UUID(),
-            preference: .automatic,
-            farmShape: FarmShape(accountCount: 3, locationCount: 2, printerCount: 40),
-            isFarmAdmin: false,
-            capabilities: capabilities,
-            oversightAvailability: .fullyAvailable
-        )
-
-        XCTAssertEqual(router.configuredServerID, secondServerID)
-        XCTAssertEqual(router.establishedAutomaticDerivation?.shell, .simple)
-        XCTAssertEqual(router.requestedShell, .simple)
-        XCTAssertTrue(
-            router.establishedAutomaticDerivation?.explanation.contains("not a farm administrator") == true
-        )
-    }
-
-    func testVerifiedIdentityUpgradeCanPreserveCurrentNavigationStack() {
-        let router = AppRouter()
-        let serverID = UUID()
-        let provisionalUserID = UUID()
-        let verifiedUserID = UUID()
-        let printerID = UUID()
-
-        router.configureAdaptiveShell(
-            serverID: serverID,
-            userID: provisionalUserID,
-            preference: .simple,
-            farmShape: nil,
-            isFarmAdmin: false,
-            capabilities: capabilities,
-            oversightAvailability: .fullyAvailable
-        )
-        router.printersPath.append(AppDestination.printerDetail(id: printerID))
-
-        router.configureAdaptiveShell(
-            serverID: serverID,
-            userID: verifiedUserID,
-            preference: .automatic,
-            farmShape: FarmShape(accountCount: 1, locationCount: 1, printerCount: 4),
-            isFarmAdmin: true,
-            capabilities: capabilities,
-            oversightAvailability: .fullyAvailable,
-            preserveNavigationOnContextChange: true
-        )
-
-        XCTAssertEqual(router.configuredUserID, verifiedUserID)
-        XCTAssertEqual(router.printersPath.count, 1)
-    }
-
-    func testShippingPresentationPreservesAdaptiveSelectionForCompactReturn() {
-        let router = AppRouter()
-        let serverID = UUID()
-        let userID = UUID()
-
-        router.configureAdaptiveShell(
-            serverID: serverID,
-            userID: userID,
-            preference: .twoModes,
-            farmShape: nil,
-            isFarmAdmin: true,
-            capabilities: capabilities,
-            oversightAvailability: .fullyAvailable
-        )
-        router.setNavigationMode(.oversight, capabilities: capabilities)
-
-        router.presentShippingShell(capabilities: capabilities)
-
-        XCTAssertEqual(router.activeShell, .current)
-        XCTAssertEqual(router.activeMode, .oversight)
-        XCTAssertEqual(router.requestedShell, .twoModes)
-        XCTAssertEqual(
-            router.visibleTabs(for: capabilities),
-            [.attention, .farm, .tasks, .inventory]
-        )
-
-        router.configureAdaptiveShell(
-            serverID: serverID,
-            userID: userID,
-            preference: .twoModes,
-            farmShape: nil,
-            isFarmAdmin: true,
-            capabilities: capabilities,
-            oversightAvailability: .fullyAvailable
-        )
-
-        XCTAssertEqual(router.activeShell, .twoModes)
-        XCTAssertEqual(router.activeMode, .oversight)
-        XCTAssertEqual(
-            router.visibleTabs(for: capabilities),
-            [.overview, .fleet, .jobs, .upkeep, .reports]
-        )
-    }
-
-    func testShippingPresentationClearsDisabledCapabilityState() {
-        var disabled = capabilities
-        disabled.attentionEnabled = false
-        disabled.shiftPlanEnabled = false
-        let router = AppRouter()
-        router.notificationBadgeCount = 3
-        router.pendingReadyCount = 2
-        router.pendingAttentionItemId = "attention-1"
-        router.notificationsPath.append(AppDestination.jobDetail(id: printerId))
-        router.tasksPath.append(AppDestination.jobDetail(id: printerId))
-
-        router.presentShippingShell(capabilities: disabled)
-
-        XCTAssertEqual(router.activeShell, .current)
-        XCTAssertEqual(router.selectedTab, .farm)
-        XCTAssertEqual(router.notificationBadgeCount, 0)
-        XCTAssertEqual(router.pendingReadyCount, 0)
-        XCTAssertNil(router.pendingAttentionItemId)
-        XCTAssertTrue(router.notificationsPath.isEmpty)
-        XCTAssertTrue(router.tasksPath.isEmpty)
-    }
-
-    func testTwoModesCollapsesWhenOversightHasFewerThanTwoTabs() {
-        let router = AppRouter()
-        let availability = OversightNavigationAvailability(
-            hasVisibleHubDestinations: true,
-            visibleTabs: [.fleet]
-        )
-
-        router.configureAdaptiveShell(
-            serverID: UUID(),
-            userID: UUID(),
-            preference: .twoModes,
-            farmShape: nil,
-            isFarmAdmin: true,
-            capabilities: capabilities,
-            oversightAvailability: availability
-        )
-
-        XCTAssertEqual(router.requestedShell, .twoModes)
-        XCTAssertEqual(router.activeShell, .simple)
-        XCTAssertFalse(router.shouldShowModeControl(for: .farm))
-        XCTAssertFalse(router.visibleTabs(for: capabilities).isEmpty)
-    }
-
-    func testCapabilityCollapseResetsDisappearingOversightPaths() {
-        let router = AppRouter()
-        router.setNavigationShell(
-            .twoModes,
-            mode: .oversight,
-            capabilities: capabilities
-        )
-        router.overviewPath.append(AppDestination.dispatchDashboard)
-        router.fleetPath.append(AppDestination.printerDetail(id: printerId))
-
-        router.reconcileCapabilities(
-            capabilities,
-            oversightAvailability: OversightNavigationAvailability(
-                hasVisibleHubDestinations: true,
-                visibleTabs: [.fleet]
-            )
-        )
-
-        XCTAssertEqual(router.activeShell, .simple)
-        XCTAssertTrue(router.overviewPath.isEmpty)
-        XCTAssertTrue(router.fleetPath.isEmpty)
-        XCTAssertTrue(router.visibleTabs(for: capabilities).contains(.oversight))
-    }
-
-    func testShellTransitionsPreserveValidSelectionAndFallbackBidirectionally() {
-        let router = AppRouter()
-        router.selectedTab = .inventory
-
-        router.setNavigationShell(
-            .simple,
-            capabilities: capabilities
-        )
-        XCTAssertEqual(router.selectedTab, .inventory)
-
-        router.selectTab(.oversight, capabilities: capabilities)
-        router.setNavigationShell(
-            .twoModes,
-            mode: .floor,
-            capabilities: capabilities
-        )
-        XCTAssertEqual(router.selectedTab, .attention)
-
-        router.setNavigationShell(
-            .twoModes,
-            mode: .oversight,
-            capabilities: capabilities
-        )
-        XCTAssertEqual(router.selectedTab, .overview)
-
-        router.selectTab(.reports, capabilities: capabilities)
-        router.setNavigationShell(
-            .twoModes,
-            mode: .floor,
-            capabilities: capabilities
-        )
-        XCTAssertEqual(router.selectedTab, .attention)
-    }
-
-    func testShellTransitionResetsPathForDisappearingTab() {
-        let router = AppRouter()
-        router.setNavigationShell(.simple, capabilities: capabilities)
-        router.selectedTab = .oversight
-        router.oversightPath.append(AppDestination.jobHistory)
-
-        router.setNavigationShell(
-            .twoModes,
-            mode: .floor,
-            capabilities: capabilities
-        )
-
-        XCTAssertTrue(router.oversightPath.isEmpty)
-        XCTAssertEqual(router.selectedTab, .attention)
-    }
-
-    func testModeTransitionResetsPathsForPreviousMode() {
-        let router = AppRouter()
-        router.setNavigationShell(
-            .twoModes,
-            mode: .oversight,
-            capabilities: capabilities
-        )
-        router.overviewPath.append(AppDestination.dispatchDashboard)
-        router.fleetPath.append(AppDestination.printerDetail(id: printerId))
-
-        router.setNavigationMode(.floor, capabilities: capabilities)
-
-        XCTAssertTrue(router.overviewPath.isEmpty)
-        XCTAssertTrue(router.fleetPath.isEmpty)
-        XCTAssertEqual(router.selectedTab, .attention)
-    }
-
-    func testModeControlIsOnlyAvailableAtTabRoot() {
-        let router = AppRouter()
-        router.setNavigationShell(
-            .twoModes,
-            mode: .oversight,
-            capabilities: capabilities
-        )
-
-        XCTAssertTrue(router.shouldShowModeControl(for: .fleet))
-        router.fleetPath.append(AppDestination.printerDetail(id: printerId))
-        XCTAssertFalse(router.shouldShowModeControl(for: .fleet))
-    }
-
-    func testInvalidSelectionFallsBackWithinActiveShell() {
-        let router = AppRouter()
-        router.setNavigationShell(
-            .twoModes,
-            mode: .oversight,
-            capabilities: capabilities
-        )
-
-        router.selectTab(.tasks, capabilities: capabilities)
-
-        XCTAssertEqual(router.selectedTab, .overview)
-        XCTAssertEqual(router.resolvedTab(for: capabilities), .overview)
-        XCTAssertEqual(router.fallbackTab(for: capabilities), .overview)
-    }
-
-    func testShellTransitionCancelsPendingDelayedNavigation() async {
-        let router = AppRouter()
-        router.navigate(
-            to: .printerReady(id: printerId),
-            capabilities: capabilities
-        )
-        router.pendingSpoolHighlightId = spoolId
-        router.pendingAttentionItemId = "attention-1"
-        router.pendingFilamentSwap = .init(
-            printerId: printerId,
-            toolheadIndex: 1,
-            jobId: nil
-        )
-
-        router.setNavigationShell(
-            .twoModes,
-            mode: .oversight,
-            capabilities: capabilities
-        )
-        try? await Task.sleep(for: .milliseconds(120))
-
-        XCTAssertTrue(router.printersPath.isEmpty)
-        XCTAssertTrue(router.fleetPath.isEmpty)
-        XCTAssertNil(router.pendingNFCReadyPrinterId)
-        XCTAssertNil(router.pendingSpoolHighlightId)
-        XCTAssertNil(router.pendingAttentionItemId)
-        XCTAssertNil(router.pendingFilamentSwap)
-        XCTAssertEqual(router.selectedTab, .overview)
-    }
-
-    func testReconcileMovesDisabledSelectionToDeterministicFallback() {
-        var disabled = capabilities
-        disabled.attentionEnabled = false
-        disabled.shiftPlanEnabled = false
-        let router = AppRouter()
-        router.selectedTab = .attention
-        router.notificationBadgeCount = 3
-        router.pendingAttentionItemId = "attention-1"
-        router.notificationsPath.append(AppDestination.jobDetail(id: printerId))
-
-        router.reconcileCapabilities(disabled)
-
-        XCTAssertEqual(router.selectedTab, .farm)
-        XCTAssertEqual(router.notificationBadgeCount, 0)
-        XCTAssertNil(router.pendingAttentionItemId)
-        XCTAssertTrue(router.notificationsPath.isEmpty)
-    }
-
-    func testReconcileMovesDisabledTasksSelectionToAttentionWhenAvailable() {
-        var disabled = capabilities
-        disabled.shiftPlanEnabled = false
-        let router = AppRouter()
-        router.selectedTab = .tasks
-        router.jobsPath.append(AppDestination.jobDetail(id: printerId))
-
-        router.reconcileCapabilities(disabled)
-
-        XCTAssertEqual(router.selectedTab, .attention)
-        XCTAssertTrue(router.jobsPath.isEmpty)
-    }
-
     // MARK: - Deep link routing
-
-    func testPrinterDetailDeepLinkSelectsFarmTab() async {
-        let router = AppRouter()
-        router.selectedTab = .attention
-
-        router.navigate(to: .printerDetail(id: printerId), capabilities: capabilities)
-        XCTAssertEqual(router.selectedTab, .farm)
-
-        // navigate() schedules a delayed append; wait past the 50 ms delay.
-        try? await Task.sleep(for: .milliseconds(120))
-        XCTAssertFalse(router.printersPath.isEmpty)
-    }
-
-    func testPrinterReadyDeepLinkSelectsFarmTabAndSetsPending() async {
-        let router = AppRouter()
-        router.selectedTab = .attention
-
-        router.navigate(to: .printerReady(id: printerId), capabilities: capabilities)
-
-        XCTAssertEqual(router.selectedTab, .farm)
-        XCTAssertEqual(router.pendingNFCReadyPrinterId, printerId)
-
-        try? await Task.sleep(for: .milliseconds(120))
-        XCTAssertFalse(router.printersPath.isEmpty)
-    }
-
-    func testSpoolDetailDeepLinkSelectsInventoryTab() {
-        let router = AppRouter()
-        router.selectedTab = .attention
-
-        router.navigate(to: .spoolDetail(id: spoolId), capabilities: capabilities)
-
-        XCTAssertEqual(router.selectedTab, .inventory)
-        XCTAssertEqual(router.pendingSpoolHighlightId, spoolId)
-    }
-
-    func testAttentionDeepLinkSelectsAttentionAndPreservesItem() {
-        let router = AppRouter()
-
-        router.navigate(to: .attentionItem(id: "failure-123"), capabilities: capabilities)
-
-        XCTAssertEqual(router.selectedTab, .attention)
-        XCTAssertEqual(router.pendingAttentionItemId, "failure-123")
-    }
 
     func testFilamentSwapDeepLinkSelectsFarmAndPreservesDestination() async {
         let jobId = UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
@@ -1847,177 +831,6 @@ final class AppRouterTests: XCTestCase {
 
         try? await Task.sleep(for: .milliseconds(120))
         XCTAssertFalse(router.printersPath.isEmpty)
-    }
-
-    func testPrinterDeepLinkUsesDistinctFleetPathInOversightMode() async {
-        let router = AppRouter()
-        router.setNavigationShell(
-            .twoModes,
-            mode: .oversight,
-            capabilities: capabilities
-        )
-
-        router.navigate(
-            to: .printerDetail(id: printerId),
-            capabilities: capabilities
-        )
-
-        XCTAssertEqual(router.selectedTab, .fleet)
-        try? await Task.sleep(for: .milliseconds(120))
-        XCTAssertTrue(router.printersPath.isEmpty)
-        XCTAssertEqual(router.fleetPath.count, 1)
-    }
-
-    func testExpandedSidebarPrinterDeepLinkUsesSelectedOversightSectionDespiteFloorMode() async {
-        let router = AppRouter()
-        router.setNavigationShell(
-            .twoModes,
-            mode: .floor,
-            capabilities: capabilities
-        )
-        router.setExpandedSidebarPresentation(
-            true,
-            capabilities: capabilities,
-            oversightAvailability: .fullyAvailable
-        )
-        router.selectTab(.jobs, capabilities: capabilities)
-        router.oversightJobsPath.append(AppDestination.jobQueue)
-
-        router.navigate(
-            to: .printerDetail(id: printerId),
-            capabilities: capabilities
-        )
-
-        XCTAssertEqual(router.activeMode, .floor)
-        XCTAssertEqual(router.selectedTab, .fleet)
-        XCTAssertEqual(router.oversightJobsPath.count, 1)
-        try? await Task.sleep(for: .milliseconds(120))
-        XCTAssertTrue(router.printersPath.isEmpty)
-        XCTAssertEqual(router.fleetPath.count, 1)
-    }
-
-    func testExpandedSidebarFilamentSwapUsesSelectedFloorSectionDespiteOversightMode() {
-        let router = AppRouter()
-        router.setNavigationShell(
-            .twoModes,
-            mode: .oversight,
-            capabilities: capabilities
-        )
-        router.setExpandedSidebarPresentation(
-            true,
-            capabilities: capabilities,
-            oversightAvailability: .fullyAvailable
-        )
-        router.selectTab(.farm, capabilities: capabilities)
-
-        router.routeToFilamentSwap(printerID: printerId)
-
-        XCTAssertEqual(router.activeMode, .oversight)
-        XCTAssertEqual(router.selectedTab, .farm)
-        XCTAssertEqual(router.printersPath.count, 1)
-        XCTAssertTrue(router.fleetPath.isEmpty)
-    }
-
-    func testPrinterDeepLinkFallsBackWhenFleetIsUnavailable() async {
-        let router = AppRouter()
-        let availability = OversightNavigationAvailability(
-            hasVisibleHubDestinations: true,
-            visibleTabs: [.overview, .reports]
-        )
-        router.setNavigationShell(
-            .twoModes,
-            mode: .oversight,
-            capabilities: capabilities,
-            oversightAvailability: availability
-        )
-
-        router.navigate(
-            to: .printerDetail(id: printerId),
-            capabilities: capabilities
-        )
-
-        XCTAssertEqual(router.selectedTab, .overview)
-        try? await Task.sleep(for: .milliseconds(120))
-        XCTAssertTrue(router.printersPath.isEmpty)
-        XCTAssertTrue(router.fleetPath.isEmpty)
-    }
-
-    func testAttentionDeepLinkSwitchesToFloorModeAndPreservesItem() {
-        let router = AppRouter()
-        router.setNavigationShell(
-            .twoModes,
-            mode: .oversight,
-            capabilities: capabilities
-        )
-
-        router.navigate(
-            to: .attentionItem(id: "failure-123"),
-            capabilities: capabilities
-        )
-
-        XCTAssertEqual(router.activeMode, .floor)
-        XCTAssertEqual(router.selectedTab, .attention)
-        XCTAssertEqual(router.pendingAttentionItemId, "failure-123")
-        XCTAssertTrue(router.notificationsPath.isEmpty)
-    }
-
-    func testSpoolDeepLinkSwitchesToFloorModeAndPreservesHighlight() {
-        let router = AppRouter()
-        router.setNavigationShell(
-            .twoModes,
-            mode: .oversight,
-            capabilities: capabilities
-        )
-
-        router.navigate(
-            to: .spoolDetail(id: spoolId),
-            capabilities: capabilities
-        )
-
-        XCTAssertEqual(router.activeMode, .floor)
-        XCTAssertEqual(router.selectedTab, .inventory)
-        XCTAssertEqual(router.pendingSpoolHighlightId, spoolId)
-        XCTAssertTrue(router.inventoryPath.isEmpty)
-    }
-
-    func testFilamentSwapUsesDistinctFleetPathInOversightMode() async {
-        let router = AppRouter()
-        router.setNavigationShell(
-            .twoModes,
-            mode: .oversight,
-            capabilities: capabilities
-        )
-
-        router.navigate(
-            to: .filamentSwap(
-                printerId: printerId,
-                toolheadIndex: 2,
-                jobId: nil
-            ),
-            capabilities: capabilities
-        )
-
-        XCTAssertEqual(router.selectedTab, .fleet)
-        XCTAssertNotNil(router.pendingFilamentSwap)
-        try? await Task.sleep(for: .milliseconds(120))
-        XCTAssertTrue(router.printersPath.isEmpty)
-        XCTAssertEqual(router.fleetPath.count, 1)
-    }
-
-    func testDisabledAttentionDeepLinkRoutesToFarmWithoutPendingItem() {
-        var disabled = capabilities
-        disabled.attentionEnabled = false
-        let router = AppRouter()
-        router.selectedTab = .inventory
-
-        router.navigate(
-            to: .attentionItem(id: "failure-123"),
-            capabilities: disabled
-        )
-
-        XCTAssertEqual(router.selectedTab, .farm)
-        XCTAssertNil(router.pendingAttentionItemId)
-        XCTAssertTrue(router.notificationsPath.isEmpty)
     }
 
     func testDisabledGuidedSwapDeepLinkOpensPrinterWithoutOpeningSwap() async {
@@ -2051,37 +864,6 @@ final class AppRouterTests: XCTestCase {
         XCTAssertNil(router.pendingFilamentSwap)
     }
 
-    func testDisablingAdvancedControlsClearsEveryDestinationStack() {
-        let router = AppRouter()
-        router.printersPath.append(AppDestination.advancedPrinterControls(printerId: printerId))
-        router.tasksPath.append(AppDestination.advancedPrinterControls(printerId: printerId))
-        router.jobsPath.append(AppDestination.advancedPrinterControls(printerId: printerId))
-        router.notificationsPath.append(AppDestination.advancedPrinterControls(printerId: printerId))
-        router.inventoryPath.append(AppDestination.advancedPrinterControls(printerId: printerId))
-        router.oversightPath.append(AppDestination.advancedPrinterControls(printerId: printerId))
-        router.overviewPath.append(AppDestination.advancedPrinterControls(printerId: printerId))
-        router.fleetPath.append(AppDestination.advancedPrinterControls(printerId: printerId))
-        router.oversightJobsPath.append(
-            AppDestination.advancedPrinterControls(printerId: printerId)
-        )
-        router.upkeepPath.append(AppDestination.advancedPrinterControls(printerId: printerId))
-        router.reportsPath.append(AppDestination.advancedPrinterControls(printerId: printerId))
-
-        router.revokeAdvancedPrinterControlsAccess()
-
-        XCTAssertTrue(router.printersPath.isEmpty)
-        XCTAssertTrue(router.tasksPath.isEmpty)
-        XCTAssertTrue(router.jobsPath.isEmpty)
-        XCTAssertTrue(router.notificationsPath.isEmpty)
-        XCTAssertTrue(router.inventoryPath.isEmpty)
-        XCTAssertTrue(router.oversightPath.isEmpty)
-        XCTAssertTrue(router.overviewPath.isEmpty)
-        XCTAssertTrue(router.fleetPath.isEmpty)
-        XCTAssertTrue(router.oversightJobsPath.isEmpty)
-        XCTAssertTrue(router.upkeepPath.isEmpty)
-        XCTAssertTrue(router.reportsPath.isEmpty)
-    }
-
     func testAdvancedControlsAccessRequiresOptInAndOnlinePrinter() throws {
         var printer = try TestData.decodePrinter()
 
@@ -2098,53 +880,7 @@ final class AppRouterTests: XCTestCase {
         )
     }
 
-    func testPendingPrinterNavigationIsInvalidatedWhenServerChanges() async {
-        let router = AppRouter()
-
-        router.navigate(to: .printerDetail(id: printerId), capabilities: capabilities)
-        router.navigate(to: .attentionItem(id: "attention-1"), capabilities: capabilities)
-        router.navigate(to: .spoolDetail(id: 42), capabilities: capabilities)
-        router.tasksPath.append(AppDestination.jobHistory)
-        router.jobsPath.append(AppDestination.jobDetail(id: printerId))
-        router.oversightPath.append(AppDestination.jobHistory)
-        router.overviewPath.append(AppDestination.dispatchDashboard)
-        router.fleetPath.append(AppDestination.printerDetail(id: printerId))
-        router.oversightJobsPath.append(AppDestination.jobTimeline)
-        router.upkeepPath.append(AppDestination.maintenanceAnalytics)
-        router.reportsPath.append(AppDestination.uptimeReliability)
-        router.navigate(
-            to: .filamentSwap(printerId: printerId, toolheadIndex: 1, jobId: nil),
-            capabilities: capabilities
-        )
-        router.invalidatePendingNavigation()
-        try? await Task.sleep(for: .milliseconds(120))
-
-        XCTAssertTrue(router.printersPath.isEmpty)
-        XCTAssertTrue(router.tasksPath.isEmpty)
-        XCTAssertTrue(router.jobsPath.isEmpty)
-        XCTAssertTrue(router.notificationsPath.isEmpty)
-        XCTAssertTrue(router.inventoryPath.isEmpty)
-        XCTAssertTrue(router.oversightPath.isEmpty)
-        XCTAssertTrue(router.overviewPath.isEmpty)
-        XCTAssertTrue(router.fleetPath.isEmpty)
-        XCTAssertTrue(router.oversightJobsPath.isEmpty)
-        XCTAssertTrue(router.upkeepPath.isEmpty)
-        XCTAssertTrue(router.reportsPath.isEmpty)
-        XCTAssertNil(router.pendingAttentionItemId)
-        XCTAssertNil(router.pendingSpoolHighlightId)
-        XCTAssertNil(router.pendingFilamentSwap)
-    }
-
     // MARK: - Reset to root
-
-    func testResetToRootClearsAttentionPath() {
-        let router = AppRouter()
-        router.notificationsPath.append(AppDestination.jobDetail(id: printerId))
-        XCTAssertFalse(router.notificationsPath.isEmpty)
-
-        router.resetToRoot(tab: .attention)
-        XCTAssertTrue(router.notificationsPath.isEmpty)
-    }
 
     func testResetToRootClearsFarmPath() {
         let router = AppRouter()
@@ -2155,51 +891,13 @@ final class AppRouterTests: XCTestCase {
         XCTAssertTrue(router.printersPath.isEmpty)
     }
 
-    func testResetToRootClearsTasksPath() {
-        let router = AppRouter()
-        router.tasksPath.append("printQueue")
-        router.jobsPath.append(AppDestination.jobDetail(id: printerId))
-        XCTAssertFalse(router.tasksPath.isEmpty)
-        XCTAssertFalse(router.jobsPath.isEmpty)
-
-        router.resetToRoot(tab: .tasks)
-        XCTAssertTrue(router.tasksPath.isEmpty)
-        XCTAssertTrue(router.jobsPath.isEmpty)
-    }
-
     func testResetToRootClearsInventoryPath() {
         let router = AppRouter()
         router.inventoryPath.append(AppDestination.jobDetail(id: printerId))
         XCTAssertFalse(router.inventoryPath.isEmpty)
 
-        router.resetToRoot(tab: .inventory)
+        router.resetToRoot(tab: .filament)
         XCTAssertTrue(router.inventoryPath.isEmpty)
-    }
-
-    func testEveryAdaptiveTabResetClearsOnlyItsOwnPath() {
-        let tabs: [AppTab] = [
-            .oversight,
-            .overview,
-            .fleet,
-            .jobs,
-            .upkeep,
-            .reports
-        ]
-
-        for tab in tabs {
-            let router = AppRouter()
-            seedAdaptivePaths(router)
-
-            router.resetToRoot(tab: tab)
-
-            for candidate in tabs {
-                XCTAssertEqual(
-                    adaptivePathCount(for: candidate, router: router),
-                    candidate == tab ? 0 : 1,
-                    "Resetting \(tab) must not alter \(candidate)"
-                )
-            }
-        }
     }
 
     // MARK: - AppDestination migrations
@@ -2215,105 +913,6 @@ final class AppRouterTests: XCTestCase {
         }
     }
 
-    func testRehomedDestinationsHaveDistinctCanonicalCases() {
-        let destinations: [AppDestination] = [
-            .dashboard,
-            .maintenance,
-            .notifications,
-            .settings,
-            .dispatchDashboard,
-            .jobHistory,
-            .jobTimeline,
-            .uptimeReliability,
-            .maintenanceAnalytics,
-            .locations,
-            .predictiveInsights(printerId: nil),
-            .advancedPrinterControls(printerId: printerId),
-            .offlineQueue,
-            .manageServers
-        ]
-
-        XCTAssertEqual(destinations.count, 14)
-        XCTAssertEqual(Set(destinations).count, destinations.count)
-        XCTAssertNotEqual(AppDestination.settings, .navigationSettings)
-    }
-
-    func testPredictiveInsightsDestinationPreservesFarmAndPrinterScopes() {
-        let farmWide = AppDestination.predictiveInsights(printerId: nil)
-        let printer = AppDestination.predictiveInsights(printerId: printerId)
-
-        if case .predictiveInsights(let id) = farmWide {
-            XCTAssertNil(id)
-        } else {
-            XCTFail("Expected farm-wide predictiveInsights case")
-        }
-
-        if case .predictiveInsights(let id) = printer {
-            XCTAssertEqual(id, printerId)
-        } else {
-            XCTFail("Expected printer-scoped predictiveInsights case")
-        }
-    }
-
     // MARK: - Inventory feature visibility
 
-    func testInventorySegmentsKeepSpoolsWhenPrintedPartsAreDisabled() {
-        XCTAssertEqual(
-            InventoryView.Segment.available(printedPartsInventoryEnabled: false),
-            [.spools]
-        )
-        XCTAssertEqual(
-            InventoryView.Segment.resolved(
-                .parts,
-                printedPartsInventoryEnabled: false
-            ),
-            .spools
-        )
-    }
-
-    func testInventorySegmentsIncludePrintedPartsWhenEnabled() {
-        XCTAssertEqual(
-            InventoryView.Segment.available(printedPartsInventoryEnabled: true),
-            [.spools, .parts]
-        )
-        XCTAssertEqual(
-            InventoryView.Segment.resolved(
-                .parts,
-                printedPartsInventoryEnabled: true
-            ),
-            .parts
-        )
-    }
-
-    private func seedAdaptivePaths(_ router: AppRouter) {
-        router.oversightPath.append(AppDestination.jobHistory)
-        router.overviewPath.append(AppDestination.dispatchDashboard)
-        router.fleetPath.append(AppDestination.printerDetail(id: printerId))
-        router.oversightJobsPath.append(AppDestination.jobTimeline)
-        router.upkeepPath.append(AppDestination.maintenanceAnalytics)
-        router.reportsPath.append(AppDestination.uptimeReliability)
-    }
-
-    private func adaptivePathCount(
-        for tab: AppTab,
-        router: AppRouter
-    ) -> Int {
-        switch tab {
-        case .oversight:
-            return router.oversightPath.count
-        case .overview:
-            return router.overviewPath.count
-        case .fleet:
-            return router.fleetPath.count
-        case .jobs:
-            return router.oversightJobsPath.count
-        case .upkeep:
-            return router.upkeepPath.count
-        case .reports:
-            return router.reportsPath.count
-        case .attention, .farm, .tasks, .inventory:
-            XCTFail("Expected an adaptive tab")
-            return -1
-        }
-    }
 }

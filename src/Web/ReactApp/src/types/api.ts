@@ -2729,6 +2729,20 @@ export interface QueuedPrintJobDto {
   blockedReasonCode?: JobBlockedReasonCode | null;
 }
 
+export type MoveQueuedJobPositionRequest =
+  | {
+      beforeJobId: string;
+      beforeJobETag: string;
+      afterJobId?: never;
+      afterJobETag?: never;
+    }
+  | {
+      afterJobId: string;
+      afterJobETag: string;
+      beforeJobId?: never;
+      beforeJobETag?: never;
+    };
+
 /** Mirrors backend `JobBlockedReasonCode` (serialized as a string enum). */
 export type JobBlockedReasonCode =
   | 'None'
@@ -3078,6 +3092,13 @@ export interface UpdateQueueJobRequest {
   assignedPrinterId?: string;
   status?: string;
   failureReason?: string;
+}
+
+export interface MoveQueuedJobRequest {
+  beforeJobId?: string;
+  beforeJobETag?: string;
+  afterJobId?: string;
+  afterJobETag?: string;
 }
 
 export interface BulkCancelQueueJobsRequest {

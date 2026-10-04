@@ -175,6 +175,7 @@ public class EfPrintJobManagementRepository(AppDbContext context, TimeProvider? 
 
         query = sortBy.ToLowerInvariant() switch
         {
+            "queue" => query.OrderGroupedByScope(),
             "deadline" => query
                 .OrderBy(pj => pj.DeadlineAtUtc.HasValue ? 0 : 1)
                 .ThenBy(pj => pj.DeadlineAtUtc)
@@ -196,16 +197,41 @@ public class EfPrintJobManagementRepository(AppDbContext context, TimeProvider? 
 
     public async Task<List<PrintJob>> GetJobsByPrinterAsync(Guid printerId, int limit = 50, CancellationToken ct = default)
     {
-        return await _context.PrintJobs
+        IQueryable<PrintJob> printerJobs = _context.PrintJobs
             .AsNoTracking()
             .Include(pj => pj.GcodeFile)
             .Include(pj => pj.AssignedPrinter)
                 .ThenInclude(p => p!.Model)
-            .Where(pj => pj.AssignedPrinterId == printerId &&
-                (pj.Status == PrintJobStatus.Queued || pj.Status == PrintJobStatus.Printing))
+            .Where(pj => pj.AssignedPrinterId == printerId);
+
+        List<PrintJob> occupyingJobs = await printerJobs
+            .WhereOccupiesPrinter()
             .OrderByPriorityDescending()
             .Take(limit)
             .ToListAsync(ct);
+        int remainingLimit = limit - occupyingJobs.Count;
+        if (remainingLimit <= 0)
+        {
+            return occupyingJobs;
+        }
+
+        List<PrintJob> assignedJobs = await printerJobs
+            .Where(pj => pj.Status == PrintJobStatus.Assigned)
+            .OrderByPriorityDescending()
+            .Take(remainingLimit)
+            .ToListAsync(ct);
+        remainingLimit -= assignedJobs.Count;
+        if (remainingLimit <= 0)
+        {
+            return [.. occupyingJobs, .. assignedJobs];
+        }
+
+        List<PrintJob> queuedJobs = await printerJobs
+            .Where(pj => pj.Status == PrintJobStatus.Queued)
+            .OrderWithinScope()
+            .Take(remainingLimit)
+            .ToListAsync(ct);
+        return [.. occupyingJobs, .. assignedJobs, .. queuedJobs];
     }
 
     /// <summary>

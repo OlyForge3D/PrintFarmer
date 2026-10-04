@@ -94,11 +94,6 @@ struct JobHistoryView: View {
                 }
             }
 
-            ToolbarItem(placement: .primaryAction) {
-                NavigationLink(value: AppDestination.jobTimeline) {
-                    Image(systemName: "chart.line.text.clipboard")
-                }
-            }
         }
         .sheet(isPresented: $showDateFilter) {
             dateFilterSheet

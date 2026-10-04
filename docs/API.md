@@ -933,6 +933,77 @@ Authorization: Bearer <token>
 - `404` - Location not found
 - `503` - System initializing
 
+## Queue Position API
+
+### Move a queued job
+
+`PUT /api/job-queue/jobs/{id}/position` requires the `Queue.Write` permission
+and an `If-Match` header containing the moved job's ETag. Supply exactly one
+neighbor ID and its ETag to place the queued job immediately before or after
+that neighbor:
+
+```http
+PUT /api/job-queue/jobs/{id}/position
+If-Match: "moved-job-etag"
+Content-Type: application/json
+
+{ "beforeJobId": "neighbor-guid", "beforeJobETag": "neighbor-etag" }
+```
+
+Use `afterJobId` and `afterJobETag` instead to place the job after the neighbor.
+The moved job adopts the neighbor's priority. Reordering is limited to queued
+jobs in the same assigned-printer queue (or the unassigned queue), preserves
+assigned jobs' positions, and is persisted transactionally. Queue positions are
+only compared within a queue scope; cross-scope ordering remains priority then
+FIFO by queued time and job ID **when comparing eligible dispatch heads**, not
+when flattening queue scope groups for display.
+
+### Refetch the authoritative queue order
+
+`GET /api/job-queue-analytics?sortBy=priority` (the default), with no status filter
+or `filterStatus=Queued`, returns a **flat array of scope groups**: unassigned
+(`job.assignedPrinterId = null`, "Any printer") first, then assigned-printer
+groups by printer ID. Inside each group the queued rows follow
+`Priority desc → QueuePosition asc → QueuedAt asc → Id asc`.
+Scope grouping and ordering happen **before** `offset`/`limit` pagination.
+A group can span pages; append pages in response order, using `X-Has-More`
+to continue even when authorization filtering yields a short page.
+
+Web and iOS queue clients must preserve the server order, group by
+`job.assignedPrinterId`, filter queued rows within those groups, and limit drag
+to a single group. Refetch this same endpoint after a successful move or a
+409/412. Do not sort by creation time or compare positions across scopes.
+`GET /api/job-queue-analytics/printer/{printerId}` remains the authoritative
+single-printer view, returning a flat array of `QueuedPrintJobDto` (no `job`
+wrapper). It includes exactly these active bands, sharing the requested limit:
+
+- Printer-occupying `Starting`, `Printing`, `Paused` rows first, ordered by
+  `Priority desc → QueuedAt asc → Id asc`.
+- `Assigned` committed-handoff rows next, with the same priority/time/ID order.
+- `Queued` rows last, in scope-local priority/position/time/ID order.
+
+Terminal rows are excluded. This explicitly clarifies PLAN.md's former
+Printing/Queued-only wording to preserve queued **and in-progress** visibility.
+Only Queued rows are reorderable or candidates for a new dispatch; the active
+bands are read-only visibility, not additional dispatch candidates.
+Read `name` as the display filename, `queuedAtUtc` as queue time,
+`queuePosition` as the scope-local position, and Base64 `rowVersion` as the
+job ETag. Clients retain all active rows and filter Queued for next-job/drag
+without locally sorting the array.
+
+The general repository priority/FIFO order is retained for job reporting and
+cross-scope eligible-head comparison. Terminal-status and deadline-sorted
+analytics are reporting views, not reorderable queue order. The first eligible
+queued row of each scope, rather than the first group displayed, competes for
+dispatch using `Priority desc → QueuedAt asc → Id asc`.
+
+Responses: `200` with the moved job; `428` when `If-Match` is missing; `412`
+when either ETag is stale or a concurrent row-version update occurs (the body
+includes the current moved-job and neighbor ETags); `409` when either job is no
+longer queued, the neighbor is the moved job or is outside the moved job's
+queue scope, or the neighbor no longer exists; `404` when the moved job is
+missing; and `400` for malformed neighbor fields or invalid ETags.
+
 ## Auto-Dispatch API
 
 The auto-dispatch system scores all available printers against job requirements using a 9-factor algorithm (4 hard filters + 5 soft scoring factors). This enables intelligent printer selection and automated job assignment.

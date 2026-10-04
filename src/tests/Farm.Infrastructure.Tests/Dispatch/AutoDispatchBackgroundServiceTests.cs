@@ -336,6 +336,94 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
     [Fact]
     [Trait("Category", "Dispatch")]
     [Trait("Phase", "2")]
+    public async Task OnPrinterIdle_MixedScopes_SkipsIneligibleScopeHeadAndIgnoresOtherScopePositions()
+    {
+        SeedSettings(enabled: true, mode: AutoDispatchMode.Auto, idleThresholdSeconds: 0, minimumScoreThreshold: 50.0);
+        (Printer printer, Guid printerId) = SeedPrinter();
+        PrintJob ineligibleAssignedHead = SeedJob(
+            "ineligible-assigned-head",
+            PrintJobStatus.Queued,
+            printerId,
+            priority: 0,
+            queuePosition: 1);
+        PrintJob eligibleAssignedJob = SeedJob(
+            "eligible-assigned-job",
+            PrintJobStatus.Queued,
+            printerId,
+            priority: 0,
+            queuePosition: 10);
+        PrintJob unassignedJob = SeedQueuedJob("unassigned-job", priority: 0, queuePosition: 1);
+        DateTime queuedAt = DateTime.UtcNow;
+        ineligibleAssignedHead.QueuedAt = queuedAt.AddMinutes(-1);
+        eligibleAssignedJob.QueuedAt = queuedAt;
+        unassignedJob.QueuedAt = queuedAt.AddMinutes(1);
+        _db.SaveChanges();
+
+        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(30));
+        AutoDispatchBackgroundService service = CreateService();
+        DispatchScore eliminated = new(
+            printerId, printer.Name, 0,
+            new Dictionary<string, FactorScore>(),
+            Eliminated: true,
+            EliminationReasons: ["Not compatible"]);
+        DispatchScore eligible = new(
+            printerId, printer.Name, 90,
+            new Dictionary<string, FactorScore>(),
+            Eliminated: false,
+            EliminationReasons: []);
+
+        _scorerMock
+            .Setup(scorer => scorer.ScorePrinterForJobAsync(
+                ineligibleAssignedHead.Id,
+                printerId,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(eliminated);
+        _scorerMock
+            .Setup(scorer => scorer.ScorePrinterForJobAsync(
+                eligibleAssignedJob.Id,
+                printerId,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(eligible);
+        _scorerMock
+            .Setup(scorer => scorer.ScorePrinterForJobAsync(
+                unassignedJob.Id,
+                printerId,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(eligible);
+        _dispatchServiceMock
+            .Setup(dispatch => dispatch.DispatchJobAsync(
+                eligibleAssignedJob.Id,
+                printerId,
+                "system:auto-dispatch",
+                It.IsAny<DispatchScore>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Farm.Infrastructure.Dtos.PrintQueue.QueuedPrintJobDto
+            {
+                DispatchResult = new Farm.Infrastructure.Dtos.PrintQueue.DispatchAttemptResultDto
+                {
+                    Outcome = DispatchAttemptOutcome.Accepted,
+                },
+            });
+
+        await service.ProcessPrinterIdleAsync(printerId, skipIdleThreshold: true, cts.Token);
+
+        _dispatchServiceMock.Verify(dispatch => dispatch.DispatchJobAsync(
+            eligibleAssignedJob.Id,
+            printerId,
+            "system:auto-dispatch",
+            It.IsAny<DispatchScore>(),
+            It.IsAny<CancellationToken>()), Times.Once);
+        _dispatchServiceMock.Verify(dispatch => dispatch.DispatchJobAsync(
+            unassignedJob.Id,
+            It.IsAny<Guid>(),
+            It.IsAny<string>(),
+            It.IsAny<DispatchScore>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    [Trait("Category", "Dispatch")]
+    [Trait("Phase", "2")]
     public async Task ExecuteAsync_FencePauseRequested_SkipsStartingWorkerAndAcknowledgesPause()
     {
         // Kane/panel audit (issue #2663, "physical admission barrier is not real"): while a

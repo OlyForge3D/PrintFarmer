@@ -21,6 +21,7 @@ final class PrinterListViewModel {
         case printing = "Printing"
         case offline = "Offline"
         case error = "Error"
+        case needsAttention = "Needs attention"
 
         var id: String { rawValue }
     }
@@ -501,6 +502,8 @@ final class PrinterListViewModel {
         case .printing: return printer.state?.lowercased() == "printing"
         case .offline: return !printer.isOnline
         case .error: return printer.state?.lowercased() == "error"
+        case .needsAttention:
+            return isPendingReady(printer) || ["error", "paused"].contains(printer.state?.lowercased() ?? "")
         }
     }
 

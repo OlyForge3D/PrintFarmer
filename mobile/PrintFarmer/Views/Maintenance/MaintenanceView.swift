@@ -91,9 +91,7 @@ struct MaintenanceView: View {
                     alertsSection
                 }
                 
-                analyticsLink
                 
-                uptimeLink
                 
                 if viewModel.activeAlerts.isEmpty {
                     EmptyStateView(
@@ -144,9 +142,7 @@ struct MaintenanceView: View {
                     upcomingSection
                 }
 
-                analyticsLink
 
-                uptimeLink
 
                 if viewModel.activeAlerts.isEmpty && viewModel.sortedUpcomingTasks.isEmpty {
                     EmptyStateView(
@@ -243,44 +239,4 @@ struct MaintenanceView: View {
 
     // MARK: - Navigation Links
 
-    private var analyticsLink: some View {
-        NavigationLink(value: AppDestination.maintenanceAnalytics) {
-            HStack {
-                Label("Analytics", systemImage: "chart.bar")
-                    .font(.headline)
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-            }
-            .padding()
-            .background(Color.pfCard, in: RoundedRectangle(cornerRadius: 12))
-            .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .strokeBorder(Color.pfBorder, lineWidth: 1)
-            )
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("maintenance.analytics.link")
-    }
-
-    private var uptimeLink: some View {
-        NavigationLink(value: AppDestination.uptimeReliability) {
-            HStack {
-                Label("Uptime & Reliability", systemImage: "gauge.with.dots.needle.33percent")
-                    .font(.headline)
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-            }
-            .padding()
-            .background(Color.pfCard, in: RoundedRectangle(cornerRadius: 12))
-            .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .strokeBorder(Color.pfBorder, lineWidth: 1)
-            )
-        }
-        .buttonStyle(.plain)
-    }
 }

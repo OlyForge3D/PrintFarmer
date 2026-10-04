@@ -14,6 +14,7 @@ import type {
 import { QueueJobsTable } from "../QueueJobsTable";
 import { QueuedPrintJobWithFileMetaDto } from "@/services/printQueueService";
 import { PrintJobPriority } from "@/types/api";
+import { getQueueMoveNeighbors } from "@/features/queue/utils/queueReordering";
 import "@testing-library/jest-dom";
 
 interface MockFleetCoverageResult {
@@ -744,6 +745,51 @@ describe("QueueJobsTable Component", () => {
     const cancelButton = screen.getAllByText("Cancel")[0];
     fireEvent.keyDown(cancelButton, { key: "Enter" });
     expect(onEdit).not.toHaveBeenCalled();
+  });
+
+  it("exposes accessible reorder buttons and accepts a same-scope pointer drop", () => {
+    const firstBase = createMockJob();
+    const first = createMockJob({
+      job: { ...firstBase.job, rowVersion: "etag-job-1" },
+      gcodeFile: { ...firstBase.gcodeFile!, name: "first.gcode" },
+    });
+    const second = createMockJob({
+      job: { ...first.job, id: "job-2", name: "second", rowVersion: "etag-job-2" },
+      gcodeFile: { ...first.gcodeFile!, id: "file-2", name: "second.gcode", fileName: "second.gcode" },
+    });
+    const jobs = [first, second];
+    const onMoveJob = vi.fn();
+    const onDragStartJob = vi.fn();
+    const dataTransfer = {
+      effectAllowed: "",
+      dropEffect: "",
+      setData: vi.fn(),
+      getData: vi.fn().mockReturnValue("job-2"),
+    } as unknown as DataTransfer;
+    const { container } = render(
+      <QueueJobsTable
+        jobs={jobs}
+        canReorder
+        draggedJobId="job-2"
+        reorderNeighbors={getQueueMoveNeighbors(jobs)}
+        onMoveJob={onMoveJob}
+        onDragStartJob={onDragStartJob}
+        canDropOnJob={(movedId, neighborId) => movedId !== neighborId}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Move second.gcode up" })).toBeEnabled();
+    const source = container.querySelector('[data-job-id="job-2"]');
+    const target = container.querySelector('[data-job-id="job-1"]');
+    expect(source).not.toBeNull();
+    expect(target).not.toBeNull();
+    vi.spyOn(target!, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 100, 100));
+
+    fireEvent.dragStart(source!, { dataTransfer });
+    fireEvent.drop(target!, { dataTransfer, clientY: 5 });
+
+    expect(onDragStartJob).toHaveBeenCalledWith("job-2");
+    expect(onMoveJob).toHaveBeenCalledWith("job-2", "job-1", "after");
   });
 });
 

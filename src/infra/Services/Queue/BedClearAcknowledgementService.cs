@@ -238,7 +238,7 @@ public sealed class BedClearAcknowledgementService(
                 candidate.AssignedPrinterId == request.PrinterId &&
                 (candidate.Status == PrintJobStatus.Queued ||
                  candidate.Status == PrintJobStatus.Assigned))
-            .OrderByPriorityDescending()
+            .OrderWithinScope()
             .Select(candidate => (Guid?)candidate.Id)
             .FirstOrDefaultAsync(ct);
         if (queueHeadId != request.JobId)
@@ -755,13 +755,12 @@ public sealed class BedClearAcknowledgementService(
 
         Guid acknowledgedJobId = dispatchState.AcknowledgedJobId.Value;
 
-        // Verify the acknowledged job is still the front-of-queue for this printer,
-        // using the SINGLE shared ordering selector (Urgent first).
+        // Verify the acknowledged job is still the front of this printer's queue.
         PrintJob? frontJob = await _db.PrintJobs
             .Where(j =>
                 j.AssignedPrinterId == printerId &&
                 (j.Status == PrintJobStatus.Queued || j.Status == PrintJobStatus.Assigned))
-            .OrderByPriorityDescending()
+            .OrderWithinScope()
             .FirstOrDefaultAsync(ct);
 
         long? printerRevision = await _db.Printers
@@ -986,7 +985,7 @@ public sealed class BedClearAcknowledgementService(
                     candidate.AssignedPrinterId == command.PrinterId &&
                     (candidate.Status == PrintJobStatus.Queued ||
                      candidate.Status == PrintJobStatus.Assigned))
-                .OrderByPriorityDescending()
+                .OrderWithinScope()
                 .Select(candidate => (Guid?)candidate.Id)
                 .FirstOrDefaultAsync(ct);
             long? currentPrinterRevision = await _db.Printers

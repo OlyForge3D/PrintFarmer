@@ -3,6 +3,7 @@ using System.Security.Claims;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Dtos.PrintQueue;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Services.Printers;
@@ -11,6 +12,7 @@ using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Telemetry;
 using Farm.Modules.PrintQueue.Controllers;
+using Farm.Modules.PrintQueue.Controllers.Requests;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -533,6 +535,195 @@ public class JobQueueControllerTests
             Status = QueueOutboxEventStatus.Pending,
             CreatedAtUtc = DateTime.UtcNow,
         };
+
+    [Fact]
+    public async Task MoveQueuedJob_WithValidRequest_ReturnsMovedJobAsync()
+    {
+        Guid jobId = Guid.NewGuid();
+        Guid neighborId = Guid.NewGuid();
+        string movedETag = Convert.ToBase64String([1, 2, 3]);
+        string neighborETag = Convert.ToBase64String([4, 5, 6]);
+        var request = new MoveQueuedJobRequest
+        {
+            BeforeJobId = neighborId,
+            BeforeJobETag = neighborETag,
+        };
+        var movedJob = new QueuedPrintJobDto { Id = jobId.ToString() };
+        _controller.Request.Headers.IfMatch = $"\"{movedETag}\"";
+        _printJobManagementServiceMock
+            .Setup(service => service.MoveQueuedJobAsync(
+                jobId,
+                neighborId,
+                null,
+                movedETag,
+                neighborETag,
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(movedJob);
+
+        ActionResult<QueuedPrintJobDto> result = await _controller.MoveQueuedJobAsync(jobId, request);
+
+        OkObjectResult ok = Assert.IsType<OkObjectResult>(result.Result);
+        Assert.Same(movedJob, ok.Value);
+    }
+
+    [Theory]
+    [InlineData(false, false, false, false)]
+    [InlineData(true, true, true, true)]
+    [InlineData(true, false, false, false)]
+    [InlineData(false, false, true, false)]
+    [InlineData(true, false, false, true)]
+    [InlineData(false, true, true, false)]
+    public async Task MoveQueuedJob_WithInvalidNeighborFields_ReturnsBadRequestAsync(
+        bool setBefore,
+        bool setBeforeETag,
+        bool setAfter,
+        bool setAfterETag)
+    {
+        var request = new MoveQueuedJobRequest
+        {
+            BeforeJobId = setBefore ? Guid.NewGuid() : null,
+            BeforeJobETag = setBeforeETag ? Convert.ToBase64String([1, 2, 3]) : null,
+            AfterJobId = setAfter ? Guid.NewGuid() : null,
+            AfterJobETag = setAfterETag ? Convert.ToBase64String([4, 5, 6]) : null,
+        };
+
+        ActionResult<QueuedPrintJobDto> result =
+            await _controller.MoveQueuedJobAsync(Guid.NewGuid(), request);
+
+        Assert.IsType<BadRequestObjectResult>(result.Result);
+        _printJobManagementServiceMock.Verify(
+            service => service.MoveQueuedJobAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<Guid?>(),
+                It.IsAny<Guid?>(),
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task MoveQueuedJob_WhenMovedJobIsMissing_ReturnsNotFoundAsync()
+    {
+        Guid jobId = Guid.NewGuid();
+        Guid neighborId = Guid.NewGuid();
+        _controller.Request.Headers.IfMatch = $"\"{Convert.ToBase64String([1, 2, 3])}\"";
+        _printJobManagementServiceMock
+            .Setup(service => service.MoveQueuedJobAsync(
+                jobId,
+                neighborId,
+                null,
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new KeyNotFoundException("Moved job not found."));
+
+        ActionResult<QueuedPrintJobDto> result = await _controller.MoveQueuedJobAsync(
+            jobId,
+            new MoveQueuedJobRequest
+            {
+                BeforeJobId = neighborId,
+                BeforeJobETag = Convert.ToBase64String([4, 5, 6]),
+            });
+
+        Assert.IsType<NotFoundObjectResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task MoveQueuedJob_WhenNeighborNoLongerExists_ReturnsConflictAsync()
+    {
+        Guid jobId = Guid.NewGuid();
+        Guid neighborId = Guid.NewGuid();
+        _controller.Request.Headers.IfMatch = $"\"{Convert.ToBase64String([1, 2, 3])}\"";
+        _printJobManagementServiceMock
+            .Setup(service => service.MoveQueuedJobAsync(
+                jobId,
+                neighborId,
+                null,
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new QueueSemanticConflictException("The neighbour no longer exists."));
+
+        ActionResult<QueuedPrintJobDto> result = await _controller.MoveQueuedJobAsync(
+            jobId,
+            new MoveQueuedJobRequest
+            {
+                BeforeJobId = neighborId,
+                BeforeJobETag = Convert.ToBase64String([4, 5, 6]),
+            });
+
+        Assert.IsType<ConflictObjectResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task MoveQueuedJob_WhenETagIsStale_ReturnsPreconditionFailedWithCurrentETagsAsync()
+    {
+        Guid jobId = Guid.NewGuid();
+        Guid neighborId = Guid.NewGuid();
+        string currentJobETag = Convert.ToBase64String([7, 8, 9]);
+        string currentNeighborETag = Convert.ToBase64String([10, 11, 12]);
+        _controller.Request.Headers.IfMatch = $"\"{Convert.ToBase64String([1, 2, 3])}\"";
+        _printJobManagementServiceMock
+            .Setup(service => service.MoveQueuedJobAsync(
+                jobId,
+                neighborId,
+                null,
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new QueueRevisionConflictException(
+                "The ETag is stale.",
+                Convert.FromBase64String(currentJobETag),
+                null,
+                Convert.FromBase64String(currentNeighborETag)));
+
+        ActionResult<QueuedPrintJobDto> result = await _controller.MoveQueuedJobAsync(
+            jobId,
+            new MoveQueuedJobRequest
+            {
+                BeforeJobId = neighborId,
+                BeforeJobETag = Convert.ToBase64String([4, 5, 6]),
+            });
+
+        ObjectResult preconditionFailed = Assert.IsType<ObjectResult>(result.Result);
+        Assert.Equal(StatusCodes.Status412PreconditionFailed, preconditionFailed.StatusCode);
+        Assert.Equal(currentJobETag, preconditionFailed.Value!.GetType().GetProperty("jobETag")!.GetValue(preconditionFailed.Value));
+        Assert.Equal(currentNeighborETag, preconditionFailed.Value.GetType().GetProperty("neighborETag")!.GetValue(preconditionFailed.Value));
+    }
+
+    [Fact]
+    public async Task MoveQueuedJob_WhenIfMatchIsMissing_Returns428Async()
+    {
+        Guid jobId = Guid.NewGuid();
+        Guid neighborId = Guid.NewGuid();
+        _printJobManagementServiceMock
+            .Setup(service => service.MoveQueuedJobAsync(
+                jobId,
+                neighborId,
+                null,
+                string.Empty,
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new QueuePreconditionRequiredException("If-Match is required."));
+
+        ActionResult<QueuedPrintJobDto> result = await _controller.MoveQueuedJobAsync(
+            jobId,
+            new MoveQueuedJobRequest
+            {
+                BeforeJobId = neighborId,
+                BeforeJobETag = Convert.ToBase64String([4, 5, 6]),
+            });
+
+        ObjectResult preconditionRequired = Assert.IsType<ObjectResult>(result.Result);
+        Assert.Equal(StatusCodes.Status428PreconditionRequired, preconditionRequired.StatusCode);
+    }
 
     [Fact]
     public async Task QueueJobAsync_WithNullRequest_ReturnsBadRequest()
