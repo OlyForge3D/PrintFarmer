@@ -198,6 +198,7 @@ jobs:
       want_dotnet_build: ${{ steps.selector.outputs.want_dotnet_build }}
       want_dotnet_test: ${{ steps.selector.outputs.want_dotnet_test }}
       want_mig_drift: ${{ steps.selector.outputs.want_mig_drift }}
+      want_dependency_compliance: ${{ steps.selector.outputs.want_dependency_compliance }}
       full_matrix: ${{ steps.selector.outputs.full_matrix }}
       matrix: ${{ steps.selector.outputs.matrix }}
       mig_matrix: ${{ steps.selector.outputs.mig_matrix }}
@@ -245,6 +246,7 @@ jobs:
           WANT_DOTNET_BUILD: ${{ steps.selector.outputs.want_dotnet_build }}
           WANT_DOTNET_TEST: ${{ steps.selector.outputs.want_dotnet_test }}
           WANT_MIG_DRIFT: ${{ steps.selector.outputs.want_mig_drift }}
+          WANT_DEPENDENCY_COMPLIANCE: ${{ steps.selector.outputs.want_dependency_compliance }}
           FULL_MATRIX: ${{ steps.selector.outputs.full_matrix }}
         run: |
           # Every `printf` whose format string begins with `-` uses the POSIX
@@ -258,6 +260,7 @@ jobs:
             printf -- '- want_dotnet_build: `%s`\n' "$WANT_DOTNET_BUILD"
             printf -- '- want_dotnet_test: `%s`\n' "$WANT_DOTNET_TEST"
             printf -- '- want_mig_drift: `%s`\n' "$WANT_MIG_DRIFT"
+            printf -- '- want_dependency_compliance: `%s`\n' "$WANT_DEPENDENCY_COMPLIANCE"
             printf -- '- full_matrix: `%s`\n' "$FULL_MATRIX"
             echo ""
             echo "### test matrix"
@@ -272,7 +275,11 @@ jobs:
   # summary because the selector's own correctness gates every scoped run.
   # Deliberately kept free of any .NET restore (see `dependency-compliance`
   # below, #1395) so this job stays fast and cheap on every PR, including
-  # mobile-only/docs-only changes.
+  # mobile-only/docs-only changes. It does run the restore-free part of
+  # validate-compliance.mjs (`--skip-nuget`, #3150) on every PR, because the
+  # licensing policy reads repository paths (LICENSE, notices, docs,
+  # Dockerfiles, release workflows, package manifests) that no selector
+  # bucket tracks.
   # ---------------------------------------------------------------------------
   ci-tools:
     name: CI tooling tests
@@ -390,31 +397,33 @@ jobs:
       - name: Test squad triage routing
         run: node --test scripts/ci/tests/test-squad-routing.mjs
 
+      # Everything except the NuGet inventory, which needs a restore and runs
+      # in dependency-compliance. Unconditional so path-list drift in the
+      # selector can never skip licensing/npm validation (#3150).
+      - name: Validate compliance (restore-free)
+        run: node scripts/compliance/validate-compliance.mjs --skip-nuget
+
   # ---------------------------------------------------------------------------
   # dependency-compliance — full dependency-license/provenance validation.
   # Requires restored NuGet assets (project.assets.json under src/**/obj/);
-  # without a restore the validator emits NUGET_ASSETS_MISSING. Gated behind
-  # the SAME `want_dotnet_build` decision the `dotnet-build`/`dotnet-test`
-  # jobs use (see #1395): the dependency graph cannot have changed unless a
-  # bucket that feeds `want_dotnet_build` changed, so a mobile-only or
-  # docs-only PR provably has nothing new to validate. Coverage does not
-  # regress — `want_dotnet_build` is forced `true` (full-safe) on every
-  # trusted push to `main`/`development` or `release/**` (see
-  # select-dotnet-tests.sh `emit_full_safe "full-safe: trusted push to $base"`), on
-  # `workflow_dispatch`, and on any change to `Directory.Packages.props`,
-  # `NuGet.Config`, or any `*.sln` (the `shared_config` bucket). Any edit to
-  # an EXISTING `.csproj` that `farm-web.sln` actually references also lives
-  # under a `src/**` bucket (api/infra/backends/slicer/tools/etc.) that
-  # already sets `want_dotnet_build=true` on its own — the restore this job
-  # runs only ever covers `farm-web.sln`'s project graph, so a project file
-  # outside that graph was never covered by validation before this change
-  # either (adding one to the solution requires editing `farm-web.sln`
-  # itself, which is `shared_config` and always triggers full-safe).
+  # without a restore the validator emits NUGET_ASSETS_MISSING. Everything
+  # except the NuGet inventory also runs unconditionally in ci-tools
+  # (`--skip-nuget`), so this job exists for the NuGet graph and for policy
+  # changes that affect NuGet validation. Gated on the
+  # selector's `want_dependency_compliance` output, which is a strict
+  # superset of `want_dotnet_build` (see #1395, #3150):
+  #   - NuGet graph: can only change through a bucket that already sets
+  #     `want_dotnet_build` (every `src/**` .NET bucket, plus the
+  #     `shared_config` full-safe bucket for `Directory.Packages.props`,
+  #     `NuGet.Config`, or any `*.sln`).
+  #   - npm/compliance graph: can change through package manifests, npm
+  #     lockfiles, notices, or compliance policy/tooling paths that do not
+  #     require a .NET build.
   # ---------------------------------------------------------------------------
   dependency-compliance:
     name: Dependency license & provenance validation
     needs: [select, ci-tools]
-    if: ${{ needs.select.outputs.want_dotnet_build == 'true' }}
+    if: ${{ needs.select.outputs.want_dependency_compliance == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -1398,6 +1407,7 @@ jobs:
           WANT_DOTNET_BUILD: ${{ needs.select.outputs.want_dotnet_build }}
           WANT_DOTNET_TEST: ${{ needs.select.outputs.want_dotnet_test }}
           WANT_MIG_DRIFT: ${{ needs.select.outputs.want_mig_drift }}
+          WANT_DEPENDENCY_COMPLIANCE: ${{ needs.select.outputs.want_dependency_compliance }}
           SELECTOR_REASON: ${{ needs.select.outputs.reason }}
         run: |
           # Every leading-dash format string is passed after the POSIX `--`
@@ -1409,7 +1419,7 @@ jobs:
             printf -- '- reason: `%s`\n' "$SELECTOR_REASON"
             printf -- '- select: `%s`\n' "$SELECT_RESULT"
             printf -- '- ci-tools: `%s`\n' "$CI_TOOLS_RESULT"
-            printf -- '- dependency-compliance: `%s` (wanted=`%s`)\n' "$DEPENDENCY_COMPLIANCE_RESULT" "$WANT_DOTNET_BUILD"
+            printf -- '- dependency-compliance: `%s` (wanted=`%s`)\n' "$DEPENDENCY_COMPLIANCE_RESULT" "$WANT_DEPENDENCY_COMPLIANCE"
             printf -- '- dotnet-format: `%s` (wanted=`%s`)\n' "$DOTNET_FORMAT_RESULT" "$WANT_DOTNET_BUILD"
             printf -- '- frontend: `%s` (wanted=`%s`)\n' "$FRONTEND_RESULT" "$WANT_FRONTEND"
             printf -- '- dotnet-build: `%s` (wanted=`%s`)\n' "$DOTNET_BUILD_RESULT" "$WANT_DOTNET_BUILD"
@@ -1433,6 +1443,7 @@ jobs:
           WANT_DOTNET_BUILD: ${{ needs.select.outputs.want_dotnet_build }}
           WANT_DOTNET_TEST: ${{ needs.select.outputs.want_dotnet_test }}
           WANT_MIG_DRIFT: ${{ needs.select.outputs.want_mig_drift }}
+          WANT_DEPENDENCY_COMPLIANCE: ${{ needs.select.outputs.want_dependency_compliance }}
         run: |
           set -euo pipefail
           fail=0
@@ -1460,7 +1471,7 @@ jobs:
               fi
             fi
           }
-          check_conditional dependency-compliance "$DEPENDENCY_COMPLIANCE_RESULT" "$WANT_DOTNET_BUILD"
+          check_conditional dependency-compliance "$DEPENDENCY_COMPLIANCE_RESULT" "$WANT_DEPENDENCY_COMPLIANCE"
           check_conditional dotnet-format "$DOTNET_FORMAT_RESULT" "$WANT_DOTNET_BUILD"
           check_conditional frontend "$FRONTEND_RESULT" "$WANT_FRONTEND"
           check_conditional dotnet-build "$DOTNET_BUILD_RESULT" "$WANT_DOTNET_BUILD"

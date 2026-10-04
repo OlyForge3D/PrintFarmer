@@ -2336,6 +2336,7 @@ case_policy_npm_lockfiles_trigger_dependency_compliance() {
     return 1
   fi
   while IFS= read -r lock; do
+    lock="${lock%$'\r'}"
     manifest="${lock%package-lock.json}package.json"
     for p in "$lock" "$manifest"; do
       : > "$out"
