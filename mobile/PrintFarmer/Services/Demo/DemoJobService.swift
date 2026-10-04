@@ -2,7 +2,7 @@ import Foundation
 
 // MARK: - Demo Job Service
 
-final class DemoJobService: JobServiceProtocol, @unchecked Sendable {
+class DemoJobService: JobServiceProtocol, @unchecked Sendable {
 
     private static let jobs: [PrintJob] = {
         let now = Date()

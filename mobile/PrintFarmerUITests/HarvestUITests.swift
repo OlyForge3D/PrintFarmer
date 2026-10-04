@@ -42,6 +42,127 @@ final class HarvestUITests: QueueUITestBase {
                       "The promoted identity must navigate to the actual Queue destination")
     }
 
+    func testQueueReorderDragUpdatesTheRenderedQueueWithinOneGroup() throws {
+        launchQueueReorderScenario()
+        openQueueDestination()
+
+        let alpha = app.buttons["job.row.32340000-0000-0000-0000-000000000003"]
+        let beta = app.buttons["job.row.32340000-0000-0000-0000-000000000004"]
+        let gamma = app.buttons["job.row.32340000-0000-0000-0000-000000000007"]
+        for row in [alpha, beta, gamma] {
+            XCTAssertTrue(row.waitForExistence(timeout: 8))
+        }
+        XCTAssertTrue(app.buttons["job.row.32340000-0000-0000-0000-000000000002"].exists,
+                      "Assigned work remains visible outside the reorder group.")
+
+        let alphaHandle = app.buttons["Reorder Queue reorder alpha.gcode"]
+        let gammaHandle = app.buttons["Reorder Queue reorder gamma.gcode"]
+        XCTAssertTrue(alphaHandle.waitForExistence(timeout: 5),
+                      "Eligible queued rows should expose the native reorder handle.")
+        XCTAssertTrue(gammaHandle.exists)
+        let originalAlphaY = alpha.frame.minY
+        let source = alphaHandle.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        let destination = gamma.coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5))
+        source.press(
+            forDuration: 1,
+            thenDragTo: destination,
+            withVelocity: .slow,
+            thenHoldForDuration: 0.5
+        )
+
+        let reordered = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in
+                beta.frame.minY < alpha.frame.minY && alpha.frame.minY > originalAlphaY + 10
+            },
+            object: nil
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [reordered], timeout: 5), .completed,
+                       "Dragging alpha down within its group should move it below beta.")
+
+        if app.frame.width > 600 {
+            let priorityBoundary = app.buttons["job.row.32340000-0000-0000-0000-000000000005"]
+            let printerBoundary = app.buttons["job.row.32340000-0000-0000-0000-000000000006"]
+            XCTAssertTrue(priorityBoundary.waitForExistence(timeout: 5))
+            XCTAssertTrue(printerBoundary.waitForExistence(timeout: 5))
+            XCTAssertTrue(priorityBoundary.isHittable)
+            XCTAssertTrue(printerBoundary.isHittable)
+
+            let currentGroupOrder = {
+                [alpha, beta, gamma]
+                    .sorted { $0.frame.minY < $1.frame.minY }
+                    .map(\.identifier)
+            }
+            let reorderedGroup = currentGroupOrder()
+            let alphaReorderHandle = app.buttons["Reorder Queue reorder alpha.gcode"]
+            let alphaCoordinate = alphaReorderHandle.coordinate(
+                withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)
+            )
+            alphaCoordinate.press(
+                forDuration: 1,
+                thenDragTo: priorityBoundary.coordinate(
+                    withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)
+                ),
+                withVelocity: .slow,
+                thenHoldForDuration: 0.5
+            )
+            XCTAssertEqual(currentGroupOrder(), reorderedGroup,
+                           "Dragging to another priority group must not reorder this group.")
+
+            alphaReorderHandle.coordinate(
+                withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)
+            ).press(
+                forDuration: 1,
+                thenDragTo: printerBoundary.coordinate(
+                    withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)
+                ),
+                withVelocity: .slow,
+                thenHoldForDuration: 0.5
+            )
+            XCTAssertEqual(currentGroupOrder(), reorderedGroup,
+                           "Dragging to another printer group must not reorder this group.")
+        }
+    }
+
+    func testQueueAccessibilityReorderControlsRespectEligibility() {
+        launchQueueReorderScenario()
+        openQueueDestination()
+
+        let alphaHandle = app.buttons["Reorder Queue reorder alpha.gcode"]
+        let betaHandle = app.buttons["Reorder Queue reorder beta.gcode"]
+        XCTAssertTrue(alphaHandle.waitForExistence(timeout: 8))
+        XCTAssertTrue(betaHandle.exists)
+        XCTAssertFalse(app.buttons["Reorder Queue pinned assigned.gcode"].exists,
+                       "Assigned jobs must not expose native reorder controls.")
+
+        let priorityBoundaryHandle = app.buttons["Reorder Queue priority boundary.gcode"]
+        let printerBoundaryHandle = app.buttons["Reorder Queue printer boundary.gcode"]
+        for _ in 0..<3 where !priorityBoundaryHandle.exists || !printerBoundaryHandle.exists {
+            app.descendants(matching: .any)["jobList.root"].swipeUp()
+        }
+        XCTAssertTrue(app.buttons["job.row.32340000-0000-0000-0000-000000000005"].exists)
+        XCTAssertTrue(app.buttons["job.row.32340000-0000-0000-0000-000000000006"].exists)
+        XCTAssertFalse(priorityBoundaryHandle.exists,
+                       "A single-row priority group must not expose a reorder handle.")
+        XCTAssertFalse(printerBoundaryHandle.exists,
+                       "A single-row printer group must not expose a reorder handle.")
+
+        if app.buttons["jobList.page.printing"].exists {
+            app.buttons["jobList.page.printing"].tap()
+        }
+        let printing = app.buttons.matching(
+            NSPredicate(format: "label CONTAINS %@", "Queue pinned printing.gcode")
+        ).firstMatch
+        XCTAssertTrue(printing.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["Reorder Queue pinned printing.gcode"].exists,
+                       "Printing jobs must not expose native reorder controls.")
+    }
+
+    private func launchQueueReorderScenario() {
+        app.terminate()
+        app.launchArguments.append("--uitesting-queue-reorder")
+        app.launchForPrintFarmerUITest()
+    }
+
     /// Navigates the operator shell to the seeded completed demo job's
     /// detail view, device-adaptively:
     /// Queue → Recent → the seeded completed job. Queue opens `JobListView`
