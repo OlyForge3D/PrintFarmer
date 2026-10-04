@@ -108,6 +108,28 @@ final class PrinterCardSnapshotTests: XCTestCase {
         XCTAssertNil(model.request)
     }
 
+    func testAuthenticatedThumbnailIsDecodedAndDownsampledForCurrentRevision() async throws {
+        let service = MockPrinterService()
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 600, height: 600)).image { context in
+            UIColor.green.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 600, height: 600))
+        }
+        let data = try XCTUnwrap(image.pngData())
+        service.thumbnailHandler = { _, path in
+            XCTAssertEqual(path, "/current-version")
+            return data
+        }
+        let model = PrinterCardMediaModel()
+        let request = PrinterCardRequestID(
+            printerID: TestData.testUUID, path: "/current-version",
+            jobName: "benchy", state: "printing", serviceID: ObjectIdentifier(service)
+        )
+        await model.load(request: request, service: service)
+        XCTAssertEqual(model.request, request)
+        XCTAssertEqual(model.image?.size.width, 180)
+        XCTAssertEqual(model.image?.size.height, 180)
+    }
+
     func testThumbnailMissingInvalidAndTransportFailureLeaveNeutralPlaceholder() async throws {
         for error in [NetworkError.notFound, NetworkError.staleServerResponse] {
             let service = MockPrinterService()

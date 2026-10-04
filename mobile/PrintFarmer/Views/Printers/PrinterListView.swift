@@ -227,6 +227,7 @@ struct PrinterListView: View {
                                 )
                             }
                             .buttonStyle(.plain)
+                            .accessibilityElement(children: .combine)
                             .accessibilityHint("Opens \(printer.name) printer details.")
                             .accessibilityIdentifier(
                                 printerAccessibilityIdentifier(for: printer)

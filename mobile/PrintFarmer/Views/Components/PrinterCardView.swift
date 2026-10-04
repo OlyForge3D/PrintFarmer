@@ -101,6 +101,11 @@ struct PrinterCardView: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(presentation.accessibilityLabel)
+        .accessibilityRepresentation {
+            Color.clear
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(presentation.accessibilityLabel)
+        }
         .accessibilityHint(isReadOnly
             ? "Read-only cached status. Reconnect to control this printer."
             : "Opens \(printer.name) printer details.")

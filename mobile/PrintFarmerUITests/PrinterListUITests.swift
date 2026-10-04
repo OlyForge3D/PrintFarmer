@@ -1,5 +1,28 @@
 import XCTest
 
+@MainActor
+final class PrinterCardFailureUITests: PrintFarmerUITestCase {
+    override var waitsForNavigationReadiness: Bool { true }
+    override var additionalLaunchArguments: [String] {
+        ["--uitesting-attention-actions"]
+    }
+
+    func testFailureAndAttentionArePartOfSingleCardLabel() {
+        let farm = shellDestinationButton(tabIdentifier: "tab.farm", timeout: 8)
+        XCTAssertTrue(farm.exists)
+        farm.tap()
+        let card = app.buttons["farm-card-10000000-0001-0000-0000-000000000003"]
+        XCTAssertTrue(card.waitForExistence(timeout: 8))
+        let combined = NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@",
+                                   "Failure suspected:", "1 attention items")
+        expectation(for: combined, evaluatedWith: card)
+        waitForExpectations(timeout: 8)
+        XCTAssertTrue(card.label.contains("Failure?"))
+        XCTAssertTrue(card.label.contains("The card remains usable when camera data cannot be decoded."))
+        XCTAssertEqual(card.descendants(matching: .staticText).count, 0)
+    }
+}
+
 /// UI tests for deterministic Farm list rendering and stable-ID printer navigation.
 @MainActor
 final class PrinterListUITests: PrintFarmerUITestCase {

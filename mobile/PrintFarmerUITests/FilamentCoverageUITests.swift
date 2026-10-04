@@ -122,7 +122,7 @@ final class FilamentCoverageUITests: PrintFarmerUITestCase {
                       "Fleet card must render before absence assertions become meaningful.")
     }
 
-    // MARK: - Per-state Farm-card scoped assertions
+    // MARK: - Farm cards no longer show coverage (#3232)
 
     func testFarmCardOmitsCoversBadgeForCoversPrinter() {
         enterFarmView()
@@ -191,10 +191,8 @@ final class FilamentCoverageUITests: PrintFarmerUITestCase {
 
     // MARK: - Duplicate-display-name printers (reviewer blocker D)
 
-    /// TWO Farm cards share the display name "Prusa MK4 #1" but
-    /// have DIFFERENT stable UUIDs and DIFFERENT coverage badges
-    /// (covers vs runout-no-ETA). Each card's scoped badge query
-    /// finds ITS badge and NOT the sibling's.
+    /// Duplicate names remain distinct stable-ID navigation targets, with
+    /// coverage intentionally absent from both cards.
     func testDuplicateDisplayNamePrintersRemainDistinctWithoutCoverageBadges() {
         enterFarmView()
 
@@ -205,7 +203,7 @@ final class FilamentCoverageUITests: PrintFarmerUITestCase {
         XCTAssertTrue(duplicateCard.waitForExistence(timeout: 10),
                       "Duplicate 'Prusa MK4 #1' card must render as a distinct element (keyed by UUID, not name).")
 
-        // Original: covers.
+        // Coverage is still present in the fixture, but not on the card.
         let originalCovers = badgeInsideCard(
             cardUUID: prusaMK4_1_ID,
             identifier: "filament-coverage-badge-covers",
@@ -213,7 +211,6 @@ final class FilamentCoverageUITests: PrintFarmerUITestCase {
         )
         XCTAssertFalse(originalCovers.exists)
 
-        // Duplicate: runout without ETA.
         let duplicateRunout = badgeInsideCard(
             cardUUID: duplicateID,
             identifier: "filament-coverage-badge-runout-no-eta",
@@ -221,9 +218,7 @@ final class FilamentCoverageUITests: PrintFarmerUITestCase {
         )
         XCTAssertFalse(duplicateRunout.exists)
 
-        // Cross-check absence: original has NO runout-no-eta badge,
-        // duplicate has NO covers badge. If per-card scoping were
-        // broken these would both fire.
+        // Both cards omit every coverage state.
         let originalNoETACount = originalCard.descendants(matching: .any)
             .matching(identifier: "filament-coverage-badge-runout-no-eta").count
         let duplicateCoversCount = duplicateCard.descendants(matching: .any)
