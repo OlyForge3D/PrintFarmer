@@ -1,5 +1,24 @@
 ## XCUI timeout diagnosis (#2573)
 
+### Diagnostic-only iPad run-loop evidence (#3263)
+
+UI-test launches retain the latest 16 common-mode run-loop observer callbacks
+(uptime, activity bitmask, mode) and their total count. The watchdog writes
+`UITEST_RUN_LOOP_DIAGNOSTIC` to app stderr after 10 seconds without a timer beat
+and immediately before the existing 20-second fatal error. Observer callbacks
+never advance the heartbeat or change the watchdog decision.
+
+iPad shard 4 also samples each app process on its selected simulator for its
+first 30 seconds at 100ms intervals. The sampler never requests accessibility
+or main-thread cooperation. Its process selection excludes other simulators
+and the XCTest runner. `main-thread-samples/` is uploaded with the shard artifact,
+including sampler exit statuses. App stderr remains in the xcresult diagnostics.
+
+Compare sample timestamps/stacks and AX callback timestamps with the observer
+history before classifying a missing beat as a deadlock or continuously busy
+snapshot traversal. No watchdog correction is established by this diagnostic
+change; thresholds, skips, assertions, and test behavior remain unchanged.
+
 ### Historical evidence
 
 The retained `/tmp/gorman-2519-test.log` lines 4740-4742 recover the exact

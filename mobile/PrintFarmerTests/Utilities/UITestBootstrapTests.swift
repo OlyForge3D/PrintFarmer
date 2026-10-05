@@ -70,6 +70,19 @@ final class UITestBootstrapTests: XCTestCase {
         for second in 1..<20 {
             XCTAssertFalse(meter.tick(beat: 1, at: TimeInterval(second)))
         }
+
+        func test_runLoopDiagnosticsAreBoundedAndDoNotAdvanceHeartbeat() {
+            let beats = UITestMainThreadBeatCounter()
+            beats.increment()
+            for second in 0..<20 {
+                beats.recordRunLoopActivity(32, at: TimeInterval(second), mode: "test-mode")
+            }
+            XCTAssertEqual(beats.value, 1, "Diagnostics must not change watchdog decisions")
+            XCTAssertTrue(beats.diagnostic.contains("runLoopCallbacks=20"))
+            XCTAssertFalse(beats.diagnostic.contains("uptime=3.0,"))
+            XCTAssertTrue(beats.diagnostic.contains("uptime=4.0,"))
+            XCTAssertTrue(beats.diagnostic.contains("uptime=19.0, activity=32, mode=test-mode"))
+        }
         XCTAssertTrue(meter.tick(beat: 1, at: 20))
         XCTAssertEqual(meter.stalled, 20)
     }

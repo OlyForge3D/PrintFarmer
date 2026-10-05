@@ -375,6 +375,15 @@ jobs:
           if [[ "${{ matrix.shard }}" == "1" ]]; then
             selectors=("${selectors[@]:1}")
           fi
+          if [[ "${{ matrix.key }}" == "ipad-4" ]]; then
+            mkdir -p "build-${{ matrix.key }}/main-thread-samples"
+            python3 scripts/sample-ui-test-processes.py \
+              --device "$SIMULATOR_UDID" \
+              --output "build-${{ matrix.key }}/main-thread-samples" \
+              > "build-${{ matrix.key }}/main-thread-samples/monitor.log" 2>&1 &
+            sampler_pid=$!
+            trap 'kill -TERM "$sampler_pid"; wait "$sampler_pid"' EXIT
+          fi
           python3 scripts/run-tests.py -- test-without-building \
             -project PrintFarmer.xcodeproj \
             -scheme PrintFarmer \
@@ -405,4 +414,5 @@ jobs:
             mobile/build-${{ matrix.key }}/XCUIShard.log
             mobile/build-${{ matrix.key }}/XCUIShard.events.jsonl
             mobile/build-${{ matrix.key }}/XCUIShard.timing.json
+            mobile/build-${{ matrix.key }}/main-thread-samples/
           retention-days: 7

@@ -911,11 +911,23 @@ enum UITestMainThreadHeartbeat {
 
     private static var token: Int32 = NOTIFY_TOKEN_INVALID
     private static var timer: Timer?
+    private static var observer: CFRunLoopObserver?
     private static let beats = UITestMainThreadBeatCounter()
 
     static func start() {
         guard timer == nil,
               notify_register_check(notificationName, &token) == NOTIFY_STATUS_OK else { return }
+        let observer = CFRunLoopObserverCreateWithHandler(
+            nil, CFRunLoopActivity.allActivities.rawValue, true, 0
+        ) { _, activity in
+            beats.recordRunLoopActivity(
+                activity.rawValue,
+                at: ProcessInfo.processInfo.systemUptime,
+                mode: CFRunLoopCopyCurrentMode(CFRunLoopGetMain()).map { String(describing: $0) } ?? "none"
+            )
+        }
+        CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
+        self.observer = observer
         // Fires on the first main-run-loop turn, then every `interval`. Nothing
         // is published before a callback, so a published beat always means the
         // run loop turned and the watchdog is armed.
@@ -962,6 +974,8 @@ enum UITestMainThreadHeartbeat {
 final class UITestMainThreadBeatCounter: @unchecked Sendable {
     private let lock = NSLock()
     private var count: UInt64 = 0
+    private var activityCount: UInt64 = 0
+    private var recentActivities: [String] = []
 
     var value: UInt64 { lock.withLock { count } }
 
@@ -970,6 +984,21 @@ final class UITestMainThreadBeatCounter: @unchecked Sendable {
         lock.withLock {
             count += 1
             return count
+        }
+    }
+
+    func recordRunLoopActivity(_ activity: CFOptionFlags, at uptime: TimeInterval, mode: String) {
+        lock.withLock {
+            activityCount += 1
+            recentActivities.append("uptime=\(uptime), activity=\(activity), mode=\(mode)")
+            if recentActivities.count > 16 { recentActivities.removeFirst() }
+        }
+    }
+
+    var diagnostic: String {
+        lock.withLock {
+            "beats=\(count), runLoopCallbacks=\(activityCount), recent=["
+                + recentActivities.joined(separator: "; ") + "]"
         }
     }
 }
@@ -1013,6 +1042,7 @@ private final class UITestMainThreadWatchdog: @unchecked Sendable {
     private let queue = DispatchQueue(label: "com.olyforge3d.printfarmer.uitesting.watchdog")
     private var meter: UITestMainThreadStallMeter
     private var timer: DispatchSourceTimer?
+    private var reportedDiagnostic = false
 
     init(beats: UITestMainThreadBeatCounter, limit: TimeInterval) {
         self.beats = beats
@@ -1029,7 +1059,17 @@ private final class UITestMainThreadWatchdog: @unchecked Sendable {
     }
 
     private func check() {
-        guard meter.tick(beat: beats.value, at: ProcessInfo.processInfo.systemUptime) else { return }
+        let now = ProcessInfo.processInfo.systemUptime
+        let shouldAbort = meter.tick(beat: beats.value, at: now)
+        if meter.stalled == 0 { reportedDiagnostic = false }
+        if meter.stalled >= 10 && !reportedDiagnostic {
+            reportedDiagnostic = true
+            NSLog("UITEST_RUN_LOOP_DIAGNOSTIC pid=%d uptime=%f stalled=%f %@",
+                  ProcessInfo.processInfo.processIdentifier, now, meter.stalled, beats.diagnostic)
+        }
+        guard shouldAbort else { return }
+        NSLog("UITEST_RUN_LOOP_DIAGNOSTIC before abort pid=%d uptime=%f %@",
+              ProcessInfo.processInfo.processIdentifier, now, beats.diagnostic)
         fatalError(
             "UI-test main run loop stalled for \(Int(meter.stalled))s; "
                 + "aborting to retain the main-thread backtrace (#3013)"
