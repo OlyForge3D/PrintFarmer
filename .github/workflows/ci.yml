@@ -1405,7 +1405,8 @@ jobs:
   # ---------------------------------------------------------------------------
   recovery-matrix-fixture-migrations:
     name: Recovery-matrix fixture migrations (${{ matrix.project }})
-    needs: [ci-tools]
+    needs: [ci-tools, select]
+    if: ${{ needs.select.outputs.want_dotnet_build == 'true' }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -1560,7 +1561,7 @@ jobs:
             printf -- '- frontend: `%s` (wanted=`%s`)\n' "$FRONTEND_RESULT" "$WANT_FRONTEND"
             printf -- '- dotnet-build: `%s` (wanted=`%s`)\n' "$DOTNET_BUILD_RESULT" "$WANT_DOTNET_BUILD"
             printf -- '- migration-drift: `%s` (wanted=`%s`)\n' "$MIG_RESULT" "$WANT_MIG_DRIFT"
-            printf -- '- recovery-matrix-fixture-migrations: `%s`\n' "$FIXTURE_MIG_RESULT"
+            printf -- '- recovery-matrix-fixture-migrations: `%s` (wanted=`%s`)\n' "$FIXTURE_MIG_RESULT" "$WANT_DOTNET_BUILD"
             printf -- '- dotnet-test: `%s` (wanted=`%s`)\n' "$DOTNET_TEST_RESULT" "$WANT_DOTNET_TEST"
             printf -- '- dotnet-test-providers: `%s` (wanted=`%s`)\n' "$DOTNET_TEST_PROVIDERS_RESULT" "$WANT_DOTNET_TEST"
           } >> "$GITHUB_STEP_SUMMARY"
@@ -1595,8 +1596,6 @@ jobs:
           # Foundations always required.
           require_success select "$SELECT_RESULT"
           require_success ci-tools "$CI_TOOLS_RESULT"
-          require_success recovery-matrix-fixture-migrations "$FIXTURE_MIG_RESULT"
-
           # Conditional jobs: require success when wanted, require skipped
           # when not wanted.
           check_conditional() {
@@ -1615,6 +1614,7 @@ jobs:
           check_conditional frontend "$FRONTEND_RESULT" "$WANT_FRONTEND"
           check_conditional dotnet-build "$DOTNET_BUILD_RESULT" "$WANT_DOTNET_BUILD"
           check_conditional migration-drift "$MIG_RESULT" "$WANT_MIG_DRIFT"
+          check_conditional recovery-matrix-fixture-migrations "$FIXTURE_MIG_RESULT" "$WANT_DOTNET_BUILD"
           check_conditional dotnet-test "$DOTNET_TEST_RESULT" "$WANT_DOTNET_TEST"
           check_conditional dotnet-test-providers "$DOTNET_TEST_PROVIDERS_RESULT" "$WANT_DOTNET_TEST"
 
