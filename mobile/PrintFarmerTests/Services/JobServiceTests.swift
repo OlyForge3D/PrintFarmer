@@ -18,6 +18,32 @@ final class JobServiceTests: XCTestCase {
         super.tearDown()
     }
 
+    func testGetPreservesRowVersionForConditionalRetry() async throws {
+        mockAPIClient.stubResponse(
+            json: """
+            {
+                "id": "\(jobId)",
+                "rowVersion": "failed-job-v3",
+                "status": "Failed",
+                "priority": "Normal",
+                "queuePosition": 0,
+                "gcodeFileName": "failed-job.gcode",
+                "copies": 1,
+                "completedCopies": 0,
+                "remainingCopies": 1
+            }
+            """
+        )
+
+        let job = try await service.get(id: jobId)
+
+        XCTAssertEqual(job.rowVersion, "failed-job-v3")
+        XCTAssertEqual(
+            mockAPIClient.capturedRequests.last?.url?.path,
+            "/api/job-queue/\(jobId)"
+        )
+    }
+
     func testPrinterQueueUsesScopedEndpointAndPreservesServerOrderWithConflictingTimestamps() async throws {
         let printerId = UUID()
         let firstId = UUID()
@@ -172,6 +198,20 @@ final class JobServiceTests: XCTestCase {
         XCTAssertEqual(
             response.dispatchResult?.errorCode,
             "printer_busy"
+        )
+    }
+
+    func testRerunUsesReviewedETagAndExistingEndpoint() async throws {
+        mockAPIClient.stubResponse(json: "{}")
+
+        try await service.rerun(id: jobId, reviewedRowVersion: "failed-job-v3")
+
+        let request = try XCTUnwrap(mockAPIClient.capturedRequests.last)
+        XCTAssertEqual(request.httpMethod, "POST")
+        XCTAssertEqual(request.url?.path, "/api/job-queue/\(jobId)/rerun")
+        XCTAssertEqual(
+            request.value(forHTTPHeaderField: "If-Match"),
+            "\"failed-job-v3\""
         )
     }
 

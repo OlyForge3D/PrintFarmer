@@ -536,18 +536,64 @@ struct JobListView: View {
     // MARK: - Recent Job Row
 
     private func recentFailureRow(_ item: QueueHistoryEntry) -> some View {
-        Group {
-            if let id = UUID(uuidString: item.id) {
-                NavigationLink(value: AppDestination.jobDetail(id: id)) {
-                    recentFailureRowContent(item)
+        let jobID = UUID(uuidString: item.id)
+        return Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 8) {
+                    recentFailureNavigationLink(item, id: jobID)
+                    if let jobID {
+                        rerunFailedJobButton(id: jobID)
+                    }
                 }
             } else {
-                recentFailureRowContent(item)
+                HStack(alignment: .top, spacing: 12) {
+                    recentFailureNavigationLink(item, id: jobID)
+                        .layoutPriority(1)
+                    if let jobID {
+                        rerunFailedJobButton(id: jobID)
+                    }
+                }
             }
         }
+    }
+
+    @ViewBuilder
+    private func recentFailureNavigationLink(
+        _ item: QueueHistoryEntry,
+        id: UUID?
+    ) -> some View {
+        if let id {
+            NavigationLink(value: AppDestination.jobDetail(id: id)) {
+                recentFailureRowContent(item)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(recentFailureAccessibilityLabel(item))
+            .accessibilityIdentifier("job.row.\(item.id)")
+        } else {
+            recentFailureRowContent(item)
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel(recentFailureAccessibilityLabel(item))
+                .accessibilityIdentifier("job.row.\(item.id)")
+        }
+    }
+
+    private func rerunFailedJobButton(id: UUID) -> some View {
+        Button {
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            Task { await viewModel.rerunFailedJob(id: id) }
+        } label: {
+            Text("Retry")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Color.pfAccent)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+                .contentShape(Rectangle())
+        }
         .buttonStyle(.plain)
-        .accessibilityLabel(recentFailureAccessibilityLabel(item))
-        .accessibilityIdentifier("job.row.\(item.id)")
+        .fixedSize()
+        .disabled(!viewModel.canRerunFailedJobs || viewModel.rerunningFailedJobIDs.contains(id))
+        .accessibilityHint("Creates a new queued copy of this failed job.")
+        .accessibilityIdentifier("job.retry.\(id.uuidString.lowercased())")
     }
 
     private func recentFailureRowContent(_ item: QueueHistoryEntry) -> some View {

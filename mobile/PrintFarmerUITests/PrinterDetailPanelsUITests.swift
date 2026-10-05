@@ -358,8 +358,10 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
                 if section == "recent-failures" {
                     XCTAssertTrue(heading.isHittable, "Recent failures must be reachable in the shared queue.")
                     let failedJob = queueList.buttons["job.row.30000000-0003-0000-0000-000000000009"]
-                    for _ in 0..<8 {
-                        if failedJob.isHittable {
+                    let scan = app.buttons["navigation.scan"]
+                    for _ in 0..<12 {
+                        if failedJob.isHittable,
+                           failedJob.frame.maxY <= scan.frame.minY - 8 {
                             break
                         }
                         queueList.swipeUp()
@@ -368,8 +370,14 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
                     XCTAssertTrue(failedJobExists, "The visual acceptance fixture must expose the first failed job.")
                     guard failedJobExists else { return }
                     XCTAssertTrue(failedJob.label.localizedCaseInsensitiveContains("vase_mode_spiral.gcode"))
-                    let scan = app.buttons["navigation.scan"]
+                    let retryButton = queueList.buttons["job.retry.30000000-0003-0000-0000-000000000009"]
+                    XCTAssertTrue(retryButton.waitForExistence(timeout: 5))
+                    XCTAssertTrue(retryButton.isEnabled, "Queue.Write-authorized operators can rerun a failed job.")
                     XCTAssertTrue(heading.isHittable, "Recent failures must remain visible while inspecting its rows.")
+                    XCTAssertTrue(retryButton.isHittable, "Retry must remain visible beside the failed job.")
+                    if size == "normal" {
+                        XCTAssertLessThan(retryButton.frame.width, 80, "Retry should stay a compact inline action.")
+                    }
                     XCTAssertTrue(
                         failedJob.isHittable,
                         "A failed-job row must be visible in Recent failures. Row: \(failedJob.frame), scan: \(scan.frame), list: \(queueList.frame)."
@@ -391,8 +399,9 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
                     )
 
                     let lastFailure = queueList.buttons["job.row.30000000-0003-0000-0000-000000000010"]
-                    for _ in 0..<12 {
-                        if lastFailure.isHittable {
+                    for _ in 0..<20 {
+                        if lastFailure.isHittable,
+                           lastFailure.frame.maxY <= scan.frame.minY - 8 {
                             break
                         }
                         queueList.swipeUp()
@@ -415,14 +424,19 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
                     attachScreen("\(device)-\(size)-global-queue-recent-failures")
                 }
                 if section == "queued" {
+                    let assignedSubheading = queueList.descendants(matching: .any)["jobList.assigned.subheading"]
+                    for _ in 0..<12 where !assignedSubheading.isHittable {
+                        queueList.swipeUp()
+                    }
                     XCTAssertTrue(
-                        queueList.descendants(matching: .any)["jobList.assigned.subheading"].exists,
+                        assignedSubheading.isHittable,
                         "Assigned jobs stay visible within the Queued section."
                     )
                     XCTAssertFalse(
                         queueList.descendants(matching: .any)["jobList.section.assigned"].exists,
                         "Assigned must not become a fourth top-level queue group."
                     )
+                    attachScreen("\(device)-\(size)-global-queue-assigned")
                 }
             }
 
@@ -1032,6 +1046,31 @@ final class Issue3259MockupAccessibilityUITests: PrinterDetailPanelsUITests.Issu
 
     func testCaptureApprovedScreensAtLargestTextSize() {
         captureApprovedMockupScreens()
+    }
+
+    func testRetryFailedQueueJobUsesAuthenticatedRerunEndpoint() {
+        let queue = shellDestinationButton(tabIdentifier: "tab.queue", timeout: 8)
+        XCTAssertTrue(queue.waitForExistence(timeout: 8))
+        queue.tap()
+        let queueList = app.collectionViews["jobList.root"]
+        XCTAssertTrue(queueList.waitForExistence(timeout: 8))
+
+        let retryButton = queueList.buttons["job.retry.30000000-0003-0000-0000-000000000009"]
+        for _ in 0..<8 where !retryButton.isHittable {
+            queueList.swipeUp()
+        }
+        XCTAssertTrue(retryButton.waitForExistence(timeout: 5))
+        XCTAssertTrue(retryButton.isEnabled)
+        retryButton.tap()
+
+        let rerunRow = queueList.buttons["job.row.32590000-0000-0000-0000-000000000104"]
+        for _ in 0..<12 where !rerunRow.isHittable {
+            queueList.swipeDown()
+        }
+        XCTAssertTrue(
+            rerunRow.waitForExistence(timeout: 8),
+            "A successful authenticated rerun should add the new copy to the queue."
+        )
     }
 }
 

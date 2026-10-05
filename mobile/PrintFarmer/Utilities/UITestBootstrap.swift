@@ -411,16 +411,6 @@ enum UITestBootstrap {
         }
         #if DEBUG
         if mode == .authenticatedIssue3259VisualAcceptance {
-            var hiddenJobIDs: Set<UUID> = [DemoData.job2ID]
-            if ProcessInfo.processInfo.arguments.contains(issue3259ControlIdleLaunchArgument) {
-                hiddenJobIDs.insert(DemoData.job1ID)
-            }
-            services.jobService = DemoJobService(
-                jobNameOverrides: [DemoData.job1ID: "benchy_0.2mm_PLA.gcode"],
-                queueJobOverrides: Self.issue3259VisualAcceptanceQueue(),
-                hiddenJobIDs: hiddenJobIDs,
-                dispatchEnabled: false
-            )
             services.spoolService = DemoSpoolService(
                 spoolOverrides: [Self.issue3259VisualAcceptanceSpool()]
             )
@@ -951,7 +941,13 @@ enum UITestBootstrap {
             let attentionData: Data
             let capabilitiesData: Data
             let assignedQueueData: Data
+            var globalQueueData: Data
+            let globalQueueAfterRerunData: Data
+            let globalQueueAfterSecondRerunData: Data
             let recentFailureHistoryData: Data
+            let failedJobsDataByID: [String: Data]
+            let failedJobRowVersionsByID: [String: String]
+            let rerunResponsesByID: [String: Data]
             let userData: Data
             let thumbnailData: Data
         }
@@ -1105,6 +1101,85 @@ enum UITestBootstrap {
                         stats: nil
                     )
                 )
+                let globalQueueData = try encoder.encode(
+                    issue3259VisualAcceptanceQueue(includeCurrentPrint: true)
+                )
+                let globalQueueAfterRerunData = try encoder.encode(
+                    issue3259VisualAcceptanceQueue(includeCurrentPrint: true, includeRerunJob: true)
+                )
+                let globalQueueAfterSecondRerunData = try encoder.encode(
+                    issue3259VisualAcceptanceQueue(includeCurrentPrint: true, includeSecondRerunJob: true)
+                )
+                let failedJobData = Data("""
+                {
+                    "id": "\(DemoData.job9ID)",
+                    "rowVersion": "issue3259-failed-job-v1",
+                    "status": "Failed",
+                    "priority": "Normal",
+                    "queuePosition": 0,
+                    "gcodeFileName": "vase_mode_spiral.gcode",
+                    "assignedPrinterId": "\(DemoData.voron24_ID)",
+                    "assignedPrinterName": "Voron 2.4",
+                    "createdAt": "2026-10-04T10:00:00Z",
+                    "actualStartTime": "2026-10-04T10:10:00Z",
+                    "actualEndTime": "2026-10-04T11:10:00Z",
+                    "estimatedPrintTime": "01:00:00",
+                    "estimatedFilamentUsage": 48.0,
+                    "failureReason": "Thermal runaway detected",
+                    "copies": 1,
+                    "completedCopies": 0,
+                    "remainingCopies": 1
+                }
+                """.utf8)
+                let secondFailedJobData = Data("""
+                {
+                    "id": "\(DemoData.job10ID)",
+                    "rowVersion": "issue3259-second-failed-job-v1",
+                    "status": "Failed",
+                    "priority": "Normal",
+                    "queuePosition": 0,
+                    "gcodeFileName": "lamp_shade_textured.gcode",
+                    "assignedPrinterId": "\(DemoData.voron24_ID)",
+                    "assignedPrinterName": "Voron 2.4",
+                    "createdAt": "2026-10-03T10:00:00Z",
+                    "actualStartTime": "2026-10-03T10:10:00Z",
+                    "actualEndTime": "2026-10-03T11:10:00Z",
+                    "estimatedPrintTime": "01:00:00",
+                    "estimatedFilamentUsage": 65.0,
+                    "failureReason": "Heater disconnected",
+                    "copies": 1,
+                    "completedCopies": 0,
+                    "remainingCopies": 1
+                }
+                """.utf8)
+                let rerunResponseData = Data("""
+                {
+                    "id": "32590000-0000-0000-0000-000000000104",
+                    "rowVersion": "issue3259-rerun-v1",
+                    "name": "vase_mode_spiral.gcode",
+                    "status": "Queued",
+                    "priority": "Normal",
+                    "queuePosition": 3,
+                    "createdAtUtc": "2026-10-05T16:00:00Z",
+                    "copies": 1,
+                    "completedCopies": 0,
+                    "remainingCopies": 1
+                }
+                """.utf8)
+                let secondRerunResponseData = Data("""
+                {
+                    "id": "32590000-0000-0000-0000-000000000105",
+                    "rowVersion": "issue3259-second-rerun-v1",
+                    "name": "lamp_shade_textured.gcode",
+                    "status": "Queued",
+                    "priority": "Normal",
+                    "queuePosition": 3,
+                    "createdAtUtc": "2026-10-05T16:00:00Z",
+                    "copies": 1,
+                    "completedCopies": 0,
+                    "remainingCopies": 1
+                }
+                """.utf8)
                 lock.lock()
                 fixtureState = FixtureState(
                     printersData: printersData,
@@ -1115,7 +1190,22 @@ enum UITestBootstrap {
                     attentionData: try encoder.encode(fixture.attentionFeed),
                     capabilitiesData: capabilitiesData,
                     assignedQueueData: assignedQueueData,
+                    globalQueueData: globalQueueData,
+                    globalQueueAfterRerunData: globalQueueAfterRerunData,
+                    globalQueueAfterSecondRerunData: globalQueueAfterSecondRerunData,
                     recentFailureHistoryData: recentFailureHistoryData,
+                    failedJobsDataByID: [
+                        DemoData.job9ID.uuidString: failedJobData,
+                        DemoData.job10ID.uuidString: secondFailedJobData,
+                    ],
+                    failedJobRowVersionsByID: [
+                        DemoData.job9ID.uuidString: "issue3259-failed-job-v1",
+                        DemoData.job10ID.uuidString: "issue3259-second-failed-job-v1",
+                    ],
+                    rerunResponsesByID: [
+                        DemoData.job9ID.uuidString: rerunResponseData,
+                        DemoData.job10ID.uuidString: secondRerunResponseData,
+                    ],
                     userData: userData,
                     thumbnailData: fixture.thumbnail
                 )
@@ -1196,8 +1286,32 @@ enum UITestBootstrap {
                 result = (200, "application/json", fixture.capabilitiesData)
             case ("GET", "/api/job-queue-analytics/printer/\(printerID)"):
                 result = (200, "application/json", fixture.assignedQueueData)
+            case ("GET", "/api/job-queue-analytics"):
+                result = (200, "application/json", fixture.globalQueueData)
             case ("GET", "/api/job-queue-analytics/history"):
                 result = (200, "application/json", fixture.recentFailureHistoryData)
+            case ("GET", let path)
+                where path.hasPrefix("/api/job-queue/") && !path.hasSuffix("/rerun"):
+                let jobID = String(path.dropFirst("/api/job-queue/".count))
+                result = fixture.failedJobsDataByID[jobID].map {
+                    (200, "application/json", $0)
+                } ?? (404, "application/json", Data(#"{"error":"not-found"}"#.utf8))
+            case ("POST", let path) where path.hasSuffix("/rerun"):
+                let jobID = String(
+                    path
+                        .dropFirst("/api/job-queue/".count)
+                        .dropLast("/rerun".count)
+                )
+                guard let rowVersion = fixture.failedJobRowVersionsByID[jobID],
+                      request.value(forHTTPHeaderField: "If-Match") == "\"\(rowVersion)\"",
+                      let responseData = fixture.rerunResponsesByID[jobID] else {
+                    result = (412, "application/json", Data(#"{"error":"precondition_failed"}"#.utf8))
+                    break
+                }
+                fixture.globalQueueData = jobID == DemoData.job9ID.uuidString
+                    ? fixture.globalQueueAfterRerunData
+                    : fixture.globalQueueAfterSecondRerunData
+                result = (200, "application/json", responseData)
             case ("GET", "/api/printers/\(printerID)/current-job/thumbnail"):
                 result = (200, "image/png", fixture.thumbnailData)
             case ("POST", "/api/printers/\(printerID)/temps"):
@@ -1425,7 +1539,11 @@ enum UITestBootstrap {
         )
     }
 
-    private static func issue3259VisualAcceptanceQueue() -> [QueuedPrintJobResponse] {
+    private static func issue3259VisualAcceptanceQueue(
+        includeCurrentPrint: Bool = false,
+        includeRerunJob: Bool = false,
+        includeSecondRerunJob: Bool = false
+    ) -> [QueuedPrintJobResponse] {
         let printerID = DemoData.prusaMK4_1_ID.uuidString.lowercased()
         let printer = QueuePrinterMeta(
             id: printerID, name: "Prusa MK4 #1", modelName: "Prusa MK4",
@@ -1440,7 +1558,8 @@ enum UITestBootstrap {
             priority: PrintJobPriority,
             position: Int,
             requiredGrams: Int,
-            durationSeconds: Int
+            durationSeconds: Int,
+            actualStartTime: Date? = nil
         ) -> QueuedPrintJobResponse {
             let row = QueuedJobInfo(
                 id: id,
@@ -1454,7 +1573,7 @@ enum UITestBootstrap {
                 priority: priority,
                 queuePosition: position,
                 estimatedPrintTimeSeconds: durationSeconds,
-                actualStartTimeUtc: nil,
+                actualStartTimeUtc: actualStartTime,
                 actualEndTimeUtc: nil,
                 actualPrintTimeSeconds: nil,
                 failureReason: nil,
@@ -1478,7 +1597,8 @@ enum UITestBootstrap {
                 estimatedFilamentUsageGrams: requiredGrams,
                 thumbnailUrl: issue3259VisualAcceptanceThumbnailPath
             )
-            let estimatedStart = createdAt.addingTimeInterval(TimeInterval(position * 7_200))
+            let estimatedStart = actualStartTime
+                ?? createdAt.addingTimeInterval(TimeInterval(position * 7_200))
             return QueuedPrintJobResponse(
                 job: row,
                 gcodeFile: file,
@@ -1488,7 +1608,20 @@ enum UITestBootstrap {
             )
         }
 
-        return [
+        var jobs: [QueuedPrintJobResponse] = []
+        if includeCurrentPrint {
+            jobs.append(job(
+                id: DemoData.job1ID.uuidString.lowercased(),
+                name: "benchy_0.2mm_PLA.gcode",
+                status: "Printing",
+                priority: .normal,
+                position: 0,
+                requiredGrams: 140,
+                durationSeconds: 8_280,
+                actualStartTime: Date().addingTimeInterval(-6_000)
+            ))
+        }
+        jobs += [
             job(
                 id: "32590000-0000-0000-0000-000000000101",
                 name: "Coral spool bracket.gcode",
@@ -1517,6 +1650,29 @@ enum UITestBootstrap {
                 durationSeconds: 4_800
             ),
         ]
+        if includeRerunJob {
+            jobs.append(job(
+                id: "32590000-0000-0000-0000-000000000104",
+                name: "vase_mode_spiral.gcode",
+                status: "Queued",
+                priority: .normal,
+                position: 3,
+                requiredGrams: 48,
+                durationSeconds: 3_600
+            ))
+        }
+        if includeSecondRerunJob {
+            jobs.append(job(
+                id: "32590000-0000-0000-0000-000000000105",
+                name: "lamp_shade_textured.gcode",
+                status: "Queued",
+                priority: .normal,
+                position: 3,
+                requiredGrams: 65,
+                durationSeconds: 3_600
+            ))
+        }
+        return jobs
     }
 
     private static func issue3259VisualAcceptanceCoverage() -> FleetFilamentCoverage {

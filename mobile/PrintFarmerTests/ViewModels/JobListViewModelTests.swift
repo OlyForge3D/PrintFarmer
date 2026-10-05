@@ -87,6 +87,67 @@ final class JobListViewModelTests: XCTestCase {
         XCTAssertEqual(mockJobAnalyticsService.getHistoryCalledWith?.statuses, "failed")
     }
 
+    func testRerunFailedJobFetchesCurrentRevisionAndRefreshesQueue() async throws {
+        let id = UUID()
+        mockJobService.jobToReturn = try TestData.decodePrintJob(from: """
+        {
+            "id": "\(id)",
+            "rowVersion": "failed-job-v3",
+            "status": "Failed",
+            "priority": "Normal",
+            "queuePosition": 0,
+            "gcodeFileName": "failed.gcode",
+            "copies": 1,
+            "completedCopies": 0,
+            "remainingCopies": 1
+        }
+        """)
+        viewModel.setQueueWriteAuthorization(true)
+        viewModel.setNetworkReachability(true)
+
+        await viewModel.rerunFailedJob(id: id)
+
+        XCTAssertEqual(mockJobService.getJobCalledWith, id)
+        XCTAssertEqual(mockJobService.rerunCalledWith?.id, id)
+        XCTAssertEqual(mockJobService.rerunCalledWith?.reviewedRowVersion, "failed-job-v3")
+        XCTAssertEqual(mockJobService.listAllJobsCallCount, 1)
+        XCTAssertNil(viewModel.errorMessage)
+    }
+
+    func testRerunFailedJobDoesNotActWithoutQueueWriteAuthorization() async {
+        let id = UUID()
+        viewModel.setNetworkReachability(true)
+
+        await viewModel.rerunFailedJob(id: id)
+
+        XCTAssertNil(mockJobService.getJobCalledWith)
+        XCTAssertNil(mockJobService.rerunCalledWith)
+    }
+
+    func testRerunFailedJobRejectsJobThatIsNoLongerFailed() async throws {
+        let id = UUID()
+        mockJobService.jobToReturn = try TestData.decodePrintJob(from: """
+        {
+            "id": "\(id)",
+            "rowVersion": "queued-job-v1",
+            "status": "Queued",
+            "priority": "Normal",
+            "queuePosition": 1,
+            "gcodeFileName": "changed.gcode",
+            "copies": 1,
+            "completedCopies": 0,
+            "remainingCopies": 1
+        }
+        """)
+        viewModel.setQueueWriteAuthorization(true)
+        viewModel.setNetworkReachability(true)
+
+        await viewModel.rerunFailedJob(id: id)
+
+        XCTAssertNil(mockJobService.rerunCalledWith)
+        XCTAssertTrue(viewModel.errorMessage?.contains("no longer failed") == true)
+    }
+
     func testLoadJobsShowsHistoryErrorWithoutDroppingActiveQueue() async throws {
         let printing = try TestData.decodeQueuedPrintJobResponse(
             from: TestJSON.queuedPrintJobResponsePrinting
