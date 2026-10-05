@@ -239,6 +239,7 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
             XCTAssertTrue(app.descendants(matching: .any)["jobList.root"].waitForExistence(timeout: 8))
             let queueList = app.collectionViews["jobList.root"]
             XCTAssertTrue(queueList.exists)
+            XCTAssertTrue(app.buttons["navigation.scan"].isHittable)
             attachScreen("\(device)-\(size)-global-queue")
             for section in ["printing", "queued", "recent-failures"] {
                 let heading = queueList.descendants(matching: .any)["jobList.section.\(section)"]
@@ -248,6 +249,16 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
                 XCTAssertTrue(heading.exists, "The \(section) section must remain in the combined queue.")
                 if section == "recent-failures" {
                     XCTAssertTrue(heading.isHittable, "Recent failures must be reachable in the shared queue.")
+                    let failedJob = queueList.buttons.matching(NSPredicate(
+                        format: "label CONTAINS %@",
+                        "vase_mode_spiral.gcode"
+                    )).firstMatch
+                    XCTAssertTrue(failedJob.waitForExistence(timeout: 5))
+                    for _ in 0..<4 where !failedJob.isHittable {
+                        queueList.swipeUp()
+                    }
+                    XCTAssertTrue(failedJob.isHittable, "A failed-job row must be visible in Recent failures.")
+                    XCTAssertTrue(failedJob.label.localizedCaseInsensitiveContains("failed status"))
                     attachScreen("\(device)-\(size)-global-queue-recent-failures")
                 }
                 if section == "queued" {
@@ -266,12 +277,17 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
             XCTAssertTrue(inventory.exists)
             inventory.tap()
             XCTAssertTrue(app.buttons["inventory.addSpool"].waitForExistence(timeout: 8))
+            XCTAssertTrue(app.buttons["navigation.scan"].isHittable)
             attachScreen("\(device)-\(size)-filament-inventory")
 
             farm.tap()
             let printerCard = app.buttons["farm-card-10000000-0001-0000-0000-000000000001"]
             XCTAssertTrue(printerCard.waitForExistence(timeout: 8))
             printerCard.tap()
+            XCTAssertFalse(
+                app.buttons["navigation.scan"].exists,
+                "The root-level scanner must not cover printer-detail controls; in-page spool scan remains available."
+            )
 
             let selector = app.descendants(matching: .any)["printer.detail.panel.selector"]
             XCTAssertTrue(selector.waitForExistence(timeout: 8))
@@ -823,6 +839,21 @@ final class Issue3259ControlIdleUITests: PrinterDetailPanelsUITests.Issue3259Moc
         let device = isIPad ? "iPad" : "iPhone"
         let size = contentSizeCategory == "UICTContentSizeCategoryL" ? "normal" : "largest"
         attachScreen("\(device)-\(size)-printer-control-idle")
+
+        let controlPage = app.descendants(matching: .any)["printer.detail.panel.control"]
+        let motion = app.otherElements["printer.controls.motion-group"]
+        for _ in 0..<4 where !motion.isHittable {
+            controlPage.swipeUp()
+        }
+        XCTAssertTrue(motion.isHittable, "Idle motion controls must be visible in the approved Control composition.")
+        attachScreen("\(device)-\(size)-printer-control-idle-motion")
+
+        let runtime = app.otherElements["printer.controls.runtime"]
+        for _ in 0..<4 where !runtime.isHittable {
+            controlPage.swipeUp()
+        }
+        XCTAssertTrue(runtime.isHittable, "Fan and Z-offset controls must be visibly reachable.")
+        attachScreen("\(device)-\(size)-printer-control-idle-runtime")
     }
 }
 #endif

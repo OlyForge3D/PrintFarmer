@@ -35,14 +35,18 @@ struct ContentView: View {
                     .navigationTitle("PrintFarmer")
                 } detail: {
                     tabContentView(for: router.selectedTab)
-                        .safeAreaInset(edge: .bottom, alignment: .trailing) { scanButton }
+                        .safeAreaInset(edge: .bottom, alignment: .trailing) {
+                            if router.isAtRoot(router.selectedTab) { scanButton }
+                        }
                 }
                 .navigationSplitViewStyle(.balanced)
             } else {
                 TabView(selection: $router.selectedTab) {
                     ForEach(AppTab.allCases, id: \.self) { tab in
                         tabContentView(for: tab)
-                            .safeAreaInset(edge: .bottom, alignment: .trailing) { scanButton }
+                            .safeAreaInset(edge: .bottom, alignment: .trailing) {
+                                if router.isAtRoot(tab) { scanButton }
+                            }
                             .tabItem {
                                 Label(tab.title, systemImage: tab.systemImage)
                                     .accessibilityIdentifier(tab.tabAccessibilityIdentifier)
