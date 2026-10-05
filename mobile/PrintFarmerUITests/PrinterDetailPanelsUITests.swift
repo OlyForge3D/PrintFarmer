@@ -181,6 +181,234 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
         }
     }
 
+    #if DEBUG
+    @MainActor
+    class Issue3259MockupCaptureUITests: PrintFarmerUITestCase {
+        override var waitsForNavigationReadiness: Bool { true }
+        var contentSizeCategory: String { "UICTContentSizeCategoryL" }
+
+        override var additionalLaunchArguments: [String] {
+            [
+                "--uitesting-issue3259-visual-acceptance",
+                "-pf_theme_mode", "dark",
+                "-UIPreferredContentSizeCategoryName", contentSizeCategory
+            ]
+        }
+
+        func captureApprovedMockupScreens() {
+            let isIPad = UIDevice.current.userInterfaceIdiom == .pad
+            if isIPad {
+                XCUIDevice.shared.orientation = .landscapeLeft
+            }
+            defer {
+                if isIPad {
+                    XCUIDevice.shared.orientation = .portrait
+                }
+            }
+            let device = isIPad ? "iPad" : "iPhone"
+            let size = contentSizeCategory == "UICTContentSizeCategoryL" ? "normal" : "largest"
+
+            let farm = shellDestinationButton(tabIdentifier: "tab.farm", timeout: 8)
+            XCTAssertTrue(farm.exists)
+            farm.tap()
+            XCTAssertTrue(app.navigationBars["Farm"].waitForExistence(timeout: 8))
+            let filters = app.descendants(matching: .any)["farm.filters"]
+            XCTAssertTrue(filters.exists)
+            let filterButtons = app.buttons.matching(
+                NSPredicate(format: "identifier BEGINSWITH %@", "farm.filter.")
+            )
+            XCTAssertEqual(filterButtons.count, 4, "Farm must expose all four status filters.")
+            XCTAssertEqual(app.buttons["farm.filter.All"].label, "All 6")
+            XCTAssertEqual(app.buttons["farm.filter.Printing"].label, "Printing 2")
+            XCTAssertEqual(app.buttons["farm.filter.Needs attention"].label, "Needs attention 2")
+            XCTAssertEqual(app.buttons["farm.filter.Idle"].label, "Idle 1")
+            XCTAssertFalse(app.staticTexts.containing(
+                NSPredicate(format: "label BEGINSWITH %@", "Attention unavailable:")
+            ).firstMatch.exists)
+            for index in 0..<filterButtons.count {
+                let button = filterButtons.element(boundBy: index)
+                XCTAssertTrue(button.isHittable, "\(button.identifier) must be visible and tappable.")
+                XCTAssertGreaterThanOrEqual(button.frame.minX, filters.frame.minX - 1)
+                XCTAssertLessThanOrEqual(button.frame.maxX, filters.frame.maxX + 1)
+            }
+            attachScreen("\(device)-\(size)-farm")
+
+            let queue = shellDestinationButton(tabIdentifier: "tab.queue", timeout: 8)
+            XCTAssertTrue(queue.exists)
+            queue.tap()
+            XCTAssertTrue(app.descendants(matching: .any)["jobList.root"].waitForExistence(timeout: 8))
+            let queueList = app.collectionViews["jobList.root"]
+            XCTAssertTrue(queueList.exists)
+            attachScreen("\(device)-\(size)-global-queue")
+            for section in ["printing", "queued", "recent-failures"] {
+                let heading = queueList.descendants(matching: .any)["jobList.section.\(section)"]
+                for _ in 0..<8 where !heading.exists {
+                    queueList.swipeUp()
+                }
+                XCTAssertTrue(heading.exists, "The \(section) section must remain in the combined queue.")
+                if section == "recent-failures" {
+                    XCTAssertTrue(heading.isHittable, "Recent failures must be reachable in the shared queue.")
+                    attachScreen("\(device)-\(size)-global-queue-recent-failures")
+                }
+                if section == "queued" {
+                    XCTAssertTrue(
+                        queueList.descendants(matching: .any)["jobList.assigned.subheading"].exists,
+                        "Assigned jobs stay visible within the Queued section."
+                    )
+                    XCTAssertFalse(
+                        queueList.descendants(matching: .any)["jobList.section.assigned"].exists,
+                        "Assigned must not become a fourth top-level queue group."
+                    )
+                }
+            }
+
+            let inventory = shellDestinationButton(tabIdentifier: "tab.filament", timeout: 8)
+            XCTAssertTrue(inventory.exists)
+            inventory.tap()
+            XCTAssertTrue(app.buttons["inventory.addSpool"].waitForExistence(timeout: 8))
+            attachScreen("\(device)-\(size)-filament-inventory")
+
+            farm.tap()
+            let printerCard = app.buttons["farm-card-10000000-0001-0000-0000-000000000001"]
+            XCTAssertTrue(printerCard.waitForExistence(timeout: 8))
+            printerCard.tap()
+
+            let selector = app.descendants(matching: .any)["printer.detail.panel.selector"]
+            XCTAssertTrue(selector.waitForExistence(timeout: 8))
+            for panel in ["Status", "Control", "Filament", "Queue"] {
+                selector.buttons[panel].tap()
+                let page = app.descendants(matching: .any)["printer.detail.panel.\(panel.lowercased())"]
+                XCTAssertTrue(page.waitForExistence(timeout: 8))
+                if panel == "Status" {
+                    XCTAssertTrue(app.staticTexts["Print progress 64 percent"].waitForExistence(timeout: 5))
+                    XCTAssertTrue(app.staticTexts["benchy_0.2mm_PLA.gcode"].exists)
+                    let remainingTime = app.staticTexts
+                        .matching(identifier: "printer.detail.job")
+                        .matching(NSPredicate(format: "label CONTAINS %@", "38m"))
+                        .firstMatch
+                    XCTAssertTrue(remainingTime.waitForExistence(timeout: 5))
+                    let finishTime = app.staticTexts
+                        .matching(identifier: "printer.detail.job")
+                        .matching(NSPredicate(format: "label BEGINSWITH %@ AND NOT label CONTAINS %@", "Done at", "Unknown"))
+                        .firstMatch
+                    XCTAssertTrue(finishTime.exists)
+                    let layerFact = app.staticTexts
+                        .matching(identifier: "printer.detail.job")
+                        .matching(NSPredicate(format: "label CONTAINS %@", "142/221"))
+                        .firstMatch
+                    XCTAssertTrue(layerFact.waitForExistence(timeout: 5))
+                    let preview = app.images
+                        .matching(identifier: "printer.detail.hero")
+                        .matching(NSPredicate(format: "label == %@", "Current print preview"))
+                        .firstMatch
+                    XCTAssertTrue(preview.waitForExistence(timeout: 5))
+                }
+                if panel == "Control" {
+                    XCTAssertTrue(
+                        app.otherElements["printer.controls.runtime"].waitForExistence(timeout: 5),
+                        "Control must expose the API-backed runtime fan and live Z-offset adjustments."
+                    )
+                    XCTAssertTrue(
+                        app.buttons["printer.controls.runtime.fan.increase"].exists,
+                        "Fan adjustments must be driven by the authenticated backend-capability response."
+                    )
+                    XCTAssertTrue(
+                        app.buttons["printer.controls.runtime.z-offset.increase"].exists,
+                        "Live Z-offset adjustments must be driven by the authenticated backend-capability response."
+                    )
+                }
+                if panel == "Filament" {
+                    let warning = app.descendants(matching: .any)["printer.filament.attention"]
+                    XCTAssertTrue(warning.waitForExistence(timeout: 5))
+                    XCTAssertTrue(warning.label.contains("Insufficient filament"))
+                    XCTAssertEqual(
+                        app.staticTexts.matching(
+                            NSPredicate(format: "label CONTAINS %@", "Insufficient filament")
+                        ).count,
+                        1,
+                        "The coverage warning should be visible once, not repeated in the loaded-spool summary."
+                    )
+                    let swap = app.buttons.matching(
+                        NSPredicate(format: "identifier ENDSWITH %@", "/change")
+                    ).firstMatch
+                    let unassign = app.buttons.matching(
+                        NSPredicate(format: "identifier ENDSWITH %@", "/clearAssignment")
+                    ).firstMatch
+                    XCTAssertTrue(swap.waitForExistence(timeout: 5))
+                    XCTAssertTrue(unassign.exists)
+                    XCTAssertTrue(swap.isEnabled, "Changing the inventory assignment does not issue a physical load.")
+                    XCTAssertTrue(unassign.isEnabled, "Unassigning remains distinct from physical unload.")
+                    let physicalLoad = app.buttons.matching(NSPredicate(
+                        format: "identifier == %@ AND label == %@",
+                        "printer.detail.filament.physicalControls",
+                        "Load filament"
+                    )).firstMatch
+                    let physicalUnload = app.buttons.matching(NSPredicate(
+                        format: "identifier == %@ AND label == %@",
+                        "printer.detail.filament.physicalControls",
+                        "Unload filament"
+                    )).firstMatch
+                    XCTAssertTrue(physicalLoad.exists)
+                    XCTAssertTrue(physicalUnload.exists)
+                    XCTAssertFalse(physicalLoad.isEnabled)
+                    XCTAssertFalse(physicalUnload.isEnabled)
+                    attachScreen("\(device)-\(size)-printer-filament")
+                    let demand = app.descendants(matching: .any)
+                        .matching(NSPredicate(format: "label CONTAINS %@", "Total demand: 140 g"))
+                        .firstMatch
+                    XCTAssertFalse(demand.exists, "Technical coverage details remain disclosed progressively.")
+                    app.buttons["printer.filament.disclosure"].tap()
+                    XCTAssertTrue(demand.waitForExistence(timeout: 5))
+                    continue
+                }
+                attachScreen("\(device)-\(size)-printer-\(panel.lowercased())")
+            }
+        }
+
+        func attachScreen(_ name: String) {
+            let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            attachment.name = "Issue 3259 \(name)"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
+
+        func testRuntimeControlsUseAuthenticatedCommandsAndServerReadback() {
+            let farm = shellDestinationButton(tabIdentifier: "tab.farm", timeout: 8)
+            XCTAssertTrue(farm.exists)
+            farm.tap()
+            let printerCard = app.buttons["farm-card-10000000-0001-0000-0000-000000000001"]
+            XCTAssertTrue(printerCard.waitForExistence(timeout: 8))
+            printerCard.tap()
+
+            let selector = app.descendants(matching: .any)["printer.detail.panel.selector"]
+            XCTAssertTrue(selector.waitForExistence(timeout: 8))
+            selector.buttons["Control"].tap()
+            XCTAssertTrue(app.otherElements["printer.controls.runtime"].waitForExistence(timeout: 8))
+
+            let fanValue = app.staticTexts["printer.controls.runtime.fan.value"]
+            XCTAssertTrue(fanValue.waitForExistence(timeout: 5))
+            XCTAssertEqual(fanValue.label, "60%")
+            app.buttons["printer.controls.runtime.fan.increase"].tap()
+            let updatedFan = app.staticTexts.matching(identifier: "printer.controls.runtime.fan.value")
+                .matching(NSPredicate(format: "label == %@", "65%")).firstMatch
+            XCTAssertTrue(
+                updatedFan.waitForExistence(timeout: 5),
+                "Fan readback must reflect the accepted API command; current=\(fanValue.label), feedback=\(app.otherElements["printer.controls.runtime.feedback"].label)"
+            )
+
+            let zOffsetValue = app.staticTexts["printer.controls.runtime.z-offset.value"]
+            XCTAssertTrue(zOffsetValue.waitForExistence(timeout: 5))
+            XCTAssertEqual(zOffsetValue.label, "0.025 mm")
+            app.buttons["printer.controls.runtime.z-offset.increase"].tap()
+            let updatedZOffset = app.staticTexts.matching(identifier: "printer.controls.runtime.z-offset.value")
+                .matching(NSPredicate(format: "label == %@", "0.075 mm")).firstMatch
+            XCTAssertTrue(updatedZOffset.waitForExistence(timeout: 5), "Live Z-offset readback must reflect the accepted API command.")
+            attachScreen("control-authenticated-command-readback")
+        }
+    }
+
+    #endif
+
     func testStatusUsesAvailableWidthAcrossRotation() {
         openFirstPrinterDetail()
         defer { XCUIDevice.shared.orientation = .portrait }
@@ -200,6 +428,7 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
             } else {
                 XCTAssertGreaterThan(temperatures.frame.minY, job.frame.minY)
             }
+
             XCTAssertFalse(app.buttons["printer.detail.control.emergencyStop"].exists)
             let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
             screenshot.name = "Essential Status \(orientation == .portrait ? "portrait" : "landscape")"
@@ -214,6 +443,7 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
             $0 == "-UIPreferredContentSizeCategoryName" || $0 == "UICTContentSizeCategoryL"
         }
         app.launchArguments += [
+            "--uitesting-issue3259-visual-acceptance",
             "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL",
             "-pf_theme_mode", "dark"
         ]
@@ -241,7 +471,10 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
             if title == "Status" {
                 let temperatures = app.otherElements["printer.detail.temperatures"]
                 let beforeScroll = temperatures.frame.minY
-                page.swipeUp()
+                let statusContent = app.descendants(matching: .any)
+                    .matching(identifier: "printer.detail.status.content").firstMatch
+                XCTAssertTrue(statusContent.exists)
+                app.swipeUp()
                 XCTAssertLessThan(temperatures.frame.minY, beforeScroll, "The reading column must actually scroll")
             }
             let emergency = app.buttons["printer.detail.control.emergencyStop"]
@@ -534,3 +767,62 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
         )
     }
 }
+
+#if DEBUG
+@MainActor
+final class Issue3259MockupNormalUITests: PrinterDetailPanelsUITests.Issue3259MockupCaptureUITests {
+    func testCaptureApprovedScreensAtNormalTextSize() {
+        captureApprovedMockupScreens()
+    }
+}
+
+@MainActor
+final class Issue3259MockupAccessibilityUITests: PrinterDetailPanelsUITests.Issue3259MockupCaptureUITests {
+    override var contentSizeCategory: String {
+        "UICTContentSizeCategoryAccessibilityXXXL"
+    }
+
+    func testCaptureApprovedScreensAtLargestTextSize() {
+        captureApprovedMockupScreens()
+    }
+}
+
+@MainActor
+final class Issue3259ControlIdleUITests: PrinterDetailPanelsUITests.Issue3259MockupCaptureUITests {
+    override var additionalLaunchArguments: [String] {
+        super.additionalLaunchArguments + ["--uitesting-issue3259-control-idle"]
+    }
+
+    func testCaptureApprovedIdleControlScreen() {
+        let isIPad = UIDevice.current.userInterfaceIdiom == .pad
+        if isIPad {
+            XCUIDevice.shared.orientation = .landscapeLeft
+        }
+        defer {
+            if isIPad {
+                XCUIDevice.shared.orientation = .portrait
+            }
+        }
+
+        app.launch()
+        let farm = shellDestinationButton(tabIdentifier: "tab.farm", timeout: 8)
+        XCTAssertTrue(farm.waitForExistence(timeout: 8))
+        farm.tap()
+        let printerCard = app.buttons["farm-card-10000000-0001-0000-0000-000000000001"]
+        XCTAssertTrue(printerCard.waitForExistence(timeout: 8))
+        printerCard.tap()
+        let selector = app.descendants(matching: .any)["printer.detail.panel.selector"]
+        XCTAssertTrue(selector.waitForExistence(timeout: 8))
+        selector.buttons["Control"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["printer.detail.panel.control"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.otherElements["printer.controls.motion-group"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.otherElements["printer.controls.runtime"].exists)
+        XCTAssertTrue(app.buttons["printer.controls.hotend.increase"].isEnabled)
+        XCTAssertTrue(app.buttons["printer.controls.runtime.fan.increase"].isEnabled)
+        XCTAssertTrue(app.buttons["printer.controls.runtime.z-offset.increase"].isEnabled)
+        let device = isIPad ? "iPad" : "iPhone"
+        let size = contentSizeCategory == "UICTContentSizeCategoryL" ? "normal" : "largest"
+        attachScreen("\(device)-\(size)-printer-control-idle")
+    }
+}
+#endif

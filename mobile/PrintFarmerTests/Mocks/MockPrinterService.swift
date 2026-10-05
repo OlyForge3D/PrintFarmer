@@ -82,6 +82,8 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
     var extrudeCalledWith: (printerId: UUID, distanceMm: Double, feedrateMmPerMinute: Int)?
     var disableMotorsCalledWith: UUID?
     var saveZOffsetCalledWith: (printerId: UUID, offsetMm: Double, saveToFirmware: Bool, reviewedRowVersion: String)?
+    var setFanSpeedCalledWith: (printerId: UUID, speedPercent: Int)?
+    var adjustZOffsetCalledWith: (printerId: UUID, offsetMm: Double)?
     var unloadFilamentToolheadIndex: Int?
     var unloadResultToReturn: FilamentUnloadResult?
     var physicalFilamentCalls: [String] = []
@@ -292,6 +294,18 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
         return commandResultToReturn
     }
 
+    func setFanSpeed(printerId: UUID, speedPercent: Int) async throws -> CommandResult {
+        setFanSpeedCalledWith = (printerId, speedPercent)
+        if let error = errorToThrow { throw error }
+        return commandResultToReturn
+    }
+
+    func adjustZOffset(printerId: UUID, offsetMm: Double) async throws -> CommandResult {
+        adjustZOffsetCalledWith = (printerId, offsetMm)
+        if let error = errorToThrow { throw error }
+        return commandResultToReturn
+    }
+
     var capabilitiesToReturn: PrinterBackendCapabilities?
     var getBackendCapabilitiesCalledWith: UUID?
     var getBackendCapabilitiesCallCount = 0
@@ -391,6 +405,8 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
         extrudeCalledWith = nil
         disableMotorsCalledWith = nil
         saveZOffsetCalledWith = nil
+        setFanSpeedCalledWith = nil
+        adjustZOffsetCalledWith = nil
         unloadFilamentToolheadIndex = nil
         unloadResultToReturn = nil
         getBackendCapabilitiesCallCount = 0

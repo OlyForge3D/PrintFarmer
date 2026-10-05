@@ -37,6 +37,43 @@ final class PrinterServiceTests: XCTestCase {
         XCTAssertTrue(mockAPIClient.capturedRequests.isEmpty)
     }
 
+    func testRuntimeAdjustmentsUseAuthenticatedEndpointsAndPayloads() async throws {
+        await apiClient.applyAuthenticatedSession(
+            baseURL: TestData.testBaseURL,
+            identity: AuthenticatedIdentity(
+                accessToken: "test-runtime-control-token",
+                serverID: TestData.testUUID,
+                authSessionToken: 17
+            )
+        )
+        mockAPIClient.stubResponse(json: #"{"success":true,"message":"accepted"}"#)
+
+        _ = try await printerService.setFanSpeed(printerId: TestData.testUUID, speedPercent: 65)
+        _ = try await printerService.adjustZOffset(printerId: TestData.testUUID, offsetMm: -0.05)
+
+        let requests = mockAPIClient.capturedRequests
+        XCTAssertEqual(requests.map(\.httpMethod), ["POST", "POST"])
+        XCTAssertEqual(
+            requests.map { $0.url?.path },
+            [
+                "/api/printers/\(TestData.testUUID)/fan",
+                "/api/printers/\(TestData.testUUID)/z-offset/adjust"
+            ]
+        )
+        XCTAssertEqual(
+            requests.map { $0.value(forHTTPHeaderField: "Authorization") },
+            ["Bearer test-runtime-control-token", "Bearer test-runtime-control-token"]
+        )
+
+        let fanBody = try XCTUnwrap(requests[0].httpBody)
+        let fanPayload = try XCTUnwrap(JSONSerialization.jsonObject(with: fanBody) as? [String: Int])
+        XCTAssertEqual(fanPayload, ["speedPercent": 65])
+
+        let zOffsetBody = try XCTUnwrap(requests[1].httpBody)
+        let zOffsetPayload = try XCTUnwrap(JSONSerialization.jsonObject(with: zOffsetBody) as? [String: Double])
+        XCTAssertEqual(zOffsetPayload["offsetMm"], -0.05)
+    }
+
     private var mockAPIClient: MockAPIClient!
     private var apiClient: APIClient!
     private var printerService: PrinterService!
@@ -319,7 +356,7 @@ final class PrinterServiceTests: XCTestCase {
         let status = try await printerService.getStatus(id: TestData.testUUID)
 
         XCTAssertEqual(status.state, "printing")
-        XCTAssertEqual(status.progress, 55.0)
+        XCTAssertEqual(status.progress, 0.55)
         let captured = mockAPIClient.capturedRequests.first
         XCTAssertTrue(captured?.url?.path.contains("/api/printers/\(TestData.testUUID)/status") ?? false)
     }

@@ -1118,6 +1118,8 @@ final class PrinterControlsViewModel: ObservableObject {
         guard let command = pendingCommand, commandWasDispatched,
               !commandStateInvalidated, readStartedAt >= command.startedAt,
               status.isOnline, Self.runtimeStatusStateIsSupported(status.state) else { return }
+        // This status request is timestamped after dispatch, so an already-updated
+        // value is valid evidence even when it matches the previous cached value.
         let matches: Bool
         switch command.kind {
         case let .fanSpeed(targetPercent):
@@ -1219,7 +1221,10 @@ final class PrinterControlsViewModel: ObservableObject {
             return
         }
         await perform(command) { [printerService, printer] in
-            _ = try await printerService.setFanSpeed(printerId: printer.id, speedPercent: targetPercent)
+            let result = try await printerService.setFanSpeed(
+                printerId: printer.id, speedPercent: targetPercent
+            )
+            guard result.success else { throw PrinterControlError.rejected(result.message) }
         }
         guard pendingCommand == command, lastError == nil else { return }
         await refreshSafetyEvidence(refreshDiscovery: false)
@@ -1242,7 +1247,10 @@ final class PrinterControlsViewModel: ObservableObject {
             return
         }
         await perform(command) { [printerService, printer] in
-            _ = try await printerService.adjustZOffset(printerId: printer.id, offsetMm: deltaMm)
+            let result = try await printerService.adjustZOffset(
+                printerId: printer.id, offsetMm: deltaMm
+            )
+            guard result.success else { throw PrinterControlError.rejected(result.message) }
         }
         guard pendingCommand == command, lastError == nil else { return }
         await refreshSafetyEvidence(refreshDiscovery: false)
@@ -1493,6 +1501,8 @@ final class PrinterControlsViewModel: ObservableObject {
         to updated: Printer,
         resolves command: ControlCommand
     ) -> Bool {
+        // SignalR snapshots have no observation timestamp; runtime controls
+        // therefore require a changed value to avoid accepting stale telemetry.
         switch command.kind {
         case .home, .jog, .moveTo:
             // Ordinary telemetry is not correlated command-completion evidence.
@@ -1572,6 +1582,7 @@ final class PrinterControlsViewModel: ObservableObject {
 
     private var runtimeControlAccessReason: String? {
         if commandIdentity == nil { return "Controls require a registered server identity." }
+        if !hasConfiguredAccess { return "Waiting for registered-server access confirmation." }
         if !isActive { return "Controls are no longer active." }
         if let reason = accessCheck() { return reason }
         if !printer.isOnline { return "Printer is offline." }
@@ -1598,6 +1609,7 @@ final class PrinterControlsViewModel: ObservableObject {
 
     var blockedReason: String? {
         if commandIdentity == nil { return "Controls require a registered server identity." }
+        if !hasConfiguredAccess { return "Waiting for registered-server access confirmation." }
         if !isActive { return "Controls are no longer active." }
         if let reason = accessCheck() { return reason }
         if !printer.isOnline { return "Printer is offline." }

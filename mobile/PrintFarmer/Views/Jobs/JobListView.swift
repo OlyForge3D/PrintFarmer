@@ -7,6 +7,8 @@ struct JobListView: View {
     private let ownsNavigationStack: Bool
     @State private var viewModel = JobListViewModel()
     @State private var retryTask: Task<Void, Never>?
+    @State private var showsJobHistory = false
+    @State private var historyNavigationPath: [AppDestination] = []
 
     init(ownsNavigationStack: Bool = true) {
         self.ownsNavigationStack = ownsNavigationStack
@@ -80,12 +82,59 @@ struct JobListView: View {
             }
         }
         .navigationTitle("Queue")
-        .rootNavigationChrome(for: .queue)
+        .rootNavigationChrome(for: .queue) {
+            Button {
+                historyNavigationPath = []
+                showsJobHistory = true
+            } label: {
+                Image(systemName: "clock.arrow.circlepath")
+                    .frame(
+                        minWidth: RootNavigationChrome.minimumTouchTarget,
+                        minHeight: RootNavigationChrome.minimumTouchTarget
+                    )
+            }
+            .accessibilityLabel("Job history")
+            .accessibilityHint("Opens completed and cancelled jobs, including harvest actions.")
+            .accessibilityIdentifier("jobList.history.open")
+        }
         .refreshable {
             await viewModel.loadJobs()
         }
         .navigationDestination(for: AppDestination.self) { destination in
             destinationView(for: destination)
+        }
+        .sheet(isPresented: $showsJobHistory) {
+            NavigationStack(path: $historyNavigationPath) {
+                Group {
+                    if viewModel.completedHistoryJobs.isEmpty {
+                        ContentUnavailableView(
+                            "No Job History",
+                            systemImage: "clock.arrow.circlepath",
+                            description: Text("Completed and cancelled jobs will appear here.")
+                        )
+                    } else {
+                        List {
+                            ForEach(viewModel.completedHistoryJobs) { item in
+                                recentJobRow(item)
+                            }
+                        }
+                        .listStyle(.plain)
+                    }
+                }
+                .navigationTitle("Job History")
+                .navigationBarTitleDisplayMode(.inline)
+                .navigationDestination(for: AppDestination.self) { destination in
+                    destinationView(for: destination)
+                }
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") {
+                            showsJobHistory = false
+                        }
+                    }
+                }
+            }
+            .accessibilityIdentifier("jobList.history")
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("jobList.root")
@@ -120,20 +169,35 @@ struct JobListView: View {
                 }
             } header: {
                 sectionHeader("Printing", count: viewModel.activeJobs.count, systemImage: "printer.fill")
+                    .accessibilityIdentifier("jobList.section.printing")
             }
 
-            if !viewModel.assignedJobs.isEmpty {
-                Section {
+            Section {
+                if !viewModel.assignedJobs.isEmpty {
+                    HStack(spacing: 6) {
+                        Image(systemName: "checkmark.circle")
+                            .accessibilityHidden(true)
+                        Text("Assigned")
+                        Spacer()
+                        Text("\(viewModel.assignedJobs.count)")
+                            .monospacedDigit()
+                    }
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Color.pfTextSecondary)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier("jobList.assigned.subheading")
+
                     ForEach(viewModel.assignedJobs) { item in
                         queuedJobRow(item)
                     }
-                } header: {
-                    Label("Assigned", systemImage: "checkmark.circle")
                 }
-            }
 
-            if !viewModel.reorderableQueuedJobs.isEmpty {
-                Section {
+                if viewModel.reorderableQueuedJobs.isEmpty {
+                    if viewModel.assignedJobs.isEmpty {
+                        Text("No jobs waiting to print.")
+                            .foregroundStyle(Color.pfTextSecondary)
+                    }
+                } else {
                     ForEach(viewModel.reorderableQueuedJobs) { item in
                         let groupID = viewModel.reorderGroupID(for: item)
                         let canMove = item.job.jobUUID.map { id in
@@ -151,27 +215,24 @@ struct JobListView: View {
                             )
                         }
                     }
-                } header: {
-                    HStack {
-                        Text("Queued")
-                        Spacer()
-                        if viewModel.canReorderQueue {
-                            Text("Drag to reorder")
-                                .foregroundStyle(Color.pfTextSecondary)
-                        }
-                        Text("\(viewModel.reorderableQueuedJobs.count)")
-                            .monospacedDigit()
-                            .foregroundStyle(Color.pfTextTertiary)
+                }
+            } header: {
+                HStack {
+                    Label("Queued", systemImage: "tray.full")
+                        .font(.subheadline.weight(.semibold))
+                    Spacer()
+                    if viewModel.canReorderQueue && !viewModel.reorderableQueuedJobs.isEmpty {
+                        Text("Drag to reorder")
+                            .font(.caption)
+                            .foregroundStyle(Color.pfTextSecondary)
                     }
-                    .accessibilityElement(children: .combine)
+                    Text("\(viewModel.queuedJobs.count)")
+                        .font(.caption.monospacedDigit())
+                        .monospacedDigit()
+                        .foregroundStyle(Color.pfTextTertiary)
                 }
-            } else {
-                Section {
-                    Text("No jobs waiting to print.")
-                        .foregroundStyle(Color.pfTextSecondary)
-                } header: {
-                    sectionHeader("Queued", count: 0, systemImage: "tray.full")
-                }
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("jobList.section.queued")
             }
 
             if !viewModel.recentFailures.isEmpty {
@@ -185,6 +246,7 @@ struct JobListView: View {
                         count: viewModel.recentFailures.count,
                         systemImage: "exclamationmark.triangle"
                     )
+                    .accessibilityIdentifier("jobList.section.recent-failures")
                 }
             } else {
                 Section {
@@ -192,6 +254,7 @@ struct JobListView: View {
                         .foregroundStyle(Color.pfTextSecondary)
                 } header: {
                     sectionHeader("Recent failures", count: 0, systemImage: "exclamationmark.triangle")
+                        .accessibilityIdentifier("jobList.section.recent-failures")
                 }
             }
         }
@@ -203,11 +266,14 @@ struct JobListView: View {
     private func sectionHeader(_ title: String, count: Int, systemImage: String) -> some View {
         HStack {
             Label(title, systemImage: systemImage)
+                .font(.subheadline.weight(.semibold))
             Spacer()
             Text("\(count)")
+                .font(.caption.monospacedDigit())
                 .monospacedDigit()
                 .foregroundStyle(Color.pfTextTertiary)
         }
+        .padding(.vertical, 2)
         .accessibilityElement(children: .combine)
     }
 
@@ -224,46 +290,46 @@ struct JobListView: View {
     private func activeJobRow(_ item: QueuedPrintJobResponse) -> some View {
         jobDetailLink(for: item) {
             HStack(spacing: 12) {
-                jobThumbnail(for: item, size: 48)
-                VStack(alignment: .leading, spacing: 6) {
-                HStack {
-                    Text(item.job.name)
-                        .font(.headline)
-                        .lineLimit(1)
-                    Spacer()
-                    StatusBadge(jobStatus: item.job.jobStatus)
-                }
-
-                if let printerName = item.job.printerName {
-                    Label(printerName, systemImage: "printer")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-
-                if let startTime = item.job.actualStartTimeUtc,
-                   let estSeconds = item.job.estimatedPrintTimeSeconds, estSeconds > 0 {
-                    let elapsed = Date.now.timeIntervalSince(startTime)
-                    let total = TimeInterval(estSeconds)
-                    let progress = min(1.0, elapsed / total)
-                    PrintProgressBar(progress: progress, height: 6, color: progressColor(for: item.job.jobStatus))
-
+                jobThumbnail(for: item, size: 44)
+                VStack(alignment: .leading, spacing: 4) {
                     HStack {
-                        if item.job.isMultiCopy {
-                            Label("\(item.job.completedCopies)/\(item.job.copies)", systemImage: "doc.on.doc")
-                                .font(.caption)
+                        Text(item.job.name)
+                            .font(.subheadline.weight(.semibold))
+                            .lineLimit(1)
+                        Spacer()
+                        StatusBadge(jobStatus: item.job.jobStatus)
+                    }
+
+                    if let printerName = item.job.printerName {
+                        Label(printerName, systemImage: "printer")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+
+                    if let startTime = item.job.actualStartTimeUtc,
+                       let estSeconds = item.job.estimatedPrintTimeSeconds, estSeconds > 0 {
+                        let elapsed = Date.now.timeIntervalSince(startTime)
+                        let total = TimeInterval(estSeconds)
+                        let progress = min(1.0, elapsed / total)
+                        PrintProgressBar(progress: progress, height: 4, color: progressColor(for: item.job.jobStatus))
+
+                        HStack {
+                            if item.job.isMultiCopy {
+                                Label("\(item.job.completedCopies)/\(item.job.copies)", systemImage: "doc.on.doc")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            let remaining = max(0, total - elapsed)
+                            Label("~\(remaining.durationFormatted) left", systemImage: "clock")
+                                .font(.caption2)
                                 .foregroundStyle(.secondary)
                         }
-                        Spacer()
-                        let remaining = max(0, total - elapsed)
-                        Label("~\(remaining.durationFormatted) left", systemImage: "clock")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
                     }
                 }
             }
-            }
-            .padding(.vertical, 4)
+            .padding(.vertical, 2)
         }
         .buttonStyle(.plain)
     }
@@ -278,10 +344,10 @@ struct JobListView: View {
             jobDetailLink(for: item) {
             HStack(spacing: 12) {
                 jobThumbnail(for: item, size: 44)
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 4) {
                 HStack {
                     Text(item.job.name)
-                        .font(.headline)
+                        .font(.subheadline.weight(.semibold))
                         .lineLimit(1)
                     Spacer()
                     priorityIndicator(item.job.priority)
@@ -310,15 +376,9 @@ struct JobListView: View {
                     }
                 }
 
-                HStack {
-                    Spacer()
-                    Text(item.job.createdAtUtc.relativeFormatted)
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                }
             }
             }
-            .padding(.vertical, 4)
+            .padding(.vertical, 2)
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("job.row.\(item.job.jobUUID?.uuidString ?? "unknown")")

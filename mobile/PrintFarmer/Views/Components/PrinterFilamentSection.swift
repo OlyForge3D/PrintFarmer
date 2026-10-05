@@ -7,6 +7,8 @@ struct PrinterFilamentSection: View {
     let onAction: @MainActor (PrinterFilamentAction) -> Void
     var embedded = false
     var showsAllActions = false
+    var spoolDetailsByID: [Int: SpoolmanSpool] = [:]
+    var spoolLookupMessage: String?
     @State var detailsExpanded = false
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
@@ -64,15 +66,28 @@ struct PrinterFilamentSection: View {
                     .accessibilityIdentifier("printer.filament.attention")
             }
             if !embedded {
+                if showsAllActions {
+                    Text("Spool assignments are inventory records and do not confirm physical loading.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("printer.filament.assignment-disclaimer")
+                }
                 if let action = primaryAction {
-                    actionButton(action)
+                    if !showsAllActions { actionButton(action) }
                 }
                 if showsAllActions {
-                    ForEach(detailActions) { action in
-                        VStack(alignment: .leading, spacing: 4) {
-                            actionButton(action)
-                            if let reason = presentation.disabledReason(for: action) {
-                                Text(reason).font(.caption).foregroundStyle(.secondary)
+                    filamentDetailActions
+                } else {
+                    let layout = dynamicTypeSize.isAccessibilitySize
+                        ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+                        : AnyLayout(HStackLayout(alignment: .center, spacing: 12))
+                    layout {
+                        ForEach(detailActions) { action in
+                            VStack(alignment: .leading, spacing: 4) {
+                                actionButton(action)
+                                if let reason = presentation.disabledReason(for: action) {
+                                    Text(reason).font(.caption).foregroundStyle(.secondary)
+                                }
                             }
                         }
                     }
@@ -108,10 +123,10 @@ struct PrinterFilamentSection: View {
                     .frame(width: 40, height: 40)
                     .accessibilityHidden(true)
             } else if showsAllActions {
-                Image(systemName: "circle.circle.fill")
-                    .font(.system(size: 44, weight: .light))
-                    .foregroundStyle(row.swatchHex.map { Color(hex: $0) } ?? Color.pfTextSecondary)
-                    .frame(width: 52, height: 52)
+                spoolReel(
+                    colorHex: row.swatchHex ?? row.spoolID.flatMap { spoolDetailsByID[$0]?.colorHex },
+                    size: 64
+                )
                     .accessibilityHidden(true)
             } else if let hex = row.swatchHex {
                 Circle()
@@ -124,16 +139,33 @@ struct PrinterFilamentSection: View {
                 if let title = presentation.compactTitle(for: row) {
                     Text(title).font(.subheadline.weight(.semibold))
                 }
-                if showsAllActions && row.hasAssignment {
-                    Text("Assigned spool")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(Color.pfTextSecondary)
+                if showsAllActions, row.hasAssignment,
+                   let name = row.spoolName ?? row.spoolID.flatMap({ spoolDetailsByID[$0]?.name }) {
+                    Text(name)
+                        .font(.headline)
+                        .lineLimit(2)
                 }
-                Text(row.materialSummary + (embedded && row.hasAssignment
-                     ? row.colorText.flatMap { $0.isEmpty ? nil : " · \($0)" } ?? "" : ""))
-                    .font(embedded || showsAllActions ? .callout.weight(.semibold) : .subheadline)
+                if showsAllActions && row.hasAssignment {
+                    let material = row.material ?? row.spoolID.flatMap { spoolDetailsByID[$0]?.material }
+                    if let material {
+                        Text(material)
+                            .font(.subheadline)
+                            .foregroundStyle(Color.pfTextSecondary)
+                    }
+                } else {
+                    Text(row.materialSummary + (embedded && row.hasAssignment
+                         ? row.colorText.flatMap { $0.isEmpty ? nil : " · \($0)" } ?? "" : ""))
+                        .font(embedded ? .callout.weight(.semibold) : .subheadline)
+                }
                 if showsAllActions && row.hasAssignment {
                     coverageSummary(row)
+                    if let spoolID = row.spoolID, let spoolDetails = spoolDetailsByID[spoolID] {
+                        spoolWeightMeter(spoolDetails)
+                    } else if let spoolLookupMessage, row.spoolID != nil {
+                        Text(spoolLookupMessage)
+                            .font(.caption)
+                            .foregroundStyle(Color.pfTextSecondary)
+                    }
                 }
                 if embedded, let spool = row.spoolID {
                     Text("Spool #\(spool)" + (row.remainingGrams.flatMap {
@@ -144,7 +176,9 @@ struct PrinterFilamentSection: View {
                     Text("Color: \(color)").font(.caption).foregroundStyle(.secondary)
                 }
                 if row.coverage?.status == .runout, let notice = row.notice {
-                    Text(notice).font(.caption)
+                    if !showsAllActions {
+                        Text(notice).font(.caption)
+                    }
                 }
             }
         }
@@ -155,7 +189,7 @@ struct PrinterFilamentSection: View {
     @ViewBuilder
     private func coverageSummary(_ row: PrinterFilamentPresentation.Row) -> some View {
         let remaining = row.coverage?.remainingGrams
-        let demand = row.coverage?.currentJobRemainingGrams
+        let demand = row.coverage?.currentJobRequiredGrams
         HStack(spacing: 4) {
             Text("\(quantityText(remaining)) remaining")
             Text("·").accessibilityHidden(true)
@@ -165,7 +199,7 @@ struct PrinterFilamentSection: View {
         .foregroundStyle(row.coverage?.status == .runout ? Color.pfWarning : Color.pfTextSecondary)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
-            "Spool amount \(quantityText(remaining)); current job demand \(quantityText(demand))"
+            "Spool amount \(quantityText(remaining)); current job required \(quantityText(demand))"
         )
     }
 
@@ -176,10 +210,52 @@ struct PrinterFilamentSection: View {
         } ?? "Unknown"
     }
 
+    private func spoolWeightMeter(_ spool: SpoolmanSpool) -> some View {
+        let meter = SpoolWeightMeter(
+            remainingGrams: spool.remainingWeightG,
+            initialGrams: spool.initialWeightG
+        )
+        return VStack(alignment: .leading, spacing: 5) {
+            if let fraction = meter.fraction {
+                GeometryReader { geometry in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(Color.pfBackgroundTertiary)
+                        Capsule()
+                            .fill(fraction <= 0.12 ? Color.pfError : fraction <= 0.25 ? Color.pfWarning : Color.pfSuccess)
+                            .frame(width: geometry.size.width * fraction)
+                    }
+                }
+                .frame(height: 6)
+                .accessibilityLabel("Spool remaining")
+                .accessibilityValue(meter.label)
+            }
+            Text(meter.label)
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(Color.pfTextSecondary)
+                .accessibilityIdentifier("printer.filament.remainingMeter.label")
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("printer.filament.remainingMeter")
+    }
+
+    private func spoolReel(colorHex: String?, size: CGFloat) -> some View {
+        let materialColor = colorHex.map { Color(hex: $0) } ?? Color.pfTextSecondary
+        return ZStack {
+            Circle()
+                .fill(materialColor.opacity(0.84))
+                .overlay(Circle().strokeBorder(Color.pfBorder, lineWidth: 1))
+            Circle()
+                .fill(Color.pfCard)
+                .frame(width: size * 0.28, height: size * 0.28)
+            Circle()
+                .strokeBorder(Color.pfCard.opacity(0.9), lineWidth: max(2, size * 0.035))
+                .frame(width: size * 0.48, height: size * 0.48)
+        }
+        .frame(width: size, height: size)
+    }
+
     var details: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Spool assignments are inventory records and do not confirm physical loading.")
-                .font(.caption).foregroundStyle(.secondary)
             if let status = presentation.statusText {
                 Text(status).font(.subheadline).foregroundStyle(.secondary)
             }
@@ -209,9 +285,18 @@ struct PrinterFilamentSection: View {
 
     private func actionButton(_ action: PrinterFilamentAction) -> some View {
         Button { select(action) } label: {
-            Text(actionTitle(action))
-                .frame(minHeight: 44, alignment: .leading)
-                .contentShape(Rectangle())
+            Group {
+                if showsAllActions {
+                    Text(actionTitle(action))
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .background(Color.pfBackgroundTertiary, in: RoundedRectangle(cornerRadius: 12))
+                        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.pfBorder, lineWidth: 1))
+                } else {
+                    Text(actionTitle(action))
+                        .frame(minHeight: 44, alignment: .leading)
+                }
+            }
+            .contentShape(Rectangle())
         }
 
         .buttonStyle(.borderless)
@@ -219,6 +304,20 @@ struct PrinterFilamentSection: View {
         .accessibilityLabel("\(actionTitle(action)), \(action.target.label)")
         .accessibilityHint(presentation.disabledReason(for: action) ?? "")
         .accessibilityIdentifier("printer.filament.action.\(action.id)")
+    }
+
+    @ViewBuilder
+    private var filamentDetailActions: some View {
+        let primaryActions = actions.filter { [.set, .change, .scanNFC].contains($0.kind) }
+        let unassignActions = actions.filter { $0.kind == .clearAssignment }
+        VStack(spacing: 8) {
+            if !primaryActions.isEmpty {
+                HStack(spacing: 8) {
+                    ForEach(primaryActions) { action in actionButton(action) }
+                }
+            }
+            ForEach(unassignActions) { action in actionButton(action) }
+        }
     }
 
     private func actionTitle(_ action: PrinterFilamentAction) -> String {

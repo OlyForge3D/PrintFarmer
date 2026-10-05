@@ -24,6 +24,10 @@ enum PrinterListNavigationContext: Equatable {
         }
     }
 
+    func printerCardIdentifier(for printerID: UUID) -> String {
+        "\(accessibilityPrefix)-card-\(printerID.uuidString)"
+    }
+
     var appTab: AppTab {
         switch self {
         case .farm:
@@ -274,22 +278,35 @@ struct PrinterListView: View {
     }
 
     private var statusFilterBar: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(PrinterListViewModel.StatusFilter.allCases) { filter in
-                    let count = viewModel.count(for: filter)
-                    FilterChip(
-                        title: filterCountTitle(filter, count: count),
-                        identifier: "farm.filter.\(filter.id)",
-                        isSelected: viewModel.selectedStatus == filter
-                    ) {
-                        viewModel.selectedStatus = filter
-                    }
+        Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 8) {
+                    statusFilterChips(allowsWrapping: true)
                 }
+            } else {
+                HStack(spacing: 8) {
+                    statusFilterChips(allowsWrapping: false)
+                }
+                .fixedSize(horizontal: true, vertical: false)
             }
-            .padding(.horizontal, 4)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("farm.filters")
+    }
+
+    private func statusFilterChips(allowsWrapping: Bool) -> some View {
+        ForEach(PrinterListViewModel.StatusFilter.allCases) { filter in
+            let count = viewModel.count(for: filter)
+            FilterChip(
+                title: filterCountTitle(filter, count: count),
+                identifier: "farm.filter.\(filter.id)",
+                isSelected: viewModel.selectedStatus == filter,
+                allowsWrapping: allowsWrapping
+            ) {
+                viewModel.selectedStatus = filter
+            }
+        }
     }
 
     private func filterCountTitle(
@@ -308,10 +325,7 @@ struct PrinterListView: View {
     }
 
     private func printerAccessibilityIdentifier(for printer: Printer) -> String {
-        switch navigationContext {
-        case .farm:
-            "farm-card-\(printer.id.uuidString)"
-        }
+        navigationContext.printerCardIdentifier(for: printer.id)
     }
 }
 
@@ -399,6 +413,7 @@ private struct FilterChip: View {
     let title: String
     let identifier: String
     let isSelected: Bool
+    let allowsWrapping: Bool
     let action: () -> Void
 
     var body: some View {
@@ -409,25 +424,27 @@ private struct FilterChip: View {
                         .accessibilityHidden(true)
                 }
                 Text(title)
-                    .font(.subheadline.weight(.medium))
+                    .font(.caption.weight(.medium))
                     .fixedSize(horizontal: false, vertical: true)
             }
-                .padding(.horizontal, 12)
-                .frame(minHeight: 44)
-                .foregroundStyle(Color.pfTextPrimary)
-                .background(
-                    isSelected ? Color.pfAccent.opacity(0.18) : Color.pfCard,
-                    in: Capsule()
-                )
-                .overlay {
-                    Capsule()
-                        .strokeBorder(
-                            isSelected ? Color.pfAccentHover : Color.pfBorder,
-                            lineWidth: 1
-                        )
-                }
+            .padding(.horizontal, 8)
+            .frame(minHeight: 44)
+            .foregroundStyle(Color.pfTextPrimary)
+            .background(
+                isSelected ? Color.pfAccent.opacity(0.18) : Color.pfCard,
+                in: Capsule()
+            )
+            .overlay {
+                Capsule()
+                    .strokeBorder(
+                        isSelected ? Color.pfAccentHover : Color.pfBorder,
+                        lineWidth: 1
+                    )
+            }
+            .frame(maxWidth: allowsWrapping ? .infinity : nil, alignment: .leading)
         }
         .buttonStyle(.plain)
+        .fixedSize(horizontal: !allowsWrapping, vertical: false)
         .accessibilityLabel(title)
         .accessibilityValue(isSelected ? "Selected" : "Not selected")
         .accessibilityHint("Filters the printer list to \(title.lowercased()).")

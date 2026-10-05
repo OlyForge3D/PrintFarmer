@@ -77,7 +77,11 @@ actor PrinterService: PrinterServiceProtocol {
     // MARK: - Status & Data
 
     func getStatus(id: UUID) async throws -> PrinterStatusDetail {
-        try await apiClient.get("/api/printers/\(id)/status")
+        var status: PrinterStatusDetail = try await apiClient.get("/api/printers/\(id)/status")
+        if let progress = status.progress {
+            status.progress = min(max(progress, 0), 100) / 100
+        }
+        return status
     }
 
     func listCameraUrls() async throws -> [PrinterCameraUrls] {

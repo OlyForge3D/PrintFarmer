@@ -10,6 +10,7 @@ struct PrinterSetupControlsContent: View {
     var materialPresentation: PrinterFilamentPresentation? = nil
     var observesSafety = false
     var showsMaterial = true
+    var showsRuntimeAdjustments = false
     var usesHeaterSteppers = false
     var materialActions: [PrinterFilamentAction] = []
     var onMaterialAction: @MainActor (PrinterFilamentAction) -> Void = { _ in }
@@ -111,7 +112,7 @@ struct PrinterSetupControlsContent: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     insetGroup { PrinterMotionControls(viewModel: viewModel) }
-                    if !showsMaterial {
+                    if showsRuntimeAdjustments {
                         insetGroup { PrinterRuntimeAdjustments(viewModel: viewModel) }
                     }
                     if showsMaterial { insetGroup {
@@ -416,6 +417,7 @@ private struct PrinterRuntimeAdjustments: View {
                 Text(value ?? "Unknown")
                     .font(.subheadline.monospacedDigit())
                     .foregroundStyle(Color.pfTextSecondary)
+                    .accessibilityIdentifier("printer.controls.runtime.\(identifier).value")
             }
             if let unavailableReason {
                 Text(unavailableReason)

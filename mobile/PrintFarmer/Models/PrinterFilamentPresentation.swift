@@ -179,6 +179,13 @@ struct PrinterFilamentPresentation: Equatable, Sendable {
         var used = Set<Int>()
         var result: [Row] = []
         for toolhead in roster {
+            let assignedSpool = spool.flatMap { (info: PrinterSpoolInfo) -> PrinterSpoolInfo? in
+                guard info.hasActiveSpool, let spoolID = info.activeSpoolId,
+                      spoolID == toolhead.currentSpoolId else {
+                    return nil
+                }
+                return info
+            }
             let uuidMatch = slots.indices.first { slots[$0].toolheadId == toolhead.id }
             let sameIndex = slots.indices.filter { slots[$0].toolheadIndex == toolhead.index }
             let rosterIndexIsUnique = roster.filter { $0.index == toolhead.index }.count == 1
@@ -191,14 +198,14 @@ struct PrinterFilamentPresentation: Equatable, Sendable {
                 id: "\(printer.id)/id:\(toolhead.id)",
                 toolheadID: toolhead.id, index: toolhead.index,
                 title: toolhead.name ?? "Tool \(toolhead.index)",
-                material: toolhead.currentMaterial,
+                material: toolhead.currentMaterial ?? assignedSpool?.material,
                 spoolID: toolhead.currentSpoolId,
-                spoolName: nil,
-                remainingGrams: nil,
+                spoolName: assignedSpool.map { $0.filamentName ?? $0.spoolName ?? "Assigned spool" },
+                remainingGrams: assignedSpool?.remainingWeightG,
                 coverage: slot, isLastConfirmed: self.isStale, isCoverageOnly: false,
                 nozzleDiameter: toolhead.nozzleDiameter,
                 hasAssignment: toolhead.currentSpoolId != nil,
-                colorText: toolhead.currentFilamentColor
+                colorText: toolhead.currentFilamentColor ?? assignedSpool?.colorHex
             ))
         }
         for offset in slots.indices where !used.contains(offset) {
@@ -218,7 +225,11 @@ struct PrinterFilamentPresentation: Equatable, Sendable {
         }
         // Printer-level spool data has no slot authority. Keep it once, explicitly
         // unattributed, rather than copying its quantity into each physical slot.
-        if let spool {
+        let spoolIsAlreadyRepresentedByToolhead = spool.flatMap { info -> Bool? in
+            guard info.hasActiveSpool, let spoolID = info.activeSpoolId else { return nil }
+            return roster.contains { $0.currentSpoolId == spoolID }
+        } ?? false
+        if let spool, !spoolIsAlreadyRepresentedByToolhead {
             result.append(Row(
                 id: "\(printer.id)/printer-spool",
                 toolheadID: nil, index: nil,

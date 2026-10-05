@@ -422,7 +422,8 @@ struct PrinterStatusDetail: Codable, Sendable {
     let id: UUID
     let isOnline: Bool
     let state: String?
-    let progress: Double?
+    /// Internal 0–1 scale, normalized from the backend's 0–100 percentage in `PrinterService`.
+    var progress: Double?
     let currentLayer: Int?
     let totalLayers: Int?
     let fanSpeedPercent: Double?

@@ -131,7 +131,9 @@ struct DashboardView: View {
                         isPendingReady: viewModel.isPendingReady(printer),
                         isReadOnly: true
                     )
-                    .accessibilityIdentifier("farm-card-\(printer.id.uuidString)")
+                    .accessibilityIdentifier(
+                        PrinterListNavigationContext.farm.printerCardIdentifier(for: printer.id)
+                    )
                 }
             }
             .padding()

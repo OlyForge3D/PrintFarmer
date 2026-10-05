@@ -434,6 +434,19 @@ final class JobListViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.recentFailures.map(\.id), [failed.id])
     }
 
+    func testCompletedHistoryKeepsCompletedAndCancelledJobsOutsideRecentFailures() async throws {
+        let completed = try TestData.decodeQueuedPrintJobResponse(from: TestJSON.queuedPrintJobResponseCompleted)
+        let cancelled = try makeQueueJob(status: .cancelled, name: "cancelled-job")
+        let failed = try TestData.decodeQueuedPrintJobResponse(from: TestJSON.queuedPrintJobResponseFailed)
+        viewModel.jobs = [completed, cancelled, failed]
+
+        XCTAssertEqual(
+            Set(viewModel.completedHistoryJobs.map(\.job.name)),
+            Set([completed.job.name, "cancelled-job"])
+        )
+        XCTAssertEqual(viewModel.recentFailures.map(\.id), [failed.id])
+    }
+
     // MARK: - hasAnyJobs
 
     func testHasAnyJobsTrueWhenJobsExist() async throws {
@@ -564,6 +577,7 @@ final class JobListViewModelTests: XCTestCase {
         XCTAssertTrue(viewModel.activeJobs.isEmpty)
         XCTAssertTrue(viewModel.queuedJobs.isEmpty)
         XCTAssertTrue(viewModel.recentFailures.isEmpty)
+        XCTAssertTrue(viewModel.completedHistoryJobs.isEmpty)
     }
 
     private func makeQueueJob(

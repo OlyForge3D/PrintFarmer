@@ -124,7 +124,7 @@ final class PrinterDetailPanelsTests: XCTestCase {
         defer { window.isHidden = true; window.rootViewController = nil }
         try await selectControls(in: controller)
         try await waitForHost("Initial detail load must expose the native heater editor", in: controller.view) {
-            self.heaterTarget(in: controller.view)?.isEnabled == true && self.capabilityRequests(fixture.api).count == 2
+            self.heaterTarget(in: controller.view)?.isEnabled == true
         }
         XCTAssertEqual(capabilityRequests(fixture.api).count, 2, "Owner load plus foreground safety discovery")
         XCTAssertEqual(capabilityRequests(fixture.api).first?.url?.host, fixture.first.baseURL.host)
@@ -874,6 +874,96 @@ final class PrinterDetailPanelsTests: XCTestCase {
         )
         let scan = actions.first { $0.kind == .scanNFC }
         XCTAssertNil(scan?.disabledReason)
+    }
+
+    func testFilamentAssignmentActionsRemainAvailableWhilePrinting() {
+        let actions = PrinterDetailFilamentActionMapping.actions(
+            printerID: UUID(),
+            hasActiveSpool: true,
+            isPerformingAction: false,
+            nfcAvailable: true,
+            isOnline: true,
+            printerState: "printing"
+        )
+        for kind in [PrinterFilamentAction.Kind.change, .clearAssignment, .scanNFC] {
+            XCTAssertNil(actions.first { $0.kind == kind }?.disabledReason)
+        }
+    }
+
+    func testFilamentAssignmentActionsRemainAvailableWhilePaused() {
+        let actions = PrinterDetailFilamentActionMapping.actions(
+            printerID: UUID(),
+            hasActiveSpool: true,
+            isPerformingAction: false,
+            nfcAvailable: true,
+            isOnline: true,
+            printerState: "paused"
+        )
+        for kind in [PrinterFilamentAction.Kind.change, .clearAssignment, .scanNFC] {
+            XCTAssertNil(actions.first { $0.kind == kind }?.disabledReason)
+        }
+    }
+
+    func testFilamentAssignmentActionsStayDisabledForBusyPrintingPrinter() {
+        let actions = PrinterDetailFilamentActionMapping.actions(
+            printerID: UUID(),
+            hasActiveSpool: true,
+            isPerformingAction: true,
+            nfcAvailable: true,
+            isOnline: true,
+            printerState: "printing"
+        )
+        for kind in [PrinterFilamentAction.Kind.change, .clearAssignment, .scanNFC] {
+            XCTAssertEqual(
+                actions.first { $0.kind == kind }?.disabledReason,
+                "Another printer operation is in progress."
+            )
+        }
+    }
+
+    func testFilamentAssignmentActionsFailClosedForOfflineOrUnknownPrinter() {
+        let offline = PrinterDetailFilamentActionMapping.actions(
+            printerID: UUID(),
+            hasActiveSpool: true,
+            isPerformingAction: false,
+            nfcAvailable: true,
+            isOnline: false,
+            printerState: "ready"
+        )
+        XCTAssertEqual(
+            offline.first { $0.kind == .clearAssignment }?.disabledReason,
+            "Printer is offline."
+        )
+        XCTAssertEqual(
+            offline.first { $0.kind == .scanNFC }?.disabledReason,
+            "Printer is offline."
+        )
+
+        let unknown = PrinterDetailFilamentActionMapping.actions(
+            printerID: UUID(),
+            hasActiveSpool: true,
+            isPerformingAction: false,
+            nfcAvailable: true,
+            isOnline: true,
+            printerState: nil
+        )
+        XCTAssertEqual(
+            unknown.first { $0.kind == .change }?.disabledReason,
+            "Printer state is unknown or transitioning."
+        )
+
+        let transitioning = PrinterDetailFilamentActionMapping.actions(
+            printerID: UUID(),
+            hasActiveSpool: true,
+            isPerformingAction: false,
+            nfcAvailable: true,
+            isOnline: true,
+            printerState: "starting"
+        )
+        XCTAssertEqual(
+            transitioning.first { $0.kind == .clearAssignment }?.disabledReason,
+            "Printer state is unknown or transitioning."
+        )
     }
 
     // MARK: - Coverage state mapping

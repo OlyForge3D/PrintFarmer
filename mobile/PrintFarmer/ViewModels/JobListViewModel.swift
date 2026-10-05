@@ -547,6 +547,16 @@ final class JobListViewModel {
         .sorted { ($0.job.actualEndTimeUtc ?? $0.job.createdAtUtc) > ($1.job.actualEndTimeUtc ?? $1.job.createdAtUtc) }
     }
 
+    /// Completed and cancelled jobs remain reachable from secondary history,
+    /// outside the approved three-section queue composition.
+    var completedHistoryJobs: [QueuedPrintJobResponse] {
+        jobs.filter { item in
+            guard let status = item.job.jobStatus else { return false }
+            return [.completed, .cancelled].contains(status)
+        }
+        .sorted { ($0.job.actualEndTimeUtc ?? $0.job.createdAtUtc) > ($1.job.actualEndTimeUtc ?? $1.job.createdAtUtc) }
+    }
+
     var hasAnyJobs: Bool {
         !jobs.isEmpty
     }

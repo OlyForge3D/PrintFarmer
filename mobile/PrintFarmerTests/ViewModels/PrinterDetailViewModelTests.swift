@@ -647,6 +647,62 @@ final class PrinterDetailViewModelTests: XCTestCase {
         )
     }
 
+    func testPhysicalFilamentCommandsRequireReportedSupportAndDoNotChangeAssignment() async throws {
+        var printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        printer.isOnline = true
+        printer.state = "ready"
+        mockService.printerToReturn = printer
+        var capabilities = PrinterBackendCapabilities.fallback(for: .moonraker)
+        capabilities.supportsFilamentLoad = true
+        capabilities.supportsFilamentUnload = true
+        mockService.capabilitiesToReturn = capabilities
+        await viewModel.loadPrinter()
+        await viewModel.loadFilamentCommandCapabilities()
+
+        await viewModel.loadPhysicalFilament()
+        await viewModel.unloadPhysicalFilament()
+
+        XCTAssertEqual(mockService.physicalFilamentCalls, ["load", "unload"])
+        XCTAssertEqual(mockService.loadFilamentCalledWith, TestData.testUUID)
+        XCTAssertEqual(mockService.unloadFilamentCalledWith, TestData.testUUID)
+        XCTAssertNil(mockService.setActiveSpoolCalledWith, "Physical unload must not unassign the spool.")
+        XCTAssertNil(viewModel.actionError)
+    }
+
+    func testPhysicalFilamentCommandsFailClosedWhilePrintingOrWithoutBackendSupport() async throws {
+        var printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        printer.isOnline = true
+        printer.state = "printing"
+        mockService.printerToReturn = printer
+        var capabilities = PrinterBackendCapabilities.fallback(for: .moonraker)
+        capabilities.supportsFilamentLoad = true
+        capabilities.supportsFilamentUnload = true
+        mockService.capabilitiesToReturn = capabilities
+        await viewModel.loadPrinter()
+        await viewModel.loadFilamentCommandCapabilities()
+
+        await viewModel.loadPhysicalFilament()
+        await viewModel.unloadPhysicalFilament()
+
+        XCTAssertTrue(mockService.physicalFilamentCalls.isEmpty)
+        XCTAssertTrue(viewModel.actionError?.contains("disabled while a print is active") == true)
+
+        viewModel.actionError = nil
+        printer.state = "ready"
+        mockService.printerToReturn = printer
+        capabilities.supportsFilamentLoad = false
+        capabilities.supportsFilamentUnload = false
+        mockService.capabilitiesToReturn = capabilities
+        await viewModel.loadPrinter()
+        await viewModel.loadFilamentCommandCapabilities()
+
+        await viewModel.loadPhysicalFilament()
+        await viewModel.unloadPhysicalFilament()
+
+        XCTAssertTrue(mockService.physicalFilamentCalls.isEmpty)
+        XCTAssertTrue(viewModel.actionError?.contains("does not report support") == true)
+    }
+
     /// Shared fixture for tests that need a printer starting WITH an active
     /// spool assignment (used by both `clearActiveSpoolAssignment` and
     /// `ejectFilament`'s stale-snapshot-override regression tests).
@@ -1776,6 +1832,76 @@ final class PrinterDetailViewModelTests: XCTestCase {
 
         XCTAssertEqual(viewModel.printer?.state, "printing",
                        "Foreign-printer update must not overwrite this view's printer state")
+    }
+
+    func testConfigureSignalRAppliesAndClearsCurrentJobThumbnailAcrossJobChanges() async throws {
+        var printer = try TestData.decodePrinter()
+        printer.state = "printing"
+        printer.jobName = "old-job"
+        printer.currentJobThumbnailUrl = "/old-thumbnail"
+        mockService.printerToReturn = printer
+        await viewModel.loadPrinter()
+        viewModel.isViewActive = true
+
+        let signalR = MockSignalRService()
+        viewModel.configureSignalR(signalR)
+
+        signalR.simulatePrinterUpdate(PrinterStatusUpdate(
+            id: TestData.testUUID,
+            isOnline: true,
+            state: "printing",
+            progress: 5,
+            jobName: "new-job",
+            fileName: "new-job.gcode",
+            thumbnailUrl: nil,
+            currentJobThumbnailUrl: nil,
+            cameraStreamUrl: nil,
+            x: nil, y: nil, z: nil,
+            hotendTemp: nil, bedTemp: nil, hotendTarget: nil, bedTarget: nil,
+            homedAxes: nil, spoolInfo: nil, mmuStatus: nil
+        ))
+        await Task.yield()
+        try? await Task.sleep(for: .milliseconds(20))
+        XCTAssertNil(viewModel.printer?.currentJobThumbnailUrl,
+                     "A new job without a thumbnail must not retain the previous job's image")
+
+        signalR.simulatePrinterUpdate(PrinterStatusUpdate(
+            id: TestData.testUUID,
+            isOnline: true,
+            state: "printing",
+            progress: 10,
+            jobName: "new-job",
+            fileName: "new-job.gcode",
+            thumbnailUrl: nil,
+            currentJobThumbnailUrl: "/new-thumbnail",
+            cameraStreamUrl: nil,
+            x: nil, y: nil, z: nil,
+            hotendTemp: nil, bedTemp: nil, hotendTarget: nil, bedTarget: nil,
+            homedAxes: nil, spoolInfo: nil, mmuStatus: nil
+        ))
+        await Task.yield()
+        try? await Task.sleep(for: .milliseconds(20))
+        XCTAssertEqual(viewModel.printer?.currentJobThumbnailUrl, "/new-thumbnail")
+        XCTAssertEqual(viewModel.statusDetail?.currentJobThumbnailUrl, "/new-thumbnail")
+
+        signalR.simulatePrinterUpdate(PrinterStatusUpdate(
+            id: TestData.testUUID,
+            isOnline: true,
+            state: "ready",
+            progress: 100,
+            jobName: nil,
+            fileName: nil,
+            thumbnailUrl: nil,
+            currentJobThumbnailUrl: nil,
+            cameraStreamUrl: nil,
+            x: nil, y: nil, z: nil,
+            hotendTemp: nil, bedTemp: nil, hotendTarget: nil, bedTarget: nil,
+            homedAxes: nil, spoolInfo: nil, mmuStatus: nil
+        ))
+        await Task.yield()
+        try? await Task.sleep(for: .milliseconds(20))
+        XCTAssertNil(viewModel.printer?.currentJobThumbnailUrl)
+        XCTAssertNil(viewModel.statusDetail?.currentJobThumbnailUrl)
     }
 }
 

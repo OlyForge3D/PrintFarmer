@@ -819,6 +819,28 @@ final class PrinterControlsViewModelTests: XCTestCase {
         XCTAssertTrue(observer.commandNotice?.contains("Command accepted") == true)
     }
 
+    func test_unconfiguredServerAccessHasAnExplicitBlockedReason() async throws {
+        var printer = try idlePrinter()
+        printer.fanSpeedPercent = 25
+        var capabilities = Self.fullCaps
+        capabilities.supportsFanSpeedReadback = true
+        mockService.capabilitiesToReturn = capabilities
+        mockService.detailsToReturn = .controlsLimitsFixture(for: printer)
+        let composition = PrinterControlsComposition(
+            identity: .init(serverID: UUID(), generation: 0, revision: 0),
+            printerService: mockService
+        )
+        let model = PrinterControlsViewModel(composition: composition, printer: printer)
+        await model.loadCapabilities()
+
+        let reason = "Waiting for registered-server access confirmation."
+        XCTAssertEqual(model.blockedReason, reason)
+        XCTAssertEqual(model.fanControlUnavailableReason, reason)
+        XCTAssertFalse(model.canAdjustRuntimeControls)
+        await model.setFanSpeed(50)
+        XCTAssertNil(mockService.setFanSpeedCalledWith)
+    }
+
     func test_sharedLease_missingIdentityFailsClosedAndConfiguredIdentityCannotBeRebound() async throws {
         let printer = try idlePrinter()
         mockService.capabilitiesToReturn = Self.fullCaps
@@ -2677,6 +2699,106 @@ final class PrinterControlsViewModelTests: XCTestCase {
             PrinterControlsUpdateSignal(printer: base),
             PrinterControlsUpdateSignal(printer: printing)
         )
+    }
+
+    func test_updateSignal_differentWhenRuntimeReadbackChanges() throws {
+        let base = try idlePrinter()
+        var fanChanged = base
+        fanChanged.fanSpeedPercent = 50
+        XCTAssertNotEqual(
+            PrinterControlsUpdateSignal(printer: base),
+            PrinterControlsUpdateSignal(printer: fanChanged),
+            "Fan-only updates must reach the runtime-controls owner"
+        )
+
+        var zOffsetChanged = base
+        zOffsetChanged.liveZOffsetMm = -0.025
+        XCTAssertNotEqual(
+            PrinterControlsUpdateSignal(printer: base),
+            PrinterControlsUpdateSignal(printer: zOffsetChanged),
+            "Z-offset-only updates must reach the runtime-controls owner"
+        )
+    }
+
+    func test_runtimeAdjustmentsDispatchAndClearOnlyAfterMatchingReadback() async throws {
+        var printer = try idlePrinter()
+        printer.state = "printing"
+        printer.fanSpeedPercent = 25
+        printer.liveZOffsetMm = 0
+        var capabilities = Self.fullCaps
+        capabilities.supportsFanSpeedReadback = true
+        capabilities.supportsZOffsetAdjustment = true
+        capabilities.supportsZOffsetReadback = true
+        let model = try makeViewModel(printer: printer, capabilities: capabilities)
+        await model.loadCapabilities()
+
+        await model.setFanSpeed(50)
+        XCTAssertEqual(mockService.setFanSpeedCalledWith?.printerId, printer.id)
+        XCTAssertEqual(mockService.setFanSpeedCalledWith?.speedPercent, 50)
+        XCTAssertNotNil(model.pendingCommand, "HTTP acceptance does not confirm the printer's fan readback")
+
+        var fanReadback = printer
+        fanReadback.fanSpeedPercent = 50
+        model.handlePrinterUpdate(fanReadback)
+        XCTAssertNil(model.pendingCommand, "The matching fan readback confirms the accepted command")
+
+        await model.adjustLiveZOffset(by: 0.01)
+        XCTAssertEqual(mockService.adjustZOffsetCalledWith?.printerId, printer.id)
+        XCTAssertEqual(mockService.adjustZOffsetCalledWith?.offsetMm, 0.01)
+        XCTAssertNotNil(model.pendingCommand, "HTTP acceptance does not confirm live Z-offset")
+
+        var zReadback = fanReadback
+        zReadback.liveZOffsetMm = 0.01
+        model.handlePrinterUpdate(zReadback)
+        XCTAssertNil(model.pendingCommand, "The matching Z-offset readback confirms the accepted command")
+    }
+
+    func test_runtimeAdjustmentsRejectUnsuccessfulCommandResponses() async throws {
+        var printer = try idlePrinter()
+        printer.state = "printing"
+        printer.fanSpeedPercent = 25
+        printer.liveZOffsetMm = 0
+        var capabilities = Self.fullCaps
+        capabilities.supportsFanSpeedReadback = true
+        capabilities.supportsZOffsetAdjustment = true
+        capabilities.supportsZOffsetReadback = true
+        let model = try makeViewModel(printer: printer, capabilities: capabilities)
+        await model.loadCapabilities()
+        mockService.commandResultToReturn = CommandResult(success: false, message: "Fan request rejected")
+
+        await model.setFanSpeed(50)
+
+        XCTAssertEqual(mockService.setFanSpeedCalledWith?.speedPercent, 50)
+        XCTAssertEqual(model.lastError?.message, "Fan request rejected")
+        XCTAssertNil(model.pendingCommand, "Rejected commands must not wait for telemetry")
+
+        mockService.commandResultToReturn = CommandResult(success: false, message: "Z-offset request rejected")
+        await model.adjustLiveZOffset(by: 0.01)
+
+        XCTAssertEqual(mockService.adjustZOffsetCalledWith?.offsetMm, 0.01)
+        XCTAssertEqual(model.lastError?.message, "Z-offset request rejected")
+        XCTAssertNil(model.pendingCommand, "Rejected commands must not wait for telemetry")
+    }
+
+    func test_runtimeAdjustmentsRejectInvalidInputAndUnknownReadback() async throws {
+        var printer = try idlePrinter()
+        printer.fanSpeedPercent = nil
+        printer.liveZOffsetMm = nil
+        var capabilities = Self.fullCaps
+        capabilities.supportsFanSpeedReadback = true
+        capabilities.supportsZOffsetAdjustment = true
+        capabilities.supportsZOffsetReadback = true
+        let model = try makeViewModel(printer: printer, capabilities: capabilities)
+        await model.loadCapabilities()
+
+        await model.setFanSpeed(101)
+        XCTAssertNil(mockService.setFanSpeedCalledWith)
+        XCTAssertNotNil(model.lastError)
+        model.dismissError()
+
+        await model.adjustLiveZOffset(by: 0.01)
+        XCTAssertNil(mockService.adjustZOffsetCalledWith)
+        XCTAssertNil(model.pendingCommand)
     }
 }
 

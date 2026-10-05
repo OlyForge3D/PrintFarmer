@@ -82,27 +82,9 @@ final class SpoolInventoryViewModel {
     }
 
     func count(for status: SpoolStatus?) -> Int {
-        guard let status else { return spools.count }
-        return spools.filter { spool in
-            switch status {
-            case .available:
-                return !spool.inUse && !(spool.archived ?? false)
-            case .inUse:
-                return spool.inUse
-            case .low:
-                guard let remaining = spool.remainingWeightG,
-                      let initial = spool.initialWeightG,
-                      initial > 0 else { return false }
-                return remaining / initial < 0.2
-            case .empty:
-                if let remaining = spool.remainingWeightG {
-                    return remaining == 0
-                } else if spool.initialWeightG != nil {
-                    return true
-                }
-                return false
-            }
-        }.count
+        let candidates = filterSpoolsBySearchMaterialAndNFC(spools)
+        guard let status else { return candidates.count }
+        return candidates.filter { matches($0, status: status) }.count
     }
 
     func assignedPrinterName(for spoolID: Int) -> String? {
@@ -110,43 +92,35 @@ final class SpoolInventoryViewModel {
     }
 
     var filteredSpools: [SpoolmanSpool] {
-        var result = spools
+        let result = filterSpoolsBySearchMaterialAndNFC(spools)
+        guard let status = selectedStatus else { return result }
+        return result.filter { matches($0, status: status) }
+    }
 
-        // Apply material filter first
+    private func matches(_ spool: SpoolmanSpool, status: SpoolStatus) -> Bool {
+        switch status {
+        case .available:
+            return !spool.inUse && !(spool.archived ?? false)
+        case .inUse:
+            return spool.inUse
+        case .low:
+            guard let remaining = spool.remainingWeightG,
+                  let initial = spool.initialWeightG,
+                  initial > 0 else { return false }
+            return remaining / initial < 0.2
+        case .empty:
+            return spool.remainingWeightG == 0
+        }
+    }
+
+    private func filterSpoolsBySearchMaterialAndNFC(_ spools: [SpoolmanSpool]) -> [SpoolmanSpool] {
+        var result = spools
         if let material = selectedMaterial {
             result = result.filter { $0.material == material }
         }
-
-        // Apply status filter
-        if let status = selectedStatus {
-            result = result.filter { spool in
-                switch status {
-                case .available:
-                    return !spool.inUse && !(spool.archived ?? false)
-                case .inUse:
-                    return spool.inUse
-                case .low:
-                    guard let remaining = spool.remainingWeightG,
-                          let initial = spool.initialWeightG,
-                          initial > 0 else { return false }
-                    return (remaining / initial) < 0.2
-                case .empty:
-                    if let remaining = spool.remainingWeightG {
-                        return remaining == 0
-                    } else if spool.initialWeightG != nil {
-                        return true
-                    }
-                    return false
-                }
-            }
-        }
-
-        // Apply "No NFC Tag" filter
         if showOnlyMissingNFC {
             result = result.filter { ($0.hasNfcTag ?? false) == false }
         }
-
-        // Then apply search text filter
         guard !searchText.isEmpty else { return result }
         let query = searchText.lowercased()
         return result.filter { spool in
