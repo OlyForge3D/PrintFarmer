@@ -213,8 +213,9 @@ jobs:
     name: XCUI (${{ matrix.family }}, shard ${{ matrix.shard }})
     runs-on: macos-latest
     needs: [select, test]
-    # Diagnostic-only branch: authorized #3263 capture on iPad shard 2.
-    if: ${{ !cancelled() && needs.test.result == 'success' && needs.select.outputs.should_run != 'false' }}
+    # Diagnostic-only final #3263 iPad-2 capture: preserve unit failures without
+    # letting that prerequisite prevent the separately authorized stack capture.
+    if: ${{ !cancelled() && (needs.test.result == 'success' || needs.test.result == 'failure') && needs.select.outputs.should_run != 'false' }}
     # Retired Attention/Tasks/Two-modes screens have no shipping destinations.
     # Shell, capability-gated parts, Scan/harvest and offline suites cover retained flows.
     strategy:
