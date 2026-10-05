@@ -282,7 +282,8 @@ Unrelated temperature/position changes never acknowledge a filament operation.
 | Operation | Current production availability / missing evidence |
 | --- | --- |
 | Extrude / retract | Conditional native path complete; current Moonraker discovery deliberately leaves the material-safe minimum Unknown |
-| Load / unload / change | Conditional native paths complete; Moonraker now probes installed LOAD_FILAMENT / UNLOAD_FILAMENT / M600 macros, but still requires a verified material-safe minimum |
+| Load / unload | Conditional native paths complete when the corresponding macro is discovered; require fresh measured hotend temperature at or above the higher of 220 °C and any verified minimum. If the minimum is Unknown, the 220 °C policy floor applies without changing that fact to Verified |
+| Change | Conditional native path complete; Moonraker probes the installed M600 macro, but this operation still requires a verified material-safe minimum |
 | Calibration home | Existing ordinary Home controls remain available by their own flags; the calibration flow additionally requires firmware/movement support |
 | Calibration position / adjust | Conditional native path complete; Moonraker now supplies verified geometry and separate G90/G0 support, but its clearance remains Unknown |
 | Firmware save | Conditional reviewed native save complete; current Moonraker discovery explicitly reports Unsupported firmware persistence |

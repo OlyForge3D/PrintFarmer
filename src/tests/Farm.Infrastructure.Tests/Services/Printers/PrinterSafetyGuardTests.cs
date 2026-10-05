@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure.Services.Printers;
+﻿using System.Globalization;
+using Farm.Infrastructure.Services.Printers;
 using Moq;
 using Xunit;
 
@@ -89,10 +90,9 @@ public sealed class PrinterSafetyGuardTests
     }
 
     [Theory]
-    [InlineData(PrinterSafetyOperation.FilamentLoad)]
-    [InlineData(PrinterSafetyOperation.FilamentUnload)]
     [InlineData(PrinterSafetyOperation.FilamentChange)]
-    public async Task ValidateAsync_GenericFilamentOperationWithUnknownThreshold_FailsClosed(
+    [InlineData(PrinterSafetyOperation.Extrusion)]
+    public async Task ValidateAsync_NonLoadUnloadOperationWithUnknownThreshold_FailsClosed(
         PrinterSafetyOperation operation)
     {
         Guid printerId = Guid.NewGuid();
@@ -113,6 +113,110 @@ public sealed class PrinterSafetyGuardTests
         PrinterSafetyValidationResult result = await guard.ValidateAsync(
             printerId,
             operation,
+            null,
+            CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Equal(503, result.StatusCode);
+        Assert.Equal("printer_safety_evidence_unknown", result.Code);
+    }
+
+    [Theory]
+    [InlineData(PrinterSafetyOperation.FilamentLoad, VerifiedSafetyFactState.Unknown, null, 219d, 220d, false)]
+    [InlineData(PrinterSafetyOperation.FilamentUnload, VerifiedSafetyFactState.Unknown, null, 220d, 220d, true)]
+    [InlineData(PrinterSafetyOperation.FilamentLoad, VerifiedSafetyFactState.Verified, 180d, 219d, 220d, false)]
+    [InlineData(PrinterSafetyOperation.FilamentUnload, VerifiedSafetyFactState.Verified, 180d, 220d, 220d, true)]
+    [InlineData(PrinterSafetyOperation.FilamentLoad, VerifiedSafetyFactState.Verified, 240d, 239d, 240d, false)]
+    [InlineData(PrinterSafetyOperation.FilamentUnload, VerifiedSafetyFactState.Verified, 240d, 240d, 240d, true)]
+    public async Task ValidateAsync_FilamentLoadUnload_EnforcesMinimumTemperatureFloor(
+        PrinterSafetyOperation operation,
+        VerifiedSafetyFactState minimumState,
+        double? reportedMinimumC,
+        double measuredTemperatureC,
+        double expectedMinimumC,
+        bool expectedSuccess)
+    {
+        Guid printerId = Guid.NewGuid();
+        PrinterVerifiedSafetyDto safety = CreateSafety() with
+        {
+            Extrusion = new VerifiedSafetyExtrusionDto(
+                new VerifiedSafetyScalarFactDto(
+                    minimumState,
+                    reportedMinimumC,
+                    "test",
+                    Now)),
+        };
+        PrinterSafetyGuard guard = CreateGuard(
+            printerId,
+            safety,
+            CreateStatus(
+                printerId,
+                measuredTemperatureC,
+                measuredTemperatureC,
+                Now));
+
+        PrinterSafetyValidationResult result = await guard.ValidateAsync(
+            printerId,
+            operation,
+            null,
+            CancellationToken.None);
+
+        Assert.Equal(expectedSuccess, result.Success);
+        if (!expectedSuccess)
+        {
+            Assert.Equal(409, result.StatusCode);
+            Assert.Equal("printer_temperature_below_minimum", result.Code);
+            Assert.Contains(
+                expectedMinimumC.ToString("0.###", CultureInfo.InvariantCulture),
+                result.Detail);
+        }
+    }
+
+    [Theory]
+    [InlineData(PrinterSafetyOperation.FilamentChange)]
+    [InlineData(PrinterSafetyOperation.Extrusion)]
+    public async Task ValidateAsync_OtherExtrusionOperations_KeepReportedMinimum(
+        PrinterSafetyOperation operation)
+    {
+        Guid printerId = Guid.NewGuid();
+        PrinterSafetyGuard guard = CreateGuard(
+            printerId,
+            CreateSafety(),
+            CreateStatus(printerId, 200, 200, Now));
+
+        PrinterSafetyValidationResult result = await guard.ValidateAsync(
+            printerId,
+            operation,
+            null,
+            CancellationToken.None);
+
+        Assert.True(result.Success);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData(double.NaN)]
+    public async Task ValidateAsync_FilamentLoadWithInvalidVerifiedMinimum_FailsClosed(
+        double? reportedMinimumC)
+    {
+        Guid printerId = Guid.NewGuid();
+        PrinterVerifiedSafetyDto safety = CreateSafety() with
+        {
+            Extrusion = new VerifiedSafetyExtrusionDto(
+                new VerifiedSafetyScalarFactDto(
+                    VerifiedSafetyFactState.Verified,
+                    reportedMinimumC,
+                    "test",
+                    Now)),
+        };
+        PrinterSafetyGuard guard = CreateGuard(
+            printerId,
+            safety,
+            CreateStatus(printerId, 220, 220, Now));
+
+        PrinterSafetyValidationResult result = await guard.ValidateAsync(
+            printerId,
+            PrinterSafetyOperation.FilamentLoad,
             null,
             CancellationToken.None);
 

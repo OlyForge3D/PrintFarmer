@@ -271,6 +271,7 @@ final class PrinterControlsViewModel: ObservableObject {
     // Internal feedrates (mm/min). Not exposed; controls UI uses fixed jog distances.
     static let xyFeedrateMmMin: Int = 3000
     static let zFeedrateMmMin: Int = 600
+    private static let minimumFilamentLoadUnloadTemperatureC = 220.0
 
     @Published private(set) var capabilities: PrinterBackendCapabilities?
     @Published private(set) var lastError: ControlsError?
@@ -533,19 +534,26 @@ final class PrinterControlsViewModel: ObservableObject {
         return nil
     }
 
-    private var materialTemperatureBlockedReason: String? {
+    private func materialTemperatureBlockedReason(minimumFloorC: Double? = nil) -> String? {
         if let reason = safetyEvidenceBlockedReason { return reason }
-        guard let minimum = capabilities?.verifiedSafety?.extrusion.minimumSafeMeasuredHotendTemperatureC,
-              minimum.state == .verified, let value = minimum.value, value.isFinite,
-              hasProvenance(minimum.source, minimum.observedAtUtc) else {
+        guard let minimum = capabilities?.verifiedSafety?.extrusion.minimumSafeMeasuredHotendTemperatureC else {
+            return "A verified material-safe minimum is unavailable. Firmware cold-extrusion limits and assigned spools are not safety evidence."
+        }
+        let requiredMinimumC: Double
+        if minimum.state == .verified, let value = minimum.value, value.isFinite,
+           hasProvenance(minimum.source, minimum.observedAtUtc) {
+            requiredMinimumC = max(value, minimumFloorC ?? value)
+        } else if minimum.state == .unknown, let minimumFloorC {
+            requiredMinimumC = minimumFloorC
+        } else {
             return "A verified material-safe minimum is unavailable. Firmware cold-extrusion limits and assigned spools are not safety evidence."
         }
         guard let measured = safetyStatus?.safetyTelemetry?.measuredHotendTemperatureC,
               measured.isFresh(at: clock()), let temperature = measured.value, temperature.isFinite else {
             return "Fresh measured hotend temperature is unavailable. Refresh safety checks; a hot target cannot authorize extrusion."
         }
-        return temperature >= value ? nil :
-            "Measured hotend is below the verified minimum of \(value.formatted()) °C. Use Hotend preheat, then refresh safety checks."
+        return temperature >= requiredMinimumC ? nil :
+            "Measured hotend is below the required minimum of \(requiredMinimumC.formatted()) °C. Use Hotend preheat, then refresh safety checks."
     }
 
     func configureAccess(
@@ -616,7 +624,7 @@ final class PrinterControlsViewModel: ObservableObject {
         guard capabilities?.supportsExtrusion == true else {
             return "Extrusion is unavailable without explicit backend support."
         }
-        return materialTemperatureBlockedReason
+        return materialTemperatureBlockedReason()
     }
 
     func extrude(distanceMm: Double, speedMmPerSecond: Int) async {
@@ -663,7 +671,11 @@ final class PrinterControlsViewModel: ObservableObject {
             evidence = capabilities?.verifiedSafety?.operations.filamentChange
         }
         guard supported else { return "\(operation.title) is unavailable: no verified per-operation backend/macro support." }
-        return supportReason(evidence, title: operation.title) ?? materialTemperatureBlockedReason
+        let minimumFloorC = operation == .load || operation == .unload
+            ? Self.minimumFilamentLoadUnloadTemperatureC
+            : nil
+        return supportReason(evidence, title: operation.title) ??
+            materialTemperatureBlockedReason(minimumFloorC: minimumFloorC)
     }
 
     func performFilament(_ operation: PhysicalFilamentOperation) async {
