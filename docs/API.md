@@ -137,7 +137,10 @@ Status DTOs and `printerupdated` events may include:
   `SET_PRINT_STATS_INFO`, or SDCP's `currentLayer` / `totalLayer` status fields.
 
 Unavailable, malformed, or unsupported readbacks are `null`; the API never
-estimates layer counts from progress or position.
+estimates layer counts from progress or position. When Moonraker's authoritative
+status endpoint reports the printer offline, the composite status omits all
+secondary job and live telemetry readbacks rather than mixing them with an
+offline state.
 
 ## API Contract and Calibration Capabilities
 

@@ -539,6 +539,11 @@ public partial class MoonrakerClient(
         _logger.LogDebug("[Moonraker] GetCompositeStatusAsync: baseUrl={BaseUrl}", baseUrl);
         PrinterStatus status = await GetStatusAsync(baseUrl, ct);
         _logger.LogDebug("[Moonraker] GetCompositeStatusAsync: status.IsOnline={StatusIsOnline}, status.State={StatusState}", status.IsOnline, status.State);
+        if (!status.IsOnline)
+        {
+            return new PrinterCompositeStatus(false, status.State, null, null, null, null, null);
+        }
+
         PrinterJob? job = await GetJobAsync(baseUrl, credential, ct);
 
         // Try to read current position

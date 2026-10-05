@@ -186,11 +186,10 @@ public sealed class MoonrakerDirectControlTests
             "http://moonraker-fixture.invalid/",
             PrinterCredential.FromApiKey("fixture-key"));
 
-        Assert.False(status.IsOnline);
-        Assert.Null(status.CurrentLayer);
-        Assert.Null(status.TotalLayers);
-        Assert.Null(status.FanSpeedPercent);
-        Assert.Null(status.LiveZOffsetMm);
+        Assert.Equal(
+            new PrinterCompositeStatus(false, null, null, null, null, null, null),
+            status);
+        Assert.Equal(["GET /printer/info"], handler.Requests);
     }
 
     [Theory]
