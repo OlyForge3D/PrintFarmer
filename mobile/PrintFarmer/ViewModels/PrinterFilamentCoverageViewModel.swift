@@ -2,9 +2,8 @@ import Foundation
 
 // MARK: - Printer Filament Coverage View Model (F4-M / issue #778)
 //
-// Per-printer variant of `FarmFilamentCoverageViewModel`. Same
-// three-authority discipline (see FarmFilamentCoverageViewModel.swift
-// for the full split-authority rationale); the only differences:
+// Per-printer coverage owner using the shared read-cache and SignalR
+// authority patterns; the per-printer-specific behavior is:
 //
 //   * `load()` calls the single-printer endpoint
 //     `GET /api/printers/{id}/filament-coverage`.
@@ -207,8 +206,6 @@ final class PrinterFilamentCoverageViewModel {
 
     private var callbackTick: UInt64 = 0
     private var callbackTickWaiters: [(target: UInt64, cont: CheckedContinuation<Void, Never>)] = []
-    /// See `FarmFilamentCoverageViewModel.waitForCallbackTick` for
-    /// the absence-barrier semantics.
     func waitForCallbackTick(atLeast target: UInt64) async {
         if callbackTick >= target { return }
         await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in

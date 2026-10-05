@@ -3,8 +3,6 @@ import Foundation
 enum AppDestination: Hashable {
     case printerDetail(id: UUID)
     case jobDetail(id: UUID)
-    case createJob
-    case createPrinter
     case account
     case notifications
     case settings
@@ -18,14 +16,6 @@ enum AppTab: String, Hashable, CaseIterable, Sendable {
     case farm
     case queue
     case filament
-
-    static func visibleTabs(for capabilities: ResolvedSystemCapabilities) -> [AppTab] {
-        allCases
-    }
-
-    static func fallbackTab(for capabilities: ResolvedSystemCapabilities) -> AppTab {
-        .farm
-    }
 
     var title: String {
         switch self {

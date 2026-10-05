@@ -105,12 +105,6 @@ final class AppRouter {
         inventoryPath = NavigationPath()
     }
 
-    func visibleTabs(for capabilities: ResolvedSystemCapabilities) -> [AppTab] { AppTab.allCases }
-    func fallbackTab(for capabilities: ResolvedSystemCapabilities) -> AppTab { .farm }
-    func resolvedTab(for capabilities: ResolvedSystemCapabilities) -> AppTab { selectedTab }
-    func selectTab(_ tab: AppTab, capabilities: ResolvedSystemCapabilities) { selectedTab = tab }
-    func makeTabVisibleIfPossible(_ tab: AppTab, capabilities: ResolvedSystemCapabilities) -> Bool { true }
-
     func reconcileCapabilities(_ capabilities: ResolvedSystemCapabilities) {
         if !capabilities.guidedSwapEnabled { pendingFilamentSwap = nil }
     }

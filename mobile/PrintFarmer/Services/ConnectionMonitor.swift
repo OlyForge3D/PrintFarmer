@@ -518,7 +518,6 @@ struct StartupPrefetchValue<Value: Sendable>: Sendable {
 fileprivate struct StartupPrefetchPayload: Sendable {
     let session: FarmSnapshotSession
     var attention: StartupPrefetchValue<AttentionFeed>?
-    var filamentCoverage: StartupPrefetchValue<FleetFilamentCoverage>?
     var printers: StartupPrefetchValue<[Printer]>?
 }
 
@@ -579,14 +578,6 @@ final class StartupPrefetchStore: @unchecked Sendable {
         _ body: (StartupPrefetchValue<AttentionFeed>) -> Void
     ) -> Bool {
         consume(\.attention, body)
-    }
-
-    @MainActor
-    @discardableResult
-    func consumeFilamentCoverage(
-        _ body: (StartupPrefetchValue<FleetFilamentCoverage>) -> Void
-    ) -> Bool {
-        consume(\.filamentCoverage, body)
     }
 
     @MainActor
@@ -675,7 +666,6 @@ final class StartupPrefetchAttempt: @unchecked Sendable {
     private var isOpen = true
     private var hasBegun = false
     private var attention: StartupPrefetchValue<AttentionFeed>?
-    private var filamentCoverage: StartupPrefetchValue<FleetFilamentCoverage>?
     private var printers: StartupPrefetchValue<[Printer]>?
 
     fileprivate init(store: StartupPrefetchStore, session: FarmSnapshotSession) {
@@ -685,10 +675,6 @@ final class StartupPrefetchAttempt: @unchecked Sendable {
 
     func captureAttention(_ value: AttentionFeed) {
         capture(value) { attention = $0 }
-    }
-
-    func captureFilamentCoverage(_ value: FleetFilamentCoverage) {
-        capture(value) { filamentCoverage = $0 }
     }
 
     func capturePrinters(_ value: [Printer]) {
@@ -720,11 +706,9 @@ final class StartupPrefetchAttempt: @unchecked Sendable {
         let candidate = StartupPrefetchPayload(
             session: session,
             attention: attention,
-            filamentCoverage: filamentCoverage,
             printers: printers
         )
         attention = nil
-        filamentCoverage = nil
         printers = nil
         lock.unlock()
         store.publish(candidate)
@@ -734,7 +718,6 @@ final class StartupPrefetchAttempt: @unchecked Sendable {
         lock.lock()
         isOpen = false
         attention = nil
-        filamentCoverage = nil
         printers = nil
         lock.unlock()
     }
@@ -909,8 +892,7 @@ struct BackendReadinessPlan: Sendable {
                 isEnabled: { $0.filamentCoverageEnabled },
                 treatsUnsupportedAsAvailable: true
             ) {
-                let coverage = try await filamentCoverageService.getForFleet()
-                startupPrefetchAttempt?.captureFilamentCoverage(coverage)
+                _ = try await filamentCoverageService.getForFleet()
             },
             BackendReadinessProbe(
                 endpoint: .shiftTasks,
