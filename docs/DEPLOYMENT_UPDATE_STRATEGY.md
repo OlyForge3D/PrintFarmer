@@ -1,4 +1,4 @@
-﻿---
+---
 post_title: "Deployment visibility and safe update strategy"
 author1: "Parker"
 post_slug: "deployment-update-strategy"
@@ -25,54 +25,11 @@ owner-manual build-and-release workflow. Old unsigned reservations do not block 
 New releases deliberately do not provide the old signed managed-update set.
 `container-images.json` is informational and marks managed-update eligibility
 false. Build metadata does not fabricate allocation/sequence authority. The
-existing inventory evaluator and host-update signature, authorization,
-active-print and runtime safety contracts remain unchanged; an incompatible or
-missing signed feed must not be advertised as ready. The production GitHub
-metadata-provider/discovery adapter is read-only evidence input; it does not
-make automatic scheduling or installation effective without the separate
-protected admission, readiness and executor gates described below.
-Focused signed-update discovery tests cover pagination, draft filtering, exact
-channel/tag/workflow identity, immutable manifest bytes, malformed candidates,
-bounded asset URLs, and rejection of channel-matching tags with inverted
-prerelease metadata.
-
-### Active host-update scheduler and execution policy (#2666, 2026-09-17)
-
-The active baseline remains **default off**. `configuredEnabled` means an
-administrator saved durable policy intent; it is not the same as
-`effectiveEnabled`. Channel selection alone authorizes neither checks nor
-installation, and insider still requires explicit acknowledgement before it can
-become effective. Effective automatic execution is true only when concrete
-verified release discovery, protected replay/high-water state, policy-fence
-state, readiness and compatibility adapters, a physical admission fence with
-real consumers, and a constrained executor are all provisioned and verified. A
-generic socket, Docker, container-control, or host-command proxy is not an
-acceptable substitute for those typed adapters.
-
-The current implementation includes the explicit host-state replay store/anchor,
-policy fence, and farm-admin CAS policy repository when
-`HostUpdates:HostState:Enabled=true` is configured against a validated secure
-root and provisioned by an operator. That does not make execution effective: the
-hosted scheduler loop, constrained executor, concrete recovery port, installation
-readiness adapter, and physical admission producers/consumers remain absent. The
-logical `IHostUpdateAdmissionFence` is obeyed by scheduler/admin code, but print,
-slice, queue, printer-command, and recovery subsystems do not yet enforce or
-publish physical admission state.
-
-The current admin Update Now path is a one-time operator authorization path,
-not standing automatic policy. The API accepts only an authorization/operation
-intent plus optional expected policy revision/fingerprint. Release identity,
-sequence, source commit, channel, manifest digest, host platform, trust root,
-and the six execution target digests are resolved server-side immediately before
-admission from the current signed verified evidence cache, manifest binding
-store, replay/high-water decision, selected policy, protected authorization
-record, and admission fence. Stale cache state, last-known-good evidence with a
-current discovery error, channel mismatch, policy drift, replay rejection,
-expired or consumed authorization, rebound release/digest/target evidence, and
-active host-update admission fences fail closed. Recovery accepts only the route
-release identity and optional request ID, then reconstructs the exact immutable
-request from the durable execution journal after validating the journal binding
-hash.
+existing inventory evaluator and verified-release signature contracts remain
+unchanged; an incompatible or missing signed feed must not be advertised as
+ready. There is no production GitHub metadata-provider adapter for managed
+updates.
+Future updater work is separate and must not silently trust publication alone.
 
 The first signed managed-update release is a new boundary: it publishes
 `update-manifest.json` and `update-manifest.sigstore.json` only after all six
@@ -112,63 +69,10 @@ mutation and again immediately before the `gh release upload` call, so nothing
 between those workflow steps and the actual upload can present an unsigned or
 mismatched manifest as the release's signed contract. Existing
 unsigned releases remain manual-only, including legacy `v0.2.3-insider.1` and
-`v0.2.3-insider.2`. The first published signed insider candidate is
-`v0.2.3-insider.4`; it is a valid distribution artifact, but publication alone
-does not make an older installed host managed-update eligible. A valid signature
-authenticates the publisher and exact manifest bytes; it does not authorize or
-implement apply, installation, active-print handling, staging, recovery, or
-runtime safety.
-
-### Unsigned legacy installations: permanent manual-only decision
-
-Unsigned legacy installations do not have a trust bootstrap. Operator assertion,
-an unsigned manifest, a mutable image reference, or a matching version string
-cannot establish managed eligibility and must never be treated as a verified
-release. Historical releases are not retroactively signed.
-
-Threat-model status is intentionally explicit:
-- The update machinery is implemented and wired: the scheduler, executor adapter,
-  candidate cache, cancellation bridge, and manual execute/recover entry points
-  are all present.
-- Production admission is fail-closed in all configurations: `FeatureServicesStartup.cs`
-  registers `IHostUpdateAdmissionFence -> UnavailableHostUpdateAdmissionFence` outside the
-  `hostStateEnabled` gate, so the request path remains closed even when host-state settings are enabled.
-- No live end-to-end execution evidence exists: current test and model coverage does not
-  include a full signed-release acceptance run on a real host.
-- No deployment authority is granted: nothing in this document authorizes rollout,
-  constitutes owner acceptance, or declares the path ready for deployment.
-
-Nothing in this document grants authority to deploy, constitutes owner acceptance, or declares the path ready for rollout.
-
-Inventory and executor availability are separate fail-closed boundaries. Inventory evaluation
-checks signed-release evidence state; `HostUpdateExecutionAvailabilityProvider.CheckAsync`
-checks storage, journal health, backup and migration targets, fenced writers, executables,
-and Docker reachability without any signed-release input. The request resolver
-(`IHostUpdateExecutionRequestResolver`) is where signed evidence is consumed for admission.
-
-The supported path is deliberately one-time and manual: install a current
-signed release through the documented deployment procedure, then refresh the
-inventory. The signed release manifest and its verified identity can establish
-the evidence required for managed eligibility from that point forward. Waiting
-for an executor facility fix does not change an unsigned installation's trust
-state, and downgrade is not a recovery path.
-
-The unsigned legacy installation condition is reported as
-`SignedReleaseEvidenceUnavailableManualOnly`, separately from executor
-`facility_unavailable:*` evidence. The former is manual-only while signed release
-identity evidence is unavailable. If the installation is signed but the binding metadata is
-missing or invalid (for example a null `VerificationSource`, wrong branch/tag/channel,
-unpeeled SHA, self-report, or incorrect canonical version), repairing that metadata can clear
-the manual-only marker without a reinstall. Clearing the marker does not establish managed
-eligibility; absent blocking compatibility or channel evidence, the evaluator remains
-`NotManaged`. The latter identifies actionable deployment evidence: an explicit
-`RequiredUnavailableFacilities` override or an unverified SQL Server visible-backup-path
-mapping. Clearing executor facility blockers establishes host execution capability only; it
-does not satisfy or bypass trust-state verification. A genuinely unsigned installation that
-predates signed publication has no verified signed release to repair, so the supported
-transition is one manual installation of a current signed release followed by inventory
-refresh. Neither condition authorizes execution, and both remain fail-closed until the
-deployment issue is resolved.
+`v0.2.3-insider.2`; future signed `0.x.y-insider.N` releases are
+managed-update eligible. A valid signature authenticates the publisher and exact
+manifest bytes; it does not authorize or implement apply, installation,
+active-print handling, staging, recovery, or runtime safety.
 
 Before the first stable signed publication, a maintainer must update the live
 `release-stable` environment deployment-branch policy to allow only `main`;
@@ -200,15 +104,9 @@ evidence was complete.
 The `Eligible`, `Blocked`, `Unknown`, and `NotManaged` readiness lifecycle is a
 pure evidence evaluation. `Eligible` requires a complete signature-verified
 release and fresh, complete compatible observations for every required service,
-including platform, migration head, and worker requirements. While release
-distribution has not supplied a verified target, the inventory evaluator's
-state is `NotManaged`; the accompanying reasons explain why and are carried
-alongside the state, not fused into it — `ManagedEligibilityNotEstablished`
-when no blocking evidence exists, plus `SignedReleaseEvidenceUnavailableManualOnly`
-for an unsigned legacy installation. If blocking compatibility or channel
-evidence is also present, the state is `Blocked` instead and
-`ManagedEligibilityNotEstablished` is not among the reasons. The live API does
-not currently emit readiness and does not offer or install software.
+including platform, migration head, and worker requirements. Until release
+distribution supplies a verified target, an evaluator returns `NotManaged`; the
+live API does not currently emit readiness and does not offer or install software.
 
 Deliver **read-only installed-version inventory first**, followed by compatible
 release alerts. Make an **operator-approved, host-run updater** the first
@@ -226,143 +124,6 @@ release-workflow, release-guide and test changes inspected on 2026-09-12.
 “Current” denotes audited behavior or explicitly identified local implementation.
 Target updater contracts, routes and remaining delivery increments are
 **proposed**; channel-policy decisions fix their defaults and safeguards.
-
-### Issue #2757 acceptance evidence (2026-09-19)
-
-The signed-publication boundary is evidenced by the successful
-`v0.2.3-insider.4` release, including `update-manifest.json` and its Sigstore
-bundle. The following claims remain intentionally separate:
-
-| Area | Current evidence | Status |
-| --- | --- | --- |
-| GitHub discovery and signed wire contract | `SignedUpdateInfrastructureTests` cover pagination, draft filtering, exact channel/tag/workflow identity, immutable manifest bytes, malformed candidates, and bounded asset URLs. The prerelease-metadata rejection path is not represented by the current fixtures. | Covered by focused tests; prerelease mismatch evidence remains pending |
-| Publication | Release run `35456221950` published insider.4 after signing and verification. | Proven for that release |
-| Legacy installation transition | An authenticated insider.2 lab still reports the `NotManaged` state with the `ManagedEligibilityNotEstablished` reason (the state and reason are independent — a `NotManaged` result carries this reason only when no blocking evidence is also present); that deployed host predates the `GET /api/settings/UpdateChannel` endpoint now present in the current code. The supported transition is a one-time manual installation of a current signed release, followed by inventory refresh; no protected bootstrap or operator assertion is supported. | Manual operator action required |
-| Apply and recovery | There is no code-owned blanket unavailability list; production availability closes on concrete runtime evidence, including missing fenced writers, unverified SQL Server backup-path mapping, unsupported provider tooling, missing audited `HostExecutablePaths`, or an unreachable Docker runtime. `RequiredUnavailableFacilities` remains an explicit operator override. Separately, unsigned legacy installs remain `NotManaged` (or `Blocked`, if blocking compatibility or channel evidence is also present) while signed-release identity evidence is unavailable; a current signed release clears the manual-only reason but does not itself create an `Eligible` evaluator state. Interrupted-update recovery is covered by unit tests but has no live signed-release evidence. | Runtime prerequisites implemented; live execution and recovery evidence pending |
-| Automatic policy and UI execution | As of `ce8f4c182`, Update Now and automatic controls render disabled with no execute callback wired (`InstallerUpdatesExperience.tsx`); no live execution has been demonstrated end-to-end. | Blocked |
-
-Do not describe insider.4 publication as an end-to-end update acceptance run.
-The remaining legacy-install acceptance evidence is the documented one-time
-manual installation of a current signed release, followed by inventory refresh;
-it is not a supported trust bootstrap. Separate execution acceptance requires a
-signed release whose images differ from the installed images, followed by
-confirmation, progress, completion, and an induced interruption with
-restoration. The provider/topology matrix must include the supported shared
-database case and explicitly record the split-database and unsupported-provider
-fail-closed outcomes. Automatic updates must remain opt-in and disabled until
-the policy and executor/UI integration are implemented and observed.
-
-### Host updater foundation (#2662)
-
-The foundation accepts only bounded identifiers from a caller. It obtains installation,
-topology, current release/configuration, and required-component evidence from the
-trusted host inspector during planning and again while holding the installation lock.
-Planning and staging records use the validated metadata identity (or no identity for
-invalid metadata), never a caller-provided identity. A complete staging receipt binds
-every topology-selected platform digest plus the immutable target manifest and inspected
-prior release/configuration identity; failed or incomplete staging requires operator
-reconciliation and is never replayed. The host-local read-only journal inspection
-operation works while the API is stopped and accepts only a validated installation ID
-and absolute host state directory.
-
-The shared host-updater foundation implements only the `Planned`, `Approved`,
-and `Staged` boundary. It is one host-local engine for future operator-triggered
-one-time requests and administrator-enabled standing policies; neither caller
-may provide arbitrary commands, URLs, or filesystem paths. The engine has no
-apply, recovery, scheduler, Docker-control, or API/UI request-integration
-capability.
-
-Each plan accepts only typed, explicitly configured installation/source-target
-fingerprints; topology/replica/remote-worker inventory; provider/schema/config
-fingerprints; updater/resource/disk/recovery/maintenance evidence; and registry
-and backup readiness. It binds the source and target channels plus the
-channel-policy revision to canonical signed release identity: release/version,
-source tag/branch/commit and authorized branch head, build metadata, OCI labels,
-provenance subject, manifest/index, and every required component platform
-digest. Required components are derived from trusted installation topology,
-never caller-selected. All immutable evidence is hashed. Before artifact transfer, staging reacquires a single-installation OS file lock,
-reconciles the operation/idempotency journal, and revalidates current signed
-metadata and the hash. A latest `Approved` record is unreconciled and blocks
-staging; only the later execution increment may advance it. Drift, channel
-changes, incompatible evidence, incomplete component sets, mixed identity,
-invalid signatures, or digest conflicts reject the handoff.
-Staging adapters receive only the approved immutable plan and verified metadata,
-must retain a verified receipt for every component/platform byte plus the prior
-recovery set and configuration digests, and report failures as recoverable
-while leaving the running release untouched. An unresolved staging intent is
-`NeedsOperator`; this increment never replays, applies, or recovers it.
-
-The append-only JSON-lines operation journal and installation lock are
-host-local files, outside replaced containers and application databases. The
-configured state directory supplies that host-local root. State directories use
-only the current OS's local absolute-path grammar (a
-drive-rooted local path on Windows or a POSIX absolute path on Unix); UNC,
-device, foreign-platform, relative, and traversal paths are rejected. Both
-locks use the same bounded exponential contention retry and timeout behavior.
-Journal intent is flushed before staging, outcomes are durable and monotonic
-across process restarts and concurrent instances through same-process and
-file-system serialization. JSON-valid per-record mutations and blank, gapped,
-corrupt, partial, or non-terminated JSONL records fail closed, as does a record
-whose deterministic hash chain no longer matches. The hash chain does not
-detect deletion of an otherwise valid complete tail. Trusted plan identity
-remains separate from an authorization
-attempt audit: accepted and rejected attempts retain sanitized bounded
-presented actor, nonce, installation, plan-hash, source/target-channel and
-policy-revision values without replacing the trusted-plan fields. Arbitrary
-paths, URLs, commands, exception text, and malformed policy values are never
-journalled. A missing audit expiry explicitly records a rejected, invalid or
-default presented expiry; accepted authorization records require a future
-expiry. Journal corruption is a fail-closed reconciliation condition.
-Issue #2663 owns all transitions after `Staged`, including drain, backup,
-migration, apply, verification, and recovery. Issue #2666 owns request
-integration and scheduling.
-
-**Issue #2663 implementation status:** concrete, repository-appropriate step
-adapters are present for the designed stages, but production execution is not
-available. The adapters cover preflight (`HostUpdatePreflightCheck`), drain
-(`HostUpdateDrainCoordinator`, bounded-polling active prints/outbox work rather
-than cancelling), fence (`HostUpdateFenceCoordinator`, proving the durable admission
-gate, the queue outbox publisher, `PowerReadingPruneService`,
-`QueueRetentionPruneService`, and `AutoDispatchBackgroundService` have quiesced),
-backup (`HostUpdateBackupCoordinator` plus provider-native
-`HostUpdateDatabaseBackupTargetFactory` and `DirectoryCopyBackupTarget`, failing
-closed for externally-owned databases and unexpectedly missing required owned
-directories), migration (`HostUpdateMigrationCoordinator` with
-`DbContextMigrationTarget<T>`, which explicitly throws through the
-`HostUpdateMigrationStep.cs` implementation until a target-image/dedicated
-migration runner exists; the current/old API assembly's
-`ProviderAwareMigrationRunner` is not used for forward updates), apply
-(`HostUpdateImageApplier`, staging pinned `repository@sha256` images before compose
-mutation and applying with `docker compose up -d --no-build --pull never`), verify
-(`HostUpdateHealthVerifier`, exact configured service set, exact running digests,
-and aggregate `/health` JSON requiring configured result entries to be present and
-healthy), and recovery (`HostUpdateRecoveryCoordinator`, image-only rollback vs.
-coordinated restore via structured process args/env only, with the
-`RolledBack`/`NeedsOperator` outcome durably persisted by
-`FileHostUpdateRecoveryOutcomeStore` before fence release). Production DI uses a
-host-root-backed `FileHostUpdateAdmissionGate`; the standalone split
-`Farm.Slicer.Host` registers that same gate without registering the full executor,
-so shared-root slicer submissions are rejected while the main API is draining. All
-of it is wired through production DI (`HostUpdateExecutionStartup.AddHostUpdateExecution`)
-behind a manual, permission-gated admin API (`HostUpdateController`) with no automatic
-scheduler permission — see `docs/HOST_UPDATE_EXECUTOR.md` for the full adapter table,
-the `HostUpdateExecutionOptions` root-directory contract, and the availability-probing
-contract a scheduler must poll before ever invoking the executor. The production
-executor keeps availability closed for explicit operator-configured
-`RequiredUnavailableFacilities`; there is no code-owned blanket unavailability list,
-so built-in readiness is determined by concrete runtime probes and required writer
-coverage.
-Bridge/webhook delivery is
-fenced, and migration/apply crash uncertainty is reconciled only from concrete
-provider/container evidence after a `:before` marker without the matching `:after`
-marker.
-On process restart, `HostUpdateExecutionAvailabilityProvider` now scans the
-durable journal for any release left mid-flight or in `RecoveryRequired`
-without a confirmed `RolledBack` outcome and immediately re-closes every
-registered `IFenceableWriter` (the admission gate included) before reporting
-availability, closing the gap where the in-memory gate previously reset open
-on every restart regardless of an unresolved prior update; it never resumes
-or retries the update itself.
 
 Scope: single-host Docker Compose, monolith and split-service deployments,
 optional/local/remote workers, external databases, and offline installations.
@@ -964,8 +725,7 @@ Proposed check policy, subject to approval:
   signed channel-local sequence for anti-replay, not a replacement comparator.
   Tags are discovery hints, never equality/provenance proof.
   Pins block execution and label a newer candidate as policy-held. Channel
-  changes never silently downgrade; custom/unrecognized builds are `NotManaged` (or
-  `Blocked`, if blocking compatibility or channel evidence is also present).
+  changes never silently downgrade; custom/unrecognized builds are `NotManaged`.
   Cache, dismissal and in-flight results are keyed by installation policy
   revision and channel; durable replay state is independently keyed by enrolled
   trust root and channel as above. A late response from the previous selection
@@ -1182,9 +942,7 @@ resuming. Never infer success solely from process exit or replay uncertain work.
    Follow [migration-safe procedures](DEPLOYMENT.md#migration-safe-upgrades);
    do not rely on the current backup helper as proof of completeness.
 5. **Migrate:** A single selected owner applies and validates each context in
-   manifest order from the authenticated target image or a dedicated target
-   migration runner. The current/old API assembly must not execute forward
-   target migrations. Existing API/slicer startup migration behavior must be
+   manifest order. Existing API/slicer startup migration behavior must be
    explicitly coordinated before automation ships; do not start competing hosts
    and hope migration locks suffice. Use bounded, observable execution; on a
    timeout inspect provider state instead of assuming termination or retry safety.
@@ -1193,8 +951,7 @@ resuming. Never infer success solely from process exit or replay uncertain work.
    routes/TLS, frontend assets, auth/key continuity, worker compatibility,
    artifact read/write probes, and queue consumers/reconciler/publisher health.
    Do not send real printer start commands as smoke tests. Readiness timeout
-   fails the operation. Reopen writes only after the whole set passes and the
-   durable terminal outcome plus installed-state transition have been recorded.
+   fails the operation. Reopen writes only after the whole set passes.
 7. **Complete:** Reconcile inventory, record approvals/actor, manifest/signature
    identity, prior/target/observed digests, schema transitions, backup references,
    timestamps and outcome. Retain host audit history independently of restored
@@ -1370,8 +1127,8 @@ production validation runs are implied by this design document.
 - **Dependencies:** I1 + I2 + I3's proven host-evidence eligibility gate;
   CLI must still work without the UI. **Acceptance:** Durable journal/lock,
   whole-set staging, drain,
-  coordinated backup, target-image/dedicated serialized migrations, strict verification,
-  safe recovery, complete offline bundle, and fixed-command plan export.
+  coordinated backup, serialized migrations, strict verification, safe recovery,
+  complete offline bundle, and fixed-command plan export.
   Bind channel/policy revision in evidence, plans, commands and journals;
   preflight/confirm/audit switches and execute only whole single-channel sets.
   Channel-aware rollback must not silently downgrade or reset enrollment.
@@ -1422,13 +1179,6 @@ production validation runs are implied by this design document.
   and older database restore, including targets newer than installed: hold,
   never apply. Test stale policy responses and replay-state loss separately.
   Risk: privileged executor compromise; maintain the manual/offline fallback.
-  Daemon identity, enrollment, rotation, revocation, the three separate grants
-  and the pull-channel threat model are designed in the
-  [host-update daemon security model](HOST_UPDATE_DAEMON_SECURITY.md) (#3113);
-  the owner accepted its runtime risks in #3124.
-  The readiness, approval, re-confirmation and status contracts are defined,
-  but not served, in the [host-update daemon pull API](HOST_UPDATE_PULL_API.md)
-  (#3115); automatic approvals stay denied at runtime.
   #2666 orders verified canonical versions within the selected channel and
   binds desired state to manifest digest. Alias drift alone never triggers
   apply; an equal-version digest conflict holds for investigation.
@@ -1575,8 +1325,7 @@ does not create issues or mutate graph relationships.
 7. Migration serialization/startup coordination and schema compatibility policy;
    any image-only rollback exception needs explicit proof, not assumption.
 8. Discovery socket replacement and privileged-helper containment before
-   automation. The authorized-signer and host-compromise risks are accepted
-   (#3124); socket replacement and helper containment remain open.
+   automation; authorized-signer and host-compromise residual risk acceptance.
 9. Issue reuse, approved epic scope and first wave. No issue creation,
    deployment, implementation, commit, or push is authorized by this document.
 10. Channel-switch permission/enrollment mechanics, confirmation and audit
@@ -1597,20 +1346,3 @@ does not create issues or mutate graph relationships.
     immutable identity and qualified main rebuild promotion are mandatory.
     No permanent release channels; short-lived stabilization lifecycle and
     merge-back are settled. Operational owners/expiry limits remain gated.
-
-
-## Admin update surface
-
-`/admin/updates` is a read-only, permission-gated release-availability surface until the constrained executor and scheduler acceptance contracts are present. It distinguishes selected policy, observed installation, and proposed target; missing or disconnected observation is **Unknown**, never completion. Its disabled Update now and Auto-update controls do not issue host commands, bypass reauthentication/origin protections, or grant view users execution. Future executor integration must bind confirmation and history to immutable release identity, manifest digest, policy revision, plan, expiry, and idempotency key; drift invalidates approval.
-
-## Host update durable state
-
-Automatic host updates keep their replay anchor, replay snapshot, execution journal, and CAS policy outside the application database and cache. The file-backed host-state services are registered only when `HostUpdates:HostState:Enabled=true`; ordinary web startup with the empty default config leaves explicit unavailable ports in DI and returns 503 availability details for admin host-update operations. Configure the required absolute `HostUpdates:HostState:RootPath` (or `PFARM__HostUpdates__HostState__RootPath`) to a persistent host volume mounted at the same path after container replacement. Provision the directory before service startup. Every existing path component and the root itself must be a real directory, never a symbolic link, junction, mount reparse point, or other reparse target.
-
-On Linux, the root must be owned by the service effective UID and must not be group- or other-writable (normally mode `0700`; `0750` is acceptable only when it has no group write bit). Unsupported Unix platforms fail closed because owner validation is unavailable. On Windows, portable .NET APIs cannot robustly establish ownership and effective ACL safety for local, domain, and container identities. Deployment must therefore apply an ACL granting only Administrators/SYSTEM and the dedicated service identity access, then set `HostUpdates:HostState:WindowsSecurityAttested=true` (`PFARM__HostUpdates__HostState__WindowsSecurityAttested=true`). This option is an explicit deployment attestation, not an ACL enforcement mechanism; incorrect attestation leaves host-state protection dependent on the deployment ACL.
-
-Replay/policy state is never scheduler-self-provisioned. A trusted operator runs the API host with `--provision-host-updates` while `HostUpdates:HostState:Enabled=true` and `HostUpdates:HostState:ProvisioningEnabled=true` are both explicitly set. The command exits after provisioning, logs no secrets, and refuses missing, corrupt, or inconsistent existing state. It invokes `IHostUpdateReplayAnchorProvisioner` and `IHostUpdateAutomationPolicyProvisioner`, which atomically establish the hash-chained anchor journal, an empty versioned/checksummed replay snapshot, and the durable default-off policy record. Decision commits write and flush a fixed staged next snapshot, append the durable next anchor epoch (the commit record), atomically replace the snapshot, and finalize the stage. Startup discards an uncommitted stage or, only when epoch, checksum, and the full staged-file hash exactly match the committed anchor head, completes an interrupted forward replacement. Older replay snapshots, anchor rollback, malformed chains, truncation, and corruption fail closed.
-
-Executor journals atomically rewrite and flush the complete validated hash chain. A staged rewrite has no authority until atomic replacement. After restart, an unmatched unsafe `migration:before` or `apply:before` is durably converted to `RecoveryRequired`; those phases are never invoked again. Operator recovery remains admin-authorized and is allowed to select backups or perform side effects only after the submitted complete immutable request hashes exactly to the request binding stored in every journal activity. Production installation/recovery provisioning remains disabled pending its separate audit; automatic hosting remains unregistered and effective policy remains false.
-
-The replay anchor must be explicitly provisioned during trusted host setup; scheduler ticks never bootstrap it. The anchor, replay snapshot, operation journal, and policy record are versioned and durably replaced. If any state is missing, truncated, corrupt, or inconsistent, automatic scheduling remains disabled and an administrator must restore the complete host-state volume from a trusted backup or reprovision the host through the documented trusted setup process. Do not delete or edit individual files, and do not restore only the application database/cache: doing so must not lower the protected replay high-water state. A host administrator who can roll back the entire mounted volume remains an operational residual; the local hash chain is not a TPM-backed anti-rollback guarantee.

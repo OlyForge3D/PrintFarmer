@@ -173,91 +173,6 @@ jobs:
           cosign verify-blob --bundle "$BUNDLE" \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \
             --certificate-identity "$EXPECTED_IDENTITY" "$MANIFEST"
-      - name: Sign exact host-update CLI checksum list
-        env:
-          SUMS: release-assets/printfarmer-host-update-cli-v${{ inputs.version }}-SHA256SUMS
-          BUNDLE: signed-release/printfarmer-host-update-cli-v${{ inputs.version }}-SHA256SUMS.sigstore.json
-          EXPECTED_IDENTITY_REF: ${{ inputs.channel == 'stable' && 'main' || 'development' }}
-          EXPECTED_IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/consolidated-release.yml@refs/heads/${{ inputs.channel == 'stable' && 'main' || 'development' }}
-        run: |
-          set -euo pipefail
-          test "$GITHUB_WORKFLOW_REF" = "${GITHUB_REPOSITORY}/.github/workflows/consolidated-release.yml@refs/heads/${EXPECTED_IDENTITY_REF}"
-          sha256sum "$SUMS" > signed-release/host-update-cli-sums.sha256
-          cosign sign-blob --yes --bundle "$BUNDLE" "$SUMS"
-          cosign verify-blob --bundle "$BUNDLE" \
-            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-            --certificate-identity "$EXPECTED_IDENTITY" "$SUMS"
-      - name: Sign exact infrastructure image list
-        env:
-          LIST: release-assets/infrastructure-images.json
-          BUNDLE: signed-release/infrastructure-images.sigstore.json
-          EXPECTED_IDENTITY_REF: ${{ inputs.channel == 'stable' && 'main' || 'development' }}
-          EXPECTED_IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/consolidated-release.yml@refs/heads/${{ inputs.channel == 'stable' && 'main' || 'development' }}
-        run: |
-          set -euo pipefail
-          test "$GITHUB_WORKFLOW_REF" = "${GITHUB_REPOSITORY}/.github/workflows/consolidated-release.yml@refs/heads/${EXPECTED_IDENTITY_REF}"
-          sha256sum "$LIST" > signed-release/infrastructure-images.sha256
-          cosign sign-blob --yes --bundle "$BUNDLE" "$LIST"
-          cosign verify-blob --bundle "$BUNDLE" \
-            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-            --certificate-identity "$EXPECTED_IDENTITY" "$LIST"
-      - name: Sign exact offline recovery instructions
-        env:
-          INSTRUCTIONS: release-assets/offline-recovery-instructions.json
-          BUNDLE: signed-release/offline-recovery-instructions.sigstore.json
-          EXPECTED_IDENTITY_REF: ${{ inputs.channel == 'stable' && 'main' || 'development' }}
-          EXPECTED_IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/consolidated-release.yml@refs/heads/${{ inputs.channel == 'stable' && 'main' || 'development' }}
-        run: |
-          set -euo pipefail
-          test "$GITHUB_WORKFLOW_REF" = "${GITHUB_REPOSITORY}/.github/workflows/consolidated-release.yml@refs/heads/${EXPECTED_IDENTITY_REF}"
-          sha256sum "$INSTRUCTIONS" > signed-release/offline-recovery-instructions.sha256
-          cosign sign-blob --yes --bundle "$BUNDLE" "$INSTRUCTIONS"
-          cosign verify-blob --bundle "$BUNDLE" \
-            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-            --certificate-identity "$EXPECTED_IDENTITY" "$INSTRUCTIONS"
-      - name: Sign exact offline deployment set
-        env:
-          DEPLOYMENT_SET: release-assets/offline-deployment-set.json
-          BUNDLE: signed-release/offline-deployment-set.sigstore.json
-          EXPECTED_IDENTITY_REF: ${{ inputs.channel == 'stable' && 'main' || 'development' }}
-          EXPECTED_IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/consolidated-release.yml@refs/heads/${{ inputs.channel == 'stable' && 'main' || 'development' }}
-        run: |
-          set -euo pipefail
-          test "$GITHUB_WORKFLOW_REF" = "${GITHUB_REPOSITORY}/.github/workflows/consolidated-release.yml@refs/heads/${EXPECTED_IDENTITY_REF}"
-          sha256sum "$DEPLOYMENT_SET" > signed-release/offline-deployment-set.sha256
-          cosign sign-blob --yes --bundle "$BUNDLE" "$DEPLOYMENT_SET"
-          cosign verify-blob --bundle "$BUNDLE" \
-            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-            --certificate-identity "$EXPECTED_IDENTITY" "$DEPLOYMENT_SET"
-      # Issue #3195: package the release's original signed bytes (manifest, CLI archives, SBOMs and
-      # checksum list, recovery instructions and their Cosign bundles) into the offline recovery
-      # bundle, then sign the exact archive. Images and approved tools are not packaged: a complete
-      # image bundle exceeds GitHub's 2 GiB release asset limit and is assembled by the operator.
-      - name: Assemble and sign exact offline recovery bundle
-        env:
-          CHANNEL: ${{ inputs.channel }}
-          VERSION: ${{ inputs.version }}
-          OFFLINE_BUNDLE: signed-release/printfarmer-offline-bundle-v${{ inputs.version }}.tar
-          BUNDLE: signed-release/printfarmer-offline-bundle-v${{ inputs.version }}.tar.sigstore.json
-          EXPECTED_IDENTITY_REF: ${{ inputs.channel == 'stable' && 'main' || 'development' }}
-          EXPECTED_IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/consolidated-release.yml@refs/heads/${{ inputs.channel == 'stable' && 'main' || 'development' }}
-        run: |
-          set -euo pipefail
-          test "$GITHUB_WORKFLOW_REF" = "${GITHUB_REPOSITORY}/.github/workflows/consolidated-release.yml@refs/heads/${EXPECTED_IDENTITY_REF}"
-          stage="$(mktemp -d)"
-          trap 'rm -rf "$stage"' EXIT
-          cp -a release-assets/. "$stage/"
-          cp signed-release/*.sigstore.json "$stage/"
-          node scripts/ci/offline-update-bundle.mjs assemble --release-assets "$stage" \
-            --channel "$CHANNEL" --version "$VERSION" --output "$OFFLINE_BUNDLE"
-          size="$(stat -c %s "$OFFLINE_BUNDLE")"
-          test "$size" -gt 0
-          test "$size" -lt 2147483648
-          sha256sum "$OFFLINE_BUNDLE" > signed-release/offline-bundle.sha256
-          cosign sign-blob --yes --bundle "$BUNDLE" "$OFFLINE_BUNDLE"
-          cosign verify-blob --bundle "$BUNDLE" \
-            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-            --certificate-identity "$EXPECTED_IDENTITY" "$OFFLINE_BUNDLE"
       - name: Upload immutable signature evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
@@ -297,24 +212,10 @@ jobs:
           name: release-signature-${{ github.run_id }}
           path: signed-release
       - name: Bind signature to exact manifest bytes
-        env:
-          CLI_SUMS_BUNDLE: printfarmer-host-update-cli-v${{ inputs.version }}-SHA256SUMS.sigstore.json
-          OFFLINE_BUNDLE: printfarmer-offline-bundle-v${{ inputs.version }}.tar
         run: |
           set -euo pipefail
           sha256sum --check signed-release/update-manifest.sha256
           cp signed-release/update-manifest.sigstore.json release-assets/update-manifest.sigstore.json
-          sha256sum --check signed-release/host-update-cli-sums.sha256
-          cp "signed-release/$CLI_SUMS_BUNDLE" "release-assets/$CLI_SUMS_BUNDLE"
-          sha256sum --check signed-release/infrastructure-images.sha256
-          cp signed-release/infrastructure-images.sigstore.json release-assets/infrastructure-images.sigstore.json
-          sha256sum --check signed-release/offline-recovery-instructions.sha256
-          cp signed-release/offline-recovery-instructions.sigstore.json release-assets/offline-recovery-instructions.sigstore.json
-          sha256sum --check signed-release/offline-deployment-set.sha256
-          cp signed-release/offline-deployment-set.sigstore.json release-assets/offline-deployment-set.sigstore.json
-          sha256sum --check signed-release/offline-bundle.sha256
-          cp "signed-release/$OFFLINE_BUNDLE" "release-assets/$OFFLINE_BUNDLE"
-          cp "signed-release/$OFFLINE_BUNDLE.sigstore.json" "release-assets/$OFFLINE_BUNDLE.sigstore.json"
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7
         with:
           node-version: 24

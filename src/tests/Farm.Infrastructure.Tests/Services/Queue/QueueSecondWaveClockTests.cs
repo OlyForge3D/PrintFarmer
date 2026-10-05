@@ -331,7 +331,6 @@ public sealed class QueueSecondWaveClockTests : IAsyncDisposable
         new(
             _provider.GetRequiredService<IServiceScopeFactory>(),
             NullLogger<BackendControlCommandConsumerService>.Instance,
-            hostUpdateFence: null,
             timeProvider: clock);
 
     private async Task<Guid> SeedControlCommandAsync(

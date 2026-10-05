@@ -56,8 +56,7 @@ public class JobQueueController(
     IOperatorFeatureGate operatorFeatureGate,
     ILogger<JobQueueController> logger,
     AppDbContext? db = null,
-    IQueueResourceAuthorizationService? resourceAuthorization = null,
-    Farm.Infrastructure.Services.HostUpdates.IHostUpdateAdmissionGate? hostUpdateAdmissionGate = null) : ControllerBase
+    IQueueResourceAuthorizationService? resourceAuthorization = null) : ControllerBase
 {
     /// <summary>
     /// Get queue overview with optional compatibility filtering.
@@ -125,11 +124,6 @@ public class JobQueueController(
         if (request is null)
         {
             return BadRequest("Request body is required");
-        }
-
-        if (await IsHostUpdateAdmissionClosedAsync(CancellationToken.None))
-        {
-            return Conflict(new { error = "host_update_admission_closed" });
         }
 
         try
@@ -760,11 +754,6 @@ public class JobQueueController(
     [ProducesResponseType(500)]
     public async Task<IActionResult> DispatchJobAsync(Guid id)
     {
-        if (await IsHostUpdateAdmissionClosedAsync(CancellationToken.None))
-        {
-            return Conflict(new { error = "host_update_admission_closed" });
-        }
-
         try
         {
             string userId = GetActorSubject();
@@ -1133,11 +1122,6 @@ public class JobQueueController(
             return BadRequest("Request body is required");
         }
 
-        if (await IsHostUpdateAdmissionClosedAsync(CancellationToken.None))
-        {
-            return Conflict(new { error = "host_update_admission_closed" });
-        }
-
         try
         {
             string userId = GetActorSubject();
@@ -1190,11 +1174,6 @@ public class JobQueueController(
         if (!request.DispatchAll && (request.JobIds is null || request.JobIds.Count == 0))
         {
             return BadRequest("Either set DispatchAll to true or provide at least one job ID.");
-        }
-
-        if (await IsHostUpdateAdmissionClosedAsync(ct))
-        {
-            return Conflict(new { error = "host_update_admission_closed" });
         }
 
         try
@@ -1404,9 +1383,6 @@ public class JobQueueController(
             bedClearCommandId = result.BedClearCommandId,
             bedClearIdempotencyKeySha256 = result.BedClearIdempotencyKeySha256,
         };
-
-    private async Task<bool> IsHostUpdateAdmissionClosedAsync(CancellationToken cancellationToken) =>
-        hostUpdateAdmissionGate is not null && await hostUpdateAdmissionGate.IsClosedAsync(cancellationToken).ConfigureAwait(false);
 
     private ObjectResult MapDispatchResponse(QueuedPrintJobDto result) =>
         result.DispatchResult?.Outcome switch
