@@ -47,7 +47,7 @@ struct PrinterListView: View {
     @State private var viewModel = PrinterListViewModel()
     @State private var attentionViewModel = AttentionFeedViewModel()
     @State private var retryTask: Task<Void, Never>?
-    @State private var showingPrinterLookup = false
+    @State private var isSearchPresented = false
 
     private var iPadColumns: [GridItem] {
         sizeClass == .regular && !dynamicTypeSize.isAccessibilitySize
@@ -76,12 +76,6 @@ struct PrinterListView: View {
             switch navigationContext {
             case .farm:
                 navigationStack(path: $router.printersPath)
-            }
-        }
-        .sheet(isPresented: $showingPrinterLookup) {
-            PrinterLookupView(printerService: services.printerService) { printer in
-                showingPrinterLookup = false
-                router.printersPath.append(AppDestination.printerDetail(id: printer.id))
             }
         }
         .task(id: services.activeServerGeneration) {
@@ -173,15 +167,23 @@ struct PrinterListView: View {
                 }
             }
             .navigationTitle(navigationContext.navigationTitle)
-            .searchable(text: $viewModel.searchText, prompt: "Search printers")
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+            .modifier(
+                ConditionalPrinterSearch(
+                    text: $viewModel.searchText,
+                    isPresented: $isSearchPresented
+                )
+            )
             .refreshable {
                 await farmViewModel.loadDashboard()
                 _ = await attentionViewModel.refresh()
             }
             .rootNavigationChrome(for: navigationContext.appTab) {
-                if navigationContext == .farm {
+                if !isSearchPresented {
                     Button {
-                        showingPrinterLookup = true
+                        isSearchPresented = true
                     } label: {
                         Image(systemName: "magnifyingglass")
                             .frame(
@@ -189,9 +191,9 @@ struct PrinterListView: View {
                                 minHeight: RootNavigationChrome.minimumTouchTarget
                             )
                     }
-                    .accessibilityLabel("Find printer")
-                    .accessibilityHint("Looks up a printer by name, model, or network address.")
-                    .accessibilityIdentifier("farm.printerLookup")
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Search printers")
+                    .accessibilityIdentifier("farm.search")
                 }
             }
             .navigationDestination(for: AppDestination.self) { destination in
@@ -254,7 +256,9 @@ struct PrinterListView: View {
             }
             .padding(.horizontal)
             .padding(.vertical, 8)
+            .padding(.bottom, 112)
         }
+        .accessibilityIdentifier("farm.printerList")
     }
 
     // MARK: - Filters
@@ -329,80 +333,21 @@ struct PrinterListView: View {
     }
 }
 
-/// Direct printer lookup re-homed from the retired Scan tab.
-struct PrinterLookupView: View {
-    let printerService: any PrinterServiceProtocol
-    let onSelect: (Printer) -> Void
+private struct ConditionalPrinterSearch: ViewModifier {
+    @Binding var text: String
+    @Binding var isPresented: Bool
 
-    @Environment(\.dismiss) private var dismiss
-    @State private var printers: [Printer] = []
-    @State private var isLoading = false
-    @State private var errorMessage: String?
-    @State private var searchText = ""
-
-    private var filteredPrinters: [Printer] {
-        guard !searchText.isEmpty else { return printers }
-        return printers.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
-    }
-
-    var body: some View {
-        NavigationStack {
-            Group {
-                if isLoading {
-                    ProgressView("Loading printers…")
-                } else if let errorMessage {
-                    ContentUnavailableView {
-                        Label("Unable to Load Printers", systemImage: "exclamationmark.triangle")
-                    } description: {
-                        Text(errorMessage)
-                    }
-                } else if printers.isEmpty {
-                    ContentUnavailableView {
-                        Label("No Printers", systemImage: "printer")
-                    } description: {
-                        Text("Add a printer before using direct lookup.")
-                    }
-                } else {
-                    List(filteredPrinters) { printer in
-                        Button {
-                            onSelect(printer)
-                        } label: {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(printer.name)
-                                    .font(.subheadline.weight(.medium))
-                                if let notes = printer.notes, !notes.isEmpty {
-                                    Text(notes)
-                                        .font(.caption)
-                                        .foregroundStyle(Color.pfTextSecondary)
-                                }
-                            }
-                        }
-                        .frame(minHeight: 44)
-                        .accessibilityIdentifier(
-                            "farm.printerLookup.row.\(printer.id.uuidString)"
-                        )
-                    }
-                    .searchable(text: $searchText, prompt: "Search printers")
-                }
-            }
-            .navigationTitle("Find Printer")
-            #if os(iOS)
-            .navigationBarTitleDisplayMode(.inline)
-            #endif
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                }
-            }
-            .task {
-                isLoading = true
-                do {
-                    printers = try await printerService.list(includeDisabled: false)
-                } catch {
-                    errorMessage = error.localizedDescription
-                }
-                isLoading = false
-            }
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if isPresented {
+            content.searchable(
+                text: $text,
+                isPresented: $isPresented,
+                placement: .toolbar,
+                prompt: "Search printers"
+            )
+        } else {
+            content
         }
     }
 }

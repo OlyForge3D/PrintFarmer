@@ -231,14 +231,107 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
             XCTAssertEqual(app.buttons["farm.filter.Printing"].label, isIPad ? "Printing 5" : "Printing 2")
             XCTAssertEqual(app.buttons["farm.filter.Needs attention"].label, "Needs attention 2")
             XCTAssertEqual(app.buttons["farm.filter.Idle"].label, isIPad ? "Idle 3" : "Idle 1")
+            attachScreen("\(device)-\(size)-farm")
+            let printerList = app.descendants(matching: .any)["farm.printerList"]
+            if !isIPad {
+                XCTAssertTrue(printerList.exists, "Farm printer cards must remain in a scrollable list.")
+            }
+            func scrollFarmUp() {
+                if isIPad {
+                    app.swipeUp()
+                } else {
+                    printerList.swipeUp()
+                }
+            }
+            let failureCard = app.buttons.matching(NSPredicate(
+                format: "label CONTAINS %@ AND label CONTAINS %@",
+                "Voron 2.4",
+                "Failure suspected:"
+            )).firstMatch
+            XCTAssertTrue(failureCard.waitForExistence(timeout: 5))
+            XCTAssertTrue(failureCard.label.contains("gear_set_v3.gcode"))
+            XCTAssertTrue(failureCard.label.contains("22% progress at failure"))
+            XCTAssertTrue(failureCard.label.contains("2h 41m left"))
+            XCTAssertTrue(failureCard.label.contains("Done"))
+            let firstPrintingCard = app.buttons.matching(NSPredicate(
+                format: "label CONTAINS %@ AND label CONTAINS %@",
+                "Prusa MK4 #1",
+                "benchy_0.2mm_PLA.gcode"
+            )).firstMatch
+            XCTAssertTrue(firstPrintingCard.waitForExistence(timeout: 5))
+            let miniCard = app.buttons.matching(NSPredicate(
+                format: "label CONTAINS %@ AND label CONTAINS %@",
+                "Prusa Mini",
+                "clip_holder_x4.gcode"
+            )).firstMatch
+            for _ in 0..<8 where !miniCard.exists {
+                scrollFarmUp()
+            }
+            XCTAssertTrue(miniCard.waitForExistence(timeout: 5))
+            XCTAssertTrue(miniCard.label.contains("22m left"))
             let bedClearPrinter = app.buttons.matching(
                 NSPredicate(format: "label CONTAINS %@", "Bambu X1C")
             ).firstMatch
+            for _ in 0..<8 where !bedClearPrinter.exists {
+                scrollFarmUp()
+            }
             XCTAssertTrue(bedClearPrinter.waitForExistence(timeout: 5))
             XCTAssertTrue(
                 bedClearPrinter.label.localizedCaseInsensitiveContains("Bed clear"),
                 "Bambu X1C must use the mockup's real PendingReady demo state rather than appear as a second print."
             )
+            XCTAssertFalse(bedClearPrinter.label.contains("% complete"))
+            XCTAssertFalse(bedClearPrinter.label.contains("ETA unavailable"))
+            let pausedCard = app.buttons.matching(NSPredicate(
+                format: "label CONTAINS %@ AND label CONTAINS %@",
+                "Ender 3 S1",
+                "Paused"
+            )).firstMatch
+            for _ in 0..<8 where !pausedCard.exists {
+                scrollFarmUp()
+            }
+            XCTAssertTrue(pausedCard.waitForExistence(timeout: 5))
+            if size == "normal" {
+                if isIPad {
+                    XCTAssertLessThan(firstPrintingCard.frame.minX, failureCard.frame.minX)
+                    XCTAssertLessThan(failureCard.frame.minX, bedClearPrinter.frame.minX)
+                    XCTAssertGreaterThan(pausedCard.frame.minY, firstPrintingCard.frame.minY)
+                } else {
+                    XCTAssertLessThan(firstPrintingCard.frame.minY, failureCard.frame.minY)
+                    XCTAssertLessThan(failureCard.frame.minY, bedClearPrinter.frame.minY)
+                    XCTAssertLessThan(bedClearPrinter.frame.minY, pausedCard.frame.minY)
+                }
+            }
+            let lastFarmCard = app.buttons.matching(
+                NSPredicate(
+                    format: "label CONTAINS %@",
+                    isIPad ? "Creality K1" : "Prusa MK4 #2"
+                )
+            ).firstMatch
+            for _ in 0..<16 where
+                !lastFarmCard.isHittable
+                || lastFarmCard.frame.maxY > scanButton.frame.minY - 8
+            {
+                scrollFarmUp()
+            }
+            XCTAssertTrue(lastFarmCard.isHittable, "The final Farm card must scroll above floating navigation.")
+            XCTAssertLessThanOrEqual(
+                lastFarmCard.frame.maxY,
+                scanButton.frame.minY - 8,
+                "Farm cards must clear the floating Scan control when scrolled to the end."
+            )
+            func scrollFarmDown() {
+                if isIPad {
+                    app.swipeDown()
+                } else {
+                    printerList.swipeDown()
+                }
+            }
+            let allFilterButton = app.buttons["farm.filter.All"]
+            for _ in 0..<16 where !allFilterButton.isHittable {
+                scrollFarmDown()
+            }
+            XCTAssertTrue(allFilterButton.isHittable, "Farm filters must remain reachable after scrolling through the cards.")
             XCTAssertFalse(app.staticTexts.containing(
                 NSPredicate(format: "label BEGINSWITH %@", "Attention unavailable:")
             ).firstMatch.exists)
@@ -248,8 +341,6 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
                 XCTAssertGreaterThanOrEqual(button.frame.minX, filters.frame.minX - 1)
                 XCTAssertLessThanOrEqual(button.frame.maxX, filters.frame.maxX + 1)
             }
-            attachScreen("\(device)-\(size)-farm")
-
             let queue = shellDestinationButton(tabIdentifier: "tab.queue", timeout: 8)
             XCTAssertTrue(queue.exists)
             queue.tap()

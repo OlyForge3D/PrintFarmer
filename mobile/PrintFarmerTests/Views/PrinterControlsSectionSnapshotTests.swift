@@ -81,6 +81,63 @@ final class PrinterCardSnapshotTests: XCTestCase {
         XCTAssertTrue(bed.jobLabel.contains("Clear bed"))
     }
 
+    func testPendingReadyCardDoesNotPresentCompletedJobAsActiveProgress() throws {
+        var printer = try TestData.decodePrinter()
+        printer.state = "printing"
+        printer.progress = 0.23
+        printer.jobName = "clip_holder_x4.gcode"
+
+        let presentation = PrinterCardPresentation(
+            printer: printer,
+            isPendingReady: true,
+            attentionCount: 1,
+            failureReason: nil,
+            printTimeLeftSeconds: 1_320
+        )
+
+        XCTAssertEqual(presentation.stateLabel, "Bed clear")
+        XCTAssertFalse(presentation.canShowJobETA)
+        XCTAssertFalse(presentation.showsJobProgress)
+        XCTAssertFalse(presentation.accessibilityLabel.contains("% complete"))
+        XCTAssertFalse(presentation.accessibilityLabel.contains("ETA unavailable"))
+        XCTAssertTrue(presentation.jobLabel.contains("Clear bed"))
+    }
+
+    func testFailureCardRetainsKnownJobProgressAndOnlyShowsServerReportedETA() throws {
+        var printer = try TestData.decodePrinter()
+        printer.state = "error"
+        printer.progress = 0.22
+        printer.jobName = "gear_set_v3.gcode"
+        printer.fileName = "gear_set_v3.gcode"
+        let failure = "The printer reported a failed job."
+
+        let withETA = PrinterCardPresentation(
+            printer: printer,
+            isPendingReady: false,
+            attentionCount: 1,
+            failureReason: failure,
+            printTimeLeftSeconds: 9_660
+        )
+        XCTAssertFalse(withETA.isActiveJob)
+        XCTAssertTrue(withETA.showsJobProgress)
+        XCTAssertTrue(withETA.canShowJobETA)
+        XCTAssertEqual(withETA.stateLabel, "Failure suspected")
+        XCTAssertEqual(withETA.jobLabel, "gear_set_v3.gcode")
+        XCTAssertTrue(withETA.etaLabel.contains("2h 41m left"))
+        XCTAssertTrue(withETA.etaLabel.contains("Done"))
+        XCTAssertTrue(withETA.accessibilityLabel.contains("22% progress at failure"))
+
+        let withoutETA = PrinterCardPresentation(
+            printer: printer,
+            isPendingReady: false,
+            attentionCount: 1,
+            failureReason: failure,
+            printTimeLeftSeconds: nil
+        )
+        XCTAssertEqual(withoutETA.etaLabel, "ETA unavailable")
+        XCTAssertTrue(withoutETA.accessibilityLabel.contains("ETA unavailable"))
+    }
+
     func testLateThumbnailFromOldRevisionCannotReplaceNewCard() async throws {
         let service = MockPrinterService()
         let barrier = AsyncBarrier()
@@ -93,11 +150,13 @@ final class PrinterCardSnapshotTests: XCTestCase {
         service.thumbnailHandler = { _, _ in await barrier.arriveAndWait(); return data }
         let model = PrinterCardMediaModel()
         let old = PrinterCardRequestID(printerID: TestData.testUUID, path: "/old",
-                                       jobName: "old", state: "printing", serviceID: ObjectIdentifier(service))
+                                       jobName: "old", state: "printing", isFailureSuspected: false,
+                                       serviceID: ObjectIdentifier(service))
         let task = Task { await model.load(request: old, service: service) }
         await barrier.waitUntilArrived()
         let new = PrinterCardRequestID(printerID: TestData.testUUID, path: nil,
-                                       jobName: nil, state: "idle", serviceID: ObjectIdentifier(service))
+                                       jobName: nil, state: "idle", isFailureSuspected: false,
+                                       serviceID: ObjectIdentifier(service))
         await model.load(request: new, service: service)
         barrier.release()
         await task.value
@@ -122,7 +181,8 @@ final class PrinterCardSnapshotTests: XCTestCase {
         let model = PrinterCardMediaModel()
         let request = PrinterCardRequestID(
             printerID: TestData.testUUID, path: "/current-version",
-            jobName: "benchy", state: "printing", serviceID: ObjectIdentifier(service)
+            jobName: "benchy", state: "printing", isFailureSuspected: false,
+            serviceID: ObjectIdentifier(service)
         )
         await model.load(request: request, service: service)
         XCTAssertEqual(model.request, request)
@@ -136,7 +196,7 @@ final class PrinterCardSnapshotTests: XCTestCase {
             service.thumbnailHandler = { _, _ in throw error }
             let model = PrinterCardMediaModel()
             await model.load(request: .init(printerID: TestData.testUUID, path: "/thumbnail",
-                                            jobName: "benchy", state: "printing",
+                                            jobName: "benchy", state: "printing", isFailureSuspected: false,
                                             serviceID: ObjectIdentifier(service)), service: service)
             XCTAssertNil(model.image)
         }
@@ -144,7 +204,7 @@ final class PrinterCardSnapshotTests: XCTestCase {
         service.thumbnailHandler = { _, _ in Data("not an image".utf8) }
         let model = PrinterCardMediaModel()
         await model.load(request: .init(printerID: TestData.testUUID, path: "/thumbnail",
-                                        jobName: "benchy", state: "printing",
+                                        jobName: "benchy", state: "printing", isFailureSuspected: false,
                                         serviceID: ObjectIdentifier(service)), service: service)
         XCTAssertNil(model.image)
     }

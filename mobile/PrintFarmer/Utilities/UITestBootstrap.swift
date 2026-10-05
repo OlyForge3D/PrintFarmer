@@ -946,6 +946,7 @@ enum UITestBootstrap {
             let printersData: Data
             let printersByID: [String: Data]
             var statusData: Data
+            let additionalStatusDataByID: [String: Data]
             let detailsData: Data
             let attentionData: Data
             let capabilitiesData: Data
@@ -1013,6 +1014,38 @@ enum UITestBootstrap {
                 ])
                 let userData = try encoder.encode(visualAcceptanceDemoUser())
                 let detailsData = try encoder.encode(fixture.details)
+                let additionalStatusDataByID = try Dictionary(
+                    uniqueKeysWithValues: fixture.printers
+                        .filter { [DemoData.voron24_ID, issue3259PrusaMiniID].contains($0.id) }
+                        .map { printer in
+                            let status = PrinterStatusDetail(
+                                id: printer.id,
+                                isOnline: printer.isOnline,
+                                state: printer.state,
+                                progress: printer.progress.map { $0 * 100 },
+                                currentLayer: printer.currentLayer,
+                                totalLayers: printer.totalLayers,
+                                fanSpeedPercent: printer.fanSpeedPercent,
+                                liveZOffsetMm: printer.liveZOffsetMm,
+                                jobName: printer.jobName,
+                                thumbnailUrl: printer.thumbnailUrl,
+                                cameraStreamUrl: printer.cameraStreamUrl,
+                                cameraSnapshotUrl: printer.cameraSnapshotUrl,
+                                x: printer.x,
+                                y: printer.y,
+                                z: printer.z,
+                                hotendTemp: printer.hotendTemp,
+                                bedTemp: printer.bedTemp,
+                                hotendTarget: printer.hotendTarget,
+                                bedTarget: printer.bedTarget,
+                                homedAxes: printer.homedAxes,
+                                spoolInfo: printer.spoolInfo,
+                                mmuStatus: nil,
+                                printTimeLeftSeconds: printer.id == DemoData.voron24_ID ? 9_660 : 1_320
+                            )
+                            return (printer.id.uuidString.lowercased(), try encoder.encode(status))
+                        }
+                )
                 let printerID = DemoData.prusaMK4_1_ID.uuidString.lowercased()
                 let assignedQueueData = try encoder.encode([
                     QueuedJobInfo(
@@ -1046,6 +1079,7 @@ enum UITestBootstrap {
                     printersData: printersData,
                     printersByID: printersByID,
                     statusData: try encoder.encode(fixture.status),
+                    additionalStatusDataByID: additionalStatusDataByID,
                     detailsData: detailsData,
                     attentionData: try encoder.encode(fixture.attentionFeed),
                     capabilitiesData: capabilitiesData,
@@ -1117,6 +1151,15 @@ enum UITestBootstrap {
                 result = (200, "application/json", fixture.detailsData)
             case ("GET", "/api/printers/\(printerID)/status"):
                 result = (200, "application/json", fixture.statusData)
+            case ("GET", let path)
+                where path.hasPrefix("/api/printers/") && path.hasSuffix("/status"):
+                let components = path.split(separator: "/")
+                if components.count == 4,
+                   let status = fixture.additionalStatusDataByID[String(components[2]).lowercased()] {
+                    result = (200, "application/json", status)
+                } else {
+                    result = (404, "application/json", Data(#"{"error":"not-found"}"#.utf8))
+                }
             case ("GET", "/api/printers/\(printerID)/backend-capabilities"):
                 result = (200, "application/json", fixture.capabilitiesData)
             case ("GET", "/api/job-queue-analytics/printer/\(printerID)"):

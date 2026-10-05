@@ -83,6 +83,17 @@ final class PrinterListUITests: PrintFarmerUITestCase {
 
     func testSearchFieldExists() {
         openFarm()
+        let searchButton = app.buttons["farm.search"]
+        XCTAssertTrue(
+            searchButton.waitForExistence(timeout: 5),
+            "Farm should expose search from the toolbar"
+        )
+        XCTAssertFalse(
+            app.searchFields.firstMatch.exists,
+            "Farm search should stay collapsed until requested"
+        )
+        searchButton.tap()
+
         let searchField = app.searchFields.firstMatch
         XCTAssertTrue(
             searchField.waitForExistence(timeout: 5),

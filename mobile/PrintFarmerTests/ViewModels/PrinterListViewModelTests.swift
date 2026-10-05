@@ -47,6 +47,37 @@ final class PrinterListViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.count(for: .idle), 1)
     }
 
+    func testFilteredPrintersPreserveFarmOrderAcrossStatusGroups() throws {
+        func printer(id: String, state: String, isOnline: Bool = true) throws -> Printer {
+            let json = TestJSON.printerMinimal.replacingOccurrences(
+                of: "660e8400-29b-41d4-a716-446655440001",
+                with: id
+            )
+            var printer = try TestData.decodePrinter(from: json)
+            printer.state = state
+            printer.isOnline = isOnline
+            return printer
+        }
+
+        let printing = try printer(id: "660e8400-29b-41d4-a716-446655440010", state: "printing")
+        let failed = try printer(id: "660e8400-29b-41d4-a716-446655440011", state: "error")
+        let bedClear = try printer(id: "660e8400-29b-41d4-a716-446655440012", state: "completed")
+        let paused = try printer(id: "660e8400-29b-41d4-a716-446655440013", state: "paused")
+        let idle = try printer(id: "660e8400-29b-41d4-a716-446655440014", state: "idle")
+        let offline = try printer(
+            id: "660e8400-29b-41d4-a716-446655440015",
+            state: "offline",
+            isOnline: false
+        )
+        let ordered = [printing, failed, bedClear, paused, idle, offline]
+        let viewModel = PrinterListViewModel(
+            initialPrinters: ordered,
+            pendingReadyPrinterIDs: [bedClear.id]
+        )
+
+        XCTAssertEqual(viewModel.filteredPrinters.map(\.id), ordered.map(\.id))
+    }
+
     func testNeedsAttentionIncludesPendingReadyAndFeedPrintersButNotPausedPrinters() throws {
         let pending = try TestData.decodePrinter(from: TestJSON.printerMinimal)
         let feed = try TestData.decodePrinter(from: TestJSON.printer)

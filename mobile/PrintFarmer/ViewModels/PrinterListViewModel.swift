@@ -34,7 +34,6 @@ final class PrinterListViewModel {
         printers.filter { printer in
             matchesSearch(printer) && matchesStatus(printer)
         }
-        .sorted { sortPriority($0) < sortPriority($1) }
     }
 
     func count(for filter: StatusFilter) -> Int {
@@ -48,16 +47,6 @@ final class PrinterListViewModel {
     var availableLocations: [LocationSummary] {
         var seen = Set<UUID>()
         return printers.compactMap(\.location).filter { seen.insert($0.id).inserted }
-    }
-
-    private func sortPriority(_ printer: Printer) -> Int {
-        if isPendingReady(printer) { return 0 }
-        guard printer.isOnline else { return 100 }
-        switch printer.state?.lowercased() {
-        case "printing": return 1
-        case "ready", "idle": return 2
-        default: return 3
-        }
     }
 
     private func matchesSearch(_ printer: Printer) -> Bool {
