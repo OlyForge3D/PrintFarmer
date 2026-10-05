@@ -1303,7 +1303,7 @@ public class JobQueueService : IJobQueueService
         job.DispatchedAt ??= now;
         job.DispatchMode ??= (int)DispatchMode.Manual;
         _ = await _partOutputSnapshotService.CaptureJobSnapshotIfAbsentAsync(job, ct);
-        _repo.AddDispatchLog(new DispatchLog(new DateTimeOffset(now, TimeSpan.Zero))
+        _repo.AddDispatchLog(new DispatchLog(now)
         {
             Id = Guid.NewGuid(),
             PrintJobId = job.Id,
@@ -1313,7 +1313,6 @@ public class JobQueueService : IJobQueueService
             DispatchedAt = new DateTimeOffset(now, TimeSpan.Zero),
             DispatchedByUserId = userId,
             Reason = "Assigned during queue operation.",
-            CreatedAtUtc = now,
         });
     }
 
@@ -1774,7 +1773,7 @@ public class JobQueueService : IJobQueueService
                 candidate.AssignedPrinterId == command.PrinterId &&
                 (candidate.Status == PrintJobStatus.Queued ||
                  candidate.Status == PrintJobStatus.Assigned))
-            .OrderByPriorityDescending()
+            .OrderWithinScope()
             .Select(candidate => (Guid?)candidate.Id)
             .FirstOrDefaultAsync(ct);
         long? currentPrinterConfigRevision = await _db.Printers
@@ -1788,7 +1787,7 @@ public class JobQueueService : IJobQueueService
             commandDispatchState,
             currentQueueHeadId,
             currentPrinterConfigRevision,
-            DateTime.UtcNow)
+            _timeProvider.GetUtcNow().UtcDateTime)
                 ? BedClearState.Acknowledged
                 : BedClearState.Invalidated;
     }

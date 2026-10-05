@@ -20,7 +20,6 @@ namespace Farm.Infrastructure.Services.Queue;
 public sealed class BackendControlCommandConsumerService(
     IServiceScopeFactory scopeFactory,
     ILogger<BackendControlCommandConsumerService> logger,
-    object? hostUpdateFence = null,
     TimeProvider? timeProvider = null) : BackgroundService
 {
     private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
@@ -39,7 +38,6 @@ public sealed class BackendControlCommandConsumerService(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _ = hostUpdateFence;
         while (!stoppingToken.IsCancellationRequested)
         {
             try
@@ -258,14 +256,14 @@ public sealed class BackendControlCommandConsumerService(
         }
     }
 
-    private static async Task DeferFenceConflictAsync(
+    private async Task DeferFenceConflictAsync(
         AppDbContext db,
         IDbOutboxSequenceAllocator allocator,
         QueueDispatchOutbox command,
         BackendControlPayload payload,
         CancellationToken ct)
     {
-        DateTime now = DateTime.UtcNow;
+        DateTime now = _timeProvider.GetUtcNow().UtcDateTime;
         command.AttemptCount++;
         command.LastAttemptedAtUtc = now;
         command.LastError = "Another physical command owns the printer barrier.";
@@ -310,7 +308,8 @@ public sealed class BackendControlCommandConsumerService(
                 }),
                 failureRetryable: false,
                 failureRequiresReconciliation: true,
-                ct: ct);
+                ct: ct,
+                timeProvider: _timeProvider);
         }
 
         await db.SaveChangesAsync(ct);
@@ -530,7 +529,8 @@ public sealed class BackendControlCommandConsumerService(
                 }),
                 failureRetryable: false,
                 failureRequiresReconciliation: false,
-                ct: ct);
+                ct: ct,
+                timeProvider: _timeProvider);
         }
 
         await db.SaveChangesAsync(ct);
@@ -610,7 +610,8 @@ public sealed class BackendControlCommandConsumerService(
                     }),
                     failureRetryable: false,
                     failureRequiresReconciliation: true,
-                    ct: ct);
+                    ct: ct,
+                    timeProvider: _timeProvider);
             }
         }
 

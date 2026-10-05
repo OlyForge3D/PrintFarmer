@@ -36,7 +36,6 @@ public sealed class BackendStartCommandConsumerService(
     IServiceScopeFactory scopeFactory,
     ILogger<BackendStartCommandConsumerService> logger,
     IOptions<BackendTimeoutSettings> backendTimeoutSettings,
-    object? hostUpdateFence = null,
     TimeProvider? timeProvider = null) : BackgroundService
 {
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(5);
@@ -80,7 +79,6 @@ public sealed class BackendStartCommandConsumerService(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _ = hostUpdateFence;
         logger.LogInformation("[BackendStartConsumer] Durable backend-start command consumer started");
 
         while (!stoppingToken.IsCancellationRequested)

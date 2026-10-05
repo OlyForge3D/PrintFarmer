@@ -174,7 +174,7 @@ public sealed class QueueReconciliationService(
         return false;
     }
 
-    private static async Task<bool> RecoverNullAttemptCommandsAsync(
+    private async Task<bool> RecoverNullAttemptCommandsAsync(
         AppDbContext db,
         CancellationToken ct)
     {
@@ -211,7 +211,7 @@ public sealed class QueueReconciliationService(
                 if (record is not null)
                 {
                     record.DispatchAttemptId = state.ActiveDispatchAttemptId;
-                    record.UpdatedAtUtc = DateTime.UtcNow;
+                    record.UpdatedAtUtc = _timeProvider.GetUtcNow().UtcDateTime;
                 }
 
                 changed = true;
@@ -229,7 +229,7 @@ public sealed class QueueReconciliationService(
                 command.Status = QueueOutboxEventStatus.Pending;
                 command.FailureCode = null;
                 command.LastError = "Recovered a pre-claim command with no persisted attempt.";
-                command.RetryAfterUtc = DateTime.UtcNow;
+                command.RetryAfterUtc = _timeProvider.GetUtcNow().UtcDateTime;
                 BedClearCommandRecord? record = await db.BedClearCommandRecords
                     .FirstOrDefaultAsync(
                         candidate => candidate.OutboxEventId == command.Id,
@@ -237,7 +237,7 @@ public sealed class QueueReconciliationService(
                 if (record is not null)
                 {
                     record.Status = BedClearCommandStatus.Pending;
-                    record.UpdatedAtUtc = DateTime.UtcNow;
+                    record.UpdatedAtUtc = _timeProvider.GetUtcNow().UtcDateTime;
                 }
 
                 changed = true;
@@ -369,7 +369,8 @@ public sealed class QueueReconciliationService(
                     printJobId: attempt.PrintJobId,
                     dispatchAttemptId: attempt.Id,
                     reasonCode: "reconciliation_active",
-                    detail: new { startPathKind = attempt.StartPathKind });
+                    detail: new { startPathKind = attempt.StartPathKind },
+                    timeProvider: _timeProvider);
 
                 // Emit a durable lifecycle event so the outbox publisher broadcasts the
                 // reconciliation result to authorized groups.
@@ -391,7 +392,8 @@ public sealed class QueueReconciliationService(
                             attemptId = attempt.Id,
                             startPathKind = attempt.StartPathKind,
                         }),
-                        ct);
+                        ct,
+                        timeProvider: _timeProvider);
                 }
 
                 await FinalizeBackendStartCommandAsync(
@@ -527,7 +529,8 @@ public sealed class QueueReconciliationService(
                         startPathKind = attempt.StartPathKind,
                         terminalStatus = terminalStatus.ToString(),
                         allCopiesDone,
-                    });
+                    },
+                    timeProvider: _timeProvider);
 
                 await FinalizeBackendStartCommandAsync(
                     db,
@@ -577,7 +580,8 @@ public sealed class QueueReconciliationService(
                             (allCopiesDone ? terminalStatus : PrintJobStatus.Queued).ToString(),
                             attempt.PrintJob?.JobKind?.ToString() ?? nameof(JobKind.Standard),
                             failureCode: failureCode),
-                        ct);
+                        ct,
+                        timeProvider: _timeProvider);
                 }
 
                 logger.LogInformation(
@@ -677,7 +681,8 @@ public sealed class QueueReconciliationService(
                     printJobId: attempt.PrintJobId,
                     dispatchAttemptId: attempt.Id,
                     reasonCode: "reconciliation_absent",
-                    detail: new { startPathKind = attempt.StartPathKind });
+                    detail: new { startPathKind = attempt.StartPathKind },
+                    timeProvider: _timeProvider);
 
                 // Emit the resolved local intent, or the absent reconciliation when no
                 // terminal intent was queued.
@@ -723,7 +728,8 @@ public sealed class QueueReconciliationService(
                         aggregateRowVersion: attempt.PrintJob?.RowVersion,
                         failureCode: failureCode,
                         payloadJson: payloadJson,
-                        ct);
+                        ct,
+                        timeProvider: _timeProvider);
                 }
 
                 await FinalizeBackendStartCommandAsync(
@@ -757,7 +763,8 @@ public sealed class QueueReconciliationService(
                     printJobId: attempt.PrintJobId,
                     dispatchAttemptId: attempt.Id,
                     reasonCode: "reconciliation_indeterminate",
-                    detail: new { startPathKind = attempt.StartPathKind });
+                    detail: new { startPathKind = attempt.StartPathKind },
+                    timeProvider: _timeProvider);
 
                 // Emit a durable lifecycle event for the indeterminate reconciliation state.
                 if (attempt.PrintJobId is not null && sequenceAllocator is not null)
@@ -779,7 +786,8 @@ public sealed class QueueReconciliationService(
                             startPathKind = attempt.StartPathKind,
                             requiresReconciliation = true,
                         }),
-                        ct);
+                        ct,
+                        timeProvider: _timeProvider);
                 }
 
                 break;
@@ -789,13 +797,13 @@ public sealed class QueueReconciliationService(
         await transaction.CommitAsync(ct);
     }
 
-    private static void MarkRequiresReconciliation(QueueDispatchAttempt attempt, string reason)
+    private void MarkRequiresReconciliation(QueueDispatchAttempt attempt, string reason)
     {
         attempt.Outcome = DispatchAttemptOutcome.Unknown;
         attempt.RequiresReconciliation = true;
         attempt.IsRetryable = false;
         attempt.ErrorDetail = reason;
-        attempt.UpdatedAtUtc = DateTime.UtcNow;
+        attempt.UpdatedAtUtc = _timeProvider.GetUtcNow().UtcDateTime;
         attempt.BackendCallPhase = DispatchBackendCallPhase.AwaitingReconciliation;
     }
 
@@ -832,14 +840,14 @@ public sealed class QueueReconciliationService(
         state.AcknowledgedPrinterConfigRevision = null;
     }
 
-    private static void AddHistory(
+    private void AddHistory(
         AppDbContext db,
         Guid jobId,
         PrintJobStatus fromState,
         PrintJobStatus toState,
         string notes)
     {
-        DateTime now = DateTime.UtcNow;
+        DateTime now = _timeProvider.GetUtcNow().UtcDateTime;
         db.JobStateHistories.Add(new JobStateHistory
         {
             Id = Guid.NewGuid(),
@@ -852,7 +860,7 @@ public sealed class QueueReconciliationService(
         });
     }
 
-    private static async Task SetBedClearCommandStatusAsync(
+    private async Task SetBedClearCommandStatusAsync(
         AppDbContext db,
         Guid attemptId,
         BedClearCommandStatus status,
@@ -863,11 +871,11 @@ public sealed class QueueReconciliationService(
         if (command is not null)
         {
             command.Status = status;
-            command.UpdatedAtUtc = DateTime.UtcNow;
+            command.UpdatedAtUtc = _timeProvider.GetUtcNow().UtcDateTime;
         }
     }
 
-    private static async Task FinalizeBackendStartCommandAsync(
+    private async Task FinalizeBackendStartCommandAsync(
         AppDbContext db,
         QueueDispatchAttempt attempt,
         QueueOutboxEventStatus status,
@@ -894,12 +902,12 @@ public sealed class QueueReconciliationService(
             command.Status = status;
             command.FailureCode = failureCode;
             command.LastError = lastError;
-            command.CompletedAtUtc = DateTime.UtcNow;
+            command.CompletedAtUtc = _timeProvider.GetUtcNow().UtcDateTime;
             command.RetryAfterUtc = null;
         }
     }
 
-    private static async Task<FinalizedBackendControlIntent?>
+    private async Task<FinalizedBackendControlIntent?>
         FinalizePendingBackendControlCommandsAsync(
         AppDbContext db,
         QueueDispatchAttempt attempt,
@@ -918,7 +926,7 @@ public sealed class QueueReconciliationService(
                 command.AggregateId == attempt.PrintJobId.Value)
             .OrderBy(command => command.Sequence)
             .ToListAsync(ct);
-        DateTime now = DateTime.UtcNow;
+        DateTime now = _timeProvider.GetUtcNow().UtcDateTime;
         FinalizedBackendControlIntent? intent = null;
         foreach (QueueDispatchOutbox command in commands)
         {
