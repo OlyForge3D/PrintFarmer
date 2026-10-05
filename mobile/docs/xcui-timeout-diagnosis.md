@@ -1,5 +1,46 @@
 ## XCUI timeout diagnosis (#2573)
 
+### Harvest queue failures (#3265)
+
+The retained iPad shard 2 bundle from run `37296414762`, original job
+`111727827057` (Xcode 26.6, iOS 26.5 build 23F77), records two distinct failures:
+
+- Eligibility navigation: the helper terminated the launch already checked in
+  setup, then launched the reorder scenario without refreshing heartbeat identity
+  or waiting for authenticated-shell readiness. Its first collapsed-sidebar
+  snapshot took 9.607621s, exhausting the existing 8s navigation budget before
+  the observed Show Sidebar toggle could be used.
+- Native drag: app stderr records an uncaught `NSInternalInconsistencyException`
+  in `_UIDragSnappingFeedbackGenerator`, cancelling an interaction through
+  `UICollectionView.reloadData` and SwiftUI List batch updates. This is an app
+  process abort, not the UI-test main-run-loop watchdog. During persistence,
+  `canReorderQueue` becomes false; previously this both disabled List editing and
+  switched every queued row's conditional accessibility-content branch.
+
+Scenario relaunches now use the original test allowance, refresh heartbeat
+identity, and run the same launch-readiness check before starting navigation.
+Queue rows retain their content identity while accessibility actions change,
+and an accepted move keeps the native editing session active until persistence
+finishes. New mutations still require authorization, connectivity, fresh
+revisions, and no move in flight. No assertion or timeout is relaxed.
+
+The diagnostic PR's host sampler ran only for `matrix.key == ipad-4`; original
+shards 2 and 4 used separate Actions runners (`1000171803` and `1000171804`).
+Its app run-loop observer was present in shard 2, so a timing influence cannot
+be excluded. An uninstrumented development baseline on an isolated iPad Pro
+13-inch (M5), iOS 26.5 (23F77), **Xcode 27.0**, passed both focused cases; it does
+not establish Xcode 26.6 parity or explain away the retained crash. Keep #3260
+blocked until corrected-head CI evidence is available. #3263 remains unresolved;
+the diagnostic PR is not a watchdog fix.
+
+Local corrected-head validation passed all 31 `JobListViewModelTests`, all 10
+`HarvestUITests` (including the two failing cases), and all 66 `UIWaitBudgetTests`
+with zero failures/skips on the isolated approved iPad. Both the original and
+corrected local cases passed, so local results alone do not prove which List
+invalidation triggered the CI-only UIKit exception. The fix removes the observed
+editing/content-identity hazards without replacing native drag or relaxing its
+ordering and cross-group assertions.
+
 ### Historical evidence
 
 The retained `/tmp/gorman-2519-test.log` lines 4740-4742 recover the exact
