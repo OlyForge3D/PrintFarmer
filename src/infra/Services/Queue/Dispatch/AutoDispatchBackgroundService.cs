@@ -60,7 +60,7 @@ public sealed class AutoDispatchBackgroundService(
                     CancellationTokenSource.CreateLinkedTokenSource(stoppingToken))
                 {
                     Task<DispatchTriggerEvent> readTask = trigger.ReadAsync(readCts.Token).AsTask();
-                    Task scanDelay = Task.Delay(DurableScanInterval, stoppingToken);
+                    Task scanDelay = Task.Delay(DurableScanInterval, _timeProvider, stoppingToken);
                     Task completed = await Task.WhenAny(readTask, scanDelay);
 
                     if (completed == scanDelay)

@@ -61,7 +61,7 @@ public sealed class QueueReconciliationService(
                 logger.LogError(ex, "[Reconciliation] Error during reconciliation scan");
             }
 
-            _ = await WaitForIntervalOrPauseAsync(stoppingToken).ConfigureAwait(false);
+            await Task.Delay(ReconciliationInterval, _timeProvider, stoppingToken).ConfigureAwait(false);
         }
 
         logger.LogInformation("[Reconciliation] Queue reconciliation service stopped");
@@ -163,17 +163,6 @@ public sealed class QueueReconciliationService(
         await db.SaveChangesAsync(ct);
     }
 
-    internal async Task<bool> WaitForIntervalOrPauseAsync(CancellationToken ct)
-    {
-        DateTimeOffset until = _timeProvider.GetUtcNow() + ReconciliationInterval;
-        while (_timeProvider.GetUtcNow() < until)
-        {
-            await Task.Delay(TimeSpan.FromMilliseconds(250), _timeProvider, ct).ConfigureAwait(false);
-        }
-
-        return false;
-    }
-
     private async Task<bool> RecoverNullAttemptCommandsAsync(
         AppDbContext db,
         CancellationToken ct)
@@ -229,7 +218,8 @@ public sealed class QueueReconciliationService(
                 command.Status = QueueOutboxEventStatus.Pending;
                 command.FailureCode = null;
                 command.LastError = "Recovered a pre-claim command with no persisted attempt.";
-                command.RetryAfterUtc = _timeProvider.GetUtcNow().UtcDateTime;
+                DateTime now = _timeProvider.GetUtcNow().UtcDateTime;
+                command.RetryAfterUtc = now;
                 BedClearCommandRecord? record = await db.BedClearCommandRecords
                     .FirstOrDefaultAsync(
                         candidate => candidate.OutboxEventId == command.Id,
@@ -237,7 +227,7 @@ public sealed class QueueReconciliationService(
                 if (record is not null)
                 {
                     record.Status = BedClearCommandStatus.Pending;
-                    record.UpdatedAtUtc = _timeProvider.GetUtcNow().UtcDateTime;
+                    record.UpdatedAtUtc = now;
                 }
 
                 changed = true;
@@ -278,8 +268,9 @@ public sealed class QueueReconciliationService(
             attempt.IsRetryable = false;
             attempt.RequiresReconciliation = false;
             attempt.BackendCallPhase = DispatchBackendCallPhase.Terminal;
-            attempt.TerminalAtUtc = _timeProvider.GetUtcNow().UtcDateTime;
-            attempt.UpdatedAtUtc = _timeProvider.GetUtcNow().UtcDateTime;
+            DateTime supersededAt = _timeProvider.GetUtcNow().UtcDateTime;
+            attempt.TerminalAtUtc = supersededAt;
+            attempt.UpdatedAtUtc = supersededAt;
             return;
         }
 
@@ -327,7 +318,8 @@ public sealed class QueueReconciliationService(
             await QueueOutboxTransactionScope.BeginAsync(db, ct);
         activeState.Revision = Math.Max(1, activeState.Revision) + 1;
         attempt.ReconciliationCount++;
-        attempt.LastReconciledAtUtc = _timeProvider.GetUtcNow().UtcDateTime;
+        DateTime reconciledAt = _timeProvider.GetUtcNow().UtcDateTime;
+        attempt.LastReconciledAtUtc = reconciledAt;
 
         switch (outcome)
         {
@@ -335,16 +327,16 @@ public sealed class QueueReconciliationService(
                 // The backend is actively printing — advance to Printing for queue jobs.
                 // Accepted ad-hoc starts retain the lease while the backend is active.
                 attempt.Outcome = DispatchAttemptOutcome.Accepted;
-                attempt.BackendAcceptedAtUtc ??= _timeProvider.GetUtcNow().UtcDateTime;
+                attempt.BackendAcceptedAtUtc ??= reconciledAt;
                 attempt.RequiresReconciliation = false;
-                attempt.UpdatedAtUtc = _timeProvider.GetUtcNow().UtcDateTime;
+                attempt.UpdatedAtUtc = reconciledAt;
                 attempt.BackendCallPhase = DispatchBackendCallPhase.PostAccept;
                 ClearStartBarrier(activeState, attempt.Id);
 
                 if (attempt.PrintJob is not null && attempt.PrintJob.Status == PrintJobStatus.Starting)
                 {
                     attempt.PrintJob.Status = PrintJobStatus.Printing;
-                    attempt.PrintJob.UpdatedAt = _timeProvider.GetUtcNow().UtcDateTime;
+                    attempt.PrintJob.UpdatedAt = reconciledAt;
                     AddHistory(
                         db,
                         attempt.PrintJob.Id,
@@ -430,7 +422,7 @@ public sealed class QueueReconciliationService(
                 // a multi-copy job with CompletedCopies < Copies remaining.
                 bool allCopiesDone = true;
                 attempt.Outcome = DispatchAttemptOutcome.Accepted;
-                attempt.BackendAcceptedAtUtc ??= _timeProvider.GetUtcNow().UtcDateTime;
+                attempt.BackendAcceptedAtUtc ??= reconciledAt;
                 attempt.ErrorCode = terminalStatus == PrintJobStatus.Completed
                     ? null
                     : reconciliationReason;
@@ -443,9 +435,9 @@ public sealed class QueueReconciliationService(
                     _ => null,
                 };
                 attempt.RequiresReconciliation = false;
-                attempt.UpdatedAtUtc = _timeProvider.GetUtcNow().UtcDateTime;
+                attempt.UpdatedAtUtc = reconciledAt;
                 attempt.BackendCallPhase = DispatchBackendCallPhase.Terminal;
-                attempt.TerminalAtUtc = _timeProvider.GetUtcNow().UtcDateTime;
+                attempt.TerminalAtUtc = reconciledAt;
                 ClearStartBarrier(activeState, attempt.Id);
 
                 if (attempt.PrintJob is not null &&
@@ -480,14 +472,14 @@ public sealed class QueueReconciliationService(
                     }
                     else
                     {
-                        attempt.PrintJob.ActualEndTime ??= _timeProvider.GetUtcNow().UtcDateTime;
+                        attempt.PrintJob.ActualEndTime ??= reconciledAt;
                     }
 
                     attempt.PrintJob.FailureReason =
                         appliedStatus is PrintJobStatus.Completed or PrintJobStatus.Queued
                             ? null
                             : attempt.ErrorDetail;
-                    attempt.PrintJob.UpdatedAt = _timeProvider.GetUtcNow().UtcDateTime;
+                    attempt.PrintJob.UpdatedAt = reconciledAt;
                     string historyMessage = allCopiesDone
                         ? $"Backend history proved {terminalStatus.ToString().ToLowerInvariant()}."
                         : "Backend history proved completed; more copies remaining, requeued for next copy.";
@@ -598,9 +590,9 @@ public sealed class QueueReconciliationService(
                 attempt.ErrorDetail = "Backend reconciliation found no active or historical record of this job.";
                 attempt.IsRetryable = attempt.PrintJobId is not null; // queue jobs are retryable; ad-hoc are not
                 attempt.RequiresReconciliation = false;
-                attempt.UpdatedAtUtc = _timeProvider.GetUtcNow().UtcDateTime;
+                attempt.UpdatedAtUtc = reconciledAt;
                 attempt.BackendCallPhase = DispatchBackendCallPhase.Terminal;
-                attempt.TerminalAtUtc = _timeProvider.GetUtcNow().UtcDateTime;
+                attempt.TerminalAtUtc = reconciledAt;
                 FinalizedBackendControlIntent? pendingIntent =
                     await FinalizePendingBackendControlCommandsAsync(
                         db,
@@ -637,10 +629,10 @@ public sealed class QueueReconciliationService(
                     attempt.PrintJob.ActualStartTime = null;
                     attempt.PrintJob.ActualEndTime =
                         targetStatus == PrintJobStatus.Cancelled
-                            ? _timeProvider.GetUtcNow().UtcDateTime
+                            ? reconciledAt
                             : null;
                     attempt.PrintJob.FailureReason = null;
-                    attempt.PrintJob.UpdatedAt = _timeProvider.GetUtcNow().UtcDateTime;
+                    attempt.PrintJob.UpdatedAt = reconciledAt;
                     string historyNote = pendingIntent is null
                         ? "Backend reconciliation proved the start absent."
                         : $"Pending {pendingIntent.Operation} honored after backend absence.";
@@ -977,8 +969,8 @@ public sealed class QueueReconciliationService(
             if (!status.IsOnline)
             {
                 logger.LogDebug(
-                            "[Reconciliation] Printer {PrinterId} is offline — cannot reconcile attempt {AttemptId}",
-                            attempt.PrinterId, attempt.Id);
+                    "[Reconciliation] Printer {PrinterId} is offline — cannot reconcile attempt {AttemptId}",
+                    attempt.PrinterId, attempt.Id);
                 return BackendReconciliationOutcome.BackendIndeterminate;
             }
 
@@ -1013,11 +1005,11 @@ public sealed class QueueReconciliationService(
             if (!IsExplicitlyIdleOrTerminalState(status.State))
             {
                 logger.LogWarning(
-                            "[Reconciliation] Printer {PrinterId} reported unknown online state '{State}' for attempt {AttemptId}; " +
-                            "absence cannot be proven and every dispatch fence is retained",
-                            attempt.PrinterId,
-                            status.State ?? "(null)",
-                            attempt.Id);
+                    "[Reconciliation] Printer {PrinterId} reported unknown online state '{State}' for attempt {AttemptId}; " +
+                    "absence cannot be proven and every dispatch fence is retained",
+                    attempt.PrinterId,
+                    status.State ?? "(null)",
+                    attempt.Id);
                 return BackendReconciliationOutcome.BackendIndeterminate;
             }
 
@@ -1089,10 +1081,10 @@ public sealed class QueueReconciliationService(
                 historyProbe.History is null)
             {
                 logger.LogWarning(
-                            "[Reconciliation] History-list probe for attempt {AttemptId} was {Status}; " +
-                            "absence cannot be proven and every dispatch fence is retained",
-                            attempt.Id,
-                            historyProbe?.Status.ToString() ?? "null");
+                    "[Reconciliation] History-list probe for attempt {AttemptId} was {Status}; " +
+                    "absence cannot be proven and every dispatch fence is retained",
+                    attempt.Id,
+                    historyProbe?.Status.ToString() ?? "null");
                 return BackendReconciliationOutcome.BackendIndeterminate;
             }
 
@@ -1130,21 +1122,21 @@ public sealed class QueueReconciliationService(
             if (excludedMatch is not null)
             {
                 logger.LogWarning(
-                            "[Reconciliation] Malformed history evidence may represent attempt {AttemptId} " +
-                            "(backendJobId='{BackendJobId}', file='{FileName}', reason='{Reason}'); retaining every fence",
-                            attempt.Id,
-                            excludedMatch.BackendJobId ?? "(none)",
-                            excludedMatch.Filename ?? "(none)",
-                            excludedMatch.Reason);
+                    "[Reconciliation] Malformed history evidence may represent attempt {AttemptId} " +
+                    "(backendJobId='{BackendJobId}', file='{FileName}', reason='{Reason}'); retaining every fence",
+                    attempt.Id,
+                    excludedMatch.BackendJobId ?? "(none)",
+                    excludedMatch.Filename ?? "(none)",
+                    excludedMatch.Reason);
                 return BackendReconciliationOutcome.BackendIndeterminate;
             }
 
             if (!hasBackendJobId)
             {
                 logger.LogWarning(
-                            "[Reconciliation] Attempt {AttemptId} has no authoritative backend job id and no exact history match; " +
-                            "absence cannot be proven and every dispatch fence is retained",
-                            attempt.Id);
+                    "[Reconciliation] Attempt {AttemptId} has no authoritative backend job id and no exact history match; " +
+                    "absence cannot be proven and every dispatch fence is retained",
+                    attempt.Id);
                 return BackendReconciliationOutcome.BackendIndeterminate;
             }
 

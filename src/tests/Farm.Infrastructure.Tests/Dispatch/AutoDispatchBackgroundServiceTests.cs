@@ -10,6 +10,7 @@ using Farm.Infrastructure.Services.AutoDispatch;
 using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Tests.Builders;
+using Farm.Testing.Shared;
 using FluentAssertions;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Data.Sqlite;
@@ -193,11 +194,11 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
         return (printer, printerId);
     }
 
-    private AutoDispatchBackgroundService CreateService()
+    private AutoDispatchBackgroundService CreateService(TimeProvider? timeProvider = null)
     {
         return new AutoDispatchBackgroundService(
             _trigger, _scopeFactory, _concurrencyCoordinator, _hubMock.Object,
-            NullLogger<AutoDispatchBackgroundService>.Instance);
+            NullLogger<AutoDispatchBackgroundService>.Instance, timeProvider);
     }
 
     private PrintJob SeedQueuedJob(string name = "Test Job", int priority = 0, int queuePosition = 1) =>
@@ -400,6 +401,55 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
         _dispatchServiceMock.Verify(
             d => d.DispatchJobAsync(job.Id, printerId, "system:auto-dispatch", It.IsAny<DispatchScore>(), It.IsAny<CancellationToken>()),
             Times.Once);
+    }
+
+    [Theory]
+    [Trait("Category", "Dispatch")]
+    [InlineData(0L, true)]
+    [InlineData(1L, false)]
+    public async Task OnStartup_EligibilityInstantComesFromInjectedClockAndIsInclusive(
+        long queuedAfterClockTicks,
+        bool expectIntent)
+    {
+        var anchor = new DateTimeOffset(2031, 4, 5, 6, 7, 8, TimeSpan.Zero);
+        SeedSettings(enabled: true, mode: AutoDispatchMode.Auto, idleThresholdSeconds: 0);
+        (_, Guid printerId) = SeedPrinter(name: "Startup Clock Printer");
+        PrintJob job = SeedQueuedJob("startup-clock-job");
+        job.QueuedAt = anchor.UtcDateTime.AddTicks(queuedAfterClockTicks);
+        _db.SaveChanges();
+
+        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(30));
+        AutoDispatchBackgroundService svc = CreateService(timeProvider: new ManualTimeProvider(anchor));
+        await svc.ReconcileStartupEligiblePrintersAsync(cts.Token);
+
+        _trigger.IntentStateCount.Should().Be(expectIntent ? 1 : 0);
+        if (expectIntent)
+        {
+            DispatchTriggerEvent triggerEvent = await _trigger.ReadAsync(cts.Token);
+            triggerEvent.PrinterId.Should().Be(printerId);
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "Dispatch")]
+    public async Task OnPrinterIdle_IdleThresholdWaitsOnInjectedClock()
+    {
+        SeedSettings(enabled: true, mode: AutoDispatchMode.Auto, idleThresholdSeconds: 30);
+        (_, Guid printerId) = SeedPrinter(name: "Idle Clock Printer");
+        var clock = new ManualTimeProvider(new DateTimeOffset(2031, 4, 5, 6, 7, 8, TimeSpan.Zero));
+
+        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(30));
+        AutoDispatchBackgroundService svc = CreateService(timeProvider: clock);
+        Task idle = svc.ProcessPrinterIdleAsync(printerId, skipIdleThreshold: false, cts.Token);
+        await clock.WaitForActiveTimersAsync(1, TimeSpan.FromSeconds(10));
+
+        clock.Advance(TimeSpan.FromSeconds(29));
+        idle.IsCompleted.Should().BeFalse("the 30s idle threshold has not elapsed on the injected clock");
+        _trigger.HasPendingDispatch(printerId).Should().BeTrue();
+
+        clock.Advance(TimeSpan.FromSeconds(1));
+        await idle.WaitAsync(TimeSpan.FromSeconds(10));
+        _trigger.HasPendingDispatch(printerId).Should().BeFalse();
     }
 
     [Fact]
@@ -646,12 +696,14 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
     [Trait("Phase", "2")]
     public async Task OnPrinterIdle_SuggestMode_LogsSuggestionToDispatchLog()
     {
+        DateTimeOffset now = new(2031, 4, 5, 6, 7, 8, TimeSpan.Zero);
         // Arrange
         SeedSettings(enabled: true, mode: AutoDispatchMode.Suggest, idleThresholdSeconds: 0);
         (Printer printer, Guid printerId) = SeedPrinter();
 
         using CancellationTokenSource cts = new(TimeSpan.FromSeconds(30));
-        AutoDispatchBackgroundService svc = CreateService();
+        AutoDispatchBackgroundService svc = CreateService(
+            Mock.Of<TimeProvider>(clock => clock.GetUtcNow() == now));
         PrintJob job = SeedQueuedJob("log-check");
 
         DispatchScore goodScore = new(
@@ -843,12 +895,14 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
     [Trait("Phase", "2")]
     public async Task OnPrinterIdle_DispatchThrowsException_LogsFailureAndSendsEvent()
     {
+        DateTimeOffset now = new(2031, 4, 5, 6, 7, 8, TimeSpan.Zero);
         // Arrange: dispatch service throws an exception
         SeedSettings(enabled: true, mode: AutoDispatchMode.Auto, idleThresholdSeconds: 0);
         (Printer printer, Guid printerId) = SeedPrinter();
 
         using CancellationTokenSource cts = new(TimeSpan.FromSeconds(30));
-        AutoDispatchBackgroundService svc = CreateService();
+        AutoDispatchBackgroundService svc = CreateService(
+            Mock.Of<TimeProvider>(clock => clock.GetUtcNow() == now));
         PrintJob job = SeedQueuedJob();
 
         DispatchScore goodScore = new(

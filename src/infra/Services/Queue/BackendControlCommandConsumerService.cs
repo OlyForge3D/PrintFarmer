@@ -188,11 +188,12 @@ public sealed class BackendControlCommandConsumerService(
             dispatchState.PhysicalControlAttemptId = payload.AttemptId;
             dispatchState.PhysicalControlOperation = payload.Operation;
             dispatchState.PhysicalControlActorSubject = payload.ActorSubject;
-            dispatchState.PhysicalControlStartedAtUtc = _timeProvider.GetUtcNow().UtcDateTime;
+            DateTime leasedAtUtc = _timeProvider.GetUtcNow().UtcDateTime;
+            dispatchState.PhysicalControlStartedAtUtc = leasedAtUtc;
             dispatchState.PhysicalControlRequiresReconciliation = false;
             command.Status = QueueOutboxEventStatus.Processing;
             command.AttemptCount++;
-            command.LastAttemptedAtUtc = _timeProvider.GetUtcNow().UtcDateTime;
+            command.LastAttemptedAtUtc = leasedAtUtc;
             command.LastError = null;
             try
             {

@@ -100,13 +100,13 @@ public class EfAppSettingsRepository(AppDbContext db) : IAppSettingsRepository
         }
         else
         {
-            var setting = new AppSettingsEntity
+            AppSettingsEntity setting = new AppSettingsEntity
             {
                 Key = key,
                 SettingsJson = value,
                 UpdatedAt = DateTime.UtcNow
             };
-            await _db.AppSettingsEntities.AddAsync(setting, ct);
+            _ = await _db.AppSettingsEntities.AddAsync(setting, ct);
         }
     }
 
@@ -134,12 +134,12 @@ public class EfAppSettingsRepository(AppDbContext db) : IAppSettingsRepository
             return false;
         }
 
-        _db.AppSettingsEntities.Remove(existing);
+        _ = _db.AppSettingsEntities.Remove(existing);
         return true;
     }
 
     public async Task SaveChangesAsync(CancellationToken ct = default)
     {
-        await _db.SaveChangesAsync(ct);
+        _ = await _db.SaveChangesAsync(ct);
     }
 }

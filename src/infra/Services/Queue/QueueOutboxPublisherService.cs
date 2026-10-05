@@ -89,7 +89,7 @@ public sealed class QueueOutboxPublisherService(
                 logger.LogError(ex, "[OutboxPublisher] Error processing outbox events");
             }
 
-            _ = await WaitForIntervalOrPauseAsync(stoppingToken).ConfigureAwait(false);
+            await Task.Delay(PollInterval, _timeProvider, stoppingToken).ConfigureAwait(false);
         }
     }
 
@@ -97,7 +97,8 @@ public sealed class QueueOutboxPublisherService(
     {
         await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        DateTime staleCutoff = _timeProvider.GetUtcNow().UtcDateTime - StaleLeaseAge;
+        DateTime now = _timeProvider.GetUtcNow().UtcDateTime;
+        DateTime staleCutoff = now - StaleLeaseAge;
 
         List<QueueDispatchOutbox> stale = await db.QueueDispatchOutbox
             .Where(evt =>
@@ -111,7 +112,7 @@ public sealed class QueueOutboxPublisherService(
         {
             evt.Status = QueueOutboxEventStatus.Pending;
             evt.LastError = "Recovered after the publisher lease expired.";
-            evt.RetryAfterUtc = _timeProvider.GetUtcNow().UtcDateTime;
+            evt.RetryAfterUtc = now;
         }
 
         if (stale.Count > 0)
@@ -177,17 +178,6 @@ public sealed class QueueOutboxPublisherService(
         }
 
         _ = await db.SaveChangesAsync(ct);
-    }
-
-    internal async Task<bool> WaitForIntervalOrPauseAsync(CancellationToken ct)
-    {
-        DateTimeOffset until = _timeProvider.GetUtcNow() + PollInterval;
-        while (_timeProvider.GetUtcNow() < until)
-        {
-            await Task.Delay(TimeSpan.FromMilliseconds(250), _timeProvider, ct).ConfigureAwait(false);
-        }
-
-        return false;
     }
 
     internal async Task ProcessSingleEventAsync(

@@ -80,7 +80,7 @@ public class JobQueueService : IJobQueueService
     /// membership-changing job transition that needs a direct call here rather than relying
     /// on <see cref="QueueOutboxPublisherService"/>'s narrowed outbox-event handling.
     /// </param>
-    /// <param name="timeProvider">Optional clock used by queue deadline tests.</param>
+    /// <param name="timeProvider">Clock used for dispatch audit creation.</param>
     /// <exception cref="ArgumentNullException">Thrown when any required dependency is null</exception>
     public JobQueueService(
         IQueueRepository repo,
@@ -213,7 +213,10 @@ public class JobQueueService : IJobQueueService
                 QueuedJobsCount = queuedCount,
                 CurrentJobId = currentJob?.Id,
                 CurrentJobName = currentJob?.Name,
-                EstimatedCompletionTime = CalculateEstimatedCompletionTime(allJobs, currentJob, _timeProvider.GetUtcNow().UtcDateTime),
+                EstimatedCompletionTime = CalculateEstimatedCompletionTime(
+                    allJobs,
+                    currentJob,
+                    _timeProvider.GetUtcNow().UtcDateTime),
                 NozzleDiameter = primaryToolhead?.NozzleModel?.Diameter,
                 SupportedMaterials = supportedMaterials
             });
@@ -1210,7 +1213,10 @@ public class JobQueueService : IJobQueueService
 
         if (request.DeadlineAtUtc.HasValue)
         {
-            job.DeadlineAtUtc = ValidateProvidedDeadline(request.DeadlineAtUtc, GetQueuePlanningSettings(), _timeProvider.GetUtcNow().UtcDateTime);
+            job.DeadlineAtUtc = ValidateProvidedDeadline(
+                request.DeadlineAtUtc,
+                GetQueuePlanningSettings(),
+                _timeProvider.GetUtcNow().UtcDateTime);
         }
 
         if (!string.IsNullOrEmpty(request.Name))
@@ -1407,7 +1413,10 @@ public class JobQueueService : IJobQueueService
         }
     }
 
-    private static DateTime? CalculateEstimatedCompletionTime(List<PrintJob> queuedJobs, PrintJob? currentJob, DateTime nowUtc)
+    private static DateTime? CalculateEstimatedCompletionTime(
+        List<PrintJob> queuedJobs,
+        PrintJob? currentJob,
+        DateTime nowUtc)
     {
         double totalMinutes = 0.0;
 
@@ -1844,7 +1853,10 @@ public class JobQueueService : IJobQueueService
         }
     }
 
-    private static DateTime? ResolveEnqueueDeadline(DateTime? requestedDeadlineAtUtc, QueuePlanningSettings settings, DateTime nowUtc)
+    private static DateTime? ResolveEnqueueDeadline(
+        DateTime? requestedDeadlineAtUtc,
+        QueuePlanningSettings settings,
+        DateTime nowUtc)
     {
         DateTime? normalizedDeadline = NormalizeUtcDeadline(requestedDeadlineAtUtc);
         if (!normalizedDeadline.HasValue)
@@ -1864,7 +1876,10 @@ public class JobQueueService : IJobQueueService
         return normalizedDeadline;
     }
 
-    private static DateTime ValidateProvidedDeadline(DateTime? requestedDeadlineAtUtc, QueuePlanningSettings settings, DateTime nowUtc)
+    private static DateTime ValidateProvidedDeadline(
+        DateTime? requestedDeadlineAtUtc,
+        QueuePlanningSettings settings,
+        DateTime nowUtc)
     {
         DateTime? normalized = NormalizeUtcDeadline(requestedDeadlineAtUtc);
         if (!normalized.HasValue)
