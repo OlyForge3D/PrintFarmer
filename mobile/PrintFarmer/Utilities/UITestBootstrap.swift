@@ -107,6 +107,8 @@ enum UITestBootstrap {
         "--uitesting-issue3259-visual-acceptance"
     static let issue3259ControlIdleLaunchArgument =
         "--uitesting-issue3259-control-idle"
+    static let issue3259SafeFilamentActionsLaunchArgument =
+        "--uitesting-issue3259-safe-filament-actions"
     #endif
 
     #if DEBUG
@@ -537,6 +539,10 @@ enum UITestBootstrap {
     private static let issue3259VisualAcceptanceThumbnailPath =
         "/api/printers/\(DemoData.prusaMK4_1_ID.uuidString.lowercased())/current-job/thumbnail?v=3259000000000001"
 
+    private static func issue3259QueueThumbnailPath(_ jobID: String) -> String {
+        "/api/gcode-files/thumbnail/\(jobID)"
+    }
+
     private struct Issue3259VisualAcceptanceFixture {
         let printers: [Printer]
         let status: PrinterStatusDetail
@@ -591,6 +597,19 @@ enum UITestBootstrap {
             printer.y = 0
             printer.z = 5
             printer.homedAxes = ""
+        }
+        if ProcessInfo.processInfo.arguments.contains(issue3259SafeFilamentActionsLaunchArgument) {
+            printer.state = "ready"
+            printer.progress = nil
+            printer.currentLayer = nil
+            printer.totalLayers = nil
+            printer.jobName = nil
+            printer.fileName = nil
+            printer.currentJobThumbnailUrl = nil
+            printer.hotendTemp = PhysicalFilamentCommandEligibility.minimumLoadUnloadTemperatureC
+            printer.hotendTarget = PhysicalFilamentCommandEligibility.minimumLoadUnloadTemperatureC
+            printer.bedTemp = 23
+            printer.bedTarget = 0
         }
 
         var bambuX1C = demoPrinter(DemoData.bambuX1C_ID)
@@ -992,6 +1011,8 @@ enum UITestBootstrap {
             let failedJobsDataByID: [String: Data]
             let failedJobRowVersionsByID: [String: String]
             let rerunResponsesByID: [String: Data]
+            let farmShapeData: Data
+            let queueStatsData: Data
             let userData: Data
             let thumbnailData: Data
         }
@@ -1047,13 +1068,25 @@ enum UITestBootstrap {
                     "supportsHomingZ": true,
                     "supportsHotendTemperature": true,
                     "supportsBedTemperature": true,
-                    "supportsFilamentLoad": false,
-                    "supportsFilamentUnload": false,
+                    "supportsFilamentLoad": true,
+                    "supportsFilamentUnload": true,
                     "supportsFilamentChange": false,
                     "supportedAxes": ["X", "Y", "Z"],
                     "verifiedSafety": safety
                 ])
                 let userData = try encoder.encode(visualAcceptanceDemoUser())
+                let farmShapeData = try JSONSerialization.data(withJSONObject: [
+                    "accountCount": 1,
+                    "locationCount": 1,
+                    "printerCount": fixture.printers.count,
+                ])
+                let queueStatsData = try encoder.encode(QueueStats(
+                    totalQueued: 2,
+                    totalPrinting: 1,
+                    totalPaused: 0,
+                    averageWaitTimeMinutes: 18,
+                    byModel: []
+                ))
                 let detailsData = try encoder.encode(fixture.details)
                 guard var idleDetails = try JSONSerialization.jsonObject(with: detailsData) as? [String: Any] else {
                     preconditionFailure("The idle-printer details fixture must encode as an object.")
@@ -1153,7 +1186,7 @@ enum UITestBootstrap {
                         failureReason: nil,
                         createdAtUtc: Date(timeIntervalSince1970: 1_790_000_000),
                         updatedAtUtc: nil,
-                        thumbnailUrl: nil,
+                        thumbnailUrl: issue3259QueueThumbnailPath("32590000-0000-0000-0000-000000000002"),
                         filamentName: "PLA",
                         filamentColor: "#EF6B4A",
                         copies: 1,
@@ -1178,7 +1211,7 @@ enum UITestBootstrap {
                         failureReason: nil,
                         createdAtUtc: Date(timeIntervalSince1970: 1_790_000_100),
                         updatedAtUtc: nil,
-                        thumbnailUrl: nil,
+                        thumbnailUrl: issue3259QueueThumbnailPath("32590000-0000-0000-0000-000000000003"),
                         filamentName: "PLA",
                         filamentColor: "#EF6B4A",
                         copies: 1,
@@ -1203,7 +1236,7 @@ enum UITestBootstrap {
                         failureReason: nil,
                         createdAtUtc: Date(timeIntervalSince1970: 1_790_000_200),
                         updatedAtUtc: nil,
-                        thumbnailUrl: nil,
+                        thumbnailUrl: issue3259QueueThumbnailPath("32590000-0000-0000-0000-000000000004"),
                         filamentName: "PLA",
                         filamentColor: "#EF6B4A",
                         copies: 1,
@@ -1230,7 +1263,7 @@ enum UITestBootstrap {
                         failureReason: nil,
                         createdAtUtc: Date(timeIntervalSince1970: 1_790_000_000),
                         updatedAtUtc: nil,
-                        thumbnailUrl: nil,
+                        thumbnailUrl: issue3259QueueThumbnailPath("32590000-0000-0000-0000-000000000020"),
                         filamentName: "PLA",
                         filamentColor: "#EF6B4A",
                         copies: 1,
@@ -1255,7 +1288,7 @@ enum UITestBootstrap {
                         failureReason: nil,
                         createdAtUtc: Date(timeIntervalSince1970: 1_790_000_100),
                         updatedAtUtc: nil,
-                        thumbnailUrl: nil,
+                        thumbnailUrl: issue3259QueueThumbnailPath("32590000-0000-0000-0000-000000000021"),
                         filamentName: "PLA",
                         filamentColor: "#EF6B4A",
                         copies: 1,
@@ -1280,7 +1313,7 @@ enum UITestBootstrap {
                         failureReason: nil,
                         createdAtUtc: Date(timeIntervalSince1970: 1_790_000_200),
                         updatedAtUtc: nil,
-                        thumbnailUrl: nil,
+                        thumbnailUrl: issue3259QueueThumbnailPath("32590000-0000-0000-0000-000000000022"),
                         filamentName: "PLA",
                         filamentColor: "#EF6B4A",
                         copies: 1,
@@ -1426,6 +1459,8 @@ enum UITestBootstrap {
                         DemoData.job9ID.uuidString: rerunResponseData,
                         DemoData.job10ID.uuidString: secondRerunResponseData,
                     ],
+                    farmShapeData: farmShapeData,
+                    queueStatsData: queueStatsData,
                     userData: userData,
                     thumbnailData: fixture.thumbnail
                 )
@@ -1535,8 +1570,12 @@ enum UITestBootstrap {
                 }
             case ("GET", "/api/job-queue-analytics"):
                 result = (200, "application/json", fixture.globalQueueData)
+            case ("GET", "/api/job-queue-analytics/stats"):
+                result = (200, "application/json", fixture.queueStatsData)
             case ("GET", "/api/job-queue-analytics/history"):
                 result = (200, "application/json", fixture.recentFailureHistoryData)
+            case ("GET", "/api/system/farm-shape"):
+                result = (200, "application/json", fixture.farmShapeData)
             case ("GET", let path)
                 where path.hasPrefix("/api/job-queue/") && !path.hasSuffix("/rerun"):
                 let jobID = String(path.dropFirst("/api/job-queue/".count))
@@ -1559,7 +1598,25 @@ enum UITestBootstrap {
                     ? fixture.globalQueueAfterRerunData
                     : fixture.globalQueueAfterSecondRerunData
                 result = (200, "application/json", responseData)
+            case ("POST", let path)
+                where path.hasPrefix("/api/printers/")
+                    && path.split(separator: "/").count == 4
+                    && (path.hasSuffix("/filament-load") || path.hasSuffix("/filament-unload")):
+                let printerKey = String(path.split(separator: "/")[2]).lowercased()
+                if fixture.capabilitiesDataByID[printerKey] != nil {
+                    result = (
+                        200,
+                        "application/json",
+                        Data(#"{"success":true,"message":"Accepted by authenticated visual-acceptance API fixture."}"#.utf8)
+                    )
+                } else {
+                    result = (404, "application/json", Data(#"{"error":"not-found"}"#.utf8))
+                }
             case ("GET", "/api/printers/\(printerID)/current-job/thumbnail"):
+                result = (200, "image/png", fixture.thumbnailData)
+            case ("GET", let path)
+                where path.hasPrefix("/api/gcode-files/thumbnail/")
+                    && UUID(uuidString: String(path.dropFirst("/api/gcode-files/thumbnail/".count))) != nil:
                 result = (200, "image/png", fixture.thumbnailData)
             case ("POST", "/api/printers/\(printerID)/temps"):
                 result = updateTemperatures(&fixture, request: request)
@@ -1746,8 +1803,8 @@ enum UITestBootstrap {
             operations: VerifiedSafetyOperationsDto(
                 absoluteMovement: supported,
                 firmwareZOffsetSave: supported,
-                filamentLoad: unsupported,
-                filamentUnload: unsupported,
+                filamentLoad: supported,
+                filamentUnload: supported,
                 filamentChange: unsupported
             ),
             extrusion: VerifiedSafetyExtrusionDto(
@@ -1831,7 +1888,7 @@ enum UITestBootstrap {
                 failureReason: nil,
                 createdAtUtc: createdAt,
                 updatedAtUtc: nil,
-                thumbnailUrl: issue3259VisualAcceptanceThumbnailPath,
+                thumbnailUrl: issue3259QueueThumbnailPath(id),
                 filamentName: "Prusament PLA",
                 filamentColor: "#EF6B4A",
                 copies: 1,
@@ -1847,7 +1904,7 @@ enum UITestBootstrap {
                 nozzleDiameter: 0.4,
                 estimatedPrintTimeSeconds: durationSeconds,
                 estimatedFilamentUsageGrams: requiredGrams,
-                thumbnailUrl: issue3259VisualAcceptanceThumbnailPath
+                thumbnailUrl: issue3259QueueThumbnailPath(id)
             )
             let estimatedStart = actualStartTime
                 ?? createdAt.addingTimeInterval(TimeInterval(position * 7_200))

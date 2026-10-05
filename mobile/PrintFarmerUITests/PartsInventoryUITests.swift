@@ -8,13 +8,17 @@ final class PartsInventoryUITests: PrintFarmerUITestCase {
         let filament = shellDestinationButton(tabIdentifier: "tab.filament", timeout: 8)
         XCTAssertTrue(filament.exists)
         filament.tap()
-        XCTAssertTrue(app.navigationBars["Filament"].waitForExistence(timeout: 8))
+        XCTAssertTrue(
+            app.staticTexts["navigation.title"].waitForExistence(timeout: 8)
+                || app.navigationBars["Filament"].waitForExistence(timeout: 8)
+        )
         XCTAssertTrue(app.buttons["inventory.addSpool"].exists)
         XCTAssertFalse(app.segmentedControls["inventory.segmentPicker"].exists)
     }
 
     func testPrintedPartsEntryOpensStockRowAndQuantityAdjustment() {
         shellDestinationButton(tabIdentifier: "tab.filament", timeout: 8).tap()
+        app.buttons["inventory.actions"].tap()
         let parts = app.buttons["filament.printedParts"]
         XCTAssertTrue(parts.waitForExistence(timeout: 8))
         parts.tap()
@@ -28,6 +32,7 @@ final class PartsInventoryUITests: PrintFarmerUITestCase {
 
     func testScanFromPrintedPartsSheetReturnsInPlace() {
         shellDestinationButton(tabIdentifier: "tab.filament", timeout: 8).tap()
+        app.buttons["inventory.actions"].tap()
         app.buttons["filament.printedParts"].tap()
         XCTAssertTrue(app.navigationBars["Printed Parts"].waitForExistence(timeout: 8))
 
@@ -50,11 +55,13 @@ final class PartsInventoryUITests: PrintFarmerUITestCase {
         XCTAssertTrue(filament.exists)
         filament.tap()
         XCTAssertTrue(app.buttons["inventory.addSpool"].waitForExistence(timeout: 8))
+        app.buttons["inventory.actions"].tap()
         XCTAssertFalse(app.buttons["filament.printedParts"].exists)
     }
 
     func testReorderWarningAndFilterRemainAvailableInSecondaryStockList() {
         shellDestinationButton(tabIdentifier: "tab.filament", timeout: 8).tap()
+        app.buttons["inventory.actions"].tap()
         let parts = app.buttons["filament.printedParts"]
         XCTAssertTrue(parts.waitForExistence(timeout: 8))
         parts.tap()

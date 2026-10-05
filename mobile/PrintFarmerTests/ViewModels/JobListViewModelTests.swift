@@ -482,6 +482,53 @@ final class JobListViewModelTests: XCTestCase {
         XCTAssertFalse(viewModel.isReorderingQueue)
     }
 
+    func testMoveQueuedRowsMapsOffsetsAroundAssignedJobs() async throws {
+        let printerID = UUID()
+        let assigned = try makeQueueJob(
+            scope: printerID,
+            status: .assigned,
+            priority: .high,
+            queuePosition: 0,
+            name: "assigned"
+        )
+        let moved = try makeQueueJob(
+            scope: printerID,
+            priority: .high,
+            queuePosition: 1,
+            revision: "AQIDAg==",
+            name: "moved"
+        )
+        let neighbor = try makeQueueJob(
+            scope: printerID,
+            priority: .high,
+            queuePosition: 2,
+            revision: "AQIDAw==",
+            name: "neighbor"
+        )
+        let initial = [assigned, moved, neighbor]
+        let serverOrder = [assigned, neighbor, moved]
+        mockJobService.queuedJobResponsesByLoad = [initial, serverOrder]
+        mockJobService.queuedJobResponsesToReturn = serverOrder
+        viewModel.setQueueWriteAuthorization(true)
+        viewModel.setNetworkReachability(true)
+        await viewModel.loadJobs()
+
+        await viewModel.moveQueuedRows(
+            fromOffsets: IndexSet(integer: 1),
+            toOffset: 3
+        )
+
+        XCTAssertEqual(mockJobService.moveQueuedJobCalledWith?.id, moved.job.jobUUID)
+        XCTAssertEqual(
+            mockJobService.moveQueuedJobCalledWith?.neighbor,
+            .after(
+                id: try XCTUnwrap(neighbor.job.jobUUID),
+                rowVersion: try XCTUnwrap(neighbor.job.rowVersion)
+            )
+        )
+        XCTAssertEqual(viewModel.jobs.map(\.id), serverOrder.map(\.id))
+    }
+
     func testVoiceOverMovesRespectGroupBoundaries() async throws {
         let printerID = UUID()
         let highFirst = try makeQueueJob(scope: printerID, priority: .high, name: "high first")

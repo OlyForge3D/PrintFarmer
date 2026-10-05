@@ -667,7 +667,7 @@ final class PrinterDetailViewModel {
 
     func loadPhysicalFilament() async {
         clearOperationError(source: .loadPhysicalFilament)
-        guard let reason = physicalFilamentCommandBlockedReason(supports: \.supportsFilamentLoad) else {
+        guard let reason = physicalFilamentCommandBlockedReason(for: .load) else {
             guard let printerService else { return }
             let authority = beginActionAuthority(for: printerService)
             defer { endBusyToken(authority.busyToken) }
@@ -693,7 +693,7 @@ final class PrinterDetailViewModel {
 
     func unloadPhysicalFilament() async {
         clearOperationError(source: .unloadPhysicalFilament)
-        guard let reason = physicalFilamentCommandBlockedReason(supports: \.supportsFilamentUnload) else {
+        guard let reason = physicalFilamentCommandBlockedReason(for: .unload) else {
             guard let printerService else { return }
             let authority = beginActionAuthority(for: printerService)
             defer { endBusyToken(authority.busyToken) }
@@ -2123,9 +2123,7 @@ final class PrinterDetailViewModel {
         return rowVersion
     }
 
-    func physicalFilamentCommandBlockedReason(
-        supports capability: KeyPath<PrinterBackendCapabilities, Bool>
-    ) -> String? {
+    func physicalFilamentCommandBlockedReason(for operation: PhysicalFilamentOperation) -> String? {
         guard printerService != nil else { return "Printer service is not available." }
         guard let printer else { return "Printer status is unavailable." }
         guard printer.isOnline else { return "Printer is offline." }
@@ -2145,10 +2143,19 @@ final class PrinterDetailViewModel {
             }
             return "Checking printer filament-command support."
         }
-        guard capabilities[keyPath: capability] else {
+        let isSupported = operation == .load
+            ? capabilities.supportsFilamentLoad
+            : capabilities.supportsFilamentUnload
+        guard isSupported else {
             return "This printer backend does not report support for that filament command."
         }
-        return nil
+        return PhysicalFilamentCommandEligibility.blockedReason(
+            for: operation,
+            capabilities: capabilities,
+            status: statusDetail,
+            configurationRevision: printer.configurationRevision,
+            now: nowProvider()
+        )
     }
 
     @discardableResult

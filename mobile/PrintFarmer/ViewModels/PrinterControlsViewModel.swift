@@ -80,6 +80,93 @@ enum PhysicalFilamentOperation: String, CaseIterable, Identifiable, Sendable {
     var title: String { "\(rawValue.capitalized) filament" }
 }
 
+enum PhysicalFilamentCommandEligibility {
+    static let minimumLoadUnloadTemperatureC = 220.0
+
+    static func blockedReason(
+        for operation: PhysicalFilamentOperation,
+        capabilities: PrinterBackendCapabilities?,
+        status: PrinterStatusDetail?,
+        configurationRevision: Int64,
+        now: Date
+    ) -> String? {
+        guard let capabilities else { return "\(operation.title): backend capabilities are unavailable." }
+        let supported: Bool
+        let evidence: VerifiedSafetyOperationCapabilityDto?
+        switch operation {
+        case .load:
+            supported = capabilities.supportsFilamentLoad
+            evidence = capabilities.verifiedSafety?.operations.filamentLoad
+        case .unload:
+            supported = capabilities.supportsFilamentUnload
+            evidence = capabilities.verifiedSafety?.operations.filamentUnload
+        case .change:
+            supported = capabilities.supportsFilamentChange
+            evidence = capabilities.verifiedSafety?.operations.filamentChange
+        }
+        guard supported else {
+            return "\(operation.title) is unavailable: no verified per-operation backend/macro support."
+        }
+        guard let safety = capabilities.verifiedSafety else {
+            return "\(operation.title): backend did not provide verified safety data. Refresh safety checks."
+        }
+        guard safety.contractVersion == 1 else {
+            return "\(operation.title): verified safety contract version is unsupported. Refresh safety checks."
+        }
+        guard safety.discovery.state != .unavailable else {
+            return "\(operation.title): verified safety discovery is unavailable. Refresh safety checks."
+        }
+        guard safety.discovery.sourceRevision == String(configurationRevision) else {
+            return "\(operation.title): verified safety discovery does not match the current printer configuration. Refresh safety checks."
+        }
+        guard let discoveryObservedAt = safety.discovery.observedAtUtc,
+              discoveryObservedAt <= now else {
+            return "\(operation.title): verified safety discovery timestamp is invalid. Refresh safety checks."
+        }
+        guard let evidence else { return "\(operation.title): verified support is unknown. Refresh safety checks." }
+        if evidence.support == .unsupported {
+            return "\(operation.title) is unsupported by the authoritative printer probe. Use the printer's supported procedure."
+        }
+        guard evidence.support == .supported,
+              hasProvenance(evidence.source, evidence.observedAtUtc, discoveryObservedAt: discoveryObservedAt, now: now) else {
+            return "\(operation.title): verified support or its provenance is unknown. Refresh safety checks."
+        }
+
+        let floor = operation == .load || operation == .unload
+            ? minimumLoadUnloadTemperatureC
+            : nil
+        let minimum = safety.extrusion.minimumSafeMeasuredHotendTemperatureC
+        let requiredTemperature: Double
+        if minimum.state == .verified,
+           let value = minimum.value, value.isFinite,
+           hasProvenance(minimum.source, minimum.observedAtUtc, discoveryObservedAt: discoveryObservedAt, now: now) {
+            requiredTemperature = max(value, floor ?? value)
+        } else if minimum.state == .unknown, let floor {
+            requiredTemperature = floor
+        } else {
+            return "A verified material-safe minimum is unavailable. Firmware cold-extrusion limits and assigned spools are not safety evidence."
+        }
+
+        guard let measured = status?.safetyTelemetry?.measuredHotendTemperatureC,
+              measured.isFresh(at: now), let temperature = measured.value, temperature.isFinite else {
+            return "Fresh measured hotend temperature is unavailable. Refresh safety checks; a hot target cannot authorize extrusion."
+        }
+        return temperature >= requiredTemperature ? nil :
+            "Measured hotend is below the required minimum of \(requiredTemperature.formatted()) °C. Use Hotend preheat, then refresh safety checks."
+    }
+
+    private static func hasProvenance(
+        _ source: String?,
+        _ observedAt: Date?,
+        discoveryObservedAt: Date,
+        now: Date
+    ) -> Bool {
+        guard let source, !source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              let observedAt else { return false }
+        return observedAt <= now && observedAt <= discoveryObservedAt
+    }
+}
+
 enum ZOffsetCalibrationStep: String, CaseIterable, Sendable {
     case introduction, home, position, adjust, save, done
 }
@@ -271,7 +358,6 @@ final class PrinterControlsViewModel: ObservableObject {
     // Internal feedrates (mm/min). Not exposed; controls UI uses fixed jog distances.
     static let xyFeedrateMmMin: Int = 3000
     static let zFeedrateMmMin: Int = 600
-    private static let minimumFilamentLoadUnloadTemperatureC = 220.0
 
     @Published private(set) var capabilities: PrinterBackendCapabilities?
     @Published private(set) var lastError: ControlsError?
@@ -534,26 +620,19 @@ final class PrinterControlsViewModel: ObservableObject {
         return nil
     }
 
-    private func materialTemperatureBlockedReason(minimumFloorC: Double? = nil) -> String? {
+    private var materialTemperatureBlockedReason: String? {
         if let reason = safetyEvidenceBlockedReason { return reason }
-        guard let minimum = capabilities?.verifiedSafety?.extrusion.minimumSafeMeasuredHotendTemperatureC else {
-            return "A verified material-safe minimum is unavailable. Firmware cold-extrusion limits and assigned spools are not safety evidence."
-        }
-        let requiredMinimumC: Double
-        if minimum.state == .verified, let value = minimum.value, value.isFinite,
-           hasProvenance(minimum.source, minimum.observedAtUtc) {
-            requiredMinimumC = max(value, minimumFloorC ?? value)
-        } else if minimum.state == .unknown, let minimumFloorC {
-            requiredMinimumC = minimumFloorC
-        } else {
+        guard let minimum = capabilities?.verifiedSafety?.extrusion.minimumSafeMeasuredHotendTemperatureC,
+              minimum.state == .verified, let value = minimum.value, value.isFinite,
+              hasProvenance(minimum.source, minimum.observedAtUtc) else {
             return "A verified material-safe minimum is unavailable. Firmware cold-extrusion limits and assigned spools are not safety evidence."
         }
         guard let measured = safetyStatus?.safetyTelemetry?.measuredHotendTemperatureC,
               measured.isFresh(at: clock()), let temperature = measured.value, temperature.isFinite else {
             return "Fresh measured hotend temperature is unavailable. Refresh safety checks; a hot target cannot authorize extrusion."
         }
-        return temperature >= requiredMinimumC ? nil :
-            "Measured hotend is below the required minimum of \(requiredMinimumC.formatted()) °C. Use Hotend preheat, then refresh safety checks."
+        return temperature >= value ? nil :
+            "Measured hotend is below the verified minimum of \(value.formatted()) °C. Use Hotend preheat, then refresh safety checks."
     }
 
     func configureAccess(
@@ -624,7 +703,7 @@ final class PrinterControlsViewModel: ObservableObject {
         guard capabilities?.supportsExtrusion == true else {
             return "Extrusion is unavailable without explicit backend support."
         }
-        return materialTemperatureBlockedReason()
+        return materialTemperatureBlockedReason
     }
 
     func extrude(distanceMm: Double, speedMmPerSecond: Int) async {
@@ -657,25 +736,14 @@ final class PrinterControlsViewModel: ObservableObject {
 
     func filamentBlockedReason(_ operation: PhysicalFilamentOperation) -> String? {
         if let reason = blockedReason { return reason }
-        let supported: Bool
-        let evidence: VerifiedSafetyOperationCapabilityDto?
-        switch operation {
-        case .load:
-            supported = capabilities?.supportsFilamentLoad == true
-            evidence = capabilities?.verifiedSafety?.operations.filamentLoad
-        case .unload:
-            supported = capabilities?.supportsFilamentUnload == true
-            evidence = capabilities?.verifiedSafety?.operations.filamentUnload
-        case .change:
-            supported = capabilities?.supportsFilamentChange == true
-            evidence = capabilities?.verifiedSafety?.operations.filamentChange
-        }
-        guard supported else { return "\(operation.title) is unavailable: no verified per-operation backend/macro support." }
-        let minimumFloorC = operation == .load || operation == .unload
-            ? Self.minimumFilamentLoadUnloadTemperatureC
-            : nil
-        return supportReason(evidence, title: operation.title) ??
-            materialTemperatureBlockedReason(minimumFloorC: minimumFloorC)
+        if let reason = safetyEvidenceBlockedReason { return reason }
+        return PhysicalFilamentCommandEligibility.blockedReason(
+            for: operation,
+            capabilities: capabilities,
+            status: safetyStatus,
+            configurationRevision: printer.configurationRevision,
+            now: clock()
+        )
     }
 
     func performFilament(_ operation: PhysicalFilamentOperation) async {

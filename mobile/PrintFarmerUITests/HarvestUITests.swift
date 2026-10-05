@@ -26,7 +26,7 @@ final class HarvestUITests: QueueUITestBase {
         ))
         let expectedID = destination.surface == .tabBar ? "tab.queue" : "sidebar.queue"
         let scope = destination.surface == .tabBar
-            ? app.tabBars.descendants(matching: captured.type)
+            ? app.buttons
             : app.descendants(matching: captured.type)
         let stable = scope.matching(identifier: expectedID).firstMatch
         XCTAssertTrue(stable.waitForExistence(timeout: 8))
@@ -55,21 +55,21 @@ final class HarvestUITests: QueueUITestBase {
         XCTAssertTrue(app.buttons["job.row.32340000-0000-0000-0000-000000000002"].exists,
                       "Assigned work remains visible outside the reorder group.")
 
-        let alphaHandle = app.buttons["Reorder Queue reorder alpha.gcode"]
-        let gammaHandle = app.buttons["Reorder Queue reorder gamma.gcode"]
+        let alphaHandle = reorderHandle(for: "Queue reorder alpha.gcode")
+        let gammaHandle = reorderHandle(for: "Queue reorder gamma.gcode")
         XCTAssertTrue(alphaHandle.waitForExistence(timeout: 5),
-                      "Eligible queued rows should expose the native reorder handle.")
+                      "Eligible queued rows should expose the drag-to-reorder control.")
         XCTAssertTrue(gammaHandle.exists)
+        XCTAssertTrue(gammaHandle.isHittable)
         let originalAlphaY = alpha.frame.minY
         let source = alphaHandle.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-        let destination = gamma.coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5))
+        let destination = beta.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         source.press(
             forDuration: 1,
             thenDragTo: destination,
             withVelocity: .slow,
             thenHoldForDuration: 0.5
         )
-
         let reordered = XCTNSPredicateExpectation(
             predicate: NSPredicate { _, _ in
                 beta.frame.minY < alpha.frame.minY && alpha.frame.minY > originalAlphaY + 10
@@ -93,14 +93,13 @@ final class HarvestUITests: QueueUITestBase {
                     .map(\.identifier)
             }
             let reorderedGroup = currentGroupOrder()
-            let alphaReorderHandle = app.buttons["Reorder Queue reorder alpha.gcode"]
-            let alphaCoordinate = alphaReorderHandle.coordinate(
+            let alphaCoordinate = alphaHandle.coordinate(
                 withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)
             )
             alphaCoordinate.press(
                 forDuration: 1,
                 thenDragTo: priorityBoundary.coordinate(
-                    withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)
+                    withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)
                 ),
                 withVelocity: .slow,
                 thenHoldForDuration: 0.5
@@ -108,12 +107,12 @@ final class HarvestUITests: QueueUITestBase {
             XCTAssertEqual(currentGroupOrder(), reorderedGroup,
                            "Dragging to another priority group must not reorder this group.")
 
-            alphaReorderHandle.coordinate(
+            alphaHandle.coordinate(
                 withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)
             ).press(
                 forDuration: 1,
                 thenDragTo: printerBoundary.coordinate(
-                    withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)
+                    withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)
                 ),
                 withVelocity: .slow,
                 thenHoldForDuration: 0.5
@@ -127,17 +126,17 @@ final class HarvestUITests: QueueUITestBase {
         launchQueueReorderScenario()
         openQueueDestination()
 
-        let alphaHandle = app.buttons["Reorder Queue reorder alpha.gcode"]
-        let betaHandle = app.buttons["Reorder Queue reorder beta.gcode"]
+        let alphaHandle = reorderHandle(for: "Queue reorder alpha.gcode")
+        let betaHandle = reorderHandle(for: "Queue reorder beta.gcode")
         XCTAssertTrue(alphaHandle.waitForExistence(timeout: 8))
         XCTAssertTrue(betaHandle.exists)
-        XCTAssertFalse(app.buttons["Reorder Queue pinned assigned.gcode"].exists,
-                       "Assigned jobs must not expose native reorder controls.")
+        XCTAssertFalse(reorderHandle(for: "Queue pinned assigned.gcode").exists,
+                       "Assigned jobs must not expose drag-to-reorder controls.")
 
-        let priorityBoundaryHandle = app.buttons["Reorder Queue priority boundary.gcode"]
-        let printerBoundaryHandle = app.buttons["Reorder Queue printer boundary.gcode"]
+        let priorityBoundaryHandle = reorderHandle(for: "Queue priority boundary.gcode")
+        let printerBoundaryHandle = reorderHandle(for: "Queue printer boundary.gcode")
         for _ in 0..<3 where !priorityBoundaryHandle.exists || !printerBoundaryHandle.exists {
-            app.descendants(matching: .any)["jobList.root"].swipeUp()
+            app.collectionViews["jobList.combined.list"].swipeUp()
         }
         XCTAssertTrue(app.buttons["job.row.32340000-0000-0000-0000-000000000005"].exists)
         XCTAssertTrue(app.buttons["job.row.32340000-0000-0000-0000-000000000006"].exists)
@@ -149,18 +148,24 @@ final class HarvestUITests: QueueUITestBase {
         let printing = app.buttons.matching(
             NSPredicate(format: "label CONTAINS %@", "Queue pinned printing.gcode")
         ).firstMatch
-        let queueList = app.collectionViews["jobList.root"]
+        let queueList = app.collectionViews["jobList.combined.list"]
         for _ in 0..<8 where !printing.isHittable {
             queueList.swipeDown()
         }
         XCTAssertTrue(printing.waitForExistence(timeout: 5))
         XCTAssertTrue(printing.isHittable, "The Printing row must remain reachable in the combined Queue.")
-        XCTAssertFalse(app.buttons["Reorder Queue pinned printing.gcode"].exists,
+        XCTAssertFalse(reorderHandle(for: "Queue pinned printing.gcode").exists,
                        "Printing jobs must not expose native reorder controls.")
     }
 
     private func launchQueueReorderScenario() {
         relaunchAppForTest(additionalArguments: ["--uitesting-queue-reorder"])
+    }
+
+    private func reorderHandle(for jobName: String) -> XCUIElement {
+        app.buttons.matching(
+            NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@", "Reorder", jobName)
+        ).firstMatch
     }
 
     /// Navigates Queue → Job History → the completed demo job. Queue opens
@@ -184,8 +189,25 @@ final class HarvestUITests: QueueUITestBase {
         line: UInt = #line
     ) {
         openQueueDestination(file: file, line: line)
+        openJobHistoryMenuAndSelect(file: file, line: line)
 
+        XCTAssertTrue(
+            app.buttons[completedJobIdentifier].waitForExistence(timeout: 8),
+            "Completed jobs must be reachable from Job History",
+            file: file,
+            line: line
+        )
+    }
+
+    private func openJobHistoryMenuAndSelect(
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let queueList = app.collectionViews["jobList.combined.list"]
         let historyButton = app.buttons["jobList.history.open"]
+        for _ in 0..<8 where !historyButton.isHittable {
+            queueList.swipeUp()
+        }
         XCTAssertTrue(
             historyButton.waitForExistence(timeout: 8),
             "Queue must expose the separate Job History destination",
@@ -193,11 +215,14 @@ final class HarvestUITests: QueueUITestBase {
             line: line
         )
         historyButton.tap()
+        let selectHistory = app.buttons["jobList.history.select"]
+        XCTAssertTrue(selectHistory.waitForExistence(timeout: 5), file: file, line: line)
+        selectHistory.tap()
         XCTAssertTrue(
-            app.buttons[completedJobIdentifier].waitForExistence(timeout: 8),
-            "Completed jobs must be reachable from Job History",
-            file: file,
-            line: line
+            app.descendants(matching: .any)["jobList.history"]
+                .waitForExistence(timeout: 8),
+            "Job History sheet must open",
+            file: file, line: line
         )
     }
 
@@ -212,9 +237,7 @@ final class HarvestUITests: QueueUITestBase {
         XCTAssertFalse(app.buttons[completedJobIdentifier].exists)
         XCTAssertFalse(app.buttons[cancelledJobIdentifier].exists)
 
-        let historyButton = app.buttons["jobList.history.open"]
-        XCTAssertTrue(historyButton.waitForExistence(timeout: 5))
-        historyButton.tap()
+        openJobHistoryMenuAndSelect()
         assertHistoryJob(
             identifier: completedJobIdentifier,
             name: "benchy_calibration.gcode",
@@ -240,18 +263,10 @@ final class HarvestUITests: QueueUITestBase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        let row = app.buttons[identifier]
-        if !row.exists {
-            // #2445 wrapped `JobListView.screenContent` in an outer
-            // `.accessibilityIdentifier("jobList.root")`, which collapses
-            // onto the same underlying collection view as the inner
-            // `jobList` list's own `"jobList.combined.list"` identifier —
-            // only the outer identifier survives at runtime on iPad. Swipe
-            // the actual queue list to reveal the off-screen failure row.
-            let combinedList = app.collectionViews["jobList.root"]
-            if combinedList.exists {
-                combinedList.swipeUp()
-            }
+        let row = app.descendants(matching: .any)[identifier]
+        let combinedList = app.collectionViews["jobList.combined.list"]
+        for _ in 0..<8 where !row.isHittable {
+            combinedList.swipeUp()
         }
         XCTAssertTrue(
             row.waitForExistence(timeout: 5),
@@ -270,9 +285,9 @@ final class HarvestUITests: QueueUITestBase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        let history = app.collectionViews["jobList.history"]
-        let row = app.buttons[identifier]
-        for _ in 0..<5 where !row.exists && history.exists {
+        let history = app.descendants(matching: .any)["jobList.history"]
+        let row = app.descendants(matching: .any)[identifier]
+        for _ in 0..<5 where !row.isHittable && history.exists {
             history.swipeUp()
         }
         XCTAssertTrue(

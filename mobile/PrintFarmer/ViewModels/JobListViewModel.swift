@@ -413,6 +413,39 @@ final class JobListViewModel {
         )
     }
 
+    func moveQueuedRows(fromOffsets offsets: IndexSet, toOffset destination: Int) async {
+        let visibleRows = queuedJobs
+        guard offsets.count == 1,
+              let source = offsets.first,
+              visibleRows.indices.contains(source),
+              (0...visibleRows.count).contains(destination),
+              visibleRows[source].job.jobStatus == .queued else {
+            return
+        }
+
+        let moved = visibleRows[source]
+        var reorderedRows = visibleRows
+        reorderedRows.remove(at: source)
+        let insertionIndex = min(
+            max(destination > source ? destination - 1 : destination, 0),
+            reorderedRows.count
+        )
+        reorderedRows.insert(moved, at: insertionIndex)
+
+        let queuedRows = reorderedRows.filter { $0.job.jobStatus == .queued }
+        let originalQueuedRows = reorderableQueuedJobs
+        guard let queuedSource = originalQueuedRows.firstIndex(where: { $0.id == moved.id }),
+              let queuedDestination = queuedRows.firstIndex(where: { $0.id == moved.id }),
+              queuedSource != queuedDestination else {
+            return
+        }
+
+        await moveQueuedJobs(
+            fromOffsets: IndexSet(integer: queuedSource),
+            toOffset: queuedDestination > queuedSource ? queuedDestination + 1 : queuedDestination
+        )
+    }
+
     func moveQueuedJobs(fromOffsets offsets: IndexSet, toOffset destination: Int) async {
         let orderedJobs = reorderableQueuedJobs
         guard offsets.count == 1,

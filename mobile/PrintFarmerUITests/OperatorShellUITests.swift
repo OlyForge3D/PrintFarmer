@@ -11,8 +11,17 @@ final class OperatorShellUITests: PrintFarmerUITestCase {
         for id in ["tab.farm", "tab.queue", "tab.filament"] {
             XCTAssertTrue(shellDestinationButton(tabIdentifier: id, timeout: 8).exists)
         }
-        if app.tabBars.firstMatch.exists {
-            XCTAssertEqual(app.tabBars.firstMatch.buttons.count, 3)
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            XCTAssertFalse(app.descendants(matching: .any)["navigation.tabBar"].exists)
+            for id in ["farm", "queue", "filament"] {
+                XCTAssertTrue(app.buttons["sidebar.\(id)"].exists)
+            }
+        } else {
+            XCTAssertTrue(app.descendants(matching: .any)["navigation.tabBar"].exists)
+            XCTAssertEqual(
+                app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "tab.")).count,
+                3
+            )
         }
         for retired in ["attention", "tasks", "inventory", "oversight", "overview", "fleet", "jobs", "upkeep", "reports"] {
             XCTAssertFalse(compactTabExists(tabIdentifier: "tab.\(retired)"))

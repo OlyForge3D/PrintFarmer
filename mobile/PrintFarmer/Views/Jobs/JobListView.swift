@@ -1,4 +1,5 @@
 import SwiftUI
+import OSLog
 
 struct JobListView: View {
     @Environment(AuthViewModel.self) private var authViewModel
@@ -7,12 +8,38 @@ struct JobListView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     private let ownsNavigationStack: Bool
     @State private var viewModel = JobListViewModel()
+    @State private var queueEditMode: EditMode = .inactive
     @State private var retryTask: Task<Void, Never>?
     @State private var showsJobHistory = false
     @State private var historyNavigationPath: [AppDestination] = []
+    @State private var activePrinterStatuses: [UUID: PrinterStatusDetail] = [:]
+    @State private var unavailableActivePrinterStatuses: Set<UUID> = []
+
+    private var activePrinterIDs: [UUID] {
+        Array(Set(viewModel.activeJobs.compactMap { item in
+            item.job.assignedPrinterId.flatMap(UUID.init(uuidString:))
+        })).sorted { $0.uuidString < $1.uuidString }
+    }
+
+    private var activePrinterStatusRequestKey: String {
+        "\(services.activeServerGeneration):\(activePrinterIDs.map(\.uuidString).joined(separator: ","))"
+    }
 
     init(ownsNavigationStack: Bool = true) {
         self.ownsNavigationStack = ownsNavigationStack
+    }
+
+    private func queueCard<Content: View>(
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        content()
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.pfCard, in: RoundedRectangle(cornerRadius: 12))
+            .overlay {
+                RoundedRectangle(cornerRadius: 12)
+                    .strokeBorder(Color.pfBorder, lineWidth: 1)
+            }
     }
 
     var body: some View {
@@ -36,8 +63,14 @@ struct JobListView: View {
             viewModel.startObservingNetworkPath()
             await viewModel.loadJobs()
         }
+        .task(id: activePrinterStatusRequestKey) {
+            await refreshActivePrinterStatuses()
+        }
         .onChange(of: canWriteQueue) { _, isAuthorized in
             viewModel.setQueueWriteAuthorization(isAuthorized)
+        }
+        .onChange(of: viewModel.keepsQueueEditingActive, initial: true) { _, isActive in
+            queueEditMode = isActive ? .active : .inactive
         }
         .onDisappear {
             retryTask?.cancel()
@@ -52,8 +85,44 @@ struct JobListView: View {
               user.isActive else {
             return false
         }
+
         return user.permissions.contains("queue:write")
             || user.roles.contains("farm_admin")
+    }
+
+    private func refreshActivePrinterStatuses() async {
+        let printerIDs = activePrinterIDs
+        guard !printerIDs.isEmpty else {
+            activePrinterStatuses = [:]
+            unavailableActivePrinterStatuses = []
+            return
+        }
+
+        let generation = services.activeServerGeneration
+        await services.awaitActiveServerSettled()
+        guard !Task.isCancelled, services.isActiveGeneration(generation) else { return }
+
+        activePrinterStatuses = [:]
+        unavailableActivePrinterStatuses = []
+        while !Task.isCancelled {
+            for printerID in printerIDs {
+                do {
+                    let status = try await services.printerService.getStatus(id: printerID)
+                    guard !Task.isCancelled, services.isActiveGeneration(generation) else { return }
+                    activePrinterStatuses[printerID] = status
+                    unavailableActivePrinterStatuses.remove(printerID)
+                } catch {
+                    guard !Task.isCancelled, services.isActiveGeneration(generation) else { return }
+                    activePrinterStatuses.removeValue(forKey: printerID)
+                    unavailableActivePrinterStatuses.insert(printerID)
+                }
+            }
+            do {
+                try await Task.sleep(for: .seconds(15))
+            } catch {
+                return
+            }
+        }
     }
 
     @ViewBuilder
@@ -84,21 +153,10 @@ struct JobListView: View {
             }
         }
         .navigationTitle("Queue")
-        .rootNavigationChrome(for: .queue) {
-            Button {
-                historyNavigationPath = []
-                showsJobHistory = true
-            } label: {
-                Image(systemName: "clock.arrow.circlepath")
-                    .frame(
-                        minWidth: RootNavigationChrome.minimumTouchTarget,
-                        minHeight: RootNavigationChrome.minimumTouchTarget
-                    )
-            }
-            .accessibilityLabel("Job history")
-            .accessibilityHint("Opens completed and cancelled jobs, including harvest actions.")
-            .accessibilityIdentifier("jobList.history.open")
-        }
+        #if os(iOS)
+        .navigationBarTitleDisplayMode(.inline)
+        #endif
+        .rootNavigationChrome(for: .queue)
         .refreshable {
             await viewModel.loadJobs()
         }
@@ -166,7 +224,7 @@ struct JobListView: View {
                         .foregroundStyle(Color.pfTextSecondary)
                 } else {
                     ForEach(viewModel.activeJobs) { item in
-                        activeJobRow(item)
+                        queueCard { activeJobRow(item) }
                     }
                 }
             } header: {
@@ -175,43 +233,26 @@ struct JobListView: View {
             }
 
             Section {
-                if !viewModel.assignedJobs.isEmpty {
-                    HStack(spacing: 6) {
-                        Image(systemName: "checkmark.circle")
-                            .accessibilityHidden(true)
-                        Text("Assigned")
-                        Spacer()
-                        Text("\(viewModel.assignedJobs.count)")
-                            .monospacedDigit()
-                    }
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(Color.pfTextSecondary)
-                    .accessibilityElement(children: .combine)
-                    .accessibilityIdentifier("jobList.assigned.subheading")
-
-                    ForEach(viewModel.assignedJobs) { item in
-                        queuedJobRow(item)
-                    }
-                }
-
-                if viewModel.reorderableQueuedJobs.isEmpty {
-                    if viewModel.assignedJobs.isEmpty {
-                        Text("No jobs waiting to print.")
-                            .foregroundStyle(Color.pfTextSecondary)
-                    }
+                if viewModel.queuedJobs.isEmpty {
+                    Text("No jobs waiting to print.")
+                        .foregroundStyle(Color.pfTextSecondary)
                 } else {
-                    ForEach(viewModel.reorderableQueuedJobs) { item in
-                        let groupID = viewModel.reorderGroupID(for: item)
-                        let canMove = item.job.jobUUID.map { id in
-                            viewModel.canMoveQueuedJob(id: id, direction: .up, inGroup: groupID)
-                                || viewModel.canMoveQueuedJob(id: id, direction: .down, inGroup: groupID)
+                    ForEach(viewModel.queuedJobs) { item in
+                        let groupID = item.job.jobStatus == .queued
+                            ? viewModel.reorderGroupID(for: item)
+                            : nil
+                        let canMove = groupID.flatMap { groupID in
+                            item.job.jobUUID.map { id in
+                                viewModel.canMoveQueuedJob(id: id, direction: .up, inGroup: groupID)
+                                    || viewModel.canMoveQueuedJob(id: id, direction: .down, inGroup: groupID)
+                            }
                         } ?? false
-                        queuedJobRow(item, groupID: groupID)
+                        queueCard { queuedJobRow(item, groupID: groupID) }
                             .moveDisabled(!canMove)
                     }
                     .onMove { offsets, destination in
                         Task { @MainActor in
-                            await viewModel.moveQueuedJobs(
+                            await viewModel.moveQueuedRows(
                                 fromOffsets: offsets,
                                 toOffset: destination
                             )
@@ -252,20 +293,16 @@ struct JobListView: View {
                     }
                     .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
                 } header: {
-                    sectionHeader("Recent failures", count: 0, systemImage: "exclamationmark.triangle")
+                    recentFailuresHeader(count: 0)
                         .accessibilityIdentifier("jobList.section.recent-failures")
                 }
             } else if !viewModel.recentFailures.isEmpty {
                 Section {
                     ForEach(viewModel.recentFailures) { item in
-                        recentFailureRow(item)
+                        queueCard { recentFailureRow(item) }
                     }
                 } header: {
-                    sectionHeader(
-                        "Recent failures",
-                        count: viewModel.recentFailures.count,
-                        systemImage: "exclamationmark.triangle"
-                    )
+                    recentFailuresHeader(count: viewModel.recentFailures.count)
                     .accessibilityIdentifier("jobList.section.recent-failures")
                 }
             } else {
@@ -273,15 +310,50 @@ struct JobListView: View {
                     Text("No recent failures.")
                         .foregroundStyle(Color.pfTextSecondary)
                 } header: {
-                    sectionHeader("Recent failures", count: 0, systemImage: "exclamationmark.triangle")
+                    recentFailuresHeader(count: 0)
                         .accessibilityIdentifier("jobList.section.recent-failures")
                 }
             }
         }
         .listStyle(.plain)
-        .contentMargins(.bottom, 200, for: .scrollContent)
-        .environment(\.editMode, .constant(viewModel.keepsQueueEditingActive ? .active : .inactive))
+        .scrollContentBackground(.hidden)
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
+        .listRowInsets(EdgeInsets(top: 4, leading: 14, bottom: 4, trailing: 14))
+        .contentMargins(.bottom, 112, for: .scrollContent)
+        .environment(\.editMode, $queueEditMode)
         .accessibilityIdentifier("jobList.combined.list")
+    }
+
+    private func recentFailuresHeader(count: Int) -> some View {
+        HStack {
+            Label("Recent failures", systemImage: "exclamationmark.triangle")
+                .font(.subheadline.weight(.semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+            Spacer()
+            Menu {
+                Button {
+                    historyNavigationPath = []
+                    showsJobHistory = true
+                } label: {
+                    Label("Job history", systemImage: "clock.arrow.circlepath")
+                }
+                .accessibilityIdentifier("jobList.history.select")
+            } label: {
+                Image(systemName: "ellipsis")
+                    .frame(width: 32, height: 32)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityLabel("Job history")
+            .accessibilityHint("Opens completed and cancelled jobs, including harvest actions.")
+            .accessibilityIdentifier("jobList.history.open")
+            Text("\(count)")
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(Color.pfTextTertiary)
+        }
+        .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
+        .accessibilityElement(children: .contain)
     }
 
     private func sectionHeader(_ title: String, count: Int, systemImage: String) -> some View {
@@ -294,6 +366,7 @@ struct JobListView: View {
                 .monospacedDigit()
                 .foregroundStyle(Color.pfTextTertiary)
         }
+        .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
         .padding(.vertical, 2)
         .accessibilityElement(children: .combine)
     }
@@ -345,6 +418,8 @@ struct JobListView: View {
 
     @ViewBuilder
     private func activeJobDetails(_ item: QueuedPrintJobResponse) -> some View {
+        let printerID = item.job.assignedPrinterId.flatMap(UUID.init(uuidString:))
+        let status = printerID.flatMap { activePrinterStatuses[$0] }
         VStack(alignment: .leading, spacing: 4) {
             if let printerName = item.job.printerName {
                 Label(printerName, systemImage: "printer")
@@ -354,13 +429,18 @@ struct JobListView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            if let startTime = item.job.actualStartTimeUtc,
-               let estSeconds = item.job.estimatedPrintTimeSeconds, estSeconds > 0 {
-                let elapsed = Date.now.timeIntervalSince(startTime)
-                let total = TimeInterval(estSeconds)
-                let progress = min(1.0, elapsed / total)
-                PrintProgressBar(progress: progress, height: 4, color: progressColor(for: item.job.jobStatus))
-
+            if let status {
+                if let progress = status.progress, progress.isFinite {
+                    PrintProgressBar(
+                        progress: progress, height: 4,
+                        color: progressColor(for: item.job.jobStatus)
+                    )
+                    .accessibilityIdentifier("job.active.progress.\(item.job.id)")
+                } else {
+                    Text("Progress unavailable")
+                        .font(.caption2)
+                        .foregroundStyle(Color.pfTextSecondary)
+                }
                 if dynamicTypeSize.isAccessibilitySize {
                     VStack(alignment: .leading, spacing: 4) {
                         if item.job.isMultiCopy {
@@ -368,10 +448,8 @@ struct JobListView: View {
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                         }
-                        let remaining = max(0, total - elapsed)
-                        Label("~\(remaining.durationFormatted) left", systemImage: "clock")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
+                        activeJobETA(status)
+                        .accessibilityIdentifier("job.active.eta.\(item.job.id)")
                     }
                 } else {
                     HStack {
@@ -381,12 +459,33 @@ struct JobListView: View {
                                 .foregroundStyle(.secondary)
                         }
                         Spacer()
-                        let remaining = max(0, total - elapsed)
-                        Label("~\(remaining.durationFormatted) left", systemImage: "clock")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
+                        activeJobETA(status)
+                            .accessibilityIdentifier("job.active.eta.\(item.job.id)")
                     }
                 }
+            } else if printerID == nil || printerID.map(unavailableActivePrinterStatuses.contains) == true {
+                Text("Live status unavailable")
+                    .font(.caption2)
+                    .foregroundStyle(Color.pfTextSecondary)
+            } else {
+                Text("Loading live status…")
+                    .font(.caption2)
+                    .foregroundStyle(Color.pfTextSecondary)
+            }
+        }
+    }
+
+    private func activeJobETA(_ status: PrinterStatusDetail) -> some View {
+        Group {
+            if let seconds = status.printTimeLeftSeconds,
+               seconds.isFinite, seconds >= 0 {
+                Label("\(seconds.durationFormatted) left", systemImage: "clock")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+            } else {
+                Label("ETA unavailable", systemImage: "clock")
+                    .font(.caption2)
+                    .foregroundStyle(Color.pfTextSecondary)
             }
         }
     }
@@ -539,8 +638,9 @@ struct JobListView: View {
         let jobID = UUID(uuidString: item.id)
         return Group {
             if dynamicTypeSize.isAccessibilitySize {
-                VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .top, spacing: 8) {
                     recentFailureNavigationLink(item, id: jobID)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     if let jobID {
                         rerunFailedJobButton(id: jobID)
                     }
@@ -584,6 +684,7 @@ struct JobListView: View {
         } label: {
             Text("Retry")
                 .font(.subheadline.weight(.semibold))
+                .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
                 .foregroundStyle(Color.pfAccent)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 6)
@@ -628,13 +729,6 @@ struct JobListView: View {
                                 .dynamicTypeSize(.xxxLarge)
                                 .foregroundStyle(Color.pfTextTertiary)
                         }
-                        if let failureReason = item.failureReason {
-                            Text(failureReason)
-                                .font(.caption)
-                                .dynamicTypeSize(.xxxLarge)
-                                .foregroundStyle(Color.pfError)
-                                .lineLimit(2)
-                        }
                     }
                 }
             } else {
@@ -667,12 +761,6 @@ struct JobListView: View {
                                     .lineLimit(1)
                             }
                         }
-                        if let failureReason = item.failureReason {
-                            Text(failureReason)
-                                .font(.caption)
-                                .foregroundStyle(Color.pfError)
-                                .lineLimit(1)
-                        }
                     }
                 }
             }
@@ -682,6 +770,7 @@ struct JobListView: View {
 
     private var recentFailureIcon: some View {
         Image(systemName: "exclamationmark.triangle.fill")
+            .font(.system(size: 18))
             .foregroundStyle(Color.pfError)
             .frame(width: 36, height: 36)
             .background(
@@ -844,34 +933,84 @@ struct JobListView: View {
     @ViewBuilder
     private func jobThumbnail(for item: QueuedPrintJobResponse, size: CGFloat = 44) -> some View {
         let urlString = item.job.thumbnailUrl ?? item.gcodeFile?.thumbnailUrl
-        if let urlString,
-           let baseURL = APIClient.savedBaseURL(),
-           let url = URL(string: urlString, relativeTo: baseURL) {
-            AsyncImage(url: url) { phase in
-                switch phase {
-                case .success(let image):
-                    image
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .frame(width: size, height: size)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                default:
-                    placeholderThumbnail(size: size)
-                }
+        AuthenticatedJobThumbnail(
+            path: urlString,
+            apiClient: services.apiClient,
+            size: size,
+            accessibilityLabel: "Thumbnail for \(item.job.name)",
+            identifier: "job.thumbnail.\(item.job.id)"
+        )
+    }
+
+}
+
+struct AuthenticatedJobThumbnail: View {
+    private static let maxImageBytes = 10 * 1024 * 1024
+    private static let logger = Logger(subsystem: "com.printfarmer.ios", category: "JobThumbnail")
+
+    let path: String?
+    let apiClient: APIClient?
+    let size: CGFloat
+    let accessibilityLabel: String
+    let identifier: String
+    @State private var image: UIImage?
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color.pfCard)
+                    .overlay {
+                        Image(systemName: "cube")
+                            .font(.system(size: size * 0.4))
+                            .foregroundStyle(.tertiary)
+                    }
             }
-        } else {
-            placeholderThumbnail(size: size)
+        }
+        .frame(width: size, height: size)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityValue(image == nil ? "Thumbnail unavailable" : "Thumbnail loaded")
+        .accessibilityIdentifier(identifier)
+        .task(id: path) {
+            await loadThumbnail()
         }
     }
 
-    private func placeholderThumbnail(size: CGFloat = 44) -> some View {
-        RoundedRectangle(cornerRadius: 8)
-            .fill(Color.pfCard)
-            .frame(width: size, height: size)
-            .overlay(
-                Image(systemName: "cube")
-                    .font(.system(size: size * 0.4))
-                    .foregroundStyle(.tertiary)
-            )
+    @MainActor
+    private func loadThumbnail() async {
+        image = nil
+        guard let path, let apiClient, isGcodeThumbnailPath(path) else { return }
+        do {
+            let data = try await apiClient.getData(path)
+            guard !Task.isCancelled, data.count <= Self.maxImageBytes,
+                  let loadedImage = UIImage(data: data) else {
+                guard !Task.isCancelled else { return }
+                Self.logger.notice("Queued job thumbnail was not a decodable image")
+                return
+            }
+            image = loadedImage
+        } catch {
+            guard !Task.isCancelled else { return }
+            Self.logger.notice("Queued job thumbnail unavailable")
+        }
+    }
+
+    private func isGcodeThumbnailPath(_ path: String) -> Bool {
+        guard let components = URLComponents(string: path),
+              components.scheme == nil,
+              components.host == nil,
+              components.queryItems?.isEmpty != false,
+              components.fragment == nil,
+              components.path.hasPrefix("/api/gcode-files/thumbnail/"),
+              let fileID = components.path.split(separator: "/").last else {
+            return false
+        }
+        return UUID(uuidString: String(fileID)) != nil
     }
 }

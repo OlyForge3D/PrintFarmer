@@ -141,7 +141,14 @@ final class FilamentCoverageUITests: PrintFarmerUITestCase {
         let heading = filament.descendants(matching: .any)
             .matching(identifier: "printer.filament.heading").firstMatch
         XCTAssertTrue(heading.waitForExistence(timeout: 10))
-        let disclosure = filament.buttons["printer.filament.disclosure"]
+        let coverageSummary = filament.descendants(matching: .any)
+            .matching(identifier: "printer.filament.attention").firstMatch
+        XCTAssertTrue(
+            coverageSummary.waitForExistence(timeout: 8),
+            "The printer's coverage response must be rendered before testing its disclosure."
+        )
+        let disclosure = filament.descendants(matching: .any)
+            .matching(identifier: "printer.filament.disclosure").firstMatch
         XCTAssertTrue(disclosure.waitForExistence(timeout: 5))
         for _ in 0..<3 where !disclosure.isHittable {
             filament.swipeUp()

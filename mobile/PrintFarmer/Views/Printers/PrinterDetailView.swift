@@ -60,7 +60,6 @@ struct PrinterDetailView: View {
     @State private var showsFilamentLoadConfirmation = false
     @State private var showsFilamentUnloadConfirmation = false
     @State private var showsSafetyChecks = false
-    @State private var filamentToolsExpanded = false
     @State private var printPreviewImage: UIImage?
     @State private var printPreviewPath: String?
     // Transient UI state only (issue #2522) — never persisted, resets to
@@ -123,8 +122,7 @@ struct PrinterDetailView: View {
         }
         .frame(maxWidth: .infinity, alignment: fillsWidth ? .center : .trailing)
         .padding(.horizontal)
-        .padding(.vertical, 4)
-        .background(.bar)
+        .padding(.vertical, 6)
     }
 
     /// Pager neighbors stay mounted; camera work requires visible Status
@@ -137,7 +135,7 @@ struct PrinterDetailView: View {
     }
 
     private var statusHeroHeight: CGFloat {
-        dynamicTypeSize.isAccessibilitySize ? 196 : 168
+        dynamicTypeSize.isAccessibilitySize ? 180 : 156
     }
 
     init(printerId: UUID) {
@@ -322,26 +320,47 @@ struct PrinterDetailView: View {
             .navigationTitle("")
             .navigationBarBackButtonHidden()
             .toolbar(.hidden, for: .tabBar)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button {
-                        Self.returnToFarm(router: router)
-                    } label: { Label("Farm", systemImage: "chevron.left") }
-                        .accessibilityIdentifier("printer.detail.farm")
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    if let baseURL = serverRegistry.activeServer?.baseURL {
-                        Link(destination: baseURL.appendingPathComponent("printers")
-                            .appendingPathComponent(printerId.uuidString.lowercased())) {
-                            Label("Open in web", systemImage: "arrow.up.right")
-                        }
-                        .accessibilityIdentifier("printer.detail.web")
-                    }
-                }
+            .toolbar(.hidden, for: .navigationBar)
+            .safeAreaInset(edge: .top, spacing: 0) {
+                detailHeader
             }
-            #if os(iOS)
-            .navigationBarTitleDisplayMode(.inline)
-            #endif
+    }
+
+    private var detailHeader: some View {
+        HStack {
+            Button {
+                Self.returnToFarm(router: router)
+            } label: {
+                Text("‹ Farm")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(Color.pfAccent)
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("printer.detail.farm")
+
+            Spacer(minLength: 12)
+
+            if let baseURL = serverRegistry.activeServer?.baseURL {
+                Link(
+                    destination: baseURL.appendingPathComponent("printers")
+                        .appendingPathComponent(printerId.uuidString.lowercased())
+                ) {
+                    Text("Open in web ↗")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(Color.pfTextSecondary)
+                        .frame(minHeight: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("printer.detail.web")
+            }
+        }
+        .padding(.horizontal, 16)
+        .frame(height: 48)
+        .background(Color.pfBackground)
+        .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
     }
 
     private var pageContent: some View {
@@ -569,24 +588,22 @@ struct PrinterDetailView: View {
         guard canStartPrinterCommand else {
             return "Queue.Start permission is required to use physical filament controls."
         }
-        return viewModel.physicalFilamentCommandBlockedReason(
-            supports: load ? \.supportsFilamentLoad : \.supportsFilamentUnload
-        )
+        return viewModel.physicalFilamentCommandBlockedReason(for: load ? .load : .unload)
     }
 
     private func physicalFilamentControls() -> some View {
         let loadReason = physicalFilamentCommandBlockedReason(load: true)
         let unloadReason = physicalFilamentCommandBlockedReason(load: false)
-        return VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline) {
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack {
                 Text("Extruder")
-                    .font(.headline)
+                    .font(.caption.weight(.semibold))
                     .accessibilityAddTraits(.isHeader)
                     .accessibilityIdentifier("printer.detail.filament.extruder.heading")
                 Spacer(minLength: 8)
                 if viewModel.isActivelyPrinting {
-                    Text("Not available while printing")
-                        .font(.footnote)
+                    Text("Unavailable while printing")
+                        .font(.caption)
                         .foregroundStyle(Color.pfTextSecondary)
                         .accessibilityIdentifier("printer.detail.filament.printingLockout")
                 }
@@ -617,26 +634,13 @@ struct PrinterDetailView: View {
                 .accessibilityIdentifier("printer.detail.filament.unload")
             }
 
-            if !viewModel.isActivelyPrinting && !canStartPrinterCommand {
-                Text("Queue.Start permission is required to use physical filament controls.")
-                    .font(.footnote)
-                    .foregroundStyle(Color.pfTextSecondary)
-            } else if !viewModel.isActivelyPrinting, let error = viewModel.filamentCommandCapabilitiesError {
-                Text("Filament command support could not be confirmed: \(error)")
-                    .font(.footnote)
-                    .foregroundStyle(Color.pfTextSecondary)
-            } else if !viewModel.isActivelyPrinting, viewModel.filamentCommandCapabilities == nil {
-                Text("Checking backend filament-command support.")
-                    .font(.footnote)
-                    .foregroundStyle(Color.pfTextSecondary)
-            } else if !viewModel.isActivelyPrinting, loadReason != nil || unloadReason != nil {
-                Text(loadReason ?? unloadReason ?? "")
-                    .font(.footnote)
+            if !viewModel.isActivelyPrinting, let reason = loadReason ?? unloadReason {
+                Text(reason)
+                    .font(.caption)
                     .foregroundStyle(Color.pfTextSecondary)
             }
         }
-        .padding()
-        .operatorCard()
+        .padding(.top, 4)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("printer.detail.filament.physicalControls")
     }
@@ -705,6 +709,8 @@ struct PrinterDetailView: View {
 
         safetyObservationTask = Task {
             await owner.refreshSafetyEvidence()
+            guard !Task.isCancelled else { return }
+            synchronizeFilamentCommandCapabilities(from: owner)
             var cadence = PrinterDetailSafetyRefreshCadence()
             while !Task.isCancelled && owner.isActive {
                 do {
@@ -715,8 +721,19 @@ struct PrinterDetailView: View {
                 await owner.refreshSafetyEvidence(
                     refreshDiscovery: cadence.shouldRefreshDiscovery(at: .now)
                 )
+                guard !Task.isCancelled else { return }
+                synchronizeFilamentCommandCapabilities(from: owner)
             }
         }
+    }
+
+    @MainActor
+    private func synchronizeFilamentCommandCapabilities(from owner: PrinterControlsViewModel) {
+        guard controlsViewModel === owner else { return }
+        viewModel.adoptFilamentCommandCapabilities(
+            owner.capabilities,
+            error: owner.capabilityLoadError
+        )
     }
 
     private func printerContent(_ printer: Printer) -> some View {
@@ -752,13 +769,8 @@ struct PrinterDetailView: View {
             controlsViewModel?.handlePrinterUpdate(printer)
         }
         .modifier(PrinterControlsAccessLifecycle(viewModel: controlsViewModel))
-        .safeAreaInset(edge: .top, spacing: 0) {
-            if selectedPanel == .control && viewModel.isActivelyPrinting {
-                emergencyStopActionBar(for: printer)
-            }
-        }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            if selectedPanel == .control && !viewModel.isActivelyPrinting {
+            if selectedPanel == .control {
                 emergencyStopActionBar(for: printer, fillsWidth: true)
             }
         }
@@ -774,10 +786,7 @@ struct PrinterDetailView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     cameraSection(printer)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                    let layout = columns
-                        ? AnyLayout(HStackLayout(alignment: .top, spacing: 24))
-                        : AnyLayout(VStackLayout(alignment: .leading, spacing: 16))
-                    layout {
+                    VStack(alignment: .leading, spacing: 8) {
                         currentJobBlock(printer)
                         temperatureSection(printer)
                     }
@@ -805,35 +814,10 @@ struct PrinterDetailView: View {
             spoolLookupMessage: spoolLookup.statusMessage
         )
         return ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 10) {
                 filamentSection
                 physicalFilamentControls()
                 filamentSection.detailUnassignAction
-                if let controlsViewModel, controlsAvailable(for: printer) {
-                    DisclosureGroup(isExpanded: $filamentToolsExpanded) {
-                        VStack(alignment: .leading, spacing: 12) {
-                            safetyRefresh(controlsViewModel)
-                            PrinterMaterialControls(viewModel: controlsViewModel)
-                                .padding()
-                                .operatorCard()
-                        }
-                        .padding(.top, 8)
-                    } label: {
-                        Label("Advanced filament tools", systemImage: "ellipsis.circle")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(Color.pfTextPrimary)
-                            .frame(minHeight: 44, alignment: .leading)
-                            .accessibilityIdentifier("printer.detail.filament.advancedTools")
-                    }
-                    .padding(.horizontal, 12)
-                    .background(Color.pfCard, in: RoundedRectangle(cornerRadius: 12))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .strokeBorder(Color.pfBorder, lineWidth: 1)
-                    )
-                } else {
-                    controlsUnavailable(printer)
-                }
             }
             .padding()
             .padding(.bottom, 32)
@@ -892,25 +876,37 @@ struct PrinterDetailView: View {
     }
 
     private func controlsUnavailable(_ printer: Printer) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label("Controls unavailable", systemImage: "lock.fill")
-                .font(.headline)
-            if !printer.isOnline {
-                Text("This printer is offline. Reconnect before using setup controls.")
-            }
-            if !serverRegistry.advancedPrinterControlsEnabled {
-                Text("Advanced Printer Controls are off for this server. Review Printer Safety in Settings to enable them.")
-                NavigationLink(value: AppDestination.settings) {
-                    Label("Printer Safety Settings", systemImage: "gearshape")
-                        .frame(minHeight: 44)
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "lock.fill")
+                .foregroundStyle(Color.pfTextSecondary)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Controls unavailable")
+                    .font(.subheadline.weight(.semibold))
+                if !printer.isOnline {
+                    Text("Reconnect to use setup controls.")
+                        .font(.caption)
+                        .foregroundStyle(Color.pfTextSecondary)
+                } else if !serverRegistry.advancedPrinterControlsEnabled {
+                    HStack(spacing: 4) {
+                        Text("Printer controls are off.")
+                            .font(.caption)
+                            .foregroundStyle(Color.pfTextSecondary)
+                        NavigationLink(value: AppDestination.settings) {
+                            Text("Settings")
+                        }
+                        .font(.caption.weight(.semibold))
+                        .accessibilityIdentifier("printer.detail.control.settings")
+                    }
+                } else {
+                    Text("Setup controls are unavailable for this printer.")
+                        .font(.caption)
+                        .foregroundStyle(Color.pfTextSecondary)
                 }
-                .accessibilityIdentifier("printer.detail.control.settings")
             }
         }
-        .fixedSize(horizontal: false, vertical: true)
-        .padding()
-        .operatorCard()
-        .accessibilityElement(children: .contain)
+        .padding(.vertical, 4)
+        .accessibilityElement(children: .combine)
         .accessibilityIdentifier("printer.detail.control.unavailable")
     }
 
@@ -1025,7 +1021,9 @@ struct PrinterDetailView: View {
                 }
                 .padding(.vertical, 2)
             } else {
-                operatorEmptyState(icon: "pause.circle", message: "No active print")
+                Text("No active print")
+                    .font(.subheadline)
+                    .foregroundStyle(Color.pfTextSecondary)
             }
             PrinterRunActionBar(
                 presentation: statusActions(for: printer),
@@ -1054,6 +1052,7 @@ struct PrinterDetailView: View {
                 Text(jobName ?? "Printing")
                     .font(.headline)
                     .fixedSize(horizontal: false, vertical: true)
+                    .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
             }
         } else {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
@@ -1093,9 +1092,16 @@ struct PrinterDetailView: View {
 
     private func statusFact(_ title: String, value: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(title).font(.caption).foregroundStyle(Color.pfTextSecondary)
-            Text(value).font(.subheadline.weight(.semibold)).monospacedDigit()
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(Color.pfTextSecondary)
+            Text(value)
+                .font(.subheadline.weight(.semibold))
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
         }
+        .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
     }
@@ -1115,14 +1121,6 @@ struct PrinterDetailView: View {
             if active.isEmpty && assigned.isEmpty && queued.isEmpty {
                 operatorEmptyState(icon: "tray", message: "No active or queued jobs for this printer")
             } else {
-                if !active.isEmpty {
-                    queueSectionHeader("Printing", count: active.count)
-                    ForEach(active) { job in compactQueueRow(job) }
-                }
-                if !assigned.isEmpty {
-                    queueSectionHeader("Assigned", count: assigned.count)
-                    ForEach(assigned) { job in compactQueueRow(job) }
-                }
                 if let next = queued.first {
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Up next")
@@ -1137,9 +1135,17 @@ struct PrinterDetailView: View {
                     )
                 }
                 let later = Array(queued.dropFirst())
-                if !later.isEmpty {
-                    queueSectionHeader("Then", count: later.count)
-                    ForEach(later) { job in compactQueueRow(job) }
+                let following = active + assigned + later
+                if !following.isEmpty {
+                    queueSectionHeader("Then", count: following.count)
+                    ForEach(following) { job in compactQueueRow(job) }
+                }
+                if !queued.isEmpty {
+                    Text("Reorder in the Queue tab.")
+                        .font(.caption)
+                        .foregroundStyle(Color.pfTextSecondary)
+                        .padding(.horizontal, 4)
+                        .accessibilityIdentifier("printer.detail.queue.reorderNote")
                 }
             }
         }
@@ -1164,7 +1170,13 @@ struct PrinterDetailView: View {
     private func compactQueueRow(_ job: QueuedPrintJobResponse) -> some View {
         let title = job.gcodeFile?.name ?? job.job.name
         return HStack(spacing: 10) {
-            remoteThumbnail(job.gcodeFile?.thumbnailUrl ?? job.job.thumbnailUrl, size: 40)
+            AuthenticatedJobThumbnail(
+                path: job.gcodeFile?.thumbnailUrl ?? job.job.thumbnailUrl,
+                apiClient: services.apiClient,
+                size: 40,
+                accessibilityLabel: "Thumbnail for \(title)",
+                identifier: "printer.detail.queue.thumbnail.\(job.id)"
+            )
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
                     .font(.subheadline.weight(.medium))
@@ -1196,7 +1208,13 @@ struct PrinterDetailView: View {
         let title = job.gcodeFile?.name ?? job.job.name
         return VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: 12) {
-                remoteThumbnail(job.gcodeFile?.thumbnailUrl ?? job.job.thumbnailUrl, size: 48)
+                AuthenticatedJobThumbnail(
+                    path: job.gcodeFile?.thumbnailUrl ?? job.job.thumbnailUrl,
+                    apiClient: services.apiClient,
+                    size: 48,
+                    accessibilityLabel: "Thumbnail for \(title)",
+                    identifier: "printer.detail.queue.thumbnail.\(job.id)"
+                )
                 VStack(alignment: .leading, spacing: 5) {
                     Text(title)
                         .font(.headline)
@@ -1284,27 +1302,6 @@ struct PrinterDetailView: View {
         .operatorCard()
     }
 
-    @ViewBuilder
-    private func remoteThumbnail(_ urlString: String?, size: CGFloat) -> some View {
-        if let urlString,
-           let baseURL = APIClient.savedBaseURL(),
-           let url = URL(string: urlString, relativeTo: baseURL) {
-            AsyncImage(url: url) { phase in
-                switch phase {
-                case .success(let image):
-                    image
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                default:
-                    Color.pfBackgroundTertiary
-                }
-            }
-            .frame(width: size, height: size)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-            .accessibilityHidden(true)
-        }
-    }
-
     // MARK: - Temperatures
 
     private func temperatureSection(_ printer: Printer) -> some View {
@@ -1317,7 +1314,8 @@ struct PrinterDetailView: View {
 
         return PrinterDetailTemperatureStrip(
             hotend: .init(measured: hotend, target: hotendTgt, isOnline: printer.isOnline),
-            bed: .init(measured: bed, target: bedTgt, isOnline: printer.isOnline)
+            bed: .init(measured: bed, target: bedTgt, isOnline: printer.isOnline),
+            compact: true
         )
     }
 
@@ -1346,7 +1344,7 @@ struct PrinterDetailView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             HStack(spacing: 8) {
-                Text(hasCamera ? "Camera" : previewPath != nil ? "Print image" : "Camera")
+                Text("Camera")
                     .font(.caption.weight(.semibold))
                     .padding(.horizontal, 8)
                     .padding(.vertical, 5)
@@ -1406,6 +1404,7 @@ struct PrinterDetailView: View {
                 }
             }
             .padding(8)
+            .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
         }
         .frame(height: statusHeroHeight)
         .clipped()

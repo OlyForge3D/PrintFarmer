@@ -49,8 +49,8 @@ struct PrinterSetupControlsContent: View {
     }
 
     private var content: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: isPrinterDetailControl ? 10 : 12) {
+            VStack(alignment: .leading, spacing: isPrinterDetailControl ? 10 : 12) {
                 if viewModel.needsHeaterLimits {
                     VStack(alignment: .leading, spacing: 8) {
                         Text(viewModel.isLoadingHardware ? "Loading heater limits…" : "Heater limits unavailable")
@@ -155,24 +155,34 @@ struct PrinterSetupControlsContent: View {
             .background(Color.pfBackground, in: RoundedRectangle(cornerRadius: 16))
     }
 
+    @ViewBuilder
     private var lockoutBanner: some View {
         let message = String(localized: "Heat, motion and filament setup are unavailable while a job is starting, printing or paused. Fan and Z-offset adjustments require verified capability and live readback.")
-        let layout = dynamicTypeSize.isAccessibilitySize
-            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
-            : AnyLayout(HStackLayout(alignment: .center, spacing: 8))
-        return layout {
-            Image(systemName: "lock.fill")
-                .foregroundStyle(Color.pfWarning)
-            Text(message)
-                .font(.footnote)
+        if isPrinterDetailControl {
+            Label("Setup controls unavailable while printing.", systemImage: "lock.fill")
+                .font(.caption)
                 .foregroundStyle(Color.pfTextPrimary)
                 .fixedSize(horizontal: false, vertical: true)
+                .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
+                .accessibilityLabel(message)
+        } else {
+            let layout = dynamicTypeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+                : AnyLayout(HStackLayout(alignment: .center, spacing: 8))
+            layout {
+                Image(systemName: "lock.fill")
+                    .foregroundStyle(Color.pfWarning)
+                Text(message)
+                    .font(.footnote)
+                    .foregroundStyle(Color.pfTextPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.pfWarning.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(message)
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.pfWarning.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(message)
     }
 
 }

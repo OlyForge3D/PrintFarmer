@@ -673,7 +673,9 @@ final class PrinterDetailViewModelTests: XCTestCase {
         var capabilities = PrinterBackendCapabilities.fallback(for: .moonraker)
         capabilities.supportsFilamentLoad = true
         capabilities.supportsFilamentUnload = true
+        capabilities.verifiedSafety = VerifiedSafetyFixtures.discovery()
         mockService.capabilitiesToReturn = capabilities
+        mockService.statusToReturn = VerifiedSafetyFixtures.status(id: printer.id, state: "ready")
         await viewModel.loadPrinter()
         await viewModel.loadFilamentCommandCapabilities()
 
@@ -687,6 +689,38 @@ final class PrinterDetailViewModelTests: XCTestCase {
         XCTAssertNil(viewModel.actionError)
     }
 
+    func testPhysicalFilamentCommandsRequireFreshMeasuredTemperatureAtPolicyFloor() async throws {
+        var printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        printer.isOnline = true
+        printer.state = "ready"
+        mockService.printerToReturn = printer
+        mockService.statusToReturn = VerifiedSafetyFixtures.status(id: printer.id, state: "ready")
+        var capabilities = PrinterBackendCapabilities.fallback(for: .moonraker)
+        capabilities.supportsFilamentLoad = true
+        capabilities.supportsFilamentUnload = true
+        capabilities.verifiedSafety = VerifiedSafetyFixtures.discovery()
+        mockService.capabilitiesToReturn = capabilities
+        var status = VerifiedSafetyFixtures.status(id: printer.id)
+        status.safetyTelemetry?.measuredHotendTemperatureC.value = 219.9
+        mockService.statusToReturn = status
+        await viewModel.loadPrinter()
+        await viewModel.loadFilamentCommandCapabilities()
+
+        XCTAssertTrue(
+            viewModel.physicalFilamentCommandBlockedReason(for: .load)?.contains("220 °C") == true
+        )
+        await viewModel.loadPhysicalFilament()
+        XCTAssertTrue(mockService.physicalFilamentCalls.isEmpty)
+
+        status.safetyTelemetry?.measuredHotendTemperatureC.value = 220
+        status.safetyTelemetry?.measuredHotendTemperatureC.observedAtUtc = Date()
+        mockService.statusToReturn = status
+        await viewModel.loadPrinter()
+        XCTAssertNil(viewModel.physicalFilamentCommandBlockedReason(for: .load))
+        await viewModel.loadPhysicalFilament()
+        XCTAssertEqual(mockService.physicalFilamentCalls, ["load"])
+    }
+
     func testPhysicalFilamentCommandsFailClosedWhilePrintingOrWithoutBackendSupport() async throws {
         var printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
         printer.isOnline = true
@@ -695,7 +729,9 @@ final class PrinterDetailViewModelTests: XCTestCase {
         var capabilities = PrinterBackendCapabilities.fallback(for: .moonraker)
         capabilities.supportsFilamentLoad = true
         capabilities.supportsFilamentUnload = true
+        capabilities.verifiedSafety = VerifiedSafetyFixtures.discovery()
         mockService.capabilitiesToReturn = capabilities
+        mockService.statusToReturn = VerifiedSafetyFixtures.status(id: printer.id, state: "printing")
         await viewModel.loadPrinter()
         await viewModel.loadFilamentCommandCapabilities()
 
@@ -708,6 +744,7 @@ final class PrinterDetailViewModelTests: XCTestCase {
         viewModel.actionError = nil
         printer.state = "ready"
         mockService.printerToReturn = printer
+        mockService.statusToReturn = VerifiedSafetyFixtures.status(id: printer.id, state: "ready")
         capabilities.supportsFilamentLoad = false
         capabilities.supportsFilamentUnload = false
         mockService.capabilitiesToReturn = capabilities

@@ -13,7 +13,6 @@ struct SpoolInventoryView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var viewModel = SpoolInventoryViewModel()
     @State private var showAddSpool = false
-    @State private var showScanFlow = false
     @State private var showBarcodeIntake = false
     @State private var showPrintedParts = false
     @State private var nfcWriteTarget: NFCWriteTarget?
@@ -75,56 +74,9 @@ struct SpoolInventoryView: View {
             }
             .navigationTitle("Filament")
             #if os(iOS)
-            .navigationBarTitleDisplayMode(.large)
+            .navigationBarTitleDisplayMode(.inline)
             #endif
-            .rootNavigationChrome(for: .filament) {
-                if services.capabilitiesService.resolved.printedPartsInventoryEnabled {
-                    Button {
-                        showPrintedParts = true
-                    } label: {
-                        Image(systemName: "cube.box")
-                            .frame(
-                                minWidth: RootNavigationChrome.minimumTouchTarget,
-                                minHeight: RootNavigationChrome.minimumTouchTarget
-                            )
-                    }
-                    .accessibilityLabel("Printed parts")
-                    .accessibilityHint("Opens printed-part stock and quantity adjustments.")
-                    .accessibilityIdentifier("filament.printedParts")
-                }
-                Menu {
-                    Button {
-                        showScanFlow = true
-                    } label: {
-                        Label("Scan code", systemImage: "barcode.viewfinder")
-                    }
-
-                    Button {
-                        viewModel.handleNFCScan()
-                    } label: {
-                        Label("Scan NFC tag", systemImage: "wave.3.right")
-                    }
-                    .accessibilityIdentifier("inventory.scan.nfc")
-
-                    Button {
-                        showBarcodeIntake = true
-                    } label: {
-                        Label("Log new spools", systemImage: "cylinder")
-                    }
-                    .accessibilityIdentifier("inventory.scan.barcodeIntake")
-                } label: {
-                    Image(systemName: "barcode.viewfinder")
-                        .frame(
-                            minWidth: RootNavigationChrome.minimumTouchTarget,
-                            minHeight: RootNavigationChrome.minimumTouchTarget
-                        )
-                }
-                .accessibilityLabel("Scan inventory")
-                .accessibilityHint("Opens camera, NFC, and continuous spool intake actions.")
-                .accessibilityIdentifier("inventory.scan")
-
-            }
-            .searchable(text: $viewModel.searchText, prompt: "Search by name, material, color…")
+            .rootNavigationChrome(for: .filament)
             .refreshable {
                 await viewModel.loadSpools()
             }
@@ -155,11 +107,6 @@ struct SpoolInventoryView: View {
                         activeTasks.append(task)
                     }
             }
-            .sheet(isPresented: $showScanFlow, onDismiss: {
-                router.completeScanFlowDismissal(capabilities: services.capabilitiesService.resolved)
-            }, content: {
-                ScanFlowView()
-            })
             .sheet(isPresented: $showBarcodeIntake) {
                 BarcodeIntakeView()
                     .onDisappear {
@@ -257,6 +204,7 @@ struct SpoolInventoryView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal)
         .padding(.vertical, 8)
+        .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("inventory.filters")
     }
@@ -410,46 +358,36 @@ struct SpoolInventoryView: View {
     private var spoolList: some View {
         ScrollViewReader { proxy in
             VStack(spacing: 0) {
-                Button {
-                    showAddSpool = true
-                } label: {
-                    Label("Add spool", systemImage: "plus")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity, minHeight: 48)
+                HStack(spacing: 8) {
+                    Button {
+                        showAddSpool = true
+                    } label: {
+                        Label("Add spool", systemImage: "plus")
+                            .font(.subheadline.weight(.semibold))
+                            .frame(maxWidth: .infinity, minHeight: 48)
+                            .foregroundStyle(Color.pfAccent)
+                            .background(Color.pfCard, in: RoundedRectangle(cornerRadius: 12))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 12)
+                                    .strokeBorder(
+                                        Color.pfAccent,
+                                        style: StrokeStyle(lineWidth: 1.5, dash: [6, 4])
+                                    )
+                            }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityHint("Opens the form to register a filament spool.")
+                    .accessibilityIdentifier("inventory.addSpool")
+                    .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
+
+                    inventoryActions
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(Color.pfAccent)
-                .accessibilityHint("Opens the form to register a filament spool.")
-                .accessibilityIdentifier("inventory.addSpool")
                 .padding(.horizontal)
                 .padding(.vertical, 8)
 
                 List {
                     ForEach(viewModel.filteredSpools) { spool in
-                        SpoolInventoryRowView(
-                            spool: spool,
-                            assignedPrinterName: viewModel.assignedPrinterName(for: spool.id),
-                            assignmentsLoaded: viewModel.printerAssignmentsLoaded
-                        )
-                            .listRowBackground(
-                                viewModel.highlightedSpoolId == spool.id
-                                    ? Color.pfAccent.opacity(0.15)
-                                    : nil
-                            )
-                            .id(spool.id)
-                            .contextMenu {
-                                if spool.hasNfcTag != true {
-                                    Button {
-                                        let task = Task {
-                                            let filament = await viewModel.matchingFilamentForTagPreview(for: spool)
-                                            nfcWriteTarget = NFCWriteTarget(spool: spool, filament: filament)
-                                        }
-                                        activeTasks.append(task)
-                                    } label: {
-                                        Label("Write NFC Tag", systemImage: "wave.3.right")
-                                    }
-                                }
-                            }
+                        spoolRow(spool)
                     }
                     .onDelete { indexSet in
                         let spoolsToDelete = indexSet.map { viewModel.filteredSpools[$0] }
@@ -458,8 +396,10 @@ struct SpoolInventoryView: View {
                             activeTasks.append(task)
                         }
                     }
+
                 }
                 .listStyle(.plain)
+                .scrollContentBackground(.hidden)
             }
             .onChange(of: viewModel.highlightedSpoolId) { _, newId in
                 // Scroll animation only. Highlight expiry is owned synchronously
@@ -472,7 +412,84 @@ struct SpoolInventoryView: View {
                     }
                 }
             }
+
         }
+    }
+
+    private func spoolRow(_ spool: SpoolmanSpool) -> some View {
+        SpoolInventoryRowView(
+            spool: spool,
+            assignedPrinterName: viewModel.assignedPrinterName(for: spool.id),
+            assignmentsLoaded: viewModel.printerAssignmentsLoaded
+        )
+        .listRowBackground(spoolRowBackground(for: spool))
+        .listRowSeparator(.hidden)
+        .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+        .id(spool.id)
+        .contextMenu {
+            spoolContextMenu(for: spool)
+        }
+    }
+
+    @ViewBuilder
+    private func spoolRowBackground(for spool: SpoolmanSpool) -> some View {
+        if viewModel.highlightedSpoolId == spool.id {
+            Color.pfAccent.opacity(0.15)
+        } else {
+            RoundedRectangle(cornerRadius: 12).fill(Color.pfCard)
+        }
+    }
+
+    @ViewBuilder
+    private func spoolContextMenu(for spool: SpoolmanSpool) -> some View {
+        if spool.hasNfcTag != true {
+            Button {
+                let task = Task {
+                    let filament = await viewModel.matchingFilamentForTagPreview(for: spool)
+                    nfcWriteTarget = NFCWriteTarget(spool: spool, filament: filament)
+                }
+                activeTasks.append(task)
+            } label: {
+                Label("Write NFC Tag", systemImage: "wave.3.right")
+            }
+        }
+    }
+
+    private var inventoryActions: some View {
+        Menu {
+            Button {
+                viewModel.handleNFCScan()
+            } label: {
+                Label("Scan NFC tag", systemImage: "wave.3.right")
+            }
+            .accessibilityIdentifier("inventory.scan.nfc")
+
+            Button {
+                showBarcodeIntake = true
+            } label: {
+                Label("Log new spools", systemImage: "cylinder")
+            }
+            .accessibilityIdentifier("inventory.scan.barcodeIntake")
+
+            if services.capabilitiesService.resolved.printedPartsInventoryEnabled {
+                Button {
+                    showPrintedParts = true
+                } label: {
+                    Label("Printed parts", systemImage: "cube.box")
+                }
+                .accessibilityIdentifier("filament.printedParts")
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .frame(width: 44, height: 44)
+                .background(Color.pfCard, in: Circle())
+                .overlay(Circle().strokeBorder(Color.pfBorder, lineWidth: 1))
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("More inventory actions")
+        .accessibilityHint("Opens NFC intake, barcode intake, and printed-part inventory.")
+        .accessibilityIdentifier("inventory.actions")
     }
 }
 

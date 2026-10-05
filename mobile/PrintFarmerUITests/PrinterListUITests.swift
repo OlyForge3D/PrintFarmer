@@ -40,7 +40,10 @@ final class PrinterListUITests: PrintFarmerUITestCase {
 
     func testPrinterListDisplayed() {
         openFarm()
-        XCTAssertTrue(app.navigationBars["Farm"].waitForExistence(timeout: 5))
+        XCTAssertTrue(
+            app.staticTexts["navigation.title"].waitForExistence(timeout: 5)
+                || app.navigationBars["Farm"].waitForExistence(timeout: 5)
+        )
 
         let printerCard = app.buttons["farm-card-\(printerID)"]
         XCTAssertTrue(

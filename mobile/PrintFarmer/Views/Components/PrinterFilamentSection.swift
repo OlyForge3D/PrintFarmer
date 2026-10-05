@@ -25,8 +25,7 @@ struct PrinterFilamentSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: showsAllActions ? 8 : 12) {
             if !embedded {
-                Text(showsAllActions && presentation.compactRows.contains(where: \.hasAssignment)
-                     ? "Assigned spool" : "Filament")
+                Text(showsAllActions ? "Loaded" : "Filament")
                     .font(showsAllActions ? .subheadline.weight(.semibold) : .headline)
                     .accessibilityAddTraits(.isHeader)
                     .accessibilityIdentifier("printer.filament.heading")
@@ -80,14 +79,26 @@ struct PrinterFilamentSection: View {
                 }
                 if showsAllActions {
                     filamentDetailActions
+                    if presentation.rows.contains(where: { $0.coverage != nil }) {
+                        DisclosureGroup(isExpanded: $detailsExpanded) {
+                            details
+                        } label: {
+                            Text("Coverage details")
+                                .font(.caption.weight(.medium))
+                                .frame(minHeight: 44, alignment: .leading)
+                                .accessibilityIdentifier("printer.filament.disclosure")
+                        }
+                    }
                 }
-                DisclosureGroup(isExpanded: $detailsExpanded) {
-                    details
-                } label: {
-                    Text("Filament details")
-                        .font(.subheadline)
-                        .frame(minHeight: 44, alignment: .leading)
-                        .accessibilityIdentifier("printer.filament.disclosure")
+                if !showsAllActions {
+                    DisclosureGroup(isExpanded: $detailsExpanded) {
+                        details
+                    } label: {
+                        Text("Filament details")
+                            .font(.subheadline)
+                            .frame(minHeight: 44, alignment: .leading)
+                            .accessibilityIdentifier("printer.filament.disclosure")
+                    }
                 }
             }
         }
@@ -132,7 +143,9 @@ struct PrinterFilamentSection: View {
                    let name = row.spoolName ?? row.spoolID.flatMap({ spoolDetailsByID[$0]?.name }) {
                     Text(name)
                         .font(.subheadline.weight(.semibold))
-                        .lineLimit(1)
+                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
                 }
                 if showsAllActions && row.hasAssignment {
                     let material = row.material ?? row.spoolID.flatMap { spoolDetailsByID[$0]?.material }

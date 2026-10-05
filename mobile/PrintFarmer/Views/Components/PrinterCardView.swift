@@ -95,6 +95,7 @@ struct PrinterCardView: View {
             RoundedRectangle(cornerRadius: 14)
                 .strokeBorder(Color.pfBorder, lineWidth: 1)
         }
+        .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(presentation.accessibilityLabel)
         .accessibilityRepresentation {
@@ -246,7 +247,7 @@ struct PrinterCardPresentation {
         case "printing": return "Printing"
         case "paused": return "Paused"
         case "error": return "Error"
-        case "ready": return "Ready"
+        case "ready": return "Idle"
         case nil, "idle": return "Idle"
         default: return printer.state?.capitalized ?? "Idle"
         }
@@ -267,7 +268,7 @@ struct PrinterCardPresentation {
 
     var jobLabel: String {
         if isPendingReady { return "Finished · Clear bed to continue" }
-        guard isActiveJob || hasFailureJobContext else { return "No active job" }
+        guard isActiveJob || hasFailureJobContext else { return "Ready for the next job" }
         return printer.jobName ?? printer.fileName ?? "Job name unavailable"
     }
 

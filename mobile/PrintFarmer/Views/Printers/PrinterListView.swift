@@ -170,31 +170,31 @@ struct PrinterListView: View {
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif
-            .modifier(
-                ConditionalPrinterSearch(
-                    text: $viewModel.searchText,
-                    isPresented: $isSearchPresented
-                )
-            )
             .refreshable {
                 await farmViewModel.loadDashboard()
                 _ = await attentionViewModel.refresh()
             }
+            .modifier(
+                PresentedFarmSearch(
+                    text: $viewModel.searchText,
+                    isPresented: $isSearchPresented
+                )
+            )
             .rootNavigationChrome(for: navigationContext.appTab) {
-                if !isSearchPresented {
-                    Button {
-                        isSearchPresented = true
-                    } label: {
-                        Image(systemName: "magnifyingglass")
-                            .frame(
-                                minWidth: RootNavigationChrome.minimumTouchTarget,
-                                minHeight: RootNavigationChrome.minimumTouchTarget
-                            )
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Search printers")
-                    .accessibilityIdentifier("farm.search")
+                Button {
+                    isSearchPresented = true
+                } label: {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(Color.pfTextSecondary)
+                        .frame(
+                            width: RootNavigationChrome.minimumTouchTarget,
+                            height: RootNavigationChrome.minimumTouchTarget
+                        )
+                        .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Search printers")
+                .accessibilityIdentifier("farm.search")
             }
             .navigationDestination(for: AppDestination.self) { destination in
                 destinationView(for: destination)
@@ -216,49 +216,50 @@ struct PrinterListView: View {
     // MARK: - Printer List
 
     private var printerList: some View {
-        ScrollView {
-            LazyVStack(spacing: 12) {
-                statusFilterBar
+        VStack(spacing: 0) {
+            statusFilterBar
+                .padding(.horizontal)
+                .padding(.top, 8)
 
-                if viewModel.filteredPrinters.isEmpty {
-                    if viewModel.searchText.isEmpty {
-                        ContentUnavailableView {
-                            Label("No Printers in This Filter", systemImage: "line.3.horizontal.decrease.circle")
-                        } description: {
-                            Text("Choose another Farm filter to see printers.")
-                        }
-                        .padding(.top, 40)
-                    } else {
-                        ContentUnavailableView.search(text: viewModel.searchText)
-                            .padding(.top, 40)
-                    }
-                } else {
-                    LazyVGrid(columns: iPadColumns, spacing: 12) {
-                        ForEach(viewModel.filteredPrinters) { printer in
-                            NavigationLink(value: AppDestination.printerDetail(id: printer.id)) {
-                                PrinterCardView(
-                                    printer: printer,
-                                    isPendingReady: viewModel.isPendingReady(printer),
-                                    attentionCount: attentionCount(for: printer.id),
-                                    failureReason: failureReason(for: printer.id),
-                                    printerService: services.printerService
-                                )
+            ScrollView {
+                LazyVStack(spacing: 12) {
+                    Group {
+                        if viewModel.filteredPrinters.isEmpty {
+                            ContentUnavailableView {
+                                Label("No Printers in This Filter", systemImage: "line.3.horizontal.decrease.circle")
+                            } description: {
+                                Text("Choose another Farm filter to see printers.")
                             }
-                            .buttonStyle(.plain)
-                            .accessibilityElement(children: .combine)
-                            .accessibilityHint("Opens \(printer.name) printer details.")
-                            .accessibilityIdentifier(
-                                printerAccessibilityIdentifier(for: printer)
-                            )
+                            .padding(.top, 40)
+                        } else {
+                            LazyVGrid(columns: iPadColumns, spacing: 12) {
+                                ForEach(viewModel.filteredPrinters) { printer in
+                                    NavigationLink(value: AppDestination.printerDetail(id: printer.id)) {
+                                        PrinterCardView(
+                                            printer: printer,
+                                            isPendingReady: viewModel.isPendingReady(printer),
+                                            attentionCount: attentionCount(for: printer.id),
+                                            failureReason: failureReason(for: printer.id),
+                                            printerService: services.printerService
+                                        )
+                                    }
+                                    .buttonStyle(.plain)
+                                    .accessibilityElement(children: .combine)
+                                    .accessibilityHint("Opens \(printer.name) printer details.")
+                                    .accessibilityIdentifier(
+                                        printerAccessibilityIdentifier(for: printer)
+                                    )
+                                }
+                            }
                         }
                     }
+                    .padding(.horizontal)
+                    .padding(.vertical, 8)
+                    .padding(.bottom, 112)
                 }
             }
-            .padding(.horizontal)
-            .padding(.vertical, 8)
-            .padding(.bottom, 112)
+            .accessibilityIdentifier("farm.printerList")
         }
-        .accessibilityIdentifier("farm.printerList")
     }
 
     // MARK: - Filters
@@ -282,7 +283,7 @@ struct PrinterListView: View {
     }
 
     private var statusFilterBar: some View {
-        Group {
+        VStack(alignment: .leading, spacing: 0) {
             if dynamicTypeSize.isAccessibilitySize {
                 VStack(alignment: .leading, spacing: 8) {
                     statusFilterChips(allowsWrapping: true)
@@ -295,6 +296,7 @@ struct PrinterListView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("farm.filters")
     }
@@ -333,21 +335,21 @@ struct PrinterListView: View {
     }
 }
 
-private struct ConditionalPrinterSearch: ViewModifier {
+private struct PresentedFarmSearch: ViewModifier {
     @Binding var text: String
     @Binding var isPresented: Bool
 
-    @ViewBuilder
     func body(content: Content) -> some View {
-        if isPresented {
-            content.searchable(
-                text: $text,
-                isPresented: $isPresented,
-                placement: .toolbar,
-                prompt: "Search printers"
-            )
-        } else {
-            content
+        Group {
+            if isPresented {
+                content.searchable(
+                    text: $text,
+                    isPresented: $isPresented,
+                    prompt: "Search printers"
+                )
+            } else {
+                content
+            }
         }
     }
 }
