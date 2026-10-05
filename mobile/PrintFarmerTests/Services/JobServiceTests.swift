@@ -289,3 +289,46 @@ final class JobServiceTests: XCTestCase {
         )
     }
 }
+
+final class JobAnalyticsServiceTests: XCTestCase {
+    func testHistoryRequestsSmallNewestFailedPage() async throws {
+        let mockAPIClient = MockAPIClient()
+        mockAPIClient.stubResponse(
+            json: """
+            {"entries":[],"totalCount":0,"currentPage":1,"pageSize":5,"stats":null}
+            """
+        )
+        let service = JobAnalyticsService(apiClient: mockAPIClient.apiClient)
+
+        let page = try await service.getHistory(
+            limit: 5,
+            offset: 0,
+            sortBy: "newest",
+            statuses: "failed",
+            dateStart: nil,
+            dateEnd: nil
+        )
+
+        XCTAssertTrue(page.entries.isEmpty)
+        let request = try XCTUnwrap(mockAPIClient.capturedRequests.last)
+        XCTAssertEqual(request.httpMethod, "GET")
+        XCTAssertEqual(request.url?.path, "/api/job-queue-analytics/history")
+        XCTAssertEqual(request.url?.query, "limit=5&offset=0&sortBy=newest&statuses=failed")
+    }
+
+    func testDemoHistoryFiltersToRecentFailures() async throws {
+        let service = DemoJobAnalyticsService()
+
+        let page = try await service.getHistory(
+            limit: 5,
+            offset: 0,
+            sortBy: "newest",
+            statuses: "failed",
+            dateStart: nil,
+            dateEnd: nil
+        )
+
+        XCTAssertEqual(page.entries.map(\.status), ["Failed"])
+        XCTAssertEqual(page.entries.map(\.jobName), ["vase_mode_spiral.gcode"])
+    }
+}

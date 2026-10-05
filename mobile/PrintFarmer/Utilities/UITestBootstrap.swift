@@ -951,6 +951,7 @@ enum UITestBootstrap {
             let attentionData: Data
             let capabilitiesData: Data
             let assignedQueueData: Data
+            let recentFailureHistoryData: Data
             let userData: Data
             let thumbnailData: Data
         }
@@ -1074,6 +1075,36 @@ enum UITestBootstrap {
                         remainingCopies: 1
                     )
                 ])
+                let recentFailureHistoryData = try encoder.encode(
+                    QueueHistoryPage(
+                        entries: [
+                            QueueHistoryEntry(
+                                id: DemoData.job9ID.uuidString,
+                                jobName: "vase_mode_spiral.gcode",
+                                printerName: "Voron 2.4",
+                                status: "Failed",
+                                completedAt: Date(timeIntervalSince1970: 1_791_141_200),
+                                durationSeconds: 3_600,
+                                completionPercentage: 42,
+                                failureReason: "Thermal runaway detected"
+                            ),
+                            QueueHistoryEntry(
+                                id: DemoData.job10ID.uuidString,
+                                jobName: "lamp_shade_textured.gcode",
+                                printerName: "Voron 2.4",
+                                status: "Failed",
+                                completedAt: Date(timeIntervalSince1970: 1_791_065_600),
+                                durationSeconds: 5_600,
+                                completionPercentage: nil,
+                                failureReason: "Heater disconnected"
+                            )
+                        ],
+                        totalCount: 2,
+                        currentPage: 1,
+                        pageSize: 5,
+                        stats: nil
+                    )
+                )
                 lock.lock()
                 fixtureState = FixtureState(
                     printersData: printersData,
@@ -1084,6 +1115,7 @@ enum UITestBootstrap {
                     attentionData: try encoder.encode(fixture.attentionFeed),
                     capabilitiesData: capabilitiesData,
                     assignedQueueData: assignedQueueData,
+                    recentFailureHistoryData: recentFailureHistoryData,
                     userData: userData,
                     thumbnailData: fixture.thumbnail
                 )
@@ -1164,6 +1196,8 @@ enum UITestBootstrap {
                 result = (200, "application/json", fixture.capabilitiesData)
             case ("GET", "/api/job-queue-analytics/printer/\(printerID)"):
                 result = (200, "application/json", fixture.assignedQueueData)
+            case ("GET", "/api/job-queue-analytics/history"):
+                result = (200, "application/json", fixture.recentFailureHistoryData)
             case ("GET", "/api/printers/\(printerID)/current-job/thumbnail"):
                 result = (200, "image/png", fixture.thumbnailData)
             case ("POST", "/api/printers/\(printerID)/temps"):

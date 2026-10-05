@@ -14,8 +14,10 @@ struct QueueReorderGroup: Identifiable, Sendable {
 @MainActor @Observable
 final class JobListViewModel {
     var jobs: [QueuedPrintJobResponse] = []
+    private(set) var recentFailures: [QueueHistoryEntry] = []
     var isLoading = false
     var errorMessage: String?
+    private(set) var recentFailuresError: String?
     var showRecentJobs = false
     var isViewActive = true
     private(set) var queueWriteAuthorized = false
@@ -24,6 +26,7 @@ final class JobListViewModel {
     private(set) var isReorderingQueue = false
 
     private var jobService: (any JobServiceProtocol)?
+    private var jobAnalyticsService: (any JobAnalyticsServiceProtocol)?
     @ObservationIgnored private var queueUpdateSubscription: SignalRSubscription?
     @ObservationIgnored private var connectionStateSubscription: SignalRSubscription?
     @ObservationIgnored private var signalRServiceIdentity: ObjectIdentifier?
@@ -35,6 +38,10 @@ final class JobListViewModel {
 
     func configure(jobService: any JobServiceProtocol) {
         self.jobService = jobService
+    }
+
+    func configure(jobAnalyticsService: any JobAnalyticsServiceProtocol) {
+        self.jobAnalyticsService = jobAnalyticsService
     }
 
     var canReorderQueue: Bool {
@@ -127,6 +134,10 @@ final class JobListViewModel {
     @discardableResult
     private func refreshQueue() async -> Bool {
         guard let jobService, isViewActive else { return false }
+        guard let jobAnalyticsService else {
+            recentFailuresError = "Recent failures are unavailable."
+            return false
+        }
         loadGeneration &+= 1
         let requestGeneration = loadGeneration
         let stateEpoch = queueStateEpoch
@@ -137,27 +148,61 @@ final class JobListViewModel {
             isLoading = activeLoadCount > 0
         }
         errorMessage = nil
+
+        async let queueRequest = jobService.listAllJobs()
+        async let historyRequest = jobAnalyticsService.getHistory(
+            limit: 5,
+            offset: 0,
+            sortBy: "newest",
+            statuses: "failed",
+            dateStart: nil,
+            dateEnd: nil
+        )
+
+        let queueResult: Result<[QueuedPrintJobResponse], Error>
         do {
-            let result = try await jobService.listAllJobs()
-            guard isViewActive,
-                  requestGeneration == loadGeneration,
-                  stateEpoch == queueStateEpoch else {
-                return false
-            }
+            queueResult = .success(try await queueRequest)
+        } catch {
+            queueResult = .failure(error)
+        }
+
+        let historyResult: Result<QueueHistoryPage, Error>
+        do {
+            historyResult = .success(try await historyRequest)
+        } catch {
+            historyResult = .failure(error)
+        }
+
+        guard isViewActive,
+              requestGeneration == loadGeneration,
+              stateEpoch == queueStateEpoch else {
+            return false
+        }
+
+        var queueLoaded = false
+        switch queueResult {
+        case .success(let result):
             jobs = result
             hasFreshQueueSnapshot = true
             queueStateEpoch &+= 1
-            return true
-        } catch {
-            guard isViewActive,
-                  requestGeneration == loadGeneration,
-                  stateEpoch == queueStateEpoch else {
-                return false
-            }
+            queueLoaded = true
+        case .failure(let error):
             hasFreshQueueSnapshot = false
             errorMessage = error.localizedDescription
-            return false
         }
+
+        switch historyResult {
+        case .success(let page):
+            recentFailures = page.entries.filter {
+                $0.status.caseInsensitiveCompare("failed") == .orderedSame
+            }
+            recentFailuresError = nil
+        case .failure(let error):
+            recentFailures = []
+            recentFailuresError = error.localizedDescription
+        }
+
+        return queueLoaded
     }
 
     private func handleQueueInvalidation() async {
@@ -540,13 +585,6 @@ final class JobListViewModel {
     }
 
     /// Recent failures only; completed and cancelled jobs belong in history.
-    var recentFailures: [QueuedPrintJobResponse] {
-        jobs.filter {
-            $0.job.jobStatus == .failed
-        }
-        .sorted { ($0.job.actualEndTimeUtc ?? $0.job.createdAtUtc) > ($1.job.actualEndTimeUtc ?? $1.job.createdAtUtc) }
-    }
-
     /// Completed and cancelled jobs remain reachable from secondary history,
     /// outside the approved three-section queue composition.
     var completedHistoryJobs: [QueuedPrintJobResponse] {
@@ -558,7 +596,7 @@ final class JobListViewModel {
     }
 
     var hasAnyJobs: Bool {
-        !jobs.isEmpty
+        !jobs.isEmpty || !recentFailures.isEmpty || recentFailuresError != nil
     }
 
     private func reviewedRowVersion(for id: UUID) -> String? {

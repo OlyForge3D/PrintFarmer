@@ -30,6 +30,7 @@ struct JobListView: View {
         .task {
             viewModel.activate()
             viewModel.configure(jobService: services.jobService)
+            viewModel.configure(jobAnalyticsService: services.jobAnalyticsService)
             viewModel.configureSignalR(services.signalRService)
             viewModel.setQueueWriteAuthorization(canWriteQueue)
             viewModel.startObservingNetworkPath()
@@ -236,10 +237,28 @@ struct JobListView: View {
                 .accessibilityIdentifier("jobList.section.queued")
             }
 
-            if !viewModel.recentFailures.isEmpty {
+            if let error = viewModel.recentFailuresError {
                 Section {
-                    ForEach(viewModel.recentFailures.prefix(10)) { item in
-                        recentJobRow(item)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Couldn't load recent failures.")
+                            .foregroundStyle(Color.pfError)
+                        Text(error)
+                            .font(.caption)
+                            .foregroundStyle(Color.pfTextSecondary)
+                        Button("Retry") {
+                            retryTask?.cancel()
+                            retryTask = Task { await viewModel.loadJobs() }
+                        }
+                    }
+                    .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
+                } header: {
+                    sectionHeader("Recent failures", count: 0, systemImage: "exclamationmark.triangle")
+                        .accessibilityIdentifier("jobList.section.recent-failures")
+                }
+            } else if !viewModel.recentFailures.isEmpty {
+                Section {
+                    ForEach(viewModel.recentFailures) { item in
+                        recentFailureRow(item)
                     }
                 } header: {
                     sectionHeader(
@@ -260,7 +279,7 @@ struct JobListView: View {
             }
         }
         .listStyle(.plain)
-        .contentMargins(.bottom, 112, for: .scrollContent)
+        .contentMargins(.bottom, 200, for: .scrollContent)
         .environment(\.editMode, .constant(viewModel.canReorderQueue ? .active : .inactive))
         .accessibilityIdentifier("jobList.combined.list")
     }
@@ -528,6 +547,142 @@ struct JobListView: View {
     }
 
     // MARK: - Recent Job Row
+
+    private func recentFailureRow(_ item: QueueHistoryEntry) -> some View {
+        Group {
+            if let id = UUID(uuidString: item.id) {
+                NavigationLink(value: AppDestination.jobDetail(id: id)) {
+                    recentFailureRowContent(item)
+                }
+            } else {
+                recentFailureRowContent(item)
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(recentFailureAccessibilityLabel(item))
+        .accessibilityIdentifier("job.row.\(item.id)")
+    }
+
+    private func recentFailureRowContent(_ item: QueueHistoryEntry) -> some View {
+        Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(alignment: .top, spacing: 12) {
+                        recentFailureIcon
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(item.jobName)
+                                .font(.subheadline)
+                                .dynamicTypeSize(.xxxLarge)
+                                .lineLimit(2)
+                            StatusBadge(jobStatus: .failed)
+                                .dynamicTypeSize(.xxxLarge)
+                        }
+                    }
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(recentFailureSummary(item))
+                            .font(.caption)
+                            .dynamicTypeSize(.xxxLarge)
+                            .foregroundStyle(Color.pfError)
+                        if let printerName = item.printerName {
+                            Text(printerName)
+                                .font(.caption)
+                                .dynamicTypeSize(.xxxLarge)
+                                .foregroundStyle(Color.pfTextSecondary)
+                        }
+                        if let completedAt = item.completedAt {
+                            Text(completedAt.relativeFormatted)
+                                .font(.caption2)
+                                .dynamicTypeSize(.xxxLarge)
+                                .foregroundStyle(Color.pfTextTertiary)
+                        }
+                        if let failureReason = item.failureReason {
+                            Text(failureReason)
+                                .font(.caption)
+                                .dynamicTypeSize(.xxxLarge)
+                                .foregroundStyle(Color.pfError)
+                                .lineLimit(2)
+                        }
+                    }
+                }
+            } else {
+                HStack(spacing: 12) {
+                    recentFailureIcon
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text(item.jobName)
+                                .font(.subheadline)
+                                .lineLimit(1)
+                            Spacer()
+                            StatusBadge(jobStatus: .failed)
+                        }
+                        HStack {
+                            Text(recentFailureSummary(item))
+                                .font(.caption)
+                                .foregroundStyle(Color.pfError)
+                                .lineLimit(1)
+                            if let printerName = item.printerName {
+                                Text("· \(printerName)")
+                                    .font(.caption)
+                                    .foregroundStyle(Color.pfTextSecondary)
+                                    .lineLimit(1)
+                            }
+                            Spacer()
+                            if let completedAt = item.completedAt {
+                                Text(completedAt.relativeFormatted)
+                                    .font(.caption2)
+                                    .foregroundStyle(Color.pfTextTertiary)
+                                    .lineLimit(1)
+                            }
+                        }
+                        if let failureReason = item.failureReason {
+                            Text(failureReason)
+                                .font(.caption)
+                                .foregroundStyle(Color.pfError)
+                                .lineLimit(1)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
+    private var recentFailureIcon: some View {
+        Image(systemName: "exclamationmark.triangle.fill")
+            .foregroundStyle(Color.pfError)
+            .frame(width: 36, height: 36)
+            .background(
+                Color.pfError.opacity(0.12),
+                in: RoundedRectangle(cornerRadius: 8)
+            )
+    }
+
+    private func recentFailureSummary(_ item: QueueHistoryEntry) -> String {
+        guard let percentage = item.completionPercentage,
+              percentage.isFinite,
+              (0...100).contains(percentage) else {
+            return "Failed"
+        }
+        return "Failed at \(Int(percentage.rounded()))%"
+    }
+
+    private func recentFailureAccessibilityLabel(_ item: QueueHistoryEntry) -> String {
+        var components = [
+            item.jobName,
+            "Failed status",
+            recentFailureSummary(item),
+        ]
+        if let completedAt = item.completedAt {
+            components.append(completedAt.relativeFormatted)
+        }
+        if let printerName = item.printerName {
+            components.append(printerName)
+        }
+        if let failureReason = item.failureReason {
+            components.append(failureReason)
+        }
+        return components.joined(separator: ", ")
+    }
 
     private func recentJobRow(_ item: QueuedPrintJobResponse) -> some View {
         jobDetailLink(for: item) {

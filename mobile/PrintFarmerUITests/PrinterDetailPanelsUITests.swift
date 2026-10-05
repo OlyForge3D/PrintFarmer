@@ -380,7 +380,11 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
                             break
                         }
                     }
-                    XCTAssertTrue(failedJob.isHittable, "A failed-job row must be visible in Recent failures.")
+                    attachScreen("\(device)-\(size)-global-queue-recent-failures")
+                    XCTAssertTrue(
+                        failedJob.isHittable,
+                        "A failed-job row must be visible in Recent failures. Row: \(failedJob.frame), scan: \(scan.frame), list: \(queueList.frame)."
+                    )
                     XCTAssertTrue(failedJob.label.localizedCaseInsensitiveContains("failed status"))
                     XCTAssertLessThanOrEqual(
                         failedJob.frame.maxY,

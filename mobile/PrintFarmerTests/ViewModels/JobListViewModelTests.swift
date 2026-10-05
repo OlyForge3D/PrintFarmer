@@ -5,18 +5,22 @@ import XCTest
 final class JobListViewModelTests: XCTestCase {
 
     private var mockJobService: MockJobService!
+    private var mockJobAnalyticsService: MockJobAnalyticsService!
     private var viewModel: JobListViewModel!
 
     override func setUp() async throws {
         try await super.setUp()
         mockJobService = MockJobService()
+        mockJobAnalyticsService = MockJobAnalyticsService()
         viewModel = JobListViewModel()
         viewModel.configure(jobService: mockJobService)
+        viewModel.configure(jobAnalyticsService: mockJobAnalyticsService)
     }
 
     override func tearDown() async throws {
         viewModel = nil
         mockJobService = nil
+        mockJobAnalyticsService = nil
         try await super.tearDown()
     }
 
@@ -24,8 +28,10 @@ final class JobListViewModelTests: XCTestCase {
 
     func testInitialState() {
         XCTAssertTrue(viewModel.jobs.isEmpty)
+        XCTAssertTrue(viewModel.recentFailures.isEmpty)
         XCTAssertFalse(viewModel.isLoading)
         XCTAssertNil(viewModel.errorMessage)
+        XCTAssertNil(viewModel.recentFailuresError)
         XCTAssertFalse(viewModel.showRecentJobs)
         XCTAssertFalse(viewModel.hasAnyJobs)
     }
@@ -42,6 +48,59 @@ final class JobListViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.jobs.count, 1)
         XCTAssertFalse(viewModel.isLoading)
         XCTAssertNil(viewModel.errorMessage)
+    }
+
+    func testLoadJobsRequestsOnlyRecentFailedHistoryAndExcludesOtherStatuses() async throws {
+        let failed = QueueHistoryEntry(
+            id: UUID().uuidString,
+            jobName: "failed.gcode",
+            printerName: "MK4",
+            status: "Failed",
+            completedAt: Date(),
+            durationSeconds: 300,
+            completionPercentage: 42,
+            failureReason: "Thermal runaway"
+        )
+        let completed = QueueHistoryEntry(
+            id: UUID().uuidString,
+            jobName: "completed.gcode",
+            printerName: "MK4",
+            status: "Completed",
+            completedAt: Date(),
+            durationSeconds: 300
+        )
+        mockJobAnalyticsService.historyPageToReturn = QueueHistoryPage(
+            entries: [completed, failed],
+            totalCount: 2,
+            currentPage: 1,
+            pageSize: 5,
+            stats: nil
+        )
+
+        await viewModel.loadJobs()
+
+        XCTAssertEqual(viewModel.recentFailures.map(\.id), [failed.id])
+        XCTAssertNil(viewModel.recentFailuresError)
+        XCTAssertEqual(mockJobAnalyticsService.getHistoryCalledWith?.limit, 5)
+        XCTAssertEqual(mockJobAnalyticsService.getHistoryCalledWith?.offset, 0)
+        XCTAssertEqual(mockJobAnalyticsService.getHistoryCalledWith?.sortBy, "newest")
+        XCTAssertEqual(mockJobAnalyticsService.getHistoryCalledWith?.statuses, "failed")
+    }
+
+    func testLoadJobsShowsHistoryErrorWithoutDroppingActiveQueue() async throws {
+        let printing = try TestData.decodeQueuedPrintJobResponse(
+            from: TestJSON.queuedPrintJobResponsePrinting
+        )
+        mockJobService.queuedJobResponsesToReturn = [printing]
+        mockJobAnalyticsService.errorToThrow = NetworkError.serverError(500)
+
+        await viewModel.loadJobs()
+
+        XCTAssertEqual(viewModel.jobs.map(\.id), [printing.id])
+        XCTAssertTrue(viewModel.hasFreshQueueSnapshot)
+        XCTAssertNotNil(viewModel.recentFailuresError)
+        XCTAssertNil(viewModel.errorMessage)
+        XCTAssertTrue(viewModel.hasAnyJobs)
     }
 
     func testLoadJobsSetsLoadingState() async {
@@ -352,6 +411,7 @@ final class JobListViewModelTests: XCTestCase {
             mockJobService = MockJobService()
             viewModel = JobListViewModel()
             viewModel.configure(jobService: mockJobService)
+            viewModel.configure(jobAnalyticsService: MockJobAnalyticsService())
             mockJobService.queuedJobResponsesToReturn = [moved, neighbor]
             mockJobService.actionErrorToThrow = error
             viewModel.setQueueWriteAuthorization(true)
@@ -428,6 +488,31 @@ final class JobListViewModelTests: XCTestCase {
         let failed = try TestData.decodeQueuedPrintJobResponse(from: TestJSON.queuedPrintJobResponseFailed)
         let printing = try TestData.decodeQueuedPrintJobResponse(from: TestJSON.queuedPrintJobResponsePrinting)
         mockJobService.queuedJobResponsesToReturn = [completed, failed, printing]
+        mockJobAnalyticsService.historyPageToReturn = QueueHistoryPage(
+            entries: [
+                QueueHistoryEntry(
+                    id: completed.id,
+                    jobName: completed.job.name,
+                    printerName: completed.job.printerName,
+                    status: "Completed",
+                    completedAt: completed.job.actualEndTimeUtc,
+                    durationSeconds: nil
+                ),
+                QueueHistoryEntry(
+                    id: failed.id,
+                    jobName: failed.job.name,
+                    printerName: failed.job.printerName,
+                    status: "Failed",
+                    completedAt: failed.job.actualEndTimeUtc,
+                    durationSeconds: nil,
+                    failureReason: failed.job.failureReason
+                )
+            ],
+            totalCount: 2,
+            currentPage: 1,
+            pageSize: 5,
+            stats: nil
+        )
 
         await viewModel.loadJobs()
 
@@ -444,7 +529,7 @@ final class JobListViewModelTests: XCTestCase {
             Set(viewModel.completedHistoryJobs.map(\.job.name)),
             Set([completed.job.name, "cancelled-job"])
         )
-        XCTAssertEqual(viewModel.recentFailures.map(\.id), [failed.id])
+        XCTAssertTrue(viewModel.recentFailures.isEmpty)
     }
 
     // MARK: - hasAnyJobs
