@@ -315,13 +315,15 @@ jobs:
           if [[ "${{ matrix.shard }}" == "1" ]]; then
             selectors=("${selectors[@]:1}")
           fi
-          mkdir -p "build-${{ matrix.key }}/missing-heartbeat"
-          python3 scripts/capture-missing-heartbeat.py \
-            --device "$SIMULATOR_UDID" \
-            --output "build-${{ matrix.key }}/missing-heartbeat" \
-            > "build-${{ matrix.key }}/missing-heartbeat/monitor.log" 2>&1 &
-          monitor_pid=$!
-          trap 'kill -TERM "$monitor_pid" 2>/dev/null || true; wait "$monitor_pid"' EXIT
+          if [[ "${{ matrix.key }}" == "ipad-2" ]]; then
+            mkdir -p "build-${{ matrix.key }}/missing-heartbeat"
+            python3 scripts/capture-missing-heartbeat.py \
+              --device "$SIMULATOR_UDID" \
+              --output "build-${{ matrix.key }}/missing-heartbeat" \
+              > "build-${{ matrix.key }}/missing-heartbeat/monitor.log" 2>&1 &
+            monitor_pid=$!
+            trap 'kill -TERM "$monitor_pid" 2>/dev/null || true; wait "$monitor_pid"' EXIT
+          fi
           status=0
           python3 scripts/run-tests.py -- test-without-building \
             -project PrintFarmer.xcodeproj \
@@ -338,9 +340,11 @@ jobs:
             -disable-concurrent-destination-testing \
             -resultBundlePath "build-${{ matrix.key }}/XCUIShard.xcresult" \
             2>&1 | tee "build-${{ matrix.key }}/XCUIShard.log" || status=$?
-          kill -TERM "$monitor_pid" 2>/dev/null || true
-          wait "$monitor_pid" || status=$?
-          trap - EXIT
+          if [[ "${{ matrix.key }}" == "ipad-2" ]]; then
+            kill -TERM "$monitor_pid" 2>/dev/null || true
+            wait "$monitor_pid" || status=$?
+            trap - EXIT
+          fi
           exit "$status"
 
       - name: Upload XCUI shard results

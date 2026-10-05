@@ -76,12 +76,12 @@ class EventTests(unittest.TestCase):
             matrix,
             re.MULTILINE,
         )
-        self.assertEqual(len(shards), 8, "XCUI must run in four shards per device family")
+        self.assertEqual(len(shards), 1, "Diagnostic-only capture must execute only authorized iPad shard 2")
         self.assertEqual(
             Counter(family for _, family, _ in shards),
-            {"iPhone": 4, "iPad": 4},
+            {"iPad": 1},
         )
-        self.assertEqual(len({key for key, _, _ in shards}), 8)
+        self.assertEqual({key for key, _, _ in shards}, {"ipad-2"})
 
         selectors_by_family = {"iPhone": [], "iPad": []}
         selectors_by_shard = {}
@@ -94,21 +94,10 @@ class EventTests(unittest.TestCase):
             selectors_by_shard[key] = shard_selectors
             selectors_by_family[family].extend(shard_selectors)
 
-        shared = [
-            "PrintFarmerUITests/LoginFlowUITests",
-            "PrintFarmerUITests/OperatorShellUITests",
-            "PrintFarmerUITests/ScanStationUITests",
-            "PrintFarmerUITests/HarvestUITests",
-            "PrintFarmerUITests/PartsInventoryUITests",
-            "PrintFarmerUITests/PrinterListUITests",
-            "PrintFarmerUITests/FilamentCoverageUITests",
-            "PrintFarmerUITests/ColdOfflineShellUITests",
-            "PrintFarmerUITests/UIWaitBudgetTests",
-        ]
-        self.assertEqual(Counter(selectors_by_family["iPhone"]), Counter(shared))
+        self.assertEqual(selectors_by_family["iPhone"], [])
         self.assertEqual(
             Counter(selectors_by_family["iPad"]),
-            Counter(shared + ["PrintFarmerUITests/JobDetailIPadNavigationUITests"]),
+            Counter(["PrintFarmerUITests/ScanStationUITests", "PrintFarmerUITests/HarvestUITests"]),
         )
         login_step = workflow.split("      - name: Run login XCUI\n", 1)[1]
         login_step = login_step.split("\n      - name:", 1)[0]
@@ -128,19 +117,6 @@ class EventTests(unittest.TestCase):
             'selectors=("${selectors[@]:1}")',
             shard_step,
         )
-        for key in ("iphone-1", "ipad-1"):
-            with self.subTest(key=key):
-                self.assertEqual(
-                    selectors_by_shard[key][0],
-                    "PrintFarmerUITests/LoginFlowUITests",
-                )
-                self.assertEqual(
-                    selectors_by_shard[key][1:],
-                    [
-                        "PrintFarmerUITests/OperatorShellUITests",
-                    ],
-                )
-
         declarations = set()
         sources_by_suite = {}
         for source in (mobile / "PrintFarmerUITests").glob("*.swift"):
