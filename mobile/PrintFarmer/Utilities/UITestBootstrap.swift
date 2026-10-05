@@ -967,15 +967,42 @@ enum UITestBootstrap {
                       let number = requestObject[requestField] as? NSNumber else {
                     return (400, "application/problem+json", Data(#"{"detail":"Fixture command body is missing the expected numeric field."}"#.utf8))
                 }
+                let value = number.doubleValue
+                let commandMessage: String
+                let validValue: Bool
+                switch (field, requestField) {
+                case ("fanSpeedPercent", "speedPercent"):
+                    commandMessage = "speedPercent must be between 0 and 100."
+                    validValue = value.isFinite && value.rounded() == value && (0...100).contains(value)
+                case ("liveZOffsetMm", "offsetMm"):
+                    commandMessage = "offsetMm must be non-zero and between -0.2 and 0.2 mm."
+                    validValue = value.isFinite && value != 0 && (-0.2...0.2).contains(value)
+                default:
+                    return (400, "application/problem+json", Data(#"{"detail":"Fixture command field is unsupported."}"#.utf8))
+                }
+                let encoder = JSONEncoder()
+                guard validValue else {
+                    return (400, "application/json", try encoder.encode(
+                        CommandResult(success: false, message: commandMessage)
+                    ))
+                }
                 guard var statusObject = try JSONSerialization.jsonObject(with: fixture.statusData) as? [String: Any] else {
                     return (500, "application/problem+json", Data(#"{"detail":"Fixture status payload could not be updated."}"#.utf8))
                 }
-                let value = number.doubleValue
-                let currentValue = statusObject[field] as? Double ?? 0
+                guard let currentNumber = statusObject[field] as? NSNumber,
+                      currentNumber.doubleValue.isFinite,
+                      field != "fanSpeedPercent" || (0...100).contains(currentNumber.doubleValue) else {
+                    let message = field == "fanSpeedPercent"
+                        ? "The printer does not report a valid part-fan speed; no command was sent."
+                        : "The printer does not report a valid live Z offset; no command was sent."
+                    return (502, "application/json", try encoder.encode(
+                        CommandResult(success: false, message: message)
+                    ))
+                }
+                let currentValue = currentNumber.doubleValue
                 statusObject[field] = addsToCurrentValue ? currentValue + value : value
                 fixture.statusData = try JSONSerialization.data(withJSONObject: statusObject)
                 let command = CommandResult(success: true, message: "Accepted by authenticated visual-acceptance API fixture.")
-                let encoder = JSONEncoder()
                 return (200, "application/json", try encoder.encode(command))
             } catch {
                 return (500, "application/json", Data(#"{"error":"fixture-command-failed"}"#.utf8))
