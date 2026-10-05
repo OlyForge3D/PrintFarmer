@@ -124,23 +124,30 @@ public struct PrinterRunActionBar: View {
         .accessibilityAddTraits(traits(for: descriptor))
     }
 
-    /// Emergency Stop is a compact labeled action for the detail's top bar.
-    /// carrying a distinct label. The bar never blanket-disables it because
-    /// another descriptor is pending — the host's descriptor is the only gate.
+    /// Emergency Stop stays compact in the regular layout. At accessibility
+    /// sizes it uses the full row so its visible label can wrap by word.
+    /// The bar never blanket-disables it because another descriptor is
+    /// pending — the host's descriptor is the only gate.
     private func emergencyStopButton(for descriptor: PrinterRunActionDescriptor) -> some View {
         Button(role: .destructive) {
             fire(.emergencyStop)
         } label: {
-            Label(
-                PrinterRunActionLabels.title(for: .emergencyStop),
-                systemImage: PrinterRunActionLabels.systemImage(for: .emergencyStop)
-            )
+            HStack(spacing: 8) {
+                Image(systemName: PrinterRunActionLabels.systemImage(for: .emergencyStop))
+                Text(PrinterRunActionLabels.title(for: .emergencyStop))
+                    .lineLimit(shouldStack ? 2 : nil)
+            }
             .fixedSize(horizontal: false, vertical: true)
             .frame(minWidth: 44, minHeight: 44)
             .contentShape(Rectangle())
             .fontWeight(.semibold)
+            // Keep the complete emergency label legible instead of breaking
+            // "Emergency" mid-word at accessibility sizes; VoiceOver keeps
+            // the full, uncapped "Emergency Stop" label below.
+            .dynamicTypeSize(shouldStack ? .xxxLarge : dynamicTypeSize)
         }
         .buttonStyle(.bordered)
+        .frame(maxWidth: shouldStack ? .infinity : nil)
         .tint(Color.pfError)
         .disabled(!descriptor.isEnabled || descriptor.isPending)
         .accessibilityIdentifier(

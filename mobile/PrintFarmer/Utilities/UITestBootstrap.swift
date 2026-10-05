@@ -573,6 +573,14 @@ enum UITestBootstrap {
             printer.jobName = nil
             printer.fileName = nil
             printer.currentJobThumbnailUrl = nil
+            printer.hotendTemp = 24
+            printer.bedTemp = 23
+            printer.hotendTarget = 215
+            printer.bedTarget = 60
+            printer.x = 0
+            printer.y = 0
+            printer.z = 5
+            printer.homedAxes = ""
         }
         printers[index] = printer
 
@@ -929,6 +937,8 @@ enum UITestBootstrap {
                 result = (200, "application/json", fixture.assignedQueueData)
             case ("GET", "/api/printers/\(printerID)/current-job/thumbnail"):
                 result = (200, "image/png", fixture.thumbnailData)
+            case ("POST", "/api/printers/\(printerID)/temps"):
+                result = updateTemperatures(&fixture, request: request)
             case ("POST", "/api/printers/\(printerID)/fan"):
                 result = updateStatus(
                     &fixture,
@@ -950,6 +960,40 @@ enum UITestBootstrap {
             }
             fixtureState = fixture
             return result
+        }
+
+        private static func updateTemperatures(
+            _ fixture: inout FixtureState,
+            request: URLRequest
+        ) -> (Int, String, Data) {
+            do {
+                guard let body = requestBodyData(request),
+                      let requestObject = try JSONSerialization.jsonObject(with: body) as? [String: Any] else {
+                    return (400, "application/problem+json", Data(#"{"detail":"Fixture received an invalid temperature command body."}"#.utf8))
+                }
+                let hotend = requestObject["hotend"] as? NSNumber
+                let bed = requestObject["bed"] as? NSNumber
+                guard hotend != nil || bed != nil else {
+                    return (400, "application/problem+json", Data(#"{"detail":"Temperature command must include hotend or bed."}"#.utf8))
+                }
+                guard hotend.map({ $0.doubleValue.isFinite && $0.doubleValue.rounded() == $0.doubleValue && (0...300).contains($0.doubleValue) }) ?? true,
+                      bed.map({ $0.doubleValue.isFinite && $0.doubleValue.rounded() == $0.doubleValue && (0...120).contains($0.doubleValue) }) ?? true else {
+                    return (400, "application/problem+json", Data(#"{"detail":"Fixture heater targets must be whole degrees within the reported hardware limits."}"#.utf8))
+                }
+                guard var statusObject = try JSONSerialization.jsonObject(with: fixture.statusData) as? [String: Any] else {
+                    return (500, "application/problem+json", Data(#"{"detail":"Fixture status payload could not be updated."}"#.utf8))
+                }
+                if let hotend { statusObject["hotendTarget"] = hotend }
+                if let bed { statusObject["bedTarget"] = bed }
+                fixture.statusData = try JSONSerialization.data(withJSONObject: statusObject)
+                let command = CommandResult(
+                    success: true,
+                    message: "Accepted by authenticated visual-acceptance API fixture."
+                )
+                return (200, "application/json", try JSONEncoder().encode(command))
+            } catch {
+                return (500, "application/json", Data(#"{"error":"fixture-temperature-command-failed"}"#.utf8))
+            }
         }
 
         private static func updateStatus(

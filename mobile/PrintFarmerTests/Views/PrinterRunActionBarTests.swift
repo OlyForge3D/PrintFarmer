@@ -191,6 +191,23 @@ final class PrinterRunActionBarTests: XCTestCase {
         XCTAssertLessThan(size.width, proposedWidth, "Emergency Stop must not be a full-width slab")
     }
 
+    func test_render_emergencyStop_usesFullWidthAtAccessibilityDynamicType() {
+        let proposedWidth: CGFloat = 390
+        let bar = PrinterRunActionBar(
+            presentation: PrinterRunActionPresentation(descriptors: [
+                .init(kind: .emergencyStop)
+            ]),
+            onSelect: { _ in }
+        )
+        .environment(\.dynamicTypeSize, .accessibility5)
+
+        let size = contentSize(bar, proposedWidth: proposedWidth)
+        XCTAssertGreaterThanOrEqual(
+            size.width, proposedWidth - 1,
+            "Emergency Stop must use the available width so its visible label can wrap by word at accessibility sizes"
+        )
+    }
+
     /// Per-kind isolated floor at accessibility Dynamic Type. Hicks-flag:
     /// larger accessibility fonts can grow height without stacking; at
     /// isolation there is nothing to stack, but this test guards against a

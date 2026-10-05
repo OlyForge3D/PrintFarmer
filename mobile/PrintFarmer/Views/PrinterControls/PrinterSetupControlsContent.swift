@@ -12,6 +12,7 @@ struct PrinterSetupControlsContent: View {
     var showsMaterial = true
     var showsRuntimeAdjustments = false
     var usesHeaterSteppers = false
+    var isPrinterDetailControl = false
     var materialActions: [PrinterFilamentAction] = []
     var onMaterialAction: @MainActor (PrinterFilamentAction) -> Void = { _ in }
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -100,22 +101,38 @@ struct PrinterSetupControlsContent: View {
                 // Geometry changes, not view identity: retain drafts and disclosures.
                 layout {
                     VStack(alignment: .leading, spacing: EssentialControlsStyle.groupSpacing) {
-                        insetGroup {
-                            PrinterDetailTemperatureStrip(
-                                hotend: .init(measured: printer.hotendTemp, target: printer.hotendTarget, isOnline: printer.isOnline),
-                                bed: .init(measured: printer.bedTemp, target: printer.bedTarget, isOnline: printer.isOnline),
-                                showsBed: true,
-                                identifier: "printer.controls.temperatures", essentialControls: true
+                        if !isPrinterDetailControl {
+                            insetGroup {
+                                PrinterDetailTemperatureStrip(
+                                    hotend: .init(measured: printer.hotendTemp, target: printer.hotendTarget, isOnline: printer.isOnline),
+                                    bed: .init(measured: printer.bedTemp, target: printer.bedTarget, isOnline: printer.isOnline),
+                                    showsBed: true,
+                                    identifier: "printer.controls.temperatures", essentialControls: true
+                                )
+                            }
+                        }
+                        insetGroup(compact: isPrinterDetailControl) {
+                            PreheatSubgroup(
+                                viewModel: viewModel,
+                                usesSteppers: usesHeaterSteppers,
+                                compactForDetail: isPrinterDetailControl
                             )
                         }
-                        insetGroup { PreheatSubgroup(viewModel: viewModel, usesSteppers: usesHeaterSteppers) }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    insetGroup { PrinterMotionControls(viewModel: viewModel) }
-                    if showsRuntimeAdjustments {
-                        insetGroup { PrinterRuntimeAdjustments(viewModel: viewModel) }
+                    insetGroup(compact: isPrinterDetailControl) {
+                        PrinterMotionControls(viewModel: viewModel, compactForDetail: isPrinterDetailControl)
                     }
-                    if showsMaterial { insetGroup {
+                    if showsRuntimeAdjustments {
+                        insetGroup(compact: isPrinterDetailControl) {
+                            PrinterRuntimeAdjustments(
+                                viewModel: viewModel,
+                                showsHeading: !isPrinterDetailControl,
+                                compactForDetail: isPrinterDetailControl
+                            )
+                        }
+                    }
+                    if showsMaterial { insetGroup(compact: isPrinterDetailControl) {
                         PrinterMaterialControls(
                             viewModel: viewModel, materialPresentation: materialPresentation,
                             materialActions: materialActions, onMaterialAction: onMaterialAction
@@ -128,10 +145,13 @@ struct PrinterSetupControlsContent: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func insetGroup<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+    private func insetGroup<Content: View>(
+        compact: Bool = false,
+        @ViewBuilder _ content: () -> Content
+    ) -> some View {
         content()
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(EssentialControlsStyle.groupPadding)
+            .padding(compact ? 12 : EssentialControlsStyle.groupPadding)
             .background(Color.pfBackground, in: RoundedRectangle(cornerRadius: 16))
     }
 
@@ -328,11 +348,15 @@ struct PrinterMaterialControls: View {
 
 private struct PrinterRuntimeAdjustments: View {
     @ObservedObject var viewModel: PrinterControlsViewModel
+    var showsHeading = true
+    var compactForDetail = false
     @State private var zOffsetStep = 0.05
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            EssentialControlHeading(title: "Fan & Z-offset")
+        VStack(alignment: .leading, spacing: compactForDetail ? 8 : 12) {
+            if showsHeading {
+                EssentialControlHeading(title: "Fan & Z-offset")
+            }
             PrinterControlCommandFeedback(viewModel: viewModel, section: .runtime)
             adjustmentRow(
                 title: "Part fan",
@@ -342,45 +366,59 @@ private struct PrinterRuntimeAdjustments: View {
                 lowerBound: 0,
                 upperBound: 100,
                 identifier: "fan",
-                adjust: { value in Task { await viewModel.setFanSpeed(Int(value)) } }
+                adjust: { value in Task { await viewModel.setFanSpeed(Int(value)) } },
+                compact: compactForDetail
             )
             Divider()
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
+            zOffsetRow
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("printer.controls.runtime")
+    }
+
+    @ViewBuilder
+    private var zOffsetRow: some View {
+        if compactForDetail {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
                     Text("Z-offset")
                         .font(.subheadline.weight(.medium))
-                    Spacer()
-                    Text(viewModel.liveZOffsetMm.map { "\($0.formatted(.number.precision(.fractionLength(0...3)))) mm" } ?? "Unknown")
-                        .font(.subheadline.monospacedDigit())
-                        .foregroundStyle(Color.pfTextSecondary)
-                        .accessibilityIdentifier("printer.controls.runtime.z-offset.value")
+                    Spacer(minLength: 0)
+                    if viewModel.liveZOffsetMm != nil, viewModel.zOffsetUnavailableReason == nil {
+                        zOffsetStepButton(delta: -zOffsetStep, symbol: "minus")
+                    }
+                    zOffsetValue
+                    if viewModel.liveZOffsetMm != nil, viewModel.zOffsetUnavailableReason == nil {
+                        zOffsetStepButton(delta: zOffsetStep, symbol: "plus")
+                        Menu {
+                            ForEach(MaterialControlInput.increments, id: \.self) { step in
+                                Button("\(step.formatted()) mm") { zOffsetStep = step }
+                            }
+                        } label: {
+                            Image(systemName: "ellipsis")
+                                .frame(width: 44, height: 44)
+                        }
+                        .accessibilityLabel("Z-offset step \(zOffsetStep.formatted()) millimeters")
+                        .accessibilityIdentifier("printer.controls.runtime.z-offset.step")
+                    }
                 }
                 if let reason = viewModel.zOffsetUnavailableReason {
-                    Text(reason)
-                        .font(.footnote)
-                        .foregroundStyle(Color.pfTextSecondary)
+                    Text(reason).font(.footnote).foregroundStyle(Color.pfTextSecondary)
+                }
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("Z-offset").font(.subheadline.weight(.medium))
+                    Spacer()
+                    zOffsetValue
+                }
+                if let reason = viewModel.zOffsetUnavailableReason {
+                    Text(reason).font(.footnote).foregroundStyle(Color.pfTextSecondary)
                 } else if viewModel.liveZOffsetMm != nil {
                     HStack(spacing: 8) {
-                        ControlActionButton(
-                            title: "−\(zOffsetStep.formatted())",
-                            identifier: "printer.controls.runtime.z-offset.decrease",
-                            accessibilityTitle: "Move live Z-offset down \(zOffsetStep.formatted()) millimeters",
-                            hint: viewModel.zOffsetUnavailableReason,
-                            compact: true
-                        ) {
-                            Task { await viewModel.adjustLiveZOffset(by: -zOffsetStep) }
-                        }
-                        .disabled(!viewModel.canAdjustRuntimeControls)
-                        ControlActionButton(
-                            title: "+\(zOffsetStep.formatted())",
-                            identifier: "printer.controls.runtime.z-offset.increase",
-                            accessibilityTitle: "Move live Z-offset up \(zOffsetStep.formatted()) millimeters",
-                            hint: viewModel.zOffsetUnavailableReason,
-                            compact: true
-                        ) {
-                            Task { await viewModel.adjustLiveZOffset(by: zOffsetStep) }
-                        }
-                        .disabled(!viewModel.canAdjustRuntimeControls)
+                        zOffsetStepButton(delta: -zOffsetStep, symbol: "minus", title: "−\(zOffsetStep.formatted())")
+                        zOffsetStepButton(delta: zOffsetStep, symbol: "plus", title: "+\(zOffsetStep.formatted())")
                         Menu {
                             ForEach(MaterialControlInput.increments, id: \.self) { step in
                                 Button("\(step.formatted()) mm") { zOffsetStep = step }
@@ -396,8 +434,30 @@ private struct PrinterRuntimeAdjustments: View {
                 }
             }
         }
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("printer.controls.runtime")
+    }
+
+    private var zOffsetValue: some View {
+        Text(viewModel.liveZOffsetMm.map {
+            "\($0.formatted(.number.precision(.fractionLength(0...3)))) mm"
+        } ?? "Unknown")
+        .font(.subheadline.monospacedDigit())
+        .foregroundStyle(Color.pfTextSecondary)
+        .accessibilityIdentifier("printer.controls.runtime.z-offset.value")
+    }
+
+    private func zOffsetStepButton(delta: Double, symbol: String, title: String = "") -> some View {
+        ControlActionButton(
+            title: title,
+            identifier: "printer.controls.runtime.z-offset.\(delta > 0 ? "increase" : "decrease")",
+            accessibilityTitle: "Move live Z-offset \(delta > 0 ? "up" : "down") \(zOffsetStep.formatted()) millimeters",
+            hint: viewModel.zOffsetUnavailableReason,
+            compact: true,
+            systemImage: compactForDetail ? symbol : nil
+        ) {
+            Task { await viewModel.adjustLiveZOffset(by: delta) }
+        }
+        .frame(minWidth: compactForDetail ? 44 : nil, minHeight: compactForDetail ? 44 : nil)
+        .disabled(!viewModel.canAdjustRuntimeControls)
     }
 
     private func adjustmentRow(
@@ -408,42 +468,96 @@ private struct PrinterRuntimeAdjustments: View {
         lowerBound: Double,
         upperBound: Double,
         identifier: String,
-        adjust: @escaping (Double) -> Void
+        adjust: @escaping (Double) -> Void,
+        compact: Bool
     ) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text(title).font(.subheadline.weight(.medium))
-                Spacer()
-                Text(value ?? "Unknown")
-                    .font(.subheadline.monospacedDigit())
-                    .foregroundStyle(Color.pfTextSecondary)
-                    .accessibilityIdentifier("printer.controls.runtime.\(identifier).value")
-            }
-            if let unavailableReason {
-                Text(unavailableReason)
-                    .font(.footnote)
-                    .foregroundStyle(Color.pfTextSecondary)
-            } else if let current = viewModel.fanSpeedPercent {
-                HStack(spacing: 8) {
-                    ControlActionButton(
-                        title: "−\(Int(step))%",
-                        identifier: "printer.controls.runtime.\(identifier).decrease",
-                        accessibilityTitle: "Decrease \(title.lowercased()) by \(Int(step)) percent",
-                        hint: unavailableReason,
-                        compact: true
-                    ) { adjust(max(lowerBound, current - step).rounded()) }
-                    .disabled(!viewModel.canAdjustRuntimeControls || current <= lowerBound)
-                    ControlActionButton(
-                        title: "+\(Int(step))%",
-                        identifier: "printer.controls.runtime.\(identifier).increase",
-                        accessibilityTitle: "Increase \(title.lowercased()) by \(Int(step)) percent",
-                        hint: unavailableReason,
-                        compact: true
-                    ) { adjust(min(upperBound, current + step).rounded()) }
-                    .disabled(!viewModel.canAdjustRuntimeControls || current >= upperBound)
+        VStack(alignment: .leading, spacing: compact ? 4 : 8) {
+            if compact {
+                HStack(spacing: 6) {
+                    Text(title).font(.subheadline.weight(.medium))
+                    Spacer(minLength: 0)
+                    if let current = viewModel.fanSpeedPercent, unavailableReason == nil {
+                        adjustmentButton(
+                            title: "", symbol: "minus", increasing: false,
+                            identifier: "printer.controls.runtime.\(identifier).decrease",
+                            current: current, step: step, lowerBound: lowerBound, upperBound: upperBound,
+                            adjust: adjust, compact: true
+                        )
+                    }
+                    adjustmentValue(value, identifier: identifier)
+                    if let current = viewModel.fanSpeedPercent, unavailableReason == nil {
+                        adjustmentButton(
+                            title: "", symbol: "plus", increasing: true,
+                            identifier: "printer.controls.runtime.\(identifier).increase",
+                            current: current, step: step, lowerBound: lowerBound, upperBound: upperBound,
+                            adjust: adjust, compact: true
+                        )
+                    }
+                }
+                if let unavailableReason {
+                    Text(unavailableReason).font(.footnote).foregroundStyle(Color.pfTextSecondary)
+                }
+            } else {
+                HStack {
+                    Text(title).font(.subheadline.weight(.medium))
+                    Spacer()
+                    adjustmentValue(value, identifier: identifier)
+                }
+                if let unavailableReason {
+                    Text(unavailableReason).font(.footnote).foregroundStyle(Color.pfTextSecondary)
+                } else if let current = viewModel.fanSpeedPercent {
+                    HStack(spacing: 8) {
+                        adjustmentButton(
+                            title: "−\(Int(step))%", symbol: nil, increasing: false,
+                            identifier: "printer.controls.runtime.\(identifier).decrease",
+                            current: current, step: step, lowerBound: lowerBound, upperBound: upperBound,
+                            adjust: adjust, compact: false
+                        )
+                        adjustmentButton(
+                            title: "+\(Int(step))%", symbol: nil, increasing: true,
+                            identifier: "printer.controls.runtime.\(identifier).increase",
+                            current: current, step: step, lowerBound: lowerBound, upperBound: upperBound,
+                            adjust: adjust, compact: false
+                        )
+                    }
                 }
             }
         }
+    }
+
+    private func adjustmentValue(_ value: String?, identifier: String) -> some View {
+        Text(value ?? "Unknown")
+            .font(.subheadline.monospacedDigit())
+            .foregroundStyle(Color.pfTextSecondary)
+            .accessibilityIdentifier("printer.controls.runtime.\(identifier).value")
+    }
+
+    private func adjustmentButton(
+        title: String,
+        symbol: String?,
+        increasing: Bool,
+        identifier: String,
+        current: Double,
+        step: Double,
+        lowerBound: Double,
+        upperBound: Double,
+        adjust: @escaping (Double) -> Void,
+        compact: Bool
+    ) -> some View {
+        return ControlActionButton(
+            title: title,
+            identifier: identifier,
+            accessibilityTitle: "\(increasing ? "Increase" : "Decrease") part fan by \(Int(step)) percent",
+            compact: true,
+            systemImage: symbol
+        ) {
+            adjust(increasing ? min(upperBound, current + step).rounded() : max(lowerBound, current - step).rounded())
+        }
+        .frame(minWidth: compact ? 44 : nil, minHeight: compact ? 44 : nil)
+        .disabled(
+            !viewModel.canAdjustRuntimeControls
+                || (increasing ? current >= upperBound : current <= lowerBound)
+        )
     }
 }
 

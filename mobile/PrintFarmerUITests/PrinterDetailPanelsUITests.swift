@@ -846,6 +846,37 @@ final class Issue3259ControlIdleUITests: PrinterDetailPanelsUITests.Issue3259Moc
         super.additionalLaunchArguments + ["--uitesting-issue3259-control-idle"]
     }
 
+    func testCompactHeatStepperRequiresApplyAndUsesAuthenticatedAPI() {
+        app.launch()
+        let farm = shellDestinationButton(tabIdentifier: "tab.farm", timeout: 8)
+        XCTAssertTrue(farm.waitForExistence(timeout: 8))
+        farm.tap()
+        let printerCard = app.buttons["farm-card-10000000-0001-0000-0000-000000000001"]
+        XCTAssertTrue(printerCard.waitForExistence(timeout: 8))
+        printerCard.tap()
+
+        let selector = app.descendants(matching: .any)["printer.detail.panel.selector"]
+        XCTAssertTrue(selector.waitForExistence(timeout: 8))
+        selector.buttons["Control"].tap()
+        let increase = app.buttons["printer.controls.hotend.increase"]
+        XCTAssertTrue(increase.waitForExistence(timeout: 8))
+        increase.tap()
+
+        let apply = app.buttons["printer.controls.heat.set-targets"]
+        XCTAssertTrue(apply.waitForExistence(timeout: 5))
+        apply.tap()
+        let accepted = app.staticTexts.matching(
+            NSPredicate(
+                format: "label == %@",
+                "Request accepted; waiting for matching telemetry. This does not confirm physical completion."
+            )
+        ).firstMatch
+        XCTAssertTrue(
+            accepted.waitForExistence(timeout: 8),
+            "The authenticated temperature API must accept the guarded stepper draft without claiming physical completion."
+        )
+    }
+
     func testCaptureApprovedIdleControlScreen() {
         let isIPad = UIDevice.current.userInterfaceIdiom == .pad
         if isIPad {
@@ -868,8 +899,21 @@ final class Issue3259ControlIdleUITests: PrinterDetailPanelsUITests.Issue3259Moc
         XCTAssertTrue(selector.waitForExistence(timeout: 8))
         selector.buttons["Control"].tap()
         XCTAssertTrue(app.descendants(matching: .any)["printer.detail.panel.control"].waitForExistence(timeout: 8))
+        XCTAssertFalse(app.tabBars.firstMatch.isHittable, "Printer detail should not retain the shell tab bar.")
+        XCTAssertFalse(
+            app.descendants(matching: .any)["printer.controls.temperatures"].exists,
+            "The detail Control page must not repeat temperatures in a separate strip."
+        )
+        XCTAssertTrue(
+            app.buttons["printer.detail.control.emergencyStop"].exists,
+            "Emergency Stop must stay visible while the Control page is selected."
+        )
         XCTAssertTrue(app.otherElements["printer.controls.motion-group"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.otherElements["printer.controls.runtime"].exists)
+        XCTAssertTrue(app.staticTexts["printer.controls.hotend.measured"].exists)
+        XCTAssertEqual(app.staticTexts["printer.controls.hotend.measured"].label, "now 24°")
+        XCTAssertEqual(app.staticTexts["printer.controls.bed.measured"].label, "now 23°")
+        XCTAssertTrue(app.buttons["printer.controls.hotend.increase"].exists)
         XCTAssertTrue(app.buttons["printer.controls.hotend.increase"].isEnabled)
         XCTAssertTrue(app.buttons["printer.controls.runtime.fan.increase"].isEnabled)
         XCTAssertTrue(app.buttons["printer.controls.runtime.z-offset.increase"].isEnabled)

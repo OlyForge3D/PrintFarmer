@@ -59,6 +59,7 @@ struct PrinterDetailView: View {
     @State private var showsEjectConfirmation = false
     @State private var showsFilamentLoadConfirmation = false
     @State private var showsFilamentUnloadConfirmation = false
+    @State private var showsSafetyChecks = false
     @State private var printPreviewImage: UIImage?
     @State private var printPreviewPath: String?
     // Transient UI state only (issue #2522) — never persisted, resets to
@@ -177,6 +178,7 @@ struct PrinterDetailView: View {
         .accessibilityIdentifier("printer.detail.root.\(printerId.uuidString)")
         .navigationTitle("")
         .navigationBarBackButtonHidden()
+        .toolbar(.hidden, for: .tabBar)
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 Button {
@@ -734,7 +736,6 @@ struct PrinterDetailView: View {
                     if !controlsAvailable(for: printer) {
                         controlsUnavailable(printer)
                     } else if let controlsViewModel {
-                        safetyRefresh(controlsViewModel)
                         PrinterSetupControlsContent(
                             printer: printer,
                             viewModel: controlsViewModel,
@@ -743,8 +744,21 @@ struct PrinterDetailView: View {
                             ),
                             showsMaterial: false,
                             showsRuntimeAdjustments: true,
-                            usesHeaterSteppers: true
+                            usesHeaterSteppers: true,
+                            isPrinterDetailControl: true
                         )
+                        DisclosureGroup(isExpanded: safetyChecksExpanded) {
+                            safetyRefresh(controlsViewModel)
+                        } label: {
+                            Label("Safety checks", systemImage: "checkmark.shield")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(Color.pfTextPrimary)
+                                .frame(minHeight: 44, alignment: .leading)
+                        }
+                        .padding(.horizontal, 12)
+                        .background(Color.pfBackground, in: RoundedRectangle(cornerRadius: 16))
+                        .accessibilityElement(children: .contain)
+                        .accessibilityIdentifier("printer.detail.safety.disclosure")
                     } else if controlsComposition == nil
                         || controlsComposition?.identity != services.printerControlsComposition?.identity {
                         Text("Controls require a settled registered server connection. Reopen this printer after reconnecting.")
@@ -792,6 +806,13 @@ struct PrinterDetailView: View {
             let task = Task { await owner.refreshSafetyEvidence() }
             activeTasks.append(task)
         }
+    }
+
+    private var safetyChecksExpanded: Binding<Bool> {
+        Binding(
+            get: { showsSafetyChecks || controlsViewModel?.safetyReadError != nil },
+            set: { if controlsViewModel?.safetyReadError == nil { showsSafetyChecks = $0 } }
+        )
     }
 
     private struct PrinterDetailSafetyDemand: Equatable {
