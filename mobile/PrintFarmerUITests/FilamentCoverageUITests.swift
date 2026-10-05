@@ -122,6 +122,31 @@ final class FilamentCoverageUITests: PrintFarmerUITestCase {
                       "Fleet card must render before absence assertions become meaningful.")
     }
 
+    /// The dedicated Filament page renders coverage details without a disclosure.
+    override func openPrinterFilamentDetails(printerID: String) -> XCUIElement {
+        let root = app.descendants(matching: .any)
+            .matching(identifier: "printer.detail.root.\(printerID)").firstMatch
+        XCTAssertTrue(root.waitForExistence(timeout: 10),
+                      "Navigation must reach the exact printer's detail, not a same-name sibling.")
+        let selector = root.descendants(matching: .any)
+            .matching(identifier: "printer.detail.panel.selector").firstMatch
+        XCTAssertTrue(selector.waitForExistence(timeout: 5))
+        let filamentSegment = selector.buttons["Filament"]
+        XCTAssertTrue(filamentSegment.waitForExistence(timeout: 5))
+        filamentSegment.tap()
+
+        let filament = root.descendants(matching: .any)
+            .matching(identifier: "printer.detail.panel.filament").firstMatch
+        XCTAssertTrue(filament.waitForExistence(timeout: 5))
+        let heading = filament.descendants(matching: .any)
+            .matching(identifier: "printer.filament.heading").firstMatch
+        XCTAssertTrue(heading.waitForExistence(timeout: 10))
+        let summary = filament.staticTexts["printer.filament.summary"]
+        XCTAssertTrue(summary.waitForExistence(timeout: 5),
+                      "Coverage details must render on the selected Filament page.")
+        return filament
+    }
+
     // MARK: - Farm cards no longer show coverage (#3232)
 
     func testFarmCardOmitsCoversBadgeForCoversPrinter() {
@@ -231,13 +256,13 @@ final class FilamentCoverageUITests: PrintFarmerUITestCase {
 
     /// Tapping the DUPLICATE card (same display name as the demo
     /// original, different UUID) reaches the DUPLICATE's detail —
-    /// proven by a disclosed coverage row accessibility identifier that embeds
+    /// proven by a coverage row accessibility identifier that embeds
     /// the duplicate's own stable printer UUID (issue #2522: the old
     /// `FilamentCoverageDetailSection` is gone; #2519's
     /// `PrinterFilamentSection` owns the one Filament block, and its
     /// detail ids are `printer.filament.details.<printerId>/coverage/<slot>`.
     /// Coverage-only slots are intentionally excluded from the compact assignment
-    /// summary; open Filament details rather than expecting the retired layout
+    /// summary; select the Filament page rather than expecting the retired layout
     /// when the printer has no toolhead roster, as demo printers do).
     /// Confirms stable-id navigation, not display-name matching.
     func testTappingDuplicateNameCardNavigatesByStableIDToCorrectDetail() {
@@ -246,12 +271,12 @@ final class FilamentCoverageUITests: PrintFarmerUITestCase {
         XCTAssertTrue(duplicateCard.waitForExistence(timeout: 10))
         duplicateCard.tap()
 
-        let overview = openPrinterFilamentDetails(printerID: duplicateID)
+        let filament = openPrinterFilamentDetails(printerID: duplicateID)
 
         // The DUPLICATE's coverage is runout-no-ETA (status .runout); the
         // ORIGINAL's is .covers. A filament row whose id embeds the
         // DUPLICATE's own printer UUID proves we landed on the duplicate.
-        let duplicateRow = overview.descendants(matching: .any)
+        let duplicateRow = filament.descendants(matching: .any)
             .matching(identifier: "printer.filament.details.\(duplicateID)/coverage/index:0")
             .firstMatch
         XCTAssertTrue(duplicateRow.waitForExistence(timeout: 5),
@@ -260,7 +285,7 @@ final class FilamentCoverageUITests: PrintFarmerUITestCase {
         // Absence cross-check: the ORIGINAL's own printer-UUID-keyed row
         // must NOT be present on this detail — proves we did NOT navigate
         // to the demo original.
-        let originalRowCount = overview.descendants(matching: .any)
+        let originalRowCount = filament.descendants(matching: .any)
             .matching(identifier: "printer.filament.details.\(prusaMK4_1_ID)/coverage/index:0").count
         XCTAssertEqual(originalRowCount, 0,
                        "Detail must not carry a row keyed by the ORIGINAL's UUID — stable-id nav landed on the duplicate.")
@@ -275,19 +300,19 @@ final class FilamentCoverageUITests: PrintFarmerUITestCase {
         XCTAssertTrue(voronCard.waitForExistence(timeout: 10))
         voronCard.tap()
 
-        let overview = openPrinterFilamentDetails(printerID: voron24_ID)
+        let filament = openPrinterFilamentDetails(printerID: voron24_ID)
 
         // Voron 2.4: 3 toolheads, no roster (demo printers report none), so
         // #2519's `PrinterFilamentPresentation` renders one coverage-only row
         // per slot, keyed by `<printerId>/coverage/<identity>`. Rows 0 and 2
         // share the display name "Extruder" but have distinct index-derived
         // stable ids. Row 1 carries a backend UUID toolheadId.
-        let rowIndex0 = overview.descendants(matching: .any)
+        let rowIndex0 = filament.descendants(matching: .any)
             .matching(identifier: "printer.filament.details.\(voron24_ID)/coverage/index:0").firstMatch
-        let rowBackendUUID = overview.descendants(matching: .any)
+        let rowBackendUUID = filament.descendants(matching: .any)
             .matching(identifier: "printer.filament.details.\(voron24_ID)/coverage/id:20000000-1111-2222-3333-444444444444")
             .firstMatch
-        let rowIndex2 = overview.descendants(matching: .any)
+        let rowIndex2 = filament.descendants(matching: .any)
             .matching(identifier: "printer.filament.details.\(voron24_ID)/coverage/index:2").firstMatch
 
         XCTAssertTrue(rowIndex0.waitForExistence(timeout: 5),
@@ -296,12 +321,12 @@ final class FilamentCoverageUITests: PrintFarmerUITestCase {
                       "Toolhead row carrying a backend UUID toolheadId must be keyed by that UUID.")
         XCTAssertTrue(rowIndex2.waitForExistence(timeout: 5),
                       "Toolhead row at index 2 must remain distinct from row 0 despite the shared 'Extruder' display name.")
-        XCTAssertTrue(overview.staticTexts["printer.filament.summary"].exists,
-                      "The disclosure must not overwrite the coverage summary identifier.")
+        XCTAssertTrue(filament.staticTexts["printer.filament.summary"].exists,
+                      "The Filament page must retain the coverage summary identifier.")
         for kind in ["clearAssignment", "scanNFC"] {
             XCTAssertTrue(
-                overview.buttons["printer.filament.action.\(voron24_ID)/printer/\(kind)"].exists,
-                "The disclosed \(kind) action must retain its own stable identifier."
+                filament.buttons["printer.filament.action.\(voron24_ID)/printer/\(kind)"].exists,
+                "The \(kind) action must retain its own stable identifier."
             )
         }
     }
@@ -314,11 +339,11 @@ final class FilamentCoverageUITests: PrintFarmerUITestCase {
         XCTAssertTrue(bambuCard.waitForExistence(timeout: 10))
         bambuCard.tap()
 
-        let overview = openPrinterFilamentDetails(printerID: bambuX1C_ID)
+        let filament = openPrinterFilamentDetails(printerID: bambuX1C_ID)
 
         // A filament row keyed by Bambu X1C's own printer UUID proves we
         // landed on THIS printer (stable-id nav proof).
-        let row = overview.descendants(matching: .any)
+        let row = filament.descendants(matching: .any)
             .matching(identifier: "printer.filament.details.\(bambuX1C_ID)/coverage/index:0")
             .firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 5),
