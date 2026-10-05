@@ -329,13 +329,16 @@ struct PrinterDetailView: View {
                   activeSpoolLookupAuthority == authority else {
                 return
             }
+            let spoolService: any SpoolServiceProtocol = services.spoolService
+            let authorityGeneration = authority.generation
+            let isAuthorityCurrent: @MainActor () -> Bool = {
+                activeSpoolLookupAuthority == authority
+                    && services.isActiveGeneration(authorityGeneration)
+            }
             await spoolLookup.load(
-                service: services.spoolService,
+                service: spoolService,
                 authority: authority,
-                isCurrent: {
-                    activeSpoolLookupAuthority == authority
-                        && services.isActiveGeneration(authority.generation)
-                }
+                isCurrent: isAuthorityCurrent
             )
         }
         .onDisappear {
