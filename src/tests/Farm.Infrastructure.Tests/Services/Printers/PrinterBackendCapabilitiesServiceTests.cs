@@ -306,6 +306,7 @@ public class PrinterBackendCapabilitiesServiceTests
             {
                 AbsoluteMovement = supported,
                 FilamentLoad = supported,
+                FilamentUnload = supported,
             },
         };
         var printer = new Printer
@@ -346,7 +347,11 @@ public class PrinterBackendCapabilitiesServiceTests
 
         Assert.True(result.SupportsAbsoluteMovement);
         Assert.True(result.SupportsFilamentLoad);
-        Assert.False(result.SupportsFilamentUnload);
+        Assert.True(result.SupportsFilamentUnload);
+        Assert.False(result.SupportsFilamentChange);
+        Assert.Equal(
+            VerifiedSafetyFactState.Unknown,
+            result.VerifiedSafety.Extrusion.MinimumSafeMeasuredHotendTemperatureC.State);
         Assert.Same(discovered, result.VerifiedSafety);
     }
 

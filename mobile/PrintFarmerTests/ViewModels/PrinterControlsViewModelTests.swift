@@ -2909,7 +2909,9 @@ final class GuardedMaterialControlsTests: XCTestCase {
             case 5: service.statusToReturn?.safetyTelemetry?.measuredHotendTemperatureC.value = .nan
             case 6: service.statusToReturn?.safetyTelemetry?.measuredHotendTemperatureC.source = nil
             case 7: service.statusToReturn?.safetyTelemetry?.measuredHotendTemperatureC.staleAfterSeconds = 0
-            case 8: service.capabilitiesToReturn?.verifiedSafety?.extrusion.minimumSafeMeasuredHotendTemperatureC.state = .unknown
+            case 8:
+                service.capabilitiesToReturn?.verifiedSafety?.extrusion.minimumSafeMeasuredHotendTemperatureC.state = .unknown
+                service.statusToReturn?.safetyTelemetry?.measuredHotendTemperatureC.value = 219
             case 9: service.capabilitiesToReturn?.verifiedSafety?.extrusion.minimumSafeMeasuredHotendTemperatureC.source = nil
             default: service.capabilitiesToReturn?.verifiedSafety?.contractVersion = 2
             }
@@ -2925,6 +2927,39 @@ final class GuardedMaterialControlsTests: XCTestCase {
         service.statusToReturn?.safetyTelemetry?.measuredHotendTemperatureC.value = 205
         await model.refreshSafetyEvidence()
         XCTAssertNil(model.extrusionBlockedReason, "Exact verified minimum is permitted")
+    }
+
+    func test_loadUnloadUse220FloorWhenBackendMinimumIsUnknown() async throws {
+        let (model, service) = try await fixture()
+        service.capabilitiesToReturn?.verifiedSafety?.extrusion.minimumSafeMeasuredHotendTemperatureC.state = .unknown
+        await model.refreshSafetyEvidence()
+
+        XCTAssertNil(model.filamentBlockedReason(.load))
+        XCTAssertNil(model.filamentBlockedReason(.unload))
+        XCTAssertNotNil(model.filamentBlockedReason(.change))
+
+        service.statusToReturn?.safetyTelemetry?.measuredHotendTemperatureC.value = 219
+        await model.refreshSafetyEvidence()
+        XCTAssertTrue(model.filamentBlockedReason(.load)?.contains("220") == true)
+        XCTAssertTrue(model.filamentBlockedReason(.unload)?.contains("220") == true)
+    }
+
+    func test_loadUnloadUseHigherOf220AndVerifiedMinimum() async throws {
+        for (reportedMinimum, measured, expectedBlocked) in [
+            (180.0, 219.0, true),
+            (180.0, 220.0, false),
+            (240.0, 239.0, true),
+            (240.0, 240.0, false),
+        ] {
+            let (model, service) = try await fixture()
+            service.capabilitiesToReturn?.verifiedSafety?.extrusion.minimumSafeMeasuredHotendTemperatureC.value =
+                reportedMinimum
+            service.statusToReturn?.safetyTelemetry?.measuredHotendTemperatureC.value = measured
+            await model.refreshSafetyEvidence()
+
+            XCTAssertEqual(model.filamentBlockedReason(.load) != nil, expectedBlocked)
+            XCTAssertEqual(model.filamentBlockedReason(.unload) != nil, expectedBlocked)
+        }
     }
 
     func test_verifiedSupportOverridesOptimisticLegacyFlagsAndRetainsPartialFacts() async throws {
