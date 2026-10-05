@@ -249,6 +249,7 @@ public sealed class PrinterSafetyGuard(
     {
         VerifiedSafetyScalarFactDto minimum =
             safety.Extrusion.MinimumSafeMeasuredHotendTemperatureC;
+
         // For load/unload, the policy floor replaces Unknown and floors lower verified values.
         double? effectiveMinimumC = minimum.State switch
         {
