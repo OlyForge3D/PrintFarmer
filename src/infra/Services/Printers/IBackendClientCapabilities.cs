@@ -691,6 +691,18 @@ public interface ISupportsGcodeExecution
     Task<bool> SendGcodeAsync(string baseUrl, string gcode, CancellationToken ct = default);
 }
 
+/// <summary>Typed support for bounded part-cooling fan control.</summary>
+public interface ISupportsFanControl
+{
+    Task<bool> SetFanSpeedAsync(string baseUrl, int speedPercent, PrinterCredential? credential, CancellationToken ct = default);
+}
+
+/// <summary>Typed support for a transient relative Z-offset adjustment during a print.</summary>
+public interface ISupportsZOffsetAdjustment
+{
+    Task<bool> AdjustZOffsetAsync(string baseUrl, decimal offsetMm, PrinterCredential? credential, CancellationToken ct = default);
+}
+
 /// <summary>
 /// Capability marker interface for backends that support filament management operations.
 /// Backends implementing this interface can load, unload, and change filament

@@ -48,6 +48,10 @@ namespace Farm.Infrastructure;
 /// <param name="ConfigurationRevision">Logical safety-relevant printer configuration revision.</param>
 /// <param name="CurrentJobThumbnailUrl">Relative authenticated proxy URL for the active job thumbnail.</param>
 /// <param name="ThumbnailCacheIdentity">Internal provider job/file identity used only to rotate the cache token.</param>
+/// <param name="CurrentLayer">Current layer reported by the backend, when available.</param>
+/// <param name="TotalLayers">Total layers reported by the backend, when available.</param>
+/// <param name="FanSpeedPercent">Part-fan output percentage reported by the backend, when available.</param>
+/// <param name="LiveZOffsetMm">Live G-code Z offset in millimeters, when available.</param>
 public record PrinterDto(
     Guid Id,
     string Name,
@@ -89,4 +93,8 @@ public record PrinterDto(
     string? RowVersion = null,
     long ConfigurationRevision = 0,
     string? CurrentJobThumbnailUrl = null,
-    [property: JsonIgnore] string? ThumbnailCacheIdentity = null);
+    [property: JsonIgnore] string? ThumbnailCacheIdentity = null,
+    int? CurrentLayer = null,
+    int? TotalLayers = null,
+    double? FanSpeedPercent = null,
+    double? LiveZOffsetMm = null);

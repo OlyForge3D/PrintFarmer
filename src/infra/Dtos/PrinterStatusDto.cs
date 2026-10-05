@@ -36,7 +36,11 @@ public record PrinterStatusDto(
     int? SpeedMultiplier = null,
     string? HomedAxes = null,
     PrinterSafetyTelemetryDto? SafetyTelemetry = null,
-    [property: JsonIgnore] string? ThumbnailCacheIdentity = null)
+    [property: JsonIgnore] string? ThumbnailCacheIdentity = null,
+    int? CurrentLayer = null,
+    int? TotalLayers = null,
+    double? FanSpeedPercent = null,
+    double? LiveZOffsetMm = null)
 {
     /// <summary>
     /// Relative authenticated proxy URL for the active job thumbnail.

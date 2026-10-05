@@ -114,6 +114,111 @@ public sealed class MoonrakerDirectControlTests
     }
 
     [Theory]
+    [InlineData(0, "M106 S0")]
+    [InlineData(50, "M106 S128")]
+    [InlineData(100, "M106 S255")]
+    public async Task SetFanSpeedAsync_MapsPercentToPartFanPwm(int speedPercent, string expectedScript)
+    {
+        using var handler = new ControlHandler();
+        using var http = new HttpClient(handler);
+        var client = new MoonrakerClient(http, NullLogger<MoonrakerClient>.Instance, new BackendTimeoutSettings());
+
+        Assert.True(await ((ISupportsFanControl)client).SetFanSpeedAsync(
+            "http://direct-fixture.invalid/",
+            speedPercent,
+            PrinterCredential.FromApiKey("fixture-key")));
+
+        Assert.Equal(1, handler.Requests);
+        Assert.Equal(expectedScript, handler.Script);
+    }
+
+    [Theory]
+    [InlineData(0.02, "SET_GCODE_OFFSET Z_ADJUST=0.020 MOVE=1")]
+    [InlineData(-0.02, "SET_GCODE_OFFSET Z_ADJUST=-0.020 MOVE=1")]
+    public async Task AdjustZOffsetAsync_SendsTransientRelativeCommand(decimal offsetMm, string expectedScript)
+    {
+        using var handler = new ControlHandler();
+        using var http = new HttpClient(handler);
+        var client = new MoonrakerClient(http, NullLogger<MoonrakerClient>.Instance, new BackendTimeoutSettings());
+
+        Assert.True(await ((ISupportsZOffsetAdjustment)client).AdjustZOffsetAsync(
+            "http://direct-fixture.invalid/",
+            offsetMm,
+            PrinterCredential.FromApiKey("fixture-key")));
+
+        Assert.Equal(1, handler.Requests);
+        Assert.Equal(expectedScript, handler.Script);
+    }
+
+    [Fact]
+    public async Task GetCompositeStatusAsync_UsesReportedLayersFanDutyAndLiveOffset()
+    {
+        using var handler = new CompositeStatusHandler();
+        using var http = new HttpClient(handler);
+        var client = new MoonrakerClient(
+            http,
+            NullLogger<MoonrakerClient>.Instance,
+            new BackendTimeoutSettings());
+
+        PrinterCompositeStatus status = await client.GetCompositeStatusAsync(
+            "http://moonraker-fixture.invalid/",
+            PrinterCredential.FromApiKey("fixture-key"));
+
+        Assert.True(status.IsOnline);
+        Assert.Equal(42, status.CurrentLayer);
+        Assert.Equal(180, status.TotalLayers);
+        Assert.Equal(65, status.FanSpeedPercent);
+        Assert.Equal(0.025, status.LiveZOffsetMm);
+        Assert.Contains("GET /printer/objects/query?fan=speed", handler.Requests);
+    }
+
+    [Theory]
+    [InlineData("""{"current_layer":2,"total_layer":10}""", 2, 10)]
+    [InlineData("""{"current_layer":11,"total_layer":10}""", null, null)]
+    [InlineData("""{"current_layer":2,"total_layer":0}""", null, null)]
+    [InlineData("""{"current_layer":null,"total_layer":10}""", null, null)]
+    public async Task GetJobAsync_ReportsOnlyValidLayerCounters(
+        string info,
+        int? expectedCurrentLayer,
+        int? expectedTotalLayers)
+    {
+        using var handler = new JobInfoHandler(info);
+        using var http = new HttpClient(handler);
+        var client = new MoonrakerClient(
+            http,
+            NullLogger<MoonrakerClient>.Instance,
+            new BackendTimeoutSettings());
+
+        PrinterJob? job = await client.GetJobAsync(
+            "http://moonraker-fixture.invalid/",
+            PrinterCredential.FromApiKey("fixture-key"));
+
+        Assert.NotNull(job);
+        Assert.Equal(expectedCurrentLayer, job.CurrentLayer);
+        Assert.Equal(expectedTotalLayers, job.TotalLayers);
+    }
+
+    [Fact]
+    public async Task BoundedControlAsync_RejectsOutOfRangeValuesBeforeSending()
+    {
+        using var handler = new ControlHandler();
+        using var http = new HttpClient(handler);
+        var client = new MoonrakerClient(http, NullLogger<MoonrakerClient>.Instance, new BackendTimeoutSettings());
+
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+            () => ((ISupportsFanControl)client).SetFanSpeedAsync(
+                "http://direct-fixture.invalid/",
+                101,
+                PrinterCredential.FromApiKey("fixture-key")));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+            () => ((ISupportsZOffsetAdjustment)client).AdjustZOffsetAsync(
+                "http://direct-fixture.invalid/",
+                0.21m,
+                PrinterCredential.FromApiKey("fixture-key")));
+        Assert.Equal(0, handler.Requests);
+    }
+
+    [Theory]
     [InlineData("home", "http")]
     [InlineData("move", "http")]
     [InlineData("moveto", "http")]
@@ -227,6 +332,66 @@ public sealed class MoonrakerDirectControlTests
                 Content = new StringContent("""
                     {"result":{"status":{"webhooks":{"state":"ready"},"print_stats":{"state":"standby"},"toolhead":{"homed_axes":"xyz"},"gcode_move":{MACHINE"gcode_position":[1.25,2.5,0.125,0],"homing_origin":[900,900,900,0]}}}}
                     """.Replace("MACHINE", machine, StringComparison.Ordinal), Encoding.UTF8, "application/json"),
+            });
+        }
+    }
+
+    private sealed class JobInfoHandler(string info) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            Assert.Equal(HttpMethod.Get, request.Method);
+            Assert.Equal(
+                "/printer/objects/query?print_stats&display_status&job_queue",
+                request.RequestUri!.PathAndQuery);
+            Assert.Equal("fixture-key", Assert.Single(request.Headers.GetValues("X-Api-Key")));
+            string response =
+                "{\"result\":{\"status\":{\"print_stats\":{\"state\":\"printing\",\"info\":" +
+                info +
+                "},\"display_status\":{\"progress\":0.25}}}}";
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(response, Encoding.UTF8, "application/json"),
+            });
+        }
+    }
+
+    private sealed class CompositeStatusHandler : HttpMessageHandler
+    {
+        public List<string> Requests { get; } = [];
+
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            string pathAndQuery = request.RequestUri!.PathAndQuery;
+            Requests.Add($"{request.Method} {pathAndQuery}");
+            string response = pathAndQuery switch
+            {
+                "/printer/info" => """{"state":"ready"}""",
+                "/printer/objects/query?print_stats&display_status&job_queue" =>
+                    """{"result":{"status":{"print_stats":{"state":"printing","info":{"current_layer":42,"total_layer":180}},"display_status":{"progress":0.25}}}}""",
+                "/printer/objects/query?toolhead=position,homed_axes&gcode_move=gcode_position,homing_origin" =>
+                    """{"result":{"status":{"toolhead":{"position":[1,2,3,0],"homed_axes":"xyz"},"gcode_move":{"gcode_position":[1,2,3,0],"homing_origin":[0,0,0.025,0]}}}}""",
+                "/printer/objects/query?fan=speed" =>
+                    """{"result":{"status":{"fan":{"speed":0.65}}}}""",
+                "/printer/objects/query?extruder&heater_bed" =>
+                    """{"result":{"status":{"extruder":{},"heater_bed":{}}}}""",
+                "/server/webcams/list" =>
+                    """{"result":{"webcams":[]}}""",
+                _ => throw new InvalidOperationException($"Unexpected request {request.Method} {pathAndQuery}."),
+            };
+
+            if (pathAndQuery.StartsWith("/printer/objects/query", StringComparison.Ordinal))
+            {
+                Assert.Equal("fixture-key", Assert.Single(request.Headers.GetValues("X-Api-Key")));
+            }
+
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(response, Encoding.UTF8, "application/json"),
             });
         }
     }

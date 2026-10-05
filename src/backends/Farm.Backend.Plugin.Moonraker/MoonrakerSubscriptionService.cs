@@ -857,6 +857,7 @@ public sealed class MoonrakerSubscriptionService(
         if (_printerStates.TryGetValue(printerId, out PrinterState? state))
         {
             state.ResetMmuState();
+            state.ResetLiveReadbacks();
         }
 
         // Step 4: Send the subscription request with discovered objects
@@ -1276,6 +1277,11 @@ public sealed class MoonrakerSubscriptionService(
             HandleGcodeMoveUpdate(state, gcodeMove);
         }
 
+        if (statusObj.TryGetProperty("fan", out JsonElement fan))
+        {
+            HandleFanUpdate(state, fan);
+        }
+
         HandlePositionUpdate(state, statusObj);
 
         // MMU (Happy Hare) status updates
@@ -1570,10 +1576,12 @@ public sealed class MoonrakerSubscriptionService(
         PrinterState state,
         JsonElement gcodeMove)
     {
-        if (!gcodeMove.TryGetProperty(
-                "homing_origin",
-                out JsonElement homingOrigin) ||
-            homingOrigin.ValueKind != JsonValueKind.Array ||
+        if (!gcodeMove.TryGetProperty("homing_origin", out JsonElement homingOrigin))
+        {
+            return;
+        }
+
+        if (homingOrigin.ValueKind != JsonValueKind.Array ||
             homingOrigin.GetArrayLength() < 3 ||
             !homingOrigin[0].TryGetDouble(out double x) ||
             !homingOrigin[1].TryGetDouble(out double y) ||
@@ -1582,11 +1590,29 @@ public sealed class MoonrakerSubscriptionService(
             !double.IsFinite(y) ||
             !double.IsFinite(z))
         {
+            state.LiveZOffsetMm = null;
             return;
         }
 
         state.CoordinateOriginOffsetMm = new SafetyVector3Dto(x, y, z);
         state.CoordinateOriginOffsetObservedAtUtc = DateTime.UtcNow;
+        state.LiveZOffsetMm = z;
+    }
+
+    private static void HandleFanUpdate(PrinterState state, JsonElement fan)
+    {
+        if (!fan.TryGetProperty("speed", out JsonElement speed))
+        {
+            return;
+        }
+
+        state.FanSpeedPercent =
+            speed.ValueKind == JsonValueKind.Number &&
+            speed.TryGetDouble(out double normalizedSpeed) &&
+            double.IsFinite(normalizedSpeed) &&
+            normalizedSpeed is >= 0 and <= 1
+                ? normalizedSpeed * 100
+                : null;
     }
 
     /// <summary>
@@ -2642,6 +2668,44 @@ public sealed class MoonrakerSubscriptionService(
             {
                 startTime = startTimeValue;
             }
+
+            ResetLayerReadbacksForNewJob(state, printStatsState, jobName, startTime);
+
+            if (ps.TryGetProperty("info", out JsonElement info))
+            {
+                if (info.ValueKind == JsonValueKind.Object)
+                {
+                    int? currentLayer = state.CurrentLayer;
+                    int? totalLayers = state.TotalLayers;
+                    if (info.TryGetProperty("current_layer", out JsonElement currentLayerNode))
+                    {
+                        currentLayer = TryReadLayerCounter(currentLayerNode);
+                    }
+
+                    if (info.TryGetProperty("total_layer", out JsonElement totalLayersNode))
+                    {
+                        totalLayers = TryReadLayerCounter(totalLayersNode);
+                    }
+
+                    if (currentLayer.HasValue &&
+                        totalLayers is > 0 &&
+                        currentLayer.Value <= totalLayers.Value)
+                    {
+                        state.CurrentLayer = currentLayer;
+                        state.TotalLayers = totalLayers;
+                    }
+                    else
+                    {
+                        state.CurrentLayer = null;
+                        state.TotalLayers = null;
+                    }
+                }
+                else
+                {
+                    state.CurrentLayer = null;
+                    state.TotalLayers = null;
+                }
+            }
         }
 
         // Webhooks state (Klipper system state)
@@ -2880,7 +2944,11 @@ public sealed class MoonrakerSubscriptionService(
                 MmuStatus: mmuStatus,
                 FileName: PrinterStatusDto.ExtractFileName(state.JobName),
                 SafetyTelemetry: safetyTelemetry,
-                ThumbnailCacheIdentity: state.ThumbnailCacheIdentity);
+                ThumbnailCacheIdentity: state.ThumbnailCacheIdentity,
+                CurrentLayer: state.CurrentLayer,
+                TotalLayers: state.TotalLayers,
+                FanSpeedPercent: state.FanSpeedPercent,
+                LiveZOffsetMm: state.LiveZOffsetMm);
 
             _logger.LogDebug("Emitting consolidated status for printer {PrinterId}: IsOnline={IsOnline}, X={StateX}, Y={StateY}, Z={StateZ}, HotendTemp={StateHotendTemp}, HotendTarget={StateHotendTarget}, BedTemp={StateBedTemp}, BedTarget={StateBedTarget}, HomedAxes={StateHomedAxes}", printerId, isOnline, state.X, state.Y, state.Z, state.HotendTemp, state.HotendTarget, state.BedTemp, state.BedTarget, state.HomedAxes);
 
@@ -2914,7 +2982,11 @@ public sealed class MoonrakerSubscriptionService(
                 PrintTimeLeftSeconds: printTimeLeftSeconds,
                 HomedAxes: state.HomedAxes,
                 SafetyTelemetry: safetyTelemetry,
-                ThumbnailCacheIdentity: state.ThumbnailCacheIdentity);
+                ThumbnailCacheIdentity: state.ThumbnailCacheIdentity,
+                CurrentLayer: state.CurrentLayer,
+                TotalLayers: state.TotalLayers,
+                FanSpeedPercent: state.FanSpeedPercent,
+                LiveZOffsetMm: state.LiveZOffsetMm);
             _statusCacheWriter.UpdateStatus(cacheUpdate, state.OriginWatermark);
 
             _logger.LogDebug("[MoonrakerSubscriptionService] Broadcasting printerupdated for {PrinterId} via SignalR", printerId);
@@ -2929,6 +3001,43 @@ public sealed class MoonrakerSubscriptionService(
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to emit consolidated status for printer {PrinterId}", printerId);
+        }
+    }
+
+    private static int? TryReadLayerCounter(JsonElement value)
+    {
+        return value.ValueKind == JsonValueKind.Number &&
+            value.TryGetInt32(out int layer) &&
+            layer >= 0
+                ? layer
+                : null;
+    }
+
+    internal static void ResetLayerReadbacksForNewJob(
+        PrinterState state,
+        string? incomingState,
+        string? incomingJobName,
+        double? incomingStartTime)
+    {
+        bool wasActiveJob =
+            string.Equals(state.State, "printing", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(state.State, "paused", StringComparison.OrdinalIgnoreCase);
+        bool isActiveJob =
+            string.Equals(incomingState, "printing", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(incomingState, "paused", StringComparison.OrdinalIgnoreCase);
+        bool jobNameChanged =
+            !string.IsNullOrWhiteSpace(incomingJobName) &&
+            !string.IsNullOrWhiteSpace(state.JobName) &&
+            !string.Equals(incomingJobName, state.JobName, StringComparison.Ordinal);
+        bool jobStartChanged =
+            incomingStartTime.HasValue &&
+            state.ThumbnailJobStartTime.HasValue &&
+            Math.Abs(incomingStartTime.Value - state.ThumbnailJobStartTime.Value) > 0.5;
+
+        if (jobNameChanged || jobStartChanged || (isActiveJob && !wasActiveJob))
+        {
+            state.CurrentLayer = null;
+            state.TotalLayers = null;
         }
     }
 

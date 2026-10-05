@@ -104,6 +104,27 @@ public sealed class SdcpClientParsingTests
         files.Should().BeEmpty();
     }
 
+    [Theory]
+    [InlineData(12, 245, 12, 245)]
+    [InlineData(0, 0, null, null)]
+    [InlineData(20, 10, null, null)]
+    public async Task GetCompositeStatusAsync_ReportsOnlyValidLayerCounters(
+        int currentLayer,
+        int totalLayers,
+        int? expectedCurrentLayer,
+        int? expectedTotalLayers)
+    {
+        await using SdcpTestEnvironment env = await CreateSdcpStartServerAsync(
+            startAck: 1,
+            currentLayer,
+            totalLayers);
+
+        PrinterCompositeStatus status = await env.Client.GetCompositeStatusAsync(env.BaseUrl);
+
+        Assert.Equal(expectedCurrentLayer, status.CurrentLayer);
+        Assert.Equal(expectedTotalLayers, status.TotalLayers);
+    }
+
     // ==================== History Tests (Cmd 320 / 321) ====================
 
     [Fact]
@@ -878,7 +899,10 @@ public sealed class SdcpClientParsingTests
         });
     }
 
-    private static async Task<SdcpTestEnvironment> CreateSdcpStartServerAsync(int startAck)
+    private static async Task<SdcpTestEnvironment> CreateSdcpStartServerAsync(
+        int startAck,
+        int? currentLayer = null,
+        int? totalLayers = null)
     {
         WebApplicationBuilder builder = WebApplication.CreateBuilder(new WebApplicationOptions
         {
@@ -910,7 +934,7 @@ public sealed class SdcpClientParsingTests
                 .GetInt32();
 
             string responsePayload = command == 0
-                ? BuildStatusResponse(currentStatus: [0])
+                ? BuildStatusResponse([0], currentLayer, totalLayers)
                 : BuildCommandAckResponse(command, startAck);
             byte[] responseBytes = Encoding.UTF8.GetBytes(responsePayload);
             await ws.SendAsync(
@@ -1201,13 +1225,24 @@ public sealed class SdcpClientParsingTests
         });
     }
 
-    private static string BuildStatusResponse(int[] currentStatus)
+    private static string BuildStatusResponse(
+        int[] currentStatus,
+        int? currentLayer = null,
+        int? totalLayers = null)
     {
         return JsonSerializer.Serialize(new
         {
             Status = new
             {
-                CurrentStatus = currentStatus
+                CurrentStatus = currentStatus,
+                PrintInfo = currentLayer.HasValue || totalLayers.HasValue
+                    ? new
+                    {
+                        Status = 5,
+                        CurrentLayer = currentLayer ?? 0,
+                        TotalLayer = totalLayers ?? 0,
+                    }
+                    : null,
             },
             MainboardID = "mb-1",
             TimeStamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),

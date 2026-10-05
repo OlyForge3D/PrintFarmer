@@ -859,6 +859,20 @@ export class ApiClient {
     return response.data;
   }
 
+  async setPrinterFanSpeed(id: string, speedPercent: number): Promise<CommandResult> {
+    const response = await this.client.post<CommandResult>(`/printers/${id}/fan`, {
+      speedPercent,
+    });
+    return response.data;
+  }
+
+  async adjustPrinterZOffset(id: string, offsetMm: number): Promise<CommandResult> {
+    const response = await this.client.post<CommandResult>(`/printers/${id}/z-offset/adjust`, {
+      offsetMm,
+    });
+    return response.data;
+  }
+
   async getPrinterVersionInfo(
     printerId: string,
     options?: { forceRefresh?: boolean }

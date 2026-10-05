@@ -98,6 +98,59 @@ public class PrinterBackendCapabilitiesServiceTests
     }
 
     [Fact]
+    public async Task GetByPrinterIdAsync_FanAndZOffsetRequireFreshReadbacks()
+    {
+        Guid printerId = Guid.NewGuid();
+        var backendClient = new Mock<IBackendClient>();
+        backendClient.As<ISupportsFanControl>();
+        backendClient.As<ISupportsZOffsetAdjustment>();
+        var backendClients = new Mock<IBackendClientFactory>();
+        backendClients.Setup(factory => factory.GetClient(PrinterBackend.Moonraker))
+            .Returns(backendClient.Object);
+        var capabilityFactory = new Mock<IBackendCapabilityFactory>();
+        capabilityFactory.Setup(factory => factory.GetSupportedCapabilities(PrinterBackend.Moonraker))
+            .Returns(BackendCapabilities.None);
+        var repo = new Mock<IPrintersRepository>();
+        repo.Setup(repository => repository.FindByIdAsync(printerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Printer
+            {
+                Id = printerId,
+                Backend = (int)PrinterBackend.Moonraker,
+            });
+        var statusCache = new Mock<IPrinterStatusCacheReader>();
+        var service = new PrinterBackendCapabilitiesService(
+            repo.Object,
+            capabilityFactory.Object,
+            backendClients.Object,
+            statusCacheReader: statusCache.Object);
+
+        PrinterBackendCapabilitiesDto unknown = (await service.GetByPrinterIdAsync(
+            printerId,
+            CancellationToken.None))!;
+        Assert.False(unknown.SupportsFanControl);
+        Assert.False(unknown.SupportsFanSpeedReadback);
+        Assert.False(unknown.SupportsZOffsetAdjustment);
+        Assert.False(unknown.SupportsZOffsetReadback);
+
+        PrinterStatusDto liveStatus = new(
+            printerId,
+            IsOnline: true,
+            State: "idle",
+            FanSpeedPercent: 70,
+            LiveZOffsetMm: 0.025);
+        statusCache.Setup(cache => cache.GetSnapshot(printerId))
+            .Returns(new PrinterStatusCacheSnapshot(liveStatus, DateTime.UtcNow));
+
+        PrinterBackendCapabilitiesDto known = (await service.GetByPrinterIdAsync(
+            printerId,
+            CancellationToken.None))!;
+        Assert.True(known.SupportsFanControl);
+        Assert.True(known.SupportsFanSpeedReadback);
+        Assert.True(known.SupportsZOffsetAdjustment);
+        Assert.True(known.SupportsZOffsetReadback);
+    }
+
+    [Fact]
     public async Task GetByPrinterIdAsync_CustomBackendMetadata_ProjectsOnlyDeclaredImplementedControls()
     {
         var backend = (PrinterBackend)999;

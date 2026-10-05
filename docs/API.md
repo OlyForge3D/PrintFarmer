@@ -108,6 +108,37 @@ Update React and iOS together with the API. Stop all old API instances and
 workers before applying the provider migrations to avoid mixed writers.
 See [direct-motion coordination and upgrades](JOB_QUEUE_ARCHITECTURE.md#direct-manual-motion-control).
 
+## Printer Fan and Live Z-Offset Controls
+
+`POST /api/printers/{id}/fan` accepts `{"speedPercent": 0}` through
+`{"speedPercent": 100}`. `POST /api/printers/{id}/z-offset/adjust` accepts a
+non-zero `offsetMm` from `-0.2` through `0.2`. Both use the existing
+`CommandResult` response, require `Queue.Start` permission and printer Submit
+access, and are capability/readback-gated. The Z-offset command is transient;
+it does not save firmware configuration.
+
+Check `supportsFanControl` and `supportsFanSpeedReadback` before enabling fan
+controls, and `supportsZOffsetAdjustment` and `supportsZOffsetReadback` before
+enabling live Z-offset controls. A status value must also be present. At present
+these controls are supported only by Moonraker printers reporting the needed
+readback. Known online idle states use a direct actuation lease; printing and
+paused states use the active-print lease. Offline printers return `503`,
+unknown/transitional states return `409`, and unsupported controls or unknown
+readbacks return `502` without sending a command.
+
+Status DTOs and `printerupdated` events may include:
+
+- `fanSpeedPercent`: Moonraker's `fan.speed` output duty (0–1) mapped to
+  percent. This is not measured RPM; tachometer readings are not inferred.
+- `liveZOffsetMm`: the reported Z component of
+  `gcode_move.homing_origin`, in millimeters.
+- `currentLayer` and `totalLayers`: actual counters from Moonraker
+  `print_stats.info.current_layer` / `total_layer`, when the slicer emitted
+  `SET_PRINT_STATS_INFO`, or SDCP's `currentLayer` / `totalLayer` status fields.
+
+Unavailable, malformed, or unsupported readbacks are `null`; the API never
+estimates layer counts from progress or position.
+
 ## API Contract and Calibration Capabilities
 
 ### Contract negotiation
@@ -1730,7 +1761,11 @@ printer's audience. These queues remain in-memory and are lost on server restart
   "bedTarget": 60,
   "progress": 45.5,
   "timeRemaining": 1800,
-  "currentFile": "calibration.gcode"
+  "currentFile": "calibration.gcode",
+  "currentLayer": 42,
+  "totalLayers": 180,
+  "fanSpeedPercent": 65,
+  "liveZOffsetMm": 0.025
 }
 ```
 

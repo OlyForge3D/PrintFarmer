@@ -83,7 +83,11 @@ public class MoonrakerStatusClient : IPrinterStatusClient, IManagedSpoolProvider
                 PrintTimeLeftSeconds: status.PrintTimeLeftSeconds,
                 HomedAxes: movement.HomedAxes,
                 SafetyTelemetry: movement.SafetyTelemetry,
-                ThumbnailCacheIdentity: status.ThumbnailCacheIdentity);
+                ThumbnailCacheIdentity: status.ThumbnailCacheIdentity,
+                CurrentLayer: status.CurrentLayer,
+                TotalLayers: status.TotalLayers,
+                FanSpeedPercent: status.FanSpeedPercent,
+                LiveZOffsetMm: status.LiveZOffsetMm);
         }
         catch (OperationCanceledException)
         {

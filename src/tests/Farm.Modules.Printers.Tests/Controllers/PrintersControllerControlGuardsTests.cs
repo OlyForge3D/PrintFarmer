@@ -83,6 +83,190 @@ public class PrintersControllerControlGuardsTests
     }
 
     [Theory]
+    [InlineData("idle", false)]
+    [InlineData("printing", true)]
+    [InlineData("paused", true)]
+    public async Task SetFanSpeedAsync_UsesLeaseForKnownPrinterState(
+        string state,
+        bool expectsActiveLease)
+    {
+        Guid id = Guid.NewGuid();
+        var printers = new Mock<IPrintersService>();
+        PrinterStatusDto status = new(
+            id,
+            IsOnline: true,
+            State: state,
+            FanSpeedPercent: 50);
+        printers.Setup(service => service.GetStatusDtoAsync(id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(status);
+        printers.Setup(service => service.FindByIdAsync(id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(SamplePrinter(id));
+        printers.Setup(service => service.SetFanSpeedAsync(id, 75, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        var statusCache = new Mock<IPrinterStatusCacheReader>();
+        statusCache.Setup(cache => cache.GetStatus(id)).Returns(status);
+        var capabilities = new Mock<IPrinterBackendCapabilitiesService>();
+        capabilities.Setup(service => service.GetByPrinterIdAsync(id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PrinterBackendCapabilitiesDto(
+                id,
+                "Test printer",
+                PrinterBackend.Moonraker)
+            {
+                SupportsFanControl = true,
+                SupportsFanSpeedReadback = true,
+            });
+        var actuation = new Mock<IPrinterPhysicalActuationService>();
+        PrintersController controller = CreateController(
+            printers,
+            statusCache,
+            out _,
+            actuation: actuation,
+            capabilitiesService: capabilities);
+
+        ActionResult<CommandResult> response = await controller.SetFanSpeedAsync(
+            id,
+            new FanSpeedRequest { SpeedPercent = 75 },
+            CancellationToken.None);
+
+        Assert.True(GetCommandResult(response).Success);
+        actuation.Verify(service => service.AcquireDirectAsync(
+            id,
+            It.IsAny<string>(),
+            "set_fan_speed",
+            It.IsAny<CancellationToken>()),
+            expectsActiveLease ? Times.Never() : Times.Once());
+        actuation.Verify(service => service.AcquireActiveAsync(
+            id,
+            It.IsAny<string>(),
+            "set_fan_speed",
+            It.IsAny<CancellationToken>()),
+            expectsActiveLease ? Times.Once() : Times.Never());
+        printers.Verify(service => service.SetFanSpeedAsync(
+            id,
+            75,
+            It.IsAny<CancellationToken>()), Times.Once());
+    }
+
+    [Fact]
+    public async Task SetFanSpeedAsync_RequiresReadbackAndSubmitAccessBeforeDispatch()
+    {
+        Guid id = Guid.NewGuid();
+        var printers = new Mock<IPrintersService>();
+        PrinterStatusDto status = new(id, IsOnline: true, State: "idle");
+        printers.Setup(service => service.GetStatusDtoAsync(id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(status);
+        var statusCache = new Mock<IPrinterStatusCacheReader>();
+        var capabilities = new Mock<IPrinterBackendCapabilitiesService>();
+        capabilities.Setup(service => service.GetByPrinterIdAsync(id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PrinterBackendCapabilitiesDto(id, "Test printer", PrinterBackend.Moonraker)
+            {
+                SupportsFanControl = true,
+                SupportsFanSpeedReadback = true,
+            });
+        var actuation = new Mock<IPrinterPhysicalActuationService>();
+        PrintersController controller = CreateController(
+            printers,
+            statusCache,
+            out _,
+            actuation: actuation,
+            capabilitiesService: capabilities);
+
+        ActionResult<CommandResult> response = await controller.SetFanSpeedAsync(
+            id,
+            new FanSpeedRequest { SpeedPercent = 75 },
+            CancellationToken.None);
+
+        Assert.Equal(StatusCodes.Status502BadGateway, Assert.IsType<ObjectResult>(response.Result).StatusCode);
+        printers.Verify(service => service.SetFanSpeedAsync(
+            It.IsAny<Guid>(),
+            It.IsAny<int>(),
+            It.IsAny<CancellationToken>()), Times.Never());
+
+        var deniedAuthorization = new Mock<IQueueResourceAuthorizationService>();
+        deniedAuthorization.Setup(service => service.CanAccessPrinterAsync(
+                It.IsAny<ClaimsPrincipal>(),
+                id,
+                PrinterGroupAccessLevel.Submit,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+        controller = CreateController(
+            printers,
+            statusCache,
+            out _,
+            actuation: actuation,
+            capabilitiesService: capabilities,
+            resourceAuthorization: deniedAuthorization);
+        deniedAuthorization.Setup(service => service.CanAccessPrinterAsync(
+                It.IsAny<ClaimsPrincipal>(),
+                id,
+                PrinterGroupAccessLevel.Submit,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+
+        response = await controller.SetFanSpeedAsync(
+            id,
+            new FanSpeedRequest { SpeedPercent = 75 },
+            CancellationToken.None);
+
+        Assert.IsType<NotFoundResult>(response.Result);
+        capabilities.Verify(service => service.GetByPrinterIdAsync(
+            id,
+            It.IsAny<CancellationToken>()), Times.Once());
+        printers.Verify(service => service.SetFanSpeedAsync(
+            It.IsAny<Guid>(),
+            It.IsAny<int>(),
+            It.IsAny<CancellationToken>()), Times.Never());
+    }
+
+    [Fact]
+    public async Task AdjustZOffsetAsync_RequiresLiveReadbackAndUsesActiveLeaseWhilePrinting()
+    {
+        Guid id = Guid.NewGuid();
+        var printers = new Mock<IPrintersService>();
+        printers.Setup(service => service.GetStatusDtoAsync(id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PrinterStatusDto(
+                id,
+                IsOnline: true,
+                State: "printing",
+                LiveZOffsetMm: 0.025));
+        printers.Setup(service => service.AdjustZOffsetAsync(
+                id,
+                0.02m,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        var capabilities = new Mock<IPrinterBackendCapabilitiesService>();
+        capabilities.Setup(service => service.GetByPrinterIdAsync(id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PrinterBackendCapabilitiesDto(id, "Test printer", PrinterBackend.Moonraker)
+            {
+                SupportsZOffsetAdjustment = true,
+                SupportsZOffsetReadback = true,
+            });
+        var actuation = new Mock<IPrinterPhysicalActuationService>();
+        PrintersController controller = CreateController(
+            printers,
+            new Mock<IPrinterStatusCacheReader>(),
+            out _,
+            actuation: actuation,
+            capabilitiesService: capabilities);
+
+        ActionResult<CommandResult> response = await controller.AdjustZOffsetAsync(
+            id,
+            new ZOffsetAdjustmentRequest { OffsetMm = 0.02m },
+            CancellationToken.None);
+
+        Assert.True(GetCommandResult(response).Success);
+        actuation.Verify(service => service.AcquireActiveAsync(
+            id,
+            It.IsAny<string>(),
+            "adjust_z_offset",
+            It.IsAny<CancellationToken>()), Times.Once());
+        printers.Verify(service => service.AdjustZOffsetAsync(
+            id,
+            0.02m,
+            It.IsAny<CancellationToken>()), Times.Once());
+    }
+
+    [Theory]
     [InlineData("home")]
     [InlineData("homexy")]
     [InlineData("homez")]
@@ -318,6 +502,13 @@ public class PrintersControllerControlGuardsTests
             },
         };
         return controller;
+    }
+
+    private static CommandResult GetCommandResult(ActionResult<CommandResult> response)
+    {
+        return response.Result is ObjectResult objectResult
+            ? Assert.IsType<CommandResult>(objectResult.Value)
+            : Assert.IsType<CommandResult>(response.Value);
     }
 
     [Theory]
