@@ -4,10 +4,8 @@ struct JobListView: View {
     @Environment(AuthViewModel.self) private var authViewModel
     @Environment(AppRouter.self) private var router
     @Environment(ServiceContainer.self) private var services
-    @Environment(\.horizontalSizeClass) private var sizeClass
     private let ownsNavigationStack: Bool
     @State private var viewModel = JobListViewModel()
-    @State private var currentPage = 0
     @State private var retryTask: Task<Void, Never>?
 
     init(ownsNavigationStack: Bool = true) {
@@ -77,26 +75,6 @@ struct JobListView: View {
                     title: "No Print Jobs",
                     message: "No jobs in the queue. Jobs will appear here when queued."
                 )
-            } else if sizeClass == .compact {
-                VStack(spacing: 0) {
-                    TabView(selection: $currentPage) {
-                        QueuePage()
-                            .tag(0)
-                        PrintingPage()
-                            .tag(1)
-                        RecentPage()
-                            .tag(2)
-                    }
-                    .tabViewStyle(.page(indexDisplayMode: .never))
-
-                    PageIndicator(
-                        currentPage: $currentPage,
-                        pageCount: 3,
-                        labels: ["Queue", "Printing", "Recent"],
-                        accessibilityIdentifierPrefix: "jobList.page"
-                    )
-                    .padding(.bottom, 8)
-                }
             } else {
                 jobList
             }
@@ -113,109 +91,6 @@ struct JobListView: View {
         .accessibilityIdentifier("jobList.root")
     }
     
-    // MARK: - iPhone Pages
-    
-    @ViewBuilder
-    private func PrintingPage() -> some View {
-        Group {
-            if viewModel.activeJobs.isEmpty {
-                EmptyStateView(
-                    icon: "tray",
-                    title: "No Active Jobs",
-                    message: "No jobs currently printing."
-                )
-                .padding()
-            } else {
-                List {
-                    ForEach(viewModel.activeJobs) { item in
-                        activeJobRow(item)
-                    }
-                }
-                .listStyle(.plain)
-                .refreshable {
-                    await viewModel.loadJobs()
-                }
-            }
-        }
-    }
-    
-    @ViewBuilder
-    private func QueuePage() -> some View {
-        Group {
-            if viewModel.queuedJobs.isEmpty {
-                VStack(spacing: 12) {
-                    if let message = viewModel.errorMessage {
-                        Label(message, systemImage: "exclamationmark.triangle")
-                            .foregroundStyle(Color.pfError)
-                    }
-                    EmptyStateView(
-                        icon: "tray",
-                        title: "Queue Empty",
-                        message: "No jobs waiting to print."
-                    )
-                }
-                .padding()
-            } else {
-                List {
-                    if let message = viewModel.errorMessage {
-                        Section {
-                            Label(message, systemImage: "exclamationmark.triangle")
-                                .foregroundStyle(Color.pfError)
-                        }
-                    }
-                    if let message = offlineReorderMessage {
-                        Section {
-                            Label(message, systemImage: "wifi.slash")
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    if !viewModel.assignedJobs.isEmpty {
-                        Section("Assigned") {
-                            ForEach(viewModel.assignedJobs) { item in
-                                queuedJobRow(item)
-                            }
-                        }
-                    }
-                    ForEach(viewModel.reorderableQueueGroups) { group in
-                        Section(group.title) {
-                            queueRows(group)
-                        }
-                    }
-                }
-                .listStyle(.plain)
-                .environment(\.editMode, .constant(viewModel.canReorderQueue ? .active : .inactive))
-                .refreshable {
-                    await viewModel.loadJobs()
-                }
-            }
-        }
-    }
-    
-    @ViewBuilder
-    private func RecentPage() -> some View {
-        Group {
-            if viewModel.recentJobs.isEmpty {
-                EmptyStateView(
-                    icon: "clock",
-                    title: "No Recent Jobs",
-                    message: "Completed jobs will appear here."
-                )
-                .padding()
-            } else {
-                List {
-                    ForEach(viewModel.recentJobs.prefix(10)) { item in
-                        recentJobRow(item)
-                    }
-                }
-                .listStyle(.plain)
-                .accessibilityIdentifier("jobList.recent.list")
-                .refreshable {
-                    await viewModel.loadJobs()
-                }
-            }
-        }
-    }
-
     // MARK: - Job List
 
     private var jobList: some View {
@@ -234,14 +109,17 @@ struct JobListView: View {
                 }
             }
 
-            if !viewModel.activeJobs.isEmpty {
-                Section {
+            Section {
+                if viewModel.activeJobs.isEmpty {
+                    Text("No jobs currently printing.")
+                        .foregroundStyle(Color.pfTextSecondary)
+                } else {
                     ForEach(viewModel.activeJobs) { item in
                         activeJobRow(item)
                     }
-                } header: {
-                    Label("Printing", systemImage: "printer.fill")
                 }
+            } header: {
+                sectionHeader("Printing", count: viewModel.activeJobs.count, systemImage: "printer.fill")
             }
 
             if !viewModel.assignedJobs.isEmpty {
@@ -254,30 +132,66 @@ struct JobListView: View {
                 }
             }
 
-            ForEach(viewModel.reorderableQueueGroups) { group in
+            if !viewModel.reorderableQueuedJobs.isEmpty {
                 Section {
-                    queueRows(group)
+                    ForEach(viewModel.reorderableQueuedJobs) { item in
+                        let groupID = viewModel.reorderGroupID(for: item)
+                        let canMove = item.job.jobUUID.map { id in
+                            viewModel.canMoveQueuedJob(id: id, direction: .up, inGroup: groupID)
+                                || viewModel.canMoveQueuedJob(id: id, direction: .down, inGroup: groupID)
+                        } ?? false
+                        queuedJobRow(item, groupID: groupID)
+                            .moveDisabled(!canMove)
+                    }
+                    .onMove { offsets, destination in
+                        Task { @MainActor in
+                            await viewModel.moveQueuedJobs(
+                                fromOffsets: offsets,
+                                toOffset: destination
+                            )
+                        }
+                    }
                 } header: {
-                    Label(group.title, systemImage: "tray.full")
+                    HStack {
+                        Text("Queued")
+                        Spacer()
+                        if viewModel.canReorderQueue {
+                            Text("Drag to reorder")
+                                .foregroundStyle(Color.pfTextSecondary)
+                        }
+                        Text("\(viewModel.reorderableQueuedJobs.count)")
+                            .monospacedDigit()
+                            .foregroundStyle(Color.pfTextTertiary)
+                    }
+                    .accessibilityElement(children: .combine)
+                }
+            } else {
+                Section {
+                    Text("No jobs waiting to print.")
+                        .foregroundStyle(Color.pfTextSecondary)
+                } header: {
+                    sectionHeader("Queued", count: 0, systemImage: "tray.full")
                 }
             }
 
-            if !viewModel.recentJobs.isEmpty {
-                // Recent must render like the sibling In Queue / Printing
-                // sections. A collapsible `Section(isExpanded:)` under the
-                // `.plain` list style renders no disclosure control on iPad,
-                // so the section stayed permanently collapsed and completed
-                // jobs (and their harvest entry point) were unreachable in
-                // the regular size class (#794). A plain always-visible
-                // section keeps completed jobs reachable on iPad; the iPhone
-                // layout uses the separate paged `RecentPage()` and is
-                // unaffected.
+            if !viewModel.recentFailures.isEmpty {
                 Section {
-                    ForEach(viewModel.recentJobs.prefix(10)) { item in
+                    ForEach(viewModel.recentFailures.prefix(10)) { item in
                         recentJobRow(item)
                     }
                 } header: {
-                    Label("Recent", systemImage: "clock")
+                    sectionHeader(
+                        "Recent failures",
+                        count: viewModel.recentFailures.count,
+                        systemImage: "exclamationmark.triangle"
+                    )
+                }
+            } else {
+                Section {
+                    Text("No recent failures.")
+                        .foregroundStyle(Color.pfTextSecondary)
+                } header: {
+                    sectionHeader("Recent failures", count: 0, systemImage: "exclamationmark.triangle")
                 }
             }
         }
@@ -286,34 +200,23 @@ struct JobListView: View {
         .accessibilityIdentifier("jobList.combined.list")
     }
 
+    private func sectionHeader(_ title: String, count: Int, systemImage: String) -> some View {
+        HStack {
+            Label(title, systemImage: systemImage)
+            Spacer()
+            Text("\(count)")
+                .monospacedDigit()
+                .foregroundStyle(Color.pfTextTertiary)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
     private var offlineReorderMessage: String? {
         guard viewModel.queueWriteAuthorized,
               !viewModel.isNetworkReachable else {
             return nil
         }
         return "Queue reordering is unavailable while offline."
-    }
-
-    @ViewBuilder
-    private func queueRows(_ group: QueueReorderGroup) -> some View {
-        if group.jobs.count > 1 {
-            ForEach(group.jobs) { item in
-                queuedJobRow(item, groupID: group.id)
-            }
-            .onMove { offsets, destination in
-                Task { @MainActor in
-                    await viewModel.moveQueuedJobs(
-                        fromOffsets: offsets,
-                        toOffset: destination,
-                        inGroup: group.id
-                    )
-                }
-            }
-        } else {
-            ForEach(group.jobs) { item in
-                queuedJobRow(item, groupID: group.id)
-            }
-        }
     }
 
     // MARK: - Active Job Row

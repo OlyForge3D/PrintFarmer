@@ -192,8 +192,14 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
                 ? "printer.detail.columns" : "printer.detail.readingColumn"
             XCTAssertTrue(app.otherElements[expectedLayout].waitForExistence(timeout: 5))
             let temperatures = app.otherElements["printer.detail.temperatures"]
+            let job = app.otherElements["printer.detail.job"]
             XCTAssertTrue(temperatures.waitForExistence(timeout: 5))
-            XCTAssertGreaterThan(temperatures.frame.minY, app.otherElements["printer.detail.job"].frame.minY)
+            XCTAssertTrue(job.exists)
+            if expectedLayout == "printer.detail.columns" {
+                XCTAssertGreaterThan(temperatures.frame.minX, job.frame.minX)
+            } else {
+                XCTAssertGreaterThan(temperatures.frame.minY, job.frame.minY)
+            }
             XCTAssertFalse(app.buttons["printer.detail.control.emergencyStop"].exists)
             let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
             screenshot.name = "Essential Status \(orientation == .portrait ? "portrait" : "landscape")"

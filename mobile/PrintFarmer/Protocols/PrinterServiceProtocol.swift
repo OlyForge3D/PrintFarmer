@@ -54,6 +54,8 @@ protocol PrinterServiceProtocol: Sendable {
 
     // Temperature & Motion Controls
     func setTemperatures(printerId: UUID, hotend: Double?, bed: Double?) async throws
+    func setFanSpeed(printerId: UUID, speedPercent: Int) async throws -> CommandResult
+    func adjustZOffset(printerId: UUID, offsetMm: Double) async throws -> CommandResult
     func home(printerId: UUID, axes: [String]) async throws
     func homeXY(printerId: UUID) async throws
     func homeZ(printerId: UUID) async throws
@@ -101,6 +103,14 @@ protocol PrinterServiceProtocol: Sendable {
 
 // Convenience overload
 extension PrinterServiceProtocol {
+    func setFanSpeed(printerId: UUID, speedPercent: Int) async throws -> CommandResult {
+        throw ServiceError.notImplemented("Fan control is unavailable in this printer service")
+    }
+
+    func adjustZOffset(printerId: UUID, offsetMm: Double) async throws -> CommandResult {
+        throw ServiceError.notImplemented("Transient Z-offset adjustment is unavailable in this printer service")
+    }
+
     func getCurrentJobThumbnail(id: UUID, path: String) async throws -> Data {
         throw ServiceError.notImplemented("Current-job thumbnails are unavailable in this service")
     }

@@ -63,12 +63,20 @@ struct PrinterFilamentSection: View {
                     .font(.subheadline)
                     .accessibilityIdentifier("printer.filament.attention")
             }
-            if !embedded, let action = primaryAction {
-                actionButton(action)
-            }
-            if !embedded, showsAllActions {
-                details
-            } else if !embedded {
+            if !embedded {
+                if let action = primaryAction {
+                    actionButton(action)
+                }
+                if showsAllActions {
+                    ForEach(detailActions) { action in
+                        VStack(alignment: .leading, spacing: 4) {
+                            actionButton(action)
+                            if let reason = presentation.disabledReason(for: action) {
+                                Text(reason).font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
                 DisclosureGroup(isExpanded: $detailsExpanded) {
                     details
                 } label: {
@@ -92,12 +100,18 @@ struct PrinterFilamentSection: View {
     }
 
     private func compactRow(_ row: PrinterFilamentPresentation.Row) -> some View {
-        HStack(alignment: .top, spacing: 10) {
+        HStack(alignment: .top, spacing: 12) {
             if embedded {
                 Image(systemName: "circle.circle")
                     .font(.system(size: 36, weight: .light))
                     .foregroundStyle(row.swatchHex.map { Color(hex: $0) } ?? Color.pfTextSecondary)
                     .frame(width: 40, height: 40)
+                    .accessibilityHidden(true)
+            } else if showsAllActions {
+                Image(systemName: "circle.circle.fill")
+                    .font(.system(size: 44, weight: .light))
+                    .foregroundStyle(row.swatchHex.map { Color(hex: $0) } ?? Color.pfTextSecondary)
+                    .frame(width: 52, height: 52)
                     .accessibilityHidden(true)
             } else if let hex = row.swatchHex {
                 Circle()
@@ -110,9 +124,17 @@ struct PrinterFilamentSection: View {
                 if let title = presentation.compactTitle(for: row) {
                     Text(title).font(.subheadline.weight(.semibold))
                 }
+                if showsAllActions && row.hasAssignment {
+                    Text("Assigned spool")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Color.pfTextSecondary)
+                }
                 Text(row.materialSummary + (embedded && row.hasAssignment
                      ? row.colorText.flatMap { $0.isEmpty ? nil : " · \($0)" } ?? "" : ""))
-                    .font(embedded ? .callout.weight(.semibold) : .subheadline)
+                    .font(embedded || showsAllActions ? .callout.weight(.semibold) : .subheadline)
+                if showsAllActions && row.hasAssignment {
+                    coverageSummary(row)
+                }
                 if embedded, let spool = row.spoolID {
                     Text("Spool #\(spool)" + (row.remainingGrams.flatMap {
                         $0.isFinite && $0 >= 0 ? " · \($0.formatted(.number.precision(.fractionLength(0...1)))) g remaining" : nil
@@ -130,9 +152,33 @@ struct PrinterFilamentSection: View {
         .accessibilityIdentifier("printer.filament.row.\(row.id)")
     }
 
+    @ViewBuilder
+    private func coverageSummary(_ row: PrinterFilamentPresentation.Row) -> some View {
+        let remaining = row.coverage?.remainingGrams
+        let demand = row.coverage?.currentJobRemainingGrams
+        HStack(spacing: 4) {
+            Text("\(quantityText(remaining)) remaining")
+            Text("·").accessibilityHidden(true)
+            Text("\(quantityText(demand)) job demand")
+        }
+        .font(.footnote.monospacedDigit())
+        .foregroundStyle(row.coverage?.status == .runout ? Color.pfWarning : Color.pfTextSecondary)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(
+            "Spool amount \(quantityText(remaining)); current job demand \(quantityText(demand))"
+        )
+    }
+
+    private func quantityText(_ grams: Double?) -> String {
+        grams.flatMap { $0.isFinite && $0 >= 0
+            ? $0.formatted(.number.precision(.fractionLength(0...1))) + " g"
+            : nil
+        } ?? "Unknown"
+    }
+
     var details: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Spool assignments do not confirm physical loading.")
+            Text("Spool assignments are inventory records and do not confirm physical loading.")
                 .font(.caption).foregroundStyle(.secondary)
             if let status = presentation.statusText {
                 Text(status).font(.subheadline).foregroundStyle(.secondary)
@@ -148,11 +194,13 @@ struct PrinterFilamentSection: View {
             ForEach(presentation.rows) { row in
                 rowDetails(row)
             }
-            ForEach(detailActions) { action in
-                VStack(alignment: .leading, spacing: 4) {
-                    actionButton(action)
-                    if let reason = presentation.disabledReason(for: action) {
-                        Text(reason).font(.caption).foregroundStyle(.secondary)
+            if !showsAllActions {
+                ForEach(detailActions) { action in
+                    VStack(alignment: .leading, spacing: 4) {
+                        actionButton(action)
+                        if let reason = presentation.disabledReason(for: action) {
+                            Text(reason).font(.caption).foregroundStyle(.secondary)
+                        }
                     }
                 }
             }

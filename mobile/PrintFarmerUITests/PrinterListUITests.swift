@@ -17,7 +17,7 @@ final class PrinterCardFailureUITests: PrintFarmerUITestCase {
                                    "Failure suspected:", "1 attention items")
         expectation(for: combined, evaluatedWith: card)
         waitForExpectations(timeout: 8)
-        XCTAssertTrue(card.label.contains("Failure?"))
+        XCTAssertTrue(card.label.contains("Failure suspected"))
         XCTAssertTrue(card.label.contains("The card remains usable when camera data cannot be decoded."))
         XCTAssertEqual(card.descendants(matching: .staticText).count, 0)
     }

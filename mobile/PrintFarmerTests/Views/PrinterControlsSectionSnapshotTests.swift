@@ -50,7 +50,7 @@ final class PrinterCardSnapshotTests: XCTestCase {
             printer: printer, isPendingReady: false, attentionCount: 2,
             failureReason: "Spaghetti detected", printTimeLeftSeconds: 8100
         )
-        XCTAssertEqual(presentation.stateLabel, "Failure?")
+        XCTAssertEqual(presentation.stateLabel, "Failure suspected")
         XCTAssertTrue(presentation.accessibilityLabel.contains("benchy.gcode"))
         XCTAssertTrue(presentation.accessibilityLabel.contains("46% complete"))
         XCTAssertTrue(presentation.accessibilityLabel.contains("2h 15m left"))
@@ -1849,8 +1849,8 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         assertSnapshot(of: host(ScrollView { section }), as: .image(on: .iPhone13), named: snapshotName)
     }
 
-    /// The starting state keeps the section visible while `canControl` is false,
-    /// exercising disabled subgroup controls without the printing lockout banner.
+    /// Starting is treated as an active job for safety: controls remain visible,
+    /// but heat, motion and filament setup are locked while verified live adjustments stay capability-gated.
     func test_snapshot_disabledState_printerStarting() async throws {
         let printer = try makePrinter(backend: .moonraker, state: "starting")
         let svc = makeService(caps: Self.layoutCaps)

@@ -241,6 +241,10 @@ final class DashboardViewModel {
         printers[idx].isOnline = update.isOnline
         if let s = update.state { printers[idx].state = s }
         if let prog = update.progress { printers[idx].progress = prog / 100.0 }
+        printers[idx].currentLayer = update.currentLayer
+        printers[idx].totalLayers = update.totalLayers
+        printers[idx].fanSpeedPercent = update.fanSpeedPercent
+        printers[idx].liveZOffsetMm = update.liveZOffsetMm
         if let name = update.jobName { printers[idx].jobName = name }
         if let fn = update.fileName { printers[idx].fileName = fn }
         // SignalR omits nullable thumbnail fields when a job ends.

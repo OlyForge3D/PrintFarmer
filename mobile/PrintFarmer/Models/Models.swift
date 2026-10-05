@@ -168,6 +168,10 @@ struct Printer: Codable, Identifiable, Sendable {
     var isOnline: Bool
     var state: String?
     var progress: Double?
+    var currentLayer: Int?
+    var totalLayers: Int?
+    var fanSpeedPercent: Double?
+    var liveZOffsetMm: Double?
     var jobName: String?
     var fileName: String?
     var thumbnailUrl: String?
@@ -203,7 +207,8 @@ struct Printer: Codable, Identifiable, Sendable {
         case manufacturerId, manufacturerName, modelId, modelName, motionType
         case backend, apiKey, originalServerUrl, backendPort, frontendPort
         case inMaintenance, isEnabled, rowVersion, configurationRevision
-        case isOnline, state, progress, jobName, fileName, thumbnailUrl, currentJobThumbnailUrl
+        case isOnline, state, progress, currentLayer, totalLayers, fanSpeedPercent, liveZOffsetMm
+        case jobName, fileName, thumbnailUrl, currentJobThumbnailUrl
         case cameraStreamUrl, cameraSnapshotUrl
         case cameraAccessMode, cameraStreamFormat, cameraSnapshotStrategy
         case x, y, z, hotendTemp, bedTemp, hotendTarget, bedTarget, homedAxes
@@ -244,6 +249,10 @@ struct Printer: Codable, Identifiable, Sendable {
         // See PrinterProgressContractTests for the pin (issue #277).
         progress = try c.decodeIfPresent(Double.self, forKey: .progress)
             .map { min(max($0, 0), 100) / 100.0 }
+        currentLayer = try c.decodeIfPresent(Int.self, forKey: .currentLayer)
+        totalLayers = try c.decodeIfPresent(Int.self, forKey: .totalLayers)
+        fanSpeedPercent = try c.decodeIfPresent(Double.self, forKey: .fanSpeedPercent)
+        liveZOffsetMm = try c.decodeIfPresent(Double.self, forKey: .liveZOffsetMm)
         jobName = try c.decodeIfPresent(String.self, forKey: .jobName)
         fileName = try c.decodeIfPresent(String.self, forKey: .fileName)
         thumbnailUrl = try c.decodeIfPresent(String.self, forKey: .thumbnailUrl)
@@ -414,6 +423,10 @@ struct PrinterStatusDetail: Codable, Sendable {
     let isOnline: Bool
     let state: String?
     let progress: Double?
+    let currentLayer: Int?
+    let totalLayers: Int?
+    let fanSpeedPercent: Double?
+    let liveZOffsetMm: Double?
     let jobName: String?
     let thumbnailUrl: String?
     let cameraStreamUrl: String?
@@ -439,6 +452,10 @@ struct PrinterStatusDetail: Codable, Sendable {
         isOnline: Bool,
         state: String?,
         progress: Double?,
+        currentLayer: Int? = nil,
+        totalLayers: Int? = nil,
+        fanSpeedPercent: Double? = nil,
+        liveZOffsetMm: Double? = nil,
         jobName: String?,
         thumbnailUrl: String?,
         cameraStreamUrl: String?,
@@ -460,6 +477,10 @@ struct PrinterStatusDetail: Codable, Sendable {
         self.isOnline = isOnline
         self.state = state
         self.progress = progress
+        self.currentLayer = currentLayer
+        self.totalLayers = totalLayers
+        self.fanSpeedPercent = fanSpeedPercent
+        self.liveZOffsetMm = liveZOffsetMm
         self.jobName = jobName
         self.thumbnailUrl = thumbnailUrl
         self.cameraStreamUrl = cameraStreamUrl

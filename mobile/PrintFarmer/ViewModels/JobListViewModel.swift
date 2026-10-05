@@ -246,6 +246,10 @@ final class JobListViewModel {
         }
     }
 
+    var reorderableQueuedJobs: [QueuedPrintJobResponse] {
+        jobs.filter { $0.job.jobStatus == .queued }
+    }
+
     var assignedJobs: [QueuedPrintJobResponse] {
         queuedJobs.filter { $0.job.jobStatus == .assigned }
     }
@@ -287,11 +291,13 @@ final class JobListViewModel {
               let index = group.jobs.firstIndex(where: { $0.job.jobUUID == id }) else {
             return false
         }
+        let item = group.jobs[index]
         switch direction {
         case .up:
-            return index > 0
+            return index > 0 && group.jobs[index - 1].job.priority == item.job.priority
         case .down:
             return index + 1 < group.jobs.count
+                && group.jobs[index + 1].job.priority == item.job.priority
         }
     }
 
@@ -309,6 +315,51 @@ final class JobListViewModel {
             fromOffsets: IndexSet(integer: index),
             toOffset: destination,
             inGroup: groupID
+        )
+    }
+
+    func moveQueuedJobs(fromOffsets offsets: IndexSet, toOffset destination: Int) async {
+        let orderedJobs = reorderableQueuedJobs
+        guard offsets.count == 1,
+              let source = offsets.first,
+              orderedJobs.indices.contains(source),
+              (0...orderedJobs.count).contains(destination) else {
+            return
+        }
+
+        let moved = orderedJobs[source]
+        guard let group = reorderableQueueGroups.first(where: { candidate in
+            candidate.jobs.contains(where: { $0.id == moved.id })
+        }) else {
+            return
+        }
+
+        var remaining = orderedJobs
+        remaining.remove(at: source)
+        let insertionIndex = min(
+            max(destination > source ? destination - 1 : destination, 0),
+            remaining.count
+        )
+        let beforeSharesGroup = insertionIndex < remaining.count
+            && reorderGroupID(for: remaining[insertionIndex]) == group.id
+        let afterSharesGroup = insertionIndex > 0
+            && reorderGroupID(for: remaining[insertionIndex - 1]) == group.id
+        guard beforeSharesGroup || afterSharesGroup else {
+            errorMessage = "Jobs can only be reordered within the same printer and priority group."
+            return
+        }
+
+        guard let localSource = group.jobs.firstIndex(where: { $0.id == moved.id }) else { return }
+        let localInsertionIndex = remaining[..<insertionIndex].filter {
+            reorderGroupID(for: $0) == group.id
+        }.count
+        let localDestination = localInsertionIndex > localSource
+            ? localInsertionIndex + 1
+            : localInsertionIndex
+        await moveQueuedJobs(
+            fromOffsets: IndexSet(integer: localSource),
+            toOffset: localDestination,
+            inGroup: group.id
         )
     }
 
@@ -355,8 +406,22 @@ final class JobListViewModel {
         guard reordered.map(\.id) != group.jobs.map(\.id) else { return }
 
         guard let movedIndex = reordered.firstIndex(where: { $0.id == moved.id }) else { return }
+        let priorityIndices = group.jobs.indices.filter {
+            group.jobs[$0].job.priority == moved.job.priority
+        }
+        guard let firstPriorityIndex = priorityIndices.first,
+              let lastPriorityIndex = priorityIndices.last,
+              priorityIndices.count == lastPriorityIndex - firstPriorityIndex + 1 else {
+            errorMessage = "Refresh the queue before reordering jobs across priority groups."
+            return
+        }
+        guard (firstPriorityIndex...lastPriorityIndex).contains(movedIndex) else {
+            errorMessage = "Jobs can only be reordered within their current priority group."
+            return
+        }
+
         let neighbor: QueuePositionNeighbor
-        if movedIndex + 1 < reordered.count {
+        if movedIndex < lastPriorityIndex {
             let next = reordered[movedIndex + 1]
             guard let neighborID = next.job.jobUUID,
                   let rowVersion = nonempty(next.job.rowVersion) else {
@@ -364,7 +429,7 @@ final class JobListViewModel {
                 return
             }
             neighbor = .before(id: neighborID, rowVersion: rowVersion)
-        } else if movedIndex > 0 {
+        } else if movedIndex > firstPriorityIndex {
             let previous = reordered[movedIndex - 1]
             guard let neighborID = previous.job.jobUUID,
                   let rowVersion = nonempty(previous.job.rowVersion) else {
@@ -428,7 +493,7 @@ final class JobListViewModel {
         return result
     }
 
-    private func reorderGroupID(for item: QueuedPrintJobResponse) -> String {
+    func reorderGroupID(for item: QueuedPrintJobResponse) -> String {
         "\(item.job.assignedPrinterId ?? "unassigned")|\(item.job.priority.rawValue)"
     }
 
@@ -474,11 +539,10 @@ final class JobListViewModel {
         }
     }
 
-    /// Recently completed, failed, or cancelled jobs
-    var recentJobs: [QueuedPrintJobResponse] {
+    /// Recent failures only; completed and cancelled jobs belong in history.
+    var recentFailures: [QueuedPrintJobResponse] {
         jobs.filter {
-            guard let status = $0.job.jobStatus else { return false }
-            return [.completed, .failed, .cancelled].contains(status)
+            $0.job.jobStatus == .failed
         }
         .sorted { ($0.job.actualEndTimeUtc ?? $0.job.createdAtUtc) > ($1.job.actualEndTimeUtc ?? $1.job.createdAtUtc) }
     }

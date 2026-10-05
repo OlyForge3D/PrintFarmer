@@ -52,20 +52,26 @@ struct PrinterCardView: View {
                     .foregroundStyle(Color.pfTextSecondary)
                     .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
                 if presentation.isActiveJob {
-                    PrintProgressBar(
-                        progress: printer.progress ?? 0, showLabel: false,
-                        height: 4, color: presentation.accent
-                    )
-                    ViewThatFits(in: .horizontal) {
-                        HStack {
-                            progressLabel
-                            Spacer(minLength: 4)
-                            etaLabel
+                    if let progress = printer.progress, progress.isFinite {
+                        PrintProgressBar(
+                            progress: progress, showLabel: false,
+                            height: 4, color: presentation.accent
+                        )
+                        ViewThatFits(in: .horizontal) {
+                            HStack {
+                                progressLabel
+                                Spacer(minLength: 4)
+                                etaLabel
+                            }
+                            VStack(alignment: .leading, spacing: 4) {
+                                progressLabel
+                                etaLabel
+                            }
                         }
-                        VStack(alignment: .leading, spacing: 4) {
-                            progressLabel
-                            etaLabel
-                        }
+                    } else {
+                        Text("Progress unavailable")
+                            .font(.caption2)
+                            .foregroundStyle(Color.pfTextSecondary)
                     }
                 }
                 ViewThatFits(in: .horizontal) {
@@ -83,12 +89,6 @@ struct PrinterCardView: View {
                             attentionBadge
                         }
                     }
-                }
-                if let failureReason {
-                    Text(failureReason)
-                        .font(.caption)
-                        .foregroundStyle(Color.pfError)
-                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
         }
@@ -209,14 +209,25 @@ struct PrinterCardView: View {
     }
 
     @ViewBuilder private var attentionBadge: some View {
-        if let attentionCount, attentionCount > 0 {
-            Label("\(attentionCount)", systemImage: "exclamationmark.triangle.fill")
+        if failureReason != nil {
+            Label("Check print", systemImage: "exclamationmark.triangle.fill")
                 .font(.caption2.weight(.semibold))
-                .foregroundStyle(failureReason == nil ? Color.pfWarning : .pfError)
+                .foregroundStyle(Color.pfError)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .background(Color.pfError.opacity(0.14), in: Capsule())
+                .fixedSize(horizontal: true, vertical: false)
+        } else if let attentionCount, attentionCount > 0 {
+            Label(
+                "\(attentionCount)",
+                systemImage: "exclamationmark.triangle.fill"
+            )
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(Color.pfWarning)
                 .padding(.horizontal, 6)
                 .padding(.vertical, 3)
                 .background(Color.pfWarning.opacity(0.14), in: Capsule())
-                .fixedSize()
+                .fixedSize(horizontal: true, vertical: false)
         }
     }
 }
@@ -233,7 +244,7 @@ struct PrinterCardPresentation {
     }
 
     var stateLabel: String {
-        if failureReason != nil { return "Failure?" }
+        if failureReason != nil { return "Failure suspected" }
         if isPendingReady { return "Bed clear" }
         if !printer.isOnline { return "Offline" }
         if printer.inMaintenance { return "Maintenance" }

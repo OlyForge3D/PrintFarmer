@@ -5,17 +5,14 @@ final class PrinterListViewModel {
     var printers: [Printer]
     var searchText = ""
     var selectedStatus: StatusFilter = .all
-    var selectedLocationId: UUID?
     var attentionPrinterIDs: Set<UUID> = []
     private(set) var pendingReadyPrinterIDs: Set<UUID>
 
     enum StatusFilter: String, CaseIterable, Identifiable {
         case all = "All"
-        case online = "Online"
         case printing = "Printing"
-        case offline = "Offline"
-        case error = "Error"
         case needsAttention = "Needs attention"
+        case idle = "Idle"
 
         var id: String { rawValue }
     }
@@ -35,9 +32,13 @@ final class PrinterListViewModel {
 
     var filteredPrinters: [Printer] {
         printers.filter { printer in
-            matchesSearch(printer) && matchesStatus(printer) && matchesLocation(printer)
+            matchesSearch(printer) && matchesStatus(printer)
         }
         .sorted { sortPriority($0) < sortPriority($1) }
+    }
+
+    func count(for filter: StatusFilter) -> Int {
+        printers.filter { matchesStatus($0, filter: filter) }.count
     }
 
     func isPendingReady(_ printer: Printer) -> Bool {
@@ -64,21 +65,19 @@ final class PrinterListViewModel {
     }
 
     private func matchesStatus(_ printer: Printer) -> Bool {
-        switch selectedStatus {
+        matchesStatus(printer, filter: selectedStatus)
+    }
+
+    private func matchesStatus(_ printer: Printer, filter: StatusFilter) -> Bool {
+        switch filter {
         case .all: true
-        case .online: printer.isOnline
         case .printing: printer.state?.lowercased() == "printing"
-        case .offline: !printer.isOnline
-        case .error: printer.state?.lowercased() == "error"
         case .needsAttention:
             attentionPrinterIDs.contains(printer.id)
                 || isPendingReady(printer)
                 || ["error", "paused"].contains(printer.state?.lowercased() ?? "")
+        case .idle:
+            printer.isOnline && ["ready", "idle"].contains(printer.state?.lowercased() ?? "")
         }
-    }
-
-    private func matchesLocation(_ printer: Printer) -> Bool {
-        guard let selectedLocationId else { return true }
-        return printer.location?.id == selectedLocationId
     }
 }

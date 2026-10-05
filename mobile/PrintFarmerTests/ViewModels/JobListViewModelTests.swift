@@ -145,7 +145,7 @@ final class JobListViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.queuedJobs.map(\.id), [assigned.id, queued.id])
     }
 
-    func testReorderGroupsPreserveServerOrderAndExcludePinnedRows() async throws {
+    func testReorderGroupsUsePrinterAndPriorityScopeAndPreserveServerOrder() async throws {
         let printerID = UUID()
         let first = try makeQueueJob(
             scope: printerID,
@@ -188,7 +188,10 @@ final class JobListViewModelTests: XCTestCase {
         await viewModel.loadJobs()
 
         XCTAssertEqual(viewModel.reorderableQueueGroups.count, 3)
-        XCTAssertEqual(viewModel.reorderableQueueGroups[0].jobs.map(\.id), [first.id, second.id])
+        XCTAssertEqual(
+            viewModel.reorderableQueueGroups[0].jobs.map(\.id),
+            [first.id, second.id]
+        )
         XCTAssertEqual(viewModel.reorderableQueueGroups[1].jobs.map(\.id), [differentPriority.id])
         XCTAssertEqual(viewModel.reorderableQueueGroups[2].jobs.map(\.id), [differentScope.id])
         XCTAssertEqual(viewModel.assignedJobs.map(\.id), [assigned.id])
@@ -231,11 +234,20 @@ final class JobListViewModelTests: XCTestCase {
         viewModel.setNetworkReachability(true)
         await viewModel.loadJobs()
 
-        let groupID = try XCTUnwrap(viewModel.reorderableQueueGroups.first?.id)
+        let groups = viewModel.reorderableQueueGroups
+        let groupID = try XCTUnwrap(groups.first(where: { $0.jobs.contains(where: { $0.id == moved.id }) })?.id)
+        let normalGroupID = try XCTUnwrap(
+            groups.first(where: { $0.jobs.contains(where: { $0.id == otherPriority.id }) })?.id
+        )
+        XCTAssertFalse(viewModel.canMoveQueuedJob(
+            id: try XCTUnwrap(neighbor.job.jobUUID), direction: .down, inGroup: groupID
+        ))
+        XCTAssertFalse(viewModel.canMoveQueuedJob(
+            id: try XCTUnwrap(otherPriority.job.jobUUID), direction: .up, inGroup: normalGroupID
+        ))
         await viewModel.moveQueuedJobs(
             fromOffsets: IndexSet(integer: 0),
-            toOffset: 2,
-            inGroup: groupID
+            toOffset: 2
         )
 
         XCTAssertEqual(mockJobService.moveQueuedJobCalledWith?.id, moved.job.jobUUID)
@@ -266,7 +278,7 @@ final class JobListViewModelTests: XCTestCase {
         let highSecond = try makeQueueJob(scope: printerID, priority: .high, name: "high second")
         let normal = try makeQueueJob(scope: printerID, priority: .normal, name: "normal")
         let anotherScope = try makeQueueJob(scope: UUID(), priority: .high, name: "other scope")
-        mockJobService.queuedJobResponsesToReturn = [highFirst, highSecond, normal, anotherScope]
+        mockJobService.queuedJobResponsesToReturn = [highFirst, normal, highSecond, anotherScope]
         viewModel.setQueueWriteAuthorization(true)
         viewModel.setNetworkReachability(true)
         await viewModel.loadJobs()
@@ -283,19 +295,19 @@ final class JobListViewModelTests: XCTestCase {
             inGroup: groups[0].id
         ))
         XCTAssertFalse(viewModel.canMoveQueuedJob(
-            id: try XCTUnwrap(normal.job.jobUUID),
+            id: try XCTUnwrap(anotherScope.job.jobUUID),
             direction: .down,
-            inGroup: groups[1].id
+            inGroup: groups[2].id
         ))
 
         await viewModel.moveQueuedJob(
             id: try XCTUnwrap(highFirst.job.jobUUID),
             direction: .down,
-            inGroup: groups[1].id
+            inGroup: groups[2].id
         )
 
         XCTAssertNil(mockJobService.moveQueuedJobCalledWith)
-        XCTAssertEqual(viewModel.jobs.map(\.id), [highFirst.id, highSecond.id, normal.id, anotherScope.id])
+        XCTAssertEqual(viewModel.jobs.map(\.id), [highFirst.id, normal.id, highSecond.id, anotherScope.id])
     }
 
     func testQueueMoveRequiresWritePermissionAndReachableNetwork() async throws {
@@ -411,7 +423,7 @@ final class JobListViewModelTests: XCTestCase {
 
     // MARK: - Grouped Jobs: Recent
 
-    func testRecentJobsFiltersCompletedFailedCancelled() async throws {
+    func testRecentFailuresIncludesOnlyFailedJobs() async throws {
         let completed = try TestData.decodeQueuedPrintJobResponse(from: TestJSON.queuedPrintJobResponseCompleted)
         let failed = try TestData.decodeQueuedPrintJobResponse(from: TestJSON.queuedPrintJobResponseFailed)
         let printing = try TestData.decodeQueuedPrintJobResponse(from: TestJSON.queuedPrintJobResponsePrinting)
@@ -419,7 +431,7 @@ final class JobListViewModelTests: XCTestCase {
 
         await viewModel.loadJobs()
 
-        XCTAssertEqual(viewModel.recentJobs.count, 2)
+        XCTAssertEqual(viewModel.recentFailures.map(\.id), [failed.id])
     }
 
     // MARK: - hasAnyJobs
@@ -551,7 +563,7 @@ final class JobListViewModelTests: XCTestCase {
 
         XCTAssertTrue(viewModel.activeJobs.isEmpty)
         XCTAssertTrue(viewModel.queuedJobs.isEmpty)
-        XCTAssertTrue(viewModel.recentJobs.isEmpty)
+        XCTAssertTrue(viewModel.recentFailures.isEmpty)
     }
 
     private func makeQueueJob(

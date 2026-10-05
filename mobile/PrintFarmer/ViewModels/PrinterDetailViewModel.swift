@@ -470,6 +470,8 @@ final class PrinterDetailViewModel {
             if let s = update.state { p.state = s }
             // Backend sends progress as 0-100; normalize to 0-1.0 for SwiftUI
             if let prog = update.progress { p.progress = prog / 100.0 }
+            p.currentLayer = update.currentLayer
+            p.totalLayers = update.totalLayers
             if let name = update.jobName { p.jobName = name }
             if let fn = update.fileName { p.fileName = fn }
             if let thumb = update.thumbnailUrl { p.thumbnailUrl = thumb }
@@ -478,6 +480,8 @@ final class PrinterDetailViewModel {
             if let bed = update.bedTemp { p.bedTemp = bed }
             if let ht = update.hotendTarget { p.hotendTarget = ht }
             if let bt = update.bedTarget { p.bedTarget = bt }
+            p.fanSpeedPercent = update.fanSpeedPercent
+            p.liveZOffsetMm = update.liveZOffsetMm
             if let x = update.x { p.x = x }
             if let y = update.y { p.y = y }
             if let z = update.z { p.z = z }
@@ -502,6 +506,10 @@ final class PrinterDetailViewModel {
             isOnline: update.isOnline,
             state: update.state ?? statusDetail?.state,
             progress: update.progress.map { $0 / 100.0 } ?? statusDetail?.progress,
+            currentLayer: update.currentLayer,
+            totalLayers: update.totalLayers,
+            fanSpeedPercent: update.fanSpeedPercent,
+            liveZOffsetMm: update.liveZOffsetMm,
             jobName: update.jobName ?? statusDetail?.jobName,
             thumbnailUrl: update.thumbnailUrl ?? statusDetail?.thumbnailUrl,
             cameraStreamUrl: update.cameraStreamUrl ?? statusDetail?.cameraStreamUrl,
@@ -1638,6 +1646,10 @@ final class PrinterDetailViewModel {
         current.isOnline = detail.isOnline
         current.state = detail.state
         current.progress = detail.progress
+        current.currentLayer = detail.currentLayer
+        current.totalLayers = detail.totalLayers
+        current.fanSpeedPercent = detail.fanSpeedPercent
+        current.liveZOffsetMm = detail.liveZOffsetMm
         current.jobName = detail.jobName
         current.thumbnailUrl = detail.thumbnailUrl
         current.cameraStreamUrl = detail.cameraStreamUrl
@@ -2316,13 +2328,12 @@ final class PrinterDetailViewModel {
         return eta.formatted(date: .omitted, time: .shortened)
     }
 
-    /// Thumbnail for the running job, if the model file carries one; falls
-    /// back to the printer thumbnail, and is omitted gracefully when absent.
+    /// Relative current-job media endpoint; never expose the printer's internal
+    /// thumbnail URL to the client or load it without session authentication.
     var currentJobThumbnailUrl: String? {
-        let candidates = [currentJob?.thumbnailUrl, printer?.thumbnailUrl]
-        return candidates
-            .compactMap { $0 }
-            .first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        guard let path = printer?.currentJobThumbnailUrl,
+              !path.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        return path
     }
 
     /// Only Queued is eligible for a new dispatch; Assigned is a committed handoff.

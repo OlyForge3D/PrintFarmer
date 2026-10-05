@@ -1,4 +1,5 @@
 import SwiftUI
+import OSLog
 
 @MainActor
 struct PrinterDetailSafetyRefresh: View {
@@ -43,6 +44,7 @@ struct PrinterDetailSafetyRefreshCadence {
 }
 
 struct PrinterDetailView: View {
+    private static let logger = Logger(subsystem: "com.printfarmer.ios", category: "PrinterDetail")
     @Environment(ServiceContainer.self) private var services
     @Environment(AppRouter.self) private var router
     @Environment(AuthViewModel.self) private var authViewModel
@@ -54,6 +56,8 @@ struct PrinterDetailView: View {
     @State private var activeTasks: [Task<Void, Never>] = []
     @State private var guidedSwapTarget: AppRouter.FilamentSwapDeepLink?
     @State private var showsEjectConfirmation = false
+    @State private var printPreviewImage: UIImage?
+    @State private var printPreviewPath: String?
     // Transient UI state only (issue #2522) — never persisted, resets to
     // `.status` whenever this view is (re)constructed for a printer/server,
     // matching `viewModel`/`coverageViewModel`'s own per-identity lifetime.
@@ -493,24 +497,25 @@ struct PrinterDetailView: View {
                 width: geometry.size.width, dynamicTypeSize: dynamicTypeSize
             )
             ScrollView {
-                let layout = columns
-                    ? AnyLayout(HStackLayout(alignment: .top, spacing: 24))
-                    : AnyLayout(VStackLayout(alignment: .leading, spacing: 20))
-                layout {
+                VStack(alignment: .leading, spacing: 16) {
                     cameraSection(printer)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                    VStack(alignment: .leading, spacing: 16) {
+                    let layout = columns
+                        ? AnyLayout(HStackLayout(alignment: .top, spacing: 24))
+                        : AnyLayout(VStackLayout(alignment: .leading, spacing: 16))
+                    layout {
                         currentJobBlock(printer)
                         temperatureSection(printer)
-                        if printer.obicoEnabled && viewModel.isActivelyPrinting {
-                            failureDetectionSummary(printer)
-                        }
                     }
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier(
+                        columns ? "printer.detail.columns" : "printer.detail.readingColumn"
+                    )
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .padding()
                 .accessibilityElement(children: .contain)
-                .accessibilityIdentifier(columns ? "printer.detail.columns" : "printer.detail.readingColumn")
+                .accessibilityIdentifier("printer.detail.status.content")
             }
         }
     }
@@ -733,50 +738,62 @@ struct PrinterDetailView: View {
     private func currentJobBlock(_ printer: Printer) -> some View {
         let jobName = printer.fileName ?? printer.jobName ?? viewModel.currentJob?.jobName
         VStack(alignment: .leading, spacing: 12) {
-            Text("Current Job")
-                .font(.headline)
-
             if viewModel.isActivelyPrinting || jobName != nil {
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack(alignment: .top, spacing: 12) {
-                        remoteThumbnail(viewModel.currentJobThumbnailUrl, size: 72)
-                            .accessibilityIdentifier("printer.detail.job.thumbnail")
-                        if let progress = printer.progress, progress.isFinite {
-                            Text("\(Int((min(max(progress, 0), 1) * 100).rounded()))%")
-                                .font(.system(size: 40, weight: .bold, design: .rounded))
-                                .monospacedDigit()
-                        }
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(jobName ?? "Printing")
-                                .font(.subheadline.weight(.semibold))
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        Spacer(minLength: 0)
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    if let progress = printer.progress, progress.isFinite {
+                        Text("\(Int((min(max(progress, 0), 1) * 100).rounded()))%")
+                            .font(.system(size: 34, weight: .bold, design: .rounded))
+                            .monospacedDigit()
+                            .accessibilityLabel("Print progress \(Int((min(max(progress, 0), 1) * 100).rounded())) percent")
                     }
-
-                    if let progress = printer.progress {
-                        PrintProgressBar(progress: progress, height: 10)
-                            .accessibilityLabel("Print progress \(Int((progress * 100).rounded())) percent")
-                    }
-
-                    HStack(alignment: .top, spacing: 8) {
-                        statusFact("Left", value: viewModel.formattedTimeRemaining ?? "Unknown")
-                        statusFact("Done at", value: viewModel.formattedEtaClock ?? "Unknown")
-                        statusFact("Layer", value: "Unavailable")
-                    }
+                    Text(jobName ?? "Printing")
+                        .font(.headline)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
                 }
 
-                .padding()
-                .operatorCard()
+                if let progress = printer.progress, progress.isFinite {
+                    PrintProgressBar(progress: min(max(progress, 0), 1), height: 6)
+                        .accessibilityIdentifier("printer.detail.job.progress")
+                }
+
+                HStack(alignment: .top, spacing: 8) {
+                    statusFact("Left", value: viewModel.formattedTimeRemaining ?? "Unknown")
+                    statusFact("Done at", value: viewModel.formattedEtaClock ?? "Unknown")
+                    statusFact("Layer", value: layerLabel(printer))
+                }
+                .padding(.vertical, 2)
             } else {
                 operatorEmptyState(icon: "pause.circle", message: "No active print")
             }
             PrinterRunActionBar(
-                presentation: runActionPresentation(for: printer).routineActions,
+                presentation: statusActions(for: printer),
                 onSelect: { kind in handleRunAction(kind) }
             )
         }
+        .padding(14)
+        .operatorCard()
         .accessibilityIdentifier("printer.detail.job")
+    }
+
+    private func layerLabel(_ printer: Printer) -> String {
+        let current = printer.currentLayer ?? viewModel.statusDetail?.currentLayer
+        let total = printer.totalLayers ?? viewModel.statusDetail?.totalLayers
+        guard let current, let total,
+              current >= 0, total > 0, current <= total else {
+            return "Unavailable"
+        }
+        return "\(current)/\(total)"
+    }
+
+    private func statusActions(for printer: Printer) -> PrinterRunActionPresentation {
+        let allowed: Set<PrinterRunActionKind> = [.pause, .resume, .cancel]
+        return PrinterRunActionPresentation(
+            descriptors: runActionPresentation(for: printer).visibleDescriptors.filter {
+                allowed.contains($0.kind)
+            }
+        )
     }
 
     private func statusFact(_ title: String, value: String) -> some View {
@@ -792,49 +809,132 @@ struct PrinterDetailView: View {
 
     private func queueSection(_ printer: Printer) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Queue")
-                .font(.headline)
+            let active = viewModel.displayedQueueJobs.filter {
+                ["starting", "printing", "paused"].contains($0.job.status.lowercased())
+            }
+            let assigned = viewModel.displayedQueueJobs.filter {
+                $0.job.status.lowercased() == "assigned"
+            }
+            let queued = viewModel.nextQueuedJobs
 
-            if viewModel.displayedQueueJobs.isEmpty {
+            if active.isEmpty && assigned.isEmpty && queued.isEmpty {
                 operatorEmptyState(icon: "tray", message: "No active or queued jobs for this printer")
             } else {
-                VStack(spacing: 10) {
-                    ForEach(viewModel.displayedQueueJobs) { job in
-                        queueRow(job, isNext: job.id == viewModel.nextQueuedJobs.first?.id, printer: printer)
+                if !active.isEmpty {
+                    queueSectionHeader("Printing", count: active.count)
+                    ForEach(active) { job in compactQueueRow(job) }
+                }
+                if !assigned.isEmpty {
+                    queueSectionHeader("Assigned", count: assigned.count)
+                    ForEach(assigned) { job in compactQueueRow(job) }
+                }
+                if let next = queued.first {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Up next")
+                            .font(.headline)
+                        queueRow(next, printer: printer)
                     }
+                    .padding(14)
+                    .background(Color.pfSuccess.opacity(0.1), in: RoundedRectangle(cornerRadius: 14))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14)
+                            .strokeBorder(Color.pfSuccess.opacity(0.3), lineWidth: 1)
+                    )
+                }
+                let later = Array(queued.dropFirst())
+                if !later.isEmpty {
+                    queueSectionHeader("Then", count: later.count)
+                    ForEach(later) { job in compactQueueRow(job) }
                 }
             }
         }
         .accessibilityIdentifier("printer.detail.queue")
     }
 
-    private func queueRow(_ job: QueuedPrintJobResponse, isNext: Bool, printer: Printer) -> some View {
+    private func queueSectionHeader(_ title: String, count: Int) -> some View {
+        HStack {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Color.pfTextSecondary)
+            Spacer()
+            Text("\(count)")
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(Color.pfTextTertiary)
+        }
+        .padding(.top, 4)
+        .accessibilityElement(children: .combine)
+    }
+
+    private func compactQueueRow(_ job: QueuedPrintJobResponse) -> some View {
+        let title = job.gcodeFile?.name ?? job.job.name
+        return HStack(spacing: 10) {
+            remoteThumbnail(job.gcodeFile?.thumbnailUrl ?? job.job.thumbnailUrl, size: 40)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.subheadline.weight(.medium))
+                    .lineLimit(1)
+                Text(job.job.printerName ?? job.job.status)
+                    .font(.caption)
+                    .foregroundStyle(Color.pfTextSecondary)
+                    .lineLimit(1)
+            }
+            Spacer()
+            if job.job.priority == .high || job.job.priority == .urgent {
+                Text(job.job.priority == .urgent ? "Urgent" : "High")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(job.job.priority == .urgent ? Color.pfError : Color.pfWarning)
+            }
+            if let duration = job.job.estimatedDuration {
+                Text(duration.durationFormatted)
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(Color.pfTextSecondary)
+            }
+        }
+        .padding(.vertical, 6)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("printer.detail.queue.row.\(job.id)")
+    }
+
+    private func queueRow(_ job: QueuedPrintJobResponse, printer: Printer) -> some View {
         let match = viewModel.matchState(for: job)
         let title = job.gcodeFile?.name ?? job.job.name
-        return VStack(alignment: .leading, spacing: 8) {
-            Text(job.job.status.lowercased() == "queued" ? (isNext ? "Up next" : "Later") : job.job.status)
-                .font(.caption).foregroundStyle(Color.pfTextSecondary)
+        return VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: 12) {
-                remoteThumbnail(job.gcodeFile?.thumbnailUrl ?? job.job.thumbnailUrl, size: 44)
-                VStack(alignment: .leading, spacing: 4) {
+                remoteThumbnail(job.gcodeFile?.thumbnailUrl ?? job.job.thumbnailUrl, size: 48)
+                VStack(alignment: .leading, spacing: 5) {
                     Text(title)
-                        .font(.subheadline.weight(.medium))
+                        .font(.headline)
                         .fixedSize(horizontal: false, vertical: true)
-                    HStack(spacing: 4) {
-                        Image(systemName: match.systemImage)
-                            .font(.caption2)
-                            .accessibilityHidden(true)
-                        Text(match.label)
+                    HStack(spacing: 6) {
+                        Text(job.gcodeFile?.materialType ?? job.job.filamentName ?? "Material unavailable")
                             .font(.caption)
+                            .foregroundStyle(Color.pfTextSecondary)
+                        if let duration = job.job.estimatedDuration {
+                            Text("· \(duration.durationFormatted)")
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(Color.pfTextSecondary)
+                        }
                     }
-                    .foregroundStyle(matchTint(match))
-                    .accessibilityElement(children: .combine)
-                    .accessibilityLabel(match.label)
                 }
-                Spacer(minLength: 0)
+                Spacer(minLength: 4)
+                if job.job.priority == .high || job.job.priority == .urgent {
+                    Text(job.job.priority == .urgent ? "Urgent" : "High")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(job.job.priority == .urgent ? Color.pfError : Color.pfWarning)
+                }
             }
 
-            if isNext {
+            HStack(spacing: 6) {
+                Image(systemName: match.systemImage)
+                    .font(.caption2)
+                    .accessibilityHidden(true)
+                Text(match.label)
+                    .font(.caption)
+            }
+            .foregroundStyle(matchTint(match))
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(match.label)
+
             Button {
                 let task = Task { await viewModel.startNextJob(job) }
                 activeTasks.append(task)
@@ -843,7 +943,8 @@ struct PrinterDetailView: View {
                     .font(.subheadline)
                     .frame(maxWidth: .infinity, minHeight: 44)
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(.borderedProminent)
+            .tint(Color.pfSuccess)
             .disabled(!printer.isOnline || !viewModel.isIdle
                       || viewModel.isDispatching || viewModel.isPerformingAction
                       || job.job.rowVersion?.isEmpty != false)
@@ -851,10 +952,7 @@ struct PrinterDetailView: View {
                         || authViewModel.currentUser?.roles.contains("farm_admin") == true))
             .accessibilityIdentifier("printer.detail.queue.dispatch.\(job.id)")
             .accessibilityLabel("Start \(title) on this printer")
-            }
         }
-        .padding()
-        .operatorCard()
         .accessibilityIdentifier("printer.detail.queue.row.\(job.id)")
     }
 
@@ -929,9 +1027,12 @@ struct PrinterDetailView: View {
     // MARK: - Camera Snapshot
 
     private func cameraSection(_ printer: Printer) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        let hasCamera = hasUsableCamera(for: printer)
+        let previewPath = viewModel.currentJobThumbnailUrl
+        let previewRequest = "\(printer.id.uuidString)|\(printer.state ?? "")|\(previewPath ?? "")|\(hasCamera)"
+        return VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("Camera")
+                Text(hasCamera ? "Camera" : previewPath != nil ? "Print image" : "Camera")
                     .font(.headline)
 
                 if viewModel.canShowLivestream || viewModel.cameraPreviewMode == .snapshotPolling {
@@ -984,20 +1085,80 @@ struct PrinterDetailView: View {
             }
 
             Group {
-                if let thumbnail = viewModel.currentJobThumbnailUrl,
-                   viewModel.cameraPreviewMode == .none || viewModel.cameraPreviewMode == .unsupported {
-                    remoteThumbnail(thumbnail, size: 168)
-                        .frame(maxWidth: .infinity)
+                if !hasCamera {
+                    if let printPreviewImage, printPreviewPath == previewPath {
+                        Image(uiImage: printPreviewImage)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .accessibilityLabel("Current print preview")
+                    } else {
+                        noCameraPlaceholder()
+                    }
                 } else {
                     cameraPreview(printer)
                 }
             }
             .frame(maxWidth: .infinity)
+            .frame(height: 220)
+            .clipped()
             .background(Color.pfCard, in: RoundedRectangle(cornerRadius: 12))
             .overlay(
                 RoundedRectangle(cornerRadius: 12)
                     .strokeBorder(Color.pfBorder, lineWidth: 1)
             )
+        }
+        .accessibilityIdentifier("printer.detail.hero")
+        .task(id: previewRequest) {
+            await loadPrintPreview(printer: printer, path: previewPath, hasCamera: hasCamera)
+        }
+        .onDisappear {
+            printPreviewImage = nil
+            printPreviewPath = nil
+        }
+    }
+
+    private func hasUsableCamera(for printer: Printer) -> Bool {
+        if viewModel.snapshotData != nil { return true }
+        switch viewModel.cameraPreviewMode {
+        case .mjpegStream:
+            return viewModel.showLivestream
+                ? validURL(printer.cameraStreamUrl) || validURL(printer.cameraSnapshotUrl)
+                : validURL(printer.cameraSnapshotUrl)
+        case .snapshotPolling, .directSnapshot:
+            return viewModel.cameraPreviewMode == .snapshotPolling
+                ? printer.isOnline
+                : validURL(printer.cameraSnapshotUrl)
+        case .unsupported, .none:
+            return false
+        }
+    }
+
+    private func validURL(_ value: String?) -> Bool {
+        guard let value, let url = URL(string: value) else { return false }
+        return url.scheme == "http" || url.scheme == "https"
+    }
+
+    @MainActor
+    private func loadPrintPreview(printer: Printer, path: String?, hasCamera: Bool) async {
+        printPreviewImage = nil
+        printPreviewPath = nil
+        guard !hasCamera,
+              ["printing", "paused"].contains(printer.state?.lowercased() ?? ""),
+              let path else { return }
+        do {
+            let data = try await services.printerService.getCurrentJobThumbnail(id: printer.id, path: path)
+            guard !Task.isCancelled,
+                  viewModel.printer?.id == printer.id,
+                  viewModel.currentJobThumbnailUrl == path,
+                  let image = UIImage(data: data) else { return }
+            printPreviewImage = image
+            printPreviewPath = path
+        } catch {
+            guard !Task.isCancelled else { return }
+            printPreviewImage = nil
+            printPreviewPath = nil
+            Self.logger.notice("Current-job preview unavailable")
         }
     }
 
@@ -1061,100 +1222,6 @@ struct PrinterDetailView: View {
         case .none:
             noCameraPlaceholder()
         }
-    }
-
-    // MARK: - Failure Detection Summary
-
-    private func failureDetectionSummary(_ printer: Printer) -> some View {
-        let status = viewModel.failureDetectionStatus
-        let displayState = status?.state ?? "checking"
-        let stateColor: Color = {
-            switch displayState {
-            case "monitoring": return .pfSuccess
-            case "error": return .pfError
-            case "misconfigured": return .pfWarning
-            default: return .pfTextSecondary
-            }
-        }()
-        let stateLabel: String = {
-            switch displayState {
-            case "monitoring": return "Guarding"
-            case "idle": return "Ready"
-            case "misconfigured": return "Needs Setup"
-            case "error": return "Error"
-            case "disabled": return printer.obicoEnabled ? "Standby" : "Off"
-            default: return printer.obicoEnabled ? "Checking" : "Off"
-            }
-        }()
-
-        return VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
-                Image(systemName: "shield.checkered")
-                    .font(.subheadline)
-                    .foregroundStyle(stateColor)
-                Text("Failure Detection")
-                    .font(.subheadline.weight(.medium))
-                Spacer()
-                Text(stateLabel)
-                    .font(.caption2.weight(.semibold))
-                    .textCase(.uppercase)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(stateColor.opacity(0.15), in: Capsule())
-                    .foregroundStyle(stateColor)
-            }
-
-            if let status {
-                switch status.lastOutcome {
-                case "failure":
-                    HStack(spacing: 6) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .font(.caption2)
-                            .foregroundStyle(Color.pfError)
-                        if let confidence = status.lastConfidence {
-                            Text("Failure detected • \(Int(confidence * 100))% confidence")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        } else {
-                            Text("Failure detected")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        if status.lastAutoPaused == true {
-                            Text("• auto-paused")
-                                .font(.caption)
-                                .foregroundStyle(Color.pfError)
-                        }
-                    }
-                case "healthy":
-                    HStack(spacing: 6) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.caption2)
-                            .foregroundStyle(Color.pfSuccess)
-                        Text("No failure detected")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                default:
-                    if displayState == "monitoring" {
-                        HStack(spacing: 6) {
-                            Image(systemName: "eye.fill")
-                                .font(.caption2)
-                                .foregroundStyle(Color.pfSuccess)
-                            Text("Actively watching this print")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-            }
-        }
-        .padding(12)
-        .background(Color.pfCard, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .strokeBorder(stateColor.opacity(0.3), lineWidth: 1)
-        )
     }
 
     #if canImport(UIKit)

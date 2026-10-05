@@ -18,6 +18,8 @@ final class SpoolInventoryViewModel {
     var isLoading = false
     var errorMessage: String?
     var isViewActive = true
+    private(set) var printerAssignments: [Int: String] = [:]
+    private(set) var printerAssignmentsLoaded = false
 
     // NFC scanning state
     var isScanning = false
@@ -59,10 +61,15 @@ final class SpoolInventoryViewModel {
 
     private let logger = Logger(subsystem: "com.printfarmer.ios", category: "SpoolInventory")
     @ObservationIgnored private var spoolService: (any SpoolServiceProtocol)?
+    @ObservationIgnored private var printerService: (any PrinterServiceProtocol)?
     @ObservationIgnored private var nfcScanner: (any SpoolScannerProtocol)?
 
     func configure(spoolService: any SpoolServiceProtocol) {
         self.spoolService = spoolService
+    }
+
+    func configure(printerService: any PrinterServiceProtocol) {
+        self.printerService = printerService
     }
 
     func configureNFC(scanner: any SpoolScannerProtocol) {
@@ -72,6 +79,34 @@ final class SpoolInventoryViewModel {
     var availableMaterials: [String] {
         let materials = Set(spools.map { $0.material })
         return materials.sorted()
+    }
+
+    func count(for status: SpoolStatus?) -> Int {
+        guard let status else { return spools.count }
+        return spools.filter { spool in
+            switch status {
+            case .available:
+                return !spool.inUse && !(spool.archived ?? false)
+            case .inUse:
+                return spool.inUse
+            case .low:
+                guard let remaining = spool.remainingWeightG,
+                      let initial = spool.initialWeightG,
+                      initial > 0 else { return false }
+                return remaining / initial < 0.2
+            case .empty:
+                if let remaining = spool.remainingWeightG {
+                    return remaining == 0
+                } else if spool.initialWeightG != nil {
+                    return true
+                }
+                return false
+            }
+        }.count
+    }
+
+    func assignedPrinterName(for spoolID: Int) -> String? {
+        printerAssignments[spoolID]
     }
 
     var filteredSpools: [SpoolmanSpool] {
@@ -160,6 +195,27 @@ final class SpoolInventoryViewModel {
         } catch {
             logger.warning("Failed to load spools: \(error.localizedDescription)")
             errorMessage = error.localizedDescription
+        }
+
+        if let printerService {
+            printerAssignmentsLoaded = false
+            do {
+                let printers = try await printerService.list()
+                printerAssignments = Dictionary(
+                    printers.compactMap { printer in
+                        guard printer.spoolInfo?.hasActiveSpool == true,
+                              let spoolID = printer.spoolInfo?.activeSpoolId else { return nil }
+                        return (spoolID, printer.name)
+                    },
+                    uniquingKeysWith: { first, _ in first }
+                )
+                printerAssignmentsLoaded = true
+            } catch {
+                printerAssignments = [:]
+                logger.warning("Failed to load printer spool assignments: \(error.localizedDescription)")
+            }
+        } else {
+            printerAssignmentsLoaded = false
         }
 
         isLoading = false

@@ -1630,15 +1630,23 @@ final class PrinterControlsViewModelTests: XCTestCase {
         caps.supportsAbsoluteMovement = true
         caps.supportsDisableMotors = true
         for (state, online) in [("printing", true), ("paused", true), ("starting", true), ("ready", false)] {
+            mockService.setTemperaturesCalledWith = nil
             var printer = try idlePrinter()
             printer.state = state
             printer.isOnline = online
             let vm = try makeViewModel(printer: printer, capabilities: caps, verifiedAbsolute: true)
+            mockService.statusToReturn = VerifiedSafetyFixtures.status(
+                id: printer.id, isOnline: online, state: state
+            )
             await vm.loadCapabilities()
+            XCTAssertNil(
+                mockService.setTemperaturesCalledWith,
+                "Reading capabilities cannot issue a heater command while \(state)"
+            )
             await vm.setHeaterTarget(.hotend, target: 200)
             await vm.moveTo(x: 1, y: 0, z: 10, feedrateMmMin: nil)
             await vm.disableMotors()
-            XCTAssertNil(mockService.setTemperaturesCalledWith)
+            XCTAssertNil(mockService.setTemperaturesCalledWith, "Heater commands must be blocked while \(state)")
             XCTAssertNil(mockService.moveToCalledWith)
             XCTAssertNil(mockService.disableMotorsCalledWith)
         }
@@ -2715,10 +2723,10 @@ enum VerifiedSafetyFixtures {
 
     static func status(
         id: UUID, at date: Date = Date(), position: SafetyVector3Dto = .init(x: 20, y: 30, z: 10),
-        isOnline: Bool = true
+        isOnline: Bool = true, state: String = "ready"
     ) -> PrinterStatusDetail {
         var status = PrinterStatusDetail(
-            id: id, isOnline: isOnline, state: "ready", progress: nil, jobName: nil,
+            id: id, isOnline: isOnline, state: state, progress: nil, jobName: nil,
             thumbnailUrl: nil, cameraStreamUrl: nil, cameraSnapshotUrl: nil,
             x: position.x, y: position.y, z: position.z,
             hotendTemp: 220, bedTemp: nil, hotendTarget: 220, bedTarget: nil,

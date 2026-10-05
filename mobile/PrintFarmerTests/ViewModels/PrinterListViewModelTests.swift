@@ -9,7 +9,6 @@ final class PrinterListViewModelTests: XCTestCase {
         XCTAssertTrue(viewModel.printers.isEmpty)
         XCTAssertEqual(viewModel.searchText, "")
         XCTAssertEqual(viewModel.selectedStatus, .all)
-        XCTAssertNil(viewModel.selectedLocationId)
         XCTAssertTrue(viewModel.filteredPrinters.isEmpty)
     }
 
@@ -27,16 +26,25 @@ final class PrinterListViewModelTests: XCTestCase {
     }
 
     func testSearchIsCaseInsensitiveAndStatusFilterUsesFarmProjection() throws {
-        let online = try TestData.decodePrinter(from: TestJSON.printer)
-        let offline = try TestData.decodePrinter(from: TestJSON.printerMinimal)
-        let viewModel = PrinterListViewModel(initialPrinters: [online, offline])
+        var printing = try TestData.decodePrinter(from: TestJSON.printer)
+        printing.state = "printing"
+        printing.isOnline = true
+        var idle = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        idle.state = "idle"
+        idle.isOnline = true
+        let viewModel = PrinterListViewModel(initialPrinters: [printing, idle])
 
         viewModel.searchText = "prusa"
-        XCTAssertEqual(viewModel.filteredPrinters.map(\.id), [online.id])
+        XCTAssertEqual(viewModel.filteredPrinters.map(\.id), [printing.id])
 
         viewModel.searchText = ""
-        viewModel.selectedStatus = .offline
-        XCTAssertEqual(viewModel.filteredPrinters.map(\.id), [offline.id])
+        viewModel.selectedStatus = .printing
+        XCTAssertEqual(viewModel.filteredPrinters.map(\.id), [printing.id])
+        viewModel.selectedStatus = .idle
+        XCTAssertEqual(viewModel.filteredPrinters.map(\.id), [idle.id])
+        XCTAssertEqual(viewModel.count(for: .all), 2)
+        XCTAssertEqual(viewModel.count(for: .printing), 1)
+        XCTAssertEqual(viewModel.count(for: .idle), 1)
     }
 
     func testNeedsAttentionIncludesPendingReadyAndFeedPrinters() throws {

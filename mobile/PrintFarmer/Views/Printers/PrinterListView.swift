@@ -118,7 +118,6 @@ struct PrinterListView: View {
             guard needsAttention else { return }
             viewModel.selectedStatus = .needsAttention
             viewModel.searchText = ""
-            viewModel.selectedLocationId = nil
             router.pendingNeedsAttentionFilter = false
         }
         .accessibilityIdentifier(navigationContext.accessibilityIdentifier)
@@ -176,7 +175,6 @@ struct PrinterListView: View {
                 _ = await attentionViewModel.refresh()
             }
             .rootNavigationChrome(for: navigationContext.appTab) {
-                statusFilterMenu
                 if navigationContext == .farm {
                     Button {
                         showingPrinterLookup = true
@@ -214,14 +212,20 @@ struct PrinterListView: View {
     private var printerList: some View {
         ScrollView {
             LazyVStack(spacing: 12) {
-                // Location filter pills
-                if viewModel.availableLocations.count > 1 {
-                    locationFilterBar
-                }
+                statusFilterBar
 
                 if viewModel.filteredPrinters.isEmpty {
-                    ContentUnavailableView.search(text: viewModel.searchText)
+                    if viewModel.searchText.isEmpty {
+                        ContentUnavailableView {
+                            Label("No Printers in This Filter", systemImage: "line.3.horizontal.decrease.circle")
+                        } description: {
+                            Text("Choose another Farm filter to see printers.")
+                        }
                         .padding(.top, 40)
+                    } else {
+                        ContentUnavailableView.search(text: viewModel.searchText)
+                            .padding(.top, 40)
+                    }
                 } else {
                     LazyVGrid(columns: iPadColumns, spacing: 12) {
                         ForEach(viewModel.filteredPrinters) { printer in
@@ -269,55 +273,38 @@ struct PrinterListView: View {
         }?.detail
     }
 
-    private var statusFilterMenu: some View {
-        Menu {
-            ForEach(PrinterListViewModel.StatusFilter.allCases) { filter in
-                Button {
-                    viewModel.selectedStatus = filter
-                } label: {
-                    if viewModel.selectedStatus == filter {
-                        Label(filter.rawValue, systemImage: "checkmark")
-                    } else {
-                        Text(filter.rawValue)
-                    }
-                }
-            }
-        } label: {
-            Image(systemName: "line.3.horizontal.decrease.circle")
-                .symbolVariant(viewModel.selectedStatus != .all ? .fill : .none)
-        }
-        .frame(minWidth: 44, minHeight: 44)
-        .accessibilityLabel("Filter printers by status")
-        .accessibilityHint("Chooses which printer statuses are shown.")
-        .accessibilityIdentifier(
-            "\(navigationContext.accessibilityPrefix).statusFilter"
-        )
-    }
-
-    private var locationFilterBar: some View {
+    private var statusFilterBar: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                FilterChip(
-                    title: "All Locations",
-                    identifier: "\(navigationContext.accessibilityPrefix).locationFilter.all",
-                    isSelected: viewModel.selectedLocationId == nil
-                ) {
-                    viewModel.selectedLocationId = nil
-                }
-
-                ForEach(viewModel.availableLocations, id: \.id) { location in
+                ForEach(PrinterListViewModel.StatusFilter.allCases) { filter in
+                    let count = viewModel.count(for: filter)
                     FilterChip(
-                        title: location.name,
-                        identifier:
-                            "\(navigationContext.accessibilityPrefix).locationFilter."
-                                + location.id.uuidString,
-                        isSelected: viewModel.selectedLocationId == location.id
+                        title: filterCountTitle(filter, count: count),
+                        identifier: "farm.filter.\(filter.id)",
+                        isSelected: viewModel.selectedStatus == filter
                     ) {
-                        viewModel.selectedLocationId = location.id
+                        viewModel.selectedStatus = filter
                     }
                 }
             }
+            .padding(.horizontal, 4)
         }
+        .accessibilityIdentifier("farm.filters")
+    }
+
+    private func filterCountTitle(
+        _ filter: PrinterListViewModel.StatusFilter,
+        count: Int
+    ) -> String {
+        guard filter == .needsAttention,
+              services.capabilitiesService.resolved.attentionEnabled,
+              !(attentionViewModel.phase == .loaded
+                && attentionViewModel.snapshot?.nextCursor == nil
+                && attentionViewModel.loadFailure == nil
+                && attentionViewModel.paginationFailure == nil) else {
+            return "\(filter.rawValue) \(count)"
+        }
+        return "\(filter.rawValue) —"
     }
 
     private func printerAccessibilityIdentifier(for printer: Printer) -> String {

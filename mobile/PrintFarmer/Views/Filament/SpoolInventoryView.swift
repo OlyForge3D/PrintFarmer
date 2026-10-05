@@ -48,9 +48,7 @@ struct SpoolInventoryView: View {
                     }
                 } else if viewModel.hasActiveSearch && viewModel.filteredSpools.isEmpty {
                     VStack(spacing: 0) {
-                        materialFilterChips
-                        statusFilterChips
-                        nfcFilterChip
+                        inventoryFilters
                         Spacer()
                         ContentUnavailableView {
                             Label("No Matching Spools", systemImage: "line.3.horizontal.decrease.circle")
@@ -69,9 +67,7 @@ struct SpoolInventoryView: View {
                     }
                 } else {
                     VStack(spacing: 0) {
-                        materialFilterChips
-                        statusFilterChips
-                        nfcFilterChip
+                        inventoryFilters
                         spoolList
                     }
                 }
@@ -126,18 +122,6 @@ struct SpoolInventoryView: View {
                 .accessibilityHint("Opens camera, NFC, and continuous spool intake actions.")
                 .accessibilityIdentifier("inventory.scan")
 
-                Button {
-                    showAddSpool = true
-                } label: {
-                    Image(systemName: "plus")
-                        .frame(
-                            minWidth: RootNavigationChrome.minimumTouchTarget,
-                            minHeight: RootNavigationChrome.minimumTouchTarget
-                        )
-                }
-                .accessibilityLabel("Add spool")
-                .accessibilityHint("Opens the form to register a filament spool.")
-                .accessibilityIdentifier("inventory.addSpool")
             }
             .searchable(text: $viewModel.searchText, prompt: "Search by name, material, color…")
             .refreshable {
@@ -216,6 +200,7 @@ struct SpoolInventoryView: View {
             }
             .task {
                 viewModel.configure(spoolService: services.spoolService)
+                viewModel.configure(printerService: services.printerService)
                 #if canImport(UIKit)
                 if let nfc = services.nfcService {
                     viewModel.configureNFC(scanner: nfc)
@@ -241,29 +226,39 @@ struct SpoolInventoryView: View {
         }
     }
 
-    private var materialFilterChips: some View {
+    private var inventoryFilters: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                // "All" chip
-                Button {
+                inventoryFilter(
+                    title: "All \(viewModel.count(for: nil))",
+                    selected: viewModel.selectedStatus == nil
+                        && viewModel.selectedMaterial == nil
+                        && !viewModel.showOnlyMissingNFC
+                ) {
+                    withAnimation { viewModel.clearFilters() }
+                }
+                inventoryFilter(
+                    title: "Loaded \(viewModel.count(for: .inUse))",
+                    selected: viewModel.selectedStatus == .inUse
+                ) {
                     withAnimation {
-                        viewModel.selectedMaterial = nil
+                        viewModel.selectedStatus = viewModel.selectedStatus == .inUse ? nil : .inUse
                     }
-                } label: {
-                    Text("All")
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(viewModel.selectedMaterial == nil ? .white : Color.pfTextSecondary)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(
-                            viewModel.selectedMaterial == nil ? Color.pfAccent : Color.pfBackgroundTertiary,
-                            in: Capsule()
-                        )
+                }
+                inventoryFilter(
+                    title: "Low \(viewModel.count(for: .low))",
+                    selected: viewModel.selectedStatus == .low
+                ) {
+                    withAnimation {
+                        viewModel.selectedStatus = viewModel.selectedStatus == .low ? nil : .low
+                    }
                 }
 
-                // Material chips
                 ForEach(viewModel.availableMaterials, id: \.self) { material in
-                    Button {
+                    inventoryFilter(
+                        title: material,
+                        selected: viewModel.selectedMaterial == material
+                    ) {
                         withAnimation {
                             if viewModel.selectedMaterial == material {
                                 viewModel.selectedMaterial = nil
@@ -271,129 +266,103 @@ struct SpoolInventoryView: View {
                                 viewModel.selectedMaterial = material
                             }
                         }
-                    } label: {
-                        Text(material)
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(viewModel.selectedMaterial == material ? .white : Color.pfTextSecondary)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(
-                                viewModel.selectedMaterial == material ? Color.pfAccent : Color.pfBackgroundTertiary,
-                                in: Capsule()
-                            )
                     }
                 }
-            }
-            .padding(.horizontal)
-        }
-        .padding(.vertical, 8)
-    }
-
-    private var statusFilterChips: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                // "All" chip
                 Button {
-                    withAnimation {
-                        viewModel.selectedStatus = nil
-                    }
+                    withAnimation { viewModel.showOnlyMissingNFC.toggle() }
                 } label: {
-                    Text("All")
+                    Label("No NFC", systemImage: "wave.3.right.circle")
                         .font(.caption.weight(.medium))
-                        .foregroundStyle(viewModel.selectedStatus == nil ? .white : Color.pfTextSecondary)
+                        .foregroundStyle(viewModel.showOnlyMissingNFC ? .white : Color.pfTextSecondary)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
                         .background(
-                            viewModel.selectedStatus == nil ? Color.pfAccent : Color.pfBackgroundTertiary,
+                            viewModel.showOnlyMissingNFC ? Color.pfAccent : Color.pfBackgroundTertiary,
                             in: Capsule()
                         )
                 }
-
-                // Status chips
-                ForEach(SpoolStatus.allCases, id: \.self) { status in
-                    Button {
-                        withAnimation {
-                            if viewModel.selectedStatus == status {
-                                viewModel.selectedStatus = nil
-                            } else {
-                                viewModel.selectedStatus = status
-                            }
-                        }
-                    } label: {
-                        Text(status.rawValue)
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(viewModel.selectedStatus == status ? .white : Color.pfTextSecondary)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(
-                                viewModel.selectedStatus == status ? Color.pfAccent : Color.pfBackgroundTertiary,
-                                in: Capsule()
-                            )
-                    }
-                }
+                .accessibilityLabel(
+                    viewModel.showOnlyMissingNFC
+                        ? "Showing spools without NFC tags"
+                        : "Filter to spools without NFC tags"
+                )
             }
             .padding(.horizontal)
         }
         .padding(.vertical, 8)
     }
 
-    private var nfcFilterChip: some View {
-        HStack {
-            Button {
-                withAnimation {
-                    viewModel.showOnlyMissingNFC.toggle()
-                }
-            } label: {
-                Label("No NFC Tag", systemImage: "wave.3.right.circle")
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(viewModel.showOnlyMissingNFC ? .white : Color.pfTextSecondary)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(
-                        viewModel.showOnlyMissingNFC ? Color.pfAccent : Color.pfBackgroundTertiary,
-                        in: Capsule()
-                    )
-            }
-            .accessibilityLabel(viewModel.showOnlyMissingNFC ? "Showing spools without NFC tags" : "Filter to spools without NFC tags")
-
-            Spacer()
+    private func inventoryFilter(
+        title: String,
+        selected: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(selected ? .white : Color.pfTextSecondary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(
+                    selected ? Color.pfAccent : Color.pfBackgroundTertiary,
+                    in: Capsule()
+                )
         }
-        .padding(.horizontal)
-        .padding(.bottom, 4)
     }
 
     private var spoolList: some View {
         ScrollViewReader { proxy in
-            List {
-                ForEach(viewModel.filteredSpools) { spool in
-                    SpoolInventoryRowView(spool: spool)
-                        .listRowBackground(
-                            viewModel.highlightedSpoolId == spool.id
-                                ? Color.pfAccent.opacity(0.15)
-                                : nil
+            VStack(spacing: 0) {
+                Button {
+                    showAddSpool = true
+                } label: {
+                    Label("Add spool", systemImage: "plus")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity, minHeight: 48)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(Color.pfAccent)
+                .accessibilityHint("Opens the form to register a filament spool.")
+                .accessibilityIdentifier("inventory.addSpool")
+                .padding(.horizontal)
+                .padding(.vertical, 8)
+
+                List {
+                    ForEach(viewModel.filteredSpools) { spool in
+                        SpoolInventoryRowView(
+                            spool: spool,
+                            assignedPrinterName: viewModel.assignedPrinterName(for: spool.id),
+                            assignmentsLoaded: viewModel.printerAssignmentsLoaded
                         )
-                        .id(spool.id)
-                        .contextMenu {
-                            if spool.hasNfcTag != true {
-                                Button {
-                                    let task = Task {
-                                        let filament = await viewModel.matchingFilamentForTagPreview(for: spool)
-                                        nfcWriteTarget = NFCWriteTarget(spool: spool, filament: filament)
+                            .listRowBackground(
+                                viewModel.highlightedSpoolId == spool.id
+                                    ? Color.pfAccent.opacity(0.15)
+                                    : nil
+                            )
+                            .id(spool.id)
+                            .contextMenu {
+                                if spool.hasNfcTag != true {
+                                    Button {
+                                        let task = Task {
+                                            let filament = await viewModel.matchingFilamentForTagPreview(for: spool)
+                                            nfcWriteTarget = NFCWriteTarget(spool: spool, filament: filament)
+                                        }
+                                        activeTasks.append(task)
+                                    } label: {
+                                        Label("Write NFC Tag", systemImage: "wave.3.right")
                                     }
-                                    activeTasks.append(task)
-                                } label: {
-                                    Label("Write NFC Tag", systemImage: "wave.3.right")
                                 }
                             }
+                    }
+                    .onDelete { indexSet in
+                        let spoolsToDelete = indexSet.map { viewModel.filteredSpools[$0] }
+                        for spool in spoolsToDelete {
+                            let task = Task { await viewModel.deleteSpool(spool) }
+                            activeTasks.append(task)
                         }
-            }
-            .onDelete { indexSet in
-                let spoolsToDelete = indexSet.map { viewModel.filteredSpools[$0] }
-                for spool in spoolsToDelete {
-                    let task = Task { await viewModel.deleteSpool(spool) }
-                    activeTasks.append(task)
+                    }
                 }
-            }
+                .listStyle(.plain)
             }
             .onChange(of: viewModel.highlightedSpoolId) { _, newId in
                 // Scroll animation only. Highlight expiry is owned synchronously
@@ -414,99 +383,147 @@ struct SpoolInventoryView: View {
 
 struct SpoolInventoryRowView: View {
     let spool: SpoolmanSpool
+    var assignedPrinterName: String? = nil
+    var assignmentsLoaded = false
 
     private var weightPercent: Double? {
         guard let remaining = spool.remainingWeightG,
               let initial = spool.initialWeightG,
-              initial > 0 else { return nil }
-        return remaining / initial
+              remaining.isFinite, remaining >= 0,
+              initial.isFinite, initial > 0 else { return nil }
+        return min(max(remaining / initial, 0), 1)
     }
 
     private var weightColor: Color {
         guard let percent = weightPercent else { return .gray }
-        if percent > 0.5 { return .green }
-        if percent > 0.2 { return .yellow }
-        return .red
+        if percent < 0.2 { return .pfError }
+        if percent < 0.5 { return .pfWarning }
+        return .pfSuccess
     }
 
     var body: some View {
         HStack(spacing: 12) {
-            Circle()
-                .fill(Color(hex: spool.colorHex ?? "#808080"))
-                .frame(width: 32, height: 32)
-                .overlay(
-                    Circle()
-                        .strokeBorder(Color.pfBorder, lineWidth: 1)
-                )
+            spoolReel
 
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    Text(spool.filamentName ?? spool.name)
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(Color.pfTextPrimary)
+            VStack(alignment: .leading, spacing: 5) {
+                Text(spool.filamentName ?? spool.name)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(Color.pfTextPrimary)
+                    .lineLimit(2)
 
-                    if spool.inUse {
-                        Image(systemName: "printer.fill")
-                            .font(.caption2)
-                            .foregroundStyle(Color.pfAccent)
-                    }
-
-                    if spool.hasNfcTag == true {
-                        Image(systemName: "wave.3.right")
-                            .font(.caption2)
-                            .foregroundStyle(.green)
-                            .accessibilityLabel("NFC tag present")
-                    } else {
-                        Image(systemName: "minus")
-                            .font(.caption2)
-                            .foregroundStyle(.gray)
-                            .accessibilityLabel("NFC tag not written")
-                    }
+                if let assignedPrinterName {
+                    Label("On \(assignedPrinterName)", systemImage: "printer.fill")
+                        .font(.caption)
+                        .foregroundStyle(Color.pfAccent)
+                        .lineLimit(1)
+                } else if spool.inUse || !assignmentsLoaded {
+                    Text("Printer assignment unavailable")
+                        .font(.caption)
+                        .foregroundStyle(Color.pfTextSecondary)
+                } else {
+                    Text(spool.location.map { "\($0) · unassigned" } ?? "Unassigned")
+                        .font(.caption)
+                        .foregroundStyle(Color.pfTextSecondary)
+                        .lineLimit(1)
                 }
 
                 HStack(spacing: 6) {
                     Text(spool.material)
-                        .font(.caption.weight(.medium))
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Color.pfBackgroundTertiary, in: Capsule())
-
-                    if let vendor = spool.vendor {
-                        Text(vendor)
-                            .font(.caption)
-                            .foregroundStyle(Color.pfTextSecondary)
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(Color.pfTextSecondary)
+                    if let vendor = spool.vendor, !vendor.isEmpty {
+                        Text("· \(vendor)")
+                            .font(.caption2)
+                            .foregroundStyle(Color.pfTextTertiary)
+                            .lineLimit(1)
+                    }
+                    if spool.hasNfcTag == true {
+                        Image(systemName: "wave.3.right")
+                            .font(.caption2)
+                            .foregroundStyle(Color.pfSuccess)
+                            .accessibilityLabel("NFC tag present")
+                    } else {
+                        Image(systemName: "wave.3.right")
+                            .font(.caption2)
+                            .foregroundStyle(Color.pfTextTertiary)
+                            .accessibilityLabel("NFC tag not written")
                     }
                 }
             }
 
-            Spacer()
+            Spacer(minLength: 4)
 
             VStack(alignment: .trailing, spacing: 4) {
-                if let remaining = spool.remainingWeightG {
-                    Text("\(Int(remaining))g")
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(Color.pfTextPrimary)
-                }
-                if let initial = spool.initialWeightG, let remaining = spool.remainingWeightG, initial > 0 {
-                    Text("\(Int(remaining))/\(Int(initial))g")
+                Text(spool.remainingWeightG.flatMap {
+                    $0.isFinite && $0 >= 0 ? "\(Int($0.rounded())) g" : nil
+                } ?? "— g")
+                    .font(.subheadline.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(Color.pfTextPrimary)
+                if let initial = spool.initialWeightG, initial.isFinite, initial > 0,
+                   let remaining = spool.remainingWeightG, remaining.isFinite, remaining >= 0 {
+                    Text("of \(Int(initial.rounded())) g")
                         .font(.caption2)
                         .foregroundStyle(Color.pfTextTertiary)
-
-                    // Weight progress bar
-                    GeometryReader { geo in
-                        ZStack(alignment: .leading) {
-                            Capsule()
-                                .fill(Color.pfBackgroundTertiary)
-
-                            Capsule()
-                                .fill(weightColor)
-                                .frame(width: geo.size.width * (weightPercent ?? 0))
+                    if let weightPercent {
+                        GeometryReader { geo in
+                            ZStack(alignment: .leading) {
+                                Capsule().fill(Color.pfBackgroundTertiary)
+                                Capsule()
+                                    .fill(weightColor)
+                                    .frame(width: geo.size.width * weightPercent)
+                            }
                         }
+                        .frame(width: 54, height: 4)
                     }
-                    .frame(width: 60, height: 4)
+                    if let weightPercent, weightPercent < 0.2 {
+                        Text("Low")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(Color.pfError)
+                    }
+                } else {
+                    Text("Weight unavailable")
+                        .font(.caption2)
+                        .foregroundStyle(Color.pfTextTertiary)
                 }
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 7)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("inventory.spool.\(spool.id)")
+        .accessibilityLabel(spoolAccessibilityLabel)
+    }
+
+    private var spoolAccessibilityLabel: String {
+        var parts = [spool.filamentName ?? spool.name, spool.material]
+        if let assignedPrinterName {
+            parts.append("On \(assignedPrinterName)")
+        } else if spool.inUse || !assignmentsLoaded {
+            parts.append("Printer assignment unavailable")
+        } else {
+            parts.append(spool.location.map { "\($0), unassigned" } ?? "Unassigned")
+        }
+        if let remaining = spool.remainingWeightG, remaining.isFinite, remaining >= 0 {
+            parts.append("\(Int(remaining.rounded())) grams remaining")
+        } else {
+            parts.append("Weight unavailable")
+        }
+        return parts.joined(separator: ", ")
+    }
+
+    private var spoolReel: some View {
+        ZStack {
+            Circle()
+                .fill(Color(hex: spool.colorHex ?? "#808080"))
+            Circle()
+                .strokeBorder(Color.pfBorder.opacity(0.8), lineWidth: 1)
+            Circle()
+                .fill(Color.pfBackground)
+                .frame(width: 13, height: 13)
+            Circle()
+                .strokeBorder(Color.pfBorder, lineWidth: 1)
+                .frame(width: 13, height: 13)
+        }
+        .frame(width: 44, height: 44)
+        .accessibilityHidden(true)
     }
 }
