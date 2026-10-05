@@ -5,8 +5,8 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Farm.Slicer.Module.Tests;
 
 /// <summary>
-/// Issue #3168: <see cref="SlicerDbContext"/> honours a distinct <c>ConnectionStrings:SlicerDatabase</c>
-/// so a split application/slicer database is visible to the host-update preflight guard.
+/// Issue #3168: <see cref="SlicerDbContext"/> honours a distinct
+/// <c>ConnectionStrings:SlicerDatabase</c> for split application/slicer deployments.
 /// </summary>
 public sealed class SlicerModuleExtensionsSlicerDatabaseTests
 {

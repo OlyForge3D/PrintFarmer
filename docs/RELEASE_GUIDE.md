@@ -27,19 +27,8 @@ post_date: "2026-09-16"
    its full 40-character ancestor SHA.
 3. Run it once. The summary identifies the pinned source, check results and
    release URL. A successful release contains generated GitHub release notes, pinned image
-   references, corresponding source, license notices, SBOMs, a signed
-   `update-manifest.json` plus its `update-manifest.sigstore.json` bundle, and the
-   self-contained host-update recovery CLI archives for `linux-x64`, `linux-arm64`
-   and `win-x64`, one `printfarmer-host-update-cli-v<version>-<runtime>.spdx.json`
-   SBOM per archive, and a signed `printfarmer-host-update-cli-v<version>-SHA256SUMS`
-   list covering the archives and SBOMs (see [Host-update runbook](HOST_UPDATE_RUNBOOK.md#install-the-signed-cli-package)),
-   and a signed `infrastructure-images.json` plus its `infrastructure-images.sigstore.json`
-   bundle naming the pinned infrastructure images for offline bundles (see
-   [Offline update recovery](OFFLINE_UPDATE_RECOVERY.md#application-and-infrastructure-images-3061)),
-   and a signed `offline-recovery-instructions.json` plus its
-   `offline-recovery-instructions.sigstore.json` bundle naming the fixed host-local
-   import and recovery operations for that release (see
-   [Offline update recovery](OFFLINE_UPDATE_RECOVERY.md#recovery-instructions-and-host-local-import-3063)).
+   references, corresponding source, license notices, SBOMs, and a signed
+   `update-manifest.json` plus its `update-manifest.sigstore.json` bundle.
 
 There is no release ledger, reservation, signing ceremony, qualification receipt,
 counter recovery or abandonment step. The explicit version and permanent Git tag
@@ -87,11 +76,7 @@ artifacts are immutable and separate; publication binds them with a SHA-256
 check before upload. The sign job verifies the signature immediately after signing. The publish job
 binds the signature artifact to the exact manifest SHA-256, and
 `publish-release.mjs` verifies it before any permanent Git/image tag mutation
-and again immediately before the `gh release upload` call. The host-update CLI
-checksum list is signed in the same job under the same workflow identity; the
-publisher re-checks that it names exactly the three supported archives, that
-their hashes match, and its Cosign bundle, at both of those points. The CLI
-archives are built before any image, so a CLI build failure publishes nothing. Its `sequence` field is a collision-free,
+and again immediately before the `gh release upload` call. Its `sequence` field is a collision-free,
 stable-dominant encoding (see [installation readiness](DEPLOYMENT_UPDATE_STRATEGY.md)).
 
 The cross-language wire contract uses exactly these service IDs: `api`,
@@ -208,9 +193,9 @@ stable sequence or signed release identity. Existing UI inventory consequently
 does not acquire managed readiness; its canonical identity fields may read
 `Unknown`. Informational version/source remain in `version.json` and
 `release-identity.json`, not a signed identity embedded in the UI.
-The host updater currently exposes a metadata
-provider interface, not a production GitHub-feed adapter; its signature, complete-set,
-installation approval, active-print and runtime safety checks are unchanged.
+The release metadata layer currently exposes a provider interface, not a
+production GitHub-feed adapter for managed updates; its signature and
+complete-set checks are unchanged.
 Any consumer requiring the old signed set must reject its absence, not treat
 ordinary GitHub release notes or `container-images.json` as an authorized plan.
 See [installation readiness](DEPLOYMENT_UPDATE_STRATEGY.md).

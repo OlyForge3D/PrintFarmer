@@ -4,7 +4,6 @@ using System.Threading.Tasks;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.ChangeTracking;
 
 namespace Farm.Infrastructure.Repositories.Settings;
 
@@ -21,12 +20,6 @@ namespace Farm.Infrastructure.Repositories.Settings;
 /// - System initialization state tracking
 /// - Cross-instance state synchronization
 /// </remarks>
-public enum AppSettingsCreateResult
-{
-    Created,
-    DuplicateKey,
-}
-
 public interface IAppSettingsRepository
 {
     /// <summary>
@@ -61,17 +54,6 @@ public interface IAppSettingsRepository
     /// if the key already exists. Sets UpdatedAt to current UTC time.
     /// </remarks>
     Task SetAsync(string key, string value, CancellationToken ct = default);
-
-    /// <summary>
-    /// Creates a setting only when the key is absent and commits it atomically.
-    /// </summary>
-    /// <returns><c>true</c> when this call inserted the row; <c>false</c> when a concurrent writer won.</returns>
-    Task<bool> TryCreateAsync(string key, string value, CancellationToken ct = default);
-
-    async Task<AppSettingsCreateResult> TryCreateDetailedAsync(string key, string value, CancellationToken ct = default) =>
-        await TryCreateAsync(key, value, ct).ConfigureAwait(false)
-            ? AppSettingsCreateResult.Created
-            : AppSettingsCreateResult.DuplicateKey;
 
     /// <summary>
     /// Deletes a setting by its key.
@@ -127,39 +109,6 @@ public class EfAppSettingsRepository(AppDbContext db) : IAppSettingsRepository
             _ = await _db.AppSettingsEntities.AddAsync(setting, ct);
         }
     }
-
-    public async Task<bool> TryCreateAsync(string key, string value, CancellationToken ct = default)
-    {
-        AppSettingsEntity setting = new AppSettingsEntity
-        {
-            Key = key,
-            SettingsJson = value,
-            UpdatedAt = DateTime.UtcNow
-        };
-
-        EntityEntry<AppSettingsEntity> entry = await _db.AppSettingsEntities.AddAsync(setting, ct);
-        try
-        {
-            _ = await _db.SaveChangesAsync(ct);
-            return true;
-        }
-        catch (DbUpdateException exception)
-        {
-            entry.State = EntityState.Detached;
-            if (IsDuplicateKey(exception))
-            {
-                return false;
-            }
-
-            throw new Farm.Infrastructure.Services.HostUpdates.HostUpdateSubsystemUnavailableException(
-                "host_update_manifest_binding_database_unavailable", exception);
-        }
-    }
-
-    public async Task<AppSettingsCreateResult> TryCreateDetailedAsync(string key, string value, CancellationToken ct = default) =>
-        await TryCreateAsync(key, value, ct).ConfigureAwait(false)
-            ? AppSettingsCreateResult.Created
-            : AppSettingsCreateResult.DuplicateKey;
 
     internal static bool IsDuplicateKey(DbUpdateException exception)
     {

@@ -32,10 +32,7 @@ param(
     [switch]$AutoAdmin,
     [string]$AutoAdminUsername = "",
     [string]$AutoAdminPassword = "",
-    [string]$AutoAdminEmail = "",
-    [string]$HostUpdateCliVersion = $env:HOST_UPDATE_CLI_VERSION,
-    [string]$HostUpdateCliAssets = $env:HOST_UPDATE_CLI_ASSETS,
-    [switch]$InstallHostUpdateDaemon = ($env:HOST_UPDATE_DAEMON_SERVICE -eq 'true')
+    [string]$AutoAdminEmail = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -151,15 +148,6 @@ function Show-Help {
     Write-Host ""
     Write-Host "DEPLOYMENT OPTIONS:"
     Write-Host "    -DryRun                    Validate configuration without deploying"
-    Write-Host "    -HostUpdateCliVersion VER  Opt in to installing the signed host-update recovery CLI (X.Y.Z or"
-    Write-Host "                               X.Y.Z-insider.N) and writing host-update.json from .env. Requires cosign"
-    Write-Host "                               and an elevated shell. Not rollout authorization. Env: HOST_UPDATE_CLI_VERSION"
-    Write-Host "    -HostUpdateCliAssets DIR   Read the CLI archive, SHA256SUMS and its bundle from DIR (offline hosts)."
-    Write-Host "                               Env: HOST_UPDATE_CLI_ASSETS"
-    Write-Host "    -InstallHostUpdateDaemon   Opt in to registering the host-update daemon as the Windows service"
-    Write-Host "                               PrintFarmerHostUpdateDaemon (issue #3118). Requires -HostUpdateCliVersion."
-    Write-Host "                               Created Disabled and stopped; installing it grants nothing (daemon"
-    Write-Host "                               execution stays disabled pending #2982). Env: HOST_UPDATE_DAEMON_SERVICE=true"
     Write-Host "    -NonInteractive            Automated deployment (CI/CD mode)"
     Write-Host "    -TearDown                  Stop and remove containers/volumes (preserve images)"
     Write-Host "    -Redeploy                  Restart existing deployment with same config"
@@ -222,14 +210,14 @@ function Get-ImagesCacheManifest {
 # Save image cache metadata
 function Save-ImagesCacheMetadata {
     param([string]$ImagesDir = "./docker-images")
-    
+
     $manifest = Get-ImagesCacheManifest
     $cacheEntry = @{
         timestamp = Get-Date -Format "o"
         imagesDir = (Resolve-Path $ImagesDir).Path
         baseImages = @($script:BaseImages)
     } | ConvertTo-Json
-    
+
     Set-Content -Path $manifest -Value $cacheEntry
 }
 
@@ -245,7 +233,7 @@ function Load-ImagesCacheMetadata {
 # Check if image exists in Docker
 function Test-ImageExists {
     param([string]$ImageName)
-    
+
     try {
         $result = docker image inspect $ImageName 2>$null
         return $result -ne $null
@@ -269,7 +257,7 @@ function Find-CachedImagesDir {
         "/mnt/usb/docker-images",    # WSL USB mount
         "/media/*/docker-images"     # Linux mount points
     )
-    
+
     foreach ($path in $searchPaths) {
         try {
             # For absolute paths with drive letters, check if drive exists first
@@ -279,7 +267,7 @@ function Find-CachedImagesDir {
                     continue  # Skip if drive doesn't exist
                 }
             }
-            
+
             $resolvedPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($path)
             if (Test-Path $resolvedPath -ErrorAction SilentlyContinue) {
                 $tarFiles = Get-ChildItem -Path $resolvedPath -Filter "*.tar" -ErrorAction SilentlyContinue
@@ -293,14 +281,14 @@ function Find-CachedImagesDir {
             continue
         }
     }
-    
+
     return $null
 }
 
 # Auto-load cached images if they exist and are not in Docker
 function Auto-Load-CachedImages {
     param([string]$ImagesDir = "")
-    
+
     # If ImagesDir not specified, search for cached images automatically
     if ([string]::IsNullOrEmpty($ImagesDir)) {
         Write-Info "Searching for cached Docker images..."
@@ -313,14 +301,14 @@ function Auto-Load-CachedImages {
         Write-Info "Images directory not found: $ImagesDir"
         return $false
     }
-    
+
     # Check if there are any TAR files
     $tarFiles = Get-ChildItem -Path $ImagesDir -Filter "*.tar" -ErrorAction SilentlyContinue
     if ($tarFiles.Count -eq 0) {
         Write-Info "No cached images found in $ImagesDir"
         return $false
     }
-    
+
     # Find images that need to be loaded
     $imagesToLoad = @()
     foreach ($image in $script:BaseImages) {
@@ -328,18 +316,18 @@ function Auto-Load-CachedImages {
             $imagesToLoad += $image
         }
     }
-    
+
     if ($imagesToLoad.Count -eq 0) {
         Write-Info "All required images are already in Docker"
         return $true
     }
-    
+
     Write-Info "Found $($imagesToLoad.Count) missing images. Loading from cache ($ImagesDir)..."
-    
+
     # Load the missing images
     $successCount = 0
     $failCount = 0
-    
+
     foreach ($tar in $tarFiles) {
         Write-Info "Loading $($tar.Name)..."
         try {
@@ -351,12 +339,12 @@ function Auto-Load-CachedImages {
             $failCount++
         }
     }
-    
+
     if ($failCount -gt 0) {
         Write-Warning "Failed to load $failCount images from cache"
         return $false
     }
-    
+
     Write-Success "All cached images loaded successfully"
     return $true
 }
@@ -364,7 +352,7 @@ function Auto-Load-CachedImages {
 # Find OrcaSlicer AppImage in common cache locations
 function Find-CachedOrcaSlicerDir {
     param([string[]]$SearchPaths = @())
-    
+
     # Default search paths if not provided
     if ($SearchPaths.Count -eq 0) {
         $SearchPaths = @(
@@ -380,7 +368,7 @@ function Find-CachedOrcaSlicerDir {
             "/media/*/docker-images/orcaslicer"
         )
     }
-    
+
     foreach ($path in $SearchPaths) {
         try {
             # For absolute paths with drive letters, check if drive exists first
@@ -390,9 +378,9 @@ function Find-CachedOrcaSlicerDir {
                     continue  # Skip if drive doesn't exist
                 }
             }
-            
+
             $expandedPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($path)
-            
+
             # Try glob expansion for media mounts
             if ($path -like "/media/*") {
                 $globPaths = @(Get-ChildItem -Path "/media/" -Directory -ErrorAction SilentlyContinue)
@@ -404,7 +392,7 @@ function Find-CachedOrcaSlicerDir {
                 }
                 continue
             }
-            
+
             if ((Test-Path $expandedPath) -and (Get-ChildItem $expandedPath -Filter "*.AppImage" -ErrorAction SilentlyContinue).Count -gt 0) {
                 return $expandedPath
             }
@@ -413,14 +401,14 @@ function Find-CachedOrcaSlicerDir {
             continue
         }
     }
-    
+
     return $null
 }
 
 # Auto-load OrcaSlicer AppImage if found in cache
 function Auto-Load-OrcaSlicer {
     param([string]$OrcaDir = "")
-    
+
     # If OrcaDir not specified, search for it
     if (-not $OrcaDir) {
         $OrcaDir = Find-CachedOrcaSlicerDir
@@ -430,31 +418,31 @@ function Auto-Load-OrcaSlicer {
             return $true
         }
     }
-    
+
     if (-not (Test-Path $OrcaDir)) {
         Write-Info "OrcaSlicer cache directory not found: $OrcaDir"
         return $true
     }
-    
+
     $appImages = @(Get-ChildItem -Path $OrcaDir -Filter "*.AppImage" -ErrorAction SilentlyContinue)
     if ($appImages.Count -eq 0) {
         Write-Info "No OrcaSlicer AppImage found in cache: $OrcaDir"
         return $true
     }
-    
+
     # Set environment variable for Docker build context
     $resolvedPath = (Resolve-Path $OrcaDir).Path
     $env:ORCA_ASSET_PATH = $resolvedPath
-    
+
     Write-Success "Found $($appImages.Count) cached OrcaSlicer AppImage(s)"
     foreach ($img in $appImages) {
         $size = $img.Length / 1MB
         Write-Info "  ✓ $($img.Name) ($([math]::Round($size, 1)) MB)"
     }
-    
+
     Write-Info "OrcaSlicer cache location: $resolvedPath"
     Write-Info "Automatically configured for deployment"
-    
+
     return $true
 }
 
@@ -476,9 +464,9 @@ function Generate-EnvFile {
         [hashtable]$Config,
         [string]$OutputPath = ".env"
     )
-    
+
     Write-Header "Generating Environment Configuration"
-    
+
     $Architecture = $Config['ARCHITECTURE']
     $DbProvider = $Config['DB_PROVIDER']
     # Set deployment environment (Development uses EnsureCreated, Production uses migrations)
@@ -486,9 +474,9 @@ function Generate-EnvFile {
     $Environment = "Development"
     $HttpPort = 80
     $ApiPort = 5245
-    
+
     Write-Info "Creating environment file: $OutputPath"
-    
+
     # Generate CORS origins based on architecture and ports
     $CorsOrigins = "http://localhost:3000"
     if ($Architecture -eq "microservices") {
@@ -496,7 +484,7 @@ function Generate-EnvFile {
     } else {
         $CorsOrigins += ",http://localhost:$HttpPort"
     }
-    
+
     # Start building the env file content
     $EnvContent = @"
 # PrintFarmer Docker Configuration
@@ -521,27 +509,27 @@ DB_PROVIDER=$DbProvider
             $PostgresUser = "printfarmer"
             $PostgresPort = 5432
             $PostgresPassword = New-RandomPassword
-            
+
             $EnvContent += "`n# PostgreSQL Configuration"
             $EnvContent += "`nPOSTGRES_IMAGE=postgres:15-alpine"
             $EnvContent += "`nPOSTGRES_DB=$PostgresDb"
             $EnvContent += "`nPOSTGRES_USER=$PostgresUser"
             $EnvContent += "`nPOSTGRES_PASSWORD=$PostgresPassword"
             $EnvContent += "`nPOSTGRES_PORT=$PostgresPort"
-            
+
             $ConnectionString = "Host=database;Database=$PostgresDb;Username=$PostgresUser;Password=$PostgresPassword;Port=$PostgresPort"
             Write-Info "Generated random PostgreSQL password"
         }
         "sqlserver" {
             $SqlServerPassword = New-RandomPassword
             $SqlServerPort = 1433
-            
+
             $EnvContent += "`n# SQL Server Configuration"
             $EnvContent += "`nPOSTGRES_IMAGE=mcr.microsoft.com/mssql/server:2022-latest"
             $EnvContent += "`nACCEPT_EULA=Y"
             $EnvContent += "`nMSSQL_SA_PASSWORD=$SqlServerPassword"
             $EnvContent += "`nMSSQL_PID=Developer"
-            
+
             $ConnectionString = "Server=database;Database=printfarmer;User Id=sa;Password=$SqlServerPassword;TrustServerCertificate=True;"
             Write-Info "Generated random SQL Server SA password"
         }
@@ -550,7 +538,7 @@ DB_PROVIDER=$DbProvider
             $MysqlPassword = New-RandomPassword
             $MysqlRootPassword = New-RandomPassword
             $MysqlPort = 3306
-            
+
             $EnvContent += "`n# MySQL Configuration"
             $EnvContent += "`nPOSTGRES_IMAGE=mysql:8.0"
             $EnvContent += "`nDATABASE_NAME=printfarmer"
@@ -558,7 +546,7 @@ DB_PROVIDER=$DbProvider
             $EnvContent += "`nMYSQL_PASSWORD=$MysqlPassword"
             $EnvContent += "`nMYSQL_ROOT_PASSWORD=$MysqlRootPassword"
             $EnvContent += "`nMYSQL_PORT=$MysqlPort"
-            
+
             $ConnectionString = "Server=database;Database=printfarmer;User=printfarmer;Password=$MysqlPassword;Port=$MysqlPort"
             Write-Info "Generated random MySQL passwords"
         }
@@ -572,10 +560,10 @@ DB_PROVIDER=$DbProvider
             $ConnectionString = "Data Source=/data/farm.db"
         }
     }
-    
+
     # Add connection string for API
     $EnvContent += "`nConnectionStrings__Default=$ConnectionString"
-    
+
     # Add common application settings
     $EnvContent += @"
 
@@ -600,7 +588,7 @@ ENABLE_DISTRIBUTED_SLICING=true
 ORCASLICER_VERSION=$script:SupportedOrcaSlicerVersion
 ORCASLICER_SHA256=$script:SupportedOrcaSlicerSha256
 "@
-    
+
     # Write to file
     try {
         Set-Content -Path $OutputPath -Value $EnvContent -Encoding UTF8
@@ -616,7 +604,7 @@ ORCASLICER_SHA256=$script:SupportedOrcaSlicerSha256
 # Pull all base images from registry
 function Pull-BaseImages {
     Write-Header "Pulling Base Container Images"
-    
+
     Write-Info "Pulling essential images for PrintFarmer core services:"
     Write-Info "  - .NET SDK 10.0 (multi-stage builds during deployment)"
     Write-Info "  - .NET ASP.NET 10.0 (API runtime)"
@@ -627,22 +615,22 @@ function Pull-BaseImages {
     Write-Info "Download size: approximately 450-700MB"
     Write-Info "Note: Images already present locally will be checked for updates"
     Write-Host ""
-    
+
     $successCount = 0
     $skipCount = 0
     $failCount = 0
-    
+
     foreach ($image in $script:BaseImages) {
         # Check if image already exists locally
         $imageExists = docker images --quiet $image 2>$null
-        
+
         if ($imageExists) {
             Write-Info "Image already present locally: $image"
             Write-Info "Checking for updates..."
         } else {
             Write-Info "Pulling $image..."
         }
-        
+
         try {
             docker pull $image
             if ($imageExists) {
@@ -656,16 +644,16 @@ function Pull-BaseImages {
             $failCount++
         }
     }
-    
+
     Write-Header "Pull Summary"
     Write-Host "Successfully processed: $successCount/$($script:BaseImages.Count)" -ForegroundColor Green
-    
+
     if ($failCount -gt 0) {
         Write-Warning "Failed to pull: $failCount images"
         Write-Info "Check your internet connection and try again"
         return $false
     }
-    
+
     Write-Success "All base images processed successfully!"
     return $true
 }
@@ -673,30 +661,30 @@ function Pull-BaseImages {
 # Save images to tar files
 function Save-ImagesToTar {
     param([string]$TargetDir = "./docker-images")
-    
+
     Write-Header "Exporting Images to TAR Files"
-    
+
     if (-not (Test-Path $TargetDir)) {
         New-Item -ItemType Directory -Path $TargetDir -Force | Out-Null
         Write-Info "Created directory: $TargetDir"
     }
-    
+
     $successCount = 0
     $failCount = 0
     $totalSize = 0
-    
+
     foreach ($image in $script:BaseImages) {
         $safeName = $image -replace '[:/]', '-'
         $tarFile = Join-Path $TargetDir "$safeName.tar"
-        
+
         Write-Info "Exporting $image to $tarFile..."
         try {
             docker save -o $tarFile $image
-            
+
             $fileSize = (Get-Item $tarFile).Length
             $fileSizeMB = [math]::Round($fileSize / 1MB, 2)
             $totalSize += $fileSize
-            
+
             Write-Success "Exported: $image - Size: $fileSizeMB MB"
             $successCount++
         } catch {
@@ -704,59 +692,59 @@ function Save-ImagesToTar {
             $failCount++
         }
     }
-    
+
     $totalSizeMB = [math]::Round($totalSize / 1MB, 2)
     $totalSizeGB = [math]::Round($totalSize / 1GB, 2)
-    
+
     Write-Header "Export Summary"
     Write-Host "Successfully exported: $successCount/$($script:BaseImages.Count)" -ForegroundColor Green
     Write-Host "Total size: $totalSizeGB GB - $totalSizeMB MB" -ForegroundColor Cyan
-    
+
     if ($failCount -gt 0) {
         Write-Warning "Failed to export: $failCount images"
         return $false
     }
-    
+
     Write-Success "All images exported successfully!"
     Write-Info "TAR files location: $TargetDir"
     Write-Info "You can now transfer this folder to offline machines"
-    
+
     $manifestPath = Join-Path $TargetDir "manifest.txt"
     $script:BaseImages | Set-Content $manifestPath
     Write-Info "Created manifest file: $manifestPath"
-    
+
     # Save cache metadata for auto-loading
     Save-ImagesCacheMetadata -ImagesDir $TargetDir
     Write-Info "Saved cache metadata for automatic offline loading"
-    
+
     return $true
 }
 
 # Load images from tar files
 function Load-ImagesFromTar {
     param([string]$SourceDir = "./docker-images")
-    
+
     Write-Header "Loading Images from TAR Files"
-    
+
     if (-not (Test-Path $SourceDir)) {
         Write-ErrorMsg "Images directory not found: $SourceDir"
         Write-Info "Use -PullImages -SaveImages first to download and export images"
         return $false
     }
-    
+
     $tarFiles = Get-ChildItem -Path $SourceDir -Filter "*.tar" -ErrorAction SilentlyContinue
-    
+
     if ($tarFiles.Count -eq 0) {
         Write-ErrorMsg "No TAR files found in $SourceDir"
         return $false
     }
-    
+
     Write-Info "Found $($tarFiles.Count) image TAR files to load"
     Write-Host ""
-    
+
     $successCount = 0
     $failCount = 0
-    
+
     foreach ($tar in $tarFiles) {
         Write-Info "Loading $($tar.Name)..."
         try {
@@ -768,18 +756,18 @@ function Load-ImagesFromTar {
             $failCount++
         }
     }
-    
+
     Write-Header "Load Summary"
     Write-Host "Successfully loaded: $successCount/$($tarFiles.Count)" -ForegroundColor Green
-    
+
     if ($failCount -gt 0) {
         Write-Warning "Failed to load: $failCount images"
         return $false
     }
-    
+
     Write-Success "All images loaded successfully!"
     Write-Info "Images are now available in local Docker daemon"
-    
+
     return $true
 }
 
@@ -790,40 +778,40 @@ function Load-ImagesFromTar {
 # Save only upgraded images to TAR (for offline deployment)
 function Save-UpgradedImagesToTar {
     param([string]$TargetDir = "./docker-images")
-    
+
     Write-Header "Exporting Pre-Upgraded Images to TAR Files"
-    
+
     if (-not (Test-Path $TargetDir)) {
         New-Item -ItemType Directory -Path $TargetDir -Force | Out-Null
         Write-Info "Created directory: $TargetDir"
     }
-    
+
     # Get all Docker images and filter for -upgraded tagged ones
     $allImages = docker images --format "{{.Repository}}:{{.Tag}}" 2>$null
     $upgradedImages = $allImages | Where-Object { $_ -like "*-upgraded" }
-    
+
     if ($upgradedImages.Count -eq 0) {
         Write-ErrorMsg "No pre-upgraded images found in Docker"
         Write-Info "Run with -BuildBaseImages first to create pre-upgraded images"
         return $false
     }
-    
+
     $successCount = 0
     $failCount = 0
     $totalSize = 0
-    
+
     foreach ($image in $upgradedImages) {
         $safeName = $image -replace '[:/]', '-'
         $tarFile = Join-Path $TargetDir "$safeName.tar"
-        
+
         Write-Info "Exporting $image to $tarFile..."
         try {
             docker save -o $tarFile $image
-            
+
             $fileSize = (Get-Item $tarFile).Length
             $fileSizeMB = [math]::Round($fileSize / 1MB, 2)
             $totalSize += $fileSize
-            
+
             Write-Success "Exported: $image - Size: $fileSizeMB MB"
             $successCount++
         } catch {
@@ -831,34 +819,34 @@ function Save-UpgradedImagesToTar {
             $failCount++
         }
     }
-    
+
     $totalSizeMB = [math]::Round($totalSize / 1MB, 2)
     $totalSizeGB = [math]::Round($totalSize / 1GB, 2)
-    
+
     Write-Header "Upgraded Images Export Summary"
     Write-Host "Successfully exported: $successCount pre-upgraded images" -ForegroundColor Green
     Write-Host "Total size: $totalSizeGB GB - $totalSizeMB MB" -ForegroundColor Cyan
-    
+
     if ($failCount -gt 0) {
         Write-Warning "Failed to export: $failCount images"
         return $false
     }
-    
+
     Write-Success "All pre-upgraded images exported successfully!"
     Write-Info "TAR files location: $TargetDir"
-    
+
     # Save upgraded images manifest
     $manifestPath = Join-Path $TargetDir "manifest-upgraded.txt"
     $upgradedImages | Set-Content $manifestPath
     Write-Info "Created upgraded images manifest: $manifestPath"
-    
+
     return $true
 }
 
 # Comprehensive offline preparation - builds pre-upgraded base images, exports to TAR, and caches OrcaSlicer
 function Prepare-OfflineDeployment {
     param([string]$TargetDir = "./docker-images")
-    
+
     Write-Header "OFFLINE DEPLOYMENT PREPARATION"
     Write-Info "This process prepares all materials needed for offline deployment:"
     Write-Info "  1. Build pre-upgraded base images (450-700MB)"
@@ -867,10 +855,10 @@ function Prepare-OfflineDeployment {
     Write-Info ""
     Write-Info "Total time: ~15-25 minutes (depends on internet speed and system performance)"
     Write-Host ""
-    
+
     $startTime = Get-Date
     $succeeded = $true
-    
+
     try {
         # Step 1: Build pre-upgraded base images
         Write-Header "STEP 1/3: Building Pre-Upgraded Base Images"
@@ -884,7 +872,7 @@ function Prepare-OfflineDeployment {
                 $succeeded = $false
             }
         }
-        
+
         if ($succeeded) {
             Write-Host ""
             Write-Header "STEP 2/3: Exporting Pre-Upgraded Images to TAR Files"
@@ -893,7 +881,7 @@ function Prepare-OfflineDeployment {
                 $succeeded = $false
             }
         }
-        
+
         if ($succeeded) {
             Write-Host ""
             Write-Header "STEP 3/3: Caching OrcaSlicer AppImage"
@@ -906,11 +894,11 @@ function Prepare-OfflineDeployment {
         Write-ErrorMsg "Unexpected error during offline preparation: $_"
         $succeeded = $false
     }
-    
+
     $elapsed = (Get-Date) - $startTime
     Write-Host ""
     Write-Header "OFFLINE PREPARATION SUMMARY"
-    
+
     if ($succeeded) {
         Write-Success "✓ Offline deployment materials prepared successfully!"
         Write-Info "Location: $TargetDir"
@@ -936,11 +924,11 @@ function Prepare-OfflineDeployment {
 # Deploy using cached offline materials
 function Deploy-OfflineMode {
     param([string]$SourceDir = "./docker-images")
-    
+
     Write-Header "OFFLINE DEPLOYMENT MODE"
     Write-Info "Loading pre-cached container images and preparing deployment"
     Write-Host ""
-    
+
     try {
         # Check if images directory exists
         if (-not (Test-Path $SourceDir)) {
@@ -948,14 +936,14 @@ function Deploy-OfflineMode {
             Write-Info "Run with -PrepareOffline first to download and cache all materials"
             return $false
         }
-        
+
         # Load cached images from TAR files
         Write-Header "STEP 1/2: Loading Cached Container Images"
         if (-not (Load-ImagesFromTar -SourceDir $SourceDir)) {
             Write-ErrorMsg "Failed to load cached images"
             return $false
         }
-        
+
         # Auto-load OrcaSlicer if available
         Write-Host ""
         Write-Header "STEP 2/2: Loading OrcaSlicer AppImage (Optional)"
@@ -965,7 +953,7 @@ function Deploy-OfflineMode {
         } else {
             Write-Info "OrcaSlicer cache not found - distributed slicing will be disabled"
         }
-        
+
         Write-Host ""
         Write-Success "✓ Offline images loaded successfully!"
         Write-Info "Proceeding with deployment configuration..."
@@ -983,26 +971,26 @@ function Cache-OrcaSlicer {
     )
 
     $Version = $script:SupportedOrcaSlicerVersion
-    
+
     Write-Header "Caching OrcaSlicer Linux AppImage"
-    
+
     if (-not (Test-Path $TargetDir)) {
         New-Item -ItemType Directory -Path $TargetDir -Force | Out-Null
         Write-Success "Created cache directory: $TargetDir"
     }
-    
+
     try {
         Write-Info "Looking up OrcaSlicer v${Version} release information..."
-        
+
         # Use .NET HttpClient directly
         $handler = New-Object System.Net.Http.HttpClientHandler
         $handler.AllowAutoRedirect = $true
         $handler.MaxAutomaticRedirections = 10
-        
+
         $client = New-Object System.Net.Http.HttpClient($handler)
         $client.Timeout = New-TimeSpan -Seconds 30
         $client.DefaultRequestHeaders.Add('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
-        
+
         # Get release information
         Write-Info "Fetching release info from GitHub API..."
         $releaseUrl = if ($Version -eq "latest") {
@@ -1010,24 +998,24 @@ function Cache-OrcaSlicer {
         } else {
             "https://api.github.com/repos/OrcaSlicer/OrcaSlicer/releases/tags/v${Version}"
         }
-        
+
         $response = $client.GetAsync($releaseUrl).Result
         if (-not $response.IsSuccessStatusCode) {
             throw "Failed to get release info: HTTP $($response.StatusCode)"
         }
-        
+
         $json = $response.Content.ReadAsStringAsync().Result | ConvertFrom-Json
-        
+
         # Select the exact x86_64 Ubuntu 24.04 asset whose digest is pinned below.
         $expectedAssetName = "OrcaSlicer_Linux_AppImage_Ubuntu2404_V${Version}.AppImage"
         $appImageAsset = $json.assets |
             Where-Object { $_.name -eq $expectedAssetName } |
             Select-Object -First 1
-        
+
         if (-not $appImageAsset) {
             throw "Could not find expected release asset $expectedAssetName"
         }
-        
+
         $downloadUrl = $appImageAsset.browser_download_url
         $fileName = $appImageAsset.name
         $appImagePath = Join-Path $TargetDir $fileName
@@ -1042,14 +1030,14 @@ function Cache-OrcaSlicer {
         if ($releaseSha256 -ne $expectedSha256) {
             throw "GitHub release digest for $fileName does not match the repository-pinned SHA-256"
         }
-        
+
         # Resolve to absolute path for reliable checking
         $resolvedAppImagePath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($appImagePath)
-        
+
         # Check if already cached - verify BOTH: path exists AND file has reasonable size
         $fileExists = Test-Path $resolvedAppImagePath -PathType Leaf
         $fileSize = if ($fileExists) { (Get-Item $resolvedAppImagePath -ErrorAction SilentlyContinue).Length } else { 0 }
-        
+
         if ($fileExists -and $fileSize -gt 50MB) {
             $cachedSha256 = (Get-FileHash -Path $resolvedAppImagePath -Algorithm SHA256).Hash.ToLowerInvariant()
             if ($cachedSha256 -eq $expectedSha256) {
@@ -1062,52 +1050,52 @@ function Cache-OrcaSlicer {
             Remove-Item $resolvedAppImagePath -Force
             $fileExists = $false
         }
-        
+
         # If file exists but is too small or corrupted, delete it and re-download
         if ($fileExists -and $fileSize -le 50MB) {
             Write-Warning "Found corrupted/incomplete AppImage ($([math]::Round($fileSize / 1MB, 1)) MB), deleting and re-downloading..."
             Remove-Item $resolvedAppImagePath -Force -ErrorAction SilentlyContinue
         }
-        
+
         Write-Info "Found asset: $fileName"
         Write-Info "Download URL: $downloadUrl"
         Write-Info ""
         Write-Info "Downloading OrcaSlicer v${Version} Linux AppImage..."
         Write-Info "This may take several minutes depending on internet speed"
-        
+
         Write-Info "Starting download with .NET HTTP client..."
         $response = $client.GetAsync($downloadUrl).Result
-        
+
         Write-Info "Response Status: $($response.StatusCode)"
-        
+
         if (-not $response.IsSuccessStatusCode) {
             throw "HTTP $($response.StatusCode): $($response.ReasonPhrase)"
         }
-        
+
         Write-Info "Reading response content..."
         $content = $response.Content.ReadAsByteArrayAsync().Result
         $size = $content.Length / 1MB
-        
+
         Write-Info "Downloaded size: $([math]::Round($size, 1)) MB"
-        
+
         # Validate file is reasonable size (AppImage typically 250-400 MB)
         if ($size -lt 50) {
             Write-ErrorMsg "Downloaded file too small ($([math]::Round($size, 1)) MB), likely invalid"
-            
+
             # Check if it's HTML error response
             $maxLen = [Math]::Min(500, $content.Length - 1)
             $text = [System.Text.Encoding]::ASCII.GetString($content[0..$maxLen])
             if ($text -match 'html|DOCTYPE|<!') {
                 Write-ErrorMsg "Response is HTML (likely GitHub error page), not binary"
             }
-            
+
             throw "Download failed: file size is $size MB (expected 250+)"
         }
-        
+
         # Write bytes to file
         Write-Info "Writing to disk..."
         [System.IO.File]::WriteAllBytes($appImagePath, $content)
-        
+
         # Verify file was written
         if (-not (Test-Path $appImagePath)) {
             throw "File written but not found at $appImagePath"
@@ -1119,14 +1107,14 @@ function Cache-OrcaSlicer {
             throw "Downloaded OrcaSlicer AppImage checksum does not match the official GitHub release digest"
         }
         Write-Success "Official AppImage SHA-256 verified"
-        
+
         # Verify ELF magic number for Linux binary
         try {
             $fileStream = [System.IO.File]::OpenRead($appImagePath)
             $buffer = New-Object byte[] 4
             $fileStream.Read($buffer, 0, 4) | Out-Null
             $fileStream.Close()
-            
+
             if ($buffer[0] -eq 0x7F -and $buffer[1] -eq 0x45 -and $buffer[2] -eq 0x4C -and $buffer[3] -eq 0x46) {
                 Write-Success "File verified as valid ELF binary (AppImage)"
             } else {
@@ -1169,9 +1157,9 @@ function Cache-OrcaSlicer {
 # Load cached OrcaSlicer binaries for Docker build
 function Load-CachedOrcaSlicer {
     param([string]$SourceDir = "")
-    
+
     Write-Header "Loading Cached OrcaSlicer AppImage"
-    
+
     # If SourceDir not specified, auto-search
     if (-not $SourceDir) {
         $SourceDir = Find-CachedOrcaSlicerDir
@@ -1180,29 +1168,29 @@ function Load-CachedOrcaSlicer {
             return $true
         }
     }
-    
+
     if (-not (Test-Path $SourceDir)) {
         Write-Info "OrcaSlicer cache directory not found: $SourceDir"
         return $true
     }
-    
+
     $appImages = @(Get-ChildItem -Path $SourceDir -Filter "*.AppImage" -ErrorAction SilentlyContinue)
     if ($appImages.Count -eq 0) {
         Write-Info "No OrcaSlicer AppImage found in $SourceDir"
         return $true
     }
-    
+
     Write-Success "Found $($appImages.Count) OrcaSlicer AppImage file(s) in cache"
     foreach ($img in $appImages) {
         $size = $img.Length / 1MB
         Write-Info "  ✓ $($img.Name) ($([math]::Round($size, 1)) MB)"
     }
-    
+
     # Set environment variable for Docker build to find AppImage
     $resolvedPath = (Resolve-Path $SourceDir).Path
     $env:ORCA_ASSET_PATH = $resolvedPath
     Write-Info "Cache automatically configured as: ORCA_ASSET_PATH=$resolvedPath"
-    
+
     return $true
 }
 
@@ -1210,7 +1198,7 @@ function Load-CachedOrcaSlicer {
 # Check prerequisites
 function Check-Prerequisites {
     Write-Header "Checking Prerequisites"
-    
+
     # Check Docker installation
     Write-Info "Checking Docker installation..."
     try {
@@ -1222,7 +1210,7 @@ function Check-Prerequisites {
         Write-Info "  https://docs.docker.com/desktop/install/windows-install/"
         exit 1
     }
-    
+
     # Check Docker Compose installation
     Write-Info "Checking Docker Compose installation..."
     try {
@@ -1233,7 +1221,7 @@ function Check-Prerequisites {
         Write-Info "Please install Docker Desktop with Compose support"
         exit 1
     }
-    
+
     # Check Docker daemon is running
     Write-Info "Checking if Docker daemon is running..."
     try {
@@ -1250,7 +1238,7 @@ function Check-Prerequisites {
         Write-Info "Please start Docker Desktop"
         exit 1
     }
-    
+
     Write-Success "All prerequisites satisfied"
     Write-Host ""
 }
@@ -1258,9 +1246,9 @@ function Check-Prerequisites {
 # Load deployment configuration from file
 function Load-DeploymentConfig {
     param([string]$ConfigPath = "./.deploy-config")
-    
+
     Write-Info "Loading deployment configuration..."
-    
+
     if (Test-Path $ConfigPath) {
         Write-Info "Found config file: $ConfigPath"
         $config = @{}
@@ -1276,7 +1264,7 @@ function Load-DeploymentConfig {
         Set-SupportedOrcaSlicerConfig -Config $config
         return $config
     }
-    
+
     Write-Info "No existing configuration found"
     $config = @{}
     Set-SupportedOrcaSlicerConfig -Config $config
@@ -1289,21 +1277,21 @@ function Save-DeploymentConfig {
         [hashtable]$Config,
         [string]$ConfigPath = "./.deploy-config"
     )
-    
+
     Set-SupportedOrcaSlicerConfig -Config $Config
     Write-Info "Saving deployment configuration to $ConfigPath..."
-    
+
     $content = @"
 # PrintFarmer Docker Deployment Configuration
 # Generated on $(Get-Date)
 # This file stores deployment settings for future use
 
 "@
-    
+
     foreach ($key in $Config.Keys) {
         $content += "$key=$($Config[$key])`n"
     }
-    
+
     Set-Content -Path $ConfigPath -Value $content
     Write-Success "Configuration saved to $ConfigPath"
 }
@@ -1311,10 +1299,10 @@ function Save-DeploymentConfig {
 # Choose deployment architecture
 function Choose-Architecture {
     param([hashtable]$Config, [switch]$Quiet = $false)
-    
+
     if (-not $Quiet) {
         Write-Header "Deployment Architecture Selection"
-        
+
         Write-Host ""
         Write-Host "PrintFarmer supports two deployment architectures:" -ForegroundColor Cyan
         Write-Host ""
@@ -1331,19 +1319,19 @@ function Choose-Architecture {
         Write-Host "   - Supports PostgreSQL and SQL Server" -ForegroundColor White
         Write-Host ""
     }
-    
+
     $default = if ($Config['ARCHITECTURE'] -eq 'microservices') { '2' } else { '1' }
-    
+
     if ($Quiet) {
         $choice = $default
     } else {
         $choice = Read-Host "Choose architecture [1=Monolithic, 2=Microservices] (default: $default)"
     }
-    
+
     if ([string]::IsNullOrWhiteSpace($choice)) {
         $choice = $default
     }
-    
+
     switch ($choice) {
         '1' {
             Write-Success "Selected: Monolithic deployment"
@@ -1363,7 +1351,7 @@ function Choose-Architecture {
 # Choose database provider
 function Choose-DatabaseProvider {
     param([hashtable]$Config, [string]$Architecture = 'monolithic', [switch]$Quiet = $false)
-    
+
     if ($Quiet) {
         # Non-interactive mode - use a supported configured provider or PostgreSQL.
         if ($Config['DB_PROVIDER']) {
@@ -1378,9 +1366,9 @@ function Choose-DatabaseProvider {
         }
         return 'postgresql'
     }
-    
+
     Write-Header "Database Configuration"
-    
+
     Write-Host ""
     Write-Host "Select your database provider:" -ForegroundColor Cyan
     Write-Host ""
@@ -1394,7 +1382,7 @@ function Choose-DatabaseProvider {
     Write-Host "   - Requires container or external server" -ForegroundColor White
     Write-Host ""
     $defaultChoice = '1'
-    $default = if ($Config['DB_PROVIDER']) { 
+    $default = if ($Config['DB_PROVIDER']) {
         switch ($Config['DB_PROVIDER']) {
             'postgres' { '1' }
             'postgresql' { '1' }
@@ -1403,11 +1391,11 @@ function Choose-DatabaseProvider {
         }
     } else { $defaultChoice }
     $choice = Read-Host "Choose database provider [1-2] (default: $default)"
-    
+
     if ([string]::IsNullOrWhiteSpace($choice)) {
         $choice = $default
     }
-    
+
     switch ($choice) {
         '1' { return 'postgresql' }
         '2' { return 'sqlserver' }
@@ -1421,14 +1409,14 @@ function Choose-DatabaseProvider {
 # Confirm deployment settings
 function Confirm-DeploymentSettings {
     param([hashtable]$Settings)
-    
+
     Write-Header "Deployment Summary"
-    
+
     Write-Host ""
     Write-Host "Deployment Settings:" -ForegroundColor Cyan
     Write-Host "  Architecture:              $($Settings['ARCHITECTURE'])" -ForegroundColor White
     Write-Host "  Database:                  $($Settings['DB_PROVIDER'])" -ForegroundColor White
-    
+
     # Distributed slicing
     if ($Settings['ENABLE_DISTRIBUTED_SLICING'] -eq 'true') {
         Write-Host "  Distributed Slicing:       Enabled" -ForegroundColor Green
@@ -1445,7 +1433,7 @@ function Confirm-DeploymentSettings {
     } else {
         Write-Host "  Distributed Slicing:       Disabled" -ForegroundColor Yellow
     }
-    
+
     # Spoolman integration
     if ($Settings['ENABLE_SPOOLMAN'] -eq 'true') {
         Write-Host "  Spoolman Integration:      Enabled" -ForegroundColor Green
@@ -1455,7 +1443,7 @@ function Confirm-DeploymentSettings {
     } else {
         Write-Host "  Spoolman Integration:      Disabled" -ForegroundColor Yellow
     }
-    
+
     # Monitoring & Telemetry
     if ($Settings['INCLUDE_MONITORING'] -eq 'true') {
         Write-Host "  Monitoring:                Enabled (Prometheus + Grafana)" -ForegroundColor Green
@@ -1463,14 +1451,14 @@ function Confirm-DeploymentSettings {
     if ($Settings['INCLUDE_TELEMETRY'] -eq 'true') {
         Write-Host "  Telemetry:                 Enabled (OpenTelemetry)" -ForegroundColor Green
     }
-    
+
     Write-Host ""
-    
+
     if ($NonInteractive) {
         Write-Success "Non-interactive mode: Proceeding with deployment"
         return $true
     }
-    
+
     $confirm = Read-Host "Proceed with deployment? (y/n)"
     return $confirm -match "^[Yy]"
 }
@@ -1478,14 +1466,14 @@ function Confirm-DeploymentSettings {
 # Tear down existing deployment
 function Tear-Down-Deployment {
     Write-Header "Tearing Down Existing Deployment"
-    
+
     Write-Warning "This will STOP and REMOVE PrintFarmer containers and volumes"
     Write-Info "The following will be PRESERVED:"
     Write-Info "  - Base container images (mcr.microsoft.com/*, node:*, postgres:*, etc.)"
     Write-Info "  - OrcaSlicer binaries and worker images"
     Write-Info "  - Downloaded image TAR files (if using offline mode)"
     Write-Host ""
-    
+
     if (-not $NonInteractive) {
         $confirm = Read-Host "Are you sure? (y/n)"
         if ($confirm -notmatch "^[Yy]") {
@@ -1493,7 +1481,7 @@ function Tear-Down-Deployment {
             return
         }
     }
-    
+
     Write-Info "Stopping PrintFarmer containers..."
     try {
         # docker compose down -v removes containers and volumes but NOT images
@@ -1504,7 +1492,7 @@ function Tear-Down-Deployment {
         Write-ErrorMsg "Failed to tear down: $_"
         exit 1
     }
-    
+
     Write-Info "Cleaning up orphaned containers (if any)..."
     try {
         docker compose --env-file .env -f docker-compose.yml down --remove-orphans 2>$null
@@ -1512,7 +1500,7 @@ function Tear-Down-Deployment {
     } catch {
         # Non-critical - continue anyway
     }
-    
+
     Write-Success "Tear-down completed successfully"
     Write-Info ""
     Write-Info "To redeploy with the same configuration, run:"
@@ -1533,17 +1521,17 @@ function Wait-ForApiHealth {
         [int]$IntervalSeconds = 3,
         [string]$ApiPort = "5245"
     )
-    
+
     $ApiUrl = "http://localhost:${ApiPort}"
     $HealthEndpoint = "${ApiUrl}/health"
     $HealthzEndpoint = "${ApiUrl}/healthz"
-    
+
     Write-Info "Waiting for API to become healthy (timeout: ${TimeoutSeconds}s)..."
     Write-Info "  Health endpoint: $HealthEndpoint"
-    
+
     $elapsed = 0
     $lastDetailLog = -999
-    
+
     while ($elapsed -lt $TimeoutSeconds) {
         try {
             $response = Invoke-WebRequest -Uri $HealthzEndpoint -TimeoutSec 3 -ErrorAction SilentlyContinue -WarningAction SilentlyContinue
@@ -1565,16 +1553,16 @@ function Wait-ForApiHealth {
         } catch {
             # No response yet
         }
-        
+
         if (($elapsed - $lastDetailLog) -ge 15) {
             Write-Info "Still waiting for API to be fully healthy... ($elapsed/${TimeoutSeconds}s)"
             $lastDetailLog = $elapsed
         }
-        
+
         Start-Sleep -Seconds $IntervalSeconds
         $elapsed += $IntervalSeconds
     }
-    
+
     Write-Warning "API did not become healthy within ${TimeoutSeconds}s timeout."
     return $false
 }
@@ -1584,12 +1572,12 @@ function Test-ApiEndpoints {
     param(
         [string]$ApiPort = "5245"
     )
-    
+
     Write-Info "Testing API endpoints..."
-    
+
     $ApiUrl = "http://localhost:${ApiPort}"
     $TestEndpoint = "${ApiUrl}/api/catalog/manufacturers"
-    
+
     try {
         $response = Invoke-WebRequest -Uri $TestEndpoint -TimeoutSec 5 -ErrorAction SilentlyContinue -WarningAction SilentlyContinue
         if ($response.StatusCode -eq 200) {
@@ -1615,18 +1603,18 @@ function Test-ProxyHealth {
         [string]$Architecture = "monolithic",
         [string]$HttpPort = "8080"
     )
-    
+
     if ($Architecture -ne "microservices") {
         Write-Info "Skipping proxy health check (not microservices architecture)"
         return $true
     }
-    
+
     Write-Info "Testing nginx proxy health..."
-    
+
     $ProxyUrl = "http://localhost:${HttpPort}/api/healthz"
     $retries = 6
     $interval = 5
-    
+
     for ($attempt = 1; $attempt -le $retries; $attempt++) {
         try {
             $response = Invoke-WebRequest -Uri $ProxyUrl -TimeoutSec 3 -ErrorAction SilentlyContinue -WarningAction SilentlyContinue
@@ -1640,13 +1628,13 @@ function Test-ProxyHealth {
         } catch {
             # No response yet
         }
-        
+
         if ($attempt -le $retries) {
             Write-Info "  No response from proxy (attempt ${attempt}/${retries})"
             Start-Sleep -Seconds $interval
         }
     }
-    
+
     Write-Warning "✗ nginx proxy check failed after $retries attempts"
     return $false
 }
@@ -1654,24 +1642,24 @@ function Test-ProxyHealth {
 # Verify all containers are running and healthy
 function Verify-ContainersRunning {
     Write-Info "Verifying containers are running..."
-    
+
     try {
         $psOutput = docker compose --env-file .env -f docker-compose.yml ps 2>&1
         if (-not $?) {
             Write-Warning "Could not get container status"
             return $false
         }
-        
+
         # Simple check - look for containers with "Up" in output
         $runningCount = ($psOutput | Select-String "Up" | Measure-Object).Count
-        
+
         if ($runningCount -gt 0) {
             Write-Success "✓ Found $runningCount running container(s)"
-            
+
             # Show brief status
             Write-Info "Container status:"
             $psOutput | ForEach-Object { Write-Host "  $_" }
-            
+
             return $true
         } else {
             Write-Warning "✗ No running containers found"
@@ -1691,46 +1679,46 @@ function Verify-Deployment {
         [string]$ApiPort = "5245",
         [string]$HttpPort = "8080"
     )
-    
+
     Write-Header "Verifying Deployment"
-    
+
     Write-Info "Waiting 10 seconds for containers to initialize..."
     Start-Sleep -Seconds 10
-    
+
     $allHealthy = $true
-    
+
     # Step 1: Verify containers are running
     if (-not (Verify-ContainersRunning)) {
         $allHealthy = $false
     }
-    
+
     Write-Host ""
-    
+
     # Step 2: Wait for API health
     if (-not (Wait-ForApiHealth -TimeoutSeconds 180 -ApiPort $ApiPort)) {
         Write-Warning "⚠️ API health check timed out - services may need more time"
         Write-Info "Run 'docker compose logs api' to see API logs"
         $allHealthy = $false
     }
-    
+
     Write-Host ""
-    
+
     # Step 3: Test API endpoints
     if (-not (Test-ApiEndpoints -ApiPort $ApiPort)) {
         Write-Warning "✗ API endpoint tests failed"
         $allHealthy = $false
     }
-    
+
     Write-Host ""
-    
+
     # Step 4: Test proxy (microservices only)
     if (-not (Test-ProxyHealth -Architecture $Architecture -HttpPort $HttpPort)) {
         Write-Warning "⚠️ Proxy health check failed"
         # Don't fail deployment for this - proxy might need more time
     }
-    
+
     Write-Host ""
-    
+
     if ($allHealthy) {
         Write-Success "All deployment verification checks passed!"
         return $true
@@ -1738,66 +1726,6 @@ function Verify-Deployment {
         Write-Warning "Some verification checks failed or timed out"
         Write-Info "The deployment may still complete successfully - services continue initializing"
         return $false
-    }
-}
-
-# Installs the signed host-update recovery CLI and writes its host configuration when the
-# operator opts in with -HostUpdateCliVersion (issue #3045). Packaging only: nothing here
-# enables or starts a host update.
-function Install-HostUpdateCliIfRequested {
-    param([string]$EnvFilePath = ".env")
-
-    if ([string]::IsNullOrWhiteSpace($HostUpdateCliVersion)) {
-        if ($InstallHostUpdateDaemon) {
-            Write-ErrorMsg "-InstallHostUpdateDaemon requires -HostUpdateCliVersion. See docs/HOST_UPDATE_RUNBOOK.md."
-            exit 1
-        }
-        return
-    }
-    if ($InstallHostUpdateDaemon -and -not $IsWindows) {
-        Write-ErrorMsg "-InstallHostUpdateDaemon registers a Windows service; on Linux use deploy-docker.sh --install-host-update-daemon."
-        exit 1
-    }
-
-    $installer = Join-Path $PSScriptRoot "install-host-update-cli.ps1"
-    $envPath = [System.IO.Path]::GetFullPath($EnvFilePath, (Get-Location).Path)
-    $installArgs = @('install', '-Version', $HostUpdateCliVersion)
-    if (-not [string]::IsNullOrWhiteSpace($HostUpdateCliAssets)) {
-        $installArgs += @('-AssetDir', [System.IO.Path]::GetFullPath($HostUpdateCliAssets, (Get-Location).Path))
-    }
-
-    Write-Info "Installing signed host-update CLI $HostUpdateCliVersion..."
-    & pwsh -NoProfile -File $installer @installArgs
-    if ($LASTEXITCODE -ne 0) {
-        Write-ErrorMsg "Host-update CLI installation failed; nothing was placed. See docs/HOST_UPDATE_RUNBOOK.md."
-        exit 1
-    }
-
-    & pwsh -NoProfile -File $installer write-config -EnvFile $envPath
-    switch ($LASTEXITCODE) {
-        0 { Write-Success "Host-update CLI installed and host-update.json written" }
-        3 {
-            if ($InstallHostUpdateDaemon) {
-                Write-ErrorMsg "HostUpdateExecution__RootDirectory is not set in $envPath; the host-update daemon service needs host-update.json and was not installed."
-                exit 1
-            }
-            Write-Warning "HostUpdateExecution__RootDirectory is not set in $envPath; host-update.json was not written"
-        }
-        default {
-            Write-ErrorMsg "Writing host-update.json failed (exit $LASTEXITCODE). See docs/HOST_UPDATE_RUNBOOK.md."
-            exit 1
-        }
-    }
-
-    # Issue #3118: opt-in only. The service is created Disabled and stopped; enabling it is a
-    # separate operator decision, and the daemon's execution stays disabled pending #2982.
-    if (-not $InstallHostUpdateDaemon) { return }
-    $cliDir = Join-Path $env:ProgramFiles "PrintFarmer\HostUpdateCli\$HostUpdateCliVersion"
-    Write-Info "Installing the host-update daemon service (not enabled)..."
-    & pwsh -NoProfile -File $installer install-service -CliDir $cliDir
-    if ($LASTEXITCODE -ne 0) {
-        Write-ErrorMsg "Installing the host-update daemon service failed. See docs/HOST_UPDATE_RUNBOOK.md."
-        exit 1
     }
 }
 
@@ -1841,15 +1769,13 @@ function Redeploy-Deployment {
         exit 1
     }
 
-    Install-HostUpdateCliIfRequested -EnvFilePath ".env"
-    
     Write-Info "Stopping existing containers..."
     try {
         docker compose down
     } catch {
         Write-Warning "Could not stop containers: $_"
     }
-    
+
     Write-Info "Restarting deployment..."
     try {
         docker compose --env-file .env -f docker-compose.yml up -d --pull=missing
@@ -1910,18 +1836,18 @@ if ($DeployOffline) {
 # Handle image management options (these exit early if used)
 if ($BuildBaseImages) {
     Write-Info "Building pre-upgraded base images for offline deployment..."
-    
+
     # Check if build-base-images.ps1 exists
     $buildScript = Join-Path $PSScriptRoot "docker" "build-base-images.ps1"
     if (-not (Test-Path $buildScript)) {
         Write-ErrorMsg "Build script not found: $buildScript"
         exit 1
     }
-    
+
     # Run the build script with the specified images directory
     Write-Info "Invoking: $buildScript -CacheDir $ImagesDir"
     & $buildScript -CacheDir $ImagesDir
-    
+
     if ($LASTEXITCODE -eq 0) {
         Write-Success "Pre-upgraded base images built successfully!"
         Write-Info "Cache directory: $ImagesDir"
@@ -2000,7 +1926,7 @@ $config['DB_PROVIDER'] = $dbProvider
 if (-not $NonInteractive) {
     Write-Host ""
     Write-Header "Distributed Slicing Configuration"
-    
+
     $enableDistSlicing = Read-Host "Enable distributed slicing (uses external slicer workers)? [y/n] (default: y)"
     if ($enableDistSlicing -match "^[Nn]") {
         $config['ENABLE_DISTRIBUTED_SLICING'] = 'false'
@@ -2010,21 +1936,21 @@ if (-not $NonInteractive) {
     } else {
         $config['ENABLE_DISTRIBUTED_SLICING'] = 'true'
         Write-Success "Distributed slicing enabled"
-        
+
         # Ask about OrcaSlicer workers
         Write-Host ""
         $enableOrcaWorker = Read-Host "Enable OrcaSlicer worker(s)? [y/n] (default: n)"
         if ($enableOrcaWorker -match "^[Yy]") {
             $config['ENABLE_ORCA_WORKER'] = 'true'
             Write-Success "OrcaSlicer workers enabled"
-            
+
             Set-SupportedOrcaSlicerConfig -Config $config
             Write-Info "Using repository-supported OrcaSlicer version $script:SupportedOrcaSlicerVersion"
-            
+
             # Worker replica count
             $workerCount = Read-Host "Number of OrcaSlicer worker replicas (default: 1)"
             $config['ORCA_WORKER_COUNT'] = if ([string]::IsNullOrWhiteSpace($workerCount)) { '1' } else { $workerCount }
-            
+
             # Endpoint override (only for microservices)
             if ($architecture -eq 'microservices') {
                 $overrideEndpoints = Read-Host "Override default worker service endpoints? [y/n] (default: n)"
@@ -2049,12 +1975,12 @@ if (-not $NonInteractive) {
     Write-Info "If you already run Spoolman you can point PrintFarmer at its base URL now."
     Write-Info "(You can also configure this later in the UI)"
     Write-Host ""
-    
+
     $enableSpoolman = Read-Host "Enable Spoolman integration? [y/n] (default: n)"
     if ($enableSpoolman -match "^[Yy]") {
         $config['ENABLE_SPOOLMAN'] = 'true'
         Write-Success "Spoolman integration enabled"
-        
+
         # Spoolman URL
         $spoolmanUrl = Read-Host "Spoolman base URL (protocol + host[:port], no trailing slash) (default: http://spoolman:7912)"
         $config['SPOOLMAN_BASE_URL'] = if ([string]::IsNullOrWhiteSpace($spoolmanUrl)) { 'http://spoolman:7912' } else { $spoolmanUrl }
@@ -2096,15 +2022,6 @@ if (-not (Confirm-DeploymentSettings -Settings $config)) {
 if ($DryRun) {
     Write-Success "Dry-run validation successful!"
     Write-Info "Configuration is valid and ready for deployment"
-    if (-not [string]::IsNullOrWhiteSpace($HostUpdateCliVersion)) {
-        Write-Info "[DRY RUN] Would install host-update CLI $HostUpdateCliVersion and write host-update.json from .env"
-        if ($InstallHostUpdateDaemon) {
-            Write-Info "[DRY RUN] Would install the host-update daemon service PrintFarmerHostUpdateDaemon (not enabled)"
-        }
-    } elseif ($InstallHostUpdateDaemon) {
-        Write-ErrorMsg "-InstallHostUpdateDaemon requires -HostUpdateCliVersion"
-        exit 1
-    }
     Write-Info "Remove -DryRun flag to proceed with actual deployment"
     exit 0
 }
@@ -2156,23 +2073,23 @@ if ($config['ENABLE_ORCA_WORKER'] -eq 'true') {
 try {
     $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
     $generatorScript = Join-Path $scriptDir "compose-generator.ps1"
-    
+
     if (-not (Test-Path $generatorScript)) {
         throw "Compose generator not found at $generatorScript"
     }
-    
+
     Write-Info "Calling PowerShell compose generator..."
     Write-Info "Generator: $generatorScript"
     Write-Info "Architecture: $architecture"
     Write-Info "Database: $dbProvider"
-    
+
     # Call PowerShell script with arguments
     & pwsh -File $generatorScript @generatorArgs
-    
+
     if ($LASTEXITCODE -ne 0) {
         throw "Compose generator failed with exit code $LASTEXITCODE"
     }
-    
+
     Write-Success "Docker compose configuration generated successfully"
 } catch {
     Write-ErrorMsg "Failed to generate docker-compose.yml: $_"
@@ -2218,8 +2135,6 @@ if (-not (Generate-EnvFile -Config $config -OutputPath ".env")) {
     exit 1
 }
 
-Install-HostUpdateCliIfRequested -EnvFilePath ".env"
-
 # Deploy
 Write-Header "Starting Deployment"
 
@@ -2244,17 +2159,17 @@ try {
     Write-Info "Step 1/3: Starting database container..."
     docker compose --env-file .env -f docker-compose.yml up -d database
     Write-Success "Database container started"
-    
+
     # Wait for database to be healthy (max 120 seconds)
     Write-Info "Step 2/3: Waiting for database to become healthy..."
     $dbHealthy = $false
     $maxAttempts = 24  # 24 * 5 seconds = 120 seconds
     $attempt = 0
-    
+
     while (-not $dbHealthy -and $attempt -lt $maxAttempts) {
         Start-Sleep -Seconds 5
         $attempt++
-        
+
         $psOutput = docker compose --env-file .env -f docker-compose.yml ps database 2>&1
         if ($psOutput -match "healthy|Up.*\(healthy\)") {
             $dbHealthy = $true
@@ -2263,7 +2178,7 @@ try {
             $status = if ($psOutput -match "(Up|Exited|Created)") { $matches[1] } else { "Unknown" }
             $healthStatus = if ($psOutput -match "\(([^)]+)\)") { $matches[1] } else { "no health status" }
             Write-Info "Waiting for database... (attempt $attempt/$maxAttempts) Status: $status ($healthStatus)"
-            
+
             # If exited, show logs immediately
             if ($psOutput -match "Exited") {
                 Write-Warning "Database container exited! Showing logs:"
@@ -2273,7 +2188,7 @@ try {
             }
         }
     }
-    
+
     if (-not $dbHealthy) {
         Write-ErrorMsg "Database failed to become healthy after 120 seconds"
         Write-Info "Final database status:"
@@ -2283,16 +2198,16 @@ try {
         Pop-Location
         exit 1
     }
-    
+
     # Now start the rest of the containers (they can now connect to database)
     Write-Info "Step 3/3: Starting remaining containers..."
     Write-Info "Verifying database is accepting connections before starting dependent services..."
-    
+
     # Do a more direct test - try to connect to the database
     $maxConnectionAttempts = 12
     $connectionAttempt = 0
     $dbConnected = $false
-    
+
     while (-not $dbConnected -and $connectionAttempt -lt $maxConnectionAttempts) {
         $connectionAttempt++
         try {
@@ -2312,7 +2227,7 @@ try {
             }
         }
     }
-    
+
     if (-not $dbConnected) {
         Write-Warning "Could not verify database connection after $maxConnectionAttempts attempts, but continuing anyway..."
         Write-Info "Waiting an extra 10 seconds for database to fully initialize..."
@@ -2321,7 +2236,7 @@ try {
         Write-Info "Waiting 3 seconds before starting dependent services..."
         Start-Sleep -Seconds 3
     }
-    
+
     docker compose --env-file .env -f docker-compose.yml up -d api orcaslicer-worker frontend nginx-proxy --pull=missing
     Write-Success "All containers started successfully"
 } catch {

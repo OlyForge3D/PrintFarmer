@@ -19,7 +19,6 @@ import QueueDateRangeBar, { defaultDateRange } from "../components/QueueDateRang
 import type { DateRange } from "../components/QueueDateRangeBar";
 import { SpoolValidationModal } from "../components/SpoolValidationModal";
 import { AutoDispatchGlobalToggle } from "../components/AutoDispatchGlobalToggle";
-import { DispatchRecoveryQueueSection } from "@/features/dispatch-recovery/components/DispatchRecoveryQueueSection";
 import { validateSpoolForDispatch } from "../utils/spoolValidation";
 import type { SpoolValidationContext } from "../utils/spoolValidation";
 import {
@@ -753,7 +752,6 @@ export function PrintQueueDashboardPage() {
                 <span className="sr-only" role="status" aria-live="polite" aria-atomic="true">
                   {queueReordering.announcement}
                 </span>
-                <DispatchRecoveryQueueSection jobs={jobs} />
                 {queueViewMode === "table" ? (
                   <QueueJobsTable
                     jobs={displayedJobs}

@@ -28,7 +28,6 @@ namespace Farm.Infrastructure.Services.Queue;
 public sealed class QueueReconciliationService(
     IServiceScopeFactory scopeFactory,
     ILogger<QueueReconciliationService> logger,
-    Farm.Infrastructure.Services.HostUpdates.QueueReconciliationFenceFlag? hostUpdateFence = null,
     TimeProvider? timeProvider = null) : BackgroundService
 {
     private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
@@ -51,20 +50,7 @@ public sealed class QueueReconciliationService(
         {
             try
             {
-                if (hostUpdateFence is not null && await hostUpdateFence.IsPauseRequestedAsync(stoppingToken))
-                {
-                    if (!hostUpdateFence.IsAcknowledged)
-                    {
-                        await hostUpdateFence.AcknowledgePausedAsync(stoppingToken);
-                        logger.LogWarning("queue_reconciliation_writer_fence_rejected reason=pause_observed_before_reconciliation");
-                    }
-
-                    await Task.Delay(TimeSpan.FromMilliseconds(250), _timeProvider, stoppingToken).ConfigureAwait(false);
-                }
-                else
-                {
-                    await ReconcileStaleAttemptsAsync(stoppingToken);
-                }
+                await ReconcileStaleAttemptsAsync(stoppingToken);
             }
             catch (OperationCanceledException)
             {
@@ -75,14 +61,7 @@ public sealed class QueueReconciliationService(
                 logger.LogError(ex, "[Reconciliation] Error during reconciliation scan");
             }
 
-            if (await WaitForIntervalOrPauseAsync(stoppingToken).ConfigureAwait(false))
-            {
-                if (hostUpdateFence is { IsAcknowledged: false } fence)
-                {
-                    await fence.AcknowledgePausedAsync(stoppingToken).ConfigureAwait(false);
-                    logger.LogWarning("queue_reconciliation_writer_fence_rejected reason=pause_observed_during_interval");
-                }
-            }
+            await Task.Delay(ReconciliationInterval, _timeProvider, stoppingToken).ConfigureAwait(false);
         }
 
         logger.LogInformation("[Reconciliation] Queue reconciliation service stopped");
@@ -90,13 +69,6 @@ public sealed class QueueReconciliationService(
 
     internal async Task ReconcileStaleAttemptsAsync(CancellationToken ct)
     {
-        if (hostUpdateFence is not null && await hostUpdateFence.IsPauseRequestedAsync(ct))
-        {
-            await hostUpdateFence.AcknowledgePausedAsync(ct);
-            logger.LogWarning("queue_reconciliation_writer_fence_rejected reason=pause_observed_before_reconciliation");
-            return;
-        }
-
         await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         IDbOutboxSequenceAllocator? sequenceAllocator = scope.ServiceProvider.GetService<IDbOutboxSequenceAllocator>();
@@ -170,14 +142,6 @@ public sealed class QueueReconciliationService(
         {
             if (recoveredNullAttemptCommands)
             {
-                if (await SaveThenAcknowledgePauseAsync(
-                        db,
-                        "pause_observed_after_null_attempt_recovery",
-                        ct))
-                {
-                    return;
-                }
-
                 await db.SaveChangesAsync(ct);
             }
 
@@ -193,51 +157,10 @@ public sealed class QueueReconciliationService(
 
         foreach (QueueDispatchAttempt attempt in toReconcile)
         {
-            if (await SaveThenAcknowledgePauseAsync(db, "pause_observed_before_attempt", ct))
-            {
-                return;
-            }
-
             await ReconcileSingleAttemptAsync(db, printersSvc, sequenceAllocator, attempt, ct);
-            if (await SaveThenAcknowledgePauseAsync(db, "pause_observed_after_attempt", ct))
-            {
-                return;
-            }
         }
 
         await db.SaveChangesAsync(ct);
-    }
-
-    internal async Task<bool> WaitForIntervalOrPauseAsync(CancellationToken stoppingToken)
-    {
-        DateTimeOffset until = _timeProvider.GetUtcNow() + ReconciliationInterval;
-        while (_timeProvider.GetUtcNow() < until)
-        {
-            if (hostUpdateFence is not null && await hostUpdateFence.IsPauseRequestedAsync(stoppingToken).ConfigureAwait(false))
-            {
-                return true;
-            }
-
-            await Task.Delay(TimeSpan.FromMilliseconds(250), _timeProvider, stoppingToken).ConfigureAwait(false);
-        }
-
-        return false;
-    }
-
-    private async Task<bool> SaveThenAcknowledgePauseAsync(
-        AppDbContext db,
-        string reason,
-        CancellationToken ct)
-    {
-        if (hostUpdateFence is null || !await hostUpdateFence.IsPauseRequestedAsync(ct))
-        {
-            return false;
-        }
-
-        await db.SaveChangesAsync(ct);
-        await hostUpdateFence.AcknowledgePausedAsync(ct);
-        logger.LogWarning("queue_reconciliation_writer_fence_rejected reason={Reason}", reason);
-        return true;
     }
 
     private async Task<bool> RecoverNullAttemptCommandsAsync(
@@ -379,11 +302,6 @@ public sealed class QueueReconciliationService(
             return;
         }
 
-        if (hostUpdateFence is not null && await hostUpdateFence.IsPauseRequestedAsync(ct))
-        {
-            return;
-        }
-
         // If no backend service is available, flag for manual reconciliation.
         if (printersSvc is null)
         {
@@ -396,11 +314,6 @@ public sealed class QueueReconciliationService(
         // Query the authoritative backend for the current printer state.
         BackendReconciliationOutcome outcome = await QueryBackendOutcomeAsync(
             printersSvc, attempt, ct);
-        if (hostUpdateFence is not null && await hostUpdateFence.IsPauseRequestedAsync(ct))
-        {
-            return;
-        }
-
         await using QueueOutboxTransactionScope transaction =
             await QueueOutboxTransactionScope.BeginAsync(db, ct);
         activeState.Revision = Math.Max(1, activeState.Revision) + 1;

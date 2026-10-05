@@ -4,7 +4,6 @@ import clsx from "clsx";
 import { AlertTriangle, Clock, DollarSign, FolderOpen, Layers, Palette, Timer } from "lucide-react";
 import type { QueuedPrintJobWithFileMetaDto } from "@/services/printQueueService";
 import { PrintJobPriority, type DispatchUploadProgressDto } from "@/types/api";
-import { isDispatchIndeterminate, isRecoveryBlocked } from "@/features/dispatch-recovery/utils";
 import { QueueJobReorderControls } from "@/features/queue/components/QueueJobReorderControls";
 import type { QueueReorderInteractions } from "@/features/queue/components/QueueJobReorderControls";
 
@@ -90,16 +89,10 @@ function QueueJobActions({
   onAbortPrint,
   onDispatch,
   onSchedule,
-  dispatchBlocked = false,
-  dispatchIndeterminate = false,
 }: {
   jobId: string;
   status: string;
   hasAssignedPrinter: boolean;
-  /** Hides Start Print while the job is held (e.g. OperatorRecoveryRequired). */
-  dispatchBlocked?: boolean;
-  /** Hides Start Print and Cancel while an unknown dispatch awaits reconciliation. */
-  dispatchIndeterminate?: boolean;
   dispatchingJobId: string | null;
   cancelingJobId: string | null;
   dispatchUploadProgressByJobId?: Record<string, DispatchUploadProgressDto>;
@@ -123,7 +116,7 @@ function QueueJobActions({
 
   return (
     <div className="flex gap-1.5 flex-wrap">
-      {(status === "Queued" || status === "Assigned") && hasAssignedPrinter && !dispatchBlocked && !dispatchIndeterminate && (
+      {(status === "Queued" || status === "Assigned") && hasAssignedPrinter && (
         <Button
           onClick={(e) => {
             e.stopPropagation();
@@ -191,7 +184,7 @@ function QueueJobActions({
           Abort
         </Button>
       )}
-      {status !== "Completed" && status !== "Cancelled" && !dispatchIndeterminate && (
+      {status !== "Completed" && status !== "Cancelled" && (
         <Button
           onClick={(e) => {
             e.stopPropagation();
@@ -413,8 +406,6 @@ function QueueJobCommon({
               jobId={jobId}
               status={status}
               hasAssignedPrinter={Boolean(jobWrapper.assignedPrinter)}
-              dispatchBlocked={isRecoveryBlocked(jobWrapper.job)}
-              dispatchIndeterminate={isDispatchIndeterminate(jobWrapper.job)}
               dispatchingJobId={dispatchingJobId}
               cancelingJobId={cancelingJobId}
               dispatchUploadProgressByJobId={dispatchUploadProgressByJobId}

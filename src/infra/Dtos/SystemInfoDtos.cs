@@ -38,9 +38,6 @@ public record SystemInfoDto
 
     /// <summary>Database metadata and lightweight entity counts.</summary>
     public required SystemDatabaseInfoDto Database { get; init; }
-
-    /// <summary>Automatic host update scheduling status; null when the scheduler is not wired.</summary>
-    public HostUpdateSchedulingStatusDto? UpdateScheduling { get; init; }
 }
 
 /// <summary>
