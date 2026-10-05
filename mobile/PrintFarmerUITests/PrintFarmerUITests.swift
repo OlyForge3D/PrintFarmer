@@ -1890,6 +1890,18 @@ class PrintFarmerUITestCase: XCTestCase {
     private func launchForTest() {
         testBudget = UIWaitBudget(timeout: executionTimeAllowance)
         app = .printFarmerUITest(arguments: ["--uitesting"] + additionalLaunchArguments)
+        launchConfiguredApp()
+    }
+
+    /// A scenario relaunch keeps the original test allowance but must establish
+    /// readiness and heartbeat identity for the new process before navigation.
+    func relaunchAppForTest(additionalArguments: [String]) {
+        app.terminate()
+        app.launchArguments.append(contentsOf: additionalArguments)
+        launchConfiguredApp()
+    }
+
+    private func launchConfiguredApp() {
         appHeartbeat = .live(launchedAt: ProcessInfo.processInfo.systemUptime)
         app.launchForPrintFarmerUITest(willLaunch: launchWindow.begin)
         launchWindow.end()
