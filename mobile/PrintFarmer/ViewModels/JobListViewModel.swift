@@ -24,7 +24,6 @@ final class JobListViewModel {
     private(set) var isNetworkReachable = false
     private(set) var hasFreshQueueSnapshot = false
     private(set) var isReorderingQueue = false
-    private(set) var rerunningFailedJobIDs: Set<UUID> = []
 
     private var jobService: (any JobServiceProtocol)?
     private var jobAnalyticsService: (any JobAnalyticsServiceProtocol)?
@@ -51,10 +50,6 @@ final class JobListViewModel {
             && hasFreshQueueSnapshot
             && !isReorderingQueue
             && isViewActive
-    }
-
-    var canRerunFailedJobs: Bool {
-        queueWriteAuthorized && isNetworkReachable && isViewActive
     }
 
     /// Keep the native List's editing session alive while an accepted move is
@@ -278,42 +273,6 @@ final class JobListViewModel {
                     response.dispatchResult?.errorDetail
                     ?? "The printer rejected the dispatch."
             }
-        } catch {
-            guard isViewActive else { return }
-            await handleActionError(error)
-        }
-    }
-
-    func rerunFailedJob(id: UUID) async {
-        guard let jobService, canRerunFailedJobs,
-              !rerunningFailedJobIDs.contains(id) else { return }
-        rerunningFailedJobIDs.insert(id)
-        defer { rerunningFailedJobIDs.remove(id) }
-
-        do {
-            let reviewedJob = try await jobService.get(id: id)
-            guard isViewActive else { return }
-            guard reviewedJob.id == id else {
-                await loadJobs()
-                errorMessage = "The selected job changed. Review the refreshed queue before retrying."
-                return
-            }
-            guard reviewedJob.status == .failed else {
-                await loadJobs()
-                errorMessage = "This job is no longer failed. Review the refreshed queue before retrying."
-                return
-            }
-            guard let rowVersion = reviewedJob.rowVersion, !rowVersion.isEmpty else {
-                await loadJobs()
-                errorMessage = "The failed job revision is unavailable. Refresh and review before retrying."
-                return
-            }
-            guard canRerunFailedJobs else {
-                errorMessage = "Queue.Write access or network connectivity changed. No retry was sent."
-                return
-            }
-            try await jobService.rerun(id: id, reviewedRowVersion: rowVersion)
-            await loadJobs()
         } catch {
             guard isViewActive else { return }
             await handleActionError(error)

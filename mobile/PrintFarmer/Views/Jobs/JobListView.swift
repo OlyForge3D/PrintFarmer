@@ -536,25 +536,7 @@ struct JobListView: View {
     // MARK: - Recent Job Row
 
     private func recentFailureRow(_ item: QueueHistoryEntry) -> some View {
-        let jobID = UUID(uuidString: item.id)
-        return Group {
-            if dynamicTypeSize.isAccessibilitySize {
-                VStack(alignment: .leading, spacing: 8) {
-                    recentFailureNavigationLink(item, id: jobID)
-                    if let jobID {
-                        rerunFailedJobButton(id: jobID)
-                    }
-                }
-            } else {
-                HStack(alignment: .top, spacing: 12) {
-                    recentFailureNavigationLink(item, id: jobID)
-                        .layoutPriority(1)
-                    if let jobID {
-                        rerunFailedJobButton(id: jobID)
-                    }
-                }
-            }
-        }
+        recentFailureNavigationLink(item, id: UUID(uuidString: item.id))
     }
 
     @ViewBuilder
@@ -575,25 +557,6 @@ struct JobListView: View {
                 .accessibilityLabel(recentFailureAccessibilityLabel(item))
                 .accessibilityIdentifier("job.row.\(item.id)")
         }
-    }
-
-    private func rerunFailedJobButton(id: UUID) -> some View {
-        Button {
-            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-            Task { await viewModel.rerunFailedJob(id: id) }
-        } label: {
-            Text("Retry")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(Color.pfAccent)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 6)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .fixedSize()
-        .disabled(!viewModel.canRerunFailedJobs || viewModel.rerunningFailedJobIDs.contains(id))
-        .accessibilityHint("Creates a new queued copy of this failed job.")
-        .accessibilityIdentifier("job.retry.\(id.uuidString.lowercased())")
     }
 
     private func recentFailureRowContent(_ item: QueueHistoryEntry) -> some View {

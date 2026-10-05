@@ -371,13 +371,8 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
                     guard failedJobExists else { return }
                     XCTAssertTrue(failedJob.label.localizedCaseInsensitiveContains("vase_mode_spiral.gcode"))
                     let retryButton = queueList.buttons["job.retry.30000000-0003-0000-0000-000000000009"]
-                    XCTAssertTrue(retryButton.waitForExistence(timeout: 5))
-                    XCTAssertTrue(retryButton.isEnabled, "Queue.Write-authorized operators can rerun a failed job.")
+                    XCTAssertFalse(retryButton.exists, "Recent failures must not expose an unsupported retry action.")
                     XCTAssertTrue(heading.isHittable, "Recent failures must remain visible while inspecting its rows.")
-                    XCTAssertTrue(retryButton.isHittable, "Retry must remain visible beside the failed job.")
-                    if size == "normal" {
-                        XCTAssertLessThan(retryButton.frame.width, 80, "Retry should stay a compact inline action.")
-                    }
                     XCTAssertTrue(
                         failedJob.isHittable,
                         "A failed-job row must be visible in Recent failures. Row: \(failedJob.frame), scan: \(scan.frame), list: \(queueList.frame)."
@@ -452,7 +447,17 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
             )
             XCTAssertGreaterThanOrEqual(inventoryFilterButtons.count, 5)
             if size == "largest" {
-                XCTAssertTrue(app.buttons["inventory.filter.loaded"].isHittable)
+                for identifier in [
+                    "inventory.filter.all",
+                    "inventory.filter.loaded",
+                    "inventory.filter.low",
+                    "inventory.filter.material.PLA",
+                ] {
+                    let filter = app.buttons[identifier]
+                    XCTAssertTrue(filter.isHittable, "\(identifier) must remain directly reachable at largest text.")
+                    XCTAssertGreaterThanOrEqual(filter.frame.minX, inventoryFilters.frame.minX - 1)
+                    XCTAssertLessThanOrEqual(filter.frame.maxX, inventoryFilters.frame.maxX + 1)
+                }
             } else {
                 for index in 0..<inventoryFilterButtons.count {
                     let button = inventoryFilterButtons.element(boundBy: index)
@@ -462,18 +467,13 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
                 }
             }
             let moreFilters = app.buttons["inventory.filter.more"]
-            if size == "largest", !moreFilters.isHittable {
-                inventoryFilters.swipeLeft()
-            }
-            XCTAssertTrue(moreFilters.isHittable)
+            XCTAssertTrue(moreFilters.isHittable, "Additional inventory filters must be reachable without horizontal scrolling.")
             moreFilters.tap()
             let missingNFCFilter = app.buttons["inventory.filter.no-nfc"]
             XCTAssertTrue(missingNFCFilter.waitForExistence(timeout: 5))
             missingNFCFilter.tap()
             let allFilter = app.buttons["inventory.filter.all"]
-            if size == "largest", !allFilter.isHittable {
-                inventoryFilters.swipeRight()
-            }
+            XCTAssertTrue(allFilter.isHittable, "The All filter must remain visible after selecting a secondary filter.")
             allFilter.tap()
             attachScreen("\(device)-\(size)-filament-inventory")
 
@@ -1048,30 +1048,6 @@ final class Issue3259MockupAccessibilityUITests: PrinterDetailPanelsUITests.Issu
         captureApprovedMockupScreens()
     }
 
-    func testRetryFailedQueueJobUsesAuthenticatedRerunEndpoint() {
-        let queue = shellDestinationButton(tabIdentifier: "tab.queue", timeout: 8)
-        XCTAssertTrue(queue.waitForExistence(timeout: 8))
-        queue.tap()
-        let queueList = app.collectionViews["jobList.root"]
-        XCTAssertTrue(queueList.waitForExistence(timeout: 8))
-
-        let retryButton = queueList.buttons["job.retry.30000000-0003-0000-0000-000000000009"]
-        for _ in 0..<8 where !retryButton.isHittable {
-            queueList.swipeUp()
-        }
-        XCTAssertTrue(retryButton.waitForExistence(timeout: 5))
-        XCTAssertTrue(retryButton.isEnabled)
-        retryButton.tap()
-
-        let rerunRow = queueList.buttons["job.row.32590000-0000-0000-0000-000000000104"]
-        for _ in 0..<12 where !rerunRow.isHittable {
-            queueList.swipeDown()
-        }
-        XCTAssertTrue(
-            rerunRow.waitForExistence(timeout: 8),
-            "A successful authenticated rerun should add the new copy to the queue."
-        )
-    }
 }
 
 @MainActor
@@ -1124,7 +1100,7 @@ class Issue3259ControlIdleUITests: PrinterDetailPanelsUITests.Issue3259MockupCap
         let farm = shellDestinationButton(tabIdentifier: "tab.farm", timeout: 8)
         XCTAssertTrue(farm.waitForExistence(timeout: 8))
         farm.tap()
-        let printerCard = app.buttons["farm-card-10000000-0001-0000-0000-000000000001"]
+        let printerCard = app.buttons["farm-card-10000000-0001-0000-0000-000000000002"]
         for _ in 0..<8 where !printerCard.exists {
             app.swipeUp()
         }
@@ -1183,6 +1159,16 @@ class Issue3259ControlIdleUITests: PrinterDetailPanelsUITests.Issue3259MockupCap
         XCTAssertTrue(runtime.isHittable, "Fan and Z-offset controls must be visibly reachable.")
         attachScreen("\(device)-\(size)-printer-control-idle-runtime")
 
+        selector.buttons["Filament"].tap()
+        let filamentPage = app.descendants(matching: .any)["printer.detail.panel.filament"]
+        XCTAssertTrue(filamentPage.waitForExistence(timeout: 5))
+        let physicalLoad = app.buttons["printer.detail.filament.load"]
+        let physicalUnload = app.buttons["printer.detail.filament.unload"]
+        XCTAssertTrue(physicalLoad.waitForExistence(timeout: 5))
+        XCTAssertTrue(physicalUnload.waitForExistence(timeout: 5))
+        XCTAssertFalse(physicalLoad.isEnabled, "Do not imply Moonraker load support where the API returns 503.")
+        XCTAssertFalse(physicalUnload.isEnabled, "Do not imply Moonraker unload support where the API returns 503.")
+
         selector.buttons["Queue"].tap()
         let queue = app.descendants(matching: .any)["printer.detail.panel.queue"]
         XCTAssertTrue(queue.waitForExistence(timeout: 5))
@@ -1190,15 +1176,15 @@ class Issue3259ControlIdleUITests: PrinterDetailPanelsUITests.Issue3259MockupCap
             queue.staticTexts["Assigned"].waitForExistence(timeout: 5),
             "The idle mockup state must retain its assigned and queued jobs."
         )
+        XCTAssertTrue(queue.staticTexts["Up next"].exists)
+        XCTAssertTrue(queue.staticTexts["Then"].exists)
         XCTAssertFalse(
             queue.descendants(matching: .any).matching(
                 NSPredicate(format: "label CONTAINS[c] %@", "benchy_0.2mm_PLA.gcode")
             ).firstMatch.exists,
             "An idle printer must not show the hidden active-print job from the shared demo fixture."
         )
-        let startNext = app.buttons.matching(
-            NSPredicate(format: "identifier BEGINSWITH %@", "printer.detail.queue.dispatch.")
-        ).firstMatch
+        let startNext = app.buttons["printer.detail.queue.dispatch.32590000-0000-0000-0000-000000000021"]
         XCTAssertTrue(startNext.waitForExistence(timeout: 5))
         for _ in 0..<4 where !startNext.isHittable {
             queue.swipeUp()

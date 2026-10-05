@@ -96,13 +96,6 @@ actor JobService: JobServiceProtocol {
         }
     }
 
-    func rerun(id: UUID, reviewedRowVersion: String) async throws {
-        try await apiClient.postVoid(
-            "/api/job-queue/\(id)/rerun",
-            headers: preconditionHeaders(reviewedRowVersion)
-        )
-    }
-
     func abort(id: UUID, reviewedRowVersion: String) async throws {
         try await apiClient.postVoid(
             "/api/job-queue/\(id)/abort-print",

@@ -2761,6 +2761,31 @@ final class PrinterControlsViewModelTests: XCTestCase {
         XCTAssertNil(model.pendingCommand, "The matching Z-offset readback confirms the accepted command")
     }
 
+    func test_runtimeEndpointFailuresRemainVisibleToTheOperator() async throws {
+        var printer = try idlePrinter()
+        printer.state = "printing"
+        printer.fanSpeedPercent = 25
+        printer.liveZOffsetMm = 0
+        var capabilities = Self.fullCaps
+        capabilities.supportsFanSpeedReadback = true
+        capabilities.supportsZOffsetAdjustment = true
+        capabilities.supportsZOffsetReadback = true
+        let model = try makeViewModel(printer: printer, capabilities: capabilities)
+        await model.loadCapabilities()
+
+        mockService.errorToThrow = NetworkError.serverError(503)
+        await model.setFanSpeed(50)
+        XCTAssertTrue(model.lastError?.message.localizedCaseInsensitiveContains("server error") == true)
+        XCTAssertEqual(model.lastError?.isRetryable, true)
+        XCTAssertNil(model.pendingCommand)
+
+        mockService.errorToThrow = NetworkError.serverError(502)
+        await model.adjustLiveZOffset(by: 0.01)
+        XCTAssertTrue(model.lastError?.message.localizedCaseInsensitiveContains("server error") == true)
+        XCTAssertEqual(model.lastError?.isRetryable, true)
+        XCTAssertNil(model.pendingCommand)
+    }
+
     func test_runtimeAdjustmentsAreSupportedWhilePrintingAndPaused() async throws {
         var capabilities = Self.fullCaps
         capabilities.supportsFanSpeedReadback = true

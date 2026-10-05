@@ -56,7 +56,6 @@ protocol JobServiceProtocol: Sendable {
         id: UUID,
         reviewedRowVersion: String
     ) async throws -> JobDispatchResult
-    func rerun(id: UUID, reviewedRowVersion: String) async throws
     func cancel(id: UUID, reviewedRowVersion: String) async throws
     func abort(id: UUID, reviewedRowVersion: String) async throws
     func pause(id: UUID, reviewedRowVersion: String) async throws

@@ -562,6 +562,9 @@ final class PrinterDetailViewModel {
         }
         let statusJobChanged = update.jobName != nil
             && update.jobName != previousStatusDetail?.jobName
+        let canRetainRemainingTime = statusIsActiveJob == true
+            && update.jobName != nil
+            && update.jobName == previousStatusDetail?.jobName
         let currentJobThumbnail = statusIsActiveJob == false
             ? nil
             : update.currentJobThumbnailUrl
@@ -590,7 +593,9 @@ final class PrinterDetailViewModel {
             homedAxes: update.homedAxes ?? previousStatusDetail?.homedAxes,
             spoolInfo: update.spoolInfo ?? previousStatusDetail?.spoolInfo,
             mmuStatus: update.mmuStatus ?? previousStatusDetail?.mmuStatus,
-            printTimeLeftSeconds: previousStatusDetail?.printTimeLeftSeconds,
+            printTimeLeftSeconds: canRetainRemainingTime
+                ? previousStatusDetail?.printTimeLeftSeconds
+                : nil,
             currentJobThumbnailUrl: currentJobThumbnail
         )
     }
@@ -2521,8 +2526,10 @@ final class PrinterDetailViewModel {
     }
 
     func matchState(for job: QueuedPrintJobResponse) -> QueueMatchState {
-        guard let required = job.gcodeFile?.materialType?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !required.isEmpty else { return .unknown }
+        let required = [job.gcodeFile?.materialType, job.job.filamentName]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty }
+        guard let required else { return .unknown }
         let loaded = toolheads.compactMap {
             $0.currentMaterial?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         }.filter { !$0.isEmpty }

@@ -20,7 +20,6 @@ final class MockJobService: JobServiceProtocol, @unchecked Sendable {
     var cancelCalledWith: UUID?
     var dispatchCalledWith: UUID?
     var dispatchReviewedRowVersion: String?
-    var rerunCalledWith: (id: UUID, reviewedRowVersion: String)?
     var abortCalledWith: UUID?
     var pauseCalledWith: UUID?
     var resumeCalledWith: UUID?
@@ -139,11 +138,6 @@ final class MockJobService: JobServiceProtocol, @unchecked Sendable {
         )
     }
 
-    func rerun(id: UUID, reviewedRowVersion: String) async throws {
-        rerunCalledWith = (id, reviewedRowVersion)
-        if let error = actionErrorToThrow ?? errorToThrow { throw error }
-    }
-
     func abort(id: UUID, reviewedRowVersion: String) async throws {
         abortCalledWith = id
         if let error = actionErrorToThrow ?? errorToThrow { throw error }
@@ -203,7 +197,6 @@ final class MockJobService: JobServiceProtocol, @unchecked Sendable {
         deleteCalledWith = nil
         cancelCalledWith = nil
         dispatchCalledWith = nil
-        rerunCalledWith = nil
         abortCalledWith = nil
         pauseCalledWith = nil
         resumeCalledWith = nil

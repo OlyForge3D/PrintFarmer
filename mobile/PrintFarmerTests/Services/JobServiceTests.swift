@@ -201,20 +201,6 @@ final class JobServiceTests: XCTestCase {
         )
     }
 
-    func testRerunUsesReviewedETagAndExistingEndpoint() async throws {
-        mockAPIClient.stubResponse(json: "{}")
-
-        try await service.rerun(id: jobId, reviewedRowVersion: "failed-job-v3")
-
-        let request = try XCTUnwrap(mockAPIClient.capturedRequests.last)
-        XCTAssertEqual(request.httpMethod, "POST")
-        XCTAssertEqual(request.url?.path, "/api/job-queue/\(jobId)/rerun")
-        XCTAssertEqual(
-            request.value(forHTTPHeaderField: "If-Match"),
-            "\"failed-job-v3\""
-        )
-    }
-
     func testMoveQueuedJobEncodesBeforeNeighborAndDecodesFlatResponse() async throws {
         mockAPIClient.stubResponse(
             json: """

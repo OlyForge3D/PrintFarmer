@@ -784,7 +784,7 @@ final class PrinterDetailViewModelTests: XCTestCase {
             material: "PLA",
             colorHex: "#000000",
             inUse: false,
-            filamentName: nil,
+            filamentName: "PLA Spool",
             vendor: "TestVendor",
             registeredAt: nil,
             firstUsedAt: nil,
@@ -1860,9 +1860,47 @@ final class PrinterDetailViewModelTests: XCTestCase {
         mockService.printerToReturn = printer
         await viewModel.loadPrinter()
         viewModel.isViewActive = true
+        viewModel.statusDetail = PrinterStatusDetail(
+            id: TestData.testUUID,
+            isOnline: true,
+            state: "printing",
+            progress: 0.05,
+            currentLayer: nil,
+            totalLayers: nil,
+            fanSpeedPercent: nil,
+            liveZOffsetMm: nil,
+            jobName: "old-job",
+            thumbnailUrl: nil,
+            cameraStreamUrl: nil,
+            cameraSnapshotUrl: nil,
+            x: nil, y: nil, z: nil,
+            hotendTemp: nil, bedTemp: nil, hotendTarget: nil, bedTarget: nil,
+            homedAxes: nil, spoolInfo: nil, mmuStatus: nil,
+            printTimeLeftSeconds: 2_400,
+            currentJobThumbnailUrl: "/old-thumbnail"
+        )
 
         let signalR = MockSignalRService()
         viewModel.configureSignalR(signalR)
+
+        signalR.simulatePrinterUpdate(PrinterStatusUpdate(
+            id: TestData.testUUID,
+            isOnline: true,
+            state: "printing",
+            progress: 3,
+            jobName: "old-job",
+            fileName: "old-job.gcode",
+            thumbnailUrl: nil,
+            currentJobThumbnailUrl: nil,
+            cameraStreamUrl: nil,
+            x: nil, y: nil, z: nil,
+            hotendTemp: nil, bedTemp: nil, hotendTarget: nil, bedTarget: nil,
+            homedAxes: nil, spoolInfo: nil, mmuStatus: nil
+        ))
+        await Task.yield()
+        try? await Task.sleep(for: .milliseconds(20))
+        XCTAssertEqual(viewModel.statusDetail?.printTimeLeftSeconds, 2_400,
+                       "A same-job SignalR update must preserve HTTP-sourced ETA.")
 
         signalR.simulatePrinterUpdate(PrinterStatusUpdate(
             id: TestData.testUUID,
@@ -1882,6 +1920,8 @@ final class PrinterDetailViewModelTests: XCTestCase {
         try? await Task.sleep(for: .milliseconds(20))
         XCTAssertNil(viewModel.printer?.currentJobThumbnailUrl,
                      "A new job without a thumbnail must not retain the previous job's image")
+        XCTAssertNil(viewModel.statusDetail?.printTimeLeftSeconds,
+                     "A new job must wait for a fresh HTTP status ETA.")
 
         signalR.simulatePrinterUpdate(PrinterStatusUpdate(
             id: TestData.testUUID,
@@ -1901,7 +1941,23 @@ final class PrinterDetailViewModelTests: XCTestCase {
         try? await Task.sleep(for: .milliseconds(20))
         XCTAssertEqual(viewModel.printer?.currentJobThumbnailUrl, "/new-thumbnail")
         XCTAssertEqual(viewModel.statusDetail?.currentJobThumbnailUrl, "/new-thumbnail")
+        XCTAssertNil(viewModel.statusDetail?.printTimeLeftSeconds)
 
+        viewModel.statusDetail = PrinterStatusDetail(
+            id: TestData.testUUID,
+            isOnline: true,
+            state: "printing",
+            progress: 0.1,
+            jobName: "new-job",
+            thumbnailUrl: nil,
+            cameraStreamUrl: nil,
+            cameraSnapshotUrl: nil,
+            x: nil, y: nil, z: nil,
+            hotendTemp: nil, bedTemp: nil, hotendTarget: nil, bedTarget: nil,
+            spoolInfo: nil, mmuStatus: nil,
+            printTimeLeftSeconds: 900,
+            currentJobThumbnailUrl: "/new-thumbnail"
+        )
         signalR.simulatePrinterUpdate(PrinterStatusUpdate(
             id: TestData.testUUID,
             isOnline: true,
@@ -1920,6 +1976,8 @@ final class PrinterDetailViewModelTests: XCTestCase {
         try? await Task.sleep(for: .milliseconds(20))
         XCTAssertNil(viewModel.printer?.currentJobThumbnailUrl)
         XCTAssertNil(viewModel.statusDetail?.currentJobThumbnailUrl)
+        XCTAssertNil(viewModel.statusDetail?.printTimeLeftSeconds,
+                     "An ended print must not retain its previous ETA.")
     }
 }
 
@@ -1964,6 +2022,7 @@ extension PrinterDetailViewModelTests {
         status: String,
         position: Int,
         material: String? = nil,
+        filamentName: String? = nil,
         revision: String? = nil,
         priority: PrintJobPriority = .normal,
         createdAt: Date? = nil
@@ -1986,7 +2045,7 @@ extension PrinterDetailViewModelTests {
             createdAtUtc: createdAt ?? Self.fixedNow,
             updatedAtUtc: nil,
             thumbnailUrl: nil,
-            filamentName: nil,
+            filamentName: filamentName,
             filamentColor: nil,
             copies: 1,
             completedCopies: 0,
@@ -2140,6 +2199,28 @@ extension PrinterDetailViewModelTests {
 
         vm.toolheads = []
         XCTAssertEqual(vm.matchState(for: matching), .unknown, "No loaded material ⇒ unknown")
+    }
+
+    func testMatchStateFallsBackToQueueMaterialWithoutGcodeMetadata() {
+        let vm = makeOperatorViewModel()
+        vm.toolheads = [makeToolhead(index: 0, material: "PLA")]
+
+        let matching = makeQueuedJob(
+            id: "queue-material-match", assignedTo: TestData.testUUID,
+            status: "Queued", position: 1, filamentName: "pla"
+        )
+        let mismatched = makeQueuedJob(
+            id: "queue-material-mismatch", assignedTo: TestData.testUUID,
+            status: "Queued", position: 2, filamentName: "PETG"
+        )
+        let unavailable = makeQueuedJob(
+            id: "queue-material-unknown", assignedTo: TestData.testUUID,
+            status: "Queued", position: 3
+        )
+
+        XCTAssertEqual(vm.matchState(for: matching), .match)
+        XCTAssertEqual(vm.matchState(for: mismatched), .mismatch)
+        XCTAssertEqual(vm.matchState(for: unavailable), .unknown)
     }
 
     // MARK: ETA formatting (deterministic clock)

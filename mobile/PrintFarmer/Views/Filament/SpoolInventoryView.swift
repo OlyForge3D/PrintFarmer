@@ -230,14 +230,13 @@ struct SpoolInventoryView: View {
     private var inventoryFilters: some View {
         Group {
             if dynamicTypeSize.isAccessibilitySize {
-                ScrollView(.horizontal) {
-                    HStack(spacing: 8) {
-                        inventoryFilterButtons
-                    }
-                    .fixedSize(horizontal: true, vertical: false)
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 88, maximum: 150), alignment: .leading)],
+                    alignment: .leading,
+                    spacing: 8
+                ) {
+                    inventoryFilterButtons
                 }
-                .scrollIndicators(.hidden)
-                .accessibilityIdentifier("inventory.filters.accessibility")
             } else {
                 ViewThatFits(in: .horizontal) {
                     HStack(spacing: 8) {
@@ -395,7 +394,7 @@ struct SpoolInventoryView: View {
         Button(action: action) {
             Text(title)
                 .font(.caption.weight(.medium))
-                .fixedSize(horizontal: dynamicTypeSize.isAccessibilitySize, vertical: false)
+                .fixedSize(horizontal: false, vertical: true)
                 .foregroundStyle(selected ? .white : Color.pfTextSecondary)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)

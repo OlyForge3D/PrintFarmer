@@ -612,6 +612,36 @@ enum UITestBootstrap {
         voron.hotendTemp = 250
         voron.bedTemp = 100
 
+        var idleMk4 = demoPrinter(DemoData.prusaMK4_2_ID)
+        idleMk4.state = "ready"
+        idleMk4.progress = nil
+        idleMk4.currentLayer = nil
+        idleMk4.totalLayers = nil
+        idleMk4.jobName = nil
+        idleMk4.fileName = nil
+        idleMk4.currentJobThumbnailUrl = nil
+        idleMk4.hotendTemp = 24
+        idleMk4.bedTemp = 23
+        idleMk4.hotendTarget = 215
+        idleMk4.bedTarget = 60
+        idleMk4.fanSpeedPercent = 35
+        idleMk4.liveZOffsetMm = 0.025
+        idleMk4.x = 0
+        idleMk4.y = 0
+        idleMk4.z = 5
+        idleMk4.homedAxes = "X Y Z"
+        idleMk4.spoolInfo = PrinterSpoolInfo(
+            hasActiveSpool: true,
+            activeSpoolId: 1,
+            spoolName: "Prusament PLA · Coral",
+            material: "PLA",
+            colorHex: "#EF6B4A",
+            filamentName: "Prusament PLA",
+            vendor: "Prusa Research",
+            remainingWeightG: 350,
+            spoolInUse: true
+        )
+
         let phonePrinters = [
             printer,
             voron,
@@ -622,6 +652,8 @@ enum UITestBootstrap {
                 modelName: "Ender 3 S1",
                 state: "paused",
                 progress: 0.81,
+                currentLayer: 162,
+                totalLayers: 200,
                 jobName: "spiral_vase.gcode",
                 hotendTemp: 170,
                 bedTemp: 60,
@@ -634,13 +666,15 @@ enum UITestBootstrap {
                 modelName: "Mini",
                 state: "printing",
                 progress: 0.47,
+                currentLayer: 89,
+                totalLayers: 190,
                 jobName: "clip_holder_x4.gcode",
                 hotendTemp: 210,
                 bedTemp: 60,
                 spoolName: "PLA Teal",
                 colorHex: "#34D399"
             ),
-            demoPrinter(DemoData.prusaMK4_2_ID),
+            idleMk4,
         ]
         let printers: [Printer]
         if UIDevice.current.userInterfaceIdiom == .pad {
@@ -651,6 +685,8 @@ enum UITestBootstrap {
                     modelName: "P1S",
                     state: "printing",
                     progress: 0.09,
+                    currentLayer: 22,
+                    totalLayers: 242,
                     jobName: "shelf_bracket_x6.gcode",
                     hotendTemp: 245,
                     bedTemp: 80,
@@ -678,6 +714,8 @@ enum UITestBootstrap {
                     modelName: "XL",
                     state: "printing",
                     progress: 0.38,
+                    currentLayer: 76,
+                    totalLayers: 200,
                     jobName: "tool_organizer.gcode",
                     hotendTemp: 215,
                     bedTemp: 60,
@@ -690,6 +728,8 @@ enum UITestBootstrap {
                     modelName: "A1",
                     state: "printing",
                     progress: 0.56,
+                    currentLayer: 112,
+                    totalLayers: 200,
                     jobName: "cable_clip_set.gcode",
                     hotendTemp: 220,
                     bedTemp: 55,
@@ -807,6 +847,8 @@ enum UITestBootstrap {
         state: String?,
         isOnline: Bool = true,
         progress: Double? = nil,
+        currentLayer: Int? = nil,
+        totalLayers: Int? = nil,
         jobName: String? = nil,
         hotendTemp: Double? = nil,
         bedTemp: Double? = nil,
@@ -822,6 +864,8 @@ enum UITestBootstrap {
         ]
         if let state { payload["state"] = state }
         if let progress { payload["progress"] = progress * 100 }
+        if let currentLayer { payload["currentLayer"] = currentLayer }
+        if let totalLayers { payload["totalLayers"] = totalLayers }
         if let jobName {
             payload["jobName"] = jobName
             payload["fileName"] = jobName
@@ -937,17 +981,13 @@ enum UITestBootstrap {
             let printersByID: [String: Data]
             var statusData: Data
             let additionalStatusDataByID: [String: Data]
-            let detailsData: Data
+            let detailsDataByID: [String: Data]
             let attentionData: Data
-            let capabilitiesData: Data
-            let assignedQueueData: Data
+            let capabilitiesDataByID: [String: Data]
+            let assignedQueueDataByID: [String: Data]
             var globalQueueData: Data
-            let globalQueueAfterRerunData: Data
-            let globalQueueAfterSecondRerunData: Data
             let recentFailureHistoryData: Data
             let failedJobsDataByID: [String: Data]
-            let failedJobRowVersionsByID: [String: String]
-            let rerunResponsesByID: [String: Data]
             let userData: Data
             let thumbnailData: Data
         }
@@ -1003,19 +1043,59 @@ enum UITestBootstrap {
                     "supportsHomingZ": true,
                     "supportsHotendTemperature": true,
                     "supportsBedTemperature": true,
-                    "supportsFilamentLoad": true,
-                    "supportsFilamentUnload": true,
-                    "supportsFilamentChange": true,
+                    "supportsFilamentLoad": false,
+                    "supportsFilamentUnload": false,
+                    "supportsFilamentChange": false,
                     "supportedAxes": ["X", "Y", "Z"],
                     "verifiedSafety": safety
                 ])
                 let userData = try encoder.encode(visualAcceptanceDemoUser())
                 let detailsData = try encoder.encode(fixture.details)
-                let additionalStatusDataByID = try Dictionary(
+                guard var idleDetails = try JSONSerialization.jsonObject(with: detailsData) as? [String: Any] else {
+                    preconditionFailure("The idle-printer details fixture must encode as an object.")
+                }
+                idleDetails["id"] = DemoData.prusaMK4_2_ID.uuidString
+                idleDetails["name"] = "Prusa MK4 #2"
+                if var toolheads = idleDetails["toolheads"] as? [[String: Any]] {
+                    for index in toolheads.indices {
+                        toolheads[index]["id"] = "32590000-0000-0000-0000-000000000023"
+                    }
+                    idleDetails["toolheads"] = toolheads
+                }
+                let detailsDataByID = [
+                    printerID: detailsData,
+                    DemoData.prusaMK4_2_ID.uuidString.lowercased():
+                        try JSONSerialization.data(withJSONObject: idleDetails),
+                ]
+                guard var idleCapabilities = try JSONSerialization.jsonObject(with: capabilitiesData) as? [String: Any] else {
+                    preconditionFailure("The idle-printer capability fixture must encode as an object.")
+                }
+                idleCapabilities["printerId"] = DemoData.prusaMK4_2_ID.uuidString.lowercased()
+                idleCapabilities["printerName"] = "Prusa MK4 #2"
+                idleCapabilities["verifiedSafety"] = try JSONSerialization.jsonObject(with: encoder.encode(
+                    issue3259VisualAcceptanceVerifiedSafety(
+                        configurationRevision: fixture.printers.first(where: { $0.id == DemoData.prusaMK4_2_ID })?.configurationRevision ?? 0,
+                        observedAt: Date()
+                    )
+                ))
+                let capabilitiesDataByID = [
+                    printerID: capabilitiesData,
+                    DemoData.prusaMK4_2_ID.uuidString.lowercased():
+                        try JSONSerialization.data(withJSONObject: idleCapabilities),
+                ]
+                let remainingSecondsByPrinterID: [UUID: Double] = [
+                    DemoData.voron24_ID: 9_660,
+                    issue3259Ender3S1ID: 7_200,
+                    issue3259PrusaMiniID: 1_320,
+                    DemoData.bambuP1S_ID: 19_800,
+                    issue3259PrusaXLID: 12_600,
+                    issue3259BambuA1ID: 5_040,
+                ]
+                let additionalStatusDataByID: [String: Data] = try Dictionary(
                     uniqueKeysWithValues: fixture.printers
-                        .filter { [DemoData.voron24_ID, issue3259PrusaMiniID].contains($0.id) }
+                        .filter { $0.id != DemoData.prusaMK4_1_ID }
                         .map { printer in
-                            let status = PrinterStatusDetail(
+                            var status = PrinterStatusDetail(
                                 id: printer.id,
                                 isOnline: printer.isOnline,
                                 state: printer.state,
@@ -1038,8 +1118,14 @@ enum UITestBootstrap {
                                 homedAxes: printer.homedAxes,
                                 spoolInfo: printer.spoolInfo,
                                 mmuStatus: nil,
-                                printTimeLeftSeconds: printer.id == DemoData.voron24_ID ? 9_660 : 1_320
+                                printTimeLeftSeconds: remainingSecondsByPrinterID[printer.id]
                             )
+                            if printer.id == DemoData.prusaMK4_2_ID {
+                                status.safetyTelemetry = issue3259VisualAcceptanceSafetyTelemetry(
+                                    printer: printer,
+                                    observedAt: Date()
+                                )
+                            }
                             return (printer.id.uuidString.lowercased(), try encoder.encode(status))
                         }
                 )
@@ -1047,16 +1133,16 @@ enum UITestBootstrap {
                 let assignedQueueData = try encoder.encode([
                     QueuedJobInfo(
                         id: "32590000-0000-0000-0000-000000000002",
-                        rowVersion: "issue3259-queue-row-v1",
-                        name: "raspberry_pi_case.gcode",
-                        fileName: "raspberry_pi_case.gcode",
+                        rowVersion: "issue3259-prusa1-assigned-v1",
+                        name: "Coral spool bracket.gcode",
+                        fileName: "Coral spool bracket.gcode",
                         assignedPrinterId: printerID,
                         printerName: "Prusa MK4 #1",
                         printerModel: "Prusa MK4",
-                        status: "Queued",
+                        status: "Assigned",
                         priority: .normal,
-                        queuePosition: 1,
-                        estimatedPrintTimeSeconds: 8_100,
+                        queuePosition: 0,
+                        estimatedPrintTimeSeconds: 5_400,
                         actualStartTimeUtc: nil,
                         actualEndTimeUtc: nil,
                         actualPrintTimeSeconds: nil,
@@ -1069,7 +1155,134 @@ enum UITestBootstrap {
                         copies: 1,
                         completedCopies: 0,
                         remainingCopies: 1
-                    )
+                    ),
+                    QueuedJobInfo(
+                        id: "32590000-0000-0000-0000-000000000003",
+                        rowVersion: "issue3259-prusa1-queue-head-v1",
+                        name: "Toolhead cable guide.gcode",
+                        fileName: "Toolhead cable guide.gcode",
+                        assignedPrinterId: printerID,
+                        printerName: "Prusa MK4 #1",
+                        printerModel: "Prusa MK4",
+                        status: "Queued",
+                        priority: .high,
+                        queuePosition: 1,
+                        estimatedPrintTimeSeconds: 8_100,
+                        actualStartTimeUtc: nil,
+                        actualEndTimeUtc: nil,
+                        actualPrintTimeSeconds: nil,
+                        failureReason: nil,
+                        createdAtUtc: Date(timeIntervalSince1970: 1_790_000_100),
+                        updatedAtUtc: nil,
+                        thumbnailUrl: nil,
+                        filamentName: "PLA",
+                        filamentColor: "#EF6B4A",
+                        copies: 1,
+                        completedCopies: 0,
+                        remainingCopies: 1
+                    ),
+                    QueuedJobInfo(
+                        id: "32590000-0000-0000-0000-000000000004",
+                        rowVersion: "issue3259-prusa1-queue-following-v1",
+                        name: "Controller mount.gcode",
+                        fileName: "Controller mount.gcode",
+                        assignedPrinterId: printerID,
+                        printerName: "Prusa MK4 #1",
+                        printerModel: "Prusa MK4",
+                        status: "Queued",
+                        priority: .normal,
+                        queuePosition: 2,
+                        estimatedPrintTimeSeconds: 4_800,
+                        actualStartTimeUtc: nil,
+                        actualEndTimeUtc: nil,
+                        actualPrintTimeSeconds: nil,
+                        failureReason: nil,
+                        createdAtUtc: Date(timeIntervalSince1970: 1_790_000_200),
+                        updatedAtUtc: nil,
+                        thumbnailUrl: nil,
+                        filamentName: "PLA",
+                        filamentColor: "#EF6B4A",
+                        copies: 1,
+                        completedCopies: 0,
+                        remainingCopies: 1
+                    ),
+                ])
+                let idleAssignedQueueData = try encoder.encode([
+                    QueuedJobInfo(
+                        id: "32590000-0000-0000-0000-000000000020",
+                        rowVersion: "issue3259-prusa2-assigned-v1",
+                        name: "Coral spool bracket.gcode",
+                        fileName: "Coral spool bracket.gcode",
+                        assignedPrinterId: DemoData.prusaMK4_2_ID.uuidString.lowercased(),
+                        printerName: "Prusa MK4 #2",
+                        printerModel: "Prusa MK4",
+                        status: "Assigned",
+                        priority: .normal,
+                        queuePosition: 0,
+                        estimatedPrintTimeSeconds: 5_400,
+                        actualStartTimeUtc: nil,
+                        actualEndTimeUtc: nil,
+                        actualPrintTimeSeconds: nil,
+                        failureReason: nil,
+                        createdAtUtc: Date(timeIntervalSince1970: 1_790_000_000),
+                        updatedAtUtc: nil,
+                        thumbnailUrl: nil,
+                        filamentName: "PLA",
+                        filamentColor: "#EF6B4A",
+                        copies: 1,
+                        completedCopies: 0,
+                        remainingCopies: 1
+                    ),
+                    QueuedJobInfo(
+                        id: "32590000-0000-0000-0000-000000000021",
+                        rowVersion: "issue3259-prusa2-queue-head-v1",
+                        name: "Toolhead cable guide.gcode",
+                        fileName: "Toolhead cable guide.gcode",
+                        assignedPrinterId: DemoData.prusaMK4_2_ID.uuidString.lowercased(),
+                        printerName: "Prusa MK4 #2",
+                        printerModel: "Prusa MK4",
+                        status: "Queued",
+                        priority: .high,
+                        queuePosition: 1,
+                        estimatedPrintTimeSeconds: 8_100,
+                        actualStartTimeUtc: nil,
+                        actualEndTimeUtc: nil,
+                        actualPrintTimeSeconds: nil,
+                        failureReason: nil,
+                        createdAtUtc: Date(timeIntervalSince1970: 1_790_000_100),
+                        updatedAtUtc: nil,
+                        thumbnailUrl: nil,
+                        filamentName: "PLA",
+                        filamentColor: "#EF6B4A",
+                        copies: 1,
+                        completedCopies: 0,
+                        remainingCopies: 1
+                    ),
+                    QueuedJobInfo(
+                        id: "32590000-0000-0000-0000-000000000022",
+                        rowVersion: "issue3259-prusa2-queue-following-v1",
+                        name: "Controller mount.gcode",
+                        fileName: "Controller mount.gcode",
+                        assignedPrinterId: DemoData.prusaMK4_2_ID.uuidString.lowercased(),
+                        printerName: "Prusa MK4 #2",
+                        printerModel: "Prusa MK4",
+                        status: "Queued",
+                        priority: .normal,
+                        queuePosition: 2,
+                        estimatedPrintTimeSeconds: 4_800,
+                        actualStartTimeUtc: nil,
+                        actualEndTimeUtc: nil,
+                        actualPrintTimeSeconds: nil,
+                        failureReason: nil,
+                        createdAtUtc: Date(timeIntervalSince1970: 1_790_000_200),
+                        updatedAtUtc: nil,
+                        thumbnailUrl: nil,
+                        filamentName: "PLA",
+                        filamentColor: "#EF6B4A",
+                        copies: 1,
+                        completedCopies: 0,
+                        remainingCopies: 1
+                    ),
                 ])
                 let recentFailureHistoryData = try encoder.encode(
                     QueueHistoryPage(
@@ -1103,12 +1316,6 @@ enum UITestBootstrap {
                 )
                 let globalQueueData = try encoder.encode(
                     issue3259VisualAcceptanceQueue(includeCurrentPrint: true)
-                )
-                let globalQueueAfterRerunData = try encoder.encode(
-                    issue3259VisualAcceptanceQueue(includeCurrentPrint: true, includeRerunJob: true)
-                )
-                let globalQueueAfterSecondRerunData = try encoder.encode(
-                    issue3259VisualAcceptanceQueue(includeCurrentPrint: true, includeSecondRerunJob: true)
                 )
                 let failedJobData = Data("""
                 {
@@ -1152,59 +1359,24 @@ enum UITestBootstrap {
                     "remainingCopies": 1
                 }
                 """.utf8)
-                let rerunResponseData = Data("""
-                {
-                    "id": "32590000-0000-0000-0000-000000000104",
-                    "rowVersion": "issue3259-rerun-v1",
-                    "name": "vase_mode_spiral.gcode",
-                    "status": "Queued",
-                    "priority": "Normal",
-                    "queuePosition": 3,
-                    "createdAtUtc": "2026-10-05T16:00:00Z",
-                    "copies": 1,
-                    "completedCopies": 0,
-                    "remainingCopies": 1
-                }
-                """.utf8)
-                let secondRerunResponseData = Data("""
-                {
-                    "id": "32590000-0000-0000-0000-000000000105",
-                    "rowVersion": "issue3259-second-rerun-v1",
-                    "name": "lamp_shade_textured.gcode",
-                    "status": "Queued",
-                    "priority": "Normal",
-                    "queuePosition": 3,
-                    "createdAtUtc": "2026-10-05T16:00:00Z",
-                    "copies": 1,
-                    "completedCopies": 0,
-                    "remainingCopies": 1
-                }
-                """.utf8)
                 lock.lock()
                 fixtureState = FixtureState(
                     printersData: printersData,
                     printersByID: printersByID,
                     statusData: try encoder.encode(fixture.status),
                     additionalStatusDataByID: additionalStatusDataByID,
-                    detailsData: detailsData,
+                    detailsDataByID: detailsDataByID,
                     attentionData: try encoder.encode(fixture.attentionFeed),
-                    capabilitiesData: capabilitiesData,
-                    assignedQueueData: assignedQueueData,
+                    capabilitiesDataByID: capabilitiesDataByID,
+                    assignedQueueDataByID: [
+                        printerID: assignedQueueData,
+                        DemoData.prusaMK4_2_ID.uuidString.lowercased(): idleAssignedQueueData,
+                    ],
                     globalQueueData: globalQueueData,
-                    globalQueueAfterRerunData: globalQueueAfterRerunData,
-                    globalQueueAfterSecondRerunData: globalQueueAfterSecondRerunData,
                     recentFailureHistoryData: recentFailureHistoryData,
                     failedJobsDataByID: [
                         DemoData.job9ID.uuidString: failedJobData,
                         DemoData.job10ID.uuidString: secondFailedJobData,
-                    ],
-                    failedJobRowVersionsByID: [
-                        DemoData.job9ID.uuidString: "issue3259-failed-job-v1",
-                        DemoData.job10ID.uuidString: "issue3259-second-failed-job-v1",
-                    ],
-                    rerunResponsesByID: [
-                        DemoData.job9ID.uuidString: rerunResponseData,
-                        DemoData.job10ID.uuidString: secondRerunResponseData,
                     ],
                     userData: userData,
                     thumbnailData: fixture.thumbnail
@@ -1267,10 +1439,23 @@ enum UITestBootstrap {
                 result = (200, "application/json", fixture.printersData)
             case ("GET", "/api/printers/camera-urls"):
                 result = (200, "application/json", Data("[]".utf8))
-            case ("GET", "/api/printers/\(printerID)"):
-                result = (200, "application/json", fixture.printersByID[printerID] ?? Data())
-            case ("GET", "/api/printers/\(printerID)/details"):
-                result = (200, "application/json", fixture.detailsData)
+            case ("GET", let path)
+                where path.hasPrefix("/api/printers/") && path.split(separator: "/").count == 3:
+                let components = path.split(separator: "/")
+                if let printer = fixture.printersByID[String(components[2]).lowercased()] {
+                    result = (200, "application/json", printer)
+                } else {
+                    result = (404, "application/json", Data(#"{"error":"not-found"}"#.utf8))
+                }
+            case ("GET", let path)
+                where path.hasPrefix("/api/printers/") && path.hasSuffix("/details"):
+                let components = path.split(separator: "/")
+                if components.count == 4,
+                   let details = fixture.detailsDataByID[String(components[2]).lowercased()] {
+                    result = (200, "application/json", details)
+                } else {
+                    result = (404, "application/json", Data(#"{"error":"not-found"}"#.utf8))
+                }
             case ("GET", "/api/printers/\(printerID)/status"):
                 result = (200, "application/json", fixture.statusData)
             case ("GET", let path)
@@ -1282,36 +1467,34 @@ enum UITestBootstrap {
                 } else {
                     result = (404, "application/json", Data(#"{"error":"not-found"}"#.utf8))
                 }
-            case ("GET", "/api/printers/\(printerID)/backend-capabilities"):
-                result = (200, "application/json", fixture.capabilitiesData)
-            case ("GET", "/api/job-queue-analytics/printer/\(printerID)"):
-                result = (200, "application/json", fixture.assignedQueueData)
+            case ("GET", let path)
+                where path.hasPrefix("/api/printers/") && path.hasSuffix("/backend-capabilities"):
+                let components = path.split(separator: "/")
+                if components.count == 4,
+                   let capabilities = fixture.capabilitiesDataByID[String(components[2]).lowercased()] {
+                    result = (200, "application/json", capabilities)
+                } else {
+                    result = (404, "application/json", Data(#"{"error":"not-found"}"#.utf8))
+                }
+            case ("GET", let path)
+                where path.hasPrefix("/api/job-queue-analytics/printer/"):
+                let components = path.split(separator: "/")
+                if components.count == 4,
+                   let queue = fixture.assignedQueueDataByID[String(components[3]).lowercased()] {
+                    result = (200, "application/json", queue)
+                } else {
+                    result = (404, "application/json", Data(#"{"error":"not-found"}"#.utf8))
+                }
             case ("GET", "/api/job-queue-analytics"):
                 result = (200, "application/json", fixture.globalQueueData)
             case ("GET", "/api/job-queue-analytics/history"):
                 result = (200, "application/json", fixture.recentFailureHistoryData)
             case ("GET", let path)
-                where path.hasPrefix("/api/job-queue/") && !path.hasSuffix("/rerun"):
+                where path.hasPrefix("/api/job-queue/"):
                 let jobID = String(path.dropFirst("/api/job-queue/".count))
                 result = fixture.failedJobsDataByID[jobID].map {
                     (200, "application/json", $0)
                 } ?? (404, "application/json", Data(#"{"error":"not-found"}"#.utf8))
-            case ("POST", let path) where path.hasSuffix("/rerun"):
-                let jobID = String(
-                    path
-                        .dropFirst("/api/job-queue/".count)
-                        .dropLast("/rerun".count)
-                )
-                guard let rowVersion = fixture.failedJobRowVersionsByID[jobID],
-                      request.value(forHTTPHeaderField: "If-Match") == "\"\(rowVersion)\"",
-                      let responseData = fixture.rerunResponsesByID[jobID] else {
-                    result = (412, "application/json", Data(#"{"error":"precondition_failed"}"#.utf8))
-                    break
-                }
-                fixture.globalQueueData = jobID == DemoData.job9ID.uuidString
-                    ? fixture.globalQueueAfterRerunData
-                    : fixture.globalQueueAfterSecondRerunData
-                result = (200, "application/json", responseData)
             case ("GET", "/api/printers/\(printerID)/current-job/thumbnail"):
                 result = (200, "image/png", fixture.thumbnailData)
             case ("POST", "/api/printers/\(printerID)/temps"):
@@ -1457,6 +1640,11 @@ enum UITestBootstrap {
             source: "issue3259-visual-acceptance-api-fixture",
             observedAtUtc: observedAt
         )
+        let unsupported = VerifiedSafetyOperationCapabilityDto(
+            support: .unsupported,
+            source: "issue3259-visual-acceptance-api-fixture",
+            observedAtUtc: observedAt
+        )
         let verifiedScalar: (Double) -> VerifiedSafetyScalarFactDto = { value in
             VerifiedSafetyScalarFactDto(
                 state: .verified,
@@ -1494,9 +1682,9 @@ enum UITestBootstrap {
             operations: VerifiedSafetyOperationsDto(
                 absoluteMovement: supported,
                 firmwareZOffsetSave: supported,
-                filamentLoad: supported,
-                filamentUnload: supported,
-                filamentChange: supported
+                filamentLoad: unsupported,
+                filamentUnload: unsupported,
+                filamentChange: unsupported
             ),
             extrusion: VerifiedSafetyExtrusionDto(
                 minimumSafeMeasuredHotendTemperatureC: verifiedScalar(170)
@@ -1540,9 +1728,7 @@ enum UITestBootstrap {
     }
 
     private static func issue3259VisualAcceptanceQueue(
-        includeCurrentPrint: Bool = false,
-        includeRerunJob: Bool = false,
-        includeSecondRerunJob: Bool = false
+        includeCurrentPrint: Bool = false
     ) -> [QueuedPrintJobResponse] {
         let printerID = DemoData.prusaMK4_1_ID.uuidString.lowercased()
         let printer = QueuePrinterMeta(
@@ -1650,28 +1836,6 @@ enum UITestBootstrap {
                 durationSeconds: 4_800
             ),
         ]
-        if includeRerunJob {
-            jobs.append(job(
-                id: "32590000-0000-0000-0000-000000000104",
-                name: "vase_mode_spiral.gcode",
-                status: "Queued",
-                priority: .normal,
-                position: 3,
-                requiredGrams: 48,
-                durationSeconds: 3_600
-            ))
-        }
-        if includeSecondRerunJob {
-            jobs.append(job(
-                id: "32590000-0000-0000-0000-000000000105",
-                name: "lamp_shade_textured.gcode",
-                status: "Queued",
-                priority: .normal,
-                position: 3,
-                requiredGrams: 65,
-                durationSeconds: 3_600
-            ))
-        }
         return jobs
     }
 

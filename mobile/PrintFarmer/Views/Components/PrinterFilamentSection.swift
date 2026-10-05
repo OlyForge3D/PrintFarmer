@@ -247,7 +247,7 @@ struct PrinterFilamentSection: View {
                             .frame(width: geometry.size.width * fraction)
                     }
                 }
-                .frame(height: 6)
+                .frame(height: dynamicTypeSize.isAccessibilitySize ? 12 : 8)
                 .accessibilityLabel("Spool remaining")
                 .accessibilityValue(meter.label)
             }
