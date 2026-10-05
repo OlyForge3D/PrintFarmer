@@ -44,6 +44,18 @@ public record PrinterBackendCapabilitiesDto(
     /// <summary>Whether saving the offset persistently to firmware is proven, not just raw command transport.</summary>
     public bool SupportsZOffsetFirmwareSave { get; init; }
 
+    /// <summary>Whether a transient relative Z-offset adjustment is supported during an active print.</summary>
+    public bool SupportsZOffsetAdjustment { get; init; }
+
+    /// <summary>Whether the backend supports setting the part-cooling fan speed with a known readback.</summary>
+    public bool SupportsFanControl { get; init; }
+
+    /// <summary>Whether the latest printer status includes a valid part-fan output percentage.</summary>
+    public bool SupportsFanSpeedReadback { get; init; }
+
+    /// <summary>Whether the latest printer status includes a valid live G-code Z offset.</summary>
+    public bool SupportsZOffsetReadback { get; init; }
+
     /// <summary>Whether the shared home-all route is supported. Not the current homed state.</summary>
     public bool SupportsHoming { get; init; }
 

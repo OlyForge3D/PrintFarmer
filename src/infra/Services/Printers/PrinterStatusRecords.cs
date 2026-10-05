@@ -14,7 +14,9 @@ public record PrinterJob(
     string? JobName,
     string? ThumbnailUrl,
     double? PrintDurationSeconds = null,
-    string? ThumbnailCacheIdentity = null);
+    string? ThumbnailCacheIdentity = null,
+    int? CurrentLayer = null,
+    int? TotalLayers = null);
 
 /// <summary>
 /// Temperature reading for a single extruder (Tn index).
@@ -45,5 +47,9 @@ public record PrinterCompositeStatus(
     double? PrintTimeLeftSeconds = null,
     string? HomedAxes = null,
     DateTime? HomedAxesObservedAtUtc = null,
-    string? ThumbnailCacheIdentity = null);
+    string? ThumbnailCacheIdentity = null,
+    int? CurrentLayer = null,
+    int? TotalLayers = null,
+    double? FanSpeedPercent = null,
+    double? LiveZOffsetMm = null);
 #pragma warning restore CA1056 // URI-like properties should not be strings

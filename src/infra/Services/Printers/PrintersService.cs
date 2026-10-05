@@ -2007,7 +2007,11 @@ public class PrintersService(
                     IsEnabled: p.IsEnabled,
 
                     CameraStreamUrl: cam.StreamUrl,
-                    CameraSnapshotUrl: cam.SnapshotUrl));
+                    CameraSnapshotUrl: cam.SnapshotUrl,
+                    CurrentLayer: status.CurrentLayer,
+                    TotalLayers: status.TotalLayers,
+                    FanSpeedPercent: status.FanSpeedPercent,
+                    LiveZOffsetMm: status.LiveZOffsetMm));
             }
             catch (Exception ex)
             {
@@ -2165,6 +2169,10 @@ public class PrintersService(
                     ObicoEnabled: p.ObicoEnabled,
                     HasCatalogUpdate: p.Model != null && p.ServiceState != null && p.ServiceState.LastModelSyncAt != null && p.Model.UpdatedAt > p.ServiceState.LastModelSyncAt,
                     EstimatedCompletionTimeUtc: status.PrintTimeLeftSeconds is { } timeLeft ? DateTime.UtcNow.AddSeconds(timeLeft) : null,
+                    CurrentLayer: status.CurrentLayer,
+                    TotalLayers: status.TotalLayers,
+                    FanSpeedPercent: status.FanSpeedPercent,
+                    LiveZOffsetMm: status.LiveZOffsetMm,
                     BedTypeId: p.BedTypeId,
                     BedTypeName: p.BedType?.Name,
                     BedTypeColor: p.BedType?.Color,
@@ -3973,6 +3981,20 @@ public class PrintersService(
         ExecuteBackendControlAsync<ISupportsZOffsetCalibration>(
             id,
             (client, printer, token) => client.SaveZOffsetAsync(printer.BackendUrl, offsetMm, printer.Credential, token),
+            ct);
+
+    /// <inheritdoc />
+    public Task<bool> SetFanSpeedAsync(Guid id, int speedPercent, CancellationToken ct) =>
+        ExecuteBackendControlAsync<ISupportsFanControl>(
+            id,
+            (client, printer, token) => client.SetFanSpeedAsync(printer.BackendUrl, speedPercent, printer.Credential, token),
+            ct);
+
+    /// <inheritdoc />
+    public Task<bool> AdjustZOffsetAsync(Guid id, decimal offsetMm, CancellationToken ct) =>
+        ExecuteBackendControlAsync<ISupportsZOffsetAdjustment>(
+            id,
+            (client, printer, token) => client.AdjustZOffsetAsync(printer.BackendUrl, offsetMm, printer.Credential, token),
             ct);
 
     /// <inheritdoc />

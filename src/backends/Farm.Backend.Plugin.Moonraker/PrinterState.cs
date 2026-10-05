@@ -56,6 +56,22 @@ internal sealed class PrinterState
 
     public DateTime? CoordinateOriginOffsetObservedAtUtc { get; set; }
 
+    public int? CurrentLayer { get; set; }
+
+    public int? TotalLayers { get; set; }
+
+    public double? FanSpeedPercent { get; set; }
+
+    public double? LiveZOffsetMm { get; set; }
+
+    public void ResetLiveReadbacks()
+    {
+        CurrentLayer = null;
+        TotalLayers = null;
+        FanSpeedPercent = null;
+        LiveZOffsetMm = null;
+    }
+
     /// <summary>
     /// Active Klipper extruder index parsed from the <c>toolhead.extruder</c> field
     /// ("extruder" → 0, "extruder1" → 1, …). Used to attribute per-tool wear on native

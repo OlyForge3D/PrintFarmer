@@ -553,6 +553,12 @@ public interface IPrintersService
     /// <summary>Saves a calibrated Z-offset through the backend's firmware capability.</summary>
     Task<bool> SaveZOffsetToFirmwareAsync(Guid id, decimal offsetMm, CancellationToken ct);
 
+    /// <summary>Sets the part-cooling fan to a bounded percentage through a semantic backend capability.</summary>
+    Task<bool> SetFanSpeedAsync(Guid id, int speedPercent, CancellationToken ct);
+
+    /// <summary>Applies a bounded transient relative Z-offset adjustment through a semantic backend capability.</summary>
+    Task<bool> AdjustZOffsetAsync(Guid id, decimal offsetMm, CancellationToken ct);
+
     /// <summary>Performs a typed multi-material action through the backend capability.</summary>
     Task<bool> ExecuteMmuAsync(Guid id, MmuControlRequest request, CancellationToken ct);
 

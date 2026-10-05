@@ -30,7 +30,11 @@ public record PrinterStatusUpdate(
     MmuStatusDto? MmuStatus = null,
     string? FileName = null,
     PrinterSafetyTelemetryDto? SafetyTelemetry = null,
-    [property: JsonIgnore] string? ThumbnailCacheIdentity = null)
+    [property: JsonIgnore] string? ThumbnailCacheIdentity = null,
+    int? CurrentLayer = null,
+    int? TotalLayers = null,
+    double? FanSpeedPercent = null,
+    double? LiveZOffsetMm = null)
 {
     /// <summary>
     /// Relative authenticated proxy URL for the active job thumbnail.
@@ -64,5 +68,9 @@ public record PrinterStatusUpdate(
             PrintTimeLeftSeconds: printTimeLeftSeconds,
             HomedAxes: HomedAxes,
             SafetyTelemetry: SafetyTelemetry,
-            ThumbnailCacheIdentity: ThumbnailCacheIdentity);
+            ThumbnailCacheIdentity: ThumbnailCacheIdentity,
+            CurrentLayer: CurrentLayer,
+            TotalLayers: TotalLayers,
+            FanSpeedPercent: FanSpeedPercent,
+            LiveZOffsetMm: LiveZOffsetMm);
 }

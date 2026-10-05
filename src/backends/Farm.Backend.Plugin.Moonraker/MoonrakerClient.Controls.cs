@@ -6,7 +6,7 @@ using Farm.Infrastructure.Services.Printers;
 
 namespace Farm.Backend.Plugin.Moonraker;
 
-public partial class MoonrakerClient : ISupportsPrinterControlCapabilities, ISupportsMotorControl, ISupportsExtrusionControl, ISupportsMmuControl, ISupportsZOffsetCalibration
+public partial class MoonrakerClient : ISupportsPrinterControlCapabilities, ISupportsMotorControl, ISupportsExtrusionControl, ISupportsMmuControl, ISupportsZOffsetCalibration, ISupportsFanControl, ISupportsZOffsetAdjustment
 {
     public PrinterControlCapabilities ControlCapabilities { get; } = new()
     {
@@ -22,6 +22,29 @@ public partial class MoonrakerClient : ISupportsPrinterControlCapabilities, ISup
 
     public Task<bool> DisableMotorsAsync(string baseUrl, PrinterCredential? credential, CancellationToken ct = default) =>
         SendControlScriptAsync(baseUrl, "M84", credential, ct);
+
+    public Task<bool> SetFanSpeedAsync(string baseUrl, int speedPercent, PrinterCredential? credential, CancellationToken ct = default)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(speedPercent, 0);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(speedPercent, 100);
+        int gcodeSpeed = (int)Math.Round(speedPercent * 255d / 100d, MidpointRounding.AwayFromZero);
+        return SendControlScriptAsync(
+            baseUrl,
+            string.Create(CultureInfo.InvariantCulture, $"M106 S{gcodeSpeed}"),
+            credential,
+            ct);
+    }
+
+    public Task<bool> AdjustZOffsetAsync(string baseUrl, decimal offsetMm, PrinterCredential? credential, CancellationToken ct = default)
+    {
+        if (offsetMm is < -0.2m or > 0.2m || offsetMm == 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(offsetMm));
+        }
+
+        string command = string.Create(CultureInfo.InvariantCulture, $"SET_GCODE_OFFSET Z_ADJUST={offsetMm:F3} MOVE=1");
+        return SendControlScriptAsync(baseUrl, command, credential, ct);
+    }
 
     /// <summary>Sends the legacy Klipper sequence; SAVE_CONFIG alone does not prove SET_GCODE_OFFSET persistence.</summary>
     public async Task<bool> SaveZOffsetAsync(string baseUrl, decimal offsetMm, PrinterCredential? credential, CancellationToken ct = default)

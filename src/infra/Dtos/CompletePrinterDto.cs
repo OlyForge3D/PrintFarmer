@@ -63,4 +63,8 @@ public record CompletePrinterDto(
 
     // Concurrency token for list consumers to guard mutations.
     string? RowVersion = null,
-    string? CurrentJobThumbnailUrl = null);
+    string? CurrentJobThumbnailUrl = null,
+    int? CurrentLayer = null,
+    int? TotalLayers = null,
+    double? FanSpeedPercent = null,
+    double? LiveZOffsetMm = null);
