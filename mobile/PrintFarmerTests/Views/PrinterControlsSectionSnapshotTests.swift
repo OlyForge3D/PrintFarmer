@@ -1888,6 +1888,10 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         "supportsHoming": false, "supportsHotendTemperature": false,
         "supportedAxes": []
         """)
+        XCTAssertFalse(caps.supportsTemperatureControl)
+        XCTAssertFalse(caps.supportsMovement)
+        XCTAssertFalse(caps.supportsHome(axes: ["X", "Y", "Z"]))
+        XCTAssertFalse(PreheatSubgroup.isVisible(capabilities: caps))
         let svc = makeService(caps: caps)
         let section = await loadedSection(printer: printer, service: svc)
         assertSnapshot(of: host(ScrollView { section }), as: .image(on: .iPhone13), named: snapshotName)

@@ -357,35 +357,29 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
                 XCTAssertTrue(heading.exists, "The \(section) section must remain in the combined queue.")
                 if section == "recent-failures" {
                     XCTAssertTrue(heading.isHittable, "Recent failures must be reachable in the shared queue.")
-                    let failedJob = queueList.buttons.matching(NSPredicate(
-                        format: "label CONTAINS %@",
-                        "vase_mode_spiral.gcode"
-                    )).firstMatch
-                    for _ in 0..<8 where !failedJob.exists {
-                        queueList.swipeUp()
-                    }
-                    XCTAssertTrue(failedJob.waitForExistence(timeout: 5))
-                    let scan = app.buttons["navigation.scan"]
-                    for _ in 0..<12 where
-                        !failedJob.isHittable
-                        || failedJob.frame.maxY > scan.frame.minY - 8
-                        || failedJob.frame.intersects(scan.frame)
-                    {
-                        if failedJob.frame.maxY < queueList.frame.minY {
-                            queueList.swipeDown()
-                        } else if failedJob.frame.maxY > scan.frame.minY - 8
-                                    || failedJob.frame.intersects(scan.frame) {
-                            queueList.swipeUp()
-                        } else {
+                    let failedJob = queueList.buttons["job.row.30000000-0003-0000-0000-000000000009"]
+                    for _ in 0..<8 {
+                        if failedJob.isHittable {
                             break
                         }
+                        queueList.swipeUp()
                     }
-                    attachScreen("\(device)-\(size)-global-queue-recent-failures")
+                    let failedJobExists = failedJob.waitForExistence(timeout: 5)
+                    XCTAssertTrue(failedJobExists, "The visual acceptance fixture must expose the first failed job.")
+                    guard failedJobExists else { return }
+                    XCTAssertTrue(failedJob.label.localizedCaseInsensitiveContains("vase_mode_spiral.gcode"))
+                    let scan = app.buttons["navigation.scan"]
+                    XCTAssertTrue(heading.isHittable, "Recent failures must remain visible while inspecting its rows.")
                     XCTAssertTrue(
                         failedJob.isHittable,
                         "A failed-job row must be visible in Recent failures. Row: \(failedJob.frame), scan: \(scan.frame), list: \(queueList.frame)."
                     )
                     XCTAssertTrue(failedJob.label.localizedCaseInsensitiveContains("failed status"))
+                    attachScreen("\(device)-\(size)-global-queue-recent-failures")
+                    XCTAssertFalse(
+                        failedJob.frame.intersects(heading.frame),
+                        "The failed-job row must not overlap the Recent failures heading."
+                    )
                     XCTAssertLessThanOrEqual(
                         failedJob.frame.maxY,
                         scan.frame.minY - 8,
@@ -395,21 +389,24 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
                         failedJob.frame.intersects(scan.frame),
                         "The floating Scan action must not obscure failure details."
                     )
-                    let lastFailure = queueList.buttons.matching(
-                        NSPredicate(format: "label CONTAINS %@", "lamp_shade_textured.gcode")
-                    ).firstMatch
-                    XCTAssertTrue(lastFailure.waitForExistence(timeout: 5))
-                    for _ in 0..<12 where
-                        !lastFailure.isHittable
-                        || lastFailure.frame.maxY > scan.frame.minY - 8
-                    {
-                        if lastFailure.frame.maxY < queueList.frame.minY {
-                            queueList.swipeDown()
-                        } else {
-                            queueList.swipeUp()
+
+                    let lastFailure = queueList.buttons["job.row.30000000-0003-0000-0000-000000000010"]
+                    for _ in 0..<12 {
+                        if lastFailure.isHittable {
+                            break
                         }
+                        queueList.swipeUp()
                     }
+                    let lastFailureExists = lastFailure.waitForExistence(timeout: 5)
+                    XCTAssertTrue(lastFailureExists, "The visual acceptance fixture must expose the final failed job.")
+                    guard lastFailureExists else { return }
+                    XCTAssertTrue(lastFailure.label.localizedCaseInsensitiveContains("lamp_shade_textured.gcode"))
                     XCTAssertTrue(lastFailure.isHittable, "The last failed-job row must remain reachable.")
+                    XCTAssertTrue(heading.isHittable, "Recent failures must remain visible while inspecting its rows.")
+                    XCTAssertFalse(
+                        lastFailure.frame.intersects(heading.frame),
+                        "The last failed-job row must not overlap the Recent failures heading."
+                    )
                     XCTAssertLessThanOrEqual(
                         lastFailure.frame.maxY,
                         scan.frame.minY - 8,
