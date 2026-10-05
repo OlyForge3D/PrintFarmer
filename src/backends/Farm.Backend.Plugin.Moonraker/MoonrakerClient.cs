@@ -590,8 +590,7 @@ public partial class MoonrakerClient(
                         z = toolheadZ;
                     }
 
-                    if (status.IsOnline &&
-                        TryGetFinitePosition(
+                    if (TryGetFinitePosition(
                             statusNode,
                             "gcode_move",
                             "gcode_position",
@@ -625,10 +624,7 @@ public partial class MoonrakerClient(
         {
         }
 
-        if (status.IsOnline)
-        {
-            fanSpeedPercent = await QueryPartFanSpeedPercentAsync(baseUrl, credential, ct);
-        }
+        fanSpeedPercent = await QueryPartFanSpeedPercentAsync(baseUrl, credential, ct);
 
         // Prefer print job state (printing, paused, complete) over system state, but not for error states
         // If system is shutdown/error, that takes precedence over print_stats state
@@ -719,14 +715,7 @@ public partial class MoonrakerClient(
         }
 
         // Query camera info when online; webcam listing may still be available via Moonraker
-        string? cam = null;
-        string? snap = null;
-        if (status.IsOnline)
-        {
-            (string? streamUrl, string? snapshotUrl) = await GetCameraUrlsAsync(baseUrl, ct: ct);
-            cam = streamUrl;
-            snap = snapshotUrl;
-        }
+        (string? cam, string? snap) = await GetCameraUrlsAsync(baseUrl, ct: ct);
 
         // Calculate estimated time remaining from progress and elapsed print duration
         double? printTimeLeftSeconds = null;
@@ -741,10 +730,10 @@ public partial class MoonrakerClient(
             HomedAxes: homedAxes,
             HomedAxesObservedAtUtc: homedAxesObservedAtUtc,
             ThumbnailCacheIdentity: job?.ThumbnailCacheIdentity,
-            CurrentLayer: status.IsOnline ? job?.CurrentLayer : null,
-            TotalLayers: status.IsOnline ? job?.TotalLayers : null,
+            CurrentLayer: job?.CurrentLayer,
+            TotalLayers: job?.TotalLayers,
             FanSpeedPercent: fanSpeedPercent,
-            LiveZOffsetMm: status.IsOnline ? liveZOffsetMm : null);
+            LiveZOffsetMm: liveZOffsetMm);
     }
 
     private async Task<double?> QueryPartFanSpeedPercentAsync(
