@@ -227,10 +227,18 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
                 NSPredicate(format: "identifier BEGINSWITH %@", "farm.filter.")
             )
             XCTAssertEqual(filterButtons.count, 4, "Farm must expose all four status filters.")
-            XCTAssertEqual(app.buttons["farm.filter.All"].label, "All 6")
-            XCTAssertEqual(app.buttons["farm.filter.Printing"].label, "Printing 2")
+            XCTAssertEqual(app.buttons["farm.filter.All"].label, isIPad ? "All 12" : "All 6")
+            XCTAssertEqual(app.buttons["farm.filter.Printing"].label, isIPad ? "Printing 5" : "Printing 2")
             XCTAssertEqual(app.buttons["farm.filter.Needs attention"].label, "Needs attention 2")
-            XCTAssertEqual(app.buttons["farm.filter.Idle"].label, "Idle 1")
+            XCTAssertEqual(app.buttons["farm.filter.Idle"].label, isIPad ? "Idle 3" : "Idle 1")
+            let bedClearPrinter = app.buttons.matching(
+                NSPredicate(format: "label CONTAINS %@", "Bambu X1C")
+            ).firstMatch
+            XCTAssertTrue(bedClearPrinter.waitForExistence(timeout: 5))
+            XCTAssertTrue(
+                bedClearPrinter.label.localizedCaseInsensitiveContains("Bed clear"),
+                "Bambu X1C must use the mockup's real PendingReady demo state rather than appear as a second print."
+            )
             XCTAssertFalse(app.staticTexts.containing(
                 NSPredicate(format: "label BEGINSWITH %@", "Attention unavailable:")
             ).firstMatch.exists)
@@ -267,7 +275,11 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
                     }
                     XCTAssertTrue(failedJob.waitForExistence(timeout: 5))
                     let scan = app.buttons["navigation.scan"]
-                    for _ in 0..<12 where !failedJob.isHittable {
+                    for _ in 0..<12 where
+                        !failedJob.isHittable
+                        || failedJob.frame.maxY > scan.frame.minY - 8
+                        || failedJob.frame.intersects(scan.frame)
+                    {
                         if failedJob.frame.maxY < queueList.frame.minY {
                             queueList.swipeDown()
                         } else if failedJob.frame.maxY > scan.frame.minY - 8
@@ -493,7 +505,8 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
                     XCTAssertTrue(demand.waitForExistence(timeout: 5))
                     continue
                 }
-                attachScreen("\(device)-\(size)-printer-\(panel.lowercased())")
+                let printStateSuffix = ["Control", "Queue"].contains(panel) ? "-active-print" : ""
+                attachScreen("\(device)-\(size)-printer-\(panel.lowercased())\(printStateSuffix)")
             }
         }
 
@@ -931,7 +944,7 @@ final class Issue3259MockupAccessibilityUITests: PrinterDetailPanelsUITests.Issu
 }
 
 @MainActor
-final class Issue3259ControlIdleUITests: PrinterDetailPanelsUITests.Issue3259MockupCaptureUITests {
+class Issue3259ControlIdleUITests: PrinterDetailPanelsUITests.Issue3259MockupCaptureUITests {
     override var additionalLaunchArguments: [String] {
         super.additionalLaunchArguments + ["--uitesting-issue3259-control-idle"]
     }
@@ -983,6 +996,9 @@ final class Issue3259ControlIdleUITests: PrinterDetailPanelsUITests.Issue3259Moc
         XCTAssertTrue(farm.waitForExistence(timeout: 8))
         farm.tap()
         let printerCard = app.buttons["farm-card-10000000-0001-0000-0000-000000000001"]
+        for _ in 0..<8 where !printerCard.exists {
+            app.swipeUp()
+        }
         XCTAssertTrue(printerCard.waitForExistence(timeout: 8))
         printerCard.tap()
         let selector = app.descendants(matching: .any)["printer.detail.panel.selector"]
@@ -1041,6 +1057,16 @@ final class Issue3259ControlIdleUITests: PrinterDetailPanelsUITests.Issue3259Moc
         selector.buttons["Queue"].tap()
         let queue = app.descendants(matching: .any)["printer.detail.panel.queue"]
         XCTAssertTrue(queue.waitForExistence(timeout: 5))
+        XCTAssertTrue(
+            queue.staticTexts["Assigned"].waitForExistence(timeout: 5),
+            "The idle mockup state must retain its assigned and queued jobs."
+        )
+        XCTAssertFalse(
+            queue.descendants(matching: .any).matching(
+                NSPredicate(format: "label CONTAINS[c] %@", "benchy_0.2mm_PLA.gcode")
+            ).firstMatch.exists,
+            "An idle printer must not show the hidden active-print job from the shared demo fixture."
+        )
         let startNext = app.buttons.matching(
             NSPredicate(format: "identifier BEGINSWITH %@", "printer.detail.queue.dispatch.")
         ).firstMatch
@@ -1051,6 +1077,13 @@ final class Issue3259ControlIdleUITests: PrinterDetailPanelsUITests.Issue3259Moc
         XCTAssertTrue(startNext.isEnabled, "The idle printer's authenticated Start next action must be enabled.")
         XCTAssertTrue(startNext.isHittable, "The enabled Start next action must be visible in the idle Queue capture.")
         attachScreen("\(device)-\(size)-printer-queue-idle")
+    }
+}
+
+@MainActor
+final class Issue3259ControlIdleAccessibilityUITests: Issue3259ControlIdleUITests {
+    override var contentSizeCategory: String {
+        "UICTContentSizeCategoryAccessibilityXXXL"
     }
 }
 #endif

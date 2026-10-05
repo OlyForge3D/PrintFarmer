@@ -75,7 +75,7 @@ final class PrinterListViewModel {
         case .needsAttention:
             attentionPrinterIDs.contains(printer.id)
                 || isPendingReady(printer)
-                || ["error", "paused"].contains(printer.state?.lowercased() ?? "")
+                || printer.state?.lowercased() == "error"
         case .idle:
             printer.isOnline && ["ready", "idle"].contains(printer.state?.lowercased() ?? "")
         }

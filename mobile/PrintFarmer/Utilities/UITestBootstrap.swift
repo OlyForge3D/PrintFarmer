@@ -411,10 +411,14 @@ enum UITestBootstrap {
         }
         #if DEBUG
         if mode == .authenticatedIssue3259VisualAcceptance {
+            var hiddenJobIDs: Set<UUID> = [DemoData.job2ID]
+            if ProcessInfo.processInfo.arguments.contains(issue3259ControlIdleLaunchArgument) {
+                hiddenJobIDs.insert(DemoData.job1ID)
+            }
             services.jobService = DemoJobService(
                 jobNameOverrides: [DemoData.job1ID: "benchy_0.2mm_PLA.gcode"],
                 queueJobOverrides: Self.issue3259VisualAcceptanceQueue(),
-                hiddenJobIDs: [DemoData.job2ID],
+                hiddenJobIDs: hiddenJobIDs,
                 dispatchEnabled: false
             )
             services.spoolService = DemoSpoolService(
@@ -527,6 +531,19 @@ enum UITestBootstrap {
     private static let issue3259VisualAcceptanceToolheadID =
         UUID(uuidString: "32590000-0000-0000-0000-000000000001")!
 
+    private static let issue3259Ender3S1ID =
+        UUID(uuidString: "32590000-0000-0000-0000-000000000002")!
+    private static let issue3259PrusaMiniID =
+        UUID(uuidString: "32590000-0000-0000-0000-000000000003")!
+    private static let issue3259SovolSV06ID =
+        UUID(uuidString: "32590000-0000-0000-0000-000000000004")!
+    private static let issue3259PrusaXLID =
+        UUID(uuidString: "32590000-0000-0000-0000-000000000005")!
+    private static let issue3259BambuA1ID =
+        UUID(uuidString: "32590000-0000-0000-0000-000000000006")!
+    private static let issue3259CrealityK1ID =
+        UUID(uuidString: "32590000-0000-0000-0000-000000000007")!
+
     private static let issue3259VisualAcceptanceThumbnailPath =
         "/api/printers/\(DemoData.prusaMK4_1_ID.uuidString.lowercased())/current-job/thumbnail?v=3259000000000001"
 
@@ -541,11 +558,14 @@ enum UITestBootstrap {
     private static func issue3259VisualAcceptanceFixture(
         controlIdle: Bool = false
     ) -> Issue3259VisualAcceptanceFixture {
-        var printers = DemoData.printers
-        guard let index = printers.firstIndex(where: { $0.id == DemoData.prusaMK4_1_ID }) else {
-            preconditionFailure("The visual-acceptance fixture requires the first demo printer.")
+        func demoPrinter(_ id: UUID) -> Printer {
+            guard let printer = DemoData.printers.first(where: { $0.id == id }) else {
+                preconditionFailure("The visual-acceptance fixture requires demo printer \(id).")
+            }
+            return printer
         }
-        var printer = printers[index]
+
+        var printer = demoPrinter(DemoData.prusaMK4_1_ID)
         printer.progress = 0.64
         printer.currentLayer = 142
         printer.totalLayers = 221
@@ -582,7 +602,122 @@ enum UITestBootstrap {
             printer.z = 5
             printer.homedAxes = ""
         }
-        printers[index] = printer
+
+        var bambuX1C = demoPrinter(DemoData.bambuX1C_ID)
+        bambuX1C.state = "completed"
+        bambuX1C.progress = nil
+        bambuX1C.currentLayer = nil
+        bambuX1C.totalLayers = nil
+        bambuX1C.jobName = "clip_holder_x4.gcode"
+        bambuX1C.fileName = "clip_holder_x4.gcode"
+        bambuX1C.hotendTemp = 32
+        bambuX1C.bedTemp = 41
+        bambuX1C.hotendTarget = 0
+        bambuX1C.bedTarget = 0
+
+        var voron = demoPrinter(DemoData.voron24_ID)
+        voron.progress = 0.22
+        voron.jobName = "gear_set_v3.gcode"
+        voron.fileName = "gear_set_v3.gcode"
+        voron.hotendTemp = 250
+        voron.bedTemp = 100
+
+        let phonePrinters = [
+            printer,
+            voron,
+            bambuX1C,
+            issue3259MockupPrinter(
+                id: issue3259Ender3S1ID,
+                name: "Ender 3 S1",
+                modelName: "Ender 3 S1",
+                state: "paused",
+                progress: 0.81,
+                jobName: "spiral_vase.gcode",
+                hotendTemp: 170,
+                bedTemp: 60,
+                spoolName: "PLA Purple",
+                colorHex: "#A78BFA"
+            ),
+            issue3259MockupPrinter(
+                id: issue3259PrusaMiniID,
+                name: "Prusa Mini",
+                modelName: "Mini",
+                state: "printing",
+                progress: 0.47,
+                jobName: "clip_holder_x4.gcode",
+                hotendTemp: 210,
+                bedTemp: 60,
+                spoolName: "PLA Teal",
+                colorHex: "#34D399"
+            ),
+            demoPrinter(DemoData.prusaMK4_2_ID),
+        ]
+        let printers: [Printer]
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            printers = phonePrinters + [
+                issue3259MockupPrinter(
+                    id: DemoData.bambuP1S_ID,
+                    name: "Bambu P1S",
+                    modelName: "P1S",
+                    state: "printing",
+                    progress: 0.09,
+                    jobName: "shelf_bracket_x6.gcode",
+                    hotendTemp: 245,
+                    bedTemp: 80,
+                    spoolName: "PLA White",
+                    colorHex: "#F3F4F6"
+                ),
+                issue3259MockupPrinter(
+                    id: issue3259SovolSV06ID,
+                    name: "Sovol SV06",
+                    modelName: "SV06",
+                    state: nil,
+                    isOnline: false
+                ),
+                issue3259MockupPrinter(
+                    id: DemoData.ender3V3_ID,
+                    name: "Ender 3 V3",
+                    modelName: "Ender 3 V3",
+                    state: "idle",
+                    hotendTemp: 22,
+                    bedTemp: 22
+                ),
+                issue3259MockupPrinter(
+                    id: issue3259PrusaXLID,
+                    name: "Prusa XL",
+                    modelName: "XL",
+                    state: "printing",
+                    progress: 0.38,
+                    jobName: "tool_organizer.gcode",
+                    hotendTemp: 215,
+                    bedTemp: 60,
+                    spoolName: "PLA Orange",
+                    colorHex: "#F97316"
+                ),
+                issue3259MockupPrinter(
+                    id: issue3259BambuA1ID,
+                    name: "Bambu A1",
+                    modelName: "A1",
+                    state: "printing",
+                    progress: 0.56,
+                    jobName: "cable_clip_set.gcode",
+                    hotendTemp: 220,
+                    bedTemp: 55,
+                    spoolName: "PETG Blue",
+                    colorHex: "#3B82F6"
+                ),
+                issue3259MockupPrinter(
+                    id: issue3259CrealityK1ID,
+                    name: "Creality K1",
+                    modelName: "K1",
+                    state: "idle",
+                    hotendTemp: 24,
+                    bedTemp: 23
+                ),
+            ]
+        } else {
+            printers = phonePrinters
+        }
 
         let status = PrinterStatusDetail(
             id: printer.id,
@@ -675,6 +810,55 @@ enum UITestBootstrap {
         )
     }
 
+    private static func issue3259MockupPrinter(
+        id: UUID,
+        name: String,
+        modelName: String,
+        state: String?,
+        isOnline: Bool = true,
+        progress: Double? = nil,
+        jobName: String? = nil,
+        hotendTemp: Double? = nil,
+        bedTemp: Double? = nil,
+        spoolName: String? = nil,
+        colorHex: String? = nil
+    ) -> Printer {
+        var payload: [String: Any] = [
+            "id": id.uuidString,
+            "name": name,
+            "modelName": modelName,
+            "isOnline": isOnline,
+            "isEnabled": true,
+        ]
+        if let state { payload["state"] = state }
+        if let progress { payload["progress"] = progress * 100 }
+        if let jobName {
+            payload["jobName"] = jobName
+            payload["fileName"] = jobName
+        }
+        if let hotendTemp { payload["hotendTemp"] = hotendTemp }
+        if let bedTemp { payload["bedTemp"] = bedTemp }
+        if let spoolName, let colorHex {
+            payload["spoolInfo"] = [
+                "hasActiveSpool": true,
+                "activeSpoolId": 3259,
+                "spoolName": spoolName,
+                "material": "PLA",
+                "colorHex": colorHex,
+                "filamentName": spoolName,
+                "vendor": "Mockup fixture",
+                "remainingWeightG": 350,
+                "spoolInUse": true,
+            ]
+        }
+        do {
+            let data = try JSONSerialization.data(withJSONObject: payload)
+            return try JSONDecoder().decode(Printer.self, from: data)
+        } catch {
+            preconditionFailure("The visual-acceptance printer fixture must decode: \(error)")
+        }
+    }
+
     private static func issue3259VisualAcceptanceServices(
         registry: ServerRegistry,
         defaults: UserDefaults
@@ -694,7 +878,7 @@ enum UITestBootstrap {
         )
         registry.setAdvancedPrinterControlsEnabled(true)
 
-        return ServiceContainer(
+        let services = ServiceContainer(
             serverRegistry: registry,
             credentialsStore: credentials,
             userDefaultsBox: AuthServiceUserDefaultsBox(defaults),
@@ -722,6 +906,8 @@ enum UITestBootstrap {
                 DemoSignalRService(simulatesProgress: false)
             }
         )
+        services.autoPrintService = DemoAutoDispatchService()
+        return services
     }
 
     private static func issue3259VisualAcceptanceSafetyTelemetry(

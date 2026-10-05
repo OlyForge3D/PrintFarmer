@@ -47,11 +47,17 @@ final class PrinterListViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.count(for: .idle), 1)
     }
 
-    func testNeedsAttentionIncludesPendingReadyAndFeedPrinters() throws {
+    func testNeedsAttentionIncludesPendingReadyAndFeedPrintersButNotPausedPrinters() throws {
         let pending = try TestData.decodePrinter(from: TestJSON.printerMinimal)
         let feed = try TestData.decodePrinter(from: TestJSON.printer)
+        let pausedFixture = TestJSON.printerMinimal.replacingOccurrences(
+            of: "660e8400-e29b-41d4-a716-446655440001",
+            with: "660e8400-e29b-41d4-a716-446655440003"
+        )
+        var paused = try TestData.decodePrinter(from: pausedFixture)
+        paused.state = "paused"
         let viewModel = PrinterListViewModel(
-            initialPrinters: [pending, feed],
+            initialPrinters: [pending, feed, paused],
             pendingReadyPrinterIDs: [pending.id]
         )
         viewModel.selectedStatus = .needsAttention
@@ -59,5 +65,6 @@ final class PrinterListViewModelTests: XCTestCase {
 
         XCTAssertEqual(Set(viewModel.filteredPrinters.map(\.id)), [pending.id, feed.id])
         XCTAssertEqual(viewModel.filteredPrinters.first?.id, pending.id)
+        XCTAssertEqual(viewModel.count(for: .needsAttention), 2)
     }
 }
