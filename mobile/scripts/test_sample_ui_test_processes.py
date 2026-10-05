@@ -12,10 +12,11 @@ spec.loader.exec_module(sampler)
 class AppProcessSelectionTests(unittest.TestCase):
     def test_only_selected_simulator_app_is_sampled(self):
         listing = """
-  101 /Users/test/Library/Developer/CoreSimulator/Devices/ABC/data/Containers/Bundle/Application/1/PrintFarmer.app/PrintFarmer
+  101 /Users/test/Library/Developer/CoreSimulator/Devices/ABC/data/Containers/Bundle/Application/1/PrintFarmer.app/PrintFarmer --uitesting -AppleLanguages (en)
   102 /Users/test/Library/Developer/CoreSimulator/Devices/OTHER/data/Containers/Bundle/Application/1/PrintFarmer.app/PrintFarmer
   103 /Users/test/Library/Developer/CoreSimulator/Devices/ABC/data/Containers/Bundle/Application/1/PrintFarmerUITests-Runner.app/PrintFarmerUITests-Runner
   104 /Applications/PrintFarmer.app/PrintFarmer
+  105 /Users/test/Library/Developer/CoreSimulator/Devices/ABC/data/Containers/Bundle/Application/1/PrintFarmer.app/PrintFarmerHelper
 """
         self.assertEqual(sampler.app_pids(listing, "ABC"), [101])
 

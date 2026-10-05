@@ -2,6 +2,7 @@
 """Retain read-only main-thread samples for one simulator's UI-test app."""
 
 import argparse
+import re
 import signal
 import subprocess
 import time
@@ -17,7 +18,7 @@ def app_pids(process_listing, device_id):
         if len(fields := line.strip().split(maxsplit=1)) == 2
         for pid, command in [fields]
         if pid.isdecimal() and marker in command
-        and command.endswith("/PrintFarmer.app/PrintFarmer")
+        and re.search(r"/PrintFarmer\.app/PrintFarmer(?:\s|$)", command)
     ]
 
 
@@ -67,6 +68,8 @@ def main():
                 status = process.wait(timeout=5)
             print(f"sample pid={process.pid} exit={status}", flush=True)
             log.close()
+    if not seen:
+        raise RuntimeError("No selected-simulator PrintFarmer process was observed; no stacks captured")
 
 
 if __name__ == "__main__":
