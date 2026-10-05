@@ -160,9 +160,7 @@ final class HarvestUITests: QueueUITestBase {
     }
 
     private func launchQueueReorderScenario() {
-        app.terminate()
-        app.launchArguments.append("--uitesting-queue-reorder")
-        app.launchForPrintFarmerUITest()
+        relaunchAppForTest(additionalArguments: ["--uitesting-queue-reorder"])
     }
 
     /// Navigates Queue → Job History → the completed demo job. Queue opens

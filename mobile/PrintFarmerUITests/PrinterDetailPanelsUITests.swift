@@ -1045,7 +1045,6 @@ class Issue3259ControlIdleUITests: PrinterDetailPanelsUITests.Issue3259MockupCap
     }
 
     func testCompactHeatStepperRequiresApplyAndUsesAuthenticatedAPI() {
-        app.launch()
         let farm = shellDestinationButton(tabIdentifier: "tab.farm", timeout: 8)
         XCTAssertTrue(farm.waitForExistence(timeout: 8))
         farm.tap()
@@ -1086,7 +1085,6 @@ class Issue3259ControlIdleUITests: PrinterDetailPanelsUITests.Issue3259MockupCap
             }
         }
 
-        app.launch()
         let farm = shellDestinationButton(tabIdentifier: "tab.farm", timeout: 8)
         XCTAssertTrue(farm.waitForExistence(timeout: 8))
         farm.tap()

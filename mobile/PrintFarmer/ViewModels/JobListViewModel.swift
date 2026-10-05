@@ -52,6 +52,12 @@ final class JobListViewModel {
             && isViewActive
     }
 
+    /// Keep the native List's editing session alive while an accepted move is
+    /// persisted. Mutation admission still uses canReorderQueue and fresh revisions.
+    var keepsQueueEditingActive: Bool {
+        isReorderingQueue || canReorderQueue
+    }
+
     func setQueueWriteAuthorization(_ isAuthorized: Bool) {
         queueWriteAuthorized = isAuthorized
     }

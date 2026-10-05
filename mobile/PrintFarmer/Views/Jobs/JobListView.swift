@@ -280,7 +280,7 @@ struct JobListView: View {
         }
         .listStyle(.plain)
         .contentMargins(.bottom, 200, for: .scrollContent)
-        .environment(\.editMode, .constant(viewModel.canReorderQueue ? .active : .inactive))
+        .environment(\.editMode, .constant(viewModel.keepsQueueEditingActive ? .active : .inactive))
         .accessibilityIdentifier("jobList.combined.list")
     }
 
@@ -505,45 +505,32 @@ struct JobListView: View {
         }
     }
 
-    @ViewBuilder
     private func queueRowAccessibilityActions<Content: View>(
         _ item: QueuedPrintJobResponse,
         groupID: String?,
         @ViewBuilder content: () -> Content
     ) -> some View {
-        if let groupID, let id = item.job.jobUUID,
-           viewModel.canMoveQueuedJob(id: id, direction: .up, inGroup: groupID),
-           viewModel.canMoveQueuedJob(id: id, direction: .down, inGroup: groupID) {
-           content()
-               .accessibilityAction(named: Text("Move up")) {
-                   Task { @MainActor in
-                       await viewModel.moveQueuedJob(id: id, direction: .up, inGroup: groupID)
-                   }
-               }
-               .accessibilityAction(named: Text("Move down")) {
-                   Task { @MainActor in
-                       await viewModel.moveQueuedJob(id: id, direction: .down, inGroup: groupID)
-                   }
-               }
-        } else if let groupID, let id = item.job.jobUUID,
-                  viewModel.canMoveQueuedJob(id: id, direction: .up, inGroup: groupID) {
-            content()
-                .accessibilityAction(named: Text("Move up")) {
-                    Task { @MainActor in
-                        await viewModel.moveQueuedJob(id: id, direction: .up, inGroup: groupID)
+        // Action availability changes during a move; the row itself must not
+        // switch conditional-content branches under UIKit's interactive drag.
+        content()
+            .accessibilityActions {
+                if let groupID, let id = item.job.jobUUID {
+                    if viewModel.canMoveQueuedJob(id: id, direction: .up, inGroup: groupID) {
+                        Button("Move up") {
+                            Task { @MainActor in
+                                await viewModel.moveQueuedJob(id: id, direction: .up, inGroup: groupID)
+                            }
+                        }
+                    }
+                    if viewModel.canMoveQueuedJob(id: id, direction: .down, inGroup: groupID) {
+                        Button("Move down") {
+                            Task { @MainActor in
+                                await viewModel.moveQueuedJob(id: id, direction: .down, inGroup: groupID)
+                            }
+                        }
                     }
                 }
-        } else if let groupID, let id = item.job.jobUUID,
-                  viewModel.canMoveQueuedJob(id: id, direction: .down, inGroup: groupID) {
-            content()
-                .accessibilityAction(named: Text("Move down")) {
-                    Task { @MainActor in
-                        await viewModel.moveQueuedJob(id: id, direction: .down, inGroup: groupID)
-                    }
-                }
-        } else {
-            content()
-        }
+            }
     }
 
     // MARK: - Recent Job Row

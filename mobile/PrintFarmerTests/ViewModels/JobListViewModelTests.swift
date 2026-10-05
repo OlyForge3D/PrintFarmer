@@ -259,6 +259,54 @@ final class JobListViewModelTests: XCTestCase {
 
     // MARK: - Queue Reordering
 
+    func testPendingMoveKeepsNativeEditingSessionWithoutAdmittingAnotherMove() async throws {
+        let first = try makeQueueJob(name: "first")
+        let second = try makeQueueJob(name: "second")
+        mockJobService.queuedJobResponsesByLoad = [[first, second], [second, first]]
+        mockJobService.queuedJobResponsesToReturn = [second, first]
+        let gate = QueueMoveGate()
+        mockJobService.beforeMoveQueuedJob = { await gate.suspend() }
+        viewModel.setQueueWriteAuthorization(true)
+        viewModel.setNetworkReachability(true)
+        await viewModel.loadJobs()
+        let groupID = try XCTUnwrap(viewModel.reorderableQueueGroups.first?.id)
+        XCTAssertTrue(viewModel.keepsQueueEditingActive)
+
+        let move = Task {
+            await viewModel.moveQueuedJobs(
+                fromOffsets: IndexSet(integer: 0), toOffset: 2, inGroup: groupID
+            )
+        }
+        await gate.waitUntilEntered()
+        XCTAssertTrue(viewModel.isReorderingQueue)
+        XCTAssertFalse(viewModel.hasFreshQueueSnapshot)
+        XCTAssertFalse(viewModel.canReorderQueue)
+        XCTAssertTrue(viewModel.keepsQueueEditingActive,
+                      "An accepted native drag must not toggle List editing off during persistence.")
+        XCTAssertFalse(viewModel.canMoveQueuedJob(
+            id: try XCTUnwrap(first.job.jobUUID), direction: .up, inGroup: groupID
+        ))
+        await viewModel.moveQueuedJobs(
+            fromOffsets: IndexSet(integer: 0), toOffset: 2, inGroup: groupID
+        )
+        XCTAssertEqual(mockJobService.moveQueuedJobCalledWith?.id, first.job.jobUUID,
+                       "The second move must not reach the service with a stale queue snapshot.")
+
+        await gate.release()
+        await move.value
+        XCTAssertEqual(viewModel.jobs.map(\.id), [second.id, first.id])
+        XCTAssertFalse(viewModel.isReorderingQueue)
+        XCTAssertTrue(viewModel.canReorderQueue)
+        XCTAssertTrue(viewModel.keepsQueueEditingActive)
+
+        viewModel.setQueueWriteAuthorization(false)
+        XCTAssertFalse(viewModel.canReorderQueue)
+        XCTAssertFalse(viewModel.keepsQueueEditingActive)
+        viewModel.setQueueWriteAuthorization(true)
+        viewModel.setNetworkReachability(false)
+        XCTAssertFalse(viewModel.keepsQueueEditingActive)
+    }
+
     func testMoveQueuedJobUsesSameGroupNeighborAndRefreshesAuthoritativeOrder() async throws {
         let printerID = UUID()
         let moved = try makeQueueJob(
@@ -431,7 +479,9 @@ final class JobListViewModelTests: XCTestCase {
             XCTAssertTrue(viewModel.hasFreshQueueSnapshot)
             if case .forbidden = error {
                 XCTAssertFalse(viewModel.queueWriteAuthorized)
+                XCTAssertFalse(viewModel.keepsQueueEditingActive)
             }
+            XCTAssertEqual(viewModel.keepsQueueEditingActive, viewModel.canReorderQueue)
         }
     }
 
