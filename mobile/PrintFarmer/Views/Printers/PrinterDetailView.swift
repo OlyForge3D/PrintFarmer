@@ -127,6 +127,195 @@ struct PrinterDetailView: View {
     }
 
     var body: some View {
+        finalContent
+    }
+
+    private var finalContent: some View {
+        lifecycleContent
+            .sheet(isPresented: $viewModel.showSpoolPicker) {
+                SpoolPickerView { spool in
+                    let task = Task {
+                        if let target = guidedSwapTarget {
+                            await viewModel.bindToolheadSpool(spool, at: target.toolheadIndex)
+                            guidedSwapTarget = nil
+                        } else {
+                            await viewModel.setActiveSpool(spool)
+                        }
+                    }
+                    activeTasks.append(task)
+                }
+            }
+            .sheet(isPresented: $viewModel.showScannedDataSheet) {
+                if let data = viewModel.nfcScannedData {
+                    AddSpoolView(scannedData: data)
+                        .onDisappear {
+                            let task = Task { await viewModel.loadPrinter() }
+                            activeTasks.append(task)
+                        }
+                }
+            }
+            .alert("Scan Error", isPresented: .constant(viewModel.nfcScanError != nil)) {
+                Button("OK") { viewModel.nfcScanError = nil }
+            } message: {
+                if let error = viewModel.nfcScanError {
+                    Text(error)
+                }
+            }
+            .alert("Mark Printer Ready?", isPresented: $viewModel.showNFCReadyConfirmation) {
+                Button("Cancel", role: .cancel) {
+                    viewModel.reviewedReadyStatus = nil
+                }
+                Button("Mark Ready") {
+                    let task = Task { await viewModel.markPrinterReady() }
+                    activeTasks.append(task)
+                }
+            } message: {
+                Text(
+                    "Clear the bed and confirm \(viewModel.reviewedReadyStatus?.nextJobName ?? "the reviewed next job")?"
+                )
+            }
+    }
+
+    private var lifecycleContent: some View {
+        commandContent
+            .task {
+                await configureDetail()
+            }
+            .task(id: filamentCoverageEnabled) {
+                await loadFilamentCoverage()
+            }
+            .task(id: activeSpoolLookupAuthority) {
+                await loadActiveSpoolLookup(activeSpoolLookupAuthority)
+            }
+            .onDisappear {
+                spoolLookup.invalidate()
+                activeTasks.forEach { $0.cancel() }
+                activeTasks.removeAll()
+                viewModel.isViewActive = false
+                viewModel.stopSnapshotPolling()
+                coverageViewModel.tearDownSignalR()
+            }
+            .onChange(of: scenePhase) { _, newPhase in
+                handleScenePhaseChange(newPhase)
+            }
+            // Reacts to a page switch alone, independent of `scenePhase` (issue
+            // #2522, Hicks review finding 19): leaving Status for another page
+            // must stop camera polling immediately, not just the next
+            // time the app backgrounds/foregrounds.
+            .onChange(of: selectedPanel) { _, _ in
+                viewModel.setSnapshotPollingAllowed(isStatusPageForeground)
+            }
+            .onChange(of: guidedSwapEnabled) { _, isEnabled in
+                guard !isEnabled, guidedSwapTarget != nil else { return }
+                guidedSwapTarget = nil
+                viewModel.showSpoolPicker = false
+            }
+    }
+
+    private var commandContent: some View {
+        navigationContent
+            .refreshable {
+                await PrinterDetailViewLifecycle.refresh(
+                    viewModel: viewModel,
+                    coverageViewModel: coverageViewModel,
+                    refreshCoverage: filamentCoverageEnabled,
+                    snapshotPollingAllowed: { isStatusPageForeground }
+                )
+                await viewModel.loadFilamentCommandCapabilities()
+            }
+            .alert(
+                viewModel.pendingAction?.title ?? "Confirm",
+                isPresented: $viewModel.showConfirmation,
+                presenting: viewModel.pendingAction
+            ) { _ in
+                Button("Cancel", role: .cancel) {}
+                Button("Confirm", role: .destructive) {
+                    UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+                    let task = Task { await viewModel.confirmAction() }
+                    activeTasks.append(task)
+                }
+            } message: { action in
+                Text(action.message)
+            }
+            .alert("Action Failed", isPresented: .constant(viewModel.actionError != nil)) {
+                Button("OK") { viewModel.actionError = nil }
+            } message: {
+                if let error = viewModel.actionError {
+                    Text(error)
+                }
+            }
+            .confirmationDialog(
+                "Load filament?",
+                isPresented: $showsFilamentLoadConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Load") { dispatchPhysicalFilamentCommand(load: true) }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Requests a physical filament load. Confirm the assigned spool and printer before continuing.")
+            }
+            .confirmationDialog(
+                "Unload filament?",
+                isPresented: $showsFilamentUnloadConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Unload", role: .destructive) { dispatchPhysicalFilamentCommand(load: false) }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Requests a physical filament unload. This does not clear the spool assignment.")
+            }
+            .alert("Start Failed", isPresented: .constant(viewModel.dispatchError != nil)) {
+                Button("OK") { viewModel.dispatchError = nil }
+            } message: {
+                Text(viewModel.dispatchError ?? "")
+            }
+    }
+
+    private var navigationContent: some View {
+        pageContent
+            // Stable, printer-scoped destination identifier so task-action routing
+            // (#788) can assert it reached the exact printer and place a11y focus
+            // there. Additive only — no behavior change.
+            //
+            // `.accessibilityElement(children: .contain)` (issue #2522): without
+            // it, this identifier — set on a plain, non-rendering `VStack` —
+            // bubbles down and OVERRIDES the explicit identifiers of multiple
+            // distinct descendant elements (observed: the panel selector's own
+            // `SegmentedControl` and the paging `TabView`'s internal
+            // `CollectionView` both silently lost their own identifiers and
+            // reported "printer.detail.root.<uuid>" instead once the
+            // paged detail replaced the single old `ScrollView`).
+            // `.contain` makes this VStack a genuine, opaque accessibility node
+            // in its own right so its identifier stops leaking onto children
+            // that already declare their own.
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("printer.detail.root.\(printerId.uuidString)")
+            .navigationTitle("")
+            .navigationBarBackButtonHidden()
+            .toolbar(.hidden, for: .tabBar)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        Self.returnToFarm(router: router)
+                    } label: { Label("Farm", systemImage: "chevron.left") }
+                        .accessibilityIdentifier("printer.detail.farm")
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    if let baseURL = serverRegistry.activeServer?.baseURL {
+                        Link(destination: baseURL.appendingPathComponent("printers")
+                            .appendingPathComponent(printerId.uuidString.lowercased())) {
+                            Label("Open in web", systemImage: "arrow.up.right")
+                        }
+                        .accessibilityIdentifier("printer.detail.web")
+                    }
+                }
+            }
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+    }
+
+    private var pageContent: some View {
         VStack(spacing: 0) {
             // #789: shared stale banner — honest, read-only cached coverage.
             // Gated on `isStaleCacheReportable`, not `isShowingStaleCache`: the
@@ -159,269 +348,112 @@ struct PrinterDetailView: View {
                 }
             }
         }
-        // Stable, printer-scoped destination identifier so task-action routing
-        // (#788) can assert it reached the exact printer and place a11y focus
-        // there. Additive only — no behavior change.
-        //
-        // `.accessibilityElement(children: .contain)` (issue #2522): without
-        // it, this identifier — set on a plain, non-rendering `VStack` —
-        // bubbles down and OVERRIDES the explicit identifiers of multiple
-        // distinct descendant elements (observed: the panel selector's own
-        // `SegmentedControl` and the paging `TabView`'s internal
-        // `CollectionView` both silently lost their own identifiers and
-        // reported "printer.detail.root.<uuid>" instead once the
-        // paged detail replaced the single old `ScrollView`).
-        // `.contain` makes this VStack a genuine, opaque accessibility node
-        // in its own right so its identifier stops leaking onto children
-        // that already declare their own.
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("printer.detail.root.\(printerId.uuidString)")
-        .navigationTitle("")
-        .navigationBarBackButtonHidden()
-        .toolbar(.hidden, for: .tabBar)
-        .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                Button {
-                    Self.returnToFarm(router: router)
-                } label: { Label("Farm", systemImage: "chevron.left") }
-                    .accessibilityIdentifier("printer.detail.farm")
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                if let baseURL = serverRegistry.activeServer?.baseURL {
-                    Link(destination: baseURL.appendingPathComponent("printers")
-                        .appendingPathComponent(printerId.uuidString.lowercased())) {
-                        Label("Open in web", systemImage: "arrow.up.right")
-                    }
-                    .accessibilityIdentifier("printer.detail.web")
-                }
-            }
+    }
+
+    private func configureDetail() async {
+        let generation = services.activeServerGeneration
+        await services.awaitActiveServerSettled()
+        guard !Task.isCancelled, services.activeServerGeneration == generation else { return }
+
+        let composition = services.printerControlsComposition
+        controlsComposition = composition
+        viewModel.isViewActive = true
+        viewModel.setSnapshotPollingAllowed(isStatusPageForeground)
+        viewModel.configure(printerService: composition?.printerService ?? services.printerService)
+        #if canImport(UIKit)
+        if let nfc = services.nfcService {
+            viewModel.configureNFCScanner(nfc)
         }
-        #if os(iOS)
-        .navigationBarTitleDisplayMode(.inline)
         #endif
-        .refreshable {
-            await PrinterDetailViewLifecycle.refresh(
-                viewModel: viewModel,
-                coverageViewModel: coverageViewModel,
-                refreshCoverage: filamentCoverageEnabled,
-                snapshotPollingAllowed: { isStatusPageForeground }
+        viewModel.configureSignalR(services.signalRService)
+        viewModel.configurePredictive(services.predictiveService)
+        viewModel.configureFailureDetection(services.failureDetectionService)
+        viewModel.configureOperatorServices(
+            jobService: services.jobService,
+            maintenanceService: services.maintenanceService
+        )
+        await viewModel.loadPrinter()
+        if let printer = viewModel.printer {
+            await ensureControlsOwnerIfAvailable(for: printer)
+        }
+        await viewModel.loadOperatorSections()
+        if let controlsViewModel {
+            viewModel.adoptFilamentCommandCapabilities(
+                controlsViewModel.capabilities,
+                error: controlsViewModel.capabilityLoadError
             )
+        } else {
             await viewModel.loadFilamentCommandCapabilities()
         }
-        .alert(
-            viewModel.pendingAction?.title ?? "Confirm",
-            isPresented: $viewModel.showConfirmation,
-            presenting: viewModel.pendingAction
-        ) { _ in
-            Button("Cancel", role: .cancel) {}
-            Button("Confirm", role: .destructive) {
-                UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
-                let task = Task { await viewModel.confirmAction() }
-                activeTasks.append(task)
-            }
-        } message: { action in
-            Text(action.message)
-        }
-        .alert("Action Failed", isPresented: .constant(viewModel.actionError != nil)) {
-            Button("OK") { viewModel.actionError = nil }
-        } message: {
-            if let error = viewModel.actionError {
-                Text(error)
-            }
-        }
-        .confirmationDialog(
-            "Load filament?",
-            isPresented: $showsFilamentLoadConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Load") { dispatchPhysicalFilamentCommand(load: true) }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Requests a physical filament load. Confirm the assigned spool and printer before continuing.")
-        }
-        .confirmationDialog(
-            "Unload filament?",
-            isPresented: $showsFilamentUnloadConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Unload", role: .destructive) { dispatchPhysicalFilamentCommand(load: false) }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Requests a physical filament unload. This does not clear the spool assignment.")
-        }
-        .alert("Start Failed", isPresented: .constant(viewModel.dispatchError != nil)) {
-            Button("OK") { viewModel.dispatchError = nil }
-        } message: {
-            Text(viewModel.dispatchError ?? "")
-        }
-        .task {
-            let generation = services.activeServerGeneration
-            await services.awaitActiveServerSettled()
-            guard !Task.isCancelled, services.activeServerGeneration == generation else { return }
-            // Pin setup controls to the same composition used for detail data,
-            // before the first await that loads that data.
-            let composition = services.printerControlsComposition
-            controlsComposition = composition
-            viewModel.isViewActive = true
-            viewModel.setSnapshotPollingAllowed(isStatusPageForeground)
-            viewModel.configure(printerService: composition?.printerService ?? services.printerService)
-            #if canImport(UIKit)
-            if let nfc = services.nfcService {
-                viewModel.configureNFCScanner(nfc)
-            }
-            #endif
-            viewModel.configureSignalR(services.signalRService)
-            viewModel.configurePredictive(services.predictiveService)
-            viewModel.configureFailureDetection(services.failureDetectionService)
-            viewModel.configureOperatorServices(
-                jobService: services.jobService,
-                maintenanceService: services.maintenanceService
-            )
-            await viewModel.loadPrinter()
-            if let printer = viewModel.printer {
-                await ensureControlsOwnerIfAvailable(for: printer)
-            }
-            await viewModel.loadOperatorSections()
-            if let controlsViewModel {
-                viewModel.adoptFilamentCommandCapabilities(
-                    controlsViewModel.capabilities,
-                    error: controlsViewModel.capabilityLoadError
-                )
-            } else {
-                await viewModel.loadFilamentCommandCapabilities()
-            }
-            viewModel.setSnapshotPollingAllowed(isStatusPageForeground)
+        viewModel.setSnapshotPollingAllowed(isStatusPageForeground)
 
-            // Handle NFC "mark ready" deep link
-            if let pendingId = router.pendingNFCReadyPrinterId, pendingId == viewModel.printerId {
-                await viewModel.prepareReadyConfirmation()
-                router.pendingNFCReadyPrinterId = nil
-            }
-            if let target = router.pendingFilamentSwap, target.printerId == viewModel.printerId {
-                router.pendingFilamentSwap = nil
-                if guidedSwapEnabled {
-                    guidedSwapTarget = target
-                    viewModel.showSpoolPicker = true
-                }
+        if let pendingId = router.pendingNFCReadyPrinterId, pendingId == viewModel.printerId {
+            await viewModel.prepareReadyConfirmation()
+            router.pendingNFCReadyPrinterId = nil
+        }
+        if let target = router.pendingFilamentSwap, target.printerId == viewModel.printerId {
+            router.pendingFilamentSwap = nil
+            if guidedSwapEnabled {
+                guidedSwapTarget = target
+                viewModel.showSpoolPicker = true
             }
         }
-        .task(id: filamentCoverageEnabled) {
-            guard filamentCoverageEnabled else {
-                coverageViewModel.disableForCapabilityGate()
-                return
-            }
-            coverageViewModel.configure(coverageService: services.filamentCoverageService)
-            coverageViewModel.configureSignalR(services.signalRService)
-            // #789: wire + hydrate this printer's coverage read-cache BEFORE the
-            // canonical load so an offline detail launch shows honest stale data.
-            coverageViewModel.configureCache(services.filamentCoverageReadCache)
-            await coverageViewModel.hydrateFromCache()
-            await coverageViewModel.load()
+    }
+
+    private func loadFilamentCoverage() async {
+        guard filamentCoverageEnabled else {
+            coverageViewModel.disableForCapabilityGate()
+            return
         }
-        .task(id: activeSpoolLookupAuthority) {
-            guard let authority = activeSpoolLookupAuthority else {
-                spoolLookup.invalidate()
-                return
-            }
-            await services.awaitActiveServerSettled()
-            guard !Task.isCancelled,
-                  services.isActiveGeneration(authority.generation),
-                  activeSpoolLookupAuthority == authority else {
-                return
-            }
-            let spoolService: any SpoolServiceProtocol = services.spoolService
-            let authorityGeneration = authority.generation
-            let isAuthorityCurrent: @MainActor () -> Bool = {
-                activeSpoolLookupAuthority == authority
-                    && services.isActiveGeneration(authorityGeneration)
-            }
-            await spoolLookup.load(
-                service: spoolService,
-                authority: authority,
-                isCurrent: isAuthorityCurrent
-            )
-        }
-        .onDisappear {
+        coverageViewModel.configure(coverageService: services.filamentCoverageService)
+        coverageViewModel.configureSignalR(services.signalRService)
+        coverageViewModel.configureCache(services.filamentCoverageReadCache)
+        await coverageViewModel.hydrateFromCache()
+        await coverageViewModel.load()
+    }
+
+    private func loadActiveSpoolLookup(_ authority: PrinterDetailSpoolLookupAuthority?) async {
+        guard let authority else {
             spoolLookup.invalidate()
-            activeTasks.forEach { $0.cancel() }
-            activeTasks.removeAll()
-            viewModel.isViewActive = false
-            viewModel.stopSnapshotPolling()
-            coverageViewModel.tearDownSignalR()
+            return
         }
-        .onChange(of: scenePhase) { _, newPhase in
-            switch newPhase {
-            case .active:
-                if viewModel.isViewActive {
-                    let task = Task {
-                        await PrinterDetailViewLifecycle.willEnterForeground(
-                            viewModel: viewModel,
-                            coverageViewModel: coverageViewModel,
-                            refreshCoverage: filamentCoverageEnabled,
-                            snapshotPollingAllowed: selectedPanel == .status
-                        )
-                    }
-                    activeTasks.append(task)
-                }
-            case .inactive, .background:
-                viewModel.setSnapshotPollingAllowed(false)
-            @unknown default:
-                viewModel.setSnapshotPollingAllowed(false)
-            }
+        await services.awaitActiveServerSettled()
+        guard !Task.isCancelled,
+              services.isActiveGeneration(authority.generation),
+              activeSpoolLookupAuthority == authority else {
+            return
         }
-        // Reacts to a page switch alone, independent of `scenePhase` (issue
-        // #2522, Hicks review finding 19): leaving Status for another page
-        // must stop camera polling immediately, not just the next
-        // time the app backgrounds/foregrounds.
-        .onChange(of: selectedPanel) { _, _ in
-            viewModel.setSnapshotPollingAllowed(isStatusPageForeground)
+        let spoolService: any SpoolServiceProtocol = services.spoolService
+        let authorityGeneration = authority.generation
+        let isAuthorityCurrent: @MainActor () -> Bool = {
+            activeSpoolLookupAuthority == authority
+                && services.isActiveGeneration(authorityGeneration)
         }
-        .onChange(of: guidedSwapEnabled) { _, isEnabled in
-            guard !isEnabled, guidedSwapTarget != nil else { return }
-            guidedSwapTarget = nil
-            viewModel.showSpoolPicker = false
-        }
-        .sheet(isPresented: $viewModel.showSpoolPicker) {
-            SpoolPickerView { spool in
+        await spoolLookup.load(
+            service: spoolService,
+            authority: authority,
+            isCurrent: isAuthorityCurrent
+        )
+    }
+
+    private func handleScenePhaseChange(_ newPhase: ScenePhase) {
+        switch newPhase {
+        case .active:
+            if viewModel.isViewActive {
                 let task = Task {
-                    if let target = guidedSwapTarget {
-                        await viewModel.bindToolheadSpool(spool, at: target.toolheadIndex)
-                        guidedSwapTarget = nil
-                    } else {
-                        await viewModel.setActiveSpool(spool)
-                    }
+                    await PrinterDetailViewLifecycle.willEnterForeground(
+                        viewModel: viewModel,
+                        coverageViewModel: coverageViewModel,
+                        refreshCoverage: filamentCoverageEnabled,
+                        snapshotPollingAllowed: selectedPanel == .status
+                    )
                 }
                 activeTasks.append(task)
             }
-        }
-        .sheet(isPresented: $viewModel.showScannedDataSheet) {
-            if let data = viewModel.nfcScannedData {
-                AddSpoolView(scannedData: data)
-                    .onDisappear {
-                        let task = Task { await viewModel.loadPrinter() }
-                        activeTasks.append(task)
-                    }
-            }
-        }
-        .alert("Scan Error", isPresented: .constant(viewModel.nfcScanError != nil)) {
-            Button("OK") { viewModel.nfcScanError = nil }
-        } message: {
-            if let error = viewModel.nfcScanError {
-                Text(error)
-            }
-        }
-        .alert("Mark Printer Ready?", isPresented: $viewModel.showNFCReadyConfirmation) {
-            Button("Cancel", role: .cancel) {
-                viewModel.reviewedReadyStatus = nil
-            }
-            Button("Mark Ready") {
-                let task = Task { await viewModel.markPrinterReady() }
-                activeTasks.append(task)
-            }
-        } message: {
-            Text(
-                "Clear the bed and confirm \(viewModel.reviewedReadyStatus?.nextJobName ?? "the reviewed next job")?"
-            )
+        case .inactive, .background:
+            viewModel.setSnapshotPollingAllowed(false)
+        @unknown default:
+            viewModel.setSnapshotPollingAllowed(false)
         }
     }
 
