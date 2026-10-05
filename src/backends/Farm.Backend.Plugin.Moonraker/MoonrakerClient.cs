@@ -736,10 +736,10 @@ public partial class MoonrakerClient(
             HomedAxes: homedAxes,
             HomedAxesObservedAtUtc: homedAxesObservedAtUtc,
             ThumbnailCacheIdentity: job?.ThumbnailCacheIdentity,
-            CurrentLayer: job?.CurrentLayer,
-            TotalLayers: job?.TotalLayers,
+            CurrentLayer: status.IsOnline ? job?.CurrentLayer : null,
+            TotalLayers: status.IsOnline ? job?.TotalLayers : null,
             FanSpeedPercent: fanSpeedPercent,
-            LiveZOffsetMm: liveZOffsetMm);
+            LiveZOffsetMm: status.IsOnline ? liveZOffsetMm : null);
     }
 
     private async Task<double?> QueryPartFanSpeedPercentAsync(

@@ -172,6 +172,27 @@ public sealed class MoonrakerDirectControlTests
         Assert.Contains("GET /printer/objects/query?fan=speed", handler.Requests);
     }
 
+    [Fact]
+    public async Task GetCompositeStatusAsync_OfflineStatusDoesNotReturnLiveReadbacks()
+    {
+        using var handler = new CompositeStatusHandler { FailPrinterInfo = true };
+        using var http = new HttpClient(handler);
+        var client = new MoonrakerClient(
+            http,
+            NullLogger<MoonrakerClient>.Instance,
+            new BackendTimeoutSettings());
+
+        PrinterCompositeStatus status = await client.GetCompositeStatusAsync(
+            "http://moonraker-fixture.invalid/",
+            PrinterCredential.FromApiKey("fixture-key"));
+
+        Assert.False(status.IsOnline);
+        Assert.Null(status.CurrentLayer);
+        Assert.Null(status.TotalLayers);
+        Assert.Null(status.FanSpeedPercent);
+        Assert.Null(status.LiveZOffsetMm);
+    }
+
     [Theory]
     [InlineData("""{"current_layer":2,"total_layer":10}""", 2, 10)]
     [InlineData("""{"current_layer":11,"total_layer":10}""", null, null)]
@@ -362,12 +383,19 @@ public sealed class MoonrakerDirectControlTests
     {
         public List<string> Requests { get; } = [];
 
+        public bool FailPrinterInfo { get; init; }
+
         protected override Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
             CancellationToken cancellationToken)
         {
             string pathAndQuery = request.RequestUri!.PathAndQuery;
             Requests.Add($"{request.Method} {pathAndQuery}");
+            if (FailPrinterInfo && pathAndQuery == "/printer/info")
+            {
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
+            }
+
             string response = pathAndQuery switch
             {
                 "/printer/info" => """{"state":"ready"}""",
