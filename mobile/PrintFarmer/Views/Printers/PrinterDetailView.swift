@@ -60,6 +60,7 @@ struct PrinterDetailView: View {
     @State private var showsFilamentLoadConfirmation = false
     @State private var showsFilamentUnloadConfirmation = false
     @State private var showsSafetyChecks = false
+    @State private var filamentToolsExpanded = false
     @State private var printPreviewImage: UIImage?
     @State private var printPreviewPath: String?
     // Transient UI state only (issue #2522) — never persisted, resets to
@@ -69,6 +70,8 @@ struct PrinterDetailView: View {
     // The command owner outlives page visibility and access changes.
     @State private var controlsViewModel: PrinterControlsViewModel?
     @State private var controlsComposition: PrinterControlsComposition?
+    @State private var safetyObservationTask: Task<Void, Never>?
+    @State private var safetyObservationPanel: PrinterDetailPanel?
 
     private let printerId: UUID
 
@@ -101,6 +104,27 @@ struct PrinterDetailView: View {
             printerID: printer.id,
             spoolIDs: spoolIDs.sorted()
         )
+    }
+
+    private func emergencyStopActionBar(for printer: Printer, fillsWidth: Bool = false) -> some View {
+        let presentation = runActionPresentation(for: printer)
+        return VStack(alignment: fillsWidth ? .center : .trailing, spacing: 4) {
+            PrinterRunActionBar(
+                presentation: presentation.emergencyAction,
+                emergencyStopFillsAvailableWidth: fillsWidth,
+                onSelect: { kind in handleRunAction(kind) }
+            )
+            if !printer.isOnline {
+                Text("Printer offline. Use the physical safety switch if needed.")
+                    .font(.caption)
+                    .foregroundStyle(Color.pfTextSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: fillsWidth ? .center : .trailing)
+        .padding(.horizontal)
+        .padding(.vertical, 4)
+        .background(.bar)
     }
 
     /// Pager neighbors stay mounted; camera work requires visible Status
@@ -191,12 +215,16 @@ struct PrinterDetailView: View {
                 spoolLookup.invalidate()
                 activeTasks.forEach { $0.cancel() }
                 activeTasks.removeAll()
+                safetyObservationTask?.cancel()
+                safetyObservationTask = nil
+                safetyObservationPanel = nil
                 viewModel.isViewActive = false
                 viewModel.stopSnapshotPolling()
                 coverageViewModel.tearDownSignalR()
             }
             .onChange(of: scenePhase) { _, newPhase in
                 handleScenePhaseChange(newPhase)
+                synchronizeSafetyObservation()
             }
             // Reacts to a page switch alone, independent of `scenePhase` (issue
             // #2522, Hicks review finding 19): leaving Status for another page
@@ -204,6 +232,7 @@ struct PrinterDetailView: View {
             // time the app backgrounds/foregrounds.
             .onChange(of: selectedPanel) { _, _ in
                 viewModel.setSnapshotPollingAllowed(isStatusPageForeground)
+                synchronizeSafetyObservation()
             }
             .onChange(of: guidedSwapEnabled) { _, isEnabled in
                 guard !isEnabled, guidedSwapTarget != nil else { return }
@@ -549,6 +578,19 @@ struct PrinterDetailView: View {
         let loadReason = physicalFilamentCommandBlockedReason(load: true)
         let unloadReason = physicalFilamentCommandBlockedReason(load: false)
         return VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Extruder")
+                    .font(.headline)
+                    .accessibilityAddTraits(.isHeader)
+                    .accessibilityIdentifier("printer.detail.filament.extruder.heading")
+                Spacer(minLength: 8)
+                if viewModel.isActivelyPrinting {
+                    Text("Not available while printing")
+                        .font(.footnote)
+                        .foregroundStyle(Color.pfTextSecondary)
+                        .accessibilityIdentifier("printer.detail.filament.printingLockout")
+                }
+            }
             HStack(spacing: 12) {
                 Button {
                     showsFilamentLoadConfirmation = true
@@ -575,29 +617,27 @@ struct PrinterDetailView: View {
                 .accessibilityIdentifier("printer.detail.filament.unload")
             }
 
-            if viewModel.isActivelyPrinting {
-                Text("Load and Unload are disabled while a print is active.")
-                    .font(.footnote)
-                    .foregroundStyle(Color.pfTextSecondary)
-                    .accessibilityIdentifier("printer.detail.filament.printingLockout")
-            } else if !canStartPrinterCommand {
+            if !viewModel.isActivelyPrinting && !canStartPrinterCommand {
                 Text("Queue.Start permission is required to use physical filament controls.")
                     .font(.footnote)
                     .foregroundStyle(Color.pfTextSecondary)
-            } else if let error = viewModel.filamentCommandCapabilitiesError {
+            } else if !viewModel.isActivelyPrinting, let error = viewModel.filamentCommandCapabilitiesError {
                 Text("Filament command support could not be confirmed: \(error)")
                     .font(.footnote)
                     .foregroundStyle(Color.pfTextSecondary)
-            } else if viewModel.filamentCommandCapabilities == nil {
+            } else if !viewModel.isActivelyPrinting, viewModel.filamentCommandCapabilities == nil {
                 Text("Checking backend filament-command support.")
                     .font(.footnote)
                     .foregroundStyle(Color.pfTextSecondary)
-            } else if loadReason != nil || unloadReason != nil {
+            } else if !viewModel.isActivelyPrinting, loadReason != nil || unloadReason != nil {
                 Text(loadReason ?? unloadReason ?? "")
                     .font(.footnote)
                     .foregroundStyle(Color.pfTextSecondary)
             }
         }
+        .padding()
+        .operatorCard()
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("printer.detail.filament.physicalControls")
     }
 
@@ -643,6 +683,40 @@ struct PrinterDetailView: View {
         let vm = PrinterControlsViewModel(composition: composition, printer: printer)
         controlsViewModel = vm
         await vm.loadCapabilities()
+        synchronizeSafetyObservation()
+    }
+
+    @MainActor
+    private func synchronizeSafetyObservation() {
+        guard scenePhase == .active,
+              selectedPanel == .control || selectedPanel == .filament,
+              let owner = controlsViewModel,
+              !owner.isLoadingCapabilities else {
+            safetyObservationTask?.cancel()
+            safetyObservationTask = nil
+            safetyObservationPanel = nil
+            controlsViewModel?.suspendSafetyObservation()
+            return
+        }
+        guard safetyObservationTask == nil || safetyObservationPanel != selectedPanel else { return }
+        safetyObservationTask?.cancel()
+        owner.suspendSafetyObservation()
+        safetyObservationPanel = selectedPanel
+
+        safetyObservationTask = Task {
+            await owner.refreshSafetyEvidence()
+            var cadence = PrinterDetailSafetyRefreshCadence()
+            while !Task.isCancelled && owner.isActive {
+                do {
+                    try await Task.sleep(for: PrinterDetailSafetyRefreshCadence.statusInterval)
+                } catch {
+                    return
+                }
+                await owner.refreshSafetyEvidence(
+                    refreshDiscovery: cadence.shouldRefreshDiscovery(at: .now)
+                )
+            }
+        }
     }
 
     private func printerContent(_ printer: Printer) -> some View {
@@ -678,29 +752,14 @@ struct PrinterDetailView: View {
             controlsViewModel?.handlePrinterUpdate(printer)
         }
         .modifier(PrinterControlsAccessLifecycle(viewModel: controlsViewModel))
-        .modifier(PrinterDetailSafetyLifecycle(
-            viewModel: controlsViewModel,
-            observes: scenePhase == .active && (selectedPanel == .control || selectedPanel == .filament)
-        ))
         .safeAreaInset(edge: .top, spacing: 0) {
-            if selectedPanel == .control {
-            let presentation = runActionPresentation(for: printer)
-            VStack(alignment: .trailing, spacing: 4) {
-                PrinterRunActionBar(
-                    presentation: presentation.emergencyAction,
-                    onSelect: { kind in handleRunAction(kind) }
-                )
-                if !printer.isOnline {
-                    Text("Printer offline. Use the physical safety switch if needed.")
-                        .font(.caption)
-                        .foregroundStyle(Color.pfTextSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+            if selectedPanel == .control && viewModel.isActivelyPrinting {
+                emergencyStopActionBar(for: printer)
             }
-            .frame(maxWidth: .infinity, alignment: .trailing)
-            .padding(.horizontal)
-            .padding(.vertical, 4)
-            .background(.bar)
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if selectedPanel == .control && !viewModel.isActivelyPrinting {
+                emergencyStopActionBar(for: printer, fillsWidth: true)
             }
         }
     }
@@ -737,25 +796,44 @@ struct PrinterDetailView: View {
     }
 
     private func filamentPage(_ printer: Printer) -> some View {
-        ScrollView {
+        let filamentSection = PrinterFilamentSection(
+            presentation: filamentPresentation(printer),
+            actions: filamentActions(printer),
+            onAction: { handleFilamentAction($0) },
+            showsAllActions: true,
+            spoolDetailsByID: spoolLookup.spoolsByID,
+            spoolLookupMessage: spoolLookup.statusMessage
+        )
+        return ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                PrinterFilamentSection(
-                    presentation: filamentPresentation(printer),
-                    actions: filamentActions(printer),
-                    onAction: { handleFilamentAction($0) },
-                    showsAllActions: true,
-                    spoolDetailsByID: spoolLookup.spoolsByID,
-                    spoolLookupMessage: spoolLookup.statusMessage
-                )
+                filamentSection
+                physicalFilamentControls()
+                filamentSection.detailUnassignAction
                 if let controlsViewModel, controlsAvailable(for: printer) {
-                    safetyRefresh(controlsViewModel)
-                    PrinterMaterialControls(viewModel: controlsViewModel)
-                        .padding()
-                        .operatorCard()
+                    DisclosureGroup(isExpanded: $filamentToolsExpanded) {
+                        VStack(alignment: .leading, spacing: 12) {
+                            safetyRefresh(controlsViewModel)
+                            PrinterMaterialControls(viewModel: controlsViewModel)
+                                .padding()
+                                .operatorCard()
+                        }
+                        .padding(.top, 8)
+                    } label: {
+                        Label("Advanced filament tools", systemImage: "ellipsis.circle")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Color.pfTextPrimary)
+                            .frame(minHeight: 44, alignment: .leading)
+                            .accessibilityIdentifier("printer.detail.filament.advancedTools")
+                    }
+                    .padding(.horizontal, 12)
+                    .background(Color.pfCard, in: RoundedRectangle(cornerRadius: 12))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .strokeBorder(Color.pfBorder, lineWidth: 1)
+                    )
                 } else {
                     controlsUnavailable(printer)
                 }
-                physicalFilamentControls()
             }
             .padding()
             .padding(.bottom, 32)
@@ -845,61 +923,12 @@ struct PrinterDetailView: View {
 
     private var safetyChecksExpanded: Binding<Bool> {
         Binding(
-            get: { showsSafetyChecks || controlsViewModel?.safetyReadError != nil },
+            get: {
+                showsSafetyChecks
+                    || controlsViewModel?.safetyReadError != nil
+            },
             set: { if controlsViewModel?.safetyReadError == nil { showsSafetyChecks = $0 } }
         )
-    }
-
-    private struct PrinterDetailSafetyDemand: Equatable {
-        let observes: Bool
-        let owner: ObjectIdentifier?
-        let loadingCapabilities: Bool
-    }
-
-    private struct PrinterDetailSafetyLifecycle: ViewModifier {
-        let viewModel: PrinterControlsViewModel?
-        let observes: Bool
-
-        func body(content: Content) -> some View {
-            content.background {
-                if let viewModel {
-                    Color.clear
-                        .modifier(ObservedPrinterDetailSafetyLifecycle(viewModel: viewModel, observes: observes))
-                        .allowsHitTesting(false)
-                        .accessibilityHidden(true)
-                }
-            }
-        }
-    }
-
-    // This legacy ObservableObject must be observed at the safety task's host,
-    // not merely by pager children, so capability completion restarts the task.
-    private struct ObservedPrinterDetailSafetyLifecycle: ViewModifier {
-        @ObservedObject var viewModel: PrinterControlsViewModel
-        let observes: Bool
-
-        func body(content: Content) -> some View {
-            content
-                .task(id: PrinterDetailSafetyDemand(
-                    observes: observes,
-                    owner: ObjectIdentifier(viewModel),
-                    loadingCapabilities: viewModel.isLoadingCapabilities
-                )) {
-                    guard observes else {
-                        viewModel.suspendSafetyObservation()
-                        return
-                    }
-                    guard !viewModel.isLoadingCapabilities else { return }
-                    await viewModel.refreshSafetyEvidence()
-                    var cadence = PrinterDetailSafetyRefreshCadence()
-                    while !Task.isCancelled && viewModel.isActive {
-                        do { try await Task.sleep(for: PrinterDetailSafetyRefreshCadence.statusInterval) } catch { return }
-                        let refreshDiscovery = cadence.shouldRefreshDiscovery(at: .now)
-                        await viewModel.refreshSafetyEvidence(refreshDiscovery: refreshDiscovery)
-                    }
-                }
-                .onDisappear { viewModel.suspendSafetyObservation() }
-        }
     }
 
     /// Eject clears assignment and requests physical unload; Unassign only
@@ -972,29 +1001,27 @@ struct PrinterDetailView: View {
         let jobName = printer.fileName ?? printer.jobName ?? viewModel.currentJob?.jobName
         VStack(alignment: .leading, spacing: 8) {
             if viewModel.isActivelyPrinting || jobName != nil {
-                HStack(alignment: .firstTextBaseline, spacing: 12) {
-                    if let progress = printer.progress, progress.isFinite {
-                        Text("\(Int((min(max(progress, 0), 1) * 100).rounded()))%")
-                            .font(.system(size: 34, weight: .bold, design: .rounded))
-                            .monospacedDigit()
-                            .accessibilityLabel("Print progress \(Int((min(max(progress, 0), 1) * 100).rounded())) percent")
-                    }
-                    Text(jobName ?? "Printing")
-                        .font(.headline)
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Spacer(minLength: 0)
-                }
+                currentJobHeading(printer, jobName: jobName)
 
                 if let progress = printer.progress, progress.isFinite {
                     PrintProgressBar(progress: min(max(progress, 0), 1), height: 6)
                         .accessibilityIdentifier("printer.detail.job.progress")
                 }
 
-                HStack(alignment: .top, spacing: 8) {
-                    statusFact("Left", value: viewModel.formattedTimeRemaining ?? "Unknown")
-                    statusFact("Done at", value: viewModel.formattedEtaClock ?? "Unknown")
-                    statusFact("Layer", value: layerLabel(printer))
+                Group {
+                    if dynamicTypeSize.isAccessibilitySize {
+                        VStack(alignment: .leading, spacing: 8) {
+                            statusFact("Left", value: viewModel.formattedTimeRemaining ?? "Unknown")
+                            statusFact("Done at", value: viewModel.formattedEtaClock ?? "Unknown")
+                            statusFact("Layer", value: layerLabel(printer))
+                        }
+                    } else {
+                        HStack(alignment: .top, spacing: 8) {
+                            statusFact("Left", value: viewModel.formattedTimeRemaining ?? "Unknown")
+                            statusFact("Done at", value: viewModel.formattedEtaClock ?? "Unknown")
+                            statusFact("Layer", value: layerLabel(printer))
+                        }
+                    }
                 }
                 .padding(.vertical, 2)
             } else {
@@ -1007,6 +1034,42 @@ struct PrinterDetailView: View {
         }
         .padding(.horizontal, 2)
         .accessibilityIdentifier("printer.detail.job")
+    }
+
+    @ViewBuilder
+    private func currentJobHeading(_ printer: Printer, jobName: String?) -> some View {
+        let progress = printer.progress.flatMap { $0.isFinite ? min(max($0, 0), 1) : nil }
+        let progressLabel = progress.map {
+            "Print progress \(Int(($0 * 100).rounded())) percent"
+        }
+
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 4) {
+                if let progress, let progressLabel {
+                    Text("\(Int((progress * 100).rounded()))%")
+                        .font(.system(size: 34, weight: .bold, design: .rounded))
+                        .monospacedDigit()
+                        .accessibilityLabel(progressLabel)
+                }
+                Text(jobName ?? "Printing")
+                    .font(.headline)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        } else {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                if let progress, let progressLabel {
+                    Text("\(Int((progress * 100).rounded()))%")
+                        .font(.system(size: 34, weight: .bold, design: .rounded))
+                        .monospacedDigit()
+                        .accessibilityLabel(progressLabel)
+                }
+                Text(jobName ?? "Printing")
+                    .font(.headline)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+            }
+        }
     }
 
     private func layerLabel(_ printer: Printer) -> String {

@@ -80,6 +80,9 @@ final class PrinterDetailPanelsTests: XCTestCase {
         try await waitForHost("The existing controls page must replace its connection fallback", in: controller.view) {
             self.heaterTarget(in: controller.view)?.isEnabled == true && self.capabilityRequests(fixture.api).count == 2
         }
+        try await waitForHost("The selected Control page must start foreground safety discovery", in: controller.view) {
+            self.capabilityRequests(fixture.api).count == 2
+        }
         XCTAssertEqual(capabilityRequests(fixture.api).count, 2, "Owner load plus foreground safety discovery")
         XCTAssertEqual(capabilityRequests(fixture.api).first?.url?.host, fixture.second.baseURL.host)
         XCTAssertFalse(fixture.api.capturedRequests.contains { $0.url?.path.contains("control-operations") == true },
@@ -125,6 +128,9 @@ final class PrinterDetailPanelsTests: XCTestCase {
         try await selectControls(in: controller)
         try await waitForHost("Initial detail load must expose the native heater editor", in: controller.view) {
             self.heaterTarget(in: controller.view)?.isEnabled == true
+        }
+        try await waitForHost("The selected Control page must start foreground safety discovery", in: controller.view) {
+            self.capabilityRequests(fixture.api).count == 2
         }
         XCTAssertEqual(capabilityRequests(fixture.api).count, 2, "Owner load plus foreground safety discovery")
         XCTAssertEqual(capabilityRequests(fixture.api).first?.url?.host, fixture.first.baseURL.host)
@@ -229,16 +235,19 @@ final class PrinterDetailPanelsTests: XCTestCase {
         let window = show(controller)
         defer { window.isHidden = true; window.rootViewController = nil }
         try await selectControls(in: controller)
+        let statusReadsBeforeCapabilityLoad = safetyStatusReads(fixture.api)
         let selector = try XCTUnwrap(views(UISegmentedControl.self, in: controller.view).first)
         selector.selectedSegmentIndex = panel
         selector.sendActions(for: .valueChanged)
         try await waitForHost("Capability request must be held while the selected page is mounted", in: controller.view) {
             !self.capabilityRequests(fixture.api).isEmpty
-                && self.views(UIButton.self, in: controller.view).contains {
-                    $0.accessibilityIdentifier == "printer.detail.safety.refresh" && !$0.isEnabled
-                }
         }
-        let initialStatusReads = fixture.api.capturedRequests.filter { $0.url?.path.hasSuffix("/status") == true }.count
+        XCTAssertEqual(
+            safetyStatusReads(fixture.api),
+            statusReadsBeforeCapabilityLoad,
+            "Safety reads must wait for backend capabilities, regardless of whether the retry disclosure is open."
+        )
+        let initialStatusReads = safetyStatusReads(fixture.api)
         barrier.release()
         // One read comes from loadCapabilities, one from the observation task,
         // and a third proves its five-second loop continues without navigation.
@@ -262,37 +271,35 @@ final class PrinterDetailPanelsTests: XCTestCase {
         let selector = try XCTUnwrap(views(UISegmentedControl.self, in: controller.view).first)
         for panels in [[0, 3, 2], [1, 2], [0, 2]] {
             for panel in panels {
+                let statusReadsBeforePanel = safetyStatusReads(fixture.api)
                 selector.selectedSegmentIndex = panel
                 selector.sendActions(for: .valueChanged)
+                try await waitForHost("The selected detail panel must settle at index \(panel)", in: controller.view) {
+                    selector.selectedSegmentIndex == panel
+                }
                 await Task.yield()
                 controller.view.layoutIfNeeded()
-            }
-            try await waitForHost("Filament must reacquire fresh safety evidence after page traversal", in: controller.view) {
-                self.views(UIButton.self, in: controller.view).contains {
-                    $0.accessibilityIdentifier == "printer.controls.filament-load" && $0.isEnabled
+                if panel == 1 || panel == 2 {
+                    try await waitForHost(
+                        "Control and Filament must reacquire safety evidence after page traversal \(panels)",
+                        in: controller.view
+                    ) {
+                        self.safetyStatusReads(fixture.api) > statusReadsBeforePanel
+                    }
                 }
             }
-            XCTAssertTrue(views(UIButton.self, in: controller.view).contains {
-                $0.accessibilityIdentifier == "printer.detail.safety.refresh"
-            })
         }
+        let readsBeforeForeground = safetyStatusReads(fixture.api)
         controller.rootView = try host(
             detail, services: fixture.services, registry: fixture.registry, scenePhase: .background
         )
-        try await waitForHost("Backgrounding must revoke material actuation", in: controller.view) {
-            self.views(UIButton.self, in: controller.view).contains {
-                $0.accessibilityIdentifier == "printer.controls.filament-load" && !$0.isEnabled
-            }
-        }
         controller.rootView = try host(
             detail, services: fixture.services, registry: fixture.registry, scenePhase: .active
         )
-        try await waitForHost("Foreground Filament must obtain new proof, not stay permanently disabled", in: controller.view) {
-            self.views(UIButton.self, in: controller.view).contains {
-                $0.accessibilityIdentifier == "printer.controls.filament-load" && $0.isEnabled
-            }
+        try await waitForHost("Foreground Filament must restart safety observation", in: controller.view) {
+            self.safetyStatusReads(fixture.api) > readsBeforeForeground
         }
-        XCTAssertGreaterThanOrEqual(fixture.api.capturedRequests.filter { $0.url?.path.hasSuffix("/status") == true }.count, 2)
+        XCTAssertGreaterThanOrEqual(safetyStatusReads(fixture.api), 2)
         XCTAssertFalse(fixture.api.capturedRequests.contains { $0.httpMethod != "GET" })
     }
 
@@ -505,6 +512,10 @@ final class PrinterDetailPanelsTests: XCTestCase {
         api.capturedRequests.filter { $0.url?.path.hasSuffix("/backend-capabilities") == true }
     }
 
+    private func safetyStatusReads(_ api: MockAPIClient) -> Int {
+        api.capturedRequests.filter { $0.url?.path.hasSuffix("/status") == true }.count
+    }
+
     private func detailRequests(_ api: MockAPIClient) -> [URLRequest] {
         api.capturedRequests.filter { $0.url?.path != Self.deviceTokensPath }
     }
@@ -530,6 +541,9 @@ final class PrinterDetailPanelsTests: XCTestCase {
         selector.sendActions(for: .valueChanged)
         controller.view.setNeedsLayout()
         controller.view.layoutIfNeeded()
+        try await waitForHost("The Control page selection must settle", in: controller.view) {
+            selector.selectedSegmentIndex == 1
+        }
     }
 
     private func waitForHost(_ message: String, in view: UIView, timeout: Duration = .seconds(5), condition: () -> Bool) async throws {

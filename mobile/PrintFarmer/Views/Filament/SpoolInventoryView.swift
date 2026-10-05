@@ -10,6 +10,7 @@ private struct NFCWriteTarget: Identifiable {
 struct SpoolInventoryView: View {
     @Environment(ServiceContainer.self) private var services
     @Environment(AppRouter.self) private var router
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var viewModel = SpoolInventoryViewModel()
     @State private var showAddSpool = false
     @State private var showScanFlow = false
@@ -227,18 +228,31 @@ struct SpoolInventoryView: View {
     }
 
     private var inventoryFilters: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 8) {
-                inventoryFilterButtons
-            }
-            .fixedSize(horizontal: true, vertical: false)
+        Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                ScrollView(.horizontal) {
+                    HStack(spacing: 8) {
+                        inventoryFilterButtons
+                    }
+                    .fixedSize(horizontal: true, vertical: false)
+                }
+                .scrollIndicators(.hidden)
+                .accessibilityIdentifier("inventory.filters.accessibility")
+            } else {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 8) {
+                        inventoryFilterButtons
+                    }
+                    .fixedSize(horizontal: true, vertical: false)
 
-            LazyVGrid(
-                columns: [GridItem(.adaptive(minimum: 88, maximum: 150), alignment: .leading)],
-                alignment: .leading,
-                spacing: 8
-            ) {
-                inventoryFilterButtons
+                    LazyVGrid(
+                        columns: [GridItem(.adaptive(minimum: 88, maximum: 150), alignment: .leading)],
+                        alignment: .leading,
+                        spacing: 8
+                    ) {
+                        inventoryFilterButtons
+                    }
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -381,9 +395,11 @@ struct SpoolInventoryView: View {
         Button(action: action) {
             Text(title)
                 .font(.caption.weight(.medium))
+                .fixedSize(horizontal: dynamicTypeSize.isAccessibilitySize, vertical: false)
                 .foregroundStyle(selected ? .white : Color.pfTextSecondary)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
+                .frame(minHeight: 44)
                 .background(
                     selected ? Color.pfAccent : Color.pfBackgroundTertiary,
                     in: Capsule()
@@ -467,6 +483,7 @@ struct SpoolInventoryRowView: View {
     let spool: SpoolmanSpool
     var assignedPrinterName: String? = nil
     var assignmentsLoaded = false
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private var weightPercent: Double? {
         guard let remaining = spool.remainingWeightG,
@@ -484,88 +501,27 @@ struct SpoolInventoryRowView: View {
     }
 
     var body: some View {
-        HStack(spacing: 12) {
-            spoolReel
-
-            VStack(alignment: .leading, spacing: 5) {
-                Text(spool.filamentName ?? spool.name)
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(Color.pfTextPrimary)
-                    .lineLimit(2)
-
-                if let assignedPrinterName {
-                    Label("On \(assignedPrinterName)", systemImage: "printer.fill")
-                        .font(.caption)
-                        .foregroundStyle(Color.pfAccent)
-                        .lineLimit(1)
-                } else if spool.inUse || !assignmentsLoaded {
-                    Text("Printer assignment unavailable")
-                        .font(.caption)
-                        .foregroundStyle(Color.pfTextSecondary)
-                } else {
-                    Text(spool.location.map { "\($0) · unassigned" } ?? "Unassigned")
-                        .font(.caption)
-                        .foregroundStyle(Color.pfTextSecondary)
-                        .lineLimit(1)
-                }
-
-                HStack(spacing: 6) {
-                    Text(spool.material)
-                        .font(.caption2.weight(.medium))
-                        .foregroundStyle(Color.pfTextSecondary)
-                    if let vendor = spool.vendor, !vendor.isEmpty {
-                        Text("· \(vendor)")
-                            .font(.caption2)
-                            .foregroundStyle(Color.pfTextTertiary)
-                            .lineLimit(1)
+        Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(alignment: .top, spacing: 12) {
+                        spoolReel
+                        spoolDetails
                     }
-                    if spool.hasNfcTag == true {
-                        Image(systemName: "wave.3.right")
-                            .font(.caption2)
-                            .foregroundStyle(Color.pfSuccess)
-                            .accessibilityLabel("NFC tag present")
-                    } else {
-                        Image(systemName: "wave.3.right")
-                            .font(.caption2)
-                            .foregroundStyle(Color.pfTextTertiary)
-                            .accessibilityLabel("NFC tag not written")
+                    HStack(alignment: .top) {
+                        Text("Remaining")
+                            .font(.caption)
+                            .foregroundStyle(Color.pfTextSecondary)
+                        Spacer(minLength: 8)
+                        weightSummary
                     }
                 }
-            }
-
-            Spacer(minLength: 4)
-
-            VStack(alignment: .trailing, spacing: 4) {
-                Text(spool.remainingWeightG.flatMap {
-                    $0.isFinite && $0 >= 0 ? "\(Int($0.rounded())) g" : nil
-                } ?? "— g")
-                    .font(.subheadline.weight(.semibold).monospacedDigit())
-                    .foregroundStyle(Color.pfTextPrimary)
-                if let initial = spool.initialWeightG, initial.isFinite, initial > 0,
-                   let remaining = spool.remainingWeightG, remaining.isFinite, remaining >= 0 {
-                    Text("of \(Int(initial.rounded())) g")
-                        .font(.caption2)
-                        .foregroundStyle(Color.pfTextTertiary)
-                    if let weightPercent {
-                        GeometryReader { geo in
-                            ZStack(alignment: .leading) {
-                                Capsule().fill(Color.pfBackgroundTertiary)
-                                Capsule()
-                                    .fill(weightColor)
-                                    .frame(width: geo.size.width * weightPercent)
-                            }
-                        }
-                        .frame(width: 54, height: 4)
-                    }
-                    if let weightPercent, weightPercent < 0.2 {
-                        Text("Low")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(Color.pfError)
-                    }
-                } else {
-                    Text("Weight unavailable")
-                        .font(.caption2)
-                        .foregroundStyle(Color.pfTextTertiary)
+            } else {
+                HStack(spacing: 12) {
+                    spoolReel
+                    spoolDetails
+                    Spacer(minLength: 4)
+                    weightSummary
                 }
             }
         }
@@ -573,6 +529,126 @@ struct SpoolInventoryRowView: View {
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("inventory.spool.\(spool.id)")
         .accessibilityLabel(spoolAccessibilityLabel)
+    }
+
+    private var spoolDetails: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(spool.filamentName ?? spool.name)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(Color.pfTextPrimary)
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if let assignedPrinterName {
+                Label("On \(assignedPrinterName)", systemImage: "printer.fill")
+                    .font(.caption)
+                    .foregroundStyle(Color.pfAccent)
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if spool.inUse || !assignmentsLoaded {
+                Text("Printer assignment unavailable")
+                    .font(.caption)
+                    .foregroundStyle(Color.pfTextSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text(spool.location.map { "\($0) · unassigned" } ?? "Unassigned")
+                    .font(.caption)
+                    .foregroundStyle(Color.pfTextSecondary)
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Group {
+                if dynamicTypeSize.isAccessibilitySize {
+                    VStack(alignment: .leading, spacing: 2) {
+                        materialLabel
+                        nfcStatus
+                    }
+                } else {
+                    HStack(spacing: 6) {
+                        materialLabel
+                        nfcStatus
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var materialLabel: some View {
+        Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 2) {
+                    materialName
+                    vendorName
+                }
+            } else {
+                HStack(spacing: 4) {
+                    materialName
+                    vendorName
+                }
+            }
+        }
+    }
+
+    private var materialName: some View {
+        Text(spool.material)
+            .font(.caption2.weight(.medium))
+            .foregroundStyle(Color.pfTextSecondary)
+    }
+
+    @ViewBuilder
+    private var vendorName: some View {
+        if let vendor = spool.vendor, !vendor.isEmpty {
+            Text("· \(vendor)")
+                .font(.caption2)
+                .foregroundStyle(Color.pfTextTertiary)
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var nfcStatus: some View {
+        Image(systemName: "wave.3.right")
+            .font(dynamicTypeSize.isAccessibilitySize ? .system(size: 16) : .caption2)
+            .foregroundStyle(spool.hasNfcTag == true ? Color.pfSuccess : Color.pfTextTertiary)
+            .accessibilityLabel(spool.hasNfcTag == true ? "NFC tag present" : "NFC tag not written")
+    }
+
+    private var weightSummary: some View {
+        VStack(alignment: dynamicTypeSize.isAccessibilitySize ? .leading : .trailing, spacing: 4) {
+            Text(spool.remainingWeightG.flatMap {
+                $0.isFinite && $0 >= 0 ? "\(Int($0.rounded())) g" : nil
+            } ?? "— g")
+                .font(.subheadline.weight(.semibold).monospacedDigit())
+                .foregroundStyle(Color.pfTextPrimary)
+            if let initial = spool.initialWeightG, initial.isFinite, initial > 0,
+               let remaining = spool.remainingWeightG, remaining.isFinite, remaining >= 0 {
+                Text("of \(Int(initial.rounded())) g")
+                    .font(.caption2)
+                    .foregroundStyle(Color.pfTextTertiary)
+                if let weightPercent {
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(Color.pfBackgroundTertiary)
+                            Capsule()
+                                .fill(weightColor)
+                                .frame(width: geo.size.width * weightPercent)
+                        }
+                    }
+                    .frame(width: dynamicTypeSize.isAccessibilitySize ? 96 : 54, height: 4)
+                }
+                if let weightPercent, weightPercent < 0.2 {
+                    Text("Low")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(Color.pfError)
+                }
+            } else {
+                Text("Weight unavailable")
+                    .font(.caption2)
+                    .foregroundStyle(Color.pfTextTertiary)
+            }
+        }
     }
 
     private var spoolAccessibilityLabel: String {

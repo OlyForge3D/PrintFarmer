@@ -28,6 +28,7 @@ import SwiftUI
 public struct PrinterRunActionBar: View {
 
     public let presentation: PrinterRunActionPresentation
+    public let emergencyStopFillsAvailableWidth: Bool
     private let onSelect: (PrinterRunActionKind) -> Void
 
     /// Callback-only. `onSelect` is invoked on the main actor exactly once per
@@ -35,9 +36,11 @@ public struct PrinterRunActionBar: View {
     /// haptics, telemetry and command dispatch.
     public init(
         presentation: PrinterRunActionPresentation,
+        emergencyStopFillsAvailableWidth: Bool = false,
         onSelect: @escaping (PrinterRunActionKind) -> Void
     ) {
         self.presentation = presentation
+        self.emergencyStopFillsAvailableWidth = emergencyStopFillsAvailableWidth
         self.onSelect = onSelect
     }
 
@@ -138,7 +141,10 @@ public struct PrinterRunActionBar: View {
                     .lineLimit(shouldStack ? 2 : nil)
             }
             .fixedSize(horizontal: false, vertical: true)
-            .frame(minWidth: 44, minHeight: 44)
+            .frame(
+                maxWidth: shouldStack || emergencyStopFillsAvailableWidth ? .infinity : nil,
+                minHeight: 44
+            )
             .contentShape(Rectangle())
             .fontWeight(.semibold)
             // Keep the complete emergency label legible instead of breaking
@@ -147,7 +153,7 @@ public struct PrinterRunActionBar: View {
             .dynamicTypeSize(shouldStack ? .xxxLarge : dynamicTypeSize)
         }
         .buttonStyle(.bordered)
-        .frame(maxWidth: shouldStack ? .infinity : nil)
+        .frame(maxWidth: shouldStack || emergencyStopFillsAvailableWidth ? .infinity : nil)
         .tint(Color.pfError)
         .disabled(!descriptor.isEnabled || descriptor.isPending)
         .accessibilityIdentifier(

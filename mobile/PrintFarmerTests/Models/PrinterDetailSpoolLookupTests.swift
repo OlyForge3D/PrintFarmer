@@ -1,40 +1,69 @@
 import XCTest
 @testable import PrintFarmer
 
+private actor DelayedSpoolLookupService: SpoolServiceProtocol {
+    let result: SpoolmanPagedResult<SpoolmanSpool>
+    let switchAuthority: @MainActor @Sendable () -> Void
+
+    init(
+        result: SpoolmanPagedResult<SpoolmanSpool>,
+        switchAuthority: @escaping @MainActor @Sendable () -> Void
+    ) {
+        self.result = result
+        self.switchAuthority = switchAuthority
+    }
+
+    func listSpools(
+        limit: Int, offset: Int, search: String?, material: String?, vendor: String?
+    ) async throws -> SpoolmanPagedResult<SpoolmanSpool> {
+        await switchAuthority()
+        return result
+    }
+
+    func createSpool(_ request: SpoolmanSpoolRequest) async throws -> SpoolmanSpool { throw NetworkError.notFound }
+    func updateSpool(id: Int, _ request: SpoolmanSpoolRequest) async throws -> SpoolmanSpool { throw NetworkError.notFound }
+    func deleteSpool(id: Int) async throws {}
+    func listFilaments() async throws -> [SpoolmanFilament] { [] }
+    func createFilament(_ request: SpoolmanFilamentRequest) async throws -> SpoolmanFilament { throw NetworkError.notFound }
+    func listVendors() async throws -> [SpoolmanVendor] { [] }
+    func listMaterials() async throws -> [SpoolmanMaterial] { [] }
+    func listAvailableMaterials() async throws -> [String] { [] }
+}
+
+@MainActor
+private final class SpoolLookupAuthorityState {
+    var current: PrinterDetailSpoolLookupAuthority
+
+    init(_ authority: PrinterDetailSpoolLookupAuthority) {
+        current = authority
+    }
+}
+
 @MainActor
 final class PrinterDetailSpoolLookupTests: XCTestCase {
     func testLateLookupResultIsDiscardedAfterAuthoritySwitch() async throws {
-        let mockAPIClient = MockAPIClient()
-        let entered = AsyncBarrier()
-        let release = AsyncBarrier()
-        mockAPIClient.asyncRequestHandler = { request in
-            await entered.arriveAndWait()
-            await release.arriveAndWait()
-            let json = #"{"items":[{"id":8,"name":"Assigned spool","material":"PLA","initialWeightG":1000,"remainingWeightG":84}],"totalCount":1}"#
-            return (TestData.httpResponse(url: request.url, statusCode: 200), Data(json.utf8))
-        }
-        let service = SpoolService(apiClient: mockAPIClient.apiClient)
-        let lookup = PrinterDetailSpoolLookup()
+        let result = SpoolmanPagedResult(
+            items: [try TestData.decodeSpoolmanSpool()],
+            totalCount: 1
+        )
         let authority = PrinterDetailSpoolLookupAuthority(
             serverID: UUID(), userID: UUID(), generation: 4,
-            printerID: UUID(), spoolIDs: [8]
+            printerID: UUID(), spoolIDs: [1]
         )
-        var currentAuthority = authority
-        let request = Task {
-            await lookup.load(
-                service: service,
-                authority: authority,
-                isCurrent: { currentAuthority == authority }
+        let authorityState = SpoolLookupAuthorityState(authority)
+        let lookup = PrinterDetailSpoolLookup()
+        let service = DelayedSpoolLookupService(result: result) {
+            authorityState.current = PrinterDetailSpoolLookupAuthority(
+                serverID: UUID(), userID: authority.userID, generation: authority.generation + 1,
+                printerID: authority.printerID, spoolIDs: authority.spoolIDs
             )
         }
 
-        await entered.waitUntilArrived()
-        currentAuthority = PrinterDetailSpoolLookupAuthority(
-            serverID: UUID(), userID: authority.userID, generation: authority.generation + 1,
-            printerID: authority.printerID, spoolIDs: authority.spoolIDs
+        await lookup.load(
+            service: service,
+            authority: authority,
+            isCurrent: { authorityState.current == authority }
         )
-        await release.release()
-        await request.value
 
         guard case .idle = lookup.state else {
             return XCTFail("A result from the previous server generation must not be retained.")

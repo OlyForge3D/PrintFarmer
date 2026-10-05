@@ -214,6 +214,15 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
             XCTAssertTrue(app.navigationBars["Farm"].waitForExistence(timeout: 8))
             let filters = app.descendants(matching: .any)["farm.filters"]
             XCTAssertTrue(filters.exists)
+            let scanButton = app.buttons["navigation.scan"]
+            XCTAssertTrue(scanButton.isHittable)
+            if size == "largest" {
+                XCTAssertLessThanOrEqual(
+                    scanButton.frame.height,
+                    88,
+                    "The primary Scan action must remain compact enough not to dominate the screen at accessibility text sizes."
+                )
+            }
             let filterButtons = app.buttons.matching(
                 NSPredicate(format: "identifier BEGINSWITH %@", "farm.filter.")
             )
@@ -253,13 +262,20 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
                         format: "label CONTAINS %@",
                         "vase_mode_spiral.gcode"
                     )).firstMatch
+                    for _ in 0..<8 where !failedJob.exists {
+                        queueList.swipeUp()
+                    }
                     XCTAssertTrue(failedJob.waitForExistence(timeout: 5))
                     let scan = app.buttons["navigation.scan"]
-                    for _ in 0..<8 where
-                        failedJob.frame.maxY > scan.frame.minY - 8
-                        || failedJob.frame.intersects(scan.frame)
-                    {
-                        queueList.swipeUp()
+                    for _ in 0..<12 where !failedJob.isHittable {
+                        if failedJob.frame.maxY < queueList.frame.minY {
+                            queueList.swipeDown()
+                        } else if failedJob.frame.maxY > scan.frame.minY - 8
+                                    || failedJob.frame.intersects(scan.frame) {
+                            queueList.swipeUp()
+                        } else {
+                            break
+                        }
                     }
                     XCTAssertTrue(failedJob.isHittable, "A failed-job row must be visible in Recent failures.")
                     XCTAssertTrue(failedJob.label.localizedCaseInsensitiveContains("failed status"))
@@ -271,6 +287,26 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
                     XCTAssertFalse(
                         failedJob.frame.intersects(scan.frame),
                         "The floating Scan action must not obscure failure details."
+                    )
+                    let lastFailure = queueList.buttons.matching(
+                        NSPredicate(format: "label CONTAINS %@", "lamp_shade_textured.gcode")
+                    ).firstMatch
+                    XCTAssertTrue(lastFailure.waitForExistence(timeout: 5))
+                    for _ in 0..<12 where
+                        !lastFailure.isHittable
+                        || lastFailure.frame.maxY > scan.frame.minY - 8
+                    {
+                        if lastFailure.frame.maxY < queueList.frame.minY {
+                            queueList.swipeDown()
+                        } else {
+                            queueList.swipeUp()
+                        }
+                    }
+                    XCTAssertTrue(lastFailure.isHittable, "The last failed-job row must remain reachable.")
+                    XCTAssertLessThanOrEqual(
+                        lastFailure.frame.maxY,
+                        scan.frame.minY - 8,
+                        "The last failure row must scroll completely above Scan."
                     )
                     attachScreen("\(device)-\(size)-global-queue-recent-failures")
                 }
@@ -297,19 +333,30 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
                 NSPredicate(format: "identifier BEGINSWITH %@", "inventory.filter.")
             )
             XCTAssertGreaterThanOrEqual(inventoryFilterButtons.count, 5)
-            for index in 0..<inventoryFilterButtons.count {
-                let button = inventoryFilterButtons.element(boundBy: index)
-                XCTAssertGreaterThanOrEqual(button.frame.minX, inventoryFilters.frame.minX - 1)
-                XCTAssertLessThanOrEqual(button.frame.maxX, inventoryFilters.frame.maxX + 1)
-                XCTAssertLessThanOrEqual(button.frame.maxY, inventoryFilters.frame.maxY + 1)
+            if size == "largest" {
+                XCTAssertTrue(app.buttons["inventory.filter.loaded"].isHittable)
+            } else {
+                for index in 0..<inventoryFilterButtons.count {
+                    let button = inventoryFilterButtons.element(boundBy: index)
+                    XCTAssertGreaterThanOrEqual(button.frame.minX, inventoryFilters.frame.minX - 1)
+                    XCTAssertLessThanOrEqual(button.frame.maxX, inventoryFilters.frame.maxX + 1)
+                    XCTAssertLessThanOrEqual(button.frame.maxY, inventoryFilters.frame.maxY + 1)
+                }
             }
             let moreFilters = app.buttons["inventory.filter.more"]
+            if size == "largest", !moreFilters.isHittable {
+                inventoryFilters.swipeLeft()
+            }
             XCTAssertTrue(moreFilters.isHittable)
             moreFilters.tap()
             let missingNFCFilter = app.buttons["inventory.filter.no-nfc"]
             XCTAssertTrue(missingNFCFilter.waitForExistence(timeout: 5))
             missingNFCFilter.tap()
-            app.buttons["inventory.filter.all"].tap()
+            let allFilter = app.buttons["inventory.filter.all"]
+            if size == "largest", !allFilter.isHittable {
+                inventoryFilters.swipeRight()
+            }
+            allFilter.tap()
             attachScreen("\(device)-\(size)-filament-inventory")
 
             farm.tap()
@@ -327,6 +374,15 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
                 selector.buttons[panel].tap()
                 let page = app.descendants(matching: .any)["printer.detail.panel.\(panel.lowercased())"]
                 XCTAssertTrue(page.waitForExistence(timeout: 8))
+                if panel == "Control" {
+                    let emergency = app.buttons["printer.detail.control.emergencyStop"]
+                    XCTAssertTrue(emergency.waitForExistence(timeout: 5))
+                    XCTAssertLessThan(
+                        emergency.frame.maxY,
+                        selector.frame.minY,
+                        "Active-print Emergency Stop stays pinned above the detail selector."
+                    )
+                }
                 if panel == "Status" {
                     XCTAssertTrue(app.staticTexts["Print progress 64 percent"].waitForExistence(timeout: 5))
                     XCTAssertTrue(app.staticTexts["benchy_0.2mm_PLA.gcode"].exists)
@@ -368,13 +424,13 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
                 if panel == "Filament" {
                     let warning = app.descendants(matching: .any)["printer.filament.attention"]
                     XCTAssertTrue(warning.waitForExistence(timeout: 5))
-                    XCTAssertTrue(warning.label.contains("Insufficient filament"))
+                    XCTAssertEqual(warning.label, "About 84 g left. This job needs about 140 g.")
                     XCTAssertEqual(
                         app.staticTexts.matching(
-                            NSPredicate(format: "label CONTAINS %@", "Insufficient filament")
+                            NSPredicate(format: "label CONTAINS %@", "This job needs about 140 g")
                         ).count,
                         1,
-                        "The coverage warning should be visible once, not repeated in the loaded-spool summary."
+                        "The current-job demand warning should be visible once."
                     )
                     let swap = app.buttons.matching(
                         NSPredicate(format: "identifier ENDSWITH %@", "/change")
@@ -386,21 +442,49 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
                     XCTAssertTrue(unassign.exists)
                     XCTAssertTrue(swap.isEnabled, "Changing the inventory assignment does not issue a physical load.")
                     XCTAssertTrue(unassign.isEnabled, "Unassigning remains distinct from physical unload.")
-                    let physicalLoad = app.buttons.matching(NSPredicate(
-                        format: "identifier == %@ AND label == %@",
-                        "printer.detail.filament.physicalControls",
-                        "Load filament"
-                    )).firstMatch
-                    let physicalUnload = app.buttons.matching(NSPredicate(
-                        format: "identifier == %@ AND label == %@",
-                        "printer.detail.filament.physicalControls",
-                        "Unload filament"
-                    )).firstMatch
+                    let physicalLoad = app.buttons["printer.detail.filament.load"]
+                    let physicalUnload = app.buttons["printer.detail.filament.unload"]
                     XCTAssertTrue(physicalLoad.exists)
                     XCTAssertTrue(physicalUnload.exists)
                     XCTAssertFalse(physicalLoad.isEnabled)
                     XCTAssertFalse(physicalUnload.isEnabled)
+                    XCTAssertTrue(
+                        app.staticTexts["printer.detail.filament.extruder.heading"].exists,
+                        "Load and Unload belong directly beneath the loaded-spool hero."
+                    )
+                    XCTAssertEqual(
+                        app.staticTexts["printer.detail.filament.printingLockout"].label,
+                        "Not available while printing"
+                    )
                     attachScreen("\(device)-\(size)-printer-filament")
+                    if size == "largest" {
+                        for _ in 0..<8 where !physicalLoad.isHittable || !physicalUnload.isHittable {
+                            swipeUp(on: page)
+                        }
+                        XCTAssertTrue(physicalLoad.isHittable, "Large text must let users scroll to Load.")
+                        XCTAssertTrue(physicalUnload.isHittable, "Large text must let users scroll to Unload.")
+                        attachScreen("\(device)-largest-printer-filament-physical-controls")
+                        for _ in 0..<8 where !unassign.isHittable {
+                            swipeUp(on: page)
+                        }
+                    } else {
+                        XCTAssertTrue(physicalLoad.isHittable, "Load remains visible on the compact detail page.")
+                        XCTAssertTrue(physicalUnload.isHittable, "Unload remains visible on the compact detail page.")
+                    }
+                    XCTAssertTrue(unassign.isHittable, "Unassign remains reachable in the filament page.")
+                    XCTAssertGreaterThan(
+                        unassign.frame.minY,
+                        physicalUnload.frame.maxY,
+                        "Physical Load/Unload precede inventory Unassign."
+                    )
+                    attachScreen("\(device)-\(size)-printer-filament-unassign")
+                    let advancedTools = app.buttons["printer.detail.filament.advancedTools"]
+                    XCTAssertTrue(advancedTools.waitForExistence(timeout: 5))
+                    advancedTools.tap()
+                    XCTAssertTrue(
+                        app.buttons["printer.detail.safety.refresh"].waitForExistence(timeout: 5),
+                        "Safety refresh and advanced extrusion remain available in the progressive disclosure."
+                    )
                     let demand = app.descendants(matching: .any)
                         .matching(NSPredicate(format: "label CONTAINS %@", "Total demand: 140 g"))
                         .firstMatch
@@ -423,6 +507,12 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
             attachment.name = "Issue 3259 \(name)"
             attachment.lifetime = .keepAlways
             add(attachment)
+        }
+
+        private func swipeUp(on page: XCUIElement) {
+            let start = page.coordinate(withNormalizedOffset: CGVector(dx: 0.75, dy: 0.82))
+            let end = page.coordinate(withNormalizedOffset: CGVector(dx: 0.75, dy: 0.24))
+            start.press(forDuration: 0.1, thenDragTo: end)
         }
 
         func testRuntimeControlsUseAuthenticatedCommandsAndServerReadback() {
@@ -899,6 +989,7 @@ final class Issue3259ControlIdleUITests: PrinterDetailPanelsUITests.Issue3259Moc
         XCTAssertTrue(selector.waitForExistence(timeout: 8))
         selector.buttons["Control"].tap()
         XCTAssertTrue(app.descendants(matching: .any)["printer.detail.panel.control"].waitForExistence(timeout: 8))
+        let controlPage = app.descendants(matching: .any)["printer.detail.panel.control"]
         XCTAssertFalse(app.tabBars.firstMatch.isHittable, "Printer detail should not retain the shell tab bar.")
         XCTAssertFalse(
             app.descendants(matching: .any)["printer.controls.temperatures"].exists,
@@ -907,6 +998,18 @@ final class Issue3259ControlIdleUITests: PrinterDetailPanelsUITests.Issue3259Moc
         XCTAssertTrue(
             app.buttons["printer.detail.control.emergencyStop"].exists,
             "Emergency Stop must stay visible while the Control page is selected."
+        )
+        let emergency = app.buttons["printer.detail.control.emergencyStop"]
+        XCTAssertTrue(emergency.isHittable)
+        XCTAssertGreaterThan(
+            emergency.frame.midY,
+            controlPage.frame.midY,
+            "For an idle printer, the full-width Emergency Stop belongs at the bottom of Control."
+        )
+        XCTAssertGreaterThanOrEqual(
+            emergency.frame.width,
+            controlPage.frame.width * 0.85,
+            "Idle Emergency Stop must fill the Control page width rather than use the compact active-print placement."
         )
         XCTAssertTrue(app.otherElements["printer.controls.motion-group"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.otherElements["printer.controls.runtime"].exists)
@@ -921,7 +1024,6 @@ final class Issue3259ControlIdleUITests: PrinterDetailPanelsUITests.Issue3259Moc
         let size = contentSizeCategory == "UICTContentSizeCategoryL" ? "normal" : "largest"
         attachScreen("\(device)-\(size)-printer-control-idle")
 
-        let controlPage = app.descendants(matching: .any)["printer.detail.panel.control"]
         let motion = app.otherElements["printer.controls.motion-group"]
         for _ in 0..<4 where !motion.isHittable {
             controlPage.swipeUp()

@@ -6,6 +6,7 @@ struct ContentView: View {
     @Environment(AppRouter.self) private var router
     @Environment(ServiceContainer.self) private var services
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var showScan = false
     @State private var scanSessionActive = false
     @State private var externalScanRequestID: UUID?
@@ -80,6 +81,9 @@ struct ContentView: View {
         } label: {
             Label("Scan", systemImage: "barcode.viewfinder")
                 .font(.headline)
+                .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
                 .padding(.horizontal, 18)
                 .frame(minHeight: 48)
         }

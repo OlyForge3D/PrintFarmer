@@ -95,10 +95,10 @@ final class PrinterDetailSpoolLookup {
             state = .loaded(results, missingIDs: spoolIDs.subtracting(Set(results.keys)))
         } catch is CancellationError {
             guard generation == requestGeneration else { return }
-            if isCurrent() { state = .idle }
+            state = .idle
         } catch {
-            guard generation == requestGeneration, isCurrent() else { return }
-            state = .failed(error.localizedDescription)
+            guard generation == requestGeneration else { return }
+            state = isCurrent() ? .failed(error.localizedDescription) : .idle
         }
     }
 

@@ -66,9 +66,9 @@ final class SpoolServiceTests: XCTestCase {
             let json: String
             switch offset {
             case "0":
-                json = #"{"items":[{"id":101,"name":"First page","material":"PLA","initialWeightG":1000,"remainingWeightG":850}],"totalCount":2}"#
+                json = #"{"items":[{"id":101,"name":"First page","material":"PLA","inUse":false,"initialWeightG":1000,"remainingWeightG":850}],"totalCount":2}"#
             case "1":
-                json = #"{"items":[{"id":902,"name":"Assigned spool","material":"PLA","initialWeightG":1000,"remainingWeightG":84}],"totalCount":2}"#
+                json = #"{"items":[{"id":902,"name":"Assigned spool","material":"PLA","inUse":false,"initialWeightG":1000,"remainingWeightG":84}],"totalCount":2}"#
             default:
                 json = #"{"items":[],"totalCount":2}"#
             }

@@ -4,6 +4,7 @@ struct JobListView: View {
     @Environment(AuthViewModel.self) private var authViewModel
     @Environment(AppRouter.self) private var router
     @Environment(ServiceContainer.self) private var services
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     private let ownsNavigationStack: Bool
     @State private var viewModel = JobListViewModel()
     @State private var retryTask: Task<Void, Never>?
@@ -259,6 +260,7 @@ struct JobListView: View {
             }
         }
         .listStyle(.plain)
+        .contentMargins(.bottom, 112, for: .scrollContent)
         .environment(\.editMode, .constant(viewModel.canReorderQueue ? .active : .inactive))
         .accessibilityIdentifier("jobList.combined.list")
     }
@@ -289,42 +291,30 @@ struct JobListView: View {
 
     private func activeJobRow(_ item: QueuedPrintJobResponse) -> some View {
         jobDetailLink(for: item) {
-            HStack(spacing: 12) {
-                jobThumbnail(for: item, size: 44)
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
+            Group {
+                if dynamicTypeSize.isAccessibilitySize {
+                    VStack(alignment: .leading, spacing: 8) {
                         Text(item.job.name)
                             .font(.subheadline.weight(.semibold))
-                            .lineLimit(1)
-                        Spacer()
+                            .fixedSize(horizontal: false, vertical: true)
                         StatusBadge(jobStatus: item.job.jobStatus)
+                        HStack(alignment: .top, spacing: 12) {
+                            jobThumbnail(for: item, size: 44)
+                            activeJobDetails(item)
+                        }
                     }
-
-                    if let printerName = item.job.printerName {
-                        Label(printerName, systemImage: "printer")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-
-                    if let startTime = item.job.actualStartTimeUtc,
-                       let estSeconds = item.job.estimatedPrintTimeSeconds, estSeconds > 0 {
-                        let elapsed = Date.now.timeIntervalSince(startTime)
-                        let total = TimeInterval(estSeconds)
-                        let progress = min(1.0, elapsed / total)
-                        PrintProgressBar(progress: progress, height: 4, color: progressColor(for: item.job.jobStatus))
-
-                        HStack {
-                            if item.job.isMultiCopy {
-                                Label("\(item.job.completedCopies)/\(item.job.copies)", systemImage: "doc.on.doc")
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
+                } else {
+                    HStack(spacing: 12) {
+                        jobThumbnail(for: item, size: 44)
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Text(item.job.name)
+                                    .font(.subheadline.weight(.semibold))
+                                    .lineLimit(1)
+                                Spacer()
+                                StatusBadge(jobStatus: item.job.jobStatus)
                             }
-                            Spacer()
-                            let remaining = max(0, total - elapsed)
-                            Label("~\(remaining.durationFormatted) left", systemImage: "clock")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
+                            activeJobDetails(item)
                         }
                     }
                 }
@@ -332,6 +322,54 @@ struct JobListView: View {
             .padding(.vertical, 2)
         }
         .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private func activeJobDetails(_ item: QueuedPrintJobResponse) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if let printerName = item.job.printerName {
+                Label(printerName, systemImage: "printer")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if let startTime = item.job.actualStartTimeUtc,
+               let estSeconds = item.job.estimatedPrintTimeSeconds, estSeconds > 0 {
+                let elapsed = Date.now.timeIntervalSince(startTime)
+                let total = TimeInterval(estSeconds)
+                let progress = min(1.0, elapsed / total)
+                PrintProgressBar(progress: progress, height: 4, color: progressColor(for: item.job.jobStatus))
+
+                if dynamicTypeSize.isAccessibilitySize {
+                    VStack(alignment: .leading, spacing: 4) {
+                        if item.job.isMultiCopy {
+                            Label("\(item.job.completedCopies)/\(item.job.copies)", systemImage: "doc.on.doc")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        let remaining = max(0, total - elapsed)
+                        Label("~\(remaining.durationFormatted) left", systemImage: "clock")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    HStack {
+                        if item.job.isMultiCopy {
+                            Label("\(item.job.completedCopies)/\(item.job.copies)", systemImage: "doc.on.doc")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        let remaining = max(0, total - elapsed)
+                        Label("~\(remaining.durationFormatted) left", systemImage: "clock")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
     }
 
     // MARK: - Queued Job Row
@@ -342,43 +380,34 @@ struct JobListView: View {
     ) -> some View {
         queueRowAccessibilityActions(item, groupID: groupID) {
             jobDetailLink(for: item) {
-            HStack(spacing: 12) {
-                jobThumbnail(for: item, size: 44)
-                VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Text(item.job.name)
-                        .font(.subheadline.weight(.semibold))
-                        .lineLimit(1)
-                    Spacer()
-                    priorityIndicator(item.job.priority)
-                }
-
-                HStack(spacing: 12) {
-                    if let printerName = item.job.printerName {
-                        Label(printerName, systemImage: "printer")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-
-                    Spacer()
-
-                    if item.job.isMultiCopy {
-                        Label("\(item.job.copies) copies", systemImage: "doc.on.doc")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    if let duration = item.job.estimatedDuration {
-                        Label(duration.durationFormatted, systemImage: "clock")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                Group {
+                    if dynamicTypeSize.isAccessibilitySize {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(item.job.name)
+                                .font(.subheadline.weight(.semibold))
+                                .fixedSize(horizontal: false, vertical: true)
+                            HStack(alignment: .top, spacing: 12) {
+                                jobThumbnail(for: item, size: 44)
+                                queuedJobDetails(item, stacksMetadata: true)
+                            }
+                        }
+                    } else {
+                        HStack(spacing: 12) {
+                            jobThumbnail(for: item, size: 44)
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack {
+                                    Text(item.job.name)
+                                        .font(.subheadline.weight(.semibold))
+                                        .lineLimit(1)
+                                    Spacer()
+                                    priorityIndicator(item.job.priority)
+                                }
+                                queuedJobDetails(item, stacksMetadata: false)
+                            }
+                        }
                     }
                 }
-
-            }
-            }
-            .padding(.vertical, 2)
+                .padding(.vertical, 2)
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("job.row.\(item.job.jobUUID?.uuidString ?? "unknown")")
@@ -405,6 +434,54 @@ struct JobListView: View {
                     Label("Start", systemImage: "play.circle.fill")
                 }
                 .tint(Color.pfAccent)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func queuedJobDetails(
+        _ item: QueuedPrintJobResponse,
+        stacksMetadata: Bool
+    ) -> some View {
+        if stacksMetadata {
+            VStack(alignment: .leading, spacing: 4) {
+                priorityIndicator(item.job.priority)
+                if let printerName = item.job.printerName {
+                    Label(printerName, systemImage: "printer")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if item.job.isMultiCopy {
+                    Label("\(item.job.copies) copies", systemImage: "doc.on.doc")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                if let duration = item.job.estimatedDuration {
+                    Label(duration.durationFormatted, systemImage: "clock")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        } else {
+            HStack(spacing: 12) {
+                if let printerName = item.job.printerName {
+                    Label(printerName, systemImage: "printer")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer()
+                if item.job.isMultiCopy {
+                    Label("\(item.job.copies) copies", systemImage: "doc.on.doc")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                if let duration = item.job.estimatedDuration {
+                    Label(duration.durationFormatted, systemImage: "clock")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
     }
@@ -454,38 +531,69 @@ struct JobListView: View {
 
     private func recentJobRow(_ item: QueuedPrintJobResponse) -> some View {
         jobDetailLink(for: item) {
-            HStack(spacing: 12) {
-                jobThumbnail(for: item, size: 36)
-                VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Text(item.job.name)
-                        .font(.subheadline)
-                        .lineLimit(1)
-                    Spacer()
-                    StatusBadge(jobStatus: item.job.jobStatus)
-                }
-
-                HStack {
-                    if let printerName = item.job.printerName {
-                        Text(printerName)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+            Group {
+                if dynamicTypeSize.isAccessibilitySize {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(alignment: .top, spacing: 12) {
+                            jobThumbnail(for: item, size: 36)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(item.job.name)
+                                    .font(.subheadline)
+                                    .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
+                                    .lineLimit(2)
+                                StatusBadge(jobStatus: item.job.jobStatus)
+                                    .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
+                            }
+                        }
+                        VStack(alignment: .leading, spacing: 4) {
+                            if let printerName = item.job.printerName {
+                                Text(printerName)
+                                    .font(.caption)
+                                    .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                            if let endTime = item.job.actualEndTimeUtc {
+                                Text(endTime.relativeFormatted)
+                                    .font(.caption2)
+                                    .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
                     }
-                    Spacer()
-                    if let endTime = item.job.actualEndTimeUtc {
-                        Text(endTime.relativeFormatted)
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
+                } else {
+                    HStack(spacing: 12) {
+                        jobThumbnail(for: item, size: 36)
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Text(item.job.name)
+                                    .font(.subheadline)
+                                    .lineLimit(1)
+                                Spacer()
+                                StatusBadge(jobStatus: item.job.jobStatus)
+                            }
+                            HStack {
+                                if let printerName = item.job.printerName {
+                                    Text(printerName)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                if let endTime = item.job.actualEndTimeUtc {
+                                    Text(endTime.relativeFormatted)
+                                        .font(.caption2)
+                                        .foregroundStyle(.tertiary)
+                                }
+                            }
+                            if let reason = item.job.failureReason, item.job.jobStatus == .failed {
+                                Text(reason)
+                                    .font(.caption)
+                                    .foregroundStyle(Color.pfError)
+                                    .lineLimit(2)
+                            }
+                        }
                     }
                 }
-
-                if let reason = item.job.failureReason, item.job.jobStatus == .failed {
-                    Text(reason)
-                        .font(.caption)
-                        .foregroundStyle(Color.pfError)
-                        .lineLimit(2)
-                }
-            }
             }
             .padding(.vertical, 2)
         }
@@ -538,6 +646,7 @@ struct JobListView: View {
                 Text(priority == .urgent ? "Urgent" : "High")
                     .font(.caption2.weight(.semibold))
             }
+            .fixedSize(horizontal: true, vertical: false)
             .foregroundStyle(priority == .urgent ? Color.pfError : Color.pfWarning)
         }
     }

@@ -208,6 +208,23 @@ final class PrinterRunActionBarTests: XCTestCase {
         )
     }
 
+    func test_render_emergencyStopCanFillAvailableWidthAtRegularDynamicType() {
+        let proposedWidth: CGFloat = 390
+        let bar = PrinterRunActionBar(
+            presentation: PrinterRunActionPresentation(descriptors: [
+                .init(kind: .emergencyStop)
+            ]),
+            emergencyStopFillsAvailableWidth: true,
+            onSelect: { _ in }
+        )
+
+        let size = contentSize(bar, proposedWidth: proposedWidth)
+        XCTAssertGreaterThanOrEqual(
+            size.width, proposedWidth - 1,
+            "The idle detail action must match the mockup's full-width bottom Emergency Stop."
+        )
+    }
+
     /// Per-kind isolated floor at accessibility Dynamic Type. Hicks-flag:
     /// larger accessibility fonts can grow height without stacking; at
     /// isolation there is nothing to stack, but this test guards against a

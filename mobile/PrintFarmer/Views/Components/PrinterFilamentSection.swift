@@ -23,10 +23,11 @@ struct PrinterFilamentSection: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: showsAllActions ? 8 : 12) {
             if !embedded {
-                Text("Filament")
-                    .font(.headline)
+                Text(showsAllActions && presentation.compactRows.contains(where: \.hasAssignment)
+                     ? "Assigned spool" : "Filament")
+                    .font(showsAllActions ? .subheadline.weight(.semibold) : .headline)
                     .accessibilityAddTraits(.isHeader)
                     .accessibilityIdentifier("printer.filament.heading")
             }
@@ -60,15 +61,17 @@ struct PrinterFilamentSection: View {
             } else {
                 ForEach(presentation.compactRows) { row in compactRow(row) }
             }
-            if let attention = presentation.attentionText {
+            let hasConciseRunoutSummary = showsAllActions
+                && presentation.compactRows.contains { conciseCoverageSummaryText(for: $0) != nil }
+            if let attention = presentation.attentionText, !hasConciseRunoutSummary {
                 Label(attention, systemImage: "exclamationmark.triangle")
-                    .font(.subheadline)
+                    .font(showsAllActions ? .footnote : .subheadline)
                     .accessibilityIdentifier("printer.filament.attention")
             }
             if !embedded {
                 if showsAllActions {
-                    Text("Spool assignments are inventory records and do not confirm physical loading.")
-                        .font(.caption)
+                    Text("Assignment does not verify physical loading.")
+                        .font(.caption2)
                         .foregroundStyle(.secondary)
                         .accessibilityIdentifier("printer.filament.assignment-disclaimer")
                 }
@@ -77,20 +80,6 @@ struct PrinterFilamentSection: View {
                 }
                 if showsAllActions {
                     filamentDetailActions
-                } else {
-                    let layout = dynamicTypeSize.isAccessibilitySize
-                        ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
-                        : AnyLayout(HStackLayout(alignment: .center, spacing: 12))
-                    layout {
-                        ForEach(detailActions) { action in
-                            VStack(alignment: .leading, spacing: 4) {
-                                actionButton(action)
-                                if let reason = presentation.disabledReason(for: action) {
-                                    Text(reason).font(.caption).foregroundStyle(.secondary)
-                                }
-                            }
-                        }
-                    }
                 }
                 DisclosureGroup(isExpanded: $detailsExpanded) {
                     details
@@ -102,10 +91,10 @@ struct PrinterFilamentSection: View {
                 }
             }
         }
-        .fixedSize(horizontal: false, vertical: true)
         .padding(embedded ? 0 : 16)
         .background(embedded ? Color.clear : Color.pfCard, in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(embedded ? Color.clear : Color.pfBorder, lineWidth: 1))
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     @MainActor
@@ -135,21 +124,26 @@ struct PrinterFilamentSection: View {
                     .overlay(Circle().strokeBorder(Color.pfBorder, lineWidth: 1))
                     .accessibilityHidden(true)
             }
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: showsAllActions ? 3 : 4) {
                 if let title = presentation.compactTitle(for: row) {
                     Text(title).font(.subheadline.weight(.semibold))
                 }
                 if showsAllActions, row.hasAssignment,
                    let name = row.spoolName ?? row.spoolID.flatMap({ spoolDetailsByID[$0]?.name }) {
                     Text(name)
-                        .font(.headline)
-                        .lineLimit(2)
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
                 }
                 if showsAllActions && row.hasAssignment {
                     let material = row.material ?? row.spoolID.flatMap { spoolDetailsByID[$0]?.material }
-                    if let material {
+                    let color = row.colorText.flatMap { $0.isEmpty ? nil : $0 }
+                    if let material, let color {
+                        Text("\(material) · \(color)")
+                            .font(.caption)
+                            .foregroundStyle(Color.pfTextSecondary)
+                    } else if let material {
                         Text(material)
-                            .font(.subheadline)
+                            .font(.caption)
                             .foregroundStyle(Color.pfTextSecondary)
                     }
                 } else {
@@ -158,7 +152,7 @@ struct PrinterFilamentSection: View {
                         .font(embedded ? .callout.weight(.semibold) : .subheadline)
                 }
                 if showsAllActions && row.hasAssignment {
-                    coverageSummary(row)
+                    coverageSummary(row, useConciseRunoutCopy: true)
                     if let spoolID = row.spoolID, let spoolDetails = spoolDetailsByID[spoolID] {
                         spoolWeightMeter(spoolDetails)
                     } else if let spoolLookupMessage, row.spoolID != nil {
@@ -172,7 +166,7 @@ struct PrinterFilamentSection: View {
                         $0.isFinite && $0 >= 0 ? " · \($0.formatted(.number.precision(.fractionLength(0...1)))) g remaining" : nil
                     } ?? ""))
                     .font(.footnote).foregroundStyle(Color.pfTextSecondary)
-                } else if let color = row.colorText, !color.isEmpty {
+                } else if !showsAllActions, let color = row.colorText, !color.isEmpty {
                     Text("Color: \(color)").font(.caption).foregroundStyle(.secondary)
                 }
                 if row.coverage?.status == .runout, let notice = row.notice {
@@ -182,15 +176,30 @@ struct PrinterFilamentSection: View {
                 }
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("printer.filament.row.\(row.id)")
     }
 
     @ViewBuilder
-    private func coverageSummary(_ row: PrinterFilamentPresentation.Row) -> some View {
+    private func coverageSummary(
+        _ row: PrinterFilamentPresentation.Row,
+        useConciseRunoutCopy: Bool = false
+    ) -> some View {
+        if useConciseRunoutCopy, let text = conciseCoverageSummaryText(for: row) {
+            Text(text)
+                .font(.footnote.monospacedDigit())
+                .foregroundStyle(Color.pfWarning)
+                .accessibilityIdentifier("printer.filament.attention")
+        } else {
+            coverageQuantities(row)
+        }
+    }
+
+    private func coverageQuantities(_ row: PrinterFilamentPresentation.Row) -> some View {
         let remaining = row.coverage?.remainingGrams
         let demand = row.coverage?.currentJobRequiredGrams
-        HStack(spacing: 4) {
+        return HStack(spacing: 4) {
             Text("\(quantityText(remaining)) remaining")
             Text("·").accessibilityHidden(true)
             Text("\(quantityText(demand)) job demand")
@@ -203,11 +212,24 @@ struct PrinterFilamentSection: View {
         )
     }
 
+    private func conciseCoverageSummaryText(for row: PrinterFilamentPresentation.Row) -> String? {
+        guard row.coverage?.status == .runout,
+              let remaining = quantityValue(row.coverage?.remainingGrams),
+              let demand = quantityValue(row.coverage?.currentJobRequiredGrams) else {
+            return nil
+        }
+        return "About \(remaining) g left. This job needs about \(demand) g."
+    }
+
     private func quantityText(_ grams: Double?) -> String {
+        quantityValue(grams).map { $0 + " g" } ?? "Unknown"
+    }
+
+    private func quantityValue(_ grams: Double?) -> String? {
         grams.flatMap { $0.isFinite && $0 >= 0
-            ? $0.formatted(.number.precision(.fractionLength(0...1))) + " g"
+            ? $0.formatted(.number.precision(.fractionLength(0...1)))
             : nil
-        } ?? "Unknown"
+        }
     }
 
     private func spoolWeightMeter(_ spool: SpoolmanSpool) -> some View {
@@ -215,7 +237,7 @@ struct PrinterFilamentSection: View {
             remainingGrams: spool.remainingWeightG,
             initialGrams: spool.initialWeightG
         )
-        return VStack(alignment: .leading, spacing: 5) {
+        return VStack(alignment: .leading, spacing: 3) {
             if let fraction = meter.fraction {
                 GeometryReader { geometry in
                     ZStack(alignment: .leading) {
@@ -309,14 +331,19 @@ struct PrinterFilamentSection: View {
     @ViewBuilder
     private var filamentDetailActions: some View {
         let primaryActions = actions.filter { [.set, .change, .scanNFC].contains($0.kind) }
-        let unassignActions = actions.filter { $0.kind == .clearAssignment }
         VStack(spacing: 8) {
             if !primaryActions.isEmpty {
                 HStack(spacing: 8) {
                     ForEach(primaryActions) { action in actionButton(action) }
                 }
             }
-            ForEach(unassignActions) { action in actionButton(action) }
+        }
+    }
+
+    @ViewBuilder
+    var detailUnassignAction: some View {
+        if let action = actions.first(where: { $0.kind == .clearAssignment }) {
+            actionButton(action)
         }
     }
 
