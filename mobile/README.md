@@ -144,6 +144,10 @@ exactly three tabs: **Farm · Queue · Filament**. Regular-width iPad presents
 those same items in a `NavigationSplitView` sidebar, without Floor/Oversight
 sections or a duplicate Fleet destination.
 
+Queue groups the active print, queued jobs and recent failures. For an eligible
+failed job, **Retry** rechecks its current status and row version before
+submitting the authenticated rerun; it is unavailable offline and in Demo mode.
+
 A floating **Scan** button is available above the tab bar (or at the bottom of
 the iPad detail column). It opens the existing barcode/QR and NFC flows for
 printer and spool tags. Filament retains Add spool and continuous barcode
