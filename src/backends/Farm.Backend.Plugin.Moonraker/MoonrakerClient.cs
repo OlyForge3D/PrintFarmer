@@ -247,6 +247,8 @@ public partial class MoonrakerClient(
             string? thumb = null;
             double? printDuration = null;
             double? startTime = null;
+            int? currentLayer = null;
+            int? totalLayers = null;
 
             if (result.TryGetProperty("status", out JsonElement statusEl))
             {
@@ -289,6 +291,20 @@ public partial class MoonrakerClient(
                         double.IsFinite(startTimeValue))
                     {
                         startTime = startTimeValue;
+                    }
+
+                    if (ps.TryGetProperty("info", out JsonElement info) &&
+                        info.ValueKind == JsonValueKind.Object)
+                    {
+                        int? reportedCurrentLayer = TryReadLayerCounter(info, "current_layer");
+                        int? reportedTotalLayers = TryReadLayerCounter(info, "total_layer");
+                        if (reportedCurrentLayer.HasValue &&
+                            reportedTotalLayers is > 0 &&
+                            reportedCurrentLayer.Value <= reportedTotalLayers.Value)
+                        {
+                            currentLayer = reportedCurrentLayer;
+                            totalLayers = reportedTotalLayers;
+                        }
                     }
                 }
             }
@@ -334,7 +350,9 @@ public partial class MoonrakerClient(
                 jobName,
                 thumb,
                 printDuration,
-                MoonrakerThumbnailCacheIdentity.Create(startTime, thumbnailFileSize, thumbnailFileModified));
+                MoonrakerThumbnailCacheIdentity.Create(startTime, thumbnailFileSize, thumbnailFileModified),
+                currentLayer,
+                totalLayers);
         }
         catch
         {
@@ -521,10 +539,17 @@ public partial class MoonrakerClient(
         _logger.LogDebug("[Moonraker] GetCompositeStatusAsync: baseUrl={BaseUrl}", baseUrl);
         PrinterStatus status = await GetStatusAsync(baseUrl, ct);
         _logger.LogDebug("[Moonraker] GetCompositeStatusAsync: status.IsOnline={StatusIsOnline}, status.State={StatusState}", status.IsOnline, status.State);
+        if (!status.IsOnline)
+        {
+            return new PrinterCompositeStatus(false, status.State, null, null, null, null, null);
+        }
+
         PrinterJob? job = await GetJobAsync(baseUrl, credential, ct);
 
         // Try to read current position
         double? x = null, y = null, z = null;
+        double? liveZOffsetMm = null;
+        double? fanSpeedPercent = null;
         string? homedAxes = null;
         DateTime? homedAxesObservedAtUtc = null;
         try
@@ -534,8 +559,9 @@ public partial class MoonrakerClient(
             Uri baseUri = new(baseUrl);
             Uri posUri = new(
                 baseUri,
-                "printer/objects/query?toolhead=position,homed_axes&gcode_move=gcode_position");
-            using HttpResponseMessage resp = await _http.GetAsync(posUri, cts.Token);
+                "printer/objects/query?toolhead=position,homed_axes&gcode_move=gcode_position,homing_origin");
+            using HttpRequestMessage request = CreateSafetyDiscoveryRequest(posUri, credential);
+            using HttpResponseMessage resp = await _http.SendAsync(request, cts.Token);
             if (resp.IsSuccessStatusCode)
             {
                 await using Stream stream = await resp.Content.ReadAsStreamAsync(cts.Token);
@@ -576,12 +602,29 @@ public partial class MoonrakerClient(
                         y = gcodeY;
                         z = gcodeZ;
                     }
+
+                    if (TryGetFinitePosition(
+                            statusNode,
+                            "gcode_move",
+                            "homing_origin",
+                            out _,
+                            out _,
+                            out double originZ))
+                    {
+                        liveZOffsetMm = originZ;
+                    }
                 }
             }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
         }
         catch
         {
         }
+
+        fanSpeedPercent = await QueryPartFanSpeedPercentAsync(baseUrl, credential, ct);
 
         // Prefer print job state (printing, paused, complete) over system state, but not for error states
         // If system is shutdown/error, that takes precedence over print_stats state
@@ -672,14 +715,7 @@ public partial class MoonrakerClient(
         }
 
         // Query camera info when online; webcam listing may still be available via Moonraker
-        string? cam = null;
-        string? snap = null;
-        if (status.IsOnline)
-        {
-            (string? streamUrl, string? snapshotUrl) = await GetCameraUrlsAsync(baseUrl, ct: ct);
-            cam = streamUrl;
-            snap = snapshotUrl;
-        }
+        (string? cam, string? snap) = await GetCameraUrlsAsync(baseUrl, ct: ct);
 
         // Calculate estimated time remaining from progress and elapsed print duration
         double? printTimeLeftSeconds = null;
@@ -693,7 +729,68 @@ public partial class MoonrakerClient(
             PrintTimeLeftSeconds: printTimeLeftSeconds,
             HomedAxes: homedAxes,
             HomedAxesObservedAtUtc: homedAxesObservedAtUtc,
-            ThumbnailCacheIdentity: job?.ThumbnailCacheIdentity);
+            ThumbnailCacheIdentity: job?.ThumbnailCacheIdentity,
+            CurrentLayer: job?.CurrentLayer,
+            TotalLayers: job?.TotalLayers,
+            FanSpeedPercent: fanSpeedPercent,
+            LiveZOffsetMm: liveZOffsetMm);
+    }
+
+    private async Task<double?> QueryPartFanSpeedPercentAsync(
+        string baseUrl,
+        PrinterCredential? credential,
+        CancellationToken ct)
+    {
+        try
+        {
+            using CancellationTokenSource timeout =
+                CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeout.CancelAfter(_timeouts.StatusPollTimeout);
+            Uri uri = new(new Uri(baseUrl), "printer/objects/query?fan=speed");
+            using HttpRequestMessage request = CreateSafetyDiscoveryRequest(uri, credential);
+            using HttpResponseMessage response = await _http.SendAsync(request, timeout.Token);
+            if (!response.IsSuccessStatusCode)
+            {
+                return null;
+            }
+
+            await using Stream stream = await response.Content.ReadAsStreamAsync(timeout.Token);
+            using JsonDocument document =
+                await JsonDocument.ParseAsync(stream, cancellationToken: timeout.Token);
+            if (!document.RootElement.TryGetProperty("result", out JsonElement result) ||
+                !result.TryGetProperty("status", out JsonElement status) ||
+                !status.TryGetProperty("fan", out JsonElement fan) ||
+                !fan.TryGetProperty("speed", out JsonElement speed) ||
+                speed.ValueKind != JsonValueKind.Number ||
+                !speed.TryGetDouble(out double normalizedSpeed) ||
+                !double.IsFinite(normalizedSpeed) ||
+                normalizedSpeed is < 0 or > 1)
+            {
+                return null;
+            }
+
+            return normalizedSpeed * 100;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception) when (exception is HttpRequestException or JsonException or
+                                          OperationCanceledException or InvalidOperationException)
+        {
+            _logger.LogDebug(exception, "Failed to read Moonraker part-fan speed from {BaseUrl}", baseUrl);
+            return null;
+        }
+    }
+
+    private static int? TryReadLayerCounter(JsonElement info, string propertyName)
+    {
+        return info.TryGetProperty(propertyName, out JsonElement value) &&
+            value.ValueKind == JsonValueKind.Number &&
+            value.TryGetInt32(out int layer) &&
+            layer >= 0
+                ? layer
+                : null;
     }
 
     private static bool TryGetFinitePosition(
@@ -762,7 +859,11 @@ public partial class MoonrakerClient(
             FrontendUrl: printer.FrontendUrl,
             Location: printer.Location == null ? null : new LocationSummaryDto(printer.Location.Id, printer.Location.Name, printer.Location.Description),
             ObicoEnabled: printer.ObicoEnabled,
-            ThumbnailCacheIdentity: status.ThumbnailCacheIdentity));
+            ThumbnailCacheIdentity: status.ThumbnailCacheIdentity,
+            CurrentLayer: status.CurrentLayer,
+            TotalLayers: status.TotalLayers,
+            FanSpeedPercent: status.FanSpeedPercent,
+            LiveZOffsetMm: status.LiveZOffsetMm));
     }
 
     public async Task<bool> SendHomeAsync(string baseUrl, CancellationToken ct = default)

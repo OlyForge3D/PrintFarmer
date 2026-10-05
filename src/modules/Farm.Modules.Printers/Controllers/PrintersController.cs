@@ -1038,6 +1038,80 @@ public class PrintersController(
             ct);
     }
 
+    /// <summary>Sets the part-cooling fan speed for an online idle or active printer.</summary>
+    [HttpPost("{id:guid}/fan")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Start)]
+    [ProducesResponseType(typeof(CommandResult), 200)]
+    [ProducesResponseType(typeof(CommandResult), 400)]
+    [ProducesResponseType(typeof(CommandResult), 404)]
+    [ProducesResponseType(typeof(CommandResult), 409)]
+    [ProducesResponseType(typeof(CommandResult), 502)]
+    [ProducesResponseType(typeof(CommandResult), 503)]
+    public async Task<ActionResult<CommandResult>> SetFanSpeedAsync(Guid id, [FromBody] FanSpeedRequest request, CancellationToken ct)
+    {
+        if (request is null ||
+            request.SpeedPercent is not int speedPercent ||
+            speedPercent is < 0 or > 100)
+        {
+            return BadRequest(new CommandResult(false, "speedPercent must be between 0 and 100."));
+        }
+
+        if (!await CanAccessPrinterAsync(id, PrinterGroupAccessLevel.Submit, ct))
+        {
+            return NotFound();
+        }
+
+        PrinterBackendCapabilitiesDto? capabilities =
+            await _printerBackendCapabilitiesService.GetByPrinterIdAsync(id, ct);
+        if (capabilities is null)
+        {
+            return NotFound();
+        }
+
+        if (!capabilities.SupportsFanControl)
+        {
+            return StatusCode(
+                StatusCodes.Status502BadGateway,
+                new CommandResult(false, "This printer backend does not support part-fan control."));
+        }
+
+        (bool useActiveLease, PrinterStatusDto? status, ActionResult? stateFailure) =
+            await ResolveFanControlLeaseAsync(id, ct);
+        if (stateFailure is not null)
+        {
+            return stateFailure;
+        }
+
+        if (status?.FanSpeedPercent is not double fanSpeedPercent ||
+            !double.IsFinite(fanSpeedPercent) ||
+            fanSpeedPercent is < 0 or > 100)
+        {
+            return StatusCode(
+                StatusCodes.Status502BadGateway,
+                new CommandResult(false, "The printer does not report a valid part-fan speed; no command was sent."));
+        }
+
+        if (!useActiveLease)
+        {
+            return await ExecuteDirectBooleanControlAsync(
+                id,
+                "set_fan_speed",
+                "set_fan_speed",
+                token => _printersService.SetFanSpeedAsync(id, speedPercent, token),
+                ct);
+        }
+
+        return await ExecuteActiveCommandControlAsync(
+            id,
+            "set_fan_speed",
+            "set_fan_speed",
+            async token => await _printersService.SetFanSpeedAsync(id, speedPercent, token)
+                ? new CommandResult(true, null)
+                : new CommandResult(false, "The backend did not confirm whether the fan command was applied."),
+            ct,
+            mapUnconfirmedAsUnavailable: true);
+    }
+
     /// <summary>
     /// Gets the current status of a specific printer.
     /// </summary>
@@ -2936,7 +3010,8 @@ public class PrintersController(
         string operation,
         string telemetryOperation,
         Func<CancellationToken, Task<CommandResult>> backendCall,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool mapUnconfirmedAsUnavailable = false)
     {
         if (_physicalActuationService is null)
         {
@@ -2977,7 +3052,17 @@ public class PrintersController(
                     CancellationToken.None);
             }
 
-            return MapCommandResult(result);
+            return !result.Success && mapUnconfirmedAsUnavailable
+                ? StatusCode(StatusCodes.Status503ServiceUnavailable, result)
+                : MapCommandResult(result);
+        }
+        catch (OperationCanceledException)
+        {
+            await _physicalActuationService.MarkDirectUnknownAsync(
+                begin.Lease,
+                "backend_control_cancelled_after_send",
+                CancellationToken.None);
+            throw;
         }
         catch (Exception) when (!ct.IsCancellationRequested)
         {
@@ -2991,6 +3076,38 @@ public class PrintersController(
                     false,
                     "The physical command outcome is unknown; reconciliation is required."));
         }
+    }
+
+    private async Task<(bool UseActiveLease, PrinterStatusDto? Status, ActionResult? Failure)> ResolveFanControlLeaseAsync(
+        Guid printerId,
+        CancellationToken ct)
+    {
+        PrinterStatusDto status = await _printersService.GetStatusDtoAsync(printerId, ct);
+        if (!status.IsOnline)
+        {
+            return (
+                false,
+                null,
+                StatusCode(
+                    StatusCodes.Status503ServiceUnavailable,
+                    new CommandResult(false, "The printer is offline; no command was sent.")));
+        }
+
+        string? state = status.State?.Trim().ToLowerInvariant();
+        if (state is "printing" or "paused")
+        {
+            return (true, status, null);
+        }
+
+        if (state is "idle" or "ready" or "standby" or "complete" or "completed" or "cancelled")
+        {
+            return (false, status, null);
+        }
+
+        return (
+            false,
+            null,
+            Conflict(new CommandResult(false, "The printer must report a known idle, printing, or paused state.")));
     }
 
     private async Task<PrinterActuationResult> BeginPhysicalControlAsync(
@@ -3491,6 +3608,80 @@ public class PrintersController(
     }
 
     // Z-offset calibration endpoint
+
+    /// <summary>Applies a transient relative Z-offset adjustment during an active print.</summary>
+    [HttpPost("{id:guid}/z-offset/adjust")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Start)]
+    [ProducesResponseType(typeof(CommandResult), 200)]
+    [ProducesResponseType(typeof(CommandResult), 400)]
+    [ProducesResponseType(typeof(CommandResult), 404)]
+    [ProducesResponseType(typeof(CommandResult), 409)]
+    [ProducesResponseType(typeof(CommandResult), 502)]
+    [ProducesResponseType(typeof(CommandResult), 503)]
+    public async Task<ActionResult<CommandResult>> AdjustZOffsetAsync(
+        Guid id,
+        [FromBody] ZOffsetAdjustmentRequest request,
+        CancellationToken ct)
+    {
+        if (request is null || request.OffsetMm is not decimal offsetMm || offsetMm is < -0.2m or > 0.2m || offsetMm == 0)
+        {
+            return BadRequest(new CommandResult(false, "offsetMm must be non-zero and between -0.2 and 0.2 mm."));
+        }
+
+        if (!await CanAccessPrinterAsync(id, PrinterGroupAccessLevel.Submit, ct))
+        {
+            return NotFound();
+        }
+
+        PrinterBackendCapabilitiesDto? capabilities =
+            await _printerBackendCapabilitiesService.GetByPrinterIdAsync(id, ct);
+        if (capabilities is null)
+        {
+            return NotFound();
+        }
+
+        if (!capabilities.SupportsZOffsetAdjustment)
+        {
+            return StatusCode(
+                StatusCodes.Status502BadGateway,
+                new CommandResult(false, "This printer backend does not support transient Z-offset adjustment."));
+        }
+
+        (bool useActiveLease, PrinterStatusDto? status, ActionResult? stateFailure) =
+            await ResolveFanControlLeaseAsync(id, ct);
+        if (stateFailure is not null)
+        {
+            return stateFailure;
+        }
+
+        if (status?.LiveZOffsetMm is not double liveZOffsetMm ||
+            !double.IsFinite(liveZOffsetMm))
+        {
+            return StatusCode(
+                StatusCodes.Status502BadGateway,
+                new CommandResult(false, "The printer does not report a valid live Z offset; no command was sent."));
+        }
+
+        if (!useActiveLease)
+        {
+            return await ExecuteDirectBooleanControlAsync(
+                id,
+                "adjust_z_offset",
+                "adjust_z_offset",
+                token => _printersService.AdjustZOffsetAsync(id, offsetMm, token),
+                ct);
+        }
+
+        return await ExecuteActiveCommandControlAsync(
+            id,
+            "adjust_z_offset",
+            "adjust_z_offset",
+            async token => await _printersService.AdjustZOffsetAsync(id, offsetMm, token)
+                ? new CommandResult(true, null)
+                : new CommandResult(false, "The backend did not confirm whether the Z-offset command was applied."),
+            ct,
+            mapUnconfirmedAsUnavailable: true);
+    }
 
     /// <summary>
     /// Saves the calibrated Z-offset for a printer.

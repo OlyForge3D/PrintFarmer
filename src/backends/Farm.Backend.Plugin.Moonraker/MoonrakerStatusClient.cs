@@ -60,6 +60,11 @@ public class MoonrakerStatusClient : IPrinterStatusClient, IManagedSpoolProvider
             PrinterCompositeStatus status = await breaker.ExecuteAsync(
                 async ct => await _client.GetCompositeStatusAsync(printer.BackendUrl, printer.Credential, ct),
                 ct);
+            if (!status.IsOnline)
+            {
+                return CreateOfflineStatus(printer.Id);
+            }
+
             PrinterStatusDto movement = await _client.GetMovementStatusAsync(printer, ct);
 
             _logger.LogInformation("[Moonraker] Status received for {PrinterName}: IsOnline={StatusIsOnline}, State={StatusState}", printer.Name, status.IsOnline, status.State);
@@ -83,7 +88,11 @@ public class MoonrakerStatusClient : IPrinterStatusClient, IManagedSpoolProvider
                 PrintTimeLeftSeconds: status.PrintTimeLeftSeconds,
                 HomedAxes: movement.HomedAxes,
                 SafetyTelemetry: movement.SafetyTelemetry,
-                ThumbnailCacheIdentity: status.ThumbnailCacheIdentity);
+                ThumbnailCacheIdentity: status.ThumbnailCacheIdentity,
+                CurrentLayer: status.CurrentLayer,
+                TotalLayers: status.TotalLayers,
+                FanSpeedPercent: status.FanSpeedPercent,
+                LiveZOffsetMm: status.LiveZOffsetMm);
         }
         catch (OperationCanceledException)
         {

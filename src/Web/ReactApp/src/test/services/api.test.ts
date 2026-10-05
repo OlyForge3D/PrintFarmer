@@ -123,6 +123,26 @@ describe("ApiClient", () => {
       expect(result).not.toHaveProperty("backendUrl");
       expect(result).not.toHaveProperty("isReachable");
     });
+
+    it("setPrinterFanSpeed posts the percentage using the fan control route", async () => {
+      const data = { success: true, message: undefined };
+      const postMock = vi.fn().mockResolvedValue({ data });
+      (apiClient as unknown as { client: { post: typeof postMock } }).client.post = postMock;
+
+      await expect(apiClient.setPrinterFanSpeed("printer-1", 65)).resolves.toEqual(data);
+
+      expect(postMock).toHaveBeenCalledWith("/printers/printer-1/fan", { speedPercent: 65 });
+    });
+
+    it("adjustPrinterZOffset posts the transient offset using the adjustment route", async () => {
+      const data = { success: true, message: undefined };
+      const postMock = vi.fn().mockResolvedValue({ data });
+      (apiClient as unknown as { client: { post: typeof postMock } }).client.post = postMock;
+
+      await expect(apiClient.adjustPrinterZOffset("printer-1", 0.025)).resolves.toEqual(data);
+
+      expect(postMock).toHaveBeenCalledWith("/printers/printer-1/z-offset/adjust", { offsetMm: 0.025 });
+    });
   });
 
   describe("getHealthStatus", () => {

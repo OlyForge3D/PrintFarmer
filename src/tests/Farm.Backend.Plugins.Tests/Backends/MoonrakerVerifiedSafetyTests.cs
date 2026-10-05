@@ -16,6 +16,60 @@ namespace Farm.Backend.Plugins.Tests.Backends;
 public sealed class MoonrakerVerifiedSafetyTests
 {
     [Fact]
+    public async Task GetPrinterStatusAsync_AuthoritativeCompositeOffline_DoesNotUseSuccessfulMovementReadback()
+    {
+        var requests = new List<string>();
+        using var handler = new InlineHandler(request =>
+        {
+            string pathAndQuery = request.RequestUri!.PathAndQuery;
+            requests.Add(pathAndQuery);
+            return pathAndQuery switch
+            {
+                "/printer/info" => new HttpResponseMessage(HttpStatusCode.ServiceUnavailable),
+                "/printer/objects/query?webhooks=state&print_stats=state&toolhead=homed_axes&gcode_move=position,gcode_position" =>
+                    JsonResponse(
+                        """
+                        {"result":{"status":{"webhooks":{"state":"ready"},"print_stats":{"state":"printing"},"toolhead":{"homed_axes":"xyz"},"gcode_move":{"gcode_position":[1,2,3,0],"position":[4,5,6,0]}}}}
+                        """),
+                _ => JsonResponse("""{"result":{"status":{}}}"""),
+            };
+        });
+        using var http = new HttpClient(handler);
+        var client = new MoonrakerClient(
+            http,
+            NullLogger<MoonrakerClient>.Instance,
+            new BackendTimeoutSettings());
+        var breakers = new Mock<ICircuitBreakerService>();
+        breakers.Setup(service => service.GetCircuitBreaker(It.IsAny<string>(), null, null, null))
+            .Returns(new CircuitBreaker());
+        var statusClient = new MoonrakerStatusClient(
+            client,
+            breakers.Object,
+            new ManagedSpoolProviderHelper(
+                Mock.Of<ISpoolmanStatusCache>(),
+                NullLogger<ManagedSpoolProviderHelper>.Instance),
+            NullLogger<MoonrakerStatusClient>.Instance);
+
+        PrinterStatusDto status = await statusClient.GetPrinterStatusAsync(
+            new Printer
+            {
+                Id = Guid.NewGuid(),
+                Name = "Offline fixture",
+                ServerUrl = "http://fixture.invalid",
+                BackendPort = 7125,
+            },
+            CancellationToken.None);
+
+        Assert.False(status.IsOnline);
+        Assert.Null(status.X);
+        Assert.Null(status.Y);
+        Assert.Null(status.Z);
+        Assert.Null(status.Progress);
+        Assert.Null(status.JobName);
+        Assert.Equal(["/printer/info"], requests);
+    }
+
+    [Fact]
     public async Task GetCompositeStatusAsync_GcodePositionPresent_PrefersGcodeCoordinates()
     {
         using var handler = new InlineHandler(request => request.RequestUri!.AbsolutePath switch

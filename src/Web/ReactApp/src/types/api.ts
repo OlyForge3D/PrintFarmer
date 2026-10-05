@@ -207,6 +207,14 @@ export interface PrinterLiveStatus {
   isOnline: boolean;
   /** Current printer state (e.g., "Idle", "Printing", "Paused") */
   state?: string;
+  /** Current layer reported by a backend that exposes a real layer counter. */
+  currentLayer?: number | null;
+  /** Total layers reported by a backend that exposes a real layer counter. */
+  totalLayers?: number | null;
+  /** Part-fan output percentage reported by the backend, not tachometer RPM. */
+  fanSpeedPercent?: number | null;
+  /** Live transient G-code Z offset reported by the backend, in millimeters. */
+  liveZOffsetMm?: number | null;
 }
 
 /**
@@ -460,6 +468,10 @@ export interface PrinterBackendCapabilitiesDto {
   supportsHistory: boolean;
   supportsFilamentControl: boolean;
   supportsObjectExclusion: boolean;
+  supportsFanControl?: boolean;
+  supportsZOffsetAdjustment?: boolean;
+  supportsFanSpeedReadback?: boolean;
+  supportsZOffsetReadback?: boolean;
 }
 
 /**
