@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Printer, GcodeHarvestOperation } from '@/types/api';
 import { HarvestWizardStep1Selection } from './steps/HarvestWizardStep1Selection';
 import { HarvestWizardStep2Options, HarvestWizardStep2OptionsRef } from './steps/HarvestWizardStep2Options';

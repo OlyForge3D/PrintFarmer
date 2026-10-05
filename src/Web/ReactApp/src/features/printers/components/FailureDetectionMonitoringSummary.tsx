@@ -86,7 +86,6 @@ function getSubline(
 }
 
 function getOperatorAction(
-  status: FailureDetectionPrinterStatusDto | undefined,
   latestIncident: FailureDetectionEvent | undefined,
   attention: { issue: string; action: string } | null
 ): string | null {
@@ -145,7 +144,7 @@ export function FailureDetectionMonitoringSummary({
   const style = toneStyles[tone];
   const headline = getHeadline(enabled, status, latestIncident, attention);
   const subline = getSubline(status, latestIncident);
-  const operatorAction = getOperatorAction(status, latestIncident, attention);
+  const operatorAction = getOperatorAction(latestIncident, attention);
   const snapshotUrl = latestIncident?.snapshotUrl ?? status?.snapshotUrl;
   const needsAction = tone === 'critical' || tone === 'attention';
   const confidence = latestIncident?.confidence ?? status?.lastConfidence ?? null;

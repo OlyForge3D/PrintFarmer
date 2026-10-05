@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { Modal } from '@/common/components/modals/Modal';
 import { Button, Select, FormField } from '@/common/components/ui';
 import { RefreshIcon } from '@/common/components/icons/MdiIcons';

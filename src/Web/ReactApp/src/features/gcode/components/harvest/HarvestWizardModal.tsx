@@ -11,7 +11,7 @@
  * 4. User selects files and clicks Import
  * 5. Import progress is shown, then modal closes
  */
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Modal } from '@/common/components/modals/Modal';
 import { Button } from '@/common/components/ui/Button';
 import { Printer, GcodeHarvestOperation } from '@/types/api';

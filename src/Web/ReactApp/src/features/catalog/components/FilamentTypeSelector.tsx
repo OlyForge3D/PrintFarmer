@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 // No MdiIcons used in this component
 import { ChevronsRightIcon, ChevronsLeftIcon, SettingsIcon } from '@/common/components/icons/MdiIcons';
 import { Button } from '@/common/components/ui/Button';

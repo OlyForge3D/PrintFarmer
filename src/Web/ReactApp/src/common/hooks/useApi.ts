@@ -546,7 +546,7 @@ export function useCreateModel() {
       if (ctx?.previous && ctx.key) queryClient.setQueryData(ctx.key, ctx.previous);
       toast.error('Failed to create model');
     },
-    onSuccess: (created, vars, ctx) => {
+    onSuccess: (created, _vars, ctx) => {
       if (ctx?.key) {
         const list = queryClient.getQueryData<PrinterModelDto[]>(ctx.key);
         if (list) {
@@ -1383,7 +1383,7 @@ export function useQueuePrintJob() {
       if (prevGlobalQueue) queryClient.setQueryData(globalQueueKey, [temp, ...prevGlobalQueue]); else queryClient.setQueryData(globalQueueKey, [temp]);
       return { prevPrinterQueue, prevGlobalQueue, printerQueueKey, globalQueueKey, tempId };
     },
-    onError: (_e, vars, ctx) => {
+    onError: (_e, _vars, ctx) => {
       if (ctx?.prevPrinterQueue && ctx.printerQueueKey) {
         queryClient.setQueryData(ctx.printerQueueKey, ctx.prevPrinterQueue);
       } else if (ctx?.printerQueueKey) {

@@ -1,5 +1,5 @@
 /* eslint-disable local/pf-no-raw-html-controls */
-import React, { useState, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { Printer, PrinterBackend, GcodeHarvestOperation } from '@/types/api';
 import { toPrinterBackend } from '@/common/utils/enumHelpers';
 import { formatPrinterModelSubtitle } from '@/common/utils/printerModelDisplay';

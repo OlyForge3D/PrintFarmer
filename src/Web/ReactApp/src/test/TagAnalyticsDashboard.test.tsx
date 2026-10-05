@@ -237,7 +237,7 @@ describe('TagAnalyticsDashboard', () => {
 
       expect(await screen.findByText('No tags yet')).toBeInTheDocument();
       // Use getAllByText since the text might appear multiple times
-      const elements = screen.getAllByText((content, element) => {
+      const elements = screen.getAllByText((_content, element) => {
         return element?.textContent?.includes('Start by creating tags') ?? false;
       });
       expect(elements.length).toBeGreaterThan(0);
@@ -259,7 +259,7 @@ describe('TagAnalyticsDashboard', () => {
 
       await screen.findByText('No tags yet');
       // Alert component handles icon rendering internally
-      const elements = screen.getAllByText((content, element) => {
+      const elements = screen.getAllByText((_content, element) => {
         return element?.textContent?.includes('Start by creating tags') ?? false;
       });
       expect(elements.length).toBeGreaterThan(0);

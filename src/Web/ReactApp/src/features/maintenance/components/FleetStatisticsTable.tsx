@@ -5,7 +5,6 @@
  * Sorted by maintenance urgency (overdue first, then by days remaining).
  */
 
-import React from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router';
 import { maintenanceService } from '@/services/maintenanceService';

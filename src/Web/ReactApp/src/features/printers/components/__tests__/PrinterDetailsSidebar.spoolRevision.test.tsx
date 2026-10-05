@@ -3,7 +3,6 @@ vi.mock('@/features/printers/hooks/use-printer-controls-mode', () => ({
 }));
 
 import '@testing-library/jest-dom';
-import React from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi, beforeEach } from 'vitest';

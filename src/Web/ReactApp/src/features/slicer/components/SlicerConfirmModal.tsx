@@ -1,4 +1,3 @@
-import React from 'react';
 import { Button } from '@/common/components/ui';
 import { Modal } from '@/common/components/modals/Modal';
 

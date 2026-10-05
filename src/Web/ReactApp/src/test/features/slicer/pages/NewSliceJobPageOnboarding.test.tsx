@@ -4,7 +4,6 @@ import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import React from 'react';
 import { NewSliceJobPage } from '@/features/slicer/pages/NewSliceJobPage';
 import { AuthProvider } from '@/common/contexts/AuthContext';
 

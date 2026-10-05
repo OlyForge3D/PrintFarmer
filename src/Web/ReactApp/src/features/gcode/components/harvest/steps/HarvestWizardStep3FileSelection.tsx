@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { CheckCircleIcon, AlertCircleIcon, LoaderIcon } from '@/common/components/icons/MdiIcons';
 import type { HarvestOptions, HarvestDiscoveredFile } from '../HarvestWizard';
 import { Button } from '@/common/components/ui/Button';

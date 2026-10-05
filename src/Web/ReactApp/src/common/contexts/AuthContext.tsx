@@ -1,4 +1,4 @@
-import React, { useEffect, useState, ReactNode, useCallback, useRef } from 'react';
+import { useEffect, useState, ReactNode, useCallback, useRef } from 'react';
 import { getCurrentUser, login as authLogin, register as authRegister, logout as authLogout } from '@/services/api/authApi';
 import { UserDto, LoginRequest, RegisterRequest } from '@/types/api';
 import { loginWithPasskey as passkeyLogin } from '@/services/passkeyService';
