@@ -1013,6 +1013,7 @@ private final class UITestMainThreadWatchdog: @unchecked Sendable {
     private let queue = DispatchQueue(label: "com.olyforge3d.printfarmer.uitesting.watchdog")
     private var meter: UITestMainThreadStallMeter
     private var timer: DispatchSourceTimer?
+    private var requestedCapture = false
 
     init(beats: UITestMainThreadBeatCounter, limit: TimeInterval) {
         self.beats = beats
@@ -1020,6 +1021,7 @@ private final class UITestMainThreadWatchdog: @unchecked Sendable {
     }
 
     func start() {
+        NSLog("PFARM_STALL_CAPTURE_READY pid=%d", ProcessInfo.processInfo.processIdentifier)
         let timer = DispatchSource.makeTimerSource(queue: queue)
         timer.schedule(deadline: .now() + 1, repeating: 1, leeway: .milliseconds(100))
         // The source retains this watchdog for the life of the process.
@@ -1029,7 +1031,19 @@ private final class UITestMainThreadWatchdog: @unchecked Sendable {
     }
 
     private func check() {
-        guard meter.tick(beat: beats.value, at: ProcessInfo.processInfo.systemUptime) else { return }
+        let beat = beats.value
+        let uptime = ProcessInfo.processInfo.systemUptime
+        let shouldAbort = meter.tick(beat: beat, at: uptime)
+        if meter.stalled == 0 {
+            requestedCapture = false
+        } else if meter.stalled >= 5 && !requestedCapture {
+            requestedCapture = true
+            NSLog(
+                "PFARM_STALL_CAPTURE_MISSING pid=%d beat=%llu uptime=%.3f stalled=%.3f",
+                ProcessInfo.processInfo.processIdentifier, beat, uptime, meter.stalled
+            )
+        }
+        guard shouldAbort else { return }
         fatalError(
             "UI-test main run loop stalled for \(Int(meter.stalled))s; "
                 + "aborting to retain the main-thread backtrace (#3013)"

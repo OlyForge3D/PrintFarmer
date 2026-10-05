@@ -1,5 +1,25 @@
 ## XCUI timeout diagnosis (#2573)
 
+### Missing-heartbeat capture (#3263, diagnostic branch only)
+
+This branch must never merge. Its CI matrix runs only iPad shard 2 on
+Xcode 26.6 (17F113) and the resolver-approved iOS 26.5 (23F77).
+All tests in that shard retain their original assertions and timeouts.
+
+The UI-test watchdog logs its pid, beat count and monotonic uptime once a
+missing-beat window reaches five seconds. The host monitor streams those
+markers from the selected simulator, verifies the exact app executable/pid,
+then runs `sample` for five seconds at 10ms intervals. No sampling occurs on
+ordinary launches. The existing background watchdog still aborts after twenty
+seconds; diagnostic logging never advances its beat counter.
+
+The `ios-xcui-ipad-2` artifact includes `missing-heartbeat/heartbeat.ndjson`,
+the monitor/stream logs and each `app-<pid>.sample.txt` with its sampler log.
+An empty capture set with verified launch markers means no missing-beat window
+was observed, not that the underlying failure is environmental. A missing stream
+or failed sample fails explicitly. The coordinator authorized at most three
+target-shard executions, stopping after the first captured stall.
+
 ### Harvest queue failures (#3265)
 
 The retained iPad shard 2 bundle from run `37296414762`, original job

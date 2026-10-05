@@ -213,8 +213,7 @@ jobs:
     name: XCUI (${{ matrix.family }}, shard ${{ matrix.shard }})
     runs-on: macos-latest
     needs: [select, test]
-    # Avoid allocating eight macOS runners until unit coverage passes; retain
-    # the selector's fail-safe behavior by skipping only explicit false.
+    # Diagnostic-only branch: authorized #3263 capture on iPad shard 2.
     if: ${{ !cancelled() && needs.test.result == 'success' && needs.select.outputs.should_run != 'false' }}
     # Retired Attention/Tasks/Two-modes screens have no shipping destinations.
     # Shell, capability-gated parts, Scan/harvest and offline suites cover retained flows.
@@ -222,47 +221,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - key: iphone-1
-            family: iPhone
-            shard: 1
-            prefix: iPhone
-            device_preference: iPhone 15,iPhone 16,iPhone 17,iPhone 17 Pro,iPhone 17e
-            selectors: >-
-              -only-testing:PrintFarmerUITests/LoginFlowUITests
-              -only-testing:PrintFarmerUITests/OperatorShellUITests
-          - key: iphone-2
-            family: iPhone
-            shard: 2
-            prefix: iPhone
-            device_preference: iPhone 15,iPhone 16,iPhone 17,iPhone 17 Pro,iPhone 17e
-            selectors: >-
-              -only-testing:PrintFarmerUITests/ScanStationUITests
-              -only-testing:PrintFarmerUITests/HarvestUITests
-          - key: iphone-3
-            family: iPhone
-            shard: 3
-            prefix: iPhone
-            device_preference: iPhone 15,iPhone 16,iPhone 17,iPhone 17 Pro,iPhone 17e
-            selectors: >-
-              -only-testing:PrintFarmerUITests/PartsInventoryUITests
-              -only-testing:PrintFarmerUITests/PrinterListUITests
-              -only-testing:PrintFarmerUITests/FilamentCoverageUITests
-          - key: iphone-4
-            family: iPhone
-            shard: 4
-            prefix: iPhone
-            device_preference: iPhone 15,iPhone 16,iPhone 17,iPhone 17 Pro,iPhone 17e
-            selectors: >-
-              -only-testing:PrintFarmerUITests/ColdOfflineShellUITests
-              -only-testing:PrintFarmerUITests/UIWaitBudgetTests
-          - key: ipad-1
-            family: iPad
-            shard: 1
-            prefix: iPad
-            device_preference: iPad Pro 13-inch (M5),iPad Pro 11-inch (M5),iPad Air 13-inch (M4),iPad Air 11-inch (M4),iPad (A16),iPad mini (A17 Pro)
-            selectors: >-
-              -only-testing:PrintFarmerUITests/LoginFlowUITests
-              -only-testing:PrintFarmerUITests/OperatorShellUITests
           - key: ipad-2
             family: iPad
             shard: 2
@@ -271,24 +229,6 @@ jobs:
             selectors: >-
               -only-testing:PrintFarmerUITests/ScanStationUITests
               -only-testing:PrintFarmerUITests/HarvestUITests
-          - key: ipad-3
-            family: iPad
-            shard: 3
-            prefix: iPad
-            device_preference: iPad Pro 13-inch (M5),iPad Pro 11-inch (M5),iPad Air 13-inch (M4),iPad Air 11-inch (M4),iPad (A16),iPad mini (A17 Pro)
-            selectors: >-
-              -only-testing:PrintFarmerUITests/PartsInventoryUITests
-              -only-testing:PrintFarmerUITests/PrinterListUITests
-              -only-testing:PrintFarmerUITests/FilamentCoverageUITests
-          - key: ipad-4
-            family: iPad
-            shard: 4
-            prefix: iPad
-            device_preference: iPad Pro 13-inch (M5),iPad Pro 11-inch (M5),iPad Air 13-inch (M4),iPad Air 11-inch (M4),iPad (A16),iPad mini (A17 Pro)
-            selectors: >-
-              -only-testing:PrintFarmerUITests/ColdOfflineShellUITests
-              -only-testing:PrintFarmerUITests/UIWaitBudgetTests
-              -only-testing:PrintFarmerUITests/JobDetailIPadNavigationUITests
     defaults:
       run:
         working-directory: mobile
@@ -298,12 +238,12 @@ jobs:
 
       - name: Select Xcode
         run: |
-          XCODE_PATH=$(ls -d /Applications/Xcode_16*.app /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
-          if [ -z "$XCODE_PATH" ]; then
-            XCODE_PATH="/Applications/Xcode.app"
-          fi
-          sudo xcode-select -s "$XCODE_PATH/Contents/Developer"
+          sudo xcode-select -s /Applications/Xcode_26.6.app/Contents/Developer
           xcodebuild -version
+          test "$(xcodebuild -version)" = "$(printf 'Xcode 26.6\nBuild version 17F113')"
+
+      - name: Test diagnostic capture monitor
+        run: python3 -m unittest discover -s scripts/tests -p 'test_capture_missing_heartbeat.py' -v
 
       - name: Test simulator resolver
         if: matrix.key == 'iphone-1'
@@ -375,6 +315,14 @@ jobs:
           if [[ "${{ matrix.shard }}" == "1" ]]; then
             selectors=("${selectors[@]:1}")
           fi
+          mkdir -p "build-${{ matrix.key }}/missing-heartbeat"
+          python3 scripts/capture-missing-heartbeat.py \
+            --device "$SIMULATOR_UDID" \
+            --output "build-${{ matrix.key }}/missing-heartbeat" \
+            > "build-${{ matrix.key }}/missing-heartbeat/monitor.log" 2>&1 &
+          monitor_pid=$!
+          trap 'kill -TERM "$monitor_pid" 2>/dev/null || true; wait "$monitor_pid"' EXIT
+          status=0
           python3 scripts/run-tests.py -- test-without-building \
             -project PrintFarmer.xcodeproj \
             -scheme PrintFarmer \
@@ -389,7 +337,11 @@ jobs:
             -parallel-testing-enabled NO \
             -disable-concurrent-destination-testing \
             -resultBundlePath "build-${{ matrix.key }}/XCUIShard.xcresult" \
-            2>&1 | tee "build-${{ matrix.key }}/XCUIShard.log"
+            2>&1 | tee "build-${{ matrix.key }}/XCUIShard.log" || status=$?
+          kill -TERM "$monitor_pid" 2>/dev/null || true
+          wait "$monitor_pid" || status=$?
+          trap - EXIT
+          exit "$status"
 
       - name: Upload XCUI shard results
         if: always()
@@ -405,4 +357,5 @@ jobs:
             mobile/build-${{ matrix.key }}/XCUIShard.log
             mobile/build-${{ matrix.key }}/XCUIShard.events.jsonl
             mobile/build-${{ matrix.key }}/XCUIShard.timing.json
+            mobile/build-${{ matrix.key }}/missing-heartbeat/
           retention-days: 7
