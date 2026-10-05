@@ -84,6 +84,10 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
     var saveZOffsetCalledWith: (printerId: UUID, offsetMm: Double, saveToFirmware: Bool, reviewedRowVersion: String)?
     var setFanSpeedCalledWith: (printerId: UUID, speedPercent: Int)?
     var adjustZOffsetCalledWith: (printerId: UUID, offsetMm: Double)?
+    var beforeSetFanSpeed: (@Sendable () async -> Void)?
+    var beforeAdjustZOffset: (@Sendable () async -> Void)?
+    private(set) var setFanSpeedCallCount = 0
+    private(set) var adjustZOffsetCallCount = 0
     var unloadFilamentToolheadIndex: Int?
     var unloadResultToReturn: FilamentUnloadResult?
     var physicalFilamentCalls: [String] = []
@@ -295,13 +299,17 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
     }
 
     func setFanSpeed(printerId: UUID, speedPercent: Int) async throws -> CommandResult {
+        setFanSpeedCallCount += 1
         setFanSpeedCalledWith = (printerId, speedPercent)
+        if let beforeSetFanSpeed { await beforeSetFanSpeed() }
         if let error = errorToThrow { throw error }
         return commandResultToReturn
     }
 
     func adjustZOffset(printerId: UUID, offsetMm: Double) async throws -> CommandResult {
+        adjustZOffsetCallCount += 1
         adjustZOffsetCalledWith = (printerId, offsetMm)
+        if let beforeAdjustZOffset { await beforeAdjustZOffset() }
         if let error = errorToThrow { throw error }
         return commandResultToReturn
     }

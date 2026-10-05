@@ -163,93 +163,73 @@ final class HarvestUITests: QueueUITestBase {
         app.launchForPrintFarmerUITest()
     }
 
-    /// Navigates the operator shell to the seeded completed demo job's
-    /// detail view, device-adaptively:
-    /// Queue → Recent → the seeded completed job. Queue opens `JobListView`
-    /// directly on iPhone (tab bar) and iPad (sidebar). The `jobDetail.*` assertion
-    /// proves `JobDetailView` is presented in the FOREGROUND navigation
-    /// context on both device classes (issue #794).
+    /// Navigates Queue → Job History → the completed demo job. Queue opens
+    /// `JobListView` directly on iPhone (tab bar) and iPad (sidebar), while
+    /// completed jobs remain separate from the failures-only Queue section.
     func openCompletedJobDetail(
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        openRecentJobs(file: file, line: line)
+        openJobHistory(file: file, line: line)
 
         let jobRow = app.buttons[completedJobIdentifier]
         XCTAssertTrue(jobRow.waitForExistence(timeout: 8),
-                      "Seeded completed demo job should render in the Recent list",
+                      "Seeded completed demo job should render in Job History",
                       file: file, line: line)
         jobRow.tap()
     }
 
-    private func openRecentJobs(
+    private func openJobHistory(
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
         openQueueDestination(file: file, line: line)
 
-        // iPhone paginates the queue and exposes a Recent page control;
-        // iPad renders a single List with an always-visible Recent section.
-        revealRecentJobs()
-    }
-
-    /// Reveals the Recent (completed/failed/cancelled) jobs in the preserved
-    /// `JobListView`, handling both the iPhone paged layout (a "Recent" page
-    /// button) and the iPad List layout (a "Recent" section, which may be
-    /// collapsed by default).
-    private func revealRecentJobs() {
-        let jobRow = app.buttons[completedJobIdentifier]
-        if jobRow.waitForExistence(timeout: 3) { return }
-
-        // iPhone: swipeable pages expose a "Recent" page control.
-        let recentPage = app.buttons["jobList.page.recent"]
-        if recentPage.waitForExistence(timeout: 2) {
-            XCTAssertEqual(recentPage.label, "Recent")
-            XCTAssertGreaterThanOrEqual(recentPage.frame.width, 44)
-            XCTAssertGreaterThanOrEqual(recentPage.frame.height, 44)
-            XCTAssertTrue(recentPage.isEnabled)
-            XCTAssertTrue(recentPage.isHittable)
-            recentPage.tap()
-            // The page control's `.isSelected` trait follows `currentPage`,
-            // which changes inside an animated paging transition; the
-            // accessibility snapshot can lag the tap by a frame or more, so
-            // wait (bounded) for the real final selected state (#3001).
-            let recentSelected = XCTNSPredicateExpectation(
-                predicate: NSPredicate(format: "isSelected == true"),
-                object: recentPage
-            )
-            XCTAssertEqual(
-                XCTWaiter.wait(for: [recentSelected], timeout: 5),
-                .completed,
-                "Tapping the Recent page control must select the Recent page"
-            )
-            if jobRow.waitForExistence(timeout: 3) { return }
-        }
-
-        // iPad: the Recent section header can be collapsed; tap it to expand.
-        let recentHeader = app.staticTexts["Recent"]
-        if recentHeader.waitForExistence(timeout: 2) {
-            recentHeader.tap()
-        }
-    }
-
-    func testRecentPageExposesCompletedFailedAndCancelledJobs() {
-        openRecentJobs()
-
-        assertRecentJob(
-            identifier: completedJobIdentifier,
-            name: "benchy_calibration.gcode",
-            status: "Completed"
+        let historyButton = app.buttons["jobList.history.open"]
+        XCTAssertTrue(
+            historyButton.waitForExistence(timeout: 8),
+            "Queue must expose the separate Job History destination",
+            file: file,
+            line: line
         )
+        historyButton.tap()
+        XCTAssertTrue(
+            app.buttons[completedJobIdentifier].waitForExistence(timeout: 8),
+            "Completed jobs must be reachable from Job History",
+            file: file,
+            line: line
+        )
+    }
+
+    func testQueueRecentShowsOnlyFailuresAndHistoryShowsCompletedJobs() {
+        openQueueDestination()
+
         assertRecentJob(
             identifier: failedJobIdentifier,
             name: "vase_mode_spiral.gcode",
             status: "Failed"
         )
-        assertRecentJob(
+        XCTAssertFalse(app.buttons[completedJobIdentifier].exists)
+        XCTAssertFalse(app.buttons[cancelledJobIdentifier].exists)
+
+        let historyButton = app.buttons["jobList.history.open"]
+        XCTAssertTrue(historyButton.waitForExistence(timeout: 5))
+        historyButton.tap()
+        assertHistoryJob(
+            identifier: completedJobIdentifier,
+            name: "benchy_calibration.gcode",
+            status: "Completed"
+        )
+        assertHistoryJob(
             identifier: cancelledJobIdentifier,
             name: "test_cube_20mm.gcode",
             status: "Cancelled"
+        )
+        let history = app.descendants(matching: .any)["jobList.history"]
+        XCTAssertTrue(history.exists)
+        XCTAssertFalse(
+            history.descendants(matching: .any)[failedJobIdentifier].exists,
+            "Recent failures must not be included in the separate completed/cancelled Job History."
         )
     }
 
@@ -267,8 +247,7 @@ final class HarvestUITests: QueueUITestBase {
             // onto the same underlying collection view as the inner
             // `jobList` list's own `"jobList.combined.list"` identifier —
             // only the outer identifier survives at runtime on iPad. Swipe
-            // by the identifier that is actually present so the off-screen
-            // cancelled job row becomes reachable.
+            // the actual queue list to reveal the off-screen failure row.
             let combinedList = app.collectionViews["jobList.root"]
             if combinedList.exists {
                 combinedList.swipeUp()
@@ -277,6 +256,28 @@ final class HarvestUITests: QueueUITestBase {
         XCTAssertTrue(
             row.waitForExistence(timeout: 5),
             "Recent must expose the seeded \(status.lowercased()) job",
+            file: file,
+            line: line
+        )
+        XCTAssertTrue(row.label.contains(name), file: file, line: line)
+        XCTAssertTrue(row.label.contains("\(status) status"), file: file, line: line)
+    }
+
+    private func assertHistoryJob(
+        identifier: String,
+        name: String,
+        status: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let history = app.collectionViews["jobList.history"]
+        let row = app.buttons[identifier]
+        for _ in 0..<5 where !row.exists && history.exists {
+            history.swipeUp()
+        }
+        XCTAssertTrue(
+            row.waitForExistence(timeout: 5),
+            "Job History must expose the seeded \(status.lowercased()) job",
             file: file,
             line: line
         )

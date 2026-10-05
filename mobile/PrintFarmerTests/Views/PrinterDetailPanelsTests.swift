@@ -138,6 +138,75 @@ final class PrinterDetailPanelsTests: XCTestCase {
         XCTAssertFalse(fixture.api.capturedRequests.contains { $0.url?.path == Self.deviceTokensPath })
     }
 
+    func testRuntimeReadbackResolvesAfterControlPageIsOffscreen() async throws {
+        let fixture = try detailHostFixture()
+        fixture.registry.setAdvancedPrinterControlsEnabled(true)
+        let detail = PrinterDetailViewModel(printerId: fixture.printer.id)
+        detail.configure(printerService: fixture.services.printerService)
+        await detail.loadPrinter()
+        let controller = DetailHostingController(rootView: try host(
+            PrinterDetailView(viewModel: detail), services: fixture.services, registry: fixture.registry
+        ))
+        let window = show(controller)
+        defer { window.isHidden = true; window.rootViewController = nil }
+        try await selectControls(in: controller)
+
+        let fanIncrease = {
+            self.views(UIButton.self, in: controller.view).first {
+                $0.accessibilityIdentifier == "printer.controls.runtime.fan.increase"
+            }
+        }
+        try await waitForHost("Authenticated fan adjustment must be enabled", in: controller.view) {
+            fanIncrease()?.isEnabled == true
+        }
+        try XCTUnwrap(fanIncrease()).sendActions(for: .touchUpInside)
+        try await waitForHost("Authenticated fan adjustment must reach the registered printer API", in: controller.view) {
+            fixture.api.capturedRequests.contains {
+                $0.httpMethod == "POST" && $0.url?.path == "/api/printers/\(fixture.printer.id)/fan"
+            }
+        }
+
+        let selector = try XCTUnwrap(views(UISegmentedControl.self, in: controller.view).first)
+        selector.selectedSegmentIndex = 0
+        selector.sendActions(for: .valueChanged)
+        let signal = try XCTUnwrap(fixture.services.signalRService as? MockSignalRService)
+        signal.simulatePrinterUpdate(PrinterStatusUpdate(
+            id: fixture.printer.id,
+            isOnline: true,
+            state: "idle",
+            progress: nil,
+            fanSpeedPercent: 30,
+            liveZOffsetMm: 0,
+            jobName: nil,
+            fileName: nil,
+            thumbnailUrl: nil,
+            cameraStreamUrl: nil,
+            x: nil,
+            y: nil,
+            z: nil,
+            hotendTemp: nil,
+            bedTemp: nil,
+            hotendTarget: nil,
+            bedTarget: nil,
+            homedAxes: nil,
+            spoolInfo: nil,
+            mmuStatus: nil
+        ))
+        try await waitForHost("SignalR readback must update the detail while Control is offscreen", in: controller.view) {
+            detail.printer?.fanSpeedPercent == 30
+        }
+
+        selector.selectedSegmentIndex = 1
+        selector.sendActions(for: .valueChanged)
+        try await waitForHost("Offscreen owner must release the matching runtime command", in: controller.view) {
+            fanIncrease()?.isEnabled == true
+        }
+        XCTAssertTrue(
+            fixture.api.capturedRequests.contains { $0.httpMethod == "POST" },
+            "Only the authenticated mock API command is exercised; no physical printer is contacted."
+        )
+    }
+
     private static let deviceTokensPath = "/api/notifications/device-tokens"
 
     func testDelayedCapabilitiesStartAndRepeatSafetyWhileStayingOnControl() async throws {
@@ -292,15 +361,43 @@ final class PrinterDetailPanelsTests: XCTestCase {
         var printer = try TestData.decodePrinter()
         printer.state = "idle"
         printer.isOnline = true
+        printer.fanSpeedPercent = 25
+        printer.liveZOffsetMm = 0
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         let printerData = try encoder.encode(printer)
+        var status = PrinterStatusDetail(
+            id: printer.id,
+            isOnline: true,
+            state: "idle",
+            progress: nil,
+            fanSpeedPercent: 25,
+            liveZOffsetMm: 0,
+            jobName: nil,
+            thumbnailUrl: nil,
+            cameraStreamUrl: nil,
+            cameraSnapshotUrl: nil,
+            x: printer.x,
+            y: printer.y,
+            z: printer.z,
+            hotendTemp: printer.hotendTemp,
+            bedTemp: printer.bedTemp,
+            hotendTarget: printer.hotendTarget,
+            bedTarget: printer.bedTarget,
+            homedAxes: printer.homedAxes,
+            spoolInfo: nil,
+            mmuStatus: nil
+        )
+        status.safetyTelemetry = VerifiedSafetyFixtures.status(id: printer.id, state: "idle").safetyTelemetry
+        let statusData = try encoder.encode(status)
         let details = try encoder.encode(PrinterDetails.controlsLimitsFixture(for: printer))
         let printerPath = "/api/printers/\(printer.id)"
         let printerID = printer.id
         let capabilities = Data("""
         {"printerId":"\(printerID)","backend":"Moonraker",
-         "supportsHotendTemperature":true,"supportsBedTemperature":true}
+         "supportsHotendTemperature":true,"supportsBedTemperature":true,
+         "supportsFanControl":true,"supportsFanSpeedReadback":true,
+         "supportsZOffsetAdjustment":true,"supportsZOffsetReadback":true}
         """.utf8)
         let api = MockAPIClient()
         api.asyncRequestHandler = { request in
@@ -321,10 +418,12 @@ final class PrinterDetailPanelsTests: XCTestCase {
                 } else {
                     data = capabilities
                 }
-            } else if path.hasSuffix("/status") && verifiedMaterial {
-                data = try encoder.encode(VerifiedSafetyFixtures.status(id: printerID))
+            } else if path.hasSuffix("/status") {
+                data = statusData
             } else if path.hasSuffix("/details") {
                 data = details
+            } else if request.httpMethod != "GET" {
+                data = Data(#"{"success":true,"message":"Accepted"}"#.utf8)
             } else {
                 return (TestData.httpResponse(url: request.url, statusCode: 404), Data())
             }

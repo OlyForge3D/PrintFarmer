@@ -279,6 +279,7 @@ struct PrinterDetailView: View {
             if let printer = viewModel.printer {
                 await ensureControlsOwnerIfAvailable(for: printer)
             }
+            await viewModel.loadOperatorSections()
             if let controlsViewModel {
                 viewModel.adoptFilamentCommandCapabilities(
                     controlsViewModel.capabilities,
@@ -1023,6 +1024,7 @@ struct PrinterDetailView: View {
                 }
             }
         }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("printer.detail.queue")
     }
 
@@ -1128,6 +1130,7 @@ struct PrinterDetailView: View {
             .accessibilityIdentifier("printer.detail.queue.dispatch.\(job.id)")
             .accessibilityLabel("Start \(title) on this printer")
         }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("printer.detail.queue.row.\(job.id)")
     }
 

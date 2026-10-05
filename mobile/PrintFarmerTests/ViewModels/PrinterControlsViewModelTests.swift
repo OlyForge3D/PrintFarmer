@@ -227,16 +227,24 @@ final class PrinterControlsViewModelTests: XCTestCase {
     private static let hotendOnlyCaps = PrinterBackendCapabilities.hotendOnlyFixture
 
     private func leaseOwner(
-        serverID: UUID, printer: Printer? = nil
+        serverID: UUID, printer: Printer? = nil, runtimeControls: Bool = false
     ) async throws -> (PrinterControlsViewModel, MockPrinterService) {
         let printer = try printer ?? idlePrinter()
         let service = MockPrinterService()
         var caps = Self.fullCaps
         caps.supportsAbsoluteMovement = true
         caps.supportsDisableMotors = true
+        caps.supportsFanSpeedReadback = runtimeControls
+        caps.supportsZOffsetAdjustment = runtimeControls
+        caps.supportsZOffsetReadback = runtimeControls
         caps.verifiedSafety = VerifiedSafetyFixtures.discovery()
         service.capabilitiesToReturn = caps
-        service.statusToReturn = VerifiedSafetyFixtures.status(id: printer.id)
+        service.statusToReturn = VerifiedSafetyFixtures.status(
+            id: printer.id,
+            state: printer.state ?? "ready",
+            fanSpeedPercent: runtimeControls ? printer.fanSpeedPercent : nil,
+            liveZOffsetMm: runtimeControls ? printer.liveZOffsetMm : nil
+        )
         service.detailsToReturn = .controlsLimitsFixture(for: printer)
         let model = PrinterControlsViewModel.configuredForTests(
             printerService: service, printer: printer, serverID: serverID
@@ -2753,6 +2761,187 @@ final class PrinterControlsViewModelTests: XCTestCase {
         XCTAssertNil(model.pendingCommand, "The matching Z-offset readback confirms the accepted command")
     }
 
+    func test_runtimeAdjustmentsAreSupportedWhilePrintingAndPaused() async throws {
+        var capabilities = Self.fullCaps
+        capabilities.supportsFanSpeedReadback = true
+        capabilities.supportsZOffsetAdjustment = true
+        capabilities.supportsZOffsetReadback = true
+
+        for state in ["printing", "paused"] {
+            var printer = try idlePrinter()
+            printer.state = state
+            printer.fanSpeedPercent = 25
+            printer.liveZOffsetMm = 0
+            let model = try makeViewModel(printer: printer, capabilities: capabilities)
+            await model.loadCapabilities()
+            XCTAssertTrue(model.canAdjustRuntimeControls, "\(state) permits only these documented runtime adjustments.")
+
+            await model.setFanSpeed(50)
+            XCTAssertEqual(mockService.setFanSpeedCalledWith?.speedPercent, 50)
+            XCTAssertNotNil(model.pendingCommand)
+            var fanReadback = printer
+            fanReadback.fanSpeedPercent = 50
+            model.handlePrinterUpdate(fanReadback)
+            XCTAssertNil(model.pendingCommand)
+
+            await model.adjustLiveZOffset(by: 0.01)
+            XCTAssertEqual(mockService.adjustZOffsetCalledWith?.offsetMm, 0.01)
+            XCTAssertNotNil(model.pendingCommand)
+            var zOffsetReadback = fanReadback
+            zOffsetReadback.liveZOffsetMm = 0.01
+            model.handlePrinterUpdate(zOffsetReadback)
+            XCTAssertNil(model.pendingCommand)
+        }
+    }
+
+    func test_runtimeAdjustmentsFailClosedWhenRegisteredServerAuthorityIsRevoked() async throws {
+        var printer = try idlePrinter()
+        printer.state = "paused"
+        var capabilities = Self.fullCaps
+        capabilities.supportsFanSpeedReadback = true
+        capabilities.supportsZOffsetAdjustment = true
+        capabilities.supportsZOffsetReadback = true
+        let access = AccessGate()
+        let model = try makeViewModel(
+            printer: printer,
+            capabilities: capabilities,
+            accessCheck: { access.isAllowed ? nil : "Registered server access was revoked." }
+        )
+        await model.loadCapabilities()
+
+        access.isAllowed = false
+        model.refreshAccess()
+        await model.setFanSpeed(50)
+        await model.adjustLiveZOffset(by: 0.01)
+
+        XCTAssertFalse(model.canAdjustRuntimeControls)
+        XCTAssertEqual(mockService.setFanSpeedCallCount, 0)
+        XCTAssertEqual(mockService.adjustZOffsetCallCount, 0)
+    }
+
+    func test_runtimeSignalRRequiresChangedMatchingReadbackAndKeepsUncertainValuesPending() async throws {
+        var printer = try idlePrinter()
+        printer.state = "printing"
+        printer.fanSpeedPercent = 25
+        printer.liveZOffsetMm = 0
+        var capabilities = Self.fullCaps
+        capabilities.supportsFanSpeedReadback = true
+        capabilities.supportsZOffsetAdjustment = true
+        capabilities.supportsZOffsetReadback = true
+        let model = try makeViewModel(printer: printer, capabilities: capabilities)
+        await model.loadCapabilities()
+
+        await model.setFanSpeed(50)
+        for value in [25.0, 45.0] {
+            var report = printer
+            report.fanSpeedPercent = value
+            model.handlePrinterUpdate(report)
+            XCTAssertNotNil(model.pendingCommand, "Same or nonmatching fan values cannot confirm a command.")
+        }
+        var unknownFan = printer
+        unknownFan.fanSpeedPercent = nil
+        model.handlePrinterUpdate(unknownFan)
+        XCTAssertNotNil(model.pendingCommand, "Unknown readback cannot confirm a command.")
+        var matchingFan = printer
+        matchingFan.fanSpeedPercent = 50
+        model.handlePrinterUpdate(matchingFan)
+        XCTAssertNil(model.pendingCommand)
+
+        await model.adjustLiveZOffset(by: 0.01)
+        for value in [0.0, 0.005] {
+            var report = matchingFan
+            report.liveZOffsetMm = value
+            model.handlePrinterUpdate(report)
+            XCTAssertNotNil(model.pendingCommand, "Same or nonmatching Z-offset values cannot confirm a command.")
+        }
+        var unknownZOffset = matchingFan
+        unknownZOffset.liveZOffsetMm = nil
+        model.handlePrinterUpdate(unknownZOffset)
+        XCTAssertNotNil(model.pendingCommand, "Unknown Z-offset readback cannot confirm a command.")
+        var matchingZOffset = matchingFan
+        matchingZOffset.liveZOffsetMm = 0.01
+        model.handlePrinterUpdate(matchingZOffset)
+        XCTAssertNil(model.pendingCommand)
+    }
+
+    func test_runtimeCancellationRetainsSharedLeaseUntilDispatchedFanRequestSettles() async throws {
+        var printer = try idlePrinter()
+        printer.fanSpeedPercent = 25
+        let serverID = UUID()
+        let (original, service) = try await leaseOwner(
+            serverID: serverID, printer: printer, runtimeControls: true
+        )
+        let barrier = AsyncBarrier()
+        addTeardownBlock { barrier.close() }
+        service.beforeSetFanSpeed = { await barrier.arriveAndWait() }
+        let request = Task { await original.setFanSpeed(50) }
+        await barrier.waitUntilArrived()
+
+        let (replacement, replacementService) = try await leaseOwner(
+            serverID: serverID, printer: printer, runtimeControls: true
+        )
+        XCTAssertTrue(replacement.isExecuting)
+        original.cancelPendingCommand()
+        XCTAssertTrue(original.commandNotice?.contains("Stopped waiting for telemetry") == true)
+        XCTAssertNotNil(original.pendingCommand)
+        XCTAssertTrue(original.isExecuting)
+
+        await replacement.setFanSpeed(75)
+        XCTAssertEqual(replacementService.setFanSpeedCallCount, 0, "Another view must not bypass the registered-printer lease.")
+
+        barrier.release()
+        await request.value
+        XCTAssertNil(original.pendingCommand)
+        XCTAssertFalse(original.isExecuting)
+        XCTAssertTrue(original.commandNotice?.contains("outcome is unknown") == true)
+
+        await replacement.setFanSpeed(75)
+        XCTAssertEqual(replacementService.setFanSpeedCallCount, 1, "The lease releases only after the HTTP result settles.")
+    }
+
+    func test_runtimeHttpReadStartedBeforeCommandCannotConfirmMatchingLaterResponse() async throws {
+        let clock = SafetyTestClock()
+        var printer = try idlePrinter()
+        printer.state = "printing"
+        printer.fanSpeedPercent = 25
+        var capabilities = Self.fullCaps
+        capabilities.supportsFanSpeedReadback = true
+        mockService.capabilitiesToReturn = capabilities
+        mockService.detailsToReturn = .controlsLimitsFixture(for: printer)
+        let initialStatus = VerifiedSafetyFixtures.status(
+            id: printer.id, at: clock.now(), state: "printing", fanSpeedPercent: 25
+        )
+        mockService.statusToReturn = initialStatus
+        let model = PrinterControlsViewModel.configuredForTests(
+            printerService: mockService, printer: printer, clock: { clock.now() }
+        )
+        await model.loadCapabilities()
+
+        let statusBarrier = AsyncBarrier()
+        let commandBarrier = AsyncBarrier()
+        addTeardownBlock { statusBarrier.close(); commandBarrier.close() }
+        mockService.beforeSafetyStatus = { await statusBarrier.arriveAndWait() }
+        let staleMatchingStatus = VerifiedSafetyFixtures.status(
+            id: printer.id, at: clock.now(), state: "printing", fanSpeedPercent: 50
+        )
+        mockService.statusToReturn = staleMatchingStatus
+        let staleRead = Task { await model.refreshSafetyEvidence(refreshDiscovery: false) }
+        await statusBarrier.waitUntilArrived()
+
+        clock.advance(1)
+        mockService.beforeSetFanSpeed = { await commandBarrier.arriveAndWait() }
+        let command = Task { await model.setFanSpeed(50) }
+        await commandBarrier.waitUntilArrived()
+        statusBarrier.release()
+        await staleRead.value
+        XCTAssertNotNil(model.pendingCommand, "A response from a status read started before dispatch is stale.")
+
+        mockService.beforeSafetyStatus = nil
+        commandBarrier.release()
+        await command.value
+        XCTAssertNil(model.pendingCommand, "A post-dispatch status read with the matching value can confirm the command.")
+    }
+
     func test_runtimeAdjustmentsRejectUnsuccessfulCommandResponses() async throws {
         var printer = try idlePrinter()
         printer.state = "printing"
@@ -2845,10 +3034,12 @@ enum VerifiedSafetyFixtures {
 
     static func status(
         id: UUID, at date: Date = Date(), position: SafetyVector3Dto = .init(x: 20, y: 30, z: 10),
-        isOnline: Bool = true, state: String = "ready"
+        isOnline: Bool = true, state: String = "ready", fanSpeedPercent: Double? = nil,
+        liveZOffsetMm: Double? = nil
     ) -> PrinterStatusDetail {
         var status = PrinterStatusDetail(
-            id: id, isOnline: isOnline, state: state, progress: nil, jobName: nil,
+            id: id, isOnline: isOnline, state: state, progress: nil, fanSpeedPercent: fanSpeedPercent,
+            liveZOffsetMm: liveZOffsetMm, jobName: nil,
             thumbnailUrl: nil, cameraStreamUrl: nil, cameraSnapshotUrl: nil,
             x: position.x, y: position.y, z: position.z,
             hotendTemp: 220, bedTemp: nil, hotendTarget: 220, bedTarget: nil,

@@ -227,73 +227,154 @@ struct SpoolInventoryView: View {
     }
 
     private var inventoryFilters: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
+        ViewThatFits(in: .horizontal) {
             HStack(spacing: 8) {
-                inventoryFilter(
-                    title: "All \(viewModel.count(for: nil))",
-                    selected: viewModel.selectedStatus == nil
-                        && viewModel.selectedMaterial == nil
-                        && !viewModel.showOnlyMissingNFC
-                ) {
-                    withAnimation { viewModel.clearFilters() }
-                }
-                inventoryFilter(
-                    title: "Loaded \(viewModel.count(for: .inUse))",
-                    selected: viewModel.selectedStatus == .inUse
-                ) {
-                    withAnimation {
-                        viewModel.selectedStatus = viewModel.selectedStatus == .inUse ? nil : .inUse
-                    }
-                }
-                inventoryFilter(
-                    title: "Low \(viewModel.count(for: .low))",
-                    selected: viewModel.selectedStatus == .low
-                ) {
-                    withAnimation {
-                        viewModel.selectedStatus = viewModel.selectedStatus == .low ? nil : .low
-                    }
-                }
+                inventoryFilterButtons
+            }
+            .fixedSize(horizontal: true, vertical: false)
 
-                ForEach(viewModel.availableMaterials, id: \.self) { material in
-                    inventoryFilter(
-                        title: material,
-                        selected: viewModel.selectedMaterial == material
-                    ) {
-                        withAnimation {
-                            if viewModel.selectedMaterial == material {
-                                viewModel.selectedMaterial = nil
-                            } else {
-                                viewModel.selectedMaterial = material
-                            }
-                        }
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 88, maximum: 150), alignment: .leading)],
+                alignment: .leading,
+                spacing: 8
+            ) {
+                inventoryFilterButtons
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal)
+        .padding(.vertical, 8)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("inventory.filters")
+    }
+
+    @ViewBuilder
+    private var inventoryFilterButtons: some View {
+        inventoryFilter(
+            title: "All \(viewModel.count(for: nil))",
+            identifier: "inventory.filter.all",
+            selected: viewModel.selectedStatus == nil
+                && viewModel.selectedMaterial == nil
+                && !viewModel.showOnlyMissingNFC
+        ) {
+            withAnimation { viewModel.clearFilters() }
+        }
+        inventoryFilter(
+            title: "Loaded \(viewModel.count(for: .inUse))",
+            identifier: "inventory.filter.loaded",
+            selected: viewModel.selectedStatus == .inUse
+        ) {
+            withAnimation {
+                viewModel.selectedStatus = viewModel.selectedStatus == .inUse ? nil : .inUse
+            }
+        }
+        inventoryFilter(
+            title: "Low \(viewModel.count(for: .low))",
+            identifier: "inventory.filter.low",
+            selected: viewModel.selectedStatus == .low
+        ) {
+            withAnimation {
+                viewModel.selectedStatus = viewModel.selectedStatus == .low ? nil : .low
+            }
+        }
+
+        ForEach(primaryInventoryMaterials, id: \.self) { material in
+            materialFilter(material)
+        }
+
+        Menu {
+            if !additionalInventoryMaterials.isEmpty {
+                Section("Material") {
+                    ForEach(additionalInventoryMaterials, id: \.self) { material in
+                        materialMenuFilter(material)
                     }
                 }
-                Button {
-                    withAnimation { viewModel.showOnlyMissingNFC.toggle() }
-                } label: {
-                    Label("No NFC", systemImage: "wave.3.right.circle")
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(viewModel.showOnlyMissingNFC ? .white : Color.pfTextSecondary)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(
-                            viewModel.showOnlyMissingNFC ? Color.pfAccent : Color.pfBackgroundTertiary,
-                            in: Capsule()
-                        )
-                }
-                .accessibilityLabel(
-                    viewModel.showOnlyMissingNFC
-                        ? "Showing spools without NFC tags"
-                        : "Filter to spools without NFC tags"
+            }
+
+            Button {
+                withAnimation { viewModel.showOnlyMissingNFC.toggle() }
+            } label: {
+                Label(
+                    "No NFC",
+                    systemImage: viewModel.showOnlyMissingNFC ? "checkmark" : "wave.3.right.circle"
                 )
             }
-            .padding(.horizontal)
+            .accessibilityIdentifier("inventory.filter.no-nfc")
+        } label: {
+            let activeCount = (viewModel.selectedMaterial.map(additionalInventoryMaterials.contains) == true ? 1 : 0)
+                + (viewModel.showOnlyMissingNFC ? 1 : 0)
+            Text(activeCount == 0 ? "More" : "More \(activeCount)")
+                .font(.caption.weight(.medium))
+                .foregroundStyle(activeCount > 0 ? .white : Color.pfTextSecondary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(
+                    activeCount > 0 ? Color.pfAccent : Color.pfBackgroundTertiary,
+                    in: Capsule()
+                )
         }
-        .padding(.vertical, 8)
+        .accessibilityLabel(
+            viewModel.showOnlyMissingNFC
+                ? "More spool filters, including no NFC"
+                : "More spool filters"
+        )
+        .accessibilityValue(
+            viewModel.selectedMaterial.map(additionalInventoryMaterials.contains) == true
+                ? "A material filter is active"
+                : viewModel.showOnlyMissingNFC ? "No NFC filter is active" : ""
+        )
+        .accessibilityIdentifier("inventory.filter.more")
+    }
+
+    private var primaryInventoryMaterials: [String] {
+        let preferred = ["PLA", "PETG"].compactMap { material in
+            viewModel.availableMaterials.first {
+                $0.localizedCaseInsensitiveCompare(material) == .orderedSame
+            }
+        }
+        return Array((preferred + viewModel.availableMaterials.filter { material in
+            !preferred.contains { $0.localizedCaseInsensitiveCompare(material) == .orderedSame }
+        }).prefix(2))
+    }
+
+    private var additionalInventoryMaterials: [String] {
+        viewModel.availableMaterials.filter { material in
+            !primaryInventoryMaterials.contains {
+                $0.localizedCaseInsensitiveCompare(material) == .orderedSame
+            }
+        }
+    }
+
+    private func materialFilter(_ material: String) -> some View {
+        inventoryFilter(
+            title: material,
+            identifier: "inventory.filter.material.\(material)",
+            selected: viewModel.selectedMaterial == material
+        ) {
+            withAnimation {
+                viewModel.selectedMaterial = viewModel.selectedMaterial == material ? nil : material
+            }
+        }
+    }
+
+    private func materialMenuFilter(_ material: String) -> some View {
+        Button {
+            withAnimation {
+                viewModel.selectedMaterial = viewModel.selectedMaterial == material ? nil : material
+            }
+        } label: {
+            if viewModel.selectedMaterial == material {
+                Label(material, systemImage: "checkmark")
+            } else {
+                Text(material)
+            }
+        }
+        .accessibilityIdentifier("inventory.filter.material.\(material)")
     }
 
     private func inventoryFilter(
         title: String,
+        identifier: String,
         selected: Bool,
         action: @escaping () -> Void
     ) -> some View {
@@ -308,6 +389,7 @@ struct SpoolInventoryView: View {
                     in: Capsule()
                 )
         }
+        .accessibilityIdentifier(identifier)
     }
 
     private var spoolList: some View {

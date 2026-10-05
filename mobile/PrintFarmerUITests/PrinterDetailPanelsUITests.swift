@@ -254,11 +254,24 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
                         "vase_mode_spiral.gcode"
                     )).firstMatch
                     XCTAssertTrue(failedJob.waitForExistence(timeout: 5))
-                    for _ in 0..<4 where !failedJob.isHittable {
+                    let scan = app.buttons["navigation.scan"]
+                    for _ in 0..<8 where
+                        failedJob.frame.maxY > scan.frame.minY - 8
+                        || failedJob.frame.intersects(scan.frame)
+                    {
                         queueList.swipeUp()
                     }
                     XCTAssertTrue(failedJob.isHittable, "A failed-job row must be visible in Recent failures.")
                     XCTAssertTrue(failedJob.label.localizedCaseInsensitiveContains("failed status"))
+                    XCTAssertLessThanOrEqual(
+                        failedJob.frame.maxY,
+                        scan.frame.minY - 8,
+                        "The failure row must be completely above the floating Scan action."
+                    )
+                    XCTAssertFalse(
+                        failedJob.frame.intersects(scan.frame),
+                        "The floating Scan action must not obscure failure details."
+                    )
                     attachScreen("\(device)-\(size)-global-queue-recent-failures")
                 }
                 if section == "queued" {
@@ -278,6 +291,25 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
             inventory.tap()
             XCTAssertTrue(app.buttons["inventory.addSpool"].waitForExistence(timeout: 8))
             XCTAssertTrue(app.buttons["navigation.scan"].isHittable)
+            let inventoryFilters = app.descendants(matching: .any)["inventory.filters"]
+            XCTAssertTrue(inventoryFilters.waitForExistence(timeout: 5))
+            let inventoryFilterButtons = app.buttons.matching(
+                NSPredicate(format: "identifier BEGINSWITH %@", "inventory.filter.")
+            )
+            XCTAssertGreaterThanOrEqual(inventoryFilterButtons.count, 5)
+            for index in 0..<inventoryFilterButtons.count {
+                let button = inventoryFilterButtons.element(boundBy: index)
+                XCTAssertGreaterThanOrEqual(button.frame.minX, inventoryFilters.frame.minX - 1)
+                XCTAssertLessThanOrEqual(button.frame.maxX, inventoryFilters.frame.maxX + 1)
+                XCTAssertLessThanOrEqual(button.frame.maxY, inventoryFilters.frame.maxY + 1)
+            }
+            let moreFilters = app.buttons["inventory.filter.more"]
+            XCTAssertTrue(moreFilters.isHittable)
+            moreFilters.tap()
+            let missingNFCFilter = app.buttons["inventory.filter.no-nfc"]
+            XCTAssertTrue(missingNFCFilter.waitForExistence(timeout: 5))
+            missingNFCFilter.tap()
+            app.buttons["inventory.filter.all"].tap()
             attachScreen("\(device)-\(size)-filament-inventory")
 
             farm.tap()
@@ -382,7 +414,12 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
         }
 
         func attachScreen(_ name: String) {
-            let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            let screenshot = XCUIScreen.main.screenshot()
+            let image = screenshot.image
+            let normalizedImage = UIGraphicsImageRenderer(size: image.size).image { _ in
+                image.draw(in: CGRect(origin: .zero, size: image.size))
+            }
+            let attachment = XCTAttachment(image: normalizedImage)
             attachment.name = "Issue 3259 \(name)"
             attachment.lifetime = .keepAlways
             add(attachment)
@@ -854,6 +891,20 @@ final class Issue3259ControlIdleUITests: PrinterDetailPanelsUITests.Issue3259Moc
         }
         XCTAssertTrue(runtime.isHittable, "Fan and Z-offset controls must be visibly reachable.")
         attachScreen("\(device)-\(size)-printer-control-idle-runtime")
+
+        selector.buttons["Queue"].tap()
+        let queue = app.descendants(matching: .any)["printer.detail.panel.queue"]
+        XCTAssertTrue(queue.waitForExistence(timeout: 5))
+        let startNext = app.buttons.matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "printer.detail.queue.dispatch.")
+        ).firstMatch
+        XCTAssertTrue(startNext.waitForExistence(timeout: 5))
+        for _ in 0..<4 where !startNext.isHittable {
+            queue.swipeUp()
+        }
+        XCTAssertTrue(startNext.isEnabled, "The idle printer's authenticated Start next action must be enabled.")
+        XCTAssertTrue(startNext.isHittable, "The enabled Start next action must be visible in the idle Queue capture.")
+        attachScreen("\(device)-\(size)-printer-queue-idle")
     }
 }
 #endif

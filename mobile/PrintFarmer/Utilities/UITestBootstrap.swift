@@ -755,6 +755,7 @@ enum UITestBootstrap {
             let detailsData: Data
             let attentionData: Data
             let capabilitiesData: Data
+            let assignedQueueData: Data
             let userData: Data
             let thumbnailData: Data
         }
@@ -818,6 +819,34 @@ enum UITestBootstrap {
                 ])
                 let userData = try encoder.encode(visualAcceptanceDemoUser())
                 let detailsData = try encoder.encode(fixture.details)
+                let printerID = DemoData.prusaMK4_1_ID.uuidString.lowercased()
+                let assignedQueueData = try encoder.encode([
+                    QueuedJobInfo(
+                        id: "32590000-0000-0000-0000-000000000002",
+                        rowVersion: "issue3259-queue-row-v1",
+                        name: "raspberry_pi_case.gcode",
+                        fileName: "raspberry_pi_case.gcode",
+                        assignedPrinterId: printerID,
+                        printerName: "Prusa MK4 #1",
+                        printerModel: "Prusa MK4",
+                        status: "Queued",
+                        priority: .normal,
+                        queuePosition: 1,
+                        estimatedPrintTimeSeconds: 8_100,
+                        actualStartTimeUtc: nil,
+                        actualEndTimeUtc: nil,
+                        actualPrintTimeSeconds: nil,
+                        failureReason: nil,
+                        createdAtUtc: Date(timeIntervalSince1970: 1_790_000_000),
+                        updatedAtUtc: nil,
+                        thumbnailUrl: nil,
+                        filamentName: "PLA",
+                        filamentColor: "#EF6B4A",
+                        copies: 1,
+                        completedCopies: 0,
+                        remainingCopies: 1
+                    )
+                ])
                 lock.lock()
                 fixtureState = FixtureState(
                     printersData: printersData,
@@ -826,6 +855,7 @@ enum UITestBootstrap {
                     detailsData: detailsData,
                     attentionData: try encoder.encode(fixture.attentionFeed),
                     capabilitiesData: capabilitiesData,
+                    assignedQueueData: assignedQueueData,
                     userData: userData,
                     thumbnailData: fixture.thumbnail
                 )
@@ -895,6 +925,8 @@ enum UITestBootstrap {
                 result = (200, "application/json", fixture.statusData)
             case ("GET", "/api/printers/\(printerID)/backend-capabilities"):
                 result = (200, "application/json", fixture.capabilitiesData)
+            case ("GET", "/api/job-queue-analytics/printer/\(printerID)"):
+                result = (200, "application/json", fixture.assignedQueueData)
             case ("GET", "/api/printers/\(printerID)/current-job/thumbnail"):
                 result = (200, "image/png", fixture.thumbnailData)
             case ("POST", "/api/printers/\(printerID)/fan"):

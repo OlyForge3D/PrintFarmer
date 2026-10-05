@@ -58,6 +58,24 @@ final class PrinterDetailViewModelTests: XCTestCase {
         XCTAssertNil(viewModel.errorMessage)
     }
 
+    func testCanonicalUnknownStatusStateReplacesStaleReadyStateAndFailsClosed() async throws {
+        var ready = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        ready.state = "ready"
+        mockService.printerToReturn = ready
+        mockService.statusToReturn = PrinterStatusDetail(
+            id: ready.id, isOnline: true, state: nil, progress: nil,
+            jobName: nil, thumbnailUrl: nil, cameraStreamUrl: nil, cameraSnapshotUrl: nil,
+            x: nil, y: nil, z: nil, hotendTemp: nil, bedTemp: nil,
+            hotendTarget: nil, bedTarget: nil, spoolInfo: nil, mmuStatus: nil
+        )
+
+        await viewModel.loadPrinter()
+
+        XCTAssertNil(viewModel.printer?.state, "An authoritative unknown status must not preserve stale readiness.")
+        XCTAssertFalse(viewModel.isIdle, "Unknown status cannot authorize idle-only actions.")
+        XCTAssertNil(viewModel.errorMessage)
+    }
+
     func testLoadPrinterError() async {
         mockService.errorToThrow = NetworkError.notFound
 
