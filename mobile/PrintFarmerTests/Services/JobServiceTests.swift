@@ -201,6 +201,33 @@ final class JobServiceTests: XCTestCase {
         )
     }
 
+    func testRerunUsesReviewedETagAndSurfacesPreconditionFailure() async {
+        mockAPIClient.stubResponse(
+            json: #"{"error":"precondition_failed"}"#,
+            statusCode: 412
+        )
+
+        var didSurfacePreconditionFailure = false
+        do {
+            try await service.rerun(id: jobId, reviewedRowVersion: "failed-job-v3")
+            XCTFail("A stale job revision must not be treated as a successful rerun.")
+        } catch let error as NetworkError {
+            if case .preconditionFailed = error {
+                didSurfacePreconditionFailure = true
+            } else {
+                XCTFail("Expected a precondition failure, received \(error).")
+            }
+        } catch {
+            XCTFail("Expected a typed precondition failure, received \(error).")
+        }
+
+        XCTAssertTrue(didSurfacePreconditionFailure)
+        let request = mockAPIClient.capturedRequests.last
+        XCTAssertEqual(request?.httpMethod, "POST")
+        XCTAssertEqual(request?.url?.path, "/api/job-queue/\(jobId)/rerun")
+        XCTAssertEqual(request?.value(forHTTPHeaderField: "If-Match"), "\"failed-job-v3\"")
+    }
+
     func testMoveQueuedJobEncodesBeforeNeighborAndDecodesFlatResponse() async throws {
         mockAPIClient.stubResponse(
             json: """

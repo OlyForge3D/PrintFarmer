@@ -232,6 +232,11 @@ class DemoJobService: JobServiceProtocol, @unchecked Sendable {
         )
     }
     func cancel(id: UUID, reviewedRowVersion: String) async throws {}
+
+    func rerun(id: UUID, reviewedRowVersion: String) async throws {
+        throw ServiceError.notImplemented("rerun jobs in demo mode")
+    }
+
     func abort(id: UUID, reviewedRowVersion: String) async throws {}
     func pause(id: UUID, reviewedRowVersion: String) async throws {}
     func resume(id: UUID, reviewedRowVersion: String) async throws {}

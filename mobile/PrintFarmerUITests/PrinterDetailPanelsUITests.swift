@@ -371,8 +371,13 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
                     guard failedJobExists else { return }
                     XCTAssertTrue(failedJob.label.localizedCaseInsensitiveContains("vase_mode_spiral.gcode"))
                     let retryButton = queueList.buttons["job.retry.30000000-0003-0000-0000-000000000009"]
-                    XCTAssertFalse(retryButton.exists, "Recent failures must not expose an unsupported retry action.")
+                    XCTAssertTrue(retryButton.waitForExistence(timeout: 5))
+                    XCTAssertTrue(retryButton.isEnabled, "Queue.Write-authorized operators can rerun a failed job.")
                     XCTAssertTrue(heading.isHittable, "Recent failures must remain visible while inspecting its rows.")
+                    XCTAssertTrue(retryButton.isHittable, "Retry must remain visible beside the failed job.")
+                    if size == "normal" {
+                        XCTAssertLessThan(retryButton.frame.width, 80, "Retry should stay a compact inline action.")
+                    }
                     XCTAssertTrue(
                         failedJob.isHittable,
                         "A failed-job row must be visible in Recent failures. Row: \(failedJob.frame), scan: \(scan.frame), list: \(queueList.frame)."
@@ -1048,6 +1053,30 @@ final class Issue3259MockupAccessibilityUITests: PrinterDetailPanelsUITests.Issu
         captureApprovedMockupScreens()
     }
 
+    func testRetryFailedQueueJobUsesAuthenticatedRerunEndpoint() {
+        let queue = shellDestinationButton(tabIdentifier: "tab.queue", timeout: 8)
+        XCTAssertTrue(queue.waitForExistence(timeout: 8))
+        queue.tap()
+        let queueList = app.collectionViews["jobList.root"]
+        XCTAssertTrue(queueList.waitForExistence(timeout: 8))
+
+        let retryButton = queueList.buttons["job.retry.30000000-0003-0000-0000-000000000009"]
+        for _ in 0..<8 where !retryButton.isHittable {
+            queueList.swipeUp()
+        }
+        XCTAssertTrue(retryButton.waitForExistence(timeout: 5))
+        XCTAssertTrue(retryButton.isEnabled)
+        retryButton.tap()
+
+        let rerunRow = queueList.buttons["job.row.32590000-0000-0000-0000-000000000104"]
+        for _ in 0..<12 where !rerunRow.isHittable {
+            queueList.swipeDown()
+        }
+        XCTAssertTrue(
+            rerunRow.waitForExistence(timeout: 8),
+            "A successful authenticated rerun should add the new copy to the queue."
+        )
+    }
 }
 
 @MainActor

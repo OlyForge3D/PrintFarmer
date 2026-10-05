@@ -144,9 +144,9 @@ exactly three tabs: **Farm · Queue · Filament**. Regular-width iPad presents
 those same items in a `NavigationSplitView` sidebar, without Floor/Oversight
 sections or a duplicate Fleet destination.
 
-Queue groups the active print, queued jobs and recent failures. Failed jobs are
-browsable from Recent failures; retry is not offered because the API does not
-provide a rerun endpoint.
+Queue groups the active print, queued jobs and recent failures. For an eligible
+failed job, **Retry** rechecks its current status and row version before
+submitting the authenticated rerun; it is unavailable offline and in Demo mode.
 
 Printer-detail Load and Unload stay disabled unless the selected backend
 confirms command support. Moonraker currently returns unsupported responses for
