@@ -122,7 +122,7 @@ final class FilamentCoverageUITests: PrintFarmerUITestCase {
                       "Fleet card must render before absence assertions become meaningful.")
     }
 
-    /// The dedicated Filament page renders coverage details without a disclosure.
+    /// The dedicated Filament page progressively discloses technical coverage details.
     override func openPrinterFilamentDetails(printerID: String) -> XCUIElement {
         let root = app.descendants(matching: .any)
             .matching(identifier: "printer.detail.root.\(printerID)").firstMatch
@@ -141,6 +141,13 @@ final class FilamentCoverageUITests: PrintFarmerUITestCase {
         let heading = filament.descendants(matching: .any)
             .matching(identifier: "printer.filament.heading").firstMatch
         XCTAssertTrue(heading.waitForExistence(timeout: 10))
+        let disclosure = filament.buttons["printer.filament.disclosure"]
+        XCTAssertTrue(disclosure.waitForExistence(timeout: 5))
+        for _ in 0..<3 where !disclosure.isHittable {
+            filament.swipeUp()
+        }
+        XCTAssertTrue(disclosure.isHittable)
+        disclosure.tap()
         let summary = filament.staticTexts["printer.filament.summary"]
         XCTAssertTrue(summary.waitForExistence(timeout: 5),
                       "Coverage details must render on the selected Filament page.")

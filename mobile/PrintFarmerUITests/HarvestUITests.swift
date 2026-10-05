@@ -146,13 +146,15 @@ final class HarvestUITests: QueueUITestBase {
         XCTAssertFalse(printerBoundaryHandle.exists,
                        "A single-row printer group must not expose a reorder handle.")
 
-        if app.buttons["jobList.page.printing"].exists {
-            app.buttons["jobList.page.printing"].tap()
-        }
         let printing = app.buttons.matching(
             NSPredicate(format: "label CONTAINS %@", "Queue pinned printing.gcode")
         ).firstMatch
+        let queueList = app.collectionViews["jobList.root"]
+        for _ in 0..<8 where !printing.isHittable {
+            queueList.swipeDown()
+        }
         XCTAssertTrue(printing.waitForExistence(timeout: 5))
+        XCTAssertTrue(printing.isHittable, "The Printing row must remain reachable in the combined Queue.")
         XCTAssertFalse(app.buttons["Reorder Queue pinned printing.gcode"].exists,
                        "Printing jobs must not expose native reorder controls.")
     }
