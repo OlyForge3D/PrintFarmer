@@ -181,4 +181,3 @@ fixtures/wire-contracts/manifest.json.lock
 /src/Web/ReactApp/public/release-identity.json
 
 # Recovery matrix harness scratch (#3099)
-/.recovery-matrix-work/

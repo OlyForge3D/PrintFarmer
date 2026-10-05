@@ -5,7 +5,6 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
-  statSync,
   writeFileSync,
 } from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -17,22 +16,6 @@ import { emitBuildMetadata } from './release-metadata.mjs';
 import { command, imageRepository, rejectExistingImages, verifyImages, publishImageTags } from './release-set.mjs';
 import { releaseNotes } from './release-notes.mjs';
 import { buildManifest, deriveSequence, validateManifest } from './release-manifest.mjs';
-import { hostUpdateCliAssets, hostUpdateCliSumsBundleName, hostUpdateCliSumsName, packageHostUpdateCli,
-  verifyHostUpdateCliSums } from './host-update-cli-package.mjs';
-import { infrastructureImagesDocument, infrastructureImagesName, infrastructureImagesSignatureName,
-  infrastructureLockPath, validateInfrastructureImages, validateInfrastructureLock,
-  verifyInfrastructureLockAgainstRegistry } from './offline-bundle-images.mjs';
-import { recoveryInstructionsDocument, recoveryInstructionsName, recoveryInstructionsSignatureName,
-  validateRecoveryInstructions } from './offline-recovery-instructions.mjs';
-import { deploymentSetDocument, deploymentSetName, deploymentSetSignatureName, offlineToolsLockPath,
-  readDeploymentTemplates, validateDeploymentSet, validateOfflineToolsLock } from './offline-deployment-set.mjs';
-import { offlineBundleName, offlineBundleSignatureName } from './offline-update-bundle.mjs';
-
-// Issue #3061: the identity the signed infrastructure image list is bound to; it matches the
-// release fields of update-manifest.json so an offline bundle can prove both belong together.
-const infrastructureIdentity = release => ({ tag: release.tag, version: release.version, channel: release.channel,
-  sourceBranch: release.sourceBranch, sourceCommit: release.sourceCommit, buildId: String(release.buildId),
-  sequence: deriveSequence(release.version) });
 
 export async function rejectExistingVersion(api, tag) {
   requireThat(!await api(`git/ref/tags/${tag}`, { allowMissing: true }), `Tag ${tag} already exists; choose a new version`);
@@ -67,10 +50,6 @@ export function buildImages(release, source, assets, run = command, rejectImages
     'Build checkout does not match selected source');
   validateVersion(release.version, release.channel, readFileSync(join(source, 'VERSION'), 'utf8'));
   rejectImages(release.version);
-  // Issue #3061: prove every pinned infrastructure digest against the registry before anything is
-  // built, so a moved or unavailable pin publishes nothing.
-  const infrastructureLock = validateInfrastructureLock(readFileSync(join(source, infrastructureLockPath)));
-  verifyInfrastructureLockAgainstRegistry(infrastructureLock, (name, args) => run(name, args, { cwd: source }));
   mkdirSync(assets, { recursive: true });
   const execute = (name, args) => run(name, args, { cwd: source, stdio: ['ignore', 'inherit', 'pipe'] });
   run('dotnet', ['restore', 'farm-web.sln'], { cwd: join(source, 'src'), stdio: ['ignore', 'inherit', 'pipe'] });
@@ -88,15 +67,6 @@ export function buildImages(release, source, assets, run = command, rejectImages
   execute('node', ['scripts/compliance/create-license-inventory.mjs', '--version', release.tag,
     '--revision', release.sourceCommit, '--output', join(assets, 'license-inventory.json')]);
   emitBuildMetadata(release, source);
-  // Issue #3041: self-contained host-update recovery CLI archives plus the checksum list the
-  // sign job signs. Built before the images so a CLI build failure publishes nothing. Issue
-  // #3045: each archive's staged tree is also scanned into an SPDX SBOM bound by that list. It
-  // is a component inventory, not license-enriched: the compliance inventory excludes /tools/.
-  packageHostUpdateCli(release, source, assets, {
-    run,
-    sbom: ({ stage, sbomPath, rid }) => execute('syft', [`dir:${stage}`, '-o', `spdx-json=${sbomPath}`,
-      '--source-name', `printfarmer-host-update-cli-${rid}`, '--source-version', release.version]),
-  });
   const digests = {};
   const baseUrl = `https://github.com/${repository}/releases/download/${release.tag}`;
   for (const [name, { target, platforms }] of Object.entries(components)) {
@@ -148,16 +118,6 @@ export function buildImages(release, source, assets, run = command, rejectImages
   }, undefined, 2)}\n`);
   writeFileSync(join(assets, 'update-manifest.json'), buildManifest(
     { ...release, sequence: deriveSequence(release.version) }, imageDetails));
-  writeFileSync(join(assets, infrastructureImagesName),
-    infrastructureImagesDocument(infrastructureIdentity(release), infrastructureLock));
-  // Issue #3063: host-local recovery instructions derived from the same release identity.
-  writeFileSync(join(assets, recoveryInstructionsName), recoveryInstructionsDocument(infrastructureIdentity(release)));
-  // Issue #3081: the supported deployment templates, their config schema and the approved tool
-  // pins, bound to the same release identity so an offline bundle carries a complete set.
-  writeFileSync(join(assets, deploymentSetName), deploymentSetDocument(infrastructureIdentity(release), {
-    templates: readDeploymentTemplates(source),
-    lock: validateOfflineToolsLock(readFileSync(join(source, ...offlineToolsLockPath.split('/')))),
-  }));
   writeFileSync(join(assets, 'digests.json'), JSON.stringify(digests));
   return digests;
 }
@@ -174,13 +134,8 @@ export function releaseAssets(release) {
     ...sourceBundleFiles(release),
     'LICENSE', 'THIRD-PARTY-NOTICES.md', 'license-inventory.json', 'container-images.json', 'release-notes.md',
     'update-manifest.json', 'update-manifest.sigstore.json',
-    infrastructureImagesName, infrastructureImagesSignatureName,
-    recoveryInstructionsName, recoveryInstructionsSignatureName,
-    deploymentSetName, deploymentSetSignatureName,
     `printfarmer-${release.tag}.spdx.json`,
     ...Object.keys(components).map(name => `printfarmer-${name}-${release.tag}.spdx.json`),
-    ...hostUpdateCliAssets(release.version),
-    offlineBundleName(release.version), offlineBundleSignatureName(release.version),
   ];
 }
 
@@ -199,76 +154,6 @@ function manifestSignatureIdentity(channel) {
   requireThat(['stable', 'insider'].includes(channel), 'Invalid release channel for signature identity');
   const ref = channel === 'stable' ? 'main' : 'development';
   return `https://github.com/${repository}/${workflow}@refs/heads/${ref}`;
-}
-
-// Issue #3041: the host-update CLI checksum list is signed by the same workflow identity as the
-// manifest, and must still name exactly the archives about to be uploaded.
-function verifyHostUpdateCliBeforeUpload(assets, run, release) {
-  const sumsPath = join(assets, hostUpdateCliSumsName(release.version));
-  const bundlePath = join(assets, hostUpdateCliSumsBundleName(release.version));
-  requireThat(readFileSync(bundlePath).length > 0,
-    'Missing host-update CLI checksum signature bundle immediately before upload');
-  verifyHostUpdateCliSums(assets, release.version);
-  run('cosign', ['verify-blob', '--bundle', bundlePath,
-    '--certificate-oidc-issuer', 'https://token.actions.githubusercontent.com',
-    '--certificate-identity', manifestSignatureIdentity(release.channel), sumsPath]);
-}
-
-// Issue #3061: the infrastructure image list is signed by the same workflow identity and must
-// still be bound to exactly this release before it is uploaded.
-function verifyInfrastructureImagesBeforeUpload(assets, run, release) {
-  const listPath = join(assets, infrastructureImagesName);
-  const bundlePath = join(assets, infrastructureImagesSignatureName);
-  validateInfrastructureImages(readFileSync(listPath), infrastructureIdentity(release));
-  requireThat(readFileSync(bundlePath).length > 0,
-    'Missing infrastructure image list signature bundle immediately before upload');
-  run('cosign', ['verify-blob', '--bundle', bundlePath,
-    '--certificate-oidc-issuer', 'https://token.actions.githubusercontent.com',
-    '--certificate-identity', manifestSignatureIdentity(release.channel), listPath]);
-}
-
-// Issue #3063: the recovery instructions are signed by the same workflow identity and must still
-// be the exact instructions generated for this release before they are uploaded.
-function verifyRecoveryInstructionsBeforeUpload(assets, run, release) {
-  const path = join(assets, recoveryInstructionsName);
-  const bundlePath = join(assets, recoveryInstructionsSignatureName);
-  validateRecoveryInstructions(readFileSync(path), infrastructureIdentity(release));
-  requireThat(readFileSync(bundlePath).length > 0,
-    'Missing recovery instructions signature bundle immediately before upload');
-  run('cosign', ['verify-blob', '--bundle', bundlePath,
-    '--certificate-oidc-issuer', 'https://token.actions.githubusercontent.com',
-    '--certificate-identity', manifestSignatureIdentity(release.channel), path]);
-}
-
-// Issue #3081: the deployment set is signed by the same workflow identity and must still be the
-// exact set generated for this release before it is uploaded.
-function verifyDeploymentSetBeforeUpload(assets, run, release) {
-  const path = join(assets, deploymentSetName);
-  const bundlePath = join(assets, deploymentSetSignatureName);
-  validateDeploymentSet(readFileSync(path), infrastructureIdentity(release));
-  requireThat(readFileSync(bundlePath).length > 0,
-    'Missing deployment set signature bundle immediately before upload');
-  run('cosign', ['verify-blob', '--bundle', bundlePath,
-    '--certificate-oidc-issuer', 'https://token.actions.githubusercontent.com',
-    '--certificate-identity', manifestSignatureIdentity(release.channel), path]);
-}
-
-// Issue #3195: GitHub rejects release assets of 2 GiB or more; the published bundle must fit.
-export const releaseAssetMaxBytes = 2 * 1024 * 1024 * 1024 - 1;
-
-// Issue #3195: the published offline recovery bundle archive is signed by the same workflow
-// identity and must still be the exact archive assembled for this release before it is uploaded.
-function verifyOfflineBundleBeforeUpload(assets, run, release) {
-  const path = join(assets, offlineBundleName(release.version));
-  const bundlePath = join(assets, offlineBundleSignatureName(release.version));
-  const size = statSync(path).size;
-  requireThat(size > 0, 'Missing offline recovery bundle immediately before upload');
-  requireThat(size <= releaseAssetMaxBytes, 'Offline recovery bundle exceeds the GitHub release asset size limit');
-  requireThat(readFileSync(bundlePath).length > 0,
-    'Missing offline recovery bundle signature immediately before upload');
-  run('cosign', ['verify-blob', '--bundle', bundlePath,
-    '--certificate-oidc-issuer', 'https://token.actions.githubusercontent.com',
-    '--certificate-identity', manifestSignatureIdentity(release.channel), path]);
 }
 
 function verifyManifestSignatureBeforeUpload(assets, run, channel) {
@@ -297,11 +182,6 @@ export async function publishRelease(release, assets, api, {
   // Verify before creating the permanent Git tag or draft release. The later
   // verification immediately before upload protects the exact bytes after any
   // fallible draft-release operations.
-  verifyHostUpdateCliBeforeUpload(assets, run, release);
-  verifyInfrastructureImagesBeforeUpload(assets, run, release);
-  verifyRecoveryInstructionsBeforeUpload(assets, run, release);
-  verifyDeploymentSetBeforeUpload(assets, run, release);
-  verifyOfflineBundleBeforeUpload(assets, run, release);
   verifyManifestSignatureBeforeUpload(assets, run, release.channel);
   const notes = await releaseNotes(api, release, digests);
   writeFileSync(join(assets, 'release-notes.md'), notes);
@@ -317,11 +197,6 @@ export async function publishRelease(release, assets, api, {
     body: notes, draft: true, prerelease: release.channel === 'insider', make_latest: 'false',
   } });
   requireThat(Number.isSafeInteger(draft?.id), 'GitHub did not return a draft release ID');
-  verifyHostUpdateCliBeforeUpload(assets, run, release);
-  verifyInfrastructureImagesBeforeUpload(assets, run, release);
-  verifyRecoveryInstructionsBeforeUpload(assets, run, release);
-  verifyDeploymentSetBeforeUpload(assets, run, release);
-  verifyOfflineBundleBeforeUpload(assets, run, release);
   verifyManifestSignatureBeforeUpload(assets, run, release.channel);
   run('gh', ['release', 'upload', release.tag, ...files.map(name => join(assets, name)), '--repo', repository]);
   const uploaded = await api(`releases/${draft.id}/assets?per_page=100`);

@@ -4,11 +4,6 @@ import { generateUUID } from "@/utils/uuid";
 import { getApiBaseUrl } from "@/common/utils/apiUrlHelpers";
 import type {
   PrinterStatus,
-  HostUpdateManualAuthorizationIntent,
-  HostUpdateManualAuthorizationResponse,
-  HostUpdateRecoveryResult,
-  HostUpdateExecutionState,
-  HostUpdateStatusResponse,
   UpdateChannelSettings,
 } from "@/types/api";
 import {
@@ -167,54 +162,6 @@ import {
   CreateCustomFieldDefinitionRequest,
   UpdateCustomFieldDefinitionRequest,
 } from "@/types/api";
-
-const HOST_UPDATE_STATES = [
-  "Accepted",
-  "Preflight",
-  "Draining",
-  "Fenced",
-  "BackedUp",
-  "Migrating",
-  "Applying",
-  "Verifying",
-  "Completed",
-  "RecoveryRequired",
-  "Refused",
-] as const satisfies readonly HostUpdateExecutionState[];
-
-const HOST_UPDATE_STATE_SET = new Set<HostUpdateExecutionState>(HOST_UPDATE_STATES);
-
-export type HostUpdateExecutionResult =
-  | HostUpdateStatusResponse
-  | { kind: "conflict"; status: HostUpdateStatusResponse };
-
-export function isHostUpdateManualAuthorizationResponse(
-  value: unknown,
-): value is HostUpdateManualAuthorizationResponse {
-  return typeof value === "object" &&
-    value !== null &&
-    typeof (value as { authorizationId?: unknown }).authorizationId === "string" &&
-    (value as { authorizationId: string }).authorizationId.length > 0 &&
-    typeof (value as { releaseId?: unknown }).releaseId === "string" &&
-    (value as { releaseId: string }).releaseId.length > 0;
-}
-
-export function isHostUpdateStatusResponse(value: unknown): value is HostUpdateStatusResponse {
-  return typeof value === "object" &&
-    value !== null &&
-    typeof (value as { releaseId?: unknown }).releaseId === "string" &&
-    HOST_UPDATE_STATE_SET.has((value as { currentState?: unknown }).currentState as HostUpdateExecutionState) &&
-    Array.isArray((value as { activities?: unknown }).activities);
-}
-
-export function isHostUpdateRecoveryResult(value: unknown): value is HostUpdateRecoveryResult {
-  return typeof value === "object" &&
-    value !== null &&
-    ["RolledBack", "NeedsOperator", "FenceReleasePending"].includes(
-      (value as { outcome?: unknown }).outcome as string,
-    ) &&
-    typeof (value as { detail?: unknown }).detail === "string";
-}
 
 type HistoryJobWire = Omit<
   HistoryJob,
@@ -539,86 +486,6 @@ export class ApiClient {
     settings: UpdateChannelSettings,
   ): Promise<UpdateChannelSettings> {
     return this.saveSettings("UpdateChannel", settings);
-  }
-
-  async authorizeHostUpdate(
-    intent: HostUpdateManualAuthorizationIntent = {},
-  ): Promise<HostUpdateManualAuthorizationResponse> {
-    const response = await this.client.post<HostUpdateManualAuthorizationResponse>(
-      "/admin/host-updates/authorizations",
-      intent,
-    );
-    if (!isHostUpdateManualAuthorizationResponse(response.data)) {
-      throw {
-        message: "The host update authorization response was invalid.",
-        statusCode: response.status,
-        data: response.data,
-      };
-    }
-    return response.data;
-  }
-
-  async executeHostUpdate(
-    intent: HostUpdateManualAuthorizationIntent = {},
-  ): Promise<HostUpdateExecutionResult> {
-    const response = await this.client.post<HostUpdateStatusResponse>(
-      "/admin/host-updates/execute",
-      intent,
-      { validateStatus: (status) => [200, 409, 503].includes(status) },
-    );
-    if (response.status === 503) {
-      const detail = (response.data as { detail?: unknown } | undefined)?.detail;
-      throw {
-        message:
-          typeof detail === "string"
-            ? detail
-            : "The host update subsystem is unavailable on this host.",
-        statusCode: response.status,
-        data: response.data,
-      };
-    }
-    if (!isHostUpdateStatusResponse(response.data)) {
-      throw {
-        message: "The host update status response was invalid.",
-        statusCode: response.status,
-        data: response.data,
-      };
-    }
-    return response.status === 409
-      ? { kind: "conflict", status: response.data }
-      : response.data;
-  }
-
-  async getHostUpdateStatus(releaseId: string): Promise<HostUpdateStatusResponse> {
-    const response = await this.client.get<HostUpdateStatusResponse>(
-      `/admin/host-updates/${encodeURIComponent(releaseId)}/status`,
-    );
-    if (!isHostUpdateStatusResponse(response.data)) {
-      throw {
-        message: "The host update status response was invalid.",
-        statusCode: response.status,
-        data: response.data,
-      };
-    }
-    return response.data;
-  }
-
-  async recoverHostUpdate(
-    releaseId: string,
-    requestId?: string,
-  ): Promise<HostUpdateRecoveryResult> {
-    const response = await this.client.post<HostUpdateRecoveryResult>(
-      `/admin/host-updates/${encodeURIComponent(releaseId)}/recover`,
-      requestId ? { requestId } : {},
-    );
-    if (!isHostUpdateRecoveryResult(response.data)) {
-      throw {
-        message: "The host update recovery response was invalid.",
-        statusCode: response.status,
-        data: response.data,
-      };
-    }
-    return response.data;
   }
 
   /**
@@ -2537,12 +2404,12 @@ export class ApiClient {
     const params = Object.fromEntries(
       Object.entries(apiRequest).filter(([, value]) => value !== undefined)
     );
-    
+
     // Debug logging
     if (typeof window !== 'undefined' && (window as { PrintFarmerDebug?: { gcodeFileBrowser?: boolean } }).PrintFarmerDebug?.gcodeFileBrowser) {
       console.log('[API Client] getGcodeFilesWithFilter params after filtering:', params);
     }
-    
+
     const response = await this.client.get<GetGcodeFilesApiResponse>(
       "/gcode-files",
       { params }
@@ -2560,12 +2427,12 @@ export class ApiClient {
     const params = Object.fromEntries(
       Object.entries(apiRequest).filter(([, value]) => value !== undefined)
     );
-    
+
     // Debug logging
     if (typeof window !== 'undefined' && (window as { PrintFarmerDebug?: { gcodeFileBrowser?: boolean } }).PrintFarmerDebug?.gcodeFileBrowser) {
       console.log('[API Client] getGcodeFilesQuery params after filtering:', params);
     }
-    
+
     const response = await this.client.get<GetGcodeFilesApiResponse>(
       "/gcode-files/query",
       { params }
@@ -2807,7 +2674,7 @@ export class ApiClient {
   ): Promise<GcodeLibraryFile> {
     const form = new FormData();
     form.append("file", file);
-    
+
     // Create a new XMLHttpRequest to track progress
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
@@ -2871,7 +2738,7 @@ export class ApiClient {
   ): Promise<import("@/types/api").Model3DUploadResultDto> {
     const form = new FormData();
     form.append("file", file);
-    
+
     // Create a new XMLHttpRequest to track progress
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
@@ -3699,7 +3566,7 @@ export class ApiClient {
   ): Promise<Record<string, unknown>> {
     const form = new FormData();
     form.append('file', file, file.name);
-    
+
     const response = await this.client.post('/3d-models', form, {
       headers: {
         'Content-Type': 'multipart/form-data'
@@ -4471,12 +4338,12 @@ export class ApiClient {
     dateEnd?: string | null
   ): Promise<QueueHistoryPageDto> {
     const params: Record<string, unknown> = { limit, offset, sortBy };
-    
+
     // Add statuses as comma-separated string if provided
     if (statuses && statuses.length > 0) {
       params.statuses = statuses.join(',');
     }
-    
+
     // Add date filters if provided
     if (dateStart) {
       params.dateStart = dateStart;
@@ -4484,7 +4351,7 @@ export class ApiClient {
     if (dateEnd) {
       params.dateEnd = dateEnd;
     }
-    
+
     const response = await this.client.get(`/job-queue-analytics/history`, { params });
     return response.data;
   }
@@ -4758,7 +4625,7 @@ export class ApiClient {
   }
 
   // ============ Camera API methods ============
-  
+
   /**
    * Get all standalone cameras
    */
@@ -5154,7 +5021,7 @@ export class ApiClient {
   }
 
   // ============ Obico ML Server Management API methods ============
-  
+
   /**
    * Get all configured Obico ML servers
    */

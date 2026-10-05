@@ -94,6 +94,8 @@ public class QueuedPrintJobDto
 
     public string? FailureReason { get; set; }
 
+    public Farm.Infrastructure.Domain.JobBlockedReasonCode? BlockedReasonCode { get; set; }
+
     public DateTime CreatedAtUtc { get; set; }
 
     public DateTime UpdatedAtUtc { get; set; }
@@ -203,12 +205,6 @@ public class QueuedPrintJobDto
 
     /// <summary>Typed result of the most recent physical dispatch invocation.</summary>
     public DispatchAttemptResultDto? DispatchResult { get; set; }
-
-    /// <summary>
-    /// Typed reason the job is held from dispatch (string enum), e.g.
-    /// <c>OperatorRecoveryRequired</c> after an operator recovery (issue #2993).
-    /// </summary>
-    public JobBlockedReasonCode? BlockedReasonCode { get; set; }
 }
 
 /// <summary>

@@ -24,7 +24,7 @@ cd PrintFarmer/src
 # Terminal 1 - API Server
 dotnet run --project api/Farm.Web.Api.csproj
 
-# Terminal 2 - React Client  
+# Terminal 2 - React Client
 cd Web/ReactApp && npm run dev
 ```
 
@@ -39,10 +39,10 @@ cd Web/ReactApp && npm run dev
 - 2GB+ RAM
 
 ### Advantages
-✅ Full WiFi access for printer discovery  
-✅ Fast development with hot reload  
-✅ Native debugging tools  
-✅ No Docker overhead  
+✅ Full WiFi access for printer discovery
+✅ Fast development with hot reload
+✅ Native debugging tools
+✅ No Docker overhead
 
 ## Docker Deployment
 
@@ -167,7 +167,7 @@ docker compose --env-file .env.monolithic up -d --build
 docker compose --env-file .env.microservices up -d --build
 ```
 
-**Architecture**: 
+**Architecture**:
 - **Frontend**: Nginx + React SPA (Port 3000)
 - **Backend**: ASP.NET API + SignalR (Port 5000)
 - **Load Balancer**: Nginx proxy (Port 8080)
@@ -210,9 +210,9 @@ Do not restore the socket when troubleshooting.
 
 Native/custom installations retain ordinary network discovery but have no
 container inventory or managed replacement guarantee. There is no supported
-host enrollment, host updater, pull reconciler or UI execution helper in this
-change. See the [host enrollment security contract](HOST_ENROLLMENT_SECURITY.md)
-for proposed opt-in boundaries and the outstanding maintainer/security gates.
+host enrollment, pull reconciler or UI execution helper in this change. See
+the [host enrollment security contract](HOST_ENROLLMENT_SECURITY.md) for
+proposed opt-in boundaries and the outstanding maintainer/security gates.
 
 ## Deployment Architectures
 
@@ -342,23 +342,6 @@ pg_dump --format=custom --file=printfarmer.backup printfarmer
 sqlcmd -S "$SQLSERVER_HOST" -Q \
   "BACKUP DATABASE [printfarmer] TO DISK = N'/var/opt/mssql/backup/printfarmer.bak' WITH COPY_ONLY"
 ```
-
-For the host-update executor's automated pre-update backups, a SQL Server
-deployment must additionally bind-mount a **shared volume** between the
-`sqlserver` container and the PrintFarmer container: `BACKUP DATABASE` writes
-from the SQL Server container's own filesystem view, not PrintFarmer's, so
-the directory PrintFarmer derives as `BackupRootDirectory`
-(`{RootDirectory}/backups` — set the root via `HostUpdateExecution__RootDirectory`;
-`BackupRootDirectory` is a computed value and is not independently
-configurable) must be mounted at the identical path in both containers — the
-same directory production backups already write to and read back from, with
-no separate "SQL Server side" setting. The SQL Server login used also needs
-`BACKUP DATABASE` permission on `master` (e.g. `sysadmin` or
-`db_backupoperator`), since the round-trip probe backs up `master`. The
-executor verifies this mapping with a real round-trip probe before trusting
-it — see "SQL Server visible backup-path mapping" in
-[`HOST_UPDATE_EXECUTOR.md`](./HOST_UPDATE_EXECUTOR.md) for the required
-configuration and failure modes.
 
 Previously supported SQLite databases created with `EnsureCreated` and without
 migration history are adopted only when the complete relational fingerprint
@@ -494,12 +477,8 @@ replay continuity, complete infrastructure coverage or a recoverable
 database/blob/key consistency point. Do not treat a subsequent installer run
 as a network-denied safe update or rollback.
 
-Use the [installation update runbook](HOST_UPDATE_RUNBOOK.md) for setup,
-manual authorization, automatic policy and failure handling. The
-[offline delivery requirements](OFFLINE_UPDATE_RECOVERY.md) distinguish
-existing caching from the remaining bounded import/export (#2981) and isolated
-restore evidence (#2982). The signed host-local status/recovery CLI is
-available as a release asset. Its remaining gaps are listed in the runbook.
+The existing offline cache is for deployment convenience only. It is not a
+managed update, rollback, or automated recovery channel.
 Managed offline update support must remain blocked until those gates pass.
 There is no download/build fallback or skip-verification recovery path.
 

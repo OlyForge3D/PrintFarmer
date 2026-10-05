@@ -1,7 +1,7 @@
 # PrintFarmer Job Queue System Architecture
 
-**Document Date:** January 16, 2026  
-**Version:** 1.0  
+**Document Date:** January 16, 2026
+**Version:** 1.0
 **Status:** NEEDS CONSOLIDATION
 
 ---
@@ -474,46 +474,6 @@ resolves the open points of the contract above as follows:
 - **Authorization scope.** Reads require printer `View` scope; recover requires
   printer `Manage` scope and clear requires job `Manage` scope. Out-of-scope
   resources return `404`.
-- **Queue read model.** `QueuedPrintJobDto` (used by `/api/job-queue` and
-  `/api/job-queue-analytics`) carries the string-enum `blockedReasonCode`, so
-  queue surfaces can identify `OperatorRecoveryRequired` jobs without a
-  per-job reconciliation read. It is `null` (omitted) for unblocked jobs.
-
-#### Operator recovery UI (#2993)
-
-The React UI lives in `src/Web/ReactApp/src/features/dispatch-recovery/` and
-calls the four routes through `services/api/dispatchRecoveryApi.ts`.
-
-- **Warning.** `DispatchReconciliationBanner` renders on the printer card, and
-  on the queue dashboard for each printer with an `Unknown` dispatch result
-  that requires reconciliation. It shows the job, attempt, claim age,
-  escalation level, sender state, and last redacted evidence phase. It offers
-  no cancel or retry action. The resource polls every 30 seconds only while a
-  claim is indeterminate; queue SignalR events invalidate it otherwise.
-  Queue-dashboard candidates come from an unfiltered, fully paged queue read,
-  so filters and pagination cannot hide a warning. Because
-  `GET /api/job-queue-analytics` applies authorization after pagination, a
-  scoped caller can get a short page before the end; the endpoint returns
-  `X-Has-More` (`true` when the unscoped page filled `limit`) and the UI keeps
-  paging while it is `true`. A banner stays mounted
-  until the reconciliation read reports the claim closed, and a recorded
-  recovery notice (with its audit link) stays until the operator dismisses it.
-  Queue views hide Start Print and Cancel while a job's dispatch outcome is
-  `Unknown` and still requires reconciliation.
-- **Recovery.** The Recover action appears only when the server reports
-  `recoveryPermission`. The modal requires the physical-check confirmation, and
-  also sender isolation when `senderSettled` is not `true` or the server
-  returned `rejected_sender_isolation_required`. It sends the reviewed
-  reconciliation ETag as `If-Match` and a client-generated `Idempotency-Key`.
-  The same key is reused only to retry an identical body after a transport
-  failure. Any definitive response retires it. A `412` or a claim revision
-  change clears the confirmations and refetches the resource. Nothing is
-  updated optimistically; every settled mutation invalidates the
-  reconciliation and queue queries.
-- **Clear.** The queue dashboard lists `OperatorRecoveryRequired` jobs and
-  hides Start Print for them. Holders of `queue:reconcile` can confirm
-  **Allow dispatch**, which sends the job `rowVersion` as `If-Match`. The UI
-  fails closed when no auth context is mounted.
 
 The minimum validation matrix covers authorization denial, wrong-printer and
 stale-revision conflicts, duplicate/replayed assertions, concurrent
@@ -615,8 +575,8 @@ exception text.
 
 ### 1. JobQueueController (`/api/job-queue`)
 
-**Purpose:** Basic queue operations and printer management  
-**Status:** ✅ **ACTIVE & USED**  
+**Purpose:** Basic queue operations and printer management
+**Status:** ✅ **ACTIVE & USED**
 **Used By:** PrinterDashboard (simple queue view)
 
 #### Endpoints
@@ -675,9 +635,9 @@ revalidates every fence authoritatively.
 
 ### 2. JobQueueAnalyticsController (`/api/job-queue-analytics`)
 
-**Purpose:** Rich dashboard analytics, history, and advanced job management  
-**Status:** ✅ **ACTIVE & USED**  
-**Used By:** PrintQueueDashboard (advanced queue analytics)  
+**Purpose:** Rich dashboard analytics, history, and advanced job management
+**Status:** ✅ **ACTIVE & USED**
+**Used By:** PrintQueueDashboard (advanced queue analytics)
 **Previously Known As:** `PrintQueueController`
 
 #### Endpoints
@@ -754,8 +714,8 @@ public record DurationAnalyticsDto(
 
 ### 3. PrintJobQueueController (`/api/print-job-queue`)
 
-**Purpose:** Unknown (appears to be experimental or legacy)  
-**Status:** 🔴 **DEAD CODE - NOT REGISTERED**  
+**Purpose:** Unknown (appears to be experimental or legacy)
+**Status:** 🔴 **DEAD CODE - NOT REGISTERED**
 **Used By:** `QueueGcodeModal.tsx` (only component using `printJobQueueService`)
 
 #### Endpoints
@@ -790,8 +750,8 @@ public record DurationAnalyticsDto(
 
 ### 4. JobSchedulingController (`/api/jobscheduling`)
 
-**Purpose:** Schedule jobs for deferred/future execution with recurrence support  
-**Status:** ✅ **ACTIVE & USED**  
+**Purpose:** Schedule jobs for deferred/future execution with recurrence support
+**Status:** ✅ **ACTIVE & USED**
 **Used By:** Schedule features, recurring print jobs
 
 #### Endpoints
@@ -954,7 +914,7 @@ Dashboard displays statistics chart
 
 ### Issue #1: PrintJobQueueController is Dead Code
 
-**Severity:** Medium  
+**Severity:** Medium
 **Impact:** Maintenance burden, confusion, wasted developer time
 
 **Evidence:**
@@ -972,7 +932,7 @@ Dashboard displays statistics chart
 
 ### Issue #2: Frontend Service Disconnect
 
-**Severity:** Medium  
+**Severity:** Medium
 **Impact:** Frontend can't use the "new" PrintJobQueueController
 
 **Evidence:**
@@ -989,14 +949,14 @@ Dashboard displays statistics chart
 
 ### Issue #3: API Naming Ambiguity
 
-**Severity:** Low  
+**Severity:** Low
 **Impact:** Developer confusion, slow API integration, wrong endpoint selection
 
 **Current Confusion:**
 ```
 New developers see three endpoints:
 - /api/job-queue
-- /api/job-queue-analytics  
+- /api/job-queue-analytics
 - /api/print-job-queue
 
 Which should I use?
@@ -1011,7 +971,7 @@ No clear guidance exists.
 
 ### Issue #4: No Documentation
 
-**Severity:** Medium  
+**Severity:** Medium
 **Impact:** Architectural knowledge only in developers' heads
 
 **Current State:**
@@ -1042,8 +1002,8 @@ No clear guidance exists.
 5. Verify in tests that QueueGcodeModal still works
 6. Update `Program.cs` to remove any references (if any)
 
-**Effort:** 30 minutes  
-**Risk:** LOW (only QueueGcodeModal affected, easily testable)  
+**Effort:** 30 minutes
+**Risk:** LOW (only QueueGcodeModal affected, easily testable)
 **Benefit:** Reduced codebase complexity, clearer queue API
 
 ---
@@ -1084,8 +1044,8 @@ Cons: Confusion about which to use
 Pros: Single source of truth, clear semantics
 Cons: One controller gets large (manageable with regions)
 
-**Effort:** 4-6 hours  
-**Risk:** MEDIUM (API contract change, need frontend updates)  
+**Effort:** 4-6 hours
+**Risk:** MEDIUM (API contract change, need frontend updates)
 **Benefit:** Simpler architecture, less confusion, easier to document
 
 ---
@@ -1127,8 +1087,8 @@ Cons: One controller gets large (manageable with regions)
 - Easier to monitor and debug
 - Better for API versioning
 
-**Effort:** 6-8 hours  
-**Risk:** MEDIUM (significant API restructuring)  
+**Effort:** 6-8 hours
+**Risk:** MEDIUM (significant API restructuring)
 **Benefit:** Production-grade architecture, better scalability
 
 ---
@@ -1173,8 +1133,8 @@ public async Task<IActionResult> EnqueueJobAsync(...)
 }
 ```
 
-**Effort:** 2 hours  
-**Risk:** LOW (output caching is safe with proper tags)  
+**Effort:** 2 hours
+**Risk:** LOW (output caching is safe with proper tags)
 **Benefit:** 10-50x faster analytics queries, reduced database load
 
 ---
@@ -1198,7 +1158,7 @@ CREATE INDEX idx_jobs_created ON Jobs(CreatedAt DESC);
 CREATE INDEX idx_jobs_status_created ON Jobs(Status, CreatedAt DESC);
 
 -- Composite for common analytics query
-CREATE INDEX idx_jobs_analytics 
+CREATE INDEX idx_jobs_analytics
     ON Jobs(Status, AssignedPrinterId, CreatedAt DESC);
 ```
 
@@ -1227,8 +1187,8 @@ var stats = await _context.Jobs
     .ToListAsync();
 ```
 
-**Effort:** 4 hours  
-**Risk:** LOW (indexes are non-breaking)  
+**Effort:** 4 hours
+**Risk:** LOW (indexes are non-breaking)
 **Benefit:** 50-100x faster complex queries, reduced CPU/memory
 
 ---
@@ -1258,8 +1218,8 @@ var stats = await _context.Jobs
 | Schedule future print | POST /api/jobscheduling/{id}/schedule | `{ scheduledTime, timezone }` |
 ```
 
-**Effort:** 3 hours  
-**Risk:** NONE (documentation only)  
+**Effort:** 3 hours
+**Risk:** NONE (documentation only)
 **Benefit:** Faster onboarding, fewer API misuses
 
 ---
@@ -1268,7 +1228,7 @@ var stats = await _context.Jobs
 
 ### Phase 1: Remove Dead Code (Week 1)
 
-**Priority:** HIGH  
+**Priority:** HIGH
 **Effort:** 2-4 hours
 
 ```
@@ -1291,7 +1251,7 @@ var stats = await _context.Jobs
 
 ### Phase 2: Document Current Architecture (Week 1-2)
 
-**Priority:** MEDIUM  
+**Priority:** MEDIUM
 **Effort:** 3-4 hours
 
 ```
@@ -1306,7 +1266,7 @@ var stats = await _context.Jobs
 
 ### Phase 3: Add Caching & Optimize (Week 2-3)
 
-**Priority:** MEDIUM  
+**Priority:** MEDIUM
 **Effort:** 4-6 hours
 
 ```
@@ -1327,8 +1287,8 @@ var stats = await _context.Jobs
 
 ### Phase 4: Consolidate Endpoints (Month 2)
 
-**Priority:** LOW (can wait)  
-**Effort:** 6-8 hours  
+**Priority:** LOW (can wait)
+**Effort:** 6-8 hours
 **Breaking Change:** YES
 
 ```
@@ -1388,6 +1348,6 @@ These changes will:
 
 ---
 
-**Document Version:** 1.0  
-**Last Updated:** January 16, 2026  
+**Document Version:** 1.0
+**Last Updated:** January 16, 2026
 **Next Review:** February 16, 2026

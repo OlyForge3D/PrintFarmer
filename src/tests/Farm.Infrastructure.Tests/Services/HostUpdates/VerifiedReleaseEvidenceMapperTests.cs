@@ -7,7 +7,7 @@ namespace Farm.Infrastructure.Tests.Services.HostUpdates;
 
 /// <summary>
 /// Focused coverage for <see cref="VerifiedReleaseEvidenceMapper"/> (issue #2757
-/// item 4): translating the host-update-domain <see cref="SignedReleaseMetadata"/> shape into
+/// item 4): translating the release-domain <see cref="SignedReleaseMetadata"/> shape into
 /// the inventory-domain <see cref="VerifiedReleaseEvidenceDto"/> shape
 /// <c>ReleaseReadinessEvaluator</c> consumes, including splitting
 /// <c>ComponentPlatformDigests</c>' <c>"{serviceId}/{platform}"</c> keys.
@@ -198,9 +198,6 @@ public class VerifiedReleaseEvidenceMapperTests
             ["api", "frontend", "slicer-host", "discovery", "slicer-worker"]);
         dto.Services.Should().OnlyContain(service =>
             service.PlatformDigest == platformDigest && service.IndexDigest == indexDigest);
-        dto.ExecutionTargets.Select(target => target.ServiceId).Should().BeEquivalentTo(manifestServices);
-        dto.ExecutionTargets.Should().OnlyContain(target =>
-            target.Platform == "linux-amd64" && target.PlatformDigest == platformDigest);
     }
 
     public static IEnumerable<object[]> NoncanonicalDigests()

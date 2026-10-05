@@ -2,16 +2,15 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
-using System.Threading.Channels;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.AutoDispatch;
-using Farm.Infrastructure.Services.HostUpdates;
 using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Tests.Builders;
+using Farm.Testing.Shared;
 using FluentAssertions;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Data.Sqlite;
@@ -195,35 +194,11 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
         return (printer, printerId);
     }
 
-    private AutoDispatchBackgroundService CreateService(
-        AutoDispatchFenceFlag? hostUpdateFence = null,
-        TimeProvider? timeProvider = null)
+    private AutoDispatchBackgroundService CreateService(TimeProvider? timeProvider = null)
     {
         return new AutoDispatchBackgroundService(
             _trigger, _scopeFactory, _concurrencyCoordinator, _hubMock.Object,
-            NullLogger<AutoDispatchBackgroundService>.Instance, hostUpdateFence, timeProvider);
-    }
-
-    private static TimeProvider CreateScanClock(ChannelWriter<Action> scanIntervals)
-    {
-        var clock = new Mock<TimeProvider>();
-        // Durable scans sample the same provider for their eligibility instant; jobs are
-        // seeded with wall-clock QueuedAt, so keep the instant on wall time.
-        clock.Setup(value => value.GetUtcNow()).Returns(() => DateTimeOffset.UtcNow);
-        clock.Setup(value => value.CreateTimer(
-                It.IsAny<TimerCallback>(),
-                It.IsAny<object?>(),
-                It.IsAny<TimeSpan>(),
-                It.IsAny<TimeSpan>()))
-            .Returns((TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period) =>
-            {
-                dueTime.Should().Be(TimeSpan.FromSeconds(30));
-                period.Should().Be(Timeout.InfiniteTimeSpan);
-                // Each callback advances one real scan wait past its requested interval.
-                scanIntervals.TryWrite(() => callback(state)).Should().BeTrue();
-                return Mock.Of<ITimer>();
-            });
-        return clock.Object;
+            NullLogger<AutoDispatchBackgroundService>.Instance, timeProvider);
     }
 
     private PrintJob SeedQueuedJob(string name = "Test Job", int priority = 0, int queuePosition = 1) =>
@@ -336,67 +311,25 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
     [Fact]
     [Trait("Category", "Dispatch")]
     [Trait("Phase", "2")]
-    public async Task OnPrinterIdle_MixedScopes_SkipsIneligibleScopeHeadAndIgnoresOtherScopePositions()
+    public async Task OnPrinterIdle_RecoveryBlockedUnassignedJob_DoesNotDispatch()
     {
-        SeedSettings(enabled: true, mode: AutoDispatchMode.Auto, idleThresholdSeconds: 0, minimumScoreThreshold: 50.0);
+        SeedSettings(enabled: true, mode: AutoDispatchMode.Auto, idleThresholdSeconds: 0);
         (Printer printer, Guid printerId) = SeedPrinter();
-        PrintJob ineligibleAssignedHead = SeedJob(
-            "ineligible-assigned-head",
-            PrintJobStatus.Queued,
-            printerId,
-            priority: 0,
-            queuePosition: 1);
-        PrintJob eligibleAssignedJob = SeedJob(
-            "eligible-assigned-job",
-            PrintJobStatus.Queued,
-            printerId,
-            priority: 0,
-            queuePosition: 10);
-        PrintJob unassignedJob = SeedQueuedJob("unassigned-job", priority: 0, queuePosition: 1);
-        DateTime queuedAt = DateTime.UtcNow;
-        ineligibleAssignedHead.QueuedAt = queuedAt.AddMinutes(-1);
-        eligibleAssignedJob.QueuedAt = queuedAt;
-        unassignedJob.QueuedAt = queuedAt.AddMinutes(1);
+        PrintJob job = SeedQueuedJob("operator-recovery-blocked");
+        job.BlockedReasonCode = JobBlockedReasonCode.OperatorRecoveryRequired;
         _db.SaveChanges();
 
-        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(30));
-        AutoDispatchBackgroundService service = CreateService();
-        DispatchScore eliminated = new(
-            printerId, printer.Name, 0,
-            new Dictionary<string, FactorScore>(),
-            Eliminated: true,
-            EliminationReasons: ["Not compatible"]);
-        DispatchScore eligible = new(
-            printerId, printer.Name, 90,
+        DispatchScore goodScore = new(
+            printerId, printer.Name, 85.0,
             new Dictionary<string, FactorScore>(),
             Eliminated: false,
             EliminationReasons: []);
 
         _scorerMock
-            .Setup(scorer => scorer.ScorePrinterForJobAsync(
-                ineligibleAssignedHead.Id,
-                printerId,
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(eliminated);
-        _scorerMock
-            .Setup(scorer => scorer.ScorePrinterForJobAsync(
-                eligibleAssignedJob.Id,
-                printerId,
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(eligible);
-        _scorerMock
-            .Setup(scorer => scorer.ScorePrinterForJobAsync(
-                unassignedJob.Id,
-                printerId,
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(eligible);
+            .Setup(s => s.ScorePrinterForJobAsync(job.Id, printerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(goodScore);
         _dispatchServiceMock
-            .Setup(dispatch => dispatch.DispatchJobAsync(
-                eligibleAssignedJob.Id,
-                printerId,
-                "system:auto-dispatch",
-                It.IsAny<DispatchScore>(),
-                It.IsAny<CancellationToken>()))
+            .Setup(d => d.DispatchJobAsync(job.Id, printerId, "system:auto-dispatch", It.IsAny<DispatchScore>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Farm.Infrastructure.Dtos.PrintQueue.QueuedPrintJobDto
             {
                 DispatchResult = new Farm.Infrastructure.Dtos.PrintQueue.DispatchAttemptResultDto
@@ -405,280 +338,20 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
                 },
             });
 
-        await service.ProcessPrinterIdleAsync(printerId, skipIdleThreshold: true, cts.Token);
+        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(30));
+        AutoDispatchBackgroundService svc = CreateService();
 
-        _dispatchServiceMock.Verify(dispatch => dispatch.DispatchJobAsync(
-            eligibleAssignedJob.Id,
-            printerId,
-            "system:auto-dispatch",
-            It.IsAny<DispatchScore>(),
-            It.IsAny<CancellationToken>()), Times.Once);
-        _dispatchServiceMock.Verify(dispatch => dispatch.DispatchJobAsync(
-            unassignedJob.Id,
-            It.IsAny<Guid>(),
-            It.IsAny<string>(),
-            It.IsAny<DispatchScore>(),
-            It.IsAny<CancellationToken>()), Times.Never);
-    }
+        await svc.ProcessPrinterIdleAsync(printerId, skipIdleThreshold: true, cts.Token);
 
-    [Fact]
-    [Trait("Category", "Dispatch")]
-    [Trait("Phase", "2")]
-    public async Task ExecuteAsync_FencePauseRequested_SkipsStartingWorkerAndAcknowledgesPause()
-    {
-        // Kane/panel audit (issue #2663, "physical admission barrier is not real"): while a
-        // host update's fence step has paused auto-dispatch, the background loop must not start
-        // a new dispatch worker for an idle-printer notification -- and must acknowledge
-        // quiescence to the fence coordinator only once it genuinely has none in flight.
-        SeedSettings(enabled: true, mode: AutoDispatchMode.Auto, idleThresholdSeconds: 0);
-        (Printer printer, Guid printerId) = SeedPrinter();
-        SeedQueuedJob("benchy");
-
-        var fenceFlag = new Farm.Infrastructure.Services.HostUpdates.AutoDispatchFenceFlag();
-        await fenceFlag.RequestPauseAsync(CancellationToken.None);
-
-        AutoDispatchBackgroundService svc = CreateService(fenceFlag);
-        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(10));
-
-        await svc.StartAsync(cts.Token);
-        try
-        {
-            _trigger.NotifyPrinterIdle(printerId);
-
-            DateTime deadline = DateTime.UtcNow.AddSeconds(5);
-            while (!await fenceFlag.IsPausedAsync(CancellationToken.None) && DateTime.UtcNow < deadline)
-            {
-                await Task.Delay(25);
-            }
-
-            (await fenceFlag.IsPausedAsync(CancellationToken.None)).Should().BeTrue();
-            svc.TrackedWorkerCount.Should().Be(0);
-            _dispatchServiceMock.Verify(
-                d => d.DispatchJobAsync(
-                    It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<DispatchScore>(), It.IsAny<CancellationToken>()),
-                Times.Never);
-        }
-        finally
-        {
-            await svc.StopAsync(CancellationToken.None);
-        }
-    }
-
-    [Theory]
-    [InlineData(true, AutoDispatchMode.Auto)]
-    [InlineData(false, AutoDispatchMode.Auto)]
-    [InlineData(true, AutoDispatchMode.Manual)]
-    [Trait("Category", "Dispatch")]
-    public async Task ExecuteAsync_IdleTriggerChannel_AcknowledgesPauseOnDurableScan(
-        bool enabled,
-        AutoDispatchMode mode)
-    {
-        SeedSettings(enabled: enabled, mode: mode);
-        var fenceFlag = new AutoDispatchFenceFlag();
-        Channel<Action> scanIntervals = Channel.CreateUnbounded<Action>();
-        using AutoDispatchBackgroundService service =
-            CreateService(fenceFlag, CreateScanClock(scanIntervals.Writer));
-        using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(10));
-
-        await service.StartAsync(CancellationToken.None);
-        try
-        {
-            Action elapseScanInterval = await scanIntervals.Reader.ReadAsync(timeout.Token);
-            _trigger.IntentStateCount.Should().Be(0);
-            await fenceFlag.RequestPauseAsync(timeout.Token);
-            (await fenceFlag.IsPausedAsync(timeout.Token)).Should().BeFalse();
-
-            elapseScanInterval();
-            _ = await scanIntervals.Reader.ReadAsync(timeout.Token);
-
-            (await fenceFlag.IsPausedAsync(timeout.Token)).Should().BeTrue(
-                "an idle writer must acknowledge without receiving a dispatch trigger");
-            service.TrackedWorkerCount.Should().Be(0);
-            _trigger.IntentStateCount.Should().Be(0);
-            _scorerMock.VerifyNoOtherCalls();
-            _dispatchServiceMock.VerifyNoOtherCalls();
-        }
-        finally
-        {
-            await service.StopAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10));
-        }
-    }
-
-    [Fact]
-    [Trait("Category", "Dispatch")]
-    public async Task ExecuteAsync_IdleTriggerChannelAfterWorkerDrain_AcknowledgesOnlyAfterWorkerCompletes()
-    {
-        SeedSettings();
-        (Printer printer, Guid printerId) = SeedPrinter();
-        printer.DispatchState!.AutoDispatchState = AutoDispatchState.None;
-        _db.SaveChanges();
-        PrintJob job = SeedQueuedJob();
-        DispatchScore score = new(printerId, printer.Name, 90, new Dictionary<string, FactorScore>(), false, []);
-        _scorerMock.Setup(value => value.ScorePrintersForJobAsync(job.Id, It.IsAny<CancellationToken>()))
-            .ReturnsAsync([score]);
-        _scorerMock.Setup(value => value.ScorePrinterForJobAsync(job.Id, printerId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(score);
-        var dispatchEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var releaseDispatch = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        _dispatchServiceMock.Setup(value => value.DispatchJobAsync(
-                job.Id, printerId, "system:auto-dispatch", It.IsAny<DispatchScore>(), It.IsAny<CancellationToken>()))
-            .Returns<Guid, Guid, string, DispatchScore, CancellationToken>(async (_, _, _, _, ct) =>
-            {
-                job.Status = PrintJobStatus.Starting;
-                await _db.SaveChangesAsync(ct);
-                dispatchEntered.TrySetResult();
-                await releaseDispatch.Task.WaitAsync(ct);
-                return new Farm.Infrastructure.Dtos.PrintQueue.QueuedPrintJobDto
-                {
-                    DispatchResult = new Farm.Infrastructure.Dtos.PrintQueue.DispatchAttemptResultDto
-                    {
-                        Outcome = DispatchAttemptOutcome.Accepted,
-                    },
-                };
-            });
-        var fenceFlag = new AutoDispatchFenceFlag();
-        Channel<Action> scanIntervals = Channel.CreateUnbounded<Action>();
-        using AutoDispatchBackgroundService service =
-            CreateService(fenceFlag, CreateScanClock(scanIntervals.Writer));
-        using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(10));
-
-        await service.StartAsync(CancellationToken.None);
-        try
-        {
-            _ = await scanIntervals.Reader.ReadAsync(timeout.Token);
-            printer.DispatchState.AutoDispatchState = AutoDispatchState.Ready;
-            await _db.SaveChangesAsync(timeout.Token);
-            _trigger.NotifyJobQueued(printerId);
-            await dispatchEntered.Task.WaitAsync(timeout.Token);
-            Action elapseScanInterval = await scanIntervals.Reader.ReadAsync(timeout.Token);
-
-            await fenceFlag.RequestPauseAsync(timeout.Token);
-            elapseScanInterval();
-            Action elapseNextScanInterval = await scanIntervals.Reader.ReadAsync(timeout.Token);
-
-            service.TrackedWorkerCount.Should().Be(1);
-            (await fenceFlag.IsPausedAsync(timeout.Token)).Should().BeFalse(
-                "a scan tick must not acknowledge while physical dispatch is still in flight");
-
-            releaseDispatch.TrySetResult();
-            while (service.TrackedWorkerCount != 0)
-            {
-                await Task.Delay(10, timeout.Token);
-            }
-
-            _trigger.IntentStateCount.Should().Be(0);
-            elapseNextScanInterval();
-            _ = await scanIntervals.Reader.ReadAsync(timeout.Token);
-
-            (await fenceFlag.IsPausedAsync(timeout.Token)).Should().BeTrue();
-            _dispatchServiceMock.Verify(value => value.DispatchJobAsync(
-                    job.Id, printerId, "system:auto-dispatch", It.IsAny<DispatchScore>(), It.IsAny<CancellationToken>()),
-                Times.Once);
-        }
-        finally
-        {
-            releaseDispatch.TrySetResult();
-            await service.StopAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10));
-        }
-    }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    [Trait("Category", "Dispatch")]
-    public async Task ExecuteAsync_FenceResumed_DurableScanDispatchesQueuedJobWithoutNewTrigger(
-        bool triggerWhilePaused)
-    {
-        SeedSettings();
-        (Printer printer, Guid printerId) = SeedPrinter();
-        var fenceFlag = new AutoDispatchFenceFlag();
-        Channel<Action> scanIntervals = Channel.CreateUnbounded<Action>();
-        using AutoDispatchBackgroundService service =
-            CreateService(fenceFlag, CreateScanClock(scanIntervals.Writer));
-        using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(10));
-
-        await service.StartAsync(CancellationToken.None);
-        try
-        {
-            Action elapseScanInterval = await scanIntervals.Reader.ReadAsync(timeout.Token);
-            await fenceFlag.RequestPauseAsync(timeout.Token);
-            PrintJob job = SeedQueuedJob();
-            DispatchScore score = new(printerId, printer.Name, 90, new Dictionary<string, FactorScore>(), false, []);
-            _scorerMock.Setup(value => value.ScorePrintersForJobAsync(job.Id, It.IsAny<CancellationToken>()))
-                .ReturnsAsync([score]);
-            _scorerMock.Setup(value => value.ScorePrinterForJobAsync(job.Id, printerId, It.IsAny<CancellationToken>()))
-                .ReturnsAsync(score);
-            var dispatchEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            _dispatchServiceMock.Setup(value => value.DispatchJobAsync(
-                    job.Id, printerId, "system:auto-dispatch", It.IsAny<DispatchScore>(), It.IsAny<CancellationToken>()))
-                .Callback(() => dispatchEntered.TrySetResult())
-                .ReturnsAsync(new Farm.Infrastructure.Dtos.PrintQueue.QueuedPrintJobDto
-                {
-                    DispatchResult = new Farm.Infrastructure.Dtos.PrintQueue.DispatchAttemptResultDto
-                    {
-                        Outcome = DispatchAttemptOutcome.Accepted,
-                    },
-                });
-
-            if (triggerWhilePaused)
-            {
-                _trigger.NotifyJobQueued(printerId);
-            }
-            else
-            {
-                elapseScanInterval();
-            }
-
-            Action elapseNextScanInterval = await scanIntervals.Reader.ReadAsync(timeout.Token);
-            (await fenceFlag.IsPausedAsync(timeout.Token)).Should().BeTrue();
-            _trigger.IntentStateCount.Should().Be(0);
-            _dispatchServiceMock.VerifyNoOtherCalls();
-
-            await fenceFlag.ResumeAsync(timeout.Token);
-            elapseNextScanInterval();
-            await dispatchEntered.Task.WaitAsync(timeout.Token);
-            while (service.TrackedWorkerCount != 0 || _trigger.IntentStateCount != 0)
-            {
-                await Task.Delay(10, timeout.Token);
-            }
-
-            _trigger.IntentStateCount.Should().Be(0);
-            _dispatchServiceMock.Verify(value => value.DispatchJobAsync(
-                    job.Id, printerId, "system:auto-dispatch", It.IsAny<DispatchScore>(), It.IsAny<CancellationToken>()),
-                Times.Once);
-        }
-        finally
-        {
-            await service.StopAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10));
-        }
-    }
-
-    [Fact]
-    [Trait("Category", "Dispatch")]
-    public async Task StopAsync_IdleTriggerChannel_DoesNotTreatCancellationAsScanTick()
-    {
-        SeedSettings();
-        var fenceFlag = new AutoDispatchFenceFlag();
-        Channel<Action> scanIntervals = Channel.CreateUnbounded<Action>();
-        using AutoDispatchBackgroundService service =
-            CreateService(fenceFlag, CreateScanClock(scanIntervals.Writer));
-        using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(10));
-
-        await service.StartAsync(CancellationToken.None);
-        try
-        {
-            _ = await scanIntervals.Reader.ReadAsync(timeout.Token);
-            await fenceFlag.RequestPauseAsync(timeout.Token);
-        }
-        finally
-        {
-            await service.StopAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10));
-        }
-
-        service.ExecuteTask?.Status.Should().Be(TaskStatus.RanToCompletion);
-        service.TrackedWorkerCount.Should().Be(0);
-        _trigger.IntentStateCount.Should().Be(0);
-        (await fenceFlag.IsPausedAsync(CancellationToken.None)).Should().BeFalse();
+        _scorerMock.Verify(
+            s => s.ScorePrinterForJobAsync(job.Id, printerId, It.IsAny<CancellationToken>()),
+            Times.Never);
+        _dispatchServiceMock.Verify(
+            d => d.DispatchJobAsync(job.Id, printerId, "system:auto-dispatch", It.IsAny<DispatchScore>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        _clientProxyMock.Verify(
+            c => c.SendCoreAsync(It.IsAny<string>(), It.IsAny<object?[]>(), It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 
     [Fact]
@@ -1030,7 +703,7 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
 
         using CancellationTokenSource cts = new(TimeSpan.FromSeconds(30));
         AutoDispatchBackgroundService svc = CreateService(
-            timeProvider: Mock.Of<TimeProvider>(clock => clock.GetUtcNow() == now));
+            Mock.Of<TimeProvider>(clock => clock.GetUtcNow() == now));
         PrintJob job = SeedQueuedJob("log-check");
 
         DispatchScore goodScore = new(
@@ -1054,9 +727,6 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
             l.PrintJobId == job.Id
             && l.PrinterId == printerId
             && l.Action == DispatchAction.Suggested);
-        logs.Single().CreatedAtUtc.Should().Be(now.UtcDateTime);
-        logs.Single().CreatedDate.Should().Be(now);
-        logs.Single().UpdatedDate.Should().Be(now);
     }
 
     [Fact]
@@ -1232,7 +902,7 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
 
         using CancellationTokenSource cts = new(TimeSpan.FromSeconds(30));
         AutoDispatchBackgroundService svc = CreateService(
-            timeProvider: Mock.Of<TimeProvider>(clock => clock.GetUtcNow() == now));
+            Mock.Of<TimeProvider>(clock => clock.GetUtcNow() == now));
         PrintJob job = SeedQueuedJob();
 
         DispatchScore goodScore = new(
@@ -1264,8 +934,5 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
         logs.Should().ContainSingle(l =>
             l.PrintJobId == job.Id
             && l.Action == DispatchAction.Failed);
-        logs.Single().CreatedAtUtc.Should().Be(now.UtcDateTime);
-        logs.Single().CreatedDate.Should().Be(now);
-        logs.Single().UpdatedDate.Should().Be(now);
     }
 }

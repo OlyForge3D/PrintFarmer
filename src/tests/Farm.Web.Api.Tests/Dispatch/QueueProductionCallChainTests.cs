@@ -5334,34 +5334,6 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         }
     }
 
-    [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public async Task QueuePolling_FakeClock_AdvancesAndCancelsTimers(bool reconciliation)
-    {
-        var clock = new ManualTimeProvider();
-        using var reconciler = new QueueReconciliationService(
-            Mock.Of<IServiceScopeFactory>(), NullLogger<QueueReconciliationService>.Instance, timeProvider: clock);
-        using var publisher = new QueueOutboxPublisherService(
-            Mock.Of<IServiceScopeFactory>(), CreateHubContext(),
-            NullLogger<QueueOutboxPublisherService>.Instance, timeProvider: clock);
-        using var cancellation = new CancellationTokenSource();
-        async Task<bool> WaitAsync() => reconciliation
-            ? await reconciler.WaitForIntervalOrPauseAsync(cancellation.Token)
-            : await publisher.WaitForIntervalOrPauseAsync(cancellation.Token);
-
-        Task<bool> interval = WaitAsync();
-        interval.IsCompleted.Should().BeFalse();
-        clock.Advance(reconciliation ? TimeSpan.FromMinutes(2) : TimeSpan.FromSeconds(5));
-        (await interval.WaitAsync(TimeSpan.FromSeconds(5))).Should().BeFalse();
-
-        Task<bool> cancelledInterval = WaitAsync();
-        cancelledInterval.IsCompleted.Should().BeFalse();
-        await cancellation.CancelAsync();
-        Func<Task> waitForCancellation = async () => await cancelledInterval.WaitAsync(TimeSpan.FromSeconds(5));
-        await waitForCancellation.Should().ThrowAsync<OperationCanceledException>();
-    }
-
     [Fact]
     [Trait("Category", "DbHeavy")]
     public async Task OutboxPublisher_SkipsDiscoveryHintAndSendsPersistedEnvelope()

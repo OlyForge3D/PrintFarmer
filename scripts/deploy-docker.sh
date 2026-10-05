@@ -67,11 +67,6 @@ DOTNET_MAJOR_VERSION="${SDK_TAG%%-*}"  # Remove everything after first hyphen
 
 # Default flags
 DRY_RUN=false
-# Opt-in installation of the signed host-update recovery CLI (issue #3045).
-HOST_UPDATE_CLI_VERSION="${HOST_UPDATE_CLI_VERSION:-}"
-HOST_UPDATE_CLI_ASSETS="${HOST_UPDATE_CLI_ASSETS:-}"
-HOST_UPDATE_DAEMON_SERVICE="${HOST_UPDATE_DAEMON_SERVICE:-false}"
-HOST_UPDATE_DAEMON_USER="${HOST_UPDATE_DAEMON_USER:-}"
 NON_INTERACTIVE=false
 TEAR_DOWN=false
 SHOW_HELP=false
@@ -212,7 +207,7 @@ fi
 # ============================================================================
 # Single source of truth for all offline deployment images
 # Format: "base_image|dockerfile|upgraded_image"
-# 
+#
 # - base_image: Standard upstream image (pulled as fallback)
 # - dockerfile: Dockerfile for building pre-upgraded version (in scripts/docker/dockerfiles/)
 # - upgraded_image: Pre-upgraded image with apt/apk updates and tools (preferred, built during --prepare-offline)
@@ -246,13 +241,13 @@ DOCKER_UPGRADED_IMAGES=()
 _init_image_arrays() {
     DOCKER_BASE_IMAGES=()
     DOCKER_UPGRADED_IMAGES=()
-    
+
     for image_config in "${DOCKER_IMAGES_CONFIG[@]}"; do
         IFS='|' read -r base_image dockerfile upgraded_image <<< "$image_config"
         DOCKER_BASE_IMAGES+=("$base_image")
         DOCKER_UPGRADED_IMAGES+=("$upgraded_image")
     done
-    
+
     # Add BuildKit image to base images (it doesn't need upgrading)
     DOCKER_BASE_IMAGES+=("$DOCKER_BUILDKIT_IMAGE")
     DOCKER_UPGRADED_IMAGES+=("$DOCKER_BUILDKIT_IMAGE")
@@ -280,7 +275,7 @@ resolve_image_tag() {
     local image_prefix="$1"  # e.g., "mcr.microsoft.com/dotnet/sdk"
     local base_tag="$2"      # e.g., "10.0-noble"
     local upgraded_tag="${base_tag}-upgraded"
-    
+
     if test_image_exists "${image_prefix}:${upgraded_tag}"; then
         echo "$upgraded_tag"
     else
@@ -418,7 +413,7 @@ find_cached_images_dir() {
         "/mnt/usb/docker-images"
         "/media/*/docker-images"
     )
-    
+
     for path in "${search_paths[@]}"; do
         # Handle glob patterns
         if [[ "$path" == *"*"* ]]; then
@@ -437,7 +432,7 @@ find_cached_images_dir() {
             fi
         fi
     done
-    
+
     return 1
 }
 
@@ -452,12 +447,12 @@ find_cached_images_dir() {
 _load_tar_images() {
     local images_dir="$1"
     local quiet="${2:-}"
-    
+
     if [ ! -d "$images_dir" ]; then
         [ "$quiet" != "quiet" ] && print_error "Images directory not found: $images_dir"
         return 1
     fi
-    
+
     # Detect current platform for smart matching
     local current_platform="linux-amd64"  # Default
     if [ -n "${DOCKER_BUILD_PLATFORM:-}" ]; then
@@ -471,7 +466,7 @@ _load_tar_images() {
             x86_64|amd64) current_platform="linux-amd64" ;;
         esac
     fi
-    
+
     # Find TAR files: prefer platform-specific, then fall back to unprefixed
     local tar_files
     local preferred_tar_files
@@ -483,24 +478,24 @@ _load_tar_images() {
         # Fall back to any .tar files (legacy support for non-platform-tagged files)
         tar_files=$(find "$images_dir" -maxdepth 1 -name "*.tar" 2>/dev/null)
     fi
-    
+
     if [ -z "$tar_files" ]; then
         [ "$quiet" != "quiet" ] && print_error "No TAR files found in $images_dir"
         return 1
     fi
-    
+
     local tar_count
     tar_count=$(echo "$tar_files" | wc -l)
     print_info "Found $tar_count cached image TAR file(s) for current platform. Loading from $images_dir..."
-    
+
     local success_count=0
     local fail_count=0
-    
+
     # Save tar_files to a temporary file to avoid here-string stdin issues with docker load
     local tar_list_file
     tar_list_file=$(mktemp)
     echo "$tar_files" > "$tar_list_file"
-    
+
     while IFS= read -r tar_file; do
         [ -z "$tar_file" ] && continue
         local basename
@@ -515,12 +510,12 @@ _load_tar_images() {
         fi
     done < "$tar_list_file"
     rm -f "$tar_list_file"
-    
+
     if [ $fail_count -gt 0 ]; then
         print_warning "Failed to load $fail_count images from cache"
         return 1
     fi
-    
+
     print_success "Successfully loaded $success_count/$tar_count images"
     return 0
 }
@@ -528,7 +523,7 @@ _load_tar_images() {
 # Auto-load cached images if they exist and are not already in Docker
 auto_load_cached_images() {
     local images_dir="${1:-.}"
-    
+
     # If ImagesDir not specified, search for cached images automatically
     if [ -z "$images_dir" ] || [ "$images_dir" = "." ]; then
         print_info "Searching for cached Docker images..."
@@ -539,13 +534,13 @@ auto_load_cached_images() {
             return 0
         fi
     fi
-    
+
     if [ ! -d "$images_dir" ]; then
         print_info "Images directory not found: $images_dir"
         print_info "Images will be built during docker-compose deployment"
         return 0
     fi
-    
+
     # Check if there are any TAR files
     local tar_files
     tar_files=$(find "$images_dir" -maxdepth 1 -name "*.tar" 2>/dev/null)
@@ -554,7 +549,7 @@ auto_load_cached_images() {
         print_info "Images will be built during docker-compose deployment"
         return 0
     fi
-    
+
     # Find images that need to be loaded
     local images_to_load=()
     for image in "${DOCKER_BASE_IMAGES[@]}"; do
@@ -562,21 +557,21 @@ auto_load_cached_images() {
             images_to_load+=("$image")
         fi
     done
-    
+
     if [ ${#images_to_load[@]} -eq 0 ]; then
         print_info "All required images are already in Docker"
         return 0
     fi
-    
+
     # Use the core loading function
     _load_tar_images "$images_dir" "quiet"
-    
+
     # Create aliases for upgraded images so they can be used as base images
     # If upgraded images are loaded (e.g., aspnet:${ASPNET_TAG}-upgraded),
     # also tag them as the base image (e.g., aspnet:${ASPNET_TAG}) so Dockerfile.multistage can use them
     print_info "Creating aliases for upgraded images..."
     local alias_count=0
-    
+
     # Temporarily disabled - image aliasing logic needs debugging
     # for image_config in "${DOCKER_IMAGES_CONFIG[@]}"; do
     #     IFS='|' read -r base_image dockerfile upgraded_image <<< "$image_config"
@@ -587,15 +582,15 @@ auto_load_cached_images() {
     #         fi
     #     fi
     # done
-    
+
     if [ $alias_count -eq 0 ]; then
         print_info "  Note: Upgraded base images will be used directly by docker-compose if available"
     fi
-    
+
     if [ $alias_count -gt 0 ]; then
         print_success "✓ Created $alias_count image alias/aliases for faster builds"
     fi
-    
+
     # After loading, check if orcaslicer-binaries was loaded and set ORCA_ASSET_IMAGE
     # This enables the build system to skip downloading OrcaSlicer from GitHub
     for local_image in "${DOCKER_LOCAL_IMAGES[@]}"; do
@@ -617,7 +612,7 @@ find_cached_orcaslicer_dir() {
         "/mnt/usb/docker-images/orcaslicer"
         "/media/*/docker-images/orcaslicer"
     )
-    
+
     for path in "${search_paths[@]}"; do
         # Handle glob patterns
         if [[ "$path" == *"*"* ]]; then
@@ -634,14 +629,14 @@ find_cached_orcaslicer_dir() {
             fi
         fi
     done
-    
+
     return 1
 }
 
 # Auto-load OrcaSlicer AppImage if found in cache
 auto_load_orcaslicer() {
     local orca_dir="${1:-.}"
-    
+
     # If OrcaDir not specified, search for it
     if [ -z "$orca_dir" ] || [ "$orca_dir" = "." ]; then
         orca_dir=$(find_cached_orcaslicer_dir) || {
@@ -650,22 +645,22 @@ auto_load_orcaslicer() {
             return 0
         }
     fi
-    
+
     if [ ! -d "$orca_dir" ]; then
         print_info "OrcaSlicer cache directory not found: $orca_dir"
         return 0
     fi
-    
+
     local appimages
     appimages=$(find "$orca_dir" -maxdepth 1 -name "*.AppImage" 2>/dev/null)
     if [ -z "$appimages" ]; then
         print_info "No OrcaSlicer AppImage found in cache: $orca_dir"
         return 0
     fi
-    
+
     # Set environment variable for Docker build context
     export ORCA_ASSET_PATH="$orca_dir"
-    
+
     local count
     count=$(echo "$appimages" | wc -l)
     print_success "Found $count cached OrcaSlicer AppImage(s)"
@@ -674,10 +669,10 @@ auto_load_orcaslicer() {
         size=$(($(stat -f%z "$img" 2>/dev/null || stat -c%s "$img" 2>/dev/null) / 1048576))
         print_info "  ✓ $(basename "$img") ($size MB)"
     done <<< "$appimages"
-    
+
     print_info "OrcaSlicer cache location: $orca_dir"
     print_info "Automatically configured for deployment"
-    
+
     return 0
 }
 
@@ -860,7 +855,7 @@ mask_secret_short() {
 
 ensure_connection_string_password() {
     local provider="$(echo "${DB_PROVIDER:-}" | tr '[:upper:]' '[:lower:]')"
-    
+
     local conn
     conn=$(get_kv_from_file "$ENV_FILE" "ConnectionStrings__Default" || true)
     if [ -z "$conn" ]; then
@@ -1155,13 +1150,13 @@ generate_deployment_config() {
     local include_registry="${4:-false}"
     local include_discovery="${5:-false}"
     local output_dir="${6:-$(pwd)}"
-    
+
     print_info "Generating deployment configuration..."
-    
+
     # Use the compose generator
     local generator_cmd="$SCRIPT_DIR/docker/compose-generator.sh"
     local generator_args=()
-    
+
     # Monitoring and telemetry: pass exclude flags if disabled, include flags if enabled
     # Generator defaults to enabled, so we only need to pass exclude when false
     if [ "$include_monitoring" = "false" ]; then
@@ -1179,17 +1174,17 @@ generate_deployment_config() {
     if [ "$include_discovery" = "true" ]; then
         generator_args+=("--include-discovery")
     fi
-    
+
     # Add Spoolman container if user chose to deploy it
     if [ "${DEPLOY_SPOOLMAN_CONTAINER:-no}" = "yes" ]; then
         generator_args+=("--include-spoolman")
     fi
-    
+
     # Add go2rtc sidecar if user chose to deploy it
     if [ "${DEPLOY_GO2RTC:-no}" = "yes" ]; then
         generator_args+=("--include-go2rtc")
     fi
-    
+
     # Add worker configuration. When scaling to more than one worker, pass the
     # count itself so compose-generator.sh renders N distinct
     # orcaslicer-worker-1..N services (each with its own Worker__InstanceId)
@@ -1204,12 +1199,12 @@ generate_deployment_config() {
         fi
     fi
 
-    
+
     # Add database provider configuration
     if [ -n "${DB_PROVIDER:-}" ]; then
         generator_args+=("--db-provider" "$DB_PROVIDER")
     fi
-    
+
     # Add pgAdmin configuration (only for PostgreSQL)
     if [ "$ENABLE_PGADMIN" = "true" ]; then
         db_provider_lower=$(echo "${DB_PROVIDER:-postgres}" | tr '[:upper:]' '[:lower:]')
@@ -1220,10 +1215,10 @@ generate_deployment_config() {
             ENABLE_PGADMIN=false
         fi
     fi
-    
+
     # Set output directory
     generator_args+=("--output-dir" "$output_dir")
-    
+
     if [ "$DRY_RUN" = "true" ]; then
         generator_args+=("--dry-run")
     fi
@@ -1231,20 +1226,20 @@ generate_deployment_config() {
     if [ "${KEEP_GENERATED:-true}" = "false" ]; then
         generator_args+=("--cleanup-generated")
     fi
-    
+
     # Check if the generator exists
     if [ ! -f "$generator_cmd" ]; then
         print_error "Compose generator not found: $generator_cmd"
         print_info "Falling back to legacy compose file generation..."
         return 1
     fi
-    
+
     # Run the generator
     local elastic_env_value="${ENABLE_ELASTIC_STACK:-false}"
 
     if ENABLE_ELASTIC_STACK="$elastic_env_value" "$generator_cmd" "${generator_args[@]}"; then
         print_success "Deployment configuration generated successfully"
-        
+
         # Set the compose file path for the rest of the deployment script
         COMPOSE_FILE="docker-compose.yml"
 
@@ -1253,7 +1248,7 @@ generate_deployment_config() {
             "docker-compose.yml"
             "docker-entrypoint-config.sh"
         )
-        
+
         # Add Dockerfiles - all deployments use multi-stage builds
         GENERATED_FILES+=("Dockerfile.multistage")
 
@@ -1272,13 +1267,13 @@ generate_deployment_config() {
                 *) GENERATED_FILES+=("Dockerfile.multistage");;
             esac
         fi
-        
+
         # Add optional config files
         [ "$include_monitoring" = "true" ] && GENERATED_FILES+=("prometheus.yml")
         [ "$include_telemetry" = "true" ] && GENERATED_FILES+=("otel-collector-config.yaml")
         [ "$include_security" = "true" ] && GENERATED_FILES+=("security-config.json")
         [ "$include_registry" = "true" ] && GENERATED_FILES+=("registry-config.yml")
-        
+
         return 0
     else
         print_error "Failed to generate deployment configuration"
@@ -1433,12 +1428,12 @@ prompt_with_default() {
     local prompt="$1"
     local default="$2"
     local var_name="$3"
-    
+
     # If variable already set (from env or loaded config), use it as default
     if [ -n "${!var_name:-}" ]; then
         default="${!var_name}"
     fi
-    
+
     if [ "$NON_INTERACTIVE" = "true" ]; then
         # In non-interactive mode, keep existing value or use default
         if [ -z "${!var_name:-}" ]; then
@@ -1461,17 +1456,17 @@ prompt_yes_no() {
     local prompt="$1"
     local default="$2"
     local var_name="$3"
-    
+
     # If variable already set (from env or loaded config), use it as default
     if [ -n "${!var_name:-}" ]; then
         default="${!var_name}"
     fi
-    
+
     local default_text="y/N"
     if [ "$default" = "y" ] || [ "$default" = "yes" ]; then
         default_text="Y/n"
     fi
-    
+
     if [ "$NON_INTERACTIVE" = "true" ]; then
         # In non-interactive mode, keep existing value or use default
         if [ -z "${!var_name:-}" ]; then
@@ -1578,7 +1573,7 @@ cleanup_redeploy_docker_artifacts() {
 # Pull all base images from registry
 pull_base_images() {
     print_header "📥 Pulling Base Container Images"
-    
+
     print_info "Pulling essential images for PrintFarmer core services:"
     print_info "  - .NET SDK $DOTNET_MAJOR_VERSION (multi-stage builds during deployment)"
     print_info "  - .NET ASP.NET $DOTNET_MAJOR_VERSION (API runtime)"
@@ -1589,10 +1584,10 @@ pull_base_images() {
     print_info "Download size: approximately 450-700MB"
     print_info "Note: Images already present locally will be checked for updates"
     echo
-    
+
     local success_count=0
     local fail_count=0
-    
+
     for image in "${DOCKER_BASE_IMAGES[@]}"; do
         # Check if image already exists locally
         if docker images --quiet "$image" >/dev/null 2>&1; then
@@ -1601,7 +1596,7 @@ pull_base_images() {
         else
             print_info "Pulling $image..."
         fi
-        
+
         if docker pull "$image" 2>&1; then
             print_success "✓ $image"
             ((success_count++))
@@ -1610,17 +1605,17 @@ pull_base_images() {
             ((fail_count++))
         fi
     done
-    
+
     echo
     print_header "Pull Summary"
     print_success "Successfully processed: $success_count/${#DOCKER_BASE_IMAGES[@]}"
-    
+
     if [ $fail_count -gt 0 ]; then
         print_warning "Failed to pull: $fail_count images"
         print_info "Check your internet connection and try again"
         return 1
     fi
-    
+
     print_success "All base images processed successfully!"
     return 0
 }
@@ -1629,14 +1624,14 @@ pull_base_images() {
 # Filenames include platform information (e.g., image-name-linux-amd64.tar)
 save_images_to_tar() {
     local target_dir="${1:-.}"
-    
+
     print_header "💾 Exporting Images to TAR Files"
-    
+
     if [ ! -d "$target_dir" ]; then
         mkdir -p "$target_dir"
         print_info "Created directory: $target_dir"
     fi
-    
+
     # Determine platform suffix for filenames
     local platform_suffix=""
     if [ -n "${DOCKER_BUILD_PLATFORM:-}" ]; then
@@ -1652,7 +1647,7 @@ save_images_to_tar() {
             *) platform_suffix="" ;;
         esac
     fi
-    
+
     local success_count=0
     local fail_count=0
     local total_size=0
@@ -1668,7 +1663,7 @@ save_images_to_tar() {
     # "Images exported successfully!" and returned 0, hiding a security-
     # critical refusal from operators and CI.
     local orca_attestation_refused=false
-    
+
     # Export upgraded base images first (preferred)
     print_info "Exporting pre-upgraded base images (with tools pre-installed)..."
     for image in "${DOCKER_UPGRADED_IMAGES[@]}"; do
@@ -1677,19 +1672,19 @@ save_images_to_tar() {
             print_info "  Skipping $image (not built)"
             continue
         fi
-        
+
         # Replace special characters in image name for filename, add platform suffix
         local safe_name
         safe_name=$(echo "$image" | sed 's|[:/ ]|-|g')
         local tar_file="$target_dir/$safe_name${platform_suffix}.tar"
-        
+
         print_info "Exporting $image to $tar_file..."
         if docker save -o "$tar_file" "$image" > /dev/null 2>&1; then
             local file_size
             file_size=$(stat -f%z "$tar_file" 2>/dev/null || stat -c%s "$tar_file" 2>/dev/null)
             local file_size_mb=$((file_size / 1048576))
             total_size=$((total_size + file_size))
-            
+
             print_success "✓ Exported: $image - Size: ${file_size_mb} MB"
             exported_images+=("$image")
             ((success_count++))
@@ -1698,37 +1693,37 @@ save_images_to_tar() {
             ((fail_count++))
         fi
     done
-    
+
     # Export standard base images only if upgraded version wasn't exported
     print_info "Checking for fallback base images..."
     for i in "${!DOCKER_BASE_IMAGES[@]}"; do
         local base_image="${DOCKER_BASE_IMAGES[$i]}"
         local upgraded_image="${DOCKER_UPGRADED_IMAGES[$i]}"
-        
+
         # Skip if upgraded version was already exported
         if [[ " ${exported_images[*]} " =~ " ${upgraded_image} " ]]; then
             print_info "  Skipping $base_image (using upgraded version)"
             continue
         fi
-        
+
         # Check if base image exists
         if ! docker images --quiet "$base_image" >/dev/null 2>&1; then
             print_info "  Skipping $base_image (not present)"
             continue
         fi
-        
+
         # Replace special characters in image name for filename, add platform suffix
         local safe_name
         safe_name=$(echo "$base_image" | sed 's|[:/ ]|-|g')
         local tar_file="$target_dir/$safe_name${platform_suffix}.tar"
-        
+
         print_info "Exporting $base_image to $tar_file..."
         if docker save -o "$tar_file" "$base_image" > /dev/null 2>&1; then
             local file_size
             file_size=$(stat -f%z "$tar_file" 2>/dev/null || stat -c%s "$tar_file" 2>/dev/null)
             local file_size_mb=$((file_size / 1048576))
             total_size=$((total_size + file_size))
-            
+
             print_success "✓ Exported: $base_image - Size: ${file_size_mb} MB"
             exported_images+=("$base_image")
             ((success_count++))
@@ -1737,7 +1732,7 @@ save_images_to_tar() {
             ((fail_count++))
         fi
     done
-    
+
     # Export OrcaSlicer binaries image if it exists
     for image in "${DOCKER_LOCAL_IMAGES[@]}"; do
         # Check if image exists locally. `docker images --quiet <ref>` is NOT
@@ -1788,14 +1783,14 @@ save_images_to_tar() {
         local safe_name
         safe_name=$(echo "$image" | sed 's|[:/ ]|-|g')
         local tar_file="$target_dir/$safe_name${platform_suffix}.tar"
-        
+
         print_info "Exporting $image to $tar_file..."
         if docker save -o "$tar_file" "$image" > /dev/null 2>&1; then
             local file_size
             file_size=$(stat -f%z "$tar_file" 2>/dev/null || stat -c%s "$tar_file" 2>/dev/null)
             local file_size_mb=$((file_size / 1048576))
             total_size=$((total_size + file_size))
-            
+
             print_success "✓ Exported: $image - Size: ${file_size_mb} MB"
             exported_images+=("$image")
             ((success_count++))
@@ -1803,15 +1798,15 @@ save_images_to_tar() {
             print_warning "⚠ Failed to export $image (optional)"
         fi
     done
-    
+
     local total_size_mb=$((total_size / 1048576))
     local total_size_gb=$((total_size / 1073741824))
-    
+
     echo
     print_header "Export Summary"
     print_success "Successfully exported: $success_count images"
     print_success "Total size: ${total_size_gb} GB - ${total_size_mb} MB"
-    
+
     if [ $fail_count -gt 0 ]; then
         print_warning "Failed to export: $fail_count images"
         # Don't fail completely if some export fails
@@ -1846,14 +1841,14 @@ save_images_to_tar() {
     print_success "Images exported successfully!"
     print_info "TAR files location: $target_dir"
     print_info "You can now transfer this folder to offline machines"
-    
+
     # Create manifest with actually exported images
     local manifest_path="$target_dir/manifest.txt"
     {
         printf "%s\n" "${exported_images[@]}"
     } > "$manifest_path"
     print_info "Created manifest file: $manifest_path"
-    
+
     return 0
 }
 
@@ -1861,21 +1856,21 @@ save_images_to_tar() {
 # Load images from TAR files (for --load-images flag)
 load_images_from_tar() {
     local source_dir="${1:-.}"
-    
+
     print_header "📤 Loading Images from TAR Files"
-    
+
     if [ ! -d "$source_dir" ]; then
         print_error "Images directory not found: $source_dir"
         print_info "Use --pull-images --save-images first to download and export images"
         return 1
     fi
-    
+
     # Use the core loading function
     if _load_tar_images "$source_dir"; then
         echo
         print_success "All images loaded successfully!"
         print_info "Images are now available in local Docker daemon"
-        
+
         # Check if orcaslicer-binaries was loaded and set ORCA_ASSET_IMAGE
         # This enables the build system to skip downloading OrcaSlicer from GitHub
         for local_image in "${DOCKER_LOCAL_IMAGES[@]}"; do
@@ -1886,13 +1881,13 @@ load_images_from_tar() {
                 fi
             fi
         done
-        
+
         # Also set ORCA_ASSET_PATH if available for Docker build context
         if [ -d "$source_dir/orcaslicer" ]; then
             export ORCA_ASSET_PATH="$source_dir/orcaslicer"
             print_info "OrcaSlicer assets available at: $ORCA_ASSET_PATH"
         fi
-        
+
         return 0
     else
         return 1
@@ -1903,22 +1898,22 @@ load_images_from_tar() {
 cache_orcaslicer() {
     local target_dir="${1:-.}"
     local version="${2:-latest}"
-    
+
     # Skip slicer downloads on ARM
     if [ "$IS_ARM_PLATFORM" = "true" ]; then
         print_warning "Skipping OrcaSlicer download — not available on ARM architecture"
         return 0
     fi
-    
+
     print_header "⬇️ Caching OrcaSlicer Linux AppImage"
-    
+
     if [ ! -d "$target_dir" ]; then
         mkdir -p "$target_dir"
         print_success "Created cache directory: $target_dir"
     fi
-    
+
     print_info "Looking up OrcaSlicer v${version} release information..."
-    
+
     # Construct the GitHub API URL
     local release_url
     if [ "$version" = "latest" ]; then
@@ -1926,25 +1921,25 @@ cache_orcaslicer() {
     else
         release_url="https://api.github.com/repos/OrcaSlicer/OrcaSlicer/releases/tags/v${version}"
     fi
-    
+
     print_info "Fetching release info from GitHub API..."
-    
+
     # Use curl to get release information
     local release_json
     if ! release_json=$(curl -s -L "$release_url" 2>/dev/null); then
         print_error "Failed to fetch release information from GitHub"
         return 1
     fi
-    
+
     # Extract the AppImage download URL using multiple fallback strategies
     # Try jq first if available (cleaner parsing), fall back to grep/cut if not
     local download_url=""
-    
+
     # Check if jq is available
     if command -v jq >/dev/null 2>&1; then
         # First try: Linux AppImage excluding aarch64 (prefer generic/x86_64)
         download_url=$(echo "$release_json" | jq -r '.assets[] | select(.name | contains("AppImage") and contains("Linux") and (contains("aarch64") | not)) | .browser_download_url' 2>/dev/null | head -1)
-        
+
         if [ -z "$download_url" ]; then
             # Second try: any AppImage excluding aarch64
             download_url=$(echo "$release_json" | jq -r '.assets[] | select(.name | contains("AppImage") and (contains("aarch64") | not)) | .browser_download_url' 2>/dev/null | head -1)
@@ -1953,18 +1948,18 @@ cache_orcaslicer() {
         # Fallback: use grep (less reliable but works without jq)
         # First try: Ubuntu AppImage variant
         download_url=$(echo "$release_json" | grep -o '"browser_download_url": "[^"]*Ubuntu[^"]*AppImage[^"]*"' | head -1 | cut -d'"' -f4 2>/dev/null)
-        
+
         if [ -z "$download_url" ]; then
             # Second try: any Linux AppImage not aarch64
             download_url=$(echo "$release_json" | grep "Linux.*AppImage\|AppImage.*Linux" | grep -v "aarch64" | grep -o 'https://[^"]*AppImage[^"]*' | head -1 2>/dev/null)
         fi
-        
+
         if [ -z "$download_url" ]; then
             # Last try: extract any AppImage URL not aarch64
             download_url=$(echo "$release_json" | grep -o 'https://[^"]*\.AppImage[^"]*' | grep -v "aarch64" | head -1 2>/dev/null)
         fi
     fi
-    
+
     if [ -z "$download_url" ]; then
         print_error "Could not find AppImage asset for Linux in release"
         print_info "Alternative solutions:"
@@ -1978,11 +1973,11 @@ cache_orcaslicer() {
         print_info "   export ORCA_ASSET_PATH='$target_dir'"
         return 1
     fi
-    
+
     local file_name
     file_name=$(basename "$download_url" | cut -d'?' -f1)
     local app_image_path="$target_dir/$file_name"
-    
+
     # Check if already cached and valid (>50MB)
     if [ -f "$app_image_path" ]; then
         local file_size
@@ -1996,31 +1991,31 @@ cache_orcaslicer() {
             rm -f "$app_image_path"
         fi
     fi
-    
+
     print_info "Found asset: $file_name"
     print_info "Download URL: $download_url"
     print_info ""
     print_info "Downloading OrcaSlicer v${version} Linux AppImage..."
     print_info "This may take several minutes depending on internet speed"
-    
+
     # Download the file
     if ! curl -L -o "$app_image_path" "$download_url" 2>&1; then
         print_error "Failed to download OrcaSlicer AppImage"
         rm -f "$app_image_path"
         return 1
     fi
-    
+
     # Verify file size
     local file_size
     file_size=$(stat -f%z "$app_image_path" 2>/dev/null || stat -c%s "$app_image_path" 2>/dev/null)
     local size_mb=$((file_size / 1048576))
-    
+
     if [ $file_size -lt 52428800 ]; then  # 50MB
         print_error "Downloaded file too small ($size_mb MB), likely invalid"
         rm -f "$app_image_path"
         return 1
     fi
-    
+
     # Verify ELF magic number
     local magic
     magic=$(xxd -p -l 4 "$app_image_path" 2>/dev/null || head -c 4 "$app_image_path" | od -An -tx1 | tr -d ' ')
@@ -2029,57 +2024,57 @@ cache_orcaslicer() {
     elif [ "$magic" = "7f454c46" ]; then
         print_success "File verified as valid ELF binary (AppImage)"
     fi
-    
+
     print_success "OrcaSlicer AppImage cached successfully"
     print_info "Location: $app_image_path"
     print_info "Size: $size_mb MB"
     print_info ""
     print_info "OrcaSlicer AppImage will be automatically detected during deployment"
     print_info "No environment variables or additional arguments needed!"
-    
+
     return 0
 }
 
 # Build pre-upgraded base images with apt/apk updates baked in
 build_base_images() {
     local target_dir="${1:-.}"
-    
+
     print_header "🏗️  BUILDING PRE-UPGRADED BASE IMAGES & ORCASLICER BINARIES"
     print_info "Building base images with apt/apk updates + OrcaSlicer binary layer for offline deployment"
     echo
-    
+
     local docker_dir="scripts/docker/dockerfiles"
-    
+
     # Use consolidated DOCKER_IMAGES_CONFIG instead of local duplicate array
     local total_images=${#DOCKER_IMAGES_CONFIG[@]}
     local successful=0
     local failed=0
-    
+
     # Generate cache-bust timestamp to force fresh package updates
     local cache_bust
     cache_bust=$(date +%s)
-    
+
     for image_config in "${DOCKER_IMAGES_CONFIG[@]}"; do
         IFS='|' read -r base_image dockerfile upgraded_image <<< "$image_config"
-        
+
         print_info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         print_info "Building: $upgraded_image"
         print_info "  Base: $base_image"
         print_info "  Dockerfile: $dockerfile"
         print_info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        
+
         # Prepare build command with optional platform
         local build_cmd=(docker build -f "$docker_dir/$dockerfile" -t "$upgraded_image" --label="printfarmer-precache=true" --build-arg "CACHE_BUST=$cache_bust")
-        
+
         # Add platform flag if DOCKER_BUILD_PLATFORM is set (e.g., on macOS Apple Silicon)
         if [ -n "${DOCKER_BUILD_PLATFORM:-}" ]; then
             build_cmd+=(--platform "${DOCKER_BUILD_PLATFORM}")
         fi
-        
+
         build_cmd+=(.)
-        
+
         if "${build_cmd[@]}" > /dev/null 2>&1; then
-            
+
             print_success "✓ Build successful: $upgraded_image"
             ((successful++))
         else
@@ -2088,10 +2083,10 @@ build_base_images() {
         fi
         echo
     done
-    
+
     # Build OrcaSlicer binary layer
     print_info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    
+
     local orca_binary_image="orcaslicer-binaries:${ORCASLICER_VERSION}"
     local rebuild_orca_binary=false
     # Accept both documented truthy values (`true` from --rebuild-orcaslicer,
@@ -2152,7 +2147,7 @@ build_base_images() {
         print_info "  Extracts OrcaSlicer Linux AppImage for caching"
         print_info "  Dockerfile: Dockerfile.base-orcaslicer-binaries"
         print_info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        
+
         # Prepare build args - include ORCA_ASSET_PATH if available for offline builds
         local build_args=(
             --no-cache
@@ -2168,15 +2163,15 @@ build_base_images() {
         if [ -n "${DOCKER_BUILD_PLATFORM:-}" ]; then
             build_args+=(--platform "${DOCKER_BUILD_PLATFORM}")
         fi
-        
+
         # Pass cached AppImage path if available (for offline deployments)
         if [ -n "${ORCA_ASSET_PATH:-}" ]; then
             build_args+=(--build-arg "ORCA_ASSET_PATH=$ORCA_ASSET_PATH")
             print_info "Using cached OrcaSlicer from: $ORCA_ASSET_PATH"
         fi
-        
+
         build_args+=(.)
-        
+
         if docker build "${build_args[@]}" > /dev/null 2>&1; then
             if ! validate_orcaslicer_binary_image "$orca_binary_image" "$ORCASLICER_VERSION" "$ORCASLICER_SHA256"; then
                 print_error "Built OrcaSlicer binary layer failed identity validation."
@@ -2199,14 +2194,14 @@ build_base_images() {
         fi
     fi
     echo
-    
+
     # Pull BuildKit Dockerfile frontend (required for # syntax=docker/dockerfile:1)
     print_info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     print_info "Pulling: docker/dockerfile:1"
     print_info "  BuildKit Dockerfile frontend parser"
     print_info "  Required for advanced Dockerfile syntax features"
     print_info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    
+
     if docker pull docker/dockerfile:1 > /dev/null 2>&1; then
         print_success "✓ Pulled: docker/dockerfile:1"
         ((successful++))
@@ -2214,17 +2209,17 @@ build_base_images() {
         print_warning "⚠ Failed to pull docker/dockerfile:1 (builds may require network)"
     fi
     echo
-    
+
     print_info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     print_header "Base Image Build Summary"
     print_info "Successful: $successful/$((total_images + 2))"
     print_info "Failed: $failed/$total_images"
-    
+
     if [ "$failed" -gt 0 ]; then
         print_warning "Some base images failed to build. Continuing with standard images."
         return 1
     fi
-    
+
     print_success "All base images and OrcaSlicer binaries built successfully!"
     return 0
 }
@@ -2232,7 +2227,7 @@ build_base_images() {
 # Prepare offline deployment - comprehensive preparation
 prepare_offline_deployment() {
     local target_dir="${1:-.}"
-    
+
     print_header "🚀 OFFLINE DEPLOYMENT PREPARATION"
     print_info "This process prepares all materials needed for offline deployment:"
     print_info "  1. Build pre-upgraded base images with apt/apk updates (300-500MB)"
@@ -2242,12 +2237,12 @@ prepare_offline_deployment() {
     print_info ""
     print_info "Total time: ~25-35 minutes (depends on internet speed and system performance)"
     echo
-    
+
     local start_time
     start_time=$(date +%s)
     local succeeded=true
     local upgraded_built=false
-    
+
     # Step 1: Build pre-upgraded base images (including OrcaSlicer binaries)
     print_header "STEP 1/4: Building Pre-Upgraded Base Images & OrcaSlicer Binary Layer"
     # Capture build_base_images return code so we can distinguish:
@@ -2273,7 +2268,7 @@ prepare_offline_deployment() {
     else
         print_warning "Some base images failed to build, will use standard images as fallback"
     fi
-    
+
     # Step 2: Only pull standard base images if upgraded versions weren't built
     if [ "$upgraded_built" = true ]; then
         echo
@@ -2288,7 +2283,7 @@ prepare_offline_deployment() {
             succeeded=false
         fi
     fi
-    
+
     if [ "$succeeded" = true ]; then
         echo
         print_header "STEP 3/4: Exporting All Images (including OrcaSlicer binaries) to TAR Files"
@@ -2296,7 +2291,7 @@ prepare_offline_deployment() {
             print_error "Failed to export images to TAR"
             succeeded=false
         fi
-        
+
         if [ "$succeeded" = true ]; then
             echo
             print_header "STEP 4/4: Caching OrcaSlicer AppImage"
@@ -2305,13 +2300,13 @@ prepare_offline_deployment() {
                 # Don't fail overall if OrcaSlicer download fails
             fi
         fi
-        
+
         # Cleanup: Remove dangling images and original base images to save disk space
         if [ "$succeeded" = true ]; then
             echo
             print_header "CLEANUP: Removing Redundant Images"
             print_info "Removing dangling images and original base images (upgraded versions exported)..."
-            
+
             # Remove dangling images (leftover from builds)
             local dangling_count
             dangling_count=$(docker images -f "dangling=true" -q | wc -l)
@@ -2319,7 +2314,7 @@ prepare_offline_deployment() {
                 docker image prune -f > /dev/null 2>&1
                 print_success "✓ Removed $dangling_count dangling image(s)"
             fi
-            
+
             # Remove original base images (we have upgraded versions exported)
             local removed_count=0
             for image in "${DOCKER_BASE_IMAGES[@]}"; do
@@ -2330,23 +2325,23 @@ prepare_offline_deployment() {
                     fi
                 fi
             done
-            
+
             if [ "$removed_count" -gt 0 ]; then
                 print_success "✓ Removed $removed_count original base image(s)"
             fi
-            
+
             print_success "✓ Cleanup complete - only upgraded images remain"
         fi
     fi
-    
+
     local end_time
     end_time=$(date +%s)
     local elapsed=$((end_time - start_time))
     local elapsed_min=$((elapsed / 60))
-    
+
     echo
     print_header "OFFLINE PREPARATION SUMMARY"
-    
+
     if [ "$succeeded" = true ]; then
         print_success "✓ Offline deployment materials prepared successfully!"
         print_info "Location: $target_dir"
@@ -2373,25 +2368,25 @@ prepare_offline_deployment() {
 # Deploy using cached offline materials
 deploy_offline_mode() {
     local source_dir="${1:-.}"
-    
+
     print_header "🔌 OFFLINE DEPLOYMENT MODE"
     print_info "Loading pre-cached container images and preparing deployment"
     echo
-    
+
     # Check if images directory exists
     if [ ! -d "$source_dir" ]; then
         print_error "Images directory not found: $source_dir"
         print_info "Run with --prepare-offline first to download and cache all materials"
         return 1
     fi
-    
+
     # Load cached images from TAR files
     print_header "STEP 1/2: Loading Cached Container Images"
     if ! load_images_from_tar "$source_dir"; then
         print_error "Failed to load cached images"
         return 1
     fi
-    
+
     # Auto-load OrcaSlicer if available
     echo
     print_header "STEP 2/2: Loading OrcaSlicer AppImage (Optional)"
@@ -2401,7 +2396,7 @@ deploy_offline_mode() {
     else
         print_info "OrcaSlicer cache not found - distributed slicing will be disabled"
     fi
-    
+
     echo
     print_success "✓ Offline images loaded successfully!"
     print_info "Proceeding with deployment configuration..."
@@ -2495,7 +2490,7 @@ stop_compose_services() {
 
 tear_down_deployment() {
     print_header "🧹 Tearing Down PrintFarmer Deployment"
-    
+
     print_warning "This will:"
     echo "  1. Stop and remove ALL Docker containers"
     echo "  2. Remove ALL Docker volumes (⚠️  ALL DATA WILL BE DELETED!)"
@@ -2505,19 +2500,19 @@ tear_down_deployment() {
     echo "  6. Clean up generated configuration files"
     echo -e "  7. ${RED}Remove ALL bind-mounted storage INCLUDING DATABASE${NC}"
     echo
-    
+
     if [ "$NON_INTERACTIVE" = "false" ]; then
         echo -e "${RED}⚠️  WARNING: This is a destructive operation!${NC}"
         echo -e "${RED}   All database data and uploaded files will be permanently deleted.${NC}"
         echo
         read -p "Are you sure you want to continue? Type 'yes' to confirm: " confirm
-        
+
         if [ "$confirm" != "yes" ]; then
             print_info "Tear-down cancelled."
             exit 0
         fi
     fi
-    
+
     echo
     print_info "Starting tear-down process..."
 
@@ -2585,7 +2580,7 @@ tear_down_deployment() {
         print_success "Removed database containers: $containers"
         audit_log "remove" "teardown: removed database containers: $containers"
     fi
-    
+
     # 3. Remove all volumes
     print_info "Step 3/8: Removing all Docker volumes..."
     local vol_list
@@ -2600,25 +2595,25 @@ tear_down_deployment() {
     else
         print_info "No volumes to remove"
     fi
-    
+
     # 4. Remove PrintFarmer images
     print_info "Step 4/8: Removing PrintFarmer Docker images..."
     docker_cleanup_printfarmer_images force
-    
+
     # 5. Docker system cleanup (preserve base images for faster rebuilds)
     print_info "Step 5/8: Cleaning up Docker system..."
     docker_system_cleanup preserve-base
-    
+
     # 6. Clear Docker builder cache for next build
     print_info "Step 6/8: Clearing Docker builder cache..."
     docker builder prune -af 2>/dev/null || true
     print_success "Builder cache cleared"
-    
+
     # 7. Remove external storage paths (data persistence directories)
     # NOTE: Must run BEFORE step 8 because it needs to read .deploy-config
     print_header "Step 7/8: Removing External Storage Directories"
     local external_paths_removed=0
-    
+
     # Load current config to find external paths
     local external_models_path=""
     local external_gcode_path=""
@@ -2626,7 +2621,7 @@ tear_down_deployment() {
     local external_app_data_path=""
     local external_database_path=""
     local external_dataprotection_path=""
-    
+
     if [ -f ".deploy-config" ]; then
         print_info "Loading external paths from .deploy-config..."
         # Extract paths directly from config file without sourcing (safer)
@@ -2644,7 +2639,7 @@ tear_down_deployment() {
     else
         print_info "No .deploy-config found - checking environment variables..."
     fi
-    
+
     # Array of paths and descriptions for display
     # NOTE: Remove paths from config even if they don't exist yet (config is source of truth)
     local paths_to_remove=()
@@ -2664,19 +2659,19 @@ tear_down_deployment() {
         paths_to_remove+=("$external_dataprotection_path:Data Protection Keys")
     fi
     # Note: Database is handled separately due to permission issues
-    
+
     # Separate array for interactive-only prompts (includes database)
     local paths_interactive_only=()
     if [ -n "$external_database_path" ]; then
         paths_interactive_only+=("$external_database_path:Database")
     fi
-    
+
     if [ "$NON_INTERACTIVE" = "false" ]; then
         # In interactive mode, include database in the removal list
         if [ -n "$external_database_path" ]; then
             paths_to_remove+=("$external_database_path:Database")
         fi
-        
+
         if [ ${#paths_to_remove[@]} -gt 0 ]; then
             echo
             print_warning "External storage directories configured:"
@@ -2695,7 +2690,7 @@ tear_down_deployment() {
             print_info "No external storage directories configured in .deploy-config"
             remove_storage="n"
         fi
-        
+
         if [ "$remove_storage" = "y" ] || [ "$remove_storage" = "Y" ]; then
             for path_entry in "${paths_to_remove[@]}"; do
                 local path="${path_entry%:*}"
@@ -2728,12 +2723,12 @@ tear_down_deployment() {
     else
         # In non-interactive mode with --tear-down: remove ALL storage INCLUDING database
         # This provides a complete reset to fresh state
-        
+
         # Add database to the removal list
         if [ -n "$external_database_path" ]; then
             paths_to_remove+=("$external_database_path:Database")
         fi
-        
+
         if [ ${#paths_to_remove[@]} -gt 0 ]; then
             print_warning "Removing ALL external storage directories (from config):"
             for path_entry in "${paths_to_remove[@]}"; do
@@ -2766,38 +2761,38 @@ tear_down_deployment() {
             print_info "✓ No external storage directories configured - nothing to remove"
         fi
     fi
-    
+
     # 8. Remove generated files
     print_info "Step 8/8: Removing generated configuration and build artifacts..."
     local files_removed=0
-    
+
     # Remove docker-compose files
     if [ -f docker-compose.yml ]; then
         rm -f docker-compose.yml
         echo "  • Removed docker-compose.yml"
         ((files_removed++)) || true
     fi
-    
+
     if [ -f docker-compose.override.yml ]; then
         rm -f docker-compose.override.yml
         echo "  • Removed docker-compose.override.yml"
         ((files_removed++)) || true
     fi
-    
+
     # Remove environment file
     if [ -f .env ]; then
         rm -f .env
         echo "  • Removed .env"
         ((files_removed++)) || true
     fi
-    
+
     # Remove generated dockerfiles folder
     if [ -d dockerfiles ]; then
         rm -rf dockerfiles
         echo "  • Removed dockerfiles/ directory"
         ((files_removed++)) || true
     fi
-    
+
     # Ask about .deploy-config separately
     if [ -f .deploy-config ]; then
         if [ "$NON_INTERACTIVE" = "false" ]; then
@@ -2816,18 +2811,18 @@ tear_down_deployment() {
             print_info "Kept .deploy-config (preserved for next deployment)"
         fi
     fi
-    
+
     if [ $files_removed -gt 0 ]; then
         print_success "Configuration files cleaned"
     else
         print_info "No configuration files to remove"
     fi
-    
+
     echo
     print_success "✨ Tear-down complete!"
     echo
     print_info "You can now run './scripts/deploy-docker.sh' to start a fresh deployment."
-    
+
     exit 0
 }
 
@@ -2868,24 +2863,6 @@ OPTIONS:
     --native-arch           Build for the host's native architecture instead of forcing amd64.
                             Use on Raspberry Pi or when building ARM images on Apple Silicon.
     --platform PLATFORM     Explicitly set the Docker build platform (e.g., linux/arm64).
-    --host-update-cli-version VERSION
-                            Opt in to installing the signed host-update recovery CLI
-                            (X.Y.Z or X.Y.Z-insider.N) and writing /etc/printfarmer/host-update.json
-                            from .env. Requires cosign and root. Not rollout authorization.
-                            Env: HOST_UPDATE_CLI_VERSION.
-    --host-update-cli-assets DIR
-                            Read the CLI archive, SHA256SUMS and its bundle from DIR instead of
-                            the GitHub release (offline hosts). Env: HOST_UPDATE_CLI_ASSETS.
-    --install-host-update-daemon
-                            Opt in to registering the host-update daemon as the systemd unit
-                            printfarmer-host-update-daemon.service (issue #3118). Requires
-                            --host-update-cli-version. Installed disabled and stopped; installing
-                            it grants nothing (daemon execution stays disabled pending #2982).
-                            Env: HOST_UPDATE_DAEMON_SERVICE=true.
-    --host-update-daemon-user USER
-                            Account the daemon unit runs as (default: the owner of
-                            host-update.json). Env: HOST_UPDATE_DAEMON_USER.
-
 SMART IMAGE CACHING - Automatic offline support:
     * Downloaded images are automatically cached for offline use
     * Subsequent deployments use cached images when available (NO arguments needed)
@@ -2901,24 +2878,24 @@ ORCASLICER AUTO-DISCOVERY - Automatic offline support:
 
 SIMPLIFIED OFFLINE DEPLOYMENT (RECOMMENDED):
     Single command prepares ALL offline materials (pre-upgraded base images + OrcaSlicer):
-    
+
     On machine WITH internet:
         ./scripts/deploy-docker.sh --prepare-offline
-        
+
         This will:
           - Build pre-upgraded base images with apt/apk updates included
           - Build OrcaSlicer binary layer (extracted and cached)
           - Pull and export all Docker images to TAR files
           - Download OrcaSlicer AppImage
-        
+
         Total size: ~2-2.5GB (depending on system)
         Total time: ~25-35 minutes
-    
+
     Transfer ./docker-images folder to offline machine, then:
-    
+
     On machine WITHOUT internet:
         ./scripts/deploy-docker.sh --deploy-offline
-        
+
         This will:
           - Auto-detect and load cached Docker images
           - Auto-detect and load OrcaSlicer binary layer
@@ -2950,18 +2927,18 @@ COMPOSE GENERATOR OPTIONS:
 REGISTRY DEPLOYMENT OPTIONS:
     Use pre-built images from GitHub Container Registry instead of building locally.
     Images are built and pushed via GitHub Actions on push to main/release or tags.
-    
+
     --use-registry              Pull pre-built images from container registry (skip local builds)
     --registry-host HOST        Registry host (default: ghcr.io/olyforge3d)
     --registry-tag TAG          Image tag to pull (default: latest)
-    
+
     VERSION CONTROL:
       Tags are automatically created by GitHub Actions:
         latest          - Latest build from main branch
         <branch>        - Branch name (e.g., main, release, feat/new-feature)
         sha-<commit>    - Git commit SHA (e.g., sha-abc1234)
         v<version>      - Semantic version from git tag (e.g., v1.2.3, v1.2)
-      
+
       Examples:
         --registry-tag latest              # Latest from main branch
         --registry-tag main                # Explicit main branch
@@ -3004,7 +2981,7 @@ EXAMPLES:
 
     # Check storage directory permissions (troubleshooting)
     ./scripts/deploy-docker.sh --validate-storage
-    
+
     # Check storage with a specific config file
     ./scripts/deploy-docker.sh --validate-storage --config-file .deploy-config
 
@@ -3012,62 +2989,62 @@ EXAMPLES:
     ./scripts/deploy-docker.sh --non-interactive --auto-admin
 
     # === OFFLINE DEPLOYMENT ===
-    
+
     # Prepare ALL offline materials to auto-discoverable location (RECOMMENDED)
     ./scripts/deploy-docker.sh --prepare-offline --images-dir ./docker-images
     ./scripts/deploy-docker.sh --prepare-offline --images-dir ~/docker-images
-    
+
     # Prepare to USB drive (specify path when deploying)
     ./scripts/deploy-docker.sh --prepare-offline --images-dir /media/usb/docker-images
-    
+
     # Deploy from cache (auto-discovers ./docker-images or ~/docker-images)
     ./scripts/deploy-docker.sh --deploy-offline
-    
+
     # Deploy from a specific cache location (e.g., USB drive)
     ./scripts/deploy-docker.sh --deploy-offline --images-dir /media/usb/docker-images
-    
+
     # Manual image management
     ./scripts/deploy-docker.sh --pull-images                    # Download images
     ./scripts/deploy-docker.sh --pull-images --save-images      # Download and export TAR
     ./scripts/deploy-docker.sh --save-images --images-dir ~/docker-images  # Export to auto-discoverable path
     ./scripts/deploy-docker.sh --load-images                    # Load from auto-discovered path
     ./scripts/deploy-docker.sh --cache-orcaslicer --images-dir ~/docker-images  # Cache to auto-discoverable path
-    
+
     # Deploy specific architecture with additional services
     ./scripts/deploy-docker.sh --include-monitoring
-    
+
     # Deploy with full observability stack
     ./scripts/deploy-docker.sh --include-monitoring --include-telemetry
-    
+
     # Deploy with discovery, security and registry
     ./scripts/deploy-docker.sh --include-discovery --include-security --include-registry
-    
+
     # Deploy with printer discovery service
     ./scripts/deploy-docker.sh --include-discovery
-    
+
     # Deploy with monitoring + discovery + auto-admin
     ./scripts/deploy-docker.sh --include-monitoring --include-discovery --auto-admin
-    
+
     # Non-interactive deployment with all options
     ./scripts/deploy-docker.sh --non-interactive --include-monitoring --include-telemetry --include-security --include-discovery
 
     # === REGISTRY DEPLOYMENT (Pre-built images from GitHub) ===
-    
+
     # Deploy using latest pre-built images from GitHub Container Registry
     ./scripts/deploy-docker.sh --use-registry
-    
+
     # Deploy a specific version (git tag)
     ./scripts/deploy-docker.sh --use-registry --registry-tag v1.2.3
-    
+
     # Deploy from a specific branch
     ./scripts/deploy-docker.sh --use-registry --registry-tag main
-    
+
     # Deploy a specific commit (SHA)
     ./scripts/deploy-docker.sh --use-registry --registry-tag sha-abc1234
-    
+
     # Deploy from a custom registry host
     ./scripts/deploy-docker.sh --use-registry --registry-host my-registry.example.com:5000 --registry-tag latest
-    
+
     # Non-interactive registry deployment
     ./scripts/deploy-docker.sh --non-interactive --use-registry --registry-tag v1.0.0
 
@@ -3089,18 +3066,18 @@ NETWORK MODES:
 DATA PERSISTENCE (P0 Requirement):
     During interactive deployment, you'll be prompted to configure external storage
     for critical data that must survive container recreation:
-    
+
     • 3D Model Storage   - Maps to host directory (default: /var/lib/printfarmer/models)
     • Generated G-code   - Maps to host directory (default: /var/lib/printfarmer/gcode)
     • Slicer Profiles    - Maps to host directory (default: /var/lib/printfarmer/slicer-profiles)
-    
+
     With external storage enabled:
     ✅ Data persists across container recreation (docker-compose down/up)
     ✅ Data survives image rebuild
     ✅ Data only deleted when explicitly removing the host directory
     ✅ Database deletion does NOT affect these directories
     ✅ Can easily backup/restore files from host filesystem
-    
+
     To enable external storage in non-interactive mode, set:
         export USE_EXTERNAL_STORAGE=yes
         export EXTERNAL_MODELS_PATH=/path/to/models
@@ -3109,7 +3086,7 @@ DATA PERSISTENCE (P0 Requirement):
         ./scripts/deploy-docker.sh --non-interactive
 
 PRINTER DISCOVERY:
-    The network printer discovery service automatically scans your local network 
+    The network printer discovery service automatically scans your local network
     to find compatible 3D printers (Moonraker, PrusaLink, OctoPrint, SDCP).
     - Runs on the configured Docker network and can be tuned via discovery ranges
     - Scans configurable IP ranges periodically
@@ -3264,9 +3241,9 @@ load_previous_config() {
         # Mark that we loaded values from disk so downstream logic can
         # treat redacted placeholders as "not set" when necessary.
         LOADED_DEPLOY_CONFIG=true
-        
+
         print_success "Loaded configuration from $CONFIG_FILE"
-        
+
         # Display key settings that will be used as defaults
         if [ -n "${ARCHITECTURE:-}" ]; then
             echo -e "  ${BLUE}Architecture:${NC} $ARCHITECTURE"
@@ -3280,7 +3257,7 @@ load_previous_config() {
         if [ "${AUTO_ADMIN:-false}" = "true" ]; then
             echo -e "  ${BLUE}Auto-Admin Setup:${NC} Enabled (${AUTO_ADMIN_USERNAME:-admin})"
         fi
-        
+
         # Display external storage paths if configured
         if [ -n "${EXTERNAL_MODELS_PATH:-}" ] || [ -n "${EXTERNAL_GCODE_PATH:-}" ] || [ -n "${EXTERNAL_PROFILES_PATH:-}" ] || [ -n "${EXTERNAL_APP_DATA_PATH:-}" ] || [ -n "${EXTERNAL_DATABASE_PATH:-}" ] || [ -n "${EXTERNAL_DATAPROTECTION_PATH:-}" ] || [ -n "${EXTERNAL_PGADMIN_PATH:-}" ]; then
             echo -e "  ${BLUE}External Storage:${NC}"
@@ -3306,7 +3283,7 @@ load_previous_config() {
                 echo -e "    • pgAdmin:   $EXTERNAL_PGADMIN_PATH"
             fi
         fi
-        
+
         print_info "Previous settings will be used as defaults (press Enter to accept)"
         echo
         return 0
@@ -3317,10 +3294,10 @@ load_previous_config() {
 # Save current configuration for future use
 save_deployment_config() {
     print_header "💾 Saving Deployment Configuration"
-    
+
     print_info "Saving configuration to $CONFIG_FILE for future deployments"
     resolve_webauthn_configuration || return 1
-    
+
     # Decide which DB include flags to persist. Only persist flags for the
     # actively selected DB provider to avoid accidentally saving unrelated
     # database credentials or enabling other DB containers in future runs.
@@ -3388,7 +3365,7 @@ EOF
 
     cat >> "$CONFIG_FILE" << EOF
 
-# Application Settings - Pre-populate Setup Wizard  
+# Application Settings - Pre-populate Setup Wizard
 PFARM__NetworkDiscovery__EnableDiscovery=${ENABLE_DISCOVERY}
 PFARM__NetworkDiscovery__DiscoverySubnets=$(printf '%q' "$NETWORK_RANGES")
 EOF
@@ -3566,7 +3543,7 @@ EOF
 # Detect OS and Docker environment
 detect_environment() {
     print_header "🔍 Environment Detection"
-    
+
     # Detect OS
     if [[ "$OSTYPE" == "linux-gnu"* ]]; then
         OS="linux"
@@ -3582,7 +3559,7 @@ detect_environment() {
         OS="unknown"
         print_warning "Unknown OS detected"
     fi
-    
+
     # Check Docker
     if command -v docker &> /dev/null; then
         DOCKER_VERSION=$(docker --version | cut -d' ' -f3 | cut -d',' -f1)
@@ -3592,7 +3569,7 @@ detect_environment() {
         print_info "Visit: https://docs.docker.com/get-docker/"
         exit 1
     fi
-    
+
     # Check Docker Compose
     if docker compose version &> /dev/null; then
         COMPOSE_VERSION=$(docker compose version | head -n1 | cut -d' ' -f4)
@@ -3601,7 +3578,7 @@ detect_environment() {
         print_error "Docker Compose not found! Please install Docker Compose."
         exit 1
     fi
-    
+
     # Check if Docker is running
     if docker ps &> /dev/null; then
         print_success "Docker daemon is running"
@@ -3615,11 +3592,11 @@ detect_environment() {
 check_dotnet_sdk() {
     echo
     print_info "Checking for .NET SDK..."
-    
+
     if command -v dotnet &> /dev/null; then
         DOTNET_VERSION=$(dotnet --version 2>/dev/null || echo "unknown")
         print_success ".NET SDK found: $DOTNET_VERSION"
-        
+
         # Check if version meets minimum requirement (uses DOTNET_MAJOR_VERSION from config)
         local major_ver="${DOTNET_MAJOR_VERSION%%.*}"  # Extract just the major number (e.g., "10")
         if [[ "$DOTNET_VERSION" =~ ^${major_ver}\. ]] || [[ "$DOTNET_VERSION" =~ ^[1-9][0-9]+\. ]]; then
@@ -3634,15 +3611,15 @@ check_dotnet_sdk() {
         print_info "While Docker deployment doesn't require .NET SDK on the host,"
         print_info "having it installed allows for local development and debugging."
         echo
-        
+
         if [ "$NON_INTERACTIVE" = "true" ]; then
             print_info "Skipping .NET SDK installation in non-interactive mode"
             print_info "To install manually, visit: https://dotnet.microsoft.com/download"
             return 0
         fi
-        
+
         prompt_yes_no "Would you like to install .NET SDK now?" "no" "INSTALL_DOTNET"
-        
+
         if [ "$INSTALL_DOTNET" = "yes" ]; then
             install_dotnet_sdk
         else
@@ -3655,10 +3632,10 @@ check_dotnet_sdk() {
 # Install .NET SDK using official installation script
 install_dotnet_sdk() {
     print_header "📦 Installing .NET SDK"
-    
+
     local install_script="dotnet-install.sh"
     local install_url="https://dot.net/v1/dotnet-install.sh"
-    
+
     # Download installation script
     print_info "Downloading .NET installation script..."
     if command -v curl &> /dev/null; then
@@ -3670,19 +3647,19 @@ install_dotnet_sdk() {
         print_info "Please install .NET manually: https://dotnet.microsoft.com/download"
         return 1
     fi
-    
+
     if [ ! -f "$install_script" ]; then
         print_error "Failed to download .NET installation script"
         return 1
     fi
-    
+
     chmod +x "$install_script"
     print_success "Installation script downloaded"
-    
+
     # Install .NET SDK (required version from container-versions.conf)
     print_info "Installing .NET SDK $DOTNET_MAJOR_VERSION..."
     print_info "This may take a few minutes..."
-    
+
     if [ "$OS" = "windows" ]; then
         print_warning "Automated .NET installation not supported on Windows"
         print_info "Please download and install from: https://dotnet.microsoft.com/download"
@@ -3690,15 +3667,15 @@ install_dotnet_sdk() {
         rm -f "$install_script"
         exit 1
     fi
-    
+
     # Run installation script
     if ./"$install_script" --channel "$DOTNET_MAJOR_VERSION" --install-dir "$HOME/.dotnet"; then
         print_success ".NET SDK $DOTNET_MAJOR_VERSION installed successfully"
-        
+
         # Add to PATH for current session
         export PATH="$HOME/.dotnet:$PATH"
         export DOTNET_ROOT="$HOME/.dotnet"
-        
+
         # Provide instructions for permanent PATH setup
         echo
         print_info "To make .NET available in future sessions, add to your shell profile:"
@@ -3711,7 +3688,7 @@ install_dotnet_sdk() {
             echo "  echo 'export DOTNET_ROOT=\"\$HOME/.dotnet\"' >> ~/.bashrc"
         fi
         echo
-        
+
         # Verify installation
         if command -v dotnet &> /dev/null; then
             DOTNET_VERSION=$(dotnet --version)
@@ -3720,7 +3697,7 @@ install_dotnet_sdk() {
             print_warning "Installation completed but 'dotnet' command not found in PATH"
             print_info "You may need to start a new terminal session"
         fi
-        
+
         # Clean up
         rm -f "$install_script"
     else
@@ -3736,20 +3713,20 @@ choose_architecture() {
     ARCHITECTURE="microservices"
     ENV_FILE=".env"
     COMPOSE_FILE="docker-compose.yml"
-    
+
     if [ "$NON_INTERACTIVE" = "true" ]; then
         return 0
     fi
-    
+
     print_header "🏗️  Deployment Architecture"
-    
+
     echo -e "${GREEN}Standard Deployment${NC}"
     echo "   • Separate containers for API, Web, Database, and Workers"
     echo "   • PostgreSQL or SQL Server database support"
     echo "   • External storage for data persistence"
     echo "   • Built with multi-stage Docker builds for efficiency"
     echo
-    
+
     print_success "Using standard deployment architecture"
 }
 
@@ -4094,15 +4071,15 @@ configure_database() {
         esac
         return 0
     fi
-    
+
     print_header "💾 Database Configuration"
-    
+
     echo -e "${BLUE}Database options:${NC}"
     echo "1. PostgreSQL (recommended) - Included container"
     echo "2. SQL Server - Included container"
     echo "3. External database - Your own database server"
     echo
-    
+
     # Map DB_PROVIDER to menu choice number for default
     local default_choice="1"
     case "${DB_PROVIDER:-postgres}" in
@@ -4110,9 +4087,9 @@ configure_database() {
         sqlserver) default_choice="2" ;;
         external) default_choice="3" ;;
     esac
-    
+
     prompt_with_default "Choose database [1=PostgreSQL, 2=SQL Server, 3=External]:" "$default_choice" "DB_CHOICE"
-    
+
     case "$DB_CHOICE" in
         1|postgres|PostgreSQL)
             DB_PROVIDER="postgres"
@@ -4139,7 +4116,7 @@ configure_database() {
             echo "4. Enterprise - Commercial license required"
             echo
             prompt_with_default "Choose SQL Server edition [1=Developer, 2=Express, 3=Standard, 4=Enterprise]:" "${SQLSERVER_EDITION:-1}" "SQLSERVER_EDITION_CHOICE"
-            
+
             case "$SQLSERVER_EDITION_CHOICE" in
                 1|developer|Developer)
                     SQLSERVER_EDITION="Developer"
@@ -4160,7 +4137,7 @@ configure_database() {
                     print_info "Using Developer edition as default"
                     ;;
             esac
-            
+
             print_info "Using SQL Server $SQLSERVER_EDITION edition"
             echo
             prompt_with_default "SQL Server database name:" "${SQLSERVER_DB:-printfarmer}" "SQLSERVER_DB"
@@ -4181,7 +4158,7 @@ configure_database() {
             prompt_with_default "Database name:" "printfarmer" "EXT_DB_NAME"
             prompt_with_default "Database username:" "user" "EXT_DB_USER"
             prompt_with_default "Database password:" "password" "EXT_DB_PASSWORD"
-            
+
             case "$EXT_DB_TYPE" in
                 postgres)
                     CONNECTION_STRING="Host=$EXT_DB_HOST;Database=$EXT_DB_NAME;Username=$EXT_DB_USER;Password=$EXT_DB_PASSWORD"
@@ -4236,28 +4213,28 @@ configure_networking() {
         API_PORT="${API_PORT:-5245}"
         return 0
     fi
-    
+
     print_header "🌐 Network Configuration"
-    
+
     # All services run on the docker bridge network for service discovery by hostname
     # Printer discovery uses routed TCP/HTTP probes on the application bridge.
     print_success "All services on bridge network with service discovery"
     NETWORK_MODE="bridge"
     print_info "API will be accessible at http://api:5245 within the docker network"
     print_info "Printer discovery service will scan configured IP ranges for devices"
-    
+
     echo
     echo -e "${BLUE}Configure external access:${NC}"
     prompt_with_default "HTTP port for web access:" "8080" "HTTP_PORT"
-    
+
     # Warn about port 80 requiring elevated privileges
     if [ "$HTTP_PORT" = "80" ] && [ "$OS" = "linux" ]; then
         print_warning "Port 80 requires elevated privileges. Docker must be running with proper permissions."
         print_info "If containers fail to start, consider using port 8080 or run with: sudo docker compose ..."
     fi
-    
+
     prompt_with_default "HTTPS port for secure web access (0 to disable):" "8443" "HTTPS_PORT"
-    
+
     prompt_with_default "API port (for direct API access):" "5245" "API_PORT"
 }
 
@@ -4267,7 +4244,7 @@ adjust_connection_strings_for_network_mode() {
     return 0
 }
 
- 
+
 
 # Configure distributed slicing and worker settings
 # Must run BEFORE configure_external_storage so storage prompts can
@@ -4323,7 +4300,7 @@ configure_external_storage() {
     # In non-interactive mode, use pre-loaded config if available
     if [ "$NON_INTERACTIVE" = "true" ] && [ -n "${USE_EXTERNAL_STORAGE:-}" ]; then
         print_info "Using configured external storage: $USE_EXTERNAL_STORAGE"
-        
+
         # Apply defaults for any missing paths when external storage is enabled
         if [ "$USE_EXTERNAL_STORAGE" = "yes" ] || [ "$USE_EXTERNAL_STORAGE" = "true" ]; then
             # G-code storage is always needed (manual uploads, slicer uploads)
@@ -4339,7 +4316,7 @@ configure_external_storage() {
             EXTERNAL_DATAPROTECTION_PATH="${EXTERNAL_DATAPROTECTION_PATH:-$HOME/.printfarmer/dataprotection-keys}"
             EXTERNAL_DATABASE_PATH="${EXTERNAL_DATABASE_PATH:-$HOME/.printfarmer/database}"
             EXTERNAL_PGADMIN_PATH="${EXTERNAL_PGADMIN_PATH:-$HOME/.printfarmer/pgadmin}"
-            
+
             # Create directories that don't exist
             for dir in "$EXTERNAL_MODELS_PATH" "$EXTERNAL_GCODE_PATH" "$EXTERNAL_PROFILES_PATH" "$EXTERNAL_DATAPROTECTION_PATH" "$EXTERNAL_DATABASE_PATH" "$EXTERNAL_PGADMIN_PATH"; do
                 if [ -n "$dir" ] && [ ! -d "$dir" ]; then
@@ -4349,14 +4326,14 @@ configure_external_storage() {
         fi
         return 0
     fi
-    
+
     print_header "💾 External Storage Configuration (P0 Data Persistence)"
-    
+
     echo -e "${BLUE}3D Model Storage & G-Code Library${NC}"
     echo "These critical data files should persist independently from container lifecycles."
     echo "They will only be deleted when database files are removed explicitly."
     echo
-    
+
     # Check if external storage was already configured
     if [ -z "${USE_EXTERNAL_STORAGE:-}" ]; then
         prompt_yes_no "Use external host directories for model uploads and G-code? (Required for data persistence)" "yes" "USE_EXTERNAL_STORAGE"
@@ -4367,15 +4344,15 @@ configure_external_storage() {
             USE_EXTERNAL_STORAGE="no"
         fi
     fi
-    
+
     if [ "$USE_EXTERNAL_STORAGE" = "yes" ]; then
         print_success "External storage enabled - data will persist on host filesystem"
         echo
-        
+
         # G-code storage directory (always needed - manual uploads, slicer uploads)
         local default_gcode_path="${EXTERNAL_GCODE_PATH:-$HOME/.printfarmer/gcode}"
         prompt_with_default "Host directory for G-code files:" "$default_gcode_path" "EXTERNAL_GCODE_PATH"
-        
+
         # Ensure directory exists
         if ! mkdir -p "$EXTERNAL_GCODE_PATH" 2>/dev/null; then
             print_error "Failed to create G-code directory: $EXTERNAL_GCODE_PATH"
@@ -4383,13 +4360,13 @@ configure_external_storage() {
             return 1
         fi
         print_success "G-code directory ready: $EXTERNAL_GCODE_PATH"
-        
+
         # Slicer-only storage: models and profiles only when distributed slicing is enabled
         if [ "${ENABLE_DISTRIBUTED_SLICING:-false}" = "true" ]; then
             # Model storage directory (defaults to user's home directory - no sudo needed)
             local default_models_path="${EXTERNAL_MODELS_PATH:-$HOME/.printfarmer/models}"
             prompt_with_default "Host directory for 3D model storage (all uploaded models):" "$default_models_path" "EXTERNAL_MODELS_PATH"
-            
+
             # Ensure directory exists
             if ! mkdir -p "$EXTERNAL_MODELS_PATH" 2>/dev/null; then
                 print_error "Failed to create models directory: $EXTERNAL_MODELS_PATH"
@@ -4397,11 +4374,11 @@ configure_external_storage() {
                 return 1
             fi
             print_success "Models directory ready: $EXTERNAL_MODELS_PATH"
-            
+
             # Slicer profiles directory (defaults to user's home directory, optional)
             local default_profiles_path="${EXTERNAL_PROFILES_PATH:-$HOME/.printfarmer/slicer-profiles}"
             prompt_with_default "Host directory for slicer profiles (optional):" "$default_profiles_path" "EXTERNAL_PROFILES_PATH"
-            
+
             # Ensure directory exists
             if ! mkdir -p "$EXTERNAL_PROFILES_PATH" 2>/dev/null; then
                 print_error "Failed to create slicer profiles directory: $EXTERNAL_PROFILES_PATH"
@@ -4414,11 +4391,11 @@ configure_external_storage() {
             EXTERNAL_MODELS_PATH=""
             EXTERNAL_PROFILES_PATH=""
         fi
-        
+
         # Data Protection keys storage (ASP.NET Core encryption keys - persists across container restarts)
         local default_dataprotection_path="${EXTERNAL_DATAPROTECTION_PATH:-$HOME/.printfarmer/dataprotection-keys}"
         prompt_with_default "Host directory for Data Protection keys (encryption keys):" "$default_dataprotection_path" "EXTERNAL_DATAPROTECTION_PATH"
-        
+
         # Ensure directory exists
         if ! mkdir -p "$EXTERNAL_DATAPROTECTION_PATH" 2>/dev/null; then
             print_error "Failed to create Data Protection keys directory: $EXTERNAL_DATAPROTECTION_PATH"
@@ -4426,11 +4403,11 @@ configure_external_storage() {
             return 1
         fi
         print_success "Data Protection keys directory ready: $EXTERNAL_DATAPROTECTION_PATH"
-        
+
         # Database storage directory (PostgreSQL/SQL Server)
         local default_database_path="${EXTERNAL_DATABASE_PATH:-$HOME/.printfarmer/database}"
         prompt_with_default "Host directory for database storage (PostgreSQL/SQL Server):" "$default_database_path" "EXTERNAL_DATABASE_PATH"
-        
+
         # Ensure directory exists
         if ! mkdir -p "$EXTERNAL_DATABASE_PATH" 2>/dev/null; then
             print_error "Failed to create database directory: $EXTERNAL_DATABASE_PATH"
@@ -4438,11 +4415,11 @@ configure_external_storage() {
             return 1
         fi
         print_success "Database directory ready: $EXTERNAL_DATABASE_PATH"
-        
+
         # pgAdmin storage directory (pgAdmin configuration and sessions)
         local default_pgadmin_path="${EXTERNAL_PGADMIN_PATH:-$HOME/.printfarmer/pgadmin}"
         prompt_with_default "Host directory for pgAdmin data (configuration and sessions):" "$default_pgadmin_path" "EXTERNAL_PGADMIN_PATH"
-        
+
         # Ensure directory exists
         if ! mkdir -p "$EXTERNAL_PGADMIN_PATH" 2>/dev/null; then
             print_error "Failed to create pgAdmin directory: $EXTERNAL_PGADMIN_PATH"
@@ -4450,7 +4427,7 @@ configure_external_storage() {
             return 1
         fi
         print_success "pgAdmin directory ready: $EXTERNAL_PGADMIN_PATH"
-        
+
         print_success "External storage directories configured:"
         [ -n "$EXTERNAL_MODELS_PATH" ] && echo "  • Models:       $EXTERNAL_MODELS_PATH"
         [ -n "$EXTERNAL_GCODE_PATH" ] && echo "  • G-code:       $EXTERNAL_GCODE_PATH"
@@ -4463,7 +4440,7 @@ configure_external_storage() {
         echo "  • Data survives container recreation (docker-compose down/up)"
         echo "  • Data survives image rebuild"
         echo "  • Data only deleted if you explicitly remove these directories"
-        
+
     else
         print_warning "Docker-managed volumes will be used - data may be lost if volumes are removed"
         print_warning "⚠️  WARNING: Uploaded models and G-code will NOT persist across container recreation"
@@ -4554,9 +4531,9 @@ configure_additional() {
 
         return 0
     fi
-    
+
     print_header "⚙️  Additional Configuration"
-    
+
     # Initialize monitoring/observability variables with defaults if not already set
     # Monitoring and telemetry are NOW ENABLED BY DEFAULT for production observability
     INCLUDE_MONITORING=${INCLUDE_MONITORING:-true}
@@ -4568,14 +4545,14 @@ configure_additional() {
     if [ -n "$ENABLE_ELASTIC_STACK" ]; then
         elastic_stack_from_env="true"
     fi
-    
+
     prompt_with_default "Environment [Development/Production]:" "Development" "ENVIRONMENT"
-    
+
     if [ "$ENVIRONMENT" = "Development" ]; then
         ENABLE_SWAGGER="true"
         ENABLE_DETAILED_LOGGING="true"
         print_info "Development mode: Swagger UI and detailed logging enabled"
-        
+
         # Ask about DevMode auth bypass for easier debugging
         echo
         echo -e "${YELLOW}Developer Security Option:${NC}"
@@ -4594,11 +4571,11 @@ configure_additional() {
         DEVMODE_BYPASS_AUTH="false"
         print_info "Production mode: Swagger UI, detailed logging, and auth bypass disabled"
     fi
-    
+
     echo
     echo -e "${BLUE}Observability & Monitoring Configuration${NC}"
     echo "PrintFarmer supports optional monitoring and telemetry stacks for production deployments."
-    
+
     # Only offer monitoring/telemetry prompts if not already set by CLI flags
     if [ "${CLI_INCLUDE_MONITORING:-false}" = "false" ]; then
         # If INCLUDE_MONITORING was previously set (e.g., from env/.env), use it to seed the interactive choice
@@ -4680,7 +4657,7 @@ configure_additional() {
     else
         ENABLE_ELASTIC_STACK="false"
     fi
-    
+
     if [ "${CLI_INCLUDE_TELEMETRY:-false}" = "false" ]; then
         # Seed telemetry prompt from existing INCLUDE_TELEMETRY value if present
         if [ -z "${INCLUDE_TELEMETRY_CHOICE:-}" ] && [ -n "${INCLUDE_TELEMETRY:-}" ]; then
@@ -4733,7 +4710,7 @@ configure_additional() {
     if [ -n "${INCLUDE_DISCOVERY:-}" ]; then
         persist_env_key "INCLUDE_DISCOVERY" "${INCLUDE_DISCOVERY}"
     fi
-    
+
     if [ "${CLI_INCLUDE_SECURITY:-false}" = "false" ]; then
         prompt_yes_no "Enable security configurations (enhanced security headers, HTTPS)?" "no" "INCLUDE_SECURITY_CHOICE"
         if [ "$INCLUDE_SECURITY_CHOICE" = "yes" ]; then
@@ -4743,7 +4720,7 @@ configure_additional() {
         print_info "Security configurations enabled via CLI flag"
         INCLUDE_SECURITY="true"
     fi
-    
+
     if [ "${CLI_INCLUDE_REGISTRY:-false}" = "false" ]; then
         prompt_yes_no "Enable local Docker registry (for development/air-gapped deployments)?" "no" "INCLUDE_REGISTRY_CHOICE"
         if [ "$INCLUDE_REGISTRY_CHOICE" = "yes" ]; then
@@ -4753,28 +4730,28 @@ configure_additional() {
         print_info "Local Docker registry enabled via CLI flag"
         INCLUDE_REGISTRY="true"
     fi
-    
+
     if [ "${CLI_INCLUDE_DISCOVERY:-false}" = "false" ]; then
         echo -e "${BLUE}Network Discovery Configuration${NC}"
         echo "Network discovery allows PrintFarmer to find 3D printers on your network."
         echo
-        
+
         if [ "$OS" = "macos" ] && [ "$ARCHITECTURE" = "docker" ]; then
             print_warning "macOS Docker has limited network access. Discovery may not work for all WiFi-connected printers."
         fi
-        
+
         # Use previously configured value as default if available
         local default_discovery="no"
         if [ "${ENABLE_DISCOVERY:-}" = "true" ]; then
             default_discovery="yes"
         fi
-        
+
         prompt_yes_no "Enable network printer discovery?" "$default_discovery" "INCLUDE_DISCOVERY_CHOICE"
-        
+
         if [ "$INCLUDE_DISCOVERY_CHOICE" = "yes" ]; then
             INCLUDE_DISCOVERY="true"
             ALLOW_LOCAL_NETWORK="true"
-            
+
             echo
             echo -e "${BLUE}Configure IP address ranges to scan for printers:${NC}"
             echo "Common ranges:"
@@ -4782,7 +4759,7 @@ configure_additional() {
             echo "  • 10.0.0.0/8 (Corporate networks: 10.x.x.x)"
             echo "  • 172.16.0.0/12 (Docker networks: 172.16.x.x-172.31.x.x)"
             echo
-            
+
             prompt_with_default "Network ranges to scan (comma-separated):" "192.168.0.0/16,10.0.0.0/8" "NETWORK_RANGES"
         else
             INCLUDE_DISCOVERY="false"
@@ -4794,14 +4771,14 @@ configure_additional() {
         INCLUDE_DISCOVERY="true"
         ALLOW_LOCAL_NETWORK="true"
     fi
-    
+
     # Map INCLUDE_DISCOVERY to ENABLE_DISCOVERY for downstream use
     if [ "$INCLUDE_DISCOVERY" = "true" ]; then
         ENABLE_DISCOVERY="true"
     else
         ENABLE_DISCOVERY="false"
     fi
-    
+
 
     if [ "${NON_INTERACTIVE:-false}" = "true" ] && [ -n "${ENABLE_SPOOLMAN:-}" ]; then
         # Non-interactive: preserve pre-loaded Spoolman config from .deploy-config/env
@@ -4890,14 +4867,14 @@ EOF
 # Generate the main environment file for docker deployment
 generate_env_file() {
     print_header "📝 Generating Configuration"
-    
+
     # Set default env file if not already set
     ENV_FILE="${ENV_FILE:-.env}"
 
     # Resolve this before reading or truncating ENV_FILE so redeploys retain the key.
     resolve_deployment_shared_keys || return 1
     resolve_webauthn_configuration || return 1
-    
+
     # Preserve existing secrets before overwriting .env file
     # This ensures JWT key and other secrets persist across redeploys
     # Check both .env and .deploy-config (config takes precedence as source of truth)
@@ -4919,25 +4896,25 @@ generate_env_file() {
             fi
         fi
     fi
-    
+
     print_info "Creating environment file: $ENV_FILE"
-    
+
     # Generate dynamic CORS origins based on configured ports
     CORS_ORIGINS="http://localhost:3000"
-    
+
     # Frontend on HTTP_PORT, API on API_PORT
     CORS_ORIGINS="${CORS_ORIGINS},http://localhost:${HTTP_PORT},http://localhost:${API_PORT}"
-    
+
     # Add HTTPS origins if enabled
     if [ "${HTTPS_PORT:-0}" != "0" ]; then
         CORS_ORIGINS="${CORS_ORIGINS},https://localhost:${HTTPS_PORT}"
     fi
-    
+
     # Resolve ORCASLICER_CONTAINER_DIGEST before the heredoc below, since the
     # resolution emits print_success/print_warning output that must not be
     # captured into the .env file's variable text (issue #2164).
     resolve_orcaslicer_container_digest
-    
+
     cat > "$ENV_FILE" << EOF
 # PrintFarmer Docker Configuration
 # Generated by deploy-docker.sh on $(date)
@@ -4952,7 +4929,7 @@ ASPNETCORE_URLS=http://0.0.0.0:8080
 # Database Configuration
 DB_PROVIDER=$DB_PROVIDER
 EOF
-    
+
     # Clear provider include flags to avoid accidental emission of other DB secrets
     INCLUDE_POSTGRES=${INCLUDE_POSTGRES:-no}
     INCLUDE_SQLSERVER=${INCLUDE_SQLSERVER:-no}
@@ -5026,11 +5003,11 @@ EOF
     echo "CONNECTION_STRING=$CONNECTION_STRING_TO_WRITE" >> "$ENV_FILE"
     set_exported_env_var "ConnectionStrings__Default" "$CONNECTION_STRING_TO_WRITE"
     set_exported_env_var "CONNECTION_STRING" "$CONNECTION_STRING_TO_WRITE"
-    
+
     # Generate monitoring service credentials
     GRAFANA_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-$(generate_random_password)}
     VAULT_DEV_ROOT_TOKEN=${VAULT_DEV_ROOT_TOKEN:-$(generate_random_password)}
-    
+
     # Setup pgAdmin credentials from AUTO_ADMIN variables if available
     AUTO_ADMIN_USERNAME=${AUTO_ADMIN_USERNAME:-admin}
     AUTO_ADMIN_EMAIL=${AUTO_ADMIN_EMAIL:-admin@printfarmer.local}
@@ -5076,7 +5053,7 @@ WebAuthn__RelyingPartyId=$WebAuthn__RelyingPartyId
 WebAuthn__RelyingPartyName=$WebAuthn__RelyingPartyName
 WebAuthn__Origin=$WebAuthn__Origin
 
-# Feature Flags  
+# Feature Flags
 ENABLE_SWAGGER=$ENABLE_SWAGGER
 ENABLE_DETAILED_LOGGING=$ENABLE_DETAILED_LOGGING
 ENABLE_DISTRIBUTED_SLICING=$ENABLE_DISTRIBUTED_SLICING
@@ -5218,7 +5195,7 @@ EOF
             print_info "External DB configuration included (credentials not displayed)."
             ;;
     esac
-    
+
     print_info "Monitoring & Observability credentials generated (masked):"
     echo "  GRAFANA_ADMIN_USER=admin"
     echo "  GRAFANA_ADMIN_PASSWORD=$(mask_secret "$GRAFANA_ADMIN_PASSWORD")"
@@ -5226,14 +5203,14 @@ EOF
 
     print_warning "Generated passwords are sensitive. Store .env files securely and restrict access (chmod 600)."
     print_info "To view all credentials, run: grep 'PASSWORD\|TOKEN' $ENV_FILE || true"
-    
+
     if [ "$ARCHITECTURE" = "microservices" ]; then
         cat >> "$ENV_FILE" << EOF
 API_PORT=$API_PORT
 
 EOF
     fi
-    
+
     # Emit SQL Server entries only if SQL Server is selected or explicitly requested
     if [ "${DB_PROVIDER:-}" = "sqlserver" ] || [ "${INCLUDE_SQLSERVER:-no}" = "yes" ]; then
         cat >> "$ENV_FILE" << EOF
@@ -5247,8 +5224,8 @@ MSSQL_PID=${SQLSERVER_EDITION:-Developer}
 ACCEPT_EULA=Y
 EOF
     fi
-    
-    
+
+
     # Generate JWT signing key (only if not already set - preserves existing key on redeploy)
     # This prevents user sessions from being invalidated on every deployment
     if [ -z "${Jwt__Key:-}" ]; then
@@ -5257,7 +5234,7 @@ EOF
     else
         print_info "Using existing JWT signing key (sessions preserved)"
     fi
-    
+
     # Write JWT configuration to env file
     cat >> "$ENV_FILE" << EOF
 
@@ -5277,16 +5254,16 @@ EOF
     echo "PROMOTION_SHARED_API_KEY=$PROMOTION_SHARED_API_KEY" >> "$ENV_FILE"
 
     export_discovery_service_key
-    
+
     # Confirm authentication setup without emitting secret material.
     if [ "$ENABLE_ORCA_WORKER" = "yes" ] && [ "$ORCA_WORKER_COUNT" -gt 0 ]; then
         echo
         print_info "Slicer worker bootstrap authentication is configured (secret hidden)."
         print_info "Each registered worker receives a distinct service identity and API key."
     fi
-    
+
     print_success "Environment file created: $ENV_FILE"
-    
+
     # Also create a standard .env file for docker-compose default behavior
     if [ "$ENV_FILE" != ".env" ]; then
         print_info "Creating standard .env file"
@@ -5376,7 +5353,7 @@ detect_db_credential_divergence() {
             fi
             ;;
         *)
-            ;; 
+            ;;
     esac
 
     if [ -n "$mismatch_info" ]; then
@@ -5548,7 +5525,7 @@ run_compose_build_with_snapshot_repair() {
 # Build and deploy
 deploy_containers() {
     print_header "🚀 Building and Deploying Containers"
-    
+
     # Source the .env file into the current shell so that environment variables
     # are available to the script and are properly passed to docker compose.
     # This ensures that health check commands can access variables like MSSQL_SA_PASSWORD.
@@ -5563,7 +5540,7 @@ deploy_containers() {
     else
         print_warning "Environment file $ENV_FILE not found; some variables may be missing"
     fi
-    
+
     print_info "Step 1/3: Building Docker images..."
     print_info "This may take several minutes on first run..."
     print_info "Build verbosity: $BUILD_VERBOSITY (set with --build-verbosity or --verbose-build)"
@@ -5575,15 +5552,15 @@ deploy_containers() {
         print_header "📦 Using Pre-built Images from Registry"
         print_info "Registry: $REGISTRY_HOST"
         print_info "Tag: $REGISTRY_IMAGE_TAG"
-        
+
         # Export registry variables for compose file
         export REGISTRY_HOST
         export REGISTRY_IMAGE_TAG
-        
+
         # Write these to .env so they persist
         update_kv_file "$ENV_FILE" "REGISTRY_HOST" "$REGISTRY_HOST"
         update_kv_file "$ENV_FILE" "REGISTRY_IMAGE_TAG" "$REGISTRY_IMAGE_TAG"
-        
+
         # Create registry override file that uses pre-built images
         local registry_override="docker-compose.registry-override.yml"
         cat > "$registry_override" << EOF
@@ -5594,7 +5571,7 @@ deploy_containers() {
 services:
   api:
     image: ${REGISTRY_HOST}/printfarmer-api:${REGISTRY_IMAGE_TAG}
-    
+
   frontend:
     image: ${REGISTRY_HOST}/printfarmer-frontend:${REGISTRY_IMAGE_TAG}
 EOF
@@ -5602,7 +5579,7 @@ EOF
         # Add printer-discovery if discovery is enabled
         if [ "${CLI_INCLUDE_DISCOVERY:-false}" = "true" ] || grep -q "printer-discovery:" "$COMPOSE_FILE" 2>/dev/null; then
             cat >> "$registry_override" << EOF
-    
+
   printer-discovery:
     image: ${REGISTRY_HOST}/printfarmer-printer-discovery:${REGISTRY_IMAGE_TAG}
 EOF
@@ -5610,19 +5587,19 @@ EOF
 
         print_info "Created registry override: $registry_override"
         compose_cmd+=( -f "$registry_override" )
-        
+
         # Pull images from registry
         print_info "Pulling images from registry..."
         local images_to_pull=(
             "${REGISTRY_HOST}/printfarmer-api:${REGISTRY_IMAGE_TAG}"
             "${REGISTRY_HOST}/printfarmer-frontend:${REGISTRY_IMAGE_TAG}"
         )
-        
+
         # Add printer-discovery if enabled
         if [ "${CLI_INCLUDE_DISCOVERY:-false}" = "true" ] || grep -q "printer-discovery:" "$COMPOSE_FILE" 2>/dev/null; then
             images_to_pull+=("${REGISTRY_HOST}/printfarmer-printer-discovery:${REGISTRY_IMAGE_TAG}")
         fi
-        
+
         local pull_failed=false
         for img in "${images_to_pull[@]}"; do
             print_info "  Pulling $img..."
@@ -5633,19 +5610,19 @@ EOF
                 print_success "  ✓ Pulled $img"
             fi
         done
-        
+
         if [ "$pull_failed" = "true" ]; then
             print_error "Some images failed to pull from registry"
             print_info "Make sure you have access to the registry and the images exist"
             print_info "Available tags: latest, main, release, v1.0.0, sha-<commit>"
             exit 1
         fi
-        
+
         print_success "All images pulled from registry"
-        
+
         # Skip the local build process
         print_info "Skipping local build (using registry images)"
-        
+
     elif [ "$DRY_RUN" = "true" ]; then
         print_info "Dry-run mode: skipping image build. (Would run: docker compose build)"
     else
@@ -5747,7 +5724,7 @@ EOF
                 exit 1
             fi
             print_info "Building orcaslicer-binaries:${ORCA_VERSION} layer (optimized caching via Dockerfile.multistage)..."
-            
+
             # Build binary layer with automatic download and extraction
             BUILD_ARGS="--build-arg ORCASLICER_VERSION=${ORCA_VERSION} --build-arg ORCASLICER_SHA256=${ORCASLICER_SHA256} --build-arg ALLOW_STUB=false"
 
@@ -5792,7 +5769,7 @@ EOF
                     fi
                 fi
             fi
-            
+
             # Auto-detect if orcaslicer-binaries image already exists locally (even if not from ORCA_ASSET_IMAGE)
             # This handles the case where images were loaded externally before this script runs
             if [ "${_PF_SKIP_ORCA_BUILD:-0}" != "1" ] && [ "$orca_clean_rebuild" != "true" ]; then
@@ -5811,7 +5788,7 @@ EOF
                     fi
                 fi
             fi
-            
+
             # Ensure a root-level Dockerfile.multistage exists for build commands
             if [ ! -f "./Dockerfile.multistage" ]; then
                 print_error "Dockerfile.multistage not found - required for OrcaSlicer builds"
@@ -5846,7 +5823,7 @@ EOF
 
         # Note: slicer-base stage is now part of Dockerfile.multistage (orcaslicer-worker target)
         # No separate build needed - docker compose build will handle it automatically
-        
+
         # If we have a prebuilt orcaslicer-binaries image, create an override compose file
         # that uses additional_contexts to make Docker use the cached image instead of rebuilding
         ORCA_OVERRIDE_FILE=""
@@ -5886,18 +5863,18 @@ EOF
             # Ensure cleanup on exit
             trap cleanup_orca_override EXIT
         fi
-        
+
         # Now build all services
         # Support passing --platform to docker compose build when requested
         # Prepare build args including ORCA_ASSET_PATH for offline deployments
         declare -a compose_build_args=(--build-arg "BUILD_VERBOSITY=${BUILD_VERBOSITY}" --build-arg "GIT_SHA=${GIT_SHA}")
-        
+
         # Add --no-cache if requested (useful when NuGet packages are corrupted from .NET version migrations)
         if [ "$NO_CACHE" = "true" ]; then
             compose_build_args+=(--no-cache)
             print_info "Building without cache (--no-cache enabled)"
         fi
-        
+
         # Copy AppImage files to build context if they exist (for offline builds)
         # Docker cannot access host paths in build args, so we must copy files into the build context
         if [ "${_PF_SKIP_ORCA_BUILD:-0}" != "1" ] && [ -n "${ORCA_ASSET_PATH:-}" ] && [ -d "${ORCA_ASSET_PATH}" ]; then
@@ -5914,7 +5891,7 @@ EOF
                 print_warning "No AppImage files found in ${ORCA_ASSET_PATH}, will attempt download during build"
             fi
         fi
-        
+
         # When using prebuilt orcaslicer-binaries image via additional_contexts,
         # tell the Dockerfile to skip building the binary and use only what's in the prebuilt image
         if [ "${_PF_SKIP_ORCA_BUILD:-0}" = "1" ]; then
@@ -5950,11 +5927,11 @@ EOF
                 exit 1
             fi
         fi
-        
+
         # Clean up the temporary override file if it was created
         cleanup_orca_override
     fi
-    
+
     # Re-resolve ORCASLICER_CONTAINER_DIGEST now that the worker image build
     # (or registry pull) above has completed, and persist the fresh value into
     # $ENV_FILE so the imminent `docker compose --env-file "$ENV_FILE" up`
@@ -5968,14 +5945,14 @@ EOF
     if [ -f "$ENV_FILE" ]; then
         update_kv_file "$ENV_FILE" "ORCASLICER_CONTAINER_DIGEST" "$ORCASLICER_CONTAINER_DIGEST"
     fi
-    
+
     print_info "Step 2/3: Starting containers..."
     print_info "Bringing up services with configuration from $ENV_FILE"
 
     # Activate profiles for enabled workers (compose v2 profiles)
     # Build complete compose command with profiles BEFORE the 'up' subcommand
     local final_compose_cmd=("${compose_cmd[@]}")
-    
+
     if [ "$ENABLE_ORCA_WORKER" = "yes" ] && [ "$ORCA_WORKER_COUNT" -gt 0 ]; then
         final_compose_cmd+=(--profile orca)
     fi
@@ -6087,7 +6064,7 @@ EOF
             # Now start the remaining services (frontend, workers, etc.)
             if "${final_compose_cmd[@]}" up -d; then
                 print_success "All containers started successfully"
-                
+
                 # Verify the docker-compose nginx-proxy is working
                 if check_nginx_proxy; then
                     print_info "nginx proxy verification passed"
@@ -6117,43 +6094,43 @@ EOF
     # services (each with its own Worker__InstanceId baked in) whenever
     # ORCA_WORKER_COUNT>1, and those are already started by the `up -d` calls
     # above -- no separate scale step is required.
-    
+
     if [ "$DRY_RUN" = "true" ]; then
         print_info "Dry-run complete. No containers launched."
     else
         print_success "Step 3/3: Containers starting..."
         print_info "Waiting for all services to be healthy..."
-        
+
         # Wait for containers to be healthy (with timeout)
         local max_wait=120  # 2 minutes total
         local wait_interval=5
         local elapsed=0
         local all_healthy=false
-        
+
         while [ $elapsed -lt $max_wait ]; do
             # Check if all containers are healthy
         local unhealthy_count=$(dc ps --format json 2>/dev/null | grep -E '"Health":"(starting|unhealthy)"' | wc -l | tr -d ' ')
-            
+
             if [ "$unhealthy_count" -eq 0 ]; then
                 all_healthy=true
                 print_success "All containers are healthy!"
                 break
             fi
-            
+
             # Show progress
             if [ $((elapsed % 15)) -eq 0 ]; then
                 print_info "Still waiting for services to become healthy... ($elapsed seconds elapsed)"
                 dc ps --format "table {{.Name}}\t{{.Status}}" 2>/dev/null | grep -E "starting|unhealthy" || true
             fi
-            
+
             sleep $wait_interval
             elapsed=$((elapsed + wait_interval))
         done
-        
+
         if [ "$all_healthy" = false ]; then
             print_warning "Some services may still be starting after ${max_wait}s. Checking detailed status..."
         fi
-        
+
         # Reload nginx configuration to pick up any new service IPs from the deployment
         # This ensures DNS resolution is fresh and nginx uses correct upstream addresses
         if docker ps --format '{{.Names}}' | grep -q '^printfarmer-nginx-proxy$'; then
@@ -6227,17 +6204,17 @@ wait_for_database() {
     print_error ""
     print_error "📊 DIAGNOSTIC INFORMATION:"
     print_error ""
-    
+
     # Show container status
     print_error "Container Status:"
     dc ps --format "table {{.Name}}\t{{.Status}}\t{{.Health}}" 2>/dev/null || true
     print_error ""
-    
+
     # Show logs from database container
     print_error "Recent Database Logs (last 50 lines):"
     dc logs database --tail 50 2>/dev/null || true
     print_error ""
-    
+
     # SQL Server specific diagnostics
     if [ "${DB_PROVIDER:-postgres}" = "sqlserver" ]; then
         print_error "🔍 SQL SERVER SPECIFIC CHECKS:"
@@ -6250,7 +6227,7 @@ wait_for_database() {
         print_error "  rm .env 2>/dev/null"
         print_error "  ./scripts/deploy-docker.sh  # Let script generate new password"
     fi
-    
+
     # Generic diagnostics
     print_error "🔧 TROUBLESHOOTING STEPS:"
     print_error "1. Check available disk space: df -h"
@@ -6266,7 +6243,7 @@ wait_for_database() {
     print_error "   docker compose down -v"
     print_error "   ./scripts/deploy-docker.sh"
     print_error ""
-    
+
     return 1
 }
 
@@ -6427,7 +6404,7 @@ wait_for_api() {
             if [ $((elapsed - last_detail_log)) -ge 15 ]; then
                 print_warning "API responded but dependencies still initializing (status=${health_status:-unknown}, http=${health_http:-n/a})."
                 [ -n "$health_desc" ] && print_info "Health description: $health_desc"
-              
+
                 if [ -n "$health_payload" ]; then
                     print_info "Latest /health payload (truncated):"
                     printf '%s\n' "$health_payload" | head -n 20
@@ -6746,22 +6723,22 @@ prepare_external_storage_directories() {
     fi
 
     print_header "📁 Pre-creating External Storage Directories"
-    
+
     local current_user
     current_user=$(whoami)
     local current_uid
     current_uid=$(id -u)
-    
+
     print_info "Current user: $current_user (UID: $current_uid)"
     print_info "Target ownership: Will be readable by appuser (UID 1001) inside containers"
     echo
-    
+
     local paths_created=0
     local paths_failed=0
-    
+
     # Array of paths to create: "path:description"
     local paths_to_create=()
-    
+
     if [ -n "${EXTERNAL_MODELS_PATH:-}" ]; then
         paths_to_create+=("${EXTERNAL_MODELS_PATH}:3D Models")
     fi
@@ -6777,24 +6754,24 @@ prepare_external_storage_directories() {
     if [ -n "${EXTERNAL_DATABASE_PATH:-}" ]; then
         paths_to_create+=("${EXTERNAL_DATABASE_PATH}:Database")
     fi
-    
+
     if [ ${#paths_to_create[@]} -eq 0 ]; then
         print_info "No external storage paths configured"
         return 0
     fi
-    
+
     for path_entry in "${paths_to_create[@]}"; do
         local path="${path_entry%:*}"
         local desc="${path_entry#*:}"
-        
+
         if [ -z "$path" ]; then
             continue
         fi
-        
+
         # Create parent directory if needed
         local parent_dir
         parent_dir=$(dirname "$path")
-        
+
         if [ ! -d "$parent_dir" ]; then
             print_info "Creating parent directory: $parent_dir"
             if ! mkdir -p "$parent_dir" 2>/dev/null; then
@@ -6805,7 +6782,7 @@ prepare_external_storage_directories() {
                 continue
             fi
         fi
-        
+
         # Create the storage directory itself
         if [ ! -d "$path" ]; then
             print_info "Creating directory: [$desc] $path"
@@ -6819,7 +6796,7 @@ prepare_external_storage_directories() {
         else
             print_info "Directory already exists: [$desc] $path"
         fi
-        
+
         # Fix permissions to 775 (rwxrwxr-x) so both the host user and container appuser
         # can write when they share a common group (for example gid 1001 / docker).
         if ! chmod 775 "$path" 2>/dev/null; then
@@ -6827,13 +6804,13 @@ prepare_external_storage_directories() {
             ((paths_failed++))
             continue
         fi
-        
+
         # Check current ownership (informational, not enforced)
         local current_owner
         current_owner=$(ls -ld "$path" | awk '{print $3":"$4}')
         print_info "  Current ownership: $current_owner"
         print_info "  Permissions set to: 775 (rwxrwxr-x)"
-        
+
         # Verify permissions are now correct
         local perms
         perms=$(stat -c '%a' "$path" 2>/dev/null || stat -f '%A' "$path" 2>/dev/null || echo "unknown")
@@ -6843,11 +6820,11 @@ prepare_external_storage_directories() {
             print_success "  Permissions verified ✓"
         fi
     done
-    
+
     echo
     print_header "Storage Directory Preparation Summary"
     print_info "Directories created: $paths_created"
-    
+
     if [ $paths_failed -gt 0 ]; then
         print_warning "Failed to create/prepare: $paths_failed directories"
         print_warning "⚠️  Some storage directories may not be accessible. Docker will attempt to create them as root."
@@ -6882,7 +6859,7 @@ prepare_pgadmin_setup() {
     if [ "${ENABLE_PGADMIN:-false}" != "true" ]; then
         return 0
     fi
-    
+
     # Only configure if using PostgreSQL
     if [ "$DB_PROVIDER" != "postgres" ]; then
         print_info "pgAdmin configuration skipped (PostgreSQL not selected)"
@@ -6890,10 +6867,10 @@ prepare_pgadmin_setup() {
     fi
 
     print_header "🐘 Preparing pgAdmin Configuration"
-    
+
     # Ensure pgAdmin volume directory exists with proper permissions
     local pgadmin_vol="${EXTERNAL_PGADMIN_PATH:-.volumes/printfarmer-pgadmin}"
-    
+
     if [ ! -d "$pgadmin_vol" ]; then
         print_info "Creating pgAdmin volume directory: $pgadmin_vol"
         if ! mkdir -p "$pgadmin_vol" 2>/dev/null; then
@@ -6903,7 +6880,7 @@ prepare_pgadmin_setup() {
             fi
         fi
     fi
-    
+
     # Fix permissions for pgAdmin container (pgadmin user is uid 5050 in the container)
     # Docker maps to the host user, but we need world-writable for safety
     if ! chmod 777 "$pgadmin_vol" 2>/dev/null; then
@@ -6914,10 +6891,10 @@ prepare_pgadmin_setup() {
         fi
     fi
     print_success "pgAdmin volume directory ready: $pgadmin_vol"
-    
+
     # Generate pgAdmin servers.json configuration to auto-register the PostgreSQL database
     generate_pgadmin_servers_config || return 1
-    
+
     echo
     return 0
 }
@@ -6926,15 +6903,15 @@ prepare_pgadmin_setup() {
 generate_pgadmin_servers_config() {
     local pgadmin_vol="${EXTERNAL_PGADMIN_PATH:-.volumes/printfarmer-pgadmin}"
     local servers_config="$pgadmin_vol/servers.json"
-    
+
     print_info "Generating pgAdmin PostgreSQL server configuration: $servers_config"
-    
+
     # Get database connection details from environment
     local db_host="${POSTGRES_HOST:-database}"
     local db_port="${POSTGRES_PORT:-5432}"
     local db_user="${POSTGRES_USER:-postgres}"
     local db_name="${POSTGRES_DB:-printfarmer}"
-    
+
     # Create servers.json in correct format per pgAdmin documentation
     # See: https://www.pgadmin.org/docs/pgadmin4/latest/import_export_servers.html#json-format
     # Note: Password fields cannot be imported/exported - user must enter manually
@@ -6961,7 +6938,7 @@ EOF
     sed -i "s|\"DB_HOST\"|\"$db_host\"|g" "$servers_config"
     sed -i "s|DB_PORT|$db_port|g" "$servers_config"
     sed -i "s|\"DB_USER\"|\"$db_user\"|g" "$servers_config"
-    
+
     print_success "pgAdmin servers configuration generated"
     return 0
 }
@@ -6975,15 +6952,15 @@ validate_external_storage_permissions() {
     fi
 
     print_header "🔐 Validating External Storage Permissions"
-    
+
     local validation_passed=true
     local total_dirs=0
     local valid_dirs=0
     local invalid_dirs=0
-    
+
     # Array of paths to validate: "path:description"
     local paths_to_validate=()
-    
+
     if [ -n "${EXTERNAL_MODELS_PATH:-}" ]; then
         paths_to_validate+=("${EXTERNAL_MODELS_PATH}:3D Models")
     fi
@@ -7002,37 +6979,37 @@ validate_external_storage_permissions() {
     if [ -n "${EXTERNAL_DATAPROTECTION_PATH:-}" ]; then
         paths_to_validate+=("${EXTERNAL_DATAPROTECTION_PATH}:Data Protection Keys")
     fi
-    
+
     if [ ${#paths_to_validate[@]} -eq 0 ]; then
         return 0
     fi
-    
+
     echo "Checking external storage directories..."
     echo
-    
+
     for path_entry in "${paths_to_validate[@]}"; do
         local path="${path_entry%:*}"
         local desc="${path_entry#*:}"
         ((total_dirs++))
-        
+
         if [ -z "$path" ]; then
             continue
         fi
-        
+
         # Skip database directory validation - ownership will be changed by database provider
         if [ "$desc" = "Database" ]; then
             print_info "⊘ [$desc] $path (skipped - ownership managed by database provider)"
             ((valid_dirs++))
             continue
         fi
-        
+
         if [ ! -d "$path" ]; then
             print_error "✗ [$desc] Directory not found: $path"
             ((invalid_dirs++))
             validation_passed=false
             continue
         fi
-        
+
         # Container-mounted directories (G-code, Models, Profiles, Data Protection Keys)
         # are chown'd by the container entrypoint at startup. The deploy user doesn't
         # need write access — only verify the directory exists and is readable.
@@ -7043,7 +7020,7 @@ validate_external_storage_permissions() {
                 continue
                 ;;
         esac
-        
+
         # For remaining directories, check if readable and writable by current user
         if [ ! -r "$path" ]; then
             print_error "✗ [$desc] Directory not readable: $path"
@@ -7051,7 +7028,7 @@ validate_external_storage_permissions() {
             validation_passed=false
             continue
         fi
-        
+
         if [ ! -w "$path" ]; then
             print_error "✗ [$desc] Directory not writable: $path"
             print_info "   Run: sudo chmod 775 '$path' to fix permissions"
@@ -7059,11 +7036,11 @@ validate_external_storage_permissions() {
             validation_passed=false
             continue
         fi
-        
+
         # Check permissions
         local perms
         perms=$(stat -c '%a' "$path" 2>/dev/null || stat -f '%A' "$path" 2>/dev/null || echo "unknown")
-        
+
         # Acceptable permissions: 775 (optimal), 755 (owner-only write), 777 (permissive)
         if [[ "$perms" =~ ^(755|777|775)$ ]]; then
             local owner
@@ -7082,13 +7059,13 @@ validate_external_storage_permissions() {
             validation_passed=false
         fi
     done
-    
+
     echo
     print_header "Storage Permission Validation Summary"
     print_info "Total directories: $total_dirs"
     print_info "Valid: $valid_dirs"
     print_info "Invalid/Inaccessible: $invalid_dirs"
-    
+
     if [ "$validation_passed" = true ]; then
         print_success "✓ All external storage directories have correct permissions"
         return 0
@@ -7111,19 +7088,19 @@ verify_deployment() {
         print_info "Dry-run mode: skipping live deployment verification."
         return 0
     fi
-    
+
     local api_url="http://localhost:$HTTP_PORT"
     if [ "$ARCHITECTURE" = "microservices" ]; then
         local direct_api_url="http://localhost:$API_PORT"
     fi
-    
+
     print_info "Checking container status..."
     dc ps
     echo
-    
+
     print_info "Running comprehensive health checks..."
     local health_check_failed=false
-    
+
     # Test basic health endpoint
     print_info "Testing basic health endpoint..."
     local basic_health=$(curl -s "$api_url/healthz" 2>/dev/null)
@@ -7137,25 +7114,25 @@ verify_deployment() {
         fi
         health_check_failed=true
     fi
-    
+
     # Test comprehensive health endpoint
     print_info "Testing comprehensive health endpoint..."
     local health_json=$(curl -s "$api_url/health" 2>/dev/null)
-    
+
     if [ -n "$health_json" ]; then
         # Check if it's JSON or simple text response
         if echo "$health_json" | grep -q '^{'; then
             # JSON response
             local health_status=$(echo "$health_json" | grep -o '"status":"[^"]*"' | head -1 | cut -d '"' -f4)
-            
+
             if [ "$health_status" = "Healthy" ]; then
                 print_success "✓ Comprehensive health check: Healthy"
-                
+
                 # Parse and display key health metrics
                 if command -v jq >/dev/null 2>&1; then
                     print_info "Health check details:"
                     echo "$health_json" | jq -r '
-                        .results | to_entries[] | 
+                        .results | to_entries[] |
                         "  • \(.key): \(.value.description // .value.status // "OK")"
                     ' 2>/dev/null || true
                 fi
@@ -7181,7 +7158,7 @@ verify_deployment() {
         fi
     else
         print_warning "✗ Comprehensive health check: FAILED (no response)"
-        
+
         # Retry once after brief delay
         print_info "Retrying after 5 seconds..."
         sleep 5
@@ -7194,13 +7171,13 @@ verify_deployment() {
             health_check_failed=true
         fi
     fi
-    
+
     # Test an anonymous API endpoint without depending on catalog authorization policy.
     print_info "Testing API endpoints..."
     local endpoint_response=$(curl -s -w "\n%{http_code}" "$api_url/api/setup/status" 2>&1)
     local endpoint_body=$(echo "$endpoint_response" | head -n -1)
     local endpoint_status=$(echo "$endpoint_response" | tail -n 1)
-    
+
     if [ "$endpoint_status" = "200" ] && echo "$endpoint_body" | grep -q '"needsSetup"'; then
         print_success "✓ API endpoints: OK (/api/setup/status)"
     else
@@ -7213,13 +7190,13 @@ verify_deployment() {
         fi
         health_check_failed=true
     fi
-    
+
     # Test worker health if enabled
     if [ "$ENABLE_ORCA_WORKER" = "yes" ]; then
         print_info "Testing OrcaSlicer worker..."
         local orca_checked=false
         local orca_container=""
-        
+
         # Get the first OrcaSlicer worker container. With ORCA_WORKER_COUNT=1
         # the service is still named "orcaslicer-worker"; with count>1, N
         # distinct services are rendered instead (issue #1847), named
@@ -7229,7 +7206,7 @@ verify_deployment() {
             orca_service="orcaslicer-worker-1"
         fi
         orca_container=$(dc ps -q "$orca_service" 2>/dev/null | head -1)
-        
+
         if [ -n "$orca_container" ]; then
             # Check container health via docker compose exec
             if dc exec -T "$orca_service" curl -sf "http://localhost:8080/healthz" >/dev/null 2>&1; then
@@ -7237,13 +7214,13 @@ verify_deployment() {
                 orca_checked=true
             fi
         fi
-        
+
         # Fallback: try localhost:port (works when worker port is bound to host)
         if [ "$orca_checked" = false ] && curl -sf "http://localhost:${ORCA_HOST_PORT:-8080}/healthz" >/dev/null 2>&1; then
             print_success "✓ OrcaSlicer worker: Healthy"
             orca_checked=true
         fi
-        
+
         if [ "$orca_checked" = false ]; then
             print_warning "✗ OrcaSlicer worker: Not responding"
             print_info "  (Worker may still be starting. Check 'docker-compose -f $COMPOSE_FILE ps' and logs for details)"
@@ -7265,12 +7242,12 @@ verify_deployment() {
             health_check_failed=true
         fi
     fi
-    
+
     # Test pgAdmin health if enabled
     if [ "$ENABLE_PGADMIN" = "true" ] && [ "$DB_PROVIDER" = "postgres" ]; then
         print_info "Testing pgAdmin..."
         local pgadmin_checked=false
-        
+
         # Check if pgAdmin container is running
         if docker ps --format '{{.Names}}' | grep -q "^printfarmer-pgadmin$"; then
             # Try to reach the pgAdmin health endpoint
@@ -7279,7 +7256,7 @@ verify_deployment() {
                 pgadmin_checked=true
             fi
         fi
-        
+
         if [ "$pgadmin_checked" = false ]; then
             print_warning "✗ pgAdmin: Not responding"
             print_info "  (pgAdmin may still be starting. Check 'docker-compose -f $COMPOSE_FILE ps' and logs for details)"
@@ -7287,7 +7264,7 @@ verify_deployment() {
             health_check_failed=true
         fi
     fi
-    
+
     # Browser-origin / Proxy health check: ensure the public-facing origin proxies /api to the API
     # Use SERVER_HOST if set, otherwise default to localhost
     local proxy_host=${SERVER_HOST:-localhost}
@@ -7360,9 +7337,9 @@ verify_deployment() {
 # Display final information
 display_final_info() {
     local verification_passed="${1:-true}"
-    
+
     print_header "🎉 Deployment Complete"
-    
+
     if [ "$DRY_RUN" = "true" ]; then
         print_success "Dry-run summary (no containers started)"
     else
@@ -7374,7 +7351,7 @@ display_final_info() {
         fi
     fi
     echo
-    
+
     # Determine the hostname/IP to show in URLs
     local SERVER_HOST="localhost"
     if [ "${DEPLOYING_TO_LINUX:-no}" = "yes" ] || [ "$OS" = "linux" ]; then
@@ -7398,34 +7375,34 @@ display_final_info() {
             fi
         fi
     fi
-    
+
     echo -e "${GREEN}Access URLs:${NC}"
     echo -e "${BLUE}  🌐 Web Interface: http://$SERVER_HOST:$HTTP_PORT${NC}"
     echo -e "${BLUE}  🔑 Passkeys: ${WebAuthn__Origin}${NC}"
-    
+
     if [ "${HTTPS_PORT:-0}" != "0" ]; then
         echo -e "${BLUE}  🔒 Secure Access: https://$SERVER_HOST:$HTTPS_PORT${NC}"
     fi
-    
+
     if [ "$ARCHITECTURE" = "microservices" ]; then
         echo -e "${BLUE}  🔧 Direct API: http://$SERVER_HOST:$API_PORT${NC}"
     fi
-    
+
     echo -e "${BLUE}  ❤️  Health Check: http://$SERVER_HOST:$HTTP_PORT/healthz${NC}"
-    
+
     # Show pgAdmin URL if enabled
     if [ "$ENABLE_PGADMIN" = "true" ] && [ "$DRY_RUN" != "true" ]; then
         echo -e "${BLUE}  🐘 pgAdmin (Database): http://$SERVER_HOST:5050/pgadmin${NC}"
         echo -e "       ${YELLOW}Credentials: ${AUTO_ADMIN_USERNAME:-admin} / ${AUTO_ADMIN_EMAIL:-admin@printfarmer.local}${NC}"
         echo -e "       ${YELLOW}Network Access: http://$(hostname -I | awk '{print $1}'):5050/pgadmin${NC}"
     fi
-    
+
     # Show localhost alternative if we're showing an IP
     if [ "$SERVER_HOST" != "localhost" ]; then
         echo -e "${BLUE}  📍 Local access: http://localhost:$HTTP_PORT${NC}"
     fi
     echo
-    
+
     echo -e "${GREEN}Management Commands:${NC}"
     echo -e "${BLUE}  • View status:    docker compose --env-file $ENV_FILE ps${NC}"
     if [ "$DRY_RUN" != "true" ]; then
@@ -7453,12 +7430,12 @@ display_final_info() {
         print_calibration_status_line
     fi
 
-    
+
     echo -e "${GREEN}Configuration Files:${NC}"
     echo -e "${BLUE}  • Environment: $ENV_FILE${NC}"
     echo -e "${BLUE}  • Compose: $COMPOSE_FILE${NC}"
     echo
-    
+
     # Troubleshooting section
     if [ "$DRY_RUN" != "true" ]; then
         echo -e "${YELLOW}Troubleshooting:${NC}"
@@ -7466,7 +7443,7 @@ display_final_info() {
         echo -e "${BLUE}  • View all logs: docker compose --env-file $ENV_FILE logs${NC}"
         echo -e "${BLUE}  • Check specific service: docker compose --env-file $ENV_FILE logs api${NC}"
         echo -e "${BLUE}  • Restart a service: docker compose --env-file $ENV_FILE restart api${NC}"
-        
+
         # Show additional help if verification failed
         if [ "$verification_passed" = false ]; then
             echo
@@ -7482,7 +7459,7 @@ display_final_info() {
             echo -e "${BLUE}  5. Check health manually (wait 30s then):${NC}"
             echo -e "     curl http://localhost:$HTTP_PORT/health | jq"
         fi
-        
+
         # Port 80 specific troubleshooting
         if [ "$HTTP_PORT" = "80" ]; then
             echo
@@ -7491,7 +7468,7 @@ display_final_info() {
             echo -e "${BLUE}  • Check if port is bound: sudo netstat -tlnp | grep :80${NC}"
             echo -e "${BLUE}  • If connection refused, check firewall: sudo ufw status${NC}"
         fi
-        
+
         # Remote access troubleshooting
         if [ "$SERVER_HOST" != "localhost" ]; then
             echo
@@ -7505,135 +7482,15 @@ display_final_info() {
         fi
         echo
     fi
-    
+
     print_info "For troubleshooting, see: DOCKER_DEPLOYMENT.md"
     print_info "For local development, see: LOCAL_DEVELOPMENT.md"
 }
 
 # Redeploy existing deployment with rebuild
-# Installs the signed host-update recovery CLI and writes its host configuration when the
-# operator opts in with --host-update-cli-version (issue #3045). This is packaging only, not
-# rollout authorization: nothing here enables or starts a host update.
-install_host_update_cli_if_requested() {
-    if [ -z "${HOST_UPDATE_CLI_VERSION:-}" ]; then
-        if [ "${HOST_UPDATE_DAEMON_SERVICE:-false}" = "true" ]; then
-            print_error "--install-host-update-daemon requires --host-update-cli-version. See docs/HOST_UPDATE_RUNBOOK.md."
-            exit 1
-        fi
-        return 0
-    fi
-
-    local installer="$SCRIPT_DIR/install-host-update-cli.sh"
-    local env_file="${ENV_FILE:-.env}"
-    case "$env_file" in
-        /*) ;;
-        *) env_file="$(pwd)/$env_file" ;;
-    esac
-
-    local -a install_args=(install --version "$HOST_UPDATE_CLI_VERSION")
-    if [ -n "${HOST_UPDATE_CLI_ASSETS:-}" ]; then
-        local asset_dir="$HOST_UPDATE_CLI_ASSETS"
-        case "$asset_dir" in
-            /*) ;;
-            *) asset_dir="$(pwd)/$asset_dir" ;;
-        esac
-        install_args+=(--asset-dir "$asset_dir")
-    fi
-
-    # Issue #3118: opt-in only. The unit is installed disabled and stopped; enabling it is a
-    # separate operator decision, and the daemon's execution stays disabled pending #2982.
-    local -a service_args=(install-service --cli-dir "/opt/printfarmer/host-update-cli/$HOST_UPDATE_CLI_VERSION")
-    if [ -n "${HOST_UPDATE_DAEMON_USER:-}" ]; then
-        service_args+=(--service-user "$HOST_UPDATE_DAEMON_USER")
-    fi
-
-    local -a elevate=()
-    if [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1; then
-        elevate=(sudo)
-    fi
-
-    if [ "$DRY_RUN" = "true" ]; then
-        print_info "[DRY RUN] Would install host-update CLI: ${elevate[*]:-} $installer ${install_args[*]}"
-        print_info "[DRY RUN] Would write host-update config: ${elevate[*]:-} $installer write-config --env-file $env_file"
-        if [ "${HOST_UPDATE_DAEMON_SERVICE:-false}" = "true" ]; then
-            print_info "[DRY RUN] Would install the host-update daemon unit (not enabled): ${elevate[*]:-} $installer ${service_args[*]}"
-        fi
-        return 0
-    fi
-
-    print_info "Installing signed host-update CLI $HOST_UPDATE_CLI_VERSION..."
-    if ! ${elevate[@]+"${elevate[@]}"} "$installer" "${install_args[@]}"; then
-        print_error "Host-update CLI installation failed; nothing was placed. See docs/HOST_UPDATE_RUNBOOK.md."
-        exit 1
-    fi
-
-    local rc=0
-    ${elevate[@]+"${elevate[@]}"} "$installer" write-config --env-file "$env_file" || rc=$?
-    case "$rc" in
-        0) print_success "Host-update CLI installed and host-update.json written" ;;
-        3)
-            if [ "${HOST_UPDATE_DAEMON_SERVICE:-false}" = "true" ]; then
-                print_error "HostUpdateExecution__RootDirectory is not set in $env_file; the host-update daemon unit needs host-update.json and was not installed."
-                exit 1
-            fi
-            print_warning "HostUpdateExecution__RootDirectory is not set in $env_file; host-update.json was not written"
-            ;;
-        *)
-            print_error "Writing host-update.json failed (exit $rc). See docs/HOST_UPDATE_RUNBOOK.md."
-            exit 1
-            ;;
-    esac
-
-    [ "${HOST_UPDATE_DAEMON_SERVICE:-false}" = "true" ] || return 0
-    print_info "Installing the host-update daemon unit (not enabled)..."
-    if ! ${elevate[@]+"${elevate[@]}"} "$installer" "${service_args[@]}"; then
-        print_error "Installing the host-update daemon unit failed. See docs/HOST_UPDATE_RUNBOOK.md."
-        exit 1
-    fi
-}
-
-# Issue #3207: the api, slicer-host and monolith containers bind-mount
-# <HostUpdateExecution__RootDirectory>/state read-only to observe the host-update admission
-# fence. Create it before Compose does, or Docker creates it as root and the executor account
-# can no longer write admission.closed.
-prepare_host_update_admission_state() {
-    local installer="$SCRIPT_DIR/install-host-update-cli.sh"
-    local env_file="${ENV_FILE:-.env}"
-    case "$env_file" in
-        /*) ;;
-        *) env_file="$(pwd)/$env_file" ;;
-    esac
-    [ -f "$env_file" ] || return 0
-
-    local root
-    root="$(sed -n 's/^HostUpdateExecution__RootDirectory=//p' "$env_file" | tail -n 1 | tr -d '\r')"
-    [ -n "$root" ] || return 0
-
-    local -a elevate=()
-    if [ "$(id -u)" -ne 0 ] && [ -d "$root" ] && [ ! -O "$root" ] &&
-        command -v sudo >/dev/null 2>&1; then
-        elevate=(sudo)
-    fi
-
-    if [ "$DRY_RUN" = "true" ]; then
-        print_info "[DRY RUN] Would prepare the host-update admission state directory: ${elevate[*]:-} $installer prepare-state --env-file $env_file"
-        return 0
-    fi
-
-    local rc=0
-    ${elevate[@]+"${elevate[@]}"} "$installer" prepare-state --env-file "$env_file" || rc=$?
-    case "$rc" in
-        0|3) ;;
-        *)
-            print_error "Preparing the host-update admission state directory failed (exit $rc). See docs/HOST_UPDATE_RUNBOOK.md."
-            exit 1
-            ;;
-    esac
-}
-
 redeploy_existing() {
     print_header "🔄 Redeploying PrintFarmer (Rebuild Mode)"
-    
+
     # Check if previous config exists
     if [ ! -f "$CONFIG_FILE" ]; then
         print_error "No previous deployment configuration found!"
@@ -7641,7 +7498,7 @@ redeploy_existing() {
         print_info "Please run a full deployment first: ./scripts/deploy-docker.sh"
         exit 1
     fi
-    
+
     print_info "Loading previous deployment configuration..."
     # Explicit caller overrides must survive the source here too, otherwise
     # `ENABLE_ORCA_WORKER=yes ... --redeploy` is silently ignored and the stale
@@ -7658,17 +7515,17 @@ redeploy_existing() {
         print_error "Stored worker configuration is invalid."
         exit 1
     fi
-    
+
     print_success "Loaded configuration:"
     echo -e "  ${BLUE}Architecture:${NC} $ARCHITECTURE"
     echo -e "  ${BLUE}Database:${NC} $DB_PROVIDER"
     echo -e "  ${BLUE}Network Mode:${NC} $NETWORK_MODE"
     echo -e "  ${BLUE}Compose File:${NC} $COMPOSE_FILE"
     echo
-    
+
     # Force rebuild flag
     REBUILD=true
-    
+
     # Set env file path
     ENV_FILE=".env"
 
@@ -7676,12 +7533,12 @@ redeploy_existing() {
     # .deploy-config so a redeploy cannot crash-loop containers with a
     # mismatched password (issue #1392).
     migrate_legacy_db_credentials
-    
+
     print_info "Starting redeployment with rebuild..."
-    
+
     # Validate configuration first
     validate_configuration
-    
+
     # Migrate saved state and generate fresh env files with the supported release.
     resolve_deployment_shared_keys || exit 1
     save_deployment_config
@@ -7700,9 +7557,6 @@ redeploy_existing() {
         exit 1
     fi
 
-    install_host_update_cli_if_requested
-    prepare_host_update_admission_state
-    
     # Remove stale legacy override file - the compose-generator produces a complete
     # docker-compose.yml that already includes the database service configuration.
     # A leftover docker-compose.override.yml would add a conflicting duplicate service.
@@ -7710,25 +7564,25 @@ redeploy_existing() {
         print_info "Removing stale docker-compose.override.yml (database already in generated compose file)"
         rm -f docker-compose.override.yml
     fi
-    
+
     # Pre-create external storage directories with proper ownership on the host
     # CRITICAL: Must happen BEFORE docker compose up
     prepare_external_storage_directories || print_warning "Some external storage directories could not be prepared - Docker will attempt to create them"
-    
+
     # Pre-create the OrcaSlicer worker's temp directory(ies). Unlike external storage,
     # this bind mount is not optional when the worker is enabled, so it runs regardless
     # of USE_EXTERNAL_STORAGE (issue #1908).
     prepare_orcaslicer_worker_temp_directories || print_warning "OrcaSlicer worker temp directories could not be prepared - Docker will attempt to create them"
-    
+
     # Prepare pgAdmin volume and configuration
     prepare_pgadmin_setup || print_warning "pgAdmin setup could not be fully prepared"
-    
+
     # Validate that external storage directories have correct permissions
     validate_external_storage_permissions || print_warning "External storage permission validation found issues - attempting deployment anyway"
-    
+
     # Generate self-signed TLS certificates if HTTPS is enabled and certs don't exist
     ensure_tls_certificates
-    
+
     # Deploy with rebuild
     deploy_containers
 
@@ -7741,11 +7595,11 @@ redeploy_existing() {
     # configured initial-admin step. The setup endpoint is idempotent once an
     # administrator exists, so run the same post-readiness step as a full deploy.
     setup_initial_admin || true
-    
+
     print_success "✅ Redeployment complete!"
     print_info "All containers have been rebuilt and restarted with the current configuration."
     print_calibration_status_line
-    
+
     exit 0
 }
 
@@ -7754,11 +7608,11 @@ deploy_pgadmin_if_needed() {
     if [ "$ENABLE_PGADMIN" != "true" ] || [ "$DRY_RUN" = "true" ]; then
         return 0
     fi
-    
+
     # Check if pgAdmin container is already running
     if docker ps -a --format '{{.Names}}' | grep -q "^printfarmer-pgadmin$"; then
         print_info "pgAdmin container already deployed"
-        
+
         # Check if it's running
         if docker ps --format '{{.Names}}' | grep -q "^printfarmer-pgadmin$"; then
             print_success "pgAdmin is running and accessible"
@@ -7772,13 +7626,13 @@ deploy_pgadmin_if_needed() {
         fi
     else
         print_info "Deploying pgAdmin container..."
-        
+
         # Check if docker-compose includes pgAdmin (it should if ENABLE_PGADMIN was true)
         if docker compose --env-file "${ENV_FILE:-.env}" -f "${COMPOSE_FILE:-docker-compose.yml}" ps --services 2>/dev/null | grep -qx "pgadmin"; then
             # pgAdmin is in the compose file, try to start it
             if docker compose --env-file "${ENV_FILE:-.env}" -f "${COMPOSE_FILE:-docker-compose.yml}" up -d pgadmin; then
                 print_success "pgAdmin container deployed successfully"
-                
+
                 # Wait for pgAdmin to be healthy
                 local retries=30
                 while [ $retries -gt 0 ]; do
@@ -7789,7 +7643,7 @@ deploy_pgadmin_if_needed() {
                     sleep 2
                     retries=$((retries - 1))
                 done
-                
+
                 print_warning "pgAdmin is running but health check timed out - it may still be initializing"
             else
                 print_error "Failed to deploy pgAdmin container"
@@ -7805,23 +7659,23 @@ configure_pgadmin_servers() {
     if [ "$ENABLE_PGADMIN" != "true" ] || [ "$DRY_RUN" = "true" ]; then
         return 0
     fi
-    
+
     # Server configuration is handled via servers.json pre-seeding (generated by
     # generate_pgadmin_servers_config) and mounted into the container at
     # /pgadmin4/servers.json. This is the officially supported approach per
     # https://www.pgadmin.org/docs/pgadmin4/latest/import_export_servers.html
     # The REST API endpoint (/api/v1/servers) was removed in newer pgAdmin versions.
-    
+
     local PGADMIN_URL="http://localhost:5050/pgadmin"
     local DB_HOST="${POSTGRES_HOST:-database}"
     local DB_PORT="${POSTGRES_PORT:-5432}"
     local DB_USER="${POSTGRES_USER:-postgres}"
-    
+
     print_success "PostgreSQL server pre-configured in pgAdmin via servers.json"
     print_info "Server: ${DB_HOST}:${DB_PORT}, User: ${DB_USER}"
     print_info "Access pgAdmin at ${PGADMIN_URL}"
     print_info "Note: Password must be entered on first connection"
-    
+
     return 0
 }
 
@@ -7836,19 +7690,19 @@ main() {
     detect_webauthn_configuration_source
     validate_deployment_network || exit 1
     apply_discovery_override
-    
+
     # Handle redeploy mode
     if [ "${REDEPLOY:-false}" = "true" ]; then
         redeploy_existing
         # Function exits, so we never reach here
     fi
-    
+
     # Handle tear-down mode
     if [ "${TEAR_DOWN:-false}" = "true" ]; then
         tear_down_deployment
         # Function exits, so we never reach here
     fi
-    
+
     # Handle regenerate-config mode (regenerates .env and docker-compose without affecting deployment)
     if [ "${REGENERATE_CONFIG:-false}" = "true" ]; then
         if [ ! -f "$CONFIG_FILE" ]; then
@@ -7880,10 +7734,10 @@ main() {
         save_deployment_config
         generate_env_file
         generate_react_env_production
-        
+
         # Prepare pgAdmin volume and configuration
         prepare_pgadmin_setup || print_warning "pgAdmin setup could not be fully prepared"
-        
+
         # Determine output directory
         local output_dir="$(pwd)"
         if generate_deployment_config "$INCLUDE_MONITORING" "$INCLUDE_TELEMETRY" "$INCLUDE_SECURITY" "$INCLUDE_REGISTRY" "${INCLUDE_DISCOVERY:-false}" "$output_dir"; then
@@ -7901,11 +7755,11 @@ main() {
         fi
         exit 0
     fi
-    
+
     # Handle storage validation-only mode
     if [ "$VALIDATE_STORAGE_ONLY" = "true" ]; then
         print_header "🔍 Storage Permission Validation"
-        
+
         # Load config if available to get storage paths
         if [ -f "$CONFIG_FILE" ]; then
             print_info "Loading configuration from $CONFIG_FILE"
@@ -7914,7 +7768,7 @@ main() {
         else
             print_info "No stored configuration found - checking environment variables"
         fi
-        
+
         # Validate and exit
         if validate_external_storage_permissions; then
             exit 0
@@ -7922,7 +7776,7 @@ main() {
             exit 1
         fi
     fi
-    
+
     # Handle offline deployment modes (these modes exit after completion)
     if [ "$PREPARE_OFFLINE" = "true" ]; then
         if prepare_offline_deployment "$IMAGES_DIR"; then
@@ -7933,7 +7787,7 @@ main() {
             exit 1
         fi
     fi
-    
+
     if [ "$DEPLOY_OFFLINE" = "true" ]; then
         if deploy_offline_mode "$IMAGES_DIR"; then
             print_info "Continuing with interactive deployment configuration..."
@@ -7943,7 +7797,7 @@ main() {
             exit 1
         fi
     fi
-    
+
     # Handle image management options (these exit early if used).
     #
     # Both `--pull-images --save-images` and the direct `--save-images` path
@@ -7972,7 +7826,7 @@ main() {
         save_images_to_tar "$IMAGES_DIR" || save_rc=$?
         exit "$save_rc"
     fi
-    
+
     if [ "$LOAD_IMAGES" = "true" ]; then
         if load_images_from_tar "$IMAGES_DIR"; then
             print_info "Proceeding with deployment..."
@@ -7980,23 +7834,23 @@ main() {
             exit 1
         fi
     fi
-    
+
     if [ "$CACHE_ORCASLICER" = "true" ]; then
         cache_orcaslicer "$IMAGES_DIR/orcaslicer"
         exit 0
     fi
-    
+
     if [ "$LOAD_CACHED_ORCASLICER" = "true" ]; then
         auto_load_orcaslicer "$IMAGES_DIR/orcaslicer"
         exit 0
     fi
-    
+
     print_header "🚀 PrintFarmer Docker Deployment Setup"
-    
+
     print_info "This script will help you deploy PrintFarmer using Docker containers."
     print_info "You'll be prompted for configuration with sensible defaults provided."
     echo
-    
+
     # Verify repository assets are available even when executed outside repo root
     if [ ! -f "$REPO_ROOT/global.json" ] || [ ! -d "$REPO_ROOT/scripts/docker" ]; then
         print_error "Required repository assets not found"
@@ -8009,10 +7863,10 @@ main() {
         print_info "Detected repository root at $REPO_ROOT"
         print_info "Running from $(pwd); generated deployment files will be created here"
     fi
-    
+
     # Load previous configuration if available (sets defaults for interactive mode)
     load_previous_config || true
-    
+
     # Execute setup steps
     detect_environment
     choose_architecture
@@ -8036,14 +7890,14 @@ main() {
     save_deployment_config
     generate_env_file
     generate_react_env_production
-    
+
     # Generate deployment configuration using new compose generator
     # CLI flags take precedence over environment variables
     local include_monitoring="false"
-    local include_telemetry="false" 
+    local include_telemetry="false"
     local include_security="false"
     local include_registry="false"
-    
+
     # Set from CLI flags or environment variables
     if [ "${CLI_INCLUDE_MONITORING:-false}" = "true" ] || [ "${INCLUDE_MONITORING:-false}" = "true" ]; then
         include_monitoring="true"
@@ -8057,7 +7911,7 @@ main() {
     if [ "${CLI_INCLUDE_REGISTRY:-false}" = "true" ] || [ "${INCLUDE_REGISTRY:-false}" = "true" ]; then
         include_registry="true"
     fi
-    
+
     # Determine output directory (CLI option or default to current directory)
     local output_dir="${CLI_OUTPUT_DIR:-$(pwd)}"
 
@@ -8075,9 +7929,6 @@ main() {
         exit 1
     fi
     print_success "Deployment configuration generated successfully"
-
-    install_host_update_cli_if_requested
-    prepare_host_update_admission_state
 
     # Optional prepull for Apple Silicon or slow networks: pull common base images
     prepull_images() {
@@ -8109,52 +7960,52 @@ main() {
 
     # Run prepull step if requested
     prepull_images
-    
+
     # Auto-load cached images if available (after all configuration prompts)
     # This searches common locations automatically - no user intervention needed
     # Pass empty string to trigger auto-discovery in common paths
     print_info "Checking for cached Docker images..."
     auto_load_cached_images ""
-    
+
     # Auto-load OrcaSlicer AppImage if available
     auto_load_orcaslicer ""
-    
+
     # Pre-create external storage directories with proper ownership on the host
     # This prevents Docker from creating them as root when bind-mounting
     # CRITICAL: Must happen BEFORE docker compose up
     prepare_external_storage_directories || print_warning "Some external storage directories could not be prepared - Docker will attempt to create them"
-    
+
     # Pre-create the OrcaSlicer worker's temp directory(ies). Unlike external storage,
     # this bind mount is not optional when the worker is enabled, so it runs regardless
     # of USE_EXTERNAL_STORAGE (issue #1908).
     prepare_orcaslicer_worker_temp_directories || print_warning "OrcaSlicer worker temp directories could not be prepared - Docker will attempt to create them"
-    
+
     # Prepare pgAdmin volume and configuration
     prepare_pgadmin_setup || print_warning "pgAdmin setup could not be fully prepared"
-    
+
     # Validate that external storage directories have correct permissions
     # This is a safety check before deployment to catch permission issues early
     validate_external_storage_permissions || print_warning "External storage permission validation found issues - attempting deployment anyway"
-    
+
     # Generate self-signed TLS certificates if HTTPS is enabled and certs don't exist
     ensure_tls_certificates
-    
+
     deploy_containers
-    
+
     # Run auto-admin setup as soon as API is healthy (doesn't need pgAdmin)
     # This allows users to start using the application while pgAdmin is still starting
     setup_initial_admin || true
-    
+
     # Deploy pgAdmin if requested (can take longer to become healthy)
     deploy_pgadmin_if_needed || print_warning "pgAdmin deployment encountered issues"
-    
+
     # Configure pgAdmin servers after deployment
     configure_pgadmin_servers || print_warning "pgAdmin server configuration encountered issues"
-    
+
     # Run verification and capture result
     local verification_passed=true
     verify_deployment || verification_passed=false
-    
+
     # Post-deployment validation: verify external storage is accessible
     if [ "$verification_passed" = true ]; then
         print_info "Validating external storage accessibility..."
@@ -8163,12 +8014,12 @@ main() {
             verification_passed=false
         }
     fi
-    
+
     display_final_info "$verification_passed"
-    
+
     # Cleanup generated files unless requested to keep them
     cleanup_generated_files
-    
+
     if [ "$verification_passed" = true ]; then
         print_success "Setup completed successfully! 🎉"
     else
@@ -8195,40 +8046,6 @@ while [ $# -gt 0 ]; do
             ;;
         -n|--dry-run)
             DRY_RUN=true
-            shift
-            ;;
-        --host-update-cli-version|--host-update-cli-assets)
-            if [ -z "${2:-}" ]; then
-                echo "Missing value for $1" >&2; exit 2
-            fi
-            if [ "$1" = "--host-update-cli-version" ]; then
-                HOST_UPDATE_CLI_VERSION="$2"
-            else
-                HOST_UPDATE_CLI_ASSETS="$2"
-            fi
-            shift 2
-            ;;
-        --host-update-cli-version=*)
-            HOST_UPDATE_CLI_VERSION="${1#--host-update-cli-version=}"
-            shift
-            ;;
-        --host-update-cli-assets=*)
-            HOST_UPDATE_CLI_ASSETS="${1#--host-update-cli-assets=}"
-            shift
-            ;;
-        --install-host-update-daemon)
-            HOST_UPDATE_DAEMON_SERVICE=true
-            shift
-            ;;
-        --host-update-daemon-user)
-            if [ -z "${2:-}" ]; then
-                echo "Missing value for $1" >&2; exit 2
-            fi
-            HOST_UPDATE_DAEMON_USER="$2"
-            shift 2
-            ;;
-        --host-update-daemon-user=*)
-            HOST_UPDATE_DAEMON_USER="${1#--host-update-daemon-user=}"
             shift
             ;;
         -b|--batch|--non-interactive)
