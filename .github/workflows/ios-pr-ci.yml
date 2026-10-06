@@ -63,7 +63,7 @@ jobs:
     # a non-successful `select` the same as `should_run == 'true'`: fail safe
     # toward running the real build rather than silently passing unvalidated.
     if: ${{ !cancelled() }}
-    runs-on: macos-latest
+    runs-on: xcode-27
     defaults:
       run:
         working-directory: mobile
@@ -79,16 +79,21 @@ jobs:
         if: needs.select.result != 'success' || needs.select.outputs.should_run == 'true'
         run: ./scripts/verify-marketing-version.sh source 1.0
 
-      - name: Select Xcode
+      - name: Select Xcode 27.0
         if: needs.select.result != 'success' || needs.select.outputs.should_run == 'true'
         run: |
-          XCODE_PATH=$(ls -d /Applications/Xcode_16*.app /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
-          if [ -z "$XCODE_PATH" ]; then
-            XCODE_PATH="/Applications/Xcode.app"
+          XCODE_PATH="/Applications/Xcode_27.0.app"
+          if [ ! -d "$XCODE_PATH" ]; then
+            echo "::error::Xcode 27.0 is missing from the xcode-27 runner at $XCODE_PATH."
+            exit 1
           fi
-          echo "Using: $XCODE_PATH"
           sudo xcode-select -s "$XCODE_PATH/Contents/Developer"
-          xcodebuild -version
+          XCODE_VERSION="$(xcodebuild -version)"
+          if [ "$(printf '%s\n' "$XCODE_VERSION" | head -n 1)" != "Xcode 27.0" ]; then
+            echo "::error::Expected Xcode 27.0 at $XCODE_PATH, found: $XCODE_VERSION"
+            exit 1
+          fi
+          printf '%s\n' "$XCODE_VERSION"
 
       - name: Resolve package dependencies
         if: needs.select.result != 'success' || needs.select.outputs.should_run == 'true'
@@ -124,7 +129,8 @@ jobs:
 
   test:
     name: Unit Tests (iOS)
-    runs-on: macos-latest
+    runs-on: xcode-27
+    timeout-minutes: 120
     needs: [select, build]
     # Skip ONLY when the selector explicitly said `false`. If `select` itself
     # failed, `should_run` is empty — and a skipped job reports "Success" to
@@ -139,14 +145,50 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Select Xcode
+      - name: Select Xcode 27.0
         run: |
-          XCODE_PATH=$(ls -d /Applications/Xcode_16*.app /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
-          if [ -z "$XCODE_PATH" ]; then
-            XCODE_PATH="/Applications/Xcode.app"
+          XCODE_PATH="/Applications/Xcode_27.0.app"
+          if [ ! -d "$XCODE_PATH" ]; then
+            echo "::error::Xcode 27.0 is missing from the xcode-27 runner at $XCODE_PATH."
+            exit 1
           fi
           sudo xcode-select -s "$XCODE_PATH/Contents/Developer"
-          xcodebuild -version
+          XCODE_VERSION="$(xcodebuild -version)"
+          if [ "$(printf '%s\n' "$XCODE_VERSION" | head -n 1)" != "Xcode 27.0" ]; then
+            echo "::error::Expected Xcode 27.0 at $XCODE_PATH, found: $XCODE_VERSION"
+            exit 1
+          fi
+          printf '%s\n' "$XCODE_VERSION"
+
+      - name: Install approved iOS 26.5 simulator runtime
+        timeout-minutes: 30
+        env:
+          IOS_SIMULATOR_DEVICE_FAMILY: iPhone
+        run: |
+          RUNTIME_ID="com.apple.CoreSimulator.SimRuntime.iOS-26-5"
+          DEVICE_PREFIX="${IOS_SIMULATOR_DEVICE_PREFIX:-${IOS_SIMULATOR_DEVICE_FAMILY} }"
+          if ! xcrun simctl list runtimes -j | jq -e \
+            '.runtimes[] | select(.buildversion == "23F77" and .isAvailable)' >/dev/null; then
+            sudo xcodebuild -downloadPlatform iOS \
+              -buildVersion 26.5 \
+              -architectureVariant arm64
+          fi
+          if ! xcrun simctl list devices available -j | jq -e \
+            --arg runtime "$RUNTIME_ID" --arg prefix "$DEVICE_PREFIX" \
+            '.devices[$runtime][]? | select(.isAvailable == true and (.name | startswith($prefix)))' >/dev/null; then
+            if ! DEVICE_TYPE="$(xcrun simctl list devicetypes -j | jq -e \
+              --arg family "$IOS_SIMULATOR_DEVICE_FAMILY" \
+              --arg preferences "$IOS_SIMULATOR_DEVICE_PREFERENCE" \
+              '[($preferences | split(","))[] as $name
+                | .devicetypes[]
+                | select(.name == $name and .productFamily == $family)] | first')"; then
+              echo "::error::No installed $IOS_SIMULATOR_DEVICE_FAMILY simulator type matches its preference list."
+              exit 1
+            fi
+            DEVICE_NAME="$(printf '%s\n' "$DEVICE_TYPE" | jq -r '.name')"
+            DEVICE_TYPE_ID="$(printf '%s\n' "$DEVICE_TYPE" | jq -r '.identifier')"
+            xcrun simctl create "$DEVICE_NAME" "$DEVICE_TYPE_ID" "$RUNTIME_ID"
+          fi
 
       - name: Resolve pinned iOS simulator destination
         run: ../scripts/ci/resolve-ios-simulator.sh
@@ -211,7 +253,8 @@ jobs:
 
   xcui-shards:
     name: XCUI (${{ matrix.family }}, shard ${{ matrix.shard }})
-    runs-on: macos-latest
+    runs-on: xcode-27
+    timeout-minutes: 120
     needs: [select, test]
     # Avoid allocating eight macOS runners until unit coverage passes; retain
     # the selector's fail-safe behavior by skipping only explicit false.
@@ -296,14 +339,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Select Xcode
+      - name: Select Xcode 27.0
         run: |
-          XCODE_PATH=$(ls -d /Applications/Xcode_16*.app /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
-          if [ -z "$XCODE_PATH" ]; then
-            XCODE_PATH="/Applications/Xcode.app"
+          XCODE_PATH="/Applications/Xcode_27.0.app"
+          if [ ! -d "$XCODE_PATH" ]; then
+            echo "::error::Xcode 27.0 is missing from the xcode-27 runner at $XCODE_PATH."
+            exit 1
           fi
           sudo xcode-select -s "$XCODE_PATH/Contents/Developer"
-          xcodebuild -version
+          XCODE_VERSION="$(xcodebuild -version)"
+          if [ "$(printf '%s\n' "$XCODE_VERSION" | head -n 1)" != "Xcode 27.0" ]; then
+            echo "::error::Expected Xcode 27.0 at $XCODE_PATH, found: $XCODE_VERSION"
+            exit 1
+          fi
+          printf '%s\n' "$XCODE_VERSION"
 
       - name: Test simulator resolver
         if: matrix.key == 'iphone-1'
@@ -315,6 +364,38 @@ jobs:
             -scheme PrintFarmer \
             -resolvePackageDependencies \
             -clonedSourcePackagesDirPath "build-${{ matrix.key }}/SourcePackages"
+
+      - name: Install approved iOS 26.5 simulator runtime
+        timeout-minutes: 30
+        env:
+          IOS_SIMULATOR_DEVICE_FAMILY: ${{ matrix.family }}
+          IOS_SIMULATOR_DEVICE_PREFIX: ${{ matrix.prefix }}
+          IOS_SIMULATOR_DEVICE_PREFERENCE: ${{ matrix.device_preference }}
+        run: |
+          RUNTIME_ID="com.apple.CoreSimulator.SimRuntime.iOS-26-5"
+          DEVICE_PREFIX="${IOS_SIMULATOR_DEVICE_PREFIX:-${IOS_SIMULATOR_DEVICE_FAMILY} }"
+          if ! xcrun simctl list runtimes -j | jq -e \
+            '.runtimes[] | select(.buildversion == "23F77" and .isAvailable)' >/dev/null; then
+            sudo xcodebuild -downloadPlatform iOS \
+              -buildVersion 26.5 \
+              -architectureVariant arm64
+          fi
+          if ! xcrun simctl list devices available -j | jq -e \
+            --arg runtime "$RUNTIME_ID" --arg prefix "$DEVICE_PREFIX" \
+            '.devices[$runtime][]? | select(.isAvailable == true and (.name | startswith($prefix)))' >/dev/null; then
+            if ! DEVICE_TYPE="$(xcrun simctl list devicetypes -j | jq -e \
+              --arg family "$IOS_SIMULATOR_DEVICE_FAMILY" \
+              --arg preferences "$IOS_SIMULATOR_DEVICE_PREFERENCE" \
+              '[($preferences | split(","))[] as $name
+                | .devicetypes[]
+                | select(.name == $name and .productFamily == $family)] | first')"; then
+              echo "::error::No installed $IOS_SIMULATOR_DEVICE_FAMILY simulator type matches its preference list."
+              exit 1
+            fi
+            DEVICE_NAME="$(printf '%s\n' "$DEVICE_TYPE" | jq -r '.name')"
+            DEVICE_TYPE_ID="$(printf '%s\n' "$DEVICE_TYPE" | jq -r '.identifier')"
+            xcrun simctl create "$DEVICE_NAME" "$DEVICE_TYPE_ID" "$RUNTIME_ID"
+          fi
 
       - name: Resolve ${{ matrix.family }} simulator destination
         env:

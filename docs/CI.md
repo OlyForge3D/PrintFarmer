@@ -42,6 +42,23 @@ paths and emits outputs consumed by the conditional jobs. This produces a
 required, stable check name even when no application build runs, such as a
 docs-only PR.
 
+## iOS toolchain
+
+All iOS build, test, and release jobs use GitHub's `xcode-27` runner image and
+select `/Applications/Xcode_27.0.app` explicitly, failing if it is missing or
+does not report Xcode 27.0. The image is arm64-only and currently in public
+preview; see the [runner image software list](https://github.com/actions/runner-images/blob/main/images/macos/xcode-27-arm64-Readme.md)
+and [GitHub's preview announcement](https://github.blog/changelog/2026-07-16-xcode-27-runner-image-now-in-public-preview/).
+
+The simulator jobs use the shared resolver's approved iOS 26.5 (23F77) runtime.
+Because the `xcode-27` image currently lists the iOS 27.0 runtime, CI downloads
+iOS 26.5 with `xcodebuild` when build 23F77 is absent and creates the preferred
+device for that runtime when needed; the resolver then validates the exact
+approved build before selecting a destination. Runtime setup is bounded to
+30 minutes per simulator runner. Because `xcode-27` is a public-preview image
+used by the required iOS check, capacity delays can block PR checks; there is
+intentionally no fallback to an unpinned runner.
+
 ## Jobs
 
 | Job                     | Runs when                                                    | Notes                                                                 |
