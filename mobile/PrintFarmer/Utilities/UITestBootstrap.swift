@@ -1420,7 +1420,7 @@ enum UITestBootstrap {
                 ])
                 let recentFailureHistoryData = try encoder.encode(
                     QueueHistoryPage(
-                        entries: appStoreScreenshotDate == nil ? [
+                        entries: [
                             QueueHistoryEntry(
                                 id: DemoData.job9ID.uuidString,
                                 jobName: "cable_chain",
@@ -1430,14 +1430,14 @@ enum UITestBootstrap {
                                     bySettingHour: 8,
                                     minute: 2,
                                     second: 0,
-                                    of: Date()
+                                    of: appStoreScreenshotDate ?? Date()
                                 ),
                                 durationSeconds: 3_600,
                                 completionPercentage: 12,
                                 failureReason: "Thermal runaway detected"
                             )
-                        ] : [],
-                        totalCount: appStoreScreenshotDate == nil ? 1 : 0,
+                        ],
+                        totalCount: 1,
                         currentPage: 1,
                         pageSize: 5,
                         stats: nil

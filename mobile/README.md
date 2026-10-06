@@ -114,6 +114,8 @@ status bar. The DEBUG-only capture scenario reuses `UITestBootstrap`'s
 authenticated API fixtures and bundled thumbnails, omitting offline,
 paused and bed-clear/pending printers. No physical scanner or printer is used.
 The fixture-only ETA display clock is fixed; real app launches keep live time.
+Queue retains the existing recent-job history fixture with an enabled Retry
+action; the capture never submits a rerun or another mutation.
 
 Install **iOS 26.5 (23F77)** and create an **iPhone 17 Pro Max** and an
 **iPad Pro 13-inch (M5)** simulator first. The shared resolver excludes other

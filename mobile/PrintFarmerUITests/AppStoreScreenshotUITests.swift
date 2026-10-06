@@ -45,7 +45,9 @@ final class AppStoreScreenshotUITests: PrintFarmerUITestCase {
             XCTAssertTrue(heading.isHittable, "Both queue bands must be visible in the store image.")
         }
         if UIDevice.current.userInterfaceIdiom == .pad {
-            XCTAssertTrue(app.staticTexts["No recent failures."].waitForExistence(timeout: 10))
+            let retry = app.buttons["job.retry.30000000-0003-0000-0000-000000000009"]
+            XCTAssertTrue(retry.waitForExistence(timeout: 10))
+            XCTAssertTrue(retry.isEnabled)
         }
         capture("03-queue")
 
