@@ -614,8 +614,8 @@ enum UITestBootstrap {
 
         var printer = demoPrinter(DemoData.prusaMK4_1_ID)
         printer.progress = 0.64
-        printer.currentLayer = 142
-        printer.totalLayers = 221
+        printer.currentLayer = nil
+        printer.totalLayers = nil
         printer.fanSpeedPercent = 60
         printer.liveZOffsetMm = 0.025
         printer.jobName = "benchy_0.2mm_PLA.gcode"
@@ -2020,7 +2020,6 @@ enum UITestBootstrap {
             requiredGrams: Int,
             durationSeconds: Int,
             assignedPrinter: QueuePrinterMeta?,
-            compatibilityHint: QueuePrinterMeta? = nil,
             copies: Int = 1,
             materialType: String = "PLA",
             actualStartTime: Date? = nil
@@ -2031,8 +2030,8 @@ enum UITestBootstrap {
                 name: name,
                 fileName: name,
                 assignedPrinterId: assignedPrinter?.id,
-                printerName: assignedPrinter?.name ?? compatibilityHint?.name,
-                printerModel: assignedPrinter?.modelName ?? compatibilityHint?.modelName,
+                printerName: assignedPrinter?.name,
+                printerModel: assignedPrinter?.modelName,
                 status: status,
                 priority: priority,
                 queuePosition: position,
@@ -2118,7 +2117,6 @@ enum UITestBootstrap {
                 requiredGrams: 42,
                 durationSeconds: 5_400,
                 assignedPrinter: nil,
-                compatibilityHint: idleMk4Printer,
                 copies: 4
             ),
             job(

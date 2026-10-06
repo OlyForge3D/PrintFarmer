@@ -1,7 +1,9 @@
 import importlib.util
 import json
+import os
 from pathlib import Path
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -14,6 +16,32 @@ SPEC.loader.exec_module(capture)
 
 
 class ScreenshotPipelineTests(unittest.TestCase):
+    def test_status_bar_timestamp_is_independent_of_host_timezone(self):
+        inventory = {"devices": {"approved-runtime": [{"udid": "device", "state": "Booted"}]}}
+        original_timezone = os.environ.get("TZ")
+        try:
+            for timezone in ["UTC", "America/Los_Angeles", "Asia/Tokyo"]:
+                with self.subTest(timezone=timezone), patch.dict(os.environ, {"TZ": timezone}):
+                    time.tzset()
+                    with tempfile.TemporaryDirectory() as temp:
+                        directory = Path(temp)
+                        with patch.object(capture, "run", side_effect=lambda args, **kwargs:
+                                          json.dumps(inventory) if "list" in args else "") as run:
+                            with patch.object(capture.subprocess, "run"), patch.object(
+                                capture, "export", return_value=[]
+                            ):
+                                capture.capture({"udid": "device"}, directory / "run", directory / "DerivedData")
+                        override = next(call.args[0] for call in run.call_args_list
+                                        if "override" in call.args[0])
+                        self.assertEqual(override[override.index("--time") + 1],
+                                         "2026-10-05T16:41:00.000Z")
+        finally:
+            if original_timezone is None:
+                os.environ.pop("TZ", None)
+            else:
+                os.environ["TZ"] = original_timezone
+            time.tzset()
+
     def test_resolve_rejects_smaller_fallback_device(self):
         inventory = {"devices": {"com.apple.CoreSimulator.SimRuntime.iOS-26-5": [{
             "udid": "device",

@@ -33,6 +33,7 @@ final class AppStoreScreenshotUITests: PrintFarmerUITestCase {
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(
             format: "label == %@", "Print progress 64 percent"
         )).firstMatch.waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts["Unavailable"].exists)
         capture("02-printer-status")
         app.buttons["printer.detail.farm"].tap()
 

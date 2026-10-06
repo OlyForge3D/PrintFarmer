@@ -112,6 +112,25 @@ final class UITestBootstrapTests: XCTestCase {
     }
 
     #if DEBUG
+    func test_visualAcceptanceDoesNotInventLayerCountsOrUnassignedPrinterMetadata() async throws {
+        let bundle = UITestBootstrap.makeBundle(
+            mode: .authenticatedIssue3259VisualAcceptance,
+            defaults: try makeEphemeralDefaults()
+        )
+        let printer = try await bundle.services.printerService.get(id: DemoData.prusaMK4_1_ID)
+        let status = try await bundle.services.printerService.getStatus(id: printer.id)
+        XCTAssertNil(printer.currentLayer)
+        XCTAssertNil(printer.totalLayers)
+        XCTAssertNil(status.currentLayer)
+        XCTAssertNil(status.totalLayers)
+        let page = try await bundle.services.jobService.listAllJobs()
+        let unassigned = try XCTUnwrap(page.jobs.first { $0.job.name == "clip_holder" })
+        XCTAssertNil(unassigned.assignedPrinter)
+        XCTAssertNil(unassigned.job.assignedPrinterId)
+        XCTAssertNil(unassigned.job.printerName)
+        XCTAssertNil(unassigned.job.printerModel)
+    }
+
     func test_appStoreSpoolsOnlyClaimLoadedAssignmentsPresentInCuratedFleet() {
         let spools = UITestBootstrap.appStoreScreenshotSpools(assignedSpoolIDs: [1])
         XCTAssertEqual(spools.count, DemoData.spools.count)
