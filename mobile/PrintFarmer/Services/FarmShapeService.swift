@@ -134,7 +134,10 @@ final class FarmShapeService: FarmShapeServiceProtocol, @unchecked Sendable {
     init(
         apiClient: APIClient,
         serverID: UUID?,
-        store: FarmShapeStore
+        store: FarmShapeStore,
+        sleep: @escaping Sleep = {
+            try await Task.sleep(for: $0)
+        }
     ) {
         self.store = store
         var authorities: [UUID: FarmShapeStore.Authority] = [:]
@@ -148,9 +151,7 @@ final class FarmShapeService: FarmShapeServiceProtocol, @unchecked Sendable {
                 treating: [401, 404]
             )
         }
-        self.sleep = {
-            try await Task.sleep(for: $0)
-        }
+        self.sleep = sleep
         let persisted = serverID.flatMap { id in
             authorities[id].flatMap {
                 store.shape(serverID: id, authority: $0)

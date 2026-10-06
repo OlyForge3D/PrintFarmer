@@ -3336,10 +3336,15 @@ final class GuardedMaterialControlsTests: XCTestCase {
         })
         service.getStatusCalledWith = nil
         service.statusToReturn?.safetyTelemetry?.measuredHotendTemperatureC.value = 219
+        let discoveryReads = service.getBackendCapabilitiesCallCount
         await gate.arm()
         // Mirrors a page switch: the superseded observer is cancelled before
-        // its body first runs, then the replacement observer reads at once.
-        let superseded = Task { await model.refreshSafetyEvidence() }
+        // it enters the read, then the replacement observer reads at once.
+        // Self-cancelling first makes that ordering independent of scheduling.
+        let superseded = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            await model.refreshSafetyEvidence()
+        }
         superseded.cancel()
         let replacement = Task { await model.refreshSafetyEvidence() }
         await barrier.waitUntilArrived()
@@ -3348,6 +3353,8 @@ final class GuardedMaterialControlsTests: XCTestCase {
         await replacement.value
 
         XCTAssertFalse(model.isRefreshingSafety)
+        XCTAssertEqual(service.getBackendCapabilitiesCallCount, discoveryReads + 1,
+                       "Only the replacement observer may claim the single-flight read")
         XCTAssertEqual(service.getStatusCalledWith, model.printer.id,
                        "Replacement observer's immediate read must not be dropped by a cancelled one")
         XCTAssertTrue(model.filamentBlockedReason(.load)?.contains("220") == true,
@@ -4095,14 +4102,15 @@ private actor AsyncGate {
     }
 }
 
-/// Serialized invocation counter used to gate only the FIRST mock hook entry
-/// so a regressed single-flight cannot deadlock on a closed gate.
+/// Gates only the FIRST mock hook entry after arming, so a regressed
+/// single-flight cannot deadlock on a closed gate.
 private actor OneShotGate {
     private var armed = false
     func arm() { armed = true }
     func claim() -> Bool { defer { armed = false }; return armed }
 }
 
+/// Serialized invocation counter for mock hooks.
 private actor HookCounter {
     private var n = 0
     func next() -> Int { n += 1; return n }
