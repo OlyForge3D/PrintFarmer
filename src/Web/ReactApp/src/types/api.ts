@@ -4263,6 +4263,7 @@ export interface SystemDiskInfo {
 export interface SystemServiceInfo {
   name: string;
   version: string;
+  engineVersion?: string | null;
   health: SystemServiceHealth;
 }
 
@@ -4275,7 +4276,6 @@ export interface SystemDatabaseInfo {
 }
 
 export interface SystemInfo {
-  inventory?: ServiceInventory | null;
   app: SystemAppInfo;
   cpu: SystemCpuInfo;
   memory: SystemMemoryInfo;
@@ -4989,134 +4989,4 @@ export interface CustomFieldValue {
   value?: string;
   options?: string;
   isRequired: boolean;
-}
-
-// Read-only admin inventory (#2659); canonical release vocabulary is owned by #2668.
-export type InventoryObservationState = 'Observed' | 'Stale' | 'Unavailable' | 'Unknown' | 'NotInstalled';
-export type InventoryCompatibilityState = 'Compatible' | 'Incompatible' | 'Unknown' | 'MixedRelease' | 'MixedChannel';
-export type InventoryChannelState = 'Observed' | 'Stale' | 'Unknown' | 'Mismatch' | 'Mixed';
-export type InventoryEligibility = 'Blocked' | 'Eligible' | 'Unknown' | 'NotManaged';
-
-export type UpdateChannel = 'stable' | 'insider';
-
-export interface UpdateChannelSettings {
-  rowVersion?: string;
-  channel: UpdateChannel;
-  insiderAcknowledged: boolean;
-}
-
-export type UpdateSchedulingBackoffState = 'Unknown' | 'None' | 'Waiting';
-
-export interface UpdateSchedulingBackoff {
-  state: UpdateSchedulingBackoffState;
-  consecutiveFailures: number;
-  until: string | null;
-  reasons: string[];
-}
-
-export interface UpdateSchedulingKillSwitch {
-  enabled: boolean;
-  reason: string | null;
-}
-
-export type UpdateSchedulingExecutorState = 'Unknown' | 'Unavailable' | 'Available' | 'Busy' | 'RecoveryRequired';
-
-export interface UpdateSchedulingExecutor {
-  state: UpdateSchedulingExecutorState;
-  reason: string | null;
-}
-
-export interface UpdateSchedulingStatus {
-  configuredEnabled: boolean;
-  effectiveEnabled: boolean;
-  selectedChannel: UpdateChannel;
-  effectiveChannel: UpdateChannel | null;
-  policyRevision: number;
-  lastAttemptAt: string | null;
-  nextAttemptAt: string | null;
-  backoff: UpdateSchedulingBackoff;
-  killSwitch: UpdateSchedulingKillSwitch;
-  executor: UpdateSchedulingExecutor;
-  reasons: string[];
-}
-
-export interface CanonicalReleaseIdentity {
-  canonicalVersion: string | null;
-  baseVersion: string | null;
-  channel: string | null;
-  releaseId: string | null;
-  sourceTag: string | null;
-  sourceBranch: string | null;
-  sourceCommit: string | null;
-  authorizedBranchHead: string | null;
-  buildId: string | null;
-  buildAttempt: string | null;
-  workflowIdentity: string | null;
-  allocationIdentity: string | null;
-  promotionOrigin: PromotionOrigin | null;
-}
-
-export interface PromotionOrigin {
-  releaseId: string | null;
-  canonicalVersion: string | null;
-  sourceCommit: string | null;
-  manifestDigest: string | null;
-  evidence: string | null;
-}
-
-export interface ServiceReplicaObservation {
-  serviceId: string;
-  instanceId: string | null;
-  component: string;
-  required: boolean;
-  applicationVersion: string | null;
-  sourceCommit: string | null;
-  engineVersion: string | null;
-  databaseProvider: string | null;
-  migrationHead: string | null;
-  observationState: InventoryObservationState;
-  observedAt: string | null;
-  lastSuccessAt: string | null;
-  source: string;
-  reasonCode: string;
-  identity: CanonicalReleaseIdentity | null;
-  verificationSource: string | null;
-  verifiedAt: string | null;
-  platform: string | null;
-  platformDigest: string | null;
-  indexDigest: string | null;
-  manifestDigest: string | null;
-  configuredImage: string | null;
-  observedChannel: string | null;
-  channelState: InventoryChannelState;
-  compatibilityState: InventoryCompatibilityState;
-  compatibilityReasons: string[];
-}
-
-export interface ServiceInventory {
-  hostUpdaterVersion: string | null;
-  selectedChannel: string;
-  selectionSource: string;
-  collectedAt: string;
-  observedChannel: string | null;
-  targetChannel: string | null;
-  channelState: InventoryChannelState;
-  compatibilityState: InventoryCompatibilityState;
-  compatibilityReasons: string[];
-  eligibility: InventoryEligibility;
-  eligibilityReasons: string[];
-  readiness: ReleaseReadiness | null;
-  updateScheduling?: UpdateSchedulingStatus | null;
-  snapshotOrigin: InventorySnapshotOrigin;
-  snapshotSource: string | null;
-  snapshotExportedAt: string | null;
-  services: ServiceReplicaObservation[];
-}
-
-export type InventorySnapshotOrigin = 'Live' | 'Imported';
-
-export interface ReleaseReadiness {
-  state: InventoryEligibility | null;
-  reasons: string[];
-  hops: readonly string[];
 }

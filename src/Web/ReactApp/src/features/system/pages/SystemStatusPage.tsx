@@ -28,7 +28,6 @@ import { formatFileSize } from '@/common/utils/stlFileUtils';
 import { apiClient } from '@/services/api';
 import { SystemServiceHealth, type SystemInfo } from '@/types/api';
 import { useAuth } from '@/features/auth/hooks/useAuth';
-import { ServiceVersionsTable } from '@/features/system/components/ServiceVersionsTable';
 
 const EMPTY_VALUE = '—';
 const SYSTEM_INFO_QUERY_KEY = ['system-info'];
@@ -178,10 +177,10 @@ function UsageMeter({ label, value, details }: UsageMeterProps) {
 
 function formatUpdatedAt(value: number): string {
   if (!value) {
-    return 'Waiting for first successful refresh';
+    return 'Status not refreshed yet';
   }
 
-  return `Updated ${new Date(value).toLocaleTimeString([], {
+  return `Last refreshed ${new Date(value).toLocaleTimeString([], {
     hour: 'numeric',
     minute: '2-digit',
     second: '2-digit',
@@ -198,7 +197,8 @@ function renderServicesTable(systemInfo: SystemInfo) {
       <TableHead>
         <TableRow>
           <TableHeaderCell scope="col">Service</TableHeaderCell>
-          <TableHeaderCell scope="col">Version</TableHeaderCell>
+          <TableHeaderCell scope="col">Application version</TableHeaderCell>
+          <TableHeaderCell scope="col">Engine version</TableHeaderCell>
           <TableHeaderCell scope="col">Health</TableHeaderCell>
         </TableRow>
       </TableHead>
@@ -207,6 +207,7 @@ function renderServicesTable(systemInfo: SystemInfo) {
           <TableRow key={service.name}>
             <TableHeaderCell scope="row">{service.name}</TableHeaderCell>
             <TableCell>{service.version || EMPTY_VALUE}</TableCell>
+            <TableCell>{service.engineVersion || EMPTY_VALUE}</TableCell>
             <TableCell>
               <Badge variant={getServiceBadgeVariant(service.health)}>{service.health}</Badge>
             </TableCell>
@@ -219,16 +220,16 @@ function renderServicesTable(systemInfo: SystemInfo) {
 
 export function SystemStatusPage() {
   const { hasPermission } = useAuth();
-  const canViewInventory = hasPermission('system_settings', 'admin');
+  const canViewSystemInfo = hasPermission('system_settings', 'admin');
   const { data, error, isFetching, isLoading, refetch, dataUpdatedAt } = useQuery({
     queryKey: SYSTEM_INFO_QUERY_KEY,
     queryFn: () => apiClient.getSystemInfo(),
-    enabled: canViewInventory,
+    enabled: canViewSystemInfo,
     refetchInterval: SYSTEM_INFO_REFRESH_INTERVAL_MS,
     staleTime: SYSTEM_INFO_REFRESH_INTERVAL_MS,
   });
 
-  if (!canViewInventory) {
+  if (!canViewSystemInfo) {
     return <Alert type="warning" title="Access denied">System settings admin permission is required.</Alert>;
   }
 
@@ -258,9 +259,9 @@ export function SystemStatusPage() {
     <div className="space-y-4">
       <div className="flex flex-col gap-3 rounded-lg border border-pf-border bg-pf-bg-0 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-pf-text-secondary">Operational snapshot</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-pf-text-secondary">System status</p>
           <p className="mt-1 text-sm text-pf-text-secondary">
-            30-second auto-refresh for host health, service versions, and worker-adjacent infrastructure.
+            Current service health, versions, and host resources. Refreshes automatically every 30 seconds.
           </p>
           <p className="mt-2 text-xs text-pf-text-secondary">{formatUpdatedAt(dataUpdatedAt)}</p>
         </div>
@@ -275,10 +276,8 @@ export function SystemStatusPage() {
       </div>
 
       <p className="sr-only" aria-live="polite">
-        {isFetching ? 'Refreshing system status.' : 'System snapshot loaded; review individual observation times.'}
+        {isFetching ? 'Refreshing system status.' : 'System status updated.'}
       </p>
-
-      {data.inventory ? <ServiceVersionsTable inventory={data.inventory} /> : <Alert type="warning" title="Inventory unknown">This server does not report detailed service observations.</Alert>}
 
       <div className="grid gap-4 xl:grid-cols-2">
         <StatusCard
@@ -344,7 +343,7 @@ export function SystemStatusPage() {
 
         <StatusCard
           title="Services"
-          description="Background monitor health. Monitoring does not establish application build identity."
+          description="Application and background service versions and health."
           icon={<WrenchIcon className="h-5 w-5" />}
           className="xl:col-span-2"
         >

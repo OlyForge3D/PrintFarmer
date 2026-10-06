@@ -2,10 +2,7 @@
 // Get hash for a G-code file (returns string)
 import { generateUUID } from "@/utils/uuid";
 import { getApiBaseUrl } from "@/common/utils/apiUrlHelpers";
-import type {
-  PrinterStatus,
-  UpdateChannelSettings,
-} from "@/types/api";
+import type { PrinterStatus } from "@/types/api";
 import {
   PrintJobStatusDto,
   BedType,
@@ -476,16 +473,6 @@ export class ApiClient {
   ): Promise<T & { rowVersion?: string }> {
     const res = await this.client.post(`/settings/${className}`, settings);
     return res.data;
-  }
-
-  async getUpdateChannelSettings(): Promise<UpdateChannelSettings> {
-    return this.getSettings<UpdateChannelSettings>("UpdateChannel");
-  }
-
-  async updateUpdateChannelSettings(
-    settings: UpdateChannelSettings,
-  ): Promise<UpdateChannelSettings> {
-    return this.saveSettings("UpdateChannel", settings);
   }
 
   /**
