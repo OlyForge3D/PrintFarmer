@@ -476,15 +476,21 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
                         assignedSubheading.exists,
                         "Assigned jobs must not create a peer heading under Queued."
                     )
-                    let assignedJob = queueList.descendants(matching: .any).matching(
-                        NSPredicate(format: "label CONTAINS[c] %@", "clip_holder ×4")
-                    ).firstMatch
-                    for _ in 0..<12 where !assignedJob.isHittable { queueList.swipeUp() }
-                    XCTAssertTrue(assignedJob.isHittable, "Assigned jobs stay visible within Queued.")
-                    XCTAssertTrue(
-                        assignedJob.label.localizedCaseInsensitiveContains("Unassigned"),
-                        "An unassigned job must not imply any printer is compatible."
-                    )
+                    let queuedAssignments = [
+                        ("32590000-0000-0000-0000-000000000101", "Unassigned"),
+                        ("32590000-0000-0000-0000-000000000102", "Assigned to Prusa MK4 #2"),
+                        ("32590000-0000-0000-0000-000000000103", "Assigned to Ender 3 S1"),
+                        ("32590000-0000-0000-0000-000000000106", "Assigned to Voron 2.4")
+                    ]
+                    for (jobID, assignment) in queuedAssignments {
+                        let row = queueList.buttons["job.row.\(jobID)"]
+                        for _ in 0..<16 where !row.isHittable { queueList.swipeUp() }
+                        XCTAssertTrue(row.waitForExistence(timeout: 5), "Queued fixture row \(jobID) must exist.")
+                        XCTAssertTrue(
+                            row.label.localizedCaseInsensitiveContains(assignment),
+                            "Queued fixture row \(jobID) must state \(assignment), not imply compatibility. Found: \(row.label)"
+                        )
+                    }
                     XCTAssertFalse(
                         queueList.descendants(matching: .any)["jobList.section.assigned"].exists,
                         "Assigned must not become a fourth top-level queue group."

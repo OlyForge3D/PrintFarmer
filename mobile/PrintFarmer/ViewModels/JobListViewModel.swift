@@ -25,6 +25,7 @@ final class JobListViewModel {
     private(set) var hasFreshQueueSnapshot = false
     private(set) var isReorderingQueue = false
     private(set) var rerunningFailedJobIDs: Set<UUID> = []
+    private(set) var jobListMayHaveMore = false
 
     private var jobService: (any JobServiceProtocol)?
     private var jobAnalyticsService: (any JobAnalyticsServiceProtocol)?
@@ -51,6 +52,11 @@ final class JobListViewModel {
             && hasFreshQueueSnapshot
             && !isReorderingQueue
             && isViewActive
+    }
+
+    func queueSectionCountText(for count: Int) -> String {
+        guard jobListMayHaveMore else { return "\(count)" }
+        return count == 0 ? "?" : "\(count)+"
     }
 
     var canRerunFailedJobs: Bool {
@@ -173,7 +179,7 @@ final class JobListViewModel {
             dateEnd: nil
         )
 
-        let queueResult: Result<[QueuedPrintJobResponse], Error>
+        let queueResult: Result<QueuedPrintJobPage, Error>
         do {
             queueResult = .success(try await queueRequest)
         } catch {
@@ -195,8 +201,9 @@ final class JobListViewModel {
 
         var queueLoaded = false
         switch queueResult {
-        case .success(let result):
-            jobs = result
+        case .success(let page):
+            jobs = page.jobs
+            jobListMayHaveMore = page.mayHaveMore
             hasFreshQueueSnapshot = true
             queueStateEpoch &+= 1
             queueLoaded = true

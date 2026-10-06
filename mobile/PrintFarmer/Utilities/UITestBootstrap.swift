@@ -1972,6 +1972,7 @@ enum UITestBootstrap {
             requiredGrams: Int,
             durationSeconds: Int,
             assignedPrinter: QueuePrinterMeta?,
+            compatibilityHint: QueuePrinterMeta? = nil,
             copies: Int = 1,
             materialType: String = "PLA",
             actualStartTime: Date? = nil
@@ -1982,8 +1983,8 @@ enum UITestBootstrap {
                 name: name,
                 fileName: name,
                 assignedPrinterId: assignedPrinter?.id,
-                printerName: assignedPrinter?.name,
-                printerModel: assignedPrinter?.modelName,
+                printerName: assignedPrinter?.name ?? compatibilityHint?.name,
+                printerModel: assignedPrinter?.modelName ?? compatibilityHint?.modelName,
                 status: status,
                 priority: priority,
                 queuePosition: position,
@@ -2069,6 +2070,7 @@ enum UITestBootstrap {
                 requiredGrams: 42,
                 durationSeconds: 5_400,
                 assignedPrinter: nil,
+                compatibilityHint: idleMk4Printer,
                 copies: 4
             ),
             job(
@@ -2754,8 +2756,10 @@ private final class QueueReorderUITestJobService: DemoJobService, @unchecked Sen
     private let lock = NSLock()
     private var queueJobs = QueueReorderUITestJobService.makeQueueJobs()
 
-    override func listAllJobs() async throws -> [QueuedPrintJobResponse] {
-        lock.withLock { queueJobs }
+    override func listAllJobs() async throws -> QueuedPrintJobPage {
+        lock.withLock {
+            QueuedPrintJobPage(jobs: queueJobs, mayHaveMore: false)
+        }
     }
 
     override func moveQueuedJob(

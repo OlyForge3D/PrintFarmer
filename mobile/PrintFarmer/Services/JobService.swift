@@ -13,8 +13,14 @@ actor JobService: JobServiceProtocol {
         try await apiClient.get("/api/job-queue")
     }
 
-    func listAllJobs() async throws -> [QueuedPrintJobResponse] {
-        try await apiClient.get("/api/job-queue-analytics?limit=200&offset=0")
+    func listAllJobs() async throws -> QueuedPrintJobPage {
+        let jobs: [QueuedPrintJobResponse] = try await apiClient.get(
+            "/api/job-queue-analytics?limit=\(QueuedPrintJobPage.pageSize)&offset=0"
+        )
+        return QueuedPrintJobPage(
+            jobs: jobs,
+            mayHaveMore: jobs.count >= QueuedPrintJobPage.pageSize
+        )
     }
 
     func moveQueuedJob(

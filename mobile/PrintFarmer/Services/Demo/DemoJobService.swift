@@ -148,8 +148,8 @@ class DemoJobService: JobServiceProtocol, @unchecked Sendable {
         }
     }
 
-    func listAllJobs() async throws -> [QueuedPrintJobResponse] {
-        Self.jobs.filter { !hiddenJobIDs.contains($0.id) }.map { job in
+    func listAllJobs() async throws -> QueuedPrintJobPage {
+        let jobs = Self.jobs.filter { !hiddenJobIDs.contains($0.id) }.map { job in
             let displayName = jobNameOverrides[job.id] ?? job.gcodeFileName
             return QueuedPrintJobResponse(
                 job: QueuedJobInfo(
@@ -171,6 +171,7 @@ class DemoJobService: JobServiceProtocol, @unchecked Sendable {
                 gcodeFile: nil, assignedPrinter: nil,
                 estimatedStartTime: nil, estimatedCompletionTime: nil)
         } + queueJobOverrides
+        return QueuedPrintJobPage(jobs: jobs, mayHaveMore: false)
     }
 
     func moveQueuedJob(
@@ -182,7 +183,9 @@ class DemoJobService: JobServiceProtocol, @unchecked Sendable {
     }
 
     func listPrinterQueue(printerId: UUID) async throws -> [QueuedPrintJobResponse] {
-        try await listAllJobs().filter { $0.job.assignedPrinterId?.lowercased() == printerId.uuidString.lowercased() }
+        try await listAllJobs().jobs.filter {
+            $0.job.assignedPrinterId?.lowercased() == printerId.uuidString.lowercased()
+        }
     }
 
     func get(id: UUID) async throws -> PrintJob {

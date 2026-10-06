@@ -18,6 +18,25 @@ final class JobServiceTests: XCTestCase {
         super.tearDown()
     }
 
+    func testListAllJobsMarksAFullPageAsPossiblyTruncated() async throws {
+        let rows = Array(
+            repeating: TestJSON.queuedPrintJobResponseQueued,
+            count: QueuedPrintJobPage.pageSize
+        )
+        mockAPIClient.stubResponse(json: "[\(rows.joined(separator: ","))]")
+
+        let page = try await service.listAllJobs()
+
+        XCTAssertEqual(page.jobs.count, QueuedPrintJobPage.pageSize)
+        XCTAssertTrue(page.mayHaveMore)
+        let request = try XCTUnwrap(mockAPIClient.capturedRequests.last)
+        XCTAssertEqual(request.url?.path, "/api/job-queue-analytics")
+        XCTAssertEqual(
+            request.url?.query,
+            "limit=\(QueuedPrintJobPage.pageSize)&offset=0"
+        )
+    }
+
     func testGetPreservesRowVersionForConditionalRetry() async throws {
         mockAPIClient.stubResponse(
             json: """

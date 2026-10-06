@@ -50,6 +50,24 @@ final class JobListViewModelTests: XCTestCase {
         XCTAssertNil(viewModel.errorMessage)
     }
 
+    func testCapped200JobPageDoesNotExposeExactSectionTotals() async throws {
+        let queued = try TestData.decodeQueuedPrintJobResponse(from: TestJSON.queuedPrintJobResponseQueued)
+        mockJobService.queuedJobResponsesToReturn = Array(
+            repeating: queued,
+            count: QueuedPrintJobPage.pageSize
+        )
+        mockJobService.queuedJobListMayHaveMore = true
+
+        await viewModel.loadJobs()
+
+        XCTAssertEqual(viewModel.jobs.count, QueuedPrintJobPage.pageSize)
+        XCTAssertEqual(
+            viewModel.queueSectionCountText(for: viewModel.queuedJobs.count),
+            "\(QueuedPrintJobPage.pageSize)+"
+        )
+        XCTAssertEqual(viewModel.queueSectionCountText(for: viewModel.activeJobs.count), "?")
+    }
+
     func testLoadJobsRequestsOnlyRecentFailedHistoryAndExcludesOtherStatuses() async throws {
         let failed = QueueHistoryEntry(
             id: UUID().uuidString,

@@ -228,7 +228,11 @@ struct JobListView: View {
                     }
                 }
             } header: {
-                sectionHeader("Printing", count: viewModel.activeJobs.count, systemImage: "printer.fill")
+                sectionHeader(
+                    "Printing",
+                    countText: viewModel.queueSectionCountText(for: viewModel.activeJobs.count),
+                    systemImage: "printer.fill"
+                )
                     .accessibilityIdentifier("jobList.section.printing")
             }
 
@@ -267,7 +271,7 @@ struct JobListView: View {
                                 Label("Queued", systemImage: "tray.full")
                                     .font(.subheadline.weight(.semibold))
                                 Spacer()
-                                Text("\(viewModel.queuedJobs.count)")
+                                Text(viewModel.queueSectionCountText(for: viewModel.queuedJobs.count))
                                     .font(.caption.monospacedDigit())
                                     .foregroundStyle(Color.pfTextTertiary)
                             }
@@ -287,7 +291,7 @@ struct JobListView: View {
                                     .font(.caption)
                                     .foregroundStyle(Color.pfTextSecondary)
                             }
-                            Text("\(viewModel.queuedJobs.count)")
+                            Text(viewModel.queueSectionCountText(for: viewModel.queuedJobs.count))
                                 .font(.caption.monospacedDigit())
                                 .monospacedDigit()
                                 .foregroundStyle(Color.pfTextTertiary)
@@ -377,12 +381,12 @@ struct JobListView: View {
         .accessibilityElement(children: .contain)
     }
 
-    private func sectionHeader(_ title: String, count: Int, systemImage: String) -> some View {
+    private func sectionHeader(_ title: String, countText: String, systemImage: String) -> some View {
         HStack {
             Label(title, systemImage: systemImage)
                 .font(.subheadline.weight(.semibold))
             Spacer()
-            Text("\(count)")
+            Text(countText)
                 .font(.caption.monospacedDigit())
                 .monospacedDigit()
                 .foregroundStyle(Color.pfTextTertiary)
@@ -616,7 +620,12 @@ struct JobListView: View {
         if let material = item.gcodeFile?.materialType ?? item.job.filamentName {
             parts.append(material)
         }
-        parts.append(item.job.printerModel ?? item.job.printerName ?? "Unassigned")
+        if let assignedPrinter = item.assignedPrinter,
+           !assignedPrinter.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            parts.append("Assigned to \(assignedPrinter.name)")
+        } else {
+            parts.append("Unassigned")
+        }
         return parts.joined(separator: " · ")
     }
 

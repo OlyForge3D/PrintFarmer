@@ -4,6 +4,7 @@ import Foundation
 final class MockJobService: JobServiceProtocol, @unchecked Sendable {
     var queueOverviewsToReturn: [QueueOverview] = []
     var queuedJobResponsesToReturn: [QueuedPrintJobResponse] = []
+    var queuedJobListMayHaveMore = false
     var jobToReturn: PrintJob?
     var errorToThrow: Error?
     var actionErrorToThrow: Error?
@@ -44,14 +45,14 @@ final class MockJobService: JobServiceProtocol, @unchecked Sendable {
         return queueOverviewsToReturn
     }
 
-    func listAllJobs() async throws -> [QueuedPrintJobResponse] {
+    func listAllJobs() async throws -> QueuedPrintJobPage {
         listAllJobsCalled = true
         listAllJobsCallCount += 1
         if let error = errorToThrow { throw error }
-        if !queuedJobResponsesByLoad.isEmpty {
-            return queuedJobResponsesByLoad.removeFirst()
-        }
-        return queuedJobResponsesToReturn
+        let jobs = queuedJobResponsesByLoad.isEmpty
+            ? queuedJobResponsesToReturn
+            : queuedJobResponsesByLoad.removeFirst()
+        return QueuedPrintJobPage(jobs: jobs, mayHaveMore: queuedJobListMayHaveMore)
     }
 
     var queuedJobResponsesByLoad: [[QueuedPrintJobResponse]] = []
@@ -189,6 +190,7 @@ final class MockJobService: JobServiceProtocol, @unchecked Sendable {
     func reset() {
         queueOverviewsToReturn = []
         queuedJobResponsesToReturn = []
+        queuedJobListMayHaveMore = false
         queuedJobResponsesByLoad = []
         jobToReturn = nil
         errorToThrow = nil

@@ -33,11 +33,18 @@ struct MoveQueuedJobResponse: Decodable, Sendable, Equatable {
     let rowVersion: String?
 }
 
+struct QueuedPrintJobPage: Sendable {
+    static let pageSize = 200
+
+    let jobs: [QueuedPrintJobResponse]
+    let mayHaveMore: Bool
+}
+
 // MARK: - Job Service Protocol
 
 protocol JobServiceProtocol: Sendable {
     func list() async throws -> [QueueOverview]
-    func listAllJobs() async throws -> [QueuedPrintJobResponse]
+    func listAllJobs() async throws -> QueuedPrintJobPage
     func moveQueuedJob(
         id: UUID,
         reviewedRowVersion: String,
