@@ -96,12 +96,8 @@ def capture(device, directory, derived_data):
     try:
         run(["xcrun", "simctl", "ui", udid, "appearance", "dark"])
         run(["xcrun", "simctl", "ui", udid, "content_size", "large"])
-        # simctl renders dates in the host timezone; pin the local 9:41 wall clock.
-        status_bar_date = datetime.datetime(2026, 10, 5, 9, 41).astimezone(
-            datetime.timezone.utc
-        ).strftime("%Y-%m-%dT%H:%M:%S.000Z")
         run(["xcrun", "simctl", "status_bar", udid, "override",
-             "--time", status_bar_date, "--dataNetwork", "wifi", "--wifiMode", "active",
+             "--time", "9:41", "--dataNetwork", "wifi", "--wifiMode", "active",
              "--wifiBars", "3", "--batteryState", "charged", "--batteryLevel", "100"])
         with (directory / "test.log").open("w") as log:
             subprocess.run(command, cwd=MOBILE, stdout=log, stderr=subprocess.STDOUT, check=True)
@@ -135,7 +131,18 @@ def main():
     for family, device in devices.items():
         directory = output / family
         print(f"Capturing {family}; log: {directory / 'test.log'}", flush=True)
-        capture(device, directory, root / "DerivedData")
+        images = capture(device, directory, root / "DerivedData")
+        for image in images:
+            dimensions = run(["sips", "-g", "pixelWidth", "-g", "pixelHeight", str(image)])
+            width = re.search(r"pixelWidth:\s+(\d+)", dimensions)
+            height = re.search(r"pixelHeight:\s+(\d+)", dimensions)
+            if width is None or height is None:
+                raise RuntimeError(f"Could not read native screenshot dimensions: {image}")
+            actual = (int(width.group(1)), int(height.group(1)))
+            if actual != DEVICES[family][2]:
+                raise RuntimeError(
+                    f"Wrong native screenshot dimensions: {image}: {actual}, expected {DEVICES[family][2]}"
+                )
     print(f"Store screenshots ready for manual review/upload: {output}")
 
 
