@@ -44,6 +44,9 @@ final class AppStoreScreenshotUITests: PrintFarmerUITestCase {
             XCTAssertTrue(heading.waitForExistence(timeout: 10))
             XCTAssertTrue(heading.isHittable, "Both queue bands must be visible in the store image.")
         }
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            XCTAssertTrue(app.staticTexts["No recent failures."].waitForExistence(timeout: 10))
+        }
         capture("03-queue")
 
         let filament = shellDestinationButton(tabIdentifier: "tab.filament", timeout: 8)
@@ -51,6 +54,7 @@ final class AppStoreScreenshotUITests: PrintFarmerUITestCase {
         filament.tap()
         XCTAssertTrue(app.buttons["inventory.addSpool"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.buttons["inventory.filter.all"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.staticTexts["Printer assignment unavailable"].exists)
         capture("04-filament")
 
         app.buttons["navigation.scan"].tap()

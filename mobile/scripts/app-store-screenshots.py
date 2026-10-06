@@ -85,8 +85,9 @@ def capture(device, directory, derived_data):
     run(["xcrun", "simctl", "bootstatus", udid, "-b"])
     run(["xcrun", "simctl", "ui", udid, "appearance", "dark"])
     run(["xcrun", "simctl", "ui", udid, "content_size", "large"])
+    status_bar_date = datetime.datetime(2026, 10, 5, 9, 41).astimezone().isoformat()
     run(["xcrun", "simctl", "status_bar", udid, "override",
-         "--time", "9:41", "--dataNetwork", "wifi", "--wifiMode", "active",
+         "--time", status_bar_date, "--dataNetwork", "wifi", "--wifiMode", "active",
          "--wifiBars", "3", "--batteryState", "charged", "--batteryLevel", "100"])
     bundle = directory / "Screenshots.xcresult"
     command = [

@@ -426,8 +426,17 @@ enum UITestBootstrap {
         }
         #if DEBUG
         if mode == .authenticatedIssue3259VisualAcceptance {
+            let spoolOverrides: [SpoolmanSpool]
+            if appStoreScreenshotDate != nil {
+                let assignedSpoolIDs = Set(Self.issue3259VisualAcceptanceFixture().printers.compactMap {
+                    $0.spoolInfo?.activeSpoolId
+                })
+                spoolOverrides = Self.appStoreScreenshotSpools(assignedSpoolIDs: assignedSpoolIDs)
+            } else {
+                spoolOverrides = [Self.issue3259VisualAcceptanceSpool()]
+            }
             services.spoolService = DemoSpoolService(
-                spoolOverrides: [Self.issue3259VisualAcceptanceSpool()]
+                spoolOverrides: spoolOverrides
             )
             services.signalRService = DemoSignalRService(simulatesProgress: false)
             services.filamentCoverageService = StubFilamentCoverageService(
@@ -1949,6 +1958,25 @@ enum UITestBootstrap {
             usedPercent: appStoreScreenshotDate == nil ? 91.6 : 38.8,
             remainingPercent: appStoreScreenshotDate == nil ? 8.4 : 61.2
         )
+    }
+
+    static func appStoreScreenshotSpools(assignedSpoolIDs: Set<Int>) -> [SpoolmanSpool] {
+        DemoData.spools.map { original in
+            let spool = original.id == 1 ? issue3259VisualAcceptanceSpool() : original
+            do {
+                let data = try JSONEncoder().encode(spool)
+                guard var payload = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                    preconditionFailure("A store spool fixture must encode as an object.")
+                }
+                payload["inUse"] = assignedSpoolIDs.contains(spool.id)
+                return try JSONDecoder().decode(
+                    SpoolmanSpool.self,
+                    from: JSONSerialization.data(withJSONObject: payload)
+                )
+            } catch {
+                preconditionFailure("The store spool fixture could not be curated: \(error)")
+            }
+        }
     }
 
     private static func issue3259VisualAcceptanceQueue(

@@ -112,6 +112,15 @@ final class UITestBootstrapTests: XCTestCase {
     }
 
     #if DEBUG
+    func test_appStoreSpoolsOnlyClaimLoadedAssignmentsPresentInCuratedFleet() {
+        let spools = UITestBootstrap.appStoreScreenshotSpools(assignedSpoolIDs: [1])
+        XCTAssertEqual(spools.count, DemoData.spools.count)
+        XCTAssertEqual(spools.filter(\.inUse).map(\.id), [1])
+        XCTAssertEqual(spools.map(\.id), DemoData.spools.map(\.id))
+        XCTAssertEqual(spools.first { $0.id == 3 }?.remainingWeightG,
+                       DemoData.spools.first { $0.id == 3 }?.remainingWeightG)
+    }
+
     func test_appStoreScreenshotClockRequiresAllThreeLaunchArguments() {
         let arguments = [
             "--uitesting",
