@@ -539,8 +539,8 @@ final class FarmShapeServiceTests: XCTestCase {
             await container.switchToServer(serverB)
         }
         await shapeRequest.waitUntilArrived()
-        await capabilitiesRequest.waitUntilArrived()
         shapeRequest.release()
+        await capabilitiesRequest.waitUntilArrived()
         capabilitiesRequest.release()
         await switchTask.value
         XCTAssertEqual(

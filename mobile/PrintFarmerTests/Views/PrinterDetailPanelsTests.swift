@@ -234,7 +234,7 @@ final class PrinterDetailPanelsTests: XCTestCase {
         ))
         let window = show(controller)
         defer { window.isHidden = true; window.rootViewController = nil }
-        try await selectControls(in: controller)
+        try await selectControls(in: controller, timeout: .seconds(15))
         let statusReadsBeforeCapabilityLoad = safetyStatusReads(fixture.api)
         let selector = try XCTUnwrap(views(UISegmentedControl.self, in: controller.view).first)
         selector.selectedSegmentIndex = panel
@@ -532,8 +532,11 @@ final class PrinterDetailPanelsTests: XCTestCase {
         }
     }
 
-    private func selectControls<Content: View>(in controller: DetailHostingController<Content>) async throws {
-        try await waitForHost("The production detail pager must appear", in: controller.view) {
+    private func selectControls<Content: View>(
+        in controller: DetailHostingController<Content>,
+        timeout: Duration = .seconds(5)
+    ) async throws {
+        try await waitForHost("The production detail pager must appear", in: controller.view, timeout: timeout) {
             controller.hasAppeared && !self.views(UISegmentedControl.self, in: controller.view).isEmpty
         }
         let selector = try XCTUnwrap(views(UISegmentedControl.self, in: controller.view).first)

@@ -105,9 +105,9 @@ final class PreheatSubgroupTests: XCTestCase {
         let hotendDispatched = expectation(description: "Hotend target dispatched")
         service.afterSetTemperatures = { hotendDispatched.fulfill() }
         set.sendActions(for: .touchUpInside)
-        // Cold simulator graphics compilation can occupy the UI thread for a second.
+        // Cold simulator graphics compilation can occupy the UI thread for several seconds.
         // Verify dispatch, not renderer startup latency; keep the callback wait bounded.
-        await fulfillment(of: [hotendDispatched], timeout: 5)
+        await fulfillment(of: [hotendDispatched], timeout: 15)
         try await settle(controller)
         XCTAssertEqual(service.setTemperaturesCalledWith?.hotend, 205)
         XCTAssertNil(service.setTemperaturesCalledWith?.bed)
@@ -134,7 +134,7 @@ final class PreheatSubgroupTests: XCTestCase {
         let bedDispatched = expectation(description: "Zero bed target dispatched")
         service.afterSetTemperatures = { bedDispatched.fulfill() }
         set.sendActions(for: .touchUpInside)
-        await fulfillment(of: [bedDispatched], timeout: 5)
+        await fulfillment(of: [bedDispatched], timeout: 15)
         try await settle(controller)
         XCTAssertNil(service.setTemperaturesCalledWith?.hotend)
         XCTAssertEqual(service.setTemperaturesCalledWith?.bed, 0)
