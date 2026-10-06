@@ -182,8 +182,10 @@ jobs:
               >/dev/null
           }
           if ! has_approved_runtime; then
+            # Request the exact build: "-buildVersion 26.5" is resolved
+            # server-side and has served both 23F77 and 23F73 (#3286).
             sudo xcodebuild -downloadPlatform iOS \
-              -buildVersion 26.5 \
+              -buildVersion 23F77 \
               -architectureVariant arm64
             if ! has_approved_runtime; then
               echo "::error::iOS 26.5 runtime build 23F77 remained unavailable after download; inspect the download output and install the exact approved runtime."
@@ -405,8 +407,10 @@ jobs:
               >/dev/null
           }
           if ! has_approved_runtime; then
+            # Request the exact build: "-buildVersion 26.5" is resolved
+            # server-side and has served both 23F77 and 23F73 (#3286).
             sudo xcodebuild -downloadPlatform iOS \
-              -buildVersion 26.5 \
+              -buildVersion 23F77 \
               -architectureVariant arm64
             if ! has_approved_runtime; then
               echo "::error::iOS 26.5 runtime build 23F77 remained unavailable after download; inspect the download output and install the exact approved runtime."
