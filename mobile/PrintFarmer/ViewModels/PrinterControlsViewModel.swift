@@ -386,6 +386,7 @@ final class PrinterControlsViewModel: ObservableObject {
     @Published private(set) var isReviewingCalibration = false
     @Published private(set) var safetyStatus: PrinterStatusDetail?
     @Published private(set) var isRefreshingSafety = false
+    private var safetyReadRefreshesDiscovery = false
     @Published private(set) var safetyReadError: String?
     @Published private(set) var safetyCheckedAt: Date?
     private var safetyReadID = UUID()
@@ -505,11 +506,15 @@ final class PrinterControlsViewModel: ObservableObject {
     func refreshSafetyEvidence(refreshDiscovery: Bool = true) async {
         // A superseded caller (e.g. an observation task cancelled by a page
         // switch before it first ran) must not claim the single-flight slot,
-        // or it would drop the replacement observer's immediate read.
-        guard !Task.isCancelled, isActive, accessCheck() == nil, !isRefreshingSafety else { return }
+        // or it would drop the replacement observer's immediate read. A
+        // discovery read supersedes an in-flight status-only read (such as
+        // loadCapabilities' backfill) instead of waiting for the next cadence.
+        guard !Task.isCancelled, isActive, accessCheck() == nil,
+              !isRefreshingSafety || (refreshDiscovery && !safetyReadRefreshesDiscovery) else { return }
         let generation = lifecycleGeneration
         let readID = UUID()
         safetyReadID = readID
+        safetyReadRefreshesDiscovery = refreshDiscovery
         isRefreshingSafety = true
         let startedAt = clock()
         defer {

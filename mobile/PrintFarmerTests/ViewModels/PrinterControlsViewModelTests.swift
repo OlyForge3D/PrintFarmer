@@ -3093,7 +3093,8 @@ final class GuardedMaterialControlsTests: XCTestCase {
     private func fixture(
         caps: PrinterBackendCapabilities? = nil,
         access: @escaping @MainActor () -> String? = { nil },
-        beforeCapabilities: (@Sendable () async -> Void)? = nil
+        beforeCapabilities: (@Sendable () async -> Void)? = nil,
+        beforeStatus: (@Sendable () async -> Void)? = nil
     ) async throws -> (PrinterControlsViewModel, MockPrinterService) {
         var printer = try idlePrinter()
         printer.state = "ready"
@@ -3118,9 +3119,13 @@ final class GuardedMaterialControlsTests: XCTestCase {
                 maxHotendTemp: 300, maxBedTemp: 120, hasHeatedBed: true
             )
         )
-        let printerService: any PrinterServiceProtocol = beforeCapabilities.map {
-            ControlsDelayedService(base: service, beforeCapabilities: $0)
-        } ?? service
+        let printerService: any PrinterServiceProtocol = beforeCapabilities == nil && beforeStatus == nil
+            ? service
+            : ControlsDelayedService(
+                base: service,
+                beforeCapabilities: beforeCapabilities ?? {},
+                beforeStatus: beforeStatus ?? {}
+            )
         let model = PrinterControlsViewModel.configuredForTests(
             printerService: printerService, printer: printer, accessCheck: access
         )
@@ -3292,6 +3297,34 @@ final class GuardedMaterialControlsTests: XCTestCase {
         await model.refreshSafetyEvidence()
         XCTAssertTrue(model.filamentBlockedReason(.load)?.contains("220") == true)
         XCTAssertTrue(model.filamentBlockedReason(.unload)?.contains("220") == true)
+    }
+
+    func test_observerDiscoveryReadSupersedesInFlightStatusOnlyBackfill() async throws {
+        let gate = OneShotGate()
+        let barrier = AsyncBarrier()
+        addTeardownBlock { barrier.close() }
+        let (model, service) = try await fixture(beforeStatus: {
+            if await gate.claim() { await barrier.arriveAndWait() }
+        })
+        // Mirrors the detail host: the observer suspends evidence, then the
+        // section's loadCapabilities backfills status without discovery.
+        model.suspendSafetyObservation()
+        await gate.arm()
+        let backfill = Task { await model.loadCapabilities() }
+        await barrier.waitUntilArrived()
+        let discoveryReads = service.getBackendCapabilitiesCallCount
+
+        await model.refreshSafetyEvidence()
+
+        XCTAssertEqual(service.getBackendCapabilitiesCallCount, discoveryReads + 1,
+                       "The observer's immediate discovery read must not wait for the next cadence")
+        XCTAssertNotNil(model.capabilities?.verifiedSafety)
+        XCTAssertNotNil(model.safetyStatus)
+        XCTAssertFalse(model.isRefreshingSafety)
+        barrier.release()
+        await backfill.value
+        XCTAssertFalse(model.isRefreshingSafety)
+        XCTAssertNotNil(model.safetyStatus)
     }
 
     func test_cancelledSafetyReadNeverClaimsSingleFlightSlotFromReplacementObserver() async throws {
@@ -4081,6 +4114,7 @@ private struct ControlsDelayedService: PrinterServiceProtocol {
     var beforeHome: @Sendable () async -> Void = {}
     var beforeMoveTo: @Sendable () async -> Void = {}
     var beforeCapabilities: @Sendable () async -> Void = {}
+    var beforeStatus: @Sendable () async -> Void = {}
 
     func getDetails(id: UUID) async throws -> PrinterDetails {
         await beforeDetails()
@@ -4099,7 +4133,10 @@ private struct ControlsDelayedService: PrinterServiceProtocol {
     }
     func list(includeDisabled: Bool) async throws -> [Printer] { try await base.list(includeDisabled: includeDisabled) }
     func get(id: UUID) async throws -> Printer { try await base.get(id: id) }
-    func getStatus(id: UUID) async throws -> PrinterStatusDetail { try await base.getStatus(id: id) }
+    func getStatus(id: UUID) async throws -> PrinterStatusDetail {
+        await beforeStatus()
+        return try await base.getStatus(id: id)
+    }
     func listCameraUrls() async throws -> [PrinterCameraUrls] { try await base.listCameraUrls() }
     func getCameraUrl(id: UUID) async throws -> PrinterCameraUrl { try await base.getCameraUrl(id: id) }
     func getSnapshot(id: UUID) async throws -> Data { try await base.getSnapshot(id: id) }
