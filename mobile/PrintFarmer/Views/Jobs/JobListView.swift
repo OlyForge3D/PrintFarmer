@@ -260,20 +260,41 @@ struct JobListView: View {
                     }
                 }
             } header: {
-                HStack {
-                    Label("Queued", systemImage: "tray.full")
-                        .font(.subheadline.weight(.semibold))
-                    Spacer()
-                    if viewModel.canReorderQueue && !viewModel.reorderableQueuedJobs.isEmpty {
-                        Text("Drag to reorder")
-                            .font(.caption)
-                            .foregroundStyle(Color.pfTextSecondary)
+                Group {
+                    if dynamicTypeSize.isAccessibilitySize {
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Label("Queued", systemImage: "tray.full")
+                                    .font(.subheadline.weight(.semibold))
+                                Spacer()
+                                Text("\(viewModel.queuedJobs.count)")
+                                    .font(.caption.monospacedDigit())
+                                    .foregroundStyle(Color.pfTextTertiary)
+                            }
+                            if viewModel.canReorderQueue && !viewModel.reorderableQueuedJobs.isEmpty {
+                                Text("Drag to reorder")
+                                    .font(.caption)
+                                    .foregroundStyle(Color.pfTextSecondary)
+                            }
+                        }
+                    } else {
+                        HStack {
+                            Label("Queued", systemImage: "tray.full")
+                                .font(.subheadline.weight(.semibold))
+                            Spacer()
+                            if viewModel.canReorderQueue && !viewModel.reorderableQueuedJobs.isEmpty {
+                                Text("Drag to reorder")
+                                    .font(.caption)
+                                    .foregroundStyle(Color.pfTextSecondary)
+                            }
+                            Text("\(viewModel.queuedJobs.count)")
+                                .font(.caption.monospacedDigit())
+                                .monospacedDigit()
+                                .foregroundStyle(Color.pfTextTertiary)
+                        }
                     }
-                    Text("\(viewModel.queuedJobs.count)")
-                        .font(.caption.monospacedDigit())
-                        .monospacedDigit()
-                        .foregroundStyle(Color.pfTextTertiary)
                 }
+                .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
                 .accessibilityElement(children: .combine)
                 .accessibilityIdentifier("jobList.section.queued")
             }
@@ -386,7 +407,7 @@ struct JobListView: View {
             Group {
                 if dynamicTypeSize.isAccessibilitySize {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text(item.job.name)
+                        Text(item.displayName)
                             .font(.subheadline.weight(.semibold))
                             .fixedSize(horizontal: false, vertical: true)
                         StatusBadge(jobStatus: item.job.jobStatus)
@@ -400,7 +421,7 @@ struct JobListView: View {
                         jobThumbnail(for: item, size: 44)
                         VStack(alignment: .leading, spacing: 4) {
                             HStack {
-                                Text(item.job.name)
+                                Text(item.displayName)
                                     .font(.subheadline.weight(.semibold))
                                     .lineLimit(1)
                                 Spacer()
@@ -501,7 +522,7 @@ struct JobListView: View {
                 Group {
                     if dynamicTypeSize.isAccessibilitySize {
                         VStack(alignment: .leading, spacing: 8) {
-                            Text(item.job.name)
+                            Text(item.displayName)
                                 .font(.subheadline.weight(.semibold))
                                 .fixedSize(horizontal: false, vertical: true)
                             HStack(alignment: .top, spacing: 12) {
@@ -514,11 +535,10 @@ struct JobListView: View {
                             jobThumbnail(for: item, size: 44)
                             VStack(alignment: .leading, spacing: 4) {
                                 HStack {
-                                    Text(item.job.name)
+                                    Text(item.displayName)
                                         .font(.subheadline.weight(.semibold))
                                         .lineLimit(1)
                                     Spacer()
-                                    priorityIndicator(item.job.priority)
                                 }
                                 queuedJobDetails(item, stacksMetadata: false)
                             }
@@ -563,18 +583,10 @@ struct JobListView: View {
     ) -> some View {
         if stacksMetadata {
             VStack(alignment: .leading, spacing: 4) {
-                priorityIndicator(item.job.priority)
-                if let printerName = item.job.printerName {
-                    Label(printerName, systemImage: "printer")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                if item.job.isMultiCopy {
-                    Label("\(item.job.copies) copies", systemImage: "doc.on.doc")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+                Text(queuedJobMetadata(item))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
                 if let duration = item.job.estimatedDuration {
                     Label(duration.durationFormatted, systemImage: "clock")
                         .font(.caption)
@@ -582,26 +594,30 @@ struct JobListView: View {
                 }
             }
         } else {
-            HStack(spacing: 12) {
-                if let printerName = item.job.printerName {
-                    Label(printerName, systemImage: "printer")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-                Spacer()
-                if item.job.isMultiCopy {
-                    Label("\(item.job.copies) copies", systemImage: "doc.on.doc")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                if let duration = item.job.estimatedDuration {
-                    Label(duration.durationFormatted, systemImage: "clock")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
+            Text(queuedJobMetadata(item))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
         }
+    }
+
+    private func queuedJobMetadata(_ item: QueuedPrintJobResponse) -> String {
+        var parts: [String] = []
+        switch item.job.priority {
+        case .low:
+            parts.append("Low")
+        case .normal:
+            break
+        case .high:
+            parts.append("High")
+        case .urgent:
+            parts.append("Urgent")
+        }
+        if let material = item.gcodeFile?.materialType ?? item.job.filamentName {
+            parts.append(material)
+        }
+        parts.append(item.job.printerModel ?? item.job.printerName ?? "Unassigned")
+        return parts.joined(separator: " · ")
     }
 
     private func queueRowAccessibilityActions<Content: View>(
@@ -724,7 +740,7 @@ struct JobListView: View {
                                 .foregroundStyle(Color.pfTextSecondary)
                         }
                         if let completedAt = item.completedAt {
-                            Text(completedAt.relativeFormatted)
+                            Text(completedAt.formatted(date: .omitted, time: .shortened))
                                 .font(.caption2)
                                 .dynamicTypeSize(.xxxLarge)
                                 .foregroundStyle(Color.pfTextTertiary)
@@ -755,7 +771,7 @@ struct JobListView: View {
                             }
                             Spacer()
                             if let completedAt = item.completedAt {
-                                Text(completedAt.relativeFormatted)
+                                Text(completedAt.formatted(date: .omitted, time: .shortened))
                                     .font(.caption2)
                                     .foregroundStyle(Color.pfTextTertiary)
                                     .lineLimit(1)
@@ -911,20 +927,6 @@ struct JobListView: View {
         case .printing: .pfAccent
         case .paused: .pfWarning
         default: .pfAccent
-        }
-    }
-
-    @ViewBuilder
-    private func priorityIndicator(_ priority: PrintJobPriority) -> some View {
-        if priority == .high || priority == .urgent {
-            HStack(spacing: 2) {
-                Image(systemName: priority == .urgent ? "exclamationmark.triangle.fill" : "flag.fill")
-                    .font(.caption2)
-                Text(priority == .urgent ? "Urgent" : "High")
-                    .font(.caption2.weight(.semibold))
-            }
-            .fixedSize(horizontal: true, vertical: false)
-            .foregroundStyle(priority == .urgent ? Color.pfError : Color.pfWarning)
         }
     }
 

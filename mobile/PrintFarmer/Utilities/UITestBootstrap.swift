@@ -536,8 +536,36 @@ enum UITestBootstrap {
     private static let issue3259CrealityK1ID =
         UUID(uuidString: "32590000-0000-0000-0000-000000000007")!
 
-    private static let issue3259VisualAcceptanceThumbnailPath =
-        "/api/printers/\(DemoData.prusaMK4_1_ID.uuidString.lowercased())/current-job/thumbnail?v=3259000000000001"
+    private static func issue3259VisualAcceptanceThumbnailPath(for printerID: UUID) -> String {
+        "/api/printers/\(printerID.uuidString.lowercased())/current-job/thumbnail?v=3259000000000001"
+    }
+
+    private static func issue3259VisualAcceptanceThumbnailAssetName(for jobName: String?) -> String? {
+        guard let jobName = jobName?.lowercased() else { return nil }
+        if jobName.contains("benchy") {
+            return "Issue3259VisualAcceptanceBenchy"
+        }
+        if jobName.contains("gear") {
+            return "Issue3259VisualAcceptanceGear"
+        }
+        if jobName.contains("vase") || jobName.contains("tool_tray") {
+            return "Issue3259VisualAcceptanceVase"
+        }
+        if jobName.contains("clip") || jobName.contains("cable_guide") {
+            return "Issue3259VisualAcceptanceClip"
+        }
+        if jobName.contains("bracket") || jobName.contains("organizer") || jobName.contains("mount") {
+            return "Issue3259VisualAcceptanceBracket"
+        }
+        return nil
+    }
+
+    private static func issue3259VisualAcceptanceThumbnailData(named assetName: String) -> Data {
+        guard let data = UIImage(named: assetName)?.pngData() else {
+            preconditionFailure("The visual-acceptance thumbnail asset \(assetName) must be available in the app bundle.")
+        }
+        return data
+    }
 
     private static func issue3259QueueThumbnailPath(_ jobID: String) -> String {
         "/api/gcode-files/thumbnail/\(jobID)"
@@ -548,7 +576,8 @@ enum UITestBootstrap {
         let status: PrinterStatusDetail
         let details: PrinterDetails
         let attentionFeed: AttentionFeed
-        let thumbnail: Data
+        let currentJobThumbnailDataByID: [String: Data]
+        let queueThumbnailDataByJobID: [String: Data]
     }
 
     private static func issue3259VisualAcceptanceFixture(
@@ -569,7 +598,7 @@ enum UITestBootstrap {
         printer.liveZOffsetMm = 0.025
         printer.jobName = "benchy_0.2mm_PLA.gcode"
         printer.fileName = "benchy_0.2mm_PLA.gcode"
-        printer.currentJobThumbnailUrl = issue3259VisualAcceptanceThumbnailPath
+        printer.currentJobThumbnailUrl = issue3259VisualAcceptanceThumbnailPath(for: printer.id)
         printer.spoolInfo = PrinterSpoolInfo(
             hasActiveSpool: true,
             activeSpoolId: 1,
@@ -628,6 +657,7 @@ enum UITestBootstrap {
         voron.progress = 0.22
         voron.jobName = "gear_set_v3.gcode"
         voron.fileName = "gear_set_v3.gcode"
+        voron.currentJobThumbnailUrl = issue3259VisualAcceptanceThumbnailPath(for: voron.id)
         voron.hotendTemp = 250
         voron.bedTemp = 100
 
@@ -661,7 +691,7 @@ enum UITestBootstrap {
             spoolInUse: true
         )
 
-        let phonePrinters = [
+        let basePrinters = [
             printer,
             voron,
             bambuX1C,
@@ -695,78 +725,73 @@ enum UITestBootstrap {
             ),
             idleMk4,
         ]
-        let printers: [Printer]
-        if UIDevice.current.userInterfaceIdiom == .pad {
-            printers = phonePrinters + [
-                issue3259MockupPrinter(
-                    id: DemoData.bambuP1S_ID,
-                    name: "Bambu P1S",
-                    modelName: "P1S",
-                    state: "printing",
-                    progress: 0.09,
-                    currentLayer: 22,
-                    totalLayers: 242,
-                    jobName: "shelf_bracket_x6.gcode",
-                    hotendTemp: 245,
-                    bedTemp: 80,
-                    spoolName: "PLA White",
-                    colorHex: "#F3F4F6"
-                ),
-                issue3259MockupPrinter(
-                    id: issue3259SovolSV06ID,
-                    name: "Sovol SV06",
-                    modelName: "SV06",
-                    state: nil,
-                    isOnline: false
-                ),
-                issue3259MockupPrinter(
-                    id: DemoData.ender3V3_ID,
-                    name: "Ender 3 V3",
-                    modelName: "Ender 3 V3",
-                    state: "idle",
-                    hotendTemp: 22,
-                    bedTemp: 22
-                ),
-                issue3259MockupPrinter(
-                    id: issue3259PrusaXLID,
-                    name: "Prusa XL",
-                    modelName: "XL",
-                    state: "printing",
-                    progress: 0.38,
-                    currentLayer: 76,
-                    totalLayers: 200,
-                    jobName: "tool_organizer.gcode",
-                    hotendTemp: 215,
-                    bedTemp: 60,
-                    spoolName: "PLA Orange",
-                    colorHex: "#F97316"
-                ),
-                issue3259MockupPrinter(
-                    id: issue3259BambuA1ID,
-                    name: "Bambu A1",
-                    modelName: "A1",
-                    state: "printing",
-                    progress: 0.56,
-                    currentLayer: 112,
-                    totalLayers: 200,
-                    jobName: "cable_clip_set.gcode",
-                    hotendTemp: 220,
-                    bedTemp: 55,
-                    spoolName: "PETG Blue",
-                    colorHex: "#3B82F6"
-                ),
-                issue3259MockupPrinter(
-                    id: issue3259CrealityK1ID,
-                    name: "Creality K1",
-                    modelName: "K1",
-                    state: "idle",
-                    hotendTemp: 24,
-                    bedTemp: 23
-                ),
-            ]
-        } else {
-            printers = phonePrinters
-        }
+        let printers = basePrinters + [
+            issue3259MockupPrinter(
+                id: DemoData.bambuP1S_ID,
+                name: "Bambu P1S",
+                modelName: "P1S",
+                state: "printing",
+                progress: 0.09,
+                currentLayer: 22,
+                totalLayers: 242,
+                jobName: "shelf_bracket_x6.gcode",
+                hotendTemp: 245,
+                bedTemp: 80,
+                spoolName: "PLA White",
+                colorHex: "#F3F4F6"
+            ),
+            issue3259MockupPrinter(
+                id: issue3259SovolSV06ID,
+                name: "Sovol SV06",
+                modelName: "SV06",
+                state: nil,
+                isOnline: false
+            ),
+            issue3259MockupPrinter(
+                id: DemoData.ender3V3_ID,
+                name: "Ender 3 V3",
+                modelName: "Ender 3 V3",
+                state: "idle",
+                hotendTemp: 22,
+                bedTemp: 22
+            ),
+            issue3259MockupPrinter(
+                id: issue3259PrusaXLID,
+                name: "Prusa XL",
+                modelName: "XL",
+                state: "printing",
+                progress: 0.38,
+                currentLayer: 76,
+                totalLayers: 200,
+                jobName: "tool_organizer.gcode",
+                hotendTemp: 215,
+                bedTemp: 60,
+                spoolName: "PLA Orange",
+                colorHex: "#F97316"
+            ),
+            issue3259MockupPrinter(
+                id: issue3259BambuA1ID,
+                name: "Bambu A1",
+                modelName: "A1",
+                state: "printing",
+                progress: 0.56,
+                currentLayer: 112,
+                totalLayers: 200,
+                jobName: "cable_clip_set.gcode",
+                hotendTemp: 220,
+                bedTemp: 55,
+                spoolName: "PETG Blue",
+                colorHex: "#3B82F6"
+            ),
+            issue3259MockupPrinter(
+                id: issue3259CrealityK1ID,
+                name: "Creality K1",
+                modelName: "K1",
+                state: "idle",
+                hotendTemp: 24,
+                bedTemp: 23
+            ),
+        ]
 
         let status = PrinterStatusDetail(
             id: printer.id,
@@ -842,8 +867,39 @@ enum UITestBootstrap {
             nextCursor: nil,
             healthyPrinterCount: 0
         )
-        guard let thumbnail = UIImage(named: "Issue3259VisualAcceptanceBenchy")?.pngData() else {
-            preconditionFailure("The visual-acceptance Benchy asset must be available in the app bundle.")
+        let currentJobThumbnailDataByID: [String: Data] = Dictionary(
+            uniqueKeysWithValues: printers.compactMap { printer -> (String, Data)? in
+                guard printer.currentJobThumbnailUrl != nil,
+                      let assetName = issue3259VisualAcceptanceThumbnailAssetName(
+                        for: printer.jobName ?? printer.fileName
+                      ) else {
+                    return nil
+                }
+                return (
+                    printer.id.uuidString.lowercased(),
+                    issue3259VisualAcceptanceThumbnailData(named: assetName)
+                )
+            }
+        )
+        let queueThumbnailAssetNames = [
+            "32590000-0000-0000-0000-000000000002": "Issue3259VisualAcceptanceClip",
+            "32590000-0000-0000-0000-000000000003": "Issue3259VisualAcceptanceBracket",
+            "32590000-0000-0000-0000-000000000004": "Issue3259VisualAcceptanceVase",
+            "32590000-0000-0000-0000-000000000020": "Issue3259VisualAcceptanceClip",
+            "32590000-0000-0000-0000-000000000021": "Issue3259VisualAcceptanceBracket",
+            "32590000-0000-0000-0000-000000000022": "Issue3259VisualAcceptanceVase",
+            "32590000-0000-0000-0000-000000000101": "Issue3259VisualAcceptanceClip",
+            "32590000-0000-0000-0000-000000000102": "Issue3259VisualAcceptanceBracket",
+            "32590000-0000-0000-0000-000000000103": "Issue3259VisualAcceptanceVase",
+            "32590000-0000-0000-0000-000000000104": "Issue3259VisualAcceptanceClip",
+            "32590000-0000-0000-0000-000000000105": "Issue3259VisualAcceptanceVase",
+            "32590000-0000-0000-0000-000000000106": "Issue3259VisualAcceptanceGear",
+            "32590000-0000-0000-0000-000000000110": "Issue3259VisualAcceptanceGear",
+            "32590000-0000-0000-0000-000000000111": "Issue3259VisualAcceptanceClip",
+            DemoData.job1ID.uuidString.lowercased(): "Issue3259VisualAcceptanceBenchy",
+        ]
+        let queueThumbnailDataByJobID = queueThumbnailAssetNames.mapValues {
+            issue3259VisualAcceptanceThumbnailData(named: $0)
         }
         var statusWithSafety = status
         statusWithSafety.safetyTelemetry = issue3259VisualAcceptanceSafetyTelemetry(
@@ -855,7 +911,8 @@ enum UITestBootstrap {
             status: statusWithSafety,
             details: details,
             attentionFeed: attentionFeed,
-            thumbnail: thumbnail
+            currentJobThumbnailDataByID: currentJobThumbnailDataByID,
+            queueThumbnailDataByJobID: queueThumbnailDataByJobID
         )
     }
 
@@ -888,6 +945,10 @@ enum UITestBootstrap {
         if let jobName {
             payload["jobName"] = jobName
             payload["fileName"] = jobName
+            if ["printing", "paused"].contains(state?.lowercased() ?? ""),
+               issue3259VisualAcceptanceThumbnailAssetName(for: jobName) != nil {
+                payload["currentJobThumbnailUrl"] = issue3259VisualAcceptanceThumbnailPath(for: id)
+            }
         }
         if let hotendTemp { payload["hotendTemp"] = hotendTemp }
         if let bedTemp { payload["bedTemp"] = bedTemp }
@@ -998,6 +1059,9 @@ enum UITestBootstrap {
         private struct FixtureState: Sendable {
             let printersData: Data
             let printersByID: [String: Data]
+            let currentJobThumbnailUrlsByID: [String: String]
+            let currentJobThumbnailDataByID: [String: Data]
+            let queueThumbnailDataByJobID: [String: Data]
             var statusData: Data
             let additionalStatusDataByID: [String: Data]
             let detailsDataByID: [String: Data]
@@ -1014,7 +1078,6 @@ enum UITestBootstrap {
             let farmShapeData: Data
             let queueStatsData: Data
             let userData: Data
-            let thumbnailData: Data
         }
 
         static let accessToken = "issue3259-ui-test-only"
@@ -1041,6 +1104,11 @@ enum UITestBootstrap {
                 for printer in printerObjects {
                     guard let id = (printer["id"] as? String)?.lowercased() else { continue }
                     printersByID[id] = try JSONSerialization.data(withJSONObject: printer)
+                }
+                var currentJobThumbnailUrlsByID: [String: String] = [:]
+                for printer in fixture.printers {
+                    guard let path = printer.currentJobThumbnailUrl else { continue }
+                    currentJobThumbnailUrlsByID[printer.id.uuidString.lowercased()] = path
                 }
                 let safetyData = try encoder.encode(issue3259VisualAcceptanceVerifiedSafety(
                     configurationRevision: fixture.printers.first(where: { $0.id == DemoData.prusaMK4_1_ID })?.configurationRevision ?? 0,
@@ -1081,8 +1149,8 @@ enum UITestBootstrap {
                     "printerCount": fixture.printers.count,
                 ])
                 let queueStatsData = try encoder.encode(QueueStats(
-                    totalQueued: 2,
-                    totalPrinting: 1,
+                    totalQueued: 4,
+                    totalPrinting: 3,
                     totalPaused: 0,
                     averageWaitTimeMinutes: 18,
                     byModel: []
@@ -1176,7 +1244,7 @@ enum UITestBootstrap {
                         assignedPrinterId: printerID,
                         printerName: "Prusa MK4 #1",
                         printerModel: "Prusa MK4",
-                        status: "Assigned",
+                        status: "Queued",
                         priority: .normal,
                         queuePosition: 0,
                         estimatedPrintTimeSeconds: 5_400,
@@ -1248,12 +1316,12 @@ enum UITestBootstrap {
                     QueuedJobInfo(
                         id: "32590000-0000-0000-0000-000000000020",
                         rowVersion: "issue3259-prusa2-assigned-v1",
-                        name: "Coral spool bracket.gcode",
-                        fileName: "Coral spool bracket.gcode",
+                        name: "clip_holder",
+                        fileName: "clip_holder.gcode",
                         assignedPrinterId: DemoData.prusaMK4_2_ID.uuidString.lowercased(),
                         printerName: "Prusa MK4 #2",
                         printerModel: "Prusa MK4",
-                        status: "Assigned",
+                        status: "Queued",
                         priority: .normal,
                         queuePosition: 0,
                         estimatedPrintTimeSeconds: 5_400,
@@ -1266,15 +1334,15 @@ enum UITestBootstrap {
                         thumbnailUrl: issue3259QueueThumbnailPath("32590000-0000-0000-0000-000000000020"),
                         filamentName: "PLA",
                         filamentColor: "#EF6B4A",
-                        copies: 1,
+                        copies: 4,
                         completedCopies: 0,
-                        remainingCopies: 1
+                        remainingCopies: 4
                     ),
                     QueuedJobInfo(
                         id: "32590000-0000-0000-0000-000000000021",
                         rowVersion: "issue3259-prusa2-queue-head-v1",
-                        name: "Toolhead cable guide.gcode",
-                        fileName: "Toolhead cable guide.gcode",
+                        name: "shelf_bracket",
+                        fileName: "shelf_bracket.gcode",
                         assignedPrinterId: DemoData.prusaMK4_2_ID.uuidString.lowercased(),
                         printerName: "Prusa MK4 #2",
                         printerModel: "Prusa MK4",
@@ -1289,17 +1357,17 @@ enum UITestBootstrap {
                         createdAtUtc: Date(timeIntervalSince1970: 1_790_000_100),
                         updatedAtUtc: nil,
                         thumbnailUrl: issue3259QueueThumbnailPath("32590000-0000-0000-0000-000000000021"),
-                        filamentName: "PLA",
-                        filamentColor: "#EF6B4A",
-                        copies: 1,
+                        filamentName: "PETG",
+                        filamentColor: "#3B82F6",
+                        copies: 6,
                         completedCopies: 0,
-                        remainingCopies: 1
+                        remainingCopies: 6
                     ),
                     QueuedJobInfo(
                         id: "32590000-0000-0000-0000-000000000022",
                         rowVersion: "issue3259-prusa2-queue-following-v1",
-                        name: "Controller mount.gcode",
-                        fileName: "Controller mount.gcode",
+                        name: "spiral_vase",
+                        fileName: "spiral_vase.gcode",
                         assignedPrinterId: DemoData.prusaMK4_2_ID.uuidString.lowercased(),
                         printerName: "Prusa MK4 #2",
                         printerModel: "Prusa MK4",
@@ -1326,26 +1394,21 @@ enum UITestBootstrap {
                         entries: [
                             QueueHistoryEntry(
                                 id: DemoData.job9ID.uuidString,
-                                jobName: "vase_mode_spiral.gcode",
+                                jobName: "cable_chain",
                                 printerName: "Voron 2.4",
                                 status: "Failed",
-                                completedAt: Date(timeIntervalSince1970: 1_791_141_200),
+                                completedAt: Calendar.current.date(
+                                    bySettingHour: 8,
+                                    minute: 2,
+                                    second: 0,
+                                    of: Date()
+                                ),
                                 durationSeconds: 3_600,
-                                completionPercentage: 42,
+                                completionPercentage: 12,
                                 failureReason: "Thermal runaway detected"
-                            ),
-                            QueueHistoryEntry(
-                                id: DemoData.job10ID.uuidString,
-                                jobName: "lamp_shade_textured.gcode",
-                                printerName: "Voron 2.4",
-                                status: "Failed",
-                                completedAt: Date(timeIntervalSince1970: 1_791_065_600),
-                                durationSeconds: 5_600,
-                                completionPercentage: nil,
-                                failureReason: "Heater disconnected"
                             )
                         ],
-                        totalCount: 2,
+                        totalCount: 1,
                         currentPage: 1,
                         pageSize: 5,
                         stats: nil
@@ -1367,7 +1430,7 @@ enum UITestBootstrap {
                     "status": "Failed",
                     "priority": "Normal",
                     "queuePosition": 0,
-                    "gcodeFileName": "vase_mode_spiral.gcode",
+                    "gcodeFileName": "cable_chain.gcode",
                     "assignedPrinterId": "\(DemoData.voron24_ID)",
                     "assignedPrinterName": "Voron 2.4",
                     "createdAt": "2026-10-04T10:00:00Z",
@@ -1406,7 +1469,7 @@ enum UITestBootstrap {
                 {
                     "id": "32590000-0000-0000-0000-000000000104",
                     "rowVersion": "issue3259-rerun-v1",
-                    "name": "vase_mode_spiral.gcode",
+                    "name": "cable_chain.gcode",
                     "status": "Queued",
                     "priority": "Normal",
                     "queuePosition": 3,
@@ -1434,6 +1497,9 @@ enum UITestBootstrap {
                 fixtureState = FixtureState(
                     printersData: printersData,
                     printersByID: printersByID,
+                    currentJobThumbnailUrlsByID: currentJobThumbnailUrlsByID,
+                    currentJobThumbnailDataByID: fixture.currentJobThumbnailDataByID,
+                    queueThumbnailDataByJobID: fixture.queueThumbnailDataByJobID,
                     statusData: try encoder.encode(fixture.status),
                     additionalStatusDataByID: additionalStatusDataByID,
                     detailsDataByID: detailsDataByID,
@@ -1461,8 +1527,7 @@ enum UITestBootstrap {
                     ],
                     farmShapeData: farmShapeData,
                     queueStatsData: queueStatsData,
-                    userData: userData,
-                    thumbnailData: fixture.thumbnail
+                    userData: userData
                 )
                 lock.unlock()
             } catch {
@@ -1612,12 +1677,30 @@ enum UITestBootstrap {
                 } else {
                     result = (404, "application/json", Data(#"{"error":"not-found"}"#.utf8))
                 }
-            case ("GET", "/api/printers/\(printerID)/current-job/thumbnail"):
-                result = (200, "image/png", fixture.thumbnailData)
+            case ("GET", let path)
+                where path.hasPrefix("/api/printers/")
+                    && path.hasSuffix("/current-job/thumbnail"):
+                let components = path.split(separator: "/")
+                let requestedTarget = request.url.map {
+                    $0.path + ($0.query.map { "?\($0)" } ?? "")
+                }
+                let printerKey = components.count == 5 ? String(components[2]).lowercased() : nil
+                let expectedTarget = printerKey.flatMap {
+                    fixture.currentJobThumbnailUrlsByID[$0]
+                }
+                if expectedTarget == requestedTarget,
+                   let printerKey,
+                   let thumbnail = fixture.currentJobThumbnailDataByID[printerKey] {
+                    result = (200, "image/png", thumbnail)
+                } else {
+                    result = (404, "application/json", Data(#"{"error":"not-found"}"#.utf8))
+                }
             case ("GET", let path)
                 where path.hasPrefix("/api/gcode-files/thumbnail/")
                     && UUID(uuidString: String(path.dropFirst("/api/gcode-files/thumbnail/".count))) != nil:
-                result = (200, "image/png", fixture.thumbnailData)
+                let jobID = String(path.dropFirst("/api/gcode-files/thumbnail/".count)).lowercased()
+                result = fixture.queueThumbnailDataByJobID[jobID].map { (200, "image/png", $0) }
+                    ?? (404, "application/json", Data(#"{"error":"not-found"}"#.utf8))
             case ("POST", "/api/printers/\(printerID)/temps"):
                 result = updateTemperatures(&fixture, request: request)
             case ("POST", "/api/printers/\(printerID)/fan"):
@@ -1853,10 +1936,30 @@ enum UITestBootstrap {
         includeRerunJob: Bool = false,
         includeSecondRerunJob: Bool = false
     ) -> [QueuedPrintJobResponse] {
-        let printerID = DemoData.prusaMK4_1_ID.uuidString.lowercased()
-        let printer = QueuePrinterMeta(
-            id: printerID, name: "Prusa MK4 #1", modelName: "Prusa MK4",
+        let mk4Printer = QueuePrinterMeta(
+            id: DemoData.prusaMK4_1_ID.uuidString.lowercased(),
+            name: "Prusa MK4 #1", modelName: "Prusa MK4",
             status: "Printing", isOnline: true
+        )
+        let idleMk4Printer = QueuePrinterMeta(
+            id: DemoData.prusaMK4_2_ID.uuidString.lowercased(),
+            name: "Prusa MK4 #2", modelName: "Prusa MK4",
+            status: "Idle", isOnline: true
+        )
+        let voronPrinter = QueuePrinterMeta(
+            id: DemoData.voron24_ID.uuidString.lowercased(),
+            name: "Voron 2.4", modelName: "Voron 2.4",
+            status: "Printing", isOnline: true
+        )
+        let bambuPrinter = QueuePrinterMeta(
+            id: issue3259BambuA1ID.uuidString.lowercased(),
+            name: "Bambu A1", modelName: "A1",
+            status: "Printing", isOnline: true
+        )
+        let enderPrinter = QueuePrinterMeta(
+            id: issue3259Ender3S1ID.uuidString.lowercased(),
+            name: "Ender 3 S1", modelName: "Ender 3 S1",
+            status: "Idle", isOnline: true
         )
         let createdAt = Date(timeIntervalSince1970: 1_791_134_000)
 
@@ -1868,6 +1971,9 @@ enum UITestBootstrap {
             position: Int,
             requiredGrams: Int,
             durationSeconds: Int,
+            assignedPrinter: QueuePrinterMeta?,
+            copies: Int = 1,
+            materialType: String = "PLA",
             actualStartTime: Date? = nil
         ) -> QueuedPrintJobResponse {
             let row = QueuedJobInfo(
@@ -1875,9 +1981,9 @@ enum UITestBootstrap {
                 rowVersion: "visual-acceptance-only-\(id)",
                 name: name,
                 fileName: name,
-                assignedPrinterId: printerID,
-                printerName: printer.name,
-                printerModel: printer.modelName,
+                assignedPrinterId: assignedPrinter?.id,
+                printerName: assignedPrinter?.name,
+                printerModel: assignedPrinter?.modelName,
                 status: status,
                 priority: priority,
                 queuePosition: position,
@@ -1889,18 +1995,18 @@ enum UITestBootstrap {
                 createdAtUtc: createdAt,
                 updatedAtUtc: nil,
                 thumbnailUrl: issue3259QueueThumbnailPath(id),
-                filamentName: "Prusament PLA",
-                filamentColor: "#EF6B4A",
-                copies: 1,
+                filamentName: materialType == "PLA" ? "Prusament PLA" : materialType,
+                filamentColor: materialType == "PLA" ? "#EF6B4A" : "#3B82F6",
+                copies: copies,
                 completedCopies: 0,
-                remainingCopies: 1
+                remainingCopies: copies
             )
             let file = QueueGcodeFileMeta(
                 id: id,
                 name: name,
                 fileName: name,
                 fileSizeBytes: 1_200_000,
-                materialType: "PLA",
+                materialType: materialType,
                 nozzleDiameter: 0.4,
                 estimatedPrintTimeSeconds: durationSeconds,
                 estimatedFilamentUsageGrams: requiredGrams,
@@ -1911,7 +2017,7 @@ enum UITestBootstrap {
             return QueuedPrintJobResponse(
                 job: row,
                 gcodeFile: file,
-                assignedPrinter: printer,
+                assignedPrinter: assignedPrinter,
                 estimatedStartTime: estimatedStart,
                 estimatedCompletionTime: estimatedStart.addingTimeInterval(TimeInterval(durationSeconds))
             )
@@ -1921,53 +2027,93 @@ enum UITestBootstrap {
         if includeCurrentPrint {
             jobs.append(job(
                 id: DemoData.job1ID.uuidString.lowercased(),
-                name: "benchy_0.2mm_PLA.gcode",
+                name: "benchy_0.2mm_PLA",
                 status: "Printing",
                 priority: .normal,
                 position: 0,
                 requiredGrams: 140,
                 durationSeconds: 8_280,
+                assignedPrinter: mk4Printer,
                 actualStartTime: Date().addingTimeInterval(-6_000)
+            ))
+            jobs.append(job(
+                id: "32590000-0000-0000-0000-000000000110",
+                name: "gear_set_v3",
+                status: "Printing",
+                priority: .normal,
+                position: 0,
+                requiredGrams: 65,
+                durationSeconds: 8_280,
+                assignedPrinter: voronPrinter,
+                actualStartTime: Date().addingTimeInterval(-1_800)
+            ))
+            jobs.append(job(
+                id: "32590000-0000-0000-0000-000000000111",
+                name: "cable_clip_set",
+                status: "Printing",
+                priority: .normal,
+                position: 0,
+                requiredGrams: 32,
+                durationSeconds: 8_100,
+                assignedPrinter: bambuPrinter,
+                actualStartTime: Date().addingTimeInterval(-2_000)
             ))
         }
         jobs += [
             job(
                 id: "32590000-0000-0000-0000-000000000101",
-                name: "Coral spool bracket.gcode",
-                status: "Assigned",
+                name: "clip_holder",
+                status: "Queued",
                 priority: .normal,
                 position: 0,
                 requiredGrams: 42,
-                durationSeconds: 5_400
+                durationSeconds: 5_400,
+                assignedPrinter: nil,
+                copies: 4
             ),
             job(
                 id: "32590000-0000-0000-0000-000000000102",
-                name: "Toolhead cable guide.gcode",
+                name: "shelf_bracket",
                 status: "Queued",
-                priority: .normal,
+                priority: .high,
                 position: 1,
-                requiredGrams: 55,
-                durationSeconds: 8_100
+                requiredGrams: 85,
+                durationSeconds: 8_100,
+                assignedPrinter: idleMk4Printer,
+                copies: 6,
+                materialType: "PETG"
             ),
             job(
                 id: "32590000-0000-0000-0000-000000000103",
-                name: "Controller mount.gcode",
+                name: "spiral_vase",
                 status: "Queued",
                 priority: .normal,
                 position: 2,
-                requiredGrams: 36,
-                durationSeconds: 4_800
+                requiredGrams: 48,
+                durationSeconds: 3_600,
+                assignedPrinter: enderPrinter
+            ),
+            job(
+                id: "32590000-0000-0000-0000-000000000106",
+                name: "gear_set_v4",
+                status: "Queued",
+                priority: .normal,
+                position: 3,
+                requiredGrams: 65,
+                durationSeconds: 4_800,
+                assignedPrinter: voronPrinter
             ),
         ]
         if includeRerunJob {
             jobs.append(job(
                 id: "32590000-0000-0000-0000-000000000104",
-                name: "vase_mode_spiral.gcode",
+                name: "cable_chain",
                 status: "Queued",
                 priority: .normal,
                 position: 3,
                 requiredGrams: 48,
-                durationSeconds: 3_600
+                durationSeconds: 3_600,
+                assignedPrinter: voronPrinter
             ))
         }
         if includeSecondRerunJob {
@@ -1978,7 +2124,8 @@ enum UITestBootstrap {
                 priority: .normal,
                 position: 3,
                 requiredGrams: 65,
-                durationSeconds: 3_600
+                durationSeconds: 3_600,
+                assignedPrinter: voronPrinter
             ))
         }
         return jobs

@@ -627,7 +627,7 @@ final class JobListViewModel {
 
     private func reorderGroupTitle(for item: QueuedPrintJobResponse) -> String {
         let scope = item.job.assignedPrinterId == nil
-            ? "Any printer"
+            ? "Unassigned"
             : (item.job.printerName ?? "Assigned printer")
         let priority: String
         switch item.job.priority {

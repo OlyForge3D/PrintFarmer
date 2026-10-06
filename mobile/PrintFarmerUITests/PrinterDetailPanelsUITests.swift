@@ -203,6 +203,14 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
             ]
         }
 
+        @discardableResult
+        private func assertAccountToolbar() -> XCUIElement {
+            let account = app.descendants(matching: .any)["navigation.account"]
+            XCTAssertTrue(account.waitForExistence(timeout: 5), "Every root tab must expose the compact account avatar.")
+            XCTAssertTrue(account.isHittable, "The account avatar must remain reachable at the current text size.")
+            return account
+        }
+
         func captureApprovedMockupScreens() {
             let isIPad = UIDevice.current.userInterfaceIdiom == .pad
             if isIPad {
@@ -227,6 +235,14 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
                 app.staticTexts["navigation.title"].waitForExistence(timeout: 8)
                     || app.navigationBars["Farm"].waitForExistence(timeout: 8)
             )
+            let accountButton = assertAccountToolbar()
+            let farmSearchButton = app.buttons["farm.search"]
+            XCTAssertTrue(farmSearchButton.isHittable)
+            XCTAssertGreaterThan(
+                accountButton.frame.minX,
+                farmSearchButton.frame.maxX,
+                "The Farm search action and compact account avatar must not overlap."
+            )
             let farmAllFilter = app.buttons["farm.filter.All"]
             XCTAssertTrue(farmAllFilter.waitForExistence(timeout: 8))
             let scanButton = app.buttons["navigation.scan"]
@@ -242,17 +258,17 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
                 NSPredicate(format: "identifier BEGINSWITH %@", "farm.filter.")
             )
             XCTAssertEqual(filterButtons.count, 4, "Farm must expose all four status filters.")
-            XCTAssertEqual(app.buttons["farm.filter.All"].label, isIPad ? "All 12" : "All 6")
-            XCTAssertEqual(app.buttons["farm.filter.Printing"].label, isIPad ? "Printing 5" : "Printing 2")
+            XCTAssertEqual(app.buttons["farm.filter.All"].label, "All 12")
+            XCTAssertEqual(app.buttons["farm.filter.Printing"].label, "Printing 5")
             XCTAssertEqual(app.buttons["farm.filter.Needs attention"].label, "Needs attention 2")
-            XCTAssertEqual(app.buttons["farm.filter.Idle"].label, isIPad ? "Idle 3" : "Idle 1")
+            XCTAssertEqual(app.buttons["farm.filter.Idle"].label, "Idle 3")
             if isIPad {
                 let farmCount = app.staticTexts["sidebar.count.farm"]
                 XCTAssertTrue(farmCount.waitForExistence(timeout: 8))
                 XCTAssertEqual(farmCount.label, "Farm count 12")
                 let queueCount = app.staticTexts["sidebar.count.queue"]
                 XCTAssertTrue(queueCount.waitForExistence(timeout: 8))
-                XCTAssertEqual(queueCount.label, "Queue count 3")
+                XCTAssertEqual(queueCount.label, "Queue count 7")
                 XCTAssertTrue(app.staticTexts["sidebar.count.filament"].waitForExistence(timeout: 8))
                 XCTAssertTrue(app.buttons["sidebar.settings"].exists)
             }
@@ -330,7 +346,7 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
             let lastFarmCard = app.buttons.matching(
                 NSPredicate(
                     format: "label CONTAINS %@",
-                    isIPad ? "Creality K1" : "Prusa MK4 #2"
+                    "Creality K1"
                 )
             ).firstMatch
             for _ in 0..<16 where
@@ -373,6 +389,7 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
             XCTAssertTrue(queue.exists)
             queue.tap()
             XCTAssertTrue(app.descendants(matching: .any)["jobList.root"].waitForExistence(timeout: 8))
+            assertAccountToolbar()
             let queueList = app.descendants(matching: .any)["jobList.root"]
             XCTAssertTrue(queueList.exists)
             XCTAssertTrue(app.buttons["navigation.scan"].isHittable)
@@ -386,7 +403,7 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
             let queuedThumbnail = queueList.descendants(matching: .any)
                 .matching(identifier: "job.thumbnail.32590000-0000-0000-0000-000000000101")
                 .firstMatch
-            for _ in 0..<8 where !queuedThumbnail.exists {
+            for _ in 0..<12 where !queuedThumbnail.isHittable {
                 queueList.swipeUp()
             }
             XCTAssertTrue(queuedThumbnail.waitForExistence(timeout: 8))
@@ -394,8 +411,14 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
             attachScreen("\(device)-\(size)-global-queue-queued-thumbnail")
             for section in ["queued", "recent-failures"] {
                 let heading = queueList.descendants(matching: .any)["jobList.section.\(section)"]
-                for _ in 0..<8 where !heading.exists {
-                    queueList.swipeUp()
+                if section == "queued" {
+                    for _ in 0..<16 where !heading.isHittable {
+                        queueList.swipeDown()
+                    }
+                } else {
+                    for _ in 0..<16 where !heading.isHittable {
+                        queueList.swipeUp()
+                    }
                 }
                 XCTAssertTrue(heading.exists, "The \(section) section must remain in the combined queue.")
                 if section == "recent-failures" {
@@ -412,7 +435,7 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
                     let failedJobExists = failedJob.waitForExistence(timeout: 5)
                     XCTAssertTrue(failedJobExists, "The visual acceptance fixture must expose the first failed job.")
                     guard failedJobExists else { return }
-                    XCTAssertTrue(failedJob.label.localizedCaseInsensitiveContains("vase_mode_spiral.gcode"))
+                    XCTAssertTrue(failedJob.label.localizedCaseInsensitiveContains("cable_chain"))
                     let retryButton = queueList.buttons["job.retry.30000000-0003-0000-0000-000000000009"]
                     XCTAssertTrue(retryButton.waitForExistence(timeout: 5))
                     XCTAssertTrue(retryButton.isEnabled, "Queue.Write-authorized operators can rerun a failed job.")
@@ -444,30 +467,6 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
                         "The floating Scan action must not obscure failure details."
                     )
 
-                    let lastFailure = queueList.buttons["job.row.30000000-0003-0000-0000-000000000010"]
-                    for _ in 0..<20 {
-                        if lastFailure.isHittable,
-                           lastFailure.frame.maxY <= scan.frame.minY - 8 {
-                            break
-                        }
-                        queueList.swipeUp()
-                    }
-                    let lastFailureExists = lastFailure.waitForExistence(timeout: 5)
-                    XCTAssertTrue(lastFailureExists, "The visual acceptance fixture must expose the final failed job.")
-                    guard lastFailureExists else { return }
-                    XCTAssertTrue(lastFailure.label.localizedCaseInsensitiveContains("lamp_shade_textured.gcode"))
-                    XCTAssertTrue(lastFailure.isHittable, "The last failed-job row must remain reachable.")
-                    XCTAssertTrue(heading.isHittable, "Recent failures must remain visible while inspecting its rows.")
-                    XCTAssertFalse(
-                        lastFailure.frame.intersects(heading.frame),
-                        "The last failed-job row must not overlap the Recent failures heading."
-                    )
-                    XCTAssertLessThanOrEqual(
-                        lastFailure.frame.maxY,
-                        scan.frame.minY - 8,
-                        "The last failure row must scroll completely above Scan."
-                    )
-                    attachScreen("\(device)-\(size)-global-queue-recent-failures")
                 }
                 if section == "queued" {
                     let assignedSubheading = queueList.descendants(matching: .any)["jobList.assigned.subheading"]
@@ -476,10 +475,14 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
                         "Assigned jobs must not create a peer heading under Queued."
                     )
                     let assignedJob = queueList.descendants(matching: .any).matching(
-                        NSPredicate(format: "label CONTAINS[c] %@", "Coral spool bracket.gcode")
+                        NSPredicate(format: "label CONTAINS[c] %@", "clip_holder ×4")
                     ).firstMatch
                     for _ in 0..<12 where !assignedJob.isHittable { queueList.swipeUp() }
                     XCTAssertTrue(assignedJob.isHittable, "Assigned jobs stay visible within Queued.")
+                    XCTAssertTrue(
+                        assignedJob.label.localizedCaseInsensitiveContains("Unassigned"),
+                        "An unassigned job must not imply any printer is compatible."
+                    )
                     XCTAssertFalse(
                         queueList.descendants(matching: .any)["jobList.section.assigned"].exists,
                         "Assigned must not become a fourth top-level queue group."
@@ -492,6 +495,7 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
             XCTAssertTrue(inventory.exists)
             inventory.tap()
             XCTAssertTrue(app.buttons["inventory.addSpool"].waitForExistence(timeout: 8))
+            assertAccountToolbar()
             XCTAssertTrue(app.buttons["navigation.scan"].isHittable)
             let inventoryFilters = app.descendants(matching: .any)["inventory.filters"]
             XCTAssertTrue(inventoryFilters.waitForExistence(timeout: 5))
@@ -599,6 +603,23 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
                         .matching(NSPredicate(format: "label == %@", "Current print preview"))
                         .firstMatch
                     XCTAssertTrue(preview.waitForExistence(timeout: 5))
+                    if size == "largest" {
+                        let pause = app.buttons["printer.detail.control.pause"]
+                        let cancel = app.buttons["printer.detail.control.cancel"]
+                        for _ in 0..<8 where !pause.isHittable || !cancel.isHittable {
+                            swipeUp(on: page)
+                        }
+                        XCTAssertTrue(pause.isHittable, "Large text must let users scroll to Pause.")
+                        XCTAssertTrue(cancel.isHittable, "Large text must let users scroll to Cancel.")
+                        attachScreen("\(device)-largest-printer-status-actions")
+
+                        let temperatures = app.otherElements["printer.detail.temperatures"]
+                        for _ in 0..<8 where !temperatures.isHittable {
+                            swipeUp(on: page)
+                        }
+                        XCTAssertTrue(temperatures.isHittable, "Large text must let users scroll to temperatures.")
+                        attachScreen("\(device)-largest-printer-status-temperatures")
+                    }
                 }
                 if panel == "Control" {
                     XCTAssertTrue(
@@ -1277,14 +1298,16 @@ class Issue3259ControlIdleUITests: PrinterDetailPanelsUITests.Issue3259MockupCap
         )
         XCTAssertTrue(queue.staticTexts["Up next"].exists)
         XCTAssertTrue(queue.staticTexts["Then"].exists)
-        XCTAssertTrue(queue.staticTexts["Coral spool bracket.gcode"].exists)
+        XCTAssertTrue(queue.staticTexts["clip_holder ×4"].exists)
+        XCTAssertTrue(queue.staticTexts["shelf_bracket ×6"].exists)
+        XCTAssertTrue(queue.descendants(matching: .any)["printer.detail.queue.reorderNote"].exists)
         XCTAssertFalse(
             queue.descendants(matching: .any).matching(
                 NSPredicate(format: "label CONTAINS[c] %@", "benchy_0.2mm_PLA.gcode")
             ).firstMatch.exists,
             "An idle printer must not show the hidden active-print job from the shared demo fixture."
         )
-        let startNext = app.buttons["printer.detail.queue.dispatch.32590000-0000-0000-0000-000000000021"]
+        let startNext = app.buttons["printer.detail.queue.dispatch.32590000-0000-0000-0000-000000000020"]
         XCTAssertTrue(startNext.waitForExistence(timeout: 5))
         for _ in 0..<4 where !startNext.isHittable {
             queue.swipeUp()

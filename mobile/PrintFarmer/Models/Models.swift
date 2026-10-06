@@ -698,6 +698,12 @@ struct QueuedPrintJobResponse: Codable, Identifiable, Sendable {
     let estimatedCompletionTime: Date?
 
     var id: String { job.id }
+
+    var displayName: String {
+        let name = gcodeFile?.name ?? job.name
+        guard job.copies > 1 else { return name }
+        return "\(name) ×\(job.copies)"
+    }
 }
 
 struct QueuedJobInfo: Codable, Identifiable, Sendable {

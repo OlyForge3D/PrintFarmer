@@ -1168,7 +1168,7 @@ struct PrinterDetailView: View {
     }
 
     private func compactQueueRow(_ job: QueuedPrintJobResponse) -> some View {
-        let title = job.gcodeFile?.name ?? job.job.name
+        let title = job.displayName
         return HStack(spacing: 10) {
             AuthenticatedJobThumbnail(
                 path: job.gcodeFile?.thumbnailUrl ?? job.job.thumbnailUrl,
@@ -1205,7 +1205,7 @@ struct PrinterDetailView: View {
 
     private func queueRow(_ job: QueuedPrintJobResponse, printer: Printer) -> some View {
         let match = viewModel.matchState(for: job)
-        let title = job.gcodeFile?.name ?? job.job.name
+        let title = job.displayName
         return VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: 12) {
                 AuthenticatedJobThumbnail(
