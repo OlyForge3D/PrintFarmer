@@ -3092,7 +3092,8 @@ final class GuardedMaterialControlsTests: XCTestCase {
 
     private func fixture(
         caps: PrinterBackendCapabilities? = nil,
-        access: @escaping @MainActor () -> String? = { nil }
+        access: @escaping @MainActor () -> String? = { nil },
+        beforeCapabilities: (@Sendable () async -> Void)? = nil
     ) async throws -> (PrinterControlsViewModel, MockPrinterService) {
         var printer = try idlePrinter()
         printer.state = "ready"
@@ -3117,8 +3118,11 @@ final class GuardedMaterialControlsTests: XCTestCase {
                 maxHotendTemp: 300, maxBedTemp: 120, hasHeatedBed: true
             )
         )
+        let printerService: any PrinterServiceProtocol = beforeCapabilities.map {
+            ControlsDelayedService(base: service, beforeCapabilities: $0)
+        } ?? service
         let model = PrinterControlsViewModel.configuredForTests(
-            printerService: service, printer: printer, accessCheck: access
+            printerService: printerService, printer: printer, accessCheck: access
         )
         await model.loadCapabilities()
         return (model, service)
@@ -3288,6 +3292,33 @@ final class GuardedMaterialControlsTests: XCTestCase {
         await model.refreshSafetyEvidence()
         XCTAssertTrue(model.filamentBlockedReason(.load)?.contains("220") == true)
         XCTAssertTrue(model.filamentBlockedReason(.unload)?.contains("220") == true)
+    }
+
+    func test_cancelledSafetyReadNeverClaimsSingleFlightSlotFromReplacementObserver() async throws {
+        let gate = OneShotGate()
+        let barrier = AsyncBarrier()
+        addTeardownBlock { barrier.close() }
+        let (model, service) = try await fixture(beforeCapabilities: {
+            if await gate.claim() { await barrier.arriveAndWait() }
+        })
+        service.getStatusCalledWith = nil
+        service.statusToReturn?.safetyTelemetry?.measuredHotendTemperatureC.value = 219
+        await gate.arm()
+        // Mirrors a page switch: the superseded observer is cancelled before
+        // its body first runs, then the replacement observer reads at once.
+        let superseded = Task { await model.refreshSafetyEvidence() }
+        superseded.cancel()
+        let replacement = Task { await model.refreshSafetyEvidence() }
+        await barrier.waitUntilArrived()
+        barrier.release()
+        await superseded.value
+        await replacement.value
+
+        XCTAssertFalse(model.isRefreshingSafety)
+        XCTAssertEqual(service.getStatusCalledWith, model.printer.id,
+                       "Replacement observer's immediate read must not be dropped by a cancelled one")
+        XCTAssertTrue(model.filamentBlockedReason(.load)?.contains("220") == true,
+                      "Replacement observer's immediate read must publish fresh evidence")
     }
 
     func test_loadUnloadUseHigherOf220AndVerifiedMinimum() async throws {
@@ -4033,6 +4064,12 @@ private actor AsyncGate {
 
 /// Serialized invocation counter used to gate only the FIRST mock hook entry
 /// so a regressed single-flight cannot deadlock on a closed gate.
+private actor OneShotGate {
+    private var armed = false
+    func arm() { armed = true }
+    func claim() -> Bool { defer { armed = false }; return armed }
+}
+
 private actor HookCounter {
     private var n = 0
     func next() -> Int { n += 1; return n }
@@ -4043,6 +4080,7 @@ private struct ControlsDelayedService: PrinterServiceProtocol {
     var beforeDetails: @Sendable () async -> Void = {}
     var beforeHome: @Sendable () async -> Void = {}
     var beforeMoveTo: @Sendable () async -> Void = {}
+    var beforeCapabilities: @Sendable () async -> Void = {}
 
     func getDetails(id: UUID) async throws -> PrinterDetails {
         await beforeDetails()
@@ -4053,7 +4091,8 @@ private struct ControlsDelayedService: PrinterServiceProtocol {
         try await base.home(printerId: printerId, axes: axes)
     }
     func getBackendCapabilities(printerId: UUID) async throws -> PrinterBackendCapabilities {
-        try await base.getBackendCapabilities(printerId: printerId)
+        await beforeCapabilities()
+        return try await base.getBackendCapabilities(printerId: printerId)
     }
     func setTemperatures(printerId: UUID, hotend: Double?, bed: Double?) async throws {
         try await base.setTemperatures(printerId: printerId, hotend: hotend, bed: bed)

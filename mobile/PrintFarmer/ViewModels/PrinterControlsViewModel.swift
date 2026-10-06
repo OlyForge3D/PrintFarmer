@@ -503,7 +503,10 @@ final class PrinterControlsViewModel: ObservableObject {
 
     /// Read-only refresh; never retries a physical command or refreshes If-Match.
     func refreshSafetyEvidence(refreshDiscovery: Bool = true) async {
-        guard isActive, accessCheck() == nil, !isRefreshingSafety else { return }
+        // A superseded caller (e.g. an observation task cancelled by a page
+        // switch before it first ran) must not claim the single-flight slot,
+        // or it would drop the replacement observer's immediate read.
+        guard !Task.isCancelled, isActive, accessCheck() == nil, !isRefreshingSafety else { return }
         let generation = lifecycleGeneration
         let readID = UUID()
         safetyReadID = readID
