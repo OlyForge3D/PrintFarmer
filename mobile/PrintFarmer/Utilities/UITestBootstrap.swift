@@ -105,6 +105,19 @@ enum UITestBootstrap {
     static let queueReorderLaunchArgument = "--uitesting-queue-reorder"
     static let issue3259VisualAcceptanceLaunchArgument =
         "--uitesting-issue3259-visual-acceptance"
+    nonisolated static let appStoreScreenshotsLaunchArgument =
+        "--uitesting-app-store-screenshots"
+
+    nonisolated static func appStoreScreenshotDate(in arguments: [String]) -> Date? {
+        guard arguments.contains("--uitesting"),
+              arguments.contains("--uitesting-issue3259-visual-acceptance"),
+              arguments.contains(appStoreScreenshotsLaunchArgument) else { return nil }
+        return Date(timeIntervalSince1970: 1_791_193_260)
+    }
+
+    nonisolated static var appStoreScreenshotDate: Date? {
+        appStoreScreenshotDate(in: CommandLine.arguments)
+    }
     static let issue3259ControlIdleLaunchArgument =
         "--uitesting-issue3259-control-idle"
     static let issue3259SafeFilamentActionsLaunchArgument =
@@ -607,7 +620,7 @@ enum UITestBootstrap {
             colorHex: "#EF6B4A",
             filamentName: "Prusament PLA",
             vendor: "Prusa Research",
-            remainingWeightG: 84,
+            remainingWeightG: appStoreScreenshotDate == nil ? 84 : 612,
             spoolInUse: true
         )
         if controlIdle {
@@ -725,7 +738,7 @@ enum UITestBootstrap {
             ),
             idleMk4,
         ]
-        let printers = basePrinters + [
+        var printers = basePrinters + [
             issue3259MockupPrinter(
                 id: DemoData.bambuP1S_ID,
                 name: "Bambu P1S",
@@ -792,6 +805,13 @@ enum UITestBootstrap {
                 bedTemp: 23
             ),
         ]
+
+        if appStoreScreenshotDate != nil {
+            printers.removeAll {
+                !$0.isOnline || ["paused", "completed", "error"].contains($0.state?.lowercased() ?? "")
+            }
+            printers[0] = printer
+        }
 
         let status = PrinterStatusDetail(
             id: printer.id,
@@ -1150,7 +1170,7 @@ enum UITestBootstrap {
                 ])
                 let queueStatsData = try encoder.encode(QueueStats(
                     totalQueued: 4,
-                    totalPrinting: 3,
+                    totalPrinting: appStoreScreenshotDate == nil ? 3 : 1,
                     totalPaused: 0,
                     averageWaitTimeMinutes: 18,
                     byModel: []
@@ -1391,7 +1411,7 @@ enum UITestBootstrap {
                 ])
                 let recentFailureHistoryData = try encoder.encode(
                     QueueHistoryPage(
-                        entries: [
+                        entries: appStoreScreenshotDate == nil ? [
                             QueueHistoryEntry(
                                 id: DemoData.job9ID.uuidString,
                                 jobName: "cable_chain",
@@ -1407,8 +1427,8 @@ enum UITestBootstrap {
                                 completionPercentage: 12,
                                 failureReason: "Thermal runaway detected"
                             )
-                        ],
-                        totalCount: 1,
+                        ] : [],
+                        totalCount: appStoreScreenshotDate == nil ? 1 : 0,
                         currentPage: 1,
                         pageSize: 5,
                         stats: nil
@@ -2035,7 +2055,7 @@ enum UITestBootstrap {
                 requiredGrams: 140,
                 durationSeconds: 8_280,
                 assignedPrinter: mk4Printer,
-                actualStartTime: Date().addingTimeInterval(-6_000)
+                actualStartTime: (appStoreScreenshotDate ?? Date()).addingTimeInterval(-6_000)
             ))
             jobs.append(job(
                 id: "32590000-0000-0000-0000-000000000110",
@@ -2106,6 +2126,9 @@ enum UITestBootstrap {
                 assignedPrinter: voronPrinter
             ),
         ]
+        if appStoreScreenshotDate != nil {
+            jobs.removeAll { $0.job.status == "Printing" && $0.job.id != DemoData.job1ID.uuidString.lowercased() }
+        }
         if includeRerunJob {
             jobs.append(job(
                 id: "32590000-0000-0000-0000-000000000104",

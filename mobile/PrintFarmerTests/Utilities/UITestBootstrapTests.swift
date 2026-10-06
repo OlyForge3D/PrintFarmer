@@ -112,6 +112,24 @@ final class UITestBootstrapTests: XCTestCase {
     }
 
     #if DEBUG
+    func test_appStoreScreenshotClockRequiresAllThreeLaunchArguments() {
+        let arguments = [
+            "--uitesting",
+            "--uitesting-issue3259-visual-acceptance",
+            "--uitesting-app-store-screenshots",
+        ]
+        XCTAssertNotNil(UITestBootstrap.appStoreScreenshotDate(in: arguments))
+        for index in arguments.indices {
+            var incomplete = arguments
+            incomplete.remove(at: index)
+            XCTAssertNil(UITestBootstrap.appStoreScreenshotDate(in: incomplete))
+        }
+        XCTAssertEqual(
+            UITestBootstrap.appStoreScreenshotDate(in: arguments),
+            UITestBootstrap.appStoreScreenshotDate(in: arguments)
+        )
+    }
+
     func test_issue3259VisualAcceptanceLaunchArgument_selectsSyntheticCaptureMode() {
         XCTAssertEqual(
             UITestBootstrap.issue3259VisualAcceptanceLaunchArgument,

@@ -99,6 +99,42 @@ Keep snapshot strictness, skip policy and PNGs unchanged. The
 [snapshot guide](PrintFarmerTests/Views/__Snapshots__/README.md) is not
 authorization to re-record baselines for #2536/#2572.
 
+## App Store screenshots
+
+From the repository root, run:
+
+```bash
+cd mobile
+python3 scripts/app-store-screenshots.py --verify-repeatability
+```
+
+This captures Farm, printer Status, Queue (active and queued), Filament and
+Scan in dark mode, English, portrait, default Dynamic Type and a fixed 9:41
+status bar. The DEBUG-only capture scenario reuses `UITestBootstrap`'s
+authenticated API fixtures and bundled thumbnails, omitting offline,
+paused and bed-clear/pending printers. No physical scanner or printer is used.
+The fixture-only ETA display clock is fixed; real app launches keep live time.
+
+Install **iOS 26.5 (23F77)** and create an **iPhone 17 Pro Max** and an
+**iPad Pro 13-inch (M5)** simulator first. The shared resolver excludes other
+runtimes and the capture script rejects smaller display classes. Native PNGs
+must be **1320x2868** and **2064x2752** respectively; nothing is resized or
+cropped to disguise an unavailable simulator.
+
+Output is retained under git-ignored `mobile/build/app-store/<unique-run>/`,
+with PNGs in `run-1/iPhone/` and `run-1/iPad/`, XCTest bundles, logs, runner
+timing/events, environment metadata and decoded sRGB RGBA hashes. The
+verification option performs two independent launches per family and fails
+on any pixel difference, ignoring PNG metadata. Omit it for one capture.
+Use the same Xcode and runtime for comparisons; inspect `test.log` on failure.
+The command changes the selected simulators' appearance and text size, and
+clears its status-bar override afterward. Do not run it concurrently with
+other tests using those simulators.
+
+Review the images before uploading them **manually** in App Store Connect.
+PNGs are generated assets, not committed baselines; this does not change the
+release lane, snapshot test strictness or upload behavior.
+
 ## Server Configuration
 
 The app supports multiple registered PrintFarmer backend servers. Server
