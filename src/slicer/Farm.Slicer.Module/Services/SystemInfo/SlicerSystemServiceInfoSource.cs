@@ -18,8 +18,7 @@ public sealed class SlicerSystemServiceInfoSource(SlicerDbContext? db, ILogger<S
         cancellationToken.ThrowIfCancellationRequested();
         if (db is null)
         {
-            logger.LogInformation("Slicer worker registry is not available in this host");
-            return [UnavailableRegistry()];
+            return [];
         }
 
         try
@@ -28,25 +27,36 @@ public sealed class SlicerSystemServiceInfoSource(SlicerDbContext? db, ILogger<S
                 .Select(row => new { row.Name, row.Version, row.LastSeen, row.Status, row.CapabilitiesJson })
                 .ToListAsync(cancellationToken);
             DateTime now = DateTime.UtcNow;
-            return registrations.Where(row => row.Status != "Disabled").Select(row => new SystemServiceInfoDto
+            return registrations.Select(row => new SystemServiceInfoDto
             {
                 Name = string.IsNullOrWhiteSpace(row.Name) ? "Slicer worker" : $"Slicer worker ({row.Name})",
                 Version = ReadApplicationVersion(row.CapabilitiesJson) ?? "Unknown",
                 EngineVersion = ApplicationBuildObservation.Parse(row.Version).Version,
                 Health = row.Status == WorkerStatus.Error
                     ? SystemServiceHealth.Critical
-                    : row.LastSeen <= now && now - row.LastSeen <= TimeSpan.FromSeconds(WorkerStatus.LiveHeartbeatTimeoutSeconds)
+                    : NormalizeUtc(row.LastSeen) <= now && now - NormalizeUtc(row.LastSeen) <= TimeSpan.FromSeconds(WorkerStatus.LiveHeartbeatTimeoutSeconds)
                         && row.Status is WorkerStatus.Online or WorkerStatus.Busy or WorkerStatus.Draining
                         ? SystemServiceHealth.Healthy
                         : SystemServiceHealth.Degraded,
             }).ToArray();
         }
-        catch (Exception ex) when (ex is DbException or InvalidOperationException)
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
         {
             logger.LogWarning(ex, "Unable to read slicer worker registry for system status");
             return [UnavailableRegistry()];
         }
     }
+
+    private static DateTime NormalizeUtc(DateTime value) => value.Kind switch
+    {
+        DateTimeKind.Utc => value,
+        DateTimeKind.Local => value.ToUniversalTime(),
+        _ => DateTime.SpecifyKind(value, DateTimeKind.Utc),
+    };
 
     private static SystemServiceInfoDto UnavailableRegistry() => new()
     {

@@ -1,8 +1,11 @@
-﻿using Farm.Infrastructure.Dtos;
+﻿using System.Data.Common;
+using Farm.Infrastructure.Dtos;
 using Farm.Slicer.Module.Data;
 using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Services.SystemInfo;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
@@ -63,24 +66,32 @@ public sealed class SlicerSystemServiceInfoSourceTests
     }
 
     [Fact]
-    public async Task ReadAsync_EmptyOrDisabledRegistry_ReturnsNoOptionalRows()
+    public async Task ReadAsync_EmptyRegistry_ReturnsNoOptionalRows()
     {
         await using SlicerDbContext db = CreateContext();
         SlicerSystemServiceInfoSource source = new(db, NullLogger<SlicerSystemServiceInfoSource>.Instance);
         Assert.Empty(await source.ReadAsync(CancellationToken.None));
-        db.SlicerServices.Add(new SlicerService { Status = "Disabled" });
-        await db.SaveChangesAsync();
-        Assert.Empty(await source.ReadAsync(CancellationToken.None));
     }
 
     [Fact]
-    public async Task ReadAsync_MissingRegistry_ExplicitlyReportsUnavailable()
+    public async Task ReadAsync_DisabledRegistration_IsRetainedAsDegraded()
+    {
+        await using SlicerDbContext db = CreateContext();
+        db.SlicerServices.Add(new SlicerService { Status = "Disabled" });
+        await db.SaveChangesAsync();
+        SlicerSystemServiceInfoSource source = new(db, NullLogger<SlicerSystemServiceInfoSource>.Instance);
+
+        SystemServiceInfoDto row = Assert.Single(await source.ReadAsync(CancellationToken.None));
+
+        Assert.Equal(SystemServiceHealth.Degraded, row.Health);
+        Assert.Contains("Slicer worker", row.Name);
+    }
+
+    [Fact]
+    public async Task ReadAsync_MissingRegistry_ReturnsNoOptionalRows()
     {
         SlicerSystemServiceInfoSource source = new(null, NullLogger<SlicerSystemServiceInfoSource>.Instance);
-        SystemServiceInfoDto row = Assert.Single(await source.ReadAsync(CancellationToken.None));
-        Assert.Contains("registry unavailable", row.Name);
-        Assert.Equal("Unknown", row.Version);
-        Assert.Equal(SystemServiceHealth.Degraded, row.Health);
+        Assert.Empty(await source.ReadAsync(CancellationToken.None));
     }
 
     [Fact]
@@ -96,6 +107,58 @@ public sealed class SlicerSystemServiceInfoSourceTests
         Assert.Equal(SystemServiceHealth.Degraded, row.Health);
         Assert.Contains("registry unavailable", row.Name);
         VerifyWarning(logger);
+    }
+
+    [Fact]
+    public async Task ReadAsync_RegistryQueryFailure_LogsWarningAndReportsUnavailable()
+    {
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        ThrowOnRegistryReadInterceptor interceptor = new(new InvalidOperationException("Registry query failed"));
+        await using SlicerDbContext db = await CreateSqliteContextAsync(connection, interceptor);
+        db.SlicerServices.Add(new SlicerService { Status = "Online" });
+        await db.SaveChangesAsync();
+        Mock<ILogger<SlicerSystemServiceInfoSource>> logger = new();
+        SlicerSystemServiceInfoSource source = new(db, logger.Object);
+
+        SystemServiceInfoDto row = Assert.Single(await source.ReadAsync(CancellationToken.None));
+
+        Assert.Equal(SystemServiceHealth.Degraded, row.Health);
+        Assert.Contains("registry unavailable", row.Name);
+        VerifyWarning(logger);
+    }
+
+    [Fact]
+    public async Task ReadAsync_RegistryQueryCancellation_PropagatesCancellation()
+    {
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        ThrowOnRegistryReadInterceptor interceptor = new(new OperationCanceledException("Registry query canceled"));
+        await using SlicerDbContext db = await CreateSqliteContextAsync(connection, interceptor);
+        db.SlicerServices.Add(new SlicerService { Status = "Online" });
+        await db.SaveChangesAsync();
+        SlicerSystemServiceInfoSource source = new(db, NullLogger<SlicerSystemServiceInfoSource>.Instance);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => source.ReadAsync(CancellationToken.None));
+    }
+
+    [Theory]
+    [InlineData(DateTimeKind.Local)]
+    [InlineData(DateTimeKind.Unspecified)]
+    public async Task ReadAsync_NonUtcLastSeen_IsNormalizedForHealth(DateTimeKind kind)
+    {
+        await using SlicerDbContext db = CreateContext();
+        DateTime lastSeenUtc = DateTime.UtcNow.AddSeconds(-30);
+        DateTime lastSeen = kind == DateTimeKind.Local
+            ? lastSeenUtc.ToLocalTime()
+            : DateTime.SpecifyKind(lastSeenUtc, DateTimeKind.Unspecified);
+        db.SlicerServices.Add(new SlicerService { Status = "Online", LastSeen = lastSeen });
+        await db.SaveChangesAsync();
+        SlicerSystemServiceInfoSource source = new(db, NullLogger<SlicerSystemServiceInfoSource>.Instance);
+
+        SystemServiceInfoDto row = Assert.Single(await source.ReadAsync(CancellationToken.None));
+
+        Assert.Equal(SystemServiceHealth.Healthy, row.Health);
     }
 
     [Fact]
@@ -127,7 +190,40 @@ public sealed class SlicerSystemServiceInfoSourceTests
     private static SlicerDbContext CreateContext() => new(new DbContextOptionsBuilder<SlicerDbContext>()
         .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
 
+    private static async Task<SlicerDbContext> CreateSqliteContextAsync(
+        SqliteConnection connection,
+        DbCommandInterceptor interceptor)
+    {
+        SlicerDbContext db = new(new DbContextOptionsBuilder<SlicerDbContext>()
+            .UseSqlite(connection)
+            .AddInterceptors(interceptor)
+            .Options);
+        await db.Database.EnsureCreatedAsync();
+        return db;
+    }
+
     private static void VerifyWarning(Mock<ILogger<SlicerSystemServiceInfoSource>> logger) => logger.Verify(value => value.Log(
         LogLevel.Warning, It.IsAny<EventId>(), It.IsAny<It.IsAnyType>(), It.IsAny<Exception>(),
         It.IsAny<Func<It.IsAnyType, Exception?, string>>()), Times.Once);
+
+    private sealed class ThrowOnRegistryReadInterceptor(Exception failure) : DbCommandInterceptor
+    {
+        public Exception? Failure { get; } = failure;
+
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            if (Failure is not null
+                && command.CommandText.TrimStart().StartsWith("SELECT", StringComparison.OrdinalIgnoreCase)
+                && command.CommandText.Contains("SlicerServices", StringComparison.OrdinalIgnoreCase))
+            {
+                throw Failure;
+            }
+
+            return ValueTask.FromResult(result);
+        }
+    }
 }

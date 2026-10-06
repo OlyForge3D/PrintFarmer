@@ -584,11 +584,16 @@ update eligibility and requires a recovery plan, not per-service reconciliation.
 
 UI placement:
 
-- Extend `/admin/status` with a proposed `ServiceVersionsTable`. Keep
-  `SystemPulsePill` a status summary, not an intrusive upgrade advertisement.
-- Put the first compatible-release notice in Admin Control Center **Needs
-  attention**, including checked time, reason, release notes, and dismissal.
-  “Unable to check” is not “Up to date.”
+- Current `/admin/status` shows installed application and worker-engine versions,
+  worker health, uptime, resource usage, and database information. It does not
+  expose the proposed managed deployment inventory or `ServiceVersionsTable`.
+  Keep `SystemPulsePill` a status summary, not an intrusive upgrade advertisement.
+- Preserve the existing farm-admin-only release notification: check for a newer
+  release on the selected channel at startup and every six hours, show release
+  notes and manual upgrade guidance, and clear the notification after upgrade.
+  This is notification only; it does not install or update services. A future
+  compatible-release notice in Admin Control Center **Needs attention** may add
+  checked time, reason, and dismissal. “Unable to check” is not “Up to date.”
 - Put release channel/check schedule/notifications in a per-key System settings
   section under `/admin/settings`, following the
   [current settings architecture](SETTINGS_ARCHITECTURE.md). Reuse canonical
