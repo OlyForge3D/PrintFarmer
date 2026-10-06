@@ -84,6 +84,8 @@ final class PreheatSubgroupTests: XCTestCase {
     }
 
     func test_thermalSetTargets_preservesValidationOmissionZeroAndPendingLock() async throws {
+        // Hang guard only: dispatch is awaited causally below, never against a wall-clock deadline.
+        executionTimeAllowance = 120
         let (model, service) = try await thermalModel()
         let (window, controller) = try await installThermal(model)
         defer { window.isHidden = true }
@@ -102,12 +104,7 @@ final class PreheatSubgroupTests: XCTestCase {
         field.text = "205"
         field.sendActions(for: .editingChanged)
         try await settle(controller)
-        let hotendDispatched = expectation(description: "Hotend target dispatched")
-        service.afterSetTemperatures = { hotendDispatched.fulfill() }
-        set.sendActions(for: .touchUpInside)
-        // Cold simulator graphics compilation can occupy the UI thread for several seconds.
-        // Verify dispatch, not renderer startup latency; keep the callback wait bounded.
-        await fulfillment(of: [hotendDispatched], timeout: 15)
+        await tapAndAwaitDispatch(set, service: service)
         try await settle(controller)
         XCTAssertEqual(service.setTemperaturesCalledWith?.hotend, 205)
         XCTAssertNil(service.setTemperaturesCalledWith?.bed)
@@ -131,10 +128,7 @@ final class PreheatSubgroupTests: XCTestCase {
         bed.text = "0"
         bed.sendActions(for: .editingChanged)
         try await settle(controller)
-        let bedDispatched = expectation(description: "Zero bed target dispatched")
-        service.afterSetTemperatures = { bedDispatched.fulfill() }
-        set.sendActions(for: .touchUpInside)
-        await fulfillment(of: [bedDispatched], timeout: 15)
+        await tapAndAwaitDispatch(set, service: service)
         try await settle(controller)
         XCTAssertNil(service.setTemperaturesCalledWith?.hotend)
         XCTAssertEqual(service.setTemperaturesCalledWith?.bed, 0)
@@ -252,6 +246,18 @@ final class PreheatSubgroupTests: XCTestCase {
         window.makeKeyAndVisible()
         try await settle(controller)
         return (window, controller)
+    }
+
+    /// Resumes when the service receives the request. The tap-to-dispatch path crosses main-actor
+    /// turns, so the first on-screen pending frame can sit between them; on a cold CI simulator that
+    /// frame compiled render pipelines on the main thread for 47s. A wall-clock expectation timed that
+    /// renderer stall, not dispatch, so await the request causally under the test's execution allowance.
+    private func tapAndAwaitDispatch(_ button: UIButton, service: MockPrinterService) async {
+        await withCheckedContinuation { (dispatched: CheckedContinuation<Void, Never>) in
+            service.afterSetTemperatures = { dispatched.resume() }
+            button.sendActions(for: .touchUpInside)
+        }
+        service.afterSetTemperatures = nil
     }
 
     private func settle(_ controller: UIViewController) async throws {
@@ -632,3 +638,4 @@ private final class PreheatSubgroupTestService: PrinterServiceProtocol, @uncheck
     func deleteFallbackGroup(printerId: UUID, groupId: UUID) async throws {}
     func getAvailableFallback(printerId: UUID, sourceToolheadId: UUID, material: String) async throws -> AvailableFallbackMember? { nil }
 }
+
