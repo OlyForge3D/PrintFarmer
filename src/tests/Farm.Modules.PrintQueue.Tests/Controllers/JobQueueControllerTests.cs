@@ -482,7 +482,7 @@ public class JobQueueControllerTests
         string actorSubject = QueueActorIdentity.Resolve(_controller.User);
         _printJobCompletionServiceMock
             .Setup(service => service.SyncOrphanedPrintingJobsAsync(
-                It.IsAny<Func<Guid, string?>>(),
+                It.IsAny<Func<Guid, PrinterStatusCacheSnapshot?>>(),
                 actorSubject,
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(0);
@@ -492,7 +492,7 @@ public class JobQueueControllerTests
         _ = Assert.IsType<OkObjectResult>(result);
         _printJobCompletionServiceMock.Verify(
             service => service.SyncOrphanedPrintingJobsAsync(
-                It.IsAny<Func<Guid, string?>>(),
+                It.IsAny<Func<Guid, PrinterStatusCacheSnapshot?>>(),
                 actorSubject,
                 It.IsAny<CancellationToken>()),
             Times.Once);

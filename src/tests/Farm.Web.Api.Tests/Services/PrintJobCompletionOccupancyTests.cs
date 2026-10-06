@@ -122,7 +122,7 @@ public sealed class PrintJobCompletionOccupancyTests : IDisposable
         PrintJobCompletionService service = CreateService();
 
         int synced = await service.SyncOrphanedPrintingJobsAsync(
-            id => id == printer.Id ? "idle" : null,
+            id => id == printer.Id ? FreshSnapshot(printer.Id, "idle") : null,
             "system");
 
         synced.Should().Be(1);
@@ -155,7 +155,7 @@ public sealed class PrintJobCompletionOccupancyTests : IDisposable
         PrintJobCompletionService service = CreateService();
 
         int synced = await service.SyncOrphanedPrintingJobsAsync(
-            id => id == printer.Id ? "ready" : null,
+            id => id == printer.Id ? FreshSnapshot(printer.Id, "ready") : null,
             "system");
 
         synced.Should().Be(1);
@@ -163,11 +163,94 @@ public sealed class PrintJobCompletionOccupancyTests : IDisposable
         job.ActualEndTime.Should().NotBeNull();
     }
 
+    [Fact]
+    public async Task SyncOrphanedPrintingJobsAsync_WhenExternalIdleSnapshotIsStale_DoesNotCompleteJob()
+    {
+        Printer printer = await CreatePrinterAsync();
+        DateTime now = DateTime.UtcNow;
+        PrintJob job = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = "stale-idle-external.gcode",
+            AssignedPrinterId = printer.Id,
+            SourcePrinterId = printer.Id,
+            Status = PrintJobStatus.Printing,
+            ActualStartTime = now.AddMinutes(-30),
+            CreatedAt = now.AddMinutes(-30),
+            UpdatedAt = now.AddMinutes(-30),
+            QueuedAt = now.AddMinutes(-30),
+            IsExternalPrint = true,
+            ActiveExternalPrinterId = printer.Id,
+            ExternalJobId = $"ext-{printer.Id:N}-stale-idle",
+        };
+        _db.PrintJobs.Add(job);
+        await _db.SaveChangesAsync();
+        PrintJobCompletionService service = CreateService();
+
+        int synced = await service.SyncOrphanedPrintingJobsAsync(
+            id => id == printer.Id ? StaleSnapshot(printer.Id, "idle") : null,
+            "system");
+
+        synced.Should().Be(0);
+        job.Status.Should().Be(PrintJobStatus.Printing);
+        job.ActualEndTime.Should().BeNull();
+        job.ActiveExternalPrinterId.Should().Be(printer.Id);
+    }
+
+    [Fact]
+    public async Task SyncOrphanedPrintingJobsAsync_WhenExternalJobPrinterIsOffline_DoesNotFailJob()
+    {
+        Printer printer = await CreatePrinterAsync();
+        DateTime now = DateTime.UtcNow;
+        PrintJob job = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = "offline-external.gcode",
+            AssignedPrinterId = printer.Id,
+            SourcePrinterId = printer.Id,
+            Status = PrintJobStatus.Printing,
+            ActualStartTime = now.AddMinutes(-30),
+            CreatedAt = now.AddMinutes(-30),
+            UpdatedAt = now.AddMinutes(-30),
+            QueuedAt = now.AddMinutes(-30),
+            IsExternalPrint = true,
+            ActiveExternalPrinterId = printer.Id,
+            ExternalJobId = $"ext-{printer.Id:N}-offline",
+        };
+        _db.PrintJobs.Add(job);
+        await _db.SaveChangesAsync();
+        PrintJobCompletionService service = CreateService();
+
+        int synced = await service.SyncOrphanedPrintingJobsAsync(
+            id => id == printer.Id ? FreshSnapshot(printer.Id, "offline", isOnline: false) : null,
+            "system");
+
+        synced.Should().Be(0);
+        job.Status.Should().Be(PrintJobStatus.Printing);
+        job.ActualEndTime.Should().BeNull();
+        job.ActiveExternalPrinterId.Should().Be(printer.Id);
+    }
+
     private PrintJobCompletionService CreateService() =>
         new(
             _db,
             Mock.Of<IHubContext<PrinterHub>>(),
             NullLogger<PrintJobCompletionService>.Instance);
+
+    private static PrinterStatusCacheSnapshot FreshSnapshot(
+        Guid printerId,
+        string state,
+        bool isOnline = true) =>
+        new(
+            new PrinterStatusDto(printerId, isOnline, state),
+            DateTime.UtcNow,
+            LastSeenAtUtc: DateTime.UtcNow);
+
+    private static PrinterStatusCacheSnapshot StaleSnapshot(Guid printerId, string state) =>
+        new(
+            new PrinterStatusDto(printerId, true, state),
+            DateTime.UtcNow.AddMinutes(-10),
+            LastSeenAtUtc: DateTime.UtcNow.AddMinutes(-10));
 
     private async Task<Printer> CreatePrinterAsync()
     {

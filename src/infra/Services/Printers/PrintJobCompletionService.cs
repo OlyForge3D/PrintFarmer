@@ -741,7 +741,7 @@ public class PrintJobCompletionService : IPrintJobCompletionService
 
     /// <inheritdoc />
     public async Task<int> SyncOrphanedPrintingJobsAsync(
-        Func<Guid, string?> printerStateLookup,
+        Func<Guid, PrinterStatusCacheSnapshot?> printerStateLookup,
         string actorSubject,
         CancellationToken ct = default)
     {
@@ -852,7 +852,8 @@ public class PrintJobCompletionService : IPrintJobCompletionService
                 continue;
             }
 
-            string? currentPrinterState = printerStateLookup(printerId);
+            PrinterStatusCacheSnapshot? currentPrinterSnapshot = printerStateLookup(printerId);
+            string? currentPrinterState = currentPrinterSnapshot?.Status.State;
 
             _logger.Log(
                 verbose ? LogLevel.Warning : LogLevel.Debug,
@@ -866,6 +867,16 @@ public class PrintJobCompletionService : IPrintJobCompletionService
             {
                 _logger.LogDebug(
                     "[PrintJobCompletionService] Printer {PrinterId} state unknown/offline, skipping job {JobId}",
+                    printerId,
+                    job.Id);
+                continue;
+            }
+
+            if (isExternallyObservedJob &&
+                !PrinterStatusFreshness.IsFreshOnline(currentPrinterSnapshot, DateTime.UtcNow))
+            {
+                _logger.LogDebug(
+                    "[PrintJobCompletionService] Printer {PrinterId} state is stale/offline, skipping external job {JobId}",
                     printerId,
                     job.Id);
                 continue;
