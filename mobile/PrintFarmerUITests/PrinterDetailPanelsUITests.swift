@@ -206,7 +206,7 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
         @discardableResult
         private func assertAccountToolbar() -> XCUIElement {
             let account = app.descendants(matching: .any)["navigation.account"]
-            XCTAssertTrue(account.waitForExistence(timeout: 5), "Every root tab must expose the compact account avatar.")
+            XCTAssertTrue(account.waitForExistence(timeout: 5), "Every iPhone root tab must expose the compact account avatar.")
             XCTAssertTrue(account.isHittable, "The account avatar must remain reachable at the current text size.")
             return account
         }
@@ -235,14 +235,16 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
                 app.staticTexts["navigation.title"].waitForExistence(timeout: 8)
                     || app.navigationBars["Farm"].waitForExistence(timeout: 8)
             )
-            let accountButton = assertAccountToolbar()
-            let farmSearchButton = app.buttons["farm.search"]
-            XCTAssertTrue(farmSearchButton.isHittable)
-            XCTAssertGreaterThan(
-                accountButton.frame.minX,
-                farmSearchButton.frame.maxX,
-                "The Farm search action and compact account avatar must not overlap."
-            )
+            if !isIPad {
+                let accountButton = assertAccountToolbar()
+                let farmSearchButton = app.buttons["farm.search"]
+                XCTAssertTrue(farmSearchButton.isHittable)
+                XCTAssertGreaterThan(
+                    accountButton.frame.minX,
+                    farmSearchButton.frame.maxX,
+                    "The Farm search action and compact account avatar must not overlap."
+                )
+            }
             let farmAllFilter = app.buttons["farm.filter.All"]
             XCTAssertTrue(farmAllFilter.waitForExistence(timeout: 8))
             let scanButton = app.buttons["navigation.scan"]
@@ -389,7 +391,7 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
             XCTAssertTrue(queue.exists)
             queue.tap()
             XCTAssertTrue(app.descendants(matching: .any)["jobList.root"].waitForExistence(timeout: 8))
-            assertAccountToolbar()
+            if !isIPad { assertAccountToolbar() }
             let queueList = app.descendants(matching: .any)["jobList.root"]
             XCTAssertTrue(queueList.exists)
             XCTAssertTrue(app.buttons["navigation.scan"].isHittable)
@@ -495,7 +497,7 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
             XCTAssertTrue(inventory.exists)
             inventory.tap()
             XCTAssertTrue(app.buttons["inventory.addSpool"].waitForExistence(timeout: 8))
-            assertAccountToolbar()
+            if !isIPad { assertAccountToolbar() }
             XCTAssertTrue(app.buttons["navigation.scan"].isHittable)
             let inventoryFilters = app.descendants(matching: .any)["inventory.filters"]
             XCTAssertTrue(inventoryFilters.waitForExistence(timeout: 5))
