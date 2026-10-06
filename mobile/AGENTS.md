@@ -13,10 +13,11 @@ For more information, see GitHub CLI documentation: https://cli.github.com/manua
 ## Simulator Testing
 
 Use the shared resolver, not a name-only destination. The approved default is
-**iOS 26.5 (23F77)** under **Xcode 27.0 (27A266a)**; runtime preferences cannot
-approve another build. Install that runtime in Xcode Settings > Components and
-create a matching available simulator in Window > Devices and Simulators.
-The shared resolver rejects other Xcode versions. Xcode 27.0, `xcrun`, and
+**iOS 26.5 (23F77)** under **Xcode 27.0 build 27A266a**; runtime preferences
+cannot approve another build. Install that runtime in Xcode Settings >
+Components and create a matching available simulator in Window > Devices and
+Simulators. The shared resolver rejects other Xcode versions and builds. Xcode
+27.0 build 27A266a, `xcrun`, and
 Python 3 are required. `GITHUB_ENV` is optional; `--udid` emits only the local
 destination on stdout and diagnostics on stderr.
 

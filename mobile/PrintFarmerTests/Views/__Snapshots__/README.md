@@ -20,12 +20,15 @@ layout or UI tests.
 
 ## Regenerating
 
-Baselines are SDK-sensitive. Generate them with Xcode 27.0 and the approved
+Baselines are SDK-sensitive. Generate them with Xcode 27.0 build 27A266a and the approved
 iOS 26.5 (23F77) simulator runtime. CI uses the `xcode-27` runner image and
 installs iOS 26.5 when it is not preinstalled. Select the simulator with the
 same workflow steps and preference variables used by
 `.github/workflows/ios-pr-ci.yml`, then run only
 `PrinterControlsSectionSnapshotTests`.
+The shared host helper forces `.light`; the dedicated destructive-button
+snapshot selects `.dark` explicitly, so host appearance cannot change the
+Controls references.
 
 1. Run the full affected snapshot class and inspect reference/actual/difference
    attachments. Identify which baselines reflect an intentional approved change,
@@ -132,9 +135,9 @@ remain the behavioral evidence; strict image comparison is unchanged.
 
 ## Xcode 27.0 toolchain baseline (#3285)
 
-The six Controls snapshots are maintained against Xcode 27.0 (27A266a) and
+The six Controls snapshots are maintained against Xcode 27.0 build 27A266a and
 iOS 26.5 (23F77). The references were regenerated with the strict existing
-snapshot assertions on the resolver-selected iPhone and iPad hosts. The six
-iPhone references were byte-identical to their existing goldens; only the six
-iPad references changed. The dark-mode destructive-button reference is
-independent and remains unchanged.
+snapshot assertions on the resolver-selected iPhone and iPad hosts, with
+appearance pinned to light. The six iPhone references were byte-identical to
+their existing goldens; only the six iPad references changed. The dark-mode
+destructive-button reference is independent and remains unchanged.

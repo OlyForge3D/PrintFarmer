@@ -101,8 +101,8 @@ API integration:
   installs migrate into the registry on first launch.
 - The mobile app consumes the same `/api/*` JSON contract as the React frontend — camelCase property names, string enums (see Serialization Rules below). Do not introduce mobile-only DTOs unless absolutely required; extend the shared API instead.
 
-Common commands (start at the repository root). Use Xcode 27.0 (27A266a); the
-shared resolver approves only iOS 26.5 (23F77). Install that runtime in Xcode
+Common commands (start at the repository root). Use Xcode 27.0 build 27A266a;
+the shared resolver approves only iOS 26.5 (23F77). Install that runtime in Xcode
 Settings > Components and create an available matching simulator. It fails
 before tests if no approved destination exists. Python 3 is required; no GitHub
 Actions state is needed locally.

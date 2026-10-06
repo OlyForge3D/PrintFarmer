@@ -164,6 +164,10 @@ jobs:
             echo "::error::Expected Xcode 27.0 at $XCODE_PATH, found: $XCODE_VERSION"
             exit 1
           fi
+          if [ "$(printf '%s\n' "$XCODE_VERSION" | sed -n '2s/^Build version //p')" != "27A266a" ]; then
+            echo "::error::Expected Xcode build 27A266a at $XCODE_PATH, found: $XCODE_VERSION"
+            exit 1
+          fi
           printf '%s\n' "$XCODE_VERSION"
       - name: Resolve package dependencies
         run: |

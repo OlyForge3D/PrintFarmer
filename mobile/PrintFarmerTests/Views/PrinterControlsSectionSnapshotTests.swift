@@ -324,6 +324,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
 
     private func host(_ view: some View) -> UIViewController {
         let host = UIHostingController(rootView: view.frame(width: 390))
+        host.overrideUserInterfaceStyle = .light
         host.view.backgroundColor = .systemBackground
         return host
     }
