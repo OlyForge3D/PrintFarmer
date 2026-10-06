@@ -41,6 +41,20 @@ class ScreenshotPipelineTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 capture.resolve("iPhone")
 
+    def test_second_capture_reads_live_boot_state_instead_of_initial_inventory(self):
+        inventory = {"devices": {"approved-runtime": [{"udid": "device", "state": "Booted"}]}}
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            with patch.object(capture, "run", side_effect=lambda args, **kwargs:
+                              json.dumps(inventory) if "list" in args else "") as run:
+                with patch.object(capture.subprocess, "run"), patch.object(capture, "export", return_value=[]):
+                    capture.capture({"udid": "device", "state": "Shutdown"},
+                                    directory / "run-2", directory / "DerivedData")
+            calls = [call.args[0] for call in run.call_args_list]
+            self.assertNotIn(["xcrun", "simctl", "boot", "device"], calls)
+            self.assertIn(["xcrun", "simctl", "bootstatus", "device", "-b"], calls)
+            self.assertIn(["xcrun", "simctl", "status_bar", "device", "clear"], calls)
+
     def make_attachments(self, directory, screens):
         attachments = directory / "attachments"
         attachments.mkdir()

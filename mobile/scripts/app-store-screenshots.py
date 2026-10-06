@@ -74,7 +74,13 @@ def export(bundle, directory):
 def capture(device, directory, derived_data):
     directory.mkdir(parents=True)
     udid = device["udid"]
-    if device["state"] != "Booted":
+    inventory = json.loads(run(["xcrun", "simctl", "list", "devices", "available", "-j"]))
+    current = next(
+        (d for devices in inventory["devices"].values() for d in devices if d["udid"] == udid), None
+    )
+    if current is None:
+        raise RuntimeError(f"Selected simulator became unavailable: {udid}")
+    if current["state"] != "Booted":
         run(["xcrun", "simctl", "boot", udid])
     run(["xcrun", "simctl", "bootstatus", udid, "-b"])
     run(["xcrun", "simctl", "ui", udid, "appearance", "dark"])
