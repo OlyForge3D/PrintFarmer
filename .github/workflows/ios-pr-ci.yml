@@ -236,10 +236,13 @@ jobs:
             build-for-testing
 
       - name: Run unit tests
-        timeout-minutes: 15
+        # xcode-27 first launch on the downloaded iOS 26.5 runtime takes ~8 min
+        # and tests run ~2x slower than on macos-latest; use the runner's 1440s
+        # default ceiling, one minute inside this step limit.
+        timeout-minutes: 25
         run: |
           set -o pipefail
-          python3 scripts/run-tests.py --invocation-timeout 840 -- \
+          python3 scripts/run-tests.py -- \
             -project PrintFarmer.xcodeproj \
             -scheme PrintFarmer \
             -configuration Debug \

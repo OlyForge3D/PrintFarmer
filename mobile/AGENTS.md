@@ -60,8 +60,8 @@ intentional baseline changes, not permission to re-record for #2536/#2572.
 Use `scripts/run-tests.py` for local/CI simulator invocations. It preserves the
 XCTest watchdog and exit status, disables only automatic verbose simulator
 diagnostics, and gives post-test finalization/restart 120s including a 10s
-interrupt/flush window. The separate invocation ceiling is 1440s (840s in the
-unit CI job). Retain the sibling `.events.jsonl` and `.timing.json` along with
+interrupt/flush window. The separate invocation ceiling is 1440s, including
+in the unit CI job. Retain the sibling `.events.jsonl` and `.timing.json` along with
 the `.xcresult` and text log. A forced stop returns 124 and may leave a partial
 bundle; the log/event stream remain usable. See the
 [timeout policy](docs/xcui-timeout-diagnosis.md#runner-finalization-policy-2583).

@@ -349,6 +349,22 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         controller.view.layoutIfNeeded()
     }
 
+    /// Settles until `condition` holds or `timeout` elapses. Button actions dispatch
+    /// through `Task { await viewModel... }`, so slower simulators can need more than
+    /// one fixed settle before the service observes the call or the lease releases.
+    /// Callers still assert the exact outcome afterward.
+    private func settle(
+        _ controller: UIViewController,
+        until condition: () -> Bool,
+        timeout: Duration = .seconds(10)
+    ) async throws {
+        let deadline = ContinuousClock.now + timeout
+        repeat {
+            try await settle(controller)
+            if condition() { return }
+        } while ContinuousClock.now < deadline
+    }
+
     func test_embeddedContent_mountAndRemount_doNotLoadOrDispatch() async throws {
         let printer = try makePrinter(backend: .octoPrint)
         let service = makeService(caps: Self.layoutCaps)
@@ -777,7 +793,9 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         for axis in ["X", "Y", "Z"] {
             for (direction, sign) in [("negative", -1.0), ("positive", 1.0)] {
                 try button("printer.controls.jog.\(axis.lowercased()).\(direction)").sendActions(for: .touchUpInside)
-                try await settle(controller)
+                try await settle(controller) {
+                    service.moveCalledWith?.axis == axis && service.moveCalledWith?.distanceMm == sign * 10
+                }
                 XCTAssertEqual(service.moveCalledWith?.axis, axis)
                 XCTAssertEqual(service.moveCalledWith?.distanceMm, sign * 10)
                 XCTAssertEqual(
@@ -785,7 +803,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
                     axis == "Z" ? PrinterControlsViewModel.zFeedrateMmMin : PrinterControlsViewModel.xyFeedrateMmMin
                 )
                 model.cancelPendingCommand()
-                try await settle(controller)
+                try await settle(controller) { !model.isExecuting }
             }
         }
     }
@@ -1049,7 +1067,13 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
                 XCTAssertGreaterThanOrEqual(button.bounds.height, 48)
                 XCTAssertTrue(button.isEnabled)
                 button.sendActions(for: .touchUpInside)
-                try await settle(controller)
+                try await settle(controller) {
+                    switch id {
+                    case "all": service.homeCalledWith != nil
+                    case "xy": service.homeXYCalledWith != nil
+                    default: service.homeZCalledWith != nil
+                    }
+                }
                 switch id {
                 case "all":
                     XCTAssertEqual(service.homeCalledWith?.axes, ["X", "Y", "Z"])
@@ -1062,7 +1086,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
                     XCTAssertEqual(service.homeZCalledWith, printer.id)
                 }
                 model.cancelPendingCommand()
-                try await settle(controller)
+                try await settle(controller) { !model.isExecuting }
             }
             XCTAssertNil(service.moveCalledWith, "Homing glyphs must never issue a jog")
         }
