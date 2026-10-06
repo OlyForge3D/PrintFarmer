@@ -6,6 +6,7 @@ import datetime
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -54,7 +55,9 @@ def export(bundle, directory):
         for attachment in test["attachments"]:
             name = attachment["suggestedHumanReadableName"]
             for screen in SCREENS:
-                if name in (f"app-store-{screen}", f"app-store-{screen}.png"):
+                if re.fullmatch(
+                    rf"app-store-{re.escape(screen)}(?:_\d+_[0-9A-Fa-f-]{{36}})?(?:\.png)?", name
+                ):
                     if screen in found or attachment["isAssociatedWithFailure"]:
                         raise RuntimeError(f"Ambiguous or failed screenshot attachment: {name}")
                     found[screen] = attachments / attachment["exportedFileName"]

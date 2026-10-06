@@ -50,7 +50,7 @@ class ScreenshotPipelineTests(unittest.TestCase):
             (attachments / filename).write_bytes(b"native-png-bytes")
             manifest.append({
                 "exportedFileName": filename,
-                "suggestedHumanReadableName": f"app-store-{screen}.png",
+                "suggestedHumanReadableName": f"app-store-{screen}_0_5DF22B22-86D6-4138-BDB8-BFD6DD649FAC.png",
                 "isAssociatedWithFailure": False,
             })
         (attachments / "manifest.json").write_text(json.dumps([{"attachments": manifest}]))
