@@ -4,8 +4,25 @@ import { copyFileSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSy
 import { resolve } from 'node:path';
 import { runInNewContext } from 'node:vm';
 import { buildMetadata } from '../../../scripts/ci/release-metadata.mjs';
+import type { BuildReleaseIdentity } from './src/common/utils/releaseIdentity';
 import { frontendVersionMetadata, resolveGitHash } from './vite.config';
-import { identity as inventoryIdentity } from './src/test/features/system/serviceInventoryFixture';
+
+const inventoryIdentity: BuildReleaseIdentity = {
+  releaseId: 'insider:1.2.3-rc.10',
+  channel: 'insider',
+  canonicalVersion: '1.2.3-rc.10',
+  baseVersion: '1.2.3',
+  sourceBranch: 'development',
+  sourceTag: 'v1.2.3-rc.10',
+  sourceCommit: 'a'.repeat(40),
+  authorizedBranchHead: 'a'.repeat(40),
+  buildId: '45',
+  buildAttempt: '2',
+  workflowIdentity: 'OlyForge3D/PrintFarmer/.github/workflows/consolidated-release.yml@refs/heads/development',
+  stableSequence: '0',
+  allocationIdentity: 'allocation-45',
+  promotionOrigin: null,
+};
 
 const originalViteGitSha = process.env.VITE_GIT_SHA;
 const originalGitSha = process.env.GIT_SHA;
