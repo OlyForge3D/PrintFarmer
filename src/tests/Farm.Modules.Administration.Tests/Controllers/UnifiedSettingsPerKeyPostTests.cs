@@ -225,43 +225,6 @@ public class UnifiedSettingsPerKeyPostTests : IClassFixture<UnifiedSettingsPerKe
             .Should().BeFalse("a settings save must not create heartbeat telemetry");
     }
 
-    [Fact]
-    public async Task Post_UpdateChannel_RoundTripsStableInsiderStableAndRejectsUnacknowledgedInsider()
-    {
-        using HttpClient admin = await _factory.CreateAdminClientAsync();
-        string endpoint = $"/api/settings/{UpdateChannelSettings.SectionName}";
-
-        (await PostWithCurrentRevisionAsync(admin,
-            endpoint,
-            new UpdateChannelSettings { Channel = "stable", InsiderAcknowledged = false }))
-            .StatusCode.Should().Be(HttpStatusCode.OK);
-        (await PostWithCurrentRevisionAsync(admin,
-            endpoint,
-            new UpdateChannelSettings { Channel = "insider", InsiderAcknowledged = true }))
-            .StatusCode.Should().Be(HttpStatusCode.OK);
-
-        UpdateChannelSettings? insider = await admin.GetFromJsonAsync<UpdateChannelSettings>(
-            endpoint,
-            JsonOptions);
-        insider.Should().BeEquivalentTo(
-            new UpdateChannelSettings { Channel = "insider", InsiderAcknowledged = true });
-
-        (await PostWithCurrentRevisionAsync(admin,
-            endpoint,
-            new UpdateChannelSettings { Channel = "stable", InsiderAcknowledged = false }))
-            .StatusCode.Should().Be(HttpStatusCode.OK);
-        HttpResponseMessage rejected = await PostWithCurrentRevisionAsync(admin,
-            endpoint,
-            new UpdateChannelSettings { Channel = "insider", InsiderAcknowledged = false });
-
-        rejected.StatusCode.Should().Be(HttpStatusCode.BadRequest);
-        UpdateChannelSettings? retained = await admin.GetFromJsonAsync<UpdateChannelSettings>(
-            endpoint,
-            JsonOptions);
-        retained.Should().BeEquivalentTo(
-            new UpdateChannelSettings { Channel = "stable", InsiderAcknowledged = false });
-    }
-
     // ─── Defect 2: validation must run and return the structured error shape ─
 
     /// <summary>
@@ -387,7 +350,7 @@ public class UnifiedSettingsPerKeyPostTests : IClassFixture<UnifiedSettingsPerKe
     {
         using HttpClient admin = await _factory.CreateAdminClientAsync();
         using HttpResponseMessage response = await admin.PostAsJsonAsync(
-            "/api/settings/UpdateChannel", new UpdateChannelSettings());
+            "/api/settings/CatalogUpdates", new CatalogUpdateSettings());
         ((int)response.StatusCode).Should().Be(428);
     }
 
@@ -399,7 +362,7 @@ public class UnifiedSettingsPerKeyPostTests : IClassFixture<UnifiedSettingsPerKe
     {
         using HttpClient admin = await _factory.CreateAdminClientAsync();
         using HttpResponseMessage response = await admin.PostAsJsonAsync(
-            "/api/settings/UpdateChannel", new { channel = "stable", rowVersion });
+            "/api/settings/CatalogUpdates", new { enabled = true, rowVersion });
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
     }
 
@@ -407,11 +370,10 @@ public class UnifiedSettingsPerKeyPostTests : IClassFixture<UnifiedSettingsPerKe
     public async Task Post_TwoTabsWithSameRevision_RejectsStaleSaveAndAllowsExplicitReload()
     {
         using HttpClient admin = await _factory.CreateAdminClientAsync();
-        const string endpoint = "/api/settings/UpdateChannel";
+        const string endpoint = "/api/settings/CatalogUpdates";
         JsonObject original = (await admin.GetFromJsonAsync<JsonObject>(endpoint))!;
         string originalRevision = original["rowVersion"]!.GetValue<string>();
-        original["channel"] = "insider";
-        original["insiderAcknowledged"] = true;
+        original["enabled"] = false;
 
         using HttpResponseMessage first = await admin.PostAsJsonAsync(endpoint, original);
         first.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -419,20 +381,19 @@ public class UnifiedSettingsPerKeyPostTests : IClassFixture<UnifiedSettingsPerKe
         saved["rowVersion"]!.GetValue<string>().Should().NotBe(originalRevision);
         first.Headers.ETag!.Tag.Should().Be($"\"{saved["rowVersion"]!.GetValue<string>()}\"");
 
-        original["channel"] = "stable";
-        original["insiderAcknowledged"] = false;
+        original["enabled"] = true;
         using HttpResponseMessage stale = await admin.PostAsJsonAsync(endpoint, original);
         stale.StatusCode.Should().Be(HttpStatusCode.Conflict);
         JsonObject error = (await stale.Content.ReadFromJsonAsync<JsonObject>())!;
         error["message"]!.GetValue<string>().Should().Contain("Reload");
-        error["errors"]!["UpdateChannel"]!.GetValue<string>().Should().Contain("modified");
+        error["errors"]!["CatalogUpdates"]!.GetValue<string>().Should().Contain("modified");
 
         JsonObject all = (await admin.GetFromJsonAsync<JsonObject>("/api/settings"))!;
-        all["UpdateChannel"]!["rowVersion"]!.GetValue<string>()
+        all["CatalogUpdates"]!["rowVersion"]!.GetValue<string>()
             .Should().Be(saved["rowVersion"]!.GetValue<string>());
-        all["UpdateChannel"]!["channel"]!.GetValue<string>().Should().Be("insider");
+        all["CatalogUpdates"]!["enabled"]!.GetValue<bool>().Should().BeFalse();
         using HttpResponseMessage reloaded = await PostWithCurrentRevisionAsync(
-            admin, endpoint, new UpdateChannelSettings { Channel = "stable" });
+            admin, endpoint, new CatalogUpdateSettings { Enabled = true });
         reloaded.StatusCode.Should().Be(HttpStatusCode.OK);
     }
 

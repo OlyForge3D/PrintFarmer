@@ -6,20 +6,15 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Services.Background;
-using Farm.Infrastructure.Services.HostUpdates;
 using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Services.SystemStatus;
 using Farm.Slicer.Module.Data;
 using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Services.SystemInfo;
 using FluentAssertions;
-using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
-using Microsoft.Extensions.Options;
 using Xunit;
 
 namespace Farm.Web.Api.Tests.Integration;
@@ -31,41 +26,12 @@ public class SystemInfoIntegrationTests : IClassFixture<SystemInfoIntegrationTes
 {
     public class Factory : CustomWebApplicationFactory
     {
-        private readonly bool _throwDiscoveryOptions;
-
         public Factory()
-            : this(discoveryEnabled: true, throwDiscoveryOptions: false)
-        {
-        }
-
-        private Factory(bool discoveryEnabled, bool throwDiscoveryOptions)
             : base(new Dictionary<string, string?>
             {
                 ["Security:DevModeBypassAuth"] = "false",
-                ["HostUpdates:VerifiedReleaseDiscovery:Enabled"] = discoveryEnabled.ToString(),
             })
         {
-            _throwDiscoveryOptions = throwDiscoveryOptions;
-        }
-
-        public static Factory WithDiscoveryDisabled() => new(discoveryEnabled: false, throwDiscoveryOptions: false);
-
-        public static Factory WithInvalidDiscoveryOptions() => new(discoveryEnabled: true, throwDiscoveryOptions: true);
-
-        protected override void ConfigureWebHost(IWebHostBuilder builder)
-        {
-            base.ConfigureWebHost(builder);
-            if (!_throwDiscoveryOptions)
-            {
-                return;
-            }
-
-            builder.ConfigureTestServices(services =>
-            {
-                services.RemoveAll<IOptionsMonitor<VerifiedReleaseDiscoveryOptions>>();
-                services.AddSingleton<IOptionsMonitor<VerifiedReleaseDiscoveryOptions>>(
-                    new ThrowingVerifiedReleaseDiscoveryOptionsMonitor());
-            });
         }
     }
 
@@ -105,21 +71,12 @@ public class SystemInfoIntegrationTests : IClassFixture<SystemInfoIntegrationTes
     }
 
     [Fact]
-    public async Task InventorySources_HostDiResolvesModuleImplementationsAndPreservesApiBuild()
+    public async Task ServiceInfoSources_HostDiResolvesSlicerModule()
     {
         await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
-        IServiceInventorySource[] sources = scope.ServiceProvider.GetServices<IServiceInventorySource>().ToArray();
-        sources.Should().HaveCount(2);
-        LocalServiceInventorySource local = sources.OfType<LocalServiceInventorySource>().Single();
-        SlicerServiceInventorySource slicer = sources.OfType<SlicerServiceInventorySource>().Single();
-        Assert.Same(typeof(ISystemInfoService).Assembly, local.GetType().Assembly);
-        Assert.Same(typeof(SlicerDbContext).Assembly, slicer.GetType().Assembly);
-
-        IReadOnlyList<ServiceReplicaObservationDto> rows = await local.ReadAsync(CancellationToken.None);
-        ServiceReplicaObservationDto api = rows.Single(row => row.Component == "api");
-        (string? version, string? commit) = ApplicationBuildObservation.FromAssembly(typeof(Program).Assembly);
-        api.ApplicationVersion.Should().Be(version);
-        api.SourceCommit.Should().Be(commit);
+        ISystemServiceInfoSource source = Assert.Single(scope.ServiceProvider.GetServices<ISystemServiceInfoSource>());
+        source.Should().BeOfType<SlicerSystemServiceInfoSource>();
+        Assert.Same(typeof(SlicerDbContext).Assembly, source.GetType().Assembly);
     }
 
     [Fact]
@@ -150,8 +107,6 @@ public class SystemInfoIntegrationTests : IClassFixture<SystemInfoIntegrationTes
         SystemInfoDto? dto = await response.Content.ReadFromJsonAsync<SystemInfoDto>(JsonOptions);
         dto.Should().NotBeNull();
         dto!.App.Version.Should().NotBeNullOrWhiteSpace();
-        dto.Inventory!.HostUpdaterVersion.Should().Be(dto.App.Version);
-        HostUpdateValidation.IsSemanticVersion(dto.Inventory.HostUpdaterVersion).Should().BeTrue();
         dto.App.Uptime.Should().NotBeNullOrWhiteSpace();
         dto.App.Hostname.Should().NotBeNullOrWhiteSpace();
         dto.Cpu.Cores.Should().BeGreaterThan(0);
@@ -208,29 +163,18 @@ public class SystemInfoIntegrationTests : IClassFixture<SystemInfoIntegrationTes
     }
 
     [Fact]
-    public async Task GetInfo_Admin_ReportsUnknownProvenanceAndExplicitNullsWithoutChangingLegacyShape()
+    public async Task GetInfo_Admin_SerializesSimpleRootContractWithoutInventory()
     {
-        HttpResponseMessage response = await _adminClient!.GetAsync("/api/system/info");
+        using HttpResponseMessage response = await _adminClient!.GetAsync("/api/system/info");
         using JsonDocument json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        JsonElement inventory = json.RootElement.GetProperty("inventory");
-        inventory.GetProperty("selectedChannel").GetString().Should().Be("stable");
-        inventory.GetProperty("observedChannel").ValueKind.Should().Be(JsonValueKind.Null);
-        inventory.GetProperty("targetChannel").ValueKind.Should().Be(JsonValueKind.Null);
-        JsonElement api = inventory.GetProperty("services").EnumerateArray().Single(row => row.GetProperty("component").GetString() == "api");
-        api.GetProperty("applicationVersion").GetString().Should().NotBeNullOrWhiteSpace();
-        api.GetProperty("identity").ValueKind.Should().Be(JsonValueKind.Null);
-        api.GetProperty("platformDigest").ValueKind.Should().Be(JsonValueKind.Null);
-        api.GetProperty("indexDigest").ValueKind.Should().Be(JsonValueKind.Null);
-        api.GetProperty("manifestDigest").ValueKind.Should().Be(JsonValueKind.Null);
-        api.GetProperty("databaseProvider").ValueKind.Should().Be(JsonValueKind.Null);
-        api.GetProperty("migrationHead").ValueKind.Should().Be(JsonValueKind.Null);
+        json.RootElement.EnumerateObject().Select(property => property.Name).Should()
+            .BeEquivalentTo("app", "cpu", "memory", "disk", "services", "database");
         response.Headers.CacheControl!.NoStore.Should().BeTrue();
-        json.RootElement.GetProperty("services")[0].GetProperty("version").ValueKind.Should().Be(JsonValueKind.String);
         json.RootElement.GetProperty("database").GetProperty("migrationHeads").ValueKind.Should().Be(JsonValueKind.Array);
     }
 
     [Fact]
-    public async Task GetInfo_Admin_ProjectsAllReplicasWithoutSecretsOrEngineAsBuild()
+    public async Task GetInfo_Admin_ProjectsWorkerVersionsAndHealthWithoutSecretsOrReplicaIdentity()
     {
         Guid first = Guid.NewGuid();
         Guid second = Guid.NewGuid();
@@ -247,7 +191,7 @@ public class SystemInfoIntegrationTests : IClassFixture<SystemInfoIntegrationTes
                     ApiKey = "never-return-registry-key",
                     Status = "Online",
                     LastSeen = DateTime.UtcNow,
-                    CapabilitiesJson = "{\"applicationBuild\":\"1.2.3\",\"slicerContainerDigest\":\"not-attestation\"}"
+                    CapabilitiesJson = "{\"applicationBuild\":\"1.2.3\",\"slicerContainerDigest\":\"not-attestation\"}",
                 },
                 new SlicerService { Id = second, Name = "second", Version = "2.4.2", Host = "http://private-worker.invalid", Status = "Offline", LastSeen = DateTime.UtcNow.AddHours(-1) });
             await db.SaveChangesAsync();
@@ -255,230 +199,45 @@ public class SystemInfoIntegrationTests : IClassFixture<SystemInfoIntegrationTes
 
         string json = await _adminClient!.GetStringAsync("/api/system/info");
         SystemInfoDto dto = JsonSerializer.Deserialize<SystemInfoDto>(json, JsonOptions)!;
-        ServiceReplicaObservationDto[] workers = dto.Inventory!.Services.Where(row => row.Component == "slicer-worker").ToArray();
-        workers.Should().Contain(row => row.InstanceId == first.ToString() && row.ApplicationVersion == "1.2.3" && row.EngineVersion == "2.4.2");
-        workers.Should().Contain(row => row.InstanceId == second.ToString() && row.ApplicationVersion == null && row.ObservationState == InventoryObservationState.Unavailable);
-        workers.Should().OnlyContain(row => row.PlatformDigest == null && row.Identity == null);
-        json.Should().NotContain("private-worker").And.NotContain("never-return-registry-key").And.NotContain("not-attestation").And.NotContain("capabilitiesJson");
+        dto.Services.Should().Contain(row => row.Name == "Slicer worker (first)" && row.Version == "1.2.3" && row.EngineVersion == "2.4.2" && row.Health == SystemServiceHealth.Healthy);
+        dto.Services.Should().Contain(row => row.Name == "Slicer worker (second)" && row.Version == "Unknown" && row.EngineVersion == "2.4.2" && row.Health == SystemServiceHealth.Degraded);
+        json.Should().NotContain("private-worker").And.NotContain("never-return-registry-key").And.NotContain("not-attestation")
+            .And.NotContain("capabilitiesJson").And.NotContain(first.ToString()).And.NotContain(second.ToString());
     }
 
     [Fact]
-    public async Task GetInfo_Admin_ReadinessReflectsVerifiedReleaseEvidenceCacheInIsolatedHost()
+    public async Task GetInfo_Admin_ReleaseCheckFailureRemainsCriticalAndMonitorVersionUnknown()
     {
-        await using Factory isolatedFactory = new();
-        await isolatedFactory.ResetDataAsync();
-        using HttpClient isolatedAdmin = await isolatedFactory.CreateAdminClientAsync();
-
-        HttpResponseMessage before = await isolatedAdmin.GetAsync("/api/system/info");
-        using (JsonDocument beforeJson = JsonDocument.Parse(await before.Content.ReadAsStringAsync()))
+        IBackgroundServiceMonitor monitor = _factory.Services.GetRequiredService<IBackgroundServiceMonitor>();
+        monitor.Register("ApplicationReleaseUpdateCheckService", "Release Update Check");
+        monitor.ReportStarted("ApplicationReleaseUpdateCheckService");
+        monitor.ReportEnabled("ApplicationReleaseUpdateCheckService", true);
+        monitor.ReportError("ApplicationReleaseUpdateCheckService", "GitHub check failed");
+        try
         {
-            JsonElement readiness = beforeJson.RootElement.GetProperty("inventory").GetProperty("readiness");
-            readiness.GetProperty("state").GetString().Should().Be("Unknown");
-            readiness.GetProperty("reasons").EnumerateArray().Select(r => r.GetString()).Should().Contain("VerifiedReleaseEvidenceUnavailable");
+            SystemInfoDto? dto = await _adminClient!.GetFromJsonAsync<SystemInfoDto>("/api/system/info", JsonOptions);
+            dto!.Services.Should().Contain(row => row.Name == "Release Update Check" && row.Health == SystemServiceHealth.Critical && row.Version == "Unknown");
+            dto.Services.Should().NotContain(row => row.Name == "Verified Release Discovery");
+            dto.Services.Single(row => row.Name == "Backend API").Version.Should().Be(dto.App.Version);
         }
-
-        // A release whose channel does not match the host's selected channel ("stable" by
-        // default) is unambiguously Blocked, proving the evaluator is wired against a
-        // *populated* cache, not always the "no evidence" branch.
-        IVerifiedReleaseEvidenceCache cache =
-            isolatedFactory.Services.GetRequiredService<IVerifiedReleaseEvidenceCache>();
-        cache.SetVerified(
-            new VerifiedReleaseEvidenceDto
-            {
-                Sequence = 999_999,
-                MinimumUpdaterVersion = "1.0.0",
-                SignatureVerified = true,
-                IsComplete = true,
-                ManifestDigest = "sha256:" + new string('a', 64),
-                Identity = new CanonicalReleaseIdentityDto
-                {
-                    CanonicalVersion = "9.9.9",
-                    BaseVersion = "9.9.9",
-                    Channel = "insider",
-                    ReleaseId = "insider:9.9.9",
-                },
-                Services = [],
-            },
-            DateTimeOffset.UtcNow);
-        isolatedFactory.Services.GetRequiredService<IMemoryCache>().Remove("SystemInfo:Snapshot");
-
-        HttpResponseMessage after = await isolatedAdmin.GetAsync("/api/system/info");
-        using JsonDocument afterJson = JsonDocument.Parse(await after.Content.ReadAsStringAsync());
-        afterJson.RootElement.GetProperty("inventory").GetProperty("readiness").GetProperty("state").GetString().Should().Be("Blocked");
-    }
-
-    [Fact]
-    public async Task GetInfo_Admin_DiscoveryFailureRevokesPriorReadinessWithoutDiscardingDiagnostics()
-    {
-        await using Factory isolatedFactory = new();
-        await isolatedFactory.ResetDataAsync();
-        using HttpClient isolatedAdmin = await isolatedFactory.CreateAdminClientAsync();
-        IVerifiedReleaseEvidenceCache cache =
-            isolatedFactory.Services.GetRequiredService<IVerifiedReleaseEvidenceCache>();
-        VerifiedReleaseEvidenceDto evidence = new()
+        finally
         {
-            Sequence = 3,
-            MinimumUpdaterVersion = "1.0.0",
-            SignatureVerified = true,
-            IsComplete = true,
-            ManifestDigest = "sha256:" + new string('a', 64),
-            Identity = new CanonicalReleaseIdentityDto
-            {
-                CanonicalVersion = "0.0.0",
-                BaseVersion = "0.0.0",
-                Channel = "stable",
-                ReleaseId = "stable:0.0.0",
-            },
-        };
-        DateTimeOffset verifiedAt = DateTimeOffset.UtcNow;
-        cache.SetVerified(evidence, verifiedAt);
-        cache.SetVerified(evidence with { Sequence = 2 }, verifiedAt.AddMinutes(1)).Should().BeFalse();
-        const string rollbackMessage = "Rejected rollback release for channel 'stable' (sequence=2).";
-        cache.SetError(rollbackMessage);
-
-        HttpResponseMessage response = await isolatedAdmin.GetAsync("/api/system/info");
-        using JsonDocument json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        JsonElement readiness = json.RootElement.GetProperty("inventory").GetProperty("readiness");
-
-        readiness.GetProperty("state").GetString().Should().Be("Unknown");
-        readiness.GetProperty("reasons").EnumerateArray().Select(reason => reason.GetString())
-            .Should().Contain("VerifiedReleaseDiscoveryFailed");
-        cache.Current.Should().BeSameAs(evidence);
-        cache.Current!.Sequence.Should().Be(3);
-        cache.LastVerifiedAt.Should().Be(verifiedAt);
-        cache.LastError.Should().Be(rollbackMessage);
+            monitor.ReportSuccess("ApplicationReleaseUpdateCheckService");
+            monitor.ReportEnabled("ApplicationReleaseUpdateCheckService", false);
+        }
     }
 
     [Fact]
-    public async Task GetInfo_Admin_InvalidDiscoveryOptionsReportsReadinessUnavailable()
-    {
-        await using Factory isolatedFactory = Factory.WithInvalidDiscoveryOptions();
-        await isolatedFactory.ResetDataAsync();
-        using HttpClient isolatedAdmin = await isolatedFactory.CreateAdminClientAsync();
-        isolatedFactory.Services.GetRequiredService<IMemoryCache>().Remove("SystemInfo:Snapshot");
-
-        HttpResponseMessage response = await isolatedAdmin.GetAsync("/api/system/info");
-        using JsonDocument json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        JsonElement readiness = json.RootElement.GetProperty("inventory").GetProperty("readiness");
-
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-        readiness.GetProperty("state").GetString().Should().Be("Unknown");
-        readiness.GetProperty("reasons").EnumerateArray().Select(reason => reason.GetString())
-            .Should().Contain("VerifiedReleaseDiscoveryOptionsInvalid");
-    }
-
-    [Theory]
-    [MemberData(nameof(NormalizeAssemblyVersionCases))]
-    public void NormalizeAssemblyVersion_ProducesExpectedSemanticVersion(Version? assemblyVersion, string expected)
-    {
-        string normalized = SystemInfoService.NormalizeAssemblyVersion(assemblyVersion);
-
-        normalized.Should().Be(expected);
-        HostUpdateValidation.IsSemanticVersion(normalized).Should().BeTrue();
-    }
-
-    // Build == -1 (no third component, e.g. `new Version(1, 2)`) previously fell through to Math.Max, but this
-    // case must stay covered explicitly so a regression there fails a test instead of only field observation.
-    public static TheoryData<Version?, string> NormalizeAssemblyVersionCases => new()
-    {
-        { new Version(1, 2, 3, 4), "1.2.3" },
-        { new Version(1, 2), "1.2.0" },
-        { null, "0.0.0" },
-    };
-
-    private sealed class ThrowingVerifiedReleaseDiscoveryOptionsMonitor : IOptionsMonitor<VerifiedReleaseDiscoveryOptions>
-    {
-        public VerifiedReleaseDiscoveryOptions CurrentValue => throw new OptionsValidationException(
-            Options.DefaultName,
-            typeof(VerifiedReleaseDiscoveryOptions),
-            ["invalid interval"]);
-
-        public VerifiedReleaseDiscoveryOptions Get(string? name) => new();
-
-        public IDisposable? OnChange(Action<VerifiedReleaseDiscoveryOptions, string?> listener) => null;
-    }
-
-    [Fact]
-    public async Task GetInfo_Admin_DisabledDiscoveryRevokesPriorReadiness()
-    {
-        await using Factory isolatedFactory = Factory.WithDiscoveryDisabled();
-        await isolatedFactory.ResetDataAsync();
-        using HttpClient isolatedAdmin = await isolatedFactory.CreateAdminClientAsync();
-        IVerifiedReleaseEvidenceCache cache =
-            isolatedFactory.Services.GetRequiredService<IVerifiedReleaseEvidenceCache>();
-        cache.SetVerified(
-            new VerifiedReleaseEvidenceDto
-            {
-                Sequence = 99_999,
-                MinimumUpdaterVersion = "1.0.0",
-                SignatureVerified = true,
-                IsComplete = true,
-                ManifestDigest = "sha256:" + new string('a', 64),
-                Identity = new CanonicalReleaseIdentityDto
-                {
-                    CanonicalVersion = "0.0.0",
-                    BaseVersion = "0.0.0",
-                    Channel = "stable",
-                    ReleaseId = "stable:0.0.0",
-                },
-            },
-            DateTimeOffset.UtcNow);
-
-        HttpResponseMessage response = await isolatedAdmin.GetAsync("/api/system/info");
-        using JsonDocument json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        JsonElement readiness = json.RootElement.GetProperty("inventory").GetProperty("readiness");
-
-        readiness.GetProperty("state").GetString().Should().Be("Unknown");
-        readiness.GetProperty("reasons").EnumerateArray().Select(reason => reason.GetString())
-            .Should().Contain("VerifiedReleaseDiscoveryDisabled");
-    }
-
-    [Fact]
-    public async Task GetInfo_Admin_StaleVerifiedReleaseEvidenceIsNotEligible()
-    {
-        await using Factory isolatedFactory = new();
-        await isolatedFactory.ResetDataAsync();
-        using HttpClient isolatedAdmin = await isolatedFactory.CreateAdminClientAsync();
-        IVerifiedReleaseEvidenceCache cache =
-            isolatedFactory.Services.GetRequiredService<IVerifiedReleaseEvidenceCache>();
-        cache.SetVerified(
-            new VerifiedReleaseEvidenceDto
-            {
-                Sequence = 99_999,
-                MinimumUpdaterVersion = "1.0.0",
-                SignatureVerified = true,
-                IsComplete = true,
-                ManifestDigest = "sha256:" + new string('a', 64),
-                Identity = new CanonicalReleaseIdentityDto
-                {
-                    CanonicalVersion = "0.0.0",
-                    BaseVersion = "0.0.0",
-                    Channel = "stable",
-                    ReleaseId = "stable:0.0.0",
-                },
-            },
-            DateTimeOffset.UtcNow.AddHours(-3));
-
-        HttpResponseMessage response = await isolatedAdmin.GetAsync("/api/system/info");
-        using JsonDocument json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        JsonElement readiness = json.RootElement.GetProperty("inventory").GetProperty("readiness");
-
-        readiness.GetProperty("state").GetString().Should().Be("Unknown");
-        readiness.GetProperty("reasons").EnumerateArray().Select(reason => reason.GetString())
-            .Should().Contain("VerifiedReleaseEvidenceStale");
-    }
-
-    [Fact]
-    public async Task GetInfo_NonAdminAfterAdminCacheWarmup_StillDeniesInventory()
+    public async Task GetInfo_NonAdminAfterAdminCacheWarmup_StillDeniesSystemDetails()
     {
         (await _adminClient!.GetAsync("/api/system/info")).StatusCode.Should().Be(HttpStatusCode.OK);
         HttpResponseMessage denied = await _nonAdminClient!.GetAsync("/api/system/info");
         denied.StatusCode.Should().Be(HttpStatusCode.Forbidden);
-        (await denied.Content.ReadAsStringAsync()).Should().NotContain("platformDigest").And.NotContain("sourceCommit");
+        (await denied.Content.ReadAsStringAsync()).Should().NotContain("hostname").And.NotContain("migrationHeads");
     }
 
     [Fact]
-    public async Task GetInfo_CustomRoleWithExactAdminPermission_ReturnsInventory()
+    public async Task GetInfo_CustomRoleWithExactAdminPermission_ReturnsSystemDetails()
     {
         await using (AsyncServiceScope scope = _factory.Services.CreateAsyncScope())
         {
@@ -486,7 +245,7 @@ public class SystemInfoIntegrationTests : IClassFixture<SystemInfoIntegrationTes
             User user = await db.Users.SingleAsync(row => row.Username == "system-info-user");
             Resource resource = await db.Resources.SingleAsync(row => row.Name == "system_settings");
             UserAction action = await db.UserActions.SingleAsync(row => row.Name == "admin");
-            Role role = new() { Id = Guid.NewGuid(), Name = "inventory-reader", DisplayName = "Inventory reader", IsActive = true };
+            Role role = new() { Id = Guid.NewGuid(), Name = "status-reader", DisplayName = "Status reader", IsActive = true };
             db.Roles.Add(role);
             db.RolePermissions.Add(new RolePermission { Id = Guid.NewGuid(), RoleId = role.Id, ResourceId = resource.Id, ActionId = action.Id, Granted = true });
             db.UserRoles.Add(new UserRole { Id = Guid.NewGuid(), UserId = user.Id, RoleId = role.Id, IsActive = true, AssignedAt = DateTime.UtcNow });
@@ -496,20 +255,34 @@ public class SystemInfoIntegrationTests : IClassFixture<SystemInfoIntegrationTes
         using HttpClient customAdmin = await _factory.CreateAuthenticatedClientAsync("system-info-user", "system-info-user@example.com");
         HttpResponseMessage response = await customAdmin.GetAsync("/api/system/info");
         response.StatusCode.Should().Be(HttpStatusCode.OK);
-        (await response.Content.ReadAsStringAsync()).Should().Contain("platformDigest");
+        (await response.Content.ReadAsStringAsync()).Should().Contain("hostname").And.NotContain("inventory");
     }
 
     [Fact]
-    public async Task GetInfo_ProductionSignalRSerializer_MatchesRestInventoryContract()
+    public async Task GetInfo_ProductionSignalRSerializer_MatchesRestServiceContract()
     {
         string rest = await _adminClient!.GetStringAsync("/api/system/info");
         SystemInfoDto dto = JsonSerializer.Deserialize<SystemInfoDto>(rest, JsonOptions)!;
         var options = _factory.Services.GetRequiredService<Microsoft.Extensions.Options.IOptions<Microsoft.AspNetCore.SignalR.JsonHubProtocolOptions>>();
-        string signalR = JsonSerializer.Serialize(dto.Inventory, options.Value.PayloadSerializerOptions);
+        string signalR = JsonSerializer.Serialize(dto.Services, options.Value.PayloadSerializerOptions);
         using JsonDocument restJson = JsonDocument.Parse(rest);
         using JsonDocument signalRJson = JsonDocument.Parse(signalR);
-        JsonElement.DeepEquals(restJson.RootElement.GetProperty("inventory"), signalRJson.RootElement).Should().BeTrue();
+        JsonElement.DeepEquals(restJson.RootElement.GetProperty("services"), signalRJson.RootElement).Should().BeTrue();
     }
+
+    [Theory]
+    [MemberData(nameof(NormalizeAssemblyVersionCases))]
+    public void NormalizeAssemblyVersion_ProducesExpectedSemanticVersion(Version? assemblyVersion, string expected)
+    {
+        SystemInfoService.NormalizeAssemblyVersion(assemblyVersion).Should().Be(expected);
+    }
+
+    public static TheoryData<Version?, string> NormalizeAssemblyVersionCases => new()
+    {
+        { new Version(1, 2, 3, 4), "1.2.3" },
+        { new Version(1, 2), "1.2.0" },
+        { null, "0.0.0" },
+    };
 
     private async Task SeedSystemInfoDataAsync()
     {

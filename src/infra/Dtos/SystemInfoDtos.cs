@@ -18,9 +18,6 @@ public enum SystemServiceHealth
 /// </summary>
 public record SystemInfoDto
 {
-    /// <summary>Detailed admin-only service/replica observations; additive for older clients.</summary>
-    public ServiceInventoryDto? Inventory { get; init; }
-
     /// <summary>Application metadata for the running API process.</summary>
     public required SystemAppInfoDto App { get; init; }
 
@@ -107,6 +104,9 @@ public record SystemServiceInfoDto
 
     /// <summary>Reported service version.</summary>
     public required string Version { get; init; }
+
+    /// <summary>Slicer engine version, separate from the worker application build.</summary>
+    public string? EngineVersion { get; init; }
 
     /// <summary>Current service health.</summary>
     public required SystemServiceHealth Health { get; init; }
