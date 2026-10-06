@@ -21,7 +21,7 @@ server switching, and real-time updates via SignalR.
 
 ## Requirements
 
-- Xcode 26+
+- Xcode 27.0 for the pinned CI and snapshot toolchain
 - iOS 17+ deployment target
 
 ## Getting Started
@@ -52,9 +52,11 @@ Type assertions) are intentionally removed rather than mapped to empty suites.
 `scripts/tests/test_run_tests.py` checks every selected class/method against
 Swift sources and rejects selected classes without real test methods.
 
-Use **iOS 26.5 (23F77)**, the unchanged-snapshot default supported by
+Use **Xcode 27.0 (27A266a)** and **iOS 26.5 (23F77)** for snapshot and simulator
+tests. CI uses GitHub's `xcode-27` runner image and downloads iOS 26.5 when that
+runtime is not already installed. The unchanged-snapshot default is supported by
 [the original evidence](https://github.com/OlyForge3D/PrintFarmer/issues/2536#issuecomment-5573657441).
-Install it in Xcode Settings > Components and create an available iPhone
+Install iOS 26.5 in Xcode Settings > Components and create an available iPhone
 simulator. The shared resolver requires Python 3, rejects beta/unapproved
 builds even in fallbacks, and works without `GITHUB_ENV`.
 From the repository root:

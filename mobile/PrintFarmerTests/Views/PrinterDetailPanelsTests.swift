@@ -234,7 +234,7 @@ final class PrinterDetailPanelsTests: XCTestCase {
         ))
         let window = show(controller)
         defer { window.isHidden = true; window.rootViewController = nil }
-        try await selectControls(in: controller)
+        try await selectControls(in: controller, timeout: .seconds(15))
         let statusReadsBeforeCapabilityLoad = safetyStatusReads(fixture.api)
         let selector = try XCTUnwrap(views(UISegmentedControl.self, in: controller.view).first)
         selector.selectedSegmentIndex = panel
@@ -290,14 +290,25 @@ final class PrinterDetailPanelsTests: XCTestCase {
             }
         }
         let readsBeforeForeground = safetyStatusReads(fixture.api)
+        let discoveryReadsBeforeForeground = capabilityRequests(fixture.api).count
         controller.rootView = try host(
             detail, services: fixture.services, registry: fixture.registry, scenePhase: .background
         )
+        // Render the background phase before foregrounding; back-to-back root
+        // updates can coalesce so the detail never observes the transition.
+        controller.view.setNeedsLayout()
+        controller.view.layoutIfNeeded()
+        await Task.yield()
         controller.rootView = try host(
             detail, services: fixture.services, registry: fixture.registry, scenePhase: .active
         )
-        try await waitForHost("Foreground Filament must restart safety observation", in: controller.view) {
-            self.safetyStatusReads(fixture.api) > readsBeforeForeground
+        // A restarted observer reads discovery first; the 5s status cadence
+        // does not, so this cannot be satisfied by a cadence tick.
+        try await waitForHost(
+            "Foreground Filament must restart safety observation", in: controller.view, timeout: .seconds(15)
+        ) {
+            self.capabilityRequests(fixture.api).count > discoveryReadsBeforeForeground
+                && self.safetyStatusReads(fixture.api) > readsBeforeForeground
         }
         XCTAssertGreaterThanOrEqual(safetyStatusReads(fixture.api), 2)
         XCTAssertFalse(fixture.api.capturedRequests.contains { $0.httpMethod != "GET" })
@@ -532,8 +543,11 @@ final class PrinterDetailPanelsTests: XCTestCase {
         }
     }
 
-    private func selectControls<Content: View>(in controller: DetailHostingController<Content>) async throws {
-        try await waitForHost("The production detail pager must appear", in: controller.view) {
+    private func selectControls<Content: View>(
+        in controller: DetailHostingController<Content>,
+        timeout: Duration = .seconds(5)
+    ) async throws {
+        try await waitForHost("The production detail pager must appear", in: controller.view, timeout: timeout) {
             controller.hasAppeared && !self.views(UISegmentedControl.self, in: controller.view).isEmpty
         }
         let selector = try XCTUnwrap(views(UISegmentedControl.self, in: controller.view).first)

@@ -15,6 +15,16 @@ if [[ $# -gt 1 || ( -n "$OUTPUT_MODE" && "$OUTPUT_MODE" != "--udid" ) ]]; then
 fi
 readonly OUTPUT_MODE
 
+XCODE_VERSION_OUTPUT="$(xcodebuild -version)"
+XCODE_VERSION="${XCODE_VERSION_OUTPUT%%$'\n'*}"
+XCODE_BUILD="${XCODE_VERSION_OUTPUT#*$'\n'}"
+if [[ "$XCODE_VERSION" != "Xcode 27.0" || "$XCODE_BUILD" != "Build version 27A266a" ]]; then
+  log_error "Xcode 27.0 build 27A266a is required to resolve iOS simulator destinations; found '$XCODE_VERSION_OUTPUT'." >&2
+  exit 1
+fi
+readonly XCODE_VERSION
+readonly XCODE_BUILD
+
 readonly DEVICE_FAMILY="${IOS_SIMULATOR_DEVICE_FAMILY:-iPhone}"
 case "$DEVICE_FAMILY" in
   iPhone)

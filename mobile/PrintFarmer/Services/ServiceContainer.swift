@@ -66,6 +66,7 @@ final class ServiceContainer: @unchecked Sendable {
     @ObservationIgnored private let apiClientFactory: APIClientFactory
     @ObservationIgnored private let signalRServiceFactory: SignalRServiceFactory
     @ObservationIgnored private let farmShapeStore: FarmShapeStore
+    @ObservationIgnored private let farmShapeStartupSleep: FarmShapeService.Sleep
     @ObservationIgnored private let offlineReplayProviderResolutionHook: @Sendable () async -> Void
     @ObservationIgnored private let activeGeneration: ActiveServerGeneration
     @ObservationIgnored private var observesRegistry: Bool
@@ -305,6 +306,10 @@ final class ServiceContainer: @unchecked Sendable {
         farmSnapshotStore: (any FarmSnapshotStoring)? = nil,
         farmSnapshotOwnerStore: FarmSnapshotOwnerStore? = nil,
         farmShapeStore: FarmShapeStore? = nil,
+        /// Bounds the authenticated farm-shape startup wait. Tests inject a
+        /// causally controlled sleep so a held response cannot race the
+        /// wall-clock `FarmShapeService.startupTimeout`.
+        farmShapeStartupSleep: @escaping FarmShapeService.Sleep = { try await Task.sleep(for: $0) },
         /// H (issue #816 reject, Hicks): injectable canonical durable
         /// authority record. Tests pass a temp-rooted instance so the
         /// production-container reopen test can prove distinct record
@@ -350,6 +355,7 @@ final class ServiceContainer: @unchecked Sendable {
         let shapeStore = farmShapeStore
             ?? FarmShapeStore(userDefaults: userDefaultsBox.userDefaults)
         self.farmShapeStore = shapeStore
+        self.farmShapeStartupSleep = farmShapeStartupSleep
         self.offlineReplayProviderResolutionHook = offlineReplayProviderResolutionHook
         self.activeGeneration = ActiveServerGeneration()
         self.observesRegistry = observeRegistry
@@ -450,7 +456,8 @@ final class ServiceContainer: @unchecked Sendable {
         self.farmShapeService = FarmShapeService(
             apiClient: client,
             serverID: activeServer?.id,
-            store: shapeStore
+            store: shapeStore,
+            sleep: farmShapeStartupSleep
         )
         self.signalRService = signalRServiceFactory(resolvedURL, client)
         self.barcodeIntakeService = BarcodeIntakeService(apiClient: client)
@@ -1259,7 +1266,8 @@ final class ServiceContainer: @unchecked Sendable {
         self.farmShapeService = FarmShapeService(
             apiClient: client,
             serverID: server?.id,
-            store: farmShapeStore
+            store: farmShapeStore,
+            sleep: farmShapeStartupSleep
         )
         self.signalRService = signalRServiceFactory(baseURL, client)
         self.barcodeIntakeService = BarcodeIntakeService(apiClient: client)
@@ -1359,6 +1367,7 @@ final class ServiceContainer: @unchecked Sendable {
         }
         self.offlineReplayProviderResolutionHook = {}
         self.farmShapeStore = FarmShapeStore()
+        self.farmShapeStartupSleep = { try await Task.sleep(for: $0) }
         self.activeGeneration = ActiveServerGeneration()
         self.offlineWriteQueueStore = FileOfflineWriteQueueStore(
             directory: Self.offlineWriteQueueDirectory()

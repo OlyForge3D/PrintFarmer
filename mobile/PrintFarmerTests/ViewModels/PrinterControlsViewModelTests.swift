@@ -3092,7 +3092,9 @@ final class GuardedMaterialControlsTests: XCTestCase {
 
     private func fixture(
         caps: PrinterBackendCapabilities? = nil,
-        access: @escaping @MainActor () -> String? = { nil }
+        access: @escaping @MainActor () -> String? = { nil },
+        beforeCapabilities: (@Sendable () async -> Void)? = nil,
+        beforeStatus: (@Sendable () async -> Void)? = nil
     ) async throws -> (PrinterControlsViewModel, MockPrinterService) {
         var printer = try idlePrinter()
         printer.state = "ready"
@@ -3117,8 +3119,15 @@ final class GuardedMaterialControlsTests: XCTestCase {
                 maxHotendTemp: 300, maxBedTemp: 120, hasHeatedBed: true
             )
         )
+        let printerService: any PrinterServiceProtocol = beforeCapabilities == nil && beforeStatus == nil
+            ? service
+            : ControlsDelayedService(
+                base: service,
+                beforeCapabilities: beforeCapabilities ?? {},
+                beforeStatus: beforeStatus ?? {}
+            )
         let model = PrinterControlsViewModel.configuredForTests(
-            printerService: service, printer: printer, accessCheck: access
+            printerService: printerService, printer: printer, accessCheck: access
         )
         await model.loadCapabilities()
         return (model, service)
@@ -3288,6 +3297,81 @@ final class GuardedMaterialControlsTests: XCTestCase {
         await model.refreshSafetyEvidence()
         XCTAssertTrue(model.filamentBlockedReason(.load)?.contains("220") == true)
         XCTAssertTrue(model.filamentBlockedReason(.unload)?.contains("220") == true)
+    }
+
+    func test_observerDiscoveryReadSupersedesInFlightStatusOnlyBackfill() async throws {
+        let gate = OneShotGate()
+        let barrier = AsyncBarrier()
+        addTeardownBlock { barrier.close() }
+        let (model, service) = try await fixture(beforeStatus: {
+            if await gate.claim() { await barrier.arriveAndWait() }
+        })
+        // Mirrors the detail host: the observer suspends evidence, then the
+        // section's loadCapabilities backfills status without discovery.
+        model.suspendSafetyObservation()
+        await gate.arm()
+        let backfill = Task { await model.loadCapabilities() }
+        await barrier.waitUntilArrived()
+        let discoveryReads = service.getBackendCapabilitiesCallCount
+
+        await model.refreshSafetyEvidence()
+
+        XCTAssertEqual(service.getBackendCapabilitiesCallCount, discoveryReads + 1,
+                       "The observer's immediate discovery read must not wait for the next cadence")
+        XCTAssertNotNil(model.capabilities?.verifiedSafety)
+        XCTAssertNotNil(model.safetyStatus)
+        XCTAssertFalse(model.isRefreshingSafety)
+        barrier.release()
+        await backfill.value
+        XCTAssertFalse(model.isRefreshingSafety)
+        XCTAssertNotNil(model.safetyStatus)
+    }
+
+    func test_cancelledSafetyReadNeverClaimsSingleFlightSlotFromReplacementObserver() async throws {
+        let gate = OneShotGate()
+        let barrier = AsyncBarrier()
+        let cancelledHookEntries = HookCounter()
+        addTeardownBlock { barrier.close() }
+        // The hook runs in the reading task, so it can attribute each
+        // capability read. A cancelled caller is recorded and never held,
+        // keeping a regressed guard from deadlocking the test.
+        let (model, service) = try await fixture(beforeCapabilities: {
+            if Task.isCancelled {
+                _ = await cancelledHookEntries.next()
+                return
+            }
+            if await gate.claim() { await barrier.arriveAndWait() }
+        })
+        service.getStatusCalledWith = nil
+        service.statusToReturn?.safetyTelemetry?.measuredHotendTemperatureC.value = 219
+        let discoveryReads = service.getBackendCapabilitiesCallCount
+        // Mirrors a page switch: the superseded observer is cancelled before
+        // it enters the read. Its refresh attempt completes before the
+        // replacement observer launches, so no scheduler ordering can let the
+        // replacement occupy the slot first and hide a missing cancellation guard.
+        let superseded = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            await model.refreshSafetyEvidence()
+        }
+        await superseded.value
+        let cancelledEntries = await cancelledHookEntries.count
+        XCTAssertEqual(cancelledEntries, 0, "A cancelled observer must not start a capability read")
+        XCTAssertEqual(service.getBackendCapabilitiesCallCount, discoveryReads,
+                       "A cancelled observer must not claim the single-flight read")
+        XCTAssertFalse(model.isRefreshingSafety)
+        await gate.arm()
+        let replacement = Task { await model.refreshSafetyEvidence() }
+        await barrier.waitUntilArrived()
+        barrier.release()
+        await replacement.value
+
+        XCTAssertFalse(model.isRefreshingSafety)
+        XCTAssertEqual(service.getBackendCapabilitiesCallCount, discoveryReads + 1,
+                       "Only the replacement observer may claim the single-flight read")
+        XCTAssertEqual(service.getStatusCalledWith, model.printer.id,
+                       "Replacement observer's immediate read must not be dropped by a cancelled one")
+        XCTAssertTrue(model.filamentBlockedReason(.load)?.contains("220") == true,
+                      "Replacement observer's immediate read must publish fresh evidence")
     }
 
     func test_loadUnloadUseHigherOf220AndVerifiedMinimum() async throws {
@@ -4031,11 +4115,19 @@ private actor AsyncGate {
     }
 }
 
-/// Serialized invocation counter used to gate only the FIRST mock hook entry
-/// so a regressed single-flight cannot deadlock on a closed gate.
+/// Gates only the FIRST mock hook entry after arming, so a regressed
+/// single-flight cannot deadlock on a closed gate.
+private actor OneShotGate {
+    private var armed = false
+    func arm() { armed = true }
+    func claim() -> Bool { defer { armed = false }; return armed }
+}
+
+/// Serialized invocation counter for mock hooks.
 private actor HookCounter {
     private var n = 0
     func next() -> Int { n += 1; return n }
+    var count: Int { n }
 }
 
 private struct ControlsDelayedService: PrinterServiceProtocol {
@@ -4043,6 +4135,8 @@ private struct ControlsDelayedService: PrinterServiceProtocol {
     var beforeDetails: @Sendable () async -> Void = {}
     var beforeHome: @Sendable () async -> Void = {}
     var beforeMoveTo: @Sendable () async -> Void = {}
+    var beforeCapabilities: @Sendable () async -> Void = {}
+    var beforeStatus: @Sendable () async -> Void = {}
 
     func getDetails(id: UUID) async throws -> PrinterDetails {
         await beforeDetails()
@@ -4053,14 +4147,18 @@ private struct ControlsDelayedService: PrinterServiceProtocol {
         try await base.home(printerId: printerId, axes: axes)
     }
     func getBackendCapabilities(printerId: UUID) async throws -> PrinterBackendCapabilities {
-        try await base.getBackendCapabilities(printerId: printerId)
+        await beforeCapabilities()
+        return try await base.getBackendCapabilities(printerId: printerId)
     }
     func setTemperatures(printerId: UUID, hotend: Double?, bed: Double?) async throws {
         try await base.setTemperatures(printerId: printerId, hotend: hotend, bed: bed)
     }
     func list(includeDisabled: Bool) async throws -> [Printer] { try await base.list(includeDisabled: includeDisabled) }
     func get(id: UUID) async throws -> Printer { try await base.get(id: id) }
-    func getStatus(id: UUID) async throws -> PrinterStatusDetail { try await base.getStatus(id: id) }
+    func getStatus(id: UUID) async throws -> PrinterStatusDetail {
+        await beforeStatus()
+        return try await base.getStatus(id: id)
+    }
     func listCameraUrls() async throws -> [PrinterCameraUrls] { try await base.listCameraUrls() }
     func getCameraUrl(id: UUID) async throws -> PrinterCameraUrl { try await base.getCameraUrl(id: id) }
     func getSnapshot(id: UUID) async throws -> Data { try await base.getSnapshot(id: id) }

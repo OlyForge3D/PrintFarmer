@@ -53,6 +53,15 @@ esac
 MOCK
 chmod +x "$MOCK_BIN/xcrun"
 
+cat > "$MOCK_BIN/xcodebuild" <<'MOCK'
+#!/bin/bash
+set -euo pipefail
+printf 'Xcode %s\nBuild version %s\n' \
+  "${XCODE_VERSION_FIXTURE:-27.0}" \
+  "${XCODE_BUILD_FIXTURE:-27A266a}"
+MOCK
+chmod +x "$MOCK_BIN/xcodebuild"
+
 export SIMCTL_RUNTIME_FIXTURE="$TEMP_DIR/runtimes.json"
 cat > "$SIMCTL_RUNTIME_FIXTURE" <<'JSON'
 {
@@ -129,6 +138,37 @@ test_default_iphone() {
   [[ "$(wc -l < "$github_env" | tr -d ' ')" == 4 ]] \
     || fail "CI contract must contain exactly four environment lines"
   assert_contains "$output" "Using iOS simulator: iPhone 15"
+}
+
+test_xcode_version_policy() {
+  local output
+  if output="$(
+    env \
+      PATH="$MOCK_BIN:$PATH" \
+      XCODE_VERSION_FIXTURE="26.6" \
+      SIMCTL_FIXTURE="$FIXTURE_MIXED" \
+      "$RESOLVER" 2>&1
+  )"; then
+    fail "Expected an unsupported Xcode version to fail"
+  fi
+  assert_contains "$output" "Xcode 27.0 build 27A266a is required to resolve iOS simulator destinations"
+  assert_contains "$output" "found 'Xcode 26.6"
+}
+
+test_xcode_build_policy() {
+  local output
+  if output="$(
+    env \
+      PATH="$MOCK_BIN:$PATH" \
+      XCODE_VERSION_FIXTURE="27.0" \
+      XCODE_BUILD_FIXTURE="27A266b" \
+      SIMCTL_FIXTURE="$FIXTURE_MIXED" \
+      "$RESOLVER" 2>&1
+  )"; then
+    fail "Expected an unsupported Xcode build to fail"
+  fi
+  assert_contains "$output" "Xcode 27.0 build 27A266a is required"
+  assert_contains "$output" "Build version 27A266b"
 }
 
 test_explicit_ipad_with_quoted_names() {
@@ -309,6 +349,8 @@ PY
 }
 
 test_default_iphone
+test_xcode_version_policy
+test_xcode_build_policy
 test_explicit_ipad_with_quoted_names
 test_no_matching_family
 test_invalid_family_and_prefix

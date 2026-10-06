@@ -468,8 +468,11 @@ than private defaults or running a second collector.
   always returns **124**, even if interrupted Xcode reports success.
   Normally Xcode's original exit (including **65**) is preserved.
 - A separate **1440s invocation ceiling** covers build, startup and missing
-  events; the unit CI job uses 840s. These include the same flush window and
-  leave a minute before the existing 25/15-minute Actions step ceilings.
+  events in both the unit and XCUI CI jobs. It includes the same flush window
+  and leaves a minute before the 25-minute Actions step ceilings. The unit job
+  previously used 840s/15 minutes; on the `xcode-27` runner, first launch on
+  the downloaded iOS 26.5 runtime took ~8 minutes and tests ran ~2x slower, so
+  that budget expired mid-suite (#3286).
   Local overrides are explicit `--invocation-timeout` and
   `--finalization-timeout` arguments before `--`, both greater than 10s.
 - The runner forces enabled XCTest timeouts and serial execution; it rejects

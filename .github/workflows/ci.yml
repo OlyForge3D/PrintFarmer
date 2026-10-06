@@ -136,7 +136,7 @@ jobs:
     if: >-
       inputs.release_qualification || github.event_name == 'workflow_dispatch' &&
       (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/development')
-    runs-on: macos-latest
+    runs-on: xcode-27
     timeout-minutes: 45
     defaults:
       run:
@@ -151,15 +151,24 @@ jobs:
       # validation never selects/skips these steps and needs no signing secrets.
       - name: Verify marketing version consistency
         run: ./scripts/verify-marketing-version.sh source 1.0
-      - name: Select Xcode
+      - name: Select Xcode 27.0
         run: |
-          XCODE_PATH=$(ls -d /Applications/Xcode_16*.app /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
-          if [ -z "$XCODE_PATH" ]; then
-            XCODE_PATH="/Applications/Xcode.app"
+          XCODE_PATH="/Applications/Xcode_27.0.app"
+          if [ ! -d "$XCODE_PATH" ]; then
+            echo "::error::Xcode 27.0 is missing from the xcode-27 runner at $XCODE_PATH."
+            exit 1
           fi
-          echo "Using: $XCODE_PATH"
           sudo xcode-select -s "$XCODE_PATH/Contents/Developer"
-          xcodebuild -version
+          XCODE_VERSION="$(xcodebuild -version)"
+          if [ "$(printf '%s\n' "$XCODE_VERSION" | head -n 1)" != "Xcode 27.0" ]; then
+            echo "::error::Expected Xcode 27.0 at $XCODE_PATH, found: $XCODE_VERSION"
+            exit 1
+          fi
+          if [ "$(printf '%s\n' "$XCODE_VERSION" | sed -n '2s/^Build version //p')" != "27A266a" ]; then
+            echo "::error::Expected Xcode build 27A266a at $XCODE_PATH, found: $XCODE_VERSION"
+            exit 1
+          fi
+          printf '%s\n' "$XCODE_VERSION"
       - name: Resolve package dependencies
         run: |
           xcodebuild -project PrintFarmer.xcodeproj \

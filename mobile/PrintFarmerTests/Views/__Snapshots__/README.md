@@ -20,10 +20,15 @@ layout or UI tests.
 
 ## Regenerating
 
-Baselines are SDK-sensitive. Select the Xcode and simulator with the same
-workflow steps and preference variables used by
+Baselines are SDK-sensitive. Generate them with Xcode 27.0 build 27A266a and the approved
+iOS 26.5 (23F77) simulator runtime. CI uses the `xcode-27` runner image and
+installs iOS 26.5 when it is not preinstalled. Select the simulator with the
+same workflow steps and preference variables used by
 `.github/workflows/ios-pr-ci.yml`, then run only
 `PrinterControlsSectionSnapshotTests`.
+The shared host helper forces `.light`; the dedicated destructive-button
+snapshot selects `.dark` explicitly, so host appearance cannot change the
+Controls references.
 
 1. Run the full affected snapshot class and inspect reference/actual/difference
    attachments. Identify which baselines reflect an intentional approved change,
@@ -76,8 +81,8 @@ offline and print-state gates are unchanged.
 The independent destructive-button dark-mode reference remains unchanged.
 
 References were regenerated on task-isolated iPhone 17 (3x) and iPad Pro
-13-inch M5 (2x) hosts using Xcode 26.6 (17F113), iOS 26.5 (23F77), the
-shared approved-runtime resolver and the unchanged `.iPhone13` component
+13-inch M5 (2x) hosts using Xcode 26.6 (17F113), iOS 26.5 (23F77),
+the shared approved-runtime resolver and the unchanged `.iPhone13` component
 configuration. Full-page identity/selector captures and homing dispatch tests
 supplement these component goldens.
 
@@ -127,3 +132,12 @@ goldens remain unchanged.
 These are component renderings of explicit test fixtures, not backend or
 physical-printer command evidence. Capability assertions and command tests
 remain the behavioral evidence; strict image comparison is unchanged.
+
+## Xcode 27.0 toolchain baseline (#3285)
+
+The six Controls snapshots are maintained against Xcode 27.0 build 27A266a and
+iOS 26.5 (23F77). The references were regenerated with the strict existing
+snapshot assertions on the resolver-selected iPhone and iPad hosts, with
+appearance pinned to light. The six iPhone references were byte-identical to
+their existing goldens; only the six iPad references changed. The dark-mode
+destructive-button reference is independent and remains unchanged.

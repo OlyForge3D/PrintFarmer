@@ -52,7 +52,7 @@ or Two-modes promotion. Retired analytical deep links open Farm.
 
 ## Constraints
 
-- iOS 17+, SwiftUI, Swift Concurrency, MVVM and repository services; Xcode 26+.
+- iOS 17+, SwiftUI, Swift Concurrency, MVVM and repository services; Xcode 27.0.
 - Shared `/api/*` contract: camelCase JSON and string enums.
 - No mobile-only DTOs without a genuine contract need.
 - Native navigation and minimum 44-point targets on iPhone and iPad.
