@@ -183,6 +183,7 @@ public class PrintJobCompletionService : IPrintJobCompletionService
                 // All copies done — mark job as completed
                 job.Status = PrintJobStatus.Completed;
                 job.ActualEndTime = completedAtUtc;
+                job.ActiveExternalPrinterId = null;
 
                 if (job.ActualStartTime.HasValue)
                 {
@@ -396,6 +397,7 @@ public class PrintJobCompletionService : IPrintJobCompletionService
             job.Status = PrintJobStatus.Failed;
             job.ActualEndTime = failedAtUtc;
             job.FailureReason = failureReason;
+            job.ActiveExternalPrinterId = null;
 
             // Calculate actual duration if start time is set
             if (job.ActualStartTime.HasValue)
@@ -839,9 +841,13 @@ public class PrintJobCompletionService : IPrintJobCompletionService
                             attempt.Outcome == DispatchAttemptOutcome.Accepted,
                         ct)
                     : null;
-            if (activeState?.ActiveJobId != job.Id ||
-                activeAttempt is null ||
-                activeState.PhysicalControlCommandId.HasValue)
+            bool hasAcceptedDispatchLease =
+                activeState?.ActiveJobId == job.Id &&
+                activeAttempt is not null &&
+                !activeState.PhysicalControlCommandId.HasValue;
+            bool isExternallyObservedJob = IsExternallyObservedJob(job, printerId);
+
+            if (!hasAcceptedDispatchLease && !isExternallyObservedJob)
             {
                 continue;
             }
@@ -966,12 +972,13 @@ public class PrintJobCompletionService : IPrintJobCompletionService
                     resourceId: job.Id,
                     printerId: printerId,
                     printJobId: job.Id,
-                    dispatchAttemptId: activeAttempt.Id,
+                    dispatchAttemptId: activeAttempt?.Id,
                     reasonCode: reasonCode,
                     jobRowVersion: job.RowVersion,
                     detail: new
                     {
                         source = "orphan_sync",
+                        jobSource = isExternallyObservedJob ? "external" : "dispatch",
                         observedPrinterState = currentPrinterState,
                         fromState = PrintJobStatus.Printing.ToString(),
                         toState = job.Status.ToString(),
@@ -1258,6 +1265,11 @@ public class PrintJobCompletionService : IPrintJobCompletionService
 
     private static string NormalizeIdentity(string value) =>
         value.Trim().Replace('\\', '/').TrimStart('/');
+
+    private static bool IsExternallyObservedJob(PrintJob job, Guid printerId) =>
+        job.IsExternalPrint ||
+        job.WasSeededFromHistory ||
+        job.ActiveExternalPrinterId == printerId;
 
     /// <summary>
     /// Releases the dispatch lease when the active job on the printer matches one of the
