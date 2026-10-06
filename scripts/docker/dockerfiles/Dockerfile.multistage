@@ -31,6 +31,64 @@ ARG SOURCE_REPOSITORY=""
 ARG SOURCE_ARCHIVE_URL=""
 ARG SBOM_URL=""
 
+############################################################
+# Network resilience helper
+# `pf-retry <command> [args...]` re-runs a package-download command with
+# linear backoff so transient DNS/mirror failures (common on congested or
+# Wi-Fi build hosts during parallel --no-cache builds) do not fail the build.
+############################################################
+FROM scratch AS build-retry-helper
+COPY --chmod=0755 <<'EOF' /pf-retry
+#!/bin/sh
+attempts="${PF_RETRY_ATTEMPTS:-5}"
+delay="${PF_RETRY_DELAY:-10}"
+n=1
+while :; do
+    "$@" && exit 0
+    status=$?
+    if [ "$n" -ge "$attempts" ]; then
+        echo "[pf-retry] '$*' failed after $n attempts (exit $status)" >&2
+        exit "$status"
+    fi
+    wait_s=$((n * delay))
+    echo "[pf-retry] '$*' failed (exit $status); retry $((n + 1))/$attempts in ${wait_s}s" >&2
+    sleep "$wait_s"
+    n=$((n + 1))
+done
+EOF
+
+############################################################
+# Shared apt index + upgraded ASP.NET base
+# `apt-get update` runs exactly once per platform (in *-apt-index), and the
+# downloaded package lists are bind-mounted into every stage that installs
+# packages, so they never land in a shipped image layer. Every ASP.NET
+# runtime image builds FROM aspnet-base / aspnet-base-amd64, which applies
+# `apt-get upgrade` and the common tools once instead of per service.
+# Error-Mode=any makes `apt-get update` fail (and retry) on a partially
+# failed index download instead of silently succeeding with no lists.
+############################################################
+FROM mcr.microsoft.com/dotnet/aspnet:${ASPNET_TAG} AS aspnet-apt-index
+COPY --from=build-retry-helper /pf-retry /usr/local/bin/pf-retry
+RUN pf-retry apt-get -o Acquire::Retries=5 -o APT::Update::Error-Mode=any update
+
+FROM --platform=linux/amd64 mcr.microsoft.com/dotnet/aspnet:${ASPNET_TAG} AS aspnet-apt-index-amd64
+COPY --from=build-retry-helper /pf-retry /usr/local/bin/pf-retry
+RUN pf-retry apt-get -o Acquire::Retries=5 -o APT::Update::Error-Mode=any update
+
+FROM mcr.microsoft.com/dotnet/aspnet:${ASPNET_TAG} AS aspnet-base
+COPY --from=build-retry-helper /pf-retry /usr/local/bin/pf-retry
+RUN --mount=type=bind,from=aspnet-apt-index,source=/var/lib/apt/lists,target=/var/lib/apt/lists,rw \
+    DEBIAN_FRONTEND=noninteractive pf-retry apt-get -o Acquire::Retries=5 upgrade -y --no-install-recommends \
+    && DEBIAN_FRONTEND=noninteractive pf-retry apt-get -o Acquire::Retries=5 install -y --no-install-recommends \
+        curl wget ca-certificates
+
+FROM --platform=linux/amd64 mcr.microsoft.com/dotnet/aspnet:${ASPNET_TAG} AS aspnet-base-amd64
+COPY --from=build-retry-helper /pf-retry /usr/local/bin/pf-retry
+RUN --mount=type=bind,from=aspnet-apt-index-amd64,source=/var/lib/apt/lists,target=/var/lib/apt/lists,rw \
+    DEBIAN_FRONTEND=noninteractive pf-retry apt-get -o Acquire::Retries=5 upgrade -y --no-install-recommends \
+    && DEBIAN_FRONTEND=noninteractive pf-retry apt-get -o Acquire::Retries=5 install -y --no-install-recommends \
+        curl wget ca-certificates
+
 FROM scratch AS legal-assets
 COPY LICENSE /LICENSE
 COPY THIRD-PARTY-NOTICES.md /THIRD-PARTY-NOTICES.md
@@ -76,6 +134,7 @@ COPY global.json ./
 COPY VERSION ./
 COPY proto ./proto
 COPY --from=restore-manifest /manifest/src/ ./src/
+COPY --from=build-retry-helper /pf-retry /usr/local/bin/pf-retry
 
 # Set working directory for builds
 WORKDIR /src
@@ -85,19 +144,19 @@ WORKDIR /src
 # OrcaSlicer plugin versions) so every subsequent `--no-restore` build/publish
 # step has already been restored here - see issue #2330 for why this list
 # must never diverge from what is built with --no-restore further down.
-RUN dotnet restore ./api/Farm.Web.Api.csproj && \
-    dotnet restore ./orcaslicer-worker/Farm.OrcaSlicer.Worker.csproj && \
-    dotnet restore ./printer-discovery/PrinterDiscoveryService.csproj && \
-    dotnet restore ./slicer/Farm.Slicer.Host/Farm.Slicer.Host.csproj && \
-    dotnet restore ./moonraker-emulator/Farm.Moonraker.Emulator/Farm.Moonraker.Emulator.csproj && \
-    dotnet restore ./Slicers/Farm.Slicers.OrcaSlicer.v2_4_0/Farm.Slicers.OrcaSlicer.v2_4_0.csproj && \
-    dotnet restore ./Slicers/Farm.Slicers.OrcaSlicer.v2_3_1/Farm.Slicers.OrcaSlicer.v2_3_1.csproj && \
-    dotnet restore ./backends/Farm.Backend.Plugin.Moonraker/Farm.Backend.Plugin.Moonraker.csproj && \
-    dotnet restore ./backends/Farm.Backend.Plugin.PrusaLink/Farm.Backend.Plugin.PrusaLink.csproj && \
-    dotnet restore ./backends/Farm.Backend.Plugin.OctoPrint/Farm.Backend.Plugin.OctoPrint.csproj && \
-    dotnet restore ./backends/Farm.Backend.Plugin.Sdcp/Farm.Backend.Plugin.Sdcp.csproj && \
-    dotnet restore ./backends/Farm.Backend.Plugin.FlashForge/Farm.Backend.Plugin.FlashForge.csproj && \
-    dotnet restore ./backends/Farm.Backend.Plugin.TestEmulator/Farm.Backend.Plugin.TestEmulator.csproj
+RUN pf-retry dotnet restore ./api/Farm.Web.Api.csproj && \
+    pf-retry dotnet restore ./orcaslicer-worker/Farm.OrcaSlicer.Worker.csproj && \
+    pf-retry dotnet restore ./printer-discovery/PrinterDiscoveryService.csproj && \
+    pf-retry dotnet restore ./slicer/Farm.Slicer.Host/Farm.Slicer.Host.csproj && \
+    pf-retry dotnet restore ./moonraker-emulator/Farm.Moonraker.Emulator/Farm.Moonraker.Emulator.csproj && \
+    pf-retry dotnet restore ./Slicers/Farm.Slicers.OrcaSlicer.v2_4_0/Farm.Slicers.OrcaSlicer.v2_4_0.csproj && \
+    pf-retry dotnet restore ./Slicers/Farm.Slicers.OrcaSlicer.v2_3_1/Farm.Slicers.OrcaSlicer.v2_3_1.csproj && \
+    pf-retry dotnet restore ./backends/Farm.Backend.Plugin.Moonraker/Farm.Backend.Plugin.Moonraker.csproj && \
+    pf-retry dotnet restore ./backends/Farm.Backend.Plugin.PrusaLink/Farm.Backend.Plugin.PrusaLink.csproj && \
+    pf-retry dotnet restore ./backends/Farm.Backend.Plugin.OctoPrint/Farm.Backend.Plugin.OctoPrint.csproj && \
+    pf-retry dotnet restore ./backends/Farm.Backend.Plugin.Sdcp/Farm.Backend.Plugin.Sdcp.csproj && \
+    pf-retry dotnet restore ./backends/Farm.Backend.Plugin.FlashForge/Farm.Backend.Plugin.FlashForge.csproj && \
+    pf-retry dotnet restore ./backends/Farm.Backend.Plugin.TestEmulator/Farm.Backend.Plugin.TestEmulator.csproj
 
 # Now bring in the full source tree from the real build context. This layer's
 # cache is invalidated on every source edit, but it comes *after* restore, so
@@ -172,7 +231,7 @@ RUN echo "Checking published artifacts..." && \
 ############################################################
 # API Runtime Container
 ############################################################
-FROM mcr.microsoft.com/dotnet/aspnet:${ASPNET_TAG} AS api-runtime
+FROM aspnet-base AS api-runtime
 ARG BUILD_VERSION
 ARG VCS_REF
 ARG SOURCE_REPOSITORY
@@ -190,10 +249,10 @@ LABEL org.opencontainers.image.title="PrintFarmer API" \
       org.printfarmer.source-archive="${SOURCE_ARCHIVE_URL}" \
       org.printfarmer.sbom="${SBOM_URL}"
 
-# Install runtime tools that are present in the upgraded image
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        curl wget ca-certificates iputils-ping iproute2 net-tools dnsutils \
-    && rm -rf /var/lib/apt/lists/*
+# Install diagnostics tools and gosu (privilege dropping) on top of aspnet-base
+RUN --mount=type=bind,from=aspnet-apt-index,source=/var/lib/apt/lists,target=/var/lib/apt/lists,rw \
+    pf-retry apt-get -o Acquire::Retries=5 install -y --no-install-recommends \
+        iputils-ping iproute2 net-tools dnsutils gosu
 
 # Create appuser if it doesn't exist (for standard base images)
 # Use UID 1001 as UID 1000 may already be taken in Ubuntu 24.04
@@ -227,9 +286,6 @@ RUN printf '%s\n' \
     > /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
-# Install gosu for privilege dropping (used by many Docker images)
-RUN apt-get update && apt-get install -y --no-install-recommends gosu && rm -rf /var/lib/apt/lists/*
-
 # Set environment
 ENV ASPNETCORE_URLS=http://+:5000
 ENV ASPNETCORE_ENVIRONMENT=Production
@@ -258,7 +314,7 @@ ENTRYPOINT ["/app/entrypoint.sh"]
 # data (printers, catalog models, manufacturers).
 # NOTE: amd64-only — depends on OrcaSlicer binaries
 ############################################################
-FROM --platform=linux/amd64 mcr.microsoft.com/dotnet/aspnet:${ASPNET_TAG} AS slicer-host-runtime
+FROM aspnet-base-amd64 AS slicer-host-runtime
 ARG BUILD_VERSION
 ARG VCS_REF
 ARG SOURCE_REPOSITORY
@@ -276,9 +332,7 @@ LABEL org.opencontainers.image.title="PrintFarmer Slicer Host" \
       org.printfarmer.source-archive="${SOURCE_ARCHIVE_URL}" \
       org.printfarmer.sbom="${SBOM_URL}"
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        curl ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+# curl and ca-certificates come from aspnet-base-amd64
 
 RUN if ! id appuser >/dev/null 2>&1; then useradd -m -u 1001 -s /bin/bash appuser; fi
 
@@ -320,9 +374,11 @@ LABEL orcaslicer.version="${ORCASLICER_VERSION}" \
       orcaslicer.sha256="${ORCASLICER_SHA256}" \
       orcaslicer.allow_stub="${ALLOW_STUB}"
 WORKDIR /tmp
+COPY --from=build-retry-helper /pf-retry /usr/local/bin/pf-retry
 
 # Install AppImage/tooling stack (matches upgraded base image)
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN pf-retry apt-get -o Acquire::Retries=5 -o APT::Update::Error-Mode=any update \
+    && pf-retry apt-get -o Acquire::Retries=5 install -y --no-install-recommends \
         curl ca-certificates jq p7zip-full squashfs-tools libarchive-tools file wget \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
@@ -391,7 +447,8 @@ RUN set -e; \
     # supplied, the pinned URL and its checksum are the reproducibility contract and no other \
     # asset may be substituted for them. \
     if [ -z "${ORCASLICER_SHA256}" ] && [ ! -f orcaslicer.AppImage ]; then \
-        all_appimages=$(curl -H "Accept: application/vnd.github+json" \
+        all_appimages=$(curl --retry 5 --retry-delay 5 --retry-all-errors \
+                          -H "Accept: application/vnd.github+json" \
                           -H "User-Agent: OrcaSlicerWorker/1.0" \
                           -fsSL "https://api.github.com/repos/OrcaSlicer/OrcaSlicer/releases" | \
                       jq -r --arg ver "v${ORCASLICER_VERSION}" \
@@ -413,7 +470,7 @@ RUN set -e; \
     try_download() { \
         url="$1"; \
         echo "[orcaslicer-binaries] Attempting download: $url"; \
-        if curl -H "User-Agent: OrcaSlicerWorker/1.0" -fSL -o orcaslicer.AppImage.tmp "$url"; then \
+        if curl --retry 5 --retry-delay 5 --retry-all-errors -H "User-Agent: OrcaSlicerWorker/1.0" -fSL -o orcaslicer.AppImage.tmp "$url"; then \
             size=$(stat -c%s orcaslicer.AppImage.tmp 2>/dev/null || echo 0); \
             if [ "$size" -gt 5000000 ]; then \
                 mv orcaslicer.AppImage.tmp orcaslicer.AppImage; \
@@ -529,18 +586,17 @@ RUN set -e; \
 # Slicer Base Runtime (shared runtime for all workers)
 # NOTE: amd64-only — OrcaSlicer has no ARM64 binaries
 ############################################################
-FROM --platform=linux/amd64 mcr.microsoft.com/dotnet/aspnet:${ASPNET_TAG} AS slicer-base
+FROM aspnet-base-amd64 AS slicer-base
 WORKDIR /app
 
 # Install OrcaSlicer runtime deps for Ubuntu 24.04 (libgl1-mesa-glx → libgl1-mesa-glx | libglx0)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        curl wget ca-certificates \
+RUN --mount=type=bind,from=aspnet-apt-index-amd64,source=/var/lib/apt/lists,target=/var/lib/apt/lists,rw \
+    pf-retry apt-get -o Acquire::Retries=5 install -y --no-install-recommends \
         libgtk-3-0 libglx0 libglib2.0-0 libstdc++6 libopengl0 libegl1 \
         libglu1-mesa \
         libgstreamer1.0-0 libgstreamer-plugins-base1.0-0 libmspack0 \
         libwebkit2gtk-4.1-0 libjavascriptcoregtk-4.1-0 \
-        xvfb fuse squashfs-tools file p7zip-full \
-    && rm -rf /var/lib/apt/lists/*
+        xvfb fuse squashfs-tools file p7zip-full
 
 # Create appuser if it doesn't exist (for standard base images)
 # Use UID 1001 as UID 1000 may already be taken in Ubuntu 24.04
@@ -697,6 +753,7 @@ ARG PRINTFARMER_RELEASE_IDENTITY
 
 # Copy package files directly from ReactApp (no workspaces)
 COPY src/Web/ReactApp/package.json src/Web/ReactApp/package-lock.json ./
+COPY --from=build-retry-helper /pf-retry /usr/local/bin/pf-retry
 
 # Install npm dependencies with proper error handling
 RUN set -eux; \
@@ -705,10 +762,10 @@ RUN set -eux; \
     \
     if [ -f package-lock.json ]; then \
         echo "[frontend-build] package-lock.json found - using npm ci"; \
-        npm ci --prefer-offline --no-audit --legacy-peer-deps 2>&1 | tee /tmp/npm-install.log; \
+        pf-retry npm ci --prefer-offline --no-audit --legacy-peer-deps --fetch-retries=5 --fetch-retry-mintimeout=20000 --fetch-retry-maxtimeout=120000 2>&1 | tee /tmp/npm-install.log; \
     else \
         echo "[frontend-build] package-lock.json NOT found - using npm install"; \
-        npm install --prefer-offline --no-audit --legacy-peer-deps 2>&1 | tee /tmp/npm-install.log; \
+        pf-retry npm install --prefer-offline --no-audit --legacy-peer-deps --fetch-retries=5 --fetch-retry-mintimeout=20000 --fetch-retry-maxtimeout=120000 2>&1 | tee /tmp/npm-install.log; \
     fi; \
     npm_status=$?; \
     \
@@ -798,7 +855,8 @@ LABEL org.opencontainers.image.title="PrintFarmer Frontend" \
       org.printfarmer.sbom="${SBOM_URL}"
 
 # Ensure curl present for health checks
-RUN apk update && apk add --no-cache curl && rm -rf /var/cache/apk/*
+COPY --from=build-retry-helper /pf-retry /usr/local/bin/pf-retry
+RUN pf-retry apk add --no-cache curl
 
 # Copy built React app (from /app/dist since source was copied flat)
 COPY --from=frontend-build /app/dist .
@@ -845,7 +903,7 @@ HEALTHCHECK --interval=30s --timeout=15s --start-period=120s --retries=8 \
 ############################################################
 # Printer Discovery Service Runtime Container
 ############################################################
-FROM mcr.microsoft.com/dotnet/aspnet:${ASPNET_TAG} AS printer-discovery-runtime
+FROM aspnet-base AS printer-discovery-runtime
 ARG BUILD_VERSION
 ARG VCS_REF
 ARG SOURCE_REPOSITORY
@@ -862,8 +920,7 @@ LABEL org.opencontainers.image.title="PrintFarmer Printer Discovery" \
       org.printfarmer.source-archive="${SOURCE_ARCHIVE_URL}" \
       org.printfarmer.sbom="${SBOM_URL}"
 
-# Install curl for health checks (standard base images don't have it)
-RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
+# curl (health checks) comes from aspnet-base
 
 # Create discovery user (different from appuser for service isolation)
 RUN groupadd -r discovery && useradd -r -g discovery discovery && \
@@ -893,7 +950,7 @@ ENTRYPOINT ["dotnet", "PrinterDiscoveryService.dll"]
 # dependencies: it only serves deterministic printer-shaped HTTP/WebSocket
 # state to the unchanged Farm.Backend.Plugin.Moonraker client.
 ############################################################
-FROM mcr.microsoft.com/dotnet/aspnet:${ASPNET_TAG} AS moonraker-emulator-runtime
+FROM aspnet-base AS moonraker-emulator-runtime
 ARG BUILD_VERSION
 ARG VCS_REF
 ARG SOURCE_REPOSITORY
@@ -910,8 +967,7 @@ LABEL org.opencontainers.image.title="PrintFarmer Moonraker Emulator" \
       org.printfarmer.source-archive="${SOURCE_ARCHIVE_URL}" \
       org.printfarmer.sbom="${SBOM_URL}"
 
-# Install curl for health checks (standard base images don't have it)
-RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
+# curl (health checks) comes from aspnet-base
 
 # Create emulator user (isolated from appuser/discovery for service separation)
 RUN groupadd -r emulator && useradd -r -g emulator emulator && \
