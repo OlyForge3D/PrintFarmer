@@ -3330,26 +3330,39 @@ final class GuardedMaterialControlsTests: XCTestCase {
     func test_cancelledSafetyReadNeverClaimsSingleFlightSlotFromReplacementObserver() async throws {
         let gate = OneShotGate()
         let barrier = AsyncBarrier()
+        let cancelledHookEntries = HookCounter()
         addTeardownBlock { barrier.close() }
+        // The hook runs in the reading task, so it can attribute each
+        // capability read. A cancelled caller is recorded and never held,
+        // keeping a regressed guard from deadlocking the test.
         let (model, service) = try await fixture(beforeCapabilities: {
+            if Task.isCancelled {
+                _ = await cancelledHookEntries.next()
+                return
+            }
             if await gate.claim() { await barrier.arriveAndWait() }
         })
         service.getStatusCalledWith = nil
         service.statusToReturn?.safetyTelemetry?.measuredHotendTemperatureC.value = 219
         let discoveryReads = service.getBackendCapabilitiesCallCount
-        await gate.arm()
         // Mirrors a page switch: the superseded observer is cancelled before
-        // it enters the read, then the replacement observer reads at once.
-        // Self-cancelling first makes that ordering independent of scheduling.
+        // it enters the read. Its refresh attempt completes before the
+        // replacement observer launches, so no scheduler ordering can let the
+        // replacement occupy the slot first and hide a missing cancellation guard.
         let superseded = Task {
             withUnsafeCurrentTask { $0?.cancel() }
             await model.refreshSafetyEvidence()
         }
-        superseded.cancel()
+        await superseded.value
+        let cancelledEntries = await cancelledHookEntries.count
+        XCTAssertEqual(cancelledEntries, 0, "A cancelled observer must not start a capability read")
+        XCTAssertEqual(service.getBackendCapabilitiesCallCount, discoveryReads,
+                       "A cancelled observer must not claim the single-flight read")
+        XCTAssertFalse(model.isRefreshingSafety)
+        await gate.arm()
         let replacement = Task { await model.refreshSafetyEvidence() }
         await barrier.waitUntilArrived()
         barrier.release()
-        await superseded.value
         await replacement.value
 
         XCTAssertFalse(model.isRefreshingSafety)
@@ -4114,6 +4127,7 @@ private actor OneShotGate {
 private actor HookCounter {
     private var n = 0
     func next() -> Int { n += 1; return n }
+    var count: Int { n }
 }
 
 private struct ControlsDelayedService: PrinterServiceProtocol {
