@@ -99,6 +99,29 @@ Keep snapshot strictness, skip policy and PNGs unchanged. The
 [snapshot guide](PrintFarmerTests/Views/__Snapshots__/README.md) is not
 authorization to re-record baselines for #2536/#2572.
 
+## Updating App Store screenshots (manual)
+
+From the repository root, run:
+
+```bash
+cd mobile
+python3 scripts/app-store-screenshots.py
+```
+
+Requires Xcode, Python 3 and approved **iOS 26.5 (23F77)** simulators:
+**iPhone 17 Pro Max** (1320x2868) and **iPad Pro 13-inch (M5)** (2064x2752).
+The script captures Farm, printer Status, Queue, Filament and Scan once per
+device in dark mode with default Dynamic Type, using DEBUG-only API fixtures.
+Missing device classes are errors; images are never resized.
+
+Review the ten PNGs under git-ignored `mobile/build/app-store/<run>/iPhone/`
+and `iPad/`, then upload them by hand in **App Store Connect**. Logs and result
+bundles stay beside the images. This is a local manual tool, not a release or
+CI pipeline: its capture driver is excluded from the default test plan and
+CI shards, and selected explicitly by the script's manual test plan.
+The command restores simulator appearance/text size and clears its status-bar
+override afterward; do not run other tests on those devices concurrently.
+
 ## Server Configuration
 
 The app supports multiple registered PrintFarmer backend servers. Server

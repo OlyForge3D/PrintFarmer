@@ -2484,6 +2484,11 @@ final class PrinterDetailViewModel {
 
     /// Absolute completion clock time (e.g. "3:45 PM").
     var formattedEtaClock: String? {
+        #if DEBUG
+        if UITestBootstrap.appStoreScreenshotDate != nil {
+            return currentJobRemainingSeconds?.etaFormatted
+        }
+        #endif
         guard let eta = currentJobEtaDate else { return nil }
         return eta.formatted(date: .omitted, time: .shortened)
     }

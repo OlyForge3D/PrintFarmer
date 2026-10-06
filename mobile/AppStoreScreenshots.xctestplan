@@ -1,10 +1,9 @@
 {
   "configurations" : [
     {
-      "id" : "7AAB2573-66B4-4A35-9F5D-000000000001",
-      "name" : "Default",
-      "options" : {
-      }
+      "id" : "32790000-0000-0000-0000-000000000001",
+      "name" : "Manual",
+      "options" : {}
     }
   ],
   "defaultOptions" : {
@@ -14,16 +13,8 @@
   },
   "testTargets" : [
     {
-      "parallelizable" : true,
-      "target" : {
-        "containerPath" : "container:PrintFarmer.xcodeproj",
-        "identifier" : "AFC2BA1C050C049765D60160",
-        "name" : "PrintFarmerTests"
-      }
-    },
-    {
-      "parallelizable" : true,
-      "skippedTests" : [
+      "parallelizable" : false,
+      "selectedTests" : [
         "AppStoreScreenshotUITests"
       ],
       "target" : {

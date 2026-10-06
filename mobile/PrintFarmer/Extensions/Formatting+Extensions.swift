@@ -53,6 +53,15 @@ extension TimeInterval {
 
     /// Formats ETA as a time (e.g., "2:45 PM" for today, "Tomorrow 10:00 AM" for tomorrow).
     var etaFormatted: String {
+        #if DEBUG
+        if let now = UITestBootstrap.appStoreScreenshotDate {
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US")
+            formatter.timeZone = TimeZone(secondsFromGMT: 0)
+            formatter.timeStyle = .short
+            return formatter.string(from: now.addingTimeInterval(self))
+        }
+        #endif
         let eta = Date.now.addingTimeInterval(self)
         let calendar = Calendar.current
         if calendar.isDateInToday(eta) {

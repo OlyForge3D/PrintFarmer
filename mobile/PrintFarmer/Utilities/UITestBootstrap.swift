@@ -105,6 +105,19 @@ enum UITestBootstrap {
     static let queueReorderLaunchArgument = "--uitesting-queue-reorder"
     static let issue3259VisualAcceptanceLaunchArgument =
         "--uitesting-issue3259-visual-acceptance"
+    nonisolated static let appStoreScreenshotsLaunchArgument =
+        "--uitesting-app-store-screenshots"
+
+    nonisolated static func appStoreScreenshotDate(in arguments: [String]) -> Date? {
+        guard arguments.contains("--uitesting"),
+              arguments.contains("--uitesting-issue3259-visual-acceptance"),
+              arguments.contains(appStoreScreenshotsLaunchArgument) else { return nil }
+        return Date(timeIntervalSince1970: 1_791_193_260)
+    }
+
+    nonisolated static var appStoreScreenshotDate: Date? {
+        appStoreScreenshotDate(in: CommandLine.arguments)
+    }
     static let issue3259ControlIdleLaunchArgument =
         "--uitesting-issue3259-control-idle"
     static let issue3259SafeFilamentActionsLaunchArgument =
@@ -413,8 +426,17 @@ enum UITestBootstrap {
         }
         #if DEBUG
         if mode == .authenticatedIssue3259VisualAcceptance {
+            let spoolOverrides: [SpoolmanSpool]
+            if appStoreScreenshotDate != nil {
+                let assignedSpoolIDs = Set(Self.issue3259VisualAcceptanceFixture().printers.compactMap {
+                    $0.spoolInfo?.activeSpoolId
+                })
+                spoolOverrides = Self.appStoreScreenshotSpools(assignedSpoolIDs: assignedSpoolIDs)
+            } else {
+                spoolOverrides = [Self.issue3259VisualAcceptanceSpool()]
+            }
             services.spoolService = DemoSpoolService(
-                spoolOverrides: [Self.issue3259VisualAcceptanceSpool()]
+                spoolOverrides: spoolOverrides
             )
             services.signalRService = DemoSignalRService(simulatesProgress: false)
             services.filamentCoverageService = StubFilamentCoverageService(
@@ -592,8 +614,8 @@ enum UITestBootstrap {
 
         var printer = demoPrinter(DemoData.prusaMK4_1_ID)
         printer.progress = 0.64
-        printer.currentLayer = 142
-        printer.totalLayers = 221
+        printer.currentLayer = nil
+        printer.totalLayers = nil
         printer.fanSpeedPercent = 60
         printer.liveZOffsetMm = 0.025
         printer.jobName = "benchy_0.2mm_PLA.gcode"
@@ -607,7 +629,7 @@ enum UITestBootstrap {
             colorHex: "#EF6B4A",
             filamentName: "Prusament PLA",
             vendor: "Prusa Research",
-            remainingWeightG: 84,
+            remainingWeightG: appStoreScreenshotDate == nil ? 84 : 612,
             spoolInUse: true
         )
         if controlIdle {
@@ -725,7 +747,7 @@ enum UITestBootstrap {
             ),
             idleMk4,
         ]
-        let printers = basePrinters + [
+        var printers = basePrinters + [
             issue3259MockupPrinter(
                 id: DemoData.bambuP1S_ID,
                 name: "Bambu P1S",
@@ -792,6 +814,12 @@ enum UITestBootstrap {
                 bedTemp: 23
             ),
         ]
+
+        if appStoreScreenshotDate != nil {
+            printers.removeAll {
+                !$0.isOnline || ["paused", "completed", "error"].contains($0.state?.lowercased() ?? "")
+            }
+        }
 
         let status = PrinterStatusDetail(
             id: printer.id,
@@ -1150,7 +1178,7 @@ enum UITestBootstrap {
                 ])
                 let queueStatsData = try encoder.encode(QueueStats(
                     totalQueued: 4,
-                    totalPrinting: 3,
+                    totalPrinting: fixture.printers.filter { $0.state?.lowercased() == "printing" }.count,
                     totalPaused: 0,
                     averageWaitTimeMinutes: 18,
                     byModel: []
@@ -1401,7 +1429,7 @@ enum UITestBootstrap {
                                     bySettingHour: 8,
                                     minute: 2,
                                     second: 0,
-                                    of: Date()
+                                    of: appStoreScreenshotDate ?? Date()
                                 ),
                                 durationSeconds: 3_600,
                                 completionPercentage: 12,
@@ -1914,9 +1942,9 @@ enum UITestBootstrap {
             registeredAt: "2026-10-01",
             firstUsedAt: "2026-10-02",
             lastUsedAt: "2026-10-04",
-            remainingWeightG: 84,
+            remainingWeightG: appStoreScreenshotDate == nil ? 84 : 612,
             initialWeightG: 1000,
-            usedWeightG: 916,
+            usedWeightG: appStoreScreenshotDate == nil ? 916 : 388,
             spoolWeightG: 200,
             remainingLengthMm: nil,
             usedLengthMm: nil,
@@ -1926,9 +1954,28 @@ enum UITestBootstrap {
             price: nil,
             comment: nil,
             hasNfcTag: true,
-            usedPercent: 91.6,
-            remainingPercent: 8.4
+            usedPercent: appStoreScreenshotDate == nil ? 91.6 : 38.8,
+            remainingPercent: appStoreScreenshotDate == nil ? 8.4 : 61.2
         )
+    }
+
+    static func appStoreScreenshotSpools(assignedSpoolIDs: Set<Int>) -> [SpoolmanSpool] {
+        DemoData.spools.map { original in
+            let spool = original.id == 1 ? issue3259VisualAcceptanceSpool() : original
+            do {
+                let data = try JSONEncoder().encode(spool)
+                guard var payload = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                    preconditionFailure("A store spool fixture must encode as an object.")
+                }
+                payload["inUse"] = assignedSpoolIDs.contains(spool.id)
+                return try JSONDecoder().decode(
+                    SpoolmanSpool.self,
+                    from: JSONSerialization.data(withJSONObject: payload)
+                )
+            } catch {
+                preconditionFailure("The store spool fixture could not be curated: \(error)")
+            }
+        }
     }
 
     private static func issue3259VisualAcceptanceQueue(
@@ -1972,7 +2019,6 @@ enum UITestBootstrap {
             requiredGrams: Int,
             durationSeconds: Int,
             assignedPrinter: QueuePrinterMeta?,
-            compatibilityHint: QueuePrinterMeta? = nil,
             copies: Int = 1,
             materialType: String = "PLA",
             actualStartTime: Date? = nil
@@ -1983,8 +2029,8 @@ enum UITestBootstrap {
                 name: name,
                 fileName: name,
                 assignedPrinterId: assignedPrinter?.id,
-                printerName: assignedPrinter?.name ?? compatibilityHint?.name,
-                printerModel: assignedPrinter?.modelName ?? compatibilityHint?.modelName,
+                printerName: assignedPrinter?.name,
+                printerModel: assignedPrinter?.modelName,
                 status: status,
                 priority: priority,
                 queuePosition: position,
@@ -2035,7 +2081,7 @@ enum UITestBootstrap {
                 requiredGrams: 140,
                 durationSeconds: 8_280,
                 assignedPrinter: mk4Printer,
-                actualStartTime: Date().addingTimeInterval(-6_000)
+                actualStartTime: (appStoreScreenshotDate ?? Date()).addingTimeInterval(-6_000)
             ))
             jobs.append(job(
                 id: "32590000-0000-0000-0000-000000000110",
@@ -2070,7 +2116,6 @@ enum UITestBootstrap {
                 requiredGrams: 42,
                 durationSeconds: 5_400,
                 assignedPrinter: nil,
-                compatibilityHint: idleMk4Printer,
                 copies: 4
             ),
             job(
@@ -2106,6 +2151,9 @@ enum UITestBootstrap {
                 assignedPrinter: voronPrinter
             ),
         ]
+        if appStoreScreenshotDate != nil {
+            jobs.removeAll { $0.job.status == "Printing" && $0.job.id != DemoData.job1ID.uuidString.lowercased() }
+        }
         if includeRerunJob {
             jobs.append(job(
                 id: "32590000-0000-0000-0000-000000000104",
