@@ -122,10 +122,11 @@ def main():
         for family, device in devices.items():
             directory = output / f"run-{iteration}" / family
             print(f"Capturing {family}, run {iteration}; log: {directory / 'test.log'}", flush=True)
-            images = capture(device, directory, output / "DerivedData")
+            images = capture(device, directory, root / "DerivedData")
             pixels = json.loads(run(["swift", str(MOBILE / "scripts/screenshot-pixels.swift"),
                                      *map(str, images)]))
             evidence[f"{iteration}/{family}"] = pixels
+            (output / "pixels.json").write_text(json.dumps(evidence, indent=2) + "\n")
             for path, image in pixels.items():
                 if (image["width"], image["height"]) != DEVICES[family][2]:
                     raise RuntimeError(f"Wrong native screenshot dimensions: {path}: {image}")
@@ -133,7 +134,6 @@ def main():
                     original = output / "run-1" / family / Path(path).name
                     if image != evidence[f"1/{family}"][str(original)]:
                         raise RuntimeError(f"Pixel mismatch between captures: {path}")
-            (output / "pixels.json").write_text(json.dumps(evidence, indent=2) + "\n")
     metadata["repeatability"] = "identical RGBA pixels" if args.verify_repeatability else "not requested"
     (output / "environment.json").write_text(json.dumps(metadata, indent=2) + "\n")
     print(f"Store screenshots ready for manual review/upload: {output / 'run-1'}")

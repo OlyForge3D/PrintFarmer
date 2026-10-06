@@ -1934,9 +1934,9 @@ enum UITestBootstrap {
             registeredAt: "2026-10-01",
             firstUsedAt: "2026-10-02",
             lastUsedAt: "2026-10-04",
-            remainingWeightG: 84,
+            remainingWeightG: appStoreScreenshotDate == nil ? 84 : 612,
             initialWeightG: 1000,
-            usedWeightG: 916,
+            usedWeightG: appStoreScreenshotDate == nil ? 916 : 388,
             spoolWeightG: 200,
             remainingLengthMm: nil,
             usedLengthMm: nil,
@@ -1946,8 +1946,8 @@ enum UITestBootstrap {
             price: nil,
             comment: nil,
             hasNfcTag: true,
-            usedPercent: 91.6,
-            remainingPercent: 8.4
+            usedPercent: appStoreScreenshotDate == nil ? 91.6 : 38.8,
+            remainingPercent: appStoreScreenshotDate == nil ? 8.4 : 61.2
         )
     }
 
