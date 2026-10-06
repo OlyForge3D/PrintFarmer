@@ -9,6 +9,10 @@ struct PrinterStatusUpdate: Codable, Sendable {
     let isOnline: Bool
     let state: String?
     let progress: Double?
+    var currentLayer: Int? = nil
+    var totalLayers: Int? = nil
+    var fanSpeedPercent: Double? = nil
+    var liveZOffsetMm: Double? = nil
     let jobName: String?
     let fileName: String?
     let thumbnailUrl: String?

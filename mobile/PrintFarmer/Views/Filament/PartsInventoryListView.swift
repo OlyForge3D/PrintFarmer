@@ -59,30 +59,32 @@ struct PartsInventoryListView: View {
         #if os(iOS)
         .navigationBarTitleDisplayMode(.large)
         #endif
-        .rootNavigationChrome(for: .filament) {
-            Menu {
-                Button {
-                    showScanFlow = true
-                } label: {
-                    Label("Scan code", systemImage: "barcode.viewfinder")
-                }
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Button {
+                        showScanFlow = true
+                    } label: {
+                        Label("Scan code", systemImage: "barcode.viewfinder")
+                    }
 
-                Button {
-                    showPartLookup = true
+                    Button {
+                        showPartLookup = true
+                    } label: {
+                        Label("Look up printed part", systemImage: "cube.box")
+                    }
+                    .accessibilityIdentifier("inventory.partLookup")
                 } label: {
-                    Label("Look up printed part", systemImage: "cube.box")
+                    Image(systemName: "barcode.viewfinder")
+                        .frame(
+                            minWidth: RootNavigationChrome.minimumTouchTarget,
+                            minHeight: RootNavigationChrome.minimumTouchTarget
+                        )
                 }
-                .accessibilityIdentifier("inventory.partLookup")
-            } label: {
-                Image(systemName: "barcode.viewfinder")
-                    .frame(
-                        minWidth: RootNavigationChrome.minimumTouchTarget,
-                        minHeight: RootNavigationChrome.minimumTouchTarget
-                    )
+                .accessibilityLabel("Scan inventory")
+                .accessibilityHint("Opens camera scanning or printed-part lookup.")
+                .accessibilityIdentifier("inventory.scan")
             }
-            .accessibilityLabel("Scan inventory")
-            .accessibilityHint("Opens camera scanning or printed-part lookup.")
-            .accessibilityIdentifier("inventory.scan")
         }
         .refreshable {
             await viewModel.loadParts()

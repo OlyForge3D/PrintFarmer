@@ -28,6 +28,7 @@ import SwiftUI
 public struct PrinterRunActionBar: View {
 
     public let presentation: PrinterRunActionPresentation
+    public let emergencyStopFillsAvailableWidth: Bool
     private let onSelect: (PrinterRunActionKind) -> Void
 
     /// Callback-only. `onSelect` is invoked on the main actor exactly once per
@@ -35,9 +36,11 @@ public struct PrinterRunActionBar: View {
     /// haptics, telemetry and command dispatch.
     public init(
         presentation: PrinterRunActionPresentation,
+        emergencyStopFillsAvailableWidth: Bool = false,
         onSelect: @escaping (PrinterRunActionKind) -> Void
     ) {
         self.presentation = presentation
+        self.emergencyStopFillsAvailableWidth = emergencyStopFillsAvailableWidth
         self.onSelect = onSelect
     }
 
@@ -124,23 +127,33 @@ public struct PrinterRunActionBar: View {
         .accessibilityAddTraits(traits(for: descriptor))
     }
 
-    /// Emergency Stop is a compact labeled action for the detail's top bar.
-    /// carrying a distinct label. The bar never blanket-disables it because
-    /// another descriptor is pending — the host's descriptor is the only gate.
+    /// Emergency Stop stays compact in the regular layout. At accessibility
+    /// sizes it uses the full row so its visible label can wrap by word.
+    /// The bar never blanket-disables it because another descriptor is
+    /// pending — the host's descriptor is the only gate.
     private func emergencyStopButton(for descriptor: PrinterRunActionDescriptor) -> some View {
         Button(role: .destructive) {
             fire(.emergencyStop)
         } label: {
-            Label(
-                PrinterRunActionLabels.title(for: .emergencyStop),
-                systemImage: PrinterRunActionLabels.systemImage(for: .emergencyStop)
-            )
+            HStack(spacing: 8) {
+                Image(systemName: PrinterRunActionLabels.systemImage(for: .emergencyStop))
+                Text(PrinterRunActionLabels.title(for: .emergencyStop))
+                    .lineLimit(shouldStack ? 2 : nil)
+            }
             .fixedSize(horizontal: false, vertical: true)
-            .frame(minWidth: 44, minHeight: 44)
+            .frame(
+                maxWidth: shouldStack || emergencyStopFillsAvailableWidth ? .infinity : nil,
+                minHeight: 44
+            )
             .contentShape(Rectangle())
             .fontWeight(.semibold)
+            // Keep the complete emergency label legible instead of breaking
+            // "Emergency" mid-word at accessibility sizes; VoiceOver keeps
+            // the full, uncapped "Emergency Stop" label below.
+            .dynamicTypeSize(shouldStack ? .xxxLarge : dynamicTypeSize)
         }
         .buttonStyle(.bordered)
+        .frame(maxWidth: shouldStack || emergencyStopFillsAvailableWidth ? .infinity : nil)
         .tint(Color.pfError)
         .disabled(!descriptor.isEnabled || descriptor.isPending)
         .accessibilityIdentifier(

@@ -10,9 +10,9 @@ private struct NFCWriteTarget: Identifiable {
 struct SpoolInventoryView: View {
     @Environment(ServiceContainer.self) private var services
     @Environment(AppRouter.self) private var router
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var viewModel = SpoolInventoryViewModel()
     @State private var showAddSpool = false
-    @State private var showScanFlow = false
     @State private var showBarcodeIntake = false
     @State private var showPrintedParts = false
     @State private var nfcWriteTarget: NFCWriteTarget?
@@ -48,9 +48,7 @@ struct SpoolInventoryView: View {
                     }
                 } else if viewModel.hasActiveSearch && viewModel.filteredSpools.isEmpty {
                     VStack(spacing: 0) {
-                        materialFilterChips
-                        statusFilterChips
-                        nfcFilterChip
+                        inventoryFilters
                         Spacer()
                         ContentUnavailableView {
                             Label("No Matching Spools", systemImage: "line.3.horizontal.decrease.circle")
@@ -69,77 +67,16 @@ struct SpoolInventoryView: View {
                     }
                 } else {
                     VStack(spacing: 0) {
-                        materialFilterChips
-                        statusFilterChips
-                        nfcFilterChip
+                        inventoryFilters
                         spoolList
                     }
                 }
             }
             .navigationTitle("Filament")
             #if os(iOS)
-            .navigationBarTitleDisplayMode(.large)
+            .navigationBarTitleDisplayMode(.inline)
             #endif
-            .rootNavigationChrome(for: .filament) {
-                if services.capabilitiesService.resolved.printedPartsInventoryEnabled {
-                    Button {
-                        showPrintedParts = true
-                    } label: {
-                        Image(systemName: "cube.box")
-                            .frame(
-                                minWidth: RootNavigationChrome.minimumTouchTarget,
-                                minHeight: RootNavigationChrome.minimumTouchTarget
-                            )
-                    }
-                    .accessibilityLabel("Printed parts")
-                    .accessibilityHint("Opens printed-part stock and quantity adjustments.")
-                    .accessibilityIdentifier("filament.printedParts")
-                }
-                Menu {
-                    Button {
-                        showScanFlow = true
-                    } label: {
-                        Label("Scan code", systemImage: "barcode.viewfinder")
-                    }
-
-                    Button {
-                        viewModel.handleNFCScan()
-                    } label: {
-                        Label("Scan NFC tag", systemImage: "wave.3.right")
-                    }
-                    .accessibilityIdentifier("inventory.scan.nfc")
-
-                    Button {
-                        showBarcodeIntake = true
-                    } label: {
-                        Label("Log new spools", systemImage: "cylinder")
-                    }
-                    .accessibilityIdentifier("inventory.scan.barcodeIntake")
-                } label: {
-                    Image(systemName: "barcode.viewfinder")
-                        .frame(
-                            minWidth: RootNavigationChrome.minimumTouchTarget,
-                            minHeight: RootNavigationChrome.minimumTouchTarget
-                        )
-                }
-                .accessibilityLabel("Scan inventory")
-                .accessibilityHint("Opens camera, NFC, and continuous spool intake actions.")
-                .accessibilityIdentifier("inventory.scan")
-
-                Button {
-                    showAddSpool = true
-                } label: {
-                    Image(systemName: "plus")
-                        .frame(
-                            minWidth: RootNavigationChrome.minimumTouchTarget,
-                            minHeight: RootNavigationChrome.minimumTouchTarget
-                        )
-                }
-                .accessibilityLabel("Add spool")
-                .accessibilityHint("Opens the form to register a filament spool.")
-                .accessibilityIdentifier("inventory.addSpool")
-            }
-            .searchable(text: $viewModel.searchText, prompt: "Search by name, material, color…")
+            .rootNavigationChrome(for: .filament)
             .refreshable {
                 await viewModel.loadSpools()
             }
@@ -170,11 +107,6 @@ struct SpoolInventoryView: View {
                         activeTasks.append(task)
                     }
             }
-            .sheet(isPresented: $showScanFlow, onDismiss: {
-                router.completeScanFlowDismissal(capabilities: services.capabilitiesService.resolved)
-            }, content: {
-                ScanFlowView()
-            })
             .sheet(isPresented: $showBarcodeIntake) {
                 BarcodeIntakeView()
                     .onDisappear {
@@ -216,6 +148,7 @@ struct SpoolInventoryView: View {
             }
             .task {
                 viewModel.configure(spoolService: services.spoolService)
+                viewModel.configure(printerService: services.printerService)
                 #if canImport(UIKit)
                 if let nfc = services.nfcService {
                     viewModel.configureNFC(scanner: nfc)
@@ -241,159 +174,232 @@ struct SpoolInventoryView: View {
         }
     }
 
-    private var materialFilterChips: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                // "All" chip
-                Button {
-                    withAnimation {
-                        viewModel.selectedMaterial = nil
-                    }
-                } label: {
-                    Text("All")
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(viewModel.selectedMaterial == nil ? .white : Color.pfTextSecondary)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(
-                            viewModel.selectedMaterial == nil ? Color.pfAccent : Color.pfBackgroundTertiary,
-                            in: Capsule()
-                        )
+    private var inventoryFilters: some View {
+        Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 88, maximum: 150), alignment: .leading)],
+                    alignment: .leading,
+                    spacing: 8
+                ) {
+                    inventoryFilterButtons
                 }
+            } else {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 8) {
+                        inventoryFilterButtons
+                    }
+                    .fixedSize(horizontal: true, vertical: false)
 
-                // Material chips
-                ForEach(viewModel.availableMaterials, id: \.self) { material in
-                    Button {
-                        withAnimation {
-                            if viewModel.selectedMaterial == material {
-                                viewModel.selectedMaterial = nil
-                            } else {
-                                viewModel.selectedMaterial = material
-                            }
-                        }
-                    } label: {
-                        Text(material)
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(viewModel.selectedMaterial == material ? .white : Color.pfTextSecondary)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(
-                                viewModel.selectedMaterial == material ? Color.pfAccent : Color.pfBackgroundTertiary,
-                                in: Capsule()
-                            )
+                    LazyVGrid(
+                        columns: [GridItem(.adaptive(minimum: 88, maximum: 150), alignment: .leading)],
+                        alignment: .leading,
+                        spacing: 8
+                    ) {
+                        inventoryFilterButtons
                     }
                 }
             }
-            .padding(.horizontal)
         }
-        .padding(.vertical, 8)
-    }
-
-    private var statusFilterChips: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                // "All" chip
-                Button {
-                    withAnimation {
-                        viewModel.selectedStatus = nil
-                    }
-                } label: {
-                    Text("All")
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(viewModel.selectedStatus == nil ? .white : Color.pfTextSecondary)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(
-                            viewModel.selectedStatus == nil ? Color.pfAccent : Color.pfBackgroundTertiary,
-                            in: Capsule()
-                        )
-                }
-
-                // Status chips
-                ForEach(SpoolStatus.allCases, id: \.self) { status in
-                    Button {
-                        withAnimation {
-                            if viewModel.selectedStatus == status {
-                                viewModel.selectedStatus = nil
-                            } else {
-                                viewModel.selectedStatus = status
-                            }
-                        }
-                    } label: {
-                        Text(status.rawValue)
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(viewModel.selectedStatus == status ? .white : Color.pfTextSecondary)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(
-                                viewModel.selectedStatus == status ? Color.pfAccent : Color.pfBackgroundTertiary,
-                                in: Capsule()
-                            )
-                    }
-                }
-            }
-            .padding(.horizontal)
-        }
-        .padding(.vertical, 8)
-    }
-
-    private var nfcFilterChip: some View {
-        HStack {
-            Button {
-                withAnimation {
-                    viewModel.showOnlyMissingNFC.toggle()
-                }
-            } label: {
-                Label("No NFC Tag", systemImage: "wave.3.right.circle")
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(viewModel.showOnlyMissingNFC ? .white : Color.pfTextSecondary)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(
-                        viewModel.showOnlyMissingNFC ? Color.pfAccent : Color.pfBackgroundTertiary,
-                        in: Capsule()
-                    )
-            }
-            .accessibilityLabel(viewModel.showOnlyMissingNFC ? "Showing spools without NFC tags" : "Filter to spools without NFC tags")
-
-            Spacer()
-        }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal)
-        .padding(.bottom, 4)
+        .padding(.vertical, 8)
+        .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("inventory.filters")
+    }
+
+    @ViewBuilder
+    private var inventoryFilterButtons: some View {
+        inventoryFilter(
+            title: "All \(viewModel.count(for: nil))",
+            identifier: "inventory.filter.all",
+            selected: viewModel.selectedStatus == nil
+                && viewModel.selectedMaterial == nil
+                && !viewModel.showOnlyMissingNFC
+        ) {
+            withAnimation { viewModel.clearFilters() }
+        }
+        inventoryFilter(
+            title: "Loaded \(viewModel.count(for: .inUse))",
+            identifier: "inventory.filter.loaded",
+            selected: viewModel.selectedStatus == .inUse
+        ) {
+            withAnimation {
+                viewModel.selectedStatus = viewModel.selectedStatus == .inUse ? nil : .inUse
+            }
+        }
+        inventoryFilter(
+            title: "Low \(viewModel.count(for: .low))",
+            identifier: "inventory.filter.low",
+            selected: viewModel.selectedStatus == .low
+        ) {
+            withAnimation {
+                viewModel.selectedStatus = viewModel.selectedStatus == .low ? nil : .low
+            }
+        }
+
+        ForEach(primaryInventoryMaterials, id: \.self) { material in
+            materialFilter(material)
+        }
+
+        Menu {
+            if !additionalInventoryMaterials.isEmpty {
+                Section("Material") {
+                    ForEach(additionalInventoryMaterials, id: \.self) { material in
+                        materialMenuFilter(material)
+                    }
+                }
+            }
+
+            Button {
+                withAnimation { viewModel.showOnlyMissingNFC.toggle() }
+            } label: {
+                Label(
+                    "No NFC",
+                    systemImage: viewModel.showOnlyMissingNFC ? "checkmark" : "wave.3.right.circle"
+                )
+            }
+            .accessibilityIdentifier("inventory.filter.no-nfc")
+        } label: {
+            let activeCount = (viewModel.selectedMaterial.map(additionalInventoryMaterials.contains) == true ? 1 : 0)
+                + (viewModel.showOnlyMissingNFC ? 1 : 0)
+            Text(activeCount == 0 ? "More" : "More \(activeCount)")
+                .font(.caption.weight(.medium))
+                .foregroundStyle(activeCount > 0 ? .white : Color.pfTextSecondary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(
+                    activeCount > 0 ? Color.pfAccent : Color.pfBackgroundTertiary,
+                    in: Capsule()
+                )
+        }
+        .accessibilityLabel(
+            viewModel.showOnlyMissingNFC
+                ? "More spool filters, including no NFC"
+                : "More spool filters"
+        )
+        .accessibilityValue(
+            viewModel.selectedMaterial.map(additionalInventoryMaterials.contains) == true
+                ? "A material filter is active"
+                : viewModel.showOnlyMissingNFC ? "No NFC filter is active" : ""
+        )
+        .accessibilityIdentifier("inventory.filter.more")
+    }
+
+    private var primaryInventoryMaterials: [String] {
+        let preferred = ["PLA", "PETG"].compactMap { material in
+            viewModel.availableMaterials.first {
+                $0.localizedCaseInsensitiveCompare(material) == .orderedSame
+            }
+        }
+        return Array((preferred + viewModel.availableMaterials.filter { material in
+            !preferred.contains { $0.localizedCaseInsensitiveCompare(material) == .orderedSame }
+        }).prefix(2))
+    }
+
+    private var additionalInventoryMaterials: [String] {
+        viewModel.availableMaterials.filter { material in
+            !primaryInventoryMaterials.contains {
+                $0.localizedCaseInsensitiveCompare(material) == .orderedSame
+            }
+        }
+    }
+
+    private func materialFilter(_ material: String) -> some View {
+        inventoryFilter(
+            title: material,
+            identifier: "inventory.filter.material.\(material)",
+            selected: viewModel.selectedMaterial == material
+        ) {
+            withAnimation {
+                viewModel.selectedMaterial = viewModel.selectedMaterial == material ? nil : material
+            }
+        }
+    }
+
+    private func materialMenuFilter(_ material: String) -> some View {
+        Button {
+            withAnimation {
+                viewModel.selectedMaterial = viewModel.selectedMaterial == material ? nil : material
+            }
+        } label: {
+            if viewModel.selectedMaterial == material {
+                Label(material, systemImage: "checkmark")
+            } else {
+                Text(material)
+            }
+        }
+        .accessibilityIdentifier("inventory.filter.material.\(material)")
+    }
+
+    private func inventoryFilter(
+        title: String,
+        identifier: String,
+        selected: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.caption.weight(.medium))
+                .fixedSize(horizontal: false, vertical: true)
+                .foregroundStyle(selected ? .white : Color.pfTextSecondary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .frame(minHeight: 44)
+                .background(
+                    selected ? Color.pfAccent : Color.pfBackgroundTertiary,
+                    in: Capsule()
+                )
+        }
+        .accessibilityIdentifier(identifier)
     }
 
     private var spoolList: some View {
         ScrollViewReader { proxy in
-            List {
-                ForEach(viewModel.filteredSpools) { spool in
-                    SpoolInventoryRowView(spool: spool)
-                        .listRowBackground(
-                            viewModel.highlightedSpoolId == spool.id
-                                ? Color.pfAccent.opacity(0.15)
-                                : nil
-                        )
-                        .id(spool.id)
-                        .contextMenu {
-                            if spool.hasNfcTag != true {
-                                Button {
-                                    let task = Task {
-                                        let filament = await viewModel.matchingFilamentForTagPreview(for: spool)
-                                        nfcWriteTarget = NFCWriteTarget(spool: spool, filament: filament)
-                                    }
-                                    activeTasks.append(task)
-                                } label: {
-                                    Label("Write NFC Tag", systemImage: "wave.3.right")
-                                }
+            VStack(spacing: 0) {
+                HStack(spacing: 8) {
+                    Button {
+                        showAddSpool = true
+                    } label: {
+                        Label("Add spool", systemImage: "plus")
+                            .font(.subheadline.weight(.semibold))
+                            .frame(maxWidth: .infinity, minHeight: 48)
+                            .foregroundStyle(Color.pfAccent)
+                            .background(Color.pfCard, in: RoundedRectangle(cornerRadius: 12))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 12)
+                                    .strokeBorder(
+                                        Color.pfAccent,
+                                        style: StrokeStyle(lineWidth: 1.5, dash: [6, 4])
+                                    )
                             }
-                        }
-            }
-            .onDelete { indexSet in
-                let spoolsToDelete = indexSet.map { viewModel.filteredSpools[$0] }
-                for spool in spoolsToDelete {
-                    let task = Task { await viewModel.deleteSpool(spool) }
-                    activeTasks.append(task)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityHint("Opens the form to register a filament spool.")
+                    .accessibilityIdentifier("inventory.addSpool")
+                    .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
+
+                    inventoryActions
                 }
-            }
+                .padding(.horizontal)
+                .padding(.vertical, 8)
+
+                List {
+                    ForEach(viewModel.filteredSpools) { spool in
+                        spoolRow(spool)
+                    }
+                    .onDelete { indexSet in
+                        let spoolsToDelete = indexSet.map { viewModel.filteredSpools[$0] }
+                        for spool in spoolsToDelete {
+                            let task = Task { await viewModel.deleteSpool(spool) }
+                            activeTasks.append(task)
+                        }
+                    }
+
+                }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
             }
             .onChange(of: viewModel.highlightedSpoolId) { _, newId in
                 // Scroll animation only. Highlight expiry is owned synchronously
@@ -406,7 +412,84 @@ struct SpoolInventoryView: View {
                     }
                 }
             }
+
         }
+    }
+
+    private func spoolRow(_ spool: SpoolmanSpool) -> some View {
+        SpoolInventoryRowView(
+            spool: spool,
+            assignedPrinterName: viewModel.assignedPrinterName(for: spool.id),
+            assignmentsLoaded: viewModel.printerAssignmentsLoaded
+        )
+        .listRowBackground(spoolRowBackground(for: spool))
+        .listRowSeparator(.hidden)
+        .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+        .id(spool.id)
+        .contextMenu {
+            spoolContextMenu(for: spool)
+        }
+    }
+
+    @ViewBuilder
+    private func spoolRowBackground(for spool: SpoolmanSpool) -> some View {
+        if viewModel.highlightedSpoolId == spool.id {
+            Color.pfAccent.opacity(0.15)
+        } else {
+            RoundedRectangle(cornerRadius: 12).fill(Color.pfCard)
+        }
+    }
+
+    @ViewBuilder
+    private func spoolContextMenu(for spool: SpoolmanSpool) -> some View {
+        if spool.hasNfcTag != true {
+            Button {
+                let task = Task {
+                    let filament = await viewModel.matchingFilamentForTagPreview(for: spool)
+                    nfcWriteTarget = NFCWriteTarget(spool: spool, filament: filament)
+                }
+                activeTasks.append(task)
+            } label: {
+                Label("Write NFC Tag", systemImage: "wave.3.right")
+            }
+        }
+    }
+
+    private var inventoryActions: some View {
+        Menu {
+            Button {
+                viewModel.handleNFCScan()
+            } label: {
+                Label("Scan NFC tag", systemImage: "wave.3.right")
+            }
+            .accessibilityIdentifier("inventory.scan.nfc")
+
+            Button {
+                showBarcodeIntake = true
+            } label: {
+                Label("Log new spools", systemImage: "cylinder")
+            }
+            .accessibilityIdentifier("inventory.scan.barcodeIntake")
+
+            if services.capabilitiesService.resolved.printedPartsInventoryEnabled {
+                Button {
+                    showPrintedParts = true
+                } label: {
+                    Label("Printed parts", systemImage: "cube.box")
+                }
+                .accessibilityIdentifier("filament.printedParts")
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .frame(width: 44, height: 44)
+                .background(Color.pfCard, in: Circle())
+                .overlay(Circle().strokeBorder(Color.pfBorder, lineWidth: 1))
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("More inventory actions")
+        .accessibilityHint("Opens NFC intake, barcode intake, and printed-part inventory.")
+        .accessibilityIdentifier("inventory.actions")
     }
 }
 
@@ -414,99 +497,207 @@ struct SpoolInventoryView: View {
 
 struct SpoolInventoryRowView: View {
     let spool: SpoolmanSpool
+    var assignedPrinterName: String? = nil
+    var assignmentsLoaded = false
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private var weightPercent: Double? {
         guard let remaining = spool.remainingWeightG,
               let initial = spool.initialWeightG,
-              initial > 0 else { return nil }
-        return remaining / initial
+              remaining.isFinite, remaining >= 0,
+              initial.isFinite, initial > 0 else { return nil }
+        return min(max(remaining / initial, 0), 1)
     }
 
     private var weightColor: Color {
         guard let percent = weightPercent else { return .gray }
-        if percent > 0.5 { return .green }
-        if percent > 0.2 { return .yellow }
-        return .red
+        if percent < 0.2 { return .pfError }
+        if percent < 0.5 { return .pfWarning }
+        return .pfSuccess
     }
 
     var body: some View {
-        HStack(spacing: 12) {
-            Circle()
-                .fill(Color(hex: spool.colorHex ?? "#808080"))
-                .frame(width: 32, height: 32)
-                .overlay(
-                    Circle()
-                        .strokeBorder(Color.pfBorder, lineWidth: 1)
-                )
-
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    Text(spool.filamentName ?? spool.name)
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(Color.pfTextPrimary)
-
-                    if spool.inUse {
-                        Image(systemName: "printer.fill")
-                            .font(.caption2)
-                            .foregroundStyle(Color.pfAccent)
+        Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(alignment: .top, spacing: 12) {
+                        spoolReel
+                        spoolDetails
                     }
-
-                    if spool.hasNfcTag == true {
-                        Image(systemName: "wave.3.right")
-                            .font(.caption2)
-                            .foregroundStyle(.green)
-                            .accessibilityLabel("NFC tag present")
-                    } else {
-                        Image(systemName: "minus")
-                            .font(.caption2)
-                            .foregroundStyle(.gray)
-                            .accessibilityLabel("NFC tag not written")
-                    }
-                }
-
-                HStack(spacing: 6) {
-                    Text(spool.material)
-                        .font(.caption.weight(.medium))
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Color.pfBackgroundTertiary, in: Capsule())
-
-                    if let vendor = spool.vendor {
-                        Text(vendor)
+                    HStack(alignment: .top) {
+                        Text("Remaining")
                             .font(.caption)
                             .foregroundStyle(Color.pfTextSecondary)
+                        Spacer(minLength: 8)
+                        weightSummary
                     }
                 }
-            }
-
-            Spacer()
-
-            VStack(alignment: .trailing, spacing: 4) {
-                if let remaining = spool.remainingWeightG {
-                    Text("\(Int(remaining))g")
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(Color.pfTextPrimary)
-                }
-                if let initial = spool.initialWeightG, let remaining = spool.remainingWeightG, initial > 0 {
-                    Text("\(Int(remaining))/\(Int(initial))g")
-                        .font(.caption2)
-                        .foregroundStyle(Color.pfTextTertiary)
-
-                    // Weight progress bar
-                    GeometryReader { geo in
-                        ZStack(alignment: .leading) {
-                            Capsule()
-                                .fill(Color.pfBackgroundTertiary)
-
-                            Capsule()
-                                .fill(weightColor)
-                                .frame(width: geo.size.width * (weightPercent ?? 0))
-                        }
-                    }
-                    .frame(width: 60, height: 4)
+            } else {
+                HStack(spacing: 12) {
+                    spoolReel
+                    spoolDetails
+                    Spacer(minLength: 4)
+                    weightSummary
                 }
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 7)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("inventory.spool.\(spool.id)")
+        .accessibilityLabel(spoolAccessibilityLabel)
+    }
+
+    private var spoolDetails: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(spool.filamentName ?? spool.name)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(Color.pfTextPrimary)
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if let assignedPrinterName {
+                Label("On \(assignedPrinterName)", systemImage: "printer.fill")
+                    .font(.caption)
+                    .foregroundStyle(Color.pfAccent)
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if spool.inUse || !assignmentsLoaded {
+                Text("Printer assignment unavailable")
+                    .font(.caption)
+                    .foregroundStyle(Color.pfTextSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text(spool.location.map { "\($0) · unassigned" } ?? "Unassigned")
+                    .font(.caption)
+                    .foregroundStyle(Color.pfTextSecondary)
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Group {
+                if dynamicTypeSize.isAccessibilitySize {
+                    VStack(alignment: .leading, spacing: 2) {
+                        materialLabel
+                        nfcStatus
+                    }
+                } else {
+                    HStack(spacing: 6) {
+                        materialLabel
+                        nfcStatus
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var materialLabel: some View {
+        Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 2) {
+                    materialName
+                    vendorName
+                }
+            } else {
+                HStack(spacing: 4) {
+                    materialName
+                    vendorName
+                }
+            }
+        }
+    }
+
+    private var materialName: some View {
+        Text(spool.material)
+            .font(.caption2.weight(.medium))
+            .foregroundStyle(Color.pfTextSecondary)
+    }
+
+    @ViewBuilder
+    private var vendorName: some View {
+        if let vendor = spool.vendor, !vendor.isEmpty {
+            Text("· \(vendor)")
+                .font(.caption2)
+                .foregroundStyle(Color.pfTextTertiary)
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var nfcStatus: some View {
+        Image(systemName: "wave.3.right")
+            .font(dynamicTypeSize.isAccessibilitySize ? .system(size: 16) : .caption2)
+            .foregroundStyle(spool.hasNfcTag == true ? Color.pfSuccess : Color.pfTextTertiary)
+            .accessibilityLabel(spool.hasNfcTag == true ? "NFC tag present" : "NFC tag not written")
+    }
+
+    private var weightSummary: some View {
+        VStack(alignment: dynamicTypeSize.isAccessibilitySize ? .leading : .trailing, spacing: 4) {
+            Text(spool.remainingWeightG.flatMap {
+                $0.isFinite && $0 >= 0 ? "\(Int($0.rounded())) g" : nil
+            } ?? "— g")
+                .font(.subheadline.weight(.semibold).monospacedDigit())
+                .foregroundStyle(Color.pfTextPrimary)
+            if let initial = spool.initialWeightG, initial.isFinite, initial > 0,
+               let remaining = spool.remainingWeightG, remaining.isFinite, remaining >= 0 {
+                Text("of \(Int(initial.rounded())) g")
+                    .font(.caption2)
+                    .foregroundStyle(Color.pfTextTertiary)
+                if let weightPercent {
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(Color.pfBackgroundTertiary)
+                            Capsule()
+                                .fill(weightColor)
+                                .frame(width: geo.size.width * weightPercent)
+                        }
+                    }
+                    .frame(width: dynamicTypeSize.isAccessibilitySize ? 96 : 54, height: 4)
+                }
+                if let weightPercent, weightPercent < 0.2 {
+                    Text("Low")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(Color.pfError)
+                }
+            } else {
+                Text("Weight unavailable")
+                    .font(.caption2)
+                    .foregroundStyle(Color.pfTextTertiary)
+            }
+        }
+    }
+
+    private var spoolAccessibilityLabel: String {
+        var parts = [spool.filamentName ?? spool.name, spool.material]
+        if let assignedPrinterName {
+            parts.append("On \(assignedPrinterName)")
+        } else if spool.inUse || !assignmentsLoaded {
+            parts.append("Printer assignment unavailable")
+        } else {
+            parts.append(spool.location.map { "\($0), unassigned" } ?? "Unassigned")
+        }
+        if let remaining = spool.remainingWeightG, remaining.isFinite, remaining >= 0 {
+            parts.append("\(Int(remaining.rounded())) grams remaining")
+        } else {
+            parts.append("Weight unavailable")
+        }
+        return parts.joined(separator: ", ")
+    }
+
+    private var spoolReel: some View {
+        ZStack {
+            Circle()
+                .fill(Color(hex: spool.colorHex ?? "#808080"))
+            Circle()
+                .strokeBorder(Color.pfBorder.opacity(0.8), lineWidth: 1)
+            Circle()
+                .fill(Color.pfBackground)
+                .frame(width: 13, height: 13)
+            Circle()
+                .strokeBorder(Color.pfBorder, lineWidth: 1)
+                .frame(width: 13, height: 13)
+        }
+        .frame(width: 44, height: 44)
+        .accessibilityHidden(true)
     }
 }

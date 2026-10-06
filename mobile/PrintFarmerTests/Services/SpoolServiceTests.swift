@@ -55,4 +55,34 @@ final class SpoolServiceTests: XCTestCase {
 
         XCTAssertTrue(filaments.isEmpty)
     }
+
+    func testSpoolLookupPagesUntilTheAssignedIDIsFound() async throws {
+        let targetSpoolID = 902
+        mockAPIClient.asyncRequestHandler = { request in
+            let offset = request.url?.query?
+                .split(separator: "&")
+                .first(where: { $0.hasPrefix("offset=") })
+                .map { String($0.dropFirst("offset=".count)) }
+            let json: String
+            switch offset {
+            case "0":
+                json = #"{"items":[{"id":101,"name":"First page","material":"PLA","inUse":false,"initialWeightG":1000,"remainingWeightG":850}],"totalCount":2}"#
+            case "1":
+                json = #"{"items":[{"id":902,"name":"Assigned spool","material":"PLA","inUse":false,"initialWeightG":1000,"remainingWeightG":84}],"totalCount":2}"#
+            default:
+                json = #"{"items":[],"totalCount":2}"#
+            }
+            return (TestData.httpResponse(url: request.url, statusCode: 200), Data(json.utf8))
+        }
+
+        let spool = try await service.spool(id: targetSpoolID)
+
+        XCTAssertEqual(spool?.id, targetSpoolID)
+        XCTAssertEqual(spool?.initialWeightG, 1000)
+        XCTAssertEqual(spool?.remainingWeightG, 84)
+        XCTAssertEqual(
+            mockAPIClient.capturedRequests.compactMap(\.url?.query),
+            ["limit=500&offset=0", "limit=500&offset=1"]
+        )
+    }
 }

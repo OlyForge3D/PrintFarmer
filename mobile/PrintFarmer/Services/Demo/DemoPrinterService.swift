@@ -9,6 +9,9 @@ final class DemoPrinterService: PrinterServiceProtocol, @unchecked Sendable {
     /// persists. Non-Farm demo behavior is unaffected.
     private let listError: Error?
     private let snapshots: [UUID: Data]
+    private let statusOverrides: [UUID: PrinterStatusDetail]
+    private let currentJobThumbnails: [UUID: Data]
+    private let detailsOverrides: [UUID: PrinterDetails]
 
     /// Default demo constructor (all callers except UI-test bootstrap):
     /// exposes exactly the demo fleet from `DemoData.printers`.
@@ -16,6 +19,9 @@ final class DemoPrinterService: PrinterServiceProtocol, @unchecked Sendable {
         self.printers = DemoData.printers
         self.listError = nil
         self.snapshots = [:]
+        self.statusOverrides = [:]
+        self.currentJobThumbnails = [:]
+        self.detailsOverrides = [:]
     }
 
     /// UI-test bootstrap constructor (F4-M / #778 cycle-3): appends
@@ -30,6 +36,24 @@ final class DemoPrinterService: PrinterServiceProtocol, @unchecked Sendable {
         self.printers = DemoData.printers + additionalPrinters
         self.listError = nil
         self.snapshots = snapshots
+        self.statusOverrides = [:]
+        self.currentJobThumbnails = [:]
+        self.detailsOverrides = [:]
+    }
+
+    /// Explicit fixture constructor for deterministic visual-acceptance UI tests.
+    init(
+        printers: [Printer],
+        statusOverrides: [UUID: PrinterStatusDetail] = [:],
+        currentJobThumbnails: [UUID: Data] = [:],
+        detailsOverrides: [UUID: PrinterDetails] = [:]
+    ) {
+        self.printers = printers
+        self.listError = nil
+        self.snapshots = [:]
+        self.statusOverrides = statusOverrides
+        self.currentJobThumbnails = currentJobThumbnails
+        self.detailsOverrides = detailsOverrides
     }
 
     /// UI-test offline constructor (#817): `list(...)` throws `offlineError`
@@ -39,6 +63,9 @@ final class DemoPrinterService: PrinterServiceProtocol, @unchecked Sendable {
         self.printers = DemoData.printers
         self.listError = offlineError
         self.snapshots = [:]
+        self.statusOverrides = [:]
+        self.currentJobThumbnails = [:]
+        self.detailsOverrides = [:]
     }
 
     func list(includeDisabled: Bool) async throws -> [Printer] {
@@ -54,12 +81,20 @@ final class DemoPrinterService: PrinterServiceProtocol, @unchecked Sendable {
     }
 
     func getStatus(id: UUID) async throws -> PrinterStatusDetail {
+        if let override = statusOverrides[id] {
+            return override
+        }
         guard let p = printers.first(where: { $0.id == id }) else {
             throw ServiceError.notImplemented("Printer not found")
         }
         return PrinterStatusDetail(
             id: p.id, isOnline: p.isOnline, state: p.state,
-            progress: p.progress, jobName: p.jobName,
+            progress: p.progress,
+            currentLayer: p.currentLayer,
+            totalLayers: p.totalLayers,
+            fanSpeedPercent: p.fanSpeedPercent,
+            liveZOffsetMm: p.liveZOffsetMm,
+            jobName: p.jobName,
             thumbnailUrl: p.thumbnailUrl,
             cameraStreamUrl: p.cameraStreamUrl,
             cameraSnapshotUrl: p.cameraSnapshotUrl,
@@ -67,7 +102,9 @@ final class DemoPrinterService: PrinterServiceProtocol, @unchecked Sendable {
             hotendTemp: p.hotendTemp, bedTemp: p.bedTemp,
             hotendTarget: p.hotendTarget, bedTarget: p.bedTarget,
             homedAxes: p.homedAxes,
-            spoolInfo: p.spoolInfo, mmuStatus: nil)
+            spoolInfo: p.spoolInfo,
+            mmuStatus: nil,
+            currentJobThumbnailUrl: p.currentJobThumbnailUrl)
     }
 
     func listCameraUrls() async throws -> [PrinterCameraUrls] {
@@ -99,6 +136,15 @@ final class DemoPrinterService: PrinterServiceProtocol, @unchecked Sendable {
 
     func getSnapshot(id: UUID) async throws -> Data {
         snapshots[id] ?? Data()
+    }
+
+    func getCurrentJobThumbnail(id: UUID, path: String) async throws -> Data {
+        guard let printer = printers.first(where: { $0.id == id }),
+              printer.currentJobThumbnailUrl == path,
+              let thumbnail = currentJobThumbnails[id] else {
+            throw ServiceError.notImplemented("Current-job thumbnail not available in demo data")
+        }
+        return thumbnail
     }
 
     func getCurrentJob(id: UUID) async throws -> PrintJobStatusInfo? {
@@ -251,6 +297,9 @@ final class DemoPrinterService: PrinterServiceProtocol, @unchecked Sendable {
     // MARK: - Details + fallback groups (issue #711, F6 demo stubs)
 
     func getDetails(id: UUID) async throws -> PrinterDetails {
+        if let override = detailsOverrides[id] {
+            return override
+        }
         guard let p = printers.first(where: { $0.id == id }) else {
             throw ServiceError.notImplemented("Printer not found in demo data")
         }

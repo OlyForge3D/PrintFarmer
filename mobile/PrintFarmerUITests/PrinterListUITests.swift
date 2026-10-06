@@ -17,7 +17,7 @@ final class PrinterCardFailureUITests: PrintFarmerUITestCase {
                                    "Failure suspected:", "1 attention items")
         expectation(for: combined, evaluatedWith: card)
         waitForExpectations(timeout: 8)
-        XCTAssertTrue(card.label.contains("Failure?"))
+        XCTAssertTrue(card.label.contains("Failure suspected"))
         XCTAssertTrue(card.label.contains("The card remains usable when camera data cannot be decoded."))
         XCTAssertEqual(card.descendants(matching: .staticText).count, 0)
     }
@@ -40,7 +40,10 @@ final class PrinterListUITests: PrintFarmerUITestCase {
 
     func testPrinterListDisplayed() {
         openFarm()
-        XCTAssertTrue(app.navigationBars["Farm"].waitForExistence(timeout: 5))
+        XCTAssertTrue(
+            app.staticTexts["navigation.title"].waitForExistence(timeout: 5)
+                || app.navigationBars["Farm"].waitForExistence(timeout: 5)
+        )
 
         let printerCard = app.buttons["farm-card-\(printerID)"]
         XCTAssertTrue(
@@ -83,6 +86,17 @@ final class PrinterListUITests: PrintFarmerUITestCase {
 
     func testSearchFieldExists() {
         openFarm()
+        let searchButton = app.buttons["farm.search"]
+        XCTAssertTrue(
+            searchButton.waitForExistence(timeout: 5),
+            "Farm should expose search from the toolbar"
+        )
+        XCTAssertFalse(
+            app.searchFields.firstMatch.exists,
+            "Farm search should stay collapsed until requested"
+        )
+        searchButton.tap()
+
         let searchField = app.searchFields.firstMatch
         XCTAssertTrue(
             searchField.waitForExistence(timeout: 5),

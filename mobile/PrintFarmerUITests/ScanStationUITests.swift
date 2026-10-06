@@ -24,7 +24,7 @@ final class ScanStationUITests: PrintFarmerUITestCase {
         let filament = shellDestinationButton(tabIdentifier: "tab.filament", timeout: 8)
         XCTAssertTrue(filament.exists)
         filament.tap()
-        app.buttons["inventory.scan"].tap()
+        app.buttons["inventory.actions"].tap()
         let intake = app.buttons["inventory.scan.barcodeIntake"]
         XCTAssertTrue(intake.waitForExistence(timeout: 5))
         intake.tap()

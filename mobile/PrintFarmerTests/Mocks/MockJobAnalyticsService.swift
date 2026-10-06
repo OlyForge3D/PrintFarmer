@@ -5,7 +5,13 @@ final class MockJobAnalyticsService: JobAnalyticsServiceProtocol, @unchecked Sen
     var queuedJobsToReturn: [QueuedJobWithMeta] = []
     var statsToReturn: QueueStats?
     var modelStatsToReturn: [QueuePrinterModelStats] = []
-    var historyPageToReturn: QueueHistoryPage?
+    var historyPageToReturn = QueueHistoryPage(
+        entries: [],
+        totalCount: 0,
+        currentPage: 1,
+        pageSize: 5,
+        stats: nil
+    )
     var timelineToReturn: [TimelineEvent] = []
     var jobStateHistoryToReturn: JobStateHistory?
     var durationAnalyticsToReturn: DurationAnalytics?
@@ -41,7 +47,7 @@ final class MockJobAnalyticsService: JobAnalyticsServiceProtocol, @unchecked Sen
     func getHistory(limit: Int? = nil, offset: Int? = nil, sortBy: String? = nil, statuses: String? = nil, dateStart: Date? = nil, dateEnd: Date? = nil) async throws -> QueueHistoryPage {
         getHistoryCalledWith = (limit, offset, sortBy, statuses, dateStart, dateEnd)
         if let error = errorToThrow { throw error }
-        return historyPageToReturn!
+        return historyPageToReturn
     }
     
     func getTimeline(dateFrom: Date?, dateTo: Date?, printerId: UUID?, filterStatus: String?, limit: Int?) async throws -> [TimelineEvent] {

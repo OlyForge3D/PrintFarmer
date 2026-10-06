@@ -93,18 +93,21 @@ The detail view has a segmented header and a page indicator. The toolbar shows "
 
 ### Detail implementation constraints
 
-The mobile printer/current-job contracts currently contain no layer counters,
-so Status reports **Layer unavailable** rather than inferring a layer from Z.
-The mobile service also has no fan command; Control directs operators to
-**Open in web** for fans. Heater, motion, Z-offset and physical filament
-commands retain the registered-server safety preference and verified capability
-gates. Starting the assigned queue head uses the existing dispatch endpoint
-with that job's reviewed revision; it never reassigns the job or silently
-retries a stale revision. Printer detail loads the existing **printer-scoped**
-analytics endpoint and preserves its response order; it does not infer a head
-from the first 200 cross-scope jobs or use creation time as queue time. Before
-#3228 lands this preserves the server's existing order; after #3228 it follows
-the authoritative scoped reorder automatically.
+The shared printer and status contracts expose optional `currentLayer` and
+`totalLayers` values. Status displays a layer only when both counters are
+valid; otherwise it reports **Unavailable** rather than inferring a layer from
+Z. The fan and live Z-offset commands are available through the authenticated
+printer API added in #3260. Control presents them only when the server reports
+the required capability and live readback; it does not invent values for
+unsupported backends. Heater, motion, Z-offset and physical filament commands
+retain the registered-server safety preference and verified capability gates.
+Starting the assigned queue head uses the existing dispatch endpoint with that
+job's reviewed revision; it never reassigns the job or silently retries a
+stale revision. Printer detail loads the existing **printer-scoped** analytics
+endpoint and preserves its response order; it does not infer a head from the
+first 200 cross-scope jobs or use creation time as queue time. Before #3228
+lands this preserves the server's existing order; after #3228 it follows the
+authoritative scoped reorder automatically.
 
 The printer-scoped response is a **flat** `QueuedPrintJobDto` array, not the
 cross-scope analytics wrapper. The client decodes existing `QueuedJobInfo`

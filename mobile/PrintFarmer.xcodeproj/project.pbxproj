@@ -20,6 +20,8 @@
 		F25190000000000000000102 /* PrinterFilamentSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = F25190000000000000000002 /* PrinterFilamentSection.swift */; };
 		F25190000000000000000103 /* PrinterFilamentPresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F25190000000000000000003 /* PrinterFilamentPresentationTests.swift */; };
 		F25190000000000000000104 /* PrinterFilamentSectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F25190000000000000000004 /* PrinterFilamentSectionTests.swift */; };
+		3259A1010000000000000001 /* PrinterDetailSpoolLookup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3259A0010000000000000001 /* PrinterDetailSpoolLookup.swift */; };
+		3259A1020000000000000001 /* PrinterDetailSpoolLookupTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3259A0020000000000000001 /* PrinterDetailSpoolLookupTests.swift */; };
 		F24530000000000000000006 /* ScanViewModelPresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F24530000000000000000005 /* ScanViewModelPresentationTests.swift */; };
 		F24530000000000000000004 /* ScanPresentationReadiness.swift in Sources */ = {isa = PBXBuildFile; fileRef = F24530000000000000000003 /* ScanPresentationReadiness.swift */; };
 		F24530000000000000000002 /* AppRouter+Scanning.swift in Sources */ = {isa = PBXBuildFile; fileRef = F24530000000000000000001 /* AppRouter+Scanning.swift */; };
@@ -549,6 +551,8 @@
 		F25190000000000000000002 /* PrinterFilamentSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterFilamentSection.swift; sourceTree = "<group>"; };
 		F25190000000000000000003 /* PrinterFilamentPresentationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterFilamentPresentationTests.swift; sourceTree = "<group>"; };
 		F25190000000000000000004 /* PrinterFilamentSectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterFilamentSectionTests.swift; sourceTree = "<group>"; };
+		3259A0010000000000000001 /* PrinterDetailSpoolLookup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterDetailSpoolLookup.swift; sourceTree = "<group>"; };
+		3259A0020000000000000001 /* PrinterDetailSpoolLookupTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterDetailSpoolLookupTests.swift; sourceTree = "<group>"; };
 		F24530000000000000000005 /* ScanViewModelPresentationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanViewModelPresentationTests.swift; sourceTree = "<group>"; };
 		F24530000000000000000003 /* ScanPresentationReadiness.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanPresentationReadiness.swift; sourceTree = "<group>"; };
 		F24530000000000000000001 /* AppRouter+Scanning.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppRouter+Scanning.swift"; sourceTree = "<group>"; };
@@ -1131,6 +1135,7 @@ B67CDDC8FEB03EE83C0232BD /* ScanWidgets.swift */ = {isa = PBXFileReference; incl
 				F7778BB1000000000000A001 /* FilamentCoverageModels.swift */,
 				25200000000000000000001A /* PrinterRunActionPresentation.swift */,
 				F25190000000000000000001 /* PrinterFilamentPresentation.swift */,
+				3259A0010000000000000001 /* PrinterDetailSpoolLookup.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -1586,6 +1591,7 @@ B67CDDC8FEB03EE83C0232BD /* ScanWidgets.swift */ = {isa = PBXFileReference; incl
 				A78220000000000000000002 /* ShiftTaskModelsServiceTests.swift */,
 				F7778BD1000000000000B001 /* FilamentCoverageModelsTests.swift */,
 				25200000000000000000003A /* PrinterRunActionPresentationTests.swift */,
+				3259A0020000000000000001 /* PrinterDetailSpoolLookupTests.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -1908,6 +1914,7 @@ FA9835EC3313360D4BC13824 /* PrintFarmerScanWidgets */ = {
 				D1A6C200000000000000F002 /* PrinterControlsSectionSnapshotTests.swift in Sources */,
 				F25190000000000000000104 /* PrinterFilamentSectionTests.swift in Sources */,
 				F25190000000000000000103 /* PrinterFilamentPresentationTests.swift in Sources */,
+				3259A1020000000000000001 /* PrinterDetailSpoolLookupTests.swift in Sources */,
 				709F2758FA2B8BF406D1813C /* PrinterListViewModelTests.swift in Sources */,
 				9496A75515E3FA0FAF3DEB95 /* AuthViewModelTests.swift in Sources */,
 				BD4B3C1A942D0E9675E2B73A /* JobListViewModelTests.swift in Sources */,
@@ -2169,6 +2176,7 @@ FA9835EC3313360D4BC13824 /* PrintFarmerScanWidgets */ = {
 				F7778AA1000000000000A001 /* FilamentCoverageModels.swift in Sources */,
 				F25190000000000000000101 /* PrinterFilamentPresentation.swift in Sources */,
 				F25190000000000000000102 /* PrinterFilamentSection.swift in Sources */,
+				3259A1010000000000000001 /* PrinterDetailSpoolLookup.swift in Sources */,
 				F7778AA2000000000000A002 /* FilamentCoverageServiceProtocol.swift in Sources */,
 				F7778AA3000000000000A003 /* FilamentCoverageService.swift in Sources */,
 				F7778AA4000000000000A004 /* DemoFilamentCoverageService.swift in Sources */,

@@ -13,6 +13,7 @@ struct StatusBadge: View {
             .padding(.vertical, 3)
             .background(color.opacity(0.15), in: Capsule())
             .foregroundStyle(color)
+            .fixedSize(horizontal: true, vertical: false)
             .accessibilityLabel("\(text) status")
     }
 }

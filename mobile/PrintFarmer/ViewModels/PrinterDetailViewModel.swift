@@ -91,6 +91,8 @@ final class PrinterDetailViewModel {
         case prepareReadyConfirmation
         case markPrinterReady
         case loadSpoolById
+        case loadPhysicalFilament
+        case unloadPhysicalFilament
         case ejectFilament
         case clearActiveSpoolAssignment
         case setActiveSpool
@@ -272,6 +274,9 @@ final class PrinterDetailViewModel {
 
     let printerId: UUID
     private var printerService: (any PrinterServiceProtocol)?
+    private(set) var filamentCommandCapabilities: PrinterBackendCapabilities?
+    private(set) var filamentCommandCapabilitiesError: String?
+    private var filamentCapabilitiesRequestID: UUID?
     private var jobService: (any JobServiceProtocol)?
     private var maintenanceService: (any MaintenanceServiceProtocol)?
     /// Injectable clock so absolute-ETA formatting is deterministic in tests.
@@ -316,6 +321,9 @@ final class PrinterDetailViewModel {
         if !Self.identical(self.printerService, printerService) {
             invalidateCanonicalLoad()
             invalidateSnapshotLifecycle()
+            filamentCommandCapabilities = nil
+            filamentCommandCapabilitiesError = nil
+            filamentCapabilitiesRequestID = nil
             // Issue #2522, Hicks review finding 24: a service replacement is
             // its own kind of lifecycle transition for the sibling action
             // authority below — an in-flight action against the OLD service
@@ -326,6 +334,43 @@ final class PrinterDetailViewModel {
         }
 
         self.printerService = printerService
+    }
+
+    func loadFilamentCommandCapabilities() async {
+        guard isViewActive, let printer, let service = printerService else { return }
+        let requestID = UUID()
+        filamentCapabilitiesRequestID = requestID
+        filamentCommandCapabilities = nil
+        filamentCommandCapabilitiesError = nil
+        let lifecycleEpoch = actionLifecycleEpoch
+        let serviceIdentity = Self.identity(service)
+
+        do {
+            let capabilities = try await service.getBackendCapabilities(printerId: printer.id)
+            guard isViewActive, actionLifecycleEpoch == lifecycleEpoch,
+                  filamentCapabilitiesRequestID == requestID,
+                  Self.identity(printerService) == serviceIdentity,
+                  self.printer?.id == printer.id else {
+                return
+            }
+            filamentCommandCapabilities = capabilities
+        } catch {
+            guard isViewActive, actionLifecycleEpoch == lifecycleEpoch,
+                  filamentCapabilitiesRequestID == requestID,
+                  Self.identity(printerService) == serviceIdentity else {
+                return
+            }
+            filamentCommandCapabilitiesError = error.localizedDescription
+        }
+    }
+
+    func adoptFilamentCommandCapabilities(
+        _ capabilities: PrinterBackendCapabilities?,
+        error: String? = nil
+    ) {
+        filamentCapabilitiesRequestID = UUID()
+        filamentCommandCapabilities = capabilities
+        filamentCommandCapabilitiesError = error
     }
 
     /// Guided-swap toolhead bind (issue #2522, Hicks review findings 20 and
@@ -466,18 +511,32 @@ final class PrinterDetailViewModel {
     private func applyLiveUpdate(_ update: PrinterStatusUpdate) {
         guard isViewActive else { return }
         if var p = printer {
+            let jobChanged = update.jobName != nil && update.jobName != p.jobName
+            let stateEnded = update.state.map {
+                !["printing", "starting", "paused"].contains($0.lowercased())
+            } ?? false
+            let currentJobThumbnail = stateEnded
+                ? nil
+                : update.currentJobThumbnailUrl ?? (jobChanged ? nil : p.currentJobThumbnailUrl)
             p.isOnline = update.isOnline
             if let s = update.state { p.state = s }
             // Backend sends progress as 0-100; normalize to 0-1.0 for SwiftUI
             if let prog = update.progress { p.progress = prog / 100.0 }
+            p.currentLayer = update.currentLayer
+            p.totalLayers = update.totalLayers
             if let name = update.jobName { p.jobName = name }
             if let fn = update.fileName { p.fileName = fn }
             if let thumb = update.thumbnailUrl { p.thumbnailUrl = thumb }
+            // SignalR may omit this field on same-job updates, but a job change
+            // or end must never leave the previous job's image attached.
+            p.currentJobThumbnailUrl = currentJobThumbnail
             if let cam = update.cameraStreamUrl { p.cameraStreamUrl = cam }
             if let hotend = update.hotendTemp { p.hotendTemp = hotend }
             if let bed = update.bedTemp { p.bedTemp = bed }
             if let ht = update.hotendTarget { p.hotendTarget = ht }
             if let bt = update.bedTarget { p.bedTarget = bt }
+            p.fanSpeedPercent = update.fanSpeedPercent
+            p.liveZOffsetMm = update.liveZOffsetMm
             if let x = update.x { p.x = x }
             if let y = update.y { p.y = y }
             if let z = update.z { p.z = z }
@@ -497,26 +556,47 @@ final class PrinterDetailViewModel {
             startSnapshotPollingIfNeeded()
         }
 
+        let previousStatusDetail = statusDetail
+        let statusIsActiveJob = update.state.map {
+            ["printing", "starting", "paused"].contains($0.lowercased())
+        }
+        let statusJobChanged = update.jobName != nil
+            && update.jobName != previousStatusDetail?.jobName
+        let canRetainRemainingTime = statusIsActiveJob == true
+            && update.jobName != nil
+            && update.jobName == previousStatusDetail?.jobName
+        let currentJobThumbnail = statusIsActiveJob == false
+            ? nil
+            : update.currentJobThumbnailUrl
+                ?? (statusJobChanged ? nil : previousStatusDetail?.currentJobThumbnailUrl)
+
         statusDetail = PrinterStatusDetail(
             id: update.id,
             isOnline: update.isOnline,
-            state: update.state ?? statusDetail?.state,
-            progress: update.progress.map { $0 / 100.0 } ?? statusDetail?.progress,
-            jobName: update.jobName ?? statusDetail?.jobName,
-            thumbnailUrl: update.thumbnailUrl ?? statusDetail?.thumbnailUrl,
-            cameraStreamUrl: update.cameraStreamUrl ?? statusDetail?.cameraStreamUrl,
-            cameraSnapshotUrl: statusDetail?.cameraSnapshotUrl,
-            x: update.x ?? statusDetail?.x,
-            y: update.y ?? statusDetail?.y,
-            z: update.z ?? statusDetail?.z,
-            hotendTemp: update.hotendTemp ?? statusDetail?.hotendTemp,
-            bedTemp: update.bedTemp ?? statusDetail?.bedTemp,
-            hotendTarget: update.hotendTarget ?? statusDetail?.hotendTarget,
-            bedTarget: update.bedTarget ?? statusDetail?.bedTarget,
-            homedAxes: update.homedAxes ?? statusDetail?.homedAxes,
-            spoolInfo: update.spoolInfo ?? statusDetail?.spoolInfo,
-            mmuStatus: update.mmuStatus ?? statusDetail?.mmuStatus,
-            printTimeLeftSeconds: statusDetail?.printTimeLeftSeconds
+            state: update.state ?? previousStatusDetail?.state,
+            progress: update.progress.map { $0 / 100.0 } ?? previousStatusDetail?.progress,
+            currentLayer: update.currentLayer,
+            totalLayers: update.totalLayers,
+            fanSpeedPercent: update.fanSpeedPercent,
+            liveZOffsetMm: update.liveZOffsetMm,
+            jobName: update.jobName ?? previousStatusDetail?.jobName,
+            thumbnailUrl: update.thumbnailUrl ?? previousStatusDetail?.thumbnailUrl,
+            cameraStreamUrl: update.cameraStreamUrl ?? previousStatusDetail?.cameraStreamUrl,
+            cameraSnapshotUrl: previousStatusDetail?.cameraSnapshotUrl,
+            x: update.x ?? previousStatusDetail?.x,
+            y: update.y ?? previousStatusDetail?.y,
+            z: update.z ?? previousStatusDetail?.z,
+            hotendTemp: update.hotendTemp ?? previousStatusDetail?.hotendTemp,
+            bedTemp: update.bedTemp ?? previousStatusDetail?.bedTemp,
+            hotendTarget: update.hotendTarget ?? previousStatusDetail?.hotendTarget,
+            bedTarget: update.bedTarget ?? previousStatusDetail?.bedTarget,
+            homedAxes: update.homedAxes ?? previousStatusDetail?.homedAxes,
+            spoolInfo: update.spoolInfo ?? previousStatusDetail?.spoolInfo,
+            mmuStatus: update.mmuStatus ?? previousStatusDetail?.mmuStatus,
+            printTimeLeftSeconds: canRetainRemainingTime
+                ? previousStatusDetail?.printTimeLeftSeconds
+                : nil,
+            currentJobThumbnailUrl: currentJobThumbnail
         )
     }
 
@@ -583,6 +663,58 @@ final class PrinterDetailViewModel {
 
     func loadFilament() {
         showSpoolPicker = true
+    }
+
+    func loadPhysicalFilament() async {
+        clearOperationError(source: .loadPhysicalFilament)
+        guard let reason = physicalFilamentCommandBlockedReason(for: .load) else {
+            guard let printerService else { return }
+            let authority = beginActionAuthority(for: printerService)
+            defer { endBusyToken(authority.busyToken) }
+            do {
+                let result = try await printerService.loadFilament(printerId: printerId)
+                guard hasActionAuthority(authority) else { return }
+                guard result.success else {
+                    setOperationError(
+                        result.message ?? "The printer did not accept the filament load command.",
+                        source: .loadPhysicalFilament
+                    )
+                    return
+                }
+                await loadPrinter()
+            } catch {
+                guard hasActionAuthority(authority) else { return }
+                setOperationError(error.localizedDescription, source: .loadPhysicalFilament)
+            }
+            return
+        }
+        setOperationError(reason, source: .loadPhysicalFilament)
+    }
+
+    func unloadPhysicalFilament() async {
+        clearOperationError(source: .unloadPhysicalFilament)
+        guard let reason = physicalFilamentCommandBlockedReason(for: .unload) else {
+            guard let printerService else { return }
+            let authority = beginActionAuthority(for: printerService)
+            defer { endBusyToken(authority.busyToken) }
+            do {
+                let result = try await printerService.unloadFilament(printerId: printerId)
+                guard hasActionAuthority(authority) else { return }
+                guard result.success else {
+                    setOperationError(
+                        result.message ?? "The printer did not accept the filament unload command.",
+                        source: .unloadPhysicalFilament
+                    )
+                    return
+                }
+                await loadPrinter()
+            } catch {
+                guard hasActionAuthority(authority) else { return }
+                setOperationError(error.localizedDescription, source: .unloadPhysicalFilament)
+            }
+            return
+        }
+        setOperationError(reason, source: .unloadPhysicalFilament)
     }
 
     // MARK: - NFC Scan to Load
@@ -1638,8 +1770,13 @@ final class PrinterDetailViewModel {
         current.isOnline = detail.isOnline
         current.state = detail.state
         current.progress = detail.progress
+        current.currentLayer = detail.currentLayer
+        current.totalLayers = detail.totalLayers
+        current.fanSpeedPercent = detail.fanSpeedPercent
+        current.liveZOffsetMm = detail.liveZOffsetMm
         current.jobName = detail.jobName
         current.thumbnailUrl = detail.thumbnailUrl
+        current.currentJobThumbnailUrl = detail.currentJobThumbnailUrl
         current.cameraStreamUrl = detail.cameraStreamUrl
         current.cameraSnapshotUrl = detail.cameraSnapshotUrl
         current.x = detail.x
@@ -1986,6 +2123,41 @@ final class PrinterDetailViewModel {
         return rowVersion
     }
 
+    func physicalFilamentCommandBlockedReason(for operation: PhysicalFilamentOperation) -> String? {
+        guard printerService != nil else { return "Printer service is not available." }
+        guard let printer else { return "Printer status is unavailable." }
+        guard printer.isOnline else { return "Printer is offline." }
+        let state = printer.state?.lowercased()
+        guard let state,
+              ["idle", "ready", "standby", "complete", "completed", "cancelled",
+               "printing", "starting", "paused"].contains(state) else {
+            return "Printer state is unknown or transitioning."
+        }
+        guard !["printing", "starting", "paused"].contains(state) else {
+            return "Filament load and unload are disabled while a print is active."
+        }
+        guard !isPerformingAction else { return "Another printer operation is in progress." }
+        guard let capabilities = filamentCommandCapabilities else {
+            if let filamentCommandCapabilitiesError {
+                return "Printer support could not be confirmed: \(filamentCommandCapabilitiesError)"
+            }
+            return "Checking printer filament-command support."
+        }
+        let isSupported = operation == .load
+            ? capabilities.supportsFilamentLoad
+            : capabilities.supportsFilamentUnload
+        guard isSupported else {
+            return "This printer backend does not report support for that filament command."
+        }
+        return PhysicalFilamentCommandEligibility.blockedReason(
+            for: operation,
+            capabilities: capabilities,
+            status: statusDetail,
+            configurationRevision: printer.configurationRevision,
+            now: nowProvider()
+        )
+    }
+
     @discardableResult
     func refreshSnapshot() async -> Bool {
         guard let printerService,
@@ -2316,13 +2488,12 @@ final class PrinterDetailViewModel {
         return eta.formatted(date: .omitted, time: .shortened)
     }
 
-    /// Thumbnail for the running job, if the model file carries one; falls
-    /// back to the printer thumbnail, and is omitted gracefully when absent.
+    /// Relative current-job media endpoint; never expose the printer's internal
+    /// thumbnail URL to the client or load it without session authentication.
     var currentJobThumbnailUrl: String? {
-        let candidates = [currentJob?.thumbnailUrl, printer?.thumbnailUrl]
-        return candidates
-            .compactMap { $0 }
-            .first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        guard let path = printer?.currentJobThumbnailUrl,
+              !path.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        return path
     }
 
     /// Only Queued is eligible for a new dispatch; Assigned is a committed handoff.
@@ -2362,8 +2533,10 @@ final class PrinterDetailViewModel {
     }
 
     func matchState(for job: QueuedPrintJobResponse) -> QueueMatchState {
-        guard let required = job.gcodeFile?.materialType?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !required.isEmpty else { return .unknown }
+        let required = [job.gcodeFile?.materialType, job.job.filamentName]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty }
+        guard let required else { return .unknown }
         let loaded = toolheads.compactMap {
             $0.currentMaterial?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         }.filter { !$0.isEmpty }

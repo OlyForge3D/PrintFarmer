@@ -111,6 +111,22 @@ final class UITestBootstrapTests: XCTestCase {
         )
     }
 
+    #if DEBUG
+    func test_issue3259VisualAcceptanceLaunchArgument_selectsSyntheticCaptureMode() {
+        XCTAssertEqual(
+            UITestBootstrap.issue3259VisualAcceptanceLaunchArgument,
+            "--uitesting-issue3259-visual-acceptance"
+        )
+        XCTAssertEqual(
+            UITestBootstrap.mode(in: [
+                "--uitesting",
+                UITestBootstrap.issue3259VisualAcceptanceLaunchArgument
+            ]),
+            .authenticatedIssue3259VisualAcceptance
+        )
+    }
+    #endif
+
     // MARK: - Operator-features-disabled mode (#2117)
 
     func test_operatorFeaturesDisabledLaunchArgument_matchesUITestsHarness() {

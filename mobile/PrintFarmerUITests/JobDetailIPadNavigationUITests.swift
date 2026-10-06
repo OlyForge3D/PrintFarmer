@@ -1,21 +1,11 @@
 import XCTest
 
-/// Strict iPad navigation coverage for issue #794.
+/// Strict iPad navigation and harvest coverage for issue #3259.
 ///
-/// Before the fix, the Tasks destination presented the preserved
-/// `JobListView` inside the operator shell's `NavigationSplitView` detail
-/// column, and the iPad List layout gated its Recent (completed / failed /
-/// cancelled) jobs behind a `Section(isExpanded:)`. Under the `.plain` list
-/// style that collapsible section renders no disclosure control, so on iPad
-/// the section stayed permanently collapsed: completed jobs — and the
-/// `jobDetail.harvestToInventory` entry point reached through them — were
-/// unreachable, blocking the harvest flow.
-///
-/// This suite proves, with strict (non-optional) assertions on the core
-/// path, that on the iPad (regular width) layout a seeded completed job is
-/// reachable in the Recent section **without any expansion affordance** and
-/// that selecting it presents `JobDetailView` in the FOREGROUND navigation
-/// context (inside the visible queue), exposing the harvest action.
+/// Completed jobs live in the explicit Job History sheet, separate from the
+/// failures-only Queue composition. This suite proves that a seeded completed
+/// job is reachable there and that selecting it presents `JobDetailView` in
+/// the foreground navigation context with its harvest action.
 ///
 /// The equivalent iPhone flow is proven by `HarvestUITests` (6/6) and is
 /// intentionally skipped here: this suite asserts the regular-width shell
@@ -55,23 +45,21 @@ final class JobDetailIPadNavigationUITests: QueueUITestBase {
         XCTAssertTrue(app.descendants(matching: .any)["jobList.root"].waitForExistence(timeout: 8))
     }
 
-    /// #794 core path: the completed job must be reachable in the iPad
-    /// Recent section and present `JobDetailView` with the harvest action in
-    /// the foreground.
-    func testIPadCompletedJobPresentsHarvestActionInForeground() throws {
+    /// The completed job must be reachable from the iPad Job History sheet
+    /// and present `JobDetailView` with the harvest action in the foreground.
+    func testIPadJobHistoryCompletedJobPresentsHarvestActionInForeground() throws {
         try requireRegularWidthShell()
 
         openQueueDestination()
+        let historyButton = app.buttons["jobList.history.open"]
+        XCTAssertTrue(historyButton.waitForExistence(timeout: 8))
+        historyButton.tap()
 
 
-        // Regression guard: the completed job must be reachable directly in
-        // the Recent section with NO expansion tap. Before the fix this row
-        // never rendered on iPad because the Recent section was collapsed
-        // with no disclosure control.
         let jobRow = app.buttons[completedJobIdentifier]
         XCTAssertTrue(
             jobRow.waitForExistence(timeout: 8),
-            "The seeded completed job must be reachable in the iPad Recent section without any expansion affordance (#794)"
+            "The seeded completed job must be reachable in the iPad Job History sheet"
         )
         jobRow.tap()
 
@@ -86,15 +74,17 @@ final class JobDetailIPadNavigationUITests: QueueUITestBase {
 
     /// The harvest action reached on iPad must present the real
     /// `HarvestSheetView`, proving the #714 harvest flow can begin on iPad.
-    func testIPadHarvestActionPresentsHarvestSheet() throws {
+    func testIPadJobHistoryHarvestActionPresentsHarvestSheet() throws {
         try requireRegularWidthShell()
 
         openQueueDestination()
-
+        let historyButton = app.buttons["jobList.history.open"]
+        XCTAssertTrue(historyButton.waitForExistence(timeout: 8))
+        historyButton.tap()
 
         let jobRow = app.buttons[completedJobIdentifier]
         XCTAssertTrue(jobRow.waitForExistence(timeout: 8),
-                      "The seeded completed job must be reachable in the iPad Recent section (#794)")
+                      "The seeded completed job must be reachable in the iPad Job History sheet")
         jobRow.tap()
 
         let harvestButton = app.buttons["jobDetail.harvestToInventory"]

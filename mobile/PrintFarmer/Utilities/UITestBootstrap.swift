@@ -1,5 +1,9 @@
 import Foundation
 import notify
+import KeychainSwift
+#if DEBUG
+import UIKit
+#endif
 #if canImport(UserNotifications)
 import UserNotifications
 #endif
@@ -99,6 +103,12 @@ enum UITestBootstrap {
         "--uitesting-cold-offline-shell"
     #if DEBUG
     static let queueReorderLaunchArgument = "--uitesting-queue-reorder"
+    static let issue3259VisualAcceptanceLaunchArgument =
+        "--uitesting-issue3259-visual-acceptance"
+    static let issue3259ControlIdleLaunchArgument =
+        "--uitesting-issue3259-control-idle"
+    static let issue3259SafeFilamentActionsLaunchArgument =
+        "--uitesting-issue3259-safe-filament-actions"
     #endif
 
     #if DEBUG
@@ -145,6 +155,8 @@ enum UITestBootstrap {
         case authenticatedColdOfflineShell
         #if DEBUG
         case authenticatedQueueReorder
+        /// Mockup-aligned synthetic state for paired screenshot review.
+        case authenticatedIssue3259VisualAcceptance
         #endif
     }
 
@@ -188,6 +200,9 @@ enum UITestBootstrap {
             return .authenticatedColdOfflineShell
         }
         #if DEBUG
+        if arguments.contains(issue3259VisualAcceptanceLaunchArgument) {
+            return .authenticatedIssue3259VisualAcceptance
+        }
         if arguments.contains(queueReorderLaunchArgument) {
             return .authenticatedQueueReorder
         }
@@ -286,16 +301,37 @@ enum UITestBootstrap {
             injectedSnapshotStore = nil
         }
         #if DEBUG
-        let testUser = mode == .authenticatedQueueReorder
-            ? Self.queueWritableDemoUser()
-            : DemoData.demoUser
+        let testUser: UserDTO
+        switch mode {
+        case .authenticatedQueueReorder:
+            testUser = Self.queueWritableDemoUser()
+        case .authenticatedIssue3259VisualAcceptance:
+            testUser = Self.visualAcceptanceDemoUser()
+        default:
+            testUser = DemoData.demoUser
+        }
         #else
         let testUser = DemoData.demoUser
         #endif
-        let services = ServiceContainer.demo(
+        let services: ServiceContainer
+        #if DEBUG
+        if mode == .authenticatedIssue3259VisualAcceptance {
+            services = Self.issue3259VisualAcceptanceServices(
+                registry: registry,
+                defaults: resolvedDefaults
+            )
+        } else {
+            services = ServiceContainer.demo(
+                serverRegistry: registry,
+                farmSnapshotStore: injectedSnapshotStore
+            )
+        }
+        #else
+        services = ServiceContainer.demo(
             serverRegistry: registry,
             farmSnapshotStore: injectedSnapshotStore
         )
+        #endif
         #if DEBUG
         if mode == .authenticatedQueueReorder {
             services.jobService = QueueReorderUITestJobService()
@@ -376,6 +412,18 @@ enum UITestBootstrap {
             )
         }
         #if DEBUG
+        if mode == .authenticatedIssue3259VisualAcceptance {
+            services.spoolService = DemoSpoolService(
+                spoolOverrides: [Self.issue3259VisualAcceptanceSpool()]
+            )
+            services.signalRService = DemoSignalRService(simulatesProgress: false)
+            services.filamentCoverageService = StubFilamentCoverageService(
+                fleet: Self.issue3259VisualAcceptanceCoverage()
+            )
+            var capabilities = ResolvedSystemCapabilities.defaults
+            capabilities.printedPartsInventoryEnabled = true
+            services.capabilitiesService = StubSystemCapabilitiesService(resolved: capabilities)
+        }
         if mode == .authenticatedShiftTaskMutationError {
             services.shiftTaskService = DemoShiftTaskService(
                 scenario: .mutationFailureThenSuccess
@@ -426,6 +474,8 @@ enum UITestBootstrap {
         #if DEBUG
         case .authenticatedQueueReorder:
             auth.markAuthenticatedForUITesting(user: testUser)
+        case .authenticatedIssue3259VisualAcceptance:
+            auth.markAuthenticatedForUITesting(user: testUser)
         #endif
         }
 
@@ -451,6 +501,1670 @@ enum UITestBootstrap {
             permissions: DemoData.demoUser.permissions + ["queue:write"]
         )
     }
+
+    #if DEBUG
+    private static func visualAcceptanceDemoUser() -> UserDTO {
+        let user = queueWritableDemoUser()
+        return UserDTO(
+            id: user.id,
+            username: user.username,
+            email: user.email,
+            firstName: user.firstName,
+            lastName: user.lastName,
+            isActive: user.isActive,
+            emailConfirmed: user.emailConfirmed,
+            lastLogin: user.lastLogin,
+            createdAt: user.createdAt,
+            roles: user.roles,
+            permissions: user.permissions + ["queue:start"]
+        )
+    }
+
+    private static let issue3259VisualAcceptanceToolheadID =
+        UUID(uuidString: "32590000-0000-0000-0000-000000000001")!
+
+    private static let issue3259Ender3S1ID =
+        UUID(uuidString: "32590000-0000-0000-0000-000000000002")!
+    private static let issue3259PrusaMiniID =
+        UUID(uuidString: "32590000-0000-0000-0000-000000000003")!
+    private static let issue3259SovolSV06ID =
+        UUID(uuidString: "32590000-0000-0000-0000-000000000004")!
+    private static let issue3259PrusaXLID =
+        UUID(uuidString: "32590000-0000-0000-0000-000000000005")!
+    private static let issue3259BambuA1ID =
+        UUID(uuidString: "32590000-0000-0000-0000-000000000006")!
+    private static let issue3259CrealityK1ID =
+        UUID(uuidString: "32590000-0000-0000-0000-000000000007")!
+
+    private static func issue3259VisualAcceptanceThumbnailPath(for printerID: UUID) -> String {
+        "/api/printers/\(printerID.uuidString.lowercased())/current-job/thumbnail?v=3259000000000001"
+    }
+
+    private static func issue3259VisualAcceptanceThumbnailAssetName(for jobName: String?) -> String? {
+        guard let jobName = jobName?.lowercased() else { return nil }
+        if jobName.contains("benchy") {
+            return "Issue3259VisualAcceptanceBenchy"
+        }
+        if jobName.contains("gear") {
+            return "Issue3259VisualAcceptanceGear"
+        }
+        if jobName.contains("vase") || jobName.contains("tool_tray") {
+            return "Issue3259VisualAcceptanceVase"
+        }
+        if jobName.contains("clip") || jobName.contains("cable_guide") {
+            return "Issue3259VisualAcceptanceClip"
+        }
+        if jobName.contains("bracket") || jobName.contains("organizer") || jobName.contains("mount") {
+            return "Issue3259VisualAcceptanceBracket"
+        }
+        return nil
+    }
+
+    private static func issue3259VisualAcceptanceThumbnailData(named assetName: String) -> Data {
+        guard let data = UIImage(named: assetName)?.pngData() else {
+            preconditionFailure("The visual-acceptance thumbnail asset \(assetName) must be available in the app bundle.")
+        }
+        return data
+    }
+
+    private static func issue3259QueueThumbnailPath(_ jobID: String) -> String {
+        "/api/gcode-files/thumbnail/\(jobID)"
+    }
+
+    private struct Issue3259VisualAcceptanceFixture {
+        let printers: [Printer]
+        let status: PrinterStatusDetail
+        let details: PrinterDetails
+        let attentionFeed: AttentionFeed
+        let currentJobThumbnailDataByID: [String: Data]
+        let queueThumbnailDataByJobID: [String: Data]
+    }
+
+    private static func issue3259VisualAcceptanceFixture(
+        controlIdle: Bool = false
+    ) -> Issue3259VisualAcceptanceFixture {
+        func demoPrinter(_ id: UUID) -> Printer {
+            guard let printer = DemoData.printers.first(where: { $0.id == id }) else {
+                preconditionFailure("The visual-acceptance fixture requires demo printer \(id).")
+            }
+            return printer
+        }
+
+        var printer = demoPrinter(DemoData.prusaMK4_1_ID)
+        printer.progress = 0.64
+        printer.currentLayer = 142
+        printer.totalLayers = 221
+        printer.fanSpeedPercent = 60
+        printer.liveZOffsetMm = 0.025
+        printer.jobName = "benchy_0.2mm_PLA.gcode"
+        printer.fileName = "benchy_0.2mm_PLA.gcode"
+        printer.currentJobThumbnailUrl = issue3259VisualAcceptanceThumbnailPath(for: printer.id)
+        printer.spoolInfo = PrinterSpoolInfo(
+            hasActiveSpool: true,
+            activeSpoolId: 1,
+            spoolName: "Prusament PLA · Coral",
+            material: "PLA",
+            colorHex: "#EF6B4A",
+            filamentName: "Prusament PLA",
+            vendor: "Prusa Research",
+            remainingWeightG: 84,
+            spoolInUse: true
+        )
+        if controlIdle {
+            printer.state = "ready"
+            printer.progress = nil
+            printer.currentLayer = nil
+            printer.totalLayers = nil
+            printer.jobName = nil
+            printer.fileName = nil
+            printer.currentJobThumbnailUrl = nil
+            printer.hotendTemp = 24
+            printer.bedTemp = 23
+            printer.hotendTarget = 215
+            printer.bedTarget = 60
+            printer.x = 0
+            printer.y = 0
+            printer.z = 5
+            printer.homedAxes = ""
+        }
+        if ProcessInfo.processInfo.arguments.contains(issue3259SafeFilamentActionsLaunchArgument) {
+            printer.state = "ready"
+            printer.progress = nil
+            printer.currentLayer = nil
+            printer.totalLayers = nil
+            printer.jobName = nil
+            printer.fileName = nil
+            printer.currentJobThumbnailUrl = nil
+            printer.hotendTemp = PhysicalFilamentCommandEligibility.minimumLoadUnloadTemperatureC
+            printer.hotendTarget = PhysicalFilamentCommandEligibility.minimumLoadUnloadTemperatureC
+            printer.bedTemp = 23
+            printer.bedTarget = 0
+        }
+
+        var bambuX1C = demoPrinter(DemoData.bambuX1C_ID)
+        bambuX1C.state = "completed"
+        bambuX1C.progress = nil
+        bambuX1C.currentLayer = nil
+        bambuX1C.totalLayers = nil
+        bambuX1C.jobName = "clip_holder_x4.gcode"
+        bambuX1C.fileName = "clip_holder_x4.gcode"
+        bambuX1C.hotendTemp = 32
+        bambuX1C.bedTemp = 41
+        bambuX1C.hotendTarget = 0
+        bambuX1C.bedTarget = 0
+
+        var voron = demoPrinter(DemoData.voron24_ID)
+        voron.progress = 0.22
+        voron.jobName = "gear_set_v3.gcode"
+        voron.fileName = "gear_set_v3.gcode"
+        voron.currentJobThumbnailUrl = issue3259VisualAcceptanceThumbnailPath(for: voron.id)
+        voron.hotendTemp = 250
+        voron.bedTemp = 100
+
+        var idleMk4 = demoPrinter(DemoData.prusaMK4_2_ID)
+        idleMk4.state = "ready"
+        idleMk4.progress = nil
+        idleMk4.currentLayer = nil
+        idleMk4.totalLayers = nil
+        idleMk4.jobName = nil
+        idleMk4.fileName = nil
+        idleMk4.currentJobThumbnailUrl = nil
+        idleMk4.hotendTemp = 24
+        idleMk4.bedTemp = 23
+        idleMk4.hotendTarget = 215
+        idleMk4.bedTarget = 60
+        idleMk4.fanSpeedPercent = 35
+        idleMk4.liveZOffsetMm = 0.025
+        idleMk4.x = 0
+        idleMk4.y = 0
+        idleMk4.z = 5
+        idleMk4.homedAxes = "X Y Z"
+        idleMk4.spoolInfo = PrinterSpoolInfo(
+            hasActiveSpool: true,
+            activeSpoolId: 1,
+            spoolName: "Prusament PLA · Coral",
+            material: "PLA",
+            colorHex: "#EF6B4A",
+            filamentName: "Prusament PLA",
+            vendor: "Prusa Research",
+            remainingWeightG: 350,
+            spoolInUse: true
+        )
+
+        let basePrinters = [
+            printer,
+            voron,
+            bambuX1C,
+            issue3259MockupPrinter(
+                id: issue3259Ender3S1ID,
+                name: "Ender 3 S1",
+                modelName: "Ender 3 S1",
+                state: "paused",
+                progress: 0.81,
+                currentLayer: 162,
+                totalLayers: 200,
+                jobName: "spiral_vase.gcode",
+                hotendTemp: 170,
+                bedTemp: 60,
+                spoolName: "PLA Purple",
+                colorHex: "#A78BFA"
+            ),
+            issue3259MockupPrinter(
+                id: issue3259PrusaMiniID,
+                name: "Prusa Mini",
+                modelName: "Mini",
+                state: "printing",
+                progress: 0.47,
+                currentLayer: 89,
+                totalLayers: 190,
+                jobName: "clip_holder_x4.gcode",
+                hotendTemp: 210,
+                bedTemp: 60,
+                spoolName: "PLA Teal",
+                colorHex: "#34D399"
+            ),
+            idleMk4,
+        ]
+        let printers = basePrinters + [
+            issue3259MockupPrinter(
+                id: DemoData.bambuP1S_ID,
+                name: "Bambu P1S",
+                modelName: "P1S",
+                state: "printing",
+                progress: 0.09,
+                currentLayer: 22,
+                totalLayers: 242,
+                jobName: "shelf_bracket_x6.gcode",
+                hotendTemp: 245,
+                bedTemp: 80,
+                spoolName: "PLA White",
+                colorHex: "#F3F4F6"
+            ),
+            issue3259MockupPrinter(
+                id: issue3259SovolSV06ID,
+                name: "Sovol SV06",
+                modelName: "SV06",
+                state: nil,
+                isOnline: false
+            ),
+            issue3259MockupPrinter(
+                id: DemoData.ender3V3_ID,
+                name: "Ender 3 V3",
+                modelName: "Ender 3 V3",
+                state: "idle",
+                hotendTemp: 22,
+                bedTemp: 22
+            ),
+            issue3259MockupPrinter(
+                id: issue3259PrusaXLID,
+                name: "Prusa XL",
+                modelName: "XL",
+                state: "printing",
+                progress: 0.38,
+                currentLayer: 76,
+                totalLayers: 200,
+                jobName: "tool_organizer.gcode",
+                hotendTemp: 215,
+                bedTemp: 60,
+                spoolName: "PLA Orange",
+                colorHex: "#F97316"
+            ),
+            issue3259MockupPrinter(
+                id: issue3259BambuA1ID,
+                name: "Bambu A1",
+                modelName: "A1",
+                state: "printing",
+                progress: 0.56,
+                currentLayer: 112,
+                totalLayers: 200,
+                jobName: "cable_clip_set.gcode",
+                hotendTemp: 220,
+                bedTemp: 55,
+                spoolName: "PETG Blue",
+                colorHex: "#3B82F6"
+            ),
+            issue3259MockupPrinter(
+                id: issue3259CrealityK1ID,
+                name: "Creality K1",
+                modelName: "K1",
+                state: "idle",
+                hotendTemp: 24,
+                bedTemp: 23
+            ),
+        ]
+
+        let status = PrinterStatusDetail(
+            id: printer.id,
+            isOnline: printer.isOnline,
+            state: printer.state,
+            progress: printer.progress.map { $0 * 100 },
+            currentLayer: printer.currentLayer,
+            totalLayers: printer.totalLayers,
+            fanSpeedPercent: 60,
+            liveZOffsetMm: 0.025,
+            jobName: printer.jobName,
+            thumbnailUrl: printer.thumbnailUrl,
+            cameraStreamUrl: printer.cameraStreamUrl,
+            cameraSnapshotUrl: printer.cameraSnapshotUrl,
+            x: printer.x,
+            y: printer.y,
+            z: printer.z,
+            hotendTemp: printer.hotendTemp,
+            bedTemp: printer.bedTemp,
+            hotendTarget: printer.hotendTarget,
+            bedTarget: printer.bedTarget,
+            homedAxes: printer.homedAxes,
+            spoolInfo: printer.spoolInfo,
+            mmuStatus: nil,
+            printTimeLeftSeconds: controlIdle ? nil : 2_280,
+            currentJobThumbnailUrl: printer.currentJobThumbnailUrl
+        )
+        let details = PrinterDetails(
+            id: printer.id,
+            name: printer.name,
+            backend: printer.backend,
+            manufacturerName: printer.manufacturerName,
+            modelName: printer.modelName,
+            toolheads: [
+                Toolhead(
+                    id: issue3259VisualAcceptanceToolheadID,
+                    name: "Extruder 1",
+                    index: 0,
+                    isPrimary: true,
+                    nozzleDiameter: 0.4,
+                    supportedMaterials: ["PLA", "PETG"],
+                    currentSpoolId: 1,
+                    currentMaterial: "PLA",
+                    currentFilamentColor: "#EF6B4A"
+                )
+            ],
+            capabilities: PrinterHardwareCapabilities(
+                maxBuildVolumeX: 220,
+                maxBuildVolumeY: 220,
+                maxBuildVolumeZ: 250,
+                maxHotendTemp: 300,
+                maxBedTemp: 120,
+                hasHeatedBed: true
+            )
+        )
+        let failedPrinter = printers.first { $0.state?.lowercased() == "error" }
+        let attentionFeed = AttentionFeed(
+            items: failedPrinter.map { failed in
+                [
+                    AttentionItem(
+                        id: "failure:issue3259-visual-acceptance",
+                        kind: .failure,
+                        severity: .critical,
+                        printerId: failed.id,
+                        printerName: failed.name,
+                        title: "Print failed",
+                        detail: "The printer reported a failed job.",
+                        occurredAt: Date(timeIntervalSince1970: 1_790_000_000),
+                        actions: []
+                    )
+                ]
+            } ?? [],
+            nextCursor: nil,
+            healthyPrinterCount: 0
+        )
+        let currentJobThumbnailDataByID: [String: Data] = Dictionary(
+            uniqueKeysWithValues: printers.compactMap { printer -> (String, Data)? in
+                guard printer.currentJobThumbnailUrl != nil,
+                      let assetName = issue3259VisualAcceptanceThumbnailAssetName(
+                        for: printer.jobName ?? printer.fileName
+                      ) else {
+                    return nil
+                }
+                return (
+                    printer.id.uuidString.lowercased(),
+                    issue3259VisualAcceptanceThumbnailData(named: assetName)
+                )
+            }
+        )
+        let queueThumbnailAssetNames = [
+            "32590000-0000-0000-0000-000000000002": "Issue3259VisualAcceptanceClip",
+            "32590000-0000-0000-0000-000000000003": "Issue3259VisualAcceptanceBracket",
+            "32590000-0000-0000-0000-000000000004": "Issue3259VisualAcceptanceVase",
+            "32590000-0000-0000-0000-000000000020": "Issue3259VisualAcceptanceClip",
+            "32590000-0000-0000-0000-000000000021": "Issue3259VisualAcceptanceBracket",
+            "32590000-0000-0000-0000-000000000022": "Issue3259VisualAcceptanceVase",
+            "32590000-0000-0000-0000-000000000101": "Issue3259VisualAcceptanceClip",
+            "32590000-0000-0000-0000-000000000102": "Issue3259VisualAcceptanceBracket",
+            "32590000-0000-0000-0000-000000000103": "Issue3259VisualAcceptanceVase",
+            "32590000-0000-0000-0000-000000000104": "Issue3259VisualAcceptanceClip",
+            "32590000-0000-0000-0000-000000000105": "Issue3259VisualAcceptanceVase",
+            "32590000-0000-0000-0000-000000000106": "Issue3259VisualAcceptanceGear",
+            "32590000-0000-0000-0000-000000000110": "Issue3259VisualAcceptanceGear",
+            "32590000-0000-0000-0000-000000000111": "Issue3259VisualAcceptanceClip",
+            DemoData.job1ID.uuidString.lowercased(): "Issue3259VisualAcceptanceBenchy",
+        ]
+        let queueThumbnailDataByJobID = queueThumbnailAssetNames.mapValues {
+            issue3259VisualAcceptanceThumbnailData(named: $0)
+        }
+        var statusWithSafety = status
+        statusWithSafety.safetyTelemetry = issue3259VisualAcceptanceSafetyTelemetry(
+            printer: printer,
+            observedAt: Date()
+        )
+        return Issue3259VisualAcceptanceFixture(
+            printers: printers,
+            status: statusWithSafety,
+            details: details,
+            attentionFeed: attentionFeed,
+            currentJobThumbnailDataByID: currentJobThumbnailDataByID,
+            queueThumbnailDataByJobID: queueThumbnailDataByJobID
+        )
+    }
+
+    private static func issue3259MockupPrinter(
+        id: UUID,
+        name: String,
+        modelName: String,
+        state: String?,
+        isOnline: Bool = true,
+        progress: Double? = nil,
+        currentLayer: Int? = nil,
+        totalLayers: Int? = nil,
+        jobName: String? = nil,
+        hotendTemp: Double? = nil,
+        bedTemp: Double? = nil,
+        spoolName: String? = nil,
+        colorHex: String? = nil
+    ) -> Printer {
+        var payload: [String: Any] = [
+            "id": id.uuidString,
+            "name": name,
+            "modelName": modelName,
+            "isOnline": isOnline,
+            "isEnabled": true,
+        ]
+        if let state { payload["state"] = state }
+        if let progress { payload["progress"] = progress * 100 }
+        if let currentLayer { payload["currentLayer"] = currentLayer }
+        if let totalLayers { payload["totalLayers"] = totalLayers }
+        if let jobName {
+            payload["jobName"] = jobName
+            payload["fileName"] = jobName
+            if ["printing", "paused"].contains(state?.lowercased() ?? ""),
+               issue3259VisualAcceptanceThumbnailAssetName(for: jobName) != nil {
+                payload["currentJobThumbnailUrl"] = issue3259VisualAcceptanceThumbnailPath(for: id)
+            }
+        }
+        if let hotendTemp { payload["hotendTemp"] = hotendTemp }
+        if let bedTemp { payload["bedTemp"] = bedTemp }
+        if let spoolName, let colorHex {
+            payload["spoolInfo"] = [
+                "hasActiveSpool": true,
+                "activeSpoolId": 3259,
+                "spoolName": spoolName,
+                "material": "PLA",
+                "colorHex": colorHex,
+                "filamentName": spoolName,
+                "vendor": "Mockup fixture",
+                "remainingWeightG": 350,
+                "spoolInUse": true,
+            ]
+        }
+        do {
+            let data = try JSONSerialization.data(withJSONObject: payload)
+            return try JSONDecoder().decode(Printer.self, from: data)
+        } catch {
+            preconditionFailure("The visual-acceptance printer fixture must decode: \(error)")
+        }
+    }
+
+    private static func issue3259VisualAcceptanceServices(
+        registry: ServerRegistry,
+        defaults: UserDefaults
+    ) -> ServiceContainer {
+        guard let server = registry.activeServer else {
+            preconditionFailure("The visual-acceptance API fixture requires an active registered server.")
+        }
+        let controlIdle = ProcessInfo.processInfo.arguments.contains(issue3259ControlIdleLaunchArgument)
+        let fixture = issue3259VisualAcceptanceFixture(controlIdle: controlIdle)
+        Issue3259VisualAcceptanceURLProtocol.install(fixture)
+
+        let keychain = KeychainSwift(keyPrefix: "PrintFarmerUITestIssue3259_")
+        let credentials = ServerCredentialsStore(keychain: keychain)
+        credentials.save(
+            ServerCredentials(accessToken: Issue3259VisualAcceptanceURLProtocol.accessToken),
+            serverId: server.id
+        )
+        registry.setAdvancedPrinterControlsEnabled(true)
+
+        let services = ServiceContainer(
+            serverRegistry: registry,
+            credentialsStore: credentials,
+            userDefaultsBox: AuthServiceUserDefaultsBox(defaults),
+            synchronizeOfflineQueueOnStartup: false,
+            apiClientFactory: { baseURL, generation, accessToken, authSessionToken, serverID in
+                let identity = accessToken.flatMap { token in
+                    serverID.map {
+                        AuthenticatedIdentity(
+                            accessToken: token,
+                            serverID: $0,
+                            authSessionToken: authSessionToken
+                        )
+                    }
+                }
+                let configuration = URLSessionConfiguration.ephemeral
+                configuration.protocolClasses = [Issue3259VisualAcceptanceURLProtocol.self]
+                return APIClient(
+                    baseURL: baseURL,
+                    session: URLSession(configuration: configuration),
+                    serverGeneration: generation,
+                    authenticated: identity
+                )
+            },
+            signalRServiceFactory: { _, _ in
+                DemoSignalRService(simulatesProgress: false)
+            }
+        )
+        services.autoPrintService = DemoAutoDispatchService()
+        return services
+    }
+
+    private static func issue3259VisualAcceptanceSafetyTelemetry(
+        printer: Printer,
+        observedAt: Date
+    ) -> PrinterSafetyTelemetryDto {
+        func scalar(_ value: Double?) -> SafetyScalarTelemetryFactDto {
+            SafetyScalarTelemetryFactDto(
+                value: value,
+                observedAtUtc: observedAt,
+                staleAfterSeconds: 120,
+                source: "issue3259-visual-acceptance-api-fixture"
+            )
+        }
+
+        return PrinterSafetyTelemetryDto(
+            measuredHotendTemperatureC: scalar(printer.hotendTemp),
+            targetHotendTemperatureC: scalar(printer.hotendTarget),
+            homedAxes: SafetyAxesTelemetryFactDto(
+                value: ["X", "Y", "Z"],
+                observedAtUtc: observedAt,
+                staleAfterSeconds: 120,
+                source: "issue3259-visual-acceptance-api-fixture"
+            ),
+            coordinateOriginOffsetMm: SafetyVectorTelemetryFactDto(
+                value: SafetyVector3Dto(x: 0, y: 0, z: 0),
+                observedAtUtc: observedAt,
+                staleAfterSeconds: 120,
+                source: "issue3259-visual-acceptance-api-fixture"
+            )
+        )
+    }
+
+    private final class Issue3259VisualAcceptanceURLProtocol: URLProtocol, @unchecked Sendable {
+        private struct FixtureState: Sendable {
+            let printersData: Data
+            let printersByID: [String: Data]
+            let currentJobThumbnailUrlsByID: [String: String]
+            let currentJobThumbnailDataByID: [String: Data]
+            let queueThumbnailDataByJobID: [String: Data]
+            var statusData: Data
+            let additionalStatusDataByID: [String: Data]
+            let detailsDataByID: [String: Data]
+            let attentionData: Data
+            let capabilitiesDataByID: [String: Data]
+            let assignedQueueDataByID: [String: Data]
+            var globalQueueData: Data
+            let globalQueueAfterRerunData: Data
+            let globalQueueAfterSecondRerunData: Data
+            let recentFailureHistoryData: Data
+            let failedJobsDataByID: [String: Data]
+            let failedJobRowVersionsByID: [String: String]
+            let rerunResponsesByID: [String: Data]
+            let farmShapeData: Data
+            let queueStatsData: Data
+            let userData: Data
+        }
+
+        static let accessToken = "issue3259-ui-test-only"
+        private static let printerID = DemoData.prusaMK4_1_ID.uuidString.lowercased()
+        private static let lock = NSLock()
+        nonisolated(unsafe) private static var fixtureState: FixtureState?
+
+        @MainActor
+        static func install(_ fixture: Issue3259VisualAcceptanceFixture) {
+            do {
+                let encoder = JSONEncoder()
+                encoder.dateEncodingStrategy = .iso8601
+                let encodedPrinters = try encoder.encode(fixture.printers)
+                guard var printerObjects = try JSONSerialization.jsonObject(with: encodedPrinters) as? [[String: Any]] else {
+                    preconditionFailure("The visual-acceptance printer fixture must encode as an array of objects.")
+                }
+                for index in printerObjects.indices {
+                    if let progress = printerObjects[index]["progress"] as? Double {
+                        printerObjects[index]["progress"] = progress * 100
+                    }
+                }
+                let printersData = try JSONSerialization.data(withJSONObject: printerObjects)
+                var printersByID: [String: Data] = [:]
+                for printer in printerObjects {
+                    guard let id = (printer["id"] as? String)?.lowercased() else { continue }
+                    printersByID[id] = try JSONSerialization.data(withJSONObject: printer)
+                }
+                var currentJobThumbnailUrlsByID: [String: String] = [:]
+                for printer in fixture.printers {
+                    guard let path = printer.currentJobThumbnailUrl else { continue }
+                    currentJobThumbnailUrlsByID[printer.id.uuidString.lowercased()] = path
+                }
+                let safetyData = try encoder.encode(issue3259VisualAcceptanceVerifiedSafety(
+                    configurationRevision: fixture.printers.first(where: { $0.id == DemoData.prusaMK4_1_ID })?.configurationRevision ?? 0,
+                    observedAt: Date()
+                ))
+                guard let safety = try JSONSerialization.jsonObject(with: safetyData) as? [String: Any] else {
+                    preconditionFailure("The verified-safety fixture must encode as an object.")
+                }
+                let capabilitiesData = try JSONSerialization.data(withJSONObject: [
+                    "printerId": printerID,
+                    "printerName": fixture.printers.first(where: { $0.id == DemoData.prusaMK4_1_ID })?.name ?? "Prusa MK4",
+                    "backend": "Moonraker",
+                    "supportsMovement": true,
+                    "supportsTemperatureControl": true,
+                    "supportsFanControl": true,
+                    "supportsFanSpeedReadback": true,
+                    "supportsRelativeMovement": true,
+                    "supportsAbsoluteMovement": true,
+                    "supportsZOffset": true,
+                    "supportsZOffsetAdjustment": true,
+                    "supportsZOffsetReadback": true,
+                    "supportsZOffsetFirmwareSave": true,
+                    "supportsHoming": true,
+                    "supportsHomingXY": true,
+                    "supportsHomingZ": true,
+                    "supportsHotendTemperature": true,
+                    "supportsBedTemperature": true,
+                    "supportsFilamentLoad": true,
+                    "supportsFilamentUnload": true,
+                    "supportsFilamentChange": false,
+                    "supportedAxes": ["X", "Y", "Z"],
+                    "verifiedSafety": safety
+                ])
+                let userData = try encoder.encode(visualAcceptanceDemoUser())
+                let farmShapeData = try JSONSerialization.data(withJSONObject: [
+                    "accountCount": 1,
+                    "locationCount": 1,
+                    "printerCount": fixture.printers.count,
+                ])
+                let queueStatsData = try encoder.encode(QueueStats(
+                    totalQueued: 4,
+                    totalPrinting: 3,
+                    totalPaused: 0,
+                    averageWaitTimeMinutes: 18,
+                    byModel: []
+                ))
+                let detailsData = try encoder.encode(fixture.details)
+                guard var idleDetails = try JSONSerialization.jsonObject(with: detailsData) as? [String: Any] else {
+                    preconditionFailure("The idle-printer details fixture must encode as an object.")
+                }
+                idleDetails["id"] = DemoData.prusaMK4_2_ID.uuidString
+                idleDetails["name"] = "Prusa MK4 #2"
+                if var toolheads = idleDetails["toolheads"] as? [[String: Any]] {
+                    for index in toolheads.indices {
+                        toolheads[index]["id"] = "32590000-0000-0000-0000-000000000023"
+                    }
+                    idleDetails["toolheads"] = toolheads
+                }
+                let detailsDataByID = [
+                    printerID: detailsData,
+                    DemoData.prusaMK4_2_ID.uuidString.lowercased():
+                        try JSONSerialization.data(withJSONObject: idleDetails),
+                ]
+                guard var idleCapabilities = try JSONSerialization.jsonObject(with: capabilitiesData) as? [String: Any] else {
+                    preconditionFailure("The idle-printer capability fixture must encode as an object.")
+                }
+                idleCapabilities["printerId"] = DemoData.prusaMK4_2_ID.uuidString.lowercased()
+                idleCapabilities["printerName"] = "Prusa MK4 #2"
+                idleCapabilities["verifiedSafety"] = try JSONSerialization.jsonObject(with: encoder.encode(
+                    issue3259VisualAcceptanceVerifiedSafety(
+                        configurationRevision: fixture.printers.first(where: { $0.id == DemoData.prusaMK4_2_ID })?.configurationRevision ?? 0,
+                        observedAt: Date()
+                    )
+                ))
+                let capabilitiesDataByID = [
+                    printerID: capabilitiesData,
+                    DemoData.prusaMK4_2_ID.uuidString.lowercased():
+                        try JSONSerialization.data(withJSONObject: idleCapabilities),
+                ]
+                let remainingSecondsByPrinterID: [UUID: Double] = [
+                    DemoData.voron24_ID: 9_660,
+                    issue3259Ender3S1ID: 7_200,
+                    issue3259PrusaMiniID: 1_320,
+                    DemoData.bambuP1S_ID: 19_800,
+                    issue3259PrusaXLID: 12_600,
+                    issue3259BambuA1ID: 5_040,
+                ]
+                let additionalStatusDataByID: [String: Data] = try Dictionary(
+                    uniqueKeysWithValues: fixture.printers
+                        .filter { $0.id != DemoData.prusaMK4_1_ID }
+                        .map { printer in
+                            var status = PrinterStatusDetail(
+                                id: printer.id,
+                                isOnline: printer.isOnline,
+                                state: printer.state,
+                                progress: printer.progress.map { $0 * 100 },
+                                currentLayer: printer.currentLayer,
+                                totalLayers: printer.totalLayers,
+                                fanSpeedPercent: printer.fanSpeedPercent,
+                                liveZOffsetMm: printer.liveZOffsetMm,
+                                jobName: printer.jobName,
+                                thumbnailUrl: printer.thumbnailUrl,
+                                cameraStreamUrl: printer.cameraStreamUrl,
+                                cameraSnapshotUrl: printer.cameraSnapshotUrl,
+                                x: printer.x,
+                                y: printer.y,
+                                z: printer.z,
+                                hotendTemp: printer.hotendTemp,
+                                bedTemp: printer.bedTemp,
+                                hotendTarget: printer.hotendTarget,
+                                bedTarget: printer.bedTarget,
+                                homedAxes: printer.homedAxes,
+                                spoolInfo: printer.spoolInfo,
+                                mmuStatus: nil,
+                                printTimeLeftSeconds: remainingSecondsByPrinterID[printer.id]
+                            )
+                            if printer.id == DemoData.prusaMK4_2_ID {
+                                status.safetyTelemetry = issue3259VisualAcceptanceSafetyTelemetry(
+                                    printer: printer,
+                                    observedAt: Date()
+                                )
+                            }
+                            return (printer.id.uuidString.lowercased(), try encoder.encode(status))
+                        }
+                )
+                let printerID = DemoData.prusaMK4_1_ID.uuidString.lowercased()
+                let assignedQueueData = try encoder.encode([
+                    QueuedJobInfo(
+                        id: "32590000-0000-0000-0000-000000000002",
+                        rowVersion: "issue3259-prusa1-assigned-v1",
+                        name: "Coral spool bracket.gcode",
+                        fileName: "Coral spool bracket.gcode",
+                        assignedPrinterId: printerID,
+                        printerName: "Prusa MK4 #1",
+                        printerModel: "Prusa MK4",
+                        status: "Queued",
+                        priority: .normal,
+                        queuePosition: 0,
+                        estimatedPrintTimeSeconds: 5_400,
+                        actualStartTimeUtc: nil,
+                        actualEndTimeUtc: nil,
+                        actualPrintTimeSeconds: nil,
+                        failureReason: nil,
+                        createdAtUtc: Date(timeIntervalSince1970: 1_790_000_000),
+                        updatedAtUtc: nil,
+                        thumbnailUrl: issue3259QueueThumbnailPath("32590000-0000-0000-0000-000000000002"),
+                        filamentName: "PLA",
+                        filamentColor: "#EF6B4A",
+                        copies: 1,
+                        completedCopies: 0,
+                        remainingCopies: 1
+                    ),
+                    QueuedJobInfo(
+                        id: "32590000-0000-0000-0000-000000000003",
+                        rowVersion: "issue3259-prusa1-queue-head-v1",
+                        name: "Toolhead cable guide.gcode",
+                        fileName: "Toolhead cable guide.gcode",
+                        assignedPrinterId: printerID,
+                        printerName: "Prusa MK4 #1",
+                        printerModel: "Prusa MK4",
+                        status: "Queued",
+                        priority: .high,
+                        queuePosition: 1,
+                        estimatedPrintTimeSeconds: 8_100,
+                        actualStartTimeUtc: nil,
+                        actualEndTimeUtc: nil,
+                        actualPrintTimeSeconds: nil,
+                        failureReason: nil,
+                        createdAtUtc: Date(timeIntervalSince1970: 1_790_000_100),
+                        updatedAtUtc: nil,
+                        thumbnailUrl: issue3259QueueThumbnailPath("32590000-0000-0000-0000-000000000003"),
+                        filamentName: "PLA",
+                        filamentColor: "#EF6B4A",
+                        copies: 1,
+                        completedCopies: 0,
+                        remainingCopies: 1
+                    ),
+                    QueuedJobInfo(
+                        id: "32590000-0000-0000-0000-000000000004",
+                        rowVersion: "issue3259-prusa1-queue-following-v1",
+                        name: "Controller mount.gcode",
+                        fileName: "Controller mount.gcode",
+                        assignedPrinterId: printerID,
+                        printerName: "Prusa MK4 #1",
+                        printerModel: "Prusa MK4",
+                        status: "Queued",
+                        priority: .normal,
+                        queuePosition: 2,
+                        estimatedPrintTimeSeconds: 4_800,
+                        actualStartTimeUtc: nil,
+                        actualEndTimeUtc: nil,
+                        actualPrintTimeSeconds: nil,
+                        failureReason: nil,
+                        createdAtUtc: Date(timeIntervalSince1970: 1_790_000_200),
+                        updatedAtUtc: nil,
+                        thumbnailUrl: issue3259QueueThumbnailPath("32590000-0000-0000-0000-000000000004"),
+                        filamentName: "PLA",
+                        filamentColor: "#EF6B4A",
+                        copies: 1,
+                        completedCopies: 0,
+                        remainingCopies: 1
+                    ),
+                ])
+                let idleAssignedQueueData = try encoder.encode([
+                    QueuedJobInfo(
+                        id: "32590000-0000-0000-0000-000000000020",
+                        rowVersion: "issue3259-prusa2-assigned-v1",
+                        name: "clip_holder",
+                        fileName: "clip_holder.gcode",
+                        assignedPrinterId: DemoData.prusaMK4_2_ID.uuidString.lowercased(),
+                        printerName: "Prusa MK4 #2",
+                        printerModel: "Prusa MK4",
+                        status: "Queued",
+                        priority: .normal,
+                        queuePosition: 0,
+                        estimatedPrintTimeSeconds: 5_400,
+                        actualStartTimeUtc: nil,
+                        actualEndTimeUtc: nil,
+                        actualPrintTimeSeconds: nil,
+                        failureReason: nil,
+                        createdAtUtc: Date(timeIntervalSince1970: 1_790_000_000),
+                        updatedAtUtc: nil,
+                        thumbnailUrl: issue3259QueueThumbnailPath("32590000-0000-0000-0000-000000000020"),
+                        filamentName: "PLA",
+                        filamentColor: "#EF6B4A",
+                        copies: 4,
+                        completedCopies: 0,
+                        remainingCopies: 4
+                    ),
+                    QueuedJobInfo(
+                        id: "32590000-0000-0000-0000-000000000021",
+                        rowVersion: "issue3259-prusa2-queue-head-v1",
+                        name: "shelf_bracket",
+                        fileName: "shelf_bracket.gcode",
+                        assignedPrinterId: DemoData.prusaMK4_2_ID.uuidString.lowercased(),
+                        printerName: "Prusa MK4 #2",
+                        printerModel: "Prusa MK4",
+                        status: "Queued",
+                        priority: .high,
+                        queuePosition: 1,
+                        estimatedPrintTimeSeconds: 8_100,
+                        actualStartTimeUtc: nil,
+                        actualEndTimeUtc: nil,
+                        actualPrintTimeSeconds: nil,
+                        failureReason: nil,
+                        createdAtUtc: Date(timeIntervalSince1970: 1_790_000_100),
+                        updatedAtUtc: nil,
+                        thumbnailUrl: issue3259QueueThumbnailPath("32590000-0000-0000-0000-000000000021"),
+                        filamentName: "PETG",
+                        filamentColor: "#3B82F6",
+                        copies: 6,
+                        completedCopies: 0,
+                        remainingCopies: 6
+                    ),
+                    QueuedJobInfo(
+                        id: "32590000-0000-0000-0000-000000000022",
+                        rowVersion: "issue3259-prusa2-queue-following-v1",
+                        name: "spiral_vase",
+                        fileName: "spiral_vase.gcode",
+                        assignedPrinterId: DemoData.prusaMK4_2_ID.uuidString.lowercased(),
+                        printerName: "Prusa MK4 #2",
+                        printerModel: "Prusa MK4",
+                        status: "Queued",
+                        priority: .normal,
+                        queuePosition: 2,
+                        estimatedPrintTimeSeconds: 4_800,
+                        actualStartTimeUtc: nil,
+                        actualEndTimeUtc: nil,
+                        actualPrintTimeSeconds: nil,
+                        failureReason: nil,
+                        createdAtUtc: Date(timeIntervalSince1970: 1_790_000_200),
+                        updatedAtUtc: nil,
+                        thumbnailUrl: issue3259QueueThumbnailPath("32590000-0000-0000-0000-000000000022"),
+                        filamentName: "PLA",
+                        filamentColor: "#EF6B4A",
+                        copies: 1,
+                        completedCopies: 0,
+                        remainingCopies: 1
+                    ),
+                ])
+                let recentFailureHistoryData = try encoder.encode(
+                    QueueHistoryPage(
+                        entries: [
+                            QueueHistoryEntry(
+                                id: DemoData.job9ID.uuidString,
+                                jobName: "cable_chain",
+                                printerName: "Voron 2.4",
+                                status: "Failed",
+                                completedAt: Calendar.current.date(
+                                    bySettingHour: 8,
+                                    minute: 2,
+                                    second: 0,
+                                    of: Date()
+                                ),
+                                durationSeconds: 3_600,
+                                completionPercentage: 12,
+                                failureReason: "Thermal runaway detected"
+                            )
+                        ],
+                        totalCount: 1,
+                        currentPage: 1,
+                        pageSize: 5,
+                        stats: nil
+                    )
+                )
+                let globalQueueData = try encoder.encode(
+                    issue3259VisualAcceptanceQueue(includeCurrentPrint: true)
+                )
+                let globalQueueAfterRerunData = try encoder.encode(
+                    issue3259VisualAcceptanceQueue(includeCurrentPrint: true, includeRerunJob: true)
+                )
+                let globalQueueAfterSecondRerunData = try encoder.encode(
+                    issue3259VisualAcceptanceQueue(includeCurrentPrint: true, includeSecondRerunJob: true)
+                )
+                let failedJobData = Data("""
+                {
+                    "id": "\(DemoData.job9ID)",
+                    "rowVersion": "issue3259-failed-job-v1",
+                    "status": "Failed",
+                    "priority": "Normal",
+                    "queuePosition": 0,
+                    "gcodeFileName": "cable_chain.gcode",
+                    "assignedPrinterId": "\(DemoData.voron24_ID)",
+                    "assignedPrinterName": "Voron 2.4",
+                    "createdAt": "2026-10-04T10:00:00Z",
+                    "actualStartTime": "2026-10-04T10:10:00Z",
+                    "actualEndTime": "2026-10-04T11:10:00Z",
+                    "estimatedPrintTime": "01:00:00",
+                    "estimatedFilamentUsage": 48.0,
+                    "failureReason": "Thermal runaway detected",
+                    "copies": 1,
+                    "completedCopies": 0,
+                    "remainingCopies": 1
+                }
+                """.utf8)
+                let secondFailedJobData = Data("""
+                {
+                    "id": "\(DemoData.job10ID)",
+                    "rowVersion": "issue3259-second-failed-job-v1",
+                    "status": "Failed",
+                    "priority": "Normal",
+                    "queuePosition": 0,
+                    "gcodeFileName": "lamp_shade_textured.gcode",
+                    "assignedPrinterId": "\(DemoData.voron24_ID)",
+                    "assignedPrinterName": "Voron 2.4",
+                    "createdAt": "2026-10-03T10:00:00Z",
+                    "actualStartTime": "2026-10-03T10:10:00Z",
+                    "actualEndTime": "2026-10-03T11:10:00Z",
+                    "estimatedPrintTime": "01:00:00",
+                    "estimatedFilamentUsage": 65.0,
+                    "failureReason": "Heater disconnected",
+                    "copies": 1,
+                    "completedCopies": 0,
+                    "remainingCopies": 1
+                }
+                """.utf8)
+                let rerunResponseData = Data("""
+                {
+                    "id": "32590000-0000-0000-0000-000000000104",
+                    "rowVersion": "issue3259-rerun-v1",
+                    "name": "cable_chain.gcode",
+                    "status": "Queued",
+                    "priority": "Normal",
+                    "queuePosition": 3,
+                    "createdAtUtc": "2026-10-05T16:00:00Z",
+                    "copies": 1,
+                    "completedCopies": 0,
+                    "remainingCopies": 1
+                }
+                """.utf8)
+                let secondRerunResponseData = Data("""
+                {
+                    "id": "32590000-0000-0000-0000-000000000105",
+                    "rowVersion": "issue3259-second-rerun-v1",
+                    "name": "lamp_shade_textured.gcode",
+                    "status": "Queued",
+                    "priority": "Normal",
+                    "queuePosition": 3,
+                    "createdAtUtc": "2026-10-05T16:00:00Z",
+                    "copies": 1,
+                    "completedCopies": 0,
+                    "remainingCopies": 1
+                }
+                """.utf8)
+                lock.lock()
+                fixtureState = FixtureState(
+                    printersData: printersData,
+                    printersByID: printersByID,
+                    currentJobThumbnailUrlsByID: currentJobThumbnailUrlsByID,
+                    currentJobThumbnailDataByID: fixture.currentJobThumbnailDataByID,
+                    queueThumbnailDataByJobID: fixture.queueThumbnailDataByJobID,
+                    statusData: try encoder.encode(fixture.status),
+                    additionalStatusDataByID: additionalStatusDataByID,
+                    detailsDataByID: detailsDataByID,
+                    attentionData: try encoder.encode(fixture.attentionFeed),
+                    capabilitiesDataByID: capabilitiesDataByID,
+                    assignedQueueDataByID: [
+                        printerID: assignedQueueData,
+                        DemoData.prusaMK4_2_ID.uuidString.lowercased(): idleAssignedQueueData,
+                    ],
+                    globalQueueData: globalQueueData,
+                    globalQueueAfterRerunData: globalQueueAfterRerunData,
+                    globalQueueAfterSecondRerunData: globalQueueAfterSecondRerunData,
+                    recentFailureHistoryData: recentFailureHistoryData,
+                    failedJobsDataByID: [
+                        DemoData.job9ID.uuidString: failedJobData,
+                        DemoData.job10ID.uuidString: secondFailedJobData,
+                    ],
+                    failedJobRowVersionsByID: [
+                        DemoData.job9ID.uuidString: "issue3259-failed-job-v1",
+                        DemoData.job10ID.uuidString: "issue3259-second-failed-job-v1",
+                    ],
+                    rerunResponsesByID: [
+                        DemoData.job9ID.uuidString: rerunResponseData,
+                        DemoData.job10ID.uuidString: secondRerunResponseData,
+                    ],
+                    farmShapeData: farmShapeData,
+                    queueStatsData: queueStatsData,
+                    userData: userData
+                )
+                lock.unlock()
+            } catch {
+                preconditionFailure("The authenticated visual-acceptance API fixture could not be encoded: \(error)")
+            }
+        }
+
+        override class func canInit(with request: URLRequest) -> Bool {
+            request.url?.host == "uitest.printfarmer.local"
+        }
+
+        override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+            request
+        }
+
+        override func startLoading() {
+            guard let url = request.url else {
+                client?.urlProtocol(self, didFailWithError: URLError(.badURL))
+                return
+            }
+            let (statusCode, contentType, body) = Self.response(for: request)
+            guard let response = HTTPURLResponse(
+                url: url,
+                statusCode: statusCode,
+                httpVersion: "HTTP/1.1",
+                headerFields: ["Content-Type": contentType]
+            ) else {
+                client?.urlProtocol(self, didFailWithError: URLError(.cannotParseResponse))
+                return
+            }
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: body)
+            client?.urlProtocolDidFinishLoading(self)
+        }
+
+        override func stopLoading() {}
+
+        private static func response(for request: URLRequest) -> (Int, String, Data) {
+            lock.lock()
+            defer { lock.unlock() }
+            guard var fixture = fixtureState else {
+                return (503, "text/plain", Data("The visual-acceptance fixture was not installed.".utf8))
+            }
+            guard request.value(forHTTPHeaderField: "Authorization") == "Bearer \(accessToken)" else {
+                return (401, "application/json", Data(#"{"error":"unauthorized"}"#.utf8))
+            }
+
+            let path = request.url?.path ?? ""
+            let method = request.httpMethod?.uppercased() ?? "GET"
+            let result: (Int, String, Data)
+            switch (method, path) {
+            case ("GET", "/api/auth/me"):
+                result = (200, "application/json", fixture.userData)
+            case ("GET", "/api/attention"):
+                result = (200, "application/json", fixture.attentionData)
+            case ("GET", "/api/printers"):
+                result = (200, "application/json", fixture.printersData)
+            case ("GET", "/api/printers/camera-urls"):
+                result = (200, "application/json", Data("[]".utf8))
+            case ("GET", let path)
+                where path.hasPrefix("/api/printers/") && path.split(separator: "/").count == 3:
+                let components = path.split(separator: "/")
+                if let printer = fixture.printersByID[String(components[2]).lowercased()] {
+                    result = (200, "application/json", printer)
+                } else {
+                    result = (404, "application/json", Data(#"{"error":"not-found"}"#.utf8))
+                }
+            case ("GET", let path)
+                where path.hasPrefix("/api/printers/") && path.hasSuffix("/details"):
+                let components = path.split(separator: "/")
+                if components.count == 4,
+                   let details = fixture.detailsDataByID[String(components[2]).lowercased()] {
+                    result = (200, "application/json", details)
+                } else {
+                    result = (404, "application/json", Data(#"{"error":"not-found"}"#.utf8))
+                }
+            case ("GET", "/api/printers/\(printerID)/status"):
+                result = (200, "application/json", fixture.statusData)
+            case ("GET", let path)
+                where path.hasPrefix("/api/printers/") && path.hasSuffix("/status"):
+                let components = path.split(separator: "/")
+                if components.count == 4,
+                   let status = fixture.additionalStatusDataByID[String(components[2]).lowercased()] {
+                    result = (200, "application/json", status)
+                } else {
+                    result = (404, "application/json", Data(#"{"error":"not-found"}"#.utf8))
+                }
+            case ("GET", let path)
+                where path.hasPrefix("/api/printers/") && path.hasSuffix("/backend-capabilities"):
+                let components = path.split(separator: "/")
+                if components.count == 4,
+                   let capabilities = fixture.capabilitiesDataByID[String(components[2]).lowercased()] {
+                    result = (200, "application/json", capabilities)
+                } else {
+                    result = (404, "application/json", Data(#"{"error":"not-found"}"#.utf8))
+                }
+            case ("GET", let path)
+                where path.hasPrefix("/api/job-queue-analytics/printer/"):
+                let components = path.split(separator: "/")
+                if components.count == 4,
+                   let queue = fixture.assignedQueueDataByID[String(components[3]).lowercased()] {
+                    result = (200, "application/json", queue)
+                } else {
+                    result = (404, "application/json", Data(#"{"error":"not-found"}"#.utf8))
+                }
+            case ("GET", "/api/job-queue-analytics"):
+                result = (200, "application/json", fixture.globalQueueData)
+            case ("GET", "/api/job-queue-analytics/stats"):
+                result = (200, "application/json", fixture.queueStatsData)
+            case ("GET", "/api/job-queue-analytics/history"):
+                result = (200, "application/json", fixture.recentFailureHistoryData)
+            case ("GET", "/api/system/farm-shape"):
+                result = (200, "application/json", fixture.farmShapeData)
+            case ("GET", let path)
+                where path.hasPrefix("/api/job-queue/") && !path.hasSuffix("/rerun"):
+                let jobID = String(path.dropFirst("/api/job-queue/".count))
+                result = fixture.failedJobsDataByID[jobID].map {
+                    (200, "application/json", $0)
+                } ?? (404, "application/json", Data(#"{"error":"not-found"}"#.utf8))
+            case ("POST", let path) where path.hasSuffix("/rerun"):
+                let jobID = String(
+                    path
+                        .dropFirst("/api/job-queue/".count)
+                        .dropLast("/rerun".count)
+                )
+                guard let rowVersion = fixture.failedJobRowVersionsByID[jobID],
+                      request.value(forHTTPHeaderField: "If-Match") == "\"\(rowVersion)\"",
+                      let responseData = fixture.rerunResponsesByID[jobID] else {
+                    result = (412, "application/json", Data(#"{"error":"precondition_failed"}"#.utf8))
+                    break
+                }
+                fixture.globalQueueData = jobID == DemoData.job9ID.uuidString
+                    ? fixture.globalQueueAfterRerunData
+                    : fixture.globalQueueAfterSecondRerunData
+                result = (200, "application/json", responseData)
+            case ("POST", let path)
+                where path.hasPrefix("/api/printers/")
+                    && path.split(separator: "/").count == 4
+                    && (path.hasSuffix("/filament-load") || path.hasSuffix("/filament-unload")):
+                let printerKey = String(path.split(separator: "/")[2]).lowercased()
+                if fixture.capabilitiesDataByID[printerKey] != nil {
+                    result = (
+                        200,
+                        "application/json",
+                        Data(#"{"success":true,"message":"Accepted by authenticated visual-acceptance API fixture."}"#.utf8)
+                    )
+                } else {
+                    result = (404, "application/json", Data(#"{"error":"not-found"}"#.utf8))
+                }
+            case ("GET", let path)
+                where path.hasPrefix("/api/printers/")
+                    && path.hasSuffix("/current-job/thumbnail"):
+                let components = path.split(separator: "/")
+                let requestedTarget = request.url.map {
+                    $0.path + ($0.query.map { "?\($0)" } ?? "")
+                }
+                let printerKey = components.count == 5 ? String(components[2]).lowercased() : nil
+                let expectedTarget = printerKey.flatMap {
+                    fixture.currentJobThumbnailUrlsByID[$0]
+                }
+                if expectedTarget == requestedTarget,
+                   let printerKey,
+                   let thumbnail = fixture.currentJobThumbnailDataByID[printerKey] {
+                    result = (200, "image/png", thumbnail)
+                } else {
+                    result = (404, "application/json", Data(#"{"error":"not-found"}"#.utf8))
+                }
+            case ("GET", let path)
+                where path.hasPrefix("/api/gcode-files/thumbnail/")
+                    && UUID(uuidString: String(path.dropFirst("/api/gcode-files/thumbnail/".count))) != nil:
+                let jobID = String(path.dropFirst("/api/gcode-files/thumbnail/".count)).lowercased()
+                result = fixture.queueThumbnailDataByJobID[jobID].map { (200, "image/png", $0) }
+                    ?? (404, "application/json", Data(#"{"error":"not-found"}"#.utf8))
+            case ("POST", "/api/printers/\(printerID)/temps"):
+                result = updateTemperatures(&fixture, request: request)
+            case ("POST", "/api/printers/\(printerID)/fan"):
+                result = updateStatus(
+                    &fixture,
+                    field: "fanSpeedPercent",
+                    request: request,
+                    requestField: "speedPercent",
+                    addsToCurrentValue: false
+                )
+            case ("POST", "/api/printers/\(printerID)/z-offset/adjust"):
+                result = updateStatus(
+                    &fixture,
+                    field: "liveZOffsetMm",
+                    request: request,
+                    requestField: "offsetMm",
+                    addsToCurrentValue: true
+                )
+            default:
+                result = (404, "application/json", Data(#"{"error":"not-found"}"#.utf8))
+            }
+            fixtureState = fixture
+            return result
+        }
+
+        private static func updateTemperatures(
+            _ fixture: inout FixtureState,
+            request: URLRequest
+        ) -> (Int, String, Data) {
+            do {
+                guard let body = requestBodyData(request),
+                      let requestObject = try JSONSerialization.jsonObject(with: body) as? [String: Any] else {
+                    return (400, "application/problem+json", Data(#"{"detail":"Fixture received an invalid temperature command body."}"#.utf8))
+                }
+                let hotend = requestObject["hotend"] as? NSNumber
+                let bed = requestObject["bed"] as? NSNumber
+                guard hotend != nil || bed != nil else {
+                    return (400, "application/problem+json", Data(#"{"detail":"Temperature command must include hotend or bed."}"#.utf8))
+                }
+                guard hotend.map({ $0.doubleValue.isFinite && $0.doubleValue.rounded() == $0.doubleValue && (0...300).contains($0.doubleValue) }) ?? true,
+                      bed.map({ $0.doubleValue.isFinite && $0.doubleValue.rounded() == $0.doubleValue && (0...120).contains($0.doubleValue) }) ?? true else {
+                    return (400, "application/problem+json", Data(#"{"detail":"Fixture heater targets must be whole degrees within the reported hardware limits."}"#.utf8))
+                }
+                guard var statusObject = try JSONSerialization.jsonObject(with: fixture.statusData) as? [String: Any] else {
+                    return (500, "application/problem+json", Data(#"{"detail":"Fixture status payload could not be updated."}"#.utf8))
+                }
+                if let hotend { statusObject["hotendTarget"] = hotend }
+                if let bed { statusObject["bedTarget"] = bed }
+                fixture.statusData = try JSONSerialization.data(withJSONObject: statusObject)
+                let command = CommandResult(
+                    success: true,
+                    message: "Accepted by authenticated visual-acceptance API fixture."
+                )
+                return (200, "application/json", try JSONEncoder().encode(command))
+            } catch {
+                return (500, "application/json", Data(#"{"error":"fixture-temperature-command-failed"}"#.utf8))
+            }
+        }
+
+        private static func updateStatus(
+            _ fixture: inout FixtureState,
+            field: String,
+            request: URLRequest,
+            requestField: String,
+            addsToCurrentValue: Bool
+        ) -> (Int, String, Data) {
+            do {
+                guard let body = requestBodyData(request) else {
+                    return (400, "application/problem+json", Data(#"{"detail":"Fixture received a command without an HTTP body."}"#.utf8))
+                }
+                guard let requestObject = try JSONSerialization.jsonObject(with: body) as? [String: Any],
+                      let number = requestObject[requestField] as? NSNumber else {
+                    return (400, "application/problem+json", Data(#"{"detail":"Fixture command body is missing the expected numeric field."}"#.utf8))
+                }
+                let value = number.doubleValue
+                let commandMessage: String
+                let validValue: Bool
+                switch (field, requestField) {
+                case ("fanSpeedPercent", "speedPercent"):
+                    commandMessage = "speedPercent must be between 0 and 100."
+                    validValue = value.isFinite && value.rounded() == value && (0...100).contains(value)
+                case ("liveZOffsetMm", "offsetMm"):
+                    commandMessage = "offsetMm must be non-zero and between -0.2 and 0.2 mm."
+                    validValue = value.isFinite && value != 0 && (-0.2...0.2).contains(value)
+                default:
+                    return (400, "application/problem+json", Data(#"{"detail":"Fixture command field is unsupported."}"#.utf8))
+                }
+                let encoder = JSONEncoder()
+                guard validValue else {
+                    return (400, "application/json", try encoder.encode(
+                        CommandResult(success: false, message: commandMessage)
+                    ))
+                }
+                guard var statusObject = try JSONSerialization.jsonObject(with: fixture.statusData) as? [String: Any] else {
+                    return (500, "application/problem+json", Data(#"{"detail":"Fixture status payload could not be updated."}"#.utf8))
+                }
+                guard let currentNumber = statusObject[field] as? NSNumber,
+                      currentNumber.doubleValue.isFinite,
+                      field != "fanSpeedPercent" || (0...100).contains(currentNumber.doubleValue) else {
+                    let message = field == "fanSpeedPercent"
+                        ? "The printer does not report a valid part-fan speed; no command was sent."
+                        : "The printer does not report a valid live Z offset; no command was sent."
+                    return (502, "application/json", try encoder.encode(
+                        CommandResult(success: false, message: message)
+                    ))
+                }
+                let currentValue = currentNumber.doubleValue
+                statusObject[field] = addsToCurrentValue ? currentValue + value : value
+                fixture.statusData = try JSONSerialization.data(withJSONObject: statusObject)
+                let command = CommandResult(success: true, message: "Accepted by authenticated visual-acceptance API fixture.")
+                return (200, "application/json", try encoder.encode(command))
+            } catch {
+                return (500, "application/json", Data(#"{"error":"fixture-command-failed"}"#.utf8))
+            }
+        }
+
+        private static func requestBodyData(_ request: URLRequest) -> Data? {
+            if let body = request.httpBody { return body }
+            guard let stream = request.httpBodyStream else { return nil }
+            stream.open()
+            defer { stream.close() }
+
+            var data = Data()
+            var buffer = [UInt8](repeating: 0, count: 1_024)
+            while true {
+                let count = stream.read(&buffer, maxLength: buffer.count)
+                guard count >= 0 else { return nil }
+                guard count > 0 else { break }
+                data.append(contentsOf: buffer.prefix(count))
+            }
+            return data
+        }
+    }
+
+    private static func issue3259VisualAcceptanceVerifiedSafety(
+        configurationRevision: Int64,
+        observedAt: Date
+    ) -> PrinterVerifiedSafetyDto {
+        let supported = VerifiedSafetyOperationCapabilityDto(
+            support: .supported,
+            source: "issue3259-visual-acceptance-api-fixture",
+            observedAtUtc: observedAt
+        )
+        let unsupported = VerifiedSafetyOperationCapabilityDto(
+            support: .unsupported,
+            source: "issue3259-visual-acceptance-api-fixture",
+            observedAtUtc: observedAt
+        )
+        let verifiedScalar: (Double) -> VerifiedSafetyScalarFactDto = { value in
+            VerifiedSafetyScalarFactDto(
+                state: .verified,
+                value: value,
+                source: "issue3259-visual-acceptance-api-fixture",
+                observedAtUtc: observedAt
+            )
+        }
+        let verifiedVector: (SafetyVector3Dto) -> VerifiedSafetyVectorFactDto = { value in
+            VerifiedSafetyVectorFactDto(
+                state: .verified,
+                value: value,
+                source: "issue3259-visual-acceptance-api-fixture",
+                observedAtUtc: observedAt
+            )
+        }
+        let envelope = SafetyTravelEnvelopeDto(
+            minimum: SafetyVector3Dto(x: 0, y: 0, z: 0),
+            maximum: SafetyVector3Dto(x: 220, y: 220, z: 250)
+        )
+        let verifiedEnvelope = VerifiedSafetyEnvelopeFactDto(
+            state: .verified,
+            value: envelope,
+            source: "issue3259-visual-acceptance-api-fixture",
+            observedAtUtc: observedAt
+        )
+
+        return PrinterVerifiedSafetyDto(
+            contractVersion: 1,
+            discovery: VerifiedSafetyDiscoveryDto(
+                state: .verified,
+                observedAtUtc: observedAt,
+                sourceRevision: String(configurationRevision)
+            ),
+            operations: VerifiedSafetyOperationsDto(
+                absoluteMovement: supported,
+                firmwareZOffsetSave: supported,
+                filamentLoad: supported,
+                filamentUnload: supported,
+                filamentChange: unsupported
+            ),
+            extrusion: VerifiedSafetyExtrusionDto(
+                minimumSafeMeasuredHotendTemperatureC: verifiedScalar(170)
+            ),
+            positioning: VerifiedSafetyPositioningDto(
+                coordinateOriginMm: verifiedVector(SafetyVector3Dto(x: 0, y: 0, z: 0)),
+                travelEnvelopeMm: verifiedEnvelope,
+                minimumClearanceZMm: verifiedScalar(5)
+            )
+        )
+    }
+
+    private static func issue3259VisualAcceptanceSpool() -> SpoolmanSpool {
+        SpoolmanSpool(
+            id: 1,
+            filamentId: 1,
+            name: "Prusament PLA · Coral",
+            material: "PLA",
+            colorHex: "#EF6B4A",
+            inUse: true,
+            filamentName: "Prusament PLA",
+            vendor: "Prusa Research",
+            registeredAt: "2026-10-01",
+            firstUsedAt: "2026-10-02",
+            lastUsedAt: "2026-10-04",
+            remainingWeightG: 84,
+            initialWeightG: 1000,
+            usedWeightG: 916,
+            spoolWeightG: 200,
+            remainingLengthMm: nil,
+            usedLengthMm: nil,
+            location: "Workshop",
+            lotNumber: nil,
+            archived: false,
+            price: nil,
+            comment: nil,
+            hasNfcTag: true,
+            usedPercent: 91.6,
+            remainingPercent: 8.4
+        )
+    }
+
+    private static func issue3259VisualAcceptanceQueue(
+        includeCurrentPrint: Bool = false,
+        includeRerunJob: Bool = false,
+        includeSecondRerunJob: Bool = false
+    ) -> [QueuedPrintJobResponse] {
+        let mk4Printer = QueuePrinterMeta(
+            id: DemoData.prusaMK4_1_ID.uuidString.lowercased(),
+            name: "Prusa MK4 #1", modelName: "Prusa MK4",
+            status: "Printing", isOnline: true
+        )
+        let idleMk4Printer = QueuePrinterMeta(
+            id: DemoData.prusaMK4_2_ID.uuidString.lowercased(),
+            name: "Prusa MK4 #2", modelName: "Prusa MK4",
+            status: "Idle", isOnline: true
+        )
+        let voronPrinter = QueuePrinterMeta(
+            id: DemoData.voron24_ID.uuidString.lowercased(),
+            name: "Voron 2.4", modelName: "Voron 2.4",
+            status: "Printing", isOnline: true
+        )
+        let bambuPrinter = QueuePrinterMeta(
+            id: issue3259BambuA1ID.uuidString.lowercased(),
+            name: "Bambu A1", modelName: "A1",
+            status: "Printing", isOnline: true
+        )
+        let enderPrinter = QueuePrinterMeta(
+            id: issue3259Ender3S1ID.uuidString.lowercased(),
+            name: "Ender 3 S1", modelName: "Ender 3 S1",
+            status: "Idle", isOnline: true
+        )
+        let createdAt = Date(timeIntervalSince1970: 1_791_134_000)
+
+        func job(
+            id: String,
+            name: String,
+            status: String,
+            priority: PrintJobPriority,
+            position: Int,
+            requiredGrams: Int,
+            durationSeconds: Int,
+            assignedPrinter: QueuePrinterMeta?,
+            compatibilityHint: QueuePrinterMeta? = nil,
+            copies: Int = 1,
+            materialType: String = "PLA",
+            actualStartTime: Date? = nil
+        ) -> QueuedPrintJobResponse {
+            let row = QueuedJobInfo(
+                id: id,
+                rowVersion: "visual-acceptance-only-\(id)",
+                name: name,
+                fileName: name,
+                assignedPrinterId: assignedPrinter?.id,
+                printerName: assignedPrinter?.name ?? compatibilityHint?.name,
+                printerModel: assignedPrinter?.modelName ?? compatibilityHint?.modelName,
+                status: status,
+                priority: priority,
+                queuePosition: position,
+                estimatedPrintTimeSeconds: durationSeconds,
+                actualStartTimeUtc: actualStartTime,
+                actualEndTimeUtc: nil,
+                actualPrintTimeSeconds: nil,
+                failureReason: nil,
+                createdAtUtc: createdAt,
+                updatedAtUtc: nil,
+                thumbnailUrl: issue3259QueueThumbnailPath(id),
+                filamentName: materialType == "PLA" ? "Prusament PLA" : materialType,
+                filamentColor: materialType == "PLA" ? "#EF6B4A" : "#3B82F6",
+                copies: copies,
+                completedCopies: 0,
+                remainingCopies: copies
+            )
+            let file = QueueGcodeFileMeta(
+                id: id,
+                name: name,
+                fileName: name,
+                fileSizeBytes: 1_200_000,
+                materialType: materialType,
+                nozzleDiameter: 0.4,
+                estimatedPrintTimeSeconds: durationSeconds,
+                estimatedFilamentUsageGrams: requiredGrams,
+                thumbnailUrl: issue3259QueueThumbnailPath(id)
+            )
+            let estimatedStart = actualStartTime
+                ?? createdAt.addingTimeInterval(TimeInterval(position * 7_200))
+            return QueuedPrintJobResponse(
+                job: row,
+                gcodeFile: file,
+                assignedPrinter: assignedPrinter,
+                estimatedStartTime: estimatedStart,
+                estimatedCompletionTime: estimatedStart.addingTimeInterval(TimeInterval(durationSeconds))
+            )
+        }
+
+        var jobs: [QueuedPrintJobResponse] = []
+        if includeCurrentPrint {
+            jobs.append(job(
+                id: DemoData.job1ID.uuidString.lowercased(),
+                name: "benchy_0.2mm_PLA",
+                status: "Printing",
+                priority: .normal,
+                position: 0,
+                requiredGrams: 140,
+                durationSeconds: 8_280,
+                assignedPrinter: mk4Printer,
+                actualStartTime: Date().addingTimeInterval(-6_000)
+            ))
+            jobs.append(job(
+                id: "32590000-0000-0000-0000-000000000110",
+                name: "gear_set_v3",
+                status: "Printing",
+                priority: .normal,
+                position: 0,
+                requiredGrams: 65,
+                durationSeconds: 8_280,
+                assignedPrinter: voronPrinter,
+                actualStartTime: Date().addingTimeInterval(-1_800)
+            ))
+            jobs.append(job(
+                id: "32590000-0000-0000-0000-000000000111",
+                name: "cable_clip_set",
+                status: "Printing",
+                priority: .normal,
+                position: 0,
+                requiredGrams: 32,
+                durationSeconds: 8_100,
+                assignedPrinter: bambuPrinter,
+                actualStartTime: Date().addingTimeInterval(-2_000)
+            ))
+        }
+        jobs += [
+            job(
+                id: "32590000-0000-0000-0000-000000000101",
+                name: "clip_holder",
+                status: "Queued",
+                priority: .normal,
+                position: 0,
+                requiredGrams: 42,
+                durationSeconds: 5_400,
+                assignedPrinter: nil,
+                compatibilityHint: idleMk4Printer,
+                copies: 4
+            ),
+            job(
+                id: "32590000-0000-0000-0000-000000000102",
+                name: "shelf_bracket",
+                status: "Queued",
+                priority: .high,
+                position: 1,
+                requiredGrams: 85,
+                durationSeconds: 8_100,
+                assignedPrinter: idleMk4Printer,
+                copies: 6,
+                materialType: "PETG"
+            ),
+            job(
+                id: "32590000-0000-0000-0000-000000000103",
+                name: "spiral_vase",
+                status: "Queued",
+                priority: .normal,
+                position: 2,
+                requiredGrams: 48,
+                durationSeconds: 3_600,
+                assignedPrinter: enderPrinter
+            ),
+            job(
+                id: "32590000-0000-0000-0000-000000000106",
+                name: "gear_set_v4",
+                status: "Queued",
+                priority: .normal,
+                position: 3,
+                requiredGrams: 65,
+                durationSeconds: 4_800,
+                assignedPrinter: voronPrinter
+            ),
+        ]
+        if includeRerunJob {
+            jobs.append(job(
+                id: "32590000-0000-0000-0000-000000000104",
+                name: "cable_chain",
+                status: "Queued",
+                priority: .normal,
+                position: 3,
+                requiredGrams: 48,
+                durationSeconds: 3_600,
+                assignedPrinter: voronPrinter
+            ))
+        }
+        if includeSecondRerunJob {
+            jobs.append(job(
+                id: "32590000-0000-0000-0000-000000000105",
+                name: "lamp_shade_textured.gcode",
+                status: "Queued",
+                priority: .normal,
+                position: 3,
+                requiredGrams: 65,
+                durationSeconds: 3_600,
+                assignedPrinter: voronPrinter
+            ))
+        }
+        return jobs
+    }
+
+    private static func issue3259VisualAcceptanceCoverage() -> FleetFilamentCoverage {
+        let evaluatedAt = Date(timeIntervalSince1970: 1_791_137_600)
+        let coverage = PrinterFilamentCoverage(
+            printerId: DemoData.prusaMK4_1_ID,
+            printerName: "Prusa MK4 #1",
+            status: .runout,
+            toolheads: [
+                ToolheadFilamentCoverage(
+                    toolheadIndex: 0,
+                    toolheadId: issue3259VisualAcceptanceToolheadID,
+                    toolheadName: "Extruder 1",
+                    spoolId: 1,
+                    material: "PLA",
+                    filamentColor: "#EF6B4A",
+                    remainingGrams: 84,
+                    currentJobRequiredGrams: 140,
+                    currentJobRemainingGrams: 90,
+                    totalDemandGrams: 140,
+                    status: .runout,
+                    statusReason: "This job needs about 140 g."
+                )
+            ],
+            activeJobId: DemoData.job1ID,
+            activeJobName: "benchy_0.2mm_PLA.gcode",
+            activeJobProgress: 0.64,
+            earliestPredictedRunoutAt: nil,
+            assignedQueuedJobCount: 0,
+            evaluatedAtUtc: evaluatedAt
+        )
+        return FleetFilamentCoverage(printers: [coverage], evaluatedAtUtc: evaluatedAt)
+    }
+    #endif
 
     private static func seedNavigationChromeServerIfRequested(
         arguments: [String],
@@ -1042,8 +2756,10 @@ private final class QueueReorderUITestJobService: DemoJobService, @unchecked Sen
     private let lock = NSLock()
     private var queueJobs = QueueReorderUITestJobService.makeQueueJobs()
 
-    override func listAllJobs() async throws -> [QueuedPrintJobResponse] {
-        lock.withLock { queueJobs }
+    override func listAllJobs() async throws -> QueuedPrintJobPage {
+        lock.withLock {
+            QueuedPrintJobPage(jobs: queueJobs, mayHaveMore: false)
+        }
     }
 
     override func moveQueuedJob(

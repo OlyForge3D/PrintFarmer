@@ -25,6 +25,7 @@ struct PrinterCardView: View {
             path: isReadOnly ? nil : printer.currentJobThumbnailUrl,
             jobName: printer.jobName ?? printer.fileName,
             state: printer.state,
+            isFailureSuspected: failureReason != nil,
             serviceID: printerService.map { ObjectIdentifier($0 as AnyObject) }
         )
     }
@@ -51,44 +52,39 @@ struct PrinterCardView: View {
                     .font(.caption)
                     .foregroundStyle(Color.pfTextSecondary)
                     .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
-                if presentation.isActiveJob {
-                    PrintProgressBar(
-                        progress: printer.progress ?? 0, showLabel: false,
-                        height: 4, color: presentation.accent
-                    )
-                    ViewThatFits(in: .horizontal) {
-                        HStack {
-                            progressLabel
-                            Spacer(minLength: 4)
-                            etaLabel
+                if presentation.canShowJobETA {
+                    if presentation.showsJobProgress, let progress = printer.progress, progress.isFinite {
+                        PrintProgressBar(
+                            progress: progress, showLabel: false,
+                            height: 4, color: presentation.accent
+                        )
+                        ViewThatFits(in: .horizontal) {
+                            HStack {
+                                progressLabel
+                                Spacer(minLength: 4)
+                                etaLabel
+                            }
+                            VStack(alignment: .leading, spacing: 4) {
+                                progressLabel
+                                etaLabel
+                            }
                         }
-                        VStack(alignment: .leading, spacing: 4) {
-                            progressLabel
-                            etaLabel
-                        }
+                    } else {
+                        Text("Progress unavailable")
+                            .font(.caption2)
+                            .foregroundStyle(Color.pfTextSecondary)
                     }
                 }
                 ViewThatFits(in: .horizontal) {
                     HStack(spacing: 10) {
-                        temperatures
-                        filament
+                        filamentAndTemperatures
                         Spacer(minLength: 0)
                         attentionBadge
                     }
                     VStack(alignment: .leading, spacing: 6) {
-                        temperatures
-                        HStack {
-                            filament
-                            Spacer(minLength: 0)
-                            attentionBadge
-                        }
+                        filamentAndTemperatures
+                        attentionBadge
                     }
-                }
-                if let failureReason {
-                    Text(failureReason)
-                        .font(.caption)
-                        .foregroundStyle(Color.pfError)
-                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
         }
@@ -99,6 +95,7 @@ struct PrinterCardView: View {
             RoundedRectangle(cornerRadius: 14)
                 .strokeBorder(Color.pfBorder, lineWidth: 1)
         }
+        .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(presentation.accessibilityLabel)
         .accessibilityRepresentation {
@@ -161,62 +158,46 @@ struct PrinterCardView: View {
             .fixedSize(horizontal: false, vertical: true)
     }
 
-    private var temperatures: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 8) {
-                nozzleTemperature
-                bedTemperature
-            }
-            .fixedSize()
-            VStack(alignment: .leading, spacing: 4) {
-                nozzleTemperature
-                bedTemperature
-            }
-            .fixedSize()
-        }
-        .font(.caption2.monospacedDigit())
-        .foregroundStyle(Color.pfTextSecondary)
-    }
-
-    private var nozzleTemperature: some View {
-        Label {
-            Text(printer.hotendTemp.map(\.temperatureFormatted) ?? "--")
-        } icon: {
-            NozzleIcon().fill(Color.pfTempMild).frame(width: 12, height: 12)
-        }
-    }
-
-    private var bedTemperature: some View {
-        Label {
-            Text(printer.bedTemp.map(\.temperatureFormatted) ?? "--")
-        } icon: {
-            RadiatorIcon().fill(Color.pfTempMild).frame(width: 12, height: 12)
-        }
-    }
-
-    private var filament: some View {
+    private var filamentAndTemperatures: some View {
         HStack(spacing: 4) {
             Circle()
                 .fill(printer.spoolInfo?.colorHex.map { Color(hex: $0) } ?? .pfTextTertiary)
                 .frame(width: 10, height: 10)
                 .overlay(Circle().strokeBorder(Color.pfBorderLight, lineWidth: 1))
-            Text(printer.spoolInfo?.hasActiveSpool == true
-                ? printer.spoolInfo?.material ?? "Loaded" : "No spool")
-                .font(.caption2)
+            Text(temperatureSummary)
+                .font(.caption2.monospacedDigit())
                 .foregroundStyle(Color.pfTextSecondary)
-                .fixedSize(horizontal: false, vertical: true)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
         }
     }
 
+    private var temperatureSummary: String {
+        let hotend = printer.hotendTemp.map(\.temperatureFormatted) ?? "--"
+        let bed = printer.bedTemp.map(\.temperatureFormatted) ?? "--"
+        return "\(hotend) / \(bed)"
+    }
+
     @ViewBuilder private var attentionBadge: some View {
-        if let attentionCount, attentionCount > 0 {
-            Label("\(attentionCount)", systemImage: "exclamationmark.triangle.fill")
+        if failureReason != nil {
+            Label("Check print", systemImage: "exclamationmark.triangle.fill")
                 .font(.caption2.weight(.semibold))
-                .foregroundStyle(failureReason == nil ? Color.pfWarning : .pfError)
+                .foregroundStyle(Color.pfError)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .background(Color.pfError.opacity(0.14), in: Capsule())
+                .fixedSize(horizontal: true, vertical: false)
+        } else if let attentionCount, attentionCount > 0 {
+            Label(
+                "\(attentionCount)",
+                systemImage: "exclamationmark.triangle.fill"
+            )
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(Color.pfWarning)
                 .padding(.horizontal, 6)
                 .padding(.vertical, 3)
                 .background(Color.pfWarning.opacity(0.14), in: Capsule())
-                .fixedSize()
+                .fixedSize(horizontal: true, vertical: false)
         }
     }
 }
@@ -232,8 +213,33 @@ struct PrinterCardPresentation {
         printer.isOnline && ["printing", "paused"].contains(printer.state?.lowercased() ?? "")
     }
 
+    var hasFailureJobContext: Bool {
+        guard failureReason != nil,
+              printer.isOnline,
+              printer.state?.lowercased() == "error",
+              let jobName = printer.jobName ?? printer.fileName,
+              !jobName.isEmpty else {
+            return false
+        }
+        return true
+    }
+
+    var canShowJobETA: Bool {
+        !isPendingReady && (isActiveJob || hasFailureJobContext)
+    }
+
+    var showsJobProgress: Bool {
+        guard canShowJobETA,
+              let progress = printer.progress,
+              progress.isFinite,
+              printer.jobName != nil || printer.fileName != nil else {
+            return false
+        }
+        return true
+    }
+
     var stateLabel: String {
-        if failureReason != nil { return "Failure?" }
+        if failureReason != nil { return "Failure suspected" }
         if isPendingReady { return "Bed clear" }
         if !printer.isOnline { return "Offline" }
         if printer.inMaintenance { return "Maintenance" }
@@ -241,7 +247,7 @@ struct PrinterCardPresentation {
         case "printing": return "Printing"
         case "paused": return "Paused"
         case "error": return "Error"
-        case "ready": return "Ready"
+        case "ready": return "Idle"
         case nil, "idle": return "Idle"
         default: return printer.state?.capitalized ?? "Idle"
         }
@@ -262,7 +268,7 @@ struct PrinterCardPresentation {
 
     var jobLabel: String {
         if isPendingReady { return "Finished · Clear bed to continue" }
-        guard isActiveJob else { return "No active job" }
+        guard isActiveJob || hasFailureJobContext else { return "Ready for the next job" }
         return printer.jobName ?? printer.fileName ?? "Job name unavailable"
     }
 
@@ -272,7 +278,7 @@ struct PrinterCardPresentation {
     }
 
     var etaLabel: String {
-        guard isActiveJob, let seconds = printTimeLeftSeconds,
+        guard canShowJobETA, let seconds = printTimeLeftSeconds,
               seconds.isFinite, seconds >= 0, seconds < Double(Int.max) else {
             return "ETA unavailable"
         }
@@ -284,7 +290,12 @@ struct PrinterCardPresentation {
 
     var accessibilityLabel: String {
         var parts = [printer.name, stateLabel, jobLabel]
-        if isActiveJob { parts += [progressLabel + " complete", etaLabel] }
+        if canShowJobETA {
+            if showsJobProgress {
+                parts.append(isActiveJob ? progressLabel + " complete" : progressLabel + " progress at failure")
+            }
+            parts.append(etaLabel)
+        }
         parts.append("Nozzle \(printer.hotendTemp.map(\.temperatureFormatted) ?? "unavailable")")
         parts.append("Bed \(printer.bedTemp.map(\.temperatureFormatted) ?? "unavailable")")
         if let spool = printer.spoolInfo, spool.hasActiveSpool {

@@ -4,6 +4,7 @@ import Foundation
 final class MockJobService: JobServiceProtocol, @unchecked Sendable {
     var queueOverviewsToReturn: [QueueOverview] = []
     var queuedJobResponsesToReturn: [QueuedPrintJobResponse] = []
+    var queuedJobListMayHaveMore = false
     var jobToReturn: PrintJob?
     var errorToThrow: Error?
     var actionErrorToThrow: Error?
@@ -20,6 +21,7 @@ final class MockJobService: JobServiceProtocol, @unchecked Sendable {
     var cancelCalledWith: UUID?
     var dispatchCalledWith: UUID?
     var dispatchReviewedRowVersion: String?
+    var rerunCalledWith: (id: UUID, reviewedRowVersion: String)?
     var abortCalledWith: UUID?
     var pauseCalledWith: UUID?
     var resumeCalledWith: UUID?
@@ -43,14 +45,14 @@ final class MockJobService: JobServiceProtocol, @unchecked Sendable {
         return queueOverviewsToReturn
     }
 
-    func listAllJobs() async throws -> [QueuedPrintJobResponse] {
+    func listAllJobs() async throws -> QueuedPrintJobPage {
         listAllJobsCalled = true
         listAllJobsCallCount += 1
         if let error = errorToThrow { throw error }
-        if !queuedJobResponsesByLoad.isEmpty {
-            return queuedJobResponsesByLoad.removeFirst()
-        }
-        return queuedJobResponsesToReturn
+        let jobs = queuedJobResponsesByLoad.isEmpty
+            ? queuedJobResponsesToReturn
+            : queuedJobResponsesByLoad.removeFirst()
+        return QueuedPrintJobPage(jobs: jobs, mayHaveMore: queuedJobListMayHaveMore)
     }
 
     var queuedJobResponsesByLoad: [[QueuedPrintJobResponse]] = []
@@ -138,6 +140,11 @@ final class MockJobService: JobServiceProtocol, @unchecked Sendable {
         )
     }
 
+    func rerun(id: UUID, reviewedRowVersion: String) async throws {
+        rerunCalledWith = (id, reviewedRowVersion)
+        if let error = actionErrorToThrow ?? errorToThrow { throw error }
+    }
+
     func abort(id: UUID, reviewedRowVersion: String) async throws {
         abortCalledWith = id
         if let error = actionErrorToThrow ?? errorToThrow { throw error }
@@ -183,6 +190,7 @@ final class MockJobService: JobServiceProtocol, @unchecked Sendable {
     func reset() {
         queueOverviewsToReturn = []
         queuedJobResponsesToReturn = []
+        queuedJobListMayHaveMore = false
         queuedJobResponsesByLoad = []
         jobToReturn = nil
         errorToThrow = nil
@@ -197,6 +205,7 @@ final class MockJobService: JobServiceProtocol, @unchecked Sendable {
         deleteCalledWith = nil
         cancelCalledWith = nil
         dispatchCalledWith = nil
+        rerunCalledWith = nil
         abortCalledWith = nil
         pauseCalledWith = nil
         resumeCalledWith = nil

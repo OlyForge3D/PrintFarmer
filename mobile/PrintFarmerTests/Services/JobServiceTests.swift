@@ -18,6 +18,51 @@ final class JobServiceTests: XCTestCase {
         super.tearDown()
     }
 
+    func testListAllJobsMarksAFullPageAsPossiblyTruncated() async throws {
+        let rows = Array(
+            repeating: TestJSON.queuedPrintJobResponseQueued,
+            count: QueuedPrintJobPage.pageSize
+        )
+        mockAPIClient.stubResponse(json: "[\(rows.joined(separator: ","))]")
+
+        let page = try await service.listAllJobs()
+
+        XCTAssertEqual(page.jobs.count, QueuedPrintJobPage.pageSize)
+        XCTAssertTrue(page.mayHaveMore)
+        let request = try XCTUnwrap(mockAPIClient.capturedRequests.last)
+        XCTAssertEqual(request.url?.path, "/api/job-queue-analytics")
+        XCTAssertEqual(
+            request.url?.query,
+            "limit=\(QueuedPrintJobPage.pageSize)&offset=0"
+        )
+    }
+
+    func testGetPreservesRowVersionForConditionalRetry() async throws {
+        mockAPIClient.stubResponse(
+            json: """
+            {
+                "id": "\(jobId)",
+                "rowVersion": "failed-job-v3",
+                "status": "Failed",
+                "priority": "Normal",
+                "queuePosition": 0,
+                "gcodeFileName": "failed-job.gcode",
+                "copies": 1,
+                "completedCopies": 0,
+                "remainingCopies": 1
+            }
+            """
+        )
+
+        let job = try await service.get(id: jobId)
+
+        XCTAssertEqual(job.rowVersion, "failed-job-v3")
+        XCTAssertEqual(
+            mockAPIClient.capturedRequests.last?.url?.path,
+            "/api/job-queue/\(jobId)"
+        )
+    }
+
     func testPrinterQueueUsesScopedEndpointAndPreservesServerOrderWithConflictingTimestamps() async throws {
         let printerId = UUID()
         let firstId = UUID()
@@ -175,6 +220,33 @@ final class JobServiceTests: XCTestCase {
         )
     }
 
+    func testRerunUsesReviewedETagAndSurfacesPreconditionFailure() async {
+        mockAPIClient.stubResponse(
+            json: #"{"error":"precondition_failed"}"#,
+            statusCode: 412
+        )
+
+        var didSurfacePreconditionFailure = false
+        do {
+            try await service.rerun(id: jobId, reviewedRowVersion: "failed-job-v3")
+            XCTFail("A stale job revision must not be treated as a successful rerun.")
+        } catch let error as NetworkError {
+            if case .preconditionFailed = error {
+                didSurfacePreconditionFailure = true
+            } else {
+                XCTFail("Expected a precondition failure, received \(error).")
+            }
+        } catch {
+            XCTFail("Expected a typed precondition failure, received \(error).")
+        }
+
+        XCTAssertTrue(didSurfacePreconditionFailure)
+        let request = mockAPIClient.capturedRequests.last
+        XCTAssertEqual(request?.httpMethod, "POST")
+        XCTAssertEqual(request?.url?.path, "/api/job-queue/\(jobId)/rerun")
+        XCTAssertEqual(request?.value(forHTTPHeaderField: "If-Match"), "\"failed-job-v3\"")
+    }
+
     func testMoveQueuedJobEncodesBeforeNeighborAndDecodesFlatResponse() async throws {
         mockAPIClient.stubResponse(
             json: """
@@ -287,5 +359,48 @@ final class JobServiceTests: XCTestCase {
             """,
             statusCode: statusCode
         )
+    }
+}
+
+final class JobAnalyticsServiceTests: XCTestCase {
+    func testHistoryRequestsSmallNewestFailedPage() async throws {
+        let mockAPIClient = MockAPIClient()
+        mockAPIClient.stubResponse(
+            json: """
+            {"entries":[],"totalCount":0,"currentPage":1,"pageSize":5,"stats":null}
+            """
+        )
+        let service = JobAnalyticsService(apiClient: mockAPIClient.apiClient)
+
+        let page = try await service.getHistory(
+            limit: 5,
+            offset: 0,
+            sortBy: "newest",
+            statuses: "failed",
+            dateStart: nil,
+            dateEnd: nil
+        )
+
+        XCTAssertTrue(page.entries.isEmpty)
+        let request = try XCTUnwrap(mockAPIClient.capturedRequests.last)
+        XCTAssertEqual(request.httpMethod, "GET")
+        XCTAssertEqual(request.url?.path, "/api/job-queue-analytics/history")
+        XCTAssertEqual(request.url?.query, "limit=5&offset=0&sortBy=newest&statuses=failed")
+    }
+
+    func testDemoHistoryFiltersToRecentFailures() async throws {
+        let service = DemoJobAnalyticsService()
+
+        let page = try await service.getHistory(
+            limit: 5,
+            offset: 0,
+            sortBy: "newest",
+            statuses: "failed",
+            dateStart: nil,
+            dateEnd: nil
+        )
+
+        XCTAssertEqual(page.entries.map(\.status), ["Failed"])
+        XCTAssertEqual(page.entries.map(\.jobName), ["vase_mode_spiral.gcode"])
     }
 }

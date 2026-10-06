@@ -7,6 +7,7 @@ struct PrinterCardRequestID: Equatable {
     let path: String?
     let jobName: String?
     let state: String?
+    let isFailureSuspected: Bool
     let serviceID: ObjectIdentifier?
 }
 
@@ -39,7 +40,7 @@ final class PrinterCardMediaModel {
         request: PrinterCardRequestID, service: any PrinterServiceProtocol, revision: UUID
     ) async {
         guard let path = request.path,
-              ["printing", "paused"].contains(request.state?.lowercased() ?? "") else { return }
+              shouldLoadJobData(request) else { return }
         do {
             let data = try await service.getCurrentJobThumbnail(id: request.printerID, path: path)
             guard self.revision == revision, !Task.isCancelled else { return }
@@ -63,7 +64,7 @@ final class PrinterCardMediaModel {
     private func loadETA(
         request: PrinterCardRequestID, service: any PrinterServiceProtocol, revision: UUID
     ) async {
-        guard ["printing", "paused"].contains(request.state?.lowercased() ?? "") else { return }
+        guard shouldLoadJobData(request) else { return }
         repeat {
             do {
                 let status = try await service.getStatus(id: request.printerID)
@@ -83,5 +84,11 @@ final class PrinterCardMediaModel {
                 return
             }
         } while self.revision == revision && !Task.isCancelled
+    }
+
+    private func shouldLoadJobData(_ request: PrinterCardRequestID) -> Bool {
+        let state = request.state?.lowercased() ?? ""
+        if ["printing", "paused"].contains(state) { return true }
+        return request.isFailureSuspected && state == "error" && request.jobName != nil
     }
 }

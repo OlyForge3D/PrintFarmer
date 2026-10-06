@@ -8,12 +8,15 @@ struct PrinterBackendCapabilities: Codable, Equatable, Sendable {
     let supportsTemperatureControl: Bool
     let supportsBedTemperature: Bool
     let supportsFanControl: Bool
+    var supportsFanSpeedReadback: Bool = false
     let supportsHoming: Bool
     let supportedAxes: [String]
     var supportsAbsoluteMovement: Bool = false
     var supportsDisableMotors: Bool = false
     var supportsExtrusion: Bool = false
     var supportsZOffset: Bool = false
+    var supportsZOffsetAdjustment: Bool = false
+    var supportsZOffsetReadback: Bool = false
     var supportsZOffsetFirmwareSave: Bool = false
     var supportsHomingXY: Bool = false
     var supportsHomingZ: Bool = false
@@ -49,7 +52,7 @@ extension PrinterBackendCapabilities {
             supportsMovement: wire.supportsRelativeMovement == true,
             supportsTemperatureControl: wire.supportsHotendTemperature == true,
             supportsBedTemperature: wire.supportsBedTemperature == true,
-            supportsFanControl: false,
+            supportsFanControl: wire.supportsFanControl == true,
             supportsHoming: wire.supportsHoming == true,
             supportedAxes: (wire.supportedAxes ?? []).map { $0.uppercased() }.filter { ["X", "Y", "Z"].contains($0) }
         )
@@ -57,6 +60,9 @@ extension PrinterBackendCapabilities {
         supportsDisableMotors = wire.supportsDisableMotors == true
         supportsExtrusion = wire.supportsExtrusion == true
         supportsZOffset = wire.supportsZOffset == true
+        supportsZOffsetAdjustment = wire.supportsZOffsetAdjustment == true
+        supportsZOffsetReadback = wire.supportsZOffsetReadback == true
+        supportsFanSpeedReadback = wire.supportsFanSpeedReadback == true
         supportsZOffsetFirmwareSave = wire.supportsZOffsetFirmwareSave == true
         supportsHomingXY = wire.supportsHomingXY == true
         supportsHomingZ = wire.supportsHomingZ == true
@@ -78,6 +84,8 @@ struct PrinterBackendCapabilitiesWireDto: Codable, Sendable {
     let backend: PrinterBackend?
     let supportsMovement: Bool?
     let supportsTemperatureControl: Bool?
+    let supportsFanControl: Bool?
+    let supportsFanSpeedReadback: Bool?
     let supportsCamera: Bool?
     let supportsFileDownload: Bool?
     let supportsFileList: Bool?
@@ -93,6 +101,8 @@ struct PrinterBackendCapabilitiesWireDto: Codable, Sendable {
     let supportsDisableMotors: Bool?
     let supportsExtrusion: Bool?
     let supportsZOffset: Bool?
+    let supportsZOffsetAdjustment: Bool?
+    let supportsZOffsetReadback: Bool?
     let supportsZOffsetFirmwareSave: Bool?
     let supportsHoming: Bool?
     let supportsHomingXY: Bool?

@@ -109,3 +109,21 @@ not homed.
 References were regenerated on the resolver-selected iPhone 15 (3x) and iPad Pro
 13-inch M5 (2x) hosts using Xcode 26.6 (17F113) and iOS 26.5 (23F77), with the
 unchanged `.iPhone13` component configuration.
+
+## Approved printer-detail control updates (#3259)
+
+The six iPhone goldens were refreshed from the reviewed CI test captures at
+`564d7531885aff0821b1597d5cc1fd4b2ce1ae98`, produced by Xcode 26.6 on iOS
+26.5 (23F77), using the iPhone snapshot configuration at 3x. Only the six
+changed cases below were updated; the destructive-button golden and all iPad
+goldens remain unchanged.
+
+| Cases | Intentional change |
+| --- | --- |
+| Starting / printing | Keep the lockout visible and physical controls disabled while using the updated control layout and explanatory copy. |
+| FlashForge / Moonraker / SDCP | Reflect the current capability-wire profiles while preserving supported and unsupported control states. |
+| Capabilities loading | Show heater maxima as unknown until a valid hardware-limits read completes; do not reuse stale fixture limits. |
+
+These are component renderings of explicit test fixtures, not backend or
+physical-printer command evidence. Capability assertions and command tests
+remain the behavioral evidence; strict image comparison is unchanged.

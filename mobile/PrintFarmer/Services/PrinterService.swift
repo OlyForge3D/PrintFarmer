@@ -77,7 +77,11 @@ actor PrinterService: PrinterServiceProtocol {
     // MARK: - Status & Data
 
     func getStatus(id: UUID) async throws -> PrinterStatusDetail {
-        try await apiClient.get("/api/printers/\(id)/status")
+        var status: PrinterStatusDetail = try await apiClient.get("/api/printers/\(id)/status")
+        if let progress = status.progress {
+            status.progress = min(max(progress, 0), 100) / 100
+        }
+        return status
     }
 
     func listCameraUrls() async throws -> [PrinterCameraUrls] {
@@ -205,6 +209,32 @@ actor PrinterService: PrinterServiceProtocol {
         let body = SetTemperaturesRequest(hotend: hotend, bed: bed)
         let result: CommandResult = try await apiClient.post("/api/printers/\(printerId)/temps", body: body)
         try requireAccepted(result)
+    }
+
+    func setFanSpeed(printerId: UUID, speedPercent: Int) async throws -> CommandResult {
+        try Task.checkCancellation()
+        guard (0...100).contains(speedPercent) else {
+            throw PrinterControlError.invalidRequest("Fan speed must be between 0 and 100 percent.")
+        }
+        let result: CommandResult = try await apiClient.post(
+            "/api/printers/\(printerId)/fan",
+            body: FanSpeedRequest(speedPercent: speedPercent)
+        )
+        try requireAccepted(result)
+        return result
+    }
+
+    func adjustZOffset(printerId: UUID, offsetMm: Double) async throws -> CommandResult {
+        try Task.checkCancellation()
+        guard offsetMm.isFinite, offsetMm != 0, (-0.2...0.2).contains(offsetMm) else {
+            throw PrinterControlError.invalidRequest("Z-offset adjustment must be nonzero and within -0.2...0.2 mm.")
+        }
+        let result: CommandResult = try await apiClient.post(
+            "/api/printers/\(printerId)/z-offset/adjust",
+            body: ZOffsetAdjustmentRequest(offsetMm: offsetMm)
+        )
+        try requireAccepted(result)
+        return result
     }
 
     func home(printerId: UUID, axes: [String]) async throws {
@@ -391,6 +421,14 @@ struct SetTemperaturesRequest: Encodable {
         if let hotend { try container.encode(hotend, forKey: .hotend) }
         if let bed { try container.encode(bed, forKey: .bed) }
     }
+}
+
+struct FanSpeedRequest: Encodable, Sendable {
+    let speedPercent: Int
+}
+
+struct ZOffsetAdjustmentRequest: Encodable, Sendable {
+    let offsetMm: Double
 }
 
 /// Encodes a single-axis relative move into backend `MoveRequest(double? X, double? Y, double? Z, double? F)`.

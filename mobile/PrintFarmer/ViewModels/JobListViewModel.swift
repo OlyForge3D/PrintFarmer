@@ -14,16 +14,21 @@ struct QueueReorderGroup: Identifiable, Sendable {
 @MainActor @Observable
 final class JobListViewModel {
     var jobs: [QueuedPrintJobResponse] = []
+    private(set) var recentFailures: [QueueHistoryEntry] = []
     var isLoading = false
     var errorMessage: String?
+    private(set) var recentFailuresError: String?
     var showRecentJobs = false
     var isViewActive = true
     private(set) var queueWriteAuthorized = false
     private(set) var isNetworkReachable = false
     private(set) var hasFreshQueueSnapshot = false
     private(set) var isReorderingQueue = false
+    private(set) var rerunningFailedJobIDs: Set<UUID> = []
+    private(set) var jobListMayHaveMore = false
 
     private var jobService: (any JobServiceProtocol)?
+    private var jobAnalyticsService: (any JobAnalyticsServiceProtocol)?
     @ObservationIgnored private var queueUpdateSubscription: SignalRSubscription?
     @ObservationIgnored private var connectionStateSubscription: SignalRSubscription?
     @ObservationIgnored private var signalRServiceIdentity: ObjectIdentifier?
@@ -37,12 +42,28 @@ final class JobListViewModel {
         self.jobService = jobService
     }
 
+    func configure(jobAnalyticsService: any JobAnalyticsServiceProtocol) {
+        self.jobAnalyticsService = jobAnalyticsService
+    }
+
     var canReorderQueue: Bool {
         queueWriteAuthorized
             && isNetworkReachable
             && hasFreshQueueSnapshot
             && !isReorderingQueue
             && isViewActive
+    }
+
+    func queueSectionCountText(for count: Int) -> String {
+        guard jobListMayHaveMore else { return "\(count)" }
+        return count == 0 ? "?" : "\(count)+"
+    }
+
+    var canRerunFailedJobs: Bool {
+        queueWriteAuthorized
+            && isNetworkReachable
+            && isViewActive
+            && !DemoMode.shared.isActive
     }
 
     /// Keep the native List's editing session alive while an accepted move is
@@ -133,6 +154,10 @@ final class JobListViewModel {
     @discardableResult
     private func refreshQueue() async -> Bool {
         guard let jobService, isViewActive else { return false }
+        guard let jobAnalyticsService else {
+            recentFailuresError = "Recent failures are unavailable."
+            return false
+        }
         loadGeneration &+= 1
         let requestGeneration = loadGeneration
         let stateEpoch = queueStateEpoch
@@ -143,27 +168,62 @@ final class JobListViewModel {
             isLoading = activeLoadCount > 0
         }
         errorMessage = nil
+
+        async let queueRequest = jobService.listAllJobs()
+        async let historyRequest = jobAnalyticsService.getHistory(
+            limit: 5,
+            offset: 0,
+            sortBy: "newest",
+            statuses: "failed",
+            dateStart: nil,
+            dateEnd: nil
+        )
+
+        let queueResult: Result<QueuedPrintJobPage, Error>
         do {
-            let result = try await jobService.listAllJobs()
-            guard isViewActive,
-                  requestGeneration == loadGeneration,
-                  stateEpoch == queueStateEpoch else {
-                return false
-            }
-            jobs = result
-            hasFreshQueueSnapshot = true
-            queueStateEpoch &+= 1
-            return true
+            queueResult = .success(try await queueRequest)
         } catch {
-            guard isViewActive,
-                  requestGeneration == loadGeneration,
-                  stateEpoch == queueStateEpoch else {
-                return false
-            }
-            hasFreshQueueSnapshot = false
-            errorMessage = error.localizedDescription
+            queueResult = .failure(error)
+        }
+
+        let historyResult: Result<QueueHistoryPage, Error>
+        do {
+            historyResult = .success(try await historyRequest)
+        } catch {
+            historyResult = .failure(error)
+        }
+
+        guard isViewActive,
+              requestGeneration == loadGeneration,
+              stateEpoch == queueStateEpoch else {
             return false
         }
+
+        var queueLoaded = false
+        switch queueResult {
+        case .success(let page):
+            jobs = page.jobs
+            jobListMayHaveMore = page.mayHaveMore
+            hasFreshQueueSnapshot = true
+            queueStateEpoch &+= 1
+            queueLoaded = true
+        case .failure(let error):
+            hasFreshQueueSnapshot = false
+            errorMessage = error.localizedDescription
+        }
+
+        switch historyResult {
+        case .success(let page):
+            recentFailures = page.entries.filter {
+                $0.status.caseInsensitiveCompare("failed") == .orderedSame
+            }
+            recentFailuresError = nil
+        case .failure(let error):
+            recentFailures = []
+            recentFailuresError = error.localizedDescription
+        }
+
+        return queueLoaded
     }
 
     private func handleQueueInvalidation() async {
@@ -234,6 +294,42 @@ final class JobListViewModel {
         }
     }
 
+    func rerunFailedJob(id: UUID) async {
+        guard let jobService, canRerunFailedJobs,
+              !rerunningFailedJobIDs.contains(id) else { return }
+        rerunningFailedJobIDs.insert(id)
+        defer { rerunningFailedJobIDs.remove(id) }
+
+        do {
+            let reviewedJob = try await jobService.get(id: id)
+            guard isViewActive else { return }
+            guard reviewedJob.id == id else {
+                await loadJobs()
+                errorMessage = "The selected job changed. Review the refreshed queue before retrying."
+                return
+            }
+            guard reviewedJob.status == .failed else {
+                await loadJobs()
+                errorMessage = "This job is no longer failed. Review the refreshed queue before retrying."
+                return
+            }
+            guard let rowVersion = reviewedJob.rowVersion, !rowVersion.isEmpty else {
+                await loadJobs()
+                errorMessage = "The failed job revision is unavailable. Refresh and review before retrying."
+                return
+            }
+            guard canRerunFailedJobs else {
+                errorMessage = "Queue.Write access or network connectivity changed. No retry was sent."
+                return
+            }
+            try await jobService.rerun(id: id, reviewedRowVersion: rowVersion)
+            await loadJobs()
+        } catch {
+            guard isViewActive else { return }
+            await handleActionError(error)
+        }
+    }
+
     // MARK: - Grouped Jobs
 
     /// Jobs actively printing, starting, or paused on a printer
@@ -250,6 +346,10 @@ final class JobListViewModel {
             guard let status = $0.job.jobStatus else { return false }
             return [.queued, .assigned].contains(status)
         }
+    }
+
+    var reorderableQueuedJobs: [QueuedPrintJobResponse] {
+        jobs.filter { $0.job.jobStatus == .queued }
     }
 
     var assignedJobs: [QueuedPrintJobResponse] {
@@ -293,11 +393,13 @@ final class JobListViewModel {
               let index = group.jobs.firstIndex(where: { $0.job.jobUUID == id }) else {
             return false
         }
+        let item = group.jobs[index]
         switch direction {
         case .up:
-            return index > 0
+            return index > 0 && group.jobs[index - 1].job.priority == item.job.priority
         case .down:
             return index + 1 < group.jobs.count
+                && group.jobs[index + 1].job.priority == item.job.priority
         }
     }
 
@@ -315,6 +417,84 @@ final class JobListViewModel {
             fromOffsets: IndexSet(integer: index),
             toOffset: destination,
             inGroup: groupID
+        )
+    }
+
+    func moveQueuedRows(fromOffsets offsets: IndexSet, toOffset destination: Int) async {
+        let visibleRows = queuedJobs
+        guard offsets.count == 1,
+              let source = offsets.first,
+              visibleRows.indices.contains(source),
+              (0...visibleRows.count).contains(destination),
+              visibleRows[source].job.jobStatus == .queued else {
+            return
+        }
+
+        let moved = visibleRows[source]
+        var reorderedRows = visibleRows
+        reorderedRows.remove(at: source)
+        let insertionIndex = min(
+            max(destination > source ? destination - 1 : destination, 0),
+            reorderedRows.count
+        )
+        reorderedRows.insert(moved, at: insertionIndex)
+
+        let queuedRows = reorderedRows.filter { $0.job.jobStatus == .queued }
+        let originalQueuedRows = reorderableQueuedJobs
+        guard let queuedSource = originalQueuedRows.firstIndex(where: { $0.id == moved.id }),
+              let queuedDestination = queuedRows.firstIndex(where: { $0.id == moved.id }),
+              queuedSource != queuedDestination else {
+            return
+        }
+
+        await moveQueuedJobs(
+            fromOffsets: IndexSet(integer: queuedSource),
+            toOffset: queuedDestination > queuedSource ? queuedDestination + 1 : queuedDestination
+        )
+    }
+
+    func moveQueuedJobs(fromOffsets offsets: IndexSet, toOffset destination: Int) async {
+        let orderedJobs = reorderableQueuedJobs
+        guard offsets.count == 1,
+              let source = offsets.first,
+              orderedJobs.indices.contains(source),
+              (0...orderedJobs.count).contains(destination) else {
+            return
+        }
+
+        let moved = orderedJobs[source]
+        guard let group = reorderableQueueGroups.first(where: { candidate in
+            candidate.jobs.contains(where: { $0.id == moved.id })
+        }) else {
+            return
+        }
+
+        var remaining = orderedJobs
+        remaining.remove(at: source)
+        let insertionIndex = min(
+            max(destination > source ? destination - 1 : destination, 0),
+            remaining.count
+        )
+        let beforeSharesGroup = insertionIndex < remaining.count
+            && reorderGroupID(for: remaining[insertionIndex]) == group.id
+        let afterSharesGroup = insertionIndex > 0
+            && reorderGroupID(for: remaining[insertionIndex - 1]) == group.id
+        guard beforeSharesGroup || afterSharesGroup else {
+            errorMessage = "Jobs can only be reordered within the same printer and priority group."
+            return
+        }
+
+        guard let localSource = group.jobs.firstIndex(where: { $0.id == moved.id }) else { return }
+        let localInsertionIndex = remaining[..<insertionIndex].filter {
+            reorderGroupID(for: $0) == group.id
+        }.count
+        let localDestination = localInsertionIndex > localSource
+            ? localInsertionIndex + 1
+            : localInsertionIndex
+        await moveQueuedJobs(
+            fromOffsets: IndexSet(integer: localSource),
+            toOffset: localDestination,
+            inGroup: group.id
         )
     }
 
@@ -361,8 +541,22 @@ final class JobListViewModel {
         guard reordered.map(\.id) != group.jobs.map(\.id) else { return }
 
         guard let movedIndex = reordered.firstIndex(where: { $0.id == moved.id }) else { return }
+        let priorityIndices = group.jobs.indices.filter {
+            group.jobs[$0].job.priority == moved.job.priority
+        }
+        guard let firstPriorityIndex = priorityIndices.first,
+              let lastPriorityIndex = priorityIndices.last,
+              priorityIndices.count == lastPriorityIndex - firstPriorityIndex + 1 else {
+            errorMessage = "Refresh the queue before reordering jobs across priority groups."
+            return
+        }
+        guard (firstPriorityIndex...lastPriorityIndex).contains(movedIndex) else {
+            errorMessage = "Jobs can only be reordered within their current priority group."
+            return
+        }
+
         let neighbor: QueuePositionNeighbor
-        if movedIndex + 1 < reordered.count {
+        if movedIndex < lastPriorityIndex {
             let next = reordered[movedIndex + 1]
             guard let neighborID = next.job.jobUUID,
                   let rowVersion = nonempty(next.job.rowVersion) else {
@@ -370,7 +564,7 @@ final class JobListViewModel {
                 return
             }
             neighbor = .before(id: neighborID, rowVersion: rowVersion)
-        } else if movedIndex > 0 {
+        } else if movedIndex > firstPriorityIndex {
             let previous = reordered[movedIndex - 1]
             guard let neighborID = previous.job.jobUUID,
                   let rowVersion = nonempty(previous.job.rowVersion) else {
@@ -434,13 +628,13 @@ final class JobListViewModel {
         return result
     }
 
-    private func reorderGroupID(for item: QueuedPrintJobResponse) -> String {
+    func reorderGroupID(for item: QueuedPrintJobResponse) -> String {
         "\(item.job.assignedPrinterId ?? "unassigned")|\(item.job.priority.rawValue)"
     }
 
     private func reorderGroupTitle(for item: QueuedPrintJobResponse) -> String {
         let scope = item.job.assignedPrinterId == nil
-            ? "Any printer"
+            ? "Unassigned"
             : (item.job.printerName ?? "Assigned printer")
         let priority: String
         switch item.job.priority {
@@ -480,17 +674,19 @@ final class JobListViewModel {
         }
     }
 
-    /// Recently completed, failed, or cancelled jobs
-    var recentJobs: [QueuedPrintJobResponse] {
-        jobs.filter {
-            guard let status = $0.job.jobStatus else { return false }
-            return [.completed, .failed, .cancelled].contains(status)
+    /// Recent failures only; completed and cancelled jobs belong in history.
+    /// Completed and cancelled jobs remain reachable from secondary history,
+    /// outside the approved three-section queue composition.
+    var completedHistoryJobs: [QueuedPrintJobResponse] {
+        jobs.filter { item in
+            guard let status = item.job.jobStatus else { return false }
+            return [.completed, .cancelled].contains(status)
         }
         .sorted { ($0.job.actualEndTimeUtc ?? $0.job.createdAtUtc) > ($1.job.actualEndTimeUtc ?? $1.job.createdAtUtc) }
     }
 
     var hasAnyJobs: Bool {
-        !jobs.isEmpty
+        !jobs.isEmpty || !recentFailures.isEmpty || recentFailuresError != nil
     }
 
     private func reviewedRowVersion(for id: UUID) -> String? {

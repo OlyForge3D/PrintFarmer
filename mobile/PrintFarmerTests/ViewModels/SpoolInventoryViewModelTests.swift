@@ -206,13 +206,13 @@ final class SpoolInventoryViewModelTests: XCTestCase {
     }
 
     func testFilterEmptyWithNilRemainingAndNonNilInitial() {
-        // nil remainingWeightG with non-nil initialWeightG → treated as empty
+        // Unknown remaining weight is not evidence that the spool is empty.
         viewModel.spools = [
             makeSpool(id: 1, material: "PLA", remainingWeightG: nil, initialWeightG: 1000),
         ]
         viewModel.selectedStatus = .empty
 
-        XCTAssertEqual(viewModel.filteredSpools.count, 1)
+        XCTAssertTrue(viewModel.filteredSpools.isEmpty)
     }
 
     func testFilterEmptyWithBothNilReturnsNothing() {
@@ -361,6 +361,24 @@ final class SpoolInventoryViewModelTests: XCTestCase {
 
         XCTAssertEqual(viewModel.filteredSpools.count, 1)
         XCTAssertEqual(viewModel.filteredSpools.first?.id, 1)
+    }
+
+    func testStatusCountsRespectSearchMaterialAndNFCFilters() {
+        viewModel.spools = [
+            makeSpool(id: 1, material: "PLA", inUse: true, vendor: "Prusament", remainingWeightG: 100, hasNfcTag: true),
+            makeSpool(id: 2, material: "PLA", vendor: "Prusament", remainingWeightG: 0, hasNfcTag: false),
+            makeSpool(id: 3, material: "PLA", vendor: "Hatchbox", remainingWeightG: nil, hasNfcTag: false),
+            makeSpool(id: 4, material: "PETG", vendor: "Prusament", remainingWeightG: nil, hasNfcTag: false),
+        ]
+        viewModel.selectedMaterial = "PLA"
+        viewModel.showOnlyMissingNFC = true
+        viewModel.searchText = "Prusament"
+        viewModel.selectedStatus = .inUse
+
+        XCTAssertTrue(viewModel.filteredSpools.isEmpty)
+        XCTAssertEqual(viewModel.count(for: nil), 1)
+        XCTAssertEqual(viewModel.count(for: .empty), 1)
+        XCTAssertEqual(viewModel.count(for: .inUse), 0)
     }
 
     // MARK: - hasActiveSearch & activeFilterDescription
@@ -689,7 +707,8 @@ final class SpoolInventoryViewModelTests: XCTestCase {
         vendor: String? = nil,
         filamentName: String? = nil,
         remainingWeightG: Double? = 500,
-        initialWeightG: Double? = 1000
+        initialWeightG: Double? = 1000,
+        hasNfcTag: Bool? = nil
     ) -> SpoolmanSpool {
         SpoolmanSpool(
             id: id, name: name, material: material,
@@ -699,7 +718,7 @@ final class SpoolInventoryViewModelTests: XCTestCase {
             initialWeightG: initialWeightG, usedWeightG: nil,
             spoolWeightG: nil, remainingLengthMm: nil, usedLengthMm: nil,
             location: nil, lotNumber: nil, archived: archived,
-            price: nil, comment: nil, hasNfcTag: nil, usedPercent: nil,
+            price: nil, comment: nil, hasNfcTag: hasNfcTag, usedPercent: nil,
             remainingPercent: nil
         )
     }
