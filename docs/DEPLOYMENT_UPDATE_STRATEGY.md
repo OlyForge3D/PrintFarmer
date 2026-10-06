@@ -1110,6 +1110,14 @@ production validation runs are implied by this design document.
   `src\Web\ReactApp\src\features\admin\registry\adminDestinations.ts`,
   settings essential manifest, shared API client/query contracts, new read-only
   host inventory exporter/importer and evidence fixtures under `scripts`.
+- **Interim (issue #3281):** A narrower, informational application release
+  alert ships ahead of I3. It derives the channel from the installed
+  `SourceInfo:Version` (not the persisted channel selection), polls public
+  GitHub releases on a bounded interval, caches the result in memory and shows
+  farm administrators the existing `install.sh --upgrade --version` path. It
+  grants no execution rights, has no signed metadata, update/rollback scripts
+  or offline import, and does not satisfy I3 acceptance. See
+  [Upgrading to a new release](DEPLOYMENT.md#upgrading-to-a-new-release).
 - **Validation/gate:** Focused server/client tests for caching, redirects/SSRF,
   permissions, malformed metadata, timeouts, channel changes, downgrade
   prevention, custom builds and offline behavior. No execution endpoint.

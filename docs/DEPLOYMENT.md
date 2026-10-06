@@ -387,6 +387,68 @@ provider-correct migration assemblies are unavailable for both `AppDbContext`
 and `SlicerDbContext`. Do not create or upgrade a MySQL deployment with this
 release.
 
+## Upgrading to a new release
+
+### Release update alerts
+
+Release images periodically check GitHub for a newer PrintFarmer release on the
+same channel as the installed version. A stable install (`vX.Y.Z`) only sees
+newer stable releases; an insider install (`vX.Y.Z-insider.N`) only sees newer
+insider releases. Drafts and unrelated tags (for example `ios/...` or
+`v1.0-beta.N`) are ignored. Farm administrators then see a banner across the
+authenticated UI with the installed version, the available version, a link to
+the release notes, and the upgrade command. Other users never see it.
+
+- The server performs the check in the background and caches the result. Browser
+  polling reads `GET /api/admin/release-updates` (requires the `system_settings`
+  admin permission) and never contacts GitHub directly.
+- The installed version comes from `PFARM__SourceInfo__Version`, which release
+  images set automatically. Source builds report `development`, so they skip the
+  check and never show the banner.
+- A failed or rate-limited check keeps the last known result and the banner states
+  that the check failed. Results older than two check intervals are marked as
+  possibly out of date.
+- The alert is informational only. It does not download, verify or apply an
+  update, and is separate from the signed host-update discovery pipeline.
+
+| Setting | Environment variable | Default |
+|---|---|---|
+| `ApplicationReleaseUpdates:Enabled` | `PFARM__ApplicationReleaseUpdates__Enabled` | `true` |
+| `ApplicationReleaseUpdates:IntervalSeconds` (300–86400) | `PFARM__ApplicationReleaseUpdates__IntervalSeconds` | `21600` |
+| `ApplicationReleaseUpdates:HttpTimeoutSeconds` (5–120) | `PFARM__ApplicationReleaseUpdates__HttpTimeoutSeconds` | `15` |
+
+Set `PFARM__ApplicationReleaseUpdates__Enabled=false` on air-gapped hosts or
+whenever outbound GitHub access is not allowed.
+
+### Applying an upgrade
+
+1. Read the release notes linked from the banner.
+2. Follow [Migration-safe upgrades](#migration-safe-upgrades): stop writers and
+   take a provider-native database backup plus a blob snapshot.
+3. For an installer-based deployment, run from the repository root, using the
+   version shown in the banner (no leading `v`):
+
+   ```bash
+   ./install.sh --upgrade --version 0.2.3-insider.6
+   ```
+
+   This pins `IMAGE_TAG` in `.env`, pulls the matching images and restarts the
+   stack.
+4. For a source-built deployment, check out the release tag and rerun the deploy
+   script:
+
+   ```bash
+   git fetch --tags
+   git checkout v0.2.3-insider.6
+   ./scripts/deploy-docker.sh
+   ```
+
+5. Confirm `/healthz` and `/health` succeed. The banner clears once the installed
+   version matches the latest release.
+
+There is no separate `update.sh` or automated rollback script. Roll back by
+restoring the backups taken in step 2 and redeploying the previous version.
+
 ## Network Configuration
 
 > **CORS note:** `ALLOW_LOCAL_NETWORK` defaults to `false`. When enabled, CORS accepts
