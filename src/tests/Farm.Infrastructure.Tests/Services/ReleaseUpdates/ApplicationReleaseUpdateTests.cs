@@ -269,7 +269,7 @@ public sealed class ApplicationReleaseUpdateTests
             .ReturnsAsync(Release("v0.2.3-insider.6"));
         Mock<IBackgroundServiceMonitor> monitor = new();
 
-        bool result = await CreateService(state, source.Object, monitor.Object).RunCheckAsync(600, CancellationToken.None);
+        bool result = await CreateService(state, source.Object, monitor.Object).RunCheckAsync(600, DefaultTimeout, CancellationToken.None);
 
         result.Should().BeTrue();
         state.GetStatus().Status.Should().Be(ApplicationReleaseUpdateStatus.UpdateAvailable);
@@ -285,12 +285,36 @@ public sealed class ApplicationReleaseUpdateTests
             .ThrowsAsync(new TaskCanceledException("timeout"));
         Mock<IBackgroundServiceMonitor> monitor = new();
 
-        bool result = await CreateService(state, source.Object, monitor.Object).RunCheckAsync(600, CancellationToken.None);
+        bool result = await CreateService(state, source.Object, monitor.Object).RunCheckAsync(600, DefaultTimeout, CancellationToken.None);
 
         result.Should().BeFalse();
         ApplicationReleaseUpdateStatusDto status = state.GetStatus();
         status.Status.Should().Be(ApplicationReleaseUpdateStatus.CheckFailed);
         status.Error.Should().Be("GitHub release check timed out.");
+        monitor.Verify(m => m.ReportError("ApplicationReleaseUpdateCheckService", "GitHub release check timed out."), Times.Once);
+    }
+
+    [Fact]
+    public async Task CheckService_SlowResponseBody_TimesOutAndRecordsFailure()
+    {
+        ApplicationReleaseUpdateState state = CreateState("0.2.3", new ManualTimeProvider());
+        // Headers arrive immediately; the body never completes, so only a whole-operation
+        // deadline (not HttpClient.Timeout with ResponseHeadersRead) can end the check.
+        using StubHandler handler = new(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StreamContent(new StallingStream()),
+        });
+        Mock<IBackgroundServiceMonitor> monitor = new();
+
+        bool result = await CreateService(state, CreateSource(handler), monitor.Object)
+            .RunCheckAsync(600, TimeSpan.FromMilliseconds(200), CancellationToken.None)
+            .WaitAsync(TimeSpan.FromSeconds(10));
+
+        result.Should().BeFalse();
+        ApplicationReleaseUpdateStatusDto status = state.GetStatus();
+        status.Status.Should().Be(ApplicationReleaseUpdateStatus.CheckFailed);
+        status.Error.Should().Be("GitHub release check timed out.");
+        status.LastCheckedAt.Should().NotBeNull();
         monitor.Verify(m => m.ReportError("ApplicationReleaseUpdateCheckService", "GitHub release check timed out."), Times.Once);
     }
 
@@ -305,7 +329,7 @@ public sealed class ApplicationReleaseUpdateTests
             .ThrowsAsync(new OperationCanceledException(cts.Token));
 
         Func<Task> act = async () =>
-            await CreateService(state, source.Object, Mock.Of<IBackgroundServiceMonitor>()).RunCheckAsync(600, cts.Token);
+            await CreateService(state, source.Object, Mock.Of<IBackgroundServiceMonitor>()).RunCheckAsync(600, DefaultTimeout, cts.Token);
 
         await act.Should().ThrowAsync<OperationCanceledException>();
         state.GetStatus().Status.Should().Be(ApplicationReleaseUpdateStatus.NotChecked);
@@ -318,7 +342,7 @@ public sealed class ApplicationReleaseUpdateTests
         Mock<IApplicationReleaseSource> source = new(MockBehavior.Strict);
 
         bool result = await CreateService(state, source.Object, Mock.Of<IBackgroundServiceMonitor>())
-            .RunCheckAsync(600, CancellationToken.None);
+            .RunCheckAsync(600, DefaultTimeout, CancellationToken.None);
 
         result.Should().BeFalse();
         source.VerifyNoOtherCalls();
@@ -337,6 +361,8 @@ public sealed class ApplicationReleaseUpdateTests
 
         new ApplicationReleaseUpdateOptionsValidator().Validate(null, options).Succeeded.Should().Be(valid);
     }
+
+    private static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(15);
 
     private static ApplicationReleaseVersion Parse(string value)
     {
@@ -382,6 +408,35 @@ public sealed class ApplicationReleaseUpdateTests
         public override DateTimeOffset GetUtcNow() => _now;
 
         public void Advance(TimeSpan delta) => _now += delta;
+    }
+
+    /// <summary>A readable stream whose reads never complete until cancelled.</summary>
+    private sealed class StallingStream : Stream
+    {
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+
+        public override void Flush() { }
+
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            await Task.Delay(Timeout.Infinite, cancellationToken).ConfigureAwait(false);
+            return 0;
+        }
+
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
+            ReadAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+        public override void SetLength(long value) => throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 
     private sealed class StubHandler(Func<HttpRequestMessage, HttpResponseMessage> respond) : HttpMessageHandler

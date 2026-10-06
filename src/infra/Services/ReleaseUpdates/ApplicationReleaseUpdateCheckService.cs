@@ -52,7 +52,10 @@ public sealed class ApplicationReleaseUpdateCheckService(
             {
                 if (active)
                 {
-                    await RunCheckAsync(options.IntervalSeconds, stoppingToken).ConfigureAwait(false);
+                    await RunCheckAsync(
+                        options.IntervalSeconds,
+                        TimeSpan.FromSeconds(options.HttpTimeoutSeconds),
+                        stoppingToken).ConfigureAwait(false);
                 }
 
                 await DelayAsync(TimeSpan.FromSeconds(options.IntervalSeconds), stoppingToken).ConfigureAwait(false);
@@ -66,8 +69,12 @@ public sealed class ApplicationReleaseUpdateCheckService(
         _serviceMonitor.ReportStopped(ServiceId);
     }
 
-    /// <summary>Runs one check and records exactly one outcome. Returns true on success.</summary>
-    internal async Task<bool> RunCheckAsync(int intervalSeconds, CancellationToken stoppingToken)
+    /// <summary>
+    /// Runs one check and records exactly one outcome. Returns true on success.
+    /// <paramref name="timeout"/> bounds the whole check, including streaming the response
+    /// body; <see cref="HttpClient.Timeout"/> alone stops at the response headers.
+    /// </summary>
+    internal async Task<bool> RunCheckAsync(int intervalSeconds, TimeSpan timeout, CancellationToken stoppingToken)
     {
         ApplicationReleaseVersion? installed = _state.InstalledVersion;
         if (installed is null)
@@ -75,10 +82,12 @@ public sealed class ApplicationReleaseUpdateCheckService(
             return false;
         }
 
+        using CancellationTokenSource deadline = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+        deadline.CancelAfter(timeout);
         try
         {
             ApplicationReleaseInfo? latest = await _releaseSource
-                .GetLatestReleaseAsync(installed.Channel, stoppingToken)
+                .GetLatestReleaseAsync(installed.Channel, deadline.Token)
                 .ConfigureAwait(false);
             _state.RecordSuccess(latest);
             _serviceMonitor.ReportSuccess(ServiceId, intervalSeconds);
