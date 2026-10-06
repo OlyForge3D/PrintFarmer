@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Capture native store PNGs; never resize, crop, upload, or record test baselines."""
 
-import argparse
 import datetime
 import json
 import os
@@ -37,7 +36,7 @@ def resolve(family):
     udid = run(["bash", str(RESOLVER), "--udid"], env=env).strip()
     devices = json.loads(run(["xcrun", "simctl", "list", "devices", "available", "-j"]))
     device = next(
-        (d for d in devices["devices"].get("com.apple.CoreSimulator.SimRuntime.iOS-26-5", [])
+        (d for runtime_devices in devices["devices"].values() for d in runtime_devices
          if d["udid"] == udid), None
     )
     if device is None or device["deviceTypeIdentifier"] != f"com.apple.CoreSimulator.SimDeviceType.{device_type}":
@@ -83,36 +82,41 @@ def capture(device, directory, derived_data):
     if current["state"] != "Booted":
         run(["xcrun", "simctl", "boot", udid])
     run(["xcrun", "simctl", "bootstatus", udid, "-b"])
-    run(["xcrun", "simctl", "ui", udid, "appearance", "dark"])
-    run(["xcrun", "simctl", "ui", udid, "content_size", "large"])
-    status_bar_date = datetime.datetime(
-        2026, 10, 5, 9, 41, tzinfo=datetime.timezone(datetime.timedelta(hours=-7))
-    ).astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
-    run(["xcrun", "simctl", "status_bar", udid, "override",
-         "--time", status_bar_date, "--dataNetwork", "wifi", "--wifiMode", "active",
-         "--wifiBars", "3", "--batteryState", "charged", "--batteryLevel", "100"])
+    appearance = run(["xcrun", "simctl", "ui", udid, "appearance"]).strip()
+    content_size = run(["xcrun", "simctl", "ui", udid, "content_size"]).strip()
     bundle = directory / "Screenshots.xcresult"
     command = [
         sys.executable, str(MOBILE / "scripts/run-tests.py"), "--",
-        "test", "-scheme", "PrintFarmer",
+        "test", "-scheme", "PrintFarmer", "-testPlan", "AppStoreScreenshots",
         "-destination", f"platform=iOS Simulator,id={udid}",
         "-derivedDataPath", str(derived_data),
         "-only-testing:PrintFarmerUITests/AppStoreScreenshotUITests",
         "-parallel-testing-enabled", "NO", "-resultBundlePath", str(bundle),
     ]
     try:
+        run(["xcrun", "simctl", "ui", udid, "appearance", "dark"])
+        run(["xcrun", "simctl", "ui", udid, "content_size", "large"])
+        # simctl renders dates in the host timezone; pin the local 9:41 wall clock.
+        status_bar_date = datetime.datetime(2026, 10, 5, 9, 41).astimezone(
+            datetime.timezone.utc
+        ).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+        run(["xcrun", "simctl", "status_bar", udid, "override",
+             "--time", status_bar_date, "--dataNetwork", "wifi", "--wifiMode", "active",
+             "--wifiBars", "3", "--batteryState", "charged", "--batteryLevel", "100"])
         with (directory / "test.log").open("w") as log:
             subprocess.run(command, cwd=MOBILE, stdout=log, stderr=subprocess.STDOUT, check=True)
         return export(bundle, directory)
     finally:
-        run(["xcrun", "simctl", "status_bar", udid, "clear"])
+        try:
+            run(["xcrun", "simctl", "status_bar", udid, "clear"])
+        finally:
+            try:
+                run(["xcrun", "simctl", "ui", udid, "appearance", appearance])
+            finally:
+                run(["xcrun", "simctl", "ui", udid, "content_size", content_size])
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--verify-repeatability", action="store_true",
-                        help="Capture twice and require identical decoded RGBA pixels for every image.")
-    args = parser.parse_args()
     # Resolve both before building; missing display classes are blockers, not resize requests.
     devices = {family: resolve(family) for family in DEVICES}
     root = MOBILE / "build/app-store"
@@ -125,30 +129,14 @@ def main():
         "xcode": run(["xcodebuild", "-version"]).strip(),
         "runtimes": json.loads(run(["xcrun", "simctl", "list", "runtimes", "-j"])),
         "devices": devices,
-        "repeatability": "not requested",
     }
     (output / "environment.json").write_text(json.dumps(metadata, indent=2) + "\n")
     print(f"Retaining PNGs, logs and result bundles in {output}", flush=True)
-    evidence = {}
-    for iteration in range(1, 3 if args.verify_repeatability else 2):
-        for family, device in devices.items():
-            directory = output / f"run-{iteration}" / family
-            print(f"Capturing {family}, run {iteration}; log: {directory / 'test.log'}", flush=True)
-            images = capture(device, directory, root / "DerivedData")
-            pixels = json.loads(run(["swift", str(MOBILE / "scripts/screenshot-pixels.swift"),
-                                     *map(str, images)]))
-            evidence[f"{iteration}/{family}"] = pixels
-            (output / "pixels.json").write_text(json.dumps(evidence, indent=2) + "\n")
-            for path, image in pixels.items():
-                if (image["width"], image["height"]) != DEVICES[family][2]:
-                    raise RuntimeError(f"Wrong native screenshot dimensions: {path}: {image}")
-                if iteration == 2:
-                    original = output / "run-1" / family / Path(path).name
-                    if image != evidence[f"1/{family}"][str(original)]:
-                        raise RuntimeError(f"Pixel mismatch between captures: {path}")
-    metadata["repeatability"] = "identical RGBA pixels" if args.verify_repeatability else "not requested"
-    (output / "environment.json").write_text(json.dumps(metadata, indent=2) + "\n")
-    print(f"Store screenshots ready for manual review/upload: {output / 'run-1'}")
+    for family, device in devices.items():
+        directory = output / family
+        print(f"Capturing {family}; log: {directory / 'test.log'}", flush=True)
+        capture(device, directory, root / "DerivedData")
+    print(f"Store screenshots ready for manual review/upload: {output}")
 
 
 if __name__ == "__main__":

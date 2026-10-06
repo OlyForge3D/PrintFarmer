@@ -819,7 +819,6 @@ enum UITestBootstrap {
             printers.removeAll {
                 !$0.isOnline || ["paused", "completed", "error"].contains($0.state?.lowercased() ?? "")
             }
-            printers[0] = printer
         }
 
         let status = PrinterStatusDetail(
@@ -1179,7 +1178,7 @@ enum UITestBootstrap {
                 ])
                 let queueStatsData = try encoder.encode(QueueStats(
                     totalQueued: 4,
-                    totalPrinting: appStoreScreenshotDate == nil ? 3 : 1,
+                    totalPrinting: fixture.printers.filter { $0.state?.lowercased() == "printing" }.count,
                     totalPaused: 0,
                     averageWaitTimeMinutes: 18,
                     byModel: []

@@ -99,43 +99,28 @@ Keep snapshot strictness, skip policy and PNGs unchanged. The
 [snapshot guide](PrintFarmerTests/Views/__Snapshots__/README.md) is not
 authorization to re-record baselines for #2536/#2572.
 
-## App Store screenshots
+## Updating App Store screenshots (manual)
 
 From the repository root, run:
 
 ```bash
 cd mobile
-python3 scripts/app-store-screenshots.py --verify-repeatability
+python3 scripts/app-store-screenshots.py
 ```
 
-This captures Farm, printer Status, Queue (active and queued), Filament and
-Scan in dark mode, English, portrait, default Dynamic Type and a fixed 9:41
-status bar. The DEBUG-only capture scenario reuses `UITestBootstrap`'s
-authenticated API fixtures and bundled thumbnails, omitting offline,
-paused and bed-clear/pending printers. No physical scanner or printer is used.
-The fixture-only ETA display clock is fixed; real app launches keep live time.
-Queue retains the existing recent-job history fixture with an enabled Retry
-action; the capture never submits a rerun or another mutation.
+Requires Xcode, Python 3 and approved **iOS 26.5 (23F77)** simulators:
+**iPhone 17 Pro Max** (1320x2868) and **iPad Pro 13-inch (M5)** (2064x2752).
+The script captures Farm, printer Status, Queue, Filament and Scan once per
+device in dark mode with default Dynamic Type, using DEBUG-only API fixtures.
+Missing device classes are errors; images are never resized.
 
-Install **iOS 26.5 (23F77)** and create an **iPhone 17 Pro Max** and an
-**iPad Pro 13-inch (M5)** simulator first. The shared resolver excludes other
-runtimes and the capture script rejects smaller display classes. Native PNGs
-must be **1320x2868** and **2064x2752** respectively; nothing is resized or
-cropped to disguise an unavailable simulator.
-
-Output is retained under git-ignored `mobile/build/app-store/<unique-run>/`,
-with PNGs in `run-1/iPhone/` and `run-1/iPad/`, XCTest bundles, logs, runner
-timing/events, environment metadata and decoded sRGB RGBA hashes. The
-verification option performs two independent launches per family and fails
-on any pixel difference, ignoring PNG metadata. Omit it for one capture.
-Use the same Xcode and runtime for comparisons; inspect `test.log` on failure.
-The command changes the selected simulators' appearance and text size, and
-clears its status-bar override afterward. Do not run it concurrently with
-other tests using those simulators.
-
-Review the images before uploading them **manually** in App Store Connect.
-PNGs are generated assets, not committed baselines; this does not change the
-release lane, snapshot test strictness or upload behavior.
+Review the ten PNGs under git-ignored `mobile/build/app-store/<run>/iPhone/`
+and `iPad/`, then upload them by hand in **App Store Connect**. Logs and result
+bundles stay beside the images. This is a local manual tool, not a release or
+CI pipeline: its capture driver is excluded from the default test plan and
+CI shards, and selected explicitly by the script's manual test plan.
+The command restores simulator appearance/text size and clears its status-bar
+override afterward; do not run other tests on those devices concurrently.
 
 ## Server Configuration
 
