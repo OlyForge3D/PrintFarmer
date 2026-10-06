@@ -106,10 +106,11 @@ public sealed class ApplicationReleaseUpdateCheckService(
         {
             throw;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            // Any failure (HTTP error, timeout, oversize/unreadable payload) is reported
-            // explicitly; the previously discovered release is retained by the state cache.
+            // Any non-fatal failure (HTTP error, timeout, oversize/unreadable payload) is
+            // reported explicitly and must not stop the host; the previously discovered
+            // release is retained by the state cache.
             string message = ex switch
             {
                 OperationCanceledException => "GitHub release check timed out.",
