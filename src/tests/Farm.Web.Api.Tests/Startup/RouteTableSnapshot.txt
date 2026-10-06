@@ -105,6 +105,7 @@ GET /api/admin/overview -> Farm.Modules.Administration::Farm.Modules.Administrat
 GET /api/admin/permissions/catalog -> Farm.Modules.Identity::Farm.Modules.Identity.Controllers.Admin.PermissionCatalogController.GetCatalogAsync [auth=policy=;roles=;schemes=|permission=roles:admin]
 GET /api/admin/power-monitors -> Farm.Modules.SmartPlug::Farm.Modules.SmartPlug.Controllers.Admin.AdminPowerMonitorsController.GetAllAsync [auth=policy=;roles=;schemes=|permission=power_monitors:admin]
 GET /api/admin/power-monitors/{id:int} -> Farm.Modules.SmartPlug::Farm.Modules.SmartPlug.Controllers.Admin.AdminPowerMonitorsController.GetByIdAsync [auth=policy=;roles=;schemes=|permission=power_monitors:admin]
+GET /api/admin/release-updates -> Farm.Modules.Administration::Farm.Modules.Administration.Controllers.Admin.ReleaseUpdatesController.GetStatus [auth=policy=;roles=;schemes=|permission=system_settings:admin]
 GET /api/admin/roles -> Farm.Modules.Identity::Farm.Modules.Identity.Controllers.Admin.RolesController.GetRolesAsync [auth=policy=;roles=;schemes=|permission=roles:admin]
 GET /api/admin/roles/{roleId:guid} -> Farm.Modules.Identity::Farm.Modules.Identity.Controllers.Admin.RolesController.GetRoleAsync [auth=policy=;roles=;schemes=|permission=roles:admin]
 GET /api/admin/roles/{roleId:guid}/permissions -> Farm.Modules.Identity::Farm.Modules.Identity.Controllers.Admin.RolePermissionsController.GetPermissionsAsync [auth=policy=;roles=;schemes=|permission=roles:admin]

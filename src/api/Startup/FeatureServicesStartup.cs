@@ -368,6 +368,32 @@ public static class FeatureServicesStartup
         services.AddTransient<Farm.Infrastructure.Services.HostUpdates.IHostUpdateMetadataProvider,
             Farm.Infrastructure.Services.HostUpdates.VerifiedGitHubReleaseMetadataProvider>();
 
+        // Application release update alert (issue #3281): unsigned GitHub release check for the
+        // installed channel, cached in-process so admin polling never reaches GitHub.
+        services.AddOptions<Farm.Infrastructure.Services.ReleaseUpdates.ApplicationReleaseUpdateOptions>()
+            .Bind(configuration.GetSection(Farm.Infrastructure.Services.ReleaseUpdates.ApplicationReleaseUpdateOptions.SectionName))
+            .ValidateOnStart();
+        services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<Farm.Infrastructure.Services.ReleaseUpdates.ApplicationReleaseUpdateOptions>,
+            Farm.Infrastructure.Services.ReleaseUpdates.ApplicationReleaseUpdateOptionsValidator>();
+        services.AddSingleton<Farm.Infrastructure.Services.ReleaseUpdates.ApplicationReleaseUpdateState>();
+        services.AddSingleton<Farm.Infrastructure.Services.ReleaseUpdates.IApplicationReleaseUpdateStatusProvider>(sp =>
+            sp.GetRequiredService<Farm.Infrastructure.Services.ReleaseUpdates.ApplicationReleaseUpdateState>());
+        services.AddHttpClient<Farm.Infrastructure.Services.ReleaseUpdates.IApplicationReleaseSource,
+            Farm.Infrastructure.Services.ReleaseUpdates.GitHubApplicationReleaseSource>((sp, client) =>
+            {
+                Farm.Infrastructure.Services.ReleaseUpdates.ApplicationReleaseUpdateOptions options =
+                    sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<Farm.Infrastructure.Services.ReleaseUpdates.ApplicationReleaseUpdateOptions>>().Value;
+                client.BaseAddress = new Uri("https://api.github.com/");
+                client.DefaultRequestHeaders.UserAgent.ParseAdd("PrintFarmer/1.0");
+                client.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
+                client.DefaultRequestHeaders.Add("X-GitHub-Api-Version", "2022-11-28");
+                client.Timeout = TimeSpan.FromSeconds(options.HttpTimeoutSeconds);
+            })
+            .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+            {
+                AllowAutoRedirect = false,
+            });
+
         // Keep host build identity and deployment policy explicit when projecting from infrastructure.
         services.AddScoped<Farm.Infrastructure.Services.SystemStatus.IServiceInventorySource>(sp =>
             new Farm.Infrastructure.Services.SystemStatus.LocalServiceInventorySource(

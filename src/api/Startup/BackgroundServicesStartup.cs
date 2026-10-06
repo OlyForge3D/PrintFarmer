@@ -46,6 +46,11 @@ public static class BackgroundServicesStartup
         // are bound + startup-validated in AddPrintFarmerFeatureServices.
         services.AddHostedService<Farm.Infrastructure.Services.HostUpdates.VerifiedReleaseDiscoveryMonitorService>();
 
+        // Application release update alert (issue #3281): notification-only check for a newer
+        // GitHub release on the installed channel. Options/HTTP client are registered in
+        // AddPrintFarmerFeatureServices.
+        services.AddHostedService<Farm.Infrastructure.Services.ReleaseUpdates.ApplicationReleaseUpdateCheckService>();
+
         // Orphaned Job Sync - Runs periodically (every 60s) to sync jobs stuck in "Printing" status
         // Catches missed state transitions from direct printer cancellations or WebSocket drops
         services.AddHostedService<Farm.Web.Api.Services.Startup.OrphanedJobSyncStartupService>();

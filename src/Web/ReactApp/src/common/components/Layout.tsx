@@ -3,6 +3,7 @@ import { RegisterModal } from '@/features/auth/components/RegisterModal';
 import { EmailConfirmationBanner } from '@/features/auth/components/EmailConfirmationBanner';
 import { TasksBadge } from '@/features/tasks/components/TasksBadge';
 import { InstallBanner } from '@/common/components/InstallBanner';
+import { ReleaseUpdateBanner } from '@/features/admin/components/ReleaseUpdateBanner';
 import clsx from 'clsx';
 import { Button } from '@/common/components/ui';
 import {
@@ -1292,6 +1293,7 @@ export function Layout() {
           <EmailConfirmationBanner />
           <PlatformBanner />
           <InstallBanner />
+          <ReleaseUpdateBanner />
           <div className="px-1 pt-1 pb-2 lg:px-2 lg:pt-2 lg:pb-2 has-[[data-page-fill]]:flex has-[[data-page-fill]]:min-h-0 has-[[data-page-fill]]:flex-1 has-[[data-page-fill]]:flex-col">
             {/* React Router's `location.key` is a unique string generated
                 per history entry. It changes on ANY navigation — including
