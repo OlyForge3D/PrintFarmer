@@ -32,10 +32,17 @@ ARG SOURCE_ARCHIVE_URL=""
 ARG SBOM_URL=""
 
 ############################################################
-# Network resilience helper
+# Network resilience helpers
 # `pf-retry <command> [args...]` re-runs a package-download command with
 # linear backoff so transient DNS/mirror failures (common on congested or
 # Wi-Fi build hosts during parallel --no-cache builds) do not fail the build.
+# PF_RETRY_ATTEMPTS (default 5) and PF_RETRY_DELAY (default 10s) tune it.
+#
+# `pf-apt <apt-get args...>` runs apt-get against the shared, possibly cached
+# index (see *-apt-index below). If that fails - e.g. a warm build cache holds
+# an index whose package versions have since been superseded and removed from
+# the mirror (HTTP 404) - it refreshes the index in place and retries with
+# backoff, so a stale cached index self-heals instead of failing the build.
 ############################################################
 FROM scratch AS build-retry-helper
 COPY --chmod=0755 <<'EOF' /pf-retry
@@ -56,16 +63,31 @@ while :; do
     n=$((n + 1))
 done
 EOF
+COPY --chmod=0755 <<'EOF' /pf-apt
+#!/bin/sh
+export DEBIAN_FRONTEND=noninteractive
+apt-get -o Acquire::Retries=5 "$@" && exit 0
+echo "[pf-apt] 'apt-get $*' failed; refreshing apt index and retrying" >&2
+pf-retry apt-get -o Acquire::Retries=5 -o APT::Update::Error-Mode=any update || exit $?
+exec pf-retry apt-get -o Acquire::Retries=5 "$@"
+EOF
 
 ############################################################
 # Shared apt index + upgraded ASP.NET base
-# `apt-get update` runs exactly once per platform (in *-apt-index), and the
-# downloaded package lists are bind-mounted into every stage that installs
-# packages, so they never land in a shipped image layer. Every ASP.NET
-# runtime image builds FROM aspnet-base / aspnet-base-amd64, which applies
-# `apt-get upgrade` and the common tools once instead of per service.
-# Error-Mode=any makes `apt-get update` fail (and retry) on a partially
-# failed index download instead of silently succeeding with no lists.
+# `apt-get update` runs once per platform (in *-apt-index), and the package
+# lists are bind-mounted into every stage that installs packages, so they
+# never land in a shipped image layer. Error-Mode=any makes `apt-get update`
+# fail (and retry) on a partially failed index download instead of silently
+# succeeding with missing lists. Consumers use `pf-apt`, which refreshes the
+# index in place if a cached copy has gone stale.
+#
+# Every ASP.NET runtime image builds FROM aspnet-base / aspnet-base-amd64,
+# which applies `apt-get upgrade` once instead of per service. This is an
+# intentional choice: runtime images pick up Ubuntu security/bug-fix updates
+# at build time rather than waiting for the next upstream base-image refresh.
+# ASPNET_TAG still pins the Ubuntu release (noble / glibc 2.39), and the
+# release SBOM is generated from the built image, so it records the upgraded
+# package set.
 ############################################################
 FROM mcr.microsoft.com/dotnet/aspnet:${ASPNET_TAG} AS aspnet-apt-index
 COPY --from=build-retry-helper /pf-retry /usr/local/bin/pf-retry
@@ -76,18 +98,16 @@ COPY --from=build-retry-helper /pf-retry /usr/local/bin/pf-retry
 RUN pf-retry apt-get -o Acquire::Retries=5 -o APT::Update::Error-Mode=any update
 
 FROM mcr.microsoft.com/dotnet/aspnet:${ASPNET_TAG} AS aspnet-base
-COPY --from=build-retry-helper /pf-retry /usr/local/bin/pf-retry
+COPY --from=build-retry-helper /pf-retry /pf-apt /usr/local/bin/
 RUN --mount=type=bind,from=aspnet-apt-index,source=/var/lib/apt/lists,target=/var/lib/apt/lists,rw \
-    DEBIAN_FRONTEND=noninteractive pf-retry apt-get -o Acquire::Retries=5 upgrade -y --no-install-recommends \
-    && DEBIAN_FRONTEND=noninteractive pf-retry apt-get -o Acquire::Retries=5 install -y --no-install-recommends \
-        curl wget ca-certificates
+    pf-apt upgrade -y \
+    && pf-apt install -y --no-install-recommends curl ca-certificates
 
 FROM --platform=linux/amd64 mcr.microsoft.com/dotnet/aspnet:${ASPNET_TAG} AS aspnet-base-amd64
-COPY --from=build-retry-helper /pf-retry /usr/local/bin/pf-retry
+COPY --from=build-retry-helper /pf-retry /pf-apt /usr/local/bin/
 RUN --mount=type=bind,from=aspnet-apt-index-amd64,source=/var/lib/apt/lists,target=/var/lib/apt/lists,rw \
-    DEBIAN_FRONTEND=noninteractive pf-retry apt-get -o Acquire::Retries=5 upgrade -y --no-install-recommends \
-    && DEBIAN_FRONTEND=noninteractive pf-retry apt-get -o Acquire::Retries=5 install -y --no-install-recommends \
-        curl wget ca-certificates
+    pf-apt upgrade -y \
+    && pf-apt install -y --no-install-recommends curl ca-certificates
 
 FROM scratch AS legal-assets
 COPY LICENSE /LICENSE
@@ -144,7 +164,10 @@ WORKDIR /src
 # OrcaSlicer plugin versions) so every subsequent `--no-restore` build/publish
 # step has already been restored here - see issue #2330 for why this list
 # must never diverge from what is built with --no-restore further down.
-RUN pf-retry dotnet restore ./api/Farm.Web.Api.csproj && \
+# PF_RETRY_ATTEMPTS=3 bounds the delay before a deterministic restore error
+# (e.g. NU1101) surfaces, while still riding out transient feed/DNS loss.
+RUN export PF_RETRY_ATTEMPTS=3 && \
+    pf-retry dotnet restore ./api/Farm.Web.Api.csproj && \
     pf-retry dotnet restore ./orcaslicer-worker/Farm.OrcaSlicer.Worker.csproj && \
     pf-retry dotnet restore ./printer-discovery/PrinterDiscoveryService.csproj && \
     pf-retry dotnet restore ./slicer/Farm.Slicer.Host/Farm.Slicer.Host.csproj && \
@@ -251,8 +274,8 @@ LABEL org.opencontainers.image.title="PrintFarmer API" \
 
 # Install diagnostics tools and gosu (privilege dropping) on top of aspnet-base
 RUN --mount=type=bind,from=aspnet-apt-index,source=/var/lib/apt/lists,target=/var/lib/apt/lists,rw \
-    pf-retry apt-get -o Acquire::Retries=5 install -y --no-install-recommends \
-        iputils-ping iproute2 net-tools dnsutils gosu
+    pf-apt install -y --no-install-recommends \
+        wget iputils-ping iproute2 net-tools dnsutils gosu
 
 # Create appuser if it doesn't exist (for standard base images)
 # Use UID 1001 as UID 1000 may already be taken in Ubuntu 24.04
@@ -591,8 +614,8 @@ WORKDIR /app
 
 # Install OrcaSlicer runtime deps for Ubuntu 24.04 (libgl1-mesa-glx → libgl1-mesa-glx | libglx0)
 RUN --mount=type=bind,from=aspnet-apt-index-amd64,source=/var/lib/apt/lists,target=/var/lib/apt/lists,rw \
-    pf-retry apt-get -o Acquire::Retries=5 install -y --no-install-recommends \
-        libgtk-3-0 libglx0 libglib2.0-0 libstdc++6 libopengl0 libegl1 \
+    pf-apt install -y --no-install-recommends \
+        wget libgtk-3-0 libglx0 libglib2.0-0 libstdc++6 libopengl0 libegl1 \
         libglu1-mesa \
         libgstreamer1.0-0 libgstreamer-plugins-base1.0-0 libmspack0 \
         libwebkit2gtk-4.1-0 libjavascriptcoregtk-4.1-0 \
@@ -762,12 +785,15 @@ RUN set -eux; \
     \
     if [ -f package-lock.json ]; then \
         echo "[frontend-build] package-lock.json found - using npm ci"; \
-        pf-retry npm ci --prefer-offline --no-audit --legacy-peer-deps --fetch-retries=5 --fetch-retry-mintimeout=20000 --fetch-retry-maxtimeout=120000 2>&1 | tee /tmp/npm-install.log; \
+        npm_cmd=ci; \
     else \
         echo "[frontend-build] package-lock.json NOT found - using npm install"; \
-        pf-retry npm install --prefer-offline --no-audit --legacy-peer-deps --fetch-retries=5 --fetch-retry-mintimeout=20000 --fetch-retry-maxtimeout=120000 2>&1 | tee /tmp/npm-install.log; \
+        npm_cmd=install; \
     fi; \
-    npm_status=$?; \
+    # Record pf-retry's own exit status: a plain `| tee` pipeline reports tee's status. \
+    npm_status=0; \
+    { pf-retry npm "$npm_cmd" --prefer-offline --no-audit --legacy-peer-deps --fetch-retries=5 --fetch-retry-mintimeout=20000 --fetch-retry-maxtimeout=120000 2>&1 || echo "$?" > /tmp/npm-status; } | tee /tmp/npm-install.log; \
+    [ -f /tmp/npm-status ] && npm_status=$(cat /tmp/npm-status); \
     \
     if [ "$npm_status" -ne 0 ]; then \
         echo "[frontend-build] ERROR: npm install/ci failed with status $npm_status"; \
