@@ -70,15 +70,19 @@ export function useSlotSpoolAssignment({
   });
   const fallbackRevision = revisionSource?.rowVersion ?? null;
   const effectiveRowVersion = reviewedRowVersion ?? fallbackRevision;
-  // Revision returned by our own last write, held until the printer revision we
-  // were given moves past the one current at write time. Deselecting or opening
-  // another slot before that refresh would otherwise fall back to the pre-write
-  // revision and 412 against our own write.
-  const [ownWrite, setOwnWrite] = useState<{ revision: string; baseline: string | null } | null>(null);
-  if (ownWrite && ownWrite.baseline !== effectiveRowVersion) {
+  // Revision returned by our own last write, plus every token our write chain
+  // consumed or superseded. Tokens are opaque, so ordering comes from the chain:
+  // a prop matching a known predecessor is a late refresh and must not displace
+  // the newer own-write revision (or the next write would 412 against our own
+  // write); a prop equal to the latest own write means the refresh caught up;
+  // any other token can only originate from a write after ours, so it wins.
+  const [ownWrite, setOwnWrite] = useState<{ revision: string; superseded: string[] } | null>(null);
+  const propIsStale =
+    !!ownWrite && (effectiveRowVersion === null || ownWrite.superseded.includes(effectiveRowVersion));
+  if (ownWrite && !propIsStale) {
     setOwnWrite(null);
   }
-  const ownWriteRevision = ownWrite && ownWrite.baseline === effectiveRowVersion ? ownWrite.revision : null;
+  const ownWriteRevision = ownWrite && propIsStale ? ownWrite.revision : null;
   if (selectedKey && !lockedRevision && !capturedFallbackRevision && fallbackRevision) {
     setCapturedFallbackRevision(fallbackRevision);
   }
@@ -114,9 +118,13 @@ export function useSlotSpoolAssignment({
     setLockedRevision(key ? ownWriteRevision ?? effectiveRowVersion : null);
   };
 
-  const recordWrite = (newRevision: string) => {
+  const recordWrite = (consumedRevision: string, newRevision: string) => {
     setLockedRevision(newRevision);
-    setOwnWrite({ revision: newRevision, baseline: effectiveRowVersion });
+    setOwnWrite((prev) => ({
+      revision: newRevision,
+      superseded: [...new Set([...(prev?.superseded ?? []), ...(prev ? [prev.revision] : []), consumedRevision])]
+        .filter((token) => token !== newRevision),
+    }));
   };
 
   const requireRevision = (): string | null => {
@@ -150,7 +158,7 @@ export function useSlotSpoolAssignment({
         spoolId,
         reviewedRowVersion: revision,
       });
-      recordWrite(newRevision);
+      recordWrite(revision, newRevision);
       onSpoolChange?.();
       return true;
     } catch {
@@ -169,7 +177,7 @@ export function useSlotSpoolAssignment({
         toolheadIndex: slot.apiIndex,
         reviewedRowVersion: revision,
       });
-      recordWrite(newRevision);
+      recordWrite(revision, newRevision);
       onSpoolChange?.();
       return true;
     } catch {

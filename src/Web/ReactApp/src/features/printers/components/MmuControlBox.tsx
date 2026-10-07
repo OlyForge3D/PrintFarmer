@@ -239,17 +239,21 @@ export function MmuControlBox({
   );
   // Coverage is keyed by 0-based g-code tool, which is the live gate index only
   // when the reported gates are contiguous from 0 and the saved layout resolves
-  // to the same gates; otherwise show "unknown" rather than join a gate to
-  // another gate's figures.
-  const topologyResolved = loadout?.hasResolvedTopology ?? false;
+  // to the same gates via the canonical `Toolhead.Index = gate + 1` mapping;
+  // otherwise show "unknown" rather than join a gate to another gate's figures.
   const coverageByGate = useMemo(() => {
     const map = new Map<number, ToolheadCoverage>();
-    if (!topologyResolved) return map;
+    if (!loadout?.hasResolvedTopology) return map;
     const indices = mmuStatus.gates.map((gate) => gate.index).sort((a, b) => a - b);
     if (!indices.every((index, position) => index === position)) return map;
-    coverage?.toolheads?.forEach((th) => map.set(th.toolheadIndex, th));
+    const byTool = new Map(coverage?.toolheads?.map((th) => [th.toolheadIndex, th]) ?? []);
+    for (const index of indices) {
+      const slot = loadout.slots.find((s) => s.key === `gate-${index}`);
+      const th = byTool.get(index);
+      if (slot?.apiIndex === index + 1 && th) map.set(index, th);
+    }
     return map;
-  }, [coverage, mmuStatus.gates, topologyResolved]);
+  }, [coverage, mmuStatus.gates, loadout]);
 
   const isQidibox = mmuStatus.mmuType === MmuProtocol.Qidibox;
   const isAfc = mmuStatus.mmuType === MmuProtocol.Afc;
