@@ -238,15 +238,18 @@ export function MmuControlBox({
     [rawCoverage, isOnline],
   );
   // Coverage is keyed by 0-based g-code tool, which is the live gate index only
-  // when the reported gates are contiguous from 0; otherwise show "unknown"
-  // rather than join a gate to another gate's figures.
+  // when the reported gates are contiguous from 0 and the saved layout resolves
+  // to the same gates; otherwise show "unknown" rather than join a gate to
+  // another gate's figures.
+  const topologyResolved = loadout?.hasResolvedTopology ?? false;
   const coverageByGate = useMemo(() => {
     const map = new Map<number, ToolheadCoverage>();
+    if (!topologyResolved) return map;
     const indices = mmuStatus.gates.map((gate) => gate.index).sort((a, b) => a - b);
     if (!indices.every((index, position) => index === position)) return map;
     coverage?.toolheads?.forEach((th) => map.set(th.toolheadIndex, th));
     return map;
-  }, [coverage, mmuStatus.gates]);
+  }, [coverage, mmuStatus.gates, topologyResolved]);
 
   const isQidibox = mmuStatus.mmuType === MmuProtocol.Qidibox;
   const isAfc = mmuStatus.mmuType === MmuProtocol.Afc;
@@ -338,7 +341,8 @@ export function MmuControlBox({
   const handleRelease = async () => {
     if (!displaySlot) return;
     await spoolAssignment.clear(displaySlot);
-    // Drop the post-write revision anchor so later actions read the refreshed one.
+    // Deselect; the hook keeps the post-write revision until the printer's
+    // revision refreshes, so a quick second action does not 412.
     spoolAssignment.selectSlot(null);
   };
 

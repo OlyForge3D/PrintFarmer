@@ -70,10 +70,19 @@ export function useSlotSpoolAssignment({
   });
   const fallbackRevision = revisionSource?.rowVersion ?? null;
   const effectiveRowVersion = reviewedRowVersion ?? fallbackRevision;
+  // Revision returned by our own last write, held until the printer revision we
+  // were given moves past the one current at write time. Deselecting or opening
+  // another slot before that refresh would otherwise fall back to the pre-write
+  // revision and 412 against our own write.
+  const [ownWrite, setOwnWrite] = useState<{ revision: string; baseline: string | null } | null>(null);
+  if (ownWrite && ownWrite.baseline !== effectiveRowVersion) {
+    setOwnWrite(null);
+  }
+  const ownWriteRevision = ownWrite && ownWrite.baseline === effectiveRowVersion ? ownWrite.revision : null;
   if (selectedKey && !lockedRevision && !capturedFallbackRevision && fallbackRevision) {
     setCapturedFallbackRevision(fallbackRevision);
   }
-  const activeRevision = lockedRevision ?? capturedFallbackRevision ?? effectiveRowVersion;
+  const activeRevision = lockedRevision ?? ownWriteRevision ?? capturedFallbackRevision ?? effectiveRowVersion;
 
   useEffect(() => {
     if (
@@ -102,11 +111,16 @@ export function useSlotSpoolAssignment({
     initialFallbackRevisionRef.current = null;
     setCapturedFallbackRevision(null);
     setSelectedKey(key);
-    setLockedRevision(key ? effectiveRowVersion : null);
+    setLockedRevision(key ? ownWriteRevision ?? effectiveRowVersion : null);
+  };
+
+  const recordWrite = (newRevision: string) => {
+    setLockedRevision(newRevision);
+    setOwnWrite({ revision: newRevision, baseline: effectiveRowVersion });
   };
 
   const requireRevision = (): string | null => {
-    const revision = lockedRevision ?? initialFallbackRevisionRef.current ?? activeRevision;
+    const revision = lockedRevision ?? ownWriteRevision ?? initialFallbackRevisionRef.current ?? activeRevision;
     if (!revision) {
       toast.error('Printer revision unavailable. Refresh and review again.');
       return null;
@@ -136,7 +150,7 @@ export function useSlotSpoolAssignment({
         spoolId,
         reviewedRowVersion: revision,
       });
-      setLockedRevision(newRevision);
+      recordWrite(newRevision);
       onSpoolChange?.();
       return true;
     } catch {
@@ -155,7 +169,7 @@ export function useSlotSpoolAssignment({
         toolheadIndex: slot.apiIndex,
         reviewedRowVersion: revision,
       });
-      setLockedRevision(newRevision);
+      recordWrite(newRevision);
       onSpoolChange?.();
       return true;
     } catch {
