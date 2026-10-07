@@ -2050,65 +2050,9 @@ public sealed class MoonrakerSubscriptionService(
             await FetchQidiboxDictionaryAsync(state, serverUrl, ct);
         }
 
-        // Parse box_count from save_variables
         if (hasBoxCount && variables.ValueKind == JsonValueKind.Object)
         {
-            if (variables.TryGetProperty("box_count", out JsonElement boxCountElem) &&
-                boxCountElem.ValueKind == JsonValueKind.Number)
-            {
-                int boxCount = boxCountElem.GetInt32();
-                if (boxCount > 0)
-                {
-                    state.QidiboxBoxCount = boxCount;
-                    state.MmuNumGates = boxCount * 4;
-                }
-            }
-
-            // Parse active slot from last_load_slot (e.g., "slot0" → 0, "slot-1" → -1)
-            if (variables.TryGetProperty("last_load_slot", out JsonElement lastSlotElem) &&
-                lastSlotElem.ValueKind == JsonValueKind.String)
-            {
-                string? lastSlot = lastSlotElem.GetString();
-                if (lastSlot is not null && lastSlot.StartsWith("slot", StringComparison.Ordinal) && int.TryParse(lastSlot.AsSpan(4), out int slotIndex))
-                {
-                    state.MmuActiveTool = slotIndex;
-                    state.MmuActiveGate = slotIndex >= 0 ? slotIndex : -1;
-                }
-            }
-
-            // Build per-slot arrays from save_variables
-            int numSlots = state.MmuNumGates > 0 ? state.MmuNumGates : 4;
-            EnsureSlotArrays(state, numSlots);
-
-            for (int i = 0; i < numSlots; i++)
-            {
-                // Filament type
-                if (variables.TryGetProperty($"filament_slot{i}", out JsonElement filTypeElem) &&
-                    filTypeElem.ValueKind == JsonValueKind.Number)
-                {
-                    int filType = filTypeElem.GetInt32();
-                    if (state.QidiboxFilamentDict.TryGetValue(filType, out string? filName))
-                    {
-                        state.MmuGateMaterial![i] = filName;
-                        state.MmuGateFilamentName![i] = filName;
-                    }
-                    else
-                    {
-                        state.MmuGateMaterial![i] = $"Type {filType}";
-                        state.MmuGateFilamentName![i] = $"Type {filType}";
-                    }
-                }
-
-                // Color
-                if (variables.TryGetProperty($"color_slot{i}", out JsonElement colorElem) &&
-                    colorElem.ValueKind == JsonValueKind.Number)
-                {
-                    int colorIdx = colorElem.GetInt32();
-                    state.MmuGateColor![i] = state.QidiboxColorDict.TryGetValue(colorIdx, out string? colorHex)
-                        ? colorHex
-                        : "#808080";
-                }
-            }
+            ApplyQidiboxSaveVariables(state, variables);
         }
 
         // Parse individual box_stepper slotN runout_button values
@@ -2151,7 +2095,7 @@ public sealed class MoonrakerSubscriptionService(
         if (state.QidiboxDetected)
         {
             // Set filament state based on active tool — only mark dirty when values change
-            string newFilamentState = state.MmuActiveTool >= 0 ? "Loaded" : "Unloaded";
+            string newFilamentState = state.MmuActiveTool >= 0 || state.MmuActiveGate == MmuGateBypass ? "Loaded" : "Unloaded";
             if (state.MmuFilamentState != newFilamentState || state.MmuAction != "Idle")
             {
                 state.MmuFilamentState = newFilamentState;
@@ -2167,6 +2111,115 @@ public sealed class MoonrakerSubscriptionService(
                 state.MmuNumGates);
         }
     }
+
+    /// <summary>Happy Hare's TOOL_GATE_BYPASS sentinel, reused for the Qidi external spool holder ("Rack").</summary>
+    internal const int MmuGateBypass = -2;
+
+    /// <summary>Qidi firmware addresses the external spool holder ("Rack") as <c>slot16</c>; it is never an MMU gate.</summary>
+    internal const int QidiboxRackSlot = 16;
+
+    /// <summary>
+    /// Applies Qidibox <c>save_variables</c> to MMU state. Box slots map to gates 0..numGates-1; the Rack
+    /// (<c>slot16</c>) is reported only as an active bypass (<see cref="MmuGateBypass"/>) and never as a gate.
+    /// </summary>
+    internal static void ApplyQidiboxSaveVariables(PrinterState state, JsonElement variables)
+    {
+        int prevTool = state.MmuActiveTool;
+        int prevGate = state.MmuActiveGate;
+        bool prevBypass = state.MmuHasBypass;
+        int prevNumGates = state.MmuNumGates;
+        string?[]? prevMaterial = (string?[]?)state.MmuGateMaterial?.Clone();
+        string?[]? prevColor = (string?[]?)state.MmuGateColor?.Clone();
+
+        if (variables.TryGetProperty("box_count", out JsonElement boxCountElem) &&
+            boxCountElem.ValueKind == JsonValueKind.Number)
+        {
+            int boxCount = boxCountElem.GetInt32();
+            if (boxCount > 0)
+            {
+                state.QidiboxBoxCount = boxCount;
+                state.MmuNumGates = boxCount * 4;
+            }
+        }
+
+        int numSlots = state.MmuNumGates > 0 ? state.MmuNumGates : 4;
+
+        if (variables.TryGetProperty($"filament_slot{QidiboxRackSlot}", out _))
+        {
+            state.MmuHasBypass = true;
+        }
+
+        // last_load_slot: "slotN" (box gate), "slot16" (Rack), "slot-1" (nothing loaded)
+        if (variables.TryGetProperty("last_load_slot", out JsonElement lastSlotElem) &&
+            lastSlotElem.ValueKind == JsonValueKind.String)
+        {
+            string? lastSlot = lastSlotElem.GetString();
+            if (lastSlot is not null && lastSlot.StartsWith("slot", StringComparison.Ordinal) && int.TryParse(lastSlot.AsSpan(4), out int slotIndex))
+            {
+                if (slotIndex == QidiboxRackSlot)
+                {
+                    state.MmuHasBypass = true;
+                    state.MmuActiveTool = MmuGateBypass;
+                    state.MmuActiveGate = MmuGateBypass;
+                }
+                else if (slotIndex >= 0 && slotIndex < numSlots)
+                {
+                    state.MmuActiveTool = slotIndex;
+                    state.MmuActiveGate = slotIndex;
+                }
+                else
+                {
+                    state.MmuActiveTool = -1;
+                    state.MmuActiveGate = -1;
+                }
+            }
+        }
+
+        EnsureSlotArrays(state, numSlots);
+
+        for (int i = 0; i < numSlots; i++)
+        {
+            if (variables.TryGetProperty($"filament_slot{i}", out JsonElement filTypeElem) &&
+                filTypeElem.ValueKind == JsonValueKind.Number)
+            {
+                int filType = filTypeElem.GetInt32();
+                if (state.QidiboxFilamentDict.TryGetValue(filType, out string? filName))
+                {
+                    state.MmuGateMaterial![i] = filName;
+                    state.MmuGateFilamentName![i] = filName;
+                }
+                else
+                {
+                    state.MmuGateMaterial![i] = $"Type {filType}";
+                    state.MmuGateFilamentName![i] = $"Type {filType}";
+                }
+            }
+
+            if (variables.TryGetProperty($"color_slot{i}", out JsonElement colorElem) &&
+                colorElem.ValueKind == JsonValueKind.Number)
+            {
+                int colorIdx = colorElem.GetInt32();
+                state.MmuGateColor![i] = state.QidiboxColorDict.TryGetValue(colorIdx, out string? colorHex)
+                    ? colorHex
+                    : "#808080";
+            }
+        }
+
+        // The cached MmuStatusDto must be rebuilt when slot telemetry changes even if
+        // the Loaded/Unloaded filament state does not (e.g. slot1 -> Rack).
+        if (prevTool != state.MmuActiveTool ||
+            prevGate != state.MmuActiveGate ||
+            prevBypass != state.MmuHasBypass ||
+            prevNumGates != state.MmuNumGates ||
+            !SequenceEqualOrBothNull(prevMaterial, state.MmuGateMaterial) ||
+            !SequenceEqualOrBothNull(prevColor, state.MmuGateColor))
+        {
+            state.MmuDirty = true;
+        }
+    }
+
+    private static bool SequenceEqualOrBothNull(string?[]? a, string?[]? b) =>
+        a is null ? b is null : b is not null && a.AsSpan().SequenceEqual(b);
 
     /// <summary>
     /// Ensures the slot arrays on PrinterState are initialized to the given size.

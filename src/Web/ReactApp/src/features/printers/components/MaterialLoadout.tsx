@@ -1,13 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
 import clsx from 'clsx';
-import { toast } from 'sonner';
 import { Badge, Button, Tooltip } from '@/common/components/ui';
 import { SpoolPickerModal } from '@/features/printers/components/SpoolPickerModal';
 import {
-  useSetToolheadSpool,
-  useClearToolheadSpool,
-  usePrinterDetails,
-} from '@/common/hooks/useApi';
+  useSlotSpoolAssignment,
+  DISABLED_SLOT_REASON,
+} from '@/features/printers/hooks/useSlotSpoolAssignment';
 import { usePrinterCoverageFromFleet } from '@/features/filament-coverage/hooks';
 import {
   FilamentCoverageBadge,
@@ -251,58 +249,33 @@ export function MaterialLoadout({
   onSpoolChange,
   className,
 }: MaterialLoadoutProps) {
-  const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
-  // Optimistic-concurrency anchor, captured when the user opens a slot rather
-  // than read at dispatch time. If a SignalR `printerupdated` lands while the
-  // drawer is open, the user's decision was made against the *older* state, so
-  // the write must still be validated against that revision — otherwise it
-  // silently overwrites whatever changed underneath instead of returning 412.
-  // Re-anchored to the response revision after each successful mutation (see
-  // handleAssign/handleClear) so a second action in the same open drawer (e.g.
-  // Assign then Clear) posts the just-written revision instead of the stale
-  // one it opened with, and does not spuriously 412 against its own write.
-  const [lockedRevision, setLockedRevision] = useState<string | null>(null);
-  const [capturedFallbackRevision, setCapturedFallbackRevision] = useState<string | null>(null);
-  // The detail query can resolve after a slot opens without a card revision.
-  // The reactive snapshot enables the drawer; this ref carries that exact
-  // immutable token into handlers after cache or live updates arrive.
-  const initialFallbackRevisionRef = useRef<string | null>(null);
-  const setSpoolMutation = useSetToolheadSpool();
-  const clearSpoolMutation = useClearToolheadSpool();
-  // The compact printer DTO can arrive before its concurrency token. Fetch the
-  // detail DTO only in that case so spool actions remain available once the
-  // authoritative revision has loaded.
-  const { data: revisionSource } = usePrinterDetails(printerId, {
-    enabled: !reviewedRowVersion,
-  });
   const { data: rawCoverage } = usePrinterCoverageFromFleet(printerId);
   const coverage = useMemo(
     () => withOfflineOverride(rawCoverage, isOnline),
     [rawCoverage, isOnline],
   );
-  const fallbackRevision = revisionSource?.rowVersion ?? null;
-  const effectiveRowVersion = reviewedRowVersion ?? fallbackRevision;
-  if (selectedKey && !lockedRevision && !capturedFallbackRevision && fallbackRevision) {
-    setCapturedFallbackRevision(fallbackRevision);
-  }
-  const activeRevision = lockedRevision ?? capturedFallbackRevision ?? effectiveRowVersion;
-
-  useEffect(() => {
-    if (
-      selectedKey &&
-      !lockedRevision &&
-      !initialFallbackRevisionRef.current &&
-      capturedFallbackRevision
-    ) {
-      initialFallbackRevisionRef.current = capturedFallbackRevision;
-    }
-  }, [capturedFallbackRevision, lockedRevision, selectedKey]);
 
   const loadout = useMemo(
     () => resolveMaterialLoadout(mmuStatus, toolheads, currentSpoolId),
     [mmuStatus, toolheads, currentSpoolId],
   );
+
+  const {
+    selectedKey,
+    selectSlot: selectSlotKey,
+    canMutate,
+    blockedReason,
+    busy,
+    assign,
+    clear,
+  } = useSlotSpoolAssignment({
+    printerId,
+    reviewedRowVersion,
+    hasResolvedTopology: loadout?.hasResolvedTopology ?? false,
+    topologyPending: loadout?.topologyPending ?? false,
+    onSpoolChange,
+  });
 
   const activeSlot = useMemo(
     () => loadout ? resolveActiveSlot(mmuStatus, loadout.kind) : null,
@@ -317,7 +290,7 @@ export function MaterialLoadout({
 
   if (!loadout || loadout.slots.length === 0) return null;
 
-  const { kind, unitLabel, slots, hasResolvedTopology } = loadout;
+  const { kind, unitLabel, slots } = loadout;
   const selected = slots.find((s) => s.key === selectedKey) ?? null;
   // Mirrors the non-contiguous defence in persistedGateIndicesByLiveIndex()
   // (materialLoadout.ts): coverage is keyed by a 0-based g-code index, and
@@ -341,110 +314,25 @@ export function MaterialLoadout({
       : undefined;
   const selectedCoverage = selected ? coverageForSlot(selected) : undefined;
   const loadedCount = slots.filter((s) => s.material != null || s.spoolId != null).length;
-  const busy = setSpoolMutation.isPending || clearSpoolMutation.isPending;
-  // The spool endpoints are optimistically concurrent, so without a revision to
-  // review against no assignment can succeed. Say so before the user picks a
-  // spool rather than failing them afterwards.
-  //
-  // For live-MMU printers we additionally require persisted toolhead topology
-  // to be resolved: without it the API-index mapping from live gate 0 to
-  // persisted `Toolhead.Index` is a guess and could write a G1 assignment to
-  // the physical hotend at index 0 (#1585 blocker 2).
-  //
-  // Preserve the revision present when the drawer opens. If the card omitted
-  // one, use the just-fetched detail revision once it becomes available.
-  const canMutate = !!activeRevision && hasResolvedTopology;
-  const blockedReason = !activeRevision
-    ? 'Printer revision unavailable — refresh to assign spools'
-    : !hasResolvedTopology
-      ? 'Materials topology not yet loaded — refresh to assign spools'
-      : undefined;
   // Clearing stays available on a disabled gate: if the device disabled a gate
   // that still carries a stale binding, the user needs a way to release it.
-  const disabledSlotReason = 'Disabled on the device — cannot take a spool';
+  const disabledSlotReason = DISABLED_SLOT_REASON;
 
   const selectSlot = (slot: LoadoutSlot) => {
-    const next = selectedKey === slot.key ? null : slot.key;
-    initialFallbackRevisionRef.current = null;
-    setCapturedFallbackRevision(null);
-    setSelectedKey(next);
-    // Anchor the revision to the state the user is actually looking at.
-    setLockedRevision(next ? effectiveRowVersion : null);
+    selectSlotKey(selectedKey === slot.key ? null : slot.key);
   };
 
   const closeDrawer = () => {
     setPickerOpen(false);
-    setSelectedKey(null);
-    setLockedRevision(null);
-    setCapturedFallbackRevision(null);
-    initialFallbackRevisionRef.current = null;
-  };
-
-  const requireRevision = (): string | null => {
-    const revision = lockedRevision ?? initialFallbackRevisionRef.current ?? activeRevision;
-    if (!revision) {
-      toast.error('Printer revision unavailable. Refresh and review again.');
-      return null;
-    }
-    if (!hasResolvedTopology) {
-      toast.error('Materials topology not yet loaded. Refresh and review again.');
-      return null;
-    }
-    return revision;
+    selectSlotKey(null);
   };
 
   const handleAssign = async (spoolId: number) => {
-    if (!selected) return;
-    // A disabled gate cannot feed filament, so binding a spool to it would
-    // record material the printer can never draw.
-    if (selected.disabled) {
-      toast.error(`${selected.label} is disabled on the device and cannot take a spool.`);
-      return;
-    }
-    const revision = requireRevision();
-    if (!revision) return;
-    try {
-      const newRevision = await setSpoolMutation.mutateAsync({
-        printerId,
-        toolheadIndex: selected.apiIndex,
-        spoolId,
-        reviewedRowVersion: revision,
-      });
-      // Re-anchor to the revision this write just produced so a second action
-      // in the same open drawer (e.g. Change then Clear) validates against
-      // what is now persisted, not the stale revision the drawer opened with.
-      setLockedRevision(newRevision);
-      setPickerOpen(false);
-      onSpoolChange?.();
-    } catch {
-      // Feedback is emitted from the mutation's onError toast. Await so the
-      // caller (spool picker) can react to the completed cycle, and swallow so
-      // React Query doesn't report an unhandled rejection while the picker
-      // stays open for the user to retry.
-    }
+    if (selected && await assign(selected, spoolId)) setPickerOpen(false);
   };
 
-  const handleClear = async (): Promise<boolean> => {
-    if (!selected) return false;
-    const revision = requireRevision();
-    if (!revision) return false;
-    try {
-      const newRevision = await clearSpoolMutation.mutateAsync({
-        printerId,
-        toolheadIndex: selected.apiIndex,
-        reviewedRowVersion: revision,
-      });
-      // Same reasoning as handleAssign — re-anchor so a subsequent action in
-      // this open drawer sees the just-cleared state's revision.
-      setLockedRevision(newRevision);
-      onSpoolChange?.();
-      return true;
-    } catch {
-      // Same reasoning as handleAssign — the mutation's onError toast already
-      // told the user what happened; suppress the unhandled rejection.
-      return false;
-    }
-  };
+  const handleClear = async (): Promise<boolean> =>
+    selected ? clear(selected) : false;
 
   // The picker's Eject action reports spool id 0, which means "release this
   // slot" — not "bind spool 0". Route it to the clear endpoint so an eject can

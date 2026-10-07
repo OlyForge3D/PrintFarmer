@@ -65,7 +65,19 @@ export interface MaterialLoadout {
    * assignment can never be posted to physical hotend index 0.
    */
   hasResolvedTopology: boolean;
+  /**
+   * True while live MMU gates are known but the persisted toolhead topology has
+   * not loaded yet, so an unresolved topology means "wait", not "mismatch".
+   */
+  topologyPending: boolean;
 }
+
+/**
+ * The backend only materializes missing MMU gates up to `Math.Max(4, index)`
+ * (PrintersService gap-fill), so a smaller unit would gain phantom gates that
+ * then exceed its live gate count. Gap-filling is only safe at or above this.
+ */
+const MIN_GAP_FILL_LIVE_GATES = 4;
 
 function isMmuGate(toolhead: ToolheadDto): boolean {
   return String(toolhead.toolheadType) === 'MmuGate';
@@ -103,16 +115,42 @@ function persistedGateIndicesByLiveIndex(
   const sortedLiveGates = [...liveGates].sort((a, b) => a.index - b.index);
 
   if (
-    persistedGates.length !== sortedLiveGates.length ||
     new Set(persistedGates.map((gate) => gate.index)).size !== persistedGates.length ||
     sortedLiveGates.some((gate, position) => gate.index !== position)
   ) {
     return null;
   }
 
-  return new Map(
-    sortedLiveGates.map((gate, position) => [gate.index, persistedGates[position].index]),
-  );
+  if (persistedGates.length === sortedLiveGates.length) {
+    return new Map(
+      sortedLiveGates.map((gate, position) => [gate.index, persistedGates[position].index]),
+    );
+  }
+
+  // The config database can lag the hardware (e.g. 3 persisted gates behind a
+  // four-slot QidiBox). When the persisted gates are exactly the canonical
+  // prefix `1..M` the backend creates (Toolhead.Index = live gate + 1, see
+  // ToolheadIndexMapper), the mapping for the remaining live gates is not a
+  // guess: binding index M+1..N makes the backend create exactly the missing
+  // gate without renumbering existing ones (#1588). The backend declines to
+  // create gates when more than one physical toolhead is persisted, and pads to
+  // at least four gates, so both shapes stay blocked here.
+  const physicalToolheadCount = (toolheads ?? []).filter((toolhead) => !isMmuGate(toolhead)).length;
+  const isCanonicalPrefix = persistedGates.length > 0
+    && sortedLiveGates.length >= MIN_GAP_FILL_LIVE_GATES
+    && physicalToolheadCount <= 1
+    && persistedGates.length < sortedLiveGates.length
+    && persistedGates.every((gate, position) => gate.index === position + 1)
+    // Never let a live-only gate land on a persisted physical toolhead index.
+    && !(toolheads ?? []).some((toolhead) =>
+      !isMmuGate(toolhead)
+      && toolhead.index > persistedGates.length
+      && toolhead.index <= sortedLiveGates.length);
+  if (!isCanonicalPrefix) {
+    return null;
+  }
+
+  return new Map(sortedLiveGates.map((gate) => [gate.index, gate.index + 1]));
 }
 
 function slotFromGate(
@@ -188,6 +226,24 @@ function externalSlotFromToolhead(
 }
 
 /**
+ * A QidiBox printer also has an external spool holder ("Rack", firmware
+ * `filament_slot16`) that feeds the hotend directly and is not one of the box's
+ * slots. Its spool binding lives on the persisted physical toolhead, never on a
+ * gate, so it is surfaced from that toolhead's own index. With more than one
+ * physical toolhead the holder's identity is ambiguous, so nothing is surfaced.
+ * The holder is only surfaced when the device reports it (`hasBypass`).
+ */
+export function resolveQidiRackSlot(
+  mmuStatus: MmuStatus | null | undefined,
+  toolheads: ToolheadDto[] | undefined,
+): LoadoutSlot | null {
+  if (mmuStatus?.mmuType !== MmuProtocol.Qidibox || !mmuStatus.hasBypass) return null;
+  const physical = (toolheads ?? []).filter((toolhead) => !isMmuGate(toolhead));
+  if (physical.length !== 1) return null;
+  return { ...externalSlotFromToolhead(physical[0]), label: 'Rack' };
+}
+
+/**
  * Collapse the live MMU status and the persisted toolhead topology into a single
  * ordered list of filament slots.
  *
@@ -216,19 +272,27 @@ export function resolveMaterialLoadout(
     // For MMU gates the API-index offset can only be pinned down from the
     // persisted topology — without it, live G1 might land on physical hotend 0.
     const hasResolvedTopology = kind === 'tool' || persistedGateIndices !== null;
+    const persistedByIndex = new Map((toolheads ?? []).filter(isMmuGate).map((t) => [t.index, t]));
     return {
       kind,
       unitLabel: unitLabelFor(kind, mmuStatus?.mmuType, sorted.length),
-      slots: sorted.map((gate, position) =>
-        slotFromGate(
-          gate,
-          position,
-          kind,
-          kind === 'tool'
-            ? gate.index
-            : persistedGateIndices?.get(gate.index) ?? gate.index,
-        )),
+      slots: sorted.map((gate, position) => {
+        const apiIndex = kind === 'tool'
+          ? gate.index
+          : persistedGateIndices?.get(gate.index) ?? gate.index;
+        const slot = slotFromGate(gate, position, kind, apiIndex);
+        // Many units (e.g. QidiBox) do not report a Spoolman id per gate, so the
+        // persisted binding is the only record of which spool sits in the slot.
+        const persisted = persistedGateIndices ? persistedByIndex.get(apiIndex) : undefined;
+        if (slot.spoolId == null && persisted?.currentSpoolId != null && persisted.currentSpoolId > 0) {
+          slot.spoolId = persisted.currentSpoolId;
+          slot.material ??= persisted.currentMaterial;
+          slot.color ??= persisted.currentFilamentColor;
+        }
+        return slot;
+      }),
       hasResolvedTopology,
+      topologyPending: kind === 'gate' && toolheads === undefined,
     };
   }
 
@@ -242,6 +306,7 @@ export function resolveMaterialLoadout(
         unitLabel: unitLabelFor('tool', undefined, 1),
         slots: [slotFromToolhead(single, 0, 'tool')],
         hasResolvedTopology: true,
+        topologyPending: false,
       };
     }
     // No persisted toolheads at all — synthesize a slot from printer-level spool
@@ -261,6 +326,7 @@ export function resolveMaterialLoadout(
           source: 'tool',
         }],
         hasResolvedTopology: true,
+        topologyPending: false,
       };
     }
     return null;
@@ -275,6 +341,7 @@ export function resolveMaterialLoadout(
       unitLabel: unitLabelFor('tool', undefined, physical.length),
       slots: physical.map((t, position) => slotFromToolhead(t, position, 'tool')),
       hasResolvedTopology: true,
+      topologyPending: false,
     };
   }
 
@@ -294,6 +361,7 @@ export function resolveMaterialLoadout(
       ...externals,
     ],
     hasResolvedTopology: true,
+    topologyPending: false,
   };
 }
 

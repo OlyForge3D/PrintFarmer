@@ -197,9 +197,12 @@ function render(element: ReactElement) {
     printerControlMode: accountMode,
     rowVersion: "v1",
   });
-  return renderTree(
-    <QueryClientProvider client={client}>{element}</QueryClientProvider>,
-  );
+  return {
+    client,
+    ...renderTree(
+      <QueryClientProvider client={client}>{element}</QueryClientProvider>,
+    ),
+  };
 }
 
 beforeEach(() => {
@@ -300,12 +303,12 @@ describe.each<Surface>(["detail", "sidebar"])(
       });
     });
 
-    it("retains the shared motion lock and stop access when switching to Expert", async () => {
+    it("retains the shared motion lock and stop access in Expert", () => {
+      accountMode = "Expert";
       mockBlocked = true;
       render(<Controls surface={surface} />);
       const stop = screen.getByTitle("Emergency Stop");
       expect(stop).toBeEnabled();
-      fireEvent.click(screen.getByRole("button", { name: "Expert" }));
       expect(
         screen.getByRole("button", { name: "Home all axes" }),
       ).toBeDisabled();
@@ -313,9 +316,6 @@ describe.each<Surface>(["detail", "sidebar"])(
         screen.getByRole("button", { name: "Jog Y positive" }),
       ).toBeDisabled();
       expect(stop).toBeEnabled();
-      await waitFor(() =>
-        expect(screen.getByRole("button", { name: "Expert" })).toBeEnabled(),
-      );
       expect(mockExecute).not.toHaveBeenCalled();
     });
 
@@ -341,8 +341,8 @@ describe.each<Surface>(["detail", "sidebar"])(
   },
 );
 
-it("synchronizes actual detail/sidebar modes and keeps both coordinate rows", async () => {
-  render(
+it("follows the User Settings mode on actual detail/sidebar surfaces without a local selector", async () => {
+  const { client } = render(
     <>
       <section aria-label="detail">
         <Controls surface="detail" />
@@ -354,28 +354,25 @@ it("synchronizes actual detail/sidebar modes and keeps both coordinate rows", as
   );
   const detail = within(screen.getByRole("region", { name: "detail" }));
   const sidebar = within(screen.getByRole("region", { name: "sidebar" }));
-  expect(detail.getByRole("button", { name: "Guided" })).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  );
-  expect(sidebar.getByRole("button", { name: "Guided" })).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  );
-  fireEvent.click(detail.getByRole("button", { name: "Expert" }));
+  for (const surface of [detail, sidebar]) {
+    expect(
+      surface.queryByRole("group", { name: "Printer controls mode" }),
+    ).not.toBeInTheDocument();
+    expect(surface.queryByRole("button", { name: "Guided" })).not.toBeInTheDocument();
+    expect(surface.queryByRole("button", { name: "Expert" })).not.toBeInTheDocument();
+    expect(surface.getByText(/Jog moves by/)).toBeVisible();
+  }
+  act(() => {
+    client.setQueryData(USER_SETTINGS_KEY, {
+      userId: "motion-user",
+      printerControlMode: "Expert",
+      rowVersion: "v2",
+    });
+  });
   await waitFor(() =>
-    expect(sidebar.getByRole("button", { name: "Expert" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    ),
+    expect(screen.queryByText(/Jog moves by/)).not.toBeInTheDocument(),
   );
-  await waitFor(() =>
-    expect(sidebar.getByRole("button", { name: "Expert" })).toBeEnabled(),
-  );
-  expect(detail.getByText("Motion help")).toBeVisible();
-  expect(sidebar.getByText("Motion help")).toBeVisible();
-  expect(detail.getByText(/Jog moves by/)).not.toBeVisible();
-  expect(sidebar.getByText(/Jog moves by/)).not.toBeVisible();
+  expect(screen.queryByText(/Motion help/i)).not.toBeInTheDocument();
   expect(screen.getAllByRole("spinbutton")).toHaveLength(6);
   expect(mockExecute).not.toHaveBeenCalled();
 });

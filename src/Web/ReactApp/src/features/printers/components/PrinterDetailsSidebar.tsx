@@ -1,5 +1,5 @@
 import { PrinterCoordinateRow } from '@/features/printers/components/PrinterCoordinateRow';
-import { PrinterControlsMode, PrinterMotionHelp } from '@/features/printers/components/PrinterControlsMode';
+import { PrinterMotionHelp } from '@/features/printers/components/PrinterControlsMode';
 import { MotionControlButton } from '@/features/printers/components/MotionControlButton';
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -25,6 +25,7 @@ import {
   canDisableMotors,
   canEmergencyStop,
   canExcludeObject,
+  isActivePrintForObjects,
   canFilamentChange,
   canFilamentControl,
   canMove,
@@ -279,6 +280,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
   const [extrudeStep, setExtrudeStep] = useState(DEFAULT_EXTRUDE_DISTANCE_MM);
   const [extrudeSpeed, setExtrudeSpeed] = useState(DEFAULT_EXTRUDE_SPEED_MMS);
   const [objectToSkip, setObjectToSkip] = useState<PrintJobObjectDto | null>(null);
+  const [objectToSkipPrinterId, setObjectToSkipPrinterId] = useState(printerId);
 
   // Track last known values for display fallback - use state not refs for render access
   const [lastKnownValues, setLastKnownValues] = useState({
@@ -345,8 +347,14 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
 
   const support = getPrinterSupport(backendCapabilities);
   const preRenderRawState = printer?.state ?? '';
-  const isActivePrintForObjectQuery = preRenderRawState.toLowerCase().includes('printing') ||
-    preRenderRawState.toLowerCase().includes('paused');
+  const isActivePrintForObjectQuery = isActivePrintForObjects({ state: preRenderRawState, isOnline: printer?.isOnline ?? false });
+  // A pending skip confirmation never outlives its print or its printer.
+  if (objectToSkipPrinterId !== printerId) {
+    setObjectToSkipPrinterId(printerId);
+    setObjectToSkip(null);
+  } else if (objectToSkip !== null && !(support.supportsObjectExclusion && isActivePrintForObjectQuery)) {
+    setObjectToSkip(null);
+  }
   const printJobObjectsQuery = usePrintJobObjects(printerId, {
     enabled: !!printerId && support.supportsObjectExclusion && isActivePrintForObjectQuery,
   });
@@ -425,6 +433,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
   const isEnabled = displayPrinter?.isEnabled ?? true;
   const rawState = displayPrinter?.state ?? 'unknown';
   const isSnapmakerU1Mmu = displayPrinter?.mmuStatus?.mmuType === MmuProtocol.SnapmakerU1;
+  const showMmuControlBox = !!displayPrinter?.mmuStatus && !isSnapmakerU1Mmu;
   const statusLabel = getPrinterDisplayState({
     printerState: rawState,
     autoDispatchState: autoDispatchStatus?.state,
@@ -965,7 +974,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
           </div>
         </CollapsibleSection>
 
-        {support.supportsObjectExclusion && (
+        {support.supportsObjectExclusion && isActivePrintForObjectQuery && (
           <CollapsibleSection
             title="Objects"
             expanded={true}
@@ -985,8 +994,6 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
           >
             {printJobObjectsQuery.isLoading ? (
               <div className="text-sm text-pf-text-secondary">Loading print objects…</div>
-            ) : !isPrinting && !isPaused ? (
-              <div className="text-sm text-pf-text-secondary">Object skipping is available during an active print.</div>
             ) : printJobObjects.length === 0 ? (
               <div className="text-sm text-pf-text-secondary">No object metadata is available for this job.</div>
             ) : (
@@ -1036,7 +1043,6 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
           onToggle={setIsMoveExpanded}
           hideExpandedTitle
         >
-          <PrinterControlsMode />
           <div className="flex flex-wrap gap-4 items-start">
             {/* XY + Z Pad */}
             <div className="flex flex-col gap-1">
@@ -1283,21 +1289,39 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
           />
         </CollapsibleSection>
 
-        {/* MMU Control Box - Show when MMU/ERCF is detected via real-time status */}
-        {displayPrinter?.mmuStatus && !isSnapmakerU1Mmu && (
+        {/* MMU Control Box - the single slot representation when MMU/ERCF/AMS is
+            detected via real-time status; spool assignment lives in its action row. */}
+        {showMmuControlBox && displayPrinter?.mmuStatus && (
           <MmuControlBox
             printerId={printer.id}
             mmuStatus={displayPrinter.mmuStatus}
             isOnline={isOnline}
+            toolheads={printerDetails?.toolheads}
+            reviewedRowVersion={spoolReviewedRowVersion ?? undefined}
+            onSpoolChange={() => {
+              queryClient.invalidateQueries({ queryKey: ['printers', printer.id, 'details'] });
+            }}
           />
         )}
 
         {/* Consolidated materials module — one slot list drives the rail, the
-            coverage rings and the assignment drawer. */}
+            coverage rings and the assignment drawer. Suppressed when the MMU
+            control box already shows the slots so there is exactly one view. */}
         {materialLoadout && (() => {
           const persistedToolheads = printerDetails?.toolheads && printerDetails.toolheads.length > 1
             ? printerDetails.toolheads
             : undefined;
+          if (showMmuControlBox) {
+            return persistedToolheads ? (
+              <CollapsibleSection title="Fallback Groups" expanded={true}>
+                <FallbackGroupsPanel
+                  printerId={printer.id}
+                  toolheads={persistedToolheads}
+                  isOnline={isOnline}
+                />
+              </CollapsibleSection>
+            ) : null;
+          }
           return (
             <CollapsibleSection title="Materials" expanded={true}>
               <MaterialLoadout
@@ -1427,7 +1451,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
       />
 
       <Modal
-        isOpen={objectToSkip !== null}
+        isOpen={objectToSkip !== null && support.supportsObjectExclusion && isActivePrintForObjectQuery}
         onClose={() => {
           if (!excludeObjectMutation.isPending) {
             setObjectToSkip(null);
@@ -1451,7 +1475,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
               variant="danger"
               loading={excludeObjectMutation.isPending}
               onClick={() => {
-                if (objectToSkip) {
+                if (objectToSkip && canExcludeObjectNow) {
                   excludeObjectMutation.mutate(objectToSkip.name);
                 }
               }}

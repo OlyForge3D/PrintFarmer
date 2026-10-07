@@ -68,6 +68,7 @@ import {
   canDisableMotors,
   canEmergencyStop,
   canExcludeObject,
+  isActivePrintForObjects,
   canFilamentChange,
   canFilamentControl,
   canMove,
@@ -183,6 +184,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
   const [isStatisticsExpanded, setIsStatisticsExpanded] = useState(false);
   const [isVersionExpanded, setIsVersionExpanded] = useState(false);
   const [objectToSkip, setObjectToSkip] = useState<PrintJobObjectDto | null>(null);
+  const [objectToSkipPrinterId, setObjectToSkipPrinterId] = useState(printer.id);
 
   // This card always needs `printerDetails` once Spoolman is ready, because
   // every path it can take needs the persisted toolhead topology:
@@ -346,7 +348,14 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
     },
   });
 
-  const isActivePrintForObjectQuery = isPrinting || isPaused;
+  const isActivePrintForObjectQuery = isActivePrintForObjects({ state, isOnline });
+  // A pending skip confirmation never outlives its print or its printer.
+  if (objectToSkipPrinterId !== printer.id) {
+    setObjectToSkipPrinterId(printer.id);
+    setObjectToSkip(null);
+  } else if (objectToSkip !== null && !(support.supportsObjectExclusion && isActivePrintForObjectQuery)) {
+    setObjectToSkip(null);
+  }
   const printJobObjectsQuery = usePrintJobObjects(printer.id, {
     enabled: support.supportsObjectExclusion && isActivePrintForObjectQuery,
   });
@@ -982,7 +991,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
       </div>
 
       {/* Print Objects (skip object) — folded in from the details sidebar (#1584) */}
-      {support.supportsObjectExclusion && (
+      {support.supportsObjectExclusion && isActivePrintForObjectQuery && (
         <div className="mb-3">
           <CollapsibleSection
             title="Objects"
@@ -1003,8 +1012,6 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
           >
             {printJobObjectsQuery.isLoading ? (
               <div className="text-sm text-pf-text-secondary">Loading print objects…</div>
-            ) : !isPrinting && !isPaused ? (
-              <div className="text-sm text-pf-text-secondary">Object skipping is available during an active print.</div>
             ) : printJobObjects.length === 0 ? (
               <div className="text-sm text-pf-text-secondary">No object metadata is available for this job.</div>
             ) : (
@@ -1143,13 +1150,16 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
             printerId={printer.id}
             mmuStatus={mmuStatus}
             isOnline={isOnline}
+            toolheads={printerDetails?.toolheads}
+            reviewedRowVersion={spoolReviewedRowVersion ?? undefined}
           />
         </div>
       )}
 
       {/* Consolidated materials module — replaces the old Material Slots strip
-          and the parallel Spools assignment list, which could disagree. */}
-      {materialLoadout && (
+          and the parallel Spools assignment list, which could disagree. Hidden
+          when the AMS control box already represents the slots. */}
+      {materialLoadout && !(mmuStatus && !isSnapmakerU1Mmu) && (
         <MaterialLoadout
           printerId={printer.id}
           mmuStatus={mmuStatus}
@@ -1247,7 +1257,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
       )}
 
       <Modal
-        isOpen={objectToSkip !== null}
+        isOpen={objectToSkip !== null && support.supportsObjectExclusion && isActivePrintForObjectQuery}
         onClose={() => {
           if (!excludeObjectMutation.isPending) {
             setObjectToSkip(null);
@@ -1271,7 +1281,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
               variant="danger"
               loading={excludeObjectMutation.isPending}
               onClick={() => {
-                if (objectToSkip) {
+                if (objectToSkip && canExcludeObjectNow) {
                   excludeObjectMutation.mutate(objectToSkip.name);
                 }
               }}
