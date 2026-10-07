@@ -109,6 +109,36 @@ def sha256_file(path):
         return hashlib.sha256(handle.read()).hexdigest()
 
 
+PROFILE_COPY_TOOLS = ("cp", "diff", "find", "ls", "sort")
+
+
+def profile_copy_script(recopy=False):
+    """Shell run inside the worker image (as root, offline) to copy /from (read-only) into /to.
+
+    Every tool is checked before anything is written; each failure prints an actionable reason to stderr.
+    """
+    lines = [
+        "set -eu",
+        'fail() { echo "profile copy: $2" >&2; exit "$1"; }',
+        'for t in %s; do command -v "$t" >/dev/null 2>&1 || fail 3 "worker image lacks $t; nothing was copied"; '
+        "done" % " ".join(PROFILE_COPY_TOOLS),
+        "diff --no-dereference /dev/null /dev/null >/dev/null 2>&1 "
+        '|| fail 3 "diff lacks --no-dereference; nothing was copied"',
+        "find /from -maxdepth 0 -printf '' >/dev/null 2>&1 || fail 3 \"find lacks -printf; nothing was copied\"",
+    ]
+    if recopy:
+        lines.append('find /to -mindepth 1 -delete || fail 4 "could not clear the incomplete earlier copy"')
+    lines += [
+        '[ -z "$(ls -A /to)" ] || fail 4 "target volume is not empty; nothing was copied"',
+        'cp -a /from/. /to/ || fail 5 "cp -a failed"',
+        'diff -r --no-dereference /from /to >/dev/null 2>&1 || fail 6 "copied content differs from the source"',
+        "meta() { (cd \"$1\" && find . -printf '%P|%u:%g|%m|%y|%l\\n' | sort); }",
+        '[ "$(meta /from)" = "$(meta /to)" ] '
+        '|| fail 7 "copied ownership, mode, or symlink targets differ from the source"',
+    ]
+    return "\n".join(lines)
+
+
 class Runner:
     """Executes external commands. Tests substitute a fake."""
 
@@ -734,13 +764,16 @@ class Controller:
                 if old_labels.get(key):
                     create += ["--label", "%s=%s" % (key, old_labels[key])]
             self.docker(*(create + [new]))
-        script = 'set -eu; [ -z "$(ls -A /to)" ]; cp -a /from/. /to/; diff -r /from /to >/dev/null'
-        if recopy:
-            script = "set -eu; find /to -mindepth 1 -delete; " + script[len("set -eu; "):]
         self.say("Copying custom profiles %s -> %s (old volume mounted read-only)" % (old, new))
-        self.docker("run", "--rm", "--network", "none", "--platform", host, "--user", "0",
-                    "--entrypoint", "/bin/sh", "-v", "%s:/from:ro" % old, "-v", "%s:/to" % new,
-                    helper, "-c", script)
+        try:
+            self.docker("run", "--rm", "--network", "none", "--platform", host, "--user", "0",
+                        "--entrypoint", "/bin/sh", "-v", "%s:/from:ro" % old, "-v", "%s:/to" % new,
+                        helper, "-c", profile_copy_script(recopy))
+        except MigrationError as error:
+            raise MigrationError("copying custom profiles %s -> %s failed: %s. %s was mounted read-only and is "
+                                 "unchanged; no service was stopped or restarted. %s is incomplete; it is cleared "
+                                 "and copied again when you rerun with --resume-interrupted."
+                                 % (old, new, error, old, new))
         copies.append({"source": old, "target": new, "fromVersion": adoption["from"],
                        "toVersion": adoption["to"], "completedAt": utc_now()})
         write_json_atomic(os.path.join(self.state_dir, PROFILE_COPIES_FILE), {"schema": 1, "copies": copies})
@@ -875,15 +908,20 @@ class Controller:
             if adoption is not None and not (isinstance(adoption, dict)
                                              and all(isinstance(adoption.get(k), str) for k in ("from", "to"))):
                 problems.append("orcaAdoption")
+            volumes = pending.get("workerVolumes")
+            if volumes is not None and not (isinstance(volumes, list) and all(isinstance(v, str) for v in volumes)):
+                problems.append("workerVolumes")
         if problems:
             raise MigrationError("%s is malformed (invalid: %s)" % (path, ", ".join(problems)) + PENDING_HELP % path)
         return pending
 
     def apply(self, release, action, allow_insider=False, allow_unsafe=False, health_timeout=600,
-              resume_interrupted=False, adopt_orca=None, accept_profile_risk=False, orca_version=None):
+              resume_interrupted=False, adopt_orca=None, accept_profile_risk=False, orca_version=None,
+              accept_volume_revert=False):
         deployment = self.deployment()
         pending_path = os.path.join(self.state_dir, "pending.json")
         state_path = os.path.join(self.state_dir, "release.json")
+        rollback_available = False
         lock = self.acquire_lock()
         try:
             pending = self.load_pending(pending_path)
@@ -896,13 +934,34 @@ class Controller:
                 orca, adoption = orca_version, None
             else:
                 orca, adoption = self.orca_target(deployment, state, adopt_orca, accept_profile_risk)
+            target_volume = WORKER_VOLUME_PREFIX + orca if orca else None
+            mounted = list((pending or {}).get("workerVolumes") or [])
+            started = str((pending or {}).get("phase", "")).replace("failed-", "") in ("starting", "health")
+            if pending and pending.get("orcaAdoption") and started:
+                earlier = WORKER_VOLUME_PREFIX + pending["orcaAdoption"]["to"]
+                mounted += [] if earlier in mounted else [earlier]
+            dropped = sorted(v for v in set(mounted) if target_volume and v != target_volume)
+            if dropped:
+                if not accept_volume_revert:
+                    raise MigrationError(
+                        "the unfinished %s to %s may already have started the worker on %s. Continuing would mount "
+                        "%s instead, and profile changes written to %s since then would no longer be used (that "
+                        "volume is kept, never merged). To keep them, rerun with the same --adopt-orcaslicer-version "
+                        "flags; to switch anyway, add --accept-profile-volume-revert. Nothing was changed."
+                        % (pending["action"], pending["version"], ", ".join(dropped), target_volume,
+                           ", ".join(dropped)))
+                self.say("WARNING: switching the worker to %s; changes written to %s are kept there but no longer "
+                         "mounted." % (target_volume, ", ".join(dropped)))
+            rollback_available = (state.get("previous") or {}).get("kind") == "release"
             transitions = self.profile_transitions(adoption)
             host, needed, _ = self.preflight(deployment, release, allow_insider, allow_unsafe, state, action)
             containers = self.project_containers(deployment["project"])
             refs = {c: release["images"][c] for c in needed}
+            previous_pending = ({k: v for k, v in pending.items() if k != "previousPending"}
+                                if pending else None)
             transaction = {"action": action, "version": release["version"], "phase": "pulling",
-                           "startedAt": utc_now(), "images": refs, "previousPending": pending,
-                           "orcaslicerVersion": orca, "orcaAdoption": adoption}
+                           "startedAt": utc_now(), "images": refs, "previousPending": previous_pending,
+                           "orcaslicerVersion": orca, "orcaAdoption": adoption, "workerVolumes": mounted}
             write_json_atomic(pending_path, transaction)
 
             for component, reference in sorted(refs.items()):
@@ -929,22 +988,17 @@ class Controller:
                 self.ensure_profile_copy(adoption, refs["orcaslicer-worker"], host)
                 self.check_storage(deployment["project"], resolved, containers, self.vendored_abs(deployment),
                                    allowed_transitions=self.profile_transitions())
-            for name, service in sorted(resolved.get("services", {}).items()):
-                image = service.get("image", "")
-                if name not in deployment["services"] and image:
-                    code, _ = self.docker("image", "inspect", image, check=False)
-                    if code != 0:
-                        self.say("Pulling dependency image %s" % image)
-                        self.docker("pull", image)
-            self.say("All images present and verified; nothing has been stopped or restarted yet.")
+                self.say("Profiles copied into %s; no service has been stopped or restarted yet." % new_volume)
 
             transaction["phase"] = "starting"
+            if target_volume and "orcaslicer-worker" in needed and target_volume not in mounted:
+                transaction["workerVolumes"] = mounted + [target_volume]
             write_json_atomic(pending_path, transaction)
             self.compose(deployment["project"], deployment["composeFiles"], deployment["profiles"],
                          "up", "-d", "--no-build", "--pull", "never", env=env)
             transaction["phase"] = "health"
             write_json_atomic(pending_path, transaction)
-            self.wait_healthy(deployment, resolved, health_timeout)
+            self.wait_healthy(deployment, resolved, health_timeout, rollback_available)
 
             previous = state.get("current") or {"kind": "git-checkout",
                                                  "sourceCommit": deployment["migratedFrom"]["deployedCommit"]}
@@ -961,7 +1015,7 @@ class Controller:
                 self.say("WARNING: could not record the failed transaction (%s); run `status`." % error)
             if isinstance(primary, KeyboardInterrupt):
                 self.say("Interrupted. The transaction state was recorded; run `status`, then rerun with "
-                         "--resume-interrupted or roll back.")
+                         "--resume-interrupted%s." % (" or roll back" if rollback_available else ""))
             raise
         finally:
             self.release_lock(lock)
@@ -1003,7 +1057,7 @@ class Controller:
         if problems:
             raise MigrationError("%s image does not match the release: %s" % (component, "; ".join(problems)))
 
-    def wait_healthy(self, deployment, resolved, timeout):
+    def wait_healthy(self, deployment, resolved, timeout, rollback_available=False):
         deadline = self.clock() + timeout
         expected = set(resolved.get("services", {}))
         while True:
@@ -1028,9 +1082,14 @@ class Controller:
             if not problems:
                 return
             if self.clock() >= deadline:
+                recovery = ("retry with --resume-interrupted or roll back" if rollback_available else
+                            "retry with --resume-interrupted. There is no previous release to roll back to: returning "
+                            "to the source build means restoring the git checkout and running "
+                            "scripts/deploy-docker.sh (docs/DEPLOYMENT_REGISTRY_MIGRATION.md, \"Return to a source "
+                            "build\")")
                 raise MigrationError("services not healthy after %ss: %s. New images may already be running; the "
                                      "last-good release record was not changed. Inspect `docker compose logs`, then "
-                                     "retry with --resume-interrupted or roll back." % (timeout, ", ".join(problems)))
+                                     "%s." % (timeout, ", ".join(problems), recovery))
             self.sleep(5)
 
     def update(self, version, manifest_file=None, **options):
@@ -1086,6 +1145,11 @@ class Controller:
         if pending:
             self.say("UNFINISHED: %s to %s in phase %s (started %s)" % (pending["action"], pending["version"],
                                                                        pending["phase"], pending.get("startedAt")))
+            volumes = pending.get("workerVolumes") or []
+            if volumes:
+                self.say("  WARNING: the worker may be mounted on %s; the release record above may not reflect it. "
+                         "Resuming onto a different volume requires --accept-profile-volume-revert."
+                         % ", ".join(volumes))
             code = 1
         return code
 
@@ -1121,6 +1185,9 @@ def build_parser():
                              help="required: confirms a current database and data-volume backup exists")
         command.add_argument("--health-timeout", type=int, default=600)
         command.add_argument("--resume-interrupted", action="store_true")
+        command.add_argument("--accept-profile-volume-revert", action="store_true",
+                             help="resume onto a different custom-profiles volume than an interrupted run may have "
+                                  "started the worker on (changes in that volume stay there, unmounted)")
 
     def adoption_options(command):
         command.add_argument("--adopt-orcaslicer-version", metavar="X.Y.Z",
@@ -1165,7 +1232,8 @@ def main(argv=None, controller_factory=Controller):
             raise MigrationError("refusing to change images without --backup-confirmed. Back up the database and "
                                  "data volumes first (see docs/DEPLOYMENT_REGISTRY_MIGRATION.md)")
         options = {"allow_insider": args.allow_insider, "allow_unsafe": args.allow_unsafe_downgrade,
-                   "health_timeout": args.health_timeout, "resume_interrupted": args.resume_interrupted}
+                   "health_timeout": args.health_timeout, "resume_interrupted": args.resume_interrupted,
+                   "accept_volume_revert": args.accept_profile_volume_revert}
         if args.command == "update":
             return controller.update(args.version, args.manifest_file, adopt_orca=args.adopt_orcaslicer_version,
                                      accept_profile_risk=args.accept_profile_compatibility_risk, **options)

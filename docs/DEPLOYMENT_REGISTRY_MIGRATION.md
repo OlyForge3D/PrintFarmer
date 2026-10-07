@@ -173,6 +173,14 @@ images are pulled and verified, and before any service restarts, the controller:
 2. Copies the old volume into it with the verified worker image (by digest),
    `--network none`, no environment, and the old volume mounted read-only. The
    copy is compared before it is recorded in `.printfarmer/orca-volumes.json`.
+   The copy runs as root inside the worker image and requires `cp`, `diff`
+   with `--no-dereference`, `find` with `-printf`, `ls`, and `sort` (GNU
+   coreutils, diffutils, and findutils; verified present in the published
+   worker). Every tool is checked before anything is written, so a worker image
+   without them fails with a named reason and an untouched new volume. After
+   `cp -a`, contents are compared without following symlinks, and every entry's
+   owner, group, mode, type, and symlink target, including the volume root, must
+   match the source.
 3. Starts the release with `ORCASLICER_VERSION` set to the new version and,
    once healthy, records that version with the release in
    `.printfarmer/release.json`.
@@ -186,6 +194,15 @@ If the copy fails, nothing restarts and `status` shows phase `failed-copying`.
 Fix the cause, then rerun the same `update` command with `--resume-interrupted`;
 an incomplete copy is cleared and copied again. `status` prints the effective
 OrcaSlicer volume and every completed copy.
+
+If the release fails after it starts (for example, health), the worker may
+already be using the new volume while `release.json` still names the old
+release. `status` warns with the volumes the worker may be mounted on. Resume
+with the same `--adopt-orcaslicer-version` flags to stay on the new volume. A
+resume or rollback that would mount a different volume is refused unless you
+add `--accept-profile-volume-revert`, because changes written to the new volume
+in the meantime would no longer be used. They are kept, never merged or copied
+back.
 
 Rollback across an adoption returns the worker to the previous version's volume
 and keeps both volumes. Edits made after the adoption stay in the newer volume.
@@ -203,8 +220,16 @@ data, and `--backup-confirmed` only attests that a backup exists. Because the
 previous release is behind the current one, lineage verification always refuses
 it unless `--allow-unsafe-downgrade` acknowledges the schema risk. If the newer
 release applied database migrations, restore the backup first; older images
-may not start against a newer schema. Rollback to the original git-checkout build is not
-automated; restore the checkout and run `scripts/deploy-docker.sh` instead.
+may not start against a newer schema.
+
+### Return to a source build
+
+Before the first release has been applied successfully, there is no previous
+release, and `rollback` refuses to run. A failed first `update` says so instead
+of suggesting rollback. To return to the original git-checkout build, restore
+the checkout at the commit recorded by `migrate` (`status` prints it), restore
+the backup if the new release ran database migrations, and run
+`scripts/deploy-docker.sh`. This is not automated.
 
 ## Updating the Controller
 

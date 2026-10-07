@@ -115,6 +115,7 @@ class FakeDocker:
         self.volume_label_map = {}
         self.volume_files = {}
         self.fail_copy = False
+        self.copy_error = None
         self.copy_runs = []
 
     # --- compose emulation ------------------------------------------------
@@ -298,6 +299,8 @@ class FakeDocker:
             files.clear()
         if files:
             return 1, "target not empty"
+        if self.copy_error:
+            return self.copy_error
         for index, (path, content) in enumerate(sorted(self.volume_files.get(source, {}).items())):
             if self.fail_copy and index == 1:
                 return 1, "copy interrupted"
@@ -585,6 +588,38 @@ class UpdateTests(RegistryTestCase):
         self.assertEqual(code, 0, err)
         self.assertEqual(self.release_state()["current"]["version"], "1.3.0")
 
+    def test_health_failure_names_rollback_only_when_a_previous_release_exists(self):
+        self.publish("1.2.0")
+        self.docker.unhealthy_after_up.add("api")
+        code, err = self.main("update", "--version", "1.2.0", "--backup-confirmed", "--health-timeout", "20")
+        self.assertEqual(code, 2)
+        self.assertNotIn("or roll back", err)
+        self.assertIn("no previous release to roll back to", err)
+        self.assertIn("scripts/deploy-docker.sh", err)
+        self.docker.unhealthy_after_up.clear()
+        self.assertEqual(self.main("update", "--version", "1.2.0", "--backup-confirmed",
+                                   "--resume-interrupted")[0], 0)
+        self.publish("1.3.0", commit=THIRD_COMMIT, char="2")
+        self.assertEqual(self.main("update", "--version", "1.3.0", "--backup-confirmed")[0], 0)
+        self.publish("1.4.0", commit="d" * 40, char="4")
+        self.fetched["https://api.github.com/repos/%s/compare/%s...%s"
+                     % (reg.GITHUB_REPOSITORY, THIRD_COMMIT, "d" * 40)] = {"status": "ahead"}
+        self.docker.unhealthy_after_up.add("api")
+        code, err = self.main("update", "--version", "1.4.0", "--backup-confirmed", "--health-timeout", "20")
+        self.assertEqual(code, 2)
+        self.assertIn("--resume-interrupted or roll back", err)
+
+    def test_pending_history_is_capped_at_one_level(self):
+        self.publish("1.2.0")
+        self.docker.unhealthy_after_up.add("api")
+        for extra in ([], ["--resume-interrupted"], ["--resume-interrupted"]):
+            code, _ = self.main("update", "--version", "1.2.0", "--backup-confirmed", "--health-timeout", "20",
+                                *extra)
+            self.assertEqual(code, 2)
+        pending = load_json(self.p(".printfarmer/pending.json"))
+        self.assertEqual(pending["previousPending"]["phase"], "failed-health")
+        self.assertNotIn("previousPending", pending["previousPending"])
+
     def test_insider_requires_explicit_opt_in(self):
         self.publish("1.3.0-insider.4")
         code, err = self.main("update", "--version", "1.3.0-insider.4", "--backup-confirmed")
@@ -869,6 +904,90 @@ class OrcaProfileAdoptionTests(RegistryTestCase):
         self.assertIn("find /to -mindepth 1 -delete", self.docker.copy_runs[-1][-1])
         self.assertEqual(self.docker.volume_files[NEW_VOLUME], self.profiles)
         self.assertEqual(self.worker_volume(), NEW_VOLUME)
+
+    def test_single_verification_message_and_copy_message(self):
+        self.publish("1.2.0", orca="2.5.0")
+        code, err = self.main("update", "--version", "1.2.0", "--backup-confirmed", *ADOPT)
+        self.assertEqual(code, 0, err)
+        out = self.output.getvalue()
+        self.assertEqual(out.count("All images present and verified"), 1)
+        verified, copied = out.index("All images present and verified"), out.index("Profiles copied into")
+        self.assertLess(verified, copied)
+        self.assertIn("Profiles copied into %s; no service has been stopped or restarted yet." % NEW_VOLUME, out)
+
+    def test_copy_script_checks_tools_before_writing(self):
+        for recopy in (False, True):
+            script = reg.profile_copy_script(recopy)
+            first_write = script.index("cp -a /from/. /to/")
+            for tool in reg.PROFILE_COPY_TOOLS:
+                self.assertLess(script.index(tool), first_write)
+            self.assertLess(script.index("--no-dereference /dev/null"), first_write)
+            self.assertLess(script.index("-maxdepth 0 -printf"), first_write)
+            self.assertIn("diff -r --no-dereference /from /to", script)
+            self.assertIn("%P|%u:%g|%m|%y|%l", script)
+            if recopy:
+                self.assertLess(script.index("-maxdepth 0 -printf"), script.index("find /to -mindepth 1 -delete"))
+            else:
+                self.assertNotIn("-delete", script)
+
+    def test_missing_copy_tool_fails_with_actionable_reason(self):
+        self.publish("1.2.0", orca="2.5.0")
+        self.docker.copy_error = (3, "profile copy: worker image lacks diff; nothing was copied")
+        code, err = self.main("update", "--version", "1.2.0", "--backup-confirmed", *ADOPT)
+        self.assertEqual(code, 2)
+        self.assertIn("worker image lacks diff; nothing was copied", err)
+        self.assertIn("%s was mounted read-only and is unchanged" % OLD_VOLUME, err)
+        self.assertIn("--resume-interrupted", err)
+        self.assertEqual(self.compose_commands("up"), [])
+        self.assertEqual(self.worker_volume(), OLD_VOLUME)
+        self.assertEqual(load_json(self.p(".printfarmer/pending.json"))["phase"], "failed-copying")
+
+    def test_resume_onto_other_volume_after_started_adoption_needs_ack(self):
+        self.publish("1.2.0")
+        self.assertEqual(self.main("update", "--version", "1.2.0", "--backup-confirmed")[0], 0)
+        self.publish("1.3.0", commit=THIRD_COMMIT, char="2")
+        self.assertEqual(self.main("update", "--version", "1.3.0", "--backup-confirmed")[0], 0)
+        self.publish("1.4.0", commit="d" * 40, char="4", orca="2.5.0")
+        self.fetched["https://api.github.com/repos/%s/compare/%s...%s"
+                     % (reg.GITHUB_REPOSITORY, THIRD_COMMIT, "d" * 40)] = {"status": "ahead"}
+        self.docker.unhealthy_after_up.add("api")
+        code, err = self.main("update", "--version", "1.4.0", "--backup-confirmed", "--health-timeout", "20", *ADOPT)
+        self.assertEqual(code, 2)
+        self.assertEqual(self.worker_volume(), NEW_VOLUME)
+        self.assertEqual(self.release_state()["current"]["orcaslicerVersion"], "2.4.2")
+        self.assertEqual(load_json(self.p(".printfarmer/pending.json"))["workerVolumes"], [NEW_VOLUME])
+        self.output.truncate(0)
+        self.output.seek(0)
+        self.assertEqual(self.main("status")[0], 1)
+        self.assertIn("worker may be mounted on %s" % NEW_VOLUME, self.output.getvalue())
+        self.docker.unhealthy_after_up.clear()
+        self.docker.volume_files[NEW_VOLUME]["filament/petg.json"] = "petg"
+        ups = len(self.compose_commands("up"))
+        for command in (["update", "--version", "1.4.0"], ["rollback", "--allow-unsafe-downgrade"]):
+            code, err = self.main(*command, "--backup-confirmed", "--resume-interrupted")
+            self.assertEqual(code, 2)
+            self.assertIn("--accept-profile-volume-revert", err)
+            self.assertIn(NEW_VOLUME, err)
+        self.assertEqual(len(self.compose_commands("up")), ups)
+        self.assertEqual(self.worker_volume(), NEW_VOLUME)
+        code, err = self.main("rollback", "--allow-unsafe-downgrade", "--backup-confirmed", "--resume-interrupted",
+                              "--accept-profile-volume-revert")
+        self.assertEqual(code, 0, err)
+        self.assertIn("no longer mounted", self.output.getvalue())
+        self.assertEqual(self.worker_volume(), OLD_VOLUME)
+        self.assertEqual(self.docker.volume_files[NEW_VOLUME]["filament/petg.json"], "petg")
+        self.assertFalse(os.path.exists(self.p(".printfarmer/pending.json")))
+
+    def test_resume_with_same_adoption_stays_on_new_volume(self):
+        self.publish("1.2.0", orca="2.5.0")
+        self.docker.unhealthy_after_up.add("api")
+        code, _ = self.main("update", "--version", "1.2.0", "--backup-confirmed", "--health-timeout", "20", *ADOPT)
+        self.assertEqual(code, 2)
+        self.docker.unhealthy_after_up.clear()
+        code, err = self.main("update", "--version", "1.2.0", "--backup-confirmed", "--resume-interrupted", *ADOPT)
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.worker_volume(), NEW_VOLUME)
+        self.assertEqual(len(self.docker.copy_runs), 1)
 
     def test_foreign_existing_target_volume_is_refused(self):
         self.publish("1.2.0", orca="2.5.0")
