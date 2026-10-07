@@ -1,10 +1,6 @@
+const controlsModeMock = vi.hoisted(() => ({ mode: "guided" as "guided" | "expert" }));
 vi.mock("@/features/printers/hooks/use-printer-controls-mode", () => ({
-  usePrinterControlsMode: () => ({
-    mode: "guided",
-    canSave: true,
-    setMode: vi.fn(),
-    reload: vi.fn(),
-  }),
+  usePrinterControlsMode: () => ({ mode: controlsModeMock.mode }),
 }));
 
 import {
@@ -572,6 +568,31 @@ describe("PrinterDetailsSidebar", () => {
     ).not.toBeInTheDocument();
   });
 
+  it.each([
+    ["guided", true],
+    ["expert", false],
+  ] as const)("follows the User Settings %s mode with no local mode selector", (mode, showsHelp) => {
+    controlsModeMock.mode = mode;
+    try {
+      render(
+        <PrinterDetailsSidebar
+          printerId={printer.id}
+          printer={printer}
+          onClose={vi.fn()}
+          layout="panel"
+        />,
+      );
+      expect(screen.queryByRole("group", { name: "Printer controls mode" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Guided" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Expert" })).not.toBeInTheDocument();
+      expect(screen.queryByText(/Motion help/i)).not.toBeInTheDocument();
+      if (showsHelp) expect(screen.getByText(/Jog moves by/)).toBeInTheDocument();
+      else expect(screen.queryByText(/Jog moves by/)).not.toBeInTheDocument();
+    } finally {
+      controlsModeMock.mode = "guided";
+    }
+  });
+
   it("hides object skip controls when backend capability is false", () => {
     render(
       <PrinterDetailsSidebar
@@ -585,6 +606,54 @@ describe("PrinterDetailsSidebar", () => {
 
     expect(screen.queryByText("Objects")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Skip object cube")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["Idle", true],
+    ["Offline", false],
+    ["Error", true],
+    ["Complete", true],
+  ])("omits the Objects section and inactive-print copy when %s", (state, isOnline) => {
+    mockPrintJobObjectsData = {
+      printerId: printer.id,
+      jobName: "plate.gcode",
+      objects: [{ name: "cube", isExcluded: false, isCurrent: false }],
+    };
+
+    render(
+      <PrinterDetailsSidebar
+        printerId={printer.id}
+        printer={{ ...printer, state, isOnline }}
+        backendCapabilities={capabilities({ supportsObjectExclusion: true })}
+        onClose={vi.fn()}
+        layout="panel"
+      />,
+    );
+
+    expect(screen.queryByText("Objects")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Skip object cube")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Object skipping is available/)).not.toBeInTheDocument();
+  });
+
+  it("keeps the Objects section for a paused active print", () => {
+    mockPrintJobObjectsData = {
+      printerId: printer.id,
+      jobName: "plate.gcode",
+      objects: [{ name: "cube", isExcluded: false, isCurrent: true }],
+    };
+
+    render(
+      <PrinterDetailsSidebar
+        printerId={printer.id}
+        printer={{ ...printer, state: "Paused" }}
+        backendCapabilities={capabilities({ supportsObjectExclusion: true })}
+        onClose={vi.fn()}
+        layout="panel"
+      />,
+    );
+
+    expect(screen.getByText("Objects")).toBeInTheDocument();
+    expect(screen.getByLabelText("Skip object cube")).toBeInTheDocument();
   });
 
   it("calls the skip object mutation after confirmation", async () => {

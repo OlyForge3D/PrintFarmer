@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { clearSensitiveUserQueries } from '@/common/auth/sensitiveQueryCache';
 import { UserSettingsSection } from '@/features/settings/components/UserSettingsSection';
-import { PrinterControlsMode, PrinterMotionHelp } from '@/features/printers/components/PrinterControlsMode';
+import { PrinterMotionHelp } from '@/features/printers/components/PrinterControlsMode';
 import { USER_SETTINGS_KEY } from '@/features/settings/hooks/useUserSettings';
 import type { UpdateUserSettingsRequest, UserSettingsResponse } from '@/features/settings/types';
 
@@ -19,7 +19,7 @@ let client: QueryClient;
 function mount() {
   return render(<QueryClientProvider client={client}>
     <UserSettingsSection />
-    <section aria-label="Printer sidebar"><PrinterControlsMode /><PrinterMotionHelp absolute /></section>
+    <section aria-label="Printer sidebar"><PrinterMotionHelp absolute /></section>
   </QueryClientProvider>);
 }
 const sidebar = () => within(screen.getByRole('region', { name: 'Printer sidebar' }));
@@ -39,7 +39,7 @@ beforeEach(() => {
 afterEach(() => { cleanup(); client.clear(); });
 
 describe('Preferences shared account persistence', () => {
-  it('stages mode until save, updates printer hints, then follows shortcut changes without stale form values', async () => {
+  it('stages mode until save, then updates printer hints without stale form values', async () => {
     mount();
     await screen.findByRole('radio', { name: 'Guided' });
     fireEvent.click(screen.getByRole('radio', { name: 'Expert' }));
@@ -48,13 +48,17 @@ describe('Preferences shared account persistence', () => {
     fireEvent.click(save());
     await waitFor(() => expect(server.printerControlMode).toBe('Expert'));
     await waitFor(() => expect(save()).toBeEnabled());
-    expect(sidebar().getByText(/Jog moves by/)).not.toBeVisible();
+    expect(sidebar().queryByText(/Jog moves by/)).not.toBeInTheDocument();
+    expect(sidebar().queryByText(/Motion help/i)).not.toBeInTheDocument();
+    expect(sidebar().queryByRole('button')).not.toBeInTheDocument();
     expect(mockPut).toHaveBeenCalledWith('/settings/user', {
       theme: 'matrix', printerControlMode: 'Expert', locale: 'en', itemsPerPage: 25,
       defaultSlicerPreset: 'quality', printablesUsername: 'maker', rowVersion: 'v1',
     });
-    fireEvent.click(sidebar().getByRole('button', { name: 'Guided' }));
-    await waitFor(() => expect(screen.getByRole('radio', { name: 'Guided' })).toBeChecked());
+    fireEvent.click(screen.getByRole('radio', { name: 'Guided' }));
+    fireEvent.click(save());
+    await waitFor(() => expect(server.printerControlMode).toBe('Guided'));
+    await waitFor(() => expect(save()).toBeEnabled());
     expect(sidebar().getByText(/Jog moves by/)).toBeVisible();
     fireEvent.change(screen.getByLabelText('Items per page'), { target: { value: '50' } });
     await waitFor(() => expect(save()).toBeEnabled());
@@ -65,31 +69,25 @@ describe('Preferences shared account persistence', () => {
     expect(server.defaultSlicerPreset).toBe('quality');
   });
 
-  it.each(['preferences', 'shortcut'])('blocks overlapping writes started from %s', async (origin) => {
+  it('blocks overlapping preference writes', async () => {
     let finish!: () => void;
     mockPut.mockImplementation((_url: string, body: UpdateUserSettingsRequest) => new Promise(resolve => {
       finish = () => resolve({ data: { ...server, ...body, rowVersion: 'v2' } });
     }));
     mount();
     await screen.findByRole('radio', { name: 'Guided' });
-    if (origin === 'preferences') {
-      fireEvent.click(screen.getByRole('radio', { name: 'Expert' }));
-      fireEvent.click(save());
-    } else {
-      fireEvent.click(sidebar().getByRole('button', { name: 'Expert' }));
-    }
+    fireEvent.click(screen.getByRole('radio', { name: 'Expert' }));
+    fireEvent.click(save());
     await waitFor(() => expect(mockPut).toHaveBeenCalledTimes(1));
     expect(screen.getByRole('button', { name: /Saving\.\.\.|Save Preferences/ })).toBeDisabled();
     expect(screen.getByRole('radio', { name: 'Guided' })).toBeDisabled();
-    expect(sidebar().getByRole('button', { name: 'Guided' })).toBeDisabled();
-    fireEvent.click(sidebar().getByRole('button', { name: 'Guided' }));
     fireEvent.submit(screen.getByRole('form', { name: 'User preferences' }));
     expect(mockPut).toHaveBeenCalledTimes(1);
     await act(async () => finish());
     await waitFor(() => expect(save()).toBeEnabled());
   });
 
-  it.each(['preferences', 'shortcut'])('allows a new account to edit and save while an old-account %s save remains unresolved', async (origin) => {
+  it('allows a new account to edit and save while an old-account save remains unresolved', async () => {
     const oldAccount = { ...server };
     let finishOldSave!: () => void;
     mockPut.mockImplementationOnce((_url: string, body: UpdateUserSettingsRequest) => new Promise(resolve => {
@@ -97,12 +95,8 @@ describe('Preferences shared account persistence', () => {
     }));
     const oldView = mount();
     await screen.findByRole('radio', { name: 'Guided' });
-    if (origin === 'preferences') {
-      fireEvent.click(screen.getByRole('radio', { name: 'Expert' }));
-      fireEvent.click(save());
-    } else {
-      fireEvent.click(sidebar().getByRole('button', { name: 'Expert' }));
-    }
+    fireEvent.click(screen.getByRole('radio', { name: 'Expert' }));
+    fireEvent.click(save());
     await waitFor(() => expect(mockPut).toHaveBeenCalledTimes(1));
     oldView.unmount();
     // Use the actual logout/login cleanup: queries are removed, mutations remain.
@@ -128,23 +122,6 @@ describe('Preferences shared account persistence', () => {
     await act(async () => finishOldSave());
     expect(client.getQueryData(USER_SETTINGS_KEY)).toEqual(saved);
     expect(screen.getByLabelText('Printables username')).toHaveValue('new-draft');
-  });
-
-  it('blocks a same-account shortcut write before its context or pending UI renders', async () => {
-    let finish!: () => void;
-    mockPut.mockImplementationOnce((_url: string, body: UpdateUserSettingsRequest) => new Promise(resolve => {
-      finish = () => resolve({ data: { ...server, ...body, rowVersion: 'v2' } });
-    }));
-    mount();
-    await screen.findByRole('radio', { name: 'Guided' });
-    act(() => {
-      fireEvent.click(sidebar().getByRole('button', { name: 'Expert' }));
-      expect(client.getMutationCache().getAll()[0].state.context).toBeUndefined();
-      fireEvent.submit(screen.getByRole('form', { name: 'User preferences' }));
-    });
-    await waitFor(() => expect(mockPut).toHaveBeenCalledTimes(1));
-    await act(async () => finish());
-    await waitFor(() => expect(save()).toBeEnabled());
   });
 
   it('preserves focus and editing during background refresh but blocks saving until it settles', async () => {
