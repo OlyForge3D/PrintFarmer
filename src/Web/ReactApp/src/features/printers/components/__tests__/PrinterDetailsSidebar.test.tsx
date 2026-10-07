@@ -613,7 +613,9 @@ describe("PrinterDetailsSidebar", () => {
     ["Offline", false],
     ["Error", true],
     ["Complete", true],
-  ])("omits the Objects section and inactive-print copy when %s", (state, isOnline) => {
+    ["Printing", false],
+    ["Paused", false],
+  ])("omits the Objects section and inactive-print copy when %s (online: %s)", (state, isOnline) => {
     mockPrintJobObjectsData = {
       printerId: printer.id,
       jobName: "plate.gcode",
@@ -737,6 +739,38 @@ describe("PrinterDetailsSidebar", () => {
         "cube",
       );
     });
+  });
+
+  it("drops a pending skip confirmation when the active print ends", async () => {
+    mockPrintJobObjectsData = {
+      printerId: printer.id,
+      jobName: "plate.gcode",
+      objects: [{ name: "cube", isExcluded: false, isCurrent: true }],
+    };
+    const renderWithState = (state: string) => (
+      <PrinterDetailsSidebar
+        printerId={printer.id}
+        printer={{ ...printer, backend: PrinterBackend.Moonraker, state }}
+        backendCapabilities={capabilities({
+          backend: PrinterBackend.Moonraker,
+          supportsObjectExclusion: true,
+        })}
+        onClose={vi.fn()}
+        layout="panel"
+      />
+    );
+
+    const { rerender } = render(renderWithState("Printing"));
+    fireEvent.click(screen.getByLabelText("Skip object cube"));
+    expect(screen.getByText("Skip print object?")).toBeInTheDocument();
+
+    rerender(renderWithState("Complete"));
+    await waitFor(() => expect(screen.queryByText("Skip print object?")).not.toBeInTheDocument());
+
+    rerender(renderWithState("Printing"));
+    expect(screen.queryByText("Skip print object?")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Skip object" })).not.toBeInTheDocument();
+    expect(mockExcludePrintJobObject).not.toHaveBeenCalled();
   });
 
   describe("Move controls while Klippy is shutdown (#1909)", () => {

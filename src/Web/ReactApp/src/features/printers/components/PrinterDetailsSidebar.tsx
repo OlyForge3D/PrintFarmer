@@ -25,6 +25,7 @@ import {
   canDisableMotors,
   canEmergencyStop,
   canExcludeObject,
+  isActivePrintForObjects,
   canFilamentChange,
   canFilamentControl,
   canMove,
@@ -279,6 +280,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
   const [extrudeStep, setExtrudeStep] = useState(DEFAULT_EXTRUDE_DISTANCE_MM);
   const [extrudeSpeed, setExtrudeSpeed] = useState(DEFAULT_EXTRUDE_SPEED_MMS);
   const [objectToSkip, setObjectToSkip] = useState<PrintJobObjectDto | null>(null);
+  const [objectToSkipPrinterId, setObjectToSkipPrinterId] = useState(printerId);
 
   // Track last known values for display fallback - use state not refs for render access
   const [lastKnownValues, setLastKnownValues] = useState({
@@ -345,8 +347,14 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
 
   const support = getPrinterSupport(backendCapabilities);
   const preRenderRawState = printer?.state ?? '';
-  const isActivePrintForObjectQuery = preRenderRawState.toLowerCase().includes('printing') ||
-    preRenderRawState.toLowerCase().includes('paused');
+  const isActivePrintForObjectQuery = isActivePrintForObjects({ state: preRenderRawState, isOnline: printer?.isOnline ?? false });
+  // A pending skip confirmation never outlives its print or its printer.
+  if (objectToSkipPrinterId !== printerId) {
+    setObjectToSkipPrinterId(printerId);
+    setObjectToSkip(null);
+  } else if (objectToSkip !== null && !(support.supportsObjectExclusion && isActivePrintForObjectQuery)) {
+    setObjectToSkip(null);
+  }
   const printJobObjectsQuery = usePrintJobObjects(printerId, {
     enabled: !!printerId && support.supportsObjectExclusion && isActivePrintForObjectQuery,
   });
@@ -1443,7 +1451,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
       />
 
       <Modal
-        isOpen={objectToSkip !== null}
+        isOpen={objectToSkip !== null && support.supportsObjectExclusion && isActivePrintForObjectQuery}
         onClose={() => {
           if (!excludeObjectMutation.isPending) {
             setObjectToSkip(null);
@@ -1467,7 +1475,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
               variant="danger"
               loading={excludeObjectMutation.isPending}
               onClick={() => {
-                if (objectToSkip) {
+                if (objectToSkip && canExcludeObjectNow) {
                   excludeObjectMutation.mutate(objectToSkip.name);
                 }
               }}

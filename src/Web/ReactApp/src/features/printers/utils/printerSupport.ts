@@ -130,6 +130,12 @@ export function canFilamentChange(args: { isOnline: boolean; isEnabled?: boolean
   return isEnabled && args.isOnline && args.support.supportsFilamentControl;
 }
 
+/** Shared active-print gate for the Objects section on every printer surface. */
+export function isActivePrintForObjects(args: { state: string | null | undefined; isOnline: boolean }): boolean {
+  const state = (args.state ?? '').toLowerCase();
+  return args.isOnline && (state === 'printing' || state === 'paused');
+}
+
 export function canExcludeObject(args: { isOnline: boolean; isEnabled?: boolean; isPrinting: boolean; isPaused?: boolean; support: PrinterSupport }): boolean {
   const isEnabled = args.isEnabled ?? true;
   return isEnabled && args.isOnline && (args.isPrinting || !!args.isPaused) && args.support.supportsObjectExclusion;
