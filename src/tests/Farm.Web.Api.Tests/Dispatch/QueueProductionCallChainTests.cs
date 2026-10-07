@@ -4441,7 +4441,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
 
         await using AppDbContext syncContext = CreateContext();
         int synced = await CreateCompletionService(syncContext)
-            .SyncOrphanedPrintingJobsAsync(_ => "idle", QueueActorIdentity.Scheduler);
+            .SyncOrphanedPrintingJobsAsync(id => FreshPrinterSnapshot(id, "idle"), QueueActorIdentity.Scheduler);
 
         synced.Should().Be(0);
         await using AppDbContext verify = CreateContext();
@@ -4486,7 +4486,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
 
         await using AppDbContext syncContext = CreateContext();
         int synced = await CreateCompletionService(syncContext)
-            .SyncOrphanedPrintingJobsAsync(_ => "idle", actorSubject);
+            .SyncOrphanedPrintingJobsAsync(id => FreshPrinterSnapshot(id, "idle"), actorSubject);
 
         synced.Should().Be(1);
         await using AppDbContext verify = CreateContext();
@@ -4542,7 +4542,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
 
         await using AppDbContext syncContext = CreateContext();
         int synced = await CreateCompletionService(syncContext)
-            .SyncOrphanedPrintingJobsAsync(_ => "idle", actorSubject);
+            .SyncOrphanedPrintingJobsAsync(id => FreshPrinterSnapshot(id, "idle"), actorSubject);
 
         synced.Should().Be(1);
 
@@ -7789,6 +7789,12 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             })
             .AddSingleton(management)
             .BuildServiceProvider();
+
+    private static PrinterStatusCacheSnapshot FreshPrinterSnapshot(Guid printerId, string state) =>
+        new(
+            new PrinterStatusDto(printerId, IsOnline: true, State: state),
+            DateTime.UtcNow,
+            LastSeenAtUtc: DateTime.UtcNow);
 
     private async Task<IReadOnlyList<(Guid EventId, Guid JobId)>>
         SeedBackendStartCommandsAsync(int count, bool withBedClearRecords = false)

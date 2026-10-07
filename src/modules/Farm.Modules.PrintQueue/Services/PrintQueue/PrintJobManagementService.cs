@@ -3209,9 +3209,28 @@ public class PrintJobManagementService(
                     continue;
                 }
 
-                if (options.ActiveOnly && IsTerminalStatus(mappedStatus.Value))
+                bool isTerminalHistoryStatus = IsTerminalStatus(mappedStatus.Value);
+                if (options.ActiveOnly && isTerminalHistoryStatus)
                 {
-                    skipped++;
+                    PrintJob? knownExternalJob = await _repository.GetByExternalIdAsync(
+                        printer.Id,
+                        historyJob.JobId,
+                        cancellationToken);
+                    if (knownExternalJob is null)
+                    {
+                        skipped++;
+                        continue;
+                    }
+
+                    UpdatePrintJobFromHistory(knownExternalJob, historyJob);
+                    knownExternalJob.UpdatedAt = _timeProvider.GetUtcNow().UtcDateTime;
+                    existingExternalJobIds.Add(historyJob.JobId);
+                    if (hasValidStartTime)
+                    {
+                        existingActualStartTimes.Add(startTimeUtc);
+                    }
+
+                    updated++;
                     continue;
                 }
 
@@ -3659,11 +3678,16 @@ public class PrintJobManagementService(
             : null;
 
         // Update mutable fields
-        existingJob.Status = MapHistoryStatusToPrintJobStatus(historyJob.Status, historyJob.EndTime.HasValue) ?? PrintJobStatus.Failed;
+        PrintJobStatus mappedStatus = MapHistoryStatusToPrintJobStatus(historyJob.Status, historyJob.EndTime.HasValue) ?? PrintJobStatus.Failed;
+        existingJob.Status = mappedStatus;
         existingJob.ActualStartTime = startTime;
         existingJob.ActualEndTime = endTime;
         existingJob.ActualPrintTime = endTime.HasValue ? endTime.Value - startTime : null;
         existingJob.ActualFilamentUsage = historyJob.FilamentUsed > 0 ? historyJob.FilamentUsed * 0.003 : null; // mm to grams: ~3g per meter for 1.75mm filament
+        if (IsTerminalStatus(mappedStatus))
+        {
+            existingJob.ActiveExternalPrinterId = null;
+        }
 
         // Update nozzle and material from metadata if not already set
         if (!existingJob.RequiredNozzleDiameter.HasValue)

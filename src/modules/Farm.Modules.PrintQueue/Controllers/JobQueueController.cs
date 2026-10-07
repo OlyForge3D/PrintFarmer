@@ -1036,15 +1036,8 @@ public class JobQueueController(
                 "[JobQueueController] Manual sync of orphaned jobs requested by {ActorSubject}",
                 actorSubject);
 
-            // Create a lookup function that gets printer state from cache
-            string? LookupPrinterState(Guid printerId)
-            {
-                PrinterStatusDto? status = printerStatusCache.GetStatus(printerId);
-                return status?.State;
-            }
-
             int syncedCount = await printJobCompletionService.SyncOrphanedPrintingJobsAsync(
-                LookupPrinterState,
+                printerStatusCache.GetSnapshot,
                 actorSubject,
                 CancellationToken.None);
 
