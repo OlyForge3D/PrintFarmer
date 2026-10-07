@@ -268,7 +268,8 @@ export function MmuControlBox({
   );
   // The Qidi adapter reports a Rack feed with Happy Hare's bypass sentinel (-2);
   // box slots are never reported active at the same time.
-  const rackActive = isQidibox && mmuStatus.activeGate === -2 && rackSlot !== null;
+  // QidiBox reuses the Happy Hare bypass sentinel (-2) for the Rack (filament_slot16).
+  const rackActive = isQidibox && mmuStatus.hasBypass && mmuStatus.activeGate === -2 && rackSlot !== null;
   const showRack = rackSlot !== null && (rackSelected || (rackActive && selectedGate === null));
 
   // Use selected gate or fall back to active gate for detail display
