@@ -86,6 +86,7 @@ public sealed class DispatchClaimService(
 
         Printer? printer = await _db.Printers
             .Include(p => p.Toolheads)
+                .ThenInclude(t => t.NozzleModel)
             .FirstOrDefaultAsync(p => p.Id == request.PrinterId, ct);
 
         if (printer is null)
