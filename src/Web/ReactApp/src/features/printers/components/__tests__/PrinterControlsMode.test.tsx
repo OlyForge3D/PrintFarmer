@@ -1,10 +1,10 @@
-import type { ReactElement } from 'react';
-import { act, cleanup, fireEvent, render as renderTree, screen, waitFor, within } from '@testing-library/react';
+import { useEffect, type ReactElement } from 'react';
+import { act, cleanup, render as renderTree, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { PrinterControlsMode, PrinterMotionHelp } from '@/features/printers/components/PrinterControlsMode';
+import { PrinterMotionHelp } from '@/features/printers/components/PrinterControlsMode';
 import { MovementControlSection } from '@/features/printers/components/MovementControlSection';
-import { USER_SETTINGS_KEY } from '@/features/settings/hooks/useUserSettings';
+import { USER_SETTINGS_KEY, useUpdateUserSettings } from '@/features/settings/hooks/useUserSettings';
 import { bumpAuthEpoch } from '@/common/auth/authEpoch';
 import type { UpdateUserSettingsRequest, UserSettingsResponse } from '@/features/settings/types';
 
@@ -22,9 +22,6 @@ function render(element: ReactElement) {
   clients.push(client);
   return { client, ...renderTree(<QueryClientProvider client={client}>{element}</QueryClientProvider>) };
 }
-function BothSurfaces() {
-  return <><section aria-label="detail"><PrinterControlsMode /><PrinterMotionHelp absolute /></section><section aria-label="sidebar"><PrinterControlsMode /><PrinterMotionHelp absolute /></section></>;
-}
 function MotionControls() {
   return <MovementControlSection
     moveX="" moveY="" moveZ="" step={1} extrudeStep={5} extrudeSpeed={5} extrudeMinTemp={170}
@@ -34,6 +31,25 @@ function MotionControls() {
     onHome={vi.fn()} onDisableMotors={vi.fn()} onExtrude={vi.fn()}
   />;
 }
+const settingsSaver: { save?: (body: UpdateUserSettingsRequest) => void } = {};
+function SettingsSaver() {
+  const update = useUpdateUserSettings();
+  useEffect(() => { settingsSaver.save = body => update.mutate(body); });
+  return null;
+}
+function BothSurfaces() {
+  return <>
+    <SettingsSaver />
+    <section aria-label="detail"><MotionControls /></section>
+    <section aria-label="sidebar"><PrinterMotionHelp absolute /></section>
+  </>;
+}
+const noLocalSelector = () => {
+  expect(screen.queryByRole('group', { name: 'Printer controls mode' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Guided' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Expert' })).not.toBeInTheDocument();
+  expect(screen.queryByText(/Motion help/i)).not.toBeInTheDocument();
+};
 
 beforeEach(() => {
   mockGet.mockReset(); mockPut.mockReset();
@@ -50,134 +66,68 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   clients.splice(0).forEach(client => client.clear());
+  settingsSaver.save = undefined;
   vi.restoreAllMocks();
 });
 
-describe('account-backed printer controls mode', () => {
-  it('defaults to Guided while loading without locking normal motion controls', async () => {
-    let finish!: () => void;
-    mockGet.mockImplementation(() => new Promise(resolve => { finish = () => resolve({ data: serverSettings }); }));
-    render(<MotionControls />);
-    expect(screen.getByRole('button', { name: 'Guided' })).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByRole('status')).toHaveTextContent(/Loading account preference/);
-    expect(screen.getByRole('button', { name: 'Expert' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Home all axes' })).toBeEnabled();
-    expect(screen.getByRole('button', { name: 'Jog Y positive' })).toBeEnabled();
-    await act(async () => finish());
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Expert' })).toBeEnabled());
-  });
-
-  it('loads once, synchronizes simultaneous mounts, and saves only mode plus the reviewed revision', async () => {
+describe('User Settings printer control mode on printer surfaces', () => {
+  it('shows Guided help on both surfaces with no local mode selector', async () => {
     render(<BothSurfaces />);
     const detail = within(screen.getByRole('region', { name: 'detail' }));
     const sidebar = within(screen.getByRole('region', { name: 'sidebar' }));
-    await waitFor(() => expect(detail.getByRole('button', { name: 'Expert' })).toBeEnabled());
-    expect(mockGet).toHaveBeenCalledExactlyOnceWith('/settings/user');
+    await waitFor(() => expect(mockGet).toHaveBeenCalledExactlyOnceWith('/settings/user'));
+    expect(detail.getByText(/Jog moves by/)).toBeVisible();
     expect(sidebar.getByText(/Jog moves by/)).toBeVisible();
-    fireEvent.click(detail.getByRole('button', { name: 'Expert' }));
-    await waitFor(() => expect(mockPut).toHaveBeenCalledExactlyOnceWith('/settings/user', { printerControlMode: 'Expert', rowVersion: 'v1' }));
-    await waitFor(() => expect(sidebar.getByRole('button', { name: 'Expert' })).toBeEnabled());
-    expect(sidebar.getByRole('button', { name: 'Expert' })).toHaveAttribute('aria-pressed', 'true');
-    expect(sidebar.getByText(/Jog moves by/)).not.toBeVisible();
-    const summary = sidebar.getByText('Motion help');
-    expect(summary.tagName).toBe('SUMMARY');
-    fireEvent.click(summary);
-    expect(sidebar.getByText(/Jog moves by/)).toBeVisible();
-    expect(serverSettings.theme).toBe('dark');
-    expect(serverSettings.printablesUsername).toBe('maker');
+    noLocalSelector();
   });
 
-  it('restores the saved account preference in a fresh device query cache, ignoring browser preferences', async () => {
-    localStorage.setItem('pf.printer-controls.mode', 'expert');
-    const storageWrite = vi.spyOn(window.localStorage, 'setItem');
-    const first = render(<PrinterControlsMode />);
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Expert' })).toBeEnabled());
-    expect(screen.getByRole('button', { name: 'Guided' })).toHaveAttribute('aria-pressed', 'true');
-    fireEvent.click(screen.getByRole('button', { name: 'Expert' }));
-    await waitFor(() => expect(serverSettings.printerControlMode).toBe('Expert'));
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Expert' })).toBeEnabled());
-    first.unmount();
-    render(<PrinterControlsMode />);
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Expert' })).toHaveAttribute('aria-pressed', 'true'));
-    expect(mockGet).toHaveBeenCalledTimes(2);
-    expect(storageWrite).not.toHaveBeenCalled();
-    localStorage.removeItem('pf.printer-controls.mode');
-  });
-
-  it('uses Guided for an omitted preference without treating it as a motion prerequisite', async () => {
-    delete serverSettings.printerControlMode;
-    render(<MotionControls />);
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Expert' })).toBeEnabled());
-    expect(screen.getByRole('button', { name: 'Guided' })).toHaveAttribute('aria-pressed', 'true');
+  it('renders no motion help on either surface in Expert mode', async () => {
+    serverSettings = { ...serverSettings, printerControlMode: 'Expert' };
+    render(<BothSurfaces />);
+    await waitFor(() => expect(mockGet).toHaveBeenCalled());
+    await waitFor(() => expect(screen.queryByText(/Jog moves by/)).not.toBeInTheDocument());
+    noLocalSelector();
     expect(screen.getByRole('button', { name: 'Home all axes' })).toBeEnabled();
   });
 
-  it('shares pending selection and prevents overlapping same-tab saves', async () => {
-    let finish!: () => void;
-    mockPut.mockImplementation((_url: string, body: UpdateUserSettingsRequest) => new Promise(resolve => {
-      finish = () => resolve({ data: { ...serverSettings, ...body, rowVersion: 'v2' } });
-    }));
+  it('follows a User Settings save on both surfaces without writing browser storage', async () => {
+    const storageWrite = vi.spyOn(window.localStorage, 'setItem');
     render(<BothSurfaces />);
-    await waitFor(() => expect(screen.getAllByRole('button', { name: 'Expert' })[0]).toBeEnabled());
-    fireEvent.click(screen.getAllByRole('button', { name: 'Expert' })[0]);
-    await waitFor(() => expect(screen.getAllByRole('button', { name: 'Expert' })[1]).toHaveAttribute('aria-pressed', 'true'));
-    for (const button of screen.getAllByRole('button', { name: 'Expert' })) expect(button).toBeDisabled();
-    fireEvent.click(screen.getAllByRole('button', { name: 'Guided' })[1]);
-    expect(mockPut).toHaveBeenCalledTimes(1);
-    await act(async () => finish());
-    await waitFor(() => expect(screen.getAllByRole('button', { name: 'Expert' })[0]).toBeEnabled());
+    await waitFor(() => expect(screen.getAllByText(/Jog moves by/)).toHaveLength(2));
+    act(() => settingsSaver.save!({ printerControlMode: 'Expert', rowVersion: 'v1' }));
+    await waitFor(() => expect(screen.queryByText(/Jog moves by/)).not.toBeInTheDocument());
+    await waitFor(() => expect(serverSettings.printerControlMode).toBe('Expert'));
+    expect(screen.queryByText(/Jog moves by/)).not.toBeInTheDocument();
+    expect(storageWrite).not.toHaveBeenCalled();
   });
 
-  it('reports load failure, keeps motion available, and supports reloading preferences', async () => {
+  it('defaults to Guided while loading and on load failure without locking motion', async () => {
     mockGet.mockRejectedValueOnce(new Error('Offline'));
     render(<MotionControls />);
-    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(/Could not load your control mode/));
+    expect(screen.getByText(/Jog moves by/)).toBeVisible();
     expect(screen.getByRole('button', { name: 'Home all axes' })).toBeEnabled();
+    await waitFor(() => expect(mockGet).toHaveBeenCalled());
+    expect(screen.getByText(/Jog moves by/)).toBeVisible();
     expect(screen.getByRole('button', { name: 'Jog Y positive' })).toBeEnabled();
-    expect(screen.getByRole('button', { name: 'Expert' })).toBeDisabled();
-    fireEvent.click(screen.getByRole('button', { name: 'Reload preferences' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Expert' })).toBeEnabled());
-    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    noLocalSelector();
   });
 
-  it('shares save errors, returns to the saved mode, and allows an explicit retry', async () => {
-    mockPut.mockRejectedValueOnce(new Error('Offline'));
-    render(<BothSurfaces />);
-    await waitFor(() => expect(screen.getAllByRole('button', { name: 'Expert' })[0]).toBeEnabled());
-    fireEvent.click(screen.getAllByRole('button', { name: 'Expert' })[0]);
-    await waitFor(() => expect(screen.getAllByRole('status')[0]).toHaveTextContent(/Could not save your control mode/));
-    expect(screen.getAllByRole('status')).toHaveLength(2);
-    for (const button of screen.getAllByRole('button', { name: 'Guided' })) expect(button).toHaveAttribute('aria-pressed', 'true');
-    fireEvent.click(screen.getAllByRole('button', { name: 'Expert' })[1]);
-    await waitFor(() => expect(serverSettings.printerControlMode).toBe('Expert'));
-    await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument());
-  });
-
-  it('surfaces revision conflicts without silently retrying a write', async () => {
-    mockPut.mockRejectedValueOnce({ statusCode: 409, message: 'Conflict' });
-    render(<PrinterControlsMode />);
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Expert' })).toBeEnabled());
-    fireEvent.click(screen.getByRole('button', { name: 'Expert' }));
-    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(/preferences changed elsewhere/));
-    expect(mockPut).toHaveBeenCalledTimes(1);
-  });
-
-  it('does not carry a pending selection or late save response across account changes', async () => {
+  it('does not carry a pending old-account mode across account changes', async () => {
     let finish!: () => void;
     mockPut.mockImplementation(() => new Promise(resolve => {
       finish = () => resolve({ data: { ...serverSettings, printerControlMode: 'Expert' } });
     }));
-    const { client } = render(<PrinterControlsMode />);
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Expert' })).toBeEnabled());
-    fireEvent.click(screen.getByRole('button', { name: 'Expert' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Expert' })).toHaveAttribute('aria-pressed', 'true'));
+    const { client } = render(<BothSurfaces />);
+    await waitFor(() => expect(screen.getAllByText(/Jog moves by/)).toHaveLength(2));
+    act(() => settingsSaver.save!({ printerControlMode: 'Expert', rowVersion: 'v1' }));
+    await waitFor(() => expect(screen.queryByText(/Jog moves by/)).not.toBeInTheDocument());
     act(() => {
       bumpAuthEpoch();
       client.setQueryData(USER_SETTINGS_KEY, { ...serverSettings, userId: 'other-user', printerControlMode: 'Guided' });
     });
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Guided' })).toHaveAttribute('aria-pressed', 'true'));
+    await waitFor(() => expect(screen.getAllByText(/Jog moves by/)).toHaveLength(2));
     await act(async () => finish());
     expect(client.getQueryData<UserSettingsResponse>(USER_SETTINGS_KEY)?.userId).toBe('other-user');
-    expect(screen.getByRole('button', { name: 'Guided' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getAllByText(/Jog moves by/)).toHaveLength(2);
   });
 });

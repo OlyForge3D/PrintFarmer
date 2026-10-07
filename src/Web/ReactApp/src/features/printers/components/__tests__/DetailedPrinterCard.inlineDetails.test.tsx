@@ -377,6 +377,50 @@ describe('DetailedPrinterCard inline details (#1584)', () => {
     expect(screen.queryByText('Objects')).not.toBeInTheDocument();
   });
 
+  it.each([
+    ['Idle', true],
+    ['Offline', false],
+    ['Error', true],
+    ['Complete', true],
+  ])('omits the Objects section and inactive-print copy when the printer is %s', (state, isOnline) => {
+    usePrintJobObjectsMock.mockReturnValue({
+      data: { printerId: 'printer-1', objects: [makeObject({ name: 'stale_part' })] },
+      isLoading: false,
+      isFetching: false,
+      refetch: vi.fn(),
+    });
+
+    render(
+      <DetailedPrinterCard
+        printer={makePrinter({ state, isOnline } as Partial<Printer>)}
+        backendCapabilities={{ supportsObjectExclusion: true } as unknown as Parameters<typeof DetailedPrinterCard>[0]['backendCapabilities']}
+      />
+    );
+
+    expect(screen.queryByText('Objects')).not.toBeInTheDocument();
+    expect(screen.queryByText('stale_part')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Object skipping is available/)).not.toBeInTheDocument();
+  });
+
+  it('keeps the Objects section for a paused active print', () => {
+    usePrintJobObjectsMock.mockReturnValue({
+      data: { printerId: 'printer-1', objects: [makeObject({ name: 'part_1' })] },
+      isLoading: false,
+      isFetching: false,
+      refetch: vi.fn(),
+    });
+
+    render(
+      <DetailedPrinterCard
+        printer={makePrinter({ state: 'Paused' } as Partial<Printer>)}
+        backendCapabilities={{ supportsObjectExclusion: true } as unknown as Parameters<typeof DetailedPrinterCard>[0]['backendCapabilities']}
+      />
+    );
+
+    expect(screen.getByText('Objects')).toBeInTheDocument();
+    expect(screen.getByText('part_1')).toBeInTheDocument();
+  });
+
   // Regression coverage for #1698: the card's shared sections must appear in the same
   // relative order as PrinterDetailsSidebar (see printerDetailSectionOrder.ts):
   // Statistics, Version, Objects, Move, Temperature, Materials.

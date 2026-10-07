@@ -982,7 +982,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
       </div>
 
       {/* Print Objects (skip object) — folded in from the details sidebar (#1584) */}
-      {support.supportsObjectExclusion && (
+      {support.supportsObjectExclusion && isActivePrintForObjectQuery && (
         <div className="mb-3">
           <CollapsibleSection
             title="Objects"
@@ -1003,8 +1003,6 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
           >
             {printJobObjectsQuery.isLoading ? (
               <div className="text-sm text-pf-text-secondary">Loading print objects…</div>
-            ) : !isPrinting && !isPaused ? (
-              <div className="text-sm text-pf-text-secondary">Object skipping is available during an active print.</div>
             ) : printJobObjects.length === 0 ? (
               <div className="text-sm text-pf-text-secondary">No object metadata is available for this job.</div>
             ) : (

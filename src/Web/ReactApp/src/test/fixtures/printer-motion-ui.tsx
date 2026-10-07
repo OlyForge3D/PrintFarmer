@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Button } from '@/common/components/ui';
 import { PrinterCoordinateRow } from '@/features/printers/components/PrinterCoordinateRow';
-import { PrinterControlsMode, PrinterMotionHelp } from '@/features/printers/components/PrinterControlsMode';
+import { PrinterMotionHelp } from '@/features/printers/components/PrinterControlsMode';
 import '@/index.css';
 
 export function mountCoordinates(element: HTMLElement) {
@@ -14,7 +14,6 @@ export function mountCoordinates(element: HTMLElement) {
     const finish = useRef<(() => void) | null>(null);
     return (
       <section aria-label={name} style={{ width, maxWidth: '100%' }}>
-        <PrinterControlsMode />
         <PrinterCoordinateRow
           values={values}
           positions={{ X: 80, Y: 90, Z: 10 }}

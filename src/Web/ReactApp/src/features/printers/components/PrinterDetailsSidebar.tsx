@@ -1,5 +1,5 @@
 import { PrinterCoordinateRow } from '@/features/printers/components/PrinterCoordinateRow';
-import { PrinterControlsMode, PrinterMotionHelp } from '@/features/printers/components/PrinterControlsMode';
+import { PrinterMotionHelp } from '@/features/printers/components/PrinterControlsMode';
 import { MotionControlButton } from '@/features/printers/components/MotionControlButton';
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -966,7 +966,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
           </div>
         </CollapsibleSection>
 
-        {support.supportsObjectExclusion && (
+        {support.supportsObjectExclusion && isActivePrintForObjectQuery && (
           <CollapsibleSection
             title="Objects"
             expanded={true}
@@ -986,8 +986,6 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
           >
             {printJobObjectsQuery.isLoading ? (
               <div className="text-sm text-pf-text-secondary">Loading print objects…</div>
-            ) : !isPrinting && !isPaused ? (
-              <div className="text-sm text-pf-text-secondary">Object skipping is available during an active print.</div>
             ) : printJobObjects.length === 0 ? (
               <div className="text-sm text-pf-text-secondary">No object metadata is available for this job.</div>
             ) : (
@@ -1037,7 +1035,6 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
           onToggle={setIsMoveExpanded}
           hideExpandedTitle
         >
-          <PrinterControlsMode />
           <div className="flex flex-wrap gap-4 items-start">
             {/* XY + Z Pad */}
             <div className="flex flex-col gap-1">
