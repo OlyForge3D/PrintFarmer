@@ -141,6 +141,15 @@ Shows full output from each test including error messages and stack traces.
 
 ## Individual Test Files
 
+### Build-free registry migration controller
+
+Issue #3295 adds `python3 -m unittest discover -s scripts/registry/tests -v`.
+It covers migration planning, storage-identity checks, release manifest and
+image validation, and transaction recovery with a fake Docker CLI. When
+`docker compose` is available, it also renders fixtures with real Compose.
+It never contacts a production host. See
+[DEPLOYMENT_REGISTRY_MIGRATION.md](DEPLOYMENT_REGISTRY_MIGRATION.md).
+
 ### Discovery security boundary
 
 Issue #2665 adds `python tests/test-discovery-boundary.py` (requires the

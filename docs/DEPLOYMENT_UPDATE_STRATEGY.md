@@ -13,6 +13,9 @@ post_date: "2026-09-12"
 
 ## Recommendation and scope
 
+Existing source-built hosts can move to release images without a checkout using
+the [build-free registry migration](DEPLOYMENT_REGISTRY_MIGRATION.md) (#3295).
+
 ### Publication supersession (#2745, 2026-09-16)
 
 The [current release guide](RELEASE_GUIDE.md) supersedes all publication-specific
