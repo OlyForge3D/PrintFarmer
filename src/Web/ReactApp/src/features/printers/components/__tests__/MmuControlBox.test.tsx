@@ -259,8 +259,37 @@ describe('MmuControlBox', () => {
     }
   });
 
-  it('keeps the post-write revision for a rapid second release', async () => {
-    clearSpool.mockResolvedValueOnce('rev-2').mockResolvedValueOnce('rev-3');
+  it('does not attribute coverage to gates whose saved layout is non-canonical', () => {
+    // Equal counts resolve positionally: live 0 -> Toolhead 2, live 1 -> Toolhead 5.
+    // Coverage is keyed per backend tool, so live keys 0/1 are not those gates.
+    coverage.mockReturnValue({
+      printerId: 'printer-1',
+      printerName: 'qp4-1',
+      status: 'runout',
+      toolheads: [{ toolheadIndex: 1, status: 'runout', statusReason: null, remainingGrams: 100, totalDemandGrams: 400 }],
+    });
+    render(
+      <MmuControlBox
+        printerId="printer-1"
+        mmuStatus={status([gate(0), gate(1)], { mmuType: MmuProtocol.Qidibox })}
+        isOnline
+        toolheads={[toolhead(0, 'Physical'), toolhead(2, 'MmuGate'), toolhead(5, 'MmuGate')]}
+        reviewedRowVersion="rev-1"
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: 'Assign' })).toBeEnabled();
+    for (const name of [/^Gate 1A:/, /^Gate 1B:/]) {
+      expect(screen.getByRole('button', { name })).toHaveAttribute('data-status', 'unknown');
+    }
+  });
+
+  it('keeps the newest own-write revision across chained writes and late refreshes', async () => {
+    clearSpool.mockReset()
+      .mockResolvedValueOnce('rev-2')
+      .mockResolvedValueOnce('rev-3')
+      .mockResolvedValueOnce('rev-4')
+      .mockResolvedValueOnce('rev-5');
     const props = {
       printerId: 'printer-1',
       mmuStatus: status([gate(0), gate(1)], { mmuType: MmuProtocol.Qidibox, activeGate: 0 }),
@@ -271,25 +300,25 @@ describe('MmuControlBox', () => {
         toolhead(2, 'MmuGate', { currentSpoolId: 81 }),
       ],
     };
+    const release = async (gateName: RegExp, expectedRevision: string, call: number) => {
+      fireEvent.click(screen.getByRole('button', { name: gateName }));
+      fireEvent.click(screen.getByRole('button', { name: 'Release' }));
+      await waitFor(() => expect(clearSpool).toHaveBeenCalledTimes(call));
+      expect(clearSpool).toHaveBeenLastCalledWith(expect.objectContaining({ reviewedRowVersion: expectedRevision }));
+    };
     const { rerender } = render(<MmuControlBox {...props} reviewedRowVersion="rev-1" />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Release' }));
-    await waitFor(() => expect(clearSpool).toHaveBeenCalledTimes(1));
-
-    fireEvent.click(screen.getByRole('button', { name: /^Gate 1B:/ }));
-    fireEvent.click(screen.getByRole('button', { name: 'Release' }));
-    await waitFor(() => expect(clearSpool).toHaveBeenLastCalledWith({
-      printerId: 'printer-1',
-      toolheadIndex: 2,
-      reviewedRowVersion: 'rev-2',
-    }));
-
+    await release(/^Gate 1A:/, 'rev-1', 1);
+    await release(/^Gate 1B:/, 'rev-2', 2);
+    // Refresh for the first write lands after the second write returned rev-3.
+    rerender(<MmuControlBox {...props} reviewedRowVersion="rev-2" />);
+    await release(/^Gate 1A:/, 'rev-3', 3);
+    // Refresh catching up to our latest write releases the anchor without change.
     rerender(<MmuControlBox {...props} reviewedRowVersion="rev-4" />);
-    fireEvent.click(screen.getByRole('button', { name: /^Gate 1A:/ }));
-    fireEvent.click(screen.getByRole('button', { name: 'Release' }));
-    await waitFor(() => expect(clearSpool).toHaveBeenLastCalledWith(
-      expect.objectContaining({ toolheadIndex: 1, reviewedRowVersion: 'rev-4' }),
-    ));
+    await release(/^Gate 1B:/, 'rev-4', 4);
+    // A token our chain never saw comes from a later external write and wins.
+    rerender(<MmuControlBox {...props} reviewedRowVersion="ext-9" />);
+    await release(/^Gate 1A:/, 'ext-9', 5);
   });
 
   it('uses the live inset-surface token for every spool hub', () => {
