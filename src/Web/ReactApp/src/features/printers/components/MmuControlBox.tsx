@@ -266,7 +266,10 @@ export function MmuControlBox({
     () => resolveQidiRackSlot(mmuStatus, toolheads),
     [mmuStatus, toolheads],
   );
-  const showRack = rackSelected && rackSlot !== null;
+  // The Qidi adapter reports a Rack feed with Happy Hare's bypass sentinel (-2);
+  // box slots are never reported active at the same time.
+  const rackActive = isQidibox && mmuStatus.activeGate === -2 && rackSlot !== null;
+  const showRack = rackSlot !== null && (rackSelected || (rackActive && selectedGate === null));
 
   // Use selected gate or fall back to active gate for detail display
   const displayGate = showRack ? null : selectedGate ?? activeGate;
@@ -551,7 +554,8 @@ export function MmuControlBox({
               variant="unstyled"
               onClick={handleSelectRack}
               aria-pressed={showRack}
-              aria-label={`Rack: ${rackSlot.material || 'Empty'}${rackSlot.spoolId != null ? ` - Spool #${rackSlot.spoolId}` : ''}`}
+              aria-label={`Rack: ${rackSlot.material || 'Empty'}${rackSlot.spoolId != null ? ` - Spool #${rackSlot.spoolId}` : ''}${rackActive ? ', in use' : ''}`}
+              data-active={rackActive}
               className={`flex flex-col items-center gap-1 p-2 rounded-lg border min-w-[70px] transition-colors cursor-pointer ${
                 showRack ? 'border-pf-accent bg-pf-accent-bg/15' : 'border-pf-border bg-pf-bg-1 hover:bg-pf-bg-2'
               }`}
@@ -559,12 +563,16 @@ export function MmuControlBox({
               <span className="text-[10px] uppercase tracking-wide text-pf-text-secondary font-bold">Rack</span>
               <SpoolIcon
                 color={rackSlot.color}
+                active={rackActive}
                 available={rackSlot.spoolId != null || rackSlot.material != null}
                 size={48}
               />
               <span className="text-xs font-medium text-pf-text-primary">
                 {rackSlot.material || '—'}
               </span>
+              {rackActive && (
+                <span className="text-[10px] font-medium text-pf-success">In use</span>
+              )}
             </Button>
           )}
 
@@ -590,6 +598,11 @@ export function MmuControlBox({
             {mmuStatus.activeTool >= 0 && (
               <span className="text-pf-text-secondary">
                 Tool <span className="font-bold text-pf-text-primary">T{mmuStatus.activeTool}</span>
+              </span>
+            )}
+            {rackActive && (
+              <span className="text-pf-text-secondary">
+                Feeding from <span className="font-bold text-pf-text-primary">Rack</span>
               </span>
             )}
           </div>

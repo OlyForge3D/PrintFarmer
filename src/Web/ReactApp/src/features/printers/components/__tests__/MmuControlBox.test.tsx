@@ -450,6 +450,45 @@ describe('MmuControlBox', () => {
       await waitFor(() => expect(setSpool).toHaveBeenCalledWith(expect.objectContaining({ toolheadIndex: 3 })));
     });
 
+    it('marks Rack as in use and shows it by default when the QidiBox feeds from it (activeGate -2)', () => {
+      render(
+        <MmuControlBox
+          {...props}
+          toolheads={rackToolheads}
+          mmuStatus={status(qidiGates, { mmuType: MmuProtocol.Qidibox, activeGate: -2, activeTool: -2 })}
+        />,
+      );
+
+      const rack = screen.getByRole('button', { name: 'Rack: ASA - Spool #127, in use' });
+      expect(rack).toHaveAttribute('aria-pressed', 'true');
+      expect(rack).toHaveAttribute('data-active', 'true');
+      expect(screen.getByText('In use')).toBeInTheDocument();
+      expect(screen.getByText('Rack (external spool)')).toBeInTheDocument();
+      expect(screen.getByText(/Feeding from/)).toBeInTheDocument();
+      for (const name of ['Eject', 'Unload', 'Load']) {
+        expect(screen.getByRole('button', { name })).toBeDisabled();
+      }
+
+      fireEvent.click(screen.getByRole('button', { name: /^Gate 1A:/ }));
+      expect(screen.queryByText('Rack (external spool)')).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^Rack:.*in use$/ })).toHaveAttribute('aria-pressed', 'false');
+    });
+
+    it('does not mark Rack in use when the active gate is unknown (-1)', () => {
+      render(
+        <MmuControlBox
+          {...props}
+          toolheads={rackToolheads}
+          mmuStatus={status(qidiGates, { mmuType: MmuProtocol.Qidibox, activeGate: -1, filamentState: 'Unloaded' })}
+        />,
+      );
+
+      const rack = screen.getByRole('button', { name: 'Rack: ASA - Spool #127' });
+      expect(rack).toHaveAttribute('aria-pressed', 'false');
+      expect(screen.queryByText('In use')).not.toBeInTheDocument();
+      expect(screen.queryByText(/Feeding from/)).not.toBeInTheDocument();
+    });
+
     it('does not surface a Rack for non-QidiBox units or ambiguous physical toolheads', () => {
       const { rerender } = render(
         <MmuControlBox
