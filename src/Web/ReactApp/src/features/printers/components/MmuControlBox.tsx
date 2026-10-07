@@ -1,5 +1,11 @@
-import { useState, useCallback, type ReactNode } from 'react';
-import { MmuGateStatus, type MmuStatus, type MmuGate } from '@/types/api';
+import { useState, useCallback, useMemo, type ReactNode } from 'react';
+import { MmuGateStatus, type MmuStatus, type MmuGate, type ToolheadDto } from '@/types/api';
+import { SpoolPickerModal } from '@/features/printers/components/SpoolPickerModal';
+import {
+  useSlotSpoolAssignment,
+  DISABLED_SLOT_REASON,
+} from '@/features/printers/hooks/useSlotSpoolAssignment';
+import { resolveMaterialLoadout } from '@/features/printers/utils/materialLoadout';
 import { apiClient } from '@/services/api';
 import { toast } from 'sonner';
 import { MmuProtocol } from '../constants/mmuProtocol';
@@ -172,17 +178,42 @@ interface MmuControlBoxProps {
   mmuStatus: MmuStatus;
   /** Whether printer is online (enables/disables commands) */
   isOnline: boolean;
+  /** Persisted toolhead topology; maps live gates to the spool-assignment API index. */
+  toolheads?: ToolheadDto[];
+  /** Printer revision required by the optimistic-concurrency spool endpoints. */
+  reviewedRowVersion?: string | null;
+  /** Called after a spool is assigned or cleared. */
+  onSpoolChange?: () => void;
 }
 
 /**
  * Control Box panel for MMU/ERCF/AMS multi-material units.
  * Displays gate status with spool visualizations and provides
- * load/unload/select commands.
+ * load/unload/select and spool-assignment commands.
  */
-export function MmuControlBox({ printerId, mmuStatus, isOnline }: MmuControlBoxProps) {
+export function MmuControlBox({
+  printerId,
+  mmuStatus,
+  isOnline,
+  toolheads,
+  reviewedRowVersion,
+  onSpoolChange,
+}: MmuControlBoxProps) {
   const [isExpanded, setIsExpanded] = useState(true);
   const [selectedGate, setSelectedGate] = useState<number | null>(null);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+
+  const loadout = useMemo(
+    () => resolveMaterialLoadout(mmuStatus, toolheads),
+    [mmuStatus, toolheads],
+  );
+  const spoolAssignment = useSlotSpoolAssignment({
+    printerId,
+    reviewedRowVersion,
+    hasResolvedTopology: loadout?.hasResolvedTopology ?? false,
+    onSpoolChange,
+  });
 
   const isQidibox = mmuStatus.mmuType === MmuProtocol.Qidibox;
   const isAfc = mmuStatus.mmuType === MmuProtocol.Afc;
@@ -197,6 +228,42 @@ export function MmuControlBox({ printerId, mmuStatus, isOnline }: MmuControlBoxP
     && displayGate < mmuStatus.gates.length
     ? mmuStatus.gates[displayGate]
     : null;
+  const displaySlot = displayGateData
+    ? loadout?.slots.find((s) => s.key === `gate-${displayGateData.index}`) ?? null
+    : null;
+  const displaySpoolId = displaySlot?.spoolId
+    ?? (displayGateData && displayGateData.spoolId > 0 ? displayGateData.spoolId : undefined);
+  const assignDisabled = !displaySlot
+    || spoolAssignment.busy
+    || !spoolAssignment.canMutate
+    || displaySlot.disabled;
+  const assignTitle = !displaySlot
+    ? 'Select a slot first'
+    : displaySlot.disabled
+      ? DISABLED_SLOT_REASON
+      : spoolAssignment.blockedReason
+        ?? `${displaySpoolId != null ? 'Change' : 'Assign'} the spool in ${displaySlot.label}`;
+
+  const openAssignPicker = () => {
+    if (!displaySlot) return;
+    // Anchor the reviewed revision to the moment the user opened the picker.
+    spoolAssignment.selectSlot(displaySlot.key);
+    setPickerOpen(true);
+  };
+
+  const closeAssignPicker = () => {
+    setPickerOpen(false);
+    spoolAssignment.selectSlot(null);
+  };
+
+  // Spool id 0 from the picker's Eject action means "release this slot".
+  const handlePickerSelect = async (spoolId: number) => {
+    if (!displaySlot) return;
+    const ok = spoolId > 0
+      ? await spoolAssignment.assign(displaySlot, spoolId)
+      : await spoolAssignment.clear(displaySlot);
+    if (ok) closeAssignPicker();
+  };
 
   const canSendCommand = isOnline && mmuStatus.enabled && !pendingAction;
 
@@ -430,10 +497,10 @@ export function MmuControlBox({ printerId, mmuStatus, isOnline }: MmuControlBoxP
               {gateStatusLabel(displayGateData.status)}
             </span>
 
-            {displayGateData.spoolId > 0 && (
+            {displaySpoolId != null && (
               <>
                 <span className="text-pf-text-secondary">Spool ID</span>
-                <span className="font-medium text-pf-text-primary">#{displayGateData.spoolId}</span>
+                <span className="font-medium text-pf-text-primary">#{displaySpoolId}</span>
               </>
             )}
           </div>
@@ -485,6 +552,18 @@ export function MmuControlBox({ printerId, mmuStatus, isOnline }: MmuControlBoxP
           >
             Load
           </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={openAssignPicker}
+            disabled={assignDisabled}
+            explainedDisabled={assignDisabled}
+            title={assignTitle}
+            className="flex-1"
+          >
+            {displaySpoolId != null ? 'Change' : 'Assign'}
+          </Button>
           {!isQidibox && !isAfc && (
             <Button
               type="button"
@@ -511,6 +590,15 @@ export function MmuControlBox({ printerId, mmuStatus, isOnline }: MmuControlBoxP
           )}
         </div>
       </div>
+      {pickerOpen && displaySlot && (
+        <SpoolPickerModal
+          isOpen
+          onClose={closeAssignPicker}
+          onSelect={handlePickerSelect}
+          printerId={printerId}
+          activeSpoolId={displaySpoolId}
+        />
+      )}
     </CollapsibleSection>
   );
 }

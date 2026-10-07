@@ -47,15 +47,29 @@ describe('resolveMaterialLoadout', () => {
     expect(loadout!.slots.map((s) => s.label)).toEqual(['G1', 'G2', 'G3', 'G4']);
     expect(loadout!.unitLabel).toBe('QidiBox');
     expect(loadout!.kind).toBe('gate');
-    // The count contradiction is fixed, but this shape is still not safely
-    // assignable: slot 4 has no persisted toolhead to write to. Reporting
-    // topology as unresolved makes the module block assignment up front rather
-    // than letting the user pick a spool and fail with "Toolhead 4 not found".
-    // #1588 stopped the backend from *producing* this shape (it now extends a
-    // partial gate set), so this is a defence against a stale or degraded
-    // topology response rather than the everyday Qidi path — the fully
-    // persisted case is covered by the next test.
+    // A canonical 1..M gate prefix shorter than the live gate count (the live
+    // qp4-1 shape) is safely assignable: the backend gap-fills the missing
+    // trailing gate on first write (#1588), so live G4 maps to index 4.
+    expect(loadout!.hasResolvedTopology).toBe(true);
+    expect(loadout!.slots.map((s) => s.apiIndex)).toEqual([1, 2, 3, 4]);
+  });
+
+  it('keeps assignment blocked when a non-gate toolhead occupies a gap-fill index', () => {
+    const loadout = resolveMaterialLoadout(
+      mmu([gate(0), gate(1), gate(2), gate(3)], MmuProtocol.Qidibox),
+      [toolhead(0), persistedGate(1), persistedGate(2), persistedGate(3), toolhead(4)],
+    );
+
     expect(loadout!.hasResolvedTopology).toBe(false);
+  });
+
+  it('shows the persisted spool on a gate whose live status reports none', () => {
+    const loadout = resolveMaterialLoadout(
+      mmu([gate(0), gate(1)], MmuProtocol.Qidibox),
+      [toolhead(0), persistedGate(1, { currentSpoolId: 80 }), persistedGate(2)],
+    );
+
+    expect(loadout!.slots[0].spoolId).toBe(80);
   });
 
   it('translates live gate indices to the 1-based indices the spool API persists', () => {
