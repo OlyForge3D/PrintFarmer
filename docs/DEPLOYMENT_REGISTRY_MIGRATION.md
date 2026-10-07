@@ -164,8 +164,12 @@ When a release's worker has a different `orcaslicer.version` label, `plan` and
 old OrcaSlicer may not load or slice identically in the new one. After all
 images are pulled and verified, and before any service restarts, the controller:
 
-1. Creates `orcaslicer-custom-profiles-<new>` labelled with its source volume.
-   An existing volume without that label is refused, never overwritten.
+1. Creates `printfarmer-custom-profiles-<new>`, the name the worker Compose
+   template derives from `ORCASLICER_VERSION`. It is labelled with its source
+   volume and inherits the source's `com.docker.compose.project` and
+   `com.docker.compose.volume` labels, so Compose treats it like the volume it
+   replaces. An existing volume without the source label is refused, never
+   overwritten.
 2. Copies the old volume into it with the verified worker image (by digest),
    `--network none`, no environment, and the old volume mounted read-only. The
    copy is compared before it is recorded in `.printfarmer/orca-volumes.json`.
@@ -174,7 +178,9 @@ images are pulled and verified, and before any service restarts, the controller:
    `.printfarmer/release.json`.
 
 The host account must be allowed to `docker run`. The old volume is never
-modified or removed. Changes made in the new volume are not merged back.
+modified or removed. Changes made in the new volume are not merged back. Like
+the original, the new volume is removed by `docker compose down -v`; never run
+that against a deployment you intend to keep.
 
 If the copy fails, nothing restarts and `status` shows phase `failed-copying`.
 Fix the cause, then rerun the same `update` command with `--resume-interrupted`;

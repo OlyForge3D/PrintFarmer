@@ -259,11 +259,15 @@ class FakeDocker:
                 return 1, "no such volume"
             return 0, json.dumps([{"Name": args[2], "Labels": self.volume_label_map.get(args[2])}])
         if args[:2] == ["volume", "create"]:
-            assert args[2] == "--label" and args[4] not in self.volumes, args
-            key, _, value = args[3].partition("=")
-            self.volumes.add(args[4])
-            self.volume_label_map[args[4]] = {key: value}
-            return 0, args[4]
+            name, labels, rest = args[-1], {}, args[2:-1]
+            assert name not in self.volumes and len(rest) % 2 == 0, args
+            for flag, pair in zip(rest[::2], rest[1::2]):
+                assert flag == "--label", args
+                key, _, value = pair.partition("=")
+                labels[key] = value
+            self.volumes.add(name)
+            self.volume_label_map[name] = labels
+            return 0, name
         if args[0] == "run":
             return self.profile_copy(args)
         if args[0] == "info":
@@ -773,6 +777,10 @@ class OrcaProfileAdoptionTests(RegistryTestCase):
         self.migrate()
         self.profiles = {"filament/pla.json": "pla", "machine/x1c.json": "x1c", "process/fine.json": "fine"}
         self.docker.volume_files[OLD_VOLUME] = dict(self.profiles)
+        self.compose_labels = {"com.docker.compose.project": "printfarmer",
+                               "com.docker.compose.volume": "orcaslicer-custom-profiles"}
+        self.docker.volume_label_map[OLD_VOLUME] = dict(self.compose_labels, **{
+            "com.docker.compose.config-hash": "abc", "com.docker.compose.version": "5.4.0"})
 
     def release_state(self):
         return load_json(self.p(".printfarmer/release.json"))
@@ -788,7 +796,10 @@ class OrcaProfileAdoptionTests(RegistryTestCase):
         self.assertEqual(self.docker.up_configs[-1]["volumes"]["orcaslicer-custom-profiles"]["name"], NEW_VOLUME)
         self.assertEqual(self.docker.volume_files[NEW_VOLUME], self.profiles)
         self.assertEqual(self.docker.volume_files[OLD_VOLUME], self.profiles)
-        self.assertEqual(self.docker.volume_label_map[NEW_VOLUME], {reg.PROFILE_COPY_LABEL: OLD_VOLUME})
+        # Same Compose project/volume identity as the replaced volume; config-hash/version are not copied.
+        self.assertEqual(self.docker.volume_label_map[NEW_VOLUME],
+                         dict(self.compose_labels, **{reg.PROFILE_COPY_LABEL: OLD_VOLUME}))
+        self.assertTrue(NEW_VOLUME.startswith("printfarmer-custom-profiles-"))
         self.assertEqual(self.release_state()["current"]["orcaslicerVersion"], "2.5.0")
         record = load_json(self.p(".printfarmer/orca-volumes.json"))["copies"]
         self.assertEqual([(c["source"], c["target"]) for c in record], [(OLD_VOLUME, NEW_VOLUME)])

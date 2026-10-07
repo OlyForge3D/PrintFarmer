@@ -59,6 +59,7 @@ PENDING_ACTIONS = {"update", "rollback"}
 PENDING_PHASES = {"pulling", "copying", "starting", "health", "failed-copying", "failed-starting", "failed-health"}
 ORCA_VERSION_RE = re.compile(r"^\d+\.\d+\.\d+$")
 PROFILE_COPY_LABEL = "org.printfarmer.profile-copy.source"
+COMPOSE_VOLUME_LABELS = ("com.docker.compose.project", "com.docker.compose.volume")
 PROFILE_COPIES_FILE = "orca-volumes.json"
 PENDING_HELP = (". Nothing was changed. Check `docker compose ps` to see which images are running, keep a copy of "
                 "%s for diagnosis, move it aside, then rerun the intended update or rollback with "
@@ -708,7 +709,8 @@ class Controller:
     def ensure_profile_copy(self, adoption, helper, host):
         """Copy the old custom-profiles volume into a new one. The old volume is mounted read-only."""
         old, new = WORKER_VOLUME_PREFIX + adoption["from"], WORKER_VOLUME_PREFIX + adoption["to"]
-        if self.volume_labels(old) is None:
+        old_labels = self.volume_labels(old)
+        if old_labels is None:
             raise MigrationError("custom-profiles volume %s does not exist; nothing to adopt from" % old)
         copies = self.profile_copies()
         completed = any(c["source"] == old and c["target"] == new for c in copies)
@@ -726,7 +728,12 @@ class Controller:
             recopy = True
             self.say("Previous copy into %s did not complete; copying again." % new)
         else:
-            self.docker("volume", "create", "--label", "%s=%s" % (PROFILE_COPY_LABEL, old), new)
+            # Inherit the Compose project identity so the new volume is owned like the one it replaces.
+            create = ["volume", "create", "--label", "%s=%s" % (PROFILE_COPY_LABEL, old)]
+            for key in COMPOSE_VOLUME_LABELS:
+                if old_labels.get(key):
+                    create += ["--label", "%s=%s" % (key, old_labels[key])]
+            self.docker(*(create + [new]))
         script = 'set -eu; [ -z "$(ls -A /to)" ]; cp -a /from/. /to/; diff -r /from /to >/dev/null'
         if recopy:
             script = "set -eu; find /to -mindepth 1 -delete; " + script[len("set -eu; "):]
