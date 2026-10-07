@@ -34,12 +34,11 @@ Migration or update fails closed when:
 - The Moonraker emulator is enabled. It has no published image; remove it first.
 - The previous-version OrcaSlicer worker is enabled. It has no published image.
 - The OrcaSlicer worker runs on a non-amd64 host. The worker image is amd64-only.
-- A release's OrcaSlicer version differs from the deployment's. The worker
-  custom-profile volume name includes the OrcaSlicer version, so accepting a
-  different version would silently start on a new, empty profile volume. There
-  is no supported adoption path yet; choose releases whose worker matches the
-  recorded `orcaslicerVersion` in `.printfarmer/deployment.json`. Do not edit
-  `.env`, `deployment.json`, or the release Compose file by hand to work around it.
+- A release's OrcaSlicer version differs from the deployment's, unless the
+  update explicitly adopts it. The worker custom-profile volume name includes
+  the OrcaSlicer version, so a silent switch would start on a new, empty profile
+  volume. See [Adopting a New OrcaSlicer Version](#adopting-a-new-orcaslicer-version).
+  Do not edit `.env`, `deployment.json`, or the release Compose file by hand.
 - An insider release is requested without `--allow-insider`.
 - Any selected image cannot be pulled, or its labels, platform, or digest do not
   match the release's `container-images.json`.
@@ -147,6 +146,45 @@ non-zero and marks a path `MISSING` if any is removed.
 
 Do not run `scripts/deploy-docker.sh` against a migrated deployment; it would
 rebuild from source and replace the release Compose project.
+
+## Adopting a New OrcaSlicer Version
+
+When a release's worker has a different `orcaslicer.version` label, `plan` and
+`update` refuse it and name the required flags. Preview, then apply:
+
+```bash
+.printfarmer/bin/printfarmer-registry plan --version 1.3.0 \
+  --adopt-orcaslicer-version 2.4.0 --accept-profile-compatibility-risk
+.printfarmer/bin/printfarmer-registry update --version 1.3.0 --backup-confirmed \
+  --adopt-orcaslicer-version 2.4.0 --accept-profile-compatibility-risk
+```
+
+`--adopt-orcaslicer-version` must equal the release worker's label.
+`--accept-profile-compatibility-risk` acknowledges that profiles written for the
+old OrcaSlicer may not load or slice identically in the new one. After all
+images are pulled and verified, and before any service restarts, the controller:
+
+1. Creates `orcaslicer-custom-profiles-<new>` labelled with its source volume.
+   An existing volume without that label is refused, never overwritten.
+2. Copies the old volume into it with the verified worker image (by digest),
+   `--network none`, no environment, and the old volume mounted read-only. The
+   copy is compared before it is recorded in `.printfarmer/orca-volumes.json`.
+3. Starts the release with `ORCASLICER_VERSION` set to the new version and,
+   once healthy, records that version with the release in
+   `.printfarmer/release.json`.
+
+The host account must be allowed to `docker run`. The old volume is never
+modified or removed. Changes made in the new volume are not merged back.
+
+If the copy fails, nothing restarts and `status` shows phase `failed-copying`.
+Fix the cause, then rerun the same `update` command with `--resume-interrupted`;
+an incomplete copy is cleared and copied again. `status` prints the effective
+OrcaSlicer volume and every completed copy.
+
+Rollback across an adoption returns the worker to the previous version's volume
+and keeps both volumes. Edits made after the adoption stay in the newer volume.
+As with the digest, only the controller sets `ORCASLICER_VERSION`; a manual
+`docker compose up` would use the stale value in `.env`.
 
 ## Rollback
 

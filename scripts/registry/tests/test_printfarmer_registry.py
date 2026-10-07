@@ -112,6 +112,10 @@ class FakeDocker:
         self.unhealthy_after_up = set()
         self.tracked = None
         self.platform = "linux/x86_64"
+        self.volume_label_map = {}
+        self.volume_files = {}
+        self.fail_copy = False
+        self.copy_runs = []
 
     # --- compose emulation ------------------------------------------------
     def dotenv(self, path):
@@ -251,7 +255,17 @@ class FakeDocker:
             by_id = {c["Id"]: c for c in self.containers.values()}
             return 0, json.dumps([by_id[i] for i in args[1:]])
         if args[:2] == ["volume", "inspect"]:
-            return (0, "[]") if args[2] in self.volumes else (1, "no such volume")
+            if args[2] not in self.volumes:
+                return 1, "no such volume"
+            return 0, json.dumps([{"Name": args[2], "Labels": self.volume_label_map.get(args[2])}])
+        if args[:2] == ["volume", "create"]:
+            assert args[2] == "--label" and args[4] not in self.volumes, args
+            key, _, value = args[3].partition("=")
+            self.volumes.add(args[4])
+            self.volume_label_map[args[4]] = {key: value}
+            return 0, args[4]
+        if args[0] == "run":
+            return self.profile_copy(args)
         if args[0] == "info":
             return 0, self.platform + "\n"
         if args[0] == "pull":
@@ -264,6 +278,27 @@ class FakeDocker:
                 return 0, json.dumps([self.images[args[2]]])
             return (0, "[{}]") if "@" not in args[2] else (1, "no such image")
         raise AssertionError("unexpected docker command %r" % args)
+
+    def profile_copy(self, args):
+        """Emulate the controller's one-shot copy helper (`docker run ... -c <script>`)."""
+        self.copy_runs.append(list(args))
+        mounts = {}
+        for index, arg in enumerate(args):
+            if arg == "-v":
+                name, _, target = args[index + 1].partition(":")
+                mounts[target] = name
+        source, dest, script = mounts["/from:ro"], mounts["/to"], args[-1]
+        assert source in self.volumes and dest in self.volumes, args
+        files = self.volume_files.setdefault(dest, {})
+        if "find /to -mindepth 1 -delete" in script:
+            files.clear()
+        if files:
+            return 1, "target not empty"
+        for index, (path, content) in enumerate(sorted(self.volume_files.get(source, {}).items())):
+            if self.fail_copy and index == 1:
+                return 1, "copy interrupted"
+            files[path] = content
+        return 0, ""
 
 
 class RegistryTestCase(unittest.TestCase):
@@ -725,6 +760,143 @@ class UpdateTests(RegistryTestCase):
         code, err = self.main("rollback", "--backup-confirmed")
         self.assertEqual(code, 2)
         self.assertIn("no previous release", err)
+
+
+OLD_VOLUME = "printfarmer-custom-profiles-2.4.2"
+NEW_VOLUME = "printfarmer-custom-profiles-2.5.0"
+ADOPT = ("--adopt-orcaslicer-version", "2.5.0", "--accept-profile-compatibility-risk")
+
+
+class OrcaProfileAdoptionTests(RegistryTestCase):
+    def setUp(self):
+        super().setUp()
+        self.migrate()
+        self.profiles = {"filament/pla.json": "pla", "machine/x1c.json": "x1c", "process/fine.json": "fine"}
+        self.docker.volume_files[OLD_VOLUME] = dict(self.profiles)
+
+    def release_state(self):
+        return load_json(self.p(".printfarmer/release.json"))
+
+    def worker_volume(self):
+        return self.docker.containers["orcaslicer-worker"]["Mounts"][0]["Name"]
+
+    def test_explicit_adoption_copies_profiles_into_new_volume(self):
+        data = self.publish("1.2.0", orca="2.5.0")
+        code, err = self.main("update", "--version", "1.2.0", "--backup-confirmed", *ADOPT)
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.worker_volume(), NEW_VOLUME)
+        self.assertEqual(self.docker.up_configs[-1]["volumes"]["orcaslicer-custom-profiles"]["name"], NEW_VOLUME)
+        self.assertEqual(self.docker.volume_files[NEW_VOLUME], self.profiles)
+        self.assertEqual(self.docker.volume_files[OLD_VOLUME], self.profiles)
+        self.assertEqual(self.docker.volume_label_map[NEW_VOLUME], {reg.PROFILE_COPY_LABEL: OLD_VOLUME})
+        self.assertEqual(self.release_state()["current"]["orcaslicerVersion"], "2.5.0")
+        record = load_json(self.p(".printfarmer/orca-volumes.json"))["copies"]
+        self.assertEqual([(c["source"], c["target"]) for c in record], [(OLD_VOLUME, NEW_VOLUME)])
+        # The helper is the verified worker image by digest, offline, with the old volume read-only and no env.
+        (run,) = self.docker.copy_runs
+        self.assertEqual(run[run.index("--network") + 1], "none")
+        self.assertIn(data["images"]["orcaslicer-worker"]["reference"], run)
+        self.assertIn("%s:/from:ro" % OLD_VOLUME, run)
+        self.assertFalse({"-e", "--env", "--env-file"} & set(run))
+        calls = self.docker.calls
+        copy_index = next(i for i, c in enumerate(calls) if c[1] == "run")
+        up_index = next(i for i, c in enumerate(calls) if c[:2] == ["docker", "compose"] and "up" in c)
+        self.assertLess(copy_index, up_index)
+        # Later updates stay on the adopted volume without repeating the flags, despite the stale .env value.
+        self.publish("1.3.0", commit=THIRD_COMMIT, char="2", orca="2.5.0")
+        code, err = self.main("update", "--version", "1.3.0", "--backup-confirmed")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.worker_volume(), NEW_VOLUME)
+        self.assertEqual(len(self.docker.copy_runs), 1)
+
+    def test_adoption_requires_explicit_risk_acknowledgement(self):
+        self.publish("1.2.0", orca="2.5.0")
+        code, err = self.main("update", "--version", "1.2.0", "--backup-confirmed", *ADOPT[:2])
+        self.assertEqual(code, 2)
+        self.assertIn("--accept-profile-compatibility-risk", err)
+        self.assertNotIn(NEW_VOLUME, self.docker.volumes)
+        self.assertEqual(self.compose_commands("up"), [])
+        code, err = self.main("update", "--version", "1.2.0", "--backup-confirmed", "--adopt-orcaslicer-version",
+                              "2.4.2", "--accept-profile-compatibility-risk")
+        self.assertEqual(code, 2)
+        self.assertIn("already the deployment's profile version", err)
+
+    def test_mismatch_without_adoption_names_the_flags(self):
+        self.publish("1.2.0", orca="2.5.0")
+        code, err = self.main("update", "--version", "1.2.0", "--backup-confirmed")
+        self.assertEqual(code, 2)
+        self.assertIn("--adopt-orcaslicer-version 2.5.0", err)
+        self.assertNotIn(NEW_VOLUME, self.docker.volumes)
+
+    def test_plan_shows_adoption_without_side_effects(self):
+        self.publish("1.2.0", orca="2.5.0")
+        before = self.snapshot()
+        code, err = self.main("plan", "--version", "1.2.0", *ADOPT)
+        self.assertEqual(code, 0, err)
+        self.assertIn("copy %s -> %s" % (OLD_VOLUME, NEW_VOLUME), self.output.getvalue())
+        self.assertEqual(self.snapshot(), before)
+        self.assertNotIn(NEW_VOLUME, self.docker.volumes)
+        self.assertEqual(self.docker.copy_runs, [])
+
+    def test_copy_failure_starts_nothing_and_retry_recopies(self):
+        self.publish("1.2.0", orca="2.5.0")
+        self.docker.fail_copy = True
+        code, err = self.main("update", "--version", "1.2.0", "--backup-confirmed", *ADOPT)
+        self.assertEqual(code, 2)
+        self.assertEqual(self.compose_commands("up"), [])
+        self.assertEqual(self.worker_volume(), OLD_VOLUME)
+        self.assertEqual(self.docker.volume_files[OLD_VOLUME], self.profiles)
+        self.assertEqual(load_json(self.p(".printfarmer/pending.json"))["phase"], "failed-copying")
+        self.assertFalse(os.path.exists(self.p(".printfarmer/orca-volumes.json")))
+        self.assertFalse(os.path.exists(self.p(".printfarmer/release.json")))
+        self.docker.fail_copy = False
+        code, err = self.main("update", "--version", "1.2.0", "--backup-confirmed", *ADOPT)
+        self.assertEqual(code, 2)
+        self.assertIn("--resume-interrupted", err)
+        code, err = self.main("update", "--version", "1.2.0", "--backup-confirmed", "--resume-interrupted", *ADOPT)
+        self.assertEqual(code, 0, err)
+        self.assertIn("find /to -mindepth 1 -delete", self.docker.copy_runs[-1][-1])
+        self.assertEqual(self.docker.volume_files[NEW_VOLUME], self.profiles)
+        self.assertEqual(self.worker_volume(), NEW_VOLUME)
+
+    def test_foreign_existing_target_volume_is_refused(self):
+        self.publish("1.2.0", orca="2.5.0")
+        self.docker.volumes.add(NEW_VOLUME)
+        self.docker.volume_files[NEW_VOLUME] = {"other.json": "keep"}
+        code, err = self.main("update", "--version", "1.2.0", "--backup-confirmed", *ADOPT)
+        self.assertEqual(code, 2)
+        self.assertIn("was not created by a profile adoption", err)
+        self.assertEqual(self.docker.copy_runs, [])
+        self.assertEqual(self.compose_commands("up"), [])
+        self.assertEqual(self.docker.volume_files[NEW_VOLUME], {"other.json": "keep"})
+
+    def test_rollback_returns_to_old_volume_and_keeps_both(self):
+        self.publish("1.2.0")
+        self.assertEqual(self.main("update", "--version", "1.2.0", "--backup-confirmed")[0], 0)
+        self.publish("1.3.0", commit=THIRD_COMMIT, char="2", orca="2.5.0")
+        self.assertEqual(self.main("update", "--version", "1.3.0", "--backup-confirmed", *ADOPT)[0], 0)
+        self.docker.volume_files[NEW_VOLUME]["filament/petg.json"] = "petg"
+        code, err = self.main("rollback", "--backup-confirmed", "--allow-unsafe-downgrade")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.worker_volume(), OLD_VOLUME)
+        self.assertEqual(self.release_state()["current"]["orcaslicerVersion"], "2.4.2")
+        self.assertTrue({OLD_VOLUME, NEW_VOLUME} <= self.docker.volumes)
+        self.assertEqual(self.docker.volume_files[OLD_VOLUME], self.profiles)
+        self.assertIn("filament/petg.json", self.docker.volume_files[NEW_VOLUME])
+        self.assertIn("Profile changes made since the adoption stay in the newer volume", self.output.getvalue())
+
+    def test_unapproved_profile_volume_switch_is_still_rejected(self):
+        controller = self.controller()
+        deployment = controller.deployment()
+        self.docker.volumes.add(NEW_VOLUME)
+        refs = {c: "%s%s@%s" % (reg.IMAGE_PREFIX, c, digest("3")) for c in set(deployment["services"].values())}
+        resolved, _ = controller.resolved_config(deployment, refs, "2.5.0")
+        containers = controller.project_containers(deployment["project"])
+        with self.assertRaises(reg.MigrationError) as raised:
+            controller.check_storage(deployment["project"], resolved, containers, controller.vendored_abs(deployment))
+        self.assertIn("would switch from volume %s to %s" % (OLD_VOLUME, NEW_VOLUME), str(raised.exception))
+        controller.check_storage(deployment["project"], resolved, containers, controller.vendored_abs(deployment),
+                                 allowed_transitions={(OLD_VOLUME, NEW_VOLUME)})
 
 
 REAL_TEMPLATE = """\

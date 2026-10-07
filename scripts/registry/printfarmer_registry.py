@@ -56,7 +56,10 @@ WORKER_PROFILE_MOUNT = "/app/custom-profiles"
 WORKER_VOLUME_PREFIX = "printfarmer-custom-profiles-"
 PREVIOUS_WORKER_SERVICE = "orcaslicer-worker-previous"
 PENDING_ACTIONS = {"update", "rollback"}
-PENDING_PHASES = {"pulling", "starting", "health", "failed-starting", "failed-health"}
+PENDING_PHASES = {"pulling", "copying", "starting", "health", "failed-copying", "failed-starting", "failed-health"}
+ORCA_VERSION_RE = re.compile(r"^\d+\.\d+\.\d+$")
+PROFILE_COPY_LABEL = "org.printfarmer.profile-copy.source"
+PROFILE_COPIES_FILE = "orca-volumes.json"
 PENDING_HELP = (". Nothing was changed. Check `docker compose ps` to see which images are running, keep a copy of "
                 "%s for diagnosis, move it aside, then rerun the intended update or rollback with "
                 "--resume-interrupted.")
@@ -399,8 +402,13 @@ class Controller:
                 mounts[target] = ("bind", source)
         return mounts
 
-    def check_storage(self, project, resolved, containers, vendored_abs, allow_new_services=False):
-        """Fail before mutation if storage identity would change or is missing."""
+    def check_storage(self, project, resolved, containers, vendored_abs, allow_new_services=False,
+                      allowed_transitions=frozenset(), pending_volumes=frozenset()):
+        """Fail before mutation if storage identity would change or is missing.
+
+        allowed_transitions holds (running, expected) volume-name pairs for the OrcaSlicer custom-profiles
+        mount only (explicit, recorded profile adoption). pending_volumes are created by the transaction itself.
+        """
         problems = []
         if resolved.get("name") != project:
             problems.append("project name would change")
@@ -413,6 +421,8 @@ class Controller:
             if service not in by_service and not allow_new_services:
                 problems.append("service %s has no existing container (Compose would create it fresh)" % service)
             for kind, ident in expected.values():
+                if kind == "volume" and ident in pending_volumes:
+                    continue
                 if kind == "volume":
                     code, _ = self.docker("volume", "inspect", ident, check=False)
                     if code != 0:
@@ -426,6 +436,9 @@ class Controller:
                     if mount is None:
                         problems.append("service %s: running container has no mount at %s" % (service, target))
                     elif kind == "volume":
+                        if (target == WORKER_PROFILE_MOUNT and mount.get("Type") == "volume"
+                                and (mount.get("Name"), ident) in allowed_transitions):
+                            continue
                         if mount.get("Type") != "volume" or mount.get("Name") != ident:
                             problems.append("service %s: %s would switch from volume %s to %s"
                                             % (service, target, mount.get("Name") or mount.get("Source"), ident))
@@ -614,16 +627,116 @@ class Controller:
         self.say("WARNING: " + message + " Proceeding because --allow-unsafe-downgrade was given.")
         return status
 
-    def resolved_config(self, deployment, refs):
+    def resolved_config(self, deployment, refs, orca_version=None):
         env = dict(os.environ)
         for component, reference in refs.items():
             env[image_var(component)] = reference
         if "orcaslicer-worker" in refs:
             # Process env overrides the .env value deploy-docker.sh resolved from the local build.
             env["ORCASLICER_CONTAINER_DIGEST"] = refs["orcaslicer-worker"].partition("@")[2]
+            if orca_version:
+                # The controller, not .env, owns which custom-profiles volume the worker mounts.
+                env["ORCASLICER_VERSION"] = orca_version
         config = self.compose_config(deployment["project"], deployment["composeFiles"], deployment["profiles"],
                                      env=env)
+        if "orcaslicer-worker" in refs and orca_version:
+            resolved_version = self.worker_orca_version(config, deployment["services"])
+            if resolved_version != orca_version:
+                raise MigrationError("the release compose does not derive the worker custom-profiles volume from "
+                                     "ORCASLICER_VERSION (resolved %s, expected %s%s); refusing to guess which volume "
+                                     "holds the profiles" % (resolved_version, WORKER_VOLUME_PREFIX, orca_version))
         return config, env
+
+    # ------------------------------------------------- OrcaSlicer profile adoption
+    @staticmethod
+    def effective_orca(deployment, state):
+        current = (state or {}).get("current") or {}
+        return current.get("orcaslicerVersion") or deployment.get("orcaslicerVersion")
+
+    def orca_target(self, deployment, state, adopt_version=None, accept_risk=False):
+        """Return (target OrcaSlicer version, adoption dict or None) for an update."""
+        effective = self.effective_orca(deployment, state)
+        if not adopt_version:
+            if accept_risk:
+                raise MigrationError("--accept-profile-compatibility-risk only applies together with "
+                                     "--adopt-orcaslicer-version")
+            return effective, None
+        if "orcaslicer-worker" not in deployment["services"].values():
+            raise MigrationError("--adopt-orcaslicer-version requires a deployed OrcaSlicer worker")
+        if not ORCA_VERSION_RE.match(adopt_version):
+            raise MigrationError("--adopt-orcaslicer-version must be X.Y.Z")
+        if not effective:
+            raise MigrationError("the deployment has no recorded OrcaSlicer volume version to adopt from")
+        if adopt_version == effective:
+            raise MigrationError("OrcaSlicer %s is already the deployment's profile version; drop "
+                                 "--adopt-orcaslicer-version" % adopt_version)
+        if not accept_risk:
+            raise MigrationError("adopting OrcaSlicer %s copies custom profiles from %s%s into a new %s%s volume. "
+                                 "OrcaSlicer may not read profiles written by %s identically. Pass "
+                                 "--accept-profile-compatibility-risk to acknowledge this."
+                                 % (adopt_version, WORKER_VOLUME_PREFIX, effective, WORKER_VOLUME_PREFIX,
+                                    adopt_version, effective))
+        return adopt_version, {"from": effective, "to": adopt_version}
+
+    def profile_copies(self):
+        path = os.path.join(self.state_dir, PROFILE_COPIES_FILE)
+        try:
+            data = read_json(path, {"schema": 1, "copies": []})
+        except (OSError, ValueError) as error:
+            raise MigrationError("%s is unreadable (%s); restore it from backup" % (path, error.__class__.__name__))
+        copies = data.get("copies") if isinstance(data, dict) and data.get("schema") == 1 else None
+        if not isinstance(copies, list) or not all(isinstance(c, dict) and isinstance(c.get("source"), str)
+                                                    and isinstance(c.get("target"), str) for c in copies):
+            raise MigrationError("%s is malformed; restore it from backup" % path)
+        return copies
+
+    def profile_transitions(self, adoption=None):
+        pairs = set()
+        for copy in self.profile_copies():
+            pairs |= {(copy["source"], copy["target"]), (copy["target"], copy["source"])}
+        if adoption:
+            pairs.add((WORKER_VOLUME_PREFIX + adoption["from"], WORKER_VOLUME_PREFIX + adoption["to"]))
+        return frozenset(pairs)
+
+    def volume_labels(self, name):
+        code, text = self.docker("volume", "inspect", name, check=False)
+        if code != 0:
+            return None
+        data = json.loads(text)
+        return ((data[0] if data else {}).get("Labels")) or {}
+
+    def ensure_profile_copy(self, adoption, helper, host):
+        """Copy the old custom-profiles volume into a new one. The old volume is mounted read-only."""
+        old, new = WORKER_VOLUME_PREFIX + adoption["from"], WORKER_VOLUME_PREFIX + adoption["to"]
+        if self.volume_labels(old) is None:
+            raise MigrationError("custom-profiles volume %s does not exist; nothing to adopt from" % old)
+        copies = self.profile_copies()
+        completed = any(c["source"] == old and c["target"] == new for c in copies)
+        labels = self.volume_labels(new)
+        recopy = False
+        if labels is not None:
+            if labels.get(PROFILE_COPY_LABEL) != old:
+                raise MigrationError("volume %s already exists and was not created by a profile adoption from %s. "
+                                     "Inspect it (`docker volume inspect %s`); remove it only if it is empty and "
+                                     "unused, then retry. Nothing was changed." % (new, old, new))
+            if completed:
+                self.say("Profiles were already copied from %s to %s; reusing %s. Changes made in %s since that copy "
+                         "are not merged." % (old, new, new, old))
+                return
+            recopy = True
+            self.say("Previous copy into %s did not complete; copying again." % new)
+        else:
+            self.docker("volume", "create", "--label", "%s=%s" % (PROFILE_COPY_LABEL, old), new)
+        script = 'set -eu; [ -z "$(ls -A /to)" ]; cp -a /from/. /to/; diff -r /from /to >/dev/null'
+        if recopy:
+            script = "set -eu; find /to -mindepth 1 -delete; " + script[len("set -eu; "):]
+        self.say("Copying custom profiles %s -> %s (old volume mounted read-only)" % (old, new))
+        self.docker("run", "--rm", "--network", "none", "--platform", host, "--user", "0",
+                    "--entrypoint", "/bin/sh", "-v", "%s:/from:ro" % old, "-v", "%s:/to" % new,
+                    helper, "-c", script)
+        copies.append({"source": old, "target": new, "fromVersion": adoption["from"],
+                       "toVersion": adoption["to"], "completedAt": utc_now()})
+        write_json_atomic(os.path.join(self.state_dir, PROFILE_COPIES_FILE), {"schema": 1, "copies": copies})
 
     def vendored_abs(self, deployment):
         return {self.path(v[2:]): self.path(k) for k, v in (deployment.get("vendored") or {}).items()}
@@ -641,14 +754,20 @@ class Controller:
         lineage = self.check_lineage(deployment, state, release, allow_unsafe, action)
         return host, needed, lineage
 
-    def plan(self, version, manifest_file=None, allow_insider=False, allow_unsafe=False):
+    def plan(self, version, manifest_file=None, allow_insider=False, allow_unsafe=False, adopt_orca=None,
+             accept_profile_risk=False):
         deployment = self.deployment()
         state = read_json(os.path.join(self.state_dir, "release.json"), {})
         release = self.load_release(version, manifest_file)
+        orca, adoption = self.orca_target(deployment, state, adopt_orca, accept_profile_risk)
         _, needed, lineage = self.preflight(deployment, release, allow_insider, allow_unsafe, state)
         containers = self.project_containers(deployment["project"])
-        resolved, _ = self.resolved_config(deployment, {c: release["images"][c] for c in needed})
-        self.check_storage(deployment["project"], resolved, containers, self.vendored_abs(deployment))
+        resolved, _ = self.resolved_config(deployment, {c: release["images"][c] for c in needed}, orca)
+        pending_volumes = set()
+        if adoption and self.volume_labels(WORKER_VOLUME_PREFIX + adoption["to"]) is None:
+            pending_volumes.add(WORKER_VOLUME_PREFIX + adoption["to"])
+        self.check_storage(deployment["project"], resolved, containers, self.vendored_abs(deployment),
+                           allowed_transitions=self.profile_transitions(adoption), pending_volumes=pending_volumes)
         current = {c["Config"]["Labels"].get("com.docker.compose.service"): c["Config"].get("Image")
                    for c in containers}
         self.say("Project %s in %s" % (deployment["project"], self.project_dir))
@@ -658,6 +777,13 @@ class Controller:
             self.say("  %s\n      old: %s\n      new: %s" % (service, current.get(service, "(not created)"),
                                                             release["images"][component]))
         self.say("Source lineage: %s. Storage identity: unchanged." % lineage)
+        if adoption:
+            self.say("OrcaSlicer profile adoption: copy %s%s -> %s%s (new volume%s); the worker will mount the new "
+                     "volume, the old one is kept unchanged."
+                     % (WORKER_VOLUME_PREFIX, adoption["from"], WORKER_VOLUME_PREFIX, adoption["to"],
+                        " created" if pending_volumes else " already exists"))
+        elif orca:
+            self.say("OrcaSlicer custom-profiles volume: %s%s" % (WORKER_VOLUME_PREFIX, orca))
         for name, volume in sorted((resolved.get("volumes") or {}).items()):
             self.say("  volume %-30s %s" % (name, volume.get("name", name)))
         self.say("Plan only: nothing pulled, written, or restarted.")
@@ -736,12 +862,18 @@ class Controller:
                 problems.append("version")
             if not isinstance(pending.get("images"), dict):
                 problems.append("images")
+            if pending.get("orcaslicerVersion") is not None and not isinstance(pending.get("orcaslicerVersion"), str):
+                problems.append("orcaslicerVersion")
+            adoption = pending.get("orcaAdoption")
+            if adoption is not None and not (isinstance(adoption, dict)
+                                             and all(isinstance(adoption.get(k), str) for k in ("from", "to"))):
+                problems.append("orcaAdoption")
         if problems:
             raise MigrationError("%s is malformed (invalid: %s)" % (path, ", ".join(problems)) + PENDING_HELP % path)
         return pending
 
     def apply(self, release, action, allow_insider=False, allow_unsafe=False, health_timeout=600,
-              resume_interrupted=False):
+              resume_interrupted=False, adopt_orca=None, accept_profile_risk=False, orca_version=None):
         deployment = self.deployment()
         pending_path = os.path.join(self.state_dir, "pending.json")
         state_path = os.path.join(self.state_dir, "release.json")
@@ -753,19 +885,43 @@ class Controller:
                                      "--resume-interrupted" % (pending["action"], pending["version"],
                                                                pending["phase"]))
             state = read_json(state_path, {})
+            if orca_version:
+                orca, adoption = orca_version, None
+            else:
+                orca, adoption = self.orca_target(deployment, state, adopt_orca, accept_profile_risk)
+            transitions = self.profile_transitions(adoption)
             host, needed, _ = self.preflight(deployment, release, allow_insider, allow_unsafe, state, action)
             containers = self.project_containers(deployment["project"])
             refs = {c: release["images"][c] for c in needed}
             transaction = {"action": action, "version": release["version"], "phase": "pulling",
-                           "startedAt": utc_now(), "images": refs, "previousPending": pending}
+                           "startedAt": utc_now(), "images": refs, "previousPending": pending,
+                           "orcaslicerVersion": orca, "orcaAdoption": adoption}
             write_json_atomic(pending_path, transaction)
 
             for component, reference in sorted(refs.items()):
                 self.say("Pulling %s" % reference)
                 self.docker("pull", "--platform", host, reference)
-                self.verify_image(component, reference, release, host, deployment)
-            resolved, env = self.resolved_config(deployment, refs)
-            self.check_storage(deployment["project"], resolved, containers, self.vendored_abs(deployment))
+                self.verify_image(component, reference, release, host, orca)
+            resolved, env = self.resolved_config(deployment, refs, orca)
+            new_volume = WORKER_VOLUME_PREFIX + adoption["to"] if adoption else None
+            self.check_storage(deployment["project"], resolved, containers, self.vendored_abs(deployment),
+                               allowed_transitions=transitions,
+                               pending_volumes={new_volume} if new_volume else set())
+            for name, service in sorted(resolved.get("services", {}).items()):
+                image = service.get("image", "")
+                if name not in deployment["services"] and image:
+                    code, _ = self.docker("image", "inspect", image, check=False)
+                    if code != 0:
+                        self.say("Pulling dependency image %s" % image)
+                        self.docker("pull", image)
+            self.say("All images present and verified; nothing has been stopped or restarted yet.")
+
+            if adoption:
+                transaction["phase"] = "copying"
+                write_json_atomic(pending_path, transaction)
+                self.ensure_profile_copy(adoption, refs["orcaslicer-worker"], host)
+                self.check_storage(deployment["project"], resolved, containers, self.vendored_abs(deployment),
+                                   allowed_transitions=self.profile_transitions())
             for name, service in sorted(resolved.get("services", {}).items()):
                 image = service.get("image", "")
                 if name not in deployment["services"] and image:
@@ -785,7 +941,8 @@ class Controller:
 
             previous = state.get("current") or {"kind": "git-checkout",
                                                  "sourceCommit": deployment["migratedFrom"]["deployedCommit"]}
-            write_json_atomic(state_path, {"schema": 1, "current": dict(release, appliedAt=utc_now()),
+            write_json_atomic(state_path, {"schema": 1,
+                                           "current": dict(release, appliedAt=utc_now(), orcaslicerVersion=orca),
                                            "previous": previous})
             os.remove(pending_path)
             self.say("PrintFarmer %s (%s) is running and healthy." % (release["version"], release["channel"]))
@@ -818,7 +975,7 @@ class Controller:
             current["phase"] = "failed-" + current["phase"]
             write_json_atomic(pending_path, current)
 
-    def verify_image(self, component, reference, release, host, deployment):
+    def verify_image(self, component, reference, release, host, orca_version):
         _, text = self.docker("image", "inspect", reference)
         image = json.loads(text)[0]
         labels = (image.get("Config") or {}).get("Labels") or {}
@@ -831,10 +988,11 @@ class Controller:
             problems.append("revision label")
         if labels.get("org.printfarmer.release-channel") != release["channel"]:
             problems.append("channel label")
-        if component == "orcaslicer-worker" and labels.get("orcaslicer.version") != deployment.get("orcaslicerVersion"):
-            expected = deployment.get("orcaslicerVersion")
-            problems.append("OrcaSlicer %s does not match the deployment's custom-profiles volume version %s; choose "
-                            "a release built with OrcaSlicer %s" % (labels.get("orcaslicer.version"), expected, expected))
+        if component == "orcaslicer-worker" and labels.get("orcaslicer.version") != orca_version:
+            problems.append("OrcaSlicer %s does not match the custom-profiles volume version %s. To move profiles to "
+                            "the new OrcaSlicer, rerun update with --adopt-orcaslicer-version %s "
+                            "--accept-profile-compatibility-risk (copies them into a new volume)"
+                            % (labels.get("orcaslicer.version"), orca_version, labels.get("orcaslicer.version")))
         if problems:
             raise MigrationError("%s image does not match the release: %s" % (component, "; ".join(problems)))
 
@@ -879,7 +1037,12 @@ class Controller:
                                  "checkout and scripts/deploy-docker.sh; restore data from backup if migrations ran")
         self.say("Rolling back images to %s. Data is NOT restored; restore your backup first if the newer release "
                  "ran database migrations (rollback also requires --allow-unsafe-downgrade)." % previous["version"])
-        return self.apply(previous, "rollback", **options)
+        deployment = self.deployment()
+        orca = previous.get("orcaslicerVersion") or deployment.get("orcaslicerVersion")
+        if orca and orca != self.effective_orca(deployment, state):
+            self.say("The worker returns to custom-profiles volume %s%s. Profile changes made since the adoption stay "
+                     "in the newer volume, which is kept." % (WORKER_VOLUME_PREFIX, orca))
+        return self.apply(previous, "rollback", orca_version=orca, **options)
 
     def status(self):
         deployment = self.deployment()
@@ -899,7 +1062,13 @@ class Controller:
         refs = dict(current["images"]) if current else {}
         for component in deployment["services"].values():
             refs.setdefault(component, "%s%s@sha256:%s" % (IMAGE_PREFIX, component, "0" * 64))
-        resolved, _ = self.resolved_config(deployment, refs)
+        resolved, _ = self.resolved_config(deployment, refs, self.effective_orca(deployment, state))
+        orca = self.effective_orca(deployment, state)
+        if orca and "orcaslicer-worker" in deployment["services"].values():
+            self.say("OrcaSlicer custom-profiles volume: %s%s" % (WORKER_VOLUME_PREFIX, orca))
+        for copy in self.profile_copies():
+            self.say("  profile copy %s -> %s completed %s" % (copy["source"], copy["target"],
+                                                               copy.get("completedAt", "?")))
         self.say("Host paths this deployment depends on:")
         for path in self.host_paths(resolved):
             present = os.path.exists(path)
@@ -946,17 +1115,26 @@ def build_parser():
         command.add_argument("--health-timeout", type=int, default=600)
         command.add_argument("--resume-interrupted", action="store_true")
 
+    def adoption_options(command):
+        command.add_argument("--adopt-orcaslicer-version", metavar="X.Y.Z",
+                             help="move custom profiles to the release's OrcaSlicer version by copying them into a "
+                                  "new printfarmer-custom-profiles-X.Y.Z volume (old volume kept unchanged)")
+        command.add_argument("--accept-profile-compatibility-risk", action="store_true",
+                             help="required with --adopt-orcaslicer-version")
+
     plan = sub.add_parser("plan", help="dry run: show image changes and storage identity")
     plan.add_argument("--version", required=True)
     plan.add_argument("--manifest-file", help="local copy of the release's container-images.json (lineage is still "
                                               "verified online through the GitHub compare API)")
     release_options(plan)
+    adoption_options(plan)
 
     update = sub.add_parser("update", help="pull, verify, and switch to a release")
     update.add_argument("--version", required=True)
     update.add_argument("--manifest-file", help="local copy of the release's container-images.json (lineage is still "
                                                 "verified online through the GitHub compare API)")
     apply_options(update)
+    adoption_options(update)
 
     rollback = sub.add_parser("rollback", help="switch images back to the previous release (no data restore; "
                                                "requires --allow-unsafe-downgrade after restoring a backup)")
@@ -972,7 +1150,8 @@ def main(argv=None, controller_factory=Controller):
         if args.command == "migrate":
             return controller.migrate(args.project, args.deployed_commit, args.dry_run, args.allow_new_services)
         if args.command == "plan":
-            return controller.plan(args.version, args.manifest_file, args.allow_insider, args.allow_unsafe_downgrade)
+            return controller.plan(args.version, args.manifest_file, args.allow_insider, args.allow_unsafe_downgrade,
+                                   args.adopt_orcaslicer_version, args.accept_profile_compatibility_risk)
         if args.command == "status":
             return controller.status()
         if not args.backup_confirmed:
@@ -981,7 +1160,8 @@ def main(argv=None, controller_factory=Controller):
         options = {"allow_insider": args.allow_insider, "allow_unsafe": args.allow_unsafe_downgrade,
                    "health_timeout": args.health_timeout, "resume_interrupted": args.resume_interrupted}
         if args.command == "update":
-            return controller.update(args.version, args.manifest_file, **options)
+            return controller.update(args.version, args.manifest_file, adopt_orca=args.adopt_orcaslicer_version,
+                                     accept_profile_risk=args.accept_profile_compatibility_risk, **options)
         return controller.rollback(**options)
     except MigrationError as error:
         sys.stderr.write("printfarmer-registry: %s\n" % error)
