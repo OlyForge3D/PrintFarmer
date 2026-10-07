@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { resolveMaterialLoadout, resolveActiveSlot, isLightColor } from '@/features/printers/utils/materialLoadout';
+import { resolveMaterialLoadout, resolveActiveSlot, resolveQidiRackSlot, isLightColor } from '@/features/printers/utils/materialLoadout';
 import { MmuProtocol } from '@/features/printers/constants/mmuProtocol';
 import type { MmuGate, MmuStatus, ToolheadDto } from '@/types/api';
 import { MmuGateStatus } from '@/types/api';
@@ -395,5 +395,28 @@ describe('resolveActiveSlot', () => {
 
   it('returns null when mmuStatus is undefined', () => {
     expect(resolveActiveSlot(undefined, 'gate')).toBeNull();
+  });
+});
+
+describe('resolveQidiRackSlot', () => {
+  it('surfaces the QidiBox external holder from the single physical toolhead', () => {
+    const rack = resolveQidiRackSlot(
+      mmu([gate(0), gate(1), gate(2), gate(3)], MmuProtocol.Qidibox),
+      [toolhead(0, { currentSpoolId: 127 }), persistedGate(1), persistedGate(2), persistedGate(3)],
+    );
+
+    expect(rack).not.toBeNull();
+    expect(rack!.label).toBe('Rack');
+    expect(rack!.external).toBe(true);
+    expect(rack!.apiIndex).toBe(0);
+    expect(rack!.spoolId).toBe(127);
+    expect(rack!.gcodeIndex).toBeUndefined();
+  });
+
+  it('surfaces nothing for other MMU types or ambiguous physical toolheads', () => {
+    const gates = [gate(0), gate(1), gate(2), gate(3)];
+    expect(resolveQidiRackSlot(mmu(gates, MmuProtocol.HappyHare), [toolhead(0)])).toBeNull();
+    expect(resolveQidiRackSlot(mmu(gates, MmuProtocol.Qidibox), [toolhead(0), toolhead(1)])).toBeNull();
+    expect(resolveQidiRackSlot(mmu(gates, MmuProtocol.Qidibox), undefined)).toBeNull();
   });
 });
