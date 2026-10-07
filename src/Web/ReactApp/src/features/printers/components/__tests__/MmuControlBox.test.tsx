@@ -455,7 +455,7 @@ describe('MmuControlBox', () => {
         <MmuControlBox
           {...props}
           toolheads={rackToolheads}
-          mmuStatus={status(qidiGates, { mmuType: MmuProtocol.Qidibox, activeGate: -2, activeTool: -2 })}
+          mmuStatus={status(qidiGates, { mmuType: MmuProtocol.Qidibox, activeGate: -2, activeTool: -2, hasBypass: true })}
         />,
       );
 
@@ -487,6 +487,19 @@ describe('MmuControlBox', () => {
       expect(rack).toHaveAttribute('aria-pressed', 'false');
       expect(screen.queryByText('In use')).not.toBeInTheDocument();
       expect(screen.queryByText(/Feeding from/)).not.toBeInTheDocument();
+    });
+
+    it('requires hasBypass alongside the -2 sentinel before marking Rack in use', () => {
+      render(
+        <MmuControlBox
+          {...props}
+          toolheads={rackToolheads}
+          mmuStatus={status(qidiGates, { mmuType: MmuProtocol.Qidibox, activeGate: -2, activeTool: -2, hasBypass: false })}
+        />,
+      );
+
+      expect(screen.getByRole('button', { name: 'Rack: ASA - Spool #127' })).toHaveAttribute('aria-pressed', 'false');
+      expect(screen.queryByText('In use')).not.toBeInTheDocument();
     });
 
     it('does not surface a Rack for non-QidiBox units or ambiguous physical toolheads', () => {
