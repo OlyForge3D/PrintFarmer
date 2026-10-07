@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import {
   useSetToolheadSpool,
@@ -76,17 +76,49 @@ export function useSlotSpoolAssignment({
   // the newer own-write revision (or the next write would 412 against our own
   // write); a prop equal to the latest own write means the refresh caught up;
   // any other token can only originate from a write after ours, so it wins.
-  const [ownWrite, setOwnWrite] = useState<{ revision: string; superseded: string[] } | null>(null);
-  const propIsStale =
-    !!ownWrite && (effectiveRowVersion === null || ownWrite.superseded.includes(effectiveRowVersion));
-  if (ownWrite && !propIsStale) {
+  const [ownWrite, setOwnWrite] = useState<
+    { printerId: string; revision: string; superseded: string[] } | null
+  >(null);
+  // The same hook instance is reused when the surrounding view switches
+  // printers. Revision tokens are per printer, so every anchor captured for the
+  // previous printer must be dropped before it can authorize a write here.
+  const [scopePrinterId, setScopePrinterId] = useState(printerId);
+  const currentPrinterIdRef = useRef(printerId);
+  useLayoutEffect(() => {
+    if (currentPrinterIdRef.current !== printerId) {
+      currentPrinterIdRef.current = printerId;
+      initialFallbackRevisionRef.current = null;
+    }
+  }, [printerId]);
+  if (scopePrinterId !== printerId) {
+    setScopePrinterId(printerId);
+    setSelectedKey(null);
+    setLockedRevision(null);
+    setCapturedFallbackRevision(null);
     setOwnWrite(null);
   }
-  const ownWriteRevision = ownWrite && propIsStale ? ownWrite.revision : null;
-  if (selectedKey && !lockedRevision && !capturedFallbackRevision && fallbackRevision) {
+  const inScope = scopePrinterId === printerId;
+  const scopedOwnWrite = inScope && ownWrite?.printerId === printerId ? ownWrite : null;
+  const scopedLockedRevision = inScope ? lockedRevision : null;
+  const scopedCapturedFallbackRevision = inScope ? capturedFallbackRevision : null;
+  const scopedSelectedKey = inScope ? selectedKey : null;
+  const propIsStale =
+    !!scopedOwnWrite &&
+    (effectiveRowVersion === null || scopedOwnWrite.superseded.includes(effectiveRowVersion));
+  if (inScope && ownWrite && !propIsStale) {
+    setOwnWrite(null);
+  }
+  const ownWriteRevision = scopedOwnWrite && propIsStale ? scopedOwnWrite.revision : null;
+  if (
+    scopedSelectedKey &&
+    !scopedLockedRevision &&
+    !scopedCapturedFallbackRevision &&
+    fallbackRevision
+  ) {
     setCapturedFallbackRevision(fallbackRevision);
   }
-  const activeRevision = lockedRevision ?? ownWriteRevision ?? capturedFallbackRevision ?? effectiveRowVersion;
+  const activeRevision =
+    scopedLockedRevision ?? ownWriteRevision ?? scopedCapturedFallbackRevision ?? effectiveRowVersion;
 
   useEffect(() => {
     if (
@@ -118,17 +150,30 @@ export function useSlotSpoolAssignment({
     setLockedRevision(key ? ownWriteRevision ?? effectiveRowVersion : null);
   };
 
-  const recordWrite = (consumedRevision: string, newRevision: string) => {
+  const recordWrite = (dispatchPrinterId: string, consumedRevision: string, newRevision: string) => {
+    // A write that resolves after the view switched printers must not anchor
+    // the new printer to the previous printer's revision.
+    if (currentPrinterIdRef.current !== dispatchPrinterId) return;
     setLockedRevision(newRevision);
-    setOwnWrite((prev) => ({
-      revision: newRevision,
-      superseded: [...new Set([...(prev?.superseded ?? []), ...(prev ? [prev.revision] : []), consumedRevision])]
-        .filter((token) => token !== newRevision),
-    }));
+    setOwnWrite((prev) => {
+      const sameScope = prev?.printerId === dispatchPrinterId ? prev : null;
+      return {
+        printerId: dispatchPrinterId,
+        revision: newRevision,
+        superseded: [
+          ...new Set([
+            ...(sameScope?.superseded ?? []),
+            ...(sameScope ? [sameScope.revision] : []),
+            consumedRevision,
+          ]),
+        ].filter((token) => token !== newRevision),
+      };
+    });
   };
 
   const requireRevision = (): string | null => {
-    const revision = lockedRevision ?? ownWriteRevision ?? initialFallbackRevisionRef.current ?? activeRevision;
+    const revision =
+      scopedLockedRevision ?? ownWriteRevision ?? initialFallbackRevisionRef.current ?? activeRevision;
     if (!revision) {
       toast.error('Printer revision unavailable. Refresh and review again.');
       return null;
@@ -158,7 +203,7 @@ export function useSlotSpoolAssignment({
         spoolId,
         reviewedRowVersion: revision,
       });
-      recordWrite(revision, newRevision);
+      recordWrite(printerId, revision, newRevision);
       onSpoolChange?.();
       return true;
     } catch {
@@ -177,7 +222,7 @@ export function useSlotSpoolAssignment({
         toolheadIndex: slot.apiIndex,
         reviewedRowVersion: revision,
       });
-      recordWrite(revision, newRevision);
+      recordWrite(printerId, revision, newRevision);
       onSpoolChange?.();
       return true;
     } catch {
@@ -186,7 +231,7 @@ export function useSlotSpoolAssignment({
   };
 
   return {
-    selectedKey,
+    selectedKey: scopedSelectedKey,
     selectSlot,
     canMutate,
     blockedReason,
