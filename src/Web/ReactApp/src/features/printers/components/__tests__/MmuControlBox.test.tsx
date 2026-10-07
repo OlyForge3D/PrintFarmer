@@ -237,6 +237,61 @@ describe('MmuControlBox', () => {
     expect(screen.getByRole('button', { name: /^Gate 1A:/ })).toHaveAttribute('data-status', 'unknown');
   });
 
+  it('does not join coverage onto gates when the saved layout is unresolved', () => {
+    coverage.mockReturnValue({
+      printerId: 'printer-1',
+      printerName: 'qp4-1',
+      status: 'runout',
+      toolheads: [{ toolheadIndex: 1, status: 'runout', statusReason: null, remainingGrams: 100, totalDemandGrams: 400 }],
+    });
+    render(
+      <MmuControlBox
+        printerId="printer-1"
+        mmuStatus={status(qidiGates, { mmuType: MmuProtocol.Qidibox })}
+        isOnline
+        toolheads={[toolhead(0, 'Physical'), toolhead(2, 'MmuGate'), toolhead(3, 'MmuGate')]}
+        reviewedRowVersion="rev-1"
+      />,
+    );
+
+    for (const name of [/^Gate 1A:/, /^Gate 1B:/, /^Gate 1C:/, /^Gate 1D:/]) {
+      expect(screen.getByRole('button', { name })).toHaveAttribute('data-status', 'unknown');
+    }
+  });
+
+  it('keeps the post-write revision for a rapid second release', async () => {
+    clearSpool.mockResolvedValueOnce('rev-2').mockResolvedValueOnce('rev-3');
+    const props = {
+      printerId: 'printer-1',
+      mmuStatus: status([gate(0), gate(1)], { mmuType: MmuProtocol.Qidibox, activeGate: 0 }),
+      isOnline: true,
+      toolheads: [
+        toolhead(0, 'Physical'),
+        toolhead(1, 'MmuGate', { currentSpoolId: 80 }),
+        toolhead(2, 'MmuGate', { currentSpoolId: 81 }),
+      ],
+    };
+    const { rerender } = render(<MmuControlBox {...props} reviewedRowVersion="rev-1" />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Release' }));
+    await waitFor(() => expect(clearSpool).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByRole('button', { name: /^Gate 1B:/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Release' }));
+    await waitFor(() => expect(clearSpool).toHaveBeenLastCalledWith({
+      printerId: 'printer-1',
+      toolheadIndex: 2,
+      reviewedRowVersion: 'rev-2',
+    }));
+
+    rerender(<MmuControlBox {...props} reviewedRowVersion="rev-4" />);
+    fireEvent.click(screen.getByRole('button', { name: /^Gate 1A:/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Release' }));
+    await waitFor(() => expect(clearSpool).toHaveBeenLastCalledWith(
+      expect.objectContaining({ toolheadIndex: 1, reviewedRowVersion: 'rev-4' }),
+    ));
+  });
+
   it('uses the live inset-surface token for every spool hub', () => {
     const { container } = render(
       <MmuControlBox printerId="printer-1" mmuStatus={status([gate(0, { spoolId: 1 })])} isOnline />,
@@ -355,7 +410,7 @@ describe('MmuControlBox', () => {
         <MmuControlBox
           {...props}
           toolheads={[toolhead(0, 'Physical'), ...rackToolheads.slice(1)]}
-          mmuStatus={status(qidiGates, { mmuType: MmuProtocol.Qidibox, activeGate: 1 })}
+          mmuStatus={status(qidiGates, { mmuType: MmuProtocol.Qidibox, hasBypass: true, activeGate: 1 })}
         />,
       );
 
@@ -375,7 +430,7 @@ describe('MmuControlBox', () => {
         <MmuControlBox
           {...props}
           toolheads={rackToolheads}
-          mmuStatus={status(qidiGates, { mmuType: MmuProtocol.Qidibox, activeGate: 0 })}
+          mmuStatus={status(qidiGates, { mmuType: MmuProtocol.Qidibox, hasBypass: true, activeGate: 0 })}
         />,
       );
 
@@ -396,7 +451,7 @@ describe('MmuControlBox', () => {
         <MmuControlBox
           {...props}
           toolheads={rackToolheads}
-          mmuStatus={status(qidiGates, { mmuType: MmuProtocol.Qidibox, activeGate: 2 })}
+          mmuStatus={status(qidiGates, { mmuType: MmuProtocol.Qidibox, hasBypass: true, activeGate: 2 })}
         />,
       );
 
@@ -412,7 +467,7 @@ describe('MmuControlBox', () => {
         <MmuControlBox
           {...props}
           toolheads={rackToolheads}
-          mmuStatus={status(qidiGates, { mmuType: MmuProtocol.Qidibox, activeGate: 0 })}
+          mmuStatus={status(qidiGates, { mmuType: MmuProtocol.Qidibox, hasBypass: true, activeGate: 0 })}
         />,
       );
 
@@ -422,7 +477,7 @@ describe('MmuControlBox', () => {
         <MmuControlBox
           {...props}
           toolheads={rackToolheads}
-          mmuStatus={status(qidiGates, { mmuType: MmuProtocol.Qidibox, activeGate: -1, filamentState: 'Unloaded' })}
+          mmuStatus={status(qidiGates, { mmuType: MmuProtocol.Qidibox, hasBypass: true, activeGate: -1, filamentState: 'Unloaded' })}
         />,
       );
       expect(screen.getByRole('button', { name: /^Rack:/ })).toBeInTheDocument();
@@ -437,7 +492,7 @@ describe('MmuControlBox', () => {
         <MmuControlBox
           {...props}
           toolheads={rackToolheads}
-          mmuStatus={status(qidiGates, { mmuType: MmuProtocol.Qidibox, activeGate: 0 })}
+          mmuStatus={status(qidiGates, { mmuType: MmuProtocol.Qidibox, hasBypass: true, activeGate: 0 })}
         />,
       );
 
@@ -479,7 +534,7 @@ describe('MmuControlBox', () => {
         <MmuControlBox
           {...props}
           toolheads={rackToolheads}
-          mmuStatus={status(qidiGates, { mmuType: MmuProtocol.Qidibox, activeGate: -1, filamentState: 'Unloaded' })}
+          mmuStatus={status(qidiGates, { mmuType: MmuProtocol.Qidibox, hasBypass: true, activeGate: -1, filamentState: 'Unloaded' })}
         />,
       );
 
@@ -489,7 +544,7 @@ describe('MmuControlBox', () => {
       expect(screen.queryByText(/Feeding from/)).not.toBeInTheDocument();
     });
 
-    it('requires hasBypass alongside the -2 sentinel before marking Rack in use', () => {
+    it('hides the Rack when the device reports no bypass holder', () => {
       render(
         <MmuControlBox
           {...props}
@@ -498,7 +553,7 @@ describe('MmuControlBox', () => {
         />,
       );
 
-      expect(screen.getByRole('button', { name: 'Rack: ASA - Spool #127' })).toHaveAttribute('aria-pressed', 'false');
+      expect(screen.queryByRole('button', { name: /^Rack:/ })).not.toBeInTheDocument();
       expect(screen.queryByText('In use')).not.toBeInTheDocument();
     });
 
@@ -516,7 +571,7 @@ describe('MmuControlBox', () => {
         <MmuControlBox
           {...props}
           toolheads={[...rackToolheads, toolhead(4, 'Physical')]}
-          mmuStatus={status(qidiGates, { mmuType: MmuProtocol.Qidibox, activeGate: -1 })}
+          mmuStatus={status(qidiGates, { mmuType: MmuProtocol.Qidibox, hasBypass: true, activeGate: -1 })}
         />,
       );
       expect(screen.queryByRole('button', { name: /^Rack:/ })).not.toBeInTheDocument();

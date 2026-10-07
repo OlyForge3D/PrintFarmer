@@ -231,12 +231,13 @@ function externalSlotFromToolhead(
  * slots. Its spool binding lives on the persisted physical toolhead, never on a
  * gate, so it is surfaced from that toolhead's own index. With more than one
  * physical toolhead the holder's identity is ambiguous, so nothing is surfaced.
+ * The holder is only surfaced when the device reports it (`hasBypass`).
  */
 export function resolveQidiRackSlot(
   mmuStatus: MmuStatus | null | undefined,
   toolheads: ToolheadDto[] | undefined,
 ): LoadoutSlot | null {
-  if (mmuStatus?.mmuType !== MmuProtocol.Qidibox) return null;
+  if (mmuStatus?.mmuType !== MmuProtocol.Qidibox || !mmuStatus.hasBypass) return null;
   const physical = (toolheads ?? []).filter((toolhead) => !isMmuGate(toolhead));
   if (physical.length !== 1) return null;
   return { ...externalSlotFromToolhead(physical[0]), label: 'Rack' };

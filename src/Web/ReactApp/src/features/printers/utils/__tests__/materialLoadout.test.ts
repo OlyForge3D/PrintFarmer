@@ -401,7 +401,7 @@ describe('resolveActiveSlot', () => {
 describe('resolveQidiRackSlot', () => {
   it('surfaces the QidiBox external holder from the single physical toolhead', () => {
     const rack = resolveQidiRackSlot(
-      mmu([gate(0), gate(1), gate(2), gate(3)], MmuProtocol.Qidibox),
+      { ...mmu([gate(0), gate(1), gate(2), gate(3)], MmuProtocol.Qidibox), hasBypass: true },
       [toolhead(0, { currentSpoolId: 127 }), persistedGate(1), persistedGate(2), persistedGate(3)],
     );
 
@@ -418,5 +418,12 @@ describe('resolveQidiRackSlot', () => {
     expect(resolveQidiRackSlot(mmu(gates, MmuProtocol.HappyHare), [toolhead(0)])).toBeNull();
     expect(resolveQidiRackSlot(mmu(gates, MmuProtocol.Qidibox), [toolhead(0), toolhead(1)])).toBeNull();
     expect(resolveQidiRackSlot(mmu(gates, MmuProtocol.Qidibox), undefined)).toBeNull();
+  });
+
+  it('surfaces nothing when the QidiBox does not report a bypass holder', () => {
+    const gates = [gate(0), gate(1), gate(2), gate(3)];
+    const toolheads = [toolhead(0, { currentSpoolId: 127 }), persistedGate(1), persistedGate(2), persistedGate(3)];
+    expect(resolveQidiRackSlot(mmu(gates, MmuProtocol.Qidibox), toolheads)).toBeNull();
+    expect(resolveQidiRackSlot({ ...mmu(gates, MmuProtocol.Qidibox), hasBypass: false }, toolheads)).toBeNull();
   });
 });
