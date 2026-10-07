@@ -8,7 +8,6 @@
  * - Click to view printer details or maintenance history
  */
 
-import React from 'react';
 import { 
   PrinterIcon, 
   WrenchIcon, 

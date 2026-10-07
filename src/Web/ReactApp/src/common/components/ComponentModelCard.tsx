@@ -1,4 +1,3 @@
-import React from 'react';
 import { Card, Button, Badge } from '@/common/components/ui';
 
 /**

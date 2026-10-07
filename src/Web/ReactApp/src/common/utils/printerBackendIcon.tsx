@@ -1,4 +1,3 @@
-import React from 'react';
 import { PrinterBackend } from '@/types/api';
 import { toPrinterBackend } from '@/common/utils/enumHelpers';
 import moonrakerIcon from '@/assets/moonraker.svg';

@@ -65,7 +65,7 @@ describe('floating bar inset (#1010)', () => {
   it('republishes when the bar resizes, which is the whole point of measuring', () => {
     const observed: (() => void)[] = [];
     class FakeResizeObserver {
-      constructor(private readonly callback: () => void) {
+      constructor(callback: () => void) {
         observed.push(callback);
       }
       observe() {}

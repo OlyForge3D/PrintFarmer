@@ -1,4 +1,3 @@
-import React from 'react';
 import { Card, Button, Badge } from '@/common/components/ui';
 import type { PrinterModelDto, MotionTypeString, PrinterBackendString } from '@/types/api';
 

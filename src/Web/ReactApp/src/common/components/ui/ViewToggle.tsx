@@ -1,4 +1,3 @@
-import React from 'react';
 import { Button } from './Button';
 import { viewModeIcons, type ViewModeIconName, type ViewModeOption } from './viewModeIcons';
 

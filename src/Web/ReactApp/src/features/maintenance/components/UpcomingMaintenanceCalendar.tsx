@@ -9,7 +9,7 @@
  * - Color coding by priority/overdue status
  */
 
-import React, { useState, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { Button } from '@/common/components/ui';
 import { 
   format, 

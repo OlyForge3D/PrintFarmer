@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useEffectEvent, useContext } from 'react';
+import { useState, useEffect, useEffectEvent, useContext } from 'react';
 import { usePasswordPolicy } from '@/common/hooks/usePasswordPolicy';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import type { EmbeddablePageProps } from '@/common/components/EmbeddablePageProps';

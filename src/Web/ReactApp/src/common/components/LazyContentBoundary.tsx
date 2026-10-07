@@ -1,4 +1,4 @@
-import React, { Component, Suspense, type ErrorInfo, type ReactNode } from 'react';
+import { Component, Suspense, type ErrorInfo, type ReactNode } from 'react';
 import { Button } from '@/common/components/ui';
 
 interface LazyContentErrorBoundaryProps {

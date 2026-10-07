@@ -13,7 +13,6 @@
  *  - unrelated/public query cache entries are left untouched by the
  *    logout/login transition.
  */
-import React from 'react';
 import { render, screen, act, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { QueryClientProvider } from '@tanstack/react-query';
