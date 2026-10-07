@@ -63,6 +63,46 @@ describe('resolveMaterialLoadout', () => {
     expect(loadout!.hasResolvedTopology).toBe(false);
   });
 
+  it('does not gap-fill a unit smaller than the backend minimum gate count', () => {
+    // The backend pads gap-fill to at least four gates, so a two-gate unit
+    // would gain phantom gates beyond its live count.
+    const loadout = resolveMaterialLoadout(
+      mmu([gate(0), gate(1)], MmuProtocol.Qidibox),
+      [toolhead(0), persistedGate(1)],
+    );
+
+    expect(loadout!.hasResolvedTopology).toBe(false);
+    expect(loadout!.topologyPending).toBe(false);
+  });
+
+  it('does not gap-fill when more than one physical toolhead is persisted', () => {
+    const loadout = resolveMaterialLoadout(
+      mmu([gate(0), gate(1), gate(2), gate(3)], MmuProtocol.Qidibox),
+      [toolhead(0), toolhead(5), persistedGate(1), persistedGate(2), persistedGate(3)],
+    );
+
+    expect(loadout!.hasResolvedTopology).toBe(false);
+  });
+
+  it('never backfills a gate slot from a persisted non-gate toolhead', () => {
+    const loadout = resolveMaterialLoadout(
+      mmu([gate(0), gate(1)], MmuProtocol.Qidibox),
+      [toolhead(0), toolhead(1, { currentSpoolId: 7 })],
+    );
+
+    expect(loadout!.slots.map((s) => s.spoolId)).not.toContain(7);
+  });
+
+  it('reports a pending (not mismatched) topology while toolheads are loading', () => {
+    const loadout = resolveMaterialLoadout(
+      mmu([gate(0), gate(1), gate(2), gate(3)], MmuProtocol.Qidibox),
+      undefined,
+    );
+
+    expect(loadout!.hasResolvedTopology).toBe(false);
+    expect(loadout!.topologyPending).toBe(true);
+  });
+
   it('shows the persisted spool on a gate whose live status reports none', () => {
     const loadout = resolveMaterialLoadout(
       mmu([gate(0), gate(1)], MmuProtocol.Qidibox),

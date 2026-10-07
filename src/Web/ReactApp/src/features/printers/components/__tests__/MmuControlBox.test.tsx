@@ -1,17 +1,38 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import type { ReactElement } from 'react';
+import { fireEvent, render as rtlRender, screen, waitFor } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { toast } from 'sonner';
 import { MmuControlBox } from '../MmuControlBox';
 import { MmuProtocol } from '@/features/printers/constants/mmuProtocol';
 import { MmuGateStatus, type MmuGate, type MmuStatus, type ToolheadDto } from '@/types/api';
 
 const setSpool = vi.fn();
 const clearSpool = vi.fn();
+const coverage = vi.fn();
+let queryClient: QueryClient;
 
 vi.mock('@/common/hooks/useApi', () => ({
   useSetToolheadSpool: () => ({ mutateAsync: setSpool, isPending: false }),
   useClearToolheadSpool: () => ({ mutateAsync: clearSpool, isPending: false }),
   usePrinterDetails: () => ({ data: undefined }),
+  queryKeys: { printerDetails: (id: string) => ['printers', id, 'details'] },
 }));
+
+vi.mock('@/features/filament-coverage/hooks', () => ({
+  usePrinterCoverageFromFleet: () => ({ data: coverage() }),
+}));
+
+vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
+
+function render(ui: ReactElement) {
+  const result = rtlRender(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>);
+  return {
+    ...result,
+    rerender: (next: ReactElement) =>
+      result.rerender(<QueryClientProvider client={queryClient}>{next}</QueryClientProvider>),
+  };
+}
 
 vi.mock('@/services/api', () => ({ apiClient: {} }));
 
@@ -68,8 +89,152 @@ const threePersistedGates = [
 
 describe('MmuControlBox', () => {
   beforeEach(() => {
+    queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     setSpool.mockReset().mockResolvedValue('rev-2');
     clearSpool.mockReset().mockResolvedValue('rev-2');
+    coverage.mockReset().mockReturnValue(undefined);
+    vi.mocked(toast.error).mockReset();
+  });
+
+  const twoGateToolheads = [toolhead(0, 'Physical'), toolhead(1, 'MmuGate'), toolhead(2, 'MmuGate')];
+
+  it('resolves gates by identity when telemetry arrives out of order', async () => {
+    render(
+      <MmuControlBox
+        printerId="printer-1"
+        mmuStatus={status([gate(1, { material: 'PETG' }), gate(0)], { mmuType: MmuProtocol.Qidibox, activeGate: 0 })}
+        isOnline
+        toolheads={twoGateToolheads}
+        reviewedRowVersion="rev-1"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Assign' }));
+    fireEvent.click(screen.getByTestId('spool-picker'));
+
+    await waitFor(() => expect(setSpool).toHaveBeenCalledWith(expect.objectContaining({ toolheadIndex: 1, spoolId: 99 })));
+  });
+
+  it('pins the picker to the slot it was opened for when the active gate changes', async () => {
+    const props = {
+      printerId: 'printer-1',
+      isOnline: true,
+      toolheads: twoGateToolheads,
+      reviewedRowVersion: 'rev-1',
+    };
+    const { rerender } = render(
+      <MmuControlBox {...props} mmuStatus={status([gate(0), gate(1)], { mmuType: MmuProtocol.Qidibox, activeGate: 0 })} />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Assign' }));
+    rerender(
+      <MmuControlBox {...props} mmuStatus={status([gate(0), gate(1)], { mmuType: MmuProtocol.Qidibox, activeGate: 1 })} />,
+    );
+    fireEvent.click(screen.getByTestId('spool-picker'));
+
+    await waitFor(() => expect(setSpool).toHaveBeenCalledWith(expect.objectContaining({ toolheadIndex: 1 })));
+    expect(setSpool).not.toHaveBeenCalledWith(expect.objectContaining({ toolheadIndex: 2 }));
+  });
+
+  it('fails closed when the pinned slot disappears before confirmation', async () => {
+    const props = {
+      printerId: 'printer-1',
+      isOnline: true,
+      toolheads: twoGateToolheads,
+      reviewedRowVersion: 'rev-1',
+    };
+    const { rerender } = render(
+      <MmuControlBox {...props} mmuStatus={status([gate(0), gate(1)], { mmuType: MmuProtocol.Qidibox, activeGate: 1 })} />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Assign' }));
+    rerender(
+      <MmuControlBox {...props} mmuStatus={status([gate(0)], { mmuType: MmuProtocol.Qidibox, activeGate: 0 })} />,
+    );
+    fireEvent.click(screen.getByTestId('spool-picker'));
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    expect(setSpool).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('spool-picker')).not.toBeInTheDocument();
+  });
+
+  it('allows releasing a stale binding from a device-disabled gate', async () => {
+    render(
+      <MmuControlBox
+        printerId="printer-1"
+        mmuStatus={status(
+          [gate(0, { status: MmuGateStatus.Disabled }), gate(1)],
+          { mmuType: MmuProtocol.Qidibox, activeGate: 0 },
+        )}
+        isOnline
+        toolheads={[toolhead(0, 'Physical'), toolhead(1, 'MmuGate', { currentSpoolId: 80 }), toolhead(2, 'MmuGate')]}
+        reviewedRowVersion="rev-1"
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: /^(Assign|Change)$/ })).toHaveAttribute('aria-disabled', 'true');
+    const release = screen.getByRole('button', { name: 'Release' });
+    expect(release).not.toHaveAttribute('aria-disabled', 'true');
+    fireEvent.click(release);
+
+    await waitFor(() => expect(clearSpool).toHaveBeenCalledWith({
+      printerId: 'printer-1',
+      toolheadIndex: 1,
+      reviewedRowVersion: 'rev-1',
+    }));
+  });
+
+  it('says the layout is loading, without a retry, while toolheads are pending', () => {
+    render(
+      <MmuControlBox
+        printerId="printer-1"
+        mmuStatus={status(qidiGates, { mmuType: MmuProtocol.Qidibox })}
+        isOnline
+        reviewedRowVersion="rev-1"
+      />,
+    );
+
+    expect(screen.getByRole('status')).toHaveTextContent('Loading saved gate layout');
+    expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
+  });
+
+  it('offers a retry that refetches printer details on a layout mismatch', () => {
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+    render(
+      <MmuControlBox
+        printerId="printer-1"
+        mmuStatus={status(qidiGates, { mmuType: MmuProtocol.Qidibox })}
+        isOnline
+        toolheads={[toolhead(0, 'Physical'), toolhead(1, 'Physical')]}
+        reviewedRowVersion="rev-1"
+      />,
+    );
+
+    expect(screen.getByRole('status')).toHaveTextContent(/does not match/);
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['printers', 'printer-1', 'details'] });
+  });
+
+  it('surfaces runout risk on the affected gate', () => {
+    coverage.mockReturnValue({
+      printerId: 'printer-1',
+      printerName: 'qp4-1',
+      status: 'runout',
+      toolheads: [{ toolheadIndex: 2, status: 'runout', statusReason: null, remainingGrams: 100, totalDemandGrams: 400 }],
+    });
+    render(
+      <MmuControlBox
+        printerId="printer-1"
+        mmuStatus={status(qidiGates, { mmuType: MmuProtocol.Qidibox })}
+        isOnline
+        toolheads={threePersistedGates}
+        reviewedRowVersion="rev-1"
+      />,
+    );
+
+    const atRisk = screen.getByRole('button', { name: /^Gate 1C:.*runout risk$/ });
+    expect(atRisk).toHaveAttribute('data-status', 'runout');
+    expect(screen.getByRole('button', { name: /^Gate 1A:/ })).toHaveAttribute('data-status', 'unknown');
   });
 
   it('uses the live inset-surface token for every spool hub', () => {
