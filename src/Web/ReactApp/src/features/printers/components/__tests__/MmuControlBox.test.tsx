@@ -335,4 +335,139 @@ describe('MmuControlBox', () => {
     fireEvent.click(assign);
     expect(screen.queryByTestId('spool-picker')).not.toBeInTheDocument();
   });
+
+  describe('QidiBox Rack (external spool holder)', () => {
+    // Live qp4-1 shape: Rack spool persisted on physical toolhead 0, box slots on 1..3.
+    const rackToolheads = [
+      toolhead(0, 'Physical', { currentSpoolId: 127, currentMaterial: 'ASA', currentFilamentColor: '#222222' }),
+      toolhead(1, 'MmuGate', { currentSpoolId: 80 }),
+      toolhead(2, 'MmuGate', { currentSpoolId: 39 }),
+      toolhead(3, 'MmuGate', { currentSpoolId: 111 }),
+    ];
+    const props = {
+      printerId: 'printer-1',
+      isOnline: true,
+      reviewedRowVersion: 'rev-1',
+    };
+
+    it('selecting Rack opens the picker and binds physical toolhead 0, not a gate', async () => {
+      render(
+        <MmuControlBox
+          {...props}
+          toolheads={[toolhead(0, 'Physical'), ...rackToolheads.slice(1)]}
+          mmuStatus={status(qidiGates, { mmuType: MmuProtocol.Qidibox, activeGate: 1 })}
+        />,
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: 'Rack: Empty' }));
+      expect(screen.getByText('Rack (external spool)')).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Assign' }));
+      fireEvent.click(screen.getByTestId('spool-picker'));
+
+      await waitFor(() => expect(setSpool).toHaveBeenCalledWith(
+        expect.objectContaining({ toolheadIndex: 0, spoolId: 99 }),
+      ));
+      expect(setSpool).toHaveBeenCalledTimes(1);
+    });
+
+    it('releases the Rack spool from toolhead 0 without touching a gate', async () => {
+      render(
+        <MmuControlBox
+          {...props}
+          toolheads={rackToolheads}
+          mmuStatus={status(qidiGates, { mmuType: MmuProtocol.Qidibox, activeGate: 0 })}
+        />,
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: 'Rack: ASA - Spool #127' }));
+      expect(screen.getByText('#127')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Change' })).not.toHaveAttribute('aria-disabled', 'true');
+      fireEvent.click(screen.getByRole('button', { name: 'Release' }));
+
+      await waitFor(() => expect(clearSpool).toHaveBeenCalledWith({
+        printerId: 'printer-1',
+        toolheadIndex: 0,
+        reviewedRowVersion: 'rev-1',
+      }));
+    });
+
+    it('keeps box-slot commands off the loaded gate while Rack is selected', () => {
+      render(
+        <MmuControlBox
+          {...props}
+          toolheads={rackToolheads}
+          mmuStatus={status(qidiGates, { mmuType: MmuProtocol.Qidibox, activeGate: 2 })}
+        />,
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: /^Rack:/ }));
+      for (const name of ['Eject', 'Unload', 'Load']) {
+        expect(screen.getByRole('button', { name })).toBeDisabled();
+      }
+      expect(screen.getByRole('button', { name: /^Rack:/ })).toHaveAttribute('aria-pressed', 'true');
+    });
+
+    it('keeps Rack selectable and pinned across active-gate transitions, including unloaded', async () => {
+      const { rerender } = render(
+        <MmuControlBox
+          {...props}
+          toolheads={rackToolheads}
+          mmuStatus={status(qidiGates, { mmuType: MmuProtocol.Qidibox, activeGate: 0 })}
+        />,
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: /^Rack:/ }));
+      fireEvent.click(screen.getByRole('button', { name: 'Change' }));
+      rerender(
+        <MmuControlBox
+          {...props}
+          toolheads={rackToolheads}
+          mmuStatus={status(qidiGates, { mmuType: MmuProtocol.Qidibox, activeGate: -1, filamentState: 'Unloaded' })}
+        />,
+      );
+      expect(screen.getByRole('button', { name: /^Rack:/ })).toBeInTheDocument();
+      expect(screen.queryByText('In use')).not.toBeInTheDocument();
+      fireEvent.click(screen.getByTestId('spool-picker'));
+
+      await waitFor(() => expect(setSpool).toHaveBeenCalledWith(expect.objectContaining({ toolheadIndex: 0 })));
+    });
+
+    it('selecting a box slot after Rack targets that gate again', async () => {
+      render(
+        <MmuControlBox
+          {...props}
+          toolheads={rackToolheads}
+          mmuStatus={status(qidiGates, { mmuType: MmuProtocol.Qidibox, activeGate: 0 })}
+        />,
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: /^Rack:/ }));
+      fireEvent.click(screen.getByRole('button', { name: /^Gate 1C:/ }));
+      expect(screen.queryByText('Rack (external spool)')).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Change' }));
+      fireEvent.click(screen.getByTestId('spool-picker'));
+
+      await waitFor(() => expect(setSpool).toHaveBeenCalledWith(expect.objectContaining({ toolheadIndex: 3 })));
+    });
+
+    it('does not surface a Rack for non-QidiBox units or ambiguous physical toolheads', () => {
+      const { rerender } = render(
+        <MmuControlBox
+          {...props}
+          toolheads={rackToolheads}
+          mmuStatus={status(qidiGates, { mmuType: MmuProtocol.HappyHare, activeGate: -1 })}
+        />,
+      );
+      expect(screen.queryByRole('button', { name: /^Rack:/ })).not.toBeInTheDocument();
+
+      rerender(
+        <MmuControlBox
+          {...props}
+          toolheads={[...rackToolheads, toolhead(4, 'Physical')]}
+          mmuStatus={status(qidiGates, { mmuType: MmuProtocol.Qidibox, activeGate: -1 })}
+        />,
+      );
+      expect(screen.queryByRole('button', { name: /^Rack:/ })).not.toBeInTheDocument();
+    });
+  });
 });

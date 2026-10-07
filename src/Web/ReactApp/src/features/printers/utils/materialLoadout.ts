@@ -226,6 +226,23 @@ function externalSlotFromToolhead(
 }
 
 /**
+ * A QidiBox printer also has an external spool holder ("Rack", firmware
+ * `filament_slot16`) that feeds the hotend directly and is not one of the box's
+ * slots. Its spool binding lives on the persisted physical toolhead, never on a
+ * gate, so it is surfaced from that toolhead's own index. With more than one
+ * physical toolhead the holder's identity is ambiguous, so nothing is surfaced.
+ */
+export function resolveQidiRackSlot(
+  mmuStatus: MmuStatus | null | undefined,
+  toolheads: ToolheadDto[] | undefined,
+): LoadoutSlot | null {
+  if (mmuStatus?.mmuType !== MmuProtocol.Qidibox) return null;
+  const physical = (toolheads ?? []).filter((toolhead) => !isMmuGate(toolhead));
+  if (physical.length !== 1) return null;
+  return { ...externalSlotFromToolhead(physical[0]), label: 'Rack' };
+}
+
+/**
  * Collapse the live MMU status and the persisted toolhead topology into a single
  * ordered list of filament slots.
  *
