@@ -37,11 +37,11 @@ public sealed class UnifiedSettingsPersistenceConcurrencyTests : IDisposable
         SettingsService service = new(new ConfigurationBuilder().Build(), factory.Object,
             NullLogger<SettingsService>.Instance, new EfAppSettingsRepository(repositoryContext));
 
-        service.Save(new UpdateChannelSettings());
-        SettingsSectionSnapshot first = service.GetSectionSnapshot("UpdateChannel");
+        service.Save(new CatalogUpdateSettings());
+        SettingsSectionSnapshot first = service.GetSectionSnapshot("CatalogUpdates");
         first.RowVersion.Should().NotBe(SettingsSectionSnapshot.AbsentRowVersion);
         SettingsSectionSnapshot second = await service.SaveWithConcurrencyCheckAsync(
-            new UpdateChannelSettings { Channel = "insider", InsiderAcknowledged = true }, first.RowVersion);
+            new CatalogUpdateSettings { Enabled = false }, first.RowVersion);
         second.RowVersion.Should().NotBe(first.RowVersion);
     }
 
@@ -50,21 +50,21 @@ public sealed class UnifiedSettingsPersistenceConcurrencyTests : IDisposable
     {
         SettingsService first = CreateService();
         SettingsSectionSnapshot seed = await first.SaveWithConcurrencyCheckAsync(
-            new UpdateChannelSettings(), SettingsSectionSnapshot.AbsentRowVersion);
+            new CatalogUpdateSettings(), SettingsSectionSnapshot.AbsentRowVersion);
         SettingsService second = CreateService();
-        SettingsSectionSnapshot old = second.GetSectionSnapshot("UpdateChannel");
+        SettingsSectionSnapshot old = second.GetSectionSnapshot("CatalogUpdates");
         SettingsSectionSnapshot saved = await first.SaveWithConcurrencyCheckAsync(
-            new UpdateChannelSettings { Channel = "insider", InsiderAcknowledged = true }, seed.RowVersion);
+            new CatalogUpdateSettings { Enabled = false }, seed.RowVersion);
 
         Func<Task> staleSave = () => second.SaveWithConcurrencyCheckAsync(
-            new UpdateChannelSettings { Channel = "stable" }, old.RowVersion);
+            new CatalogUpdateSettings { Enabled = true }, old.RowVersion);
         await staleSave.Should().ThrowAsync<DbUpdateConcurrencyException>();
-        second.GetSectionSnapshot("UpdateChannel").Should().BeEquivalentTo(old);
+        second.GetSectionSnapshot("CatalogUpdates").Should().BeEquivalentTo(old);
 
         // A long-lived reader must not attach a freshly queried token to its old cached values.
         old.RowVersion.Should().NotBe(saved.RowVersion);
-        ((UpdateChannelSettings)old.Value).Channel.Should().Be("stable");
-        CreateService().GetSectionSnapshot("UpdateChannel").Should().BeEquivalentTo(saved);
+        ((CatalogUpdateSettings)old.Value).Enabled.Should().BeTrue();
+        CreateService().GetSectionSnapshot("CatalogUpdates").Should().BeEquivalentTo(saved);
     }
 
     [Theory]
@@ -76,24 +76,24 @@ public sealed class UnifiedSettingsPersistenceConcurrencyTests : IDisposable
         string token = SettingsSectionSnapshot.AbsentRowVersion;
         if (!creating)
         {
-            token = (await seedService.SaveWithConcurrencyCheckAsync(new UpdateChannelSettings(), token)).RowVersion;
+            token = (await seedService.SaveWithConcurrencyCheckAsync(new CatalogUpdateSettings(), token)).RowVersion;
         }
 
         BeforeSaveInterceptor interceptor = new(async () =>
         {
             SettingsService winner = CreateService();
             await winner.SaveWithConcurrencyCheckAsync(
-                new UpdateChannelSettings { Channel = "insider", InsiderAcknowledged = true }, token);
+                new CatalogUpdateSettings { Enabled = false }, token);
         });
         SettingsService loser = CreateService(interceptor);
-        SettingsSectionSnapshot before = loser.GetSectionSnapshot("UpdateChannel");
-        Func<Task> losingSave = () => loser.SaveWithConcurrencyCheckAsync(new UpdateChannelSettings(), token);
+        SettingsSectionSnapshot before = loser.GetSectionSnapshot("CatalogUpdates");
+        Func<Task> losingSave = () => loser.SaveWithConcurrencyCheckAsync(new CatalogUpdateSettings(), token);
 
         await losingSave.Should().ThrowAsync<DbUpdateConcurrencyException>();
-        loser.GetSectionSnapshot("UpdateChannel").Should().BeEquivalentTo(before);
+        loser.GetSectionSnapshot("CatalogUpdates").Should().BeEquivalentTo(before);
         using AppDbContext db = new(_options);
-        AppSettingsEntity row = await db.AppSettingsEntities.SingleAsync(e => e.Key == "UpdateChannel");
-        JsonSerializer.Deserialize<UpdateChannelSettings>(row.SettingsJson)!.Channel.Should().Be("insider");
+        AppSettingsEntity row = await db.AppSettingsEntities.SingleAsync(e => e.Key == "CatalogUpdates");
+        JsonSerializer.Deserialize<CatalogUpdateSettings>(row.SettingsJson)!.Enabled.Should().BeFalse();
         row.Revision.Should().Be(creating ? 1 : 2);
     }
 
@@ -102,12 +102,12 @@ public sealed class UnifiedSettingsPersistenceConcurrencyTests : IDisposable
     {
         SettingsService service = CreateService();
         SettingsSectionSnapshot saved = await service.SaveWithConcurrencyCheckAsync(
-            new UpdateChannelSettings(), SettingsSectionSnapshot.AbsentRowVersion);
+            new CatalogUpdateSettings(), SettingsSectionSnapshot.AbsentRowVersion);
         Func<Task> retry = () => service.SaveWithConcurrencyCheckAsync(
-            new UpdateChannelSettings { Channel = "insider", InsiderAcknowledged = true },
+            new CatalogUpdateSettings { Enabled = false },
             SettingsSectionSnapshot.AbsentRowVersion);
         await retry.Should().ThrowAsync<DbUpdateConcurrencyException>();
-        service.GetSectionSnapshot("UpdateChannel").Should().BeEquivalentTo(saved);
+        service.GetSectionSnapshot("CatalogUpdates").Should().BeEquivalentTo(saved);
     }
 
     [Fact]
@@ -115,13 +115,13 @@ public sealed class UnifiedSettingsPersistenceConcurrencyTests : IDisposable
     {
         BeforeSaveInterceptor interceptor = new(() => throw new InvalidOperationException("simulated storage failure"));
         SettingsService service = CreateService(interceptor);
-        SettingsSectionSnapshot before = service.GetSectionSnapshot("UpdateChannel");
+        SettingsSectionSnapshot before = service.GetSectionSnapshot("CatalogUpdates");
         Func<Task> save = () => service.SaveWithConcurrencyCheckAsync(
-            new UpdateChannelSettings { Channel = "insider", InsiderAcknowledged = true }, before.RowVersion);
+            new CatalogUpdateSettings { Enabled = false }, before.RowVersion);
         await save.Should().ThrowAsync<InvalidOperationException>();
-        service.GetSectionSnapshot("UpdateChannel").Should().BeEquivalentTo(before);
+        service.GetSectionSnapshot("CatalogUpdates").Should().BeEquivalentTo(before);
         using AppDbContext db = new(_options);
-        (await db.AppSettingsEntities.AnyAsync(e => e.Key == "UpdateChannel")).Should().BeFalse();
+        (await db.AppSettingsEntities.AnyAsync(e => e.Key == "CatalogUpdates")).Should().BeFalse();
     }
 
     [Fact]
@@ -129,15 +129,15 @@ public sealed class UnifiedSettingsPersistenceConcurrencyTests : IDisposable
     {
         SettingsService service = CreateService();
         SettingsSectionSnapshot first = await service.SaveWithConcurrencyCheckAsync(
-            new UpdateChannelSettings(), SettingsSectionSnapshot.AbsentRowVersion);
+            new CatalogUpdateSettings(), SettingsSectionSnapshot.AbsentRowVersion);
         await service.SaveWithConcurrencyCheckAsync(
             new SpoolCoverageSettings(), SettingsSectionSnapshot.AbsentRowVersion);
-        service.GetSectionSnapshot("UpdateChannel").RowVersion.Should().Be(first.RowVersion);
+        service.GetSectionSnapshot("CatalogUpdates").RowVersion.Should().Be(first.RowVersion);
         SettingsSectionSnapshot second = await service.SaveWithConcurrencyCheckAsync(
-            new UpdateChannelSettings(), first.RowVersion);
+            new CatalogUpdateSettings(), first.RowVersion);
         second.RowVersion.Should().NotBe(first.RowVersion);
         using AppDbContext db = new(_options);
-        (await db.AppSettingsEntities.SingleAsync(e => e.Key == "UpdateChannel")).Revision.Should().Be(2);
+        (await db.AppSettingsEntities.SingleAsync(e => e.Key == "CatalogUpdates")).Revision.Should().Be(2);
     }
 
     private SettingsService CreateService(SaveChangesInterceptor? interceptor = null)

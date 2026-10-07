@@ -146,97 +146,31 @@ disagree, so each states what it measures and points at the other. A "Critical"
 service pill alongside "nothing needs your attention" is a domain difference, not a
 contradiction.
 
-### Read-only service and replica inventory
+### System Status
 
-`/admin/status` extends the existing `GET /api/system/info` with an additive
-`inventory` object. Both require `system_settings:admin`, including custom roles
-with that permission. Ordinary users receive no detailed inventory; the System
-pill remains a service-health summary, not an update advertisement. The response
-is `no-store`, and identity transitions purge the admin query cache.
+`/admin/status` uses `GET /api/system/info` for application version, uptime, hostname,
+CPU, memory, disk, database engine/version and migration heads, and service health.
+The endpoint requires `system_settings:admin`, including custom roles with that
+permission, and returns `no-store` responses. Ordinary users cannot read these details.
 
-The table separates application build, engine version, canonical release identity,
-channel, and running platform/image-index/release-manifest digests. Full commit
-and digest details are available in keyboard-operable disclosures. A database
-engine version is not the application context's migration head. Background monitor
-rows no longer borrow the API build: their legacy version string is `Unknown`.
+The response retains its root `app`, `services`, `cpu`, `memory`, `disk`, and `database`
+fields; the obsolete `inventory` property and verified-release readiness/discovery
+pipeline were removed in #3289. The frontend must stop consuming that property in
+the same integrated change. Background monitor versions remain `Unknown`: monitor
+names are not installed application versions.
 
-- `Observed` means a source was observed, **not** digest attestation. Null build,
-  digest, or release fields render as **Unknown**, not version zero.
-- Original observations older than 90 seconds become `Stale`; reading an import
-  does not refresh its timestamp. `Unavailable` identifies a failed source read
-  or an offline registration. `Unknown` means insufficient evidence.
-- `NotInstalled` identifies an absent optional topology slot, not a failed
-  application. Each registered slicer replica is retained; its engine version
-  is separate from the worker assembly build reported at registration.
-- Compatibility is `Compatible`, `Incompatible`, `Unknown`, `MixedRelease`, or
-  `MixedChannel`, independently of freshness. Conflicting digests for replicas of
-  the same component/platform/version are incompatible; different components
-  naturally have different digests. Mixed application channels block normal
-  eligibility and are explicitly labelled unsafe.
+Worker rows in `services` report their application build as `version` and their
+separate slicer engine version as optional `engineVersion`. Legacy worker builds
+remain `Unknown`. Health uses registry status and heartbeat freshness, with offline,
+stale, unknown, or unavailable sources marked degraded and explicit worker errors
+critical. Disabled workers are omitted. Empty optional registries add no rows;
+unavailable registries are logged and shown as degraded, not a healthy empty set.
+Worker endpoints, credentials, replica IDs, and raw capabilities are never returned.
+No worker endpoint requests are needed to assemble system status.
 
-Selection defaults to **stable**, including native and legacy installations. The
-persisted `UpdateChannel` setting selects `stable` or `insider`; selecting insider
-also requires the persisted `insiderAcknowledged` acknowledgement. This setting
-controls signed-release discovery and readiness evaluation only. It does not stage,
-apply, or recover an update.
-
-Observed channel still comes only from bound, independently verified release
-evidence. After discovery verifies a signed target, the inventory readiness result
-compares that discovered target with the selected channel and the host's current
-service/platform evidence. Until then, readiness remains `NotManaged` rather than
-inventing a target. When insider is selected or reported, the page persistently
-states:
-
-> Insider updates may arrive more frequently and have reduced stability compared
-> with stable releases.
-
-Verified target evidence is freshness-bounded to twice the configured discovery interval.
-Disabling discovery, a failed discovery round, or evidence older than that bound changes
-readiness to a non-success `Unknown` state while retaining the last verified target and failure
-diagnostics for operators. It never leaves an earlier `Eligible` result active indefinitely.
-
-The selected channel, insider acknowledgement, and same-version manifest bindings survive normal
-restarts through the generic settings database. Restoring an older database or replaying older
-settings storage can restore older values; #2666 and #2663 own protected anti-replay continuity.
-This readiness feature does not claim protection against old-database restoration.
-
-The browser displays its **loaded asset** commit/build time, not the API build.
-A source/release mismatch is incompatible under the conservative same-build policy
-and calls for refresh; if it persists, operators must reconcile the deployment.
-Refreshing alone does not establish compatibility or update eligibility.
-
-### Inventory evidence boundaries
-
-The API reads its own assembly and the existing local/shared slicer registration
-store. Worker `applicationBuild` is an additive self-report in existing capability
-JSON; legacy workers continue to report engine version with unknown app build.
-Worker endpoints, credentials, raw capability JSON and arbitrary metadata are not
-returned. Native builds remain useful with null image and release evidence.
-The anonymous discovery heartbeat is **not** authenticated build/replica evidence;
-disabling scanning does not prove that a discovery process is uninstalled. Unknown
-discovery and external slicer-host slots remain visible rather than
-borrowing the API version. An unavailable registry remains unavailable/unknown,
-not an empty healthy worker set. No new outbound requests are made by inventory.
-
-The canonical consumer vocabulary belongs to #2668. `IServiceInventorySource`
-accepts trusted, already-verified local observations; its binding checks are not
-signature verification. Current self-report adapters cannot populate canonical
-verification or running digests. #2668/#2660 must provide the authoritative record
-and verification adapter before those values can be known. There is no public
-snapshot import or caller-supplied `verified` flag in this increment.
-Historical authorization is retained without querying current branch heads or
-requiring an old stabilization branch to exist. Aliases such as `latest` remain
-secondary configured references, never installed versions.
-
-Published standalone and monolith frontend builds require the verified consumer's
-allow-listed output through `PRINTFARMER_RELEASE_IDENTITY` (a build argument for
-the monolith's frontend stage). The record is embedded identically in
-loaded assets and `version.json`, bound to the full frontend source commit; it is
-explicitly self-reported, not verified provenance. Without it, release association
-stays unknown in local `development` builds; versioned Docker builds reject its
-absence. No per-service version allocation or publication algorithm is added.
-The read-only contract never reports `Eligible`; verified compatibility alone
-cannot establish updater authorization, complete topology, or recovery readiness.
+The simple farm-admin release notification at `/api/admin/release-updates` is
+independent of system status and remains unchanged. It checks the installed channel
+and provides manual upgrade guidance, without applying updates.
 
 **A failed refresh keeps the last-known snapshot.** React Query retains the last
 successful overview when a background refetch fails, so the hub distinguishes two

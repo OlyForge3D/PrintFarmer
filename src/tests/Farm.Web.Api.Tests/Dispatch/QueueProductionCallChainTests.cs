@@ -22,7 +22,6 @@ using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Services.AutoDispatch;
 using Farm.Infrastructure.Services.FileManagement;
-using Farm.Infrastructure.Services.HostUpdates;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Queue;
