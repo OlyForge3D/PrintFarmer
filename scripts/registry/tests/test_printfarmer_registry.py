@@ -103,6 +103,7 @@ class FakeDocker:
     def __init__(self, root):
         self.root = root
         self.calls = []
+        self.up_configs = []
         self.containers = {}
         self.volumes = set()
         self.images = {}
@@ -191,6 +192,7 @@ class FakeDocker:
             assert command == ["up", "-d", "--no-build", "--pull", "never"], command
             assert not any("build" in s for s in merged["services"].values())
             config = self.resolve(merged, opts["dir"], opts["profiles"], environment)
+            self.up_configs.append(config)
             for service, svc in config["services"].items():
                 self.create(service, svc["image"], config, opts["files"], opts["dir"])
             return 0, ""
@@ -497,6 +499,11 @@ class UpdateTests(RegistryTestCase):
         self.assertEqual(self.docker.containers["postgres"]["Mounts"][0]["Name"], "printfarmer_pgdata")
         self.assertEqual(self.docker.containers["orcaslicer-worker"]["Mounts"][0]["Name"],
                          "printfarmer-custom-profiles-2.4.2")
+        # The worker identity digest is the release index digest, overriding the stale local-build .env value.
+        worker_env = self.docker.up_configs[-1]["services"]["orcaslicer-worker"]["environment"]
+        self.assertEqual(worker_env["ORCASLICER_CONTAINER_DIGEST"],
+                         data["images"]["orcaslicer-worker"]["reference"].partition("@")[2])
+        self.assertNotIn("9" * 64, worker_env["ORCASLICER_CONTAINER_DIGEST"])
 
     def test_failed_pull_changes_nothing(self):
         data = self.publish("1.2.0")
@@ -643,6 +650,7 @@ class RealComposeDocker(FakeDocker):
         assert code == 0, text
         config = json.loads(text)
         assert not any("build" in s for s in config["services"].values())
+        self.up_configs.append(config)
         files = [args[i + 1] for i, a in enumerate(args) if a == "-f"]
         for service, svc in config["services"].items():
             self.create(service, svc["image"], config, files, self.root)
@@ -699,6 +707,106 @@ class RealComposeTests(RegistryTestCase):
                                 text=True, env=env)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("printfarmer-registry update", result.stderr)
+
+
+REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))
+GENERATOR = os.path.join(REPO_ROOT, "scripts", "docker", "compose-generator.sh")
+PF_SERVICES = {"api", "frontend", "slicer-host", "printer-discovery", "orcaslicer-worker"}
+# Git-tracked bind sources in a generated deployment; everything else it binds is generated state.
+GENERATED_TRACKED = ["deploy/nginx/nginx-proxy-split.conf", "scripts/docker/configs/otel-collector-config.yaml"]
+GENERATED_ENV = {
+    "DB_PASSWORD": "s3cr3t-value", "SA_PASSWORD": "s3cr3t-value", "ConnectionStrings__Default": "s3cr3t-value",
+    "Jwt__Key": "s3cr3t-value", "GRAFANA_ADMIN_PASSWORD": "s3cr3t-value",
+    "WebAuthn__RelyingPartyId": "farm.example", "WebAuthn__Origin": "https://farm.example",
+    "ORCASLICER_VERSION": "2.4.2", "ORCASLICER_CONTAINER_DIGEST": "sha256:" + "9" * 64,
+}
+
+
+def find_bash():
+    if os.name == "nt":
+        git_bash = os.path.join(os.environ.get("ProgramFiles", r"C:\Program Files"), "Git", "bin", "bash.exe")
+        return git_bash if os.path.exists(git_bash) else None
+    return shutil.which("bash")
+
+
+@unittest.skipUnless(compose_available() and find_bash(), "docker compose CLI or bash not available")
+class RealGeneratorTests(RegistryTestCase):
+    """Migrates compose files rendered by the real compose-generator.sh, not hand-written fixtures."""
+
+    def render(self, provider):
+        import subprocess
+        for name in ("docker-compose.yml", "docker-compose.override.yml"):
+            os.remove(self.p(name))
+        result = subprocess.run([find_bash(), GENERATOR.replace("\\", "/"), "--output-dir",
+                                 self.root.replace("\\", "/"), "--db-provider", provider, "--include-spoolman",
+                                 "--include-discovery", "--enable-orca-worker", "yes"],
+                                cwd=REPO_ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        if result.returncode != 0 and ("envsubst" in result.stdout or "ruamel" in result.stdout):
+            self.skipTest("compose-generator prerequisites unavailable: " + result.stdout[-300:])
+        self.assertEqual(result.returncode, 0, result.stdout[-2000:])
+        for rel in GENERATED_TRACKED:
+            os.makedirs(os.path.dirname(self.p(rel)), exist_ok=True)
+            shutil.copyfile(os.path.join(REPO_ROOT, *rel.split("/")), self.p(rel))
+        self.write_text(".env", "".join("%s=%s\n" % item for item in GENERATED_ENV.items()))
+        self.write_text(".deploy-config", "DB_PROVIDER=%s\nENABLE_ORCA_WORKER=yes\n" % provider)
+        self.docker = RealComposeDocker(self.root)
+        self.docker.tracked = list(GENERATED_TRACKED)
+        compose_file = self.p("docker-compose.yml")
+        code, text = self.docker.real_config(["-p", PROJECT, "--project-directory", self.root, "--env-file",
+                                              self.p(".env"), "-f", compose_file, "config", "--format", "json"], {})
+        self.assertEqual(code, 0, text)
+        config = json.loads(text)
+        self.assertTrue(PF_SERVICES <= set(config["services"]), sorted(config["services"]))
+        self.docker.volumes = {v["name"] for v in (config.get("volumes") or {}).values()}
+        for service in config["services"]:
+            self.docker.create(service, "printfarmer-" + service, config, [compose_file], self.root)
+        for container in self.docker.containers.values():
+            for mount in container["Mounts"]:
+                if mount["Type"] == "bind" and not os.path.exists(mount["Source"]):
+                    os.makedirs(mount["Source"])  # a live host already has its data directories
+        return config
+
+    def check_provider(self, provider):
+        original = self.render(provider)
+        before = {name: c["Mounts"] for name, c in self.docker.containers.items()}
+        self.migrate()
+        release_text = read_text(self.p("docker-compose.release.yml"))
+        self.assertNotIn("s3cr3t-value", release_text)
+        release = json.loads(release_text)
+        self.assertEqual(set(release["services"]), set(original["services"]))
+        for name, svc in release["services"].items():
+            self.assertNotIn("build", svc, name)
+            if name in PF_SERVICES:
+                self.assertTrue(svc["image"].startswith("${%s:?" % reg.image_var(name)), (name, svc["image"]))
+
+        data = self.publish("1.2.0")
+        code, err = self.main("update", "--version", "1.2.0", "--backup-confirmed")
+        self.assertEqual(code, 0, err)
+        calls = self.docker.calls
+        up_index = next(i for i, c in enumerate(calls) if c[:2] == ["docker", "compose"] and "up" in c)
+        pulls = [i for i, c in enumerate(calls) if c[1] == "pull"]
+        self.assertEqual(len(pulls), len(PF_SERVICES))
+        self.assertTrue(all(i < up_index for i in pulls))
+        self.assertIn("--no-build", calls[up_index])
+        for name in PF_SERVICES:
+            self.assertEqual(self.docker.containers[name]["Config"]["Image"], data["images"][name]["reference"])
+        for name in set(original["services"]) - PF_SERVICES:
+            self.assertEqual(self.docker.containers[name]["Config"]["Image"], original["services"][name]["image"])
+        vendored = {self.p(rel): self.p(".printfarmer", "files", *rel.split("/")) for rel in GENERATED_TRACKED}
+        expected = {name: [dict(m, Source=vendored.get(m.get("Source"), m.get("Source"))) if m["Type"] == "bind"
+                           else m for m in mounts] for name, mounts in before.items()}
+        self.assertEqual({name: c["Mounts"] for name, c in self.docker.containers.items()}, expected)
+        for source in vendored.values():
+            self.assertTrue(os.path.isfile(source), source)
+        worker_env = self.docker.up_configs[-1]["services"]["orcaslicer-worker"]["environment"]
+        self.assertEqual(worker_env["Worker__ContainerDigest"],
+                         data["images"]["orcaslicer-worker"]["reference"].partition("@")[2])
+
+    def test_generated_postgres_deployment(self):
+        self.check_provider("postgres")
+
+    def test_generated_sqlserver_deployment(self):
+        self.check_provider("sqlserver")
 
 
 if __name__ == "__main__":
