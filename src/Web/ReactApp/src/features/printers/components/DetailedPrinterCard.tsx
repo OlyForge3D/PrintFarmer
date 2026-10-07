@@ -68,6 +68,7 @@ import {
   canDisableMotors,
   canEmergencyStop,
   canExcludeObject,
+  isActivePrintForObjects,
   canFilamentChange,
   canFilamentControl,
   canMove,
@@ -183,6 +184,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
   const [isStatisticsExpanded, setIsStatisticsExpanded] = useState(false);
   const [isVersionExpanded, setIsVersionExpanded] = useState(false);
   const [objectToSkip, setObjectToSkip] = useState<PrintJobObjectDto | null>(null);
+  const [objectToSkipPrinterId, setObjectToSkipPrinterId] = useState(printer.id);
 
   // This card always needs `printerDetails` once Spoolman is ready, because
   // every path it can take needs the persisted toolhead topology:
@@ -346,7 +348,14 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
     },
   });
 
-  const isActivePrintForObjectQuery = isPrinting || isPaused;
+  const isActivePrintForObjectQuery = isActivePrintForObjects({ state, isOnline });
+  // A pending skip confirmation never outlives its print or its printer.
+  if (objectToSkipPrinterId !== printer.id) {
+    setObjectToSkipPrinterId(printer.id);
+    setObjectToSkip(null);
+  } else if (objectToSkip !== null && !(support.supportsObjectExclusion && isActivePrintForObjectQuery)) {
+    setObjectToSkip(null);
+  }
   const printJobObjectsQuery = usePrintJobObjects(printer.id, {
     enabled: support.supportsObjectExclusion && isActivePrintForObjectQuery,
   });
@@ -1248,7 +1257,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
       )}
 
       <Modal
-        isOpen={objectToSkip !== null}
+        isOpen={objectToSkip !== null && support.supportsObjectExclusion && isActivePrintForObjectQuery}
         onClose={() => {
           if (!excludeObjectMutation.isPending) {
             setObjectToSkip(null);
@@ -1272,7 +1281,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
               variant="danger"
               loading={excludeObjectMutation.isPending}
               onClick={() => {
-                if (objectToSkip) {
+                if (objectToSkip && canExcludeObjectNow) {
                   excludeObjectMutation.mutate(objectToSkip.name);
                 }
               }}

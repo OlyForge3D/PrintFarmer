@@ -382,7 +382,9 @@ describe('DetailedPrinterCard inline details (#1584)', () => {
     ['Offline', false],
     ['Error', true],
     ['Complete', true],
-  ])('omits the Objects section and inactive-print copy when the printer is %s', (state, isOnline) => {
+    ['Printing', false],
+    ['Paused', false],
+  ])('omits the Objects section and inactive-print copy when the printer is %s (online: %s)', (state, isOnline) => {
     usePrintJobObjectsMock.mockReturnValue({
       data: { printerId: 'printer-1', objects: [makeObject({ name: 'stale_part' })] },
       isLoading: false,
@@ -419,6 +421,31 @@ describe('DetailedPrinterCard inline details (#1584)', () => {
 
     expect(screen.getByText('Objects')).toBeInTheDocument();
     expect(screen.getByText('part_1')).toBeInTheDocument();
+  });
+
+  it('drops a pending skip confirmation when the active print ends', async () => {
+    usePrintJobObjectsMock.mockReturnValue({
+      data: { printerId: 'printer-1', objects: [makeObject({ name: 'part_1' })] },
+      isLoading: false,
+      isFetching: false,
+      refetch: vi.fn(),
+    });
+    const capabilities = { supportsObjectExclusion: true } as unknown as Parameters<typeof DetailedPrinterCard>[0]['backendCapabilities'];
+    const card = (state: string) => (
+      <DetailedPrinterCard printer={makePrinter({ state } as Partial<Printer>)} backendCapabilities={capabilities} />
+    );
+
+    const { rerender } = render(card('Printing'));
+    fireEvent.click(screen.getAllByRole('button', { name: /skip object/i })[0]);
+    expect(screen.getByText('Skip print object?')).toBeInTheDocument();
+
+    rerender(card('Complete'));
+    await waitFor(() => expect(screen.queryByText('Skip print object?')).not.toBeInTheDocument());
+
+    rerender(card('Printing'));
+    expect(screen.queryByText('Skip print object?')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Skip object' })).not.toBeInTheDocument();
+    expect(excludePrintJobObjectMock).not.toHaveBeenCalled();
   });
 
   // Regression coverage for #1698: the card's shared sections must appear in the same
