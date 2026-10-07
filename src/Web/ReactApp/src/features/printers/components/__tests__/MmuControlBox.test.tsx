@@ -304,7 +304,11 @@ describe('MmuControlBox', () => {
       fireEvent.click(screen.getByRole('button', { name: gateName }));
       fireEvent.click(screen.getByRole('button', { name: 'Release' }));
       await waitFor(() => expect(clearSpool).toHaveBeenCalledTimes(call));
-      expect(clearSpool).toHaveBeenLastCalledWith(expect.objectContaining({ reviewedRowVersion: expectedRevision }));
+      expect(clearSpool).toHaveBeenLastCalledWith({
+        printerId: 'printer-1',
+        toolheadIndex: /1A/.test(gateName.source) ? 1 : 2,
+        reviewedRowVersion: expectedRevision,
+      });
     };
     const { rerender } = render(<MmuControlBox {...props} reviewedRowVersion="rev-1" />);
 
@@ -319,6 +323,61 @@ describe('MmuControlBox', () => {
     // A token our chain never saw comes from a later external write and wins.
     rerender(<MmuControlBox {...props} reviewedRowVersion="ext-9" />);
     await release(/^Gate 1A:/, 'ext-9', 5);
+  });
+
+  const scopedProps = {
+    mmuStatus: status([gate(0), gate(1)], { mmuType: MmuProtocol.Qidibox, activeGate: 0 }),
+    isOnline: true,
+    toolheads: [
+      toolhead(0, 'Physical'),
+      toolhead(1, 'MmuGate', { currentSpoolId: 80 }),
+      toolhead(2, 'MmuGate', { currentSpoolId: 81 }),
+    ],
+  };
+
+  it('does not carry one printer\'s own-write revision onto another printer', async () => {
+    const { rerender } = render(
+      <MmuControlBox {...scopedProps} printerId="printer-1" reviewedRowVersion="rev-1" />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /^Gate 1A:/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Release' }));
+    await waitFor(() => expect(clearSpool).toHaveBeenCalledTimes(1));
+
+    // Same component instance switches printers before B's revision is known.
+    rerender(<MmuControlBox {...scopedProps} printerId="printer-2" reviewedRowVersion={undefined} />);
+    fireEvent.click(screen.getByRole('button', { name: /^Gate 1A:/ }));
+    expect(screen.getByRole('button', { name: /^(Assign|Change)$/ })).toHaveAttribute('aria-disabled', 'true');
+    fireEvent.click(screen.getByRole('button', { name: 'Release' }));
+    fireEvent.click(screen.getByRole('button', { name: /^(Assign|Change)$/ }));
+    expect(clearSpool).toHaveBeenCalledTimes(1);
+    expect(setSpool).not.toHaveBeenCalled();
+
+    rerender(<MmuControlBox {...scopedProps} printerId="printer-2" reviewedRowVersion="b-1" />);
+    fireEvent.click(screen.getByRole('button', { name: /^Gate 1A:/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Release' }));
+    await waitFor(() => expect(clearSpool).toHaveBeenCalledTimes(2));
+    expect(clearSpool).toHaveBeenLastCalledWith({ printerId: 'printer-2', toolheadIndex: 1, reviewedRowVersion: 'b-1' });
+  });
+
+  it('ignores a previous printer\'s write that resolves after switching printers', async () => {
+    let resolveA: (revision: string) => void = () => {};
+    clearSpool.mockReset()
+      .mockImplementationOnce(() => new Promise<string>((resolve) => { resolveA = resolve; }))
+      .mockResolvedValueOnce('b-2');
+    const { rerender } = render(
+      <MmuControlBox {...scopedProps} printerId="printer-1" reviewedRowVersion="rev-1" />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /^Gate 1A:/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Release' }));
+    await waitFor(() => expect(clearSpool).toHaveBeenCalledTimes(1));
+
+    rerender(<MmuControlBox {...scopedProps} printerId="printer-2" reviewedRowVersion="b-1" />);
+    resolveA('rev-2');
+    await Promise.resolve();
+    fireEvent.click(screen.getByRole('button', { name: /^Gate 1A:/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Release' }));
+    await waitFor(() => expect(clearSpool).toHaveBeenCalledTimes(2));
+    expect(clearSpool).toHaveBeenLastCalledWith({ printerId: 'printer-2', toolheadIndex: 1, reviewedRowVersion: 'b-1' });
   });
 
   it('uses the live inset-surface token for every spool hub', () => {
