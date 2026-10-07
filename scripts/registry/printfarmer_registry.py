@@ -54,6 +54,12 @@ UNPUBLISHED_TARGETS = {
 }
 WORKER_PROFILE_MOUNT = "/app/custom-profiles"
 WORKER_VOLUME_PREFIX = "printfarmer-custom-profiles-"
+PREVIOUS_WORKER_SERVICE = "orcaslicer-worker-previous"
+PENDING_ACTIONS = {"update", "rollback"}
+PENDING_PHASES = {"pulling", "starting", "health", "failed-starting", "failed-health"}
+PENDING_HELP = (". Nothing was changed. Check `docker compose ps` to see which images are running, keep a copy of "
+                "%s for diagnosis, move it aside, then rerun the intended update or rollback with "
+                "--resume-interrupted.")
 VERSION_RE = re.compile(r"^\d+\.\d+\.\d+(-insider\.\d+)?$")
 COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -242,8 +248,9 @@ class Controller:
         target = build.get("target") if isinstance(build, dict) else None
         if target in UNPUBLISHED_TARGETS:
             raise MigrationError("service %s: %s" % (name, UNPUBLISHED_TARGETS[target]))
-        if target == "orcaslicer-worker" and ("ORCASLICER_VERSION_PREVIOUS" in json.dumps(build.get("args") or {})
-                                              or "previous" in name):
+        version_arg = str(((build.get("args") or {}) if isinstance(build, dict) else {}).get("ORCASLICER_VERSION", ""))
+        if target == "orcaslicer-worker" and (name == PREVIOUS_WORKER_SERVICE
+                                              or version_arg.startswith("${ORCASLICER_VERSION_PREVIOUS")):
             raise MigrationError(
                 "service %s is the optional previous-version OrcaSlicer worker; releases publish only the current "
                 "worker, so it cannot run build-free. Set ENABLE_ORCA_WORKER_PREVIOUS=no in .deploy-config, run "
@@ -336,8 +343,33 @@ class Controller:
         return source
 
     def tracked_files(self):
-        code, text = self.runner.run(["git", "-C", self.project_dir, "ls-files", "-z"], check=False)
-        return {name for name in text.split("\0") if name} if code == 0 else set()
+        try:
+            code, text = self.runner.run(["git", "-C", self.project_dir, "ls-files", "-z"], check=False)
+        except OSError as error:
+            code, text = None, str(error)
+        if code != 0:
+            raise MigrationError("`git ls-files` failed in %s (exit %s). migrate must run inside the git checkout "
+                                 "that deployed PrintFarmer, with git installed, so tracked bind-mounted files can be "
+                                 "vendored before the checkout is retired. Nothing was changed." % (self.project_dir, code))
+        return {name for name in text.split("\0") if name}
+
+    def host_paths(self, resolved):
+        """Non-vendored host paths the deployment depends on (paths only, never values)."""
+        state_root = self.path(STATE_DIR)
+        paths = {self.path(ENV_FILE), self.path(RELEASE_COMPOSE), state_root}
+        if os.path.exists(self.path(".deploy-config")):
+            paths.add(self.path(".deploy-config"))
+        for service in (resolved.get("services") or {}).values():
+            for volume in service.get("volumes", []) or []:
+                if isinstance(volume, dict) and volume.get("type") == "bind" and volume.get("source"):
+                    source = os.path.normpath(volume["source"])
+                    if source != state_root and not source.startswith(state_root + os.sep):
+                        paths.add(source)
+        return sorted(paths)
+
+    def display_path(self, path):
+        rel = os.path.relpath(path, self.project_dir)
+        return path if rel.startswith("..") else "./" + rel.replace("\\", "/")
 
     # ------------------------------------------------------- invariant checks
     @staticmethod
@@ -464,6 +496,9 @@ class Controller:
         if orca_version:
             self.say("  OrcaSlicer worker volume version: %s (releases must match)" % orca_version)
         self.say("  storage identity: unchanged (project, named volumes, bind sources verified)")
+        self.say("  keep these host paths when retiring the checkout (derived from the resolved configuration):")
+        for path in self.host_paths(new):
+            self.say("    %s" % self.display_path(path))
         if dry_run:
             self.say("Dry run: nothing written, no containers touched.")
             return 0
@@ -547,7 +582,7 @@ class Controller:
         return {"kind": "release", "version": version, "tag": data["tag"], "channel": data["channel"],
                 "sourceCommit": data["sourceCommit"], "source": source, "images": refs}
 
-    def check_lineage(self, deployment, state, release, allow_unsafe):
+    def check_lineage(self, deployment, state, release, allow_unsafe, action="update"):
         current = (state or {}).get("current")
         base = current["sourceCommit"] if current else deployment["migratedFrom"]["deployedCommit"]
         head = release["sourceCommit"]
@@ -561,12 +596,21 @@ class Controller:
                 status = "unknown"
         if status in ("ahead", "identical"):
             return status
-        message = ("target %s (%s) is not a verified descendant of the deployed commit %s (GitHub compare: %s). "
-                   "Database migrations are forward-only; moving to a non-descendant can break or corrupt data."
-                   % (release["version"], head[:12], base[:12], status))
+        if action == "rollback":
+            message = ("rollback moves the source from %s back to %s (%s; GitHub compare: %s). Database migrations "
+                       "are forward-only and rollback restores images only, never data."
+                       % (base[:12], head[:12], release["version"], status))
+            remedy = (" Restore the database and data-volume backup taken before the current release was applied, "
+                      "then rerun `rollback --backup-confirmed --allow-unsafe-downgrade` to acknowledge the risk.")
+        else:
+            message = ("target %s (%s) is not a verified descendant of the deployed commit %s (GitHub compare: %s). "
+                       "Database migrations are forward-only; moving to a non-descendant can break or corrupt data."
+                       % (release["version"], head[:12], base[:12], status))
+            remedy = (" Lineage is verified online through the GitHub compare API (set GITHUB_TOKEN if rate-limited). "
+                      "Restore a backup instead, or pass --allow-unsafe-downgrade after verifying schema "
+                      "compatibility yourself.")
         if not allow_unsafe:
-            raise MigrationError(message + " Restore a backup instead, or pass --allow-unsafe-downgrade after "
-                                           "verifying schema compatibility yourself.")
+            raise MigrationError(message + remedy)
         self.say("WARNING: " + message + " Proceeding because --allow-unsafe-downgrade was given.")
         return status
 
@@ -584,7 +628,7 @@ class Controller:
     def vendored_abs(self, deployment):
         return {self.path(v[2:]): self.path(k) for k, v in (deployment.get("vendored") or {}).items()}
 
-    def preflight(self, deployment, release, allow_insider, allow_unsafe, state):
+    def preflight(self, deployment, release, allow_insider, allow_unsafe, state, action="update"):
         if release["channel"] == "insider" and not allow_insider:
             raise MigrationError("%s is an insider release; pass --allow-insider to opt in explicitly"
                                  % release["version"])
@@ -594,7 +638,7 @@ class Controller:
             if host not in COMPONENTS[component]["platforms"]:
                 raise MigrationError("%s is not published for %s (published: %s)"
                                      % (component, host, ", ".join(COMPONENTS[component]["platforms"])))
-        lineage = self.check_lineage(deployment, state, release, allow_unsafe)
+        lineage = self.check_lineage(deployment, state, release, allow_unsafe, action)
         return host, needed, lineage
 
     def plan(self, version, manifest_file=None, allow_insider=False, allow_unsafe=False):
@@ -620,17 +664,81 @@ class Controller:
         return 0
 
     # --------------------------------------------------------------- apply
+    @staticmethod
+    def pid_alive(pid):
+        if os.name != "posix":
+            return None  # on Windows os.kill(pid, 0) terminates the process instead of probing it
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        except (OSError, ValueError, OverflowError):
+            return None
+        return True
+
     def acquire_lock(self):
         os.makedirs(self.state_dir, exist_ok=True)
         path = os.path.join(self.state_dir, "lock")
+        token = "%d %s %s" % (os.getpid(), os.urandom(8).hex(), utc_now())
         try:
             fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
         except FileExistsError:
-            raise MigrationError("another printfarmer-registry run holds %s; remove it only if no run is active"
-                                 % path)
-        os.write(fd, str(os.getpid()).encode())
-        os.close(fd)
-        return path
+            try:
+                with open(path, encoding="utf-8") as handle:
+                    holder = handle.read().split()
+            except OSError:
+                holder = []
+            pid = int(holder[0]) if holder and holder[0].isdigit() else None
+            alive = self.pid_alive(pid) if pid else None
+            liveness = {True: "is still running", False: "is no longer running",
+                        None: "liveness could not be determined"}[alive]
+            raise MigrationError("another printfarmer-registry run holds %s (PID %s, started %s; that process %s). "
+                                 "Locks are never taken over automatically. If no other run is active on this host, "
+                                 "run `status`, then delete the lock file and retry."
+                                 % (path, pid if pid else "unknown", holder[2] if len(holder) > 2 else "unknown",
+                                    liveness))
+        try:
+            os.write(fd, token.encode())
+        finally:
+            os.close(fd)
+        return path, token
+
+    def release_lock(self, lock):
+        path, token = lock
+        try:
+            with open(path, encoding="utf-8") as handle:
+                owner = handle.read()
+            if owner != token:
+                self.say("WARNING: %s now belongs to another run; leaving it in place." % path)
+                return
+            os.remove(path)
+        except OSError as error:
+            self.say("WARNING: could not remove lock %s (%s); delete it once no run is active." % (path, error))
+
+    def load_pending(self, path):
+        try:
+            pending = read_json(path)
+        except (OSError, ValueError) as error:
+            raise MigrationError("%s is unreadable (%s)" % (path, error.__class__.__name__) + PENDING_HELP % path)
+        if pending is None:
+            return None
+        problems = []
+        if not isinstance(pending, dict):
+            problems.append("not an object")
+        else:
+            if pending.get("action") not in PENDING_ACTIONS:
+                problems.append("action")
+            if pending.get("phase") not in PENDING_PHASES:
+                problems.append("phase")
+            if not VERSION_RE.match(str(pending.get("version", ""))):
+                problems.append("version")
+            if not isinstance(pending.get("images"), dict):
+                problems.append("images")
+        if problems:
+            raise MigrationError("%s is malformed (invalid: %s)" % (path, ", ".join(problems)) + PENDING_HELP % path)
+        return pending
 
     def apply(self, release, action, allow_insider=False, allow_unsafe=False, health_timeout=600,
               resume_interrupted=False):
@@ -639,13 +747,13 @@ class Controller:
         state_path = os.path.join(self.state_dir, "release.json")
         lock = self.acquire_lock()
         try:
-            pending = read_json(pending_path)
+            pending = self.load_pending(pending_path)
             if pending and not resume_interrupted:
                 raise MigrationError("a previous %s to %s stopped in phase %r; inspect `status`, then rerun with "
-                                     "--resume-interrupted" % (pending.get("action"), pending.get("version"),
-                                                               pending.get("phase")))
+                                     "--resume-interrupted" % (pending["action"], pending["version"],
+                                                               pending["phase"]))
             state = read_json(state_path, {})
-            host, needed, _ = self.preflight(deployment, release, allow_insider, allow_unsafe, state)
+            host, needed, _ = self.preflight(deployment, release, allow_insider, allow_unsafe, state, action)
             containers = self.project_containers(deployment["project"])
             refs = {c: release["images"][c] for c in needed}
             transaction = {"action": action, "version": release["version"], "phase": "pulling",
@@ -682,19 +790,33 @@ class Controller:
             os.remove(pending_path)
             self.say("PrintFarmer %s (%s) is running and healthy." % (release["version"], release["channel"]))
             return 0
-        except MigrationError:
-            current = read_json(pending_path)
-            if current and current.get("phase") == "pulling":
-                if current.get("previousPending"):
-                    write_json_atomic(pending_path, current["previousPending"])
-                else:
-                    os.remove(pending_path)  # nothing was started; the deployment is untouched
-            elif current and not current["phase"].startswith("failed-"):
-                current["phase"] = "failed-" + current["phase"]
-                write_json_atomic(pending_path, current)
+        except BaseException as primary:
+            try:
+                self.record_failure(pending_path)
+            except Exception as error:  # never mask the primary failure
+                self.say("WARNING: could not record the failed transaction (%s); run `status`." % error)
+            if isinstance(primary, KeyboardInterrupt):
+                self.say("Interrupted. The transaction state was recorded; run `status`, then rerun with "
+                         "--resume-interrupted or roll back.")
             raise
         finally:
-            os.remove(lock)
+            self.release_lock(lock)
+
+    def record_failure(self, pending_path):
+        try:
+            current = read_json(pending_path)
+        except (OSError, ValueError):
+            return
+        if not isinstance(current, dict) or current.get("phase") not in PENDING_PHASES:
+            return
+        if current["phase"] == "pulling":
+            if current.get("previousPending"):
+                write_json_atomic(pending_path, current["previousPending"])
+            else:
+                os.remove(pending_path)  # nothing was started; the deployment is untouched
+        elif not current["phase"].startswith("failed-"):
+            current["phase"] = "failed-" + current["phase"]
+            write_json_atomic(pending_path, current)
 
     def verify_image(self, component, reference, release, host, deployment):
         _, text = self.docker("image", "inspect", reference)
@@ -756,13 +878,12 @@ class Controller:
             raise MigrationError("no previous release to roll back to. Returning to a source build requires a "
                                  "checkout and scripts/deploy-docker.sh; restore data from backup if migrations ran")
         self.say("Rolling back images to %s. Data is NOT restored; restore your backup first if the newer release "
-                 "ran database migrations." % previous["version"])
+                 "ran database migrations (rollback also requires --allow-unsafe-downgrade)." % previous["version"])
         return self.apply(previous, "rollback", **options)
 
     def status(self):
         deployment = self.deployment()
         state = read_json(os.path.join(self.state_dir, "release.json"), {})
-        pending = read_json(os.path.join(self.state_dir, "pending.json"))
         self.say("Project: %s  profiles: %s" % (deployment["project"], ", ".join(deployment["profiles"]) or "-"))
         current = state.get("current")
         if current:
@@ -774,11 +895,23 @@ class Controller:
         previous = state.get("previous")
         if previous:
             self.say("Previous: %s" % (previous.get("version") or "git checkout " + previous["sourceCommit"]))
+        code = 0
+        refs = dict(current["images"]) if current else {}
+        for component in deployment["services"].values():
+            refs.setdefault(component, "%s%s@sha256:%s" % (IMAGE_PREFIX, component, "0" * 64))
+        resolved, _ = self.resolved_config(deployment, refs)
+        self.say("Host paths this deployment depends on:")
+        for path in self.host_paths(resolved):
+            present = os.path.exists(path)
+            self.say("  %-8s %s" % ("ok" if present else "MISSING", self.display_path(path)))
+            if not present:
+                code = 1
+        pending = self.load_pending(os.path.join(self.state_dir, "pending.json"))
         if pending:
-            self.say("UNFINISHED: %s to %s in phase %s (started %s)" % (pending.get("action"), pending.get("version"),
-                                                                       pending.get("phase"), pending.get("startedAt")))
-            return 1
-        return 0
+            self.say("UNFINISHED: %s to %s in phase %s (started %s)" % (pending["action"], pending["version"],
+                                                                       pending["phase"], pending.get("startedAt")))
+            code = 1
+        return code
 
 
 def default_project_dir():
@@ -815,15 +948,18 @@ def build_parser():
 
     plan = sub.add_parser("plan", help="dry run: show image changes and storage identity")
     plan.add_argument("--version", required=True)
-    plan.add_argument("--manifest-file", help="local container-images.json (air-gapped)")
+    plan.add_argument("--manifest-file", help="local copy of the release's container-images.json (lineage is still "
+                                              "verified online through the GitHub compare API)")
     release_options(plan)
 
     update = sub.add_parser("update", help="pull, verify, and switch to a release")
     update.add_argument("--version", required=True)
-    update.add_argument("--manifest-file", help="local container-images.json (air-gapped)")
+    update.add_argument("--manifest-file", help="local copy of the release's container-images.json (lineage is still "
+                                                "verified online through the GitHub compare API)")
     apply_options(update)
 
-    rollback = sub.add_parser("rollback", help="switch images back to the previous release (no data restore)")
+    rollback = sub.add_parser("rollback", help="switch images back to the previous release (no data restore; "
+                                               "requires --allow-unsafe-downgrade after restoring a backup)")
     apply_options(rollback)
     sub.add_parser("status", help="show current/previous release and unfinished transactions")
     return parser
@@ -850,6 +986,9 @@ def main(argv=None, controller_factory=Controller):
     except MigrationError as error:
         sys.stderr.write("printfarmer-registry: %s\n" % error)
         return 2
+    except KeyboardInterrupt:
+        sys.stderr.write("printfarmer-registry: interrupted; run `status` before retrying\n")
+        return 130
 
 
 if __name__ == "__main__":

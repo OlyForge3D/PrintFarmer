@@ -21,6 +21,7 @@ import printfarmer_registry as reg  # noqa: E402
 PROJECT = "printfarmer"
 OLD_COMMIT = "a" * 40
 NEW_COMMIT = "b" * 40
+THIRD_COMMIT = "e" * 40
 VAR_RE = re.compile(r"\$\{([A-Za-z0-9_]+)(?:(:-|:\?)([^}]*))?\}")
 
 
@@ -284,6 +285,7 @@ class RegistryTestCase(unittest.TestCase):
         self.files = [self.p("docker-compose.yml"), self.p("docker-compose.override.yml")]
         self.deploy_checkout(profiles=["orca"])
         self.fetched = {}
+        self.history = [OLD_COMMIT, NEW_COMMIT, THIRD_COMMIT]  # linear development history, oldest first
         self.output = io.StringIO()
         self.clock_value = [0]
 
@@ -313,9 +315,11 @@ class RegistryTestCase(unittest.TestCase):
     def fetch(self, url):
         if url in self.fetched:
             return self.fetched[url]
-        if "/compare/" in url:
-            return {"status": "ahead"}
-        raise reg.MigrationError("not found: " + url)
+        match = re.search(r"/compare/([0-9a-f]{40})\.\.\.([0-9a-f]{40})$", url)
+        if match and set(match.groups()) <= set(self.history):
+            base, head = (self.history.index(c) for c in match.groups())
+            return {"status": "ahead" if head > base else "behind" if head < base else "identical"}
+        raise reg.MigrationError("not found: " + url)  # unknown lineage stays unknown
 
     def controller(self, root=None):
         return reg.Controller(root or self.root, runner=self.docker, fetch=self.fetch, out=self.output,
@@ -444,6 +448,13 @@ class MigrateTests(RegistryTestCase):
         self.assertEqual(code, 2)
         self.assertIn("--deployed-commit", err)
 
+    def test_git_ls_files_failure_fails_closed_without_writing(self):
+        self.docker.tracked = None
+        code, err = self.main("migrate", "--deployed-commit", OLD_COMMIT)
+        self.assertEqual(code, 2)
+        self.assertIn("git ls-files", err)
+        self.assertFalse(os.path.exists(self.p(".printfarmer")))
+
     def test_migrate_twice_is_refused(self):
         self.migrate()
         code, err = self.main("migrate", "--deployed-commit", OLD_COMMIT)
@@ -518,7 +529,7 @@ class UpdateTests(RegistryTestCase):
     def test_unhealthy_service_keeps_last_good_release(self):
         self.publish("1.2.0")
         self.assertEqual(self.main("update", "--version", "1.2.0", "--backup-confirmed")[0], 0)
-        self.publish("1.3.0", char="2")
+        self.publish("1.3.0", commit=THIRD_COMMIT, char="2")
         self.docker.unhealthy_after_up.add("api")
         code, err = self.main("update", "--version", "1.3.0", "--backup-confirmed", "--health-timeout", "20")
         self.assertEqual(code, 2)
@@ -587,14 +598,126 @@ class UpdateTests(RegistryTestCase):
             shutil.rmtree(path) if os.path.isdir(path) else os.remove(path)
         self.docker.tracked = None  # no git checkout any more
         self.assertEqual(self.main("update", "--version", "1.2.0", "--backup-confirmed")[0], 0)
-        self.publish("1.3.0", char="2")
+        self.publish("1.3.0", commit=THIRD_COMMIT, char="2")
         self.assertEqual(self.main("update", "--version", "1.3.0", "--backup-confirmed")[0], 0)
-        code, err = self.main("rollback", "--backup-confirmed")
+        code, err = self.main("rollback", "--backup-confirmed", "--allow-unsafe-downgrade")
         self.assertEqual(code, 0, err)
         self.assertEqual(self.release_state()["current"]["version"], "1.2.0")
         self.assertIn("Data is NOT restored", self.output.getvalue())
+        self.assertIn("compare: behind", self.output.getvalue())
         otel = self.docker.containers["otel-collector"]["Mounts"][0]["Source"]
         self.assertEqual(otel, self.p(".printfarmer/files/scripts/docker/configs/otel.yaml"))
+
+    def test_rollback_requires_explicit_data_risk_acknowledgement(self):
+        self.publish("1.2.0")
+        self.assertEqual(self.main("update", "--version", "1.2.0", "--backup-confirmed")[0], 0)
+        self.publish("1.3.0", commit=THIRD_COMMIT, char="2")
+        self.assertEqual(self.main("update", "--version", "1.3.0", "--backup-confirmed")[0], 0)
+        ups = len(self.compose_commands("up"))
+        code, err = self.main("rollback", "--backup-confirmed")
+        self.assertEqual(code, 2)
+        self.assertIn("compare: behind", err)
+        self.assertIn("rollback --backup-confirmed --allow-unsafe-downgrade", err)
+        self.assertEqual(len(self.compose_commands("up")), ups)
+        self.assertEqual(self.release_state()["current"]["version"], "1.3.0")
+        self.assertFalse(os.path.exists(self.p(".printfarmer/pending.json")))
+
+    def test_unknown_lineage_is_refused(self):
+        self.publish("1.2.0", commit="f" * 40)  # GitHub cannot relate this commit
+        code, err = self.main("update", "--version", "1.2.0", "--backup-confirmed")
+        self.assertEqual(code, 2)
+        self.assertIn("compare: unknown", err)
+        self.assertEqual(self.compose_commands("up"), [])
+
+    def test_existing_lock_reports_holder_and_is_not_taken_over(self):
+        self.publish("1.2.0")
+        self.write_text(".printfarmer/lock", "%d deadbeef 2026-01-01T00:00:00+00:00" % os.getpid())
+        code, err = self.main("update", "--version", "1.2.0", "--backup-confirmed")
+        self.assertEqual(code, 2)
+        self.assertIn("PID %d" % os.getpid(), err)
+        self.assertIn("is still running" if os.name == "posix" else "liveness could not be determined", err)
+        self.assertTrue(os.path.exists(self.p(".printfarmer/lock")))
+        self.assertEqual(self.compose_commands("up"), [])
+
+    def test_lock_cleanup_failure_does_not_mask_primary_error(self):
+        data = self.publish("1.2.0")
+        self.docker.pull_failures.add(data["images"]["api"]["reference"])
+        real_remove = reg.os.remove
+
+        def failing_remove(path):
+            if path.endswith("lock"):
+                raise PermissionError("denied")
+            return real_remove(path)
+
+        reg.os.remove = failing_remove
+        try:
+            code, err = self.main("update", "--version", "1.2.0", "--backup-confirmed")
+        finally:
+            reg.os.remove = real_remove
+        self.assertEqual(code, 2)
+        self.assertIn("manifest unknown", err)
+        self.assertIn("could not remove lock", self.output.getvalue())
+
+    def test_lock_replaced_by_another_run_is_left_alone(self):
+        self.publish("1.2.0")
+        controller = self.controller()
+        original = controller.wait_healthy
+
+        def replace_lock(*args):
+            self.write_text(".printfarmer/lock", "999999 other-run 2026-01-01T00:00:00+00:00")
+            return original(*args)
+
+        controller.wait_healthy = replace_lock
+        self.assertEqual(controller.update("1.2.0"), 0)
+        self.assertEqual(read_text(self.p(".printfarmer/lock")).split()[1], "other-run")
+        self.assertIn("belongs to another run", self.output.getvalue())
+
+    def test_malformed_pending_state_fails_with_actionable_error(self):
+        self.publish("1.2.0")
+        self.write(".printfarmer/pending.json", {"action": "update", "version": "1.2.0", "images": {}})
+        code, err = self.main("update", "--version", "1.2.0", "--backup-confirmed", "--resume-interrupted")
+        self.assertEqual(code, 2)
+        self.assertIn("malformed (invalid: phase)", err)
+        self.assertIn("move it aside", err)
+        self.assertEqual(self.compose_commands("up"), [])
+        self.assertTrue(os.path.exists(self.p(".printfarmer/pending.json")))
+        self.write_text(".printfarmer/pending.json", "{not json")
+        code, err = self.main("status")
+        self.assertEqual(code, 2)
+        self.assertIn("unreadable", err)
+
+    def test_interrupt_during_health_leaves_recoverable_pending(self):
+        self.publish("1.2.0")
+        controller = self.controller()
+
+        def interrupt(*args):
+            raise KeyboardInterrupt
+
+        controller.wait_healthy = interrupt
+        with self.assertRaises(KeyboardInterrupt):
+            controller.update("1.2.0")
+        self.assertEqual(load_json(self.p(".printfarmer/pending.json"))["phase"], "failed-health")
+        self.assertFalse(os.path.exists(self.p(".printfarmer/release.json")))
+        self.assertFalse(os.path.exists(self.p(".printfarmer/lock")))
+        code, err = self.main("update", "--version", "1.2.0", "--backup-confirmed", "--resume-interrupted")
+        self.assertEqual(code, 0, err)
+        self.assertFalse(os.path.exists(self.p(".printfarmer/pending.json")))
+
+    def test_status_lists_and_verifies_preserved_host_paths(self):
+        self.output.seek(0)
+        self.output.truncate(0)
+        self.assertEqual(self.main("status")[0], 0)
+        out = self.output.getvalue()
+        self.assertIn("ok       ./.volumes/data", out)
+        self.assertIn("ok       ./deploy/nginx/nginx.conf", out)
+        self.assertIn("ok       ./.env", out)
+        self.assertNotIn(".printfarmer/files", out)
+        self.assertNotIn("s3cr3t-value", out)
+        shutil.rmtree(self.p("deploy"))
+        self.output.seek(0)
+        self.output.truncate(0)
+        self.assertEqual(self.main("status")[0], 1)
+        self.assertIn("MISSING  ./deploy/nginx/nginx.conf", self.output.getvalue())
 
     def test_rollback_to_git_checkout_is_refused(self):
         self.publish("1.2.0")

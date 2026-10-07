@@ -35,7 +35,11 @@ Migration or update fails closed when:
 - The previous-version OrcaSlicer worker is enabled. It has no published image.
 - The OrcaSlicer worker runs on a non-amd64 host. The worker image is amd64-only.
 - A release's OrcaSlicer version differs from the deployment's. The worker
-  custom-profile volume name includes the OrcaSlicer version.
+  custom-profile volume name includes the OrcaSlicer version, so accepting a
+  different version would silently start on a new, empty profile volume. There
+  is no supported adoption path yet; choose releases whose worker matches the
+  recorded `orcaslicerVersion` in `.printfarmer/deployment.json`. Do not edit
+  `.env`, `deployment.json`, or the release Compose file by hand to work around it.
 - An insider release is requested without `--allow-insider`.
 - Any selected image cannot be pulled, or its labels, platform, or digest do not
   match the release's `container-images.json`.
@@ -90,19 +94,32 @@ This writes, without restarting anything:
 `plan` shows old and new images per service, source lineage, and named volume
 identity, and changes nothing. `update` then:
 
-1. Fetches `container-images.json` from the GitHub release `v<version>`
-   (or `--manifest-file` for air-gapped hosts).
+1. Fetches `container-images.json` from the GitHub release `v<version>`, or
+   reads a reviewed copy from `--manifest-file`.
 2. Verifies the target commit descends from the deployed commit through the
-   GitHub compare API. Set `GITHUB_TOKEN` to avoid rate limits. Override with
-   `--allow-unsafe-downgrade` only after a deliberate review.
+   GitHub compare API. This step needs online GitHub API access even with
+   `--manifest-file`; an unknown or unreachable lineage is refused, never
+   treated as proven. Set `GITHUB_TOKEN` to avoid rate limits. Override with
+   `--allow-unsafe-downgrade` only after a deliberate review. The host is
+   therefore not air-gapped-capable without that override.
 3. Pulls and verifies every selected image by digest before stopping anything.
 4. Re-checks storage identity, then runs `docker compose up -d --no-build --pull never`.
 5. Waits for container health (`--health-timeout`, default 600 seconds) and only
    then records the release as current.
 
-A failed pull leaves the deployment untouched. A failure after start leaves
-`.printfarmer/pending.json`; inspect `status`, then rerun with
-`--resume-interrupted`. Concurrent runs are blocked by `.printfarmer/lock`.
+The OrcaSlicer worker's `ORCASLICER_CONTAINER_DIGEST` is set by the controller
+to the release's exact multi-platform index digest and passed through the
+process environment, which overrides the value in `.env`. The API compares this
+value as an opaque string. Always start the release through the controller: a
+manual `docker compose up` would fall back to the stale digest in `.env`.
+
+A failed pull leaves the deployment untouched. A failure or Ctrl-C after start
+leaves `.printfarmer/pending.json`; inspect `status`, then rerun with
+`--resume-interrupted`. A malformed pending file is reported, not guessed at.
+
+Concurrent runs are blocked by `.printfarmer/lock`, which records the holder's
+PID and start time. Locks are never taken over automatically. If `status` shows
+no other run is active on the host, delete the lock file and retry.
 
 ### 5. Verify
 
@@ -114,12 +131,19 @@ curl -fsS http://localhost:<published-http-port>/healthz
 
 ### 6. Remove the source checkout (optional)
 
-After a verified update, the source tree is no longer used. Keep:
+After a verified update, the source tree is no longer used. The exact host
+paths to keep depend on the deployment's profiles and `EXTERNAL_*_PATH`
+settings, so do not rely on a static list. `migrate` prints them, derived from
+the resolved configuration, and `status` re-checks each one:
 
-- `.env`, `.deploy-config`, `docker-compose.release.yml`
-- `.printfarmer/`
-- `.volumes/` or the configured `EXTERNAL_*_PATH` directories
-- `deploy/nginx/`
+```bash
+.printfarmer/bin/printfarmer-registry status
+```
+
+Keep every listed path, typically `.env`, `.deploy-config`,
+`docker-compose.release.yml`, `.printfarmer/`, data directories, and generated
+configuration such as `deploy/nginx/` or monitoring directories. `status` exits
+non-zero and marks a path `MISSING` if any is removed.
 
 Do not run `scripts/deploy-docker.sh` against a migrated deployment; it would
 rebuild from source and replace the release Compose project.
@@ -127,12 +151,15 @@ rebuild from source and replace the release Compose project.
 ## Rollback
 
 ```bash
-.printfarmer/bin/printfarmer-registry rollback --backup-confirmed
+.printfarmer/bin/printfarmer-registry rollback --backup-confirmed --allow-unsafe-downgrade
 ```
 
 Rollback switches images to the previous release only. It does not restore
-data. If the newer release applied database migrations, restore the backup
-before rolling back. Rollback to the original git-checkout build is not
+data, and `--backup-confirmed` only attests that a backup exists. Because the
+previous release is behind the current one, lineage verification always refuses
+it unless `--allow-unsafe-downgrade` acknowledges the schema risk. If the newer
+release applied database migrations, restore the backup first; older images
+may not start against a newer schema. Rollback to the original git-checkout build is not
 automated; restore the checkout and run `scripts/deploy-docker.sh` instead.
 
 ## Updating the Controller
