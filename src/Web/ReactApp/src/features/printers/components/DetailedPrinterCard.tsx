@@ -1143,13 +1143,16 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
             printerId={printer.id}
             mmuStatus={mmuStatus}
             isOnline={isOnline}
+            toolheads={printerDetails?.toolheads}
+            reviewedRowVersion={spoolReviewedRowVersion ?? undefined}
           />
         </div>
       )}
 
       {/* Consolidated materials module — replaces the old Material Slots strip
-          and the parallel Spools assignment list, which could disagree. */}
-      {materialLoadout && (
+          and the parallel Spools assignment list, which could disagree. Hidden
+          when the AMS control box already represents the slots. */}
+      {materialLoadout && !(mmuStatus && !isSnapmakerU1Mmu) && (
         <MaterialLoadout
           printerId={printer.id}
           mmuStatus={mmuStatus}

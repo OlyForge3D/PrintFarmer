@@ -499,7 +499,7 @@ describe('MaterialLoadout', () => {
     expect(assign).toHaveAttribute('aria-disabled', 'true');
     expect(assign).toHaveAttribute('tabindex', '0');
     expect(
-      screen.getByText(/Materials topology not yet loaded/),
+      screen.getByText(/Saved gate layout does not match the attached hardware/),
     ).toBeInTheDocument();
 
     fireEvent.click(assign);
@@ -521,7 +521,7 @@ describe('MaterialLoadout', () => {
 
     expect(assign).not.toBeDisabled();
     expect(assign).toHaveAttribute('aria-disabled', 'true');
-    expect(screen.getByText(/Materials topology not yet loaded/)).toBeInTheDocument();
+    expect(screen.getByText(/Saved gate layout does not match the attached hardware/)).toBeInTheDocument();
     fireEvent.click(assign);
     expect(setSpool).not.toHaveBeenCalled();
   });

@@ -153,14 +153,15 @@ describe('DetailedPrinterCard printerDetails gating (#1146 item 4)', () => {
     );
   });
 
-  it('preserves the collapsed materials module for MMU printers using only mmuStatus (no fetch needed)', () => {
+  it('represents MMU slots exactly once — via the AMS control box, not a second materials module', () => {
     const printer = makePrinter({
       mmuStatus: { gates: [{ index: 0, status: 1, color: '#fff', material: 'PLA' }] } as unknown as MmuStatus,
     } as Partial<Printer>);
 
     render(<DetailedPrinterCard printer={printer} />);
 
-    expect(screen.getByTestId('material-loadout')).toBeInTheDocument();
+    expect(screen.getByTestId('ams-control-box')).toBeInTheDocument();
+    expect(screen.queryByTestId('material-loadout')).not.toBeInTheDocument();
   });
 
   it('eagerly requests printer details collapsed when there is no MMU/AMS signal at all (narrowest safe gate)', () => {

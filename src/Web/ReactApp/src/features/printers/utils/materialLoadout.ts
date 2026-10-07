@@ -103,16 +103,37 @@ function persistedGateIndicesByLiveIndex(
   const sortedLiveGates = [...liveGates].sort((a, b) => a.index - b.index);
 
   if (
-    persistedGates.length !== sortedLiveGates.length ||
     new Set(persistedGates.map((gate) => gate.index)).size !== persistedGates.length ||
     sortedLiveGates.some((gate, position) => gate.index !== position)
   ) {
     return null;
   }
 
-  return new Map(
-    sortedLiveGates.map((gate, position) => [gate.index, persistedGates[position].index]),
-  );
+  if (persistedGates.length === sortedLiveGates.length) {
+    return new Map(
+      sortedLiveGates.map((gate, position) => [gate.index, persistedGates[position].index]),
+    );
+  }
+
+  // The config database can lag the hardware (e.g. 3 persisted gates behind a
+  // four-slot QidiBox). When the persisted gates are exactly the canonical
+  // prefix `1..M` the backend creates (Toolhead.Index = live gate + 1, see
+  // ToolheadIndexMapper), the mapping for the remaining live gates is not a
+  // guess: binding index M+1..N makes the backend create exactly the missing
+  // gate without renumbering existing ones (#1588).
+  const isCanonicalPrefix = persistedGates.length > 0
+    && persistedGates.length < sortedLiveGates.length
+    && persistedGates.every((gate, position) => gate.index === position + 1)
+    // Never let a live-only gate land on a persisted physical toolhead index.
+    && !(toolheads ?? []).some((toolhead) =>
+      !isMmuGate(toolhead)
+      && toolhead.index > persistedGates.length
+      && toolhead.index <= sortedLiveGates.length);
+  if (!isCanonicalPrefix) {
+    return null;
+  }
+
+  return new Map(sortedLiveGates.map((gate) => [gate.index, gate.index + 1]));
 }
 
 function slotFromGate(
@@ -216,18 +237,25 @@ export function resolveMaterialLoadout(
     // For MMU gates the API-index offset can only be pinned down from the
     // persisted topology — without it, live G1 might land on physical hotend 0.
     const hasResolvedTopology = kind === 'tool' || persistedGateIndices !== null;
+    const persistedByIndex = new Map((toolheads ?? []).map((t) => [t.index, t]));
     return {
       kind,
       unitLabel: unitLabelFor(kind, mmuStatus?.mmuType, sorted.length),
-      slots: sorted.map((gate, position) =>
-        slotFromGate(
-          gate,
-          position,
-          kind,
-          kind === 'tool'
-            ? gate.index
-            : persistedGateIndices?.get(gate.index) ?? gate.index,
-        )),
+      slots: sorted.map((gate, position) => {
+        const apiIndex = kind === 'tool'
+          ? gate.index
+          : persistedGateIndices?.get(gate.index) ?? gate.index;
+        const slot = slotFromGate(gate, position, kind, apiIndex);
+        // Many units (e.g. QidiBox) do not report a Spoolman id per gate, so the
+        // persisted binding is the only record of which spool sits in the slot.
+        const persisted = persistedGateIndices ? persistedByIndex.get(apiIndex) : undefined;
+        if (slot.spoolId == null && persisted?.currentSpoolId != null && persisted.currentSpoolId > 0) {
+          slot.spoolId = persisted.currentSpoolId;
+          slot.material ??= persisted.currentMaterial;
+          slot.color ??= persisted.currentFilamentColor;
+        }
+        return slot;
+      }),
       hasResolvedTopology,
     };
   }

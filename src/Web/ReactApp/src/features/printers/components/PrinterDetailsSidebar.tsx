@@ -425,6 +425,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
   const isEnabled = displayPrinter?.isEnabled ?? true;
   const rawState = displayPrinter?.state ?? 'unknown';
   const isSnapmakerU1Mmu = displayPrinter?.mmuStatus?.mmuType === MmuProtocol.SnapmakerU1;
+  const showMmuControlBox = !!displayPrinter?.mmuStatus && !isSnapmakerU1Mmu;
   const statusLabel = getPrinterDisplayState({
     printerState: rawState,
     autoDispatchState: autoDispatchStatus?.state,
@@ -1283,21 +1284,39 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
           />
         </CollapsibleSection>
 
-        {/* MMU Control Box - Show when MMU/ERCF is detected via real-time status */}
-        {displayPrinter?.mmuStatus && !isSnapmakerU1Mmu && (
+        {/* MMU Control Box - the single slot representation when MMU/ERCF/AMS is
+            detected via real-time status; spool assignment lives in its action row. */}
+        {showMmuControlBox && displayPrinter?.mmuStatus && (
           <MmuControlBox
             printerId={printer.id}
             mmuStatus={displayPrinter.mmuStatus}
             isOnline={isOnline}
+            toolheads={printerDetails?.toolheads}
+            reviewedRowVersion={spoolReviewedRowVersion ?? undefined}
+            onSpoolChange={() => {
+              queryClient.invalidateQueries({ queryKey: ['printers', printer.id, 'details'] });
+            }}
           />
         )}
 
         {/* Consolidated materials module — one slot list drives the rail, the
-            coverage rings and the assignment drawer. */}
+            coverage rings and the assignment drawer. Suppressed when the MMU
+            control box already shows the slots so there is exactly one view. */}
         {materialLoadout && (() => {
           const persistedToolheads = printerDetails?.toolheads && printerDetails.toolheads.length > 1
             ? printerDetails.toolheads
             : undefined;
+          if (showMmuControlBox) {
+            return persistedToolheads ? (
+              <CollapsibleSection title="Fallback Groups" expanded={true}>
+                <FallbackGroupsPanel
+                  printerId={printer.id}
+                  toolheads={persistedToolheads}
+                  isOnline={isOnline}
+                />
+              </CollapsibleSection>
+            ) : null;
+          }
           return (
             <CollapsibleSection title="Materials" expanded={true}>
               <MaterialLoadout
