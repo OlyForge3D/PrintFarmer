@@ -13,6 +13,8 @@ export interface SlotSpoolAssignmentOptions {
   reviewedRowVersion?: string | null;
   /** Whether every slot's API index is unambiguous. See `MaterialLoadout.hasResolvedTopology`. */
   hasResolvedTopology: boolean;
+  /** Saved topology still loading; see `MaterialLoadout.topologyPending`. */
+  topologyPending?: boolean;
   onSpoolChange?: () => void;
 }
 
@@ -30,6 +32,9 @@ export interface SlotSpoolAssignment {
 }
 
 export const DISABLED_SLOT_REASON = 'Disabled on the device — cannot take a spool';
+export const TOPOLOGY_LOADING_REASON = 'Loading saved gate layout…';
+export const TOPOLOGY_MISMATCH_REASON =
+  'Saved gate layout does not match the attached hardware — re-check the printer configuration to assign spools';
 
 /**
  * Spool bind/clear for a resolved material slot, shared by every surface that
@@ -46,6 +51,7 @@ export function useSlotSpoolAssignment({
   printerId,
   reviewedRowVersion,
   hasResolvedTopology,
+  topologyPending = false,
   onSpoolChange,
 }: SlotSpoolAssignmentOptions): SlotSpoolAssignment {
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
@@ -87,7 +93,9 @@ export function useSlotSpoolAssignment({
   const blockedReason = !activeRevision
     ? 'Printer revision unavailable — refresh to assign spools'
     : !hasResolvedTopology
-      ? 'Saved gate layout does not match the attached hardware — re-check the printer configuration to assign spools'
+      ? topologyPending
+        ? TOPOLOGY_LOADING_REASON
+        : TOPOLOGY_MISMATCH_REASON
       : undefined;
 
   const selectSlot = (key: string | null) => {
@@ -104,7 +112,9 @@ export function useSlotSpoolAssignment({
       return null;
     }
     if (!hasResolvedTopology) {
-      toast.error('Saved gate layout does not match the attached hardware. Refresh and review again.');
+      toast.error(topologyPending
+        ? 'Saved gate layout is still loading. Try again in a moment.'
+        : 'Saved gate layout does not match the attached hardware. Refresh and review again.');
       return null;
     }
     return revision;

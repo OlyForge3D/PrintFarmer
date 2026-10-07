@@ -498,9 +498,9 @@ describe('MaterialLoadout', () => {
     expect(assign).not.toBeDisabled();
     expect(assign).toHaveAttribute('aria-disabled', 'true');
     expect(assign).toHaveAttribute('tabindex', '0');
-    expect(
-      screen.getByText(/Saved gate layout does not match the attached hardware/),
-    ).toBeInTheDocument();
+    // Toolheads not fetched yet: the hint says "loading", not "mismatch".
+    expect(screen.getByText(/Loading saved gate layout/)).toBeInTheDocument();
+    expect(screen.queryByText(/does not match the attached hardware/)).not.toBeInTheDocument();
 
     fireEvent.click(assign);
     expect(screen.queryByTestId('spool-picker')).not.toBeInTheDocument();

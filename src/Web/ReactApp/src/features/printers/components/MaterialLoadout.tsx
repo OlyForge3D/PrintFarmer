@@ -273,6 +273,7 @@ export function MaterialLoadout({
     printerId,
     reviewedRowVersion,
     hasResolvedTopology: loadout?.hasResolvedTopology ?? false,
+    topologyPending: loadout?.topologyPending ?? false,
     onSpoolChange,
   });
 
