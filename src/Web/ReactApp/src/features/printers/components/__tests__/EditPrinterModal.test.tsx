@@ -7,7 +7,7 @@ import { PrinterBackend } from '@/types/api';
 const mockUsePrinterDetails = vi.fn();
 const mockUseUpdatePrinter = vi.fn();
 const mockUsePrinterCameras = vi.fn();
-const mockUseModels = vi.fn((_manufacturerId?: string) => ({ data: [] as unknown[] }));
+const mockUseModels = vi.fn<(manufacturerId?: string) => { data: unknown[] }>(() => ({ data: [] }));
 const testConnection = vi.fn();
 
 const { mockToast } = vi.hoisted(() => ({
