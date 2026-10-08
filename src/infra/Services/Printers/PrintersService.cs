@@ -2475,7 +2475,7 @@ public class PrintersService(
                 Capabilities = new PrinterCapabilitiesExportDto
                 {
                     Id = p.Id, // Use printer ID as capabilities ID
-                    NozzleDiameter = p.Toolheads?.FirstOrDefault(t => t.IsPrimary)?.NozzleModel?.Diameter ?? 0.4,
+                    NozzleDiameter = p.Toolheads?.FirstOrDefault(t => t.IsPrimary)?.NozzleDiameter ?? 0.4,
                     SupportedMaterials = p.Toolheads?.FirstOrDefault(t => t.IsPrimary)?.SupportedMaterials,
                     MaxBuildVolumeX = p.MaxBuildVolumeX,
                     MaxBuildVolumeY = p.MaxBuildVolumeY,
@@ -2593,7 +2593,7 @@ public class PrintersService(
                 ["id"] = t.Id,
                 ["name"] = t.Name,
                 ["index"] = t.Index,
-                ["nozzleDiameter"] = t.NozzleModel?.Diameter ?? 0.4,
+                ["nozzleDiameter"] = t.NozzleDiameter ?? 0.4,
 
                 // Component model references - nozzle type comes from NozzleModel.NozzleMaterial.Name
                 ["hotendModelId"] = t.HotendModelId,
@@ -3098,6 +3098,9 @@ public class PrintersService(
             // Auto-create MMU virtual toolheads if MultiMaterial is enabled
             if (p.MultiMaterial)
             {
+                // Seed the physical toolheads first: gates are added straight to the context
+                // (not p.Toolheads) and copy the primary's stored NozzleDiameter.
+                await SeedToolheadNozzleDiametersAsync(p.Toolheads, ct);
                 SyncMmuVirtualToolheads(p, mmuGateCount: 4);
             }
         }
@@ -3121,6 +3124,8 @@ public class PrintersService(
         // round-14). True only for a Moonraker printer with ≥2 physical hotends, where interval-aware
         // active-tool telemetry can genuinely differentiate per-head wear.
         _ = PerToolAttributionCapability.Refresh(p);
+
+        await SeedToolheadNozzleDiametersAsync(p.Toolheads, ct);
 
         await AddAsync(p, ct);
 
@@ -3252,10 +3257,20 @@ public class PrintersService(
                 // Find matching toolhead template by index, otherwise use default
                 PrinterModelToolheadDto? matchingTemplate = modelTemplate.Toolheads?.FirstOrDefault(t => t.Index == toolhead.Index) ?? defaultModelToolhead;
 
-                // Apply NozzleModelId from template (nozzle diameter is derived from the nozzle model)
+                // Apply NozzleModelId from template
                 if (matchingTemplate?.NozzleModelId != null && (forceOverwrite || toolhead.NozzleModelId == null))
                 {
                     toolhead.NozzleModelId = matchingTemplate.NozzleModelId;
+                    toolhead.UpdatedAt = DateTime.UtcNow;
+                    updated = true;
+                }
+
+                // The stored nozzle diameter is per-printer; the template only fills it when
+                // missing or when the caller explicitly overwrites with model defaults.
+                if (matchingTemplate?.NozzleDiameter is > 0 && (forceOverwrite || toolhead.NozzleDiameter == null)
+                    && (toolhead.NozzleDiameter is not { } current || Math.Abs(current - matchingTemplate.NozzleDiameter.Value) > 0.0001))
+                {
+                    toolhead.NozzleDiameter = matchingTemplate.NozzleDiameter;
                     toolhead.UpdatedAt = DateTime.UtcNow;
                     updated = true;
                 }
@@ -5265,6 +5280,7 @@ public class PrintersService(
                 ExtruderModelId = primaryToolhead?.ExtruderModelId,
                 ToolheadModelDefId = primaryToolhead?.ToolheadModelDefId,
                 NozzleModelId = primaryToolhead?.NozzleModelId,
+                NozzleDiameter = primaryToolhead?.NozzleDiameter,
                 SupportedMaterials = primaryToolhead?.SupportedMaterials,
                 UpdatedAt = DateTime.UtcNow
             });
@@ -5281,6 +5297,34 @@ public class PrintersService(
         }
 
         return gates;
+    }
+
+    /// <summary>
+    /// Seeds each new toolhead's stored nozzle diameter from its nozzle model when no explicit
+    /// value was provided. Model values are creation-time defaults only; afterwards the stored
+    /// per-printer value is authoritative and is never re-derived from the model.
+    /// </summary>
+    private async Task SeedToolheadNozzleDiametersAsync(IEnumerable<Toolhead> toolheads, CancellationToken ct)
+    {
+        List<Toolhead> unseeded = [.. toolheads.Where(t => t.NozzleDiameter == null && t.NozzleModelId != null)];
+        if (unseeded.Count == 0)
+        {
+            return;
+        }
+
+        List<Guid> modelIds = [.. unseeded.Select(t => t.NozzleModelId!.Value).Distinct()];
+        Dictionary<Guid, double> diameters = await _db.NozzleModelDefinitions
+            .AsNoTracking()
+            .Where(n => modelIds.Contains(n.Id) && n.Diameter > 0)
+            .ToDictionaryAsync(n => n.Id, n => n.Diameter, ct);
+
+        foreach (Toolhead toolhead in unseeded)
+        {
+            if (diameters.TryGetValue(toolhead.NozzleModelId!.Value, out double diameter))
+            {
+                toolhead.NozzleDiameter = diameter;
+            }
+        }
     }
 
     /// <summary>

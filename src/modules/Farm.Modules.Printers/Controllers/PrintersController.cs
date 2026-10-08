@@ -1287,7 +1287,7 @@ public class PrintersController(
             p.Id,
             p.Name,
             p.ServiceState?.LastCapabilityUpdate ?? DateTime.UtcNow,
-            primaryToolhead?.NozzleModel?.Diameter ?? 0.4,  // Nozzle diameter from NozzleModel
+            primaryToolhead?.NozzleDiameter ?? 0.4,  // Stored per-printer nozzle diameter
             primaryToolhead?.SupportedMaterials,
             p.MaxBuildVolumeX,
             p.MaxBuildVolumeY,
@@ -1308,12 +1308,12 @@ public class PrintersController(
             t.Id,
             t.Name,
             t.Index,
-            t.NozzleModel?.Diameter,  // Nozzle diameter from NozzleModel
+            t.NozzleDiameter,  // Stored per-printer value; NozzleModel only seeds it at creation
             t.NozzleModel?.NozzleMaterial?.Name ?? t.NozzleModel?.NozzleType.ToString(),  // Nozzle material name from NozzleModel (open string set)
             t.HotendModel?.MaxFlowRate,  // Max flow rate from HotendModel
             t.HotendModel?.MaxTemp,      // Max temp from HotendModel
 
-            // Component model references - nozzle diameter comes from NozzleModel.Diameter
+            // Component model references
             t.HotendModelId,
             t.HotendModel?.Name,
             t.ExtruderModelId,

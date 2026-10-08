@@ -328,7 +328,7 @@ public class AutoTagService : IAutoTagService
                 .FirstOrDefaultAsync(ct);
         }
 
-        double diameter = primaryToolhead?.NozzleModel?.Diameter ?? 0;
+        double diameter = primaryToolhead?.NozzleDiameter ?? 0;
         if (diameter <= 0)
         {
             return null;

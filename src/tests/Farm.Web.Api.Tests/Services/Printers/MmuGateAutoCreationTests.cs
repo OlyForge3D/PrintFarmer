@@ -189,6 +189,61 @@ public class MmuGateAutoCreationTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task CreatePrinter_TemplateNozzleModel_SeedsStoredNozzleDiameterOnAllToolheads()
+    {
+        Guid mfgId = Guid.NewGuid();
+        Guid modelId = Guid.NewGuid();
+        Guid nozzleMaterialId = Guid.NewGuid();
+        Guid nozzleModelId = Guid.NewGuid();
+
+        await using (AsyncServiceScope seedScope = _factory.Services.CreateAsyncScope())
+        {
+            AppDbContext seedDb = seedScope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+            seedDb.Manufacturers.Add(new Manufacturer { Id = mfgId, Name = "NozzleSeed Mfg" });
+            seedDb.NozzleMaterials.Add(new NozzleMaterial
+            {
+                Id = nozzleMaterialId,
+                Name = $"NozzleSeed Brass {nozzleMaterialId:N}",
+                DefaultMaxTemp = 300
+            });
+            seedDb.NozzleModelDefinitions.Add(new NozzleModelDefinition
+            {
+                Id = nozzleModelId,
+                ManufacturerId = mfgId,
+                Name = "NozzleSeed 0.4",
+                Diameter = 0.4,
+                NozzleMaterialId = nozzleMaterialId
+            });
+
+            var model = new PrinterModel { Id = modelId, ManufacturerId = mfgId, Name = "NozzleSeed Model", MultiMaterial = true };
+            model.Toolheads.Add(new PrinterModelToolhead
+            {
+                Id = Guid.NewGuid(),
+                PrinterModelId = modelId,
+                Name = "Primary",
+                Index = 0,
+                IsPrimary = true,
+                NozzleModelId = nozzleModelId
+            });
+            seedDb.PrinterModels.Add(model);
+
+            await seedDb.SaveChangesAsync();
+        }
+
+        CreatePrinterFromDiscoveryDto dto = CreatePrinterDto("NozzleSeed Printer", mfgId, modelId, true);
+        PrinterDto created = await _printersService.CreatePrinterFromDtoAsync(dto, CancellationToken.None);
+
+        List<Toolhead> toolheads = await _dbContext.Toolheads
+            .Where(t => t.PrinterId == created.Id)
+            .ToListAsync();
+
+        toolheads.Should().HaveCount(5);
+        toolheads.Should().AllSatisfy(t =>
+            t.NozzleDiameter.Should().Be(0.4, "the model's nozzle diameter seeds the stored per-printer default at creation"));
+    }
+
+    [Fact]
     public async Task CreatePrinter_MultiMaterialFalse_NoMmuGatesCreated()
     {
         (Guid mfgId, Guid modelId) = await SeedCatalogAsync("NoMMU");

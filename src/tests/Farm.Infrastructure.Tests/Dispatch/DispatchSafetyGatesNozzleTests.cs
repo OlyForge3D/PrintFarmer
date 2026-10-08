@@ -10,44 +10,35 @@ using Xunit;
 namespace Farm.Infrastructure.Tests.Dispatch;
 
 /// <summary>
-/// Nozzle-diameter evidence sources accepted by <see cref="DispatchSafetyGates.EvaluateHardware"/>.
+/// Stored per-printer nozzle diameter is the only evidence accepted by <see cref="DispatchSafetyGates.EvaluateHardware"/>.
 /// </summary>
 public sealed class DispatchSafetyGatesNozzleTests
 {
     [Fact]
-    public void StandardJob_AcceptsConfiguredNozzleModelDiameter()
+    public void StandardJob_AcceptsStoredToolheadDiameter()
     {
         PrintJob job = CreateJob(JobKind.Standard, 0.4m);
-        Printer printer = CreatePrinter(explicitDiameter: null, modelDiameter: 0.4);
+        Printer printer = CreatePrinter(explicitDiameter: 0.4, modelDiameter: null);
 
         DispatchSafetyGates.EvaluateHardware(job, printer).Should().BeNull();
     }
 
     [Fact]
-    public void StandardJob_RejectsMismatchedNozzleModelDiameter()
+    public void StandardJob_IgnoresNozzleModelDiameter_WhenStoredDiameterMissing()
     {
-        PrintJob job = CreateJob(JobKind.Standard, 0.6m);
+        PrintJob job = CreateJob(JobKind.Standard, 0.4m);
         Printer printer = CreatePrinter(explicitDiameter: null, modelDiameter: 0.4);
 
-        DispatchSafetyGates.EvaluateHardware(job, printer)!.ErrorCode.Should().Be("nozzle_mismatch");
+        DispatchSafetyGates.EvaluateHardware(job, printer)!.ErrorCode.Should().Be("nozzle_unknown");
     }
 
     [Fact]
-    public void StandardJob_ExplicitDiameterTakesPrecedenceOverNozzleModel()
+    public void StandardJob_StoredDiameterWinsOverNozzleModel()
     {
         PrintJob job = CreateJob(JobKind.Standard, 0.4m);
         Printer printer = CreatePrinter(explicitDiameter: 0.6, modelDiameter: 0.4);
 
         DispatchSafetyGates.EvaluateHardware(job, printer)!.ErrorCode.Should().Be("nozzle_mismatch");
-    }
-
-    [Fact]
-    public void StandardJob_WithNoNozzleEvidence_FailsClosed()
-    {
-        PrintJob job = CreateJob(JobKind.Standard, 0.4m);
-        Printer printer = CreatePrinter(explicitDiameter: null, modelDiameter: null);
-
-        DispatchSafetyGates.EvaluateHardware(job, printer)!.ErrorCode.Should().Be("nozzle_unknown");
     }
 
     [Fact]

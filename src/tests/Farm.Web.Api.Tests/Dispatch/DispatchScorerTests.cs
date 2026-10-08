@@ -153,6 +153,7 @@ public class DispatchScorerTests : IDisposable
             IsPrimary = isPrimary,
             NozzleModelId = nozzleModel.Id,
             NozzleModel = nozzleModel,
+            NozzleDiameter = nozzleDiameter,
             SupportedMaterials = supportedMaterials ?? ["PLA", "PETG", "ABS"],
             UpdatedAt = DateTime.UtcNow
         };
@@ -759,12 +760,12 @@ public class DispatchScorerTests : IDisposable
         Toolhead? primaryToolhead = printer.Toolheads.FirstOrDefault(t => t.IsPrimary)
             ?? printer.Toolheads.FirstOrDefault();
 
-        if (primaryToolhead?.NozzleModel is null)
+        if (primaryToolhead?.NozzleDiameter is not double storedDiameter)
         {
             return -1; // Can't verify nozzle → eliminate
         }
 
-        double diff = Math.Abs(primaryToolhead.NozzleModel.Diameter - (double)job.RequiredNozzleDiameter.Value);
+        double diff = Math.Abs(storedDiameter - (double)job.RequiredNozzleDiameter.Value);
         return diff <= 0.01 ? 100 : -1;
     }
 

@@ -84,14 +84,11 @@ public static class DispatchSafetyGates
         // --- Nozzle diameter (toolhead-aware) ---
         if (job.RequiredNozzleDiameter is { } requiredNozzle && requiredNozzle > 0m)
         {
-            // Calibration requires explicit installed-nozzle evidence. Standard jobs also accept
-            // the configured nozzle model's diameter, the source the UI and scorer present.
-            bool allowNozzleModelFallback = job.JobKind != JobKind.FilamentCalibration;
+            // The per-printer stored diameter is authoritative; the nozzle model only seeds it
+            // at creation (and via the legacy backfill migration).
             List<decimal> available = printer.Toolheads
-                .Select(t => t.NozzleDiameter ??
-                    (allowNozzleModelFallback ? t.NozzleModel?.Diameter : null))
-                .Where(d => d is > 0)
-                .Select(d => (decimal)d!.Value)
+                .Where(t => t.NozzleDiameter is > 0)
+                .Select(t => (decimal)t.NozzleDiameter!.Value)
                 .ToList();
 
             if (available.Count == 0 && printer.NozzleDiameter.HasValue)
