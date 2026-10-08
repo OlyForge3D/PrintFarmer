@@ -165,6 +165,23 @@ public class PrintersControllerToolheadMetrologyUpdateTests : IClassFixture<Cust
         persisted.ExtruderGearRatio.Should().BeNull();
     }
 
+    [Fact]
+    public async Task UpdatePrinter_CustomNozzleDiameter_RoundTripsThroughPrinterApi()
+    {
+        (Guid printerId, Guid toolheadId) = await SeedPrinterWithToolheadAsync();
+
+        var dto = new UpdatePrinterDto(Toolheads: [new UpdateToolheadDto(Id: toolheadId, NozzleDiameter: 0.6)]);
+
+        HttpResponseMessage response = await PutPrinterAsync(printerId, dto);
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        HttpResponseMessage get = await _client!.GetAsync($"/api/printers/{printerId}/details");
+        get.EnsureSuccessStatusCode();
+        using System.Text.Json.JsonDocument json = System.Text.Json.JsonDocument.Parse(await get.Content.ReadAsStringAsync());
+        System.Text.Json.JsonElement toolhead = json.RootElement.GetProperty("toolheads")[0];
+        toolhead.GetProperty("nozzleDiameter").GetDouble().Should().Be(0.6);
+    }
+
     private async Task<HttpResponseMessage> PutPrinterAsync(
         Guid printerId,
         UpdatePrinterDto dto)

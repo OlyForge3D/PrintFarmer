@@ -190,6 +190,7 @@ public class JobQueueServiceTests
             IsPrimary = true,
             NozzleModelId = nozzleModel.Id,
             NozzleModel = nozzleModel,
+            NozzleDiameter = nozzleModel.Diameter,
             SupportedMaterials = new[] { "PLA", "PETG" }
         };
         Printer printerWith04 = new PrinterBuilder()
@@ -207,6 +208,7 @@ public class JobQueueServiceTests
             IsPrimary = true,
             NozzleModelId = nozzle06.Id,
             NozzleModel = nozzle06,
+            NozzleDiameter = nozzle06.Diameter,
             SupportedMaterials = new[] { "PLA", "PETG" }
         };
         Printer printerWith06 = new PrinterBuilder()
@@ -270,6 +272,7 @@ public class JobQueueServiceTests
             Name = "Primary",
             IsPrimary = true,
             NozzleModel = nozzleModel,
+            NozzleDiameter = nozzleModel.Diameter,
             SupportedMaterials = new[] { "PLA" }
         };
         Printer printer = new PrinterBuilder()
@@ -404,6 +407,7 @@ public class JobQueueServiceTests
             Name = "Primary",
             IsPrimary = true,
             NozzleModel = nozzleModel,
+            NozzleDiameter = nozzleModel.Diameter,
             SupportedMaterials = new[] { "PLA", "PETG", "PCTG" }
         };
         Printer matchingPrinter = new PrinterBuilder()
@@ -421,6 +425,7 @@ public class JobQueueServiceTests
             Name = "Primary",
             IsPrimary = true,
             NozzleModel = wrongNozzle,
+            NozzleDiameter = wrongNozzle.Diameter,
             SupportedMaterials = new[] { "PLA", "PETG", "PCTG" }
         };
         Printer wrongNozzlePrinter = new PrinterBuilder()
@@ -437,6 +442,7 @@ public class JobQueueServiceTests
             Name = "Primary",
             IsPrimary = true,
             NozzleModel = nozzleModel,
+            NozzleDiameter = nozzleModel.Diameter,
             SupportedMaterials = new[] { "PLA", "PETG" } // No PCTG
         };
         Printer wrongMaterialPrinter = new PrinterBuilder()
@@ -473,6 +479,7 @@ public class JobQueueServiceTests
             Name = "Primary",
             IsPrimary = true,
             NozzleModel = nozzleModel,
+            NozzleDiameter = nozzleModel.Diameter,
             SupportedMaterials = new[] { "PLA" }
         };
         Printer printer = new PrinterBuilder()

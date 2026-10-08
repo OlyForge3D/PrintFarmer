@@ -951,19 +951,16 @@ public class DispatchScorer(
 
         double required = (double)requiredDiameter.Value;
 
-        // Check nozzle models first (more precise)
-        foreach (NozzleModelDefinition nozzleModel in printer.Toolheads
-                     .Select(toolhead => toolhead.NozzleModel)
-                     .OfType<NozzleModelDefinition>())
+        // Stored per-printer diameters are authoritative (NozzleModel only seeds them at creation)
+        IReadOnlyList<double> diameters = printer.GetEffectiveNozzleDiameters();
+
+        if (diameters.Any(diameter => Math.Abs(diameter - required) <= NozzleDiameterTolerance))
         {
-            if (Math.Abs(nozzleModel.Diameter - required) <= NozzleDiameterTolerance)
-            {
-                return new FactorScore("NozzleDiameter", 100, WeightNozzleDiameter, 100 * WeightNozzleDiameter, true);
-            }
+            return new FactorScore("NozzleDiameter", 100, WeightNozzleDiameter, 100 * WeightNozzleDiameter, true);
         }
 
-        // No nozzle model data — no data, score neutral
-        if (printer.Toolheads.All(t => t.NozzleModel is null))
+        // No stored nozzle data — score neutral
+        if (diameters.Count == 0)
         {
             return new FactorScore("NozzleDiameter", 50, WeightNozzleDiameter, 50 * WeightNozzleDiameter, true);
         }

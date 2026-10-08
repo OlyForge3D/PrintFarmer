@@ -1373,7 +1373,7 @@ export interface ToolheadDto {
   id: string;
   name?: string;
   index: number;
-  nozzleDiameter?: number;     // Derived from NozzleModel.Diameter
+  nozzleDiameter?: number;     // Stored per-printer value (seeded from the nozzle model at creation)
   nozzleType?: NozzleType | string;  // Derived from NozzleModel.NozzleMaterial.Name (open string set)
   maxFlowRate?: number;        // Derived from HotendModel.MaxFlowRate
   maxTemp?: number;            // Derived from HotendModel.MaxTemp

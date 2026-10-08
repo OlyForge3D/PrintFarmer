@@ -2475,7 +2475,7 @@ public class PrintersService(
                 Capabilities = new PrinterCapabilitiesExportDto
                 {
                     Id = p.Id, // Use printer ID as capabilities ID
-                    NozzleDiameter = p.Toolheads?.FirstOrDefault(t => t.IsPrimary)?.NozzleModel?.Diameter ?? 0.4,
+                    NozzleDiameter = p.Toolheads?.FirstOrDefault(t => t.IsPrimary)?.NozzleDiameter ?? 0.4,
                     SupportedMaterials = p.Toolheads?.FirstOrDefault(t => t.IsPrimary)?.SupportedMaterials,
                     MaxBuildVolumeX = p.MaxBuildVolumeX,
                     MaxBuildVolumeY = p.MaxBuildVolumeY,
@@ -2593,7 +2593,7 @@ public class PrintersService(
                 ["id"] = t.Id,
                 ["name"] = t.Name,
                 ["index"] = t.Index,
-                ["nozzleDiameter"] = t.NozzleModel?.Diameter ?? 0.4,
+                ["nozzleDiameter"] = t.NozzleDiameter ?? 0.4,
 
                 // Component model references - nozzle type comes from NozzleModel.NozzleMaterial.Name
                 ["hotendModelId"] = t.HotendModelId,
@@ -3053,6 +3053,7 @@ public class PrintersService(
                     ExtruderModelId = toolheadDto.ExtruderModelId ?? primaryModelToolhead?.ExtruderModelId,
                     ToolheadModelDefId = toolheadDto.ToolheadModelDefId ?? primaryModelToolhead?.ToolheadModelDefId,
                     NozzleModelId = toolheadDto.NozzleModelId ?? primaryModelToolhead?.NozzleModelId,
+                    NozzleDiameter = toolheadDto.NozzleDiameter is > 0 ? toolheadDto.NozzleDiameter : null,
                     SupportedMaterials = toolheadDto.SupportedMaterials ?? modelTemplate?.SupportedFilamentTypes,
                     IsPrimary = toolheadDto.IsPrimary
                 };
@@ -3098,7 +3099,10 @@ public class PrintersService(
             // Auto-create MMU virtual toolheads if MultiMaterial is enabled
             if (p.MultiMaterial)
             {
-                SyncMmuVirtualToolheads(p, mmuGateCount: 4);
+                // Seed the physical toolheads first: gates are added straight to the context
+                // (not p.Toolheads) and copy the primary's stored NozzleDiameter.
+                _ = await SeedToolheadNozzleDiametersAsync(p.Toolheads, ct);
+                await SyncMmuVirtualToolheadsAsync(p, mmuGateCount: 4, ct);
             }
         }
 
@@ -3121,6 +3125,8 @@ public class PrintersService(
         // round-14). True only for a Moonraker printer with ≥2 physical hotends, where interval-aware
         // active-tool telemetry can genuinely differentiate per-head wear.
         _ = PerToolAttributionCapability.Refresh(p);
+
+        _ = await SeedToolheadNozzleDiametersAsync(p.Toolheads, ct);
 
         await AddAsync(p, ct);
 
@@ -3217,16 +3223,14 @@ public class PrintersService(
             updated = true;
         }
 
+        bool createMmuGates = false;
         if (forceOverwrite || (!printer.MultiMaterial && modelTemplate.MultiMaterial))
         {
             printer.MultiMaterial = modelTemplate.MultiMaterial;
             updated = true;
 
-            // Auto-create MMU virtual toolheads when MultiMaterial is enabled
-            if (modelTemplate.MultiMaterial)
-            {
-                SyncMmuVirtualToolheads(printer, mmuGateCount: 4);
-            }
+            // Gates are created after the toolhead loop so they copy the primary's filled diameter.
+            createMmuGates = modelTemplate.MultiMaterial;
         }
 
         if (forceOverwrite || (!printer.SupportsAutoLeveling && modelTemplate.SupportsAutoLeveling))
@@ -3252,10 +3256,19 @@ public class PrintersService(
                 // Find matching toolhead template by index, otherwise use default
                 PrinterModelToolheadDto? matchingTemplate = modelTemplate.Toolheads?.FirstOrDefault(t => t.Index == toolhead.Index) ?? defaultModelToolhead;
 
-                // Apply NozzleModelId from template (nozzle diameter is derived from the nozzle model)
+                // Apply NozzleModelId from template
                 if (matchingTemplate?.NozzleModelId != null && (forceOverwrite || toolhead.NozzleModelId == null))
                 {
                     toolhead.NozzleModelId = matchingTemplate.NozzleModelId;
+                    toolhead.UpdatedAt = DateTime.UtcNow;
+                    updated = true;
+                }
+
+                // The stored nozzle diameter is per-printer and admin-owned: the template only
+                // fills a missing value, even when forceOverwrite is set.
+                if (matchingTemplate?.NozzleDiameter is > 0 && toolhead.NozzleDiameter == null)
+                {
+                    toolhead.NozzleDiameter = matchingTemplate.NozzleDiameter;
                     toolhead.UpdatedAt = DateTime.UtcNow;
                     updated = true;
                 }
@@ -3267,6 +3280,16 @@ public class PrintersService(
                     updated = true;
                 }
             }
+
+            if (await SeedToolheadNozzleDiametersAsync(printer.Toolheads, ct).ConfigureAwait(false) > 0)
+            {
+                updated = true;
+            }
+        }
+
+        if (createMmuGates)
+        {
+            await SyncMmuVirtualToolheadsAsync(printer, mmuGateCount: 4, ct).ConfigureAwait(false);
         }
 
         updated = PerToolAttributionCapability.Refresh(printer) || updated;
@@ -4648,7 +4671,7 @@ public class PrintersService(
                 if (p.MultiMaterial)
                 {
                     int gateCount = Math.Max(4, toolheadIndex);
-                    stagedGates = CreateMmuVirtualToolheads(p, gateCount);
+                    stagedGates = await CreateMmuVirtualToolheadsAsync(p, gateCount, ct).ConfigureAwait(false);
                     if (stagedGates.Count > 0)
                     {
                         _unitOfWork.Printers.AddToolheads(stagedGates);
@@ -4972,7 +4995,7 @@ public class PrintersService(
             if (p.MultiMaterial)
             {
                 int gateCount = Math.Max(4, toolheadIndex);
-                List<Toolhead> stagedGates = CreateMmuVirtualToolheads(p, gateCount);
+                List<Toolhead> stagedGates = await CreateMmuVirtualToolheadsAsync(p, gateCount, ct).ConfigureAwait(false);
                 if (stagedGates.Count > 0)
                 {
                     try
@@ -5088,7 +5111,7 @@ public class PrintersService(
 
         int existingGates = p.Toolheads.Count(t => t.ToolheadType == ToolheadType.MmuGate);
         int targetGateCount = Math.Max(4, existingGates);
-        List<Toolhead> gates = CreateMmuVirtualToolheads(p, targetGateCount);
+        List<Toolhead> gates = await CreateMmuVirtualToolheadsAsync(p, targetGateCount, ct).ConfigureAwait(false);
         if (gates.Count == 0)
         {
             return new CommandResult(true, $"Printer already has {existingGates} MMU gate(s)");
@@ -5110,7 +5133,7 @@ public class PrintersService(
         if (!wasMultiMaterial && printer.MultiMaterial)
         {
             // MultiMaterial enabled → create MmuGate toolheads
-            SyncMmuVirtualToolheads(printer, mmuGateCount);
+            await SyncMmuVirtualToolheadsAsync(printer, mmuGateCount, ct).ConfigureAwait(false);
         }
         else if (wasMultiMaterial && !printer.MultiMaterial)
         {
@@ -5181,9 +5204,9 @@ public class PrintersService(
     /// DbContext via the repository (not the navigation collection) to avoid unnecessarily
     /// marking the parent Printer as Modified.
     /// </summary>
-    private void SyncMmuVirtualToolheads(Printer printer, int mmuGateCount = 4)
+    private async Task SyncMmuVirtualToolheadsAsync(Printer printer, int mmuGateCount, CancellationToken ct)
     {
-        List<Toolhead> gates = CreateMmuVirtualToolheads(printer, mmuGateCount);
+        List<Toolhead> gates = await CreateMmuVirtualToolheadsAsync(printer, mmuGateCount, ct).ConfigureAwait(false);
         if (gates.Count > 0)
         {
             _unitOfWork.Printers.AddToolheads(gates);
@@ -5200,7 +5223,7 @@ public class PrintersService(
     /// indices has not yet been materialized as a <see cref="Toolhead"/> row: an absent T1 row
     /// is not evidence of an AMS, it is just discovery/sync that hasn't caught up yet. Gating on
     /// the *absence* of &gt;1 persisted physical toolheads (the old defense inside
-    /// <see cref="CreateMmuVirtualToolheads"/>) is order-dependent — it only catches a
+    /// <see cref="CreateMmuVirtualToolheadsAsync"/>) is order-dependent — it only catches a
     /// toolchanger once a second physical toolhead has already been persisted — so callers must
     /// require one of these confirmed-positive signals before treating an unmaterialized
     /// toolhead index &gt; 0 as an MMU gate request (issue #1600).
@@ -5219,7 +5242,7 @@ public class PrintersService(
     /// callers for existing printers should use the repository's AddToolheads method
     /// to add gates directly to the DbContext instead.
     /// </remarks>
-    private List<Toolhead> CreateMmuVirtualToolheads(Printer printer, int mmuGateCount = 4)
+    private async Task<List<Toolhead>> CreateMmuVirtualToolheadsAsync(Printer printer, int mmuGateCount, CancellationToken ct)
     {
         if (!printer.MultiMaterial)
         {
@@ -5265,6 +5288,7 @@ public class PrintersService(
                 ExtruderModelId = primaryToolhead?.ExtruderModelId,
                 ToolheadModelDefId = primaryToolhead?.ToolheadModelDefId,
                 NozzleModelId = primaryToolhead?.NozzleModelId,
+                NozzleDiameter = primaryToolhead?.NozzleDiameter,
                 SupportedMaterials = primaryToolhead?.SupportedMaterials,
                 UpdatedAt = DateTime.UtcNow
             });
@@ -5272,6 +5296,10 @@ public class PrintersService(
 
         if (gates.Count > 0)
         {
+            // Gates copy the primary's stored diameter; when that is unset, fall back to the
+            // copied nozzle model so a new gate never starts without a diameter.
+            _ = await SeedToolheadNozzleDiametersAsync(gates, ct).ConfigureAwait(false);
+
             _logger.LogInformation(
                 "CreateMmuVirtualToolheads: Created {GateCount} MMU gate(s) (indices {Indices}) for printer {PName} ({Id})",
                 gates.Count,
@@ -5281,6 +5309,36 @@ public class PrintersService(
         }
 
         return gates;
+    }
+
+    /// <summary>
+    /// Seeds each new toolhead's stored nozzle diameter from its nozzle model when no explicit
+    /// value was provided. Model values are creation-time defaults only; afterwards the stored
+    /// per-printer value is authoritative and is never re-derived from the model.
+    /// </summary>
+    private async Task<int> SeedToolheadNozzleDiametersAsync(IEnumerable<Toolhead> toolheads, CancellationToken ct)
+    {
+        List<Toolhead> unseeded = [.. toolheads.Where(t => t.NozzleDiameter == null && t.NozzleModelId != null)];
+        if (unseeded.Count == 0)
+        {
+            return 0;
+        }
+
+        List<Guid> modelIds = [.. unseeded.Select(t => t.NozzleModelId!.Value).Distinct()];
+        Dictionary<Guid, double> diameters = await _db.NozzleModelDefinitions
+            .AsNoTracking()
+            .Where(n => modelIds.Contains(n.Id) && n.Diameter > 0)
+            .ToDictionaryAsync(n => n.Id, n => n.Diameter, ct);
+
+        int seeded = 0;
+        foreach (Toolhead toolhead in unseeded.Where(t => diameters.ContainsKey(t.NozzleModelId!.Value)))
+        {
+            toolhead.NozzleDiameter = diameters[toolhead.NozzleModelId!.Value];
+            toolhead.UpdatedAt = DateTime.UtcNow;
+            seeded++;
+        }
+
+        return seeded;
     }
 
     /// <summary>

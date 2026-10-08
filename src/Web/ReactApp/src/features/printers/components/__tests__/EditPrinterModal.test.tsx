@@ -7,6 +7,7 @@ import { PrinterBackend } from '@/types/api';
 const mockUsePrinterDetails = vi.fn();
 const mockUseUpdatePrinter = vi.fn();
 const mockUsePrinterCameras = vi.fn();
+const mockUseModels = vi.fn<(manufacturerId?: string) => { data: unknown[] }>(() => ({ data: [] }));
 const testConnection = vi.fn();
 
 const { mockToast } = vi.hoisted(() => ({
@@ -25,7 +26,7 @@ vi.mock('@/common/hooks/useApi', () => ({
   usePrinterDetails: (...args: unknown[]) => mockUsePrinterDetails(...args),
   useUpdatePrinter: (...args: unknown[]) => mockUseUpdatePrinter(...args),
   useManufacturers: () => ({ data: [] }),
-  useModels: () => ({ data: [] }),
+  useModels: (manufacturerId?: string) => mockUseModels(manufacturerId),
   useFilamentTypes: () => ({ data: [] }),
   useModelDefaultCapabilities: () => ({ data: undefined, isLoading: false }),
   useHotendModels: () => ({ data: [] }),
@@ -63,6 +64,7 @@ describe('EditPrinterModal', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockUseModels.mockReturnValue({ data: [] });
 
     mockUsePrinterCameras.mockReturnValue({
       data: [
@@ -244,6 +246,69 @@ describe('EditPrinterModal', () => {
 
     expect(screen.getByText('Please enter a valid HTTP/HTTPS URL')).toBeInTheDocument();
     expect(mutateAsync).not.toHaveBeenCalled();
+  });
+
+  it('preserves a stored toolhead nozzle diameter when the printer model changes', async () => {
+    const user = userEvent.setup();
+    mockUseModels.mockReturnValue({
+      data: [
+        { id: 'model-1', name: 'Original Model', toolheads: [] },
+        {
+          id: 'model-2',
+          name: 'Replacement Model',
+          toolheads: [
+            { index: 0, name: 'Primary', isPrimary: true, nozzleDiameter: 0.4, nozzleModelId: 'nozzle-model-2' },
+          ],
+        },
+      ],
+    });
+    mockUsePrinterDetails.mockReturnValue({
+      data: {
+        rowVersion: 'printer-v1',
+        name: 'qp4-1',
+        serverUrl: 'http://qp4-1.local',
+        originalServerUrl: 'http://qp4-1.local',
+        notes: '',
+        manufacturerId: 'manufacturer-1',
+        modelId: 'model-1',
+        backend: 'Moonraker',
+        apiKey: '',
+        username: '',
+        password: '',
+        capabilities: {},
+        backendPort: 7125,
+        frontendPort: 80,
+        obicoEnabled: false,
+        toolheads: [
+          { id: 'th-0', index: 0, name: 'Primary', isPrimary: true, nozzleDiameter: 0.6 },
+        ],
+      },
+    });
+
+    render(
+      <EditPrinterModal
+        printerId="printer-1"
+        isOpen
+        onClose={vi.fn()}
+        onSuccess={vi.fn()}
+      />
+    );
+
+    const nozzleInput = await screen.findByLabelText('Nozzle Diameter (mm)');
+    expect(nozzleInput).toHaveValue(0.6);
+
+    await user.selectOptions(screen.getByLabelText('Model'), 'model-2');
+    await user.click(screen.getByRole('button', { name: /save changes/i }));
+
+    await waitFor(() => {
+      expect(mutateAsync).toHaveBeenCalledWith(expect.objectContaining({
+        printer: expect.objectContaining({
+          modelId: 'model-2',
+          toolheads: [expect.objectContaining({ id: 'th-0', nozzleDiameter: 0.6 })],
+        }),
+      }));
+    });
+    expect(screen.getByLabelText('Nozzle Diameter (mm)')).toHaveValue(0.6);
   });
 
   it('submits obicoEnabled when saving after toggle', async () => {

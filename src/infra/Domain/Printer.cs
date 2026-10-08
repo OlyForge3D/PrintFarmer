@@ -280,6 +280,26 @@ public class Printer : IRevisionedEntity
     public double? NozzleDiameter { get; set; }
 
     /// <summary>
+    /// Nozzle diameters this printer can print with: each toolhead's stored per-printer
+    /// <see cref="Toolhead.NozzleDiameter"/>, falling back to the backend-reported
+    /// <see cref="NozzleDiameter"/> when no toolhead has one. Nozzle model diameters are
+    /// deliberately excluded; they only seed the stored value at creation.
+    /// </summary>
+    public IReadOnlyList<double> GetEffectiveNozzleDiameters()
+    {
+        List<double> diameters = [.. (Toolheads ?? [])
+            .Where(t => t.NozzleDiameter is > 0)
+            .Select(t => t.NozzleDiameter!.Value)];
+
+        if (diameters.Count == 0 && NozzleDiameter is > 0)
+        {
+            diameters.Add(NozzleDiameter.Value);
+        }
+
+        return diameters;
+    }
+
+    /// <summary>
     /// Whether a Multi-Material Unit is connected. Populated from PrusaLink printer info.
     /// Nullable because non-Prusa backends don't report this.
     /// </summary>

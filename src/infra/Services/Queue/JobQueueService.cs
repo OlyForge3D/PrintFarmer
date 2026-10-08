@@ -154,9 +154,7 @@ public class JobQueueService : IJobQueueService
         {
             double required = (double)requiredNozzle.Value;
             printers = printers
-                .Where(p => p.Toolheads?.Any(t =>
-                    t.NozzleModel != null &&
-                    Math.Abs(t.NozzleModel.Diameter - required) <= 0.01) ?? false)
+                .Where(p => p.GetEffectiveNozzleDiameters().Any(d => Math.Abs(d - required) <= 0.01))
                 .ToList();
         }
 
@@ -217,7 +215,7 @@ public class JobQueueService : IJobQueueService
                     allJobs,
                     currentJob,
                     _timeProvider.GetUtcNow().UtcDateTime),
-                NozzleDiameter = primaryToolhead?.NozzleModel?.Diameter,
+                NozzleDiameter = primaryToolhead?.NozzleDiameter,
                 SupportedMaterials = supportedMaterials
             });
         }
@@ -1349,7 +1347,7 @@ public class JobQueueService : IJobQueueService
             if (request.RequiredNozzleDiameter.HasValue)
             {
                 double requiredDiameter = (double)request.RequiredNozzleDiameter;
-                bool hasCompatibleToolhead = printer.Toolheads?.Any(t => t.NozzleModel != null && Math.Abs(t.NozzleModel.Diameter - requiredDiameter) <= 0.01) ?? false;
+                bool hasCompatibleToolhead = printer.GetEffectiveNozzleDiameters().Any(d => Math.Abs(d - requiredDiameter) <= 0.01);
                 if (!hasCompatibleToolhead)
                 {
                     continue;
