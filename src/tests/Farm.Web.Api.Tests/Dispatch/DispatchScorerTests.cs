@@ -308,6 +308,40 @@ public class DispatchScorerTests : IDisposable
         score.ScoreBreakdown["ColorMatch"].Score.Should().Be(100);
     }
 
+    [Theory]
+    [Trait("Category", "Dispatch")]
+    [InlineData(0.6, 0.4, 0.6, 100)] // stored wins over a conflicting nozzle model
+    [InlineData(0.6, 0.4, 0.4, 0)] // model diameter alone never satisfies the job
+    [InlineData(null, 0.4, 0.4, 50)] // no stored data -> neutral, not a model-derived match
+    public async Task ScorePrintersForJobAsync_NozzleDiameter_UsesStoredToolheadDiameter(
+        double? storedDiameter, double modelDiameter, double requiredDiameter, double expectedScore)
+    {
+        Printer printer = CreateTestPrinter();
+        var manufacturer = new Manufacturer { Id = Guid.NewGuid(), Name = "Nozzle Stored Mfg" };
+        var model = new PrinterModel { Id = Guid.NewGuid(), ManufacturerId = manufacturer.Id, Name = "Nozzle Stored Model" };
+        printer.ManufacturerId = manufacturer.Id;
+        printer.ModelId = model.Id;
+        Toolhead toolhead = CreateToolhead(printer.Id, nozzleDiameter: modelDiameter);
+        toolhead.NozzleModel!.ManufacturerId = manufacturer.Id;
+        toolhead.NozzleDiameter = storedDiameter;
+        printer.Toolheads.Add(toolhead);
+
+        PrintJob job = CreateTestJob(requiredNozzleDiameter: (decimal)requiredDiameter);
+
+        _context.Manufacturers.Add(manufacturer);
+        _context.PrinterModels.Add(model);
+        _context.Printers.Add(printer);
+        _context.PrintJobs.Add(job);
+        await _context.SaveChangesAsync();
+
+        var scorer = new DispatchScorer(_context, NullLogger<DispatchScorer>.Instance);
+
+        List<DispatchScore> scores = await scorer.ScorePrintersForJobAsync(job.Id);
+
+        DispatchScore score = scores.Should().ContainSingle().Subject;
+        score.ScoreBreakdown["NozzleDiameter"].Score.Should().Be(expectedScore);
+    }
+
     // =========================================================================
     // MATERIAL MATCH FACTOR TESTS
     // =========================================================================

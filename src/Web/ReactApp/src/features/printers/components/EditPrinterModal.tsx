@@ -309,7 +309,8 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
           extruderModelId: template.extruderModelId ?? th.extruderModelId,
           toolheadModelDefId: template.toolheadModelDefId ?? th.toolheadModelDefId,
           nozzleModelId: template.nozzleModelId ?? th.nozzleModelId,
-          nozzleDiameter: template.nozzleDiameter ?? th.nozzleDiameter,
+          // Stored per-printer diameter is authoritative; the template only fills a blank value.
+          nozzleDiameter: th.nozzleDiameter ?? template.nozzleDiameter,
           supportedMaterials: template.supportedMaterials ?? selectedModel.supportedFilamentTypes ?? th.supportedMaterials,
         };
       });

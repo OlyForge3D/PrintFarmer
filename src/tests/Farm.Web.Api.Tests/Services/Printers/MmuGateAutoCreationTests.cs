@@ -243,6 +243,125 @@ public class MmuGateAutoCreationTests : IAsyncLifetime
             t.NozzleDiameter.Should().Be(0.4, "the model's nozzle diameter seeds the stored per-printer default at creation"));
     }
 
+    // ------- Stored nozzle diameter is per-printer and admin-owned -------
+
+    private async Task<(Guid PrinterId, Guid NozzleModelId)> SeedPrinterWithNozzleModelAsync(
+        string prefix, double? primaryStoredDiameter, bool multiMaterial)
+    {
+        await using AsyncServiceScope seedScope = _factory.Services.CreateAsyncScope();
+        AppDbContext seedDb = seedScope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        Guid mfgId = Guid.NewGuid();
+        Guid modelId = Guid.NewGuid();
+        Guid nozzleMaterialId = Guid.NewGuid();
+        Guid nozzleModelId = Guid.NewGuid();
+
+        seedDb.Manufacturers.Add(new Manufacturer { Id = mfgId, Name = $"{prefix} Mfg" });
+        seedDb.NozzleMaterials.Add(new NozzleMaterial
+        {
+            Id = nozzleMaterialId,
+            Name = $"{prefix} Brass {nozzleMaterialId:N}",
+            DefaultMaxTemp = 300
+        });
+        seedDb.NozzleModelDefinitions.Add(new NozzleModelDefinition
+        {
+            Id = nozzleModelId,
+            ManufacturerId = mfgId,
+            Name = $"{prefix} 0.4",
+            Diameter = 0.4,
+            NozzleMaterialId = nozzleMaterialId
+        });
+
+        var model = new PrinterModel { Id = modelId, ManufacturerId = mfgId, Name = $"{prefix} Model", MultiMaterial = multiMaterial };
+        model.Toolheads.Add(new PrinterModelToolhead
+        {
+            Id = Guid.NewGuid(),
+            PrinterModelId = modelId,
+            Name = "Primary",
+            Index = 0,
+            IsPrimary = true,
+            NozzleModelId = nozzleModelId
+        });
+        seedDb.PrinterModels.Add(model);
+
+        var printer = new Printer
+        {
+            Id = Guid.NewGuid(),
+            Name = $"{prefix} Printer",
+            ServerUrl = $"http://192.168.2.{10 + (Interlocked.Increment(ref _portCounter) % 240)}",
+            BackendPort = 7125,
+            Backend = (int)PrinterBackend.Moonraker,
+            MultiMaterial = multiMaterial,
+            ManufacturerId = mfgId,
+            ModelId = modelId
+        };
+        printer.Toolheads.Add(new Toolhead
+        {
+            Id = Guid.NewGuid(),
+            PrinterId = printer.Id,
+            Name = "Extruder",
+            Index = 0,
+            ToolheadType = ToolheadType.Physical,
+            IsPrimary = true,
+            NozzleModelId = nozzleModelId,
+            NozzleDiameter = primaryStoredDiameter,
+            UpdatedAt = DateTime.UtcNow
+        });
+        seedDb.Printers.Add(printer);
+
+        await seedDb.SaveChangesAsync();
+        return (printer.Id, nozzleModelId);
+    }
+
+    [Fact]
+    public async Task EnsureMmuToolheads_PrimaryDiameterUnset_SeedsGatesFromNozzleModel()
+    {
+        (Guid printerId, _) = await SeedPrinterWithNozzleModelAsync("GateSeed", primaryStoredDiameter: null, multiMaterial: true);
+
+        CommandResult result = await _printersService.EnsureMmuToolheadsAsync(printerId, CancellationToken.None);
+        result.Success.Should().BeTrue();
+
+        List<Toolhead> gates = await _dbContext.Toolheads
+            .Where(t => t.PrinterId == printerId && t.ToolheadType == ToolheadType.MmuGate)
+            .ToListAsync();
+
+        gates.Should().HaveCount(4);
+        gates.Should().AllSatisfy(g =>
+            g.NozzleDiameter.Should().Be(0.4, "a new gate falls back to its copied nozzle model when the primary has no stored diameter"));
+    }
+
+    [Fact]
+    public async Task ApplyModelTemplate_ForceOverwrite_PreservesStoredNozzleDiameter()
+    {
+        (Guid printerId, _) = await SeedPrinterWithNozzleModelAsync("ForceKeep", primaryStoredDiameter: 0.6, multiMaterial: false);
+
+        Printer printer = await _dbContext.Printers
+            .Include(p => p.Toolheads)
+            .SingleAsync(p => p.Id == printerId);
+
+        _ = await _printersService.ApplyModelTemplateAsync(printer, forceOverwrite: true, CancellationToken.None);
+        await _dbContext.SaveChangesAsync();
+
+        Toolhead primary = await _dbContext.Toolheads.AsNoTracking().SingleAsync(t => t.PrinterId == printerId);
+        primary.NozzleDiameter.Should().Be(0.6, "an admin-saved per-printer diameter must survive a template re-apply");
+    }
+
+    [Fact]
+    public async Task ApplyModelTemplate_StoredDiameterUnset_FillsFromNozzleModel()
+    {
+        (Guid printerId, _) = await SeedPrinterWithNozzleModelAsync("FillBlank", primaryStoredDiameter: null, multiMaterial: false);
+
+        Printer printer = await _dbContext.Printers
+            .Include(p => p.Toolheads)
+            .SingleAsync(p => p.Id == printerId);
+
+        _ = await _printersService.ApplyModelTemplateAsync(printer, forceOverwrite: true, CancellationToken.None);
+        await _dbContext.SaveChangesAsync();
+
+        Toolhead primary = await _dbContext.Toolheads.AsNoTracking().SingleAsync(t => t.PrinterId == printerId);
+        primary.NozzleDiameter.Should().Be(0.4);
+    }
+
     [Fact]
     public async Task CreatePrinter_MultiMaterialFalse_NoMmuGatesCreated()
     {

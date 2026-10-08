@@ -69,6 +69,12 @@ public class CreateToolheadDto
     #endregion
 
     /// <summary>
+    /// Stored per-printer nozzle diameter in mm. When omitted, it is seeded from the nozzle
+    /// model at creation.
+    /// </summary>
+    public double? NozzleDiameter { get; set; }
+
+    /// <summary>
     /// Materials this toolhead is rated for.
     /// </summary>
     public string[]? SupportedMaterials { get; set; }

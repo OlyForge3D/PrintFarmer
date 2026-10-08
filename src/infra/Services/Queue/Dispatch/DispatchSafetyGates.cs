@@ -86,15 +86,7 @@ public static class DispatchSafetyGates
         {
             // The per-printer stored diameter is authoritative; the nozzle model only seeds it
             // at creation (and via the legacy backfill migration).
-            List<decimal> available = printer.Toolheads
-                .Where(t => t.NozzleDiameter is > 0)
-                .Select(t => (decimal)t.NozzleDiameter!.Value)
-                .ToList();
-
-            if (available.Count == 0 && printer.NozzleDiameter.HasValue)
-            {
-                available.Add((decimal)printer.NozzleDiameter.Value);
-            }
+            List<decimal> available = [.. printer.GetEffectiveNozzleDiameters().Select(d => (decimal)d)];
 
             if (available.Count == 0)
             {
