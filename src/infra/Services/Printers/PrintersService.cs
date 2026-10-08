@@ -5331,14 +5331,11 @@ public class PrintersService(
             .ToDictionaryAsync(n => n.Id, n => n.Diameter, ct);
 
         int seeded = 0;
-        foreach (Toolhead toolhead in unseeded)
+        foreach (Toolhead toolhead in unseeded.Where(t => diameters.ContainsKey(t.NozzleModelId!.Value)))
         {
-            if (diameters.TryGetValue(toolhead.NozzleModelId!.Value, out double diameter))
-            {
-                toolhead.NozzleDiameter = diameter;
-                toolhead.UpdatedAt = DateTime.UtcNow;
-                seeded++;
-            }
+            toolhead.NozzleDiameter = diameters[toolhead.NozzleModelId!.Value];
+            toolhead.UpdatedAt = DateTime.UtcNow;
+            seeded++;
         }
 
         return seeded;
