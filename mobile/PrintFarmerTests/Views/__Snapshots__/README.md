@@ -21,7 +21,7 @@ layout or UI tests.
 ## Regenerating
 
 Baselines are SDK-sensitive. Generate them with Xcode 26.6 build 17F113 and the approved
-iOS 26.5 (23F77) simulator runtime. CI uses the `xcode-27` runner image and
+iOS 26.5 (23F77) simulator runtime. CI uses the `macos-26` arm64 runner image and
 installs iOS 26.5 when it is not preinstalled. Select the simulator with the
 same workflow steps and preference variables used by
 `.github/workflows/ios-pr-ci.yml`, then run only
