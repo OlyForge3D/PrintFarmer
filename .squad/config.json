@@ -24,5 +24,6 @@
     "bishop": "medium",
     "hicks": "medium",
     "vasquez": "medium"
-  }
+  },
+  "stateBackend": "two-layer"
 }

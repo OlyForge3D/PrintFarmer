@@ -181,3 +181,10 @@ fixtures/wire-contracts/manifest.json.lock
 /src/Web/ReactApp/public/release-identity.json
 
 # Recovery matrix harness scratch (#3099)
+# Squad: ignore runtime state (logs, inbox, sessions)
+# Note: .squad/casting/* is identity and MUST be committed to main, not ignored
+.squad/.scratch/
+# Squad: state owned by squad-state branch (two-layer/orphan backend)
+.squad/decisions.md
+.squad/agents/*/history.md
+# /Squad: state owned by squad-state branch
