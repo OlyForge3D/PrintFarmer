@@ -289,6 +289,163 @@ public sealed class RefreshTokenIntegrationTests : IClassFixture<RefreshTokenTes
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
     }
 
+    [Fact]
+    public async Task Refresh_ReusedRotatedToken_RevokesAccessTokensButAllowsFreshLogin()
+    {
+        User user = await CreateUserAsync("refresh-reuse-access", "refresh-reuse-access@test.com");
+        using HttpClient client = _factory.CreateClient();
+        AuthenticationResult login = await LoginAsync(client, user);
+        using HttpResponseMessage rotation = await client.PostAsJsonAsync(
+            "/api/auth/refresh", new { refreshToken = login.RefreshToken });
+        rotation.StatusCode.Should().Be(HttpStatusCode.OK);
+        AuthenticationResult rotated = (await rotation.Content.ReadFromJsonAsync<AuthenticationResult>())!;
+        using HttpResponseMessage replay = await client.PostAsJsonAsync(
+            "/api/auth/refresh", new { refreshToken = login.RefreshToken });
+        replay.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+
+        foreach (string? accessToken in new[] { login.Token, rotated.Token })
+        {
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+            using HttpResponseMessage me = await client.GetAsync("/api/auth/me");
+            me.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        }
+
+        client.DefaultRequestHeaders.Authorization = null;
+        AuthenticationResult fresh = await LoginAsync(client, user);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", fresh.Token);
+        using HttpResponseMessage freshMe = await client.GetAsync("/api/auth/me");
+        freshMe.StatusCode.Should().Be(HttpStatusCode.OK);
+        using HttpResponseMessage freshRefresh = await client.PostAsJsonAsync(
+            "/api/auth/refresh", new { refreshToken = fresh.RefreshToken });
+        freshRefresh.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ReplacePassword_WithValidCredentials_RevokesRefreshSessionsButPreservesAccessTokens(bool reset)
+    {
+        User user = await CreateUserAsync("refresh-password", "refresh-password@test.com");
+        using HttpClient client = _factory.CreateClient();
+        AuthenticationResult login = await LoginAsync(client, user);
+        AuthenticationResult secondLogin = await LoginAsync(client, user);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", login.Token);
+
+        if (reset)
+        {
+            using IServiceScope scope = _factory.Services.CreateScope();
+            AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            context.PasswordResetTokens.Add(new PasswordResetToken
+            {
+                Id = Guid.NewGuid(),
+                UserId = user.Id,
+                Token = "refresh-password-reset-token",
+                CreatedAt = DateTime.UtcNow,
+                ExpiresAt = DateTime.UtcNow.AddHours(1)
+            });
+            await context.SaveChangesAsync();
+            using HttpResponseMessage response = await client.PostAsJsonAsync("/api/auth/reset-password", new
+            {
+                token = "refresh-password-reset-token",
+                email = user.Email,
+                newPassword = "ReplacementPassword123!",
+                confirmPassword = "ReplacementPassword123!"
+            });
+            response.StatusCode.Should().Be(HttpStatusCode.OK);
+        }
+        else
+        {
+            using HttpResponseMessage response = await client.PostAsJsonAsync("/api/auth/change-password", new
+            {
+                currentPassword = "TestPassword123!",
+                newPassword = "ReplacementPassword123!",
+                confirmNewPassword = "ReplacementPassword123!"
+            });
+            response.StatusCode.Should().Be(HttpStatusCode.OK);
+        }
+
+        using HttpResponseMessage me = await client.GetAsync("/api/auth/me");
+        me.StatusCode.Should().Be(HttpStatusCode.OK);
+        client.DefaultRequestHeaders.Authorization = null;
+        foreach (string? refreshToken in new[] { login.RefreshToken, secondLogin.RefreshToken })
+        {
+            using HttpResponseMessage response = await client.PostAsJsonAsync("/api/auth/refresh", new { refreshToken });
+            response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        }
+
+        using HttpResponseMessage freshLogin = await client.PostAsJsonAsync("/api/auth/login", new
+        {
+            usernameOrEmail = user.Username,
+            password = "ReplacementPassword123!"
+        });
+        freshLogin.StatusCode.Should().Be(HttpStatusCode.OK);
+        AuthenticationResult fresh = (await freshLogin.Content.ReadFromJsonAsync<AuthenticationResult>())!;
+        using HttpResponseMessage freshRefresh = await client.PostAsJsonAsync(
+            "/api/auth/refresh", new { refreshToken = fresh.RefreshToken });
+        freshRefresh.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(3)]
+    public async Task Logout_WithRotatedToken_RevokesDescendantButNotIndependentSession(int rotations)
+    {
+        User user = await CreateUserAsync("refresh-stale-logout", "refresh-stale-logout@test.com");
+        using HttpClient client = _factory.CreateClient();
+        AuthenticationResult login = await LoginAsync(client, user);
+        AuthenticationResult independent = await LoginAsync(client, user);
+        AuthenticationResult current = login;
+        for (int index = 0; index < rotations; index++)
+        {
+            using HttpResponseMessage response = await client.PostAsJsonAsync(
+                "/api/auth/refresh", new { refreshToken = current.RefreshToken });
+            response.StatusCode.Should().Be(HttpStatusCode.OK);
+            current = (await response.Content.ReadFromJsonAsync<AuthenticationResult>())!;
+        }
+
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", current.Token);
+        using HttpResponseMessage logout = await client.PostAsJsonAsync(
+            "/api/auth/logout", new { refreshToken = login.RefreshToken });
+        logout.StatusCode.Should().Be(HttpStatusCode.OK);
+        client.DefaultRequestHeaders.Authorization = null;
+        using HttpResponseMessage descendant = await client.PostAsJsonAsync(
+            "/api/auth/refresh", new { refreshToken = current.RefreshToken });
+        descendant.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        using HttpResponseMessage other = await client.PostAsJsonAsync(
+            "/api/auth/refresh", new { refreshToken = independent.RefreshToken });
+        other.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task Logout_WithAnotherUsersRotatedToken_DoesNotRevokeTheirSession()
+    {
+        User owner = await CreateUserAsync("refresh-owner", "refresh-owner@test.com");
+        User caller = await CreateUserAsync("refresh-caller", "refresh-caller@test.com");
+        using HttpClient client = _factory.CreateClient();
+        AuthenticationResult ownerLogin = await LoginAsync(client, owner);
+        AuthenticationResult callerLogin = await LoginAsync(client, caller);
+        using HttpResponseMessage rotation = await client.PostAsJsonAsync(
+            "/api/auth/refresh", new { refreshToken = ownerLogin.RefreshToken });
+        rotation.StatusCode.Should().Be(HttpStatusCode.OK);
+        AuthenticationResult current = (await rotation.Content.ReadFromJsonAsync<AuthenticationResult>())!;
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", callerLogin.Token);
+        using HttpResponseMessage logout = await client.PostAsJsonAsync(
+            "/api/auth/logout", new { refreshToken = ownerLogin.RefreshToken });
+        logout.StatusCode.Should().Be(HttpStatusCode.OK);
+        client.DefaultRequestHeaders.Authorization = null;
+        using HttpResponseMessage refresh = await client.PostAsJsonAsync(
+            "/api/auth/refresh", new { refreshToken = current.RefreshToken });
+        refresh.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    private static async Task<AuthenticationResult> LoginAsync(HttpClient client, User user)
+    {
+        using HttpResponseMessage response = await client.PostAsJsonAsync(
+            "/api/auth/login", new { usernameOrEmail = user.Username, password = "TestPassword123!" });
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        return (await response.Content.ReadFromJsonAsync<AuthenticationResult>())!;
+    }
+
     private async Task<string> CreateRefreshTokenAsync(Guid userId)
     {
         using IServiceScope scope = _factory.Services.CreateScope();

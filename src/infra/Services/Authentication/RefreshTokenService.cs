@@ -1,4 +1,5 @@
 ﻿using System.Data;
+using System.Data.Common;
 using System.Security.Cryptography;
 using System.Text;
 using Farm.Infrastructure.Data;
@@ -55,6 +56,24 @@ public sealed class RefreshTokenService(
             return InvalidResult();
         }
 
+        try
+        {
+            return await RotateCoreAsync(tokenHash, ipAddress, cancellationToken);
+        }
+        catch (Exception exception) when (exception is DbUpdateException or DbException)
+        {
+            // Disposing the core transaction rolls it back before the request audit can save.
+            _context.ChangeTracker.Clear();
+            _logger.LogWarning("Refresh token rotation failed due to a database conflict ({ExceptionType})", exception.GetType().Name);
+            return InvalidResult();
+        }
+    }
+
+    private async Task<AuthenticationResult> RotateCoreAsync(
+        string tokenHash,
+        string? ipAddress,
+        CancellationToken cancellationToken)
+    {
         await using var transaction = await _context.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
         RefreshToken? refreshToken = await _context.RefreshTokens
             .Include(candidate => candidate.User)
@@ -72,6 +91,17 @@ public sealed class RefreshTokenService(
             if (refreshToken.ReplacedByToken is not null)
             {
                 await RevokeActiveTokensAsync(refreshToken.UserId, now, ipAddress, cancellationToken);
+                _context.RevokedTokens.Add(new RevokedToken
+                {
+                    Id = Guid.NewGuid(),
+                    TokenHash = $"ALL_TOKENS_{refreshToken.UserId}_{now.Ticks}",
+                    UserId = refreshToken.UserId,
+                    RevokedAt = now,
+                    RevokedByUserId = refreshToken.UserId,
+                    Reason = "All tokens revoked: rotated refresh token reuse",
+                    ExpiresAt = now.AddDays(30),
+                    IpAddress = NormalizeIp(ipAddress)
+                });
                 await _context.SaveChangesAsync(cancellationToken);
                 await transaction.CommitAsync(cancellationToken);
                 _logger.LogWarning("Rotated refresh token reuse detected for user {UserId}; active sessions revoked", refreshToken.UserId);
@@ -145,9 +175,33 @@ public sealed class RefreshTokenService(
             return false;
         }
 
+        await using var transaction = await _context.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
         RefreshToken? refreshToken = await _context.RefreshTokens
             .SingleOrDefaultAsync(candidate => candidate.Token == tokenHash && candidate.UserId == userId, cancellationToken);
-        if (refreshToken is null || refreshToken.IsRevoked || !HashesEqual(refreshToken.Token, tokenHash))
+        if (refreshToken is null || !HashesEqual(refreshToken.Token, tokenHash))
+        {
+            return false;
+        }
+
+        HashSet<string> visited = new(StringComparer.Ordinal) { tokenHash };
+        while (refreshToken.IsRevoked && refreshToken.ReplacedByToken is not null)
+        {
+            string replacementHash = refreshToken.ReplacedByToken;
+            if (!visited.Add(replacementHash))
+            {
+                return false;
+            }
+
+            refreshToken = await _context.RefreshTokens.SingleOrDefaultAsync(
+                candidate => candidate.Token == replacementHash && candidate.UserId == userId,
+                cancellationToken);
+            if (refreshToken is null || !HashesEqual(refreshToken.Token, replacementHash))
+            {
+                return false;
+            }
+        }
+
+        if (refreshToken.IsRevoked)
         {
             return false;
         }
@@ -156,6 +210,7 @@ public sealed class RefreshTokenService(
         refreshToken.RevokedAt = DateTime.UtcNow;
         refreshToken.RevokedByIp = NormalizeIp(ipAddress);
         await _context.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
         return true;
     }
 
@@ -180,8 +235,7 @@ public sealed class RefreshTokenService(
             .Select(revocation => revocation.RevokedAt)
             .ToListAsync(cancellationToken);
 
-        DateTime tokenCreatedSecond = TruncateToSecond(tokenCreatedAt);
-        return markerTimes.Any(marker => TruncateToSecond(marker) >= tokenCreatedSecond);
+        return markerTimes.Any(marker => marker >= tokenCreatedAt);
     }
 
     private static (string RawToken, string TokenHash) GenerateToken()
@@ -236,9 +290,6 @@ public sealed class RefreshTokenService(
         };
         return Convert.FromBase64String(base64);
     }
-
-    private static DateTime TruncateToSecond(DateTime value) =>
-        new(value.Year, value.Month, value.Day, value.Hour, value.Minute, value.Second, value.Kind);
 
     private static string NormalizeIp(string? ipAddress) =>
         string.IsNullOrWhiteSpace(ipAddress) ? "unknown" : ipAddress[..Math.Min(ipAddress.Length, 45)];

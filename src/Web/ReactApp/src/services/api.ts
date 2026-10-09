@@ -699,7 +699,7 @@ export class ApiClient {
 
   async getSnapshotPreview(proxyRoute: string, signal?: AbortSignal): Promise<Blob> {
     const safeRoute = getAuthenticatedCameraProxyRoute(proxyRoute);
-    if (!safeRoute || !safeRoute.endsWith('/snapshot')) {
+    if (!safeRoute || !new URL(safeRoute, window.location.origin).pathname.endsWith('/snapshot')) {
       throw new Error('Snapshot preview requires a same-origin camera proxy route.');
     }
     const cacheBustedRoute = `${safeRoute}${safeRoute.includes("?") ? "&" : "?"}_=${Date.now()}`;

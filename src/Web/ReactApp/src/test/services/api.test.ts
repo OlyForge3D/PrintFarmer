@@ -115,6 +115,21 @@ describe("ApiClient", () => {
     });
   });
 
+  it("accepts snapshot query parameters and appends the cache buster", async () => {
+    const snapshot = new Blob(["snapshot"], { type: "image/jpeg" });
+    const mockGet = vi.fn().mockResolvedValue({ data: snapshot });
+    (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+
+    await expect(apiClient.getSnapshotPreview("/api/cameras/camera-1/snapshot?quality=high"))
+      .resolves.toBe(snapshot);
+    expect(mockGet).toHaveBeenCalledWith(
+      expect.stringMatching(/^\/cameras\/camera-1\/snapshot\?quality=high&_=[0-9]+$/),
+      { responseType: "blob", signal: undefined },
+    );
+    await expect(apiClient.getSnapshotPreview("/api/cameras/camera-1/stream?path=/snapshot"))
+      .rejects.toThrow("Snapshot preview requires a same-origin camera proxy route.");
+  });
+
   describe("getHealthStatus", () => {
     it("should call the health endpoint", async () => {
       const mockResponse = {

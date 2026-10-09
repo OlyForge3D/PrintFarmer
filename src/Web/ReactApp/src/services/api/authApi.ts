@@ -47,7 +47,7 @@ export async function refresh(refreshToken: string): Promise<AuthenticationResul
 }
 
 export async function logout(refreshToken?: string): Promise<void> {
-  await client.post("/auth/logout", refreshToken ? { refreshToken } : {});
+  await client.post("/auth/logout", refreshToken ? { refreshToken } : {}, { skipAuthRedirect: true });
 }
 
 export async function forgotPassword(

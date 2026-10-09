@@ -112,13 +112,13 @@ function createHttpClient(): AxiosInstance {
             return instance.request(requestConfig);
           }
         }
-        if (!requestConfig.authChangedWhileInFlight) {
+        if (!requestConfig.authChangedWhileInFlight && localStorage.getItem("auth-token") === requestConfig.authTokenAtRequest) {
           try {
             await resetAuthenticatedSignalRSession();
           } catch (resetError) {
             console.error("Failed to reset authenticated SignalR session after a 401 response.", resetError);
           }
-          if (localStorage.getItem("auth-token") === requestConfig.authTokenAtRequest || requestConfig.authRetried) {
+          if (localStorage.getItem("auth-token") === requestConfig.authTokenAtRequest) {
             clearStoredAuthentication();
             notifyAuthenticationExpired();
             if (window.location.pathname !== "/login" && window.location.pathname !== "/register") {

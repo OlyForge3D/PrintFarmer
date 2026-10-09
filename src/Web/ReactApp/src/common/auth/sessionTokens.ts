@@ -29,14 +29,10 @@ export function clearStoredAuthentication(): void {
   localStorage.removeItem(AUTH_USER_ID_KEY);
 }
 
-async function refreshWithFallbackLock(observedRefreshToken: string): Promise<string | null> {
+async function withFallbackRefreshLock<T>(action: () => Promise<T>): Promise<T> {
   const owner = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const giveUpAt = Date.now() + 35_000;
   while (Date.now() < giveUpAt) {
-    const currentToken = localStorage.getItem(AUTH_REFRESH_TOKEN_KEY);
-    if (!currentToken) return null;
-    if (currentToken !== observedRefreshToken) return localStorage.getItem('auth-token');
-
     const existing = localStorage.getItem(fallbackRefreshLockKey);
     let lock: { owner?: string; expiresAt?: number } | null = null;
     try { lock = existing ? JSON.parse(existing) as { owner?: string; expiresAt?: number } : null; } catch { /* Ignore malformed stale lock data. */ }
@@ -45,7 +41,7 @@ async function refreshWithFallbackLock(observedRefreshToken: string): Promise<st
       const claimed = localStorage.getItem(fallbackRefreshLockKey);
       if (claimed && (JSON.parse(claimed) as { owner?: string }).owner === owner) {
         try {
-          return await refreshUnderLock(observedRefreshToken);
+          return await action();
         } finally {
           const latest = localStorage.getItem(fallbackRefreshLockKey);
           if (latest && (JSON.parse(latest) as { owner?: string }).owner === owner) {
@@ -56,7 +52,18 @@ async function refreshWithFallbackLock(observedRefreshToken: string): Promise<st
     }
     await new Promise((resolve) => window.setTimeout(resolve, 50));
   }
-  return null;
+  throw new Error('Timed out waiting for authentication renewal coordination.');
+}
+
+async function withRefreshLock<T>(action: () => Promise<T>): Promise<T> {
+  const lockManager = typeof navigator !== 'undefined' ? navigator.locks : undefined;
+  if (lockManager?.request) return lockManager.request(refreshLockName, action);
+  return withFallbackRefreshLock(action);
+}
+
+export async function withAuthenticationRenewalLock<T>(action: () => Promise<T>): Promise<T> {
+  if (refreshInFlight) await refreshInFlight;
+  return withRefreshLock(action);
 }
 
 async function refreshUnderLock(observedRefreshToken: string): Promise<string | null> {
@@ -75,15 +82,7 @@ export function renewAccessToken(): Promise<string | null> {
   const observedRefreshToken = localStorage.getItem(AUTH_REFRESH_TOKEN_KEY);
   if (!observedRefreshToken) return Promise.resolve(null);
 
-  const renew = async () => {
-    const lockManager = typeof navigator !== 'undefined' ? navigator.locks : undefined;
-    if (lockManager?.request) {
-      return lockManager.request(refreshLockName, () => refreshUnderLock(observedRefreshToken));
-    }
-    return refreshWithFallbackLock(observedRefreshToken);
-  };
-
-  refreshInFlight = renew().catch(() => null).finally(() => {
+  refreshInFlight = withRefreshLock(() => refreshUnderLock(observedRefreshToken)).catch(() => null).finally(() => {
     refreshInFlight = null;
   });
   return refreshInFlight;

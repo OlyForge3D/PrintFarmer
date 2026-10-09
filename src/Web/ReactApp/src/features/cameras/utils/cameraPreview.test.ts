@@ -24,6 +24,17 @@ describe("cameraPreview", () => {
     expect(canUseMjpegStream(contract)).toBe(false);
   });
 
+  it("polls snapshot paths with query strings but not stream paths", () => {
+    expect(shouldPollPrinterSnapshot({
+      snapshotStrategy: CameraSnapshotStrategy.None,
+      snapshotUrl: "/api/printers/printer-1/camera/snapshot?quality=high",
+    })).toBe(true);
+    expect(shouldPollPrinterSnapshot({
+      snapshotStrategy: CameraSnapshotStrategy.None,
+      snapshotUrl: "/api/printers/printer-1/camera/stream?path=/snapshot",
+    })).toBe(false);
+  });
+
   it("leaves public direct snapshot URLs in direct-browser mode", () => {
     const contract = {
       accessMode: CameraAccessMode.SnapshotOnly,

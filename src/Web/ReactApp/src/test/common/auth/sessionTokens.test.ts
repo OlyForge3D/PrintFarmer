@@ -90,6 +90,38 @@ describe('session token renewal', () => {
     expect(localStorage.getItem(AUTH_REFRESH_TOKEN_KEY)).toBeNull();
   });
 
+  it('preserves a newer token when a renewed request receives a delayed 401', async () => {
+    const hrefBefore = window.location.href;
+    const expired = vi.fn();
+    window.addEventListener('printfarmer:authentication-expired', expired);
+    let attempts = 0;
+    client.defaults.adapter = async (config) => {
+      if (config.url === '/auth/refresh') {
+        refreshAttempts += 1;
+        return { data: freshResult, status: 200, statusText: 'OK', headers: new AxiosHeaders(), config };
+      }
+      attempts += 1;
+      if (attempts === 2) {
+        expect(config.headers.get('Authorization')).toBe(['Bearer', freshResult.token].join(' '));
+        localStorage.setItem('auth-token', 'newer-tab-token');
+        localStorage.setItem(AUTH_REFRESH_TOKEN_KEY, 'newer-tab-refresh');
+      }
+      throw unauthorized(config);
+    };
+
+    try {
+      await expect(client.get('/resource')).rejects.toMatchObject({ statusCode: 401 });
+      expect(attempts).toBe(2);
+      expect(refreshAttempts).toBe(1);
+      expect(localStorage.getItem('auth-token')).toBe('newer-tab-token');
+      expect(localStorage.getItem(AUTH_REFRESH_TOKEN_KEY)).toBe('newer-tab-refresh');
+      expect(expired).not.toHaveBeenCalled();
+      expect(window.location.href).toBe(hrefBefore);
+    } finally {
+      window.removeEventListener('printfarmer:authentication-expired', expired);
+    }
+  });
+
   it('renews proactively based on access-token expiry', async () => {
     vi.useFakeTimers();
     localStorage.setItem(AUTH_TOKEN_EXPIRY_KEY, String(Date.now() + 10 * 60_000));

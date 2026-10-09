@@ -40,7 +40,14 @@ Successful password and passkey login results contain the access `token`, its
 and returns a rotated token pair with a fresh 30-day sliding refresh-token expiry
 and no absolute session cap. Refresh tokens are single-use; clients must persist
 each replacement and must not reuse a token after rotation. Send the current
-refresh token in the optional `POST /api/auth/logout` body to revoke the session. The React client refreshes access tokens proactively and retries one
+refresh token in the optional authenticated `POST /api/auth/logout` body to revoke
+that session. A previously rotated token revokes its active descendant in the same
+session family; unrelated sessions and other users' sessions are not affected.
+Reusing a rotated token at the refresh endpoint revokes all of the user's refresh
+sessions and access tokens issued at or before the revocation marker's second.
+Access tokens issued in a later second remain valid. Successful password changes
+and password resets revoke all refresh sessions, but do not revoke existing JWT
+access tokens. The React client refreshes access tokens proactively and retries one
 authenticated request after a 401; refresh tokens are stored separately from
 access tokens in local storage.
 

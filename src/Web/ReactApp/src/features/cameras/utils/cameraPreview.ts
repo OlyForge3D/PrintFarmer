@@ -20,7 +20,7 @@ export function shouldPollPrinterSnapshot({
   // Same-origin printer proxy URLs are protected by the application JWT. An
   // <img> element cannot attach that header, so retrieve them through apiClient
   // and render the resulting object URL instead.
-  if (isAuthenticatedCameraProxyRoute(snapshotUrl) && snapshotUrl?.endsWith('/snapshot')) {
+  if (isAuthenticatedCameraProxyRoute(snapshotUrl) && snapshotUrl && new URL(snapshotUrl, window.location.origin).pathname.endsWith('/snapshot')) {
     return true;
   }
 
