@@ -89,6 +89,14 @@ export function CameraCard({
   const snapshotPreviewUrl = snapshotSrc ?? directSnapshotUrl;
   const streamImageFailed = !!liveStreamSrc && failedUrl === liveStreamSrc;
   const streamFallsBackToSnapshot = cameraMode === 'stream' && (streamUnsupported || streamFailed || streamImageFailed) && !!snapshotPreviewUrl;
+  const streamIssue = cameraMode === 'stream'
+    ? streamUnsupported
+      ? 'unsupported'
+      : streamFailed || streamImageFailed
+        ? 'failed'
+        : undefined
+    : undefined;
+  const displayedMode = streamIssue && hasSnapshot ? 'snapshot' : cameraMode;
   const activeUrl = cameraMode === 'stream' && hasStream
     ? streamFallsBackToSnapshot ? snapshotPreviewUrl : liveStreamSrc
     : cameraMode === 'snapshot' && snapshotPreviewUrl
@@ -171,9 +179,9 @@ export function CameraCard({
             <span className="inline-flex items-center gap-1.5 rounded-xs bg-pf-bg-2 px-2 py-1 text-[11px] text-pf-text-secondary">
               <span
                 className={`h-2 w-2 rounded-full ${getHealthDotColor(primaryCamera.healthStatus)}`}
-                title={`Camera health: ${primaryCamera.healthStatus}`}
+                title={`Periodic camera probe health: ${primaryCamera.healthStatus}`}
               />
-              <span>{primaryCamera.healthStatus}</span>
+              <span>Probe {primaryCamera.healthStatus}</span>
             </span>
           )}
           {cameraCount > 1 && (
@@ -187,17 +195,23 @@ export function CameraCard({
           <div
             className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-pf-bg-2 text-pf-text-secondary"
             role="status"
-            title={cameraMode === 'stream' ? 'Live stream active' : 'Snapshot preview active'}
+            title={streamIssue
+              ? `${streamIssue === 'unsupported' ? 'Live stream unsupported' : 'Live stream unavailable'}${hasSnapshot ? ' · showing snapshot' : ''}`
+              : displayedMode === 'stream' ? 'Live stream active' : 'Snapshot preview active'}
           >
-            <span className="sr-only">{cameraMode === 'stream' ? 'Live stream active' : 'Snapshot preview active'}</span>
+            <span className="sr-only">
+              {streamIssue
+                ? `${streamIssue === 'unsupported' ? 'Live stream unsupported' : 'Live stream unavailable'}${hasSnapshot ? ' · showing snapshot' : ''}`
+                : displayedMode === 'stream' ? 'Live stream active' : 'Snapshot preview active'}
+            </span>
             <span className="relative inline-flex items-center justify-center">
-              {cameraMode === 'stream' ? (
+              {displayedMode === 'stream' ? (
                 <VideoIcon className="w-4 h-4" />
               ) : (
                 <ImageIcon className="w-4 h-4" />
               )}
               <span
-                className={`absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full ${cameraMode === 'stream' ? 'bg-pf-success' : 'bg-pf-accent'}`}
+                className={`absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full ${displayedMode === 'stream' && !streamIssue ? 'bg-pf-success' : 'bg-pf-accent'}`}
                 aria-hidden="true"
               />
             </span>
@@ -220,6 +234,7 @@ export function CameraCard({
               hasStream={hasStream}
               hasSnapshot={hasSnapshot}
               streamUnavailable={!!cameraStreamUrl && !hasStream}
+              streamIssue={streamIssue}
               onModeChange={setCameraMode}
             />
             {externalUrl && (

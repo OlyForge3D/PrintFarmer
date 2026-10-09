@@ -110,8 +110,16 @@ export function PrinterCameraPreview({
   const safeStreamRoute = getAuthenticatedCameraProxyRoute(cameraStreamUrl);
   const liveStreamSrc = safeStreamRoute ? streamSrc : cameraStreamUrl;
   const streamHasFailed = streamUnsupported || streamFailed || failedRawStreamKey === rawStreamKey;
-  const previewStatusLabel = streamHasFailed
-    ? 'Live stream unavailable'
+  const streamIssue = showLiveStream
+    ? streamUnsupported
+      ? 'unsupported'
+      : streamFailed || failedRawStreamKey === rawStreamKey
+        ? 'failed'
+        : undefined
+    : undefined;
+  const displayedMode = streamIssue && hasSnapshot ? 'snapshot' : cameraMode;
+  const previewStatusLabel = streamIssue
+    ? `${streamIssue === 'unsupported' ? 'Live stream unsupported' : 'Live stream unavailable'}${hasSnapshot ? ' · showing snapshot' : ''}`
     : showLiveStream ? 'Live stream active' : 'Snapshot preview active';
   const shouldRenderLiveStream = showLiveStream && !!liveStreamSrc && !streamHasFailed;
   // CameraContractClassifier emits UnsupportedStream only when no snapshot exists; keep the snapshot branch defensive.
@@ -202,7 +210,7 @@ export function PrinterCameraPreview({
           >
             <span className="sr-only">{previewStatusLabel}</span>
             <span className="relative inline-flex items-center justify-center">
-              {showLiveStream ? (
+              {displayedMode === 'stream' ? (
                 <VideoIcon className="h-3.5 w-3.5" />
               ) : (
                 <ImageIcon className="h-3.5 w-3.5" />
@@ -210,7 +218,7 @@ export function PrinterCameraPreview({
               <span
                 className={clsx(
                   'absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full',
-                  showLiveStream ? 'bg-pf-success' : 'bg-pf-accent'
+                  displayedMode === 'stream' && !streamIssue ? 'bg-pf-success' : 'bg-pf-accent'
                 )}
                 aria-hidden="true"
               />
@@ -237,6 +245,7 @@ export function PrinterCameraPreview({
               hasStream={hasStream}
               hasSnapshot={hasSnapshot}
               streamUnavailable={!!cameraStreamUrl && !hasStream}
+              streamIssue={streamIssue}
               onModeChange={setCameraMode}
             />
 

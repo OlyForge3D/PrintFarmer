@@ -1,15 +1,19 @@
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router';
 import { CamerasPage } from '@/features/cameras/pages/CamerasPage';
 import { CameraAccessMode, CameraHealthStatus, CameraSnapshotStrategy, CameraSource, CameraStreamFormat, CameraType } from '@/types/api';
 
-const { cameraServiceMock, apiMock } = vi.hoisted(() => ({
+const { cameraServiceMock, apiMock, streamMock } = vi.hoisted(() => ({
   cameraServiceMock: { getDisplayCameras: vi.fn() },
   apiMock: { getSnapshotPreview: vi.fn() },
+  streamMock: { useAuthenticatedMjpegStream: vi.fn() },
 }));
 vi.mock('@/services/cameraService', () => ({ cameraService: cameraServiceMock }));
 vi.mock('@/services/api', () => ({ apiClient: apiMock }));
+vi.mock('@/features/cameras/hooks/useAuthenticatedMjpegStream', () => ({
+  useAuthenticatedMjpegStream: streamMock.useAuthenticatedMjpegStream,
+}));
 vi.mock('@/features/auth/hooks/useAuth', () => ({
   useAuth: () => ({ hasPermission: () => false }),
 }));
@@ -48,6 +52,11 @@ beforeEach(() => {
   }));
   cameraServiceMock.getDisplayCameras.mockReset().mockResolvedValue([createCamera()]);
   apiMock.getSnapshotPreview.mockReset().mockResolvedValue(new Blob(['jpeg'], { type: 'image/jpeg' }));
+  streamMock.useAuthenticatedMjpegStream.mockReset().mockImplementation((_url, enabled) => ({
+    streamSrc: null,
+    streamUnsupported: enabled,
+    streamFailed: false,
+  }));
 });
 
 afterEach(() => {
@@ -89,6 +98,28 @@ describe('CamerasPage camera previews', () => {
     expect(await screen.findByRole('group', { name: 'x400 Camera preview mode' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Snapshot mode' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Stream mode' })).toBeInTheDocument();
+  });
+
+  it('falls back to the snapshot when a selected stream is unsupported and reports the failed preview', async () => {
+    cameraServiceMock.getDisplayCameras.mockResolvedValue([
+      createCamera({
+        streamUrl: `/api/cameras/${cameraId}/stream`,
+        accessMode: CameraAccessMode.StreamAndSnapshot,
+        streamFormat: CameraStreamFormat.Mjpeg,
+      }),
+    ]);
+    localStorage.setItem(`printfarmer-camera-mode:camera:${cameraId}`, 'snapshot');
+
+    renderPage();
+    const streamButton = await screen.findByRole('button', { name: 'Stream mode' });
+    expect(streamButton).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(streamButton);
+
+    expect(await screen.findByRole('img', { name: 'x400 Camera camera preview' })).toHaveAttribute('src', 'blob:camera-preview');
+    expect(screen.getByRole('button', { name: 'Snapshot mode' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Stream mode' })).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByText('Live stream unsupported · showing snapshot')).toBeInTheDocument();
+    expect(screen.getByText('Preview failed · probe healthy')).toBeInTheDocument();
   });
 
   it('does not fall back to an unauthenticated image request when proxy loading fails', async () => {

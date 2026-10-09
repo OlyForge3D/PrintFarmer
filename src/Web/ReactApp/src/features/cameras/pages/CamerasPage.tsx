@@ -272,6 +272,13 @@ function CameraViewCard({ camera, canManage, onEdit, onDelete }: CameraViewCardP
   const liveStreamSrc = safeStreamRoute ? streamSrc : camera.streamUrl;
   const streamImageFailed = !!liveStreamSrc && failedUrl === liveStreamSrc;
   const streamFallsBackToSnapshot = cameraMode === 'stream' && (streamUnsupported || streamFailed || streamImageFailed) && !!snapshotPreviewUrl;
+  const streamIssue = cameraMode === 'stream'
+    ? streamUnsupported
+      ? 'unsupported'
+      : streamFailed || streamImageFailed
+        ? 'failed'
+        : undefined
+    : undefined;
   const activeUrl = cameraMode === 'stream' && hasStream
     ? streamFallsBackToSnapshot ? snapshotPreviewUrl : liveStreamSrc
     : cameraMode === 'snapshot' && snapshotPreviewUrl
@@ -382,7 +389,7 @@ function CameraViewCard({ camera, canManage, onEdit, onDelete }: CameraViewCardP
         <div className="flex flex-wrap items-center gap-2">
           <CameraHealthBadge
             healthStatus={camera.healthStatus}
-            previewFailed={imageError || snapshotFailed || streamFailed || streamImageFailed}
+            previewFailed={imageError || snapshotFailed || streamUnsupported || streamFailed || streamImageFailed}
             size="sm"
           />
           <Badge variant="default" size="sm">
@@ -413,6 +420,7 @@ function CameraViewCard({ camera, canManage, onEdit, onDelete }: CameraViewCardP
             hasStream={hasStream}
             hasSnapshot={hasSnapshot}
             streamUnavailable={!!camera.streamUrl && !hasStream}
+            streamIssue={streamIssue}
             onModeChange={setCameraMode}
           />
 
