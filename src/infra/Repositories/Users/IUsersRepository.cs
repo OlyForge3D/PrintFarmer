@@ -217,6 +217,16 @@ public interface IUsersRepository
     Task<bool> UpdatePasswordAsync(Guid userId, string currentPassword, string newPasswordHash, CancellationToken ct = default);
 
     /// <summary>
+    /// Revokes all active refresh sessions without changing JWT access-token revocation.
+    /// </summary>
+    Task RevokeUserRefreshTokensAsync(Guid userId, string? ipAddress = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// Gets the latest user-wide access-token revocation marker timestamp.
+    /// </summary>
+    Task<DateTime?> GetLatestTokenRevocationTimeAsync(Guid userId, CancellationToken ct = default);
+
+    /// <summary>
     /// Creates a password reset token for a user.
     /// </summary>
     /// <param name="token">The password reset token entity.</param>

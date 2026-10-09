@@ -132,7 +132,7 @@ public class RefreshToken
     /// <summary>Navigation property to the token owner.</summary>
     public User User { get; set; } = null!;
 
-    /// <summary>The refresh token value (cryptographically secure random string).</summary>
+    /// <summary>SHA-256 hash of the cryptographically secure refresh token value.</summary>
     public string Token { get; set; } = string.Empty;
 
     /// <summary>When the refresh token expires.</summary>
@@ -150,7 +150,7 @@ public class RefreshToken
     /// <summary>IP address that revoked this token.</summary>
     public string? RevokedByIp { get; set; }
 
-    /// <summary>Token value that replaced this one during refresh rotation.</summary>
+    /// <summary>Hash of the refresh token that replaced this one during rotation.</summary>
     public string? ReplacedByToken { get; set; }
 
     /// <summary>IP address that created this token.</summary>

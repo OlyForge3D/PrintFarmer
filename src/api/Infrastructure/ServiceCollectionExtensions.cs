@@ -455,6 +455,7 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<Farm.Infrastructure.Services.Authentication.IAuthAuditService, Farm.Infrastructure.Services.Authentication.AuthAuditService>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Authentication.ILoginAuditService, Farm.Infrastructure.Services.Authentication.LoginAuditService>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Authentication.ITokenRevocationService, Farm.Infrastructure.Services.Authentication.TokenRevocationService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Authentication.IRefreshTokenService, Farm.Infrastructure.Services.Authentication.RefreshTokenService>();
 
         // Shared fan-out for "a set of users' effective permissions just changed, kill their
         // live tokens" (#1454) -- used by both the role-permissions-changed path (#1471) and

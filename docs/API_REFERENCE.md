@@ -34,7 +34,22 @@ Tracks progress/state of a harvest operation.
 Generic wrapper for paging: items, totalCount, page, pageSize, totalPages.
 
 ### AuthenticationResult
-Result of login/registration containing JWT token & user metadata.
+Successful password and passkey login results contain the access `token`, its
+`expiresAt` timestamp, user metadata, and a `refreshToken` with
+`refreshTokenExpires`. `POST /api/auth/refresh` accepts `{ "refreshToken": "..." }`
+and returns a rotated token pair with a fresh 30-day sliding refresh-token expiry
+and no absolute session cap. Refresh tokens are single-use; clients must persist
+each replacement and must not reuse a token after rotation. Send the current
+refresh token in the optional authenticated `POST /api/auth/logout` body to revoke
+that session. A previously rotated token revokes its active descendant in the same
+session family; unrelated sessions and other users' sessions are not affected.
+Reusing a rotated token at the refresh endpoint revokes all of the user's refresh
+sessions and access tokens issued at or before the revocation marker's second.
+Access tokens issued in a later second remain valid. Successful password changes
+and password resets revoke all refresh sessions, but do not revoke existing JWT
+access tokens. The React client refreshes access tokens proactively and retries one
+authenticated request after a 401; refresh tokens are stored separately from
+access tokens in local storage.
 
 ### BarcodeScanLogDto
 Admin-facing diagnostic entry for optional Spoolman barcode scan logging. Fields include

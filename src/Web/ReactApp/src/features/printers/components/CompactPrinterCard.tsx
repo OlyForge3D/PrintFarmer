@@ -327,6 +327,11 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
               printerName={printer.name}
               variant="compact"
               className="mb-3"
+              onReview={() =>
+                failureDetectionStatus?.state === 'misconfigured' && onEdit
+                  ? onEdit(printer)
+                  : onExpand(printer.id)
+              }
             />
           )}
 

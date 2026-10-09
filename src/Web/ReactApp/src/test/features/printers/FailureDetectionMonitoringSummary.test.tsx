@@ -1,4 +1,5 @@
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { FailureDetectionMonitoringSummary } from '@/features/printers/components/FailureDetectionMonitoringSummary';
 import type { FailureDetectionEvent, FailureDetectionPrinterStatusDto } from '@/types/api';
@@ -158,6 +159,38 @@ describe('FailureDetectionMonitoringSummary', () => {
     expect(screen.getByText('Setup needed')).toBeInTheDocument();
     expect(screen.getByText('Review')).toBeInTheDocument();
     expect(screen.getByText(/Add or enable a snapshot camera/)).toBeInTheDocument();
+  });
+
+
+  it('renders an accessible Review button and calls the review handler for an actionable compact summary', async () => {
+    const user = userEvent.setup();
+    const onReview = vi.fn();
+    const status: FailureDetectionPrinterStatusDto = {
+      printerId: 'printer-1',
+      printerName: 'Voron 2.4',
+      state: 'misconfigured',
+      reason: 'No enabled camera snapshot URL is configured.',
+      isPrinting: true,
+      detectionSource: 'none',
+      detectionTarget: '',
+      lastOutcome: 'none',
+      lastAutoPaused: false,
+    };
+
+    render(
+      <FailureDetectionMonitoringSummary
+        enabled
+        status={status}
+        printerName="Voron 2.4"
+        variant="compact"
+        onReview={onReview}
+      />,
+    );
+
+    const reviewButton = screen.getByRole('button', { name: 'Review: failure detection for Voron 2.4' });
+    expect(reviewButton).toBeInTheDocument();
+    await user.click(reviewButton);
+    expect(onReview).toHaveBeenCalledOnce();
   });
 
   it('shows standing by state when idle', () => {

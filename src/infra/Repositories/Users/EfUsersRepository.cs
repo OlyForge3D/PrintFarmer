@@ -296,14 +296,38 @@ public class EfUsersRepository(AppDbContext db) : IUsersRepository
         // Current password check is done in service; repository only updates if hash differs
         if (user.PasswordHash == newPasswordHash)
         {
-            return true; // no change needed
+            await RevokeUserRefreshTokensAsync(userId, ct: ct);
+            return true;
         }
 
         user.PasswordHash = newPasswordHash ?? string.Empty;
         user.UpdatedAt = DateTime.UtcNow;
-        _ = await _db.SaveChangesAsync(ct);
+        await RevokeUserRefreshTokensAsync(userId, ct: ct);
         return true;
     }
+
+    public async Task RevokeUserRefreshTokensAsync(Guid userId, string? ipAddress = null, CancellationToken ct = default)
+    {
+        DateTime now = DateTime.UtcNow;
+        List<RefreshToken> tokens = await _db.RefreshTokens
+            .Where(token => token.UserId == userId && !token.IsRevoked)
+            .ToListAsync(ct);
+        foreach (RefreshToken token in tokens)
+        {
+            token.IsRevoked = true;
+            token.RevokedAt = now;
+            token.RevokedByIp = ipAddress ?? "unknown";
+        }
+
+        await _db.SaveChangesAsync(ct);
+    }
+
+    public Task<DateTime?> GetLatestTokenRevocationTimeAsync(Guid userId, CancellationToken ct = default) =>
+        _db.RevokedTokens
+            .Where(token => token.UserId == userId && token.TokenHash.StartsWith("ALL_TOKENS_"))
+            .OrderByDescending(token => token.RevokedAt)
+            .Select(token => (DateTime?)token.RevokedAt)
+            .FirstOrDefaultAsync(ct);
 
     public async Task CreatePasswordResetTokenAsync(PasswordResetToken token, CancellationToken ct = default)
     {

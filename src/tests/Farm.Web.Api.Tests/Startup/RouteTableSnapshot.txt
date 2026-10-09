@@ -539,6 +539,7 @@ POST /api/auth/passkey/login/begin -> Farm.Modules.Identity::Farm.Modules.Identi
 POST /api/auth/passkey/login/complete -> Farm.Modules.Identity::Farm.Modules.Identity.Controllers.AuthController.PasskeyLoginCompleteAsync [auth=anonymous:AllowAnonymousAttribute]
 POST /api/auth/passkey/register/begin -> Farm.Modules.Identity::Farm.Modules.Identity.Controllers.AuthController.PasskeyRegisterBeginAsync [auth=policy=RequireInteractiveSession;roles=;schemes=]
 POST /api/auth/passkey/register/complete -> Farm.Modules.Identity::Farm.Modules.Identity.Controllers.AuthController.PasskeyRegisterCompleteAsync [auth=policy=RequireInteractiveSession;roles=;schemes=]
+POST /api/auth/refresh -> Farm.Modules.Identity::Farm.Modules.Identity.Controllers.AuthController.RefreshAsync [auth=anonymous:AllowAnonymousAttribute]
 POST /api/auth/register -> Farm.Modules.Identity::Farm.Modules.Identity.Controllers.AuthController.RegisterAsync [auth=anonymous:AllowAnonymousAttribute]
 POST /api/auth/resend-confirmation -> Farm.Modules.Identity::Farm.Modules.Identity.Controllers.AuthController.ResendEmailConfirmationAsync [auth=policy=;roles=;schemes=]
 POST /api/auth/reset-password -> Farm.Modules.Identity::Farm.Modules.Identity.Controllers.AuthController.ResetPasswordAsync [auth=anonymous:AllowAnonymousAttribute]

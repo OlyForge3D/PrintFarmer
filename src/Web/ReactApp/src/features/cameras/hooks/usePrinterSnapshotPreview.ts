@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { apiClient } from '@/services/api';
+import { getAuthenticatedCameraProxyRoute } from '@/common/auth/authenticatedCameraRoutes';
 
 const SNAPSHOT_ERROR_BACKOFF_MULTIPLIER = 3;
 
 interface SnapshotPreviewState {
-  printerId: string;
+  sourceKey: string;
   src: string | null;
   failed: boolean;
 }
@@ -28,11 +29,12 @@ export function usePrinterSnapshotPreview(
   proxyEnabled: boolean,
   refreshIntervalMs: number,
   directSnapshotUrl?: string | null,
-  directEnabled = false
+  directEnabled = false,
+  proxySnapshotRoute?: string | null,
 ) {
   const previewContainerRef = useRef<HTMLDivElement | null>(null);
   const [snapshotState, setSnapshotState] = useState<SnapshotPreviewState>({
-    printerId: '',
+    sourceKey: '',
     src: null,
     failed: false,
   });
@@ -45,186 +47,131 @@ export function usePrinterSnapshotPreview(
     () => typeof IntersectionObserver === 'undefined'
   );
   const objectUrlRef = useRef<string | null>(null);
+  const [authRevision, setAuthRevision] = useState(0);
 
   const effectiveDirectSnapshotUrl = directSnapshotUrl ?? null;
+  const selectedProxyRoute = proxySnapshotRoute ?? getAuthenticatedCameraProxyRoute(effectiveDirectSnapshotUrl);
+  const effectiveProxyRoute = selectedProxyRoute
+    ?? (proxyEnabled && printerId ? `/api/printers/${printerId}/snapshot` : null);
   const isPreviewVisible = isDocumentVisible && isIntersectingViewport;
 
   useEffect(() => {
-    if (typeof document === 'undefined') {
-      return;
-    }
-
-    const handleVisibilityChange = () => {
-      setIsDocumentVisible(getIsDocumentVisible());
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === 'auth-token' || event.key === 'auth-user-id') setAuthRevision((revision) => revision + 1);
     };
-
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
   }, []);
 
   useEffect(() => {
-    if (typeof IntersectionObserver === 'undefined') {
-      return;
-    }
+    if (typeof document === 'undefined') return;
+    const handleVisibilityChange = () => setIsDocumentVisible(getIsDocumentVisible());
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, []);
 
+  useEffect(() => {
+    if (typeof IntersectionObserver === 'undefined') return;
     const element = previewContainerRef.current;
-    if (!element) {
-      return;
-    }
-
+    if (!element) return;
     const observer = new IntersectionObserver((entries) => {
       setIsIntersectingViewport(entries.some((entry) => entry.isIntersecting));
     });
     observer.observe(element);
-
-    return () => {
-      observer.disconnect();
-    };
+    return () => observer.disconnect();
   }, []);
 
   useEffect(() => {
-    const revokeCurrentObjectUrl = () => {
-      if (!objectUrlRef.current) {
-        return;
-      }
+    return () => {
+      if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
+      objectUrlRef.current = null;
+    };
+  }, [effectiveProxyRoute]);
 
+  useEffect(() => {
+    const revokeCurrentObjectUrl = () => {
+      if (!objectUrlRef.current) return;
       URL.revokeObjectURL(objectUrlRef.current);
       objectUrlRef.current = null;
     };
 
-    if (!proxyEnabled || !printerId) {
-      revokeCurrentObjectUrl();
-      const resetTimeoutId = window.setTimeout(() => {
-        setSnapshotState({
-          printerId: '',
-          src: null,
-          failed: false,
-        });
-      }, 0);
-      return () => {
-        window.clearTimeout(resetTimeoutId);
-      };
-    }
-
-    if (!isPreviewVisible) {
+    const useProxy = !!effectiveProxyRoute && (proxyEnabled || directEnabled || !!proxySnapshotRoute || !!selectedProxyRoute);
+    if (!useProxy || !effectiveProxyRoute || !isPreviewVisible) {
+      if (!useProxy) revokeCurrentObjectUrl();
       return;
     }
 
-    const currentPrinterId = printerId;
+    const sourceKey = effectiveProxyRoute;
+    const controller = new AbortController();
     let cancelled = false;
     let timeoutId: number | undefined;
 
-    function scheduleNextLoad(intervalMs: number) {
-      timeoutId = window.setTimeout(() => {
-        void loadSnapshot();
-      }, intervalMs);
-    }
-
-    async function loadSnapshot() {
+    const scheduleNextLoad = (intervalMs: number) => {
+      timeoutId = window.setTimeout(() => { void loadSnapshot(); }, intervalMs);
+    };
+    const loadSnapshot = async () => {
       try {
-        const blob = await apiClient.getPrinterSnapshot(currentPrinterId);
-        if (cancelled) {
-          return;
-        }
-
+        const isDefaultPrinterRoute = !!printerId && sourceKey === `/api/printers/${printerId}/snapshot`;
+        const blob = isDefaultPrinterRoute
+          ? await apiClient.getPrinterSnapshot(printerId, controller.signal)
+          : await apiClient.getSnapshotPreview(sourceKey, controller.signal);
+        if (cancelled) return;
         const nextObjectUrl = URL.createObjectURL(blob);
         revokeCurrentObjectUrl();
         objectUrlRef.current = nextObjectUrl;
-        setSnapshotState({
-          printerId: currentPrinterId,
-          src: nextObjectUrl,
-          failed: false,
-        });
+        setSnapshotState({ sourceKey, src: nextObjectUrl, failed: false });
         scheduleNextLoad(refreshIntervalMs);
       } catch {
-        if (cancelled) {
-          return;
+        if (cancelled) return;
+        if (!controller.signal.aborted) {
+          setSnapshotState((current) => ({
+            sourceKey,
+            src: current.sourceKey === sourceKey ? current.src : null,
+            failed: true,
+          }));
+          scheduleNextLoad(refreshIntervalMs * SNAPSHOT_ERROR_BACKOFF_MULTIPLIER);
         }
-
-        setSnapshotState((current) => ({
-          printerId: currentPrinterId,
-          src: current.printerId === currentPrinterId ? current.src : null,
-          failed: true,
-        }));
-        scheduleNextLoad(refreshIntervalMs * SNAPSHOT_ERROR_BACKOFF_MULTIPLIER);
-      }
-    }
-
-    void loadSnapshot();
-
-    return () => {
-      cancelled = true;
-      if (timeoutId !== undefined) {
-        window.clearTimeout(timeoutId);
       }
     };
-  }, [isPreviewVisible, printerId, proxyEnabled, refreshIntervalMs]);
+
+    void loadSnapshot();
+    return () => {
+      cancelled = true;
+      controller.abort();
+      if (timeoutId !== undefined) window.clearTimeout(timeoutId);
+    };
+  }, [authRevision, directEnabled, effectiveProxyRoute, isPreviewVisible, proxyEnabled, proxySnapshotRoute, refreshIntervalMs, selectedProxyRoute, printerId]);
 
   useEffect(() => {
-    if (!directEnabled || !effectiveDirectSnapshotUrl) {
-      const resetTimeoutId = window.setTimeout(() => {
-        setDirectSnapshotState({
-          sourceUrl: '',
-          src: null,
-        });
-      }, 0);
-      return () => {
-        window.clearTimeout(resetTimeoutId);
-      };
-    }
-
-    if (!isPreviewVisible) {
+    if (!directEnabled || !effectiveDirectSnapshotUrl || getAuthenticatedCameraProxyRoute(effectiveDirectSnapshotUrl)) {
       return;
     }
-
+    if (!isPreviewVisible) return;
     const sourceUrl = effectiveDirectSnapshotUrl;
     let cancelled = false;
     let timeoutId: number | undefined;
-
-    function refreshDirectSnapshot() {
-      if (cancelled) {
-        return;
-      }
-
-      setDirectSnapshotState({
-        sourceUrl,
-        src: getCacheBustedSnapshotUrl(sourceUrl),
-      });
+    const refreshDirectSnapshot = () => {
+      if (cancelled) return;
+      setDirectSnapshotState({ sourceUrl, src: getCacheBustedSnapshotUrl(sourceUrl) });
       timeoutId = window.setTimeout(refreshDirectSnapshot, refreshIntervalMs);
-    }
-
+    };
     timeoutId = window.setTimeout(refreshDirectSnapshot, 0);
-
     return () => {
       cancelled = true;
-      if (timeoutId !== undefined) {
-        window.clearTimeout(timeoutId);
-      }
+      if (timeoutId !== undefined) window.clearTimeout(timeoutId);
     };
   }, [directEnabled, effectiveDirectSnapshotUrl, isPreviewVisible, refreshIntervalMs]);
 
-  useEffect(() => {
-    return () => {
-      if (objectUrlRef.current) {
-        URL.revokeObjectURL(objectUrlRef.current);
-      }
-    };
-  }, []);
-
-  const hasCurrentProxySnapshot = proxyEnabled && snapshotState.printerId === printerId;
-  const hasCurrentDirectSnapshot =
-    directEnabled && directSnapshotState.sourceUrl === effectiveDirectSnapshotUrl;
-
+  const hasCurrentProxySnapshot = !!effectiveProxyRoute && snapshotState.sourceKey === effectiveProxyRoute;
+  const hasCurrentDirectSnapshot = directEnabled && directSnapshotState.sourceUrl === effectiveDirectSnapshotUrl;
   return {
     previewContainerRef,
     snapshotSrc: hasCurrentProxySnapshot
       ? snapshotState.src
       : hasCurrentDirectSnapshot
-      ? directSnapshotState.src
-      : null,
+        ? directSnapshotState.src
+        : null,
     snapshotFailed: hasCurrentProxySnapshot ? snapshotState.failed : false,
-    isPollingPaused: (proxyEnabled || directEnabled) && !isPreviewVisible,
+    isPollingPaused: (proxyEnabled || directEnabled || !!proxySnapshotRoute) && !isPreviewVisible,
   };
 }

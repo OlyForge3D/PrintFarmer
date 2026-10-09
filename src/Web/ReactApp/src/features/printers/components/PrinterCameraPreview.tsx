@@ -9,6 +9,8 @@ import {
   useCameraViewPreferences,
 } from '@/features/cameras/hooks/useCameraViewPreferences';
 import { usePrinterSnapshotPreview } from '@/features/cameras/hooks/usePrinterSnapshotPreview';
+import { useAuthenticatedMjpegStream } from '@/features/cameras/hooks/useAuthenticatedMjpegStream';
+import { getAuthenticatedCameraProxyRoute } from '@/common/auth/authenticatedCameraRoutes';
 import {
   canUseMjpegStream,
   isUnsupportedCameraPreview,
@@ -72,7 +74,8 @@ export function PrinterCameraPreview({
     pollSnapshotPreview,
     refreshIntervalMs,
     directSnapshotUrl,
-    !!directSnapshotUrl
+    !!directSnapshotUrl,
+    getAuthenticatedCameraProxyRoute(cameraSnapshotUrl)
   );
   const previewSrc = snapshotSrc ?? directSnapshotUrl;
   const hasSnapshot = pollSnapshotPreview || !!directSnapshotUrl;
@@ -89,14 +92,27 @@ export function PrinterCameraPreview({
     hasStream,
     hasSnapshot,
   });
-  const externalUrl = hasStream
+  const candidateExternalUrl = hasStream
     ? cameraStreamUrl
     : pollSnapshotPreview
-    ? null
-    : cameraSnapshotUrl ?? null;
+      ? null
+      : cameraSnapshotUrl ?? null;
+  const externalUrl = candidateExternalUrl && !getAuthenticatedCameraProxyRoute(candidateExternalUrl)
+    ? candidateExternalUrl
+    : null;
   const mediaClassName = getCameraMediaTransformClassName(rotation);
   const showLiveStream = cameraMode === 'stream' && hasStream;
-  const shouldUseImageStream = showLiveStream && failedRawStreamKey !== rawStreamKey;
+  const { streamSrc, streamUnsupported, streamFailed } = useAuthenticatedMjpegStream(
+    cameraStreamUrl,
+    showLiveStream && failedRawStreamKey !== rawStreamKey,
+  );
+  const safeStreamRoute = getAuthenticatedCameraProxyRoute(cameraStreamUrl);
+  const liveStreamSrc = safeStreamRoute ? streamSrc : cameraStreamUrl;
+  const streamHasFailed = streamUnsupported || streamFailed || failedRawStreamKey === rawStreamKey;
+  const previewStatusLabel = streamHasFailed
+    ? 'Live stream unavailable'
+    : showLiveStream ? 'Live stream active' : 'Snapshot preview active';
+  const shouldRenderLiveStream = showLiveStream && !!liveStreamSrc && !streamHasFailed;
   // CameraContractClassifier emits UnsupportedStream only when no snapshot exists; keep the snapshot branch defensive.
   const placeholderTitle = unsupportedPreview
     ? 'No live preview available'
@@ -115,15 +131,13 @@ export function PrinterCameraPreview({
         ref={previewContainerRef}
         className="relative aspect-video w-full overflow-hidden bg-pf-bg-0"
       >
-        {showLiveStream && cameraStreamUrl && shouldUseImageStream ? (
+        {shouldRenderLiveStream ? (
           <img
-            src={cameraStreamUrl}
+            src={liveStreamSrc}
             alt={`${printerName} live camera feed`}
             className={`h-full w-full object-contain bg-black ${mediaClassName}`}
             loading="eager"
-            onError={() => {
-              setFailedRawStreamKey(rawStreamKey);
-            }}
+            onError={() => setFailedRawStreamKey(rawStreamKey)}
           />
         ) : previewSrc ? (
           <img
@@ -140,23 +154,15 @@ export function PrinterCameraPreview({
             }}
           />
         ) : unsupportedPreview ? (
-          <div className="absolute inset-0 flex flex-col items-center justify-center px-4 text-center text-pf-text-secondary">
+          <div role="status" aria-live="polite" className="absolute inset-0 flex flex-col items-center justify-center px-4 text-center text-pf-text-secondary">
             <CameraIcon className="mb-2 h-8 w-8 opacity-45" />
             <p className="text-sm font-medium">{placeholderTitle}</p>
             <p className="mt-1 text-xs text-pf-text-tertiary">
               This camera does not provide an embeddable MJPEG live stream.
             </p>
           </div>
-        ) : showLiveStream && cameraStreamUrl ? (
-          <iframe
-            src={cameraStreamUrl}
-            title={`${printerName} live camera feed`}
-            className={`h-full w-full border-0 bg-black ${mediaClassName}`}
-            loading="lazy"
-            referrerPolicy="no-referrer"
-          />
         ) : (
-          <div className="absolute inset-0 flex flex-col items-center justify-center px-4 text-center text-pf-text-secondary">
+          <div role="status" aria-live="polite" className="absolute inset-0 flex flex-col items-center justify-center px-4 text-center text-pf-text-secondary">
             <CameraIcon className="mb-2 h-8 w-8 opacity-45" />
             <p className="text-sm font-medium">
               {hasCameraSource
@@ -165,7 +171,11 @@ export function PrinterCameraPreview({
             </p>
             {hasCameraSource && (
               <p className="mt-1 text-xs text-pf-text-tertiary">
-                {snapshotFailed
+                {streamUnsupported
+                  ? 'This stream format is not supported in preview; showing snapshots when available.'
+                  : streamFailed || failedRawStreamKey === rawStreamKey
+                  ? 'Live stream unavailable; reconnecting or showing snapshots when available.'
+                  : snapshotFailed
                   ? 'Snapshot polling is temporarily unavailable; the preview will retry automatically.'
                   : isPollingPaused
                   ? 'Snapshot polling is paused while the page is hidden.'
@@ -187,9 +197,9 @@ export function PrinterCameraPreview({
           <div
             className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-pf-bg-2 text-pf-text-secondary"
             role="status"
-            title={showLiveStream ? 'Live stream active' : 'Snapshot preview active'}
+            title={previewStatusLabel}
           >
-            <span className="sr-only">{showLiveStream ? 'Live stream active' : 'Snapshot preview active'}</span>
+            <span className="sr-only">{previewStatusLabel}</span>
             <span className="relative inline-flex items-center justify-center">
               {showLiveStream ? (
                 <VideoIcon className="h-3.5 w-3.5" />

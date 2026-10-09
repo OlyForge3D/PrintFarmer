@@ -5,7 +5,7 @@ using Microsoft.Extensions.Logging;
 namespace Farm.Web.Api.Middleware;
 
 /// <summary>
-/// Middleware that enforces rate limiting on authentication endpoints (login, register,
+/// Middleware that enforces rate limiting on authentication endpoints (login, refresh, register,
 /// and Desktop API-key exchange). Limits are applied per client IP address to prevent
 /// brute force attacks and key enumeration.
 ///
@@ -70,10 +70,11 @@ public class AuthenticationRateLimitMiddleware(RequestDelegate next, ILogger<Aut
         // StringComparison.OrdinalIgnoreCase avoids the ToLowerInvariant()
         // allocation while preserving case-insensitive matching.
         bool isLogin = path.EndsWith("/api/auth/login", StringComparison.OrdinalIgnoreCase);
+        bool isRefresh = path.EndsWith("/api/auth/refresh", StringComparison.OrdinalIgnoreCase);
         bool isRegister = path.EndsWith("/api/auth/register", StringComparison.OrdinalIgnoreCase);
         bool isApiKeyExchange = path.EndsWith("/api/auth/api-key/exchange", StringComparison.OrdinalIgnoreCase);
 
-        if (!isLogin && !isRegister && !isApiKeyExchange)
+        if (!isLogin && !isRefresh && !isRegister && !isApiKeyExchange)
         {
             await _next(context);
             return;
@@ -89,7 +90,7 @@ public class AuthenticationRateLimitMiddleware(RequestDelegate next, ILogger<Aut
 
         // Check rate limit based on endpoint type
         RateLimitResult rateLimitResult;
-        if (isLogin)
+        if (isLogin || isRefresh)
         {
             rateLimitResult = await rateLimitService.CheckLoginLimitAsync(ipAddress);
         }
@@ -114,7 +115,7 @@ public class AuthenticationRateLimitMiddleware(RequestDelegate next, ILogger<Aut
                 context.Response.Headers["Retry-After"] = ((int)rateLimitResult.RetryAfter.Value.TotalSeconds).ToString();
             }
 
-            string endpoint = isLogin ? "login" : isRegister ? "register" : "api-key-exchange";
+            string endpoint = isLogin ? "login" : isRefresh ? "refresh" : isRegister ? "register" : "api-key-exchange";
             _logger.LogWarning("Rate limit exceeded for {Endpoint} from IP {IpAddress}", endpoint, ipAddress);
 
             await context.Response.WriteAsJsonAsync(new
@@ -128,7 +129,7 @@ public class AuthenticationRateLimitMiddleware(RequestDelegate next, ILogger<Aut
         }
 
         // Rate limit not exceeded - record attempt and continue
-        if (isLogin)
+        if (isLogin || isRefresh)
         {
             await rateLimitService.RecordLoginAttemptAsync(ipAddress);
         }

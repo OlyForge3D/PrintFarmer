@@ -37,8 +37,17 @@ export async function getCurrentUser(): Promise<UserDto> {
   return response.data;
 }
 
-export async function logout(): Promise<void> {
-  await client.post("/auth/logout");
+export async function refresh(refreshToken: string): Promise<AuthenticationResult> {
+  const response = await client.post<AuthenticationResult>(
+    "/auth/refresh",
+    { refreshToken },
+    { skipAuthRedirect: true },
+  );
+  return response.data;
+}
+
+export async function logout(refreshToken?: string): Promise<void> {
+  await client.post("/auth/logout", refreshToken ? { refreshToken } : {}, { skipAuthRedirect: true });
 }
 
 export async function forgotPassword(

@@ -15,6 +15,8 @@ public sealed class AnonymousEndpointArchitectureTests
         {
             ["Farm.Modules.Identity.Controllers.AuthController.LoginAsync [api/auth/login]"] =
                 "POST /api/auth/login - establishes the user session.",
+            ["Farm.Modules.Identity.Controllers.AuthController.RefreshAsync [api/auth/refresh]"] =
+                "POST /api/auth/refresh - exchanges the caller's refresh-token credential for a rotated session.",
             ["Farm.Modules.Identity.Controllers.AuthController.RegisterAsync [api/auth/register]"] =
                 "POST /api/auth/register - creates an account before a user can authenticate.",
             ["Farm.Modules.Identity.Controllers.AuthController.ExchangeApiKeyAsync [api/auth/api-key/exchange]"] =
