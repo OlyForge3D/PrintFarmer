@@ -78,15 +78,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Enforce containment SDK submission deadline
-        # Apple requires the iOS 27 SDK for App Store Connect uploads starting
-        # April 2027. Stop before creating tags or loading signing credentials.
-        run: |
-          if [[ "$(date -u +%Y%m%d)" -ge 20270401 ]]; then
-            echo "::error::Xcode 26.6 containment releases are blocked: Apple requires the iOS 27 SDK from April 2027. Requalify the approved release toolchain before uploading to App Store Connect/TestFlight."
-            exit 1
-          fi
-
       - name: Resolve version and build metadata
         id: version
         env:

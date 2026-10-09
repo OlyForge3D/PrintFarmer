@@ -352,8 +352,6 @@ PY
 test_shared_workflow_policy() {
   python3 - "$REPO_ROOT" <<'PY'
 import pathlib
-import re
-import subprocess
 import sys
 
 root = pathlib.Path(sys.argv[1])
@@ -365,27 +363,6 @@ for name, count in [('ios-pr-ci', 3), ('ci', 1), ('testflight-beta', 1)]:
     assert text.count('!= "17F113"') == count, name
     assert 'xcode-27' not in text and '27A266a' not in text, name
 
-text = (root / '.github/workflows/testflight-beta.yml').read_text()
-guard = re.search(
-    r'- name: Enforce containment SDK submission deadline.*?run: \|\n(.*?)\n      - name:',
-    text, re.S,
-)
-assert guard, 'release deadline guard missing'
-script = '\n'.join(line[10:] for line in guard.group(1).splitlines())
-assert text.index('Enforce containment SDK') < text.index('Resolve version and build metadata')
-for date, status in [('20261009', 0), ('20270331', 0), ('20270401', 1), ('20270501', 1)]:
-    result = subprocess.run(
-        ['bash', '-c', f'date() {{ echo {date}; }}\n{script}'],
-        capture_output=True, text=True,
-    )
-    assert result.returncode == status, (date, result)
-    if status:
-        assert '::error::' in result.stdout and 'iOS 27 SDK' in result.stdout
-
-text = (root / '.github/workflows/ios-pr-ci.yml').read_text()
-assert 'steps.xcui-build.outcome == \'success\'' in text
-assert '-only-testing:PrintFarmerTests/PrinterControlsSectionSnapshotTests' in text
-assert 'Snapshots.xcresult' in text and 'Snapshots.events.jsonl' in text
 PY
 }
 

@@ -77,14 +77,11 @@ TestFlight. Apple's
 announce the iOS/iPadOS 27 SDK minimum for App Store Connect uploads starting
 April 2027. Xcode 26.6's iOS 26.5 SDK is not excluded by that future requirement
 today; App Store Connect uploads include TestFlight. Requalify the release
-toolchain before that deadline. The release workflow fails closed from
-2027-04-01 until its approved SDK baseline is updated; it must not upload
-with this containment pin after the announced minimum takes effect.
+toolchain before that announced deadline. Apple's month-only announcement does
+not establish a precise effective day; do not infer one. This rollback adds no
+new release policy or submission automation.
 
-The rollback retains current snapshot PNGs and strict comparisons. The `ipad-1`
-XCUI job also runs the focused Controls snapshot class after XCUI, even when a
-UI test fails, provided build-for-testing succeeded; it retains a separate
-`Snapshots.xcresult`, log, event stream and timing report. Six iPad
+The rollback retains current snapshot PNGs and strict comparisons. Six iPad
 Controls references were changed by #3286; validation under the selected
 toolchain must compare the retained images before any historical restoration
 or intentional re-recording. Local Xcode 26.6 is unavailable on the containment
