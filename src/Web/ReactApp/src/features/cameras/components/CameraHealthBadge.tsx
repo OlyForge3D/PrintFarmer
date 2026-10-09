@@ -61,12 +61,14 @@ export function CameraHealthBadge({
   const lastCheckText = showLastCheck ? getLastCheckText() : null;
 
   return (
-    <div className="inline-flex flex-col items-start gap-0.5">
+    <div
+      className="inline-flex flex-col items-start gap-0.5"
+      title="Camera probe health is checked periodically by the backend; preview status reflects this browser's image load."
+    >
       <Badge
         variant={variant}
         size={size}
         className="inline-flex items-center gap-1"
-        title="Camera probe health is checked periodically by the backend; preview status reflects this browser's image load."
       >
         <Icon className="w-3 h-3" />
         <span>{label}</span>

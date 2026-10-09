@@ -13,6 +13,9 @@ describe('CameraHealthBadge', () => {
     );
 
     expect(screen.getByText('Preview failed · probe healthy')).toBeInTheDocument();
+    expect(screen.getByTitle(
+      "Camera probe health is checked periodically by the backend; preview status reflects this browser's image load."
+    )).toContainElement(screen.getByText('Preview failed · probe healthy'));
     expect(screen.queryByText('Healthy')).not.toBeInTheDocument();
   });
 
