@@ -1,0 +1,1550 @@
+---
+post_title: "Offline update and recovery delivery requirements"
+author1: "Parker"
+post_slug: "offline-update-recovery"
+microsoft_alias: ""
+featured_image: ""
+categories: []
+tags: ["deployment", "offline", "recovery"]
+ai_note: "AI-assisted delivery contract; offline activation requires prior verified import evidence."
+summary: "Document verified offline import, activation and recovery requirements for network-denied hosts."
+post_date: "2026-09-24"
+---
+
+## Current support
+
+**Complete verified network-denied update and recovery bundles are delivered**
+(#2981). A complete bundle carries the original signed release bytes, every
+release-selected application and infrastructure image, the signed deployment
+set with its approved tools, the signed recovery instructions and, for
+recovery, the prior recovery set with its images and protected-backup
+reference. The host-local [import](#recovery-instructions-and-host-local-import-3063),
+[activation](#offline-activation-3080) and
+[recovery](#offline-recovery-3082) commands verify all of it offline and fail
+closed. The isolated host-update acceptance matrix and any owner-authorized
+staging or pilot rollout remain separate acceptance under #2982 and are not
+inferred from the unit and integration fixtures below.
+
+`deploy-docker.sh --prepare-offline` still only prepares legacy deployment
+materials and image caches. It is not a signed complete release, a bounded
+trusted importer, or proof of coordinated restore. Do not use it to update an
+installation that needs #2664's recovery guarantees. The signed host-local
+status/recovery CLI package (#2980, #3041) is a separate release asset. It can
+be carried to a disconnected host as described in the
+[runbook](HOST_UPDATE_RUNBOOK.md#install-the-signed-cli-package), but it is only
+one item in the bundle below. There is no supported skip-verification,
+force-import or replay-reset option.
+
+The first delivered slice (#2981) was a
+[verified release-metadata bundle](#verified-release-metadata-bundle-first-slice):
+it carries the original signed release bytes and the host-update CLI to a
+network-denied host and verifies them with bounded extraction. It is explicitly
+**not installable** and grants no rollout authority. A
+[host-local import command](#recovery-instructions-and-host-local-import-3063)
+(#3063) verifies a complete bundle, loads only its verified images and records
+every decision durably. It also enforces the offline trust expiry policy and
+admits the release through the host's durable replay store, refusing replays,
+downgrades and cross-channel imports (#3064, see
+[replay admission and trust expiry](#replay-admission-channel-continuity-and-trust-expiry-3064)).
+It authorizes no rollout by itself; activation is a separate operator step that
+reuses the same signed bytes, replay evidence and shared host-update executor.
+
+Connected installations need a proven minimum host-local recovery path but do
+not need to hand-carry a bundle. Disconnected installations additionally need
+all the material and evidence below. See the
+[operator runbook](HOST_UPDATE_RUNBOOK.md) for authorization and stop conditions.
+This contract does not invent a second manifest format or release publisher:
+the [release guide](RELEASE_GUIDE.md) owns original signed release identity.
+
+## Required bundle contents
+
+A complete bundle accounts for every item below; the sections that follow
+describe how each is carried and verified. This table is not an archive layout.
+
+| Material | Required checks |
+| --- | --- |
+| Original manifest and signature bundle | Preserve exact signed bytes and canonical source/tag/version/channel/build identity, manifest digest, promotion/branch authorization where required by the canonical contract, and all selected index/platform digests. No mutable-only identities or same-version byte substitutions. |
+| Offline verification evidence and tooling | Preserve provenance and approved trust-root continuity, expiry/revocation evidence and pinned verification tools. Bundle-supplied signer material cannot enroll itself. Verification must work after source branch movement without live ancestry lookup. |
+| Target application and infrastructure images | Include every selected platform/service image, database/runtime/proxy/add-on dependency and required worker under the supported topology contract. Six published application images alone are not every installation's infrastructure. Verify archive content against immutable identity; no missing-image downloads or builds. |
+| Prior recovery set | Retain complete compatible prior manifests/images and effective configuration, schema/format compatibility and backup references. Prior-channel artifacts are recovery-only under explicit verified authorization, not new offers or implicit channel consent. The bundle carries the signed prior manifest and its images (#3062, #3094); effective configuration is installation-specific and is retained in the engine's activation-time backup, never in the redistributable bundle (see [offline recovery](#offline-recovery-3082)). |
+| Deployment and recovery tools | Package the approved host-local updater/status/recovery tool, matching templates, configuration schema, provider-native tooling and these operator instructions. The signed CLI archive, its checksum list, the Cosign bundle (#3041), per-archive SBOMs and the verifying installer (#3045) are the status/recovery tool. The signed [deployment set](#deployment-set-and-approved-tools-3081) (#3081) carries the templates, configuration schema and approved tool pins. No reliance on the API, package manager, registry or internet being available during recovery. |
+| Installation-specific protected backup | Coordinated databases, models/G-code/profiles/artifacts, keys, certificates and config at the same consistency point. Keep private material access-controlled and separate from the redistributable release bundle. Never include publisher credentials. |
+
+## Verified release-metadata bundle (first slice)
+
+`scripts/ci/offline-update-bundle.mjs` covers the original signed manifest row,
+the bounded-verification part of the offline verification row, and the
+host-update CLI archives. It does not package Node.js, Cosign or trust-root
+continuity/expiry/revocation evidence: the operator provisions a pinned Cosign
+and an approved `trusted_root.json` out of band; `import` applies the
+[offline trust expiry policy](#replay-admission-channel-continuity-and-trust-expiry-3064).
+It reuses the existing signed release outputs; it does not create a new
+manifest format, signer or publisher.
+
+Assemble on a connected host from a downloaded release asset directory:
+
+```bash
+node scripts/ci/offline-update-bundle.mjs assemble \
+  --release-assets ./release-assets --channel stable \
+  --output ./printfarmer-offline.tar [--version <v>] [--runtime <rid>]... \
+  [--trusted-root ./trusted_root.json]
+```
+
+Verify on the network-denied host into a staging directory that must not
+already exist:
+
+```bash
+node scripts/ci/offline-update-bundle.mjs verify \
+  --bundle ./printfarmer-offline.tar --channel stable \
+  --trusted-root ./trusted_root.json --staging ./offline-staging
+```
+
+Every release published by `consolidated-release.yml` (insider and stable)
+includes this bundle as the `printfarmer-offline-bundle-v<version>.tar` release
+asset. The sign job assembles it from the exact signed release assets, checks
+it is under GitHub's 2 GiB asset limit, and keyless-signs the archive itself
+with the release workflow identity (`.tar.sigstore.json` asset). Publication
+re-verifies the size and that signature before tagging and again before
+upload. The published bundle carries the signed release metadata, the host-update CLI
+and the signed recovery instructions. It deliberately excludes container
+images, deployment tools and Node.js/Cosign, which exceed the asset limit or are
+provisioned out of band.
+
+The bundle is a flat, uncompressed ustar archive. Its first member,
+`offline-bundle.json`, is an unsigned index; every trusted fact is re-derived
+from the signed members, never from the index. Members are the exact
+`update-manifest.json` and its `.sigstore.json` bundle, the CLI `SHA256SUMS`
+and its `.sigstore.json` bundle, and each selected runtime's CLI archive
+together with its SPDX SBOM (`.spdx.json`).
+
+`verify` fails closed unless all of the following hold:
+
+- The archive parses within fixed size and member-count limits before any file
+  is written: no links, traversal, absolute paths, PAX/long names, duplicates,
+  unexpected members or trailing data.
+- Every member matches its SHA-256 as streamed from the bundle.
+- Cosign `verify-blob --trusted-root` accepts both signature bundles for the
+  release workflow identity of the expected channel (`main` for stable,
+  `development` for insider), using only the supplied trusted root (no network
+  lookup).
+- The manifest channel (and version, when given) matches the operator's
+  `--channel`/`--version`, the signed CLI checksum list names exactly every
+  supported archive and SBOM, every carried CLI archive and SBOM matches its
+  signed SHA-256, and each carried SBOM is a structurally valid SPDX 2.x
+  document.
+
+The staging directory is created exclusively and members are written with
+exclusive-create semantics into its `.unverified/` quarantine subdirectory.
+Only after every check passes are they moved to the staging root, and
+`offline-bundle-verification.json` is written last. On any caught failure the
+staging directory is removed. **Only the presence of the verification record
+marks success;** a staging directory left by an interrupted run (for example
+with `.unverified/` and no record) is untrusted and must be deleted.
+
+### Prior recovery set and protected-backup reference
+
+A bundle may bind the prior release a host returns to on recovery. The prior
+set is that release's original signed metadata: its `update-manifest.json` and
+`.sigstore.json` bundle, and its CLI `SHA256SUMS` and `.sigstore.json` bundle.
+It must be accompanied by a reference to the installation's protected backup
+taken for that prior release; neither is accepted without the other.
+
+```bash
+node scripts/ci/offline-update-bundle.mjs assemble ... \
+  --prior-release-assets ./prior-release-assets \
+  --protected-backup ./protected-backup.json \
+  [--prior-mode packaged|local-reference]
+```
+
+The protected-backup reference is a JSON object with exactly `id`, `sha256`
+(lowercase SHA-256 of the backup), `locationClass` (`host-local`,
+`attached-volume` or `external-storage`) and `releaseVersion` (must equal the
+prior release version). The closed field set leaves no place for backup
+contents, credentials, connection strings or paths; the backup itself stays
+access-controlled and outside the redistributable bundle.
+
+- `packaged` (default) carries the prior files as `prior-*` members.
+- `local-reference` carries no prior members; the index binds each prior file
+  by name, size and SHA-256, and `verify` requires the operator's copy through
+  `--prior-recovery-set <dir>`. Each local file must match its bound digest and
+  is copied into the quarantine before authentication.
+
+The index is unsigned, so the reference it carries is only a claim. `verify`
+therefore requires the operator's own expected reference through
+`--protected-backup <reference.json>` whenever the bundle binds a prior set,
+and fails closed unless every field equals the index's reference; supplying one
+for a bundle without a prior set is also rejected. The operator's record of the
+backup, not the transported bundle, is the trust source for the reference.
+
+Both `assemble` and `verify` fail closed unless the prior set is on the same
+channel, strictly older than the target (by sequence and version), its signed
+CLI checksum list names exactly every supported archive and SBOM, and Cosign
+accepts both prior signature bundles for the channel's release workflow
+identity using the supplied trusted root. A tampered, forged, wrong-channel,
+same-version or newer prior set, a missing packaged member, an index that
+misstates the prior set, a local copy supplied for a packaged set, or a local
+set supplied for a bundle without one is rejected. On success the verification
+record's `priorRecoverySet` names the mode, prior release identity, manifest
+digest and protected-backup reference; it is `false` when the bundle binds no
+prior set.
+
+A bundle with a prior set may also carry the prior release's application images
+(#3094):
+
+```bash
+node scripts/ci/offline-update-bundle.mjs assemble ... \
+  --prior-release-assets ./prior-release-assets \
+  --protected-backup ./protected-backup.json \
+  --prior-images ./prior-oci-layout
+```
+
+`--prior-images` requires a prior set. The authenticated prior manifest alone
+decides the required set: one `prior-image-<service>.oci.tar` member per prior
+application service, each bound by digest and platform exactly like the
+[target images](#application-and-infrastructure-images-3061), and every service
+in the target manifest must exist in the prior manifest. `contents.priorImages`
+is `true` only when every required prior image is present, and it implies
+`contents.priorRecoverySet`; bundles assembled before #3094 have no claim and
+are treated as `false`. `verify` checks the prior images only after the prior set
+authenticates, and rejects a missing, tampered, wrong-platform, extra or mixed
+prior image before anything is loaded. On success the record's `priorImages`
+lists the verified prior images, or is `false`.
+
+`load-prior` hands those images to the local engine without network access:
+
+```bash
+node scripts/ci/offline-update-bundle.mjs load-prior --staging /srv/offline/staging-1 \
+  --channel stable --trusted-root /srv/offline/trusted_root.json \
+  [--missing refuse|skip] [--cosign /abs/cosign] [--docker /abs/docker]
+```
+
+Like `load`, it never trusts the mutable record for expectations: it
+re-authenticates the staged target and prior manifests, derives the required
+prior images from the prior manifest, requires the record to name exactly that
+set, and re-hashes and verifies every archive before loading any of them.
+`--missing skip` returns `no_packaged_prior_images` without loading only when the
+record claims no prior images and no prior image archive is staged; any other
+shape is refused. The prior set deliberately does not carry effective
+configuration: it is installation-specific, so it is retained by the engine's
+activation-time backup and restored by coordinated recovery (#3082), never
+shipped in the redistributable bundle. A bound
+prior set is recovery-only material and never a new offer or implicit channel
+consent.
+
+The index always states `installable: false` and `rolloutAuthorization: false`:
+a bundle by itself is never installable. Only an `import` decision record can
+state `installable: true`, after replay admission (#3064); rollout enablement
+remains out of scope.
+`contents.recoveryInstructions` is `true` only when the bundle carries the
+signed, release-bound
+[recovery instructions](#recovery-instructions-and-host-local-import-3063)
+together with their signature bundle. `contents.priorRecoverySet` is
+`true` only when the bundle binds a complete prior set with its
+protected-backup reference. `contents.images` and `contents.infrastructure` are
+both `true` when the bundle carries the image set described below and both
+`false` otherwise; a bundle that claims one without the other, or carries only
+part of the set, is rejected. `contents.deploymentSet` is `true` only when the
+bundle carries the signed
+[deployment set](#deployment-set-and-approved-tools-3081) together with its
+signature bundle, every approved tool it pins and the image set; a partial set is
+rejected. Bundles assembled before #3081 have no `deploymentSet` claim; they still
+verify and are treated as carrying no deployment set, so import refuses them as
+incomplete. Delivered slices under #2658:
+
+- #3061 (delivered): application and infrastructure image archives.
+- #3062 (delivered): prior recovery set and protected-backup references.
+- #3063 (delivered): host-local import with Bash/PowerShell parity and bound
+  recovery instructions.
+- #3064 (delivered): replay protection, channel continuity and offline trust
+  expiry.
+- #3081 (delivered): complete offline set — deployment templates, configuration
+  schema and approved tools bound to the signed release.
+- #3080 (delivered): offline activation with Bash/PowerShell wrapper parity.
+  Activation re-verifies the imported release, proves preloaded images locally and
+  executes the existing host-update engine without registry or build fallback.
+- #3082 (delivered): network-denied recovery to the prior artifact set with
+  provider and remote-owner requirements failing closed (see
+  [offline recovery](#offline-recovery-3082)).
+- #3094 (delivered): packaged prior recovery images and fail-closed handling of
+  remote pinned workers.
+- #2981 (delivered): complete-bundle acceptance audit and schema 2 signed
+  recovery instructions covering prior-bound import, activation and
+  network-denied recovery. The isolated staging matrix and owner rollout
+  evidence remain with #2982.
+
+### Application and infrastructure images (#3061)
+
+Every release publishes `infrastructure-images.json` and its
+`infrastructure-images.sigstore.json` bundle. The release build reads the
+repository lock `scripts/docker/infrastructure-images.lock.json`, proves every
+pinned digest (and, for multi-platform indexes, every pinned platform child)
+against the registry with `docker buildx imagetools inspect --raw`, binds the
+list to the exact release identity (tag, version, channel, source branch and
+commit, build ID and sequence) and signs it with the same workflow identity as
+the manifest. A moved or unavailable pin fails the release before any image is
+built. The offline-supported infrastructure images are PostgreSQL
+(`postgres:16-alpine`, amd64 and arm64), nginx (`nginx:alpine`, amd64 and arm64)
+and SQL Server (`mcr.microsoft.com/mssql/server:2022-latest`, amd64 only).
+Optional add-ons and monitoring images are not part of the offline-supported
+topology. To change a pin, update the lock (digests sorted by `id`) in a
+reviewed PR.
+
+To include images, gather them on the connected host into one OCI image layout
+directory, preserving digests, and pass it to `assemble --images`:
+
+```bash
+# For each application service (manifest index digest) and infrastructure pin:
+skopeo copy --all --preserve-digests \
+  docker://ghcr.io/olyforge3d/printfarmer-api@sha256:<index-digest> oci:./images:api
+skopeo copy --all --preserve-digests \
+  docker://docker.io/library/postgres:16-alpine@sha256:<pinned-digest> oci:./images:postgres
+node scripts/ci/offline-update-bundle.mjs assemble ... --images ./images
+```
+
+Only each image's pinned root, its release-selected platform manifests, their
+configs and layers are copied; the layout's own `index.json` is ignored. The
+bundle then carries one nested, uncompressed ustar OCI layout per image,
+`image-<service>.oci.tar` for each manifest service and
+`infrastructure-<id>.oci.tar` for each signed infrastructure pin, plus the signed
+infrastructure list and its bundle. Each nested archive holds exactly
+`oci-layout`, a canonical `index.json` with one descriptor naming the pinned
+digest and the alias the Compose templates use, and `blobs/sha256/<hex>` for the
+reachable closure, in canonical order.
+
+With images present, `verify` additionally requires that:
+
+- Cosign accepts `infrastructure-images.sigstore.json` for the same channel
+  identity, and the list is bound to the manifest's release identity.
+- The bundle carries exactly the release-selected image set: every manifest
+  service and every signed infrastructure pin, no missing or extra image.
+- Every nested archive stays within per-archive size, blob-count and JSON limits;
+  its alias and root digest match the signed identity; every selected platform
+  child digest matches the signed per-platform digest; configs match their
+  platform (`linux/arm64` accepts variant `v8`); every blob matches its digest and
+  size; and no unselected platform, attestation or unreachable blob is present.
+
+The verification record then lists every image with its reference, digest,
+platforms, size and SHA-256. Load them on the network-denied host with:
+
+```bash
+node scripts/ci/offline-update-bundle.mjs load --staging ./offline-staging --channel stable \
+  --trusted-root ./trusted_root.json [--cosign <path>] [--docker <path>]
+```
+
+`load` does not trust the mutable verification record for image expectations.
+It re-authenticates the staged `update-manifest.json` and
+`infrastructure-images.json` signatures offline against the operator-supplied
+trusted root, derives the required image set, digests and platforms from those
+signed bytes alone, requires the record to name exactly that set, re-hashes and
+re-verifies every archive before loading any of them, and streams the same open file to `docker load`. It never pulls, builds or fetches anything; a changed
+archive or a staging directory without a verified image set is rejected.
+
+#### Docker image store requirement (#3137)
+
+`load`, `load-prior` and `import` require Docker Engine 25 or later **with the
+containerd image store** (containerd snapshotter) enabled. Engine version alone
+is not enough. Each image member is an OCI image layout (`index.json` and
+`blobs/`, no `docker save` `manifest.json`) rooted at the signed index, and
+`offline-activate` pins every preloaded service by
+`repository@<signed index digest>` with `--pull never`. Only the containerd
+image store meets both needs: it imports OCI layouts and records `RepoDigests`
+for the layout's index. The classic graphdriver store (for example `overlay2`,
+still the default on many Linux hosts and on GitHub-hosted `ubuntu-24.04`
+runners) cannot:
+
+- Its `docker load` requires `manifest.json`, so an OCI-only member fails
+  (`invalid archive: does not contain a manifest.json`, or `open
+  <path>/manifest.json: no such file or directory` on older engines).
+- Its `docker load` sets tags only and never records `RepoDigests`, so a member
+  with an added `manifest.json` would still load images that activation cannot
+  pin.
+
+Before any `docker load` (and, for `import`, before verification, staging or
+replay admission), the tool runs `docker info` and requires a
+`driver-type` of `io.containerd.snapshotter.v1` in the engine's driver status.
+Any other store, or an engine it cannot query, is refused with an explicit
+reason and nothing is loaded. `load-prior --missing skip` with no packaged prior
+images loads nothing, so it does not probe the engine.
+
+Check the store with:
+
+```bash
+docker info --format '{{json .DriverStatus}}'
+```
+
+To enable it on Docker Engine, add `"features": {"containerd-snapshotter": true}`
+to `/etc/docker/daemon.json` and restart `dockerd`; on Docker Desktop, turn on
+**Use containerd for pulling and storing images**. Switching stores hides images
+held in the old store, so do it before importing the bundle.
+
+### Deployment set and approved tools (#3081)
+
+Every release publishes `offline-deployment-set.json` and its
+`offline-deployment-set.sigstore.json` bundle, signed with the same workflow
+identity as the manifest and bound to the same release identity. The release
+build generates it from the source checkout; it contains:
+
+- **Templates.** The exact bytes (with size and SHA-256) of every deployment
+  template a supported topology needs: the common, split, monolith, discovery,
+  slicer-host, OrcaSlicer worker and PostgreSQL/SQL Server Compose templates, the
+  container entrypoint and security configuration, and the nginx configurations.
+  Optional add-ons (monitoring, registry, emulators, pgAdmin, Spoolman, go2rtc,
+  Obico ML and telemetry) are outside offline support and are never carried.
+- **Configuration schema.** Version 1: the sorted set of `${NAME}` variables the
+  carried templates consume. It is derived from the template bytes, so it always
+  describes exactly those templates.
+- **Approved tools.** The host tools pinned by upstream URL, SHA-256 and size in
+  the repository lock `scripts/docker/offline-tools.lock.json` (currently Cosign
+  v3.0.6 for linux/amd64, linux/arm64 and windows/amd64, matching the version the
+  release workflow pins), plus the database tools that ship inside pinned
+  infrastructure images (`pg_dump` and `pg_restore` in `postgres`, `sqlcmd` in
+  `mssql`). Docker Engine 25 or later with the containerd image store is a host
+  prerequisite (see [Docker image store requirement](#docker-image-store-requirement-3137))
+  and is not bundled.
+- **Topologies.** `monolith-postgres`, `monolith-sqlserver`, `split-postgres` and
+  `split-sqlserver`, each naming its images, templates and tools. The document
+  states `rolloutAuthorization: false`.
+
+To change a tool pin, update the lock (artifacts sorted by name) in a reviewed PR.
+To include the set, download every pinned tool artifact into one directory on
+the connected host, verify it against the lock and pass the directory with the
+image layout:
+
+```bash
+node scripts/ci/offline-update-bundle.mjs assemble ... --images ./images --tools ./tools
+```
+
+`assemble` requires `--images` with `--tools`, checks each tool file against its
+signed size and SHA-256 and packages it as `tool-<artifact name>` beside the
+signed pair. Without `--tools` the set is omitted and `contents.deploymentSet`
+is `false`. With the set present, `verify` additionally requires that:
+
+- Cosign accepts `offline-deployment-set.sigstore.json` for the same channel
+  identity, and the document is **byte-for-byte** the document regenerated from
+  its own carried templates and tool pins for the manifest's release identity,
+  so an edited, reordered, re-signed or wrong-release copy is rejected.
+- Every topology image is a release-selected application image or signed
+  infrastructure pin, the topologies together cover exactly the carried image
+  set, and every image tool comes from a pinned infrastructure image.
+- The bundle carries exactly the pinned tool members, no missing or extra tool,
+  each matching its signed size and SHA-256.
+
+The verification record's `deploymentSet` then names the document SHA-256, the
+configuration schema version, the topologies and each tool's SHA-256; it is
+`false` when the bundle carries no set.
+
+## Recovery instructions and host-local import (#3063)
+
+Every release publishes `offline-recovery-instructions.json` and its
+`offline-recovery-instructions.sigstore.json` bundle, signed with the same
+workflow identity as the manifest. The document is generated from the release
+identity alone (tag, version, channel, source branch and commit, build ID and
+sequence) and names only fixed wrapper operations for that one release, each
+with its exact Bash and PowerShell argument vector. Schema 1 names four:
+`offline-bundle-import`, `host-update-status`, `host-update-recover-preview` and
+`host-update-recover-confirm`. Schema 2 (#2981, the current default) adds the
+network-denied path end to end: `offline-bundle-import-with-prior`,
+`offline-bundle-import-with-local-prior`, `offline-activate`,
+`offline-recover-preview` and `offline-recover-confirm`. Published schema 1
+documents still verify. Host paths and the operator are placeholders such
+as `<bundle.tar>`; there is no shell text, URL, credential or caller-chosen
+command. It states `rolloutAuthorization: false`.
+
+`assemble` packages the pair automatically when both files are present in the
+release asset directory, and rejects one without the other. `verify` requires
+Cosign to accept the signature bundle for the channel's release workflow
+identity and the document to be **byte-for-byte** the document regenerated from
+the signed manifest identity, so a re-signed, edited, wrong-release or
+unflagged copy is rejected. The verification record then names the
+instructions' SHA-256 and operation IDs.
+
+### Exact packaged commands
+
+The signed instructions package these exact schema-2 command vectors for a
+stable `1.4.0` release. Replace angle-bracket placeholders with host-local
+absolute paths or identifiers; do not add optional flags to the packaged
+operation. `--channel`, `--version` and `--release` are release-bound values:
+use the values reproduced verbatim in the host's signed
+`offline-recovery-instructions.json`. The generator and focused test bind the
+complete ordered block below line-for-line.
+
+<!-- packaged-command-vectors:start -->
+```text
+printfarmer-host-update.sh import --config <host-update.json> --bundle <bundle.tar> --channel stable --version 1.4.0 --trusted-root <trusted_root.json> --trusted-root-approval <trusted-root-approval.json> --staging <new-staging-dir> --records <decision-records-dir> --operator <operator>
+pwsh -File printfarmer-host-update.ps1 import -Config <host-update.json> -Bundle <bundle.tar> -Channel stable -Version 1.4.0 -TrustedRoot <trusted_root.json> -TrustedRootApproval <trusted-root-approval.json> -Staging <new-staging-dir> -Records <decision-records-dir> -Operator <operator>
+printfarmer-host-update.sh --config <host-update.json> status --release stable:1.4.0 --json
+pwsh -File printfarmer-host-update.ps1 -Config <host-update.json> status -Release stable:1.4.0 -Json
+printfarmer-host-update.sh --config <host-update.json> recover --release stable:1.4.0 --preview
+pwsh -File printfarmer-host-update.ps1 -Config <host-update.json> recover -Release stable:1.4.0 -Preview
+printfarmer-host-update.sh --config <host-update.json> recover --release stable:1.4.0 --confirm stable:1.4.0
+pwsh -File printfarmer-host-update.ps1 -Config <host-update.json> recover -Release stable:1.4.0 -Confirm stable:1.4.0
+printfarmer-host-update.sh import --config <host-update.json> --bundle <bundle.tar> --channel stable --version 1.4.0 --trusted-root <trusted_root.json> --trusted-root-approval <trusted-root-approval.json> --staging <new-staging-dir> --records <decision-records-dir> --operator <operator> --protected-backup <protected-backup.json>
+pwsh -File printfarmer-host-update.ps1 import -Config <host-update.json> -Bundle <bundle.tar> -Channel stable -Version 1.4.0 -TrustedRoot <trusted_root.json> -TrustedRootApproval <trusted-root-approval.json> -Staging <new-staging-dir> -Records <decision-records-dir> -Operator <operator> -ProtectedBackup <protected-backup.json>
+printfarmer-host-update.sh import --config <host-update.json> --bundle <bundle.tar> --channel stable --version 1.4.0 --trusted-root <trusted_root.json> --trusted-root-approval <trusted-root-approval.json> --staging <new-staging-dir> --records <decision-records-dir> --operator <operator> --prior-recovery-set <prior-recovery-set-dir> --protected-backup <protected-backup.json>
+pwsh -File printfarmer-host-update.ps1 import -Config <host-update.json> -Bundle <bundle.tar> -Channel stable -Version 1.4.0 -TrustedRoot <trusted_root.json> -TrustedRootApproval <trusted-root-approval.json> -Staging <new-staging-dir> -Records <decision-records-dir> -Operator <operator> -PriorRecoverySet <prior-recovery-set-dir> -ProtectedBackup <protected-backup.json>
+printfarmer-host-update.sh activate --config <host-update.json> --staging <staging-dir> --channel stable --trusted-root <trusted_root.json>
+pwsh -File printfarmer-host-update.ps1 activate -Config <host-update.json> -Staging <staging-dir> -Channel stable -TrustedRoot <trusted_root.json>
+printfarmer-host-update.sh recover-offline --config <host-update.json> --staging <staging-dir> --channel stable --trusted-root <trusted_root.json> --protected-backup <protected-backup.json> --release stable:1.4.0 --preview
+pwsh -File printfarmer-host-update.ps1 recover-offline -Config <host-update.json> -Staging <staging-dir> -Channel stable -TrustedRoot <trusted_root.json> -ProtectedBackup <protected-backup.json> -Release stable:1.4.0 -Preview
+printfarmer-host-update.sh recover-offline --config <host-update.json> --staging <staging-dir> --channel stable --trusted-root <trusted_root.json> --protected-backup <protected-backup.json> --release stable:1.4.0 --confirm stable:1.4.0
+pwsh -File printfarmer-host-update.ps1 recover-offline -Config <host-update.json> -Staging <staging-dir> -Channel stable -TrustedRoot <trusted_root.json> -ProtectedBackup <protected-backup.json> -Release stable:1.4.0 -Confirm stable:1.4.0
+```
+<!-- packaged-command-vectors:end -->
+
+Import on the network-denied host with the one documented command for each
+platform (the paths must be absolute; `--staging` must not exist yet and
+`--records` must be an existing directory kept outside replaced containers and
+restored application databases):
+
+```bash
+scripts/printfarmer-host-update.sh import --config /etc/printfarmer/host-update.json \
+  --bundle /srv/offline/printfarmer-offline.tar --channel stable --version 1.2.3 \
+  --trusted-root /srv/offline/trusted_root.json \
+  --trusted-root-approval /srv/offline/trusted-root-approval.json --staging /srv/offline/staging-1 \
+  --records /var/lib/printfarmer/offline-decisions --operator ops.alice \
+  [--prior-recovery-set /abs/dir] [--protected-backup /abs/reference.json]
+```
+
+```powershell
+pwsh -File scripts\printfarmer-host-update.ps1 import -Config D:\PrintFarmer\host-update.json `
+  -Bundle D:\offline\printfarmer-offline.tar -Channel stable -Version 1.2.3 `
+  -TrustedRoot D:\offline\trusted_root.json `
+  -TrustedRootApproval D:\offline\trusted-root-approval.json -Staging D:\offline\staging-1 `
+  -Records D:\PrintFarmer\offline-decisions -Operator ops.alice `
+  [-PriorRecoverySet D:\abs\dir] [-ProtectedBackup D:\abs\reference.json]
+```
+
+Both wrappers accept exactly the same options, validate them the same way
+(absolute paths, `stable`/`insider`, `[0-9A-Za-z.+-]{1,128}` versions and
+`[A-Za-z0-9][A-Za-z0-9._@-]{0,63}` operators), refuse a usage error with exit 2
+before anything runs, and run `node offline-update-bundle.mjs import` with an
+identical argument vector; the wrapper tests assert that parity. Both resolve the
+host-update CLI exactly as for `status`/`recover` (`PRINTFARMER_HOST_UPDATE_CLI_DIR`,
+or `cli/` beside an installed package's wrapper) and pass it with `--config` to the
+tool, which runs `offline-admit`. `import` needs Node.js, a pinned Cosign and Docker
+Engine 25 or later with the containerd image store on the host; it refuses the
+classic image store before verifying anything (see
+[Docker image store requirement](#docker-image-store-requirement-3137)). Set
+`PRINTFARMER_NODE`, `PRINTFARMER_COSIGN` and `PRINTFARMER_DOCKER` to absolute
+executables to avoid `PATH` lookup. In a repository checkout the tool is
+`scripts/ci/offline-update-bundle.mjs`; an installed CLI package does not carry
+it, so point `PRINTFARMER_OFFLINE_BUNDLE_TOOL` at an approved copy.
+
+`import` first requires the containerd image store, then applies the trust expiry policy, then runs `verify` into the new
+staging directory, then requires a complete bundle: the release-selected application images, the signed infrastructure
+image list with its images, the signed recovery instructions, and the signed
+deployment set with every approved tool it pins. A bundle that
+verifies but lacks any of them is **not installable for import** and is
+refused. It then asks the host-update CLI to admit the verified release into the
+durable replay store (below) and only then runs `load`, which re-authenticates the staged metadata and
+loads only verified archives. It exits 0 when imported and 1 when refused. A
+refusal after verification succeeded removes the staging directory.
+
+Before the first `docker load`, `import` publishes a durable record with
+outcome `in-progress`, so evidence exists before any engine side effect. The
+final `imported` or `refused` record then atomically replaces it. If `import`
+is interrupted or finalization fails, the `in-progress` record remains: treat
+it as "images may have been loaded" and re-run `import`. A refusal during
+`docker load` may leave the verified, content-addressed images loaded before
+the failure in the engine; they are inert, never tagged as active or started,
+and the record lists them in `loadedImages` and names the failing member in
+`failedLoad`.
+
+Every decision, including every refusal, is written as one record
+`<records>/<decidedAt>-<decisionId>.json`: created exclusively (POSIX mode
+`0600`), fsynced, then renamed into place (and the directory fsynced on POSIX),
+so a leftover `.<name>.partial` file is never a decision. A record holds the decision
+ID and time, operator, outcome (`imported`, `refused` or `in-progress`), a bounded reason,
+the expected channel and version, the bundle SHA-256, the signed release
+identity, the verified manifest, image, recovery-instruction and prior-set
+digests, the loaded image digests, the `trust` evaluation (trusted-root SHA-256,
+approval time, approver and approval expiry), the `replay` decision
+(`disposition`, `correlationId`, `reused`, `sequence` and `admitted`, also kept for a
+refused admission), `installable` and `rolloutAuthorization: false`. `installable` is
+`true` only on an `imported` record whose replay admission succeeded. Reasons are redacted: supplied paths are replaced
+by placeholders such as `<bundle>`, any other host path by `<path>`, control
+characters are removed and the text is capped at 512 characters. Usage errors
+(a malformed operator, version or channel, or a missing or linked records
+directory) are rejected before a record can be written.
+
+An imported record is evidence that the bytes were verified and loaded. It is
+not an update offer, an installation or channel consent; applying a release
+still follows the [operator runbook](HOST_UPDATE_RUNBOOK.md).
+
+## Offline activation (#3080)
+
+Activate a previously imported release only after the host is prepared for a
+managed update and the API service is stopped. The wrappers expose the same
+fixed operation on both platforms:
+
+```bash
+scripts/printfarmer-host-update.sh activate --config /etc/printfarmer/host-update.json \
+  --staging /srv/offline/staging-1 --channel stable \
+  --trusted-root /srv/offline/trusted_root.json [--cosign /abs/cosign] [--json]
+```
+
+```powershell
+pwsh -File scripts\printfarmer-host-update.ps1 activate -Config D:\PrintFarmer\host-update.json `
+  -Staging D:\offline\staging-1 -Channel stable `
+  -TrustedRoot D:\offline\trusted_root.json [-Cosign D:\abs\cosign.exe] [-Json]
+```
+
+`activate` invokes `Farm.HostUpdate.Cli offline-activate` with the same absolute
+argument vector and preserves the CLI exit code. Usage/setup errors return 2;
+refusals return 6; a held host-update execution lock returns 7; unreadable
+configuration or state returns the existing configuration/state codes. There is
+no registry fallback, no local build and no verification bypass option.
+
+Activation re-parses the staged `update-manifest.json`, re-verifies
+`update-manifest.sigstore.json` with the supplied trusted root and requires the
+manifest channel to equal both `--channel` and the standing policy channel. It
+then performs a read-only check of the durable replay store for the exact
+imported release identity (release ID, sequence and manifest digest). Only a
+strict `Imported` disposition is accepted. Missing evidence, an already accepted
+or completed activation, a rejected, superseded or replayed identity, or
+evidence from another channel fails closed before images or compose state are
+touched. A successful activation records the imported evidence as consumed, so a
+second activation requires a fresh import/admission.
+
+Before any mutation, activation constructs the configured topology from the
+signed manifest and verifies every required image locally by exact
+`repository@sha256:<digest>` and platform (`os/architecture[/variant]`). Missing
+images, wrong platforms, incomplete platform digest sets or mixed-release
+digests are refused before `docker compose` runs. The apply and target-image
+migration steps use preloaded image mode: they inspect local images, run
+migrations with `docker run --pull never`, and apply templates with
+`docker compose up -d --no-build --pull never`; they never run `docker pull`.
+
+Preloaded images are pinned by their signed service **index** digest (the
+`@sha256:` suffix of `services[].image`), because `docker load` of an OCI layout
+records `RepoDigests` for the layout's root index, not for the platform child.
+The index is signed and content-addresses its platform children, and the local
+inspect still checks the host's `os/architecture`. Each service must also list a
+canonical child digest for the host platform, which proves the platform was
+signed-selected; a missing child or index is `image_set_incomplete:<service>`.
+In this mode the execution target's `ChildDigest` field, and therefore the
+installed state and journal binding, carry the index pin. Registry-mode updates
+still pull and record the platform child digest.
+
+Execution still goes through the existing `HostUpdateExecutor` state machine
+(preflight, drain, fence, backup, migration, apply, verify), journal and
+installed-state writer. The CLI wires the same concrete adapters used by the API
+for backup, target-image migrations, apply, health/digest verification and
+recovery semantics. To avoid a false in-process writer fence, the CLI proves
+every active database-writing compose service is inactive: monolith topologies
+check `monolith`, split topologies check `api` and `slicer-host`, and any other
+active writer service listed by configuration must have a known compose service
+mapping. The proof uses all container states (`docker compose ps -a --format
+json`) and allows only absent, exited, dead, removed or not-created services; a
+running, restarting, paused, created/starting, unknown or unparseable state fails
+closed.
+
+One running writer is tolerated (#3126): the exact authenticated prior release.
+It is tolerated only when all of the following hold, and never on installed state
+alone:
+
+1. The staged bundle binds a prior set whose `prior-update-manifest.json` hashes
+   to the recorded digest and whose signature re-verifies against the same
+   `--trusted-root`, exactly as [Offline recovery](#offline-recovery-3082)
+   requires.
+2. The installed host state is exactly that prior set, per the same
+   `prior_installed_state_mismatch` rules recovery applies.
+3. The container's compose `State` is exactly `running` and its compose `ID` is
+   observable. A `created`, `restarting`, `paused` or otherwise non-running
+   writer is refused even on the prior image.
+4. The running container's compose `Image` is `<ImageRepository>@<installed
+   pin>` for that service. A child digest, tag, other repository or missing image
+   is refused as `writer_service_active:<service>:<state>`.
+
+A tolerated writer is then fenced before backup, migration or apply by the CLI's
+`prior-release-writer` fence. The fence closes the durable admission gate and
+waits until the gate reads closed, every active-work port reads zero, and a
+fresh `docker compose ps` shows no running writer other than the tolerated
+containers, each with the same container ID and image. Only then does it stop
+exactly those containers with `docker stop <container-id>`, and it is proven
+only once every writer host is observed stopped. The N-1 writer's in-process
+writers cannot acknowledge a pause to the CLI, so stopping it is what makes the
+offline writer-host-stopped proof (#3127) genuine; that proof never counts a
+tolerated writer as stopped. A new, replaced, extra-replica, re-imaged,
+non-running or unobservable writer, or a failed stop, keeps the fence open
+until it times out. A failure after the stop leaves the N-1 writer stopped
+behind the closed gate; recovery rolls back through the normal path. When no
+writer was tolerated, the fence is inert.
+
+A redrive after power loss between the target `compose up` and `apply:after`
+(#3181) can find writers already running the target. The absence probe also
+tolerates a writer when all of these hold, and never otherwise:
+
+1. Every journal activity for the release is bound to this exact request, and
+   the last one is `apply:before`. No `apply:after`, `Verifying`, `Completed`,
+   `RecoveryRequired` or `Refused` activity exists.
+2. The container's compose `State` is exactly `running` and its `ID` is
+   observable.
+3. Its compose `Image` is `<ImageRepository>@<target child digest>` from this
+   request's signed targets.
+
+Such a writer never enters the `prior-release-writer` fence's tolerated set, so
+it is never stopped. The executor then reconciles the interrupted apply by
+verifying the exact running digests, without a second `compose up` or any
+migration replay. If the digests do not verify, the redrive reports
+`RecoveryRequired` / `uncertain_side_effect:apply:*` as before.
+
+A host whose application or slicer schema was provably never migrated has no
+active work to drain (#3126). The proof requires the context's EF migration
+history table and the queried tables to be absent together. A missing work table
+while the history table exists, or any other read failure, still fails the drain
+closed. The manifest binding reader uses the same proof and reports no binding.
+Both absence checks are positive catalog queries on every provider (#3141),
+resolved from the context's configured history table name and schema; the EF
+provider's own history-exists check is not used because Npgsql always reports
+the table present. On PostgreSQL an unqualified table counts as present in any
+schema on the effective `search_path`, and views count as present, so an
+ambiguous catalog never proves absence. PostgreSQL and SQL Server keep one
+default-schema `__EFMigrationsHistory` for both contexts, so once either context
+is migrated neither is treated as never migrated.
+
+Activation repeats the replay and writer-absence checks inside the
+executor's own lock immediately before executor steps begin, closing the gap
+between preflight validation and mutation. After health/digest verification
+persists the installed state, the executor consumes the `Imported` replay record
+as `Accepted` before releasing that same lock. A crash in that finalization
+window is recoverable in either order: a later `activate` for the same release
+and manifest digest finalizes a completed journal whose replay record is still
+`Imported`, or finalizes the completion journal when replay is already `Accepted`
+and the request-bound journal proves `verify:after`. The completed-journal path
+requires both `verify:after` and `completed` records to carry the exact binding
+for the current preloaded activation request; registry-mode, legacy-unbound, or
+otherwise mismatched journals are refused and left unchanged. Both paths
+additionally require the installed state to already match the signed target, and
+neither reruns migration or apply steps. With writers stopped, there are no live
+API/slicer/monolith in-memory writer flags to acknowledge, so the CLI proves each
+required background writer by the closed durable admission gate plus the writer
+hosts observed stopped on every fence poll, and verifies `/health` from inside
+the compose network (see the
+[offline fence and health contract](HOST_UPDATE_EXECUTOR.md#host-local-cli-offline-fence-and-health-contract-3127)).
+The durable admission gate, database active-work checks, backups, migrations,
+health gates and installed-state records remain the single engine source of truth. Failures before
+verification preserve the prior installed state and leave recovery to the
+existing journal/recovery workflow; once the installed state has changed, the CLI
+reports the completed activation state rather than a refused activation.
+
+## Offline recovery (#3082)
+
+When an offline activation fails after mutation and the journal reports
+`RecoveryRequired`, recover to the prior release bound in the same staged bundle
+with `recover-offline`. Preview first, then confirm by retyping the release ID:
+
+```bash
+scripts/printfarmer-host-update.sh recover-offline --config /etc/printfarmer/host-update.json \
+  --staging /srv/offline/staging-1 --channel stable \
+  --trusted-root /srv/offline/trusted_root.json \
+  --protected-backup /srv/offline/protected-backup.json \
+  --release stable:1.4.0 --preview [--json]
+scripts/printfarmer-host-update.sh recover-offline ... --release stable:1.4.0 \
+  --confirm stable:1.4.0 [--reapprove-drift <token>] [--printers-reconciled <token>]
+```
+
+```powershell
+pwsh -File scripts\printfarmer-host-update.ps1 recover-offline -Config D:\PrintFarmer\host-update.json `
+  -Staging D:\offline\staging-1 -Channel stable -TrustedRoot D:\offline\trusted_root.json `
+  -ProtectedBackup D:\offline\protected-backup.json -Release stable:1.4.0 -Preview [-Json]
+```
+
+Both wrappers validate the same fixed options, forward them in one canonical
+order to `Farm.HostUpdate.Cli offline-recover` and preserve the CLI exit code;
+`--release` names the failed target, and `--request-id`, `--reapprove-drift` and
+`--printers-reconciled` behave exactly as for `recover`. Plain `recover` is
+unchanged.
+
+The staging directory and its `offline-bundle-verification.json` record are
+mutable and are never trusted on their own. Before reading host state the command
+requires, in order (every refusal exits 6 and changes nothing):
+
+1. The staged target manifest re-parses and its signature re-verifies against
+   `--trusted-root` for `--channel`, and its release ID equals `--release`
+   (`offline_recovery_release_mismatch`).
+2. The record binds a prior set (`prior_recovery_set_missing` when it is
+   `false`; `prior_recovery_set_invalid` when malformed).
+3. `prior-update-manifest.json` hashes to the recorded manifest digest, validates,
+   matches the recorded channel and version, is on the same channel as the
+   target with a strictly lower sequence, and matches the recorded backup's
+   `releaseVersion` (`prior_recovery_set_mismatch`).
+4. `prior-update-manifest.sigstore.json` verifies the prior manifest bytes
+   against the same trusted root and channel identity
+   (`prior_recovery_set_unverified`).
+5. The operator's `--protected-backup` reference — a regular file of at most
+   64 KiB with exactly `id`, `sha256`, `locationClass` and `releaseVersion` — is
+   well formed (`protected_backup_invalid`) and equal to the recorded reference
+   (`protected_backup_mismatch`). The operator's own copy, not the unauthenticated
+   record, is the authority for the reference. The reference is an operator-held
+   precondition only: the engine never contacts, reads or restores the protected
+   backup (whatever its `locationClass`). A coordinated restore uses only the
+   engine's own activation-time backup manifest under host state, whose per-file
+   checksums are re-verified before restore. For PostgreSQL, the restore first
+   drops every user schema (recreating `public` with its previous owner, ACL
+   and comment) and then runs `pg_restore`, so objects an interrupted target
+   migration created after the backup do not survive the rollback (#3177).
+   Only schema-contained objects are cleared; database-level objects such as
+   event triggers, publications, casts and foreign servers are left as they
+   are. The restore account must own those schemas, otherwise the clear fails
+   atomically (`restore_prepare_failed:database`) and nothing is changed. This
+   ownership is not checked before an update is authorized; it is an operator
+   responsibility, and a non-owning restore role is discovered only when a
+   rollback runs. Each lock the clear needs is waited on for at most 30 seconds,
+   so a session still holding a conflicting lock fails the clear fast with
+   PostgreSQL's `lock_not_available` error instead of consuming the whole restore
+   budget; the clear again changes nothing. The
+   clear commits before `pg_restore` starts, so if `pg_restore` then fails
+   (`restore_failed:database`) the database is left empty or only partly
+   restored; the admission fence stays closed and the
+   verified backup is kept, so the restore can be repeated once the cause is
+   fixed.
+6. The reference's `locationClass` is `host-local`. An `attached-volume` or
+   `external-storage` backup belongs to an owner this host has no configured,
+   authenticated provider for, so recovery refuses with
+   `protected_backup_owner_required` (detail `restore_through_backup_owner`)
+   before reading host state and without contacting that owner; restore through
+   the backup's owner instead.
+
+Recovery then runs through the ordinary recovery resolver, drift and physical
+reconciliation gates, lease and approval-bound installed-state snapshot. The
+gate below is evaluated on that locked snapshot, before planning or confirming:
+the failed request must be the
+staged target (`offline_recovery_target_mismatch`) in preloaded-image mode
+(`offline_recovery_requires_preloaded_request`; a registry-mode request would
+re-apply the prior set by pulling), and the installed state must be exactly the
+authenticated prior set: its release ID and manifest digest, and exactly the
+target's service set with each service on the target's platform and at the prior
+manifest's preloaded index pin for that platform, as defined in
+[Offline activation](#offline-activation-3080) (`prior_installed_state_mismatch`;
+a recorded platform child digest is refused). On
+confirm, the coordinator re-proves under its own execution lock, before any
+restore or apply, that both the installed state and the execution journal are
+unchanged since evaluation; otherwise it exits 12 (`drift_reapproval_stale`).
+
+The recovery engine applies the prior digests in preloaded mode: it inspects each
+prior image locally, and applies templates with
+`docker compose up -d --no-build --pull never`; it never runs `docker pull` or
+`docker login`, and a missing local prior image fails closed. With `--confirm`,
+both wrappers first run `offline-update-bundle.mjs load-prior --missing skip`
+against the staging directory (resolving `PRINTFARMER_NODE`,
+`PRINTFARMER_OFFLINE_BUNDLE_TOOL`, `PRINTFARMER_COSIGN` and `PRINTFARMER_DOCKER`
+as for `import`), so packaged prior images are verified and loaded even when the
+engine cache has pruned them; a load failure exits 6 before the CLI runs. A
+bundle without packaged prior images still recovers from the engine cache, which
+is verified by digest and platform as above; with neither, recovery fails closed.
+
+Offline activation and offline recovery also refuse (exit 6) when any registered
+slicer worker is outside this host's compose set: every registered worker host
+must be an `http(s)` URL naming the compose service of an active mapped service.
+A remote or out-of-compose worker refuses with `remote_worker_unsupported`
+(detail `restore_remote_workers_through_owner`); unreadable registrations refuse
+with `remote_worker_evidence_unavailable`. A slicer schema that was provably never
+migrated (no `__EFMigrationsHistory` and no `SlicerServices` table) has no
+registered workers; a missing registration table while the migration history
+exists is `remote_worker_evidence_unavailable`. Restore or update remote workers
+through their owner. A coordinated
+database restore owned by an external provider (`DatabaseExternallyOwned`) stops
+as needs-operator with `database_externally_owned` before any restore or apply,
+so the external owner must restore it. Owned directories declared externally
+owned (`StorageExternallyOwned`) likewise stop as needs-operator with
+`storage_externally_owned` before any directory is deleted or copied, and
+activation backup fails closed instead of copying them. Integration tests exercise a
+real failed offline activation followed by preview and confirm with a
+network-denied HTTP factory, asserting the prior set is restored through the
+engine activation-time backup, with no non-loopback request and no pull.
+
+## Replay admission, channel continuity and trust expiry (#3064)
+
+### Trust expiry policy
+
+A network-denied host cannot refresh the Sigstore trusted root, so `import`
+trusts the operator's `trusted_root.json` only while both hold:
+
+- An operator approval record (`--trusted-root-approval`) binds its exact bytes
+  and is younger than **90 days**. The record is exactly
+  `{"schema":1,"kind":"printfarmer-trusted-root-approval","trustedRootSha256":"<64 hex>","approvedAt":"<canonical UTC ISO-8601>","approvedBy":"<operator>"}`.
+  Unknown fields, a SHA-256 of different bytes, a non-canonical timestamp, an
+  approval dated more than 10 minutes in the future or one older than 90 days is
+  refused. Re-approve a current trusted root from a connected, trusted host to
+  continue.
+- The root still lists at least one certificate authority and one
+  transparency-log key whose `validFor` window covers the current time.
+
+The policy is fixed in `offlineTrustPolicy`; there is no override option. It is
+evaluated before anything is extracted, and the result is kept in the record.
+
+**Revocation** is expressed only through those validity windows and the replay
+store's rejected/superseded identities. There is no offline revocation list:
+a key compromised after approval stays accepted until its window ends or the
+approval expires (at most 90 days). The age of the manifest signature itself
+(its Rekor integration time) is not bounded; rollback to an older signed
+release is prevented by the replay high-water mark instead. Both are
+documented residuals.
+
+### Replay admission and channel continuity
+
+After a complete bundle verifies, `import` runs
+`Farm.HostUpdate.Cli offline-admit --staging <dir> --channel <c> --trusted-root <abs> [--cosign <abs>] --json`
+with the host's `--config`, passing the same absolute trusted root and Cosign
+executable used for verification. The CLI (see the
+[runbook](HOST_UPDATE_RUNBOOK.md#offline-replay-admission)) requires host state to
+be enabled, holds the host-update execution lock, re-parses and validates the
+staged manifest, checks that its digest, channel and release identity match the
+verification record, and that the manifest channel equals both `--channel` and
+the host's durable automation policy channel. Because the staging directory and
+its verification record are mutable, neither is trusted for authenticity: the CLI
+re-verifies the exact staged manifest bytes and `update-manifest.sigstore.json`
+with Cosign against `--trusted-root` (a regular, non-link file whose physical
+location, with every linked or junctioned parent resolved, lies outside staging)
+and the channel's pinned release identity, and refuses on failure. It then records the release in the
+same durable replay store (trust root `default`, per-channel high-water mark,
+hash-chained anchor) that online updates use, with a new `Imported`
+disposition:
+
+- A new identity above the channel high-water mark is recorded `Imported`,
+  supersedes the previous high-water identity and advances the mark.
+- The identical identity is reused (idempotent re-import of an `Imported` or
+  `Accepted` release).
+- A lower sequence (downgrade/replay), an equal sequence with a different
+  identity (substitution) or a rejected/superseded identity is persisted as
+  `Rejected` and refused, so reimported sequence 41 stays rejected after 42,
+  after restart and after channel round trips.
+- A channel that differs from the manifest or the policy is refused without
+  touching replay state; each channel keeps an independent high-water mark.
+
+An `Imported` identity never authorizes installation by itself: the online
+scheduler still applies every current gate and admits it normally. Replay state
+lives in the host-state directory, outside restored application databases and
+replaced containers; missing or tampered anchor state fails closed (exit 4)
+and the CLI reports the store's fixed `host_update_replay_*` code (for example
+`host_update_replay_state_rollback`), never a path or free-form message.
+`offline-admit` refuses while another host-update process holds the execution
+lock (exit 7). Every replay decision, from the API scheduler or the CLI, also
+takes an exclusive cross-process lock on `host-update-replay.lock` in the
+host-state directory, so concurrent writers cannot interleave or delete each
+other's staged state; if it cannot be acquired within 30 seconds the decision
+fails closed with `host_update_replay_lock_unavailable` (exit 4). Refused admissions are
+recorded with their disposition and the staging directory is removed.
+
+### Retention
+
+Neither `import` nor the CLI ever deletes decision records, replay state or its
+anchor journal; keep them for the life of the installation. Staging is removed
+on refusal. Keep each imported bundle and its approval record while the release
+is installed or is the prior recovery release.
+
+## Import and continuity rules
+
+Import must be bounded before extraction or allocation: reject traversal,
+absolute paths, links/reparse escapes, duplicate/conflicting entries, oversized
+or incomplete archives and expansion bombs. A failure must leave no
+success-shaped import or partially activated set. The importer must fail
+closed on untrusted, expired, revoked, wrong-platform or mixed-channel evidence.
+The approved offline trust expiry/revocation and retention policy is the fixed
+policy in [the #3064 section](#replay-admission-channel-continuity-and-trust-expiry-3064);
+an operator cannot relax it.
+
+Authenticate sequence/channel/identity before advancing durable replay state.
+Persist authenticated decisions atomically before offer or action, including
+later compatibility/policy rejection. Keep separate enrolled-trust-root/channel
+high-water marks and rejected/superseded identities outside restored app
+databases and replaced containers. Reject lower sequences, equal-sequence
+different identities and rejected/superseded metadata even above the installed
+version. Reuse is limited to the identical non-rejected/non-superseded identity
+that still passes every current gate.
+
+An import or restore cannot replace or lower existing replay state. Missing or
+unproven continuity blocks execution pending trusted recovery; no network
+fallback or reset override. Export/import must preserve selected/observed/
+source/target channels, policy revision, signed set and cadence metadata through
+restart and reconnect. Wrong or absent channel evidence must not default to
+stable or enroll insider.
+
+An intentional offline channel switch needs the same preflight, supported
+version/schema/storage transition, downtime/recovery preview, explicit
+administrator confirmation and durable audit as online operation. Insider
+requires the runbook's reduced-stability acknowledgement. Unsupported downgrade
+stays blocked; neither an old archive nor administrative intent makes it safe.
+
+Only a fixed approved operation plus validated plan/operation identifier may
+be exported as an executable instruction. No arbitrary shell fragments,
+caller-chosen paths/URLs/commands or credentials. Drift invalidates approval.
+On reconnect refresh trust/metadata and actual installed inventory before
+eligibility; do not automatically execute a previously imported plan.
+
+## Evidence required before complete delivery
+
+Run isolated **host update/recovery tests**, not a release publication
+workflow or a production pilot without authorization. Capture exact code and
+bundle identities, tool versions, network-denial controls, attempted outbound
+requests, topology, provider, operation checkpoints and recovery outcome.
+Fixtures must not read or modify a real deployment's credentials or storage.
+
+The acceptance matrix includes network-denied monolith and split Compose with
+PostgreSQL and SQL Server, required infrastructure, external-storage/DB-owner
+evidence and optional/remote pinned-worker cases. Live cells use the Bash
+entry point; the PowerShell entry point shares the same bundle contract but is
+checked for documentation and links only, which does not prove Linux restore or
+runtime parity (see the [matrix scope](#isolated-recovery-matrix-scope-3098)).
+
+Positive cases require stable and insider original/imported identity equality,
+fresh-host import without trust self-enrollment, install and coordinated
+restore using only packaged instructions. Include supported channel switches
+and both stable-insider-stable and insider-stable-insider continuity.
+
+Negative cases include missing image/trust/config, malicious archive, modified
+bytes, forged branch/promotion claims, moved aliases, wrong platform, mixed
+digests/channels, unsupported downgrade, expired/revoked trust, invalid-signature
+sequence poisoning, equal-sequence substitution and missing/rolled-back replay
+storage. Authenticate sequence 41 above the installed version but reject it;
+separately supersede 41 with 42 without installing either. Reimported 41 must
+remain rejected after policy edits, both channel round trips, restart and older
+app DB/policy/cache restoration. Intact independent-channel records and current
+allowed metadata must still work.
+
+Unit-level replay evidence already exists; it does not replace the isolated
+matrix above. `HostUpdateOfflineReplayTests` (replay store) covers sequence 41
+rejected above an installed 40, 42 imported without installing, reused
+decisions across stable-insider-stable round trips and a restart, a moved alias
+or other-branch commit at the imported sequence, and fail-closed restore of an
+older replay snapshot, an older anchor, an edited snapshot or a foreign
+same-epoch snapshot. `HostUpdateCliOfflineAdmitTests` (`offline-admit`) covers a
+forged source branch, a moved release alias, evidence staged under a prior
+policy after a policy round trip, and a restored older replay state
+(`host_update_replay_state_rollback`, exit 4). `scripts/ci/tests/test-offline-update-bundle.mjs`
+covers traversal, absolute, nested, duplicate and case-conflicting members,
+extended headers, links, and member/bundle/nested-blob size bounds.
+
+No fallback network request, local build, fabricated recovery success or
+physical printer command is acceptable. Retain full failure evidence, prove
+fences stay closed on uncertainty, and confirm safe post-restore reconciliation.
+The host-local CLI is delivered (#2980) and gates writer fence release on a
+recorded physical printer reconciliation (#2999). Provider and topology stop
+conditions are covered with fake adapters (#3000); see
+[the runbook](HOST_UPDATE_RUNBOOK.md#provider-and-topology-stop-conditions).
+
+Complete bundles are delivered in #2981. #2982 owns this matrix and separately
+authorized staging/pilot evidence. #2664 remains open until its full retained
+acceptance is complete.
+
+### Isolated recovery matrix scope (#3098)
+
+This section fixes the scope of the isolated matrix above. It is a contract
+for the harness, not evidence that any cell has run.
+
+**Supported host.** The matrix runs only on **Ubuntu LTS x64** (22.04, 24.04
+or 26.04). Linux arm64 and Windows hosts are **unsupported** for host-update
+recovery. Live cells run only through the Bash entry point; the PowerShell
+entry point is documented and link-checked only, proves no Linux restore or
+runtime parity, and cannot produce matrix evidence. SQLite is component-tested
+only and is not a live matrix provider.
+
+**Supported cells.** Monolith and split Compose topologies, each with
+PostgreSQL and SQL Server, a shared application/slicer database, and database
+and storage owned by the host. Workers are either managed on the host or
+absent. A supported recovery cell may expect `RolledBack` without an injected
+fault. Other supported non-`Activated` outcomes require a successful
+`fault-injected` checkpoint, must not use a fail-closed reason, and need a
+stable reason.
+
+**Fail-closed cells.** These cells are run to prove the refusal, never to
+prove recovery. The first matching row decides the expected result, and the
+stable reason must match exactly.
+
+| Cell | Expected outcome | Stable reason |
+| --- | --- | --- |
+| Split application/slicer databases | `Refused` | `split_database_not_supported` |
+| Remote (off-host) pinned workers | `Refused` | `remote_worker_unsupported` |
+| Externally owned database | `NeedsOperator` | `database_externally_owned` |
+| Externally owned storage | `NeedsOperator` | `storage_externally_owned` |
+
+**Network denial.** Every service and the throwaway host container that runs
+the packaged installer, Cosign, bundle-tool import/verify, activation and
+recovery commands runs on a Docker `--internal` network whose only reachable
+peer is a default-deny egress sink that logs each attempt. The host container
+mounts the Docker socket plus the repository and scratch roots at identical
+absolute paths, so Compose bind paths match the real host while DNS and egress
+are denied. The evidence mechanism value is
+`docker-internal-network+default-deny-egress-sink`. At run start, the harness
+proves the boundary by attempting a DNS canary and a direct TCP connection from
+inside the host container; the canary must fail and be recorded by the sink,
+then it is cleared so any later recorded attempt fails the run.
+
+**Live cell catalog.** The harness catalog is frozen in
+`scripts/ci/recovery-matrix/cells.mjs`. Positive recovery cells must import
+their infrastructure images from the offline bundle before Compose starts the
+database or proxy service, run Compose with `--pull never`, and pin each
+infrastructure image as `reference@<bundle index digest>`. The import decision
+record's loaded image list is recorded as checkpoint
+`infrastructure-loaded-from-bundle:<id>@<digest>,...`.
+
+After recovery, the `queue-consumers-running` checkpoint reads the main API's
+`/health` `queue-consumers` entry. It passes only when the entry `status` is `2`
+(`Healthy`) and all eight consumers in `data` report `running`. A missing entry
+fails with `queue_consumers_not_exposed`. Any other status or consumer state
+fails with `queue_consumers_not_running`, and the checkpoint records the
+offending values.
+
+| Cell id | Descriptor | Scenario | Expected outcome/reason | Local run status |
+| --- | --- | --- | --- | --- |
+| `c2` | monolith, PostgreSQL, shared host-owned database/storage, managed worker | `recover` | `RolledBack` | Passing evidence: recovery rolls back to the prior digest, migration heads and volumes are continuous, and `queue-consumers` is `2` with all eight consumers running (#3157) |
+| `monolith-sqlserver` | monolith, SQL Server, shared host-owned database/storage, managed worker | `recover` | `RolledBack` | Passing evidence: same checks as `c2` on SQL Server. The harness `sqlcmd` shim forwards `SQLCMDPASSWORD` (#3158) and never passes `-P` (#3165) |
+| `split-postgres` | split, PostgreSQL, shared host-owned database/storage, managed worker | `recover` | `RolledBack` | Passing evidence: same checks as `c2` on the split topology (api health on `:5245`, #3160), with zero egress attempts after siblings pin the `api` name (#3161) |
+| `split-postgres-no-worker` | split, PostgreSQL, shared host-owned database/storage, no optional worker | `recover` | `RolledBack` | Passing evidence: same checks as `split-postgres` without the optional worker (#3161) |
+| `split-sqlserver` | split, SQL Server, shared host-owned database/storage, managed worker | `recover` | `RolledBack` | Passing evidence: same checks as `split-postgres` on SQL Server, with `sqlcmd` authenticating only through `SQLCMDPASSWORD` (#3161, #3165) |
+| `external-database` | monolith, PostgreSQL, shared database, externally owned database, host-owned storage | `needs-operator-recover` | `NeedsOperator` / `database_externally_owned` | Passing evidence: preview returns `NeedsOperator` / `database_externally_owned` and no restore mutation is performed |
+| `external-storage` | monolith, PostgreSQL, shared database, host-owned database, externally owned storage | `needs-operator-recover` | `NeedsOperator` / `storage_externally_owned` | Passing evidence: activates host-owned, then sets `HostUpdateExecution:StorageExternallyOwned` (#3155); preview returns `NeedsOperator` / `storage_externally_owned` and no restore mutation is performed |
+| `remote-worker` | monolith, PostgreSQL, shared host-owned database/storage, remote pinned worker | `refuse-activation` | `Refused` / `remote_worker_unsupported` | Passing evidence: target activation refuses before mutation with `remote_worker_unsupported` |
+| `split-database` | split, PostgreSQL, split application/slicer databases, host-owned storage, managed worker | `refuse-activation` | `Refused` / `split_database_not_supported` | Passing evidence: the preflight guard detects the split layout (#3168). Target activation then refuses before any mutation with `split_database_not_supported`, CLI exit code `6` and journal phase `refused:split_database_not_supported` (#3182). Zero egress attempts. The harness creates the slicer database before it writes the split compose file (#3100) |
+
+Run a single cell from an Ubuntu LTS x64 host with Docker (containerd image
+store enabled; see
+[Docker image store requirement](#docker-image-store-requirement-3137)), Node.js,
+`jq`, Bash, .NET SDK/runtime support for the host-update CLI package and
+Cosign available. Run only one live matrix batch per Docker daemon at a time.
+Every run loads fixture-built images under the same canonical tags, such as
+`postgres:16-alpine`. A second run on the same daemon moves those tags, so the
+first run's pinned digests can disappear (#3183). The Bash entry point acquires
+the daemon-wide Docker container
+`printfarmer-recovery-matrix-daemon-lock` before creating any run resources.
+If another run owns that lock, it exits with status `75` and names the owning
+run instead of touching canonical tags. The lock is released by the normal
+cleanup path, including `--keep-work`; if a runner is terminated hard and leaves
+the lock behind, remove that specifically named lock container only after
+confirming no recovery-matrix resources remain on the daemon. The script works as a
+non-root runner: the CLI's `dotnet` fallback runs as the invoking user, and
+cleanup hands root-owned run files back to that user so the retained run
+directory can be removed without root:
+
+```bash
+scripts/ci/recovery-matrix/run-cell.sh \
+  --cell c2 \
+  --evidence .recovery-matrix-work/c2-evidence.json \
+  --cosign "$HOME/.cache/pf-cosign/cosign"
+```
+
+Run every catalog cell:
+
+```bash
+scripts/ci/recovery-matrix/run-cell.sh \
+  --cell all \
+  --work-dir .recovery-matrix-work \
+  --cosign "$HOME/.cache/pf-cosign/cosign"
+```
+
+The script creates only a repo-local scratch deployment root, generates a
+throwaway `.env`, signs fixture releases with the per-run fixture root, installs
+the CLI with the packaged trusted root inside the denied host container, and
+writes schema-validated evidence. It gives the monolith container (not the
+database) or split API container a deterministic address on the Docker
+`--internal` bridge and sets the product `HealthCheckBaseUrl` to that address
+for the API host. The database also gets a deterministic bridge address so the
+throwaway `host-update.json` can be written before the database exists; Compose
+starts the database only after the prior bundle import has loaded the database
+image from the bundle. The CLI's own `/health` verifier stays enabled while the
+host cannot egress because it probes from inside the compose network (#3127)
+rather than over that address. After the product verification step, the harness
+separately records the discovered `/health` entries and fails positive recovery
+cells unless the `queue-consumers` entry is healthy (see
+[Queue-consumer health entry](#queue-consumer-health-entry-3157)). On a product
+build that still has offline-recovery defects, a cell is expected to emit valid
+failing evidence with `outcome.expected` set from the catalog,
+`outcome.expectedReason` set from the catalog for fail-closed cells,
+`outcome.actual` set from the observed product CLI output/journal, and
+`outcome.reason` set to the observed failure or refusal reason. Passing
+fail-closed records must match the catalog outcome and expected reason
+(`Refused`/`remote_worker_unsupported`, `Refused`/`split_database_not_supported`,
+`NeedsOperator`/`database_externally_owned`, or
+`NeedsOperator`/`storage_externally_owned`); failing setup/precondition records
+keep their observed reason instead of pretending the expected reason occurred.
+Use `--work-dir` to move scratch space to another non-system-temp directory and
+`--keep-work` only for debugging a failed local run. Without `--keep-work`, the
+script runs `docker compose down -v --remove-orphans`, removes the host and sink
+containers and network, and fails loudly if any container, volume or network
+with the run label remains.
+
+### Live fault cells (#3101)
+
+Fault cells live in `scripts/ci/recovery-matrix/fault-cells.mjs`. Each one runs
+on the supported `c2` shape, so the injected fault is the only variable. The
+`all` group keeps its meaning. Run one fault cell with `--cell <id>`, or every
+fault cell with `--cell faults`. Faults are injected live against the packaged
+CLI:
+
+- **Power loss.** A one-shot pause gate in the harness docker shim (or the
+  `pg_dump` shim) holds the executor at the chosen journal checkpoint. The
+  harness then kills the host container (`docker kill -s KILL` then `start`),
+  which kills the CLI and the paused shim.
+- **Partial side effects.** The gate lets the side effect run, then fails the
+  call.
+- **State faults.** The harness deletes or corrupts state on disk before the
+  operator redrive.
+
+Each cell records a `fault:<kind>:<point>` checkpoint and the `fault-injected`
+checkpoint. It asserts the journal fenced the uncertain step (`<step>:before`
+with no `<step>:after`). On redrive it asserts that no migration apply or
+`compose up` ran more than once, and that `pg_restore` was never replayed. It
+then repeats the final operator action, restarts the host, runs
+`host-update-status`, and proves the same outcome is reported again.
+
+| Cell id | Fault | Expected durable outcome/reason | Local run status |
+| --- | --- | --- | --- |
+| `fault-power-loss-backup` | Power loss at `backup:before` (inside `pg_dump`) | `Activated` after redrive re-runs the safe backup | Pass (2026-09-28, `eb900fa1c8ce`) |
+| `fault-power-loss-migration-before` | Power loss before the `AppDbContext` migration apply runs, on the N+1 schema-delta target | Redrive reports `RecoveryRequired` / `uncertain_side_effect:migration:migration_state_incomplete` (the N+1 migration is still pending, so it is never blindly replayed); recovery reports `RolledBack` and the N+1 schema is absent | Pass (2026-09-28, `eb900fa1c8ce`) |
+| `fault-power-loss-migration-after` | Power loss after the final (`SlicerDbContext`) N+1 migration apply returned, before `migration:after` | `Activated` after the reconciler proves no context has pending migrations, without re-applying them | Pass (2026-09-28, `eb900fa1c8ce`) |
+| `fault-power-loss-apply-before` | Power loss before `compose up` runs | Redrive reports `RecoveryRequired` / `uncertain_side_effect:apply:*`; recovery reports `RolledBack` | Pass (2026-09-28, `eb900fa1c8ce`) |
+| `fault-power-loss-apply-after` | Power loss after `compose up` ran, before `apply:after` | `Activated` after the reconciler verifies the running digests | Pass (2026-09-29, `e0a30c5e7bc1`, after the #3181 fix) |
+| `fault-partial-migration` | The `AppDbContext` N+1 migration applies, then the call fails | `RolledBack`; the N+1 history rows and tables are gone and migration heads match the prior release | Pass (2026-09-29, `e0a30c5e7bc1`, after the #3177 fix) |
+| `fault-partial-apply` | `compose up` starts the target, then the call fails | `RolledBack`; running digests match the prior release | Pass (2026-09-28, `eb900fa1c8ce`) |
+| `fault-api-down` | Application containers stopped while `RecoveryRequired` | `RolledBack` | Pass (2026-09-28, `eb900fa1c8ce`) |
+| `fault-missing-backup` | Backups deleted while `RecoveryRequired` | `NeedsOperator` / `no_backup_available`, exit 10, no mutation | Pass (2026-09-28, `eb900fa1c8ce`) |
+| `fault-corrupt-journal` | Journal record tampered while `RecoveryRequired` | `RecoveryRequired` / `journal_integrity_failure`, exit 4, no mutation | Pass (2026-09-28, `eb900fa1c8ce`) |
+| `fault-corrupt-replay` | Replay store garbled before activation | `RecoveryRequired` / `host_update_replay_state_invalid`, exit 4, no mutation | Pass (2026-09-28, `cd314c3a53bf`) |
+| `fault-fence-release` | Printer inventory present at fence release | Confirm reports `FenceReleasePending` / `physical_reconciliation_pending` (exit 13), with the fence held across a restart. Confirming with `--printers-reconciled <token>` releases only the fence, without replaying restore, and reports `RolledBack` | Pass (2026-09-28, `cd314c3a53bf`) |
+| `fault-emulated-printer-reconciliation` | A Moonraker emulator attached to the seeded printer at fence release (#3103, #3209) | As `fault-fence-release`, plus: an eligible queued G-code job is present while `FenceReleasePending`; dispatch is refused with `409 host_update_admission_closed`, before and after a restart; after a 35s fenced consumer window (longer than the 30s durable auto-dispatch scan) the emulator has no printer command; after `--printers-reconciled`, dispatch is admitted again (`428 precondition_required`) and the queued job's backend-safe upload reaches the emulator | Pass (2026-09-28, `35dbe730286a`) |
+
+The evidence `outcome.expectedReason` is `null` for fault cells because they are
+supported cells. The observed stable reason is recorded in `outcome.reason` for
+`NeedsOperator` and `RecoveryRequired` outcomes.
+
+The two migration power-loss cells and `fault-partial-migration` declare
+`schemaDelta: 'changed'`, so the target carries the N+1 fixture migration
+described below and the fault lands inside a real schema change. Each asserts
+the `AppDbContext` and `SlicerDbContext` fixture history rows and tables
+against the outcome: absent before the apply and after a rollback, present
+exactly once after activation, both at the fault point and again after the
+durability restart. A pause mid-phase checks only the contexts it has reached. Evidence
+records the choice as `identities.schemaDelta`. The other fault cells use the
+identical-schema target.
+
+#### Emulated-printer reconciliation (#3103)
+
+`fault-emulated-printer-reconciliation` starts the Moonraker emulator
+(`moonraker-emulator-runtime` image, control API enabled) on the run network and
+points the seeded placeholder printer at it with a direct SQL update, so the
+running API treats it as a Moonraker printer. It then drives the
+`fault-fence-release` flow and reads the emulator's request log
+(`GET /__emulator/requests`, see `docs/MOONRAKER_EMULATOR_VALIDATION.md`) to
+prove recovery sent no printer command. Status reads, such as Spoolman proxy
+`GET`s, are allowed and counted. The cell probes
+`POST /api/auto-dispatch/{printerId}/ready` without `If-Match`. A fenced API
+answers `409` with `host_update_admission_closed`. An admitted request stops at
+`428` with `precondition_required` and `If-Match is required.`, and never
+mutates state. Any other response is recorded as `unexpected:status=N` and does
+not count as either outcome.
+
+The zero-command proof now includes pending auto-dispatch work (#3209). After
+the prior release is activated but before the recovery baseline volume snapshot,
+the cell writes a small deterministic G-code fixture through the running
+application container into the application `gcode` volume at `/app/gcode`. That
+matches the path resolved by `GCODE_STORAGE_PATH`, which production dispatch
+uses when it opens a local artifact for upload. After the recovery flow reaches
+`FenceReleasePending` and `admission.closed` exists, the cell seeds an
+unassigned urgent `PrintJob` linked to that healthy `GcodeFile`. It also enables
+global `DispatchSettings` auto mode, enables per-printer auto-dispatch, and
+marks the printer dispatch state `Ready` with `BedPreConfirmed = true`. That is
+the same shape the durable auto-dispatch consumer normally scans for. The cell
+records `emulator-commands-scope:pending-auto-dispatch-workload`, restarts the
+host while the fence is held, and waits 35 seconds before checking the emulator.
+That window is intentionally longer than the product's 30-second durable
+auto-dispatch scan interval, so at least one consumer scan has a chance to run.
+Only after `--printers-reconciled` releases the fence may the queued job reach
+the emulator. The post-release control no longer accepts a generic command
+count: it requires the emulator request log to include the queued job's
+backend-safe upload name (`pf-<attempt>-recovery-matrix-queued.gcode`) or an
+explicit print-start for it, and it records the queued job's database state.
+
+The first live run on 2026-09-29 (`f9ac7b7c1da0`) failed `dispatch-fenced:pending`
+and `dispatch-fenced:pending-after-restart`: the probe got the `428` precondition
+response while the host held `admission.closed`. The application containers had
+no view of the executor state directory, so their admission gate was
+unconfigured and open (#3207). The deployment templates and the harness now
+mount the host `state` directory read-only at `/run/printfarmer/host-update-state`
+in the `api`, `slicer-host`, and `monolith` containers and set
+`HostUpdateExecution__AdmissionStateDirectory` to it.
+
+The no-pending live rerun on 2026-09-29 (`74f6ec80384d`, run
+`fault-emulated-printer-reconciliation-20260929t024056z-1007021`) passed the
+#3207 admission-fence coverage: dispatch was refused with `409` while
+`FenceReleasePending`, before and after a restart, and the emulator recorded no
+recovery command.
+
+The queued-work live rerun on 2026-09-28 (`35dbe730286a`, run log
+`~/x3209-r3216-live4.log`) passes. The earlier generic checkpoint
+`queued-work-dispatched-after-reconciliation:commands=1:reads=20` did not prove
+which request reached the emulator; retained logs did not show
+`artifact_unavailable`, but they also did not identify the queued job. The
+current evidence retargets emulator upload/start requests after parsing and
+proves the specific backend-safe queued upload. Key checkpoints: fixture
+preseeded in app storage
+`queued-auto-dispatch-artifact-preseeded:file=00000000-0000-0000-0000-000000003209.gcode`;
+queued work seeded
+`queued-auto-dispatch-work-seeded:job=d3c4fa08-37fb-420d-beea-4aedd8ab65e8:file=00000000-0000-0000-0000-000000003209.gcode`;
+scope `emulator-commands-scope:pending-auto-dispatch-workload`; both
+`dispatch-fenced:pending` and `dispatch-fenced:pending-after-restart`; fenced
+wait `consumer-poll-window:35000ms>=auto-dispatch-scan:30000ms`;
+`emulator-commands-during-recovery:0:reads=10`; release by
+`--printers-reconciled`; `dispatch-reopened-after-reconciliation`;
+`queued-work-dispatched-after-reconciliation:commands=2:reads=24`;
+`queued-work-dispatched-after-reconciliation:upload=/server/files/upload:gcodes/pf-514281740ddf4b0ca3a675f9f9209229-recovery-matrix-queued.gcode:print=true:start=missing:commands=2:reads=24`;
+and `queued-work-db-state:job=d3c4fa08-37fb-420d-beea-4aedd8ab65e8:status=3:assigned=true`.
+The durable outcome is `RolledBack` after repeat confirmation and host restart,
+and the evidence validator reports `pass`.
+
+### Live import cells (#3102)
+
+Import cells live in `scripts/ci/recovery-matrix/import-cells.mjs`, with their
+assertions in `import-scenarios.mjs`. Each one runs on the supported `c2` shape.
+After the prior release is activated, the cell builds extra fixture releases
+and bundles, then imports them through the packaged `offline-bundle-import`
+operation. Run one cell with `--cell <id>`, or every import cell with
+`--cell imports`. No cell activates a release it imported. The terminal outcome
+is `Imported`, and the evidence validator accepts it only after a successful
+`import-cells-verified` checkpoint.
+
+The Recovery Matrix workflow runs every import cell nightly, alongside the
+topology cells, and offers `imports` and each import cell id on manual
+dispatch. It never runs per pull request. Fault cells stay dispatch-only.
+`scripts/ci/tests/test-recovery-matrix-workflow.mjs` fails CI if the
+workflow's dispatch options or nightly cell list drift from the cell catalog.
+
+Every refused step requires a decision record, and binds the record's reason to
+the expected refusal (for example `channel_mismatch_policy`, `replay_rejected`
+or `signature verification failed for update-manifest.json`). A refusal with no
+record, or with a different reason, fails the cell. The record must report
+`refused`, not installable, and no loaded images. The cell also asserts that no
+staging directory remains, and that the replay store, replay anchor, anchor
+journal and policy file are byte-for-byte unchanged. Two narrow exceptions are
+by design. An authenticated replay refusal (`replay_rejected` or
+`replay_superseded`) durably records a newly refused identity so it stays
+refused across restarts and restores. The cell then asserts that every channel
+high-water mark and earlier identity decision is unchanged, and that at most
+the one refused identity was added, as `Rejected` at the candidate's sequence.
+The anchor journal must be append-only, with at most one appended entry that
+chains to the previous head and authenticates the new replay store hash, and
+the anchor snapshot must equal the journal head. Only a rolled-back replay
+store (`host_update_replay_state_rollback`) may heal: the journal and replay
+store stay unchanged and the snapshot must move forward to exactly the
+pre-rollback anchor. Channel switches are operator policy edits with
+increasing revisions.
+
+| Cell id | What it proves | Workflow evidence |
+| --- | --- | --- |
+| `import-identity` | Stable `1.0.0` and insider `1.0.0-insider.10` imports keep the builder's version, channel, source commit and manifest digest. A fresh host trusts a root only through an approval bound to its exact bytes. A bundle-supplied attacker root, an attacker approval, a missing approval and an unbound approval are each refused before mutation | Pass (2026-10-02, Ubuntu 24.04 x64, [run 37017025722](https://github.com/OlyForge3D/PrintFarmer/actions/runs/37017025722), commit `6fc4094dd0e6999684d94016efbc335d59baa7b8`) |
+| `import-channel-round-trips` | stable→insider→stable and insider→stable→insider through policy edits. An insider bundle is refused without the policy edit (`channel_mismatch_policy`) and under a `stable` alias. A lower sequence is an unsupported downgrade on each channel. A moved branch (same version, different source) and a deleted-alias reimport are refused | Pass (2026-10-02, Ubuntu 24.04 x64, [run 37017025722](https://github.com/OlyForge3D/PrintFarmer/actions/runs/37017025722), commit `6fc4094dd0e6999684d94016efbc335d59baa7b8`) |
+| `import-adversarial` | The adversarial set below, each refused before mutation, then an intact higher insider release still imports | Pass (2026-10-02, Ubuntu 24.04 x64, [run 37017025722](https://github.com/OlyForge3D/PrintFarmer/actions/runs/37017025722), commit `6fc4094dd0e6999684d94016efbc335d59baa7b8`) |
+| `import-replay-supersede` | 41 is admitted, then 42 supersedes it. Neither is installed. Reimporting 41 is refused `replay_superseded`, and activating 41's staging must return the packaged CLI `Refused` exit code with the same `replay_superseded` reason and no mutation; a crash or unrelated refusal fails the cell. Both hold after policy edits, both round trips, a host restart, and restores of an older app database (`pg_dump`, then application stopped, database recreated and `pg_restore`), policy file and staging cache. The independent stable channel keeps importing | Pass (2026-10-02, Ubuntu 24.04 x64, [run 37017025722](https://github.com/OlyForge3D/PrintFarmer/actions/runs/37017025722), commit `6fc4094dd0e6999684d94016efbc335d59baa7b8`); every superseded activation returned `replay_superseded` / exit 6 |
+
+The adversarial set: missing image, missing or unbound trust approval, missing
+config, symlink and `../` traversal archive members, modified bytes, forged
+promotion (a stable version re-signed with the insider identity), wrong
+platform (correctly hashed `arm64` blobs added to an image archive), mixed
+digests (a prior-release image member), mixed channels (a stable
+manifest in an insider bundle), expired trust (a 91-day-old approval), revoked
+trust (a root whose CA and log validity ended), invalid-signature poisoning (a
+higher sequence with a foreign signature must not raise the high-water mark),
+equal-sequence substitution (`replay_rejected`), a missing replay store and a
+rolled-back replay store.
+
+Criterion 5 of #3102 is a read-only verification of a real published insider
+bundle (#3195). Run it on a connected Ubuntu host with Docker, Node.js, jq,
+`gh` and a pinned Cosign:
+
+```bash
+scripts/ci/recovery-matrix/verify-published-bundle.sh \
+  --evidence ./evidence-published-bundle.json [--tag v<version>-insider.<n>]
+```
+
+The script selects the newest non-draft insider release (or `--tag`), downloads
+exactly its `printfarmer-offline-bundle-v<version>.tar` and `.tar.sigstore.json`
+assets, checks them against the release asset digests, and obtains the
+public-good `trusted_root.json` with `cosign initialize`. The verification then
+runs in a read-only container on an internal Docker network whose only peer is
+the default-deny egress sink, after the same canary proof the matrix cells use.
+The canary runs only after the sink signals that every listener is bound, so a
+slow-starting sink cannot refuse (and fail to record) the canary DNS query.
+Cosign `verify-blob --trusted-root` first authenticates the published archive
+against the insider release workflow identity, then the
+[offline verifier](#verified-release-metadata-bundle-first-slice) checks every
+member into a fresh staging directory. The script writes the
+`printfarmer-published-bundle-verification` record; it passes only when the
+signature verified, no egress was attempted, the bundle bytes were unchanged
+and the host's Docker images, Docker volumes and trusted root were unchanged.
+
+There is no fallback. It never downloads another release, builds or re-signs a
+bundle, imports, activates or resets anything, and it rejects any unsupported
+option. If the newest insider release lacks its signed bundle, it fails with
+`published_bundle_missing` rather than verifying an older release. The Recovery
+Matrix workflow runs it as the `published-bundle` job on its schedule and on
+dispatch. It fails until the first insider release that publishes the bundle.
+
+Criterion 5 passed on 2026-10-02 against the real published insider release
+`v0.2.3-insider.5` in
+[Recovery Matrix run 37021745811](https://github.com/OlyForge3D/PrintFarmer/actions/runs/37021745811),
+at harness commit `6fc4094dd0e6999684d94016efbc335d59baa7b8`; the retained
+`recovery-matrix-evidence-published-bundle-37021745811` artifact contains the
+`printfarmer-published-bundle-verification` record. It identifies source commit
+`28783c0dbca6dd93d9b3c05b7e630d5bb093f4e4`, build `36889005001`, sequence
+`20000300005`, Ubuntu 24.04 x64, bundle SHA-256
+`e4b807baa9708be0e97961d774583ea5e88ad35478ee81ccc425175bd067c9f7`,
+and signing root `published-insider`. Its verdict is `pass`: the signature
+verified, the denied phase recorded no outbound attempt, and `imported`,
+`activated`, and `hostModified` are all `false`. No fixture or locally built
+bundle stands in for this evidence.
+
+### Queue-consumer health entry (#3157)
+
+The API's `/health` (and `/api/health`) response exposes a `queue-consumers`
+entry under `results`. Use that exact name for the queue-continuity checkpoint.
+It is registered only by the main API (`Farm.Web.Api`): the `monolith` service
+in monolith topology and the `api` service in microservices topology. The
+slicer-host does not run these consumers and does not expose the entry.
+
+The entry reports the live state of each durable queue consumer or writer
+hosted service, keyed in `data` by camelCase name:
+
+| `data` key | Hosted service |
+| --- | --- |
+| `autoDispatch` | `AutoDispatchBackgroundService` |
+| `queueOutboxPublisher` | `QueueOutboxPublisherService` |
+| `backendStartCommandConsumer` | `BackendStartCommandConsumerService` |
+| `backendControlCommandConsumer` | `BackendControlCommandConsumerService` |
+| `queueReconciliation` | `QueueReconciliationService` |
+| `queueRetentionPrune` | `QueueRetentionPruneService` |
+| `bedClearAcknowledgementExpiry` | `BedClearAcknowledgementExpiryService` |
+| `dispatchEscalation` | `DispatchEscalationService` |
+
+Each value is `running`, `notRegistered`, `notStarted`, `stopped`, `faulted`,
+`canceled` or `unobservable`. The entry `status` uses the numeric
+`HealthStatus` wire value: `2` (`Healthy`) only when every consumer is
+`running`, otherwise `0` (`Unhealthy`), which also makes the overall `/health`
+status unhealthy. A host started with `TEST_DISABLE_BACKGROUND_SERVICES` reports
+`1` (`Degraded`) with every consumer `disabled`. Acceptance checks must assert
+the entry status is `2`, not merely that the entry exists.
+
+The signal proves hosted-service liveness only. A consumer paused by the
+host-update writer fence still reports `running`, and slicer worker queue
+consumers are outside this entry.
+
+Optional fault hooks are available for later cells:
+
+```bash
+scripts/ci/recovery-matrix/run-cell.sh --cell c2 \
+  --fault before-activate='echo before activate' \
+  --fault during-activate='echo during activate' \
+  --fault before-recover='echo before recover'
+```
+
+Hooks run inside the denied host container with `PF_RECOVERY_*` context
+environment variables. A hook failure fails closed. The `fault-injected`
+checkpoint is `ok` only after a configured hook succeeds; C2's default no-fault
+path records it as `skipped`.
+
+**Signing.** Matrix cells are signed only by a per-run **ephemeral** fixture
+Sigstore root (`signingRoot` `fixture-ephemeral`), created by
+[`scripts/ci/recovery-matrix/fixture-sigstore.mjs`](../scripts/ci/recovery-matrix/fixture-sigstore.mjs).
+Its CA, certificate-transparency and transparency-log keys exist only in memory
+for the run and are never written to disk, artifacts, caches or logs, so nothing
+survives that could sign again. Because the product pins the release workflow's
+certificate identity and issuer, fixture certificates carry that identity
+string, but the release workflow's signing credentials and the public-good
+Sigstore root are never used: fixture material verifies only against its own
+discarded root and is rejected by the public-good root. Each cell records the
+root's fingerprint (`signingRootFingerprint`, the SHA-256 of its canonical
+trusted-root JSON), and fixture trust is never installed on a real host.
+Separately, each run contains exactly one read-only verification of a
+real published insider bundle (`signingRoot` `published-insider`), recorded as
+its own `printfarmer-published-bundle-verification` record. It proves the
+harness accepts production signatures; the record must show that nothing was
+imported or activated and the host was not modified, and it carries no
+recovery outcome.
+
+**Evidence record.** Each cell emits one JSON record validated by
+[`scripts/ci/recovery-matrix/evidence.mjs`](../scripts/ci/recovery-matrix/evidence.mjs)
+(`kind` `printfarmer-recovery-matrix-evidence`, `schema` 1). The record carries
+the run identity and harness commit, entry point, host distribution, version,
+architecture and kernel, the cell, the source/target/prior release identities
+(tag `v<version>`, version, `stable` or `insider` channel, 40-character source
+commit, build and non-negative integer sequence), the target bundle SHA-256
+when it exists (`null` is allowed only for failed runs before the target bundle
+assembly checkpoint), signing root and, for `fixture-ephemeral`, its fingerprint
+and whether the prior and target schemas are `identical` or `changed`
+(`schemaDelta`; C2 fixtures are `identical`), tool versions, the
+network-denial mechanism and every attempt (`destination` is the attempted
+target or DNS name and `source` is the client when known), operation
+checkpoints, expected and actual outcome with reason, exit code and journal
+phase, timings and the verdict. The packaged-instruction checkpoints are
+`import-prior`, `activate-prior`, `import-target`, `activate-target`,
+`recover-preview` and `recover-confirm`, so the evidence shows where a refusal
+occurred. Legacy schema-1 cell records with signing root `fixture` remain valid
+without the newer fingerprint/schema-delta fields. The validator rejects missing
+or unexpected fields, malformed identities, unsupported hosts or entry points, a
+non-fixture cell signing root, placeholder bundle hashes, a wrong fail-closed
+expectation, a pass with outbound attempts, a failed checkpoint or a mismatched
+outcome, and any unredacted credential: URL user information (with or without a
+password), PEM blocks, GitHub tokens, JWTs, secret assignments and
+secret-bearing field names.
+`validateMatrixRun` validates a whole run: every record, one shared run
+identity, no duplicated cell, at least one cell and exactly one published-bundle
+verification.
+
+Retain the validated JSON record and the complete cell log together. A fixture
+cell record proves only the isolated harness behavior it names; it never proves
+staging, a named pilot, or a real published-bundle result. A real published
+bundle is evidence only when its separate
+`printfarmer-published-bundle-verification` record passes and is retained with
+the workflow run. Retention duration remains the proposed, unapproved value
+below until jpapiez agrees.
+
+**Schema-delta fixture (#3167).** Migration power-loss and partial-migration
+fault cells need a target whose schema really differs from the prior release,
+so the interruption lands inside a real migration applied by the product's
+`HostUpdateTargetImageMigrationRunner`. Cells request this with
+`schemaDelta: 'changed'` (default `identical`); `buildC2ImageLayout` then builds
+the target `api`, `monolith` and `slicer-host` images from
+[`scripts/ci/recovery-matrix/fixture-migrations/Dockerfile.target-schema-delta`](../scripts/ci/recovery-matrix/fixture-migrations/Dockerfile.target-schema-delta),
+which overlays rebuilt PostgreSQL and SQL Server migrations assemblies onto the
+prior image, and returns `schemaDelta` plus `fixtureMigrations`. The overlay
+replaces those assemblies wherever the prior image carries them, in `/app` and
+in `/app/plugins/slicer` (where `api` and `monolith` load the slicer
+migrations), and fails the build if an expected assembly is missing. Services
+without migrations assemblies (`frontend`, `printer-discovery`,
+`orcaslicer-worker`) keep an identical target. The fixture adds one additive
+migration per context:
+
+| Context | Migration ID | Table |
+| --- | --- | --- |
+| `AppDbContext` | `29990601000000_RecoveryMatrixFixtureSchemaDelta` | `RecoveryMatrixFixtureMarkers` |
+| `SlicerDbContext` | `29990601000001_RecoveryMatrixFixtureSlicerSchemaDelta` | `RecoveryMatrixFixtureSlicerMarkers` |
+
+The migrations are test-only: their sources live under
+`scripts/ci/recovery-matrix/fixture-migrations/` and are compiled in only when
+`RecoveryMatrixFixture.targets` is passed through
+`-p:CustomAfterMicrosoftCommonTargets` inside the fixture Dockerfile. Shipped
+migrations projects, model snapshots and `Dockerfile.multistage` are unchanged,
+so `dotnet ef migrations has-pending-model-changes` is unaffected and no release
+image contains them. CI job `recovery-matrix-fixture-migrations` builds each
+PostgreSQL/SQL Server migrations project with the fixture, checks EF Core lists
+it as the newest migration and generates its Up and Down SQL. The far-future IDs
+sort after every real migration.
+[`schema-delta-fixture.mjs`](../scripts/ci/recovery-matrix/schema-delta-fixture.mjs)
+exports the IDs, the per-provider SQL that reads the migration-history row and
+table presence, and the expected fixture state for `Activated` (history row and
+table present) and `RolledBack` (both absent) outcomes, so fault cells can assert the database after recovery.
+
+**Cadence.** The matrix runs on `workflow_dispatch` and nightly. It is never
+part of a release publication workflow and never targets a real deployment.
+
+**Recovery objectives (proposed defaults, pending jpapiez agreement).** These
+values are proposals for the harness to measure against. They are **not agreed
+targets** and must not be quoted as commitments until the deployment owner
+accepts them.
+
+| Objective | Proposed default |
+| --- | --- |
+| RTO, image-only rollback | 10 minutes on the reference host |
+| RTO, coordinated restore | 30 minutes on the reference host |
+| RPO | The activation-time protected-backup consistency point; writers are fenced before backup, so no committed write after that point is expected |
+| Evidence retention | CI evidence artifacts for 90 days, plus a retained summary comment on the tracking issue |
+| Protected-backup retention | Until the next successful release activation (N-1) |

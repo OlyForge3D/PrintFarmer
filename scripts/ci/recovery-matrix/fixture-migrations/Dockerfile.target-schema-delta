@@ -1,0 +1,63 @@
+# syntax=docker/dockerfile:1
+############################################################
+# Recovery-matrix N -> N+1 target image (test fixture only, #3167).
+#
+# Derives the target image from the already-built PRIOR image and replaces only the
+# PostgreSQL / SQL Server migrations assemblies with rebuilds of the same product
+# projects plus exactly one fixture migration per DbContext. The fixture sources are
+# injected through MSBuild's CustomAfterMicrosoftCommonTargets hook, so no product
+# project, migration, model snapshot or Dockerfile.multistage is modified.
+#
+# Build context: the repository root (honours the root .dockerignore).
+# Never used for a shipped image; only scripts/ci/recovery-matrix/oci-layout-builder.mjs
+# builds it, for cells declaring schemaDelta 'changed'.
+############################################################
+
+ARG PRIOR_IMAGE
+ARG SDK_IMAGE=mcr.microsoft.com/dotnet/sdk:10.0-noble
+
+FROM ${PRIOR_IMAGE} AS prior
+
+FROM --platform=${BUILDPLATFORM:-linux/amd64} ${SDK_IMAGE} AS fixture-build
+ARG GIT_SHA=unknown
+WORKDIR /
+COPY Directory.Build.props global.json VERSION ./
+COPY proto ./proto
+COPY src/ /src/
+COPY scripts/ci/recovery-matrix/fixture-migrations/ /fixture/
+WORKDIR /src
+RUN set -eu; \
+    for project in Farm.Migrations.PostgreSQL Farm.Migrations.SqlServer Farm.Slicer.Migrations.PostgreSQL Farm.Slicer.Migrations.SqlServer; do \
+      dotnet build "./migrations/${project}/${project}.csproj" -c Release -o "/fixture-out/${project}" \
+        -p:GitCommitSha="${GIT_SHA}" \
+        -p:CustomAfterMicrosoftCommonTargets=/fixture/RecoveryMatrixFixture.targets \
+        --verbosity quiet; \
+      test -f "/fixture-out/${project}/${project}.dll"; \
+    done
+
+FROM --platform=${BUILDPLATFORM:-linux/amd64} ${SDK_IMAGE} AS overlay
+# Space-separated paths (relative to /app) of migrations assemblies that MUST already exist
+# in the prior image and are therefore replaced. Both the application root and the slicer
+# plugin directory are overlaid: api/monolith images carry the slicer migrations under
+# plugins/slicer, while slicer-host carries them at the root.
+ARG REQUIRED_ASSEMBLIES=""
+RUN --mount=type=bind,from=prior,source=/app,target=/prior-app \
+    --mount=type=bind,from=fixture-build,source=/fixture-out,target=/fixture-out \
+    set -eu; \
+    test -n "${REQUIRED_ASSEMBLIES}" || { echo "REQUIRED_ASSEMBLIES must not be empty" >&2; exit 1; }; \
+    mkdir -p /overlay/plugins/slicer; \
+    for project in Farm.Migrations.PostgreSQL Farm.Migrations.SqlServer Farm.Slicer.Migrations.PostgreSQL Farm.Slicer.Migrations.SqlServer; do \
+      for dir in . plugins/slicer; do \
+        if [ -f "/prior-app/${dir}/${project}.dll" ]; then cp "/fixture-out/${project}/${project}.dll" "/overlay/${dir}/"; fi; \
+      done; \
+    done; \
+    for required in ${REQUIRED_ASSEMBLIES}; do \
+      test -f "/overlay/${required}" || { echo "prior image lacks /app/${required}" >&2; exit 1; }; \
+    done; \
+    rmdir /overlay/plugins/slicer /overlay/plugins 2>/dev/null || true
+
+FROM prior
+ARG TARGET_VERSION
+COPY --chown=appuser:appuser --from=overlay /overlay/ /app/
+LABEL org.printfarmer.recovery-fixture-target="${TARGET_VERSION}" \
+      org.printfarmer.recovery-fixture-schema-delta="changed"
