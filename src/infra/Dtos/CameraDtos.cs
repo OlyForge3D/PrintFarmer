@@ -217,6 +217,26 @@ public class UpdateCameraDto
 }
 
 /// <summary>
+/// Admin-only editable camera target configuration. Unlike the public camera DTOs this exposes the
+/// stored stream/snapshot targets so an edit form can show real values instead of generated proxy paths.
+/// Embedded URL credentials are never returned: the URL is credential-stripped and the matching
+/// <c>*HasCredentials</c> flag is set. Clients must omit a URL field from the update request when the
+/// user did not change it so stored credentials are preserved.
+/// </summary>
+public class CameraConfigDto
+{
+    public Guid Id { get; set; }
+
+    public string? StreamUrl { get; set; }
+
+    public string? SnapshotUrl { get; set; }
+
+    public bool StreamUrlHasCredentials { get; set; }
+
+    public bool SnapshotUrlHasCredentials { get; set; }
+}
+
+/// <summary>
 /// DTO for toggling camera visibility in the Camera View.
 /// Used when user enables/disables a camera without full update.
 /// </summary>

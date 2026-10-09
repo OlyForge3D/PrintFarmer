@@ -613,4 +613,87 @@ public class CameraManagementTests : IClassFixture<CustomWebApplicationFactory>,
 
         _ = response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
     }
+
+    [Fact]
+    public async Task GetCameraConfig_AsAdmin_ReturnsStoredTargetsNotProxyPaths()
+    {
+        CameraDto camera = await CreateTestCameraAsync(
+            streamUrl: "http://camera.internal/live.mjpg",
+            snapshotUrl: "http://camera.internal/snap.jpg");
+
+        HttpResponseMessage response = await _client!.GetAsync($"/api/cameras/{camera.Id:D}/config");
+
+        _ = response.StatusCode.Should().Be(HttpStatusCode.OK);
+        string json = await response.Content.ReadAsStringAsync();
+        using JsonDocument doc = JsonDocument.Parse(json);
+        JsonElement root = doc.RootElement;
+        _ = root.GetProperty("streamUrl").GetString().Should().Be("http://camera.internal/live.mjpg");
+        _ = root.GetProperty("snapshotUrl").GetString().Should().Be("http://camera.internal/snap.jpg");
+        _ = root.GetProperty("streamUrlHasCredentials").GetBoolean().Should().BeFalse();
+        _ = root.GetProperty("snapshotUrlHasCredentials").GetBoolean().Should().BeFalse();
+        _ = json.Should().NotContain("/api/cameras/");
+    }
+
+    [Fact]
+    public async Task GetCameraConfig_WithEmbeddedCredentials_StripsCredentialsAndFlagsThem()
+    {
+        CameraDto camera = await CreateTestCameraAsync(
+            streamUrl: "http://viewer:private-token@camera.internal/live.mjpg",
+            snapshotUrl: "http://camera.internal/snap.jpg");
+
+        HttpResponseMessage response = await _client!.GetAsync($"/api/cameras/{camera.Id:D}/config");
+
+        _ = response.StatusCode.Should().Be(HttpStatusCode.OK);
+        string json = await response.Content.ReadAsStringAsync();
+        _ = json.Should().NotContain("private-token").And.NotContain("viewer");
+        using JsonDocument doc = JsonDocument.Parse(json);
+        _ = doc.RootElement.GetProperty("streamUrl").GetString().Should().Be("http://camera.internal/live.mjpg");
+        _ = doc.RootElement.GetProperty("streamUrlHasCredentials").GetBoolean().Should().BeTrue();
+        _ = doc.RootElement.GetProperty("snapshotUrlHasCredentials").GetBoolean().Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task GetCameraConfig_AsNonAdmin_IsForbiddenAndLeaksNothing()
+    {
+        CameraDto camera = await CreateTestCameraAsync(streamUrl: "http://camera.internal/live.mjpg");
+        using HttpClient operatorClient = await _factory.CreateAuthenticatedClientAsync("camera-viewer", "viewer@example.com");
+
+        HttpResponseMessage response = await operatorClient.GetAsync($"/api/cameras/{camera.Id:D}/config");
+
+        _ = response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        _ = (await response.Content.ReadAsStringAsync()).Should().NotContain("camera.internal");
+    }
+
+    [Fact]
+    public async Task GetCameraConfig_WithoutAuthentication_ReturnsUnauthorized()
+    {
+        using HttpClient anonymousClient = _factory.CreateClient();
+
+        HttpResponseMessage response = await anonymousClient.GetAsync($"/api/cameras/{Guid.NewGuid():D}/config");
+
+        _ = response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task GetCameraConfig_UnknownCamera_ReturnsNotFound()
+    {
+        HttpResponseMessage response = await _client!.GetAsync($"/api/cameras/{Guid.NewGuid():D}/config");
+
+        _ = response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task UpdateCamera_WithGeneratedProxyPath_IsRejectedAndStoredTargetsUnchanged()
+    {
+        CameraDto camera = await CreateTestCameraAsync(streamUrl: "http://camera.internal/live.mjpg");
+
+        HttpResponseMessage response = await _client!.PutAsJsonAsync(
+            $"/api/cameras/{camera.Id:D}",
+            new { streamUrl = $"/api/cameras/{camera.Id:D}/stream" });
+
+        _ = response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        Camera? stored = await scope.ServiceProvider.GetRequiredService<ICameraService>().FindByIdAsync(camera.Id, CancellationToken.None);
+        _ = stored!.StreamUrl.Should().Be("http://camera.internal/live.mjpg");
+    }
 }

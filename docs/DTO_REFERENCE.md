@@ -418,3 +418,10 @@ public enum PrinterBackend
 - Use enum values: `PrinterBackend.Moonraker`, `PrinterBackend.PrusaLink`, etc.
 - Custom converter handles JSON serialization automatically
 - Can be cast from int: `(PrinterBackend)1` → `Moonraker`
+
+### CameraConfigDto - Admin Camera Edit Targets
+- `GET /api/cameras/{id}/config` (requires `cameras:admin`, plus printer-group access for printer cameras)
+- Returns `id`, `streamUrl`, `snapshotUrl`, `streamUrlHasCredentials`, `snapshotUrlHasCredentials` (camelCase)
+- URLs are the stored targets, not the `/api/cameras/{id}/stream|snapshot` proxy paths returned by `GET /api/cameras/display`
+- Embedded `user:pass@` credentials are stripped and flagged; the public camera DTOs still hide targets
+- Edit flow: load this DTO, then `PUT /api/cameras/{id}` with `streamUrl`/`snapshotUrl` only when the user changed them (omitted/null = unchanged, which preserves stored credentials)

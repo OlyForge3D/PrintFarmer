@@ -9,6 +9,7 @@ using Farm.Infrastructure.Discovery;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Network;
+using Farm.Infrastructure.Normalization;
 using Farm.Infrastructure.Services.Cameras;
 using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.Startup;
@@ -221,6 +222,69 @@ public class CamerasController(
             _logger?.LogError(ex, "[CamerasController] Exception in GetCameraAsync for ID {CameraId}: {Message}", id.ToString(), ex.Message);
             return CameraProblem("camera_read_failed", "The camera could not be read.");
         }
+    }
+
+    /// <summary>
+    /// Gets the stored stream/snapshot targets of a camera for the admin edit form.
+    /// Embedded URL credentials are stripped and reported via the HasCredentials flags.
+    /// </summary>
+    /// <param name="id">The camera ID</param>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <response code="200">Returns the editable camera configuration</response>
+    /// <response code="404">If the camera is not found or not accessible</response>
+    /// <response code="503">If the system is still initializing</response>
+    [RequirePermission("cameras", "admin")]
+    [HttpGet("{id:guid}/config")]
+    [ProducesResponseType(typeof(CameraConfigDto), 200)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(503)]
+    public async Task<ActionResult<CameraConfigDto>> GetCameraConfigAsync(Guid id, CancellationToken ct)
+    {
+        try
+        {
+            if (!_startupStatus.IsReady)
+            {
+                return StatusCode(503, new { message = "System is still initializing. Please wait a moment and try again." });
+            }
+
+            Camera? camera = await _cameraService.FindByIdAsync(id, ct);
+            if (camera == null || !await CanAccessCameraPrinterAsync(camera.PrinterId, ct))
+            {
+                return NotFound(new { message = "Camera not found" });
+            }
+
+            (string? streamUrl, bool streamHasCredentials) = StripCredentials(camera.StreamUrl);
+            (string? snapshotUrl, bool snapshotHasCredentials) = StripCredentials(camera.SnapshotUrl);
+            return Ok(new CameraConfigDto
+            {
+                Id = camera.Id,
+                StreamUrl = streamUrl,
+                SnapshotUrl = snapshotUrl,
+                StreamUrlHasCredentials = streamHasCredentials,
+                SnapshotUrlHasCredentials = snapshotHasCredentials
+            });
+        }
+        catch (InvalidOperationException)
+        {
+            return StatusCode(503, new { message = "System is still initializing. Please wait a moment and try again." });
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "[CamerasController] Exception in GetCameraConfigAsync for ID {CameraId}: {Message}", id.ToString(), ex.Message);
+            return CameraProblem("camera_read_failed", "The camera could not be read.");
+        }
+    }
+
+    private static (string? Url, bool HasCredentials) StripCredentials(string? url)
+    {
+        string? redacted = UrlCredentialRedactor.Redact(url);
+        if (string.Equals(redacted, url, StringComparison.Ordinal))
+        {
+            return (url, false);
+        }
+
+        // An unparseable credentialed value redacts to a placeholder, which is not a usable URL.
+        return (Uri.TryCreate(redacted, UriKind.Absolute, out _) ? redacted : null, true);
     }
 
     /// <summary>
