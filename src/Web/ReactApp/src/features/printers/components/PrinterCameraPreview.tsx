@@ -10,6 +10,7 @@ import {
 } from '@/features/cameras/hooks/useCameraViewPreferences';
 import { usePrinterSnapshotPreview } from '@/features/cameras/hooks/usePrinterSnapshotPreview';
 import { useAuthenticatedMjpegStream } from '@/features/cameras/hooks/useAuthenticatedMjpegStream';
+import { CameraModeControl } from '@/features/cameras/components/CameraModeControl';
 import { getAuthenticatedCameraProxyRoute } from '@/common/auth/authenticatedCameraRoutes';
 import {
   canUseMjpegStream,
@@ -54,6 +55,7 @@ export function PrinterCameraPreview({
     accessMode: cameraAccessMode,
     streamFormat: cameraStreamFormat,
     snapshotStrategy: cameraSnapshotStrategy,
+    streamUrl: cameraStreamUrl,
     snapshotUrl: cameraSnapshotUrl,
   };
   const pollSnapshotPreview = shouldPollPrinterSnapshot(previewContract);
@@ -84,7 +86,6 @@ export function PrinterCameraPreview({
     setCameraMode,
     rotation,
     rotateClockwise,
-    hasModeToggle,
     hasMedia,
   } = useCameraViewPreferences({
     preferenceKey: `printer:${printerId}`,
@@ -230,30 +231,14 @@ export function PrinterCameraPreview({
               />
             )}
 
-            {hasModeToggle && (
-              <div className="flex gap-1 rounded-md border border-pf-border bg-pf-bg-2 p-1">
-                <Button
-                  type="button"
-                  variant={cameraMode === 'snapshot' ? 'primary' : 'ghost'}
-                  size="sm"
-                  onClick={() => setCameraMode('snapshot')}
-                  className="h-8 w-8 rounded-full p-0"
-                  title="Show snapshot preview"
-                  aria-label="Show snapshot preview"
-                  iconCenter={<ImageIcon className="h-3.5 w-3.5" />}
-                />
-                <Button
-                  type="button"
-                  variant={cameraMode === 'stream' ? 'primary' : 'ghost'}
-                  size="sm"
-                  onClick={() => setCameraMode('stream')}
-                  className="h-8 w-8 rounded-full p-0"
-                  title="Show live stream"
-                  aria-label="Show live stream"
-                  iconCenter={<VideoIcon className="h-3.5 w-3.5" />}
-                />
-              </div>
-            )}
+            <CameraModeControl
+              cameraName={printerName}
+              cameraMode={cameraMode}
+              hasStream={hasStream}
+              hasSnapshot={hasSnapshot}
+              streamUnavailable={!!cameraStreamUrl && !hasStream}
+              onModeChange={setCameraMode}
+            />
 
             {externalUrl && (
               <a

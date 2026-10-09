@@ -5,12 +5,13 @@ import { PageTemplate } from '@/common/components/PageTemplate';
 import type { EmbeddablePageProps } from '@/common/components/EmbeddablePageProps';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
 import { Alert, Button, Badge } from '@/common/components/ui';
-import { CameraIcon, DeleteIcon, EditIcon, ExternalLinkIcon, ImageIcon, VideoIcon, SettingsIcon } from '@/common/components/icons/MdiIcons';
+import { CameraIcon, DeleteIcon, EditIcon, ExternalLinkIcon, SettingsIcon } from '@/common/components/icons/MdiIcons';
 import { cameraService } from '@/services/cameraService';
 import type { DisplayCameraDto, CameraSource, CameraType } from '@/types/api';
 import { useSearchParams } from 'react-router';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { CameraManagementPanel } from '@/features/cameras/components/CameraManagementPanel';
+import { CameraModeControl } from '@/features/cameras/components/CameraModeControl';
 import { CameraHealthBadge } from '@/features/cameras/components/CameraHealthBadge';
 import { EditCameraModal } from '@/features/cameras/components/EditCameraModal';
 import {
@@ -233,9 +234,10 @@ function CameraViewCard({ camera, canManage, onEdit, onDelete }: CameraViewCardP
     accessMode: camera.accessMode,
     streamFormat: camera.streamFormat,
     snapshotStrategy: camera.snapshotStrategy,
+    streamUrl: camera.streamUrl,
     snapshotUrl: camera.snapshotUrl,
   };
-  const pollSnapshotPreview = !!camera.printerId && shouldPollPrinterSnapshot(previewContract);
+  const pollSnapshotPreview = shouldPollPrinterSnapshot(previewContract);
   const unsupportedPreview = isUnsupportedCameraPreview(previewContract);
   const hasStream = !!camera.streamUrl && canUseMjpegStream(previewContract);
   const directSnapshotUrl = pollSnapshotPreview ? null : camera.snapshotUrl;
@@ -254,7 +256,6 @@ function CameraViewCard({ camera, canManage, onEdit, onDelete }: CameraViewCardP
     setCameraMode,
     rotation,
     rotateClockwise,
-    hasModeToggle,
   } = useCameraViewPreferences({
     preferenceKey: `camera:${camera.id}`,
     defaultMode: hasStream ? 'stream' : 'snapshot',
@@ -290,7 +291,7 @@ function CameraViewCard({ camera, canManage, onEdit, onDelete }: CameraViewCardP
     imageError: imageError || snapshotFailed || streamFailed,
     cameraMode,
   });
-  const showInlineAttention = Boolean(cameraAttention) && !imageError && (hasStream || hasSnapshot);
+  const showInlineAttention = Boolean(cameraAttention) && !imageError && !!activeUrl;
 
   return (
     <article
@@ -379,7 +380,11 @@ function CameraViewCard({ camera, canManage, onEdit, onDelete }: CameraViewCardP
           )}
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <CameraHealthBadge healthStatus={camera.healthStatus} size="sm" />
+          <CameraHealthBadge
+            healthStatus={camera.healthStatus}
+            previewFailed={imageError || snapshotFailed || streamFailed || streamImageFailed}
+            size="sm"
+          />
           <Badge variant="default" size="sm">
             {sourceLabels[camera.source]}
           </Badge>
@@ -402,9 +407,14 @@ function CameraViewCard({ camera, canManage, onEdit, onDelete }: CameraViewCardP
         )}
 
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="inline-flex items-center gap-2 rounded-xs bg-pf-bg-2 px-2.5 py-1 text-[11px] text-pf-text-secondary">
-            <span>{cameraMode === 'stream' ? 'Live stream' : 'Snapshot preview'}</span>
-          </div>
+          <CameraModeControl
+            cameraName={camera.name}
+            cameraMode={cameraMode}
+            hasStream={hasStream}
+            hasSnapshot={hasSnapshot}
+            streamUnavailable={!!camera.streamUrl && !hasStream}
+            onModeChange={setCameraMode}
+          />
 
           <div className="flex flex-wrap items-center gap-2">
             <Button
@@ -417,30 +427,6 @@ function CameraViewCard({ camera, canManage, onEdit, onDelete }: CameraViewCardP
               aria-label="Rotate camera clockwise"
               iconCenter={<RotateCw className="w-4 h-4" />}
             />
-            {hasModeToggle && (
-              <div className="flex gap-1 rounded-md border border-pf-border bg-pf-bg-2 p-1">
-                <Button
-                  type="button"
-                  variant={cameraMode === 'snapshot' ? 'primary' : 'ghost'}
-                  size="sm"
-                  onClick={() => setCameraMode('snapshot')}
-                  className="h-8 w-8 rounded-full p-0"
-                  title="Snapshot"
-                  aria-label="Snapshot mode"
-                  iconCenter={<ImageIcon className="w-4 h-4" />}
-                />
-                <Button
-                  type="button"
-                  variant={cameraMode === 'stream' ? 'primary' : 'ghost'}
-                  size="sm"
-                  onClick={() => setCameraMode('stream')}
-                  className="h-8 w-8 rounded-full p-0"
-                  title="Stream"
-                  aria-label="Stream mode"
-                  iconCenter={<VideoIcon className="w-4 h-4" />}
-                />
-              </div>
-            )}
             {externalUrl && (
               <a
                 href={externalUrl}

@@ -4,6 +4,7 @@ import { CameraHealthStatus } from '@/types/api';
 import type { Printer } from '@/types/api';
 import { CameraIcon, ExternalLinkIcon, ImageIcon, VideoIcon } from '@/common/components/icons/MdiIcons';
 import { Button, Badge } from '@/common/components/ui';
+import { CameraModeControl } from '@/features/cameras/components/CameraModeControl';
 import { usePrinterCameras } from '@/features/cameras/hooks/usePrinterCameras';
 import {
   getCameraMediaTransformClassName,
@@ -44,6 +45,7 @@ export function CameraCard({
     accessMode: p.cameraAccessMode,
     streamFormat: p.cameraStreamFormat,
     snapshotStrategy: p.cameraSnapshotStrategy,
+    streamUrl: cameraStreamUrl,
     snapshotUrl: cameraSnapshotUrl,
   };
   const pollSnapshotPreview = shouldPollPrinterSnapshot(previewContract);
@@ -66,7 +68,6 @@ export function CameraCard({
     setCameraMode,
     rotation,
     rotateClockwise,
-    hasModeToggle,
   } = useCameraViewPreferences({
     preferenceKey: `printer:${p.id}`,
     defaultMode: hasStream ? 'stream' : 'snapshot',
@@ -213,30 +214,14 @@ export function CameraCard({
               aria-label="Rotate camera clockwise"
               iconCenter={<RotateCw className="w-4 h-4" />}
             />
-            {hasModeToggle && (
-              <div className="flex gap-1 rounded-md border border-pf-border bg-pf-bg-2 p-1">
-                <Button
-                  type="button"
-                  variant={cameraMode === 'snapshot' ? 'primary' : 'ghost'}
-                  size="sm"
-                  onClick={() => setCameraMode('snapshot')}
-                  className="h-8 w-8 rounded-full p-0"
-                  title="Snapshot"
-                  aria-label="Snapshot mode"
-                  iconCenter={<ImageIcon className="w-4 h-4" />}
-                />
-                <Button
-                  type="button"
-                  variant={cameraMode === 'stream' ? 'primary' : 'ghost'}
-                  size="sm"
-                  onClick={() => setCameraMode('stream')}
-                  className="h-8 w-8 rounded-full p-0"
-                  title="Stream"
-                  aria-label="Stream mode"
-                  iconCenter={<VideoIcon className="w-4 h-4" />}
-                />
-              </div>
-            )}
+            <CameraModeControl
+              cameraName={p.name}
+              cameraMode={cameraMode}
+              hasStream={hasStream}
+              hasSnapshot={hasSnapshot}
+              streamUnavailable={!!cameraStreamUrl && !hasStream}
+              onModeChange={setCameraMode}
+            />
             {externalUrl && (
               <a
                 href={externalUrl}

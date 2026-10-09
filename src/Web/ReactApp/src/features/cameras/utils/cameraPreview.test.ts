@@ -24,6 +24,28 @@ describe("cameraPreview", () => {
     expect(canUseMjpegStream(contract)).toBe(false);
   });
 
+  it("keeps a configured MJPEG stream available when its snapshot also uses the authenticated proxy", () => {
+    expect(canUseMjpegStream({
+      accessMode: CameraAccessMode.StreamAndSnapshot,
+      streamFormat: CameraStreamFormat.Mjpeg,
+      streamUrl: "/api/cameras/camera-1/stream",
+      snapshotStrategy: CameraSnapshotStrategy.DirectUrl,
+      snapshotUrl: "/api/cameras/camera-1/snapshot",
+    })).toBe(true);
+  });
+
+  it("does not expose unpreviewable RTSP or WebRTC streams as selectable MJPEG modes", () => {
+    for (const streamFormat of [CameraStreamFormat.Rtsp, CameraStreamFormat.WebRtc]) {
+      expect(canUseMjpegStream({
+        accessMode: CameraAccessMode.StreamAndSnapshot,
+        streamFormat,
+        streamUrl: "/api/cameras/camera-1/stream",
+        snapshotStrategy: CameraSnapshotStrategy.DirectUrl,
+        snapshotUrl: "/api/cameras/camera-1/snapshot",
+      })).toBe(false);
+    }
+  });
+
   it("polls snapshot paths with query strings but not stream paths", () => {
     expect(shouldPollPrinterSnapshot({
       snapshotStrategy: CameraSnapshotStrategy.None,
