@@ -8,7 +8,6 @@ struct JobListView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     private let ownsNavigationStack: Bool
     @State private var viewModel = JobListViewModel()
-    @State private var queueEditMode: EditMode = .inactive
     @State private var retryTask: Task<Void, Never>?
     @State private var showsJobHistory = false
     @State private var historyNavigationPath: [AppDestination] = []
@@ -68,9 +67,6 @@ struct JobListView: View {
         }
         .onChange(of: canWriteQueue) { _, isAuthorized in
             viewModel.setQueueWriteAuthorization(isAuthorized)
-        }
-        .onChange(of: viewModel.keepsQueueEditingActive, initial: true) { _, isActive in
-            queueEditMode = isActive ? .active : .inactive
         }
         .onDisappear {
             retryTask?.cancel()
@@ -346,7 +342,10 @@ struct JobListView: View {
         .listRowSeparator(.hidden)
         .listRowInsets(EdgeInsets(top: 4, leading: 14, bottom: 4, trailing: 14))
         .contentMargins(.bottom, 112, for: .scrollContent)
-        .environment(\.editMode, $queueEditMode)
+        .environment(
+            \.editMode,
+            .constant(viewModel.keepsQueueEditingActive ? .active : .inactive)
+        )
         .accessibilityIdentifier("jobList.combined.list")
     }
 
