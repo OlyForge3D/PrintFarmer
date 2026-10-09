@@ -142,6 +142,14 @@ final class HarvestUITests: QueueUITestBase {
         }
         XCTAssertTrue(priorityBoundary.exists)
         XCTAssertTrue(printerBoundary.exists)
+        XCTAssertTrue(
+            priorityBoundary.isHittable,
+            "The priority-boundary row must be visible before checking reorder eligibility."
+        )
+        XCTAssertTrue(
+            printerBoundary.isHittable,
+            "The printer-boundary row must be visible before checking reorder eligibility."
+        )
         XCTAssertFalse(priorityBoundaryHandle.exists,
                        "A single-row priority group must not expose a reorder handle.")
         XCTAssertFalse(printerBoundaryHandle.exists,

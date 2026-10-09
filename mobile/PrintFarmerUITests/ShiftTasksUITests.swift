@@ -22,7 +22,11 @@ class QueueUITestBase: PrintFarmerUITestCase {
         let queueList = app.collectionViews["jobList.combined.list"]
         let historyButton = app.buttons["jobList.history.open"]
         for _ in 0..<8 where !historyButton.isHittable {
-            queueList.swipeUp()
+            if queueList.exists {
+                queueList.swipeUp()
+            } else {
+                app.swipeUp()
+            }
         }
         XCTAssertTrue(
             historyButton.waitForExistence(timeout: 8),
@@ -30,6 +34,7 @@ class QueueUITestBase: PrintFarmerUITestCase {
             file: file,
             line: line
         )
+        XCTAssertTrue(historyButton.isHittable, "Job History menu must be reachable", file: file, line: line)
         historyButton.tap()
 
         let selectHistory = app.buttons["jobList.history.select"]
