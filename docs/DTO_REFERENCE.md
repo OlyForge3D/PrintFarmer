@@ -425,3 +425,4 @@ public enum PrinterBackend
 - URLs are the stored targets, not the `/api/cameras/{id}/stream|snapshot` proxy paths returned by `GET /api/cameras/display`
 - Embedded `user:pass@` credentials are stripped and flagged; the public camera DTOs still hide targets
 - Edit flow: load this DTO, then `PUT /api/cameras/{id}` with `streamUrl`/`snapshotUrl` only when the user changed them (omitted/null = unchanged, which preserves stored credentials)
+- Blank targets are unconfigured: create paths store empty/whitespace targets as `null`; legacy blank values return `null` here, have no proxy URL in `GET /api/cameras/display`, and their proxy route returns 404 (not 502 `camera_target_invalid`). Sending an empty string in `PUT` clears a target.

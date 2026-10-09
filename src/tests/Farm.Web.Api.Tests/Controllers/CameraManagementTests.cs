@@ -687,6 +687,59 @@ public class CameraManagementTests : IClassFixture<CustomWebApplicationFactory>,
         _ = response.StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
 
+    private static bool IsAbsentOrNull(JsonElement element, string propertyName) =>
+        !element.TryGetProperty(propertyName, out JsonElement value) || value.ValueKind == JsonValueKind.Null;
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task CreateCamera_WithBlankSnapshotTarget_StoresNullAndKeepsStream(string blankSnapshot)
+    {
+        CameraDto camera = await CreateTestCameraAsync(
+            streamUrl: " http://camera.internal/live.mjpg ",
+            snapshotUrl: blankSnapshot);
+
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        Camera? stored = await scope.ServiceProvider.GetRequiredService<ICameraService>().FindByIdAsync(camera.Id, CancellationToken.None);
+        _ = stored!.StreamUrl.Should().Be("http://camera.internal/live.mjpg");
+        _ = stored.SnapshotUrl.Should().BeNull();
+        _ = camera.SnapshotConfigured.Should().BeFalse();
+        _ = camera.AccessMode.Should().Be(CameraAccessMode.StreamOnly);
+    }
+
+    [Fact]
+    public async Task LegacyBlankSnapshotTarget_IsTreatedAsUnconfiguredByDisplayAndConfig()
+    {
+        Guid cameraId = Guid.NewGuid();
+        using (AsyncServiceScope scope = _factory.Services.CreateAsyncScope())
+        {
+            AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            context.Cameras.Add(new Camera
+            {
+                Id = cameraId,
+                Name = "legacy-blank-snapshot",
+                StreamUrl = "http://camera.internal/live.mjpg",
+                SnapshotUrl = "",
+                IsEnabled = true,
+                Source = CameraSource.Standalone
+            });
+            await context.SaveChangesAsync();
+        }
+
+        HttpResponseMessage displayResponse = await _client!.GetAsync("/api/cameras/display");
+        _ = displayResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        using JsonDocument display = JsonDocument.Parse(await displayResponse.Content.ReadAsStringAsync());
+        JsonElement legacy = display.RootElement.EnumerateArray().Single(c => c.GetProperty("id").GetGuid() == cameraId);
+        _ = legacy.GetProperty("streamUrl").GetString().Should().Be($"/api/cameras/{cameraId:D}/stream");
+        _ = IsAbsentOrNull(legacy, "snapshotUrl").Should().BeTrue();
+
+        HttpResponseMessage configResponse = await _client.GetAsync($"/api/cameras/{cameraId:D}/config");
+        _ = configResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        using JsonDocument config = JsonDocument.Parse(await configResponse.Content.ReadAsStringAsync());
+        _ = config.RootElement.GetProperty("streamUrl").GetString().Should().Be("http://camera.internal/live.mjpg");
+        _ = IsAbsentOrNull(config.RootElement, "snapshotUrl").Should().BeTrue();
+    }
+
     [Fact]
     public async Task UpdateCamera_WithGeneratedProxyPath_IsRejectedAndStoredTargetsUnchanged()
     {

@@ -138,8 +138,8 @@ public class CamerasController(
             cameras = await FilterAccessibleCamerasAsync(cameras, c => c.PrinterId, ct);
             foreach (DisplayCameraDto camera in cameras)
             {
-                camera.StreamProxyUrl = camera.StreamUrl == null ? null : GetCameraProxyPath(camera.Id, "stream");
-                camera.SnapshotProxyUrl = camera.SnapshotUrl == null ? null : GetCameraProxyPath(camera.Id, "snapshot");
+                camera.StreamProxyUrl = string.IsNullOrWhiteSpace(camera.StreamUrl) ? null : GetCameraProxyPath(camera.Id, "stream");
+                camera.SnapshotProxyUrl = string.IsNullOrWhiteSpace(camera.SnapshotUrl) ? null : GetCameraProxyPath(camera.Id, "snapshot");
             }
 
             return Ok(cameras);
@@ -253,8 +253,8 @@ public class CamerasController(
                 return NotFound(new { message = "Camera not found" });
             }
 
-            (string? streamUrl, bool streamHasCredentials) = StripCredentials(camera.StreamUrl);
-            (string? snapshotUrl, bool snapshotHasCredentials) = StripCredentials(camera.SnapshotUrl);
+            (string? streamUrl, bool streamHasCredentials) = StripCredentials(CameraContractClassifier.NormalizeTarget(camera.StreamUrl));
+            (string? snapshotUrl, bool snapshotHasCredentials) = StripCredentials(CameraContractClassifier.NormalizeTarget(camera.SnapshotUrl));
             return Ok(new CameraConfigDto
             {
                 Id = camera.Id,
@@ -610,7 +610,7 @@ public class CamerasController(
         }
 
         string? target = useSnapshot ? camera.SnapshotUrl : camera.StreamUrl;
-        if (target is null)
+        if (string.IsNullOrWhiteSpace(target))
         {
             return NotFound();
         }
