@@ -637,8 +637,13 @@ public class CameraManagementTests : IClassFixture<CustomWebApplicationFactory>,
     [Fact]
     public async Task GetCameraConfig_WithEmbeddedCredentials_StripsCredentialsAndFlagsThem()
     {
+        var streamTarget = new UriBuilder("http://camera.internal/live.mjpg")
+        {
+            UserName = "viewer",
+            Password = "private-token"
+        };
         CameraDto camera = await CreateTestCameraAsync(
-            streamUrl: "http://viewer:private-token@camera.internal/live.mjpg",
+            streamUrl: streamTarget.Uri.AbsoluteUri,
             snapshotUrl: "http://camera.internal/snap.jpg");
 
         HttpResponseMessage response = await _client!.GetAsync($"/api/cameras/{camera.Id:D}/config");
