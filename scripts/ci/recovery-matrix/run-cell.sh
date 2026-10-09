@@ -71,6 +71,13 @@ if [[ "$RELEASE_LOCK" == 1 ]]; then
     echo "No recovery matrix daemon lock named $LOCK_NAME exists." >&2
     exit 0
   fi
+  active_resources="$(
+    docker ps -aq --filter "label=printfarmer.recovery-matrix.run=$lock_owner" 2>/dev/null || true
+  )"
+  if [[ -n "$active_resources" ]]; then
+    echo "Refusing to remove $LOCK_NAME: recovery-matrix resources for $lock_owner are still present." >&2
+    exit 1
+  fi
   echo "Removing recovery matrix daemon lock $LOCK_NAME owned by $lock_owner; confirm no recovery-matrix resources remain first." >&2
   docker rm -f "$LOCK_NAME" >/dev/null
   exit 0
@@ -106,6 +113,10 @@ evidence_for_cell() {
 }
 
 if [[ "$CELL" == "all" || "$CELL" == "faults" || "$CELL" == "imports" ]]; then
+  if [[ "$KEEP_WORK" == 1 ]]; then
+    echo "--keep-work cannot be combined with a recovery matrix cell group; run one cell at a time to retain debug resources and its daemon lock." >&2
+    exit 2
+  fi
   group_ids="$CELL_IDS"
   if [[ "$CELL" == "faults" ]]; then
     group_ids="$FAULT_CELL_IDS"

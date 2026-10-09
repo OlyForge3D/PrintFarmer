@@ -100,7 +100,6 @@ test('run-cell.sh expands all cells with executable cosign and distinct evidence
       '--work-dir', toBashPath(harness.work),
       '--evidence', toBashPath(evidence),
       '--cosign', toBashPath(harness.cosign),
-      '--keep-work',
     ], {
       cwd: repoRoot,
       env: { ...process.env, PATH: `${harness.bin}${path.delimiter}${process.env.PATH}` },
@@ -129,7 +128,6 @@ test('run-cell.sh expands the imports group to every live import cell', { skip: 
       '--work-dir', toBashPath(harness.work),
       '--evidence', toBashPath(evidence),
       '--cosign', toBashPath(harness.cosign),
-      '--keep-work',
     ], {
       cwd: repoRoot,
       env: { ...process.env, PATH: `${harness.bin}${path.delimiter}${process.env.PATH}` },
@@ -207,7 +205,6 @@ test('run-cell.sh releases an owned lock during ordinary cleanup', { skip: !hasB
       env: {
         ...process.env,
         PATH: `${harness.bin}${path.delimiter}${process.env.PATH}`,
-        PF_TEST_LOCK_OWNED: '1',
       },
       encoding: 'utf8',
     });
@@ -238,6 +235,27 @@ test('run-cell.sh exposes an explicit stale-lock release path', { skip: !hasBash
     assert.equal(result.status, 0, `${result.stderr}\n${result.stdout}`);
     assert.match(result.stderr, /Removing recovery matrix daemon lock/);
     assert.match(readFileSync(harness.dockerLog, 'utf8'), /rm -f printfarmer-recovery-matrix-daemon-lock/);
+  } finally {
+    harness.cleanup();
+  }
+});
+
+test('run-cell.sh rejects retained resources for a cell group', { skip: !hasBash() }, () => {
+  const harness = createHarness();
+  try {
+    const result = spawnSync('bash', [
+      toBashPath(script),
+      '--cell', 'all',
+      '--keep-work',
+      '--work-dir', toBashPath(harness.work),
+      '--cosign', toBashPath(harness.cosign),
+    ], {
+      cwd: repoRoot,
+      env: { ...process.env, PATH: `${harness.bin}${path.delimiter}${process.env.PATH}` },
+      encoding: 'utf8',
+    });
+    assert.equal(result.status, 2);
+    assert.match(result.stderr, /cannot be combined with a recovery matrix cell group/);
   } finally {
     harness.cleanup();
   }
