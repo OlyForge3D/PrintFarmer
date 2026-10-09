@@ -91,7 +91,7 @@ Keep API servers and test commands in separate terminals or background processes
 
 ## Mobile App
 
-The SwiftUI iOS app lives in `mobile/` and was merged in from `OlyForge3D/PFarm-Ios`. It targets iOS 17+ and requires Xcode 27.0 (Swift 5.9+). Architecture is MVVM + repository pattern.
+The SwiftUI iOS app lives in `mobile/` and was merged in from `OlyForge3D/PFarm-Ios`. It targets iOS 17+ and requires Xcode 26.6 (Swift 5.9+). Architecture is MVVM + repository pattern.
 
 API integration:
 
@@ -101,7 +101,7 @@ API integration:
   installs migrate into the registry on first launch.
 - The mobile app consumes the same `/api/*` JSON contract as the React frontend — camelCase property names, string enums (see Serialization Rules below). Do not introduce mobile-only DTOs unless absolutely required; extend the shared API instead.
 
-Common commands (start at the repository root). Use Xcode 27.0 build 27A266a;
+Common commands (start at the repository root). Use Xcode 26.6 build 17F113;
 the shared resolver approves only iOS 26.5 (23F77). Install that runtime in Xcode
 Settings > Components and create an available matching simulator. It fails
 before tests if no approved destination exists. Python 3 is required; no GitHub

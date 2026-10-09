@@ -63,7 +63,7 @@ jobs:
     # a non-successful `select` the same as `should_run == 'true'`: fail safe
     # toward running the real build rather than silently passing unvalidated.
     if: ${{ !cancelled() }}
-    runs-on: xcode-27
+    runs-on: macos-26
     defaults:
       run:
         working-directory: mobile
@@ -79,22 +79,22 @@ jobs:
         if: needs.select.result != 'success' || needs.select.outputs.should_run == 'true'
         run: ./scripts/verify-marketing-version.sh source 1.0
 
-      - name: Select Xcode 27.0
+      - name: Select Xcode 26.6
         if: needs.select.result != 'success' || needs.select.outputs.should_run == 'true'
         run: |
-          XCODE_PATH="/Applications/Xcode_27.0.app"
+          XCODE_PATH="/Applications/Xcode_26.6.app"
           if [ ! -d "$XCODE_PATH" ]; then
-            echo "::error::Xcode 27.0 is missing from the xcode-27 runner at $XCODE_PATH."
+            echo "::error::Xcode 26.6 is missing from the macos-26 runner at $XCODE_PATH."
             exit 1
           fi
           sudo xcode-select -s "$XCODE_PATH/Contents/Developer"
           XCODE_VERSION="$(xcodebuild -version)"
-          if [ "$(printf '%s\n' "$XCODE_VERSION" | head -n 1)" != "Xcode 27.0" ]; then
-            echo "::error::Expected Xcode 27.0 at $XCODE_PATH, found: $XCODE_VERSION"
+          if [ "$(printf '%s\n' "$XCODE_VERSION" | head -n 1)" != "Xcode 26.6" ]; then
+            echo "::error::Expected Xcode 26.6 at $XCODE_PATH, found: $XCODE_VERSION"
             exit 1
           fi
-          if [ "$(printf '%s\n' "$XCODE_VERSION" | sed -n '2s/^Build version //p')" != "27A266a" ]; then
-            echo "::error::Expected Xcode build 27A266a at $XCODE_PATH, found: $XCODE_VERSION"
+          if [ "$(printf '%s\n' "$XCODE_VERSION" | sed -n '2s/^Build version //p')" != "17F113" ]; then
+            echo "::error::Expected Xcode build 17F113 at $XCODE_PATH, found: $XCODE_VERSION"
             exit 1
           fi
           printf '%s\n' "$XCODE_VERSION"
@@ -133,7 +133,7 @@ jobs:
 
   test:
     name: Unit Tests (iOS)
-    runs-on: xcode-27
+    runs-on: macos-26
     timeout-minutes: 120
     needs: [select, build]
     # Skip ONLY when the selector explicitly said `false`. If `select` itself
@@ -149,21 +149,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Select Xcode 27.0
+      - name: Select Xcode 26.6
         run: |
-          XCODE_PATH="/Applications/Xcode_27.0.app"
+          XCODE_PATH="/Applications/Xcode_26.6.app"
           if [ ! -d "$XCODE_PATH" ]; then
-            echo "::error::Xcode 27.0 is missing from the xcode-27 runner at $XCODE_PATH."
+            echo "::error::Xcode 26.6 is missing from the macos-26 runner at $XCODE_PATH."
             exit 1
           fi
           sudo xcode-select -s "$XCODE_PATH/Contents/Developer"
           XCODE_VERSION="$(xcodebuild -version)"
-          if [ "$(printf '%s\n' "$XCODE_VERSION" | head -n 1)" != "Xcode 27.0" ]; then
-            echo "::error::Expected Xcode 27.0 at $XCODE_PATH, found: $XCODE_VERSION"
+          if [ "$(printf '%s\n' "$XCODE_VERSION" | head -n 1)" != "Xcode 26.6" ]; then
+            echo "::error::Expected Xcode 26.6 at $XCODE_PATH, found: $XCODE_VERSION"
             exit 1
           fi
-          if [ "$(printf '%s\n' "$XCODE_VERSION" | sed -n '2s/^Build version //p')" != "27A266a" ]; then
-            echo "::error::Expected Xcode build 27A266a at $XCODE_PATH, found: $XCODE_VERSION"
+          if [ "$(printf '%s\n' "$XCODE_VERSION" | sed -n '2s/^Build version //p')" != "17F113" ]; then
+            echo "::error::Expected Xcode build 17F113 at $XCODE_PATH, found: $XCODE_VERSION"
             exit 1
           fi
           printf '%s\n' "$XCODE_VERSION"
@@ -238,9 +238,8 @@ jobs:
             build-for-testing
 
       - name: Run unit tests
-        # xcode-27 first launch on the downloaded iOS 26.5 runtime takes ~8 min
-        # and tests run ~2x slower than on macos-latest; use the runner's 1440s
-        # default ceiling, one minute inside this step limit.
+        # Preserve the bounded runner's 1440s ceiling, one minute inside
+        # this step limit, across the containment toolchain rollback.
         timeout-minutes: 25
         run: |
           set -o pipefail
@@ -275,7 +274,7 @@ jobs:
 
   xcui-shards:
     name: XCUI (${{ matrix.family }}, shard ${{ matrix.shard }})
-    runs-on: xcode-27
+    runs-on: macos-26
     timeout-minutes: 120
     needs: [select, test]
     # Avoid allocating eight macOS runners until unit coverage passes; retain
@@ -361,21 +360,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Select Xcode 27.0
+      - name: Select Xcode 26.6
         run: |
-          XCODE_PATH="/Applications/Xcode_27.0.app"
+          XCODE_PATH="/Applications/Xcode_26.6.app"
           if [ ! -d "$XCODE_PATH" ]; then
-            echo "::error::Xcode 27.0 is missing from the xcode-27 runner at $XCODE_PATH."
+            echo "::error::Xcode 26.6 is missing from the macos-26 runner at $XCODE_PATH."
             exit 1
           fi
           sudo xcode-select -s "$XCODE_PATH/Contents/Developer"
           XCODE_VERSION="$(xcodebuild -version)"
-          if [ "$(printf '%s\n' "$XCODE_VERSION" | head -n 1)" != "Xcode 27.0" ]; then
-            echo "::error::Expected Xcode 27.0 at $XCODE_PATH, found: $XCODE_VERSION"
+          if [ "$(printf '%s\n' "$XCODE_VERSION" | head -n 1)" != "Xcode 26.6" ]; then
+            echo "::error::Expected Xcode 26.6 at $XCODE_PATH, found: $XCODE_VERSION"
             exit 1
           fi
-          if [ "$(printf '%s\n' "$XCODE_VERSION" | sed -n '2s/^Build version //p')" != "27A266a" ]; then
-            echo "::error::Expected Xcode build 27A266a at $XCODE_PATH, found: $XCODE_VERSION"
+          if [ "$(printf '%s\n' "$XCODE_VERSION" | sed -n '2s/^Build version //p')" != "17F113" ]; then
+            echo "::error::Expected Xcode build 17F113 at $XCODE_PATH, found: $XCODE_VERSION"
             exit 1
           fi
           printf '%s\n' "$XCODE_VERSION"
@@ -445,6 +444,7 @@ jobs:
         run: ../scripts/ci/boot-ios-simulator.sh "$SIMULATOR_UDID"
 
       - name: Build XCUI shard for testing
+        id: xcui-build
         timeout-minutes: 20
         run: |
           xcodebuild \
@@ -509,6 +509,27 @@ jobs:
             -resultBundlePath "build-${{ matrix.key }}/XCUIShard.xcresult" \
             2>&1 | tee "build-${{ matrix.key }}/XCUIShard.log"
 
+      - name: Qualify retained iPad Controls snapshots
+        if: ${{ !cancelled() && matrix.key == 'ipad-1' && steps.xcui-build.outcome == 'success' }}
+        timeout-minutes: 25
+        run: |
+          set -o pipefail
+          python3 scripts/run-tests.py -- test-without-building \
+            -project PrintFarmer.xcodeproj \
+            -scheme PrintFarmer \
+            -configuration Debug \
+            -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
+            -destination-timeout 90 \
+            -derivedDataPath "build-${{ matrix.key }}" \
+            -clonedSourcePackagesDirPath "build-${{ matrix.key }}/SourcePackages" \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGNING_REQUIRED=NO \
+            -only-testing:PrintFarmerTests/PrinterControlsSectionSnapshotTests \
+            -parallel-testing-enabled NO \
+            -disable-concurrent-destination-testing \
+            -resultBundlePath "build-${{ matrix.key }}/Snapshots.xcresult" \
+            2>&1 | tee "build-${{ matrix.key }}/Snapshots.log"
+
       - name: Upload XCUI shard results
         if: always()
         uses: actions/upload-artifact@v7
@@ -523,4 +544,8 @@ jobs:
             mobile/build-${{ matrix.key }}/XCUIShard.log
             mobile/build-${{ matrix.key }}/XCUIShard.events.jsonl
             mobile/build-${{ matrix.key }}/XCUIShard.timing.json
+            mobile/build-${{ matrix.key }}/Snapshots.xcresult
+            mobile/build-${{ matrix.key }}/Snapshots.log
+            mobile/build-${{ matrix.key }}/Snapshots.events.jsonl
+            mobile/build-${{ matrix.key }}/Snapshots.timing.json
           retention-days: 7
