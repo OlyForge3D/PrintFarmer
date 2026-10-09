@@ -330,7 +330,9 @@ function CameraViewCard({ camera, canManage, onEdit, onDelete }: CameraViewCardP
             <CameraIcon className="w-12 h-12 mb-2 opacity-30" />
             <span className="text-center text-sm font-medium text-pf-text-secondary">
               {cameraAttention?.title
-                ?? (streamUnsupported ? 'Live preview unsupported; showing snapshot when available' : streamFailed ? 'Live stream unavailable; reconnecting' : cameraMode === 'snapshot' ? 'Snapshot preview unavailable' : 'Connecting to camera')}
+                ?? (streamUnsupported
+                  ? hasSnapshot ? 'Live preview unsupported; showing snapshot when available' : 'Live preview unsupported; no snapshot configured'
+                  : streamFailed ? 'Live stream unavailable; reconnecting' : cameraMode === 'snapshot' ? 'Snapshot preview unavailable' : 'Connecting to camera')}
             </span>
             {cameraAttention?.issue && (
               <span className="mt-1 max-w-xs text-center text-xs text-pf-text-tertiary">

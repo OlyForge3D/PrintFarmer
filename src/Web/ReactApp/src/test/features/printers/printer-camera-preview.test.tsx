@@ -109,12 +109,12 @@ describe('PrinterCameraPreview', () => {
     expect(getPrinterSnapshotMock).not.toHaveBeenCalled();
   });
   it('shows an accessible fallback when the live image stream cannot be embedded', () => {
+    localStorage.setItem('printfarmer-camera-mode:printer:printer-iframe', 'snapshot');
     render(
       <PrinterCameraPreview
         printerId="printer-iframe"
         printerName="Printer Fallback"
         cameraStreamUrl="http://printer.local/webcam/?action=stream"
-        cameraSnapshotUrl={null}
       />
     );
 
@@ -122,6 +122,11 @@ describe('PrinterCameraPreview', () => {
 
     expect(screen.queryByTitle('Printer Fallback live camera feed')).toBeNull();
     expect(screen.getAllByText('Live stream unavailable').length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: 'Snapshot mode' })).not.toBeInTheDocument();
+    expect(screen.queryByAltText('Printer Fallback camera preview')).not.toBeInTheDocument();
+    expect(screen.queryByText(/showing snapshot/)).not.toBeInTheDocument();
+    expect(screen.queryByTitle('Live stream active')).not.toBeInTheDocument();
+    expect(getPrinterSnapshotMock).not.toHaveBeenCalled();
   });
 
   it('polls the printer snapshot endpoint for snapshot-only cameras without using the stream URL', async () => {

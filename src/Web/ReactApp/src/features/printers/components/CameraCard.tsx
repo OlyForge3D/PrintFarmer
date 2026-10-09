@@ -142,7 +142,9 @@ export function CameraCard({
         ) : (
           <div role="status" aria-live="polite" className="absolute inset-0 flex flex-col items-center justify-center text-pf-text-tertiary p-4">
             <CameraIcon className="w-12 h-12 mb-2 opacity-30" />
-            <span className="text-sm">{streamUnsupported ? 'Live preview unsupported; using snapshot preview' : streamFailed ? 'Live stream unavailable; reconnecting' : hasCameraUrls ? 'Camera unavailable' : 'No linked camera configured'}</span>
+            <span className="text-sm">{streamUnsupported
+              ? hasSnapshot ? 'Live preview unsupported; using snapshot preview' : 'Live preview unsupported; no snapshot configured'
+              : streamFailed ? 'Live stream unavailable; reconnecting' : hasCameraUrls ? 'Camera unavailable' : 'No linked camera configured'}</span>
             {snapshotFailed && (
               <span className="mt-1 max-w-xs text-center text-xs text-pf-text-tertiary">
                 Snapshot polling is temporarily unavailable; the preview will retry automatically.

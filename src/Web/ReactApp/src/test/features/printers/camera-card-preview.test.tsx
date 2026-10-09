@@ -3,10 +3,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { CameraCard } from '@/features/printers/components/CameraCard';
 import type { Printer } from '@/types/api';
 
-const { camerasMock } = vi.hoisted(() => ({
+const { camerasMock, apiMock } = vi.hoisted(() => ({
   camerasMock: { usePrinterCameras: vi.fn() },
+  apiMock: { getPrinterSnapshot: vi.fn(), getSnapshotPreview: vi.fn() },
 }));
 
+vi.mock('@/services/api', () => ({ apiClient: apiMock }));
 vi.mock('@/features/cameras/hooks/usePrinterCameras', () => ({
   usePrinterCameras: camerasMock.usePrinterCameras,
 }));
@@ -27,6 +29,22 @@ describe('CameraCard preview fallback', () => {
     camerasMock.usePrinterCameras.mockReset().mockReturnValue({
       data: [{ healthStatus: 'Healthy' }],
     });
+    apiMock.getPrinterSnapshot.mockReset();
+    apiMock.getSnapshotPreview.mockReset();
+  });
+
+  it('keeps a stream-only camera in stream mode without fetching or falling back to snapshots after failure', () => {
+    render(<CameraCard printer={{ ...printer, cameraSnapshotUrl: undefined }} />);
+
+    fireEvent.error(screen.getByAltText('Stream Snapshot Printer live camera feed'));
+
+    expect(screen.getByRole('status', { name: 'Stream Snapshot Printer: Live stream unavailable' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Snapshot mode' })).not.toBeInTheDocument();
+    expect(screen.queryByAltText('Stream Snapshot Printer camera preview')).not.toBeInTheDocument();
+    expect(screen.queryByText(/showing snapshot/)).not.toBeInTheDocument();
+    expect(screen.queryByTitle('Live stream active')).not.toBeInTheDocument();
+    expect(apiMock.getPrinterSnapshot).not.toHaveBeenCalled();
+    expect(apiMock.getSnapshotPreview).not.toHaveBeenCalled();
   });
 
   it('selects the displayed snapshot and reports stream failure separately from probe health', async () => {

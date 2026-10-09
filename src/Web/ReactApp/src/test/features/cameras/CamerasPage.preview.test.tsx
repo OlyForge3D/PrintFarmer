@@ -74,6 +74,37 @@ function renderPage() {
 }
 
 describe('CamerasPage camera previews', () => {
+  it.each(['unsupported', 'failed'] as const)('does not invent a snapshot for a stream-only camera when its stream is %s', async (issue) => {
+    cameraServiceMock.getDisplayCameras.mockResolvedValue([
+      createCamera({
+        streamUrl: `/api/cameras/${cameraId}/stream`,
+        snapshotUrl: undefined,
+        accessMode: undefined,
+        streamFormat: undefined,
+        snapshotStrategy: undefined,
+      }),
+    ]);
+    localStorage.setItem(`printfarmer-camera-mode:camera:${cameraId}`, 'snapshot');
+    streamMock.useAuthenticatedMjpegStream.mockImplementation((_url, enabled) => ({
+      streamSrc: null,
+      streamUnsupported: enabled && issue === 'unsupported',
+      streamFailed: enabled && issue === 'failed',
+    }));
+
+    renderPage();
+
+    const label = issue === 'unsupported' ? 'Live stream unsupported' : 'Live stream unavailable';
+    expect(await screen.findByRole('status', { name: `x400 Camera: ${label}` })).toBeInTheDocument();
+    expect(streamMock.useAuthenticatedMjpegStream).toHaveBeenCalledWith(
+      `/api/cameras/${cameraId}/stream`, true
+    );
+    expect(apiMock.getSnapshotPreview).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: 'Snapshot mode' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('img', { name: 'x400 Camera camera preview' })).not.toBeInTheDocument();
+    expect(screen.queryByText(/showing snapshot/)).not.toBeInTheDocument();
+    expect(screen.getByText('Preview failed · probe healthy')).toBeInTheDocument();
+  });
+
   it('loads a standalone protected snapshot as an authenticated blob and shows single-mode status', async () => {
     renderPage();
 

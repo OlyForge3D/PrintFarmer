@@ -181,9 +181,13 @@ export function PrinterCameraPreview({
             {hasCameraSource && (
               <p className="mt-1 text-xs text-pf-text-tertiary">
                 {streamUnsupported
-                  ? 'This stream format is not supported in preview; showing snapshots when available.'
+                  ? hasSnapshot
+                    ? 'This stream format is not supported in preview; showing snapshots when available.'
+                    : 'This stream format is not supported in preview; no snapshot is configured.'
                   : streamFailed || failedRawStreamKey === rawStreamKey
-                  ? 'Live stream unavailable; reconnecting or showing snapshots when available.'
+                  ? hasSnapshot
+                    ? 'Live stream unavailable; reconnecting or showing snapshots when available.'
+                    : 'Live stream unavailable; no snapshot is configured.'
                   : snapshotFailed
                   ? 'Snapshot polling is temporarily unavailable; the preview will retry automatically.'
                   : isPollingPaused
