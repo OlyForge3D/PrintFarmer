@@ -3089,6 +3089,14 @@ export interface CreateCameraDto {
   cameraType?: CameraType;
 }
 
+export interface CameraConfigDto {
+  id: string;
+  streamUrl: string | null;
+  snapshotUrl: string | null;
+  streamUrlHasCredentials: boolean;
+  snapshotUrlHasCredentials: boolean;
+}
+
 export interface UpdateCameraDto {
   name?: string;
   description?: string;

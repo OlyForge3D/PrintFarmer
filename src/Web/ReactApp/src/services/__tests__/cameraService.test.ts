@@ -49,6 +49,7 @@ vi.mock("../api", () => ({
     getEnabledCameras: vi.fn(),
     getDisplayCameras: vi.fn(),
     getCameraById: vi.fn(),
+    getCameraConfig: vi.fn(),
     createCamera: vi.fn(),
     updateCamera: vi.fn(),
     deleteCamera: vi.fn(),
@@ -125,6 +126,20 @@ describe("cameraService", () => {
       expect(result).toEqual(mockCamera);
       expect(apiClient.getCameraById).toHaveBeenCalledWith("1");
     });
+  });
+
+  it("gets editable camera configuration through the API client", async () => {
+    const config = {
+      id: "1",
+      streamUrl: "http://camera.local/stream",
+      snapshotUrl: null,
+      streamUrlHasCredentials: true,
+      snapshotUrlHasCredentials: false,
+    };
+    vi.mocked(apiClient.getCameraConfig).mockResolvedValue(config);
+
+    expect(await cameraService.getCameraConfig("1")).toEqual(config);
+    expect(apiClient.getCameraConfig).toHaveBeenCalledWith("1");
   });
 
   describe("createCamera", () => {
