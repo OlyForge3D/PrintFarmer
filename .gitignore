@@ -188,3 +188,7 @@ fixtures/wire-contracts/manifest.json.lock
 .squad/decisions.md
 .squad/agents/*/history.md
 # /Squad: state owned by squad-state branch
+
+# Squad: local CLI artifacts
+.squad/.first-run
+.github/agents/*.local-backup
