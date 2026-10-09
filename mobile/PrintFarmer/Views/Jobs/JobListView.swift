@@ -443,6 +443,7 @@ struct JobListView: View {
             .padding(.vertical, 2)
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier("job.row.\(item.job.jobUUID?.uuidString ?? "unknown")")
     }
 
     @ViewBuilder

@@ -155,9 +155,7 @@ final class HarvestUITests: QueueUITestBase {
         XCTAssertFalse(printerBoundaryHandle.exists,
                        "A single-row printer group must not expose a reorder handle.")
 
-        let printing = app.buttons.matching(
-            NSPredicate(format: "label CONTAINS %@", "Queue pinned printing.gcode")
-        ).firstMatch
+        let printing = app.buttons["job.row.32340000-0000-0000-0000-000000000001"]
         for _ in 0..<8 where !printing.isHittable {
             app.swipeDown()
         }
