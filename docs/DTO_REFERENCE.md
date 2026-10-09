@@ -420,7 +420,7 @@ public enum PrinterBackend
 - Can be cast from int: `(PrinterBackend)1` → `Moonraker`
 
 ### CameraConfigDto - Admin Camera Edit Targets
-- `GET /api/cameras/{id}/config` (requires `cameras:admin`, plus printer-group access for printer cameras)
+- `GET /api/cameras/{id}/config` requires `cameras:admin`, including administrator-defined group grants. Farm administrators retain their established permission bypass. Printer-group access is checked separately for printer cameras.
 - Returns `id`, `streamUrl`, `snapshotUrl`, `streamUrlHasCredentials`, `snapshotUrlHasCredentials` (camelCase)
 - URLs are the stored targets, not the `/api/cameras/{id}/stream|snapshot` proxy paths returned by `GET /api/cameras/display`
 - Embedded `user:pass@` credentials are stripped and flagged; the public camera DTOs still hide targets

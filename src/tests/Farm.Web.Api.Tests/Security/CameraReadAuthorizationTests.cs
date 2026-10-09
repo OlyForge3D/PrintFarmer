@@ -311,6 +311,40 @@ public sealed class CameraReadAuthorizationTests : IAsyncLifetime, IDisposable
         body.Should().Contain(cameraId.ToString());
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task GetCameraConfig_DelegatedCameraAdmin_RespectsSeparatePrinterAccess(bool restricted)
+    {
+        (_, Guid restrictedCameraId, Guid standaloneCameraId) = await SeedRestrictedFixtureAsync();
+        Guid cameraId = restricted ? restrictedCameraId : standaloneCameraId;
+        using HttpClient client = CreateForeignRoleClient();
+        client.DefaultRequestHeaders.Add("X-Test-Permissions", "cameras:admin");
+
+        HttpResponseMessage response = await client.GetAsync($"/api/cameras/{cameraId}/config");
+
+        response.StatusCode.Should().Be(restricted ? HttpStatusCode.NotFound : HttpStatusCode.OK);
+        _cameras.Verify(s => s.FindByIdAsync(cameraId, It.IsAny<CancellationToken>()), Times.Once);
+        if (!restricted)
+        {
+            CameraConfigDto? config = await response.Content.ReadFromJsonAsync<CameraConfigDto>();
+            config!.StreamUrl.Should().Be("http://camera.example.invalid/stream");
+        }
+    }
+
+    [Fact]
+    public async Task GetCameraConfig_FarmAdmin_RetainsRestrictedPrinterAccess()
+    {
+        (_, Guid cameraId, _) = await SeedRestrictedFixtureAsync();
+        using HttpClient client = CreateAdminClient();
+
+        HttpResponseMessage response = await client.GetAsync($"/api/cameras/{cameraId}/config");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        CameraConfigDto? config = await response.Content.ReadFromJsonAsync<CameraConfigDto>();
+        config!.StreamUrl.Should().Be("http://camera.example.invalid/stream");
+    }
+
     // --- Open-by-default scenarios stay visible (documents current behavior) ---------------
 
     [Fact]
