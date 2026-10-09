@@ -12,6 +12,7 @@ EVIDENCE="$REPO_ROOT/.recovery-matrix-work/c2-evidence.json"
 EVIDENCE_PROVIDED=0
 COSIGN="${PF_COSIGN:-$HOME/.cache/pf-cosign/cosign}"
 KEEP_WORK=0
+RELEASE_LOCK=0
 FAULT_ARGS=()
 
 usage() {
@@ -26,6 +27,7 @@ Options:
   --cosign FILE             Cosign executable. Default: PF_COSIGN or ~/.cache/pf-cosign/cosign
   --fault POINT=COMMAND      Inject a fault hook at before-activate, during-activate, or before-recover.
   --keep-work               Do not delete containers/networks/work files on failure.
+  --release-lock            Remove a specifically named stale daemon lock and exit.
   -h, --help                Show this help.
 EOF
 }
@@ -38,6 +40,7 @@ while [[ $# -gt 0 ]]; do
     --cosign) COSIGN="${2:?}"; shift 2 ;;
     --fault) FAULT_ARGS+=("--fault" "${2:?}"); shift 2 ;;
     --keep-work) KEEP_WORK=1; shift ;;
+    --release-lock) RELEASE_LOCK=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage; exit 2 ;;
   esac
@@ -57,6 +60,21 @@ EVIDENCE="$EVIDENCE_DIR/$(basename "$EVIDENCE")"
 require_tool() {
   command -v "$1" >/dev/null 2>&1 || { echo "$1 is required" >&2; exit 2; }
 }
+
+LOCK_NAME="${PF_RECOVERY_MATRIX_LOCK_NAME:-printfarmer-recovery-matrix-daemon-lock}"
+LOCK_LABEL_KEY="printfarmer.recovery-matrix.lock"
+
+if [[ "$RELEASE_LOCK" == 1 ]]; then
+  require_tool docker
+  lock_owner="$(docker inspect --format "{{index .Config.Labels \"$LOCK_LABEL_KEY\"}}" "$LOCK_NAME" 2>/dev/null || true)"
+  if [[ -z "$lock_owner" ]]; then
+    echo "No recovery matrix daemon lock named $LOCK_NAME exists." >&2
+    exit 0
+  fi
+  echo "Removing recovery matrix daemon lock $LOCK_NAME owned by $lock_owner; confirm no recovery-matrix resources remain first." >&2
+  docker rm -f "$LOCK_NAME" >/dev/null
+  exit 0
+fi
 
 require_tool bash
 require_tool node
@@ -135,8 +153,6 @@ HOST="$RUN_ID-host"
 HOST_IMAGE="$RUN_ID-host-image"
 RUN_LABEL_KEY="printfarmer.recovery-matrix.run"
 RUN_LABEL="$RUN_LABEL_KEY=$RUN_ID"
-LOCK_NAME="${PF_RECOVERY_MATRIX_LOCK_NAME:-printfarmer-recovery-matrix-daemon-lock}"
-LOCK_LABEL_KEY="printfarmer.recovery-matrix.lock"
 LOCK_LABEL="$LOCK_LABEL_KEY=$RUN_ID"
 LOCK_ACQUIRED=0
 SUBNET_OCTET=$(( ($$ % 200) + 30 ))
@@ -149,7 +165,7 @@ release_daemon_lock() {
     return
   fi
   local owner
-  owner="$(docker inspect --format '{{index .Config.Labels "printfarmer.recovery-matrix.lock"}}' "$LOCK_NAME" 2>/dev/null || true)"
+  owner="$(docker inspect --format "{{index .Config.Labels \"$LOCK_LABEL_KEY\"}}" "$LOCK_NAME" 2>/dev/null || true)"
   if [[ "$owner" == "$RUN_ID" ]]; then
     docker rm -f "$LOCK_NAME" >/dev/null 2>&1 || true
   else
@@ -161,7 +177,6 @@ release_daemon_lock() {
 acquire_daemon_lock() {
   local create_status=0 owner
   if docker create --name "$LOCK_NAME" \
-      --label "$RUN_LABEL" \
       --label "$LOCK_LABEL" \
       python:3.12-alpine sleep infinity >/dev/null 2>&1; then
     LOCK_ACQUIRED=1
@@ -170,7 +185,7 @@ acquire_daemon_lock() {
     create_status=$?
   fi
 
-  owner="$(docker inspect --format '{{index .Config.Labels "printfarmer.recovery-matrix.lock"}}' "$LOCK_NAME" 2>/dev/null || true)"
+  owner="$(docker inspect --format "{{index .Config.Labels \"$LOCK_LABEL_KEY\"}}" "$LOCK_NAME" 2>/dev/null || true)"
   if [[ -n "$owner" ]]; then
     echo "Recovery matrix requires an exclusive Docker daemon; another run owns $LOCK_NAME ($owner). Refusing to start so canonical fixture image tags remain stable." >&2
     exit 75
@@ -181,8 +196,7 @@ acquire_daemon_lock() {
 
 cleanup() {
   if [[ "$KEEP_WORK" == 1 ]]; then
-    echo "Keeping work directory: $RUN_ROOT" >&2
-    release_daemon_lock
+    echo "Keeping work directory and daemon lock: $RUN_ROOT" >&2
     return
   fi
   if [[ -f "$RUN_ROOT/deployment/docker-compose.recovery.yml" ]]; then

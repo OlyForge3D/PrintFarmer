@@ -31,7 +31,7 @@ trusted importer, or proof of coordinated restore. Do not use it to update an
 installation that needs #2664's recovery guarantees. The signed host-local
 status/recovery CLI package (#2980, #3041) is a separate release asset. It can
 be carried to a disconnected host as described in the
-[runbook](HOST_UPDATE_RUNBOOK.md#install-the-signed-cli-package), but it is only
+offline recovery procedure in this document, but it is only
 one item in the bundle below. There is no supported skip-verification,
 force-import or replay-reset option.
 
@@ -52,7 +52,7 @@ reuses the same signed bytes, replay evidence and shared host-update executor.
 Connected installations need a proven minimum host-local recovery path but do
 not need to hand-carry a bundle. Disconnected installations additionally need
 all the material and evidence below. See the
-[operator runbook](HOST_UPDATE_RUNBOOK.md) for authorization and stop conditions.
+offline recovery contract in this document for authorization and stop conditions.
 This contract does not invent a second manifest format or release publisher:
 the [release guide](RELEASE_GUIDE.md) owns original signed release identity.
 
@@ -569,7 +569,7 @@ directory) are rejected before a record can be written.
 
 An imported record is evidence that the bytes were verified and loaded. It is
 not an update offer, an installation or channel consent; applying a release
-still follows the [operator runbook](HOST_UPDATE_RUNBOOK.md).
+still follows the offline recovery contract in this document.
 
 ## Offline activation (#3080)
 
@@ -721,7 +721,7 @@ API/slicer/monolith in-memory writer flags to acknowledge, so the CLI proves eac
 required background writer by the closed durable admission gate plus the writer
 hosts observed stopped on every fence poll, and verifies `/health` from inside
 the compose network (see the
-[offline fence and health contract](HOST_UPDATE_EXECUTOR.md#host-local-cli-offline-fence-and-health-contract-3127)).
+offline fence and health contract described in this document).
 The durable admission gate, database active-work checks, backups, migrations,
 health gates and installed-state records remain the single engine source of truth. Failures before
 verification preserve the prior installed state and leave recovery to the
@@ -888,7 +888,7 @@ After a complete bundle verifies, `import` runs
 `Farm.HostUpdate.Cli offline-admit --staging <dir> --channel <c> --trusted-root <abs> [--cosign <abs>] --json`
 with the host's `--config`, passing the same absolute trusted root and Cosign
 executable used for verification. The CLI (see the
-[runbook](HOST_UPDATE_RUNBOOK.md#offline-replay-admission)) requires host state to
+offline recovery contract in this document) requires host state to
 be enabled, holds the host-update execution lock, re-parses and validates the
 staged manifest, checks that its digest, channel and release identity match the
 verification record, and that the manifest channel equals both `--channel` and
@@ -1022,7 +1022,7 @@ fences stay closed on uncertainty, and confirm safe post-restore reconciliation.
 The host-local CLI is delivered (#2980) and gates writer fence release on a
 recorded physical printer reconciliation (#2999). Provider and topology stop
 conditions are covered with fake adapters (#3000); see
-[the runbook](HOST_UPDATE_RUNBOOK.md#provider-and-topology-stop-conditions).
+the provider and topology stop conditions described in this document.
 
 Complete bundles are delivered in #2981. #2982 owns this matrix and separately
 authorized staging/pilot evidence. #2664 remains open until its full retained
@@ -1110,9 +1110,12 @@ the daemon-wide Docker container
 `printfarmer-recovery-matrix-daemon-lock` before creating any run resources.
 If another run owns that lock, it exits with status `75` and names the owning
 run instead of touching canonical tags. The lock is released by the normal
-cleanup path, including `--keep-work`; if a runner is terminated hard and leaves
-the lock behind, remove that specifically named lock container only after
-confirming no recovery-matrix resources remain on the daemon. The script works as a
+cleanup path. With `--keep-work`, the lock is intentionally retained with the
+debug resources until they are inspected and removed. If a runner is terminated
+hard and leaves the lock behind, first confirm no recovery-matrix resources remain on the daemon,
+then run `scripts/ci/recovery-matrix/run-cell.sh --release-lock` to remove that
+specifically named lock container. Never use `--release-lock` while another
+recovery run is active. The script works as a
 non-root runner: the CLI's `dotnet` fallback runs as the invoking user, and
 cleanup hands root-owned run files back to that user so the retained run
 directory can be removed without root:

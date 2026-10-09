@@ -36,6 +36,7 @@ function createHarness() {
   writeExecutable(composePlugin, '#!/usr/bin/env bash\nexit 0\n');
   const runLog = path.join(root, 'node-run.log');
   const dockerLog = path.join(root, 'docker.log');
+  const lockOwner = path.join(root, 'lock-owner');
   writeExecutable(path.join(bin, 'node'), `#!/usr/bin/env bash
 set -euo pipefail
 if [[ " $* " == *" --input-type=module "* ]]; then
@@ -57,10 +58,17 @@ case "\${1:-}" in
     if [[ "\${PF_TEST_LOCK_HELD:-0}" == 1 ]]; then
       exit 1
     fi
+    for arg in "$@"; do
+      case "$arg" in
+        printfarmer.recovery-matrix.lock=*) printf '%s\n' "\${arg#*=}" > "${toBashPath(lockOwner)}" ;;
+      esac
+    done
     ;;
   inspect)
     if [[ "\${PF_TEST_LOCK_HELD:-0}" == 1 ]]; then
       printf '%s\n' 'fixture-run-123'
+    elif [[ -f "${toBashPath(lockOwner)}" && "$*" == *"printfarmer-recovery-matrix-daemon-lock"* ]]; then
+      cat "${toBashPath(lockOwner)}"
     else
       printf '%s\n' '172.30.50.10'
     fi
@@ -183,5 +191,64 @@ test('run-cell.sh fails fast when another run owns the daemon lock', { skip: !ha
     assert.throws(() => readFileSync(harness.runLog, 'utf8'), /ENOENT/);
   } finally {
     harness.cleanup();
+  }
+});
+
+test('run-cell.sh releases an owned lock during ordinary cleanup', { skip: !hasBash() }, () => {
+  const harness = createHarness();
+  try {
+    const result = spawnSync('bash', [
+      toBashPath(script),
+      '--cell', 'c2',
+      '--work-dir', toBashPath(harness.work),
+      '--cosign', toBashPath(harness.cosign),
+    ], {
+      cwd: repoRoot,
+      env: {
+        ...process.env,
+        PATH: `${harness.bin}${path.delimiter}${process.env.PATH}`,
+        PF_TEST_LOCK_OWNED: '1',
+      },
+      encoding: 'utf8',
+    });
+    assert.equal(result.status, 0, `${result.stderr}\n${result.stdout}`);
+    assert.doesNotMatch(result.stderr, /cleanup leaked resources/);
+    assert.match(readFileSync(harness.dockerLog, 'utf8'), /rm -f printfarmer-recovery-matrix-daemon-lock/);
+  } finally {
+    harness.cleanup();
+  }
+});
+
+test('run-cell.sh exposes an explicit stale-lock release path', { skip: !hasBash() }, () => {
+  const harness = createHarness();
+  try {
+    const result = spawnSync('bash', [
+      toBashPath(script),
+      '--release-lock',
+      '--work-dir', toBashPath(harness.work),
+    ], {
+      cwd: repoRoot,
+      env: {
+        ...process.env,
+        PATH: `${harness.bin}${path.delimiter}${process.env.PATH}`,
+        PF_TEST_LOCK_HELD: '1',
+      },
+      encoding: 'utf8',
+    });
+    assert.equal(result.status, 0, `${result.stderr}\n${result.stdout}`);
+    assert.match(result.stderr, /Removing recovery matrix daemon lock/);
+    assert.match(readFileSync(harness.dockerLog, 'utf8'), /rm -f printfarmer-recovery-matrix-daemon-lock/);
+  } finally {
+    harness.cleanup();
+  }
+});
+
+test('recovery matrix shell entrypoints remain directly executable', () => {
+  for (const entrypoint of ['run-cell.sh', 'verify-published-bundle.sh']) {
+    const result = spawnSync('git', [
+      'ls-files', '--stage', '--', `scripts/ci/recovery-matrix/${entrypoint}`,
+    ], { cwd: repoRoot, encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /^100755 /m, `${entrypoint} must be executable`);
   }
 });
