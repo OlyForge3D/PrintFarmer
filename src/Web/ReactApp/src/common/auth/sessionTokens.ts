@@ -8,6 +8,7 @@ export const AUTH_USER_ID_KEY = 'auth-user-id';
 let refreshInFlight: Promise<string | null> | null = null;
 const refreshLockName = 'printfarmer-auth-refresh';
 const fallbackRefreshLockKey = 'auth-refresh-lock';
+const RENEWAL_WINDOW_MS = 5 * 60_000;
 const MAX_TIMEOUT_MS = 2_147_000_000;
 
 export function storeAuthenticationResult(result: AuthenticationResult): void {
@@ -77,6 +78,24 @@ async function refreshUnderLock(observedRefreshToken: string): Promise<string | 
   return result.token;
 }
 
+export function isAccessTokenRenewalDue(): boolean {
+  const expiresAt = Number(localStorage.getItem(AUTH_TOKEN_EXPIRY_KEY));
+  return !localStorage.getItem('auth-token')
+    || !Number.isFinite(expiresAt)
+    || expiresAt <= Date.now() + RENEWAL_WINDOW_MS;
+}
+
+/** The caller must already hold the authentication renewal lock. */
+export async function renewAccessTokenUnderLock(): Promise<string | null> {
+  const refreshToken = localStorage.getItem(AUTH_REFRESH_TOKEN_KEY);
+  if (!refreshToken) return null;
+  try {
+    return await refreshUnderLock(refreshToken);
+  } catch {
+    return null;
+  }
+}
+
 export function renewAccessToken(): Promise<string | null> {
   if (refreshInFlight) return refreshInFlight;
   const observedRefreshToken = localStorage.getItem(AUTH_REFRESH_TOKEN_KEY);
@@ -97,7 +116,7 @@ export function scheduleProactiveRenewal(onRenewalFailure: () => void): () => vo
     const expiresAt = Number(localStorage.getItem(AUTH_TOKEN_EXPIRY_KEY));
     if (!Number.isFinite(expiresAt) || expiresAt <= 0 || !localStorage.getItem(AUTH_REFRESH_TOKEN_KEY)) return;
     const remaining = expiresAt - Date.now();
-    const delay = Math.max(0, Math.min(MAX_TIMEOUT_MS, Math.min(remaining - 5 * 60_000, remaining * 0.8)));
+    const delay = Math.max(0, Math.min(MAX_TIMEOUT_MS, Math.min(remaining - RENEWAL_WINDOW_MS, remaining * 0.8)));
     timeoutId = window.setTimeout(async () => {
       if (disposed) return;
       if (!(await renewAccessToken())) onRenewalFailure();
@@ -108,7 +127,7 @@ export function scheduleProactiveRenewal(onRenewalFailure: () => void): () => vo
   const onVisibilityChange = () => {
     if (document.visibilityState === 'visible') {
       const expiresAt = Number(localStorage.getItem(AUTH_TOKEN_EXPIRY_KEY));
-      if (Number.isFinite(expiresAt) && expiresAt - Date.now() <= 5 * 60_000) {
+      if (Number.isFinite(expiresAt) && expiresAt - Date.now() <= RENEWAL_WINDOW_MS) {
         void renewAccessToken().then((token) => { if (!token) onRenewalFailure(); else schedule(); });
       }
     }

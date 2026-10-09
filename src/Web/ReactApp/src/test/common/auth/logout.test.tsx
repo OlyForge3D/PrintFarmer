@@ -3,7 +3,7 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { AxiosError, AxiosHeaders, type InternalAxiosRequestConfig } from 'axios';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuthContext, AuthProvider } from '@/common/contexts/AuthContext';
-import { AUTH_REFRESH_TOKEN_KEY, renewAccessToken } from '@/common/auth/sessionTokens';
+import { AUTH_REFRESH_TOKEN_KEY, AUTH_TOKEN_EXPIRY_KEY, renewAccessToken } from '@/common/auth/sessionTokens';
 import { client } from '@/services/api/httpClient';
 
 vi.mock('@/common/auth/authenticatedSignalRSession', () => ({
@@ -21,6 +21,7 @@ const user = {
 };
 const freshResult = {
   success: true, token: 'renewed-access', refreshToken: 'renewed-refresh', user,
+  expiresAt: new Date(Date.now() + 60 * 60_000).toISOString(),
 };
 
 function response(config: InternalAxiosRequestConfig, data: unknown) {
@@ -35,7 +36,8 @@ async function authenticatedContext() {
 
 beforeEach(() => {
   localStorage.clear();
-  localStorage.setItem('auth-token', 'expired-access');
+  localStorage.setItem('auth-token', 'current-access');
+  localStorage.setItem(AUTH_TOKEN_EXPIRY_KEY, String(Date.now() + 60 * 60_000));
   localStorage.setItem(AUTH_REFRESH_TOKEN_KEY, 'current-refresh');
 });
 
@@ -48,29 +50,110 @@ afterEach(() => {
 });
 
 describe('coordinated logout', () => {
-  it('sends the current refresh token without renewing an expired access token and clears local state after a 401', async () => {
+  it.each(['expired', 'near-expiry', 'missing'] as const)(
+    'renews a %s access token once before logout with the rotated tokens', async (scenario) => {
+      const requests: string[] = [];
+      client.defaults.adapter = async (config) => {
+        requests.push(config.url ?? '');
+        if (config.url === '/auth/me') return response(config, user);
+        if (config.url === '/auth/refresh') {
+          expect(JSON.parse(config.data)).toEqual({ refreshToken: 'latest-refresh' });
+          return response(config, freshResult);
+        }
+        expect(config.url).toBe('/auth/logout');
+        expect(config.headers.get('Authorization')).toBe(['Bearer', freshResult.token].join(' '));
+        expect(JSON.parse(config.data)).toEqual({ refreshToken: freshResult.refreshToken });
+        expect(config.skipAuthRedirect).toBe(true);
+        return response(config, {});
+      };
+      const { result } = await authenticatedContext();
+      localStorage.setItem(AUTH_REFRESH_TOKEN_KEY, 'latest-refresh');
+      localStorage.setItem(AUTH_TOKEN_EXPIRY_KEY, String(Date.now() + (scenario === 'expired' ? -1 : 60_000)));
+      if (scenario === 'missing') localStorage.removeItem('auth-token');
+
+      await act(async () => { await result.current?.logout(); });
+
+      expect(requests).toEqual(['/auth/me', '/auth/refresh', '/auth/logout']);
+      expect(localStorage.getItem('auth-token')).toBeNull();
+      expect(localStorage.getItem(AUTH_REFRESH_TOKEN_KEY)).toBeNull();
+      expect(result.current?.isAuthenticated).toBe(false);
+      expect(result.current?.isLoading).toBe(false);
+    },
+  );
+
+  it.each([true, false])('renews and retries logout only once after an unexpected 401 (retry succeeds: %s)', async (retrySucceeds) => {
     const requests: string[] = [];
+    let logoutAttempts = 0;
     client.defaults.adapter = async (config) => {
       requests.push(config.url ?? '');
       if (config.url === '/auth/me') return response(config, user);
-      expect(config.url).toBe('/auth/logout');
-      expect(JSON.parse(config.data)).toEqual({ refreshToken: 'latest-refresh' });
-      expect(config.skipAuthRedirect).toBe(true);
+      if (config.url === '/auth/refresh') return response(config, freshResult);
+      logoutAttempts += 1;
+      if (logoutAttempts === 2) {
+        expect(config.headers.get('Authorization')).toBe(['Bearer', freshResult.token].join(' '));
+        expect(JSON.parse(config.data)).toEqual({ refreshToken: freshResult.refreshToken });
+        if (retrySucceeds) return response(config, {});
+      }
       throw new AxiosError('Unauthorized', 'ERR_BAD_REQUEST', config, undefined, {
         ...response(config, {}), status: 401,
       });
     };
     const { result } = await authenticatedContext();
-    localStorage.setItem(AUTH_REFRESH_TOKEN_KEY, 'latest-refresh');
 
     await act(async () => { await result.current?.logout(); });
 
-    expect(requests).toEqual(['/auth/me', '/auth/logout']);
+    expect(requests).toEqual(['/auth/me', '/auth/logout', '/auth/refresh', '/auth/logout']);
     expect(localStorage.getItem('auth-token')).toBeNull();
     expect(localStorage.getItem(AUTH_REFRESH_TOKEN_KEY)).toBeNull();
     expect(result.current?.isAuthenticated).toBe(false);
     expect(result.current?.isLoading).toBe(false);
   });
+
+  it('does not renew again when logout returns 401 after preflight renewal', async () => {
+    const requests: string[] = [];
+    client.defaults.adapter = async (config) => {
+      requests.push(config.url ?? '');
+      if (config.url === '/auth/me') return response(config, user);
+      if (config.url === '/auth/refresh') return response(config, freshResult);
+      throw new AxiosError('Unauthorized', 'ERR_BAD_REQUEST', config, undefined, {
+        ...response(config, {}), status: 401,
+      });
+    };
+    const { result } = await authenticatedContext();
+    localStorage.setItem(AUTH_TOKEN_EXPIRY_KEY, String(Date.now() - 1));
+
+    await act(async () => { await result.current?.logout(); });
+
+    expect(requests).toEqual(['/auth/me', '/auth/refresh', '/auth/logout']);
+    expect(localStorage.getItem('auth-token')).toBeNull();
+    expect(localStorage.getItem(AUTH_REFRESH_TOKEN_KEY)).toBeNull();
+    expect(result.current?.isAuthenticated).toBe(false);
+  });
+
+  it.each(['before-logout', 'after-401'] as const)(
+    'clears local state without a logout loop if renewal fails %s', async (scenario) => {
+      const requests: string[] = [];
+      client.defaults.adapter = async (config) => {
+        requests.push(config.url ?? '');
+        if (config.url === '/auth/me') return response(config, user);
+        throw new AxiosError('Unauthorized', 'ERR_BAD_REQUEST', config, undefined, {
+          ...response(config, {}), status: 401,
+        });
+      };
+      const { result } = await authenticatedContext();
+      if (scenario === 'before-logout') localStorage.setItem(AUTH_TOKEN_EXPIRY_KEY, String(Date.now() - 1));
+
+      await act(async () => { await result.current?.logout(); });
+
+      expect(requests).toEqual(scenario === 'before-logout'
+        ? ['/auth/me', '/auth/refresh']
+        : ['/auth/me', '/auth/logout', '/auth/refresh']);
+      expect(localStorage.getItem('auth-token')).toBeNull();
+      expect(localStorage.getItem(AUTH_REFRESH_TOKEN_KEY)).toBeNull();
+      expect(result.current?.isAuthenticated).toBe(false);
+      expect(result.current?.isLoading).toBe(false);
+    },
+  );
 
   it('waits for in-flight renewal and sends its rotated token, then clears the renewed local session', async () => {
     let completeRenewal!: () => void;

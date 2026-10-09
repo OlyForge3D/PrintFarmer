@@ -7,7 +7,7 @@ import { clearSensitiveUserQueries } from '@/common/auth/sensitiveQueryCache';
 import { resetAuthenticatedSignalRSession } from '@/common/auth/authenticatedSignalRSession';
 import { notifyAuthenticationExpired, subscribeToAuthenticationExpiration } from '@/common/auth/authenticationExpiration';
 import { AUTH_SESSION_ESTABLISHED_EVENT } from '@/services/authEvents';
-import { AUTH_REFRESH_TOKEN_KEY, AUTH_USER_ID_KEY, clearStoredAuthentication, scheduleProactiveRenewal, storeAuthenticationResult, withAuthenticationRenewalLock } from '@/common/auth/sessionTokens';
+import { AUTH_REFRESH_TOKEN_KEY, AUTH_USER_ID_KEY, clearStoredAuthentication, scheduleProactiveRenewal, storeAuthenticationResult, withAuthenticationRenewalLock, isAccessTokenRenewalDue, renewAccessTokenUnderLock } from '@/common/auth/sessionTokens';
 import type { AuthContextType } from '@/contexts/AuthContextValue';
 
 // AuthContextType now in separate file (AuthContextValue.ts) for faster refresh friendliness
@@ -300,7 +300,25 @@ export function AuthProvider({ children }: AuthProviderProps) {
         try {
           await resetAuthenticatedSignalRSession();
           if (generation !== authTransitionGeneration.current) return;
-          await authLogout(localStorage.getItem(AUTH_REFRESH_TOKEN_KEY) ?? undefined);
+          let renewalAttempted = false;
+          const renewForLogout = async () => {
+            renewalAttempted = true;
+            const renewedToken = await renewAccessTokenUnderLock();
+            if (renewedToken) tokenAtLogout = renewedToken;
+            return renewedToken;
+          };
+          if (localStorage.getItem(AUTH_REFRESH_TOKEN_KEY) && isAccessTokenRenewalDue()) {
+            if (!(await renewForLogout())) return;
+          }
+          if (generation !== authTransitionGeneration.current) return;
+          try {
+            await authLogout(localStorage.getItem(AUTH_REFRESH_TOKEN_KEY) ?? undefined);
+          } catch (err) {
+            const statusCode = (err as { statusCode?: number } | null)?.statusCode;
+            if (statusCode !== 401 || renewalAttempted || !localStorage.getItem(AUTH_REFRESH_TOKEN_KEY)) throw err;
+            if (!(await renewForLogout()) || generation !== authTransitionGeneration.current) return;
+            await authLogout(localStorage.getItem(AUTH_REFRESH_TOKEN_KEY) ?? undefined);
+          }
         } finally {
           if (generation === authTransitionGeneration.current
               && localStorage.getItem('auth-token') === tokenAtLogout) {
