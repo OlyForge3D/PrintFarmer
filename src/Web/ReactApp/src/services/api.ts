@@ -1,5 +1,6 @@
 /* eslint-disable local/pf-no-unguarded-console */
 // Get hash for a G-code file (returns string)
+import { getAuthenticatedCameraProxyRoute } from "@/common/auth/authenticatedCameraRoutes";
 import { generateUUID } from "@/utils/uuid";
 import { getApiBaseUrl } from "@/common/utils/apiUrlHelpers";
 import type { PrinterStatus } from "@/types/api";
@@ -676,14 +677,34 @@ export class ApiClient {
     return response.data;
   }
 
-  async getPrinterSnapshot(id: string): Promise<Blob> {
+  async getPrinterSnapshot(id: string, signal?: AbortSignal): Promise<Blob> {
     const response = await this.client.get<Blob>(
       `/printers/${id}/snapshot`,
       {
         params: { _: Date.now() },
         responseType: "blob",
+        signal,
       }
     );
+    return response.data;
+  }
+
+  async getCameraSnapshot(id: string): Promise<Blob> {
+    const response = await this.client.get<Blob>(`/cameras/${id}/snapshot`, {
+      params: { _: Date.now() },
+      responseType: "blob",
+    });
+    return response.data;
+  }
+
+  async getSnapshotPreview(proxyRoute: string, signal?: AbortSignal): Promise<Blob> {
+    const safeRoute = getAuthenticatedCameraProxyRoute(proxyRoute);
+    if (!safeRoute || !safeRoute.endsWith('/snapshot')) {
+      throw new Error('Snapshot preview requires a same-origin camera proxy route.');
+    }
+    const cacheBustedRoute = `${safeRoute}${safeRoute.includes("?") ? "&" : "?"}_=${Date.now()}`;
+    const apiPath = cacheBustedRoute.replace(/^\/api(?=\/)/, "");
+    const response = await this.client.get<Blob>(apiPath, { responseType: "blob", signal });
     return response.data;
   }
 

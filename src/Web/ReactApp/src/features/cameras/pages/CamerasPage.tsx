@@ -18,6 +18,8 @@ import {
   useCameraViewPreferences,
 } from '@/features/cameras/hooks/useCameraViewPreferences';
 import { usePrinterSnapshotPreview } from '@/features/cameras/hooks/usePrinterSnapshotPreview';
+import { useAuthenticatedMjpegStream } from '@/features/cameras/hooks/useAuthenticatedMjpegStream';
+import { getAuthenticatedCameraProxyRoute } from '@/common/auth/authenticatedCameraRoutes';
 import { getCameraAttentionContent } from '@/features/cameras/utils/cameraAttention';
 import {
   canUseMjpegStream,
@@ -242,8 +244,10 @@ function CameraViewCard({ camera, canManage, onEdit, onDelete }: CameraViewCardP
     pollSnapshotPreview,
     CAMERA_SNAPSHOT_REFRESH_MS,
     directSnapshotUrl,
-    !!directSnapshotUrl
+    !!directSnapshotUrl,
+    getAuthenticatedCameraProxyRoute(camera.snapshotUrl)
   );
+  const snapshotPreviewUrl = snapshotSrc ?? directSnapshotUrl;
   const hasSnapshot = pollSnapshotPreview || !!directSnapshotUrl;
   const {
     cameraMode,
@@ -258,28 +262,32 @@ function CameraViewCard({ camera, canManage, onEdit, onDelete }: CameraViewCardP
     hasSnapshot,
   });
 
-  // Determine which URL to show
-  const snapshotPreviewUrl = snapshotSrc ?? directSnapshotUrl;
+  // Authenticated app-proxy streams are fetched as multipart frames; external streams remain unauthenticated images.
+  const { streamSrc, streamUnsupported, streamFailed } = useAuthenticatedMjpegStream(
+    camera.streamUrl,
+    cameraMode === 'stream' && hasStream,
+  );
+  const safeStreamRoute = getAuthenticatedCameraProxyRoute(camera.streamUrl);
+  const liveStreamSrc = safeStreamRoute ? streamSrc : camera.streamUrl;
+  const streamImageFailed = !!liveStreamSrc && failedUrl === liveStreamSrc;
+  const streamFallsBackToSnapshot = cameraMode === 'stream' && (streamUnsupported || streamFailed || streamImageFailed) && !!snapshotPreviewUrl;
   const activeUrl = cameraMode === 'stream' && hasStream
-    ? camera.streamUrl
+    ? streamFallsBackToSnapshot ? snapshotPreviewUrl : liveStreamSrc
     : cameraMode === 'snapshot' && snapshotPreviewUrl
-    ? snapshotPreviewUrl
-    : hasStream
-    ? camera.streamUrl
-    : snapshotPreviewUrl;
+      ? snapshotPreviewUrl
+      : hasStream
+        ? liveStreamSrc
+        : snapshotPreviewUrl;
+  const showingLiveStream = cameraMode === 'stream' && !!liveStreamSrc && !streamUnsupported && !streamFailed && !streamImageFailed;
   const imageError = !!activeUrl && failedUrl === activeUrl;
   const mediaClassName = getCameraMediaTransformClassName(rotation);
-  const externalUrl = cameraMode === 'stream' && hasStream
-    ? camera.streamUrl
-    : pollSnapshotPreview
-    ? null
-    : activeUrl;
+  const externalUrl = activeUrl && !getAuthenticatedCameraProxyRoute(activeUrl) ? activeUrl : null;
   const cameraAttention = getCameraAttentionContent({
     healthStatus: camera.healthStatus,
     healthMessage: camera.healthMessage,
     hasStream,
     hasSnapshot,
-    imageError: imageError || snapshotFailed,
+    imageError: imageError || snapshotFailed || streamFailed,
     cameraMode,
   });
   const showInlineAttention = Boolean(cameraAttention) && !imageError && (hasStream || hasSnapshot);
@@ -291,24 +299,16 @@ function CameraViewCard({ camera, canManage, onEdit, onDelete }: CameraViewCardP
     >
       {/* Camera feed */}
       <div ref={previewContainerRef} className="relative w-full aspect-video bg-pf-bg-2">
-        {cameraMode === 'stream' && hasStream && activeUrl ? (
-          <iframe
-            src={activeUrl}
-            title={`${camera.name} live camera feed`}
-            className={`border-0 bg-black ${mediaClassName}`}
-            loading="lazy"
-            referrerPolicy="no-referrer"
-          />
-        ) : activeUrl && !imageError ? (
+        {activeUrl && !imageError ? (
           <img
             src={activeUrl}
-            alt={`${camera.name} camera feed`}
+            alt={showingLiveStream ? `${camera.name} live camera feed` : `${camera.name} camera preview`}
             className={`object-contain bg-black ${mediaClassName}`}
             loading="lazy"
             onError={() => setFailedUrl(activeUrl ?? '')}
           />
         ) : unsupportedPreview ? (
-          <div className="absolute inset-0 flex flex-col items-center justify-center text-pf-text-tertiary p-4">
+          <div role="status" aria-live="polite" className="absolute inset-0 flex flex-col items-center justify-center text-pf-text-tertiary p-4">
             <CameraIcon className="w-12 h-12 mb-2 opacity-30" />
             <span className="text-center text-sm font-medium text-pf-text-secondary">
               No live preview available
@@ -318,11 +318,11 @@ function CameraViewCard({ camera, canManage, onEdit, onDelete }: CameraViewCardP
             </span>
           </div>
         ) : (
-          <div className="absolute inset-0 flex flex-col items-center justify-center text-pf-text-tertiary p-4">
+          <div role="status" aria-live="polite" className="absolute inset-0 flex flex-col items-center justify-center text-pf-text-tertiary p-4">
             <CameraIcon className="w-12 h-12 mb-2 opacity-30" />
             <span className="text-center text-sm font-medium text-pf-text-secondary">
               {cameraAttention?.title
-                ?? (cameraMode === 'snapshot' ? 'Snapshot preview unavailable' : 'Camera unavailable')}
+                ?? (streamUnsupported ? 'Live preview unsupported; showing snapshot when available' : streamFailed ? 'Live stream unavailable; reconnecting' : cameraMode === 'snapshot' ? 'Snapshot preview unavailable' : 'Connecting to camera')}
             </span>
             {cameraAttention?.issue && (
               <span className="mt-1 max-w-xs text-center text-xs text-pf-text-tertiary">

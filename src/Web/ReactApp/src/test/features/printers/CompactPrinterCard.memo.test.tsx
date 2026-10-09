@@ -21,7 +21,7 @@ const queueSummaryFromFleetMock = vi.hoisted(() =>
 );
 const failureDetectionPollingEnabledMock = vi.hoisted(() => vi.fn(() => false));
 const usePrinterFailureDetectionStatusMock = vi.hoisted(() =>
-  vi.fn(() => ({ printerStatus: undefined, data: undefined, isLoading: false }))
+  vi.fn(() => ({ printerStatus: undefined as { state?: string; printerName?: string } | undefined, data: undefined, isLoading: false }))
 );
 const taggingModalRenderMock = vi.hoisted(() => vi.fn());
 
@@ -97,7 +97,10 @@ vi.mock('@/features/printers/components/FailureDetectionMonitoringBadge', () => 
 }));
 
 vi.mock('@/features/printers/components/FailureDetectionMonitoringSummary', () => ({
-  FailureDetectionMonitoringSummary: () => null,
+  FailureDetectionMonitoringSummary: ({ enabled, status, onReview }: { enabled?: boolean; status?: { state?: string }; onReview?: () => void }) =>
+    enabled && ['misconfigured', 'error'].includes(status?.state ?? '') && onReview ? (
+      <button type="button" onClick={onReview} aria-label="Review failure detection for Printer 1">Review</button>
+    ) : null,
 }));
 
 vi.mock('@/features/printers/components/OfflineTroubleshootingGuide', () => ({
@@ -314,6 +317,40 @@ describe('CompactPrinterCard memoization', () => {
 
     expect(screen.getByRole('link', { name: /open in browser for printer printer 1 in new tab/i }))
       .toHaveAttribute('href', 'http://printer-1.local');
+  });
+
+  it('routes the compact Review action to printer setup when failure detection is misconfigured', async () => {
+    const user = userEvent.setup();
+    const printer = createPrinter({ state: 'Printing', obicoEnabled: true });
+    const onEdit = vi.fn();
+    const onExpand = vi.fn();
+    usePrinterFailureDetectionStatusMock.mockReturnValue({
+      printerStatus: { state: 'misconfigured', printerName: printer.name },
+      data: undefined,
+      isLoading: false,
+    });
+
+    render(<CompactPrinterCard printer={printer} onEdit={onEdit} onExpand={onExpand} />);
+    await user.click(screen.getByRole('button', { name: 'Review failure detection for Printer 1' }));
+    expect(onEdit).toHaveBeenCalledWith(printer);
+    expect(onExpand).not.toHaveBeenCalled();
+  });
+
+  it('routes the compact Review action to printer details for a camera review', async () => {
+    const user = userEvent.setup();
+    const printer = createPrinter({ state: 'Printing', obicoEnabled: true });
+    const onEdit = vi.fn();
+    const onExpand = vi.fn();
+    usePrinterFailureDetectionStatusMock.mockReturnValue({
+      printerStatus: { state: 'error', printerName: printer.name },
+      data: undefined,
+      isLoading: false,
+    });
+
+    render(<CompactPrinterCard printer={printer} onEdit={onEdit} onExpand={onExpand} />);
+    await user.click(screen.getByRole('button', { name: 'Review failure detection for Printer 1' }));
+    expect(onExpand).toHaveBeenCalledWith(printer.id);
+    expect(onEdit).not.toHaveBeenCalled();
   });
 
   it('keeps the Open details sidebar action in compact mode', async () => {

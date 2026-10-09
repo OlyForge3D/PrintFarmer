@@ -108,7 +108,7 @@ describe('PrinterCameraPreview', () => {
     expect(stream).toHaveAttribute('src', 'http://printer.local/webcam/?action=stream');
     expect(getPrinterSnapshotMock).not.toHaveBeenCalled();
   });
-  it('falls back to an iframe when the live stream cannot be embedded as an image', () => {
+  it('shows an accessible fallback when the live image stream cannot be embedded', () => {
     render(
       <PrinterCameraPreview
         printerId="printer-iframe"
@@ -120,8 +120,8 @@ describe('PrinterCameraPreview', () => {
 
     fireEvent.error(screen.getByAltText('Printer Fallback live camera feed'));
 
-    const iframe = screen.getByTitle('Printer Fallback live camera feed');
-    expect(iframe.tagName).toBe('IFRAME');
+    expect(screen.queryByTitle('Printer Fallback live camera feed')).toBeNull();
+    expect(screen.getAllByText('Live stream unavailable').length).toBeGreaterThan(0);
   });
 
   it('polls the printer snapshot endpoint for snapshot-only cameras without using the stream URL', async () => {
@@ -143,7 +143,7 @@ describe('PrinterCameraPreview', () => {
     setPreviewIntersecting(true);
 
     await waitFor(() => expect(getPrinterSnapshotMock).toHaveBeenCalledTimes(1));
-    expect(getPrinterSnapshotMock).toHaveBeenCalledWith('printer-u1');
+    expect(getPrinterSnapshotMock).toHaveBeenCalledWith('printer-u1', expect.any(AbortSignal));
     expect(screen.queryByAltText('Snapmaker U1 live camera feed')).toBeNull();
 
     const snapshot = await screen.findByAltText('Snapmaker U1 camera preview');

@@ -12,7 +12,9 @@ public record AuthenticationResult(
     string? Token = null,
     DateTime? ExpiresAt = null,
     Contracts.Auth.UserDto? User = null,
-    string? Error = null);
+    string? Error = null,
+    string? RefreshToken = null,
+    DateTime? RefreshTokenExpires = null);
 
 /// <summary>
 /// Protected resource entity (authorization domain object).

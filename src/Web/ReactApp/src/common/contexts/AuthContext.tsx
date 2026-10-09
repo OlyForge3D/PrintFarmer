@@ -5,8 +5,9 @@ import { loginWithPasskey as passkeyLogin } from '@/services/passkeyService';
 import { queryClient } from '@/services/queryClient';
 import { clearSensitiveUserQueries } from '@/common/auth/sensitiveQueryCache';
 import { resetAuthenticatedSignalRSession } from '@/common/auth/authenticatedSignalRSession';
-import { subscribeToAuthenticationExpiration } from '@/common/auth/authenticationExpiration';
+import { notifyAuthenticationExpired, subscribeToAuthenticationExpiration } from '@/common/auth/authenticationExpiration';
 import { AUTH_SESSION_ESTABLISHED_EVENT } from '@/services/authEvents';
+import { AUTH_REFRESH_TOKEN_KEY, AUTH_USER_ID_KEY, clearStoredAuthentication, scheduleProactiveRenewal, storeAuthenticationResult } from '@/common/auth/sessionTokens';
 import type { AuthContextType } from '@/contexts/AuthContextValue';
 
 // AuthContextType now in separate file (AuthContextValue.ts) for faster refresh friendliness
@@ -24,6 +25,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const authTransitionGeneration = useRef(0);
+  const userIdRef = useRef<string | null>(null);
+  userIdRef.current = user?.id ?? null;
 
   const isAuthenticated = user !== null;
 
@@ -49,6 +52,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         const userData = await getCurrentUser();
         if (isCurrentToken()) {
           setUser(userData);
+          if (!localStorage.getItem(AUTH_USER_ID_KEY)) localStorage.setItem(AUTH_USER_ID_KEY, userData.id);
           setError(null);
         }
       } catch (err) {
@@ -64,6 +68,19 @@ export function AuthProvider({ children }: AuthProviderProps) {
   }, []);
 
   useEffect(() => {
+    if (!isAuthenticated) return;
+    return scheduleProactiveRenewal(() => {
+      clearStoredAuthentication();
+      void resetAuthenticatedSignalRSession().finally(() => {
+        notifyAuthenticationExpired();
+        if (window.location.pathname !== '/login' && window.location.pathname !== '/register') {
+          window.location.href = '/login';
+        }
+      });
+    });
+  }, [isAuthenticated]);
+
+  useEffect(() => {
     let disposed = false;
     const handleAuthTokenChange = (event: StorageEvent) => {
       if (event.key !== 'auth-token' ||
@@ -73,6 +90,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
 
       const expectedToken = event.newValue;
+      const storedUserId = localStorage.getItem(AUTH_USER_ID_KEY);
+      if (expectedToken && storedUserId && storedUserId === userIdRef.current) {
+        void resetAuthenticatedSignalRSession().catch(err => console.error('Failed to refresh SignalR token session:', err));
+        return;
+      }
       const transitionGeneration = ++authTransitionGeneration.current;
       const ownsTransition = () =>
         !disposed && authTransitionGeneration.current === transitionGeneration;
@@ -145,7 +167,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
           return false;
         }
 
-        localStorage.setItem('auth-token', result.token);
+        storeAuthenticationResult(result);
         // Purge any previous identity's sensitive cache before the
         // authenticated UI renders for this user (#762).
         await clearSensitiveUserQueries(queryClient);
@@ -195,7 +217,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
           return false;
         }
 
-        localStorage.setItem('auth-token', result.token);
+        storeAuthenticationResult(result);
         // Purge any previous identity's sensitive cache before the
         // authenticated UI renders for this user (#762).
         await clearSensitiveUserQueries(queryClient);
@@ -239,7 +261,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
           return false;
         }
 
-        localStorage.setItem('auth-token', result.token);
+        storeAuthenticationResult(result);
         // Purge any previous identity's sensitive cache before the
         // authenticated UI renders for this user (#762).
         await clearSensitiveUserQueries(queryClient);
@@ -278,7 +300,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         return;
       }
 
-      await authLogout();
+      await authLogout(localStorage.getItem(AUTH_REFRESH_TOKEN_KEY) ?? undefined);
     } catch (err) {
       console.error('Logout error:', err);
     } finally {
@@ -286,7 +308,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         generation === authTransitionGeneration.current
         && localStorage.getItem('auth-token') === tokenAtStart
       ) {
-        localStorage.removeItem('auth-token');
+        clearStoredAuthentication();
         setUser(null);
         setError(null);
         try {

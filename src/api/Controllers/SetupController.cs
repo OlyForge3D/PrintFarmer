@@ -1,4 +1,5 @@
 ﻿using Farm.Infrastructure;
+using Farm.Infrastructure.Services.Authentication;
 using Farm.Infrastructure.Services.Setup;
 using Farm.Infrastructure.Settings;
 using Microsoft.AspNetCore.Authorization;
@@ -76,11 +77,13 @@ public class SetupController(ISetupService setupService) : ControllerBase
     /// This endpoint is only available when no admin users exist.
     /// </summary>
     /// <param name="request">The request containing the initial admin user details.</param>
+    /// <param name="refreshTokenService">Issues the refresh token for the new admin's session.</param>
     /// <param name="ct">Cancellation token to cancel the operation.</param>
     [HttpPost("initial-admin")]
     [AllowAnonymous] // Public because this bootstrap action creates the installation's first authenticated account.
     public async Task<ActionResult<AuthenticationResult>> CreateInitialAdminAsync(
         [FromBody] CreateInitialAdminRequest request,
+        [FromServices] IRefreshTokenService refreshTokenService,
         CancellationToken ct)
     {
         AuthenticationResult result = await _setupService.CreateInitialAdminAsync(request, ct);
@@ -97,6 +100,15 @@ public class SetupController(ISetupService setupService) : ControllerBase
             return result.Error?.Contains("not found in database") == true
                 ? StatusCode(StatusCodes.Status500InternalServerError, result)
                 : BadRequest(result);
+        }
+
+        if (result.User is not null)
+        {
+            (string refreshToken, DateTime refreshTokenExpires) = await refreshTokenService.CreateAsync(
+                result.User.Id,
+                HttpContext?.Connection.RemoteIpAddress?.ToString(),
+                ct);
+            result = result with { RefreshToken = refreshToken, RefreshTokenExpires = refreshTokenExpires };
         }
 
         return Ok(result);

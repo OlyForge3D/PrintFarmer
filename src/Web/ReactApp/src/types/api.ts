@@ -2332,7 +2332,10 @@ export interface RegisterRequest {
 export interface AuthenticationResult {
   success: boolean;
   token?: string;
-  expiresAt?: Date;
+  expires?: string;
+  refreshToken?: string;
+  refreshTokenExpires?: string;
+  expiresAt?: string;
   user?: UserDto;
   error?: string;
 }
