@@ -196,14 +196,14 @@
         "path": ".github/skills/secret-handling/SKILL.md",
         "pattern": "-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----",
         "matchSha256": "3021d90eb9437b2d8f30e8363695c4418b5e5f1870801b5c317e9398ee0f572d",
-        "contentSha256": "b9222aa132746bb312ac06b7060e3893c6b2f0126f2e33753037bd98c0c6b47b",
+        "contentSha256": "b59ecbc69e0e5d295f0dcf6a90cd555e86c244eaacef786a753fca0e78ea8765",
         "reason": "Private-key marker documented without key material in secret-handling guidance."
       },
       {
         "path": ".github/skills/secret-handling/SKILL.md",
         "pattern": "-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----",
         "matchSha256": "8bcac7908eb950419537b91e19adc83ce2c9cbfdacf4f81157fdadfec11f7017",
-        "contentSha256": "b9222aa132746bb312ac06b7060e3893c6b2f0126f2e33753037bd98c0c6b47b",
+        "contentSha256": "b59ecbc69e0e5d295f0dcf6a90cd555e86c244eaacef786a753fca0e78ea8765",
         "reason": "RSA private-key marker documented without key material in secret-handling guidance."
       },
       {
