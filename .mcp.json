@@ -23,6 +23,9 @@
       "args": [
         "state-mcp"
       ],
+      "env": {
+        "SQUAD_TEAM_ROOT": "${workspaceFolder}"
+      },
       "tools": [
         "*"
       ]
