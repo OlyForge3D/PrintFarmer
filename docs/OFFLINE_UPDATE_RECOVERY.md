@@ -17,7 +17,7 @@ matrix command:
 scripts/ci/recovery-matrix/run-cell.sh -- ./run-recovery-cell.sh c2
 ```
 
-The entrypoint atomically creates the named Docker-volume lock
+The entrypoint atomically creates the named internal Docker-network lock
 `printfarmer-recovery-matrix-daemon-lock`, labels it with the run owner, and
 holds it until the command exits. A competing run fails before it creates
 containers, networks, or images, with exit status `75` and the current lock

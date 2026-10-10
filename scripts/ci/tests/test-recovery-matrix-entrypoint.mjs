@@ -21,7 +21,7 @@ function createHarness() {
 set -euo pipefail
 printf '%s\n' "$*" >> "${toBashPath(log)}"
 case "\${1:-}" in
-  volume)
+  network)
     case "\${2:-}" in
       create)
         if [[ "\${PF_TEST_LOCK_HELD:-0}" == 1 ]]; then exit 1; fi
@@ -36,7 +36,7 @@ case "\${1:-}" in
       rm) ;;
     esac
     ;;
-  ps|network) ;;
+  ps|volume) ;;
 esac
 `);
   return {
@@ -46,6 +46,10 @@ esac
     ran,
     cleanup: () => rmSync(root, { recursive: true, force: true }),
   };
+}
+
+function hasBash() {
+  return spawnSync('bash', ['-lc', 'true'], { stdio: 'ignore' }).status === 0;
 }
 
 function writeExecutable(file, content) {
@@ -66,28 +70,36 @@ function run(harness, args, env = {}) {
   });
 }
 
-test('run-cell.sh serializes a command and releases only its owned lock', () => {
+test('run-cell.sh serializes a command and releases only its owned lock', { skip: !hasBash() }, () => {
   const harness = createHarness();
   try {
     const result = run(harness, ['--', 'bash', '-c', `printf '%s' ok > '${toBashPath(harness.ran)}'`]);
     assert.equal(result.status, 0, `${result.stderr}\n${result.stdout}`);
     assert.equal(readFileSync(harness.ran, 'utf8'), 'ok');
     const log = readFileSync(harness.log, 'utf8');
-    assert.match(log, /volume create/);
-    assert.match(log, /volume rm/);
+    assert.match(log, /network create/);
+    assert.match(log, /network rm/);
   } finally {
     harness.cleanup();
   }
 });
 
-test('run-cell.sh fails fast with status 75 when another run owns the daemon', () => {
+test('run-cell.sh fails fast with status 75 when another run owns the daemon', { skip: !hasBash() }, () => {
   const harness = createHarness();
   try {
     const result = run(harness, ['--', 'bash', '-c', 'exit 99'], { PF_TEST_LOCK_HELD: '1' });
     assert.equal(result.status, 75, `${result.stderr}\n${result.stdout}`);
     assert.match(result.stderr, /exclusive Docker daemon.*fixture-run-123/);
-    assert.doesNotMatch(readFileSync(harness.log, 'utf8'), /volume rm/);
+    assert.doesNotMatch(readFileSync(harness.log, 'utf8'), /network rm/);
   } finally {
     harness.cleanup();
   }
+});
+
+test('run-cell.sh remains directly executable', () => {
+  const result = spawnSync('git', [
+    'ls-files', '--stage', '--', 'scripts/ci/recovery-matrix/run-cell.sh',
+  ], { cwd: repoRoot, encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^100755 /m);
 });

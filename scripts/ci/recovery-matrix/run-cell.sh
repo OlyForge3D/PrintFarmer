@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Run a recovery-matrix command while holding an exclusive Docker-daemon lock.
 #
-# The lock is a named Docker volume rather than a container, so acquiring it
-# does not pull or depend on an image that the matrix is supposed to test.
+# The lock is a named internal Docker network, so acquiring it does not pull
+# or depend on an image that the matrix is supposed to test.
 set -euo pipefail
 
 LOCK_NAME="${PF_RECOVERY_MATRIX_LOCK_NAME:-printfarmer-recovery-matrix-daemon-lock}"
@@ -36,14 +36,14 @@ resources_for_owner() {
     docker ps -aq --filter "label=printfarmer.recovery-matrix.run=$owner" \
       --format 'container {{.ID}} {{.Names}}'
     docker volume ls --filter "label=printfarmer.recovery-matrix.run=$owner" \
-      --format 'volume {{.Name}}' | awk -v lock="$LOCK_NAME" '$2 != lock'
+      --format 'volume {{.Name}}'
     docker network ls --filter "label=printfarmer.recovery-matrix.run=$owner" \
-      --format 'network {{.ID}} {{.Name}}'
+      --format 'network {{.ID}} {{.Name}}' | awk -v lock="$LOCK_NAME" '$3 != lock'
   } | sed '/^$/d'
 }
 
 lock_owner() {
-  docker volume inspect --format "{{index .Labels \"$LOCK_LABEL_KEY\"}}" \
+  docker network inspect --format "{{index .Labels \"$LOCK_LABEL_KEY\"}}" \
     "$LOCK_NAME" 2>/dev/null || true
 }
 
@@ -60,14 +60,15 @@ release_stale_lock() {
     return 1
   fi
   echo "Removing recovery matrix daemon lock $LOCK_NAME owned by $owner." >&2
-  docker volume rm "$LOCK_NAME" >/dev/null
+  docker network rm "$LOCK_NAME" >/dev/null
 }
 
 acquire_lock() {
   local create_status=0 owner
-  if docker volume create --name "$LOCK_NAME" \
+  if docker network create --internal \
       --label "$LOCK_LABEL_KEY=$RUN_ID" \
-      --label "printfarmer.recovery-matrix.run=$RUN_ID" >/dev/null 2>&1; then
+      --label "printfarmer.recovery-matrix.run=$RUN_ID" \
+      "$LOCK_NAME" >/dev/null 2>&1; then
     LOCK_ACQUIRED=1
     return
   else
@@ -79,7 +80,7 @@ acquire_lock() {
     echo "Recovery matrix requires an exclusive Docker daemon; another run owns $LOCK_NAME ($owner). Refusing to start so canonical fixture image tags remain stable." >&2
     exit 75
   fi
-  echo "Failed to acquire the recovery-matrix Docker daemon lock $LOCK_NAME (docker volume create exited $create_status)." >&2
+  echo "Failed to acquire the recovery-matrix Docker daemon lock $LOCK_NAME (docker network create exited $create_status)." >&2
   exit 1
 }
 
@@ -88,7 +89,7 @@ cleanup() {
     return
   fi
   if [[ "$(lock_owner)" == "$RUN_ID" ]]; then
-    docker volume rm "$LOCK_NAME" >/dev/null 2>&1 || true
+    docker network rm "$LOCK_NAME" >/dev/null 2>&1 || true
   else
     echo "Recovery matrix daemon lock ownership changed; leaving $LOCK_NAME untouched" >&2
   fi
