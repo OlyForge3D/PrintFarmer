@@ -59,7 +59,7 @@ export function CameraModeControl({
         {streamIssue && (
           <span role="status" className="text-xs text-pf-error">
             {streamIssue === 'unsupported' ? 'Live stream unsupported' : 'Live stream unavailable'}
-            {hasSnapshot ? ' · showing snapshot' : ''}
+            {' · showing snapshot'}
           </span>
         )}
       </div>
