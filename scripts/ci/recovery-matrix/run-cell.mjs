@@ -1954,57 +1954,6 @@ function createPostgresDatabaseIfMissing(deploymentRoot, env, databaseName) {
   }
 }
 
-function dockerContainerIp(containerName) {
-  const json = execFileSync('/usr/bin/docker', ['inspect', containerName, '--format', '{{json .NetworkSettings.Networks}}'], { encoding: 'utf8' });
-  const networks = JSON.parse(json);
-  for (const network of Object.values(networks)) {
-    if (network?.IPAddress) {
-      return network.IPAddress;
-    }
-  }
-
-  throw new Error(`database_container_ip_unavailable:${containerName}`);
-}
-
-function writePostgresToolShims(runRoot, databaseContainer) {
-  const pgDump = join(runRoot, 'pg_dump');
-  const pgRestore = join(runRoot, 'pg_restore');
-  writeFileSync(pgDump, `#!/usr/bin/env bash
-set -euo pipefail
-out=""
-args=()
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    -f)
-      out="$2"
-      shift 2
-      ;;
-    *)
-      args+=("$1")
-      shift
-      ;;
-  esac
-done
-if [[ -z "$out" ]]; then
-  echo "pg_dump shim requires -f <output>" >&2
-  exit 64
-fi
-mkdir -p "$(dirname "$out")"
-/usr/bin/docker exec -e "PGPASSWORD=\${PGPASSWORD:-}" ${databaseContainer} pg_dump "\${args[@]}" > "$out"
-`);
-  chmodSync(pgDump, 0o755);
-  writeFileSync(pgRestore, `#!/usr/bin/env bash
-set -euo pipefail
-args=("$@")
-last_index=$((\${#args[@]} - 1))
-input="\${args[$last_index]}"
-unset "args[$last_index]"
-/usr/bin/docker exec -i -e "PGPASSWORD=\${PGPASSWORD:-}" ${databaseContainer} pg_restore "\${args[@]}" < "$input"
-`);
-  chmodSync(pgRestore, 0o755);
-  return { pgDump, pgRestore };
-}
-
 function stateContinuitySnapshot({ env, deploymentRoot, hostStateRoot, hostContainer, provider }) {
   const migrationHeads = databaseQuery(deploymentRoot, env, provider, provider.migrationHeadsSql)
     .split(/\r?\n/)
