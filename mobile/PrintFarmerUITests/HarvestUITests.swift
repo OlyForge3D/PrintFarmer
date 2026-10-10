@@ -135,22 +135,29 @@ final class HarvestUITests: QueueUITestBase {
 
         let priorityBoundaryHandle = reorderHandle(for: "Queue priority boundary.gcode")
         let printerBoundaryHandle = reorderHandle(for: "Queue printer boundary.gcode")
-        for _ in 0..<3 where !priorityBoundaryHandle.exists || !printerBoundaryHandle.exists {
-            app.collectionViews["jobList.combined.list"].swipeUp()
+        let priorityBoundary = app.buttons["job.row.32340000-0000-0000-0000-000000000005"]
+        let printerBoundary = app.buttons["job.row.32340000-0000-0000-0000-000000000006"]
+        for _ in 0..<3 where !priorityBoundary.isHittable || !printerBoundary.isHittable {
+            app.swipeUp()
         }
-        XCTAssertTrue(app.buttons["job.row.32340000-0000-0000-0000-000000000005"].exists)
-        XCTAssertTrue(app.buttons["job.row.32340000-0000-0000-0000-000000000006"].exists)
+        XCTAssertTrue(priorityBoundary.exists)
+        XCTAssertTrue(printerBoundary.exists)
+        XCTAssertTrue(
+            priorityBoundary.isHittable,
+            "The priority-boundary row must be visible before checking reorder eligibility."
+        )
+        XCTAssertTrue(
+            printerBoundary.isHittable,
+            "The printer-boundary row must be visible before checking reorder eligibility."
+        )
         XCTAssertFalse(priorityBoundaryHandle.exists,
                        "A single-row priority group must not expose a reorder handle.")
         XCTAssertFalse(printerBoundaryHandle.exists,
                        "A single-row printer group must not expose a reorder handle.")
 
-        let printing = app.buttons.matching(
-            NSPredicate(format: "label CONTAINS %@", "Queue pinned printing.gcode")
-        ).firstMatch
-        let queueList = app.collectionViews["jobList.combined.list"]
+        let printing = app.buttons["job.row.32340000-0000-0000-0000-000000000001"]
         for _ in 0..<8 where !printing.isHittable {
-            queueList.swipeDown()
+            app.swipeDown()
         }
         XCTAssertTrue(printing.waitForExistence(timeout: 5))
         XCTAssertTrue(printing.isHittable, "The Printing row must remain reachable in the combined Queue.")
@@ -188,7 +195,6 @@ final class HarvestUITests: QueueUITestBase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        openQueueDestination(file: file, line: line)
         openJobHistoryMenuAndSelect(file: file, line: line)
 
         XCTAssertTrue(
@@ -196,33 +202,6 @@ final class HarvestUITests: QueueUITestBase {
             "Completed jobs must be reachable from Job History",
             file: file,
             line: line
-        )
-    }
-
-    private func openJobHistoryMenuAndSelect(
-        file: StaticString = #filePath,
-        line: UInt = #line
-    ) {
-        let queueList = app.collectionViews["jobList.combined.list"]
-        let historyButton = app.buttons["jobList.history.open"]
-        for _ in 0..<8 where !historyButton.isHittable {
-            queueList.swipeUp()
-        }
-        XCTAssertTrue(
-            historyButton.waitForExistence(timeout: 8),
-            "Queue must expose the separate Job History destination",
-            file: file,
-            line: line
-        )
-        historyButton.tap()
-        let selectHistory = app.buttons["jobList.history.select"]
-        XCTAssertTrue(selectHistory.waitForExistence(timeout: 5), file: file, line: line)
-        selectHistory.tap()
-        XCTAssertTrue(
-            app.descendants(matching: .any)["jobList.history"]
-                .waitForExistence(timeout: 8),
-            "Job History sheet must open",
-            file: file, line: line
         )
     }
 

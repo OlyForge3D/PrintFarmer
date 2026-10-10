@@ -50,12 +50,7 @@ final class JobDetailIPadNavigationUITests: QueueUITestBase {
     func testIPadJobHistoryCompletedJobPresentsHarvestActionInForeground() throws {
         try requireRegularWidthShell()
 
-        openQueueDestination()
-        let historyButton = app.buttons["jobList.history.open"]
-        XCTAssertTrue(historyButton.waitForExistence(timeout: 8))
-        historyButton.tap()
-
-
+        openJobHistoryMenuAndSelect()
         let jobRow = app.buttons[completedJobIdentifier]
         XCTAssertTrue(
             jobRow.waitForExistence(timeout: 8),
@@ -77,11 +72,7 @@ final class JobDetailIPadNavigationUITests: QueueUITestBase {
     func testIPadJobHistoryHarvestActionPresentsHarvestSheet() throws {
         try requireRegularWidthShell()
 
-        openQueueDestination()
-        let historyButton = app.buttons["jobList.history.open"]
-        XCTAssertTrue(historyButton.waitForExistence(timeout: 8))
-        historyButton.tap()
-
+        openJobHistoryMenuAndSelect()
         let jobRow = app.buttons[completedJobIdentifier]
         XCTAssertTrue(jobRow.waitForExistence(timeout: 8),
                       "The seeded completed job must be reachable in the iPad Job History sheet")
