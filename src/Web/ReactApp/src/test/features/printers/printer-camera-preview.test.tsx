@@ -89,6 +89,8 @@ describe('PrinterCameraPreview', () => {
 
     const stream = screen.getByAltText('Printer One live camera feed');
     expect(stream.tagName).toBe('IMG');
+    expect(screen.getByRole('button', { name: 'Snapshot mode' }).textContent).toBe('');
+    expect(screen.getByRole('button', { name: 'Stream mode' }).textContent).toBe('');
   });
 
   it('uses the MJPEG stream without polling snapshots when the contract supports streaming', () => {
@@ -118,6 +120,7 @@ describe('PrinterCameraPreview', () => {
       />
     );
 
+    expect(screen.getByText('Live stream only')).toHaveClass('sr-only');
     fireEvent.error(screen.getByAltText('Printer Fallback live camera feed'));
 
     expect(screen.queryByTitle('Printer Fallback live camera feed')).toBeNull();

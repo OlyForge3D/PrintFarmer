@@ -37,24 +37,22 @@ export function CameraModeControl({
             size="sm"
             onClick={() => onModeChange('snapshot')}
             aria-pressed={displayedMode === 'snapshot'}
-            className="h-8 gap-1.5 px-2"
+            className="h-8 w-8 p-0"
             aria-label="Snapshot mode"
-            iconLeft={<ImageIcon className="w-4 h-4" />}
-          >
-            Snapshot
-          </Button>
+            title="Snapshot mode"
+            iconCenter={<ImageIcon className="w-4 h-4" />}
+          />
           <Button
             type="button"
             variant={displayedMode === 'stream' ? 'primary' : 'ghost'}
             size="sm"
             onClick={() => onModeChange('stream')}
             aria-pressed={displayedMode === 'stream'}
-            className="h-8 gap-1.5 px-2"
+            className="h-8 w-8 p-0"
             aria-label="Stream mode"
-            iconLeft={<VideoIcon className="w-4 h-4" />}
-          >
-            Stream
-          </Button>
+            title="Stream mode"
+            iconCenter={<VideoIcon className="w-4 h-4" />}
+          />
         </div>
         {streamIssue && (
           <span role="status" className="text-xs text-pf-error">
@@ -84,7 +82,9 @@ export function CameraModeControl({
     <span
       role="status"
       aria-label={`${cameraName}: ${modeLabel}`}
-      className="inline-flex items-center rounded-xs bg-pf-bg-2 px-2.5 py-1 text-[11px] text-pf-text-secondary"
+      className={streamIssue || streamUnavailable || (!hasStream && !hasSnapshot)
+        ? 'text-xs text-pf-error'
+        : 'sr-only'}
     >
       {modeLabel}
     </span>

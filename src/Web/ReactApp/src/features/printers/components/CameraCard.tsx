@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { RotateCw } from 'lucide-react';
-import { CameraHealthStatus } from '@/types/api';
 import type { Printer } from '@/types/api';
 import { CameraIcon, ExternalLinkIcon, ImageIcon, VideoIcon } from '@/common/components/icons/MdiIcons';
 import { Button, Badge } from '@/common/components/ui';
 import { CameraModeControl } from '@/features/cameras/components/CameraModeControl';
+import { CameraHealthBadge } from '@/features/cameras/components/CameraHealthBadge';
 import { usePrinterCameras } from '@/features/cameras/hooks/usePrinterCameras';
 import {
   getCameraMediaTransformClassName,
@@ -109,16 +109,6 @@ export function CameraCard({
   const mediaClassName = getCameraMediaTransformClassName(rotation);
   const externalUrl = activeUrl && !getAuthenticatedCameraProxyRoute(activeUrl) ? activeUrl : null;
 
-  // Health status dot color
-  const getHealthDotColor = (health: CameraHealthStatus) => {
-    switch (health) {
-      case CameraHealthStatus.Healthy: return 'bg-pf-success';
-      case CameraHealthStatus.Degraded: return 'bg-pf-warning';
-      case CameraHealthStatus.Unhealthy: return 'bg-pf-error';
-      default: return 'bg-pf-text-tertiary';
-    }
-  };
-
   return (
     <div className="rounded-lg shadow-lg backdrop-blur-xl bg-pf-bg-0/5 border border-white/10 hover:border-white/20 transition-colors overflow-hidden flex flex-col min-h-0">
       {/* Camera feed - main content */}
@@ -178,13 +168,10 @@ export function CameraCard({
             </Badge>
           )}
           {primaryCamera && (
-            <span className="inline-flex items-center gap-1.5 rounded-xs bg-pf-bg-2 px-2 py-1 text-[11px] text-pf-text-secondary">
-              <span
-                className={`h-2 w-2 rounded-full ${getHealthDotColor(primaryCamera.healthStatus)}`}
-                title={`Periodic camera probe health: ${primaryCamera.healthStatus}`}
-              />
-              <span>Probe {primaryCamera.healthStatus}</span>
-            </span>
+            <CameraHealthBadge
+              healthStatus={primaryCamera.healthStatus}
+              previewFailed={imageError || snapshotFailed || streamUnsupported || streamFailed || streamImageFailed}
+            />
           )}
           {cameraCount > 1 && (
             <Badge variant="default" size="sm">

@@ -12,16 +12,19 @@ describe('CameraHealthBadge', () => {
       />
     );
 
-    expect(screen.getByText('Preview failed · probe healthy')).toBeInTheDocument();
+    expect(screen.getByText('Preview failed')).not.toHaveClass('sr-only');
+    expect(screen.getByRole('status', { name: 'Preview failed · probe healthy' })).toBeInTheDocument();
     expect(screen.getByTitle(
-      "Camera probe health is checked periodically by the backend; preview status reflects this browser's image load."
-    )).toContainElement(screen.getByText('Preview failed · probe healthy'));
+      "Probe healthy. Camera probe health is checked periodically by the backend; preview status reflects this browser's image load."
+    )).toContainElement(screen.getByText('Preview failed'));
     expect(screen.queryByText('Healthy')).not.toBeInTheDocument();
   });
 
-  it('labels the healthy state as a periodic probe when the preview is not failed', () => {
-    render(<CameraHealthBadge healthStatus={CameraHealthStatus.Healthy} />);
+  it.each(Object.values(CameraHealthStatus))('keeps %s probe metadata in an accessible compact icon', (healthStatus) => {
+    render(<CameraHealthBadge healthStatus={healthStatus} />);
 
-    expect(screen.getByText('Probe healthy')).toBeInTheDocument();
+    const label = `Probe ${healthStatus.toLowerCase()}`;
+    expect(screen.getByText(label)).toHaveClass('sr-only');
+    expect(screen.getByRole('status', { name: label }).querySelector('svg')).not.toBeNull();
   });
 });

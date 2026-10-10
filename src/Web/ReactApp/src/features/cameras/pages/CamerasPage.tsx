@@ -7,7 +7,7 @@ import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal'
 import { Alert, Button, Badge } from '@/common/components/ui';
 import { CameraIcon, DeleteIcon, EditIcon, ExternalLinkIcon, SettingsIcon } from '@/common/components/icons/MdiIcons';
 import { cameraService } from '@/services/cameraService';
-import type { DisplayCameraDto, CameraSource, CameraType } from '@/types/api';
+import type { DisplayCameraDto, CameraType } from '@/types/api';
 import { useSearchParams } from 'react-router';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { CameraManagementPanel } from '@/features/cameras/components/CameraManagementPanel';
@@ -207,15 +207,6 @@ interface CameraViewCardProps {
   onDelete: (camera: DisplayCameraDto) => void;
 }
 
-const sourceLabels: Record<CameraSource, string> = {
-  Standalone: 'Standalone',
-  Moonraker: 'Moonraker',
-  PrusaLink: 'PrusaLink',
-  OctoPrint: 'OctoPrint',
-  SDCP: 'SDCP',
-  FlashForge: 'FlashForge',
-};
-
 const cameraTypeLabels: Record<CameraType, string> = {
   General: 'General',
   Bed: 'Bed',
@@ -394,9 +385,6 @@ function CameraViewCard({ camera, canManage, onEdit, onDelete }: CameraViewCardP
             previewFailed={imageError || snapshotFailed || streamUnsupported || streamFailed || streamImageFailed}
             size="sm"
           />
-          <Badge variant="default" size="sm">
-            {sourceLabels[camera.source]}
-          </Badge>
           {camera.cameraType !== 'General' && (
             <Badge variant="default" size="sm">
               {cameraTypeLabels[camera.cameraType]}

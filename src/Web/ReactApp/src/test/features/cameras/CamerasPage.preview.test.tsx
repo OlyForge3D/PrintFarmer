@@ -102,7 +102,7 @@ describe('CamerasPage camera previews', () => {
     expect(screen.queryByRole('button', { name: 'Snapshot mode' })).not.toBeInTheDocument();
     expect(screen.queryByRole('img', { name: 'x400 Camera camera preview' })).not.toBeInTheDocument();
     expect(screen.queryByText(/showing snapshot/)).not.toBeInTheDocument();
-    expect(screen.getByText('Preview failed · probe healthy')).toBeInTheDocument();
+    expect(screen.getByText('Preview failed')).not.toHaveClass('sr-only');
   });
 
   it('loads a standalone protected snapshot as an authenticated blob and shows single-mode status', async () => {
@@ -112,6 +112,9 @@ describe('CamerasPage camera previews', () => {
     expect(apiMock.getSnapshotPreview).toHaveBeenCalledWith(snapshotUrl, expect.any(AbortSignal));
     expect(screen.getByRole('status', { name: 'x400 Camera: Snapshot only' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Stream mode' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Standalone')).not.toBeInTheDocument();
+    expect(screen.getByText('Probe healthy')).toHaveClass('sr-only');
+    expect(screen.getByText('Snapshot only')).toHaveClass('sr-only');
   });
 
   it('offers both mode buttons when both endpoints are configured', async () => {
@@ -127,8 +130,9 @@ describe('CamerasPage camera previews', () => {
     renderPage();
 
     expect(await screen.findByRole('group', { name: 'x400 Camera preview mode' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Snapshot mode' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Stream mode' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Snapshot mode' }).textContent).toBe('');
+    expect(screen.getByRole('button', { name: 'Stream mode' }).textContent).toBe('');
+    expect(screen.queryByText('Standalone')).not.toBeInTheDocument();
   });
 
   it('falls back to the snapshot when a selected stream is unsupported and reports the failed preview', async () => {
@@ -150,7 +154,7 @@ describe('CamerasPage camera previews', () => {
     expect(screen.getByRole('button', { name: 'Snapshot mode' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByRole('button', { name: 'Stream mode' })).toHaveAttribute('aria-pressed', 'false');
     expect(screen.getByText('Live stream unsupported · showing snapshot')).toBeInTheDocument();
-    expect(screen.getByText('Preview failed · probe healthy')).toBeInTheDocument();
+    expect(screen.getByText('Preview failed')).not.toHaveClass('sr-only');
   });
 
   it('does not fall back to an unauthenticated image request when proxy loading fails', async () => {
@@ -161,7 +165,7 @@ describe('CamerasPage camera previews', () => {
     expect(await screen.findByText('Snapshot preview failed')).toBeInTheDocument();
     expect(apiMock.getSnapshotPreview).toHaveBeenCalledWith(snapshotUrl, expect.any(AbortSignal));
     expect(screen.queryByRole('img', { name: 'x400 Camera camera preview' })).not.toBeInTheDocument();
-    expect(screen.getByText('Preview failed · probe healthy')).toBeInTheDocument();
+    expect(screen.getByText('Preview failed')).not.toHaveClass('sr-only');
     await waitFor(() => expect(screen.getByText('This card could not load the snapshot preview.')).toBeInTheDocument());
   });
 });

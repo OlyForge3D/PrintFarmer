@@ -58,7 +58,16 @@ describe('CameraCard preview fallback', () => {
     expect(screen.getByRole('button', { name: 'Snapshot mode' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByRole('button', { name: 'Stream mode' })).toHaveAttribute('aria-pressed', 'false');
     expect(screen.getAllByText('Live stream unavailable · showing snapshot')).toHaveLength(2);
-    expect(screen.getByText('Probe Healthy')).toBeInTheDocument();
+    expect(screen.getByText('Preview failed')).not.toHaveClass('sr-only');
+    expect(screen.getByRole('status', { name: 'Preview failed · probe healthy' })).toBeInTheDocument();
     expect(screen.queryByTitle('Live stream active')).not.toBeInTheDocument();
+  });
+
+  it('uses compact accessible icons without routine probe or capability chips', () => {
+    render(<CameraCard printer={printer} />);
+
+    expect(screen.getByRole('button', { name: 'Snapshot mode' }).textContent).toBe('');
+    expect(screen.getByRole('button', { name: 'Stream mode' }).textContent).toBe('');
+    expect(screen.getByText('Probe healthy')).toHaveClass('sr-only');
   });
 });
