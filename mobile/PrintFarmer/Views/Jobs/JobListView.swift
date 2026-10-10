@@ -62,6 +62,7 @@ struct JobListView: View {
             viewModel.setQueueWriteAuthorization(canWriteQueue)
             viewModel.startObservingNetworkPath()
             await viewModel.loadJobs()
+            queueEditMode = viewModel.keepsQueueEditingActive ? .active : .inactive
         }
         .task(id: activePrinterStatusRequestKey) {
             await refreshActivePrinterStatuses()
@@ -346,7 +347,10 @@ struct JobListView: View {
         .listRowSeparator(.hidden)
         .listRowInsets(EdgeInsets(top: 4, leading: 14, bottom: 4, trailing: 14))
         .contentMargins(.bottom, 112, for: .scrollContent)
-        .environment(\.editMode, $queueEditMode)
+        .environment(
+            \.editMode,
+            $queueEditMode
+        )
         .accessibilityIdentifier("jobList.combined.list")
     }
 
@@ -439,6 +443,7 @@ struct JobListView: View {
             .padding(.vertical, 2)
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier("job.row.\(item.job.jobUUID?.uuidString ?? "unknown")")
     }
 
     @ViewBuilder

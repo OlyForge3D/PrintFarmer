@@ -57,8 +57,8 @@ cat > "$MOCK_BIN/xcodebuild" <<'MOCK'
 #!/bin/bash
 set -euo pipefail
 printf 'Xcode %s\nBuild version %s\n' \
-  "${XCODE_VERSION_FIXTURE:-27.0}" \
-  "${XCODE_BUILD_FIXTURE:-27A266a}"
+  "${XCODE_VERSION_FIXTURE:-26.6}" \
+  "${XCODE_BUILD_FIXTURE:-17F113}"
 MOCK
 chmod +x "$MOCK_BIN/xcodebuild"
 
@@ -145,14 +145,15 @@ test_xcode_version_policy() {
   if output="$(
     env \
       PATH="$MOCK_BIN:$PATH" \
-      XCODE_VERSION_FIXTURE="26.6" \
+      XCODE_VERSION_FIXTURE="27.0" \
+      XCODE_BUILD_FIXTURE="27A266a" \
       SIMCTL_FIXTURE="$FIXTURE_MIXED" \
       "$RESOLVER" 2>&1
   )"; then
     fail "Expected an unsupported Xcode version to fail"
   fi
-  assert_contains "$output" "Xcode 27.0 build 27A266a is required to resolve iOS simulator destinations"
-  assert_contains "$output" "found 'Xcode 26.6"
+  assert_contains "$output" "Xcode 26.6 build 17F113 is required to resolve iOS simulator destinations"
+  assert_contains "$output" "found 'Xcode 27.0"
 }
 
 test_xcode_build_policy() {
@@ -160,15 +161,15 @@ test_xcode_build_policy() {
   if output="$(
     env \
       PATH="$MOCK_BIN:$PATH" \
-      XCODE_VERSION_FIXTURE="27.0" \
-      XCODE_BUILD_FIXTURE="27A266b" \
+      XCODE_VERSION_FIXTURE="26.6" \
+      XCODE_BUILD_FIXTURE="17F114" \
       SIMCTL_FIXTURE="$FIXTURE_MIXED" \
       "$RESOLVER" 2>&1
   )"; then
     fail "Expected an unsupported Xcode build to fail"
   fi
-  assert_contains "$output" "Xcode 27.0 build 27A266a is required"
-  assert_contains "$output" "Build version 27A266b"
+  assert_contains "$output" "Xcode 26.6 build 17F113 is required"
+  assert_contains "$output" "Build version 17F114"
 }
 
 test_explicit_ipad_with_quoted_names() {
@@ -348,6 +349,23 @@ PY
   assert_contains "$(cat "$TEMP_DIR/local.log")" "23F77"
 }
 
+test_shared_workflow_policy() {
+  python3 - "$REPO_ROOT" <<'PY'
+import pathlib
+import sys
+
+root = pathlib.Path(sys.argv[1])
+for name, count in [('ios-pr-ci', 3), ('ci', 1), ('testflight-beta', 1)]:
+    text = (root / f'.github/workflows/{name}.yml').read_text()
+    assert text.count('runs-on: macos-26') == count, name
+    assert text.count('XCODE_PATH="/Applications/Xcode_26.6.app"') == count, name
+    assert text.count('!= "Xcode 26.6"') == count, name
+    assert text.count('!= "17F113"') == count, name
+    assert 'xcode-27' not in text and '27A266a' not in text, name
+
+PY
+}
+
 test_default_iphone
 test_xcode_version_policy
 test_xcode_build_policy
@@ -355,5 +373,6 @@ test_explicit_ipad_with_quoted_names
 test_no_matching_family
 test_invalid_family_and_prefix
 test_runtime_policy
+test_shared_workflow_policy
 
 log_success "resolve-ios-simulator.sh tests passed"
