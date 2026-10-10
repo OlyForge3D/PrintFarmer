@@ -10,6 +10,7 @@ interface CameraHealthBadgeProps {
   lastHealthCheck?: string;
   showLastCheck?: boolean;
   size?: 'sm' | 'md';
+  details?: string;
 }
 
 const healthConfig: Record<CameraHealthStatus, { variant: 'default' | 'primary' | 'success' | 'warning' | 'error'; icon: React.ComponentType<{ className?: string }>; label: string }> = {
@@ -41,6 +42,7 @@ export function CameraHealthBadge({
   lastHealthCheck,
   showLastCheck = false,
   size = 'sm',
+  details,
 }: CameraHealthBadgeProps) {
   const config = healthConfig[healthStatus];
   const Icon = previewFailed ? AlertCircleIcon : config.icon;
@@ -62,7 +64,7 @@ export function CameraHealthBadge({
   return (
     <div
       className="inline-flex flex-col items-start gap-0.5"
-      title={`${probeLabel}. Camera probe health is checked periodically by the backend; preview status reflects this browser's image load.`}
+      title={`${previewFailed ? 'Preview failed. ' : ''}${probeLabel}. ${details ? `${details} ` : ''}Camera probe health is checked periodically by the backend; preview status reflects this browser's image load.`}
       role="status"
       aria-label={previewFailed ? `${label} · ${probeLabel.toLowerCase()}` : probeLabel}
     >
@@ -72,7 +74,7 @@ export function CameraHealthBadge({
         className="inline-flex items-center gap-1"
       >
         <span aria-hidden="true"><Icon className="w-3 h-3" /></span>
-        <span className={previewFailed ? undefined : 'sr-only'}>{label}</span>
+        <span className="sr-only">{label}</span>
       </Badge>
       {lastCheckText && (
         <span className="text-xs text-pf-text-tertiary">

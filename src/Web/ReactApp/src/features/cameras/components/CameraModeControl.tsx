@@ -29,6 +29,9 @@ export function CameraModeControl({
         <div
           role="group"
           aria-label={`${cameraName} preview mode`}
+          title={streamIssue
+            ? `${streamIssue === 'unsupported' ? 'Live stream unsupported' : 'Live stream unavailable'} · showing snapshot`
+            : undefined}
           className="flex gap-1 rounded-md border border-pf-border bg-pf-bg-2 p-1"
         >
           <Button
@@ -55,7 +58,11 @@ export function CameraModeControl({
           />
         </div>
         {streamIssue && (
-          <span role="status" className="text-xs text-pf-error">
+          <span
+            role="status"
+            aria-label={`${streamIssue === 'unsupported' ? 'Live stream unsupported' : 'Live stream unavailable'} · showing snapshot`}
+            className="sr-only"
+          >
             {streamIssue === 'unsupported' ? 'Live stream unsupported' : 'Live stream unavailable'}
             {' · showing snapshot'}
           </span>
@@ -82,9 +89,8 @@ export function CameraModeControl({
     <span
       role="status"
       aria-label={`${cameraName}: ${modeLabel}`}
-      className={streamIssue || streamUnavailable || (!hasStream && !hasSnapshot)
-        ? 'text-xs text-pf-error'
-        : 'sr-only'}
+      title={modeLabel}
+      className="sr-only"
     >
       {modeLabel}
     </span>

@@ -12,10 +12,10 @@ describe('CameraHealthBadge', () => {
       />
     );
 
-    expect(screen.getByText('Preview failed')).not.toHaveClass('sr-only');
+    expect(screen.getByText('Preview failed')).toHaveClass('sr-only');
     expect(screen.getByRole('status', { name: 'Preview failed · probe healthy' })).toBeInTheDocument();
     expect(screen.getByTitle(
-      "Probe healthy. Camera probe health is checked periodically by the backend; preview status reflects this browser's image load."
+      "Preview failed. Probe healthy. Camera probe health is checked periodically by the backend; preview status reflects this browser's image load."
     )).toContainElement(screen.getByText('Preview failed'));
     expect(screen.queryByText('Healthy')).not.toBeInTheDocument();
   });

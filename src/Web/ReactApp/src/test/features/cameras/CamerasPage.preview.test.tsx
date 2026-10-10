@@ -102,7 +102,7 @@ describe('CamerasPage camera previews', () => {
     expect(screen.queryByRole('button', { name: 'Snapshot mode' })).not.toBeInTheDocument();
     expect(screen.queryByRole('img', { name: 'x400 Camera camera preview' })).not.toBeInTheDocument();
     expect(screen.queryByText(/showing snapshot/)).not.toBeInTheDocument();
-    expect(screen.getByText('Preview failed')).not.toHaveClass('sr-only');
+    expect(screen.getByText('Preview failed')).toHaveClass('sr-only');
   });
 
   it('loads a standalone protected snapshot as an authenticated blob and shows single-mode status', async () => {
@@ -153,8 +153,9 @@ describe('CamerasPage camera previews', () => {
     expect(await screen.findByRole('img', { name: 'x400 Camera camera preview' })).toHaveAttribute('src', 'blob:camera-preview');
     expect(screen.getByRole('button', { name: 'Snapshot mode' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByRole('button', { name: 'Stream mode' })).toHaveAttribute('aria-pressed', 'false');
-    expect(screen.getByText('Live stream unsupported · showing snapshot')).toBeInTheDocument();
-    expect(screen.getByText('Preview failed')).not.toHaveClass('sr-only');
+    expect(screen.getByText('Live stream unsupported · showing snapshot')).toHaveClass('sr-only');
+    expect(screen.getByRole('group', { name: 'x400 Camera preview mode' })).toHaveAttribute('title', 'Live stream unsupported · showing snapshot');
+    expect(screen.getByText('Preview failed')).toHaveClass('sr-only');
   });
 
   it('does not fall back to an unauthenticated image request when proxy loading fails', async () => {
@@ -165,7 +166,7 @@ describe('CamerasPage camera previews', () => {
     expect(await screen.findByText('Snapshot preview failed')).toBeInTheDocument();
     expect(apiMock.getSnapshotPreview).toHaveBeenCalledWith(snapshotUrl, expect.any(AbortSignal));
     expect(screen.queryByRole('img', { name: 'x400 Camera camera preview' })).not.toBeInTheDocument();
-    expect(screen.getByText('Preview failed')).not.toHaveClass('sr-only');
+    expect(screen.getByText('Preview failed')).toHaveClass('sr-only');
     await waitFor(() => expect(screen.getByText('This card could not load the snapshot preview.')).toBeInTheDocument());
   });
 });
