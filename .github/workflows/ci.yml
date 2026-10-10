@@ -384,6 +384,9 @@ jobs:
       - name: Test run-owned daily UI validation
         run: node --test scripts/ci/tests/test-daily-validation.mjs
 
+      - name: Test recovery-matrix daemon lock entrypoint
+        run: node --test scripts/ci/tests/test-recovery-matrix-entrypoint.mjs
+
       - name: Test acceptance provenance preflight
         run: >-
           node --test
