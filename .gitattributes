@@ -1,4 +1,7 @@
 
+# Normalize all text files to LF in the repository and working tree
+* text=auto eol=lf
+
 # Use bd merge for beads JSONL files
 .beads/issues.jsonl merge=beads
 # Squad: union merge for append-only team state files
@@ -61,3 +64,6 @@ scripts/ci/fixtures/*.json text eol=lf
 # the hand-written Up()/Down() SQL and must stay visible for review.
 src/migrations/**/*.Designer.cs linguist-generated=true
 src/migrations/**/*ModelSnapshot.cs linguist-generated=true
+# Squad: union merge for append-only team state files
+.squad/rai/audit-trail.md merge=union
+.squad/fact-checker/audit-trail.md merge=union
