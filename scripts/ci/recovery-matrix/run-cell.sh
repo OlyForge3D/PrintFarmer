@@ -33,7 +33,7 @@ require_docker() {
 resources_for_owner() {
   local owner=$1
   {
-    docker ps -aq --filter "label=printfarmer.recovery-matrix.run=$owner" \
+    docker ps -a --filter "label=printfarmer.recovery-matrix.run=$owner" \
       --format 'container {{.ID}} {{.Names}}'
     docker volume ls --filter "label=printfarmer.recovery-matrix.run=$owner" \
       --format 'volume {{.Name}}'
