@@ -426,3 +426,4 @@ public enum PrinterBackend
 - Embedded `user:pass@` credentials are stripped and flagged; the public camera DTOs still hide targets
 - Edit flow: load this DTO, then `PUT /api/cameras/{id}` with `streamUrl`/`snapshotUrl` only when the user changed them (omitted/null = unchanged, which preserves stored credentials)
 - Blank targets are unconfigured: create paths store empty/whitespace targets as `null`; legacy blank values return `null` here, have no proxy URL in `GET /api/cameras/display`, and their proxy route returns 404 (not 502 `camera_target_invalid`). Sending an empty string in `PUT` clears a target.
+- Errors: 503 only while startup is not ready; 404 for a missing or inaccessible camera. Client cancellation and unexpected failures go to the global exception middleware (499 for client aborts, otherwise its correlated JSON error such as 500).

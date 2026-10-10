@@ -240,39 +240,29 @@ public class CamerasController(
     [ProducesResponseType(503)]
     public async Task<ActionResult<CameraConfigDto>> GetCameraConfigAsync(Guid id, CancellationToken ct)
     {
-        try
-        {
-            if (!_startupStatus.IsReady)
-            {
-                return StatusCode(503, new { message = "System is still initializing. Please wait a moment and try again." });
-            }
-
-            Camera? camera = await _cameraService.FindByIdAsync(id, ct);
-            if (camera == null || !await CanAccessCameraPrinterAsync(camera.PrinterId, ct))
-            {
-                return NotFound(new { message = "Camera not found" });
-            }
-
-            (string? streamUrl, bool streamHasCredentials) = StripCredentials(CameraContractClassifier.NormalizeTarget(camera.StreamUrl));
-            (string? snapshotUrl, bool snapshotHasCredentials) = StripCredentials(CameraContractClassifier.NormalizeTarget(camera.SnapshotUrl));
-            return Ok(new CameraConfigDto
-            {
-                Id = camera.Id,
-                StreamUrl = streamUrl,
-                SnapshotUrl = snapshotUrl,
-                StreamUrlHasCredentials = streamHasCredentials,
-                SnapshotUrlHasCredentials = snapshotHasCredentials
-            });
-        }
-        catch (InvalidOperationException)
+        // Cancellation and unexpected failures propagate to GlobalExceptionMiddleware, which
+        // treats client aborts as non-errors and maps faults to a correlated error response.
+        if (!_startupStatus.IsReady)
         {
             return StatusCode(503, new { message = "System is still initializing. Please wait a moment and try again." });
         }
-        catch (Exception ex)
+
+        Camera? camera = await _cameraService.FindByIdAsync(id, ct);
+        if (camera == null || !await CanAccessCameraPrinterAsync(camera.PrinterId, ct))
         {
-            _logger?.LogError(ex, "[CamerasController] Exception in GetCameraConfigAsync for ID {CameraId}: {Message}", id.ToString(), ex.Message);
-            return CameraProblem("camera_read_failed", "The camera could not be read.");
+            return NotFound(new { message = "Camera not found" });
         }
+
+        (string? streamUrl, bool streamHasCredentials) = StripCredentials(CameraContractClassifier.NormalizeTarget(camera.StreamUrl));
+        (string? snapshotUrl, bool snapshotHasCredentials) = StripCredentials(CameraContractClassifier.NormalizeTarget(camera.SnapshotUrl));
+        return Ok(new CameraConfigDto
+        {
+            Id = camera.Id,
+            StreamUrl = streamUrl,
+            SnapshotUrl = snapshotUrl,
+            StreamUrlHasCredentials = streamHasCredentials,
+            SnapshotUrlHasCredentials = snapshotHasCredentials
+        });
     }
 
     private static (string? Url, bool HasCredentials) StripCredentials(string? url)

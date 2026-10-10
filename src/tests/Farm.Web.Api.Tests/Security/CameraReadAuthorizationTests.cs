@@ -345,6 +345,23 @@ public sealed class CameraReadAuthorizationTests : IAsyncLifetime, IDisposable
         config!.StreamUrl.Should().Be("http://camera.example.invalid/stream");
     }
 
+    [Fact]
+    public async Task GetCameraConfig_UnexpectedFailure_UsesGlobalErrorContract()
+    {
+        Guid cameraId = Guid.NewGuid();
+        _cameras.Setup(s => s.FindByIdAsync(cameraId, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("unexpected camera read failure"));
+        using HttpClient client = CreateAdminClient();
+
+        HttpResponseMessage response = await client.GetAsync($"/api/cameras/{cameraId}/config");
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        string body = await response.Content.ReadAsStringAsync();
+        body.Should().Contain("\"correlationId\"");
+        body.Should().NotContain("initializing");
+        body.Should().NotContain("camera_read_failed");
+    }
+
     // --- Open-by-default scenarios stay visible (documents current behavior) ---------------
 
     [Fact]
