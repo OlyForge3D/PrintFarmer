@@ -6,7 +6,7 @@ import { Alert, Button, FormField, Input, Select, Textarea, Toggle } from '@/com
 import { PrinterSearchIcon } from '@/common/components/icons/MdiIcons';
 import { usePrinters } from '@/common/hooks/useApi';
 import { cameraService } from '@/services/cameraService';
-import type { DisplayCameraDto, UpdateCameraDto } from '@/types/api';
+import type { CameraConfigDto, DisplayCameraDto, UpdateCameraDto } from '@/types/api';
 
 interface EditCameraModalProps {
   camera: DisplayCameraDto | null;
@@ -43,6 +43,8 @@ export function EditCameraModal({ camera, isOpen, onClose, onSuccess }: EditCame
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [config, setConfig] = useState<CameraConfigDto | null>(null);
+  const [configError, setConfigError] = useState(false);
 
   const detectEndpointsMutation = useMutation({
     mutationFn: (printerId: string) => cameraService.detectCameraEndpoints({ printerId }),
@@ -67,13 +69,15 @@ export function EditCameraModal({ camera, isOpen, onClose, onSuccess }: EditCame
   });
 
   useEffect(() => {
+    setConfig(null);
+    setConfigError(false);
     if (!isOpen || !camera) return;
-
+    let cancelled = false;
     setFormData({
       name: camera.name,
       description: camera.description ?? '',
-      streamUrl: camera.streamUrl ?? '',
-      snapshotUrl: camera.snapshotUrl ?? '',
+      streamUrl: '',
+      snapshotUrl: '',
       location: camera.location ?? '',
       sortOrder: camera.sortOrder,
       isEnabled: camera.isEnabled,
@@ -81,22 +85,34 @@ export function EditCameraModal({ camera, isOpen, onClose, onSuccess }: EditCame
     });
     setValidationErrors({});
     setError(null);
+    void cameraService.getCameraConfig(camera.id).then((loadedConfig) => {
+      if (cancelled) return;
+      setConfig(loadedConfig);
+      setFormData((previous) => ({
+        ...previous,
+        streamUrl: loadedConfig.streamUrl ?? '',
+        snapshotUrl: loadedConfig.snapshotUrl ?? '',
+      }));
+    }).catch(() => {
+      if (!cancelled) setConfigError(true);
+    });
+    return () => { cancelled = true; };
   }, [camera, isOpen]);
 
   const hasChanges = useMemo(() => {
-    if (!camera) return false;
+    if (!camera || !config) return false;
 
     return (
       formData.name !== camera.name ||
       formData.description !== (camera.description ?? '') ||
-      formData.streamUrl !== (camera.streamUrl ?? '') ||
-      formData.snapshotUrl !== (camera.snapshotUrl ?? '') ||
+      formData.streamUrl.trim() !== (config.streamUrl ?? '') ||
+      formData.snapshotUrl.trim() !== (config.snapshotUrl ?? '') ||
       formData.location !== (camera.location ?? '') ||
       formData.sortOrder !== camera.sortOrder ||
       formData.isEnabled !== camera.isEnabled ||
       formData.printerId !== (camera.printerId ?? '')
     );
-  }, [camera, formData]);
+  }, [camera, config, formData]);
 
   const setField = <K extends keyof EditCameraFormData>(field: K, value: EditCameraFormData[K]) => {
     setFormData((previous) => ({ ...previous, [field]: value }));
@@ -121,7 +137,11 @@ export function EditCameraModal({ camera, isOpen, onClose, onSuccess }: EditCame
       errors.name = 'Camera name is required.';
     }
 
-    if (!formData.streamUrl.trim() && !formData.snapshotUrl.trim()) {
+    const streamConfigured = !!formData.streamUrl.trim()
+      || (config?.streamUrlHasCredentials && formData.streamUrl === (config.streamUrl ?? ''));
+    const snapshotConfigured = !!formData.snapshotUrl.trim()
+      || (config?.snapshotUrlHasCredentials && formData.snapshotUrl === (config.snapshotUrl ?? ''));
+    if (!streamConfigured && !snapshotConfigured) {
       errors.streamUrl = 'Add a stream URL or snapshot URL.';
       errors.snapshotUrl = 'Add a stream URL or snapshot URL.';
     }
@@ -131,18 +151,22 @@ export function EditCameraModal({ camera, isOpen, onClose, onSuccess }: EditCame
   };
 
   const handleSubmit = async () => {
-    if (!camera || !validateForm()) return;
+    if (!camera || !config || configError || !validateForm()) return;
 
     const request: UpdateCameraDto = {
       name: formData.name.trim(),
       description: formData.description.trim() || undefined,
-      streamUrl: formData.streamUrl.trim() || undefined,
-      snapshotUrl: formData.snapshotUrl.trim() || undefined,
       location: formData.location.trim() || undefined,
       sortOrder: formData.sortOrder,
       isEnabled: formData.isEnabled,
       printerId: formData.printerId || null,
     };
+    if (formData.streamUrl.trim() !== (config.streamUrl ?? '')) {
+      request.streamUrl = formData.streamUrl.trim();
+    }
+    if (formData.snapshotUrl.trim() !== (config.snapshotUrl ?? '')) {
+      request.snapshotUrl = formData.snapshotUrl.trim();
+    }
 
     try {
       setIsSaving(true);
@@ -186,13 +210,21 @@ export function EditCameraModal({ camera, isOpen, onClose, onSuccess }: EditCame
           <Button type="button" variant="secondary" onClick={handleClose} disabled={isSaving}>
             Cancel
           </Button>
-          <Button type="button" onClick={handleSubmit} loading={isSaving} disabled={!hasChanges}>
+          <Button type="button" onClick={handleSubmit} loading={isSaving} disabled={!config || configError || !hasChanges}>
             Save Camera
           </Button>
         </>
       }
     >
-      <div className="space-y-4">
+      <fieldset disabled={!config || configError || isSaving} className="space-y-4">
+        <legend className="sr-only">Camera configuration</legend>
+        {configError ? (
+          <Alert type="error" title="Could not load camera configuration">
+            Close and reopen this dialog to retry. No camera changes can be saved until configuration loads.
+          </Alert>
+        ) : !config && (
+          <p role="status">Loading camera configuration…</p>
+        )}
         {error && (
           <Alert type="error" title="Could not save camera">
             {error}
@@ -265,7 +297,9 @@ export function EditCameraModal({ camera, isOpen, onClose, onSuccess }: EditCame
         <FormField
           label="Stream URL"
           htmlFor="edit-camera-stream-url"
-          helper="MJPEG or HLS stream URL. Use a transcoder for RTSP cameras."
+          helper={config?.streamUrlHasCredentials
+            ? 'Stored credentials are hidden. Leave this URL unchanged to preserve them; replacing it overwrites the saved URL and credentials.'
+            : 'MJPEG stream URL. Use a transcoder for RTSP cameras.'}
           error={validationErrors.streamUrl}
         >
           <Input
@@ -278,7 +312,14 @@ export function EditCameraModal({ camera, isOpen, onClose, onSuccess }: EditCame
           />
         </FormField>
 
-        <FormField label="Snapshot URL" htmlFor="edit-camera-snapshot-url" error={validationErrors.snapshotUrl}>
+        <FormField
+          label="Snapshot URL"
+          htmlFor="edit-camera-snapshot-url"
+          error={validationErrors.snapshotUrl}
+          helper={config?.snapshotUrlHasCredentials
+            ? 'Stored credentials are hidden. Leave this URL unchanged to preserve them; replacing it overwrites the saved URL and credentials.'
+            : undefined}
+        >
           <Input
             id="edit-camera-snapshot-url"
             type="url"
@@ -323,7 +364,7 @@ export function EditCameraModal({ camera, isOpen, onClose, onSuccess }: EditCame
             />
           </FormField>
         </div>
-      </div>
+      </fieldset>
     </Modal>
   );
 }

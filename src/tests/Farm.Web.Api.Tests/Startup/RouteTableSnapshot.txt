@@ -150,6 +150,7 @@ GET /api/cameras -> Farm.Modules.Devices::Farm.Modules.Devices.Controllers.Camer
 GET /api/cameras/by-printer/{printerId} -> Farm.Modules.Devices::Farm.Modules.Devices.Controllers.CamerasController.GetCamerasByPrinterAsync [auth=policy=;roles=;schemes=]
 GET /api/cameras/display -> Farm.Modules.Devices::Farm.Modules.Devices.Controllers.CamerasController.GetDisplayCamerasAsync [auth=policy=;roles=;schemes=]
 GET /api/cameras/enabled -> Farm.Modules.Devices::Farm.Modules.Devices.Controllers.CamerasController.GetEnabledCamerasAsync [auth=policy=;roles=;schemes=]
+GET /api/cameras/{id:guid}/config -> Farm.Modules.Devices::Farm.Modules.Devices.Controllers.CamerasController.GetCameraConfigAsync [auth=policy=;roles=;schemes=|policy=;roles=;schemes=|permission=cameras:admin]
 GET /api/cameras/{id:guid}/snapshot -> Farm.Modules.Devices::Farm.Modules.Devices.Controllers.CamerasController.ProxyCameraSnapshotAsync [auth=policy=;roles=;schemes=]
 GET /api/cameras/{id:guid}/stream -> Farm.Modules.Devices::Farm.Modules.Devices.Controllers.CamerasController.ProxyCameraStreamAsync [auth=policy=;roles=;schemes=]
 GET /api/cameras/{id} -> Farm.Modules.Devices::Farm.Modules.Devices.Controllers.CamerasController.GetCameraAsync [auth=policy=;roles=;schemes=]

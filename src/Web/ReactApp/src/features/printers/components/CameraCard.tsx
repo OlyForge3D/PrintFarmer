@@ -4,6 +4,7 @@ import { CameraHealthStatus } from '@/types/api';
 import type { Printer } from '@/types/api';
 import { CameraIcon, ExternalLinkIcon, ImageIcon, VideoIcon } from '@/common/components/icons/MdiIcons';
 import { Button, Badge } from '@/common/components/ui';
+import { CameraModeControl } from '@/features/cameras/components/CameraModeControl';
 import { usePrinterCameras } from '@/features/cameras/hooks/usePrinterCameras';
 import {
   getCameraMediaTransformClassName,
@@ -44,6 +45,7 @@ export function CameraCard({
     accessMode: p.cameraAccessMode,
     streamFormat: p.cameraStreamFormat,
     snapshotStrategy: p.cameraSnapshotStrategy,
+    streamUrl: cameraStreamUrl,
     snapshotUrl: cameraSnapshotUrl,
   };
   const pollSnapshotPreview = shouldPollPrinterSnapshot(previewContract);
@@ -66,7 +68,6 @@ export function CameraCard({
     setCameraMode,
     rotation,
     rotateClockwise,
-    hasModeToggle,
   } = useCameraViewPreferences({
     preferenceKey: `printer:${p.id}`,
     defaultMode: hasStream ? 'stream' : 'snapshot',
@@ -88,6 +89,14 @@ export function CameraCard({
   const snapshotPreviewUrl = snapshotSrc ?? directSnapshotUrl;
   const streamImageFailed = !!liveStreamSrc && failedUrl === liveStreamSrc;
   const streamFallsBackToSnapshot = cameraMode === 'stream' && (streamUnsupported || streamFailed || streamImageFailed) && !!snapshotPreviewUrl;
+  const streamIssue = cameraMode === 'stream'
+    ? streamUnsupported
+      ? 'unsupported'
+      : streamFailed || streamImageFailed
+        ? 'failed'
+        : undefined
+    : undefined;
+  const displayedMode = streamIssue && hasSnapshot ? 'snapshot' : cameraMode;
   const activeUrl = cameraMode === 'stream' && hasStream
     ? streamFallsBackToSnapshot ? snapshotPreviewUrl : liveStreamSrc
     : cameraMode === 'snapshot' && snapshotPreviewUrl
@@ -133,7 +142,9 @@ export function CameraCard({
         ) : (
           <div role="status" aria-live="polite" className="absolute inset-0 flex flex-col items-center justify-center text-pf-text-tertiary p-4">
             <CameraIcon className="w-12 h-12 mb-2 opacity-30" />
-            <span className="text-sm">{streamUnsupported ? 'Live preview unsupported; using snapshot preview' : streamFailed ? 'Live stream unavailable; reconnecting' : hasCameraUrls ? 'Camera unavailable' : 'No linked camera configured'}</span>
+            <span className="text-sm">{streamUnsupported
+              ? hasSnapshot ? 'Live preview unsupported; using snapshot preview' : 'Live preview unsupported; no snapshot configured'
+              : streamFailed ? 'Live stream unavailable; reconnecting' : hasCameraUrls ? 'Camera unavailable' : 'No linked camera configured'}</span>
             {snapshotFailed && (
               <span className="mt-1 max-w-xs text-center text-xs text-pf-text-tertiary">
                 Snapshot polling is temporarily unavailable; the preview will retry automatically.
@@ -170,9 +181,9 @@ export function CameraCard({
             <span className="inline-flex items-center gap-1.5 rounded-xs bg-pf-bg-2 px-2 py-1 text-[11px] text-pf-text-secondary">
               <span
                 className={`h-2 w-2 rounded-full ${getHealthDotColor(primaryCamera.healthStatus)}`}
-                title={`Camera health: ${primaryCamera.healthStatus}`}
+                title={`Periodic camera probe health: ${primaryCamera.healthStatus}`}
               />
-              <span>{primaryCamera.healthStatus}</span>
+              <span>Probe {primaryCamera.healthStatus}</span>
             </span>
           )}
           {cameraCount > 1 && (
@@ -186,17 +197,23 @@ export function CameraCard({
           <div
             className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-pf-bg-2 text-pf-text-secondary"
             role="status"
-            title={cameraMode === 'stream' ? 'Live stream active' : 'Snapshot preview active'}
+            title={streamIssue
+              ? `${streamIssue === 'unsupported' ? 'Live stream unsupported' : 'Live stream unavailable'}${hasSnapshot ? ' · showing snapshot' : ''}`
+              : displayedMode === 'stream' ? 'Live stream active' : 'Snapshot preview active'}
           >
-            <span className="sr-only">{cameraMode === 'stream' ? 'Live stream active' : 'Snapshot preview active'}</span>
+            <span className="sr-only">
+              {streamIssue
+                ? `${streamIssue === 'unsupported' ? 'Live stream unsupported' : 'Live stream unavailable'}${hasSnapshot ? ' · showing snapshot' : ''}`
+                : displayedMode === 'stream' ? 'Live stream active' : 'Snapshot preview active'}
+            </span>
             <span className="relative inline-flex items-center justify-center">
-              {cameraMode === 'stream' ? (
+              {displayedMode === 'stream' ? (
                 <VideoIcon className="w-4 h-4" />
               ) : (
                 <ImageIcon className="w-4 h-4" />
               )}
               <span
-                className={`absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full ${cameraMode === 'stream' ? 'bg-pf-success' : 'bg-pf-accent'}`}
+                className={`absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full ${displayedMode === 'stream' && !streamIssue ? 'bg-pf-success' : 'bg-pf-accent'}`}
                 aria-hidden="true"
               />
             </span>
@@ -213,30 +230,15 @@ export function CameraCard({
               aria-label="Rotate camera clockwise"
               iconCenter={<RotateCw className="w-4 h-4" />}
             />
-            {hasModeToggle && (
-              <div className="flex gap-1 rounded-md border border-pf-border bg-pf-bg-2 p-1">
-                <Button
-                  type="button"
-                  variant={cameraMode === 'snapshot' ? 'primary' : 'ghost'}
-                  size="sm"
-                  onClick={() => setCameraMode('snapshot')}
-                  className="h-8 w-8 rounded-full p-0"
-                  title="Snapshot"
-                  aria-label="Snapshot mode"
-                  iconCenter={<ImageIcon className="w-4 h-4" />}
-                />
-                <Button
-                  type="button"
-                  variant={cameraMode === 'stream' ? 'primary' : 'ghost'}
-                  size="sm"
-                  onClick={() => setCameraMode('stream')}
-                  className="h-8 w-8 rounded-full p-0"
-                  title="Stream"
-                  aria-label="Stream mode"
-                  iconCenter={<VideoIcon className="w-4 h-4" />}
-                />
-              </div>
-            )}
+            <CameraModeControl
+              cameraName={p.name}
+              cameraMode={cameraMode}
+              hasStream={hasStream}
+              hasSnapshot={hasSnapshot}
+              streamUnavailable={!!cameraStreamUrl && !hasStream}
+              streamIssue={streamIssue}
+              onModeChange={setCameraMode}
+            />
             {externalUrl && (
               <a
                 href={externalUrl}

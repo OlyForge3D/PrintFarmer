@@ -28,6 +28,67 @@ public sealed class CameraProxyEgressGuardTests
 {
     // --- CamerasController: standalone camera (no PrinterGroup scoping) ----------------------
 
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task CamerasController_MissingSnapshotTarget_ReturnsNotFound_AndNeverConnects(string? snapshotTarget)
+    {
+        Guid cameraId = Guid.NewGuid();
+        var cameras = new Mock<ICameraService>();
+        cameras
+            .Setup(s => s.FindByIdAsync(cameraId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Camera
+            {
+                Id = cameraId,
+                Name = "Stream-only camera",
+                PrinterId = null,
+                IsEnabled = true,
+                StreamUrl = "http://camera.example.invalid/stream",
+                SnapshotUrl = snapshotTarget,
+            });
+
+        var poisonedEgressHandler = new NeverInvokedHandler();
+        using var factory = new CameraProxyFactory(cameras, allowedNetworkRanges: null, poisonedEgressHandler);
+        using HttpClient client = factory.CreateClient();
+
+        HttpResponseMessage response = await client.GetAsync($"/api/cameras/{cameraId}/snapshot");
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        poisonedEgressHandler.InvocationCount.Should().Be(0);
+    }
+
+    [Theory]
+    [InlineData("not a url")]
+    [InlineData("/api/cameras/self/snapshot")]
+    [InlineData("rtsp://camera.example.invalid/live")]
+    public async Task CamerasController_NonBlankInvalidTarget_ReturnsBadGateway_AndNeverConnects(string target)
+    {
+        Guid cameraId = Guid.NewGuid();
+        var cameras = new Mock<ICameraService>();
+        cameras
+            .Setup(s => s.FindByIdAsync(cameraId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Camera
+            {
+                Id = cameraId,
+                Name = "Invalid target camera",
+                PrinterId = null,
+                IsEnabled = true,
+                StreamUrl = target,
+                SnapshotUrl = target,
+            });
+
+        var poisonedEgressHandler = new NeverInvokedHandler();
+        using var factory = new CameraProxyFactory(cameras, allowedNetworkRanges: null, poisonedEgressHandler);
+        using HttpClient client = factory.CreateClient();
+
+        HttpResponseMessage response = await client.GetAsync($"/api/cameras/{cameraId}/snapshot");
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadGateway);
+        (await response.Content.ReadAsStringAsync()).Should().Contain("camera_target_invalid");
+        poisonedEgressHandler.InvocationCount.Should().Be(0);
+    }
+
     [Fact]
     public async Task CamerasController_LoopbackTarget_ReturnsBadGateway_AndNeverConnects()
     {

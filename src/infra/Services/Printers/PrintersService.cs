@@ -3139,8 +3139,8 @@ public class PrintersService(
                 Id = Guid.NewGuid(),
                 PrinterId = p.Id,
                 Name = $"{p.Name} Camera",
-                StreamUrl = dto.CameraStreamUrl,
-                SnapshotUrl = dto.CameraSnapshotUrl,
+                StreamUrl = CameraContractClassifier.NormalizeTarget(dto.CameraStreamUrl),
+                SnapshotUrl = CameraContractClassifier.NormalizeTarget(dto.CameraSnapshotUrl),
                 IsEnabled = true,
                 SortOrder = 0,
                 Source = source,
@@ -6388,8 +6388,8 @@ public class PrintersService(
 
         if (existing is not null)
         {
-            existing.StreamUrl = streamUrl;
-            existing.SnapshotUrl = snapshotUrl;
+            existing.StreamUrl = CameraContractClassifier.NormalizeTarget(streamUrl);
+            existing.SnapshotUrl = CameraContractClassifier.NormalizeTarget(snapshotUrl);
             existing.UpdatedAt = DateTime.UtcNow;
             existing.HealthStatus = CameraHealthStatus.Healthy;
             existing.LastHealthCheck = DateTime.UtcNow;
@@ -6403,8 +6403,8 @@ public class PrintersService(
                 Id = Guid.NewGuid(),
                 PrinterId = printer.Id,
                 Name = $"{printer.Name} Camera",
-                StreamUrl = streamUrl,
-                SnapshotUrl = snapshotUrl,
+                StreamUrl = CameraContractClassifier.NormalizeTarget(streamUrl),
+                SnapshotUrl = CameraContractClassifier.NormalizeTarget(snapshotUrl),
                 IsEnabled = true,
                 SortOrder = 0,
                 Source = source,

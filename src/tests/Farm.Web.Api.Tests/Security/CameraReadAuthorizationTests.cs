@@ -1,5 +1,6 @@
 ﻿using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Discovery;
@@ -309,6 +310,75 @@ public sealed class CameraReadAuthorizationTests : IAsyncLifetime, IDisposable
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         string body = await response.Content.ReadAsStringAsync();
         body.Should().Contain(cameraId.ToString());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task GetCameraConfig_DelegatedCameraAdmin_RespectsSeparatePrinterAccess(bool restricted)
+    {
+        (_, Guid restrictedCameraId, Guid standaloneCameraId) = await SeedRestrictedFixtureAsync();
+        Guid cameraId = restricted ? restrictedCameraId : standaloneCameraId;
+        using HttpClient client = CreateForeignRoleClient();
+        client.DefaultRequestHeaders.Add("X-Test-Permissions", "cameras:admin");
+
+        HttpResponseMessage response = await client.GetAsync($"/api/cameras/{cameraId}/config");
+
+        response.StatusCode.Should().Be(restricted ? HttpStatusCode.NotFound : HttpStatusCode.OK);
+        _cameras.Verify(s => s.FindByIdAsync(cameraId, It.IsAny<CancellationToken>()), Times.Once);
+        if (!restricted)
+        {
+            CameraConfigDto? config = await response.Content.ReadFromJsonAsync<CameraConfigDto>();
+            config!.StreamUrl.Should().Be("http://camera.example.invalid/stream");
+        }
+    }
+
+    [Fact]
+    public async Task GetCameraConfig_FarmAdmin_RetainsRestrictedPrinterAccess()
+    {
+        (_, Guid cameraId, _) = await SeedRestrictedFixtureAsync();
+        using HttpClient client = CreateAdminClient();
+
+        HttpResponseMessage response = await client.GetAsync($"/api/cameras/{cameraId}/config");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        CameraConfigDto? config = await response.Content.ReadFromJsonAsync<CameraConfigDto>();
+        config!.StreamUrl.Should().Be("http://camera.example.invalid/stream");
+    }
+
+    [Fact]
+    public async Task GetCameraConfig_UnexpectedFailure_ReturnsSanitizedCorrelatedProblem()
+    {
+        Guid cameraId = Guid.NewGuid();
+        string credentialedTarget = new UriBuilder("http", "camera.example.invalid")
+        {
+            UserName = "sentinel-user",
+            Password = "sentinel-pass-4417",
+            Path = "/stream",
+        }.Uri.AbsoluteUri;
+        NotSupportedException failure = new(
+            $"outer-sentinel-message {credentialedTarget}",
+            new InvalidOperationException("inner-sentinel-message database provider detail"));
+        _cameras.Setup(s => s.FindByIdAsync(cameraId, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(failure);
+        using HttpClient client = CreateAdminClient();
+
+        HttpResponseMessage response = await client.GetAsync($"/api/cameras/{cameraId}/config");
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        response.Content.Headers.ContentType?.MediaType.Should().Be("application/problem+json");
+        string body = await response.Content.ReadAsStringAsync();
+        using JsonDocument json = JsonDocument.Parse(body);
+        json.RootElement.GetProperty("code").GetString().Should().Be("camera_config_read_failed");
+        json.RootElement.GetProperty("correlationId").GetString().Should().NotBeNullOrWhiteSpace();
+        json.RootElement.TryGetProperty("details", out _).Should().BeFalse();
+        body.Should().NotContain(nameof(NotSupportedException));
+        body.Should().NotContain(nameof(InvalidOperationException));
+        body.Should().NotContain("outer-sentinel-message");
+        body.Should().NotContain("inner-sentinel-message");
+        body.Should().NotContain("sentinel-user");
+        body.Should().NotContain("sentinel-pass-4417");
+        body.Should().NotContain("camera.example.invalid");
     }
 
     // --- Open-by-default scenarios stay visible (documents current behavior) ---------------

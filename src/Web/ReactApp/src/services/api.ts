@@ -4667,6 +4667,11 @@ export class ApiClient {
     return response.data;
   }
 
+  async getCameraConfig(id: string): Promise<import('@/types/api').CameraConfigDto> {
+    const response = await this.client.get(`/cameras/${id}/config`);
+    return response.data;
+  }
+
   /**
    * Create a new standalone camera
    */

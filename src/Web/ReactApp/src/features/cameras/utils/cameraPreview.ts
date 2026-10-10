@@ -9,6 +9,7 @@ interface CameraPreviewContract {
   accessMode?: CameraAccessMode;
   streamFormat?: CameraStreamFormat;
   snapshotStrategy?: CameraSnapshotStrategy;
+  streamUrl?: string | null;
   snapshotUrl?: string | null;
 }
 
@@ -57,14 +58,18 @@ export function isUnsupportedCameraPreview({
 export function canUseMjpegStream({
   accessMode,
   streamFormat,
-  snapshotStrategy,
-  snapshotUrl,
+  streamUrl,
 }: CameraPreviewContract): boolean {
-  if (shouldPollPrinterSnapshot({ accessMode, snapshotStrategy, snapshotUrl })) {
+  if (!streamUrl) {
     return false;
   }
 
-  if (isUnsupportedCameraPreview({ accessMode, streamFormat, snapshotStrategy, snapshotUrl })) {
+  if (
+    accessMode === CameraAccessMode.UnsupportedStream ||
+    streamFormat === CameraStreamFormat.Unsupported ||
+    streamFormat === CameraStreamFormat.WebRtc ||
+    streamFormat === CameraStreamFormat.Rtsp
+  ) {
     return false;
   }
 

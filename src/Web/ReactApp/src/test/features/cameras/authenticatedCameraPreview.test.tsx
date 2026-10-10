@@ -14,6 +14,7 @@ const multipartFrame = new Uint8Array([
   0xff, 0xd8, 0xff, 0xd9,
   ...new TextEncoder().encode('\r\n--frame\r\n'),
 ]);
+const snapshotBlob = new Blob(['snapshot-image'], { type: 'image/jpeg' });
 const NativeURL = URL;
 
 beforeEach(() => {
@@ -25,7 +26,7 @@ beforeEach(() => {
     revokeObjectURL: vi.fn(),
   }));
   renewalMock.mockReset().mockResolvedValue(null);
-  apiMock.getSnapshotPreview.mockReset().mockResolvedValue(new Blob(['snapshot'], { type: 'image/jpeg' }));
+  apiMock.getSnapshotPreview.mockReset().mockResolvedValue(snapshotBlob);
 });
 
 afterEach(() => {
@@ -54,6 +55,7 @@ describe('authenticated camera previews', () => {
     await waitFor(() => expect(result.current.snapshotSrc).toBe('blob:camera-frame'));
     expect(apiMock.getSnapshotPreview).toHaveBeenCalledOnce();
     expect(apiMock.getSnapshotPreview.mock.calls[0][0]).toBe('/api/cameras/camera-1/snapshot');
+    expect(URL.createObjectURL).toHaveBeenCalledWith(snapshotBlob);
     const signal = apiMock.getSnapshotPreview.mock.calls[0][1] as AbortSignal;
     unmount();
     expect(signal.aborted).toBe(true);

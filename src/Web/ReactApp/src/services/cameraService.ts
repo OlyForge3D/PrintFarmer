@@ -1,6 +1,7 @@
 import { apiClient } from '@/services/api';
 import type {
   CameraDto,
+  CameraConfigDto,
   CreateCameraDto,
   DetectCameraEndpointsRequest,
   DetectCameraEndpointsResponse,
@@ -26,6 +27,10 @@ export const cameraService = {
 
   async getCameraById(id: string): Promise<CameraDto> {
     return apiClient.getCameraById(id);
+  },
+
+  async getCameraConfig(id: string): Promise<CameraConfigDto> {
+    return apiClient.getCameraConfig(id);
   },
 
   async createCamera(request: CreateCameraDto): Promise<CameraDto> {
