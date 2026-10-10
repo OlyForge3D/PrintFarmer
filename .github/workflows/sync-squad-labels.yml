@@ -2,14 +2,12 @@ name: Sync Squad Labels
 
 on:
   push:
+    branches: ['**']
     paths:
       - '.squad/team.md'
-      - '.ai-team/team.md'
+      - '.github/workflows/sync-squad-labels.yml'
+      - 'scripts/ci/squad-routing.cjs'
   workflow_dispatch:
-
-concurrency:
-  group: ${{ github.workflow }}
-  cancel-in-progress: true
 
 permissions:
   issues: write
@@ -19,20 +17,20 @@ jobs:
   sync-labels:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+      - uses: actions/checkout@v7
 
       - name: Parse roster and sync labels
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9
+        uses: actions/github-script@v9
         with:
           script: |
             const fs = require('fs');
-            let teamFile = '.squad/team.md';
+            const path = require('path');
+            const { memberLabel, classifySquadLabels, isRosterExcluded } = require(
+              path.join(process.env.GITHUB_WORKSPACE, 'scripts/ci/squad-routing.cjs')
+            );
+            const teamFile = '.squad/team.md';
             if (!fs.existsSync(teamFile)) {
-              teamFile = '.ai-team/team.md';
-            }
-
-            if (!fs.existsSync(teamFile)) {
-              core.info('No .squad/team.md or .ai-team/team.md found — skipping label sync');
+              core.info('No .squad/team.md found — skipping label sync');
               return;
             }
 
@@ -52,7 +50,7 @@ jobs:
               }
               if (inMembersTable && line.startsWith('|') && !line.includes('---') && !line.includes('Name')) {
                 const cells = line.split('|').map(c => c.trim()).filter(Boolean);
-                if (cells.length >= 2 && cells[0] !== 'Scribe') {
+                if (cells.length >= 2 && !isRosterExcluded(cells[0], ['scribe', 'ralph'])) {
                   members.push({
                     name: cells[0],
                     role: cells[1]
@@ -68,53 +66,8 @@ jobs:
 
             // Define label color palette for squad labels
             const SQUAD_COLOR = '9B8FCC';
+            const MEMBER_COLOR = '9B8FCC';
             const COPILOT_COLOR = '10b981';
-
-            // Curated palette of visually distinct colors for squad member labels.
-            // These have good contrast with white text and avoid colors used by
-            // other label groups (go:*, release:*, type:*, priority:*, status:*).
-            const SQUAD_MEMBER_PALETTE = [
-              'E06C75', // soft red
-              'E5C07B', // gold
-              '56B6C2', // teal
-              'C678DD', // purple
-              '61AFEF', // blue
-              '98C379', // green
-              'D19A66', // orange
-              'BE5046', // rust
-              '7EC8E3', // sky blue
-              '9ECE6A', // lime
-              'F7768E', // pink
-              'FF9E64', // tangerine
-              '7AA2F7', // periwinkle
-              'BB9AF7', // lavender
-              '73DACA', // mint
-              '2AC3DE', // cyan
-              'DB4B4B', // crimson
-              'E0AF68', // amber
-              '449DAB', // dark teal
-              'A9DC76', // chartreuse
-            ];
-
-            // Deterministic color from palette based on agent slug hash
-            const usedColors = new Set();
-
-            function getAgentColor(slug) {
-              let hash = 0;
-              for (const char of slug) {
-                hash = ((hash << 5) - hash) + char.charCodeAt(0);
-                hash = hash & hash;
-              }
-              let index = Math.abs(hash) % SQUAD_MEMBER_PALETTE.length;
-              // Linear probe to avoid collisions
-              let attempts = 0;
-              while (usedColors.has(SQUAD_MEMBER_PALETTE[index]) && attempts < SQUAD_MEMBER_PALETTE.length) {
-                index = (index + 1) % SQUAD_MEMBER_PALETTE.length;
-                attempts++;
-              }
-              usedColors.add(SQUAD_MEMBER_PALETTE[index]);
-              return SQUAD_MEMBER_PALETTE[index];
-            }
 
             // Define go: and release: labels (static)
             const GO_LABELS = [
@@ -152,29 +105,15 @@ jobs:
               { name: 'priority:p2', color: 'FBCA04', description: 'Next sprint' }
             ];
 
-            function slugify(t) { return t.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, ''); }
-            function assertUniqueMemberSlugs(teamMembers) {
-              const memberBySlug = new Map();
-              for (const member of teamMembers) {
-                const slug = slugify(member.name);
-                if (memberBySlug.has(slug)) {
-                  throw new Error(`Squad member label slug "${slug}" is ambiguous: "${memberBySlug.get(slug)}" and "${member.name}"`);
-                }
-                memberBySlug.set(slug, member.name);
-              }
-            }
-            assertUniqueMemberSlugs(members);
-
             // Ensure the base "squad" triage label exists
             const labels = [
               { name: 'squad', color: SQUAD_COLOR, description: 'Squad triage inbox — Lead will assign to a member' }
             ];
 
             for (const member of members) {
-              const slug = slugify(member.name);
               labels.push({
-                name: `squad:${slug}`,
-                color: getAgentColor(slug),
+                name: memberLabel(member.name),
+                color: MEMBER_COLOR,
                 description: `Assigned to ${member.name} (${member.role})`
               });
             }
@@ -230,3 +169,67 @@ jobs:
             }
 
             core.info(`Label sync complete: ${labels.length} labels synced`);
+
+            // Audit squad:* labels that this workflow does not produce.
+            //
+            // `memberLabel` is the single source of truth for squad label
+            // spelling, and it strips the emoji prefix from roster names, so
+            // `squad:dallas` is canonical and `squad:🏗️ dallas` is a duplicate.
+            // This sync never creates the emoji form; it reports any that
+            // already exist so the migration can be done deliberately rather
+            // than silently relabelling issues here.
+            //
+            // `squad:copilot` is emitted by squad-triage.yml and gates the
+            // coding-agent assignment step in squad-issue-assign.yml, so it is
+            // always canonical — even when the roster has no `🤖 Coding Agent`
+            // marker and this run therefore did not sync it.
+            const rosterLabels = members.map(m => memberLabel(m.name));
+            rosterLabels.push('squad:copilot');
+
+            const existing = await github.paginate(
+              github.rest.issues.listLabelsForRepo,
+              { owner: context.repo.owner, repo: context.repo.repo, per_page: 100 }
+            );
+
+            const { duplicates, retired } = classifySquadLabels(
+              existing.map(l => l.name),
+              rosterLabels
+            );
+
+            if (duplicates.length > 0) {
+              core.warning(
+                `${duplicates.length} non-canonical squad:* label(s) found: ${duplicates.map(d => d.name).join(', ')}`
+              );
+              const rows = duplicates.map(d => `| \`${d.name}\` | \`${d.canonical}\` |`);
+              await core.summary
+                .addHeading('Non-canonical `squad:*` labels', 3)
+                .addRaw(
+                  'These are alternate spellings of labels for people on the '
+                  + 'current roster. Exactly one `squad:*` label per issue '
+                  + 'identifies the owner, so duplicates break that invariant. '
+                  + 'Migrate issues onto the canonical label, then delete the '
+                  + 'duplicate.\n\n'
+                )
+                .addRaw(['| Duplicate | Canonical form |', '|---|---|', ...rows].join('\n'))
+                .addRaw('\n\n')
+                .write();
+            }
+
+            if (retired.length > 0) {
+              core.info(
+                `${retired.length} squad:* label(s) for former members: ${retired.join(', ')}`
+              );
+              await core.summary
+                .addHeading('Retired `squad:*` labels', 3)
+                .addRaw(
+                  'These belong to people who are no longer on the roster, in '
+                  + 'either spelling. **Do not delete them** — there is no '
+                  + 'current owner to migrate to, and they carry the assignment '
+                  + 'history of closed issues. They are listed only so the '
+                  + 'audit above is not mistaken for a complete inventory.\n\n'
+                )
+                .addRaw(retired.map(n => `- \`${n}\``).join('\n'))
+                .write();
+            }
+
+            core.info(`Label audit complete: ${duplicates.length} duplicate(s), ${retired.length} retired`);
