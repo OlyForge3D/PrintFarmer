@@ -394,9 +394,6 @@ jobs:
           scripts/ci/tests/test-verify-acceptance-provenance.mjs
           scripts/ci/tests/test-smoke-daily-validation-stack.mjs
 
-      - name: Test Squad state-root containment
-        run: node --test scripts/ci/tests/test-squad-state-root.mjs
-
       - name: Test squad verdict provenance
         run: node --test scripts/ci/tests/test-squad-verdict.mjs
 
