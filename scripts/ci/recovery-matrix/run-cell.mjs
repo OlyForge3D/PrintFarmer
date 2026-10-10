@@ -903,41 +903,41 @@ try {
     }
     process.exitCode = error.success ? 0 : 1;
   } else {
-  run.finishedAt = new Date().toISOString();
-  writeFileSync(join(runRoot, 'error.txt'), redactSecrets(formatError(error), harnessSecrets), { mode: 0o600 });
-  recordFaultCheckpoint();
-  checkpoints.failed('e2e-complete');
-  const failure = classifyFailure(error, join(runRoot, 'host-update', 'state', 'journal.ndjson'));
-  const expectedOutcome = cellSpec.expected.outcome ?? 'RolledBack';
-  const expectedReason = cellSpec.scenario === 'fault' ? null : cellSpec.expected.reason ?? null;
-  evidence = baseEvidence({
-    run,
-    host,
-    cell,
-    identities: {
-      source: releaseEvidenceIdentity(prior),
-      target: releaseEvidenceIdentity(target),
-      prior: releaseEvidenceIdentity(prior),
-      bundleSha256: evidenceBundleSha256(bundlePath),
-      signingRootFingerprint: root.fingerprint,
-    },
-    tools,
-    checkpoints: checkpoints.checkpoints,
-    outcome: {
-      expected: expectedOutcome,
-      expectedReason,
-      actual: failure.actual,
-      reason: failure.reason,
-      exitCode: failure.exitCode,
-      journalPhase: failure.journalPhase,
-    },
-    timings: { activationSeconds: 0, recoverySeconds: 0 },
-    verdict: 'fail',
-    networkAttempts: readNetworkAttempts(networkAttemptsPath),
-  });
-  writeValidatedEvidence(evidencePath, evidence);
-  console.error(redactSecrets(error.message, harnessSecrets));
-  process.exitCode = 1;
+    run.finishedAt = new Date().toISOString();
+    writeFileSync(join(runRoot, 'error.txt'), redactSecrets(formatError(error), harnessSecrets), { mode: 0o600 });
+    recordFaultCheckpoint();
+    checkpoints.failed('e2e-complete');
+    const failure = classifyFailure(error, join(runRoot, 'host-update', 'state', 'journal.ndjson'));
+    const expectedOutcome = cellSpec.expected.outcome ?? 'RolledBack';
+    const expectedReason = cellSpec.scenario === 'fault' ? null : cellSpec.expected.reason ?? null;
+    evidence = baseEvidence({
+      run,
+      host,
+      cell,
+      identities: {
+        source: releaseEvidenceIdentity(prior),
+        target: releaseEvidenceIdentity(target),
+        prior: releaseEvidenceIdentity(prior),
+        bundleSha256: evidenceBundleSha256(bundlePath),
+        signingRootFingerprint: root.fingerprint,
+      },
+      tools,
+      checkpoints: checkpoints.checkpoints,
+      outcome: {
+        expected: expectedOutcome,
+        expectedReason,
+        actual: failure.actual,
+        reason: failure.reason,
+        exitCode: failure.exitCode,
+        journalPhase: failure.journalPhase,
+      },
+      timings: { activationSeconds: 0, recoverySeconds: 0 },
+      verdict: 'fail',
+      networkAttempts: readNetworkAttempts(networkAttemptsPath),
+    });
+    writeValidatedEvidence(evidencePath, evidence);
+    console.error(redactSecrets(error.message, harnessSecrets));
+    process.exitCode = 1;
   }
 } finally {
   disposeEmulatedPrinter();

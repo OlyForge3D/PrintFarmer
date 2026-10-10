@@ -64,6 +64,15 @@ require_tool() {
 LOCK_NAME="${PF_RECOVERY_MATRIX_LOCK_NAME:-printfarmer-recovery-matrix-daemon-lock}"
 LOCK_LABEL_KEY="printfarmer.recovery-matrix.lock"
 
+resources_for_owner() {
+  local owner=$1
+  {
+    docker ps -aq --filter "label=printfarmer.recovery-matrix.run=$owner" --format 'container {{.ID}} {{.Names}}'
+    docker volume ls --filter "label=printfarmer.recovery-matrix.run=$owner" --format 'volume {{.Name}}'
+    docker network ls --filter "label=printfarmer.recovery-matrix.run=$owner" --format 'network {{.ID}} {{.Name}}'
+  } | sed '/^$/d'
+}
+
 if [[ "$RELEASE_LOCK" == 1 ]]; then
   require_tool docker
   lock_owner="$(docker inspect --format "{{index .Config.Labels \"$LOCK_LABEL_KEY\"}}" "$LOCK_NAME" 2>/dev/null || true)"
@@ -71,9 +80,7 @@ if [[ "$RELEASE_LOCK" == 1 ]]; then
     echo "No recovery matrix daemon lock named $LOCK_NAME exists." >&2
     exit 0
   fi
-  active_resources="$(
-    docker ps -aq --filter "label=printfarmer.recovery-matrix.run=$lock_owner" 2>/dev/null || true
-  )"
+  active_resources="$(resources_for_owner "$lock_owner" 2>/dev/null || true)"
   if [[ -n "$active_resources" ]]; then
     echo "Refusing to remove $LOCK_NAME: recovery-matrix resources for $lock_owner are still present." >&2
     exit 1
@@ -227,14 +234,14 @@ cleanup() {
   docker rm -f "$RUN_ID-printer-emulator" >/dev/null 2>&1 || true
   docker network rm "$NETWORK" >/dev/null 2>&1 || true
   docker image rm "$HOST_IMAGE" >/dev/null 2>&1 || true
+  while IFS= read -r image; do
+    [[ -z "$image" ]] || docker image rm "$image" >/dev/null 2>&1 || true
+  done < <(docker image ls --format '{{.Repository}}:{{.Tag}}' | awk -v prefix="printfarmer-${RUN_ID}-" 'index($0, prefix) == 1')
   local leaks
-  leaks="$(
-    {
-      docker ps -a --filter "label=$RUN_LABEL" --format 'container {{.ID}} {{.Names}}'
-      docker volume ls --filter "label=$RUN_LABEL" --format 'volume {{.Name}}'
-      docker network ls --filter "label=$RUN_LABEL" --format 'network {{.ID}} {{.Name}}'
-    } | sed '/^$/d'
-  )"
+  leaks="$(resources_for_owner "$RUN_ID")"
+  while IFS= read -r image; do
+    [[ -z "$image" ]] || leaks+=$'\n'"image $image"
+  done < <(docker image ls --format '{{.Repository}}:{{.Tag}}' | awk -v prefix="printfarmer-${RUN_ID}-" 'index($0, prefix) == 1')
   if [[ -n "$leaks" ]]; then
     echo "Recovery matrix cleanup leaked resources for $RUN_LABEL:" >&2
     echo "$leaks" >&2
@@ -262,7 +269,22 @@ docker network create --internal --subnet "$NETWORK_SUBNET" --label "$RUN_LABEL"
 docker run -d --name "$SINK" --label "$RUN_LABEL" --network "$NETWORK" --network-alias egress-sink \
   -v "$SCRIPT_DIR/egress-sink.py:/egress-sink.py:ro" \
   -v "$RUN_ROOT/egress-sink:/egress:rw" \
-  python:3.12-alpine python /egress-sink.py /egress/network-attempts.ndjson >/dev/null
+  python:3.12-alpine python /egress-sink.py /egress/network-attempts.ndjson /egress/ready >/dev/null
+for _ in $(seq 1 50); do
+  if [[ -f "$RUN_ROOT/egress-sink/ready" ]]; then
+    break
+  fi
+  if [[ "$(docker inspect -f '{{.State.Running}}' "$SINK" 2>/dev/null)" != "true" ]]; then
+    echo "Egress sink exited before becoming ready" >&2
+    docker logs "$SINK" >&2 || true
+    exit 1
+  fi
+  sleep 0.2
+done
+if [[ ! -f "$RUN_ROOT/egress-sink/ready" ]]; then
+  echo "Egress sink did not become ready" >&2
+  exit 1
+fi
 SINK_IP="$(docker inspect -f "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}" "$SINK")"
 if [[ -z "$SINK_IP" ]]; then
   echo "Failed to determine egress sink IP" >&2

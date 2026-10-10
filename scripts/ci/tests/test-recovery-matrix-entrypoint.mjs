@@ -74,6 +74,16 @@ case "\${1:-}" in
     fi
     ;;
   info) printf '%s\n' "${toBashPath(composePlugin)}" ;;
+  run)
+    for arg in "$@"; do
+      case "$arg" in
+        *:/egress:rw)
+          mkdir -p "\${arg%:/egress:rw}"
+          touch "\${arg%:/egress:rw}/ready"
+          ;;
+      esac
+    done
+    ;;
 esac
 exit 0
 `);
