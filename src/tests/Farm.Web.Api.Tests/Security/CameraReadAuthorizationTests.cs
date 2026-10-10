@@ -1,5 +1,6 @@
 ﻿using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Discovery;
@@ -346,20 +347,38 @@ public sealed class CameraReadAuthorizationTests : IAsyncLifetime, IDisposable
     }
 
     [Fact]
-    public async Task GetCameraConfig_UnexpectedFailure_UsesGlobalErrorContract()
+    public async Task GetCameraConfig_UnexpectedFailure_ReturnsSanitizedCorrelatedProblem()
     {
         Guid cameraId = Guid.NewGuid();
+        string credentialedTarget = new UriBuilder("http", "camera.example.invalid")
+        {
+            UserName = "sentinel-user",
+            Password = "sentinel-pass-4417",
+            Path = "/stream",
+        }.Uri.AbsoluteUri;
+        NotSupportedException failure = new(
+            $"outer-sentinel-message {credentialedTarget}",
+            new InvalidOperationException("inner-sentinel-message database provider detail"));
         _cameras.Setup(s => s.FindByIdAsync(cameraId, It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new InvalidOperationException("unexpected camera read failure"));
+            .ThrowsAsync(failure);
         using HttpClient client = CreateAdminClient();
 
         HttpResponseMessage response = await client.GetAsync($"/api/cameras/{cameraId}/config");
 
         response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        response.Content.Headers.ContentType?.MediaType.Should().Be("application/problem+json");
         string body = await response.Content.ReadAsStringAsync();
-        body.Should().Contain("\"correlationId\"");
-        body.Should().NotContain("initializing");
-        body.Should().NotContain("camera_read_failed");
+        using JsonDocument json = JsonDocument.Parse(body);
+        json.RootElement.GetProperty("code").GetString().Should().Be("camera_config_read_failed");
+        json.RootElement.GetProperty("correlationId").GetString().Should().NotBeNullOrWhiteSpace();
+        json.RootElement.TryGetProperty("details", out _).Should().BeFalse();
+        body.Should().NotContain(nameof(NotSupportedException));
+        body.Should().NotContain(nameof(InvalidOperationException));
+        body.Should().NotContain("outer-sentinel-message");
+        body.Should().NotContain("inner-sentinel-message");
+        body.Should().NotContain("sentinel-user");
+        body.Should().NotContain("sentinel-pass-4417");
+        body.Should().NotContain("camera.example.invalid");
     }
 
     // --- Open-by-default scenarios stay visible (documents current behavior) ---------------

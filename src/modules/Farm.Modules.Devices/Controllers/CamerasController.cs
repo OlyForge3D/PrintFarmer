@@ -13,6 +13,7 @@ using Farm.Infrastructure.Normalization;
 using Farm.Infrastructure.Services.Cameras;
 using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.Startup;
+using Farm.Modules.Devices.Filters;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -232,16 +233,19 @@ public class CamerasController(
     /// <param name="ct">Cancellation token for the operation</param>
     /// <response code="200">Returns the editable camera configuration</response>
     /// <response code="404">If the camera is not found or not accessible</response>
+    /// <response code="500">Generic correlated problem; failure details are logged server-side only</response>
     /// <response code="503">If the system is still initializing</response>
     [RequirePermission("cameras", "admin")]
     [HttpGet("{id:guid}/config")]
+    [CameraConfigErrorFilter]
     [ProducesResponseType(typeof(CameraConfigDto), 200)]
     [ProducesResponseType(404)]
+    [ProducesResponseType(typeof(ProblemDetails), 500)]
     [ProducesResponseType(503)]
     public async Task<ActionResult<CameraConfigDto>> GetCameraConfigAsync(Guid id, CancellationToken ct)
     {
-        // Cancellation and unexpected failures propagate to GlobalExceptionMiddleware, which
-        // treats client aborts as non-errors and maps faults to a correlated error response.
+        // Unexpected failures are sanitized by CameraConfigErrorFilter; client aborts reach
+        // GlobalExceptionMiddleware as cancellations.
         if (!_startupStatus.IsReady)
         {
             return StatusCode(503, new { message = "System is still initializing. Please wait a moment and try again." });
