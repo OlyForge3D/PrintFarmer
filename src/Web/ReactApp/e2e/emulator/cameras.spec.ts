@@ -101,8 +101,9 @@ test.describe('Cameras — Emulator', () => {
 
     for (let index = 0; index < cameraCount; index++) {
       await expect(
-        cameraCards.nth(index).getByText(/^(Healthy|Degraded|Unhealthy|Unknown)$/),
+        cameraCards.nth(index).getByRole('status', { name: /^(Probe (healthy|degraded|unhealthy|unknown)|Preview failed · probe (healthy|degraded|unhealthy|unknown))$/ }),
       ).toBeVisible();
+      await expect(cameraCards.nth(index).getByText('Standalone', { exact: true })).toHaveCount(0);
     }
 
     expect(criticalErrors()).toHaveLength(0);

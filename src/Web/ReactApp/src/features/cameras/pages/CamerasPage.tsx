@@ -4,10 +4,10 @@ import { toast } from 'sonner';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import type { EmbeddablePageProps } from '@/common/components/EmbeddablePageProps';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
-import { Alert, Button, Badge } from '@/common/components/ui';
+import { Button } from '@/common/components/ui';
 import { CameraIcon, DeleteIcon, EditIcon, ExternalLinkIcon, SettingsIcon } from '@/common/components/icons/MdiIcons';
 import { cameraService } from '@/services/cameraService';
-import type { DisplayCameraDto, CameraSource, CameraType } from '@/types/api';
+import type { DisplayCameraDto } from '@/types/api';
 import { useSearchParams } from 'react-router';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { CameraManagementPanel } from '@/features/cameras/components/CameraManagementPanel';
@@ -207,23 +207,6 @@ interface CameraViewCardProps {
   onDelete: (camera: DisplayCameraDto) => void;
 }
 
-const sourceLabels: Record<CameraSource, string> = {
-  Standalone: 'Standalone',
-  Moonraker: 'Moonraker',
-  PrusaLink: 'PrusaLink',
-  OctoPrint: 'OctoPrint',
-  SDCP: 'SDCP',
-  FlashForge: 'FlashForge',
-};
-
-const cameraTypeLabels: Record<CameraType, string> = {
-  General: 'General',
-  Bed: 'Bed',
-  Nozzle: 'Nozzle',
-  Wide: 'Wide',
-  Timelapse: 'Timelapse',
-};
-
 /**
  * CameraViewCard - Individual camera feed card
  */
@@ -298,7 +281,6 @@ function CameraViewCard({ camera, canManage, onEdit, onDelete }: CameraViewCardP
     imageError: imageError || snapshotFailed || streamFailed,
     cameraMode,
   });
-  const showInlineAttention = Boolean(cameraAttention) && !imageError && !!activeUrl;
 
   return (
     <article
@@ -321,7 +303,7 @@ function CameraViewCard({ camera, canManage, onEdit, onDelete }: CameraViewCardP
             <span className="text-center text-sm font-medium text-pf-text-secondary">
               No live preview available
             </span>
-            <span className="mt-1 max-w-xs text-center text-xs text-pf-text-tertiary">
+            <span className="sr-only">
               This camera does not provide an embeddable MJPEG live stream.
             </span>
           </div>
@@ -340,7 +322,7 @@ function CameraViewCard({ camera, canManage, onEdit, onDelete }: CameraViewCardP
               </span>
             )}
             {cameraAttention?.action && (
-              <span className="mt-2 max-w-xs text-center text-xs text-pf-text-secondary">
+              <span className="sr-only">
                 Action: {cameraAttention.action}
               </span>
             )}
@@ -353,16 +335,17 @@ function CameraViewCard({ camera, canManage, onEdit, onDelete }: CameraViewCardP
         <div className="flex items-start gap-2 mb-1">
           <CameraIcon className="w-4 h-4 text-pf-text-tertiary shrink-0 mt-1" />
           <div className="min-w-0 flex-1">
-            <h3 className="font-medium text-pf-text-primary truncate">{camera.name}</h3>
-            {camera.printerName && (
-              <p className="text-xs text-pf-text-secondary truncate">
-                Printer: {camera.printerName}
-              </p>
-            )}
-            {camera.location && (
-              <p className="text-xs text-pf-text-tertiary truncate">{camera.location}</p>
-            )}
+            <h3
+              className="font-medium text-pf-text-primary truncate"
+              title={[camera.name, camera.printerName, camera.location, camera.cameraType, camera.source].filter(Boolean).join(' · ')}
+            >{camera.name}</h3>
           </div>
+          <CameraHealthBadge
+            healthStatus={camera.healthStatus}
+            previewFailed={imageError || snapshotFailed || streamUnsupported || streamFailed || streamImageFailed}
+            details={cameraAttention ? `${cameraAttention.title}. ${cameraAttention.issue} Action: ${cameraAttention.action}` : undefined}
+            size="sm"
+          />
           {canManage && (
             <div className="flex shrink-0 items-center gap-1">
               <Button
@@ -388,33 +371,6 @@ function CameraViewCard({ camera, canManage, onEdit, onDelete }: CameraViewCardP
             </div>
           )}
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <CameraHealthBadge
-            healthStatus={camera.healthStatus}
-            previewFailed={imageError || snapshotFailed || streamUnsupported || streamFailed || streamImageFailed}
-            size="sm"
-          />
-          <Badge variant="default" size="sm">
-            {sourceLabels[camera.source]}
-          </Badge>
-          {camera.cameraType !== 'General' && (
-            <Badge variant="default" size="sm">
-              {cameraTypeLabels[camera.cameraType]}
-            </Badge>
-          )}
-        </div>
-
-        {showInlineAttention && cameraAttention && (
-          <Alert
-            type={cameraAttention.tone}
-            title={cameraAttention.title}
-            className="rounded-lg border px-3 py-2 text-xs leading-5"
-          >
-            <p>{cameraAttention.issue}</p>
-            <p className="mt-1 font-medium">Action: {cameraAttention.action}</p>
-          </Alert>
-        )}
-
         <div className="flex flex-wrap items-center justify-between gap-2">
           <CameraModeControl
             cameraName={camera.name}

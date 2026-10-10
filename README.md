@@ -32,6 +32,13 @@ A **production-ready** React TypeScript dashboard for managing multiple 3D print
 ✅ **Auto-Dispatch with 9-Factor Scoring** - Intelligent job assignment based on material, nozzle, build volume, and more  
 ✅ **Printer Discovery** - Auto-detect Moonraker and PrusaLink printers on network  
 ✅ **Automatic Camera Discovery** - Detect and populate camera URLs when importing printers  
+
+Camera cards prioritize the image, camera name, and compact icon controls.
+Snapshot/Stream icons have tooltips and accessible labels; both controls appear
+only when both modes are supported. Secondary metadata, probe health, preview
+failure status, and fallback details are available in tooltips rather than text
+chips. An unavailable preview retains one short placeholder. Stream-only cameras
+do not gain an invented snapshot endpoint.
 ✅ **Job Queue Management** - Monitor and control print jobs across all printers  
 ✅ **Integrated Slicing** - Built-in OrcaSlicer with profile management  
 ✅ **Printer Calibration Context** - Verified Klipper readiness and credential-free upstream OrcaSlicer snapshots

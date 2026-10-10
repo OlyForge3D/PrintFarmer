@@ -3,7 +3,7 @@ import { useState } from 'react';
 import clsx from 'clsx';
 import { RotateCw } from 'lucide-react';
 import { Button } from '@/common/components/ui';
-import { CameraIcon, ExternalLinkIcon, ImageIcon, VideoIcon } from '@/common/components/icons/MdiIcons';
+import { CameraIcon, ExternalLinkIcon } from '@/common/components/icons/MdiIcons';
 import {
   getCameraMediaTransformClassName,
   useCameraViewPreferences,
@@ -117,10 +117,6 @@ export function PrinterCameraPreview({
         ? 'failed'
         : undefined
     : undefined;
-  const displayedMode = streamIssue && hasSnapshot ? 'snapshot' : cameraMode;
-  const previewStatusLabel = streamIssue
-    ? `${streamIssue === 'unsupported' ? 'Live stream unsupported' : 'Live stream unavailable'}${hasSnapshot ? ' · showing snapshot' : ''}`
-    : showLiveStream ? 'Live stream active' : 'Snapshot preview active';
   const shouldRenderLiveStream = showLiveStream && !!liveStreamSrc && !streamHasFailed;
   // CameraContractClassifier emits UnsupportedStream only when no snapshot exists; keep the snapshot branch defensive.
   const placeholderTitle = unsupportedPreview
@@ -166,7 +162,7 @@ export function PrinterCameraPreview({
           <div role="status" aria-live="polite" className="absolute inset-0 flex flex-col items-center justify-center px-4 text-center text-pf-text-secondary">
             <CameraIcon className="mb-2 h-8 w-8 opacity-45" />
             <p className="text-sm font-medium">{placeholderTitle}</p>
-            <p className="mt-1 text-xs text-pf-text-tertiary">
+            <p className="sr-only">
               This camera does not provide an embeddable MJPEG live stream.
             </p>
           </div>
@@ -179,7 +175,7 @@ export function PrinterCameraPreview({
                 : 'No linked camera configured'}
             </p>
             {hasCameraSource && (
-              <p className="mt-1 text-xs text-pf-text-tertiary">
+              <p className="sr-only">
                 {streamUnsupported
                   ? hasSnapshot
                     ? 'This stream format is not supported in preview; showing snapshots when available.'
@@ -207,28 +203,6 @@ export function PrinterCameraPreview({
 
       {hasCameraSource && (
         <div className="flex items-center justify-end gap-2 overflow-x-auto border-t border-pf-border bg-pf-bg-1/90 px-3 py-2">
-          <div
-            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-pf-bg-2 text-pf-text-secondary"
-            role="status"
-            title={previewStatusLabel}
-          >
-            <span className="sr-only">{previewStatusLabel}</span>
-            <span className="relative inline-flex items-center justify-center">
-              {displayedMode === 'stream' ? (
-                <VideoIcon className="h-3.5 w-3.5" />
-              ) : (
-                <ImageIcon className="h-3.5 w-3.5" />
-              )}
-              <span
-                className={clsx(
-                  'absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full',
-                  displayedMode === 'stream' && !streamIssue ? 'bg-pf-success' : 'bg-pf-accent'
-                )}
-                aria-hidden="true"
-              />
-            </span>
-          </div>
-
           <div className="flex shrink-0 items-center gap-2">
             {hasMedia && (
               <Button

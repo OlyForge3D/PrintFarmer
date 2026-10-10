@@ -29,6 +29,9 @@ export function CameraModeControl({
         <div
           role="group"
           aria-label={`${cameraName} preview mode`}
+          title={streamIssue
+            ? `${streamIssue === 'unsupported' ? 'Live stream unsupported' : 'Live stream unavailable'} · showing snapshot`
+            : undefined}
           className="flex gap-1 rounded-md border border-pf-border bg-pf-bg-2 p-1"
         >
           <Button
@@ -37,27 +40,29 @@ export function CameraModeControl({
             size="sm"
             onClick={() => onModeChange('snapshot')}
             aria-pressed={displayedMode === 'snapshot'}
-            className="h-8 gap-1.5 px-2"
+            className="h-8 w-8 p-0"
             aria-label="Snapshot mode"
-            iconLeft={<ImageIcon className="w-4 h-4" />}
-          >
-            Snapshot
-          </Button>
+            title="Snapshot mode"
+            iconCenter={<ImageIcon className="w-4 h-4" />}
+          />
           <Button
             type="button"
             variant={displayedMode === 'stream' ? 'primary' : 'ghost'}
             size="sm"
             onClick={() => onModeChange('stream')}
             aria-pressed={displayedMode === 'stream'}
-            className="h-8 gap-1.5 px-2"
+            className="h-8 w-8 p-0"
             aria-label="Stream mode"
-            iconLeft={<VideoIcon className="w-4 h-4" />}
-          >
-            Stream
-          </Button>
+            title="Stream mode"
+            iconCenter={<VideoIcon className="w-4 h-4" />}
+          />
         </div>
         {streamIssue && (
-          <span role="status" className="text-xs text-pf-error">
+          <span
+            role="status"
+            aria-label={`${streamIssue === 'unsupported' ? 'Live stream unsupported' : 'Live stream unavailable'} · showing snapshot`}
+            className="sr-only"
+          >
             {streamIssue === 'unsupported' ? 'Live stream unsupported' : 'Live stream unavailable'}
             {' · showing snapshot'}
           </span>
@@ -84,7 +89,8 @@ export function CameraModeControl({
     <span
       role="status"
       aria-label={`${cameraName}: ${modeLabel}`}
-      className="inline-flex items-center rounded-xs bg-pf-bg-2 px-2.5 py-1 text-[11px] text-pf-text-secondary"
+      title={modeLabel}
+      className="sr-only"
     >
       {modeLabel}
     </span>

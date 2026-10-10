@@ -20,9 +20,17 @@ describe('CameraModeControl', () => {
     const streamButton = screen.getByRole('button', { name: 'Stream mode' });
     expect(snapshotButton).toHaveAttribute('aria-pressed', 'true');
     expect(streamButton).toHaveAttribute('aria-pressed', 'false');
+    for (const button of [snapshotButton, streamButton]) {
+      expect(button).toHaveAttribute('title', button.getAttribute('aria-label'));
+      expect(button.textContent).toBe('');
+      expect(button.querySelector('svg')).not.toBeNull();
+      expect(button).toHaveClass('h-8', 'w-8', 'p-0');
+    }
 
     fireEvent.click(streamButton);
     expect(onModeChange).toHaveBeenCalledWith('stream');
+    fireEvent.click(snapshotButton);
+    expect(onModeChange).toHaveBeenCalledWith('snapshot');
   });
 
   it('describes a snapshot-only camera without presenting a disabled or fake stream control', () => {
@@ -36,8 +44,22 @@ describe('CameraModeControl', () => {
       />
     );
 
-    expect(screen.getByRole('status', { name: 'x400 Camera: Snapshot only' })).toBeInTheDocument();
+    expect(screen.getByRole('status', { name: 'x400 Camera: Snapshot only' })).toHaveClass('sr-only');
     expect(screen.queryByRole('button', { name: 'Stream mode' })).not.toBeInTheDocument();
+  });
+
+  it('keeps stream-only capability information off the visible toolbar without inventing snapshot controls', () => {
+    render(
+      <CameraModeControl
+        cameraName="x400 Camera"
+        cameraMode="stream"
+        hasStream
+        hasSnapshot={false}
+        onModeChange={vi.fn()}
+      />
+    );
+    expect(screen.getByRole('status', { name: 'x400 Camera: Live stream only' })).toHaveClass('sr-only');
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
   });
 
   it('explains when a configured stream format cannot be previewed', () => {
