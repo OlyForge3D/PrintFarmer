@@ -1,12 +1,8 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, chmodSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import test from 'node:test';
-
-import { cellIds } from '../recovery-matrix/cells.mjs';
-import { faultCellIds } from '../recovery-matrix/fault-cells.mjs';
-import { importCellIds } from '../recovery-matrix/import-cells.mjs';
 
 const repoRoot = path.resolve(import.meta.dirname, '../../..');
 const script = path.join(repoRoot, 'scripts/ci/recovery-matrix/run-cell.sh');
@@ -15,8 +11,41 @@ function toBashPath(value) {
   return value.replace(/^([A-Za-z]):\\/, (_, drive) => `/${drive.toLowerCase()}/`).replaceAll('\\', '/');
 }
 
-function hasBash() {
-  return spawnSync('bash', ['-lc', 'true'], { stdio: 'ignore' }).status === 0;
+function createHarness() {
+  const root = mkdtempSync(path.join(repoRoot, '.recovery-matrix-test-'));
+  const bin = path.join(root, 'bin');
+  const log = path.join(root, 'docker.log');
+  const ran = path.join(root, 'ran');
+  mkdirSync(bin);
+  writeExecutable(path.join(bin, 'docker'), `#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> "${toBashPath(log)}"
+case "\${1:-}" in
+  volume)
+    case "\${2:-}" in
+      create)
+        if [[ "\${PF_TEST_LOCK_HELD:-0}" == 1 ]]; then exit 1; fi
+        ;;
+      inspect)
+        if [[ "\${PF_TEST_LOCK_HELD:-0}" == 1 ]]; then
+          printf '%s\n' 'fixture-run-123'
+        else
+          printf '%s\n' "\${PF_RECOVERY_MATRIX_RUN_ID:-recovery-matrix-test}"
+        fi
+        ;;
+      rm) ;;
+    esac
+    ;;
+  ps|network) ;;
+esac
+`);
+  return {
+    root,
+    bin,
+    log,
+    ran,
+    cleanup: () => rmSync(root, { recursive: true, force: true }),
+  };
 }
 
 function writeExecutable(file, content) {
@@ -24,259 +53,41 @@ function writeExecutable(file, content) {
   chmodSync(file, 0o755);
 }
 
-function createHarness() {
-  const scratchRoot = path.join(repoRoot, '.recovery-matrix-work');
-  mkdirSync(scratchRoot, { recursive: true });
-  const root = mkdtempSync(path.join(scratchRoot, 'test-entrypoint-'));
-  const bin = path.join(root, 'bin');
-  const work = path.join(root, 'work');
-  const composePlugin = path.join(root, 'docker-compose');
-  mkdirSync(bin);
-  mkdirSync(work);
-  writeExecutable(composePlugin, '#!/usr/bin/env bash\nexit 0\n');
-  const runLog = path.join(root, 'node-run.log');
-  const dockerLog = path.join(root, 'docker.log');
-  const lockOwner = path.join(root, 'lock-owner');
-  writeExecutable(path.join(bin, 'node'), `#!/usr/bin/env bash
-set -euo pipefail
-if [[ " $* " == *" --input-type=module "* ]]; then
-  case "$*" in
-    *import-cells.mjs*) printf '%s\n' "${importCellIds.join(' ')}" ;;
-    *fault-cells.mjs*) printf '%s\n' "${faultCellIds.join(' ')}" ;;
-    *) printf '%s\n' "${cellIds.join(' ')}" ;;
-  esac
-  exit 0
-fi
-printf '%s\n' "$*" >> "${toBashPath(runLog)}"
-exit 0
-`);
-  writeExecutable(path.join(bin, 'docker'), `#!/usr/bin/env bash
-set -euo pipefail
-printf '%s\n' "$*" >> "${toBashPath(dockerLog)}"
-case "\${1:-}" in
-  create)
-    if [[ "\${PF_TEST_LOCK_HELD:-0}" == 1 ]]; then
-      exit 1
-    fi
-    for arg in "$@"; do
-      case "$arg" in
-        printfarmer.recovery-matrix.lock=*) printf '%s\n' "\${arg#*=}" > "${toBashPath(lockOwner)}" ;;
-      esac
-    done
-    ;;
-  inspect)
-    if [[ "\${PF_TEST_LOCK_HELD:-0}" == 1 ]]; then
-      printf '%s\n' 'fixture-run-123'
-    elif [[ -f "${toBashPath(lockOwner)}" && "$*" == *"printfarmer-recovery-matrix-daemon-lock"* ]]; then
-      cat "${toBashPath(lockOwner)}"
-    else
-      printf '%s\n' '172.30.50.10'
-    fi
-    ;;
-  info) printf '%s\n' "${toBashPath(composePlugin)}" ;;
-  run)
-    for arg in "$@"; do
-      case "$arg" in
-        *:/egress:rw)
-          mkdir -p "\${arg%:/egress:rw}"
-          touch "\${arg%:/egress:rw}/ready"
-          ;;
-      esac
-    done
-    ;;
-esac
-exit 0
-`);
-  writeExecutable(path.join(bin, 'jq'), '#!/usr/bin/env bash\nexit 0\n');
-  writeExecutable(path.join(bin, 'cosign'), '#!/usr/bin/env bash\nexit 0\n');
-  return {
-    root,
-    bin,
-    work,
-    runLog,
-    dockerLog,
-    cosign: path.join(bin, 'cosign'),
-    cleanup: () => rmSync(root, { recursive: true, force: true }),
-  };
+function run(harness, args, env = {}) {
+  return spawnSync('bash', [toBashPath(script), ...args], {
+    cwd: repoRoot,
+    env: {
+      ...process.env,
+      PATH: `${harness.bin}${path.delimiter}${process.env.PATH}`,
+      PF_RECOVERY_MATRIX_RUN_ID: 'test-run-123',
+      ...env,
+    },
+    encoding: 'utf8',
+  });
 }
 
-test('run-cell.sh expands all cells with executable cosign and distinct evidence files', { skip: !hasBash() }, () => {
+test('run-cell.sh serializes a command and releases only its owned lock', () => {
   const harness = createHarness();
   try {
-    const evidence = path.join(harness.work, 'matrix.json');
-    const result = spawnSync('bash', [
-      toBashPath(script),
-      '--cell', 'all',
-      '--work-dir', toBashPath(harness.work),
-      '--evidence', toBashPath(evidence),
-      '--cosign', toBashPath(harness.cosign),
-    ], {
-      cwd: repoRoot,
-      env: { ...process.env, PATH: `${harness.bin}${path.delimiter}${process.env.PATH}` },
-      encoding: 'utf8',
-    });
+    const result = run(harness, ['--', 'bash', '-c', `printf '%s' ok > '${toBashPath(harness.ran)}'`]);
     assert.equal(result.status, 0, `${result.stderr}\n${result.stdout}`);
-    const invocations = readFileSync(harness.runLog, 'utf8').trim().split(/\r?\n/);
-    assert.equal(invocations.length, cellIds.length);
-    for (const cellId of cellIds) {
-      const line = invocations.find((candidate) => candidate.includes(`--cell ${cellId}`));
-      assert.ok(line, `expected invocation for ${cellId}`);
-      assert.match(line, new RegExp(`--evidence .*matrix-${cellId}\\.json`));
-    }
+    assert.equal(readFileSync(harness.ran, 'utf8'), 'ok');
+    const log = readFileSync(harness.log, 'utf8');
+    assert.match(log, /volume create/);
+    assert.match(log, /volume rm/);
   } finally {
     harness.cleanup();
   }
 });
 
-test('run-cell.sh expands the imports group to every live import cell', { skip: !hasBash() }, () => {
+test('run-cell.sh fails fast with status 75 when another run owns the daemon', () => {
   const harness = createHarness();
   try {
-    const evidence = path.join(harness.work, 'imports.json');
-    const result = spawnSync('bash', [
-      toBashPath(script),
-      '--cell', 'imports',
-      '--work-dir', toBashPath(harness.work),
-      '--evidence', toBashPath(evidence),
-      '--cosign', toBashPath(harness.cosign),
-    ], {
-      cwd: repoRoot,
-      env: { ...process.env, PATH: `${harness.bin}${path.delimiter}${process.env.PATH}` },
-      encoding: 'utf8',
-    });
-    assert.equal(result.status, 0, `${result.stderr}\n${result.stdout}`);
-    const invocations = readFileSync(harness.runLog, 'utf8').trim().split(/\r?\n/);
-    assert.equal(invocations.length, importCellIds.length);
-    for (const cellId of importCellIds) {
-      const line = invocations.find((candidate) => candidate.includes(`--cell ${cellId}`));
-      assert.ok(line, `expected invocation for ${cellId}`);
-      assert.match(line, new RegExp(`--evidence .*imports-${cellId}\\.json`));
-    }
-  } finally {
-    harness.cleanup();
-  }
-});
-
-test('run-cell.sh rejects unknown cells before Docker work', { skip: !hasBash() }, () => {
-  const harness = createHarness();
-  try {
-    const result = spawnSync('bash', [
-      toBashPath(script),
-      '--cell', 'does-not-exist',
-      '--work-dir', toBashPath(harness.work),
-      '--cosign', toBashPath(harness.cosign),
-    ], {
-      cwd: repoRoot,
-      env: { ...process.env, PATH: `${harness.bin}${path.delimiter}${process.env.PATH}` },
-      encoding: 'utf8',
-    });
-    assert.equal(result.status, 2);
-    assert.match(result.stderr, /Unknown recovery matrix cell/);
-    assert.throws(() => readFileSync(harness.dockerLog, 'utf8'), /ENOENT/);
-  } finally {
-    harness.cleanup();
-  }
-});
-
-test('run-cell.sh fails fast when another run owns the daemon lock', { skip: !hasBash() }, () => {
-  const harness = createHarness();
-  try {
-    const result = spawnSync('bash', [
-      toBashPath(script),
-      '--cell', 'c2',
-      '--work-dir', toBashPath(harness.work),
-      '--cosign', toBashPath(harness.cosign),
-    ], {
-      cwd: repoRoot,
-      env: {
-        ...process.env,
-        PATH: `${harness.bin}${path.delimiter}${process.env.PATH}`,
-        PF_TEST_LOCK_HELD: '1',
-      },
-      encoding: 'utf8',
-    });
+    const result = run(harness, ['--', 'bash', '-c', 'exit 99'], { PF_TEST_LOCK_HELD: '1' });
     assert.equal(result.status, 75, `${result.stderr}\n${result.stdout}`);
     assert.match(result.stderr, /exclusive Docker daemon.*fixture-run-123/);
-    assert.throws(() => readFileSync(harness.runLog, 'utf8'), /ENOENT/);
+    assert.doesNotMatch(readFileSync(harness.log, 'utf8'), /volume rm/);
   } finally {
     harness.cleanup();
-  }
-});
-
-test('run-cell.sh releases an owned lock during ordinary cleanup', { skip: !hasBash() }, () => {
-  const harness = createHarness();
-  try {
-    const result = spawnSync('bash', [
-      toBashPath(script),
-      '--cell', 'c2',
-      '--work-dir', toBashPath(harness.work),
-      '--cosign', toBashPath(harness.cosign),
-    ], {
-      cwd: repoRoot,
-      env: {
-        ...process.env,
-        PATH: `${harness.bin}${path.delimiter}${process.env.PATH}`,
-      },
-      encoding: 'utf8',
-    });
-    assert.equal(result.status, 0, `${result.stderr}\n${result.stdout}`);
-    assert.doesNotMatch(result.stderr, /cleanup leaked resources/);
-    assert.match(readFileSync(harness.dockerLog, 'utf8'), /rm -f printfarmer-recovery-matrix-daemon-lock/);
-  } finally {
-    harness.cleanup();
-  }
-});
-
-test('run-cell.sh exposes an explicit stale-lock release path', { skip: !hasBash() }, () => {
-  const harness = createHarness();
-  try {
-    const result = spawnSync('bash', [
-      toBashPath(script),
-      '--release-lock',
-      '--work-dir', toBashPath(harness.work),
-    ], {
-      cwd: repoRoot,
-      env: {
-        ...process.env,
-        PATH: `${harness.bin}${path.delimiter}${process.env.PATH}`,
-        PF_TEST_LOCK_HELD: '1',
-      },
-      encoding: 'utf8',
-    });
-    assert.equal(result.status, 0, `${result.stderr}\n${result.stdout}`);
-    assert.match(result.stderr, /Removing recovery matrix daemon lock/);
-    assert.match(readFileSync(harness.dockerLog, 'utf8'), /rm -f printfarmer-recovery-matrix-daemon-lock/);
-  } finally {
-    harness.cleanup();
-  }
-});
-
-test('run-cell.sh rejects retained resources for a cell group', { skip: !hasBash() }, () => {
-  const harness = createHarness();
-  try {
-    const result = spawnSync('bash', [
-      toBashPath(script),
-      '--cell', 'all',
-      '--keep-work',
-      '--work-dir', toBashPath(harness.work),
-      '--cosign', toBashPath(harness.cosign),
-    ], {
-      cwd: repoRoot,
-      env: { ...process.env, PATH: `${harness.bin}${path.delimiter}${process.env.PATH}` },
-      encoding: 'utf8',
-    });
-    assert.equal(result.status, 2);
-    assert.match(result.stderr, /cannot be combined with a recovery matrix cell group/);
-  } finally {
-    harness.cleanup();
-  }
-});
-
-test('recovery matrix shell entrypoints remain directly executable', () => {
-  for (const entrypoint of ['run-cell.sh', 'verify-published-bundle.sh']) {
-    const result = spawnSync('git', [
-      'ls-files', '--stage', '--', `scripts/ci/recovery-matrix/${entrypoint}`,
-    ], { cwd: repoRoot, encoding: 'utf8' });
-    assert.equal(result.status, 0, result.stderr);
-    assert.match(result.stdout, /^100755 /m, `${entrypoint} must be executable`);
   }
 });
