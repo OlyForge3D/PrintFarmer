@@ -226,10 +226,10 @@ describe('resolveMaterialLoadout', () => {
     ]);
 
     expect(loadout!.kind).toBe('gate');
-    // Two persisted gates are a legacy short set: the backend never creates
-    // fewer than four, so the missing canonical gates are rendered too.
-    expect(loadout!.slots.map((s) => s.apiIndex)).toEqual([1, 2, 3, 4]);
-    expect(loadout!.slots.map((s) => s.gcodeIndex)).toEqual([0, 1, 2, 3]);
+    // No authoritative four-lane model identity means the persisted topology
+    // remains the source of truth; smaller AFC/ERCf/Box Turtle units are valid.
+    expect(loadout!.slots.map((s) => s.apiIndex)).toEqual([1, 2]);
+    expect(loadout!.slots.map((s) => s.gcodeIndex)).toEqual([0, 1]);
   });
 
   it('renders all four AD5X IFS gates when only three are persisted and no live MMU is reported', () => {
@@ -240,7 +240,7 @@ describe('resolveMaterialLoadout', () => {
       persistedGate(1, { currentSpoolId: 11, currentMaterial: 'PLA' }),
       persistedGate(2),
       persistedGate(3),
-    ]);
+    ], undefined, 'Flashforge AD5X');
 
     expect(loadout!.kind).toBe('gate');
     expect(loadout!.slots.map((s) => s.label)).toEqual(['G1', 'G2', 'G3', 'G4']);
@@ -252,6 +252,26 @@ describe('resolveMaterialLoadout', () => {
     expect(loadout!.slots[3].spoolId).toBeUndefined();
     expect(new Set(loadout!.slots.map((s) => s.key)).size).toBe(4);
     expect(loadout!.hasResolvedTopology).toBe(true);
+  });
+
+  it.each([2, 3])('does not pad a legitimate %i-gate non-AD5X unit without model identity', (gateCount) => {
+    const toolheads = [toolhead(0), ...Array.from({ length: gateCount }, (_, index) => persistedGate(index + 1))];
+    const loadout = resolveMaterialLoadout(undefined, toolheads);
+
+    // Includes smaller AFC/ERCf/Box Turtle units; canonical gate numbering is
+    // not enough evidence that this printer has four physical lanes.
+    expect(loadout!.slots.map((s) => s.apiIndex)).toEqual(
+      Array.from({ length: gateCount }, (_, index) => index + 1),
+    );
+  });
+
+  it('requires the exact AD5X model identity before synthesizing its fourth gate', () => {
+    const toolheads = [toolhead(0), persistedGate(1), persistedGate(2), persistedGate(3)];
+
+    expect(resolveMaterialLoadout(undefined, toolheads, undefined, 'AD5X Pro')!.slots)
+      .toHaveLength(3);
+    expect(resolveMaterialLoadout(undefined, toolheads, undefined, undefined)!.slots)
+      .toHaveLength(3);
   });
 
   it('does not add gates beyond a complete persisted set', () => {

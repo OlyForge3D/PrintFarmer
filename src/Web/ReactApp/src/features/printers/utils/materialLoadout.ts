@@ -78,6 +78,7 @@ export interface MaterialLoadout {
  * then exceed its live gate count. Gap-filling is only safe at or above this.
  */
 const MIN_GAP_FILL_LIVE_GATES = 4;
+const AD5X_IFS_GATE_COUNT = 4;
 
 function isMmuGate(toolhead: ToolheadDto): boolean {
   return String(toolhead.toolheadType) === 'MmuGate';
@@ -226,30 +227,27 @@ function externalSlotFromToolhead(
 }
 
 /**
- * Slots for gates the backend would create but that are missing from a short,
- * legacy persisted gate set (e.g. an AD5X IFS stored as `Gate 1..3`).
- *
- * Without live MMU telemetry the persisted topology is the only gate list, and
- * the backend never creates fewer than {@link MIN_GAP_FILL_LIVE_GATES} gates
- * for a multi-material printer: binding index `M+1..4` gap-fills exactly that
- * gate without renumbering existing ones (#1588). The same canonical-prefix and
- * single-physical-toolhead guards as the live gap-fill apply, so a missing slot
- * can never alias a physical toolhead index.
+ * Slots for AD5X IFS lanes missing from persisted toolhead data. Model identity
+ * is required: a short canonical gate prefix alone cannot distinguish a damaged
+ * four-lane IFS from a legitimate smaller AFC/ERCf/Box Turtle unit.
  */
 function missingCanonicalGateSlots(
   gates: ToolheadDto[],
   physical: ToolheadDto[],
+  modelName?: string,
 ): LoadoutSlot[] {
-  const isCanonicalPrefix = gates.length > 0
-    && gates.length < MIN_GAP_FILL_LIVE_GATES
+  const isAd5x = /(?:^|\s)AD5X$/i.test(modelName?.trim() ?? '');
+  const isCanonicalPrefix = isAd5x
+    && gates.length > 0
+    && gates.length < AD5X_IFS_GATE_COUNT
     && physical.length <= 1
     && gates.every((gate, position) => gate.index === position + 1)
     && !physical.some((toolhead) =>
-      toolhead.index > gates.length && toolhead.index <= MIN_GAP_FILL_LIVE_GATES);
+      toolhead.index > gates.length && toolhead.index <= AD5X_IFS_GATE_COUNT);
   if (!isCanonicalPrefix) return [];
 
   const missing: LoadoutSlot[] = [];
-  for (let index = gates.length + 1; index <= MIN_GAP_FILL_LIVE_GATES; index++) {
+  for (let index = gates.length + 1; index <= AD5X_IFS_GATE_COUNT; index++) {
     missing.push({
       key: `toolhead-${index}`,
       apiIndex: index,
@@ -295,6 +293,7 @@ export function resolveMaterialLoadout(
   mmuStatus: MmuStatus | undefined,
   toolheads: ToolheadDto[] | undefined,
   currentSpoolId?: number | null,
+  modelName?: string,
 ): MaterialLoadout | null {
   const liveGates = mmuStatus?.gates;
 
@@ -387,7 +386,7 @@ export function resolveMaterialLoadout(
     .map((t) => externalSlotFromToolhead(t));
 
   const gateSlots = gates.map((t, position) => slotFromToolhead(t, position, 'gate'));
-  gateSlots.push(...missingCanonicalGateSlots(gates, physical));
+  gateSlots.push(...missingCanonicalGateSlots(gates, physical, modelName));
 
   // Persisted-only gate fallback (no live MMU status). Slots key gcodeIndex by
   // position, which coincides with activeGate only when persisted gates are

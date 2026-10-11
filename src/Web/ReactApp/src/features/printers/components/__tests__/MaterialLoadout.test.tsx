@@ -94,6 +94,31 @@ describe('MaterialLoadout', () => {
     expect(screen.getByTestId('loadout-slot-3')).toBeInTheDocument();
   });
 
+  it('renders the AD5X fourth lane from catalog identity when live MMU telemetry is absent', () => {
+    const ad5xToolheads = persistedQidiBox.slice(0, 4);
+    const { rerender } = renderLoadout({
+      mmuStatus: undefined,
+      toolheads: ad5xToolheads,
+      modelName: 'Flashforge AD5X',
+    });
+
+    expect(screen.getByTestId('material-loadout').querySelectorAll('[data-testid^="loadout-slot-"]'))
+      .toHaveLength(4);
+    expect(screen.getByText('G4')).toBeInTheDocument();
+
+    rerender(
+      <MaterialLoadout
+        printerId="printer-1"
+        mmuStatus={undefined}
+        toolheads={ad5xToolheads}
+        reviewedRowVersion="rev-1"
+      />,
+    );
+    expect(screen.getByTestId('material-loadout').querySelectorAll('[data-testid^="loadout-slot-"]'))
+      .toHaveLength(3);
+    expect(screen.queryByText('G4')).not.toBeInTheDocument();
+  });
+
   it('shows a single detail panel instead of one card per slot', () => {
     renderLoadout();
 

@@ -195,6 +195,8 @@ interface MmuControlBoxProps {
   isOnline: boolean;
   /** Persisted toolhead topology; maps live gates to the spool-assignment API index. */
   toolheads?: ToolheadDto[];
+  /** Catalog model identity for model-specific persisted gate recovery. */
+  modelName?: string;
   /** Printer revision required by the optimistic-concurrency spool endpoints. */
   reviewedRowVersion?: string | null;
   /** Called after a spool is assigned or cleared. */
@@ -211,6 +213,7 @@ export function MmuControlBox({
   mmuStatus,
   isOnline,
   toolheads,
+  modelName,
   reviewedRowVersion,
   onSpoolChange,
 }: MmuControlBoxProps) {
@@ -222,8 +225,8 @@ export function MmuControlBox({
   const queryClient = useQueryClient();
 
   const loadout = useMemo(
-    () => resolveMaterialLoadout(mmuStatus, toolheads),
-    [mmuStatus, toolheads],
+    () => resolveMaterialLoadout(mmuStatus, toolheads, undefined, modelName),
+    [mmuStatus, toolheads, modelName],
   );
   const spoolAssignment = useSlotSpoolAssignment({
     printerId,

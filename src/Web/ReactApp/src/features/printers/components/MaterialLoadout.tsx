@@ -31,6 +31,8 @@ export interface MaterialLoadoutProps {
   toolheads?: ToolheadDto[];
   /** Current spool loaded on a single-toolhead printer without AMS/MMU topology. */
   currentSpoolId?: number | null;
+  /** Catalog model name used only for model-specific persisted gate recovery. */
+  modelName?: string;
   /** Printer revision required by the optimistic-concurrency spool endpoints. */
   reviewedRowVersion?: string | null;
   /** Denser rendering for the printer card. */
@@ -243,6 +245,7 @@ export function MaterialLoadout({
   mmuStatus,
   toolheads,
   currentSpoolId,
+  modelName,
   reviewedRowVersion,
   compact = false,
   isOnline = true,
@@ -257,8 +260,8 @@ export function MaterialLoadout({
   );
 
   const loadout = useMemo(
-    () => resolveMaterialLoadout(mmuStatus, toolheads, currentSpoolId),
-    [mmuStatus, toolheads, currentSpoolId],
+    () => resolveMaterialLoadout(mmuStatus, toolheads, currentSpoolId, modelName),
+    [mmuStatus, toolheads, currentSpoolId, modelName],
   );
 
   const {
