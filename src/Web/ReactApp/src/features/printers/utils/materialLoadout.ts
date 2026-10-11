@@ -226,6 +226,43 @@ function externalSlotFromToolhead(
 }
 
 /**
+ * Slots for gates the backend would create but that are missing from a short,
+ * legacy persisted gate set (e.g. an AD5X IFS stored as `Gate 1..3`).
+ *
+ * Without live MMU telemetry the persisted topology is the only gate list, and
+ * the backend never creates fewer than {@link MIN_GAP_FILL_LIVE_GATES} gates
+ * for a multi-material printer: binding index `M+1..4` gap-fills exactly that
+ * gate without renumbering existing ones (#1588). The same canonical-prefix and
+ * single-physical-toolhead guards as the live gap-fill apply, so a missing slot
+ * can never alias a physical toolhead index.
+ */
+function missingCanonicalGateSlots(
+  gates: ToolheadDto[],
+  physical: ToolheadDto[],
+): LoadoutSlot[] {
+  const isCanonicalPrefix = gates.length > 0
+    && gates.length < MIN_GAP_FILL_LIVE_GATES
+    && physical.length <= 1
+    && gates.every((gate, position) => gate.index === position + 1)
+    && !physical.some((toolhead) =>
+      toolhead.index > gates.length && toolhead.index <= MIN_GAP_FILL_LIVE_GATES);
+  if (!isCanonicalPrefix) return [];
+
+  const missing: LoadoutSlot[] = [];
+  for (let index = gates.length + 1; index <= MIN_GAP_FILL_LIVE_GATES; index++) {
+    missing.push({
+      key: `toolhead-${index}`,
+      apiIndex: index,
+      gcodeIndex: index - 1,
+      label: `G${index}`,
+      name: `Gate ${index}`,
+      source: 'gate',
+    });
+  }
+  return missing;
+}
+
+/**
  * A QidiBox printer also has an external spool holder ("Rack", firmware
  * `filament_slot16`) that feeds the hotend directly and is not one of the box's
  * slots. Its spool binding lives on the persisted physical toolhead, never on a
@@ -349,15 +386,18 @@ export function resolveMaterialLoadout(
     .filter((t) => t.currentSpoolId != null || t.currentMaterial != null)
     .map((t) => externalSlotFromToolhead(t));
 
+  const gateSlots = gates.map((t, position) => slotFromToolhead(t, position, 'gate'));
+  gateSlots.push(...missingCanonicalGateSlots(gates, physical));
+
   // Persisted-only gate fallback (no live MMU status). Slots key gcodeIndex by
   // position, which coincides with activeGate only when persisted gates are
   // 0-based and contiguous. In practice activeGate is -1/-2 on this path (no
   // live MMU data), so the active indicator is intentionally suppressed here.
   return {
     kind: 'gate',
-    unitLabel: unitLabelFor('gate', undefined, gates.length),
+    unitLabel: unitLabelFor('gate', undefined, gateSlots.length),
     slots: [
-      ...gates.map((t, position) => slotFromToolhead(t, position, 'gate')),
+      ...gateSlots,
       ...externals,
     ],
     hasResolvedTopology: true,

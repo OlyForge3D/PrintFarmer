@@ -1215,7 +1215,8 @@ export class ApiClient {
   ): Promise<CommandResult> {
     const response = await this.client.post<CommandResult>(
       `/printers/${printerId}/mmu/gate-action`,
-      request
+      request,
+      request.action === 'Unload' ? { timeout: 360000 } : undefined
     );
     return response.data;
   }

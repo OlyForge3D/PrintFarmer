@@ -174,6 +174,36 @@ active lifecycle controls carry the exact job and attempt. No later dispatch may
 claim the printer while that barrier is held. Direct manual-motion uncertainty
 uses the release rules below, not print-start reconciliation.
 
+### QidiBox filament controls
+
+QidiBox Load, Unload, and Eject use the MMU gate-action endpoint with the
+zero-based box gate index (for example, gate 1 is 1B). Unload and Eject retain
+physical filament-unload safety validation before any firmware command is sent.
+Fresh measured hotend temperature must reach at least 220 °C, or the higher
+verified backend minimum. A requested heater target is not measured temperature.
+
+For a QidiBox or AFC **Unload** rejected solely for a cold hotend, the backend
+heats automatically under the same exclusive physical-control lease. It chooses
+the requested gate's assigned Spoolman filament print temperature, then its
+material's configured default, then the guard minimum. The target is never below
+the verified safety minimum; exceeding installed hotend/nozzle ratings rejects
+before heating (300 °C ceiling when ratings are unavailable). Another gate's or
+the primary's spool is not substituted for a missing box-gate binding.
+
+The server waits for fresh measured temperature within 1 °C of that target and
+requires the unchanged safety guard to pass, then revalidates the lease before
+sending the original unload exactly once. Warm-up is bounded to four minutes;
+the overall request is bounded to five minutes. Web unload requests allow six
+minutes for the server response. Already-hot unloads do not change temperature.
+Load/Eject and other safety failures do not initiate automatic heating.
+
+The MMU panel preserves actionable server error messages. Timeout, cancellation,
+stale telemetry, or lease loss prevents unloading; an accepted heater target
+remains set, so check the printer/target before explicitly retrying. An uncertain
+heater write retains reconciliation protection and is never automatically
+replayed. No firmware macros or printer configuration are modified. Backend
+orchestration gives every client of the shared endpoint the same behavior.
+
 ### Direct manual-motion control
 
 React and iOS submit `HomeAll`, `HomeXY`, `HomeZ`, relative jog, and absolute

@@ -42,7 +42,7 @@ const baseCoverage: PrinterFilamentCoverage = {
   printerName: "Alpha",
   status: "covers",
   toolheads: [],
-  activeJobId: null,
+  activeJobId: "job-1",
   activeJobName: null,
   activeJobProgress: null,
   earliestPredictedRunoutAt: null,
@@ -91,6 +91,27 @@ describe("FilamentCoverageBreakdown", () => {
       { wrapper: wrapper(qc) },
     );
     expect(container.firstChild).toBeNull();
+  });
+
+  it.each(['covers', 'unknown', 'runout'] as const)(
+    'hides the entire idle %s breakdown without assigned work', (status) => {
+      mockUsePrinterCoverageFromFleet.mockReturnValue({
+        isPending: false, isError: false,
+        data: { ...baseCoverage, activeJobId: null, status },
+      });
+      const { container } = render(<FilamentCoverageBreakdown printerId="p-1" />);
+      expect(container.firstChild).toBeNull();
+    },
+  );
+
+  it('shows the badge and queue count for assigned work on an idle printer', () => {
+    mockUsePrinterCoverageFromFleet.mockReturnValue({
+      isPending: false, isError: false,
+      data: { ...baseCoverage, activeJobId: null, assignedQueuedJobCount: 1 },
+    });
+    render(<FilamentCoverageBreakdown printerId="p-1" />);
+    expect(screen.getByText('Filament OK')).toBeInTheDocument();
+    expect(screen.getByText('+1 queued')).toBeInTheDocument();
   });
 
   it("renders the breakdown panel when coverage data is present", () => {

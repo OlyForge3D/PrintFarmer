@@ -8,6 +8,7 @@ import {
 } from '@/features/printers/hooks/useSlotSpoolAssignment';
 import { resolveMaterialLoadout, resolveQidiRackSlot } from '@/features/printers/utils/materialLoadout';
 import { queryKeys } from '@/common/hooks/useApi';
+import { getErrorMessage, isApiError } from '@/common/utils/apiErrors';
 import { usePrinterCoverageFromFleet } from '@/features/filament-coverage/hooks';
 import {
   FilamentCoverageBadge,
@@ -362,7 +363,10 @@ export function MmuControlBox({
       await fn();
     } catch (err) {
       console.error(`MMU ${label} failed:`, err);
-      toast.error(`MMU ${label} failed`);
+      const problem = isApiError(err) ? err.data : undefined;
+      const title = problem && typeof problem === 'object' && 'title' in problem
+        && typeof problem.title === 'string' ? problem.title.trim() : '';
+      toast.error(title || getErrorMessage(err, `MMU ${label} failed`));
     } finally {
       setPendingAction(null);
     }
@@ -539,11 +543,11 @@ export function MmuControlBox({
 
         {/* Gates grid */}
         <div className="flex gap-1.5 overflow-x-auto pb-1">
-          {/* Currently loaded box slot */}
-          {activeGateData && (
+          {/* Legacy Rack spool (currently loaded tool) for non-QidiBox units */}
+          {!isQidibox && activeGateData && (
             <div className="flex flex-col items-center gap-1 p-2 rounded-lg border border-pf-border bg-pf-bg-1 min-w-[70px]">
               <span className="text-[10px] uppercase tracking-wide text-pf-text-secondary font-bold">
-                {isQidibox ? 'In use' : 'Rack'}
+                Rack
               </span>
               <SpoolIcon
                 color={activeGateData.color}
@@ -586,7 +590,7 @@ export function MmuControlBox({
           )}
 
           {/* Separator */}
-          {(activeGateData || rackSlot) && <div className="w-px bg-pf-border self-stretch my-2" />}
+          {((!isQidibox && activeGateData) || rackSlot) && <div className="w-px bg-pf-border self-stretch my-2" />}
 
           {/* Individual gate slots */}
           {mmuStatus.gates.map((gate) => (

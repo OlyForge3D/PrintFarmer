@@ -226,8 +226,79 @@ describe('resolveMaterialLoadout', () => {
     ]);
 
     expect(loadout!.kind).toBe('gate');
-    expect(loadout!.slots.map((s) => s.apiIndex)).toEqual([1, 2]);
-    expect(loadout!.slots.map((s) => s.gcodeIndex)).toEqual([0, 1]);
+    // Two persisted gates are a legacy short set: the backend never creates
+    // fewer than four, so the missing canonical gates are rendered too.
+    expect(loadout!.slots.map((s) => s.apiIndex)).toEqual([1, 2, 3, 4]);
+    expect(loadout!.slots.map((s) => s.gcodeIndex)).toEqual([0, 1, 2, 3]);
+  });
+
+  it('renders all four AD5X IFS gates when only three are persisted and no live MMU is reported', () => {
+    // Live adx5-1 shape: ZMOD reports no MMU objects, and the config database
+    // holds Primary + Gate 1..3 for a four-slot IFS.
+    const loadout = resolveMaterialLoadout(undefined, [
+      toolhead(0, { name: 'Primary' }),
+      persistedGate(1, { currentSpoolId: 11, currentMaterial: 'PLA' }),
+      persistedGate(2),
+      persistedGate(3),
+    ]);
+
+    expect(loadout!.kind).toBe('gate');
+    expect(loadout!.slots.map((s) => s.label)).toEqual(['G1', 'G2', 'G3', 'G4']);
+    // Binding index 4 makes the backend gap-fill exactly the missing gate (#1588).
+    expect(loadout!.slots.map((s) => s.apiIndex)).toEqual([1, 2, 3, 4]);
+    expect(loadout!.slots.map((s) => s.gcodeIndex)).toEqual([0, 1, 2, 3]);
+    expect(loadout!.slots[0]).toMatchObject({ spoolId: 11, material: 'PLA' });
+    expect(loadout!.slots[3]).toMatchObject({ name: 'Gate 4', source: 'gate' });
+    expect(loadout!.slots[3].spoolId).toBeUndefined();
+    expect(new Set(loadout!.slots.map((s) => s.key)).size).toBe(4);
+    expect(loadout!.hasResolvedTopology).toBe(true);
+  });
+
+  it('does not add gates beyond a complete persisted set', () => {
+    const loadout = resolveMaterialLoadout(undefined, [
+      toolhead(0),
+      persistedGate(1),
+      persistedGate(2),
+      persistedGate(3),
+      persistedGate(4),
+    ]);
+
+    expect(loadout!.slots.map((s) => s.apiIndex)).toEqual([1, 2, 3, 4]);
+  });
+
+  it('does not invent persisted-only gates when the short set is not a canonical prefix', () => {
+    const loadout = resolveMaterialLoadout(undefined, [
+      toolhead(0),
+      persistedGate(2),
+      persistedGate(3),
+      persistedGate(4),
+    ]);
+
+    expect(loadout!.slots.map((s) => s.apiIndex)).toEqual([2, 3, 4]);
+  });
+
+  it('does not invent a persisted-only gate on a physical toolhead index', () => {
+    const loadout = resolveMaterialLoadout(undefined, [
+      toolhead(0),
+      persistedGate(1),
+      persistedGate(2),
+      persistedGate(3),
+      toolhead(4),
+    ]);
+
+    expect(loadout!.slots.filter((s) => s.source === 'gate').map((s) => s.apiIndex)).toEqual([1, 2, 3]);
+  });
+
+  it('does not invent persisted-only gates when more than one physical toolhead is persisted', () => {
+    const loadout = resolveMaterialLoadout(undefined, [
+      toolhead(0),
+      toolhead(5),
+      persistedGate(1),
+      persistedGate(2),
+      persistedGate(3),
+    ]);
+
+    expect(loadout!.slots.filter((s) => s.source === 'gate').map((s) => s.apiIndex)).toEqual([1, 2, 3]);
   });
 
   it('surfaces a directly fed hotend alongside the gates', () => {

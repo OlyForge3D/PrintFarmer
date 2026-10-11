@@ -15,6 +15,7 @@ import { Download, Clock, Layers, DollarSign, Box, Palette, Timer, FolderOpen, A
 import clsx from "clsx";
 import { useFleetFilamentCoverage } from "@/features/filament-coverage/hooks";
 import { FilamentCoverageBadge } from "@/features/filament-coverage/components/FilamentCoverageBadge";
+import { hasFilamentCoverageDemand } from "@/features/filament-coverage/utils";
 import type { PrinterFilamentCoverage } from "@/features/filament-coverage/types";
 import { QueueJobReorderControls } from "@/features/queue/components/QueueJobReorderControls";
 import type { QueueReorderInteractions } from "@/features/queue/components/QueueJobReorderControls";
@@ -381,7 +382,7 @@ const QueueJobRowGroup = forwardRef<HTMLTableSectionElement, QueueJobRowGroupPro
                 // warning derived from stale data.
                 if (jobWrapper.assignedPrinter?.isOnline === false) return null;
                 const cov = coverageByPrinterId.get(printerId);
-                if (cov?.status !== "runout") return null;
+                if (!hasFilamentCoverageDemand(cov) || cov.status !== "runout") return null;
                 return (
                   <FilamentCoverageBadge
                     status={cov.status}

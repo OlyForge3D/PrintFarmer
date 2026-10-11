@@ -4207,6 +4207,100 @@ public class PrintersService(
         }
     }
 
+    /// <inheritdoc />
+    public async Task<double> GetMmuUnloadTemperatureAsync(Guid id, MmuControlRequest request, double minimumTemperatureC, CancellationToken ct)
+    {
+        Printer printer = await _unitOfWork.Printers.FindByIdWithToolheadsAsync(id, ct).ConfigureAwait(false)
+            ?? throw new KeyNotFoundException("Printer not found.");
+        if (!double.IsFinite(minimumTemperatureC) || minimumTemperatureC <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(minimumTemperatureC));
+        }
+
+        // QidiBox firmware gates are zero-based; persisted virtual toolheads are gate + 1.
+        Toolhead? lane = request.Protocol switch
+        {
+            MmuControlProtocol.Qidibox when request.GateIndex is >= 0 and < 16 =>
+                printer.Toolheads.FirstOrDefault(toolhead => toolhead.ToolheadType == ToolheadType.MmuGate && toolhead.Index == request.GateIndex + 1),
+            MmuControlProtocol.Afc => printer.Toolheads.FirstOrDefault(toolhead =>
+                toolhead.ToolheadType == ToolheadType.MmuGate && toolhead.Name == request.LaneName),
+            _ => null,
+        };
+        int? spoolId = lane?.CurrentSpoolId;
+        string? material = lane?.CurrentMaterial;
+
+        // Never substitute the physical primary's spool for a different box gate.
+        if (request.Protocol == MmuControlProtocol.Qidibox && request.GateIndex == 16)
+        {
+            Toolhead? rack = printer.Toolheads.FirstOrDefault(toolhead => toolhead.ToolheadType == ToolheadType.Physical);
+            spoolId = rack?.CurrentSpoolId ?? printer.CurrentSpoolId;
+            material = rack?.CurrentMaterial ?? printer.CurrentMaterial;
+        }
+
+        double? temperature = null;
+        try
+        {
+            using var lookupTimeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            lookupTimeout.CancelAfter(FallbackSpoolLookupTimeout);
+            if (spoolId is int assignedSpool)
+            {
+                SpoolmanSpoolDto? spool = await _spoolmanService.GetSpoolByIdAsync(assignedSpool, lookupTimeout.Token).ConfigureAwait(false);
+                material = spool?.Material ?? material;
+                if (spool?.FilamentId is int filamentId)
+                {
+                    SpoolmanFilamentDto? filament = await _spoolmanService.GetFilamentByIdAsync(filamentId, lookupTimeout.Token).ConfigureAwait(false);
+                    temperature = filament?.SettingsExtruderTemp;
+                }
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception, "Unable to resolve MMU spool temperature for printer {PrinterId}; using material or safety minimum", id);
+        }
+
+        if (temperature is not > 0 || !double.IsFinite(temperature.Value))
+        {
+            var materials = await _db.FilamentTypes.AsNoTracking().Where(filament => filament.IsActive)
+                .Select(filament => new { filament.Name, filament.DefaultHotendTemp }).ToListAsync(ct).ConfigureAwait(false);
+            temperature = materials.FirstOrDefault(filament => string.Equals(filament.Name, material, StringComparison.OrdinalIgnoreCase))?.DefaultHotendTemp;
+        }
+
+        double target = temperature is > 0 && double.IsFinite(temperature.Value)
+            ? Math.Max(minimumTemperatureC, temperature.Value) : minimumTemperatureC;
+        Toolhead? physical = printer.Toolheads.FirstOrDefault(toolhead => toolhead.IsPrimary && toolhead.ToolheadType == ToolheadType.Physical)
+            ?? printer.Toolheads.FirstOrDefault(toolhead => toolhead.ToolheadType == ToolheadType.Physical);
+        int? hotendModelLimit = physical?.HotendModel?.MaxTemp;
+        if (hotendModelLimit is null && physical?.HotendModelId is Guid hotendId)
+        {
+            hotendModelLimit = await _db.HotendModelDefinitions.AsNoTracking().Where(model => model.Id == hotendId)
+                .Select(model => model.MaxTemp).FirstOrDefaultAsync(ct).ConfigureAwait(false);
+        }
+
+        int? nozzleModelLimit = physical?.NozzleModel?.MaxTemp;
+        if (nozzleModelLimit is null && physical?.NozzleModelId is Guid nozzleId)
+        {
+            nozzleModelLimit = await _db.NozzleModelDefinitions.AsNoTracking().Where(model => model.Id == nozzleId)
+                .Select(model => model.MaxTemp).FirstOrDefaultAsync(ct).ConfigureAwait(false);
+        }
+
+        int[] limits = new int?[]
+        {
+            physical?.HotendMaxTemperature, hotendModelLimit,
+            physical?.NozzleMaxTemperature, nozzleModelLimit,
+        }.Where(limit => limit is > 0).Select(limit => limit!.Value).ToArray();
+        double maximum = limits.Length > 0 ? limits.Min() : 300;
+        if (target > maximum)
+        {
+            throw new ArgumentOutOfRangeException(nameof(minimumTemperatureC), "The filament unload temperature exceeds the installed hotend/nozzle temperature limit.");
+        }
+
+        return target;
+    }
+
     /// <inheritdoc/>
     public async Task<FilamentUnloadResult> UnloadFilamentAsync(Guid id, int? toolheadIndex, CancellationToken ct)
     {

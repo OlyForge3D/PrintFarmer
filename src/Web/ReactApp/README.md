@@ -21,6 +21,16 @@ npm test
 npm run lint
 ```
 
+## Filament coverage
+
+Filament coverage badges, demand summaries, and runout indicators appear only
+on detailed printer and material surfaces when a printer has an active print
+job or at least one assigned queued job. Compact printer cards never show
+filament coverage badges.
+Idle printers without assigned work still show loaded materials and spool
+assignments, but no coverage verdict. Unknown or unavailable demand is hidden;
+offline printers with demand show unverified coverage as "Filament unknown".
+
 ## Documentation
 
 - **[UI Components Guide](./UI_COMPONENTS_GUIDE.md)** - Comprehensive guide to shared UI components (Button, Alert, FormField, Input, Select, ProgressBar) with usage examples

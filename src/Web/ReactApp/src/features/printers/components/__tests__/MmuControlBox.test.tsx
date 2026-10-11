@@ -3,6 +3,7 @@ import { fireEvent, render as rtlRender, screen, waitFor } from '@testing-librar
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { toast } from 'sonner';
+import { apiClient } from '@/services/api';
 import { MmuControlBox } from '../MmuControlBox';
 import { MmuProtocol } from '@/features/printers/constants/mmuProtocol';
 import { MmuGateStatus, type MmuGate, type MmuStatus, type ToolheadDto } from '@/types/api';
@@ -34,7 +35,7 @@ function render(ui: ReactElement) {
   };
 }
 
-vi.mock('@/services/api', () => ({ apiClient: {} }));
+vi.mock('@/services/api', () => ({ apiClient: { mmuGateAction: vi.fn() } }));
 
 vi.mock('@/features/printers/components/SpoolPickerModal', () => ({
   SpoolPickerModal: ({ onSelect }: { onSelect: (id: number) => void }) => (
@@ -94,9 +95,102 @@ describe('MmuControlBox', () => {
     clearSpool.mockReset().mockResolvedValue('rev-2');
     coverage.mockReset().mockReturnValue(undefined);
     vi.mocked(toast.error).mockReset();
+    vi.mocked(apiClient.mmuGateAction).mockReset().mockResolvedValue({ success: true });
   });
 
   const twoGateToolheads = [toolhead(0, 'Physical'), toolhead(1, 'MmuGate'), toolhead(2, 'MmuGate')];
+
+  it('shows only the four QidiBox gate tiles without an orphan divider when Rack is absent', () => {
+    render(
+      <MmuControlBox
+        printerId="printer-1"
+        mmuStatus={status(qidiGates, { mmuType: MmuProtocol.Qidibox, activeGate: 1 })}
+        isOnline
+        toolheads={threePersistedGates}
+        reviewedRowVersion="rev-1"
+      />,
+    );
+
+    const activeGate = screen.getByRole('button', { name: /^Gate 1B:/ });
+    expect(activeGate).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.queryByText('In use')).not.toBeInTheDocument();
+    expect(screen.queryByText('Rack')).not.toBeInTheDocument();
+    const gates = screen.getAllByRole('button', { name: /^Gate 1[A-D]:/ });
+    expect(gates).toHaveLength(4);
+    expect(Array.from(activeGate.parentElement!.children)).toEqual(gates);
+  });
+
+  it.each([MmuProtocol.HappyHare, MmuProtocol.Afc])('preserves the loaded Rack tile for %s', (mmuType) => {
+    render(
+      <MmuControlBox
+        printerId="printer-1"
+        mmuStatus={status([gate(0, { material: 'PETG' }), gate(1)], { mmuType })}
+        isOnline
+      />,
+    );
+
+    const rack = screen.getByText('Rack').parentElement!;
+    expect(rack).toHaveTextContent('PETG');
+    expect(rack.querySelector('svg')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Gate 1A:/ })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.queryByText('In use')).not.toBeInTheDocument();
+  });
+
+  it.each(['Load', 'Unload', 'Eject'] as const)('surfaces the server safety title for a rejected QidiBox %s', async (action) => {
+    const title = 'The fresh measured hotend temperature is below the required minimum of 220 °C.';
+    vi.mocked(apiClient.mmuGateAction).mockRejectedValue({
+      statusCode: 409,
+      message: 'Request failed with status code 409',
+      data: { status: 409, title, code: 'printer_temperature_below_minimum' },
+    });
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      render(
+        <MmuControlBox
+          printerId="printer-1"
+          mmuStatus={status(qidiGates, { mmuType: MmuProtocol.Qidibox, activeGate: 1 })}
+          isOnline
+          toolheads={threePersistedGates}
+          reviewedRowVersion="rev-1"
+        />,
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: action }));
+
+      await waitFor(() => expect(toast.error).toHaveBeenCalledWith(title));
+      expect(apiClient.mmuGateAction).toHaveBeenCalledExactlyOnceWith('printer-1', {
+        protocol: 'Qidibox', action, gateIndex: 1,
+      });
+      expect(screen.getByRole('button', { name: action })).toBeEnabled();
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  it.each([
+    { error: { statusCode: 503, message: 'Printer is unavailable' }, expected: 'Printer is unavailable' },
+    { error: new Error('Connection interrupted'), expected: 'Connection interrupted' },
+    { error: null, expected: 'MMU Unload failed' },
+  ])('preserves command error fallback: $expected', async ({ error, expected }) => {
+    vi.mocked(apiClient.mmuGateAction).mockRejectedValue(error);
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      render(
+        <MmuControlBox
+          printerId="printer-1"
+          mmuStatus={status(qidiGates, { mmuType: MmuProtocol.Qidibox, activeGate: 1 })}
+          isOnline
+        />,
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: 'Unload' }));
+
+      await waitFor(() => expect(toast.error).toHaveBeenCalledWith(expected));
+      expect(screen.getByRole('button', { name: 'Unload' })).toBeEnabled();
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
 
   it('resolves gates by identity when telemetry arrives out of order', async () => {
     render(
@@ -219,6 +313,7 @@ describe('MmuControlBox', () => {
     coverage.mockReturnValue({
       printerId: 'printer-1',
       printerName: 'qp4-1',
+      activeJobId: 'job-1',
       status: 'runout',
       toolheads: [{ toolheadIndex: 2, status: 'runout', statusReason: null, remainingGrams: 100, totalDemandGrams: 400 }],
     });
@@ -241,6 +336,7 @@ describe('MmuControlBox', () => {
     coverage.mockReturnValue({
       printerId: 'printer-1',
       printerName: 'qp4-1',
+      activeJobId: 'job-1',
       status: 'runout',
       toolheads: [{ toolheadIndex: 1, status: 'runout', statusReason: null, remainingGrams: 100, totalDemandGrams: 400 }],
     });
@@ -265,6 +361,7 @@ describe('MmuControlBox', () => {
     coverage.mockReturnValue({
       printerId: 'printer-1',
       printerName: 'qp4-1',
+      activeJobId: 'job-1',
       status: 'runout',
       toolheads: [{ toolheadIndex: 1, status: 'runout', statusReason: null, remainingGrams: 100, totalDemandGrams: 400 }],
     });
@@ -492,6 +589,27 @@ describe('MmuControlBox', () => {
       isOnline: true,
       reviewedRowVersion: 'rev-1',
     };
+
+    it('shows Rack and four gates without a duplicate In use tile while a box gate is active', () => {
+      render(
+        <MmuControlBox
+          {...props}
+          toolheads={rackToolheads}
+          mmuStatus={status(qidiGates, { mmuType: MmuProtocol.Qidibox, hasBypass: true, activeGate: 1 })}
+        />,
+      );
+
+      const rack = screen.getByRole('button', { name: 'Rack: ASA - Spool #127' });
+      expect(screen.getAllByText('Rack')).toHaveLength(1);
+      expect(rack).toHaveAttribute('data-active', 'false');
+      expect(screen.queryByText('In use')).not.toBeInTheDocument();
+      const gates = screen.getAllByRole('button', { name: /^Gate 1[A-D]:/ });
+      expect(gates).toHaveLength(4);
+      for (const gateTile of gates) {
+        expect(gateTile).toHaveAttribute('aria-pressed', String(gateTile === gates[1]));
+      }
+      expect(rack.parentElement!.children).toHaveLength(6);
+    });
 
     it('selecting Rack opens the picker and binds physical toolhead 0, not a gate', async () => {
       render(

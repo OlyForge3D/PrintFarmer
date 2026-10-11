@@ -366,8 +366,34 @@ describe('MaterialLoadout', () => {
     expect(screen.queryByTestId('loadout-drawer')).not.toBeInTheDocument();
   });
 
+  it.each(['covers', 'unknown', 'runout'])(
+    'hides idle %s badges and demand figures while keeping material slots', (status) => {
+      coverage.mockReturnValue({
+        printerId: 'printer-1', activeJobId: null, assignedQueuedJobCount: 0, status,
+        toolheads: [{ toolheadIndex: 2, status, remainingGrams: 100, totalDemandGrams: 400 }],
+      });
+      renderLoadout();
+      expect(screen.queryByRole('status')).not.toBeInTheDocument();
+      expect(screen.getByTestId('loadout-slot-2')).toHaveAttribute('data-status', 'unknown');
+      fireEvent.click(screen.getByTestId('loadout-slot-2'));
+      expect(screen.queryByRole('status')).not.toBeInTheDocument();
+      expect(screen.queryByText('400g needed')).not.toBeInTheDocument();
+      expect(screen.getByTestId('material-loadout')).toBeInTheDocument();
+    },
+  );
+
+  it('shows coverage when an idle printer has an assigned queued job', () => {
+    coverage.mockReturnValue({
+      printerId: 'printer-1', activeJobId: null, assignedQueuedJobCount: 1,
+      status: 'covers', toolheads: [],
+    });
+    renderLoadout();
+    expect(screen.getByText('Filament OK')).toBeInTheDocument();
+  });
+
   it('joins coverage on the g-code index so figures land on the right slot', () => {
     coverage.mockReturnValue({
+      activeJobId: 'job-1',
       printerId: 'printer-1',
       printerName: 'Qidi Plus 4',
       status: 'runout',
@@ -396,6 +422,7 @@ describe('MaterialLoadout', () => {
   // ring/badge to "unknown" regardless of what the backend last reported.
   it('downgrades every coverage status to unknown when the printer is offline (#1684)', () => {
     coverage.mockReturnValue({
+      activeJobId: 'job-1',
       printerId: 'printer-1',
       printerName: 'Qidi Plus 4',
       status: 'covers',
@@ -416,6 +443,7 @@ describe('MaterialLoadout', () => {
 
   it('suppresses the runout chip and warning ring when offline even for a last-known runout status (#1684)', () => {
     coverage.mockReturnValue({
+      activeJobId: 'job-1',
       printerId: 'printer-1',
       printerName: 'Qidi Plus 4',
       status: 'runout',
@@ -434,6 +462,7 @@ describe('MaterialLoadout', () => {
 
   it('keeps existing (online) badge behavior when isOnline is not provided (back-compat)', () => {
     coverage.mockReturnValue({
+      activeJobId: 'job-1',
       printerId: 'printer-1',
       printerName: 'Qidi Plus 4',
       status: 'covers',
@@ -573,6 +602,7 @@ describe('MaterialLoadout', () => {
     // distinguishable via testids and data-source, and only the gate row must
     // receive the g-code-indexed coverage entry.
     coverage.mockReturnValue({
+      activeJobId: 'job-1',
       printerId: 'printer-1',
       printerName: 'Qidi Plus 4',
       status: 'runout',
@@ -614,6 +644,7 @@ describe('MaterialLoadout', () => {
     // A partial/degraded coverage payload must not take the whole printer card
     // down with it — `toolheads` is optional on the wire.
     coverage.mockReturnValue({
+      activeJobId: 'job-1',
       printerId: 'printer-1',
       printerName: 'Qidi Plus 4',
       status: 'unknown',

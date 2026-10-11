@@ -22,7 +22,7 @@ const hoisted = vi.hoisted(() => ({
   // Mutable per-test coverage payload for usePrinterFilamentCoverage (see
   // mock below). Defaults to no toolhead rows since coverage isn't
   // exercised by most of this file's tests.
-  coverageData: { printerId: "p1", toolheads: [] as unknown[] },
+  coverageData: { activeJobId: null as string | null, printerId: "p1", toolheads: [] as unknown[] },
 }));
 
 vi.mock("@/services/api", () => ({
@@ -129,7 +129,7 @@ describe("FallbackGroupsPanel", () => {
     hoisted.filamentTypes.mockResolvedValue([{ id: "pla", name: "PLA", defaultTemperatures: {}, isAbrasive: false, needsEnclosure: false }]);
     __resetFallbackGroupsSubscriptionForTests();
     hoisted.cb.current = null;
-    hoisted.coverageData = { printerId: "p1", toolheads: [] };
+    hoisted.coverageData = { activeJobId: null, printerId: "p1", toolheads: [] };
   });
 
   afterEach(() => {
@@ -311,6 +311,7 @@ describe("FallbackGroupsPanel", () => {
   // PrinterCoverageSummary) unless `isOnline` is explicitly threaded through.
   it("does not render 'Exhausted' for a last-known runout status when the printer is offline (#1684)", async () => {
     hoisted.coverageData = {
+      activeJobId: "job-1",
       printerId: "p1",
       toolheads: [
         { toolheadIndex: 0, status: "runout" },
@@ -323,8 +324,20 @@ describe("FallbackGroupsPanel", () => {
     expect(screen.queryByText("Exhausted")).not.toBeInTheDocument();
   });
 
+  it('does not show coverage-derived Exhausted state on an idle printer without demand', async () => {
+    hoisted.coverageData = {
+      activeJobId: null, printerId: 'p1',
+      toolheads: [{ toolheadIndex: 0, status: 'runout' }],
+    };
+    hoisted.apiGet.mockResolvedValueOnce({ data: twoGroupResponse });
+    renderPanel(physicalToolheads, true);
+    await screen.findByTestId('fallback-group-g1');
+    expect(screen.queryByText('Exhausted')).not.toBeInTheDocument();
+  });
+
   it("renders 'Exhausted' for a runout toolhead when the printer is online (back-compat)", async () => {
     hoisted.coverageData = {
+      activeJobId: "job-1",
       printerId: "p1",
       toolheads: [
         { toolheadIndex: 0, status: "runout" },

@@ -540,6 +540,14 @@ describe("ApiClient", () => {
       }
     );
 
+    it("allows bounded backend warm-up time only for MMU unload", async () => {
+      const mockPost = vi.fn().mockResolvedValue({ data: { success: true } });
+      (apiClient as unknown as { client: { post: typeof mockPost } }).client.post = mockPost;
+      const unload = { protocol: "Qidibox", action: "Unload", gateIndex: 1 } as const;
+      await apiClient.mmuGateAction("printer-1", unload);
+      expect(mockPost).toHaveBeenCalledWith("/printers/printer-1/mmu/gate-action", unload, { timeout: 360000 });
+    });
+
     it("uses only bounded typed maintenance routes", async () => {
       const mockPost = vi.fn().mockResolvedValue({
         data: { success: true },
@@ -567,7 +575,8 @@ describe("ApiClient", () => {
           protocol: "Qidibox",
           action: "Eject",
           gateIndex: 2,
-        }
+        },
+        undefined
       );
       expect(
         mockPost.mock.calls.some(([url]) => String(url).endsWith("/gcode"))
