@@ -121,7 +121,10 @@ export function buildSlotView(
   const matchedHex = matched?.colorHex?.trim().replace(/^#/, '');
   const color = reportedColor ?? (matchedHex ? `#${matchedHex}` : undefined);
   const stock: SlotStock = !state.assigned ? 'none' : state.depleted ? 'depleted' : 'assigned';
-  const empty = stock === 'depleted' && !slot.material?.trim() && !reportedColor && slot.filamentPresence !== 'available';
+  // A sensor-reported absent feed is authoritative; otherwise empty means nothing is reported and the feed isn't confirmed present.
+  const empty = stock === 'depleted'
+    && (slot.filamentPresence === 'absent'
+      || (!slot.material?.trim() && !reportedColor && slot.filamentPresence !== 'available'));
   const weight = matched ? matched.remainingWeightG : state.assigned ? slot.remainingWeightG : undefined;
   return {
     key: slot.key,

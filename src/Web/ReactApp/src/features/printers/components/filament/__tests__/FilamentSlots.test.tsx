@@ -416,7 +416,26 @@ describe('buildSlotView depleted slots', () => {
     expect(slotAccessibleLabel(view)).toBe('1C: ASA, 0 g remaining');
   });
 
-  it('is empty only when nothing is reported and the feed is not present', () => {
+  it('is empty when the sensor reports the feed absent even if material and color are retained', () => {
+    const view = buildSlotView(loadoutSlot({ material: 'ASA', color: '#888888', filamentPresence: 'absent' }), zeroSpool, { id: '1C' });
+    expect(view).toMatchObject({ stock: 'depleted', empty: true });
+    expect(slotAccessibleLabel(view)).toBe('1C: ASA, empty');
+  });
+
+  it('keeps the color and 0 g for an explicitly available feed with a 0 g spool', () => {
+    const view = buildSlotView(loadoutSlot({ material: 'ASA', color: '#888888', filamentPresence: 'available' }), zeroSpool, { id: '1C' });
+    expect(view.empty).toBeUndefined();
+    expect(view.color).toBe('#888888');
+    expect(slotAccessibleLabel(view)).toBe('1C: ASA, 0 g remaining');
+  });
+
+  it('keeps an unspecified-presence slot with retained color as 0 g, not empty', () => {
+    const view = buildSlotView(loadoutSlot({ material: 'ASA', color: '#888888' }), zeroSpool, { id: '1C' });
+    expect(view.empty).toBeUndefined();
+    expect(slotAccessibleLabel(view)).toBe('1C: ASA, 0 g remaining');
+  });
+
+  it('is empty when nothing is reported and the feed is not present', () => {
     const view = buildSlotView(loadoutSlot({ filamentPresence: 'absent' }), zeroSpool, { id: '1C' });
     expect(view.empty).toBe(true);
     expect(slotAccessibleLabel(view)).toBe('1C: ASA, empty');

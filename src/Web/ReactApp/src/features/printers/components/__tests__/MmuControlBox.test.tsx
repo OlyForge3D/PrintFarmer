@@ -192,7 +192,10 @@ describe('MmuControlBox', () => {
     render(
       <MmuControlBox
         printerId="printer-1"
-        mmuStatus={status([gate(0), gate(1), gate(2, { spoolId: 7, material: 'ASA', color: '#808080' }), gate(3)], { mmuType: MmuProtocol.Qidibox })}
+        mmuStatus={status(
+          [gate(0), gate(1), gate(2, { spoolId: 7, material: 'ASA', color: '#808080', status: MmuGateStatus.Available }), gate(3)],
+          { mmuType: MmuProtocol.Qidibox, activeGate: 2 },
+        )}
         isOnline
         toolheads={threePersistedGates}
         reviewedRowVersion="rev-1"
@@ -202,9 +205,31 @@ describe('MmuControlBox', () => {
     const slot = screen.getByTestId('mmu-gate-2');
     expect(slot).toHaveAttribute('data-state', 'depleted');
     expect(within(slot).getByTestId('slot-badge-depleted')).toBeInTheDocument();
-    expect(slot).toHaveAccessibleName('1C: ASA, 0 g remaining');
+    expect(slot).toHaveAccessibleName('1C: ASA, 0 g remaining, in use');
     expect(slot).not.toHaveTextContent('Empty');
     expect(slot.querySelector('[data-stock="depleted"] svg [fill="#808080"]')).not.toBeNull();
+  });
+
+  it('calls a gate Empty when the sensor reports no filament even though material and color are retained', () => {
+    inventory.data = [{ id: 7, name: 'ASA', material: 'ASA', remainingWeightG: 0, inUse: false }];
+    render(
+      <MmuControlBox
+        printerId="printer-1"
+        mmuStatus={status(
+          [gate(0), gate(1), gate(2, { spoolId: 7, material: 'ASA', color: '#808080', status: MmuGateStatus.Empty }), gate(3)],
+          { mmuType: MmuProtocol.Qidibox, activeGate: 0 },
+        )}
+        isOnline
+        toolheads={threePersistedGates}
+        reviewedRowVersion="rev-1"
+      />,
+    );
+
+    const slot = screen.getByTestId('mmu-gate-2');
+    expect(slot).toHaveAccessibleName('1C: ASA, empty');
+    expect(slot).toHaveTextContent('Empty');
+    expect(slot).not.toHaveTextContent('0 g');
+    expect(slot.querySelector('[data-stock="depleted"] svg [fill="#808080"]')).toBeNull();
   });
 
   it.each([
