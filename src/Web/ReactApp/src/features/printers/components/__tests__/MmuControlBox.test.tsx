@@ -182,9 +182,29 @@ describe('MmuControlBox', () => {
     );
 
     expect(within(screen.getByTestId('filament-summary')).getByTestId('filament-empty-dot')).toBeInTheDocument();
-    expect(screen.getByTestId('filament-summary')).toHaveAccessibleName(/1 empty/);
+    expect(screen.getByTestId('filament-summary')).toHaveAccessibleName(/1 at 0 g/);
     expect(within(screen.getByTestId('mmu-gate-1')).getByTestId('slot-badge-depleted')).toBeInTheDocument();
     expect(within(screen.getByTestId('mmu-gate-0')).queryByTestId('slot-badge-depleted')).not.toBeInTheDocument();
+  });
+
+  it('keeps the live color of a loaded gate whose assigned spool has 0 g instead of calling it empty', () => {
+    inventory.data = [{ id: 7, name: 'ASA', material: 'ASA', remainingWeightG: 0, inUse: false }];
+    render(
+      <MmuControlBox
+        printerId="printer-1"
+        mmuStatus={status([gate(0), gate(1), gate(2, { spoolId: 7, material: 'ASA', color: '#808080' }), gate(3)], { mmuType: MmuProtocol.Qidibox })}
+        isOnline
+        toolheads={threePersistedGates}
+        reviewedRowVersion="rev-1"
+      />,
+    );
+
+    const slot = screen.getByTestId('mmu-gate-2');
+    expect(slot).toHaveAttribute('data-state', 'depleted');
+    expect(within(slot).getByTestId('slot-badge-depleted')).toBeInTheDocument();
+    expect(slot).toHaveAccessibleName('1C: ASA, 0 g remaining');
+    expect(slot).not.toHaveTextContent('Empty');
+    expect(slot.querySelector('[data-stock="depleted"] svg [fill="#808080"]')).not.toBeNull();
   });
 
   it.each([
@@ -803,6 +823,21 @@ describe('MmuControlBox', () => {
       expect(screen.getByTestId('mmu-rack')).not.toHaveAttribute('data-active');
       expect(screen.getByTestId('mmu-gate-1')).toHaveAttribute('aria-current', 'true');
       expect(document.querySelectorAll('[aria-current="true"]')).toHaveLength(1);
+    });
+
+    it('shows the live Rack material and color instead of the stale persisted toolhead', () => {
+      render(
+        <MmuControlBox
+          {...props}
+          showExternalSpool
+          toolheads={rackToolheads}
+          mmuStatus={status(qidiGates, { mmuType: MmuProtocol.Qidibox, hasBypass: true, activeGate: 1, bypassMaterial: 'PETG', bypassColor: '#00aa55' })}
+        />,
+      );
+
+      const rack = screen.getByTestId('mmu-rack');
+      expect(rack).toHaveAccessibleName(/^Rack: PETG/);
+      expect(rack.querySelector('svg [fill="#00aa55"]')).not.toBeNull();
     });
 
     it('selecting Rack opens the picker and binds physical toolhead 0, not a gate', async () => {

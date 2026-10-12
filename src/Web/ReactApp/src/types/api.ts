@@ -716,6 +716,12 @@ export interface MmuStatus {
   gates: MmuGate[];
   /** MMU protocol type: "HappyHare", "Qidibox", "AFC", or "SnapmakerU1" */
   mmuType?: string;
+  /** Live material on the external spool holder / bypass (QidiBox "Rack"), when the device reports it */
+  bypassMaterial?: string | null;
+  /** Live CSS color of the external spool holder / bypass filament */
+  bypassColor?: string | null;
+  /** Live filament name of the external spool holder / bypass */
+  bypassFilamentName?: string | null;
 }
 
 // File information with thumbnail

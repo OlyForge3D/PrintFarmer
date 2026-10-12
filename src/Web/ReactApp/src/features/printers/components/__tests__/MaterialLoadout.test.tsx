@@ -1070,7 +1070,9 @@ describe('MaterialLoadout independent material facts', () => {
     expect(slot(1)).toHaveAttribute('data-state', 'depleted');
     expect(within(slot(1)).getByTestId('slot-badge-depleted')).toBeInTheDocument();
     expect(within(slot(1)).queryByTestId('slot-badge-assign')).not.toBeInTheDocument();
-    expect(slot(1)).toHaveAccessibleName(/empty/);
+    // The gate still reports live filament, so only the inventory is at 0 g.
+    expect(slot(1)).toHaveAccessibleName(/0 g remaining/);
+    expect(slot(1)).not.toHaveAccessibleName(/empty/);
     // Unknown remaining is still an assigned spool and never shows a gram figure.
     expect(slot(2)).toHaveAttribute('data-state', 'assigned');
     expect(slot(2)).not.toHaveAccessibleName(/\d+ g/);

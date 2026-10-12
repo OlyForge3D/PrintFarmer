@@ -13,6 +13,7 @@ import {
 import { Button, Tooltip } from '@/common/components/ui';
 import { SpoolIcon } from '@/common/components/icons/SpoolIcon';
 import {
+  DEPLETED_SPOOL_HINT,
   formatGrams,
   slotAccessibleLabel,
   type FilamentSlotView,
@@ -35,11 +36,11 @@ const ACTION_ICONS: Record<SlotActionKind, LucideIcon> = {
 /** Spool glyph with the Option 4 stock states: filled, depleted (!) and unassigned (+). */
 export function SlotSpool({ slot, size, className }: { slot: FilamentSlotView; size: number; className?: string }) {
   const badge = Math.max(10, Math.round(size * 0.44));
-  const fill = slot.stock === 'depleted'
+  const fill = slot.stock === 'depleted' && slot.empty
     ? null
-    : slot.stock === 'assigned'
-      ? slot.color ?? 'var(--pf-border-strong)'
-      : slot.color ?? null;
+    : slot.stock === 'none'
+      ? slot.color ?? null
+      : slot.color ?? 'var(--pf-border-strong)';
   return (
     <span className={clsx('relative inline-flex shrink-0', className)} aria-hidden="true" data-stock={slot.stock}>
       <SpoolIcon decorative size={size} frameColor="var(--pf-text-secondary)" fillColor={fill} />
@@ -78,11 +79,13 @@ function Sep() {
   return <span aria-hidden="true" className="shrink-0 text-pf-text-tertiary">·</span>;
 }
 
-/** Material, then "Empty" or grams, joined with middots; renders nothing when nothing is known. */
+/** Material, then "Empty", "0 g" for a depleted spool in a loaded slot, or grams, joined with middots; renders nothing when nothing is known. */
 function FactsLine({ slot, nameTestId }: { slot: FilamentSlotView; nameTestId?: string }) {
   const grams = formatGrams(slot.grams);
   const tail = slot.stock === 'depleted'
-    ? <span className="shrink-0 text-pf-warning">Empty</span>
+    ? slot.empty
+      ? <span className="shrink-0 text-pf-warning">Empty</span>
+      : <span className="shrink-0 tabular-nums text-pf-warning" title={DEPLETED_SPOOL_HINT} data-testid="filament-grams">{grams ?? '0 g'}</span>
     : grams && <span className="shrink-0 tabular-nums text-pf-text-tertiary" data-testid="filament-grams">{grams}</span>;
   return (
     <>
@@ -173,7 +176,7 @@ export function SlotActionPanel({
               {showId && slot.id && <b className="shrink-0 font-semibold">{slot.id}</b>}
               {showId && slot.id && slot.displayName && <Sep />}
               {slot.displayName && <span className="min-w-0 truncate">{slot.displayName}</span>}
-              {slot.color && slot.stock !== 'depleted' && (
+              {slot.color && !slot.empty && (
                 <span
                   aria-hidden="true"
                   className="inline-block size-2.5 shrink-0 rounded-full border border-pf-border"
@@ -189,7 +192,9 @@ export function SlotActionPanel({
               {slot.spoolId != null && <span>Spool #{slot.spoolId}</span>}
               {slot.spoolId != null && (slot.stock === 'depleted' || grams) && <Sep />}
               {slot.stock === 'depleted'
-                ? <span className="text-pf-warning">Empty</span>
+                ? slot.empty
+                  ? <span className="text-pf-warning">Empty</span>
+                  : <span className="text-pf-warning" title={DEPLETED_SPOOL_HINT}>{grams ?? '0 g'}</span>
                 : slot.spoolId != null && grams && <span>{grams}</span>}
               {slot.disabled && (
                 <>
@@ -307,10 +312,12 @@ export function FilamentSlots({
     );
   }
 
-  const emptyCount = slots.filter((slot) => slot.stock === 'depleted').length;
+  const emptyCount = slots.filter((slot) => slot.stock === 'depleted' && slot.empty).length;
+  const zeroCount = slots.filter((slot) => slot.stock === 'depleted' && !slot.empty).length;
   const summaryLabel = [
     summarySlot ? slotAccessibleLabel(summarySlot) : `Filament ${unitWord}`,
     emptyCount > 0 ? `${emptyCount} empty` : null,
+    zeroCount > 0 ? `${zeroCount} at 0 g` : null,
     `${railOpen ? 'Hide' : 'Show'} ${slots.length} ${unitWord}`,
   ].filter(Boolean).join(', ');
 
@@ -352,7 +359,7 @@ export function FilamentSlots({
           </span>
         )}
         <span data-pf-radius="full" className="ml-auto inline-flex shrink-0 items-center gap-1 rounded-full border border-pf-border px-2 py-[3px] text-xs text-pf-text-secondary">
-          {emptyCount > 0 && (
+          {emptyCount + zeroCount > 0 && (
             <span aria-hidden="true" className="size-1.5 rounded-full bg-pf-warning" data-testid="filament-empty-dot" />
           )}
           <span className="tabular-nums">{slots.length}</span>
@@ -405,7 +412,7 @@ export function FilamentSlots({
                     slot.stock === 'depleted' || slot.atRisk ? 'text-pf-warning' : 'text-pf-text-secondary',
                   )}
                 >
-                  {slot.stock === 'depleted' ? 'Empty' : slot.material ?? ''}
+                  {slot.stock === 'depleted' && slot.empty ? 'Empty' : slot.material ?? ''}
                 </span>
               </Button>
             );

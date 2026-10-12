@@ -20,6 +20,12 @@ export interface FilamentSlotView {
   grams?: number;
   spoolId?: number;
   stock: SlotStock;
+  /**
+   * The assigned spool is depleted and the printer reports no filament in the
+   * slot, so it really is empty. A depleted spool alone only means inventory is
+   * at 0 g; the slot may still hold live filament with a reported color.
+   */
+  empty?: boolean;
   active?: boolean;
   disabled?: boolean;
   atRisk?: boolean;
@@ -114,6 +120,8 @@ export function buildSlotView(
   const reportedColor = slot.color?.trim() || undefined;
   const matchedHex = matched?.colorHex?.trim().replace(/^#/, '');
   const color = reportedColor ?? (matchedHex ? `#${matchedHex}` : undefined);
+  const stock: SlotStock = !state.assigned ? 'none' : state.depleted ? 'depleted' : 'assigned';
+  const empty = stock === 'depleted' && !slot.material?.trim() && !reportedColor && slot.filamentPresence !== 'available';
   const weight = matched ? matched.remainingWeightG : state.assigned ? slot.remainingWeightG : undefined;
   return {
     key: slot.key,
@@ -123,7 +131,8 @@ export function buildSlotView(
     color,
     grams: weight != null && Number.isFinite(weight) && weight >= 0 ? weight : undefined,
     spoolId: state.assigned ? slot.spoolId : undefined,
-    stock: !state.assigned ? 'none' : state.depleted ? 'depleted' : 'assigned',
+    stock,
+    empty: empty || undefined,
     active: options.active,
     disabled: slot.disabled,
     atRisk: options.atRisk,
@@ -141,7 +150,7 @@ export function slotAccessibleLabel(slot: FilamentSlotView): string {
   } else {
     parts.push(slot.displayName ?? 'Unknown material');
     const grams = formatGrams(slot.grams);
-    if (slot.stock === 'depleted') parts.push('empty');
+    if (slot.stock === 'depleted') parts.push(slot.empty ? 'empty' : '0 g remaining');
     else if (grams) parts.push(grams);
   }
   if (slot.active) parts.push('in use');
@@ -150,3 +159,6 @@ export function slotAccessibleLabel(slot: FilamentSlotView): string {
   if (slot.atRisk) parts.push('runout risk');
   return `${prefix}${parts.join(', ')}`;
 }
+
+/** Tooltip for the inventory warning on a slot whose assigned spool has no grams left. */
+export const DEPLETED_SPOOL_HINT = 'Assigned spool has 0 g remaining';

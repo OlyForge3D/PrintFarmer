@@ -16,6 +16,9 @@
 /// <param name="ClogDetection">Whether clog detection is active.</param>
 /// <param name="Gates">Per-gate slot information.</param>
 /// <param name="MmuType">The MMU protocol type: "HappyHare", "Qidibox", "AFC", or "SnapmakerU1".</param>
+/// <param name="BypassMaterial">Material loaded on the external spool holder / bypass (Qidi "Rack"), or null when not reported.</param>
+/// <param name="BypassColor">CSS color of the external spool holder / bypass filament, or null when not reported.</param>
+/// <param name="BypassFilamentName">Filament name of the external spool holder / bypass, or null when not reported.</param>
 public record MmuStatusDto(
     bool Enabled,
     bool IsHomed,
@@ -28,7 +31,10 @@ public record MmuStatusDto(
     bool EndlessSpool,
     bool ClogDetection,
     MmuGateDto[] Gates,
-    string MmuType = MmuProtocol.Unknown);
+    string MmuType = MmuProtocol.Unknown,
+    string? BypassMaterial = null,
+    string? BypassColor = null,
+    string? BypassFilamentName = null);
 
 /// <summary>
 /// Status of a single gate/slot on the MMU.

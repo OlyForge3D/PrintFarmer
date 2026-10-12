@@ -105,4 +105,77 @@ public class QidiboxRackTelemetryTests
 
         state.BuildMmuStatus().Should().BeSameAs(first);
     }
+
+    [Fact]
+    public void Slot16_TypeAndColor_AreCapturedAsBypassFilament()
+    {
+        PrinterState state = NewQidiState();
+
+        MoonrakerSubscriptionService.ApplyQidiboxSaveVariables(state, Qp41Variables("slot16"));
+        MmuStatusDto mmu = state.BuildMmuStatus()!;
+
+        mmu.BypassMaterial.Should().Be("ASA");
+        mmu.BypassFilamentName.Should().Be("ASA");
+        mmu.BypassColor.Should().Be("#FFFFFF");
+    }
+
+    [Fact]
+    public void Slot16_Absent_LeavesBypassFilamentNull()
+    {
+        PrinterState state = NewQidiState();
+        JsonElement variables = JsonDocument.Parse("""
+            { "box_count": 1, "filament_slot0": 1, "color_slot0": 1, "last_load_slot": "slot0" }
+            """).RootElement;
+
+        MoonrakerSubscriptionService.ApplyQidiboxSaveVariables(state, variables);
+        MmuStatusDto mmu = state.BuildMmuStatus()!;
+
+        mmu.BypassMaterial.Should().BeNull();
+        mmu.BypassColor.Should().BeNull();
+        mmu.BypassFilamentName.Should().BeNull();
+    }
+
+    [Fact]
+    public void Slot16_UnknownIds_FallBackLikeGates()
+    {
+        PrinterState state = NewQidiState();
+        JsonElement variables = JsonDocument.Parse("""
+            { "box_count": 1, "filament_slot0": 99, "color_slot0": 99, "filament_slot16": 77, "color_slot16": 88 }
+            """).RootElement;
+
+        MoonrakerSubscriptionService.ApplyQidiboxSaveVariables(state, variables);
+        MmuStatusDto mmu = state.BuildMmuStatus()!;
+
+        mmu.BypassMaterial.Should().Be("Type 77");
+        mmu.BypassFilamentName.Should().Be("Type 77");
+        mmu.BypassColor.Should().Be("#808080");
+        mmu.Gates[0].Material.Should().Be("Type 99");
+        mmu.Gates[0].Color.Should().Be("#808080");
+    }
+
+    [Fact]
+    public void Slot16_Change_InvalidatesCachedStatus_AndResetClearsIt()
+    {
+        PrinterState state = NewQidiState();
+        MoonrakerSubscriptionService.ApplyQidiboxSaveVariables(state, Qp41Variables("slot1"));
+        MmuStatusDto before = state.BuildMmuStatus()!;
+        before.BypassMaterial.Should().Be("ASA");
+
+        JsonElement changed = JsonDocument.Parse("""
+            { "box_count": 1, "filament_slot0": 1, "color_slot0": 1, "filament_slot1": 2, "color_slot1": 2,
+              "filament_slot2": 1, "color_slot2": 3, "filament_slot3": 3, "color_slot3": 4,
+              "filament_slot16": 2, "color_slot16": 2, "last_load_slot": "slot1" }
+            """).RootElement;
+        MoonrakerSubscriptionService.ApplyQidiboxSaveVariables(state, changed);
+        MmuStatusDto after = state.BuildMmuStatus()!;
+
+        after.Should().NotBeSameAs(before);
+        after.BypassMaterial.Should().Be("PETG");
+        after.BypassColor.Should().Be("#00FF00");
+
+        state.ResetMmuState();
+        state.MmuBypassMaterial.Should().BeNull();
+        state.MmuBypassColor.Should().BeNull();
+        state.MmuBypassFilamentName.Should().BeNull();
+    }
 }

@@ -338,7 +338,9 @@ function missingCanonicalGateSlots(
  * slots. Its spool binding lives on the persisted physical toolhead, never on a
  * gate, so it is surfaced from that toolhead's own index. With more than one
  * physical toolhead the holder's identity is ambiguous, so nothing is surfaced.
- * The holder is only surfaced when the device reports it (`hasBypass`).
+ * The holder is only surfaced when the device reports it (`hasBypass`). Its
+ * material, color and filament name prefer the live `bypass*` status fields over
+ * the persisted toolhead.
  */
 export function resolveQidiRackSlot(
   mmuStatus: MmuStatus | null | undefined,
@@ -347,7 +349,16 @@ export function resolveQidiRackSlot(
   if (mmuStatus?.mmuType !== MmuProtocol.Qidibox || !mmuStatus.hasBypass) return null;
   const physical = (toolheads ?? []).filter((toolhead) => !isMmuGate(toolhead));
   if (physical.length !== 1) return null;
-  return { ...externalSlotFromToolhead(physical[0]), label: 'Rack' };
+  const rack = externalSlotFromToolhead(physical[0]);
+  // The holder's live telemetry beats the persisted toolhead, which only records what was last saved.
+  const live = (value: string | null | undefined) => value?.trim() || undefined;
+  return {
+    ...rack,
+    label: 'Rack',
+    material: live(mmuStatus.bypassMaterial) ?? rack.material,
+    color: live(mmuStatus.bypassColor) ?? rack.color,
+    filamentName: live(mmuStatus.bypassFilamentName) ?? rack.filamentName,
+  };
 }
 
 /**

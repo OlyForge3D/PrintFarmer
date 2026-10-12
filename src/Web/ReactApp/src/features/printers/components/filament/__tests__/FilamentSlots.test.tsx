@@ -7,6 +7,7 @@ import {
   buildSlotView,
   formatGrams,
   filamentDisplayName,
+  slotAccessibleLabel,
   type FilamentSlotView,
   type SlotAction,
   type SlotPanelContent,
@@ -24,7 +25,7 @@ const slot = (overrides: Partial<FilamentSlotView> & { key: string; id: string }
 
 const qidiRail = [
   slot({ key: 'a', id: '1A', active: true, testId: 'gate-a' }),
-  slot({ key: 'b', id: '1B', stock: 'depleted', grams: 0, displayName: 'PETG White', material: 'PETG', testId: 'gate-b' }),
+  slot({ key: 'b', id: '1B', stock: 'depleted', empty: true, grams: 0, displayName: 'PETG White', material: 'PETG', testId: 'gate-b' }),
   slot({ key: 'c', id: '1C', stock: 'none', spoolId: undefined, displayName: undefined, material: undefined, grams: undefined, color: undefined, testId: 'gate-c' }),
   slot({ key: 'd', id: '1D', testId: 'gate-d' }),
 ];
@@ -306,12 +307,26 @@ describe('device-reported color without an assigned spool', () => {
     expect(within(screen.getByTestId('u1')).getByTestId('slot-badge-assign')).toBeInTheDocument();
   });
 
-  it('keeps a depleted slot unfilled even when a color is known', () => {
-    const s = slot({ key: 'd', id: 'T0', stock: 'depleted', color: '#FF8800', testId: 'dep' });
+  it('leaves a physically empty depleted slot unfilled even when a color is known', () => {
+    const s = slot({ key: 'd', id: 'T0', stock: 'depleted', empty: true, color: '#FF8800', testId: 'dep' });
     render(<Harness slots={[s]} summarySlot={s} mode="single" />);
 
     const glyph = screen.getByTestId('dep').querySelector('[data-stock="depleted"]') as HTMLElement;
     expect(fillOf(glyph)).toBe('transparent');
+  });
+
+  it('keeps the live color on a loaded slot whose spool has 0 g and says "0 g" instead of "Empty"', () => {
+    const s = slot({ key: 'd', id: '1C', stock: 'depleted', grams: 0, material: 'ASA', displayName: 'ASA', color: '#888888', testId: 'dep' });
+    render(<Harness slots={[s]} summarySlot={s} mode="single" />);
+
+    const button = screen.getByTestId('dep');
+    const glyph = button.querySelector('[data-stock="depleted"]') as HTMLElement;
+    expect(fillOf(glyph)).toBe('#888888');
+    expect(within(button).getByTestId('slot-badge-depleted')).toBeInTheDocument();
+    expect(button).toHaveTextContent('ASA·0 g');
+    expect(button).not.toHaveTextContent('Empty');
+    expect(within(button).getByText('0 g')).toHaveAttribute('title', 'Assigned spool has 0 g remaining');
+    expect(button).toHaveAccessibleName('Filament: 1C: ASA, 0 g remaining');
   });
 
   it('shows the panel color swatch for an unassigned slot', () => {
@@ -367,14 +382,44 @@ describe('formatting helpers', () => {
 });
 
 describe('depleted slot panel', () => {
-  it('hides the panel color swatch for a depleted slot', () => {
+  it('shows the panel color swatch and 0 g for a depleted slot that still holds filament', () => {
     const s = slot({ key: 'd', id: 'T0', stock: 'depleted', grams: 0, color: '#FF8800', testId: 'dep' });
+    render(<Harness slots={[s]} summarySlot={s} mode="single" />);
+
+    fireEvent.click(screen.getByTestId('dep'));
+    const panel = screen.getByTestId('slot-panel');
+    expect(panel.querySelector('span[style]')).toHaveStyle({ backgroundColor: '#FF8800' });
+    expect(within(panel).getByText('0 g')).toBeInTheDocument();
+    expect(panel).not.toHaveTextContent('Empty');
+  });
+
+  it('hides the panel color swatch for a physically empty slot', () => {
+    const s = slot({ key: 'd', id: 'T0', stock: 'depleted', empty: true, grams: 0, color: '#FF8800', testId: 'dep' });
     render(<Harness slots={[s]} summarySlot={s} mode="single" />);
 
     fireEvent.click(screen.getByTestId('dep'));
     const panel = screen.getByTestId('slot-panel');
     expect(within(panel).getByText('PLA Black')).toBeInTheDocument();
     expect(panel.querySelector('span[style]')).toBeNull();
+  });
+});
+
+describe('buildSlotView depleted slots', () => {
+  const loadoutSlot = (overrides: Partial<LoadoutSlot>): LoadoutSlot =>
+    ({ key: 'k', apiIndex: 1, label: 'G3', source: 'gate', spoolId: 9, ...overrides }) as LoadoutSlot;
+  const zeroSpool = { id: 9, name: 'x', material: 'ASA', colorHex: 'AAAAAA', inUse: false, remainingWeightG: 0 } as Parameters<typeof buildSlotView>[1];
+
+  it('is not empty when the printer reports a live color', () => {
+    const view = buildSlotView(loadoutSlot({ material: 'ASA', color: '#888888', filamentPresence: 'available' }), zeroSpool, { id: '1C' });
+    expect(view).toMatchObject({ stock: 'depleted', color: '#888888', material: 'ASA' });
+    expect(view.empty).toBeUndefined();
+    expect(slotAccessibleLabel(view)).toBe('1C: ASA, 0 g remaining');
+  });
+
+  it('is empty only when nothing is reported and the feed is not present', () => {
+    const view = buildSlotView(loadoutSlot({ filamentPresence: 'absent' }), zeroSpool, { id: '1C' });
+    expect(view.empty).toBe(true);
+    expect(slotAccessibleLabel(view)).toBe('1C: ASA, empty');
   });
 });
 

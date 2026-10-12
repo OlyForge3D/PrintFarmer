@@ -504,6 +504,30 @@ describe('resolveQidiRackSlot', () => {
     expect(rack!.gcodeIndex).toBeUndefined();
   });
 
+  const rackToolheads = () => [
+    toolhead(0, { currentSpoolId: 127, currentMaterial: 'ASA', currentFilamentColor: '#6a0dad' }),
+    persistedGate(1), persistedGate(2), persistedGate(3),
+  ];
+  const qidiGates = () => [gate(0), gate(1), gate(2), gate(3)];
+
+  it('prefers the live bypass material, color and name over the persisted toolhead', () => {
+    const rack = resolveQidiRackSlot(
+      { ...mmu(qidiGates(), MmuProtocol.Qidibox), hasBypass: true, bypassMaterial: 'PETG', bypassColor: '#00ff00', bypassFilamentName: 'Live PETG' },
+      rackToolheads(),
+    );
+
+    expect(rack).toMatchObject({ material: 'PETG', color: '#00ff00', filamentName: 'Live PETG', spoolId: 127, apiIndex: 0 });
+  });
+
+  it('falls back to the persisted toolhead when no live bypass values are reported', () => {
+    const base = { ...mmu(qidiGates(), MmuProtocol.Qidibox), hasBypass: true };
+    for (const live of [{}, { bypassMaterial: null, bypassColor: '  ', bypassFilamentName: '' }]) {
+      const rack = resolveQidiRackSlot({ ...base, ...live }, rackToolheads());
+      expect(rack).toMatchObject({ material: 'ASA', color: '#6a0dad', spoolId: 127 });
+      expect(rack!.filamentName).toBeUndefined();
+    }
+  });
+
   it('surfaces nothing for other MMU types or ambiguous physical toolheads', () => {
     const gates = [gate(0), gate(1), gate(2), gate(3)];
     expect(resolveQidiRackSlot(mmu(gates, MmuProtocol.HappyHare), [toolhead(0)])).toBeNull();
