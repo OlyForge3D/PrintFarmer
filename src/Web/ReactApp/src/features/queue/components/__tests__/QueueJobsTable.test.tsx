@@ -782,6 +782,8 @@ describe("QueueJobsTable — filament coverage badge", () => {
 
   function fleetWithStatus(
     status: FilamentCoverageStatus,
+    assignedQueuedJobCount = 1,
+    activeJobId: string | null = null,
   ): MockFleetCoverageResult {
     return {
       data: {
@@ -791,11 +793,11 @@ describe("QueueJobsTable — filament coverage badge", () => {
             printerName: "Badge Printer",
             status,
             toolheads: [],
-            activeJobId: null,
+            activeJobId,
             activeJobName: null,
             activeJobProgress: null,
             earliestPredictedRunoutAt: null,
-            assignedQueuedJobCount: 0,
+            assignedQueuedJobCount,
             evaluatedAtUtc: new Date().toISOString(),
           },
         ],
@@ -814,6 +816,18 @@ describe("QueueJobsTable — filament coverage badge", () => {
       isLoading: false,
       isError: false,
     });
+  });
+
+  it('hides a stale runout verdict when the coverage snapshot has no active or assigned work', () => {
+    mockGetCoverage.mockReturnValue(fleetWithStatus('runout', 0));
+    render(<QueueJobsTable jobs={[jobWithPrinter]} />);
+    expect(screen.queryByRole('status', { name: /runout risk/i })).not.toBeInTheDocument();
+  });
+
+  it('shows a runout verdict for an active job even without queued work', () => {
+    mockGetCoverage.mockReturnValue(fleetWithStatus('runout', 0, 'active-job'));
+    render(<QueueJobsTable jobs={[jobWithPrinter]} />);
+    expect(screen.getByRole('status', { name: /runout risk/i })).toBeInTheDocument();
   });
 
   it("shows the runout badge when assigned printer status is 'runout'", async () => {

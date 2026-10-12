@@ -220,10 +220,6 @@ export const printerService = {
     return apiClient.unloadFilament(printerId);
   },
 
-  async changeFilament(printerId: string): Promise<CommandResult> {
-    return apiClient.changeFilament(printerId);
-  },
-
   // ── MMU Commands ──────────────────────────────────────────────────────
 
   async mmuChangeTool(printerId: string, tool: number): Promise<CommandResult> {

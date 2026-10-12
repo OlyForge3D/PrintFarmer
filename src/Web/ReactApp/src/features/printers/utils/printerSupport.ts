@@ -125,9 +125,15 @@ export function canFilamentControl(args: { isOnline: boolean; isEnabled?: boolea
   return isEnabled && args.isOnline && args.support.supportsFilamentControl && !args.isPrinting;
 }
 
-export function canFilamentChange(args: { isOnline: boolean; isEnabled?: boolean; support: PrinterSupport }): boolean {
-  const isEnabled = args.isEnabled ?? true;
-  return isEnabled && args.isOnline && args.support.supportsFilamentControl;
+/**
+ * Why {@link canFilamentControl} is false, for an aria-disabled control's
+ * tooltip. Returns `undefined` when the load/unload macros may run.
+ */
+export function filamentControlBlockedReason(args: { isOnline: boolean; isEnabled?: boolean; isPrinting: boolean }): string | undefined {
+  if (!args.isOnline) return 'Printer is offline';
+  if (args.isEnabled === false) return 'Printer is disabled';
+  if (args.isPrinting) return 'Not available while printing';
+  return undefined;
 }
 
 /** Shared active-print gate for the Objects section on every printer surface. */

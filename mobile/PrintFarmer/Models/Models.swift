@@ -516,10 +516,14 @@ struct MmuStatus: Codable, Sendable {
     let clogDetection: Bool
     let gates: [MmuGate]
     let mmuType: String
+    let bypassMaterial: String?
+    let bypassColor: String?
+    let bypassFilamentName: String?
 
     private enum CodingKeys: String, CodingKey {
         case enabled, isHomed, activeTool, activeGate, filamentState, action
         case numGates, hasBypass, endlessSpool, clogDetection, gates, mmuType
+        case bypassMaterial, bypassColor, bypassFilamentName
     }
 
     init(from decoder: Decoder) throws {
@@ -536,6 +540,9 @@ struct MmuStatus: Codable, Sendable {
         clogDetection = try c.decodeIfPresent(Bool.self, forKey: .clogDetection) ?? false
         gates = try c.decodeIfPresent([MmuGate].self, forKey: .gates) ?? []
         mmuType = try c.decodeIfPresent(String.self, forKey: .mmuType) ?? "Unknown"
+        bypassMaterial = try c.decodeIfPresent(String.self, forKey: .bypassMaterial)
+        bypassColor = try c.decodeIfPresent(String.self, forKey: .bypassColor)
+        bypassFilamentName = try c.decodeIfPresent(String.self, forKey: .bypassFilamentName)
     }
 }
 

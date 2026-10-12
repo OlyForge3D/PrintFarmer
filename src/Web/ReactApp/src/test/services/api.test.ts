@@ -103,16 +103,6 @@ describe("ApiClient", () => {
 
       expect(postMock).toHaveBeenCalledWith("/printers/printer-1/fan", { speedPercent: 65 });
     });
-
-    it("adjustPrinterZOffset posts the transient offset using the adjustment route", async () => {
-      const data = { success: true, message: undefined };
-      const postMock = vi.fn().mockResolvedValue({ data });
-      (apiClient as unknown as { client: { post: typeof postMock } }).client.post = postMock;
-
-      await expect(apiClient.adjustPrinterZOffset("printer-1", 0.025)).resolves.toEqual(data);
-
-      expect(postMock).toHaveBeenCalledWith("/printers/printer-1/z-offset/adjust", { offsetMm: 0.025 });
-    });
   });
 
   it("accepts snapshot query parameters and appends the cache buster", async () => {
@@ -342,7 +332,7 @@ describe("ApiClient", () => {
   });
 
   describe("reviewed printer mutation ETags", () => {
-    it("sends displayed revisions for edit, maintenance, Z-offset, spool, and toolhead mutations", async () => {
+    it("sends displayed revisions for edit, maintenance, spool, and toolhead mutations", async () => {
       const put = vi.fn().mockResolvedValue({
         data: { id: "printer-1", success: true },
         headers: { etag: '"printer-v2"' },
@@ -381,11 +371,6 @@ describe("ApiClient", () => {
         true,
         "printer-v1"
       );
-      await apiClient.saveZOffset(
-        "printer-1",
-        { offsetMm: 0.1, saveToFirmware: false },
-        "printer-v1"
-      );
       expect(
         await apiClient.setActiveSpool(
           "printer-1",
@@ -418,6 +403,25 @@ describe("ApiClient", () => {
       expect(del).toHaveBeenCalledWith(
         "/printers/printer-1/toolheads/0/spool",
         { headers: { "If-Match": '"printer-v2"' } }
+      );
+    });
+  });
+
+  describe("legacy active-spool clear contract", () => {
+    it("clears the printer scalar with the reviewed ETag and returns the response revision", async () => {
+      const post = vi.fn().mockResolvedValue({
+        data: { success: true },
+        headers: { etag: '"printer-after-clear"' },
+      });
+      (apiClient as unknown as { client: { post: typeof post } }).client.post = post;
+
+      await expect(apiClient.clearActiveSpool("printer-1", "printer-before-clear"))
+        .resolves.toBe("printer-after-clear");
+
+      expect(post).toHaveBeenCalledWith(
+        "/printers/printer-1/active-spool",
+        { spoolId: null },
+        { headers: { "If-Match": '"printer-before-clear"' } },
       );
     });
   });
@@ -540,6 +544,14 @@ describe("ApiClient", () => {
       }
     );
 
+    it("allows bounded backend warm-up time only for MMU unload", async () => {
+      const mockPost = vi.fn().mockResolvedValue({ data: { success: true } });
+      (apiClient as unknown as { client: { post: typeof mockPost } }).client.post = mockPost;
+      const unload = { protocol: "Qidibox", action: "Unload", gateIndex: 1 } as const;
+      await apiClient.mmuGateAction("printer-1", unload);
+      expect(mockPost).toHaveBeenCalledWith("/printers/printer-1/mmu/gate-action", unload, { timeout: 360000 });
+    });
+
     it("uses only bounded typed maintenance routes", async () => {
       const mockPost = vi.fn().mockResolvedValue({
         data: { success: true },
@@ -567,7 +579,8 @@ describe("ApiClient", () => {
           protocol: "Qidibox",
           action: "Eject",
           gateIndex: 2,
-        }
+        },
+        undefined
       );
       expect(
         mockPost.mock.calls.some(([url]) => String(url).endsWith("/gcode"))

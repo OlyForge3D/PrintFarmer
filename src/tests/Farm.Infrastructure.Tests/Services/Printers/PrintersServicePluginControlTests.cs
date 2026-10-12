@@ -137,6 +137,88 @@ public sealed class PrintersServicePluginControlTests
         rawCommands.VerifyNoOtherCalls();
     }
 
+    [Theory]
+    [InlineData(260, 245d, 220d, 260d)]
+    [InlineData(null, 245d, 220d, 245d)]
+    [InlineData(200, 245d, 220d, 220d)]
+    [InlineData(null, null, 220d, 220d)]
+    [InlineData(null, 200d, 240d, 240d)]
+    public async Task GetMmuUnloadTemperatureAsync_AssignedGate_UsesFilamentThenMaterialThenSafetyMinimum(
+        int? spoolTemperature, double? materialTemperature, double minimum, double expected)
+    {
+        await using var db = CreateDbContext();
+        Printer printer = CreatePrinter(PrinterBackend.Moonraker);
+        printer.Toolheads.Add(new Toolhead { Index = 0, IsPrimary = true, CurrentSpoolId = 99, CurrentMaterial = "PLA" });
+        printer.Toolheads.Add(new Toolhead { Index = 2, ToolheadType = ToolheadType.MmuGate, CurrentSpoolId = 8, CurrentMaterial = "PETG" });
+        db.FilamentTypes.Add(new FilamentType { Id = Guid.NewGuid(), Name = "PETG", DefaultHotendTemp = materialTemperature });
+        await db.SaveChangesAsync();
+        var spoolman = new Mock<Farm.Infrastructure.Services.Interfaces.ISpoolmanService>(MockBehavior.Strict);
+        spoolman.Setup(service => service.GetSpoolByIdAsync(8, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SpoolmanSpoolDto(8, "gate spool", "PETG", 500, null, true, FilamentId: 17));
+        spoolman.Setup(service => service.GetFilamentByIdAsync(17, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SpoolmanFilamentDto(17, "PETG", "PETG", null, null, null, null, null, null, null, spoolTemperature, null, null, null, null, null));
+        var backend = new Mock<IBackendClient>(MockBehavior.Strict);
+        PrintersService service = CreateService(db, printer, backend.Object, spoolmanService: spoolman.Object);
+
+        Assert.Equal(expected, await service.GetMmuUnloadTemperatureAsync(printer.Id,
+            new MmuControlRequest(MmuControlAction.Unload, MmuControlProtocol.Qidibox, GateIndex: 1), minimum, default));
+
+        spoolman.VerifyAll();
+        spoolman.VerifyNoOtherCalls();
+        backend.VerifyNoOtherCalls();
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task GetMmuUnloadTemperatureAsync_NoGateBindingOrSpoolServiceUnavailable_UsesMaterialOrMinimum(bool unavailable)
+    {
+        await using var db = CreateDbContext();
+        Printer printer = CreatePrinter(PrinterBackend.Moonraker);
+        printer.Toolheads.Add(new Toolhead { Index = 0, IsPrimary = true, CurrentSpoolId = 99, CurrentMaterial = "PLA" });
+        if (unavailable)
+        {
+            printer.Toolheads.Add(new Toolhead { Index = 2, ToolheadType = ToolheadType.MmuGate, CurrentSpoolId = 8, CurrentMaterial = "PETG" });
+        }
+
+        db.FilamentTypes.Add(new FilamentType { Id = Guid.NewGuid(), Name = "PETG", DefaultHotendTemp = 245 });
+        await db.SaveChangesAsync();
+        var spoolman = new Mock<Farm.Infrastructure.Services.Interfaces.ISpoolmanService>(MockBehavior.Strict);
+        if (unavailable)
+        {
+            spoolman.Setup(service => service.GetSpoolByIdAsync(8, It.IsAny<CancellationToken>())).ThrowsAsync(new HttpRequestException());
+        }
+
+        var backend = new Mock<IBackendClient>(MockBehavior.Strict);
+        PrintersService service = CreateService(db, printer, backend.Object, spoolmanService: spoolman.Object);
+
+        Assert.Equal(unavailable ? 245 : 220, await service.GetMmuUnloadTemperatureAsync(printer.Id,
+            new MmuControlRequest(MmuControlAction.Unload, MmuControlProtocol.Qidibox, GateIndex: 1), 220, default));
+        spoolman.Verify(service => service.GetSpoolByIdAsync(99, It.IsAny<CancellationToken>()), Times.Never);
+        backend.VerifyNoOtherCalls();
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task GetMmuUnloadTemperatureAsync_TargetAboveInstalledRating_RejectsWithoutBackendIo(bool modelOnly)
+    {
+        await using var db = CreateDbContext();
+        Printer printer = CreatePrinter(PrinterBackend.Moonraker);
+        Guid hotendModelId = Guid.NewGuid();
+        printer.Toolheads.Add(new Toolhead { Index = 0, IsPrimary = true, HotendMaxTemperature = modelOnly ? null : 250, HotendModelId = modelOnly ? hotendModelId : null });
+        db.HotendModelDefinitions.Add(new HotendModelDefinition { Id = hotendModelId, Name = "rated hotend", MaxTemp = 250 });
+        printer.Toolheads.Add(new Toolhead { Index = 2, ToolheadType = ToolheadType.MmuGate, CurrentMaterial = "ABS" });
+        db.FilamentTypes.Add(new FilamentType { Id = Guid.NewGuid(), Name = "ABS", DefaultHotendTemp = 260 });
+        await db.SaveChangesAsync();
+        var backend = new Mock<IBackendClient>(MockBehavior.Strict);
+        PrintersService service = CreateService(db, printer, backend.Object);
+
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => service.GetMmuUnloadTemperatureAsync(printer.Id,
+            new MmuControlRequest(MmuControlAction.Unload, MmuControlProtocol.Qidibox, GateIndex: 1), 220, default));
+        backend.VerifyNoOtherCalls();
+    }
+
     private static AppDbContext CreateDbContext() => new(
         new DbContextOptionsBuilder<AppDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
 
@@ -155,10 +237,12 @@ public sealed class PrintersServicePluginControlTests
     };
 
     private static PrintersService CreateService(
-        AppDbContext db, Printer printer, IBackendClient client, IPrinterStatusClientFactory? statusClientFactory = null)
+        AppDbContext db, Printer printer, IBackendClient client, IPrinterStatusClientFactory? statusClientFactory = null,
+        Farm.Infrastructure.Services.Interfaces.ISpoolmanService? spoolmanService = null)
     {
         var printers = new Mock<IPrintersRepository>();
         printers.Setup(repository => repository.FindByIdAsync(printer.Id, It.IsAny<CancellationToken>())).ReturnsAsync(printer);
+        printers.Setup(repository => repository.FindByIdWithToolheadsAsync(printer.Id, It.IsAny<CancellationToken>())).ReturnsAsync(printer);
         var unitOfWork = new Mock<IUnitOfWork>();
         unitOfWork.Setup(unit => unit.Printers).Returns(printers.Object);
         var factory = new Mock<IBackendClientFactory>();
@@ -173,7 +257,7 @@ public sealed class PrintersServicePluginControlTests
             Mock.Of<IPrinterStatusBroadcaster>(), Mock.Of<IMultiPrinterStatusCoordinator>(),
             statusClientFactory ?? Mock.Of<IPrinterStatusClientFactory>(), Mock.Of<IPrinterStatusCacheReader>(),
             Mock.Of<Farm.Infrastructure.Services.Locations.ILocationService>(), protector.Object,
-            Mock.Of<Farm.Infrastructure.Services.Interfaces.ISpoolmanService>(),
+            spoolmanService ?? Mock.Of<Farm.Infrastructure.Services.Interfaces.ISpoolmanService>(),
             Mock.Of<Farm.Infrastructure.Services.Cameras.IGo2RtcService>(),
             Mock.Of<Farm.Infrastructure.Services.StorageManagement.IStoragePathService>(),
             Mock.Of<Farm.Infrastructure.Services.Spoolman.IFilamentCoverageSpoolResolver>());

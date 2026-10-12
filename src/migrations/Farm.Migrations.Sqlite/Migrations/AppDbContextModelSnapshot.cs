@@ -6280,6 +6280,9 @@ namespace Farm.Migrations.Sqlite.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
 
+                    b.Property<bool>("ShowExternalSpool")
+                        .HasColumnType("INTEGER");
+
                     b.Property<double?>("SquareCornerVelocity")
                         .HasColumnType("REAL");
 

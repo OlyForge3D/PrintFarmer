@@ -153,7 +153,6 @@ import {
   UserBalanceDto,
   BalanceTransactionDto,
   BalanceAdjustRequest,
-  ZOffsetSaveRequest,
   CustomFieldDefinition,
   CustomFieldEntityType,
   CustomFieldValue,
@@ -741,13 +740,6 @@ export class ApiClient {
     return response.data;
   }
 
-  async adjustPrinterZOffset(id: string, offsetMm: number): Promise<CommandResult> {
-    const response = await this.client.post<CommandResult>(`/printers/${id}/z-offset/adjust`, {
-      offsetMm,
-    });
-    return response.data;
-  }
-
   async getPrinterVersionInfo(
     printerId: string,
     options?: { forceRefresh?: boolean }
@@ -1135,13 +1127,6 @@ export class ApiClient {
     return response.data;
   }
 
-  async changeFilament(printerId: string): Promise<CommandResult> {
-    const response = await this.client.post<CommandResult>(
-      `/printers/${printerId}/filament-change`
-    );
-    return response.data;
-  }
-
   async extrudeFilament(
     printerId: string,
     distanceMm: number,
@@ -1215,7 +1200,8 @@ export class ApiClient {
   ): Promise<CommandResult> {
     const response = await this.client.post<CommandResult>(
       `/printers/${printerId}/mmu/gate-action`,
-      request
+      request,
+      request.action === 'Unload' ? { timeout: 360000 } : undefined
     );
     return response.data;
   }
@@ -1224,24 +1210,6 @@ export class ApiClient {
     const response = await this.client.post<CommandResult>(
       `/printers/${printerId}/printjob/objects/exclude`,
       { name }
-    );
-    return response.data;
-  }
-
-  /**
-   * Save calibrated Z-offset to the printer and optionally to firmware.
-   * @param printerId The printer's GUID
-   * @param request The Z-offset save payload
-   */
-  async saveZOffset(
-    printerId: string,
-    request: ZOffsetSaveRequest,
-    reviewedRowVersion: string
-  ): Promise<CommandResult> {
-    const response = await this.client.post<CommandResult>(
-      `/printers/${printerId}/z-offset`,
-      request,
-      { headers: { "If-Match": this.reviewedEtag(reviewedRowVersion, "The reviewed printer") } }
     );
     return response.data;
   }

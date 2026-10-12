@@ -6,6 +6,8 @@ import {
   areCompactPrinterCardPropsEqual,
   type CompactPrinterCardMemoProps,
 } from '@/features/printers/utils/compactPrinterCardMemo';
+import type { PrinterFilamentCoverage } from '@/features/filament-coverage/types';
+import type { PrinterCoverageSummaryProps } from '@/features/filament-coverage/components/FilamentCoverageBadge';
 import type { TagDto } from '@/services/tagService';
 import { PrinterBackend, type MmuStatus, type Printer, type PrinterBackendCapabilitiesDto } from '@/types/api';
 import type { PrinterQueueSummaryDto } from '@/types/api';
@@ -47,18 +49,24 @@ vi.mock('@/features/printers/hooks/useAutoDispatch', () => ({
   useSetAutoDispatchEnabled: () => ({ mutateAsync: vi.fn() }),
 }));
 
+const coverageHookMock = vi.hoisted(() => vi.fn((): { data: PrinterFilamentCoverage | undefined } => ({ data: undefined })));
+
 vi.mock('@/features/filament-coverage/hooks', () => ({
-  usePrinterCoverageFromFleet: () => ({ data: undefined, isLoading: false }),
+  usePrinterCoverageFromFleet: coverageHookMock,
 }));
 
 const printerCoverageSummaryRenderMock = vi.hoisted(() => vi.fn());
 
-vi.mock('@/features/filament-coverage/components/FilamentCoverageBadge', () => ({
-  PrinterCoverageSummary: (props: Record<string, unknown>) => {
-    printerCoverageSummaryRenderMock(props);
-    return null;
-  },
-}));
+vi.mock('@/features/filament-coverage/components/FilamentCoverageBadge', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/features/filament-coverage/components/FilamentCoverageBadge')>();
+  return {
+    ...actual,
+    PrinterCoverageSummary: (props: PrinterCoverageSummaryProps) => {
+      printerCoverageSummaryRenderMock(props);
+      return <actual.PrinterCoverageSummary {...props} />;
+    },
+  };
+});
 
 vi.mock('@/features/printers/hooks/useFailureDetectionAlert', () => ({
   useFailureDetectionAlert: () => ({ event: undefined, recentEvents: [] }),
@@ -689,44 +697,39 @@ describe('CompactPrinterCard memoization', () => {
   });
 });
 
-describe('CompactPrinterCard filament coverage online gating (#1684)', () => {
+describe('CompactPrinterCard omits filament coverage badges', () => {
   beforeEach(() => {
     printerCoverageSummaryRenderMock.mockClear();
+    coverageHookMock.mockReset();
   });
 
-  // Regression test for issue #1684: the Moonraker Offline card showed
-  // "No spool loaded" alongside a green "Filament OK" check even though the
-  // printer was unreachable. `PrinterCoverageSummary` now derives its
-  // effective status from `isOnline`, but only if the card actually passes
-  // that flag through — this pins the wiring so a future refactor can't
-  // silently drop it again.
-  it('passes isOnline=false through to PrinterCoverageSummary for an offline printer', () => {
-    render(
-      <CompactPrinterCard
-        printer={createPrinter({ isOnline: false })}
-        onExpand={vi.fn()}
-        onEdit={vi.fn()}
-      />,
-    );
-
-    expect(printerCoverageSummaryRenderMock).toHaveBeenCalledWith(
-      expect.objectContaining({ isOnline: false }),
-    );
-  });
-
-  it('passes isOnline=true through to PrinterCoverageSummary for an online printer', () => {
-    render(
-      <CompactPrinterCard
-        printer={createPrinter({ isOnline: true })}
-        onExpand={vi.fn()}
-        onEdit={vi.fn()}
-      />,
-    );
-
-    expect(printerCoverageSummaryRenderMock).toHaveBeenCalledWith(
-      expect.objectContaining({ isOnline: true }),
-    );
-  });
+  for (const status of ['covers', 'unknown', 'runout'] as const) {
+    it.each([
+      ['idle', null, 0, 'Idle', true],
+      ['printing', 'job-1', 0, 'Printing', true],
+      ['queued', null, 1, 'Idle', true],
+      ['offline with demand', 'job-1', 0, 'Printing', false],
+    ] as const)(`never renders a ${status} verdict when %s, even with coverage data`, (_name, activeJobId, assignedQueuedJobCount, state, isOnline) => {
+      coverageHookMock.mockReturnValue({ data: {
+        printerId: 'printer-1', printerName: 'Alpha', status, toolheads: [],
+        activeJobId, activeJobName: null, activeJobProgress: null,
+        assignedQueuedJobCount,
+        earliestPredictedRunoutAt: new Date(Date.now() + 20 * 60_000).toISOString(),
+        evaluatedAtUtc: '',
+      } });
+      render(
+        <CompactPrinterCard
+          printer={createPrinter({ isOnline, state })}
+          onExpand={vi.fn()}
+          onEdit={vi.fn()}
+        />,
+      );
+      expect(screen.queryByTestId('printer-coverage-summary')).not.toBeInTheDocument();
+      expect(screen.queryByRole('status', { name: /Filament OK|Filament unknown|Runout risk|Runs out in/i })).not.toBeInTheDocument();
+      expect(printerCoverageSummaryRenderMock).not.toHaveBeenCalled();
+      expect(coverageHookMock).not.toHaveBeenCalled();
+    });
+  }
 });
 
 /**

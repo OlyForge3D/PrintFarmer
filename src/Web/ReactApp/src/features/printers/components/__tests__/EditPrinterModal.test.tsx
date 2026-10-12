@@ -338,6 +338,70 @@ describe('EditPrinterModal', () => {
     });
   });
 
+  describe('Show external spool (QidiBox Rack)', () => {
+    const qidiDetails = (overrides: Record<string, unknown> = {}) => ({
+      rowVersion: 'printer-v1',
+      name: 'qp4-1',
+      serverUrl: 'http://qp4-1.local',
+      originalServerUrl: 'http://qp4-1.local',
+      notes: '',
+      manufacturerId: 'manufacturer-1',
+      manufacturerName: 'Qidi',
+      modelId: 'model-1',
+      modelName: 'Plus 4',
+      backend: 'Moonraker',
+      apiKey: '',
+      username: '',
+      password: '',
+      capabilities: {},
+      backendPort: 7125,
+      frontendPort: 80,
+      obicoEnabled: false,
+      toolheads: [
+        { id: 't0', index: 0, name: 'Toolhead 0', toolheadType: 'Physical', isPrimary: true },
+        { id: 't1', index: 1, name: 'Gate 1', toolheadType: 'MmuGate', isPrimary: false },
+        { id: 't2', index: 2, name: 'Gate 2', toolheadType: 'MmuGate', isPrimary: false },
+      ],
+      ...overrides,
+    });
+    const renderModal = () => render(
+      <EditPrinterModal printerId="printer-1" isOpen onClose={vi.fn()} onSuccess={vi.fn()} />,
+    );
+
+    it('defaults off when the printer has never set it, and saves it via the update flow', async () => {
+      const user = userEvent.setup();
+      mockUsePrinterDetails.mockReturnValue({ data: qidiDetails() });
+      renderModal();
+
+      const toggle = await screen.findByLabelText('Show external spool');
+      expect(toggle).not.toBeChecked();
+      const saveButton = screen.getByRole('button', { name: /save changes/i });
+      expect(saveButton).toBeDisabled();
+
+      await user.click(toggle);
+      await waitFor(() => expect(saveButton).toBeEnabled());
+      await user.click(saveButton);
+
+      await waitFor(() => expect(mutateAsync).toHaveBeenCalledWith(expect.objectContaining({
+        id: 'printer-1',
+        reviewedRowVersion: 'printer-v1',
+        printer: expect.objectContaining({ showExternalSpool: true }),
+      })));
+    });
+
+    it('reflects a saved true value', async () => {
+      mockUsePrinterDetails.mockReturnValue({ data: qidiDetails({ showExternalSpool: true }) });
+      renderModal();
+      expect(await screen.findByLabelText('Show external spool')).toBeChecked();
+    });
+
+    it('is not offered for printers without an external spool holder', async () => {
+      renderModal();
+      await screen.findByRole('button', { name: /save changes/i });
+      expect(screen.queryByLabelText('Show external spool')).not.toBeInTheDocument();
+    });
+  });
+
   it('disables Obico checkbox when no linked cameras are configured', async () => {
     mockUsePrinterCameras.mockReturnValue({
       data: [],

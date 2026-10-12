@@ -610,6 +610,45 @@ public class PrintersControllerControlGuardsTests
             It.IsAny<CancellationToken>()), Times.Never);
     }
 
+    [Theory]
+    [InlineData("Unload")]
+    [InlineData("Eject")]
+    public async Task MmuGateActionAsync_TemperatureRejectionWithoutVerifiedMinimum_PreservesSafetyReasonWithoutBackendIo(string action)
+    {
+        Guid id = Guid.NewGuid();
+        const string code = "printer_temperature_below_minimum";
+        const string reason = "The fresh measured hotend temperature is below the required minimum of 220 °C.";
+        var printersService = new Mock<IPrintersService>();
+        printersService.Setup(service => service.FindByIdAsync(id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(SamplePrinter(id));
+        var statusCache = new Mock<IPrinterStatusCacheReader>();
+        statusCache.Setup(cache => cache.GetStatus(id))
+            .Returns(new PrinterStatusDto(id, true, "standby", HotendTemp: 32.5, HotendTarget: 0));
+        var guard = new Mock<IPrinterSafetyGuard>();
+        guard.Setup(service => service.ValidateAsync(
+                id, PrinterSafetyOperation.FilamentUnload, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PrinterSafetyValidationResult.Reject(StatusCodes.Status409Conflict, code, reason));
+        PrintersController controller = CreateController(printersService, statusCache, out _, guard);
+
+        ActionResult<CommandResult> result = await controller.MmuGateActionAsync(
+            id,
+            new MmuGateActionRequest { Protocol = "Qidibox", Action = action, GateIndex = 1 },
+            CancellationToken.None);
+
+        ObjectResult response = Assert.IsType<ObjectResult>(result.Result);
+        Assert.Equal(StatusCodes.Status409Conflict, response.StatusCode);
+        ProblemDetails problem = Assert.IsType<ProblemDetails>(response.Value);
+        Assert.Equal(reason, problem.Title);
+        Assert.Equal(code, problem.Extensions["code"]);
+        Assert.Equal($"https://printfarmer.dev/problems/{code}", problem.Type);
+        guard.Verify(service => service.ValidateAsync(
+            id, PrinterSafetyOperation.FilamentUnload, null, It.IsAny<CancellationToken>()), Times.Once);
+        printersService.Verify(service => service.ExecuteMmuAsync(
+            It.IsAny<Guid>(), It.IsAny<MmuControlRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+        printersService.Verify(service => service.SendGcodeAsync(
+            It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
     [Fact]
     public async Task GetBackendCapabilitiesAsync_FiltersAccessBeforeDiscovery()
     {

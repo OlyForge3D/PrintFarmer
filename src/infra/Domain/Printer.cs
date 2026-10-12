@@ -492,6 +492,13 @@ public class Printer : IRevisionedEntity
     public bool UseModelDispatchDefaults { get; set; } = true;
 
     /// <summary>
+    /// Presentation-only preference: when true, clients render the filament box's external
+    /// spool slot (e.g. the QidiBox external rack/feed). Hidden by default. Toggling it never
+    /// changes hardware, telemetry, or any spool assigned to that slot.
+    /// </summary>
+    public bool ShowExternalSpool { get; set; }
+
+    /// <summary>
     /// Dispatch-related state (AutoDispatchState, BedPreConfirmed) stored in a separate
     /// table to avoid RowVersion contention between user edits and background dispatch writes.
     /// </summary>

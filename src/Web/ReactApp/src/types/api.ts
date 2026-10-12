@@ -162,6 +162,11 @@ export interface PrinterMetadata {
   bedTypeName?: string;
   /** Hex color code for bed type badge (e.g., "#E67E22") */
   bedTypeColor?: string;
+  /**
+   * Presentation-only: render the filament box's external spool slot (QidiBox
+   * Rack). Defaults to hidden when absent; never changes the slot's spool binding.
+   */
+  showExternalSpool?: boolean;
 }
 
 /**
@@ -711,6 +716,12 @@ export interface MmuStatus {
   gates: MmuGate[];
   /** MMU protocol type: "HappyHare", "Qidibox", "AFC", or "SnapmakerU1" */
   mmuType?: string;
+  /** Live material on the external spool holder / bypass (QidiBox "Rack"), when the device reports it */
+  bypassMaterial?: string | null;
+  /** Live CSS color of the external spool holder / bypass filament */
+  bypassColor?: string | null;
+  /** Live filament name of the external spool holder / bypass */
+  bypassFilamentName?: string | null;
 }
 
 // File information with thumbnail
@@ -831,6 +842,8 @@ export interface UpdatePrinterDto {
   zOffsetMm?: number;
   /** Bed surface type ID. Set to empty string to clear. */
   bedTypeId?: string;
+  /** Presentation-only: show the filament box external spool slot. Omit to leave unchanged. */
+  showExternalSpool?: boolean;
   // Toolheads - for updating individual toolhead settings
   toolheads?: UpdateToolheadDto[];
 }
@@ -1457,6 +1470,11 @@ export interface PrinterDetails {
    * "unsupported" for the odometer surface but tolerant everywhere else.
    */
   supportsPerToolAttribution?: boolean;
+  /**
+   * Presentation-only: render the filament box's external spool slot (QidiBox
+   * Rack). Defaults to hidden when absent; never changes the slot's spool binding.
+   */
+  showExternalSpool?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -2511,14 +2529,6 @@ export interface PrintJobObjectListDto {
 
 export interface ExcludePrintJobObjectRequest {
   name: string;
-}
-
-/** Request payload for saving a calibrated Z-offset. */
-export interface ZOffsetSaveRequest {
-  /** The Z-offset value in millimeters. Negative values move the nozzle closer to the bed. */
-  offsetMm: number;
-  /** Whether to also send save commands to the printer firmware. */
-  saveToFirmware?: boolean;
 }
 
 // Failure detail for an individual file during multi-upload.

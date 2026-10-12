@@ -6301,6 +6301,9 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("character varying(256)");
 
+                    b.Property<bool>("ShowExternalSpool")
+                        .HasColumnType("boolean");
+
                     b.Property<double?>("SquareCornerVelocity")
                         .HasColumnType("double precision");
 

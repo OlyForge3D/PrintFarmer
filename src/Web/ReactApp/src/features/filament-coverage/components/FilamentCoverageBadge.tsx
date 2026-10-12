@@ -14,6 +14,8 @@ import type {
   ToolheadCoverage,
 } from "../types";
 
+import { withOfflineOverride } from "../utils";
+
 export interface FilamentCoverageBadgeProps {
   status: FilamentCoverageStatus;
   /** Optional machine-readable reason surfaced through the accessible title. */
@@ -229,17 +231,14 @@ export interface PrinterCoverageSummaryProps {
  * earliest-runout chip when the printer is currently at risk.
  */
 export function PrinterCoverageSummary({
-  coverage,
+  coverage: rawCoverage,
   compact = false,
   className,
   isOnline = true,
 }: PrinterCoverageSummaryProps): React.ReactElement | null {
+  const coverage = withOfflineOverride(rawCoverage, isOnline);
   if (!coverage) return null;
-  // An offline printer's last-known coverage snapshot can't be trusted to
-  // reflect reality (e.g. a spool could have been removed while
-  // unreachable), so it must never be presented as a verified "covers" or
-  // "runout" state. Fall back to "unknown" and suppress the runout chip.
-  const status = isOnline ? coverage.status : "unknown";
+  const status = coverage.status;
   return (
     <span
       className={[

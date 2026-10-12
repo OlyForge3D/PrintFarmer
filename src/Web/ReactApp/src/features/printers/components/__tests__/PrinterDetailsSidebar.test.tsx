@@ -1,3 +1,4 @@
+vi.mock('@/features/printers/components/MmuControlBox', () => ({ MmuControlBox: () => <div data-testid="mmu-controls" /> }));
 const controlsModeMock = vi.hoisted(() => ({ mode: "guided" as "guided" | "expert" }));
 vi.mock("@/features/printers/hooks/use-printer-controls-mode", () => ({
   usePrinterControlsMode: () => ({ mode: controlsModeMock.mode }),
@@ -372,6 +373,19 @@ describe("PrinterDetailsSidebar", () => {
 
     const scrollRegion = shell?.querySelector(".overflow-y-auto");
     expect(scrollRegion).toHaveClass("flex-1", "min-h-0", "overflow-y-auto");
+  });
+
+  it("shows exactly one Temps heading", () => {
+    render(
+      <PrinterDetailsSidebar
+        printerId={printer.id}
+        printer={printer}
+        onClose={vi.fn()}
+        layout="content"
+      />,
+    );
+
+    expect(screen.getAllByText("Temps")).toHaveLength(1);
   });
 
   it("keeps the drawer layout height contract unchanged", () => {
@@ -862,4 +876,30 @@ describe("PrinterDetailsSidebar", () => {
       });
     });
   });
+});
+
+
+it.each([
+  ['Qidibox', true], ['HappyHare', true], ['Afc', true],
+  ['SnapmakerU1', true], ['Qidibox', false],
+] as const)('sidebar has no standalone M600 or load/unload group for %s (enabled %s)', (mmuType, enabled) => {
+  const mmuPrinter = { ...printer, backend: PrinterBackend.Moonraker, mmuStatus: {
+    mmuType, enabled, gates: [], activeGate: -1, activeTool: -1,
+  } } as Printer;
+  render(<PrinterDetailsSidebar printerId={printer.id} printer={mmuPrinter} onClose={vi.fn()}
+    backendCapabilities={capabilities({ backend: PrinterBackend.Moonraker, supportsFilamentControl: true })} />);
+  // Load/unload live in the shared slot panel only.
+  expect(screen.queryByTitle('Load Filament')).not.toBeInTheDocument();
+  expect(screen.queryByTitle('Unload Filament')).not.toBeInTheDocument();
+  expect(screen.queryByTitle('Change Filament (M600)')).not.toBeInTheDocument();
+  expect(screen.queryByText('Macros')).not.toBeInTheDocument();
+  expect(screen.queryByText('Fallback Groups')).not.toBeInTheDocument();
+});
+
+it('labels the collapsed Move section without Macros or M600 wording', () => {
+  render(<PrinterDetailsSidebar printerId={printer.id} printer={printer} onClose={vi.fn()} />);
+  fireEvent.click(screen.getByLabelText('Collapse Move').closest('[role="button"]') as HTMLElement);
+  const header = screen.getByText('Movement and Manual Move');
+  expect(header).toBeInTheDocument();
+  expect(header.textContent).not.toMatch(/macro|m600/i);
 });

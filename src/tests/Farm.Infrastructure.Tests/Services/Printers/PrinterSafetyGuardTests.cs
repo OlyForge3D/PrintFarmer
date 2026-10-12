@@ -162,6 +162,8 @@ public sealed class PrinterSafetyGuardTests
             CancellationToken.None);
 
         Assert.Equal(expectedSuccess, result.Success);
+        Assert.Equal(expectedMinimumC, result.RequiredHotendTemperatureC);
+        Assert.Equal(measuredTemperatureC, result.MeasuredHotendTemperatureC);
         if (!expectedSuccess)
         {
             Assert.Equal(409, result.StatusCode);

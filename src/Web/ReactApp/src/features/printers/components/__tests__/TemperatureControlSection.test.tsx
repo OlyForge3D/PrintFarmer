@@ -4,8 +4,8 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { TemperatureControlSection } from '../TemperatureControlSection';
 
-function renderSection(overrides: Partial<ComponentProps<typeof TemperatureControlSection>> = {}) {
-  const props: ComponentProps<typeof TemperatureControlSection> = {
+function baseProps(overrides: Partial<ComponentProps<typeof TemperatureControlSection>> = {}): ComponentProps<typeof TemperatureControlSection> {
+  return {
     hotendTemp: 210,
     bedTemp: 60,
     hotendTarget: 210,
@@ -23,12 +23,24 @@ function renderSection(overrides: Partial<ComponentProps<typeof TemperatureContr
     onApplySingleHeaterPreset: vi.fn(),
     ...overrides,
   };
+}
 
+function renderSection(overrides: Partial<ComponentProps<typeof TemperatureControlSection>> = {}) {
+  const props = baseProps(overrides);
   render(<TemperatureControlSection {...props} />);
   return props;
 }
 
 describe('TemperatureControlSection', () => {
+  it('renders the Temps heading by default and omits it when showHeading is false', () => {
+    const { unmount } = render(<TemperatureControlSection {...baseProps()} />);
+    expect(screen.getByText('Temps')).toBeInTheDocument();
+    unmount();
+
+    render(<TemperatureControlSection {...baseProps()} showHeading={false} />);
+    expect(screen.queryByText('Temps')).not.toBeInTheDocument();
+  });
+
   it('applies the main material preset', async () => {
     const user = userEvent.setup();
     const props = renderSection();

@@ -1,6 +1,10 @@
 interface SpoolIconProps {
   /** CSS class name */
   className?: string;
+  /** Hide imagery from assistive technology when the containing control names it. */
+  decorative?: boolean;
+  /** Optional themed frame color; original imagery is retained. */
+  frameColor?: string;
   /** Fill color for the filament area. When undefined/null, renders as empty (light gray). */
   fillColor?: string | null;
   /** Size in pixels (width & height). Defaults to 48. */
@@ -11,9 +15,9 @@ interface SpoolIconProps {
  * Filament spool icon. Shows an empty spool when no fillColor is provided,
  * or fills the visible filament areas with the given color.
  */
-export function SpoolIcon({ className, fillColor, size = 48 }: SpoolIconProps) {
+export function SpoolIcon({ className, fillColor, size = 48, decorative = false, frameColor }: SpoolIconProps) {
   const filamentFill = fillColor ?? 'transparent';
-  const rimColor = '#374151'; // gray-700 (darker frame)
+  const rimColor = frameColor ?? '#374151'; // gray-700 (darker frame)
 
   return (
     <svg
@@ -22,7 +26,8 @@ export function SpoolIcon({ className, fillColor, size = 48 }: SpoolIconProps) {
       width={size}
       height={size}
       className={className}
-      aria-label={fillColor ? 'Loaded spool' : 'Empty spool'}
+      aria-hidden={decorative || undefined}
+      aria-label={decorative ? undefined : fillColor ? 'Loaded spool' : 'Empty spool'}
     >
       {/* Filament fill circle (behind the rim) */}
       <circle cx="50" cy="50" r="40" fill={filamentFill} />

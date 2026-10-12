@@ -1,7 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
+import { useAuth } from '@/features/auth/hooks/useAuth';
 import {
   useSetToolheadSpool,
+  useSetActiveSpool,
+  useClearActiveSpool,
   useClearToolheadSpool,
   usePrinterDetails,
 } from '@/common/hooks/useApi';
@@ -54,6 +57,9 @@ export function useSlotSpoolAssignment({
   topologyPending = false,
   onSpoolChange,
 }: SlotSpoolAssignmentOptions): SlotSpoolAssignment {
+  const { hasPermission } = useAuth();
+  const canAssign = hasPermission('queue', 'write');
+  const mutationInFlight = useRef(false);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [lockedRevision, setLockedRevision] = useState<string | null>(null);
   const [capturedFallbackRevision, setCapturedFallbackRevision] = useState<string | null>(null);
@@ -62,7 +68,9 @@ export function useSlotSpoolAssignment({
   // immutable token into handlers after cache or live updates arrive.
   const initialFallbackRevisionRef = useRef<string | null>(null);
   const setSpoolMutation = useSetToolheadSpool();
+  const setActiveSpoolMutation = useSetActiveSpool();
   const clearSpoolMutation = useClearToolheadSpool();
+  const clearActiveSpoolMutation = useClearActiveSpool();
   // The compact printer DTO can arrive before its concurrency token. Fetch the
   // detail DTO only in that case.
   const { data: revisionSource } = usePrinterDetails(printerId, {
@@ -134,8 +142,9 @@ export function useSlotSpoolAssignment({
   // Without persisted topology the live-gate → `Toolhead.Index` mapping is a
   // guess and could write a G1 assignment to the physical hotend at index 0
   // (#1585), so mutation stays blocked.
-  const canMutate = !!activeRevision && hasResolvedTopology;
-  const blockedReason = !activeRevision
+  const canMutate = canAssign && !!activeRevision && hasResolvedTopology;
+  const blockedReason = !canAssign ? 'You do not have permission to assign spools'
+    : !activeRevision
     ? 'Printer revision unavailable — refresh to assign spools'
     : !hasResolvedTopology
       ? topologyPending
@@ -172,6 +181,10 @@ export function useSlotSpoolAssignment({
   };
 
   const requireRevision = (): string | null => {
+    if (!canAssign) {
+      toast.error(blockedReason);
+      return null;
+    }
     const revision =
       scopedLockedRevision ?? ownWriteRevision ?? initialFallbackRevisionRef.current ?? activeRevision;
     if (!revision) {
@@ -194,15 +207,23 @@ export function useSlotSpoolAssignment({
       toast.error(`${slot.label} is disabled on the device and cannot take a spool.`);
       return false;
     }
+    if (mutationInFlight.current) return false;
     const revision = requireRevision();
     if (!revision) return false;
+    mutationInFlight.current = true;
     try {
-      const newRevision = await setSpoolMutation.mutateAsync({
-        printerId,
-        toolheadIndex: slot.apiIndex,
-        spoolId,
-        reviewedRowVersion: revision,
-      });
+      // A slot backed by the printer scalar (legacy single-spool binding) must
+      // be re-bound through that same scalar. Writing Toolhead.CurrentSpoolId
+      // would leave Printer.CurrentSpoolId (compact card spoolInfo) on the old
+      // spool while MATERIALS shows the new one.
+      const newRevision = slot.legacyPrinterSpool
+        ? await setActiveSpoolMutation.mutateAsync({ printerId, spoolId, reviewedRowVersion: revision })
+        : await setSpoolMutation.mutateAsync({
+          printerId,
+          toolheadIndex: slot.apiIndex,
+          spoolId,
+          reviewedRowVersion: revision,
+        });
       recordWrite(printerId, revision, newRevision);
       onSpoolChange?.();
       return true;
@@ -210,23 +231,34 @@ export function useSlotSpoolAssignment({
       // The mutation's onError toast already reported the failure; swallow so
       // React Query doesn't report an unhandled rejection.
       return false;
+    } finally {
+      mutationInFlight.current = false;
     }
   };
 
   const clear = async (slot: LoadoutSlot): Promise<boolean> => {
+    if (mutationInFlight.current) return false;
     const revision = requireRevision();
     if (!revision) return false;
+    mutationInFlight.current = true;
     try {
-      const newRevision = await clearSpoolMutation.mutateAsync({
-        printerId,
-        toolheadIndex: slot.apiIndex,
-        reviewedRowVersion: revision,
-      });
+      // Legacy synthesized T0 has no Toolhead row: its binding is the printer
+      // scalar, so unassign it through the matching revision-checked endpoint.
+      // Real toolheads, MMU gates and rack slots keep their index-specific route.
+      const newRevision = slot.legacyPrinterSpool
+        ? await clearActiveSpoolMutation.mutateAsync({ printerId, reviewedRowVersion: revision })
+        : await clearSpoolMutation.mutateAsync({
+          printerId,
+          toolheadIndex: slot.apiIndex,
+          reviewedRowVersion: revision,
+        });
       recordWrite(printerId, revision, newRevision);
       onSpoolChange?.();
       return true;
     } catch {
       return false;
+    } finally {
+      mutationInFlight.current = false;
     }
   };
 
@@ -235,7 +267,7 @@ export function useSlotSpoolAssignment({
     selectSlot,
     canMutate,
     blockedReason,
-    busy: setSpoolMutation.isPending || clearSpoolMutation.isPending,
+    busy: setSpoolMutation.isPending || setActiveSpoolMutation.isPending || clearSpoolMutation.isPending || clearActiveSpoolMutation.isPending,
     assign,
     clear,
   };

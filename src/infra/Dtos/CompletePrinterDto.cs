@@ -67,4 +67,7 @@ public record CompletePrinterDto(
     int? CurrentLayer = null,
     int? TotalLayers = null,
     double? FanSpeedPercent = null,
-    double? LiveZOffsetMm = null);
+    double? LiveZOffsetMm = null,
+
+    // Presentation-only: show the filament box external spool slot.
+    bool ShowExternalSpool = false);

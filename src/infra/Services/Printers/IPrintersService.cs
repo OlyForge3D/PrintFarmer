@@ -562,6 +562,9 @@ public interface IPrintersService
     /// <summary>Performs a typed multi-material action through the backend capability.</summary>
     Task<bool> ExecuteMmuAsync(Guid id, MmuControlRequest request, CancellationToken ct);
 
+    /// <summary>Resolves the requested MMU lane's unload temperature, floored by verified safety and bounded by installed hardware.</summary>
+    Task<double> GetMmuUnloadTemperatureAsync(Guid id, MmuControlRequest request, double minimumTemperatureC, CancellationToken ct);
+
     /// <summary>
     /// Sends an arbitrary G-code command to the printer.
     /// </summary>
