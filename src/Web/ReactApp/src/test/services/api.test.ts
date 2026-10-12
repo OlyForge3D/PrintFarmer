@@ -332,7 +332,7 @@ describe("ApiClient", () => {
   });
 
   describe("reviewed printer mutation ETags", () => {
-    it("sends displayed revisions for edit, maintenance, Z-offset, spool, and toolhead mutations", async () => {
+    it("sends displayed revisions for edit, maintenance, spool, and toolhead mutations", async () => {
       const put = vi.fn().mockResolvedValue({
         data: { id: "printer-1", success: true },
         headers: { etag: '"printer-v2"' },

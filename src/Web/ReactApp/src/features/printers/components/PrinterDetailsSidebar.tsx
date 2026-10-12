@@ -1043,7 +1043,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
         {/* Move Section */}
         <CollapsibleSection
           title="Move"
-          collapsedTitle="Movement, Macros, and Manual Move"
+          collapsedTitle="Movement and Manual Move"
           expanded={isMoveExpanded}
           onToggle={setIsMoveExpanded}
           hideExpandedTitle

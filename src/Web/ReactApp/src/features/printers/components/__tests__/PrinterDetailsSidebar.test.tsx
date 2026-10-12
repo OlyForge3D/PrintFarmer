@@ -882,3 +882,11 @@ it.each([
   expect(screen.queryByText('Macros')).not.toBeInTheDocument();
   expect(screen.queryByText('Fallback Groups')).not.toBeInTheDocument();
 });
+
+it('labels the collapsed Move section without Macros or M600 wording', () => {
+  render(<PrinterDetailsSidebar printerId={printer.id} printer={printer} onClose={vi.fn()} />);
+  fireEvent.click(screen.getByLabelText('Collapse Move').closest('[role="button"]') as HTMLElement);
+  const header = screen.getByText('Movement and Manual Move');
+  expect(header).toBeInTheDocument();
+  expect(header.textContent).not.toMatch(/macro|m600/i);
+});
