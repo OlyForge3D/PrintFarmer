@@ -134,7 +134,9 @@ export function MmuControlBox({
 
   const isQidibox = mmuStatus.mmuType === MmuProtocol.Qidibox;
   const isAfc = mmuStatus.mmuType === MmuProtocol.Afc;
-  const isHappyHare = !isQidibox && !isAfc;
+  // Physical and unit controls are offered only to protocols matched explicitly;
+  // an unknown or future protocol keeps inventory bookkeeping alone.
+  const isHappyHare = mmuStatus.mmuType === MmuProtocol.HappyHare;
   const activeGate = mmuStatus.activeGate >= 0 ? mmuStatus.activeGate : null;
   const filamentUnloaded = mmuStatus.filamentState?.toLowerCase() === 'unloaded';
 
@@ -240,10 +242,12 @@ export function MmuControlBox({
     } else if (isAfc) {
       if (kind === 'eject') return;
       void executeCommand(label, () => apiClient.mmuGateAction(printerId, { protocol: 'Afc', action: label, laneName: laneName(index) }));
-    } else if (kind === 'load') {
-      void executeCommand(label, () => apiClient.mmuChangeTool(printerId, index));
-    } else {
-      void executeCommand(label, () => apiClient.mmuEject(printerId));
+    } else if (isHappyHare) {
+      if (kind === 'load') {
+        void executeCommand(label, () => apiClient.mmuChangeTool(printerId, index));
+      } else if (kind === 'unload') {
+        void executeCommand(label, () => apiClient.mmuEject(printerId));
+      }
     }
   };
 
@@ -256,7 +260,10 @@ export function MmuControlBox({
   // Load, Unload and Eject per protocol. QidiBox and AFC address a gate
   // directly; Happy Hare loads by tool change and unloads whatever is loaded,
   // so its Unload only acts from the loaded gate and it has no separate Eject.
-  const physicalKinds: SlotActionKind[] = isQidibox ? ['load', 'unload', 'eject'] : ['load', 'unload'];
+  // Any other protocol gets no physical commands.
+  const physicalKinds: SlotActionKind[] = isQidibox ? ['load', 'unload', 'eject']
+    : isAfc || isHappyHare ? ['load', 'unload']
+      : [];
 
   const panelFor = (view: FilamentSlotView): SlotPanelContent => {
     const slot = slotForKey(view.key)!;

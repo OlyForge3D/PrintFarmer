@@ -44,7 +44,9 @@ function render(ui: ReactElement) {
   };
 }
 
-vi.mock('@/services/api', () => ({ apiClient: { mmuGateAction: vi.fn(), mmuEject: vi.fn() } }));
+vi.mock('@/services/api', () => ({
+  apiClient: { mmuGateAction: vi.fn(), mmuEject: vi.fn(), mmuChangeTool: vi.fn(), mmuHome: vi.fn(), mmuRecover: vi.fn() },
+}));
 
 vi.mock('@/features/printers/components/SpoolPickerModal', () => ({
   SpoolPickerModal: ({ onSelect }: { onSelect: (id: number) => void }) => (
@@ -214,6 +216,42 @@ describe('MmuControlBox', () => {
     for (const button of within(panel).getAllByRole('button')) {
       expect(button).not.toHaveAttribute('title');
     }
+  });
+
+  it('gives an unknown protocol inventory controls only and never dispatches a physical command', async () => {
+    const mmuMethods = [
+      apiClient.mmuGateAction, apiClient.mmuChangeTool, apiClient.mmuEject, apiClient.mmuHome, apiClient.mmuRecover,
+    ].map((fn) => vi.mocked(fn));
+    for (const fn of mmuMethods) fn.mockClear();
+    render(
+      <MmuControlBox
+        printerId="printer-1"
+        mmuStatus={status(qidiGates, {
+          mmuType: MmuProtocol.Unknown, activeGate: 1, action: 'Error', isHomed: false, endlessSpool: true, clogDetection: true,
+        })}
+        isOnline
+        toolheads={threePersistedGates}
+        reviewedRowVersion="rev-1"
+      />,
+    );
+
+    expect(screen.queryByRole('button', { name: 'Home the MMU' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Recover the MMU from error' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Not homed')).not.toBeInTheDocument();
+    expect(screen.queryByText('Endless spool')).not.toBeInTheDocument();
+    expect(screen.queryByText('Clog detection')).not.toBeInTheDocument();
+
+    for (const gateId of ['mmu-gate-0', 'mmu-gate-1']) {
+      const panel = openSlot(gateId);
+      expect(within(panel).getAllByRole('button').map((b) => b.getAttribute('data-testid')))
+        .toEqual(['slot-action-assign']);
+      for (const kind of ['load', 'unload', 'eject']) expect(queryAction(kind)).not.toBeInTheDocument();
+    }
+
+    fireEvent.click(action('assign'));
+    fireEvent.click(screen.getByTestId('spool-picker'));
+    await waitFor(() => expect(setSpool).toHaveBeenCalledTimes(1));
+    for (const fn of mmuMethods) expect(fn).not.toHaveBeenCalled();
   });
 
   it.each(['Load', 'Unload', 'Eject'] as const)('surfaces the server safety title for a rejected QidiBox %s', async (label) => {

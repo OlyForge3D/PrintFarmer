@@ -176,30 +176,43 @@ uses the release rules below, not print-start reconciliation.
 
 ### Printer materials and spool assignment
 
-Detailed printer cards and the sidebar share the original spool-shaped imagery
-for MMU gates, QidiBox Rack feeds, multi-toolhead and single-toolhead printers.
-Selecting a tile opens its inventory actions; **In use** marks the feed that live
-telemetry confirms is loaded, not the tile selected for inspection.
+Detailed printer cards and the sidebar share one `FilamentSlots` presentation,
+with spool-shaped icons, for MMUs (QidiBox, AFC, Happy Hare), multi-toolhead
+(U1), AD5X, and single-toolhead printers. At rest it shows one line for the
+active feed: slot (multi-feed only), material, and remaining grams when known.
+Unknown grams are never shown as zero. Multi-feed devices add a slot disclosure
+that expands to a rail of spools; an amber marker flags an empty slot. Without a
+known active feed, the line shows the slot spools rather than inventing one.
+Single-toolhead printers show no Tool or T0 label.
 
-- **No spool assigned** means no Spoolman binding. Device-reported filament can
-  still be available or loaded.
-- **Assigned spool depleted** requires the matching Spoolman inventory record to
-  report exactly zero remaining grams. Missing weights, failed inventory reads,
-  and coverage consumption estimates never establish depletion.
-- **Filament not loaded** is a separate device-reported fact. Without telemetry,
-  loading state is shown as unknown; assigning a spool does not load filament.
+- **No Spoolman binding** shows a neutral spool with **+**. Device-reported
+  filament can still be loaded.
+- **Empty** requires the matching Spoolman record to report exactly zero
+  remaining grams. Missing weights, failed reads, and coverage estimates never
+  establish depletion.
+- **In use** marks the feed that live telemetry confirms is loaded, not the
+  slot selected for inspection.
 
-**Assign**, **Change**, and **Unassign** use the existing picker and revision-checked
-spool endpoints. QidiBox gates retain their persisted API indices, while Rack uses
-its supported physical toolhead binding. Inventory bookkeeping retains its existing offline support; users without
-`queue:write` cannot mutate assignments. Physical device commands require an
-online printer and `queue:start`.
-Inventory errors leave assignment information visible and offer Retry.
+Selecting a slot opens one panel of icon-only 44px buttons with accessible
+names and tooltips. **Assign**, **Change spool**, and **Unassign** use the
+existing picker and revision-checked endpoints, require `queue:write`, and keep
+offline bookkeeping; errors leave assignment information visible with Retry.
+After a divider, **Load**, **Unload**, and **Eject** appear only where
+supported: Eject is QidiBox-only, Happy Hare unload needs a loaded gate, and
+macro-driven U1/AD5X buttons act only on the active slot, otherwise disabled
+with a tooltip reason. Physical commands require an online printer and
+`queue:start`, and keep existing confirmations and heat-then-unload.
 
-Integrated enabled MMU controls replace only duplicate generic Load/Unload
-macros. Change Filament (M600) remains available under its existing safety rules;
-printers without enabled integrated controls retain generic filament macros.
-Coverage remains demand-driven and is not encoded in unexplained spool rings.
+The slot panel replaces the generic Load/Unload macro group. Change Filament
+(M600) remains a separate printer-level control under its existing safety rules.
+
+The QidiBox **Rack** (external spool) is hidden by default. Edit Printer offers
+a per-printer **Show external spool** toggle (`showExternalSpool`, persisted
+server-side, default false). Hiding Rack keeps its spool binding and never
+unassigns or actuates; when it is the active feed, the line reads
+`Rack · <material>`. QidiBox gates keep persisted API indices; Rack uses its
+physical toolhead binding. Coverage remains demand-driven and is not encoded in
+spool rings.
 
 ### QidiBox filament controls
 
