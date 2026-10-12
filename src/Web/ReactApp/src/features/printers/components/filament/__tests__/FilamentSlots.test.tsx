@@ -2,7 +2,9 @@ import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { FilamentSlots } from '../FilamentSlots';
+import type { LoadoutSlot } from '../../../utils/materialLoadout';
 import {
+  buildSlotView,
   formatGrams,
   filamentDisplayName,
   type FilamentSlotView,
@@ -273,6 +275,74 @@ describe('FilamentSlots (Option 4)', () => {
       expect(within(button).getByTestId('slot-badge-assign')).toBeInTheDocument();
       expect(document.body).not.toHaveTextContent(/no spool assigned/i);
     });
+  });
+});
+
+describe('device-reported color without an assigned spool', () => {
+  const unassigned = (overrides: Partial<FilamentSlotView> = {}) =>
+    slot({
+      key: 'u', id: 'T0', stock: 'none', spoolId: undefined, grams: undefined,
+      material: 'PLA', displayName: 'PLA', color: '#FF8800', testId: 'u1', ...overrides,
+    });
+  const fillOf = (el: HTMLElement) => el.querySelector('svg circle')?.getAttribute('fill');
+
+  it('fills the spool with the reported color and keeps the assign badge', () => {
+    const s = unassigned();
+    render(<Harness slots={[s]} summarySlot={s} mode="single" />);
+
+    const button = screen.getByTestId('u1');
+    const glyph = button.querySelector('[data-stock="none"]') as HTMLElement;
+    expect(glyph).not.toBeNull();
+    expect(fillOf(glyph)).toBe('#FF8800');
+    expect(within(button).getByTestId('slot-badge-assign')).toBeInTheDocument();
+  });
+
+  it('leaves an unassigned slot without a color unfilled', () => {
+    const s = unassigned({ color: undefined });
+    render(<Harness slots={[s]} summarySlot={s} mode="single" />);
+
+    const glyph = screen.getByTestId('u1').querySelector('[data-stock="none"]') as HTMLElement;
+    expect(fillOf(glyph)).toBe('transparent');
+    expect(within(screen.getByTestId('u1')).getByTestId('slot-badge-assign')).toBeInTheDocument();
+  });
+
+  it('keeps a depleted slot unfilled even when a color is known', () => {
+    const s = slot({ key: 'd', id: 'T0', stock: 'depleted', color: '#FF8800', testId: 'dep' });
+    render(<Harness slots={[s]} summarySlot={s} mode="single" />);
+
+    const glyph = screen.getByTestId('dep').querySelector('[data-stock="depleted"]') as HTMLElement;
+    expect(fillOf(glyph)).toBe('transparent');
+  });
+
+  it('shows the panel color swatch for an unassigned slot', () => {
+    const s = unassigned();
+    render(<Harness slots={[s]} summarySlot={s} mode="single" />);
+
+    fireEvent.click(screen.getByTestId('u1'));
+    const swatch = within(screen.getByTestId('slot-panel')).getByText('PLA').parentElement?.querySelector('span[style]');
+    expect(swatch).toHaveStyle({ backgroundColor: '#FF8800' });
+  });
+});
+
+describe('buildSlotView color normalization', () => {
+  const loadoutSlot = (overrides: Partial<LoadoutSlot>): LoadoutSlot =>
+    ({ key: 'k', apiIndex: 0, label: 'T0', source: 'tool', ...overrides }) as LoadoutSlot;
+
+  it('keeps a device color on a slot with no spool', () => {
+    const view = buildSlotView(loadoutSlot({ material: 'PLA', color: '#00AA55' }), undefined, { id: 'T0' });
+    expect(view.stock).toBe('none');
+    expect(view.color).toBe('#00AA55');
+  });
+
+  it.each(['', '   '])('treats %j as no color', (color) => {
+    const view = buildSlotView(loadoutSlot({ material: 'PLA', color }), undefined, { id: 'T0' });
+    expect(view.color).toBeUndefined();
+  });
+
+  it('falls back to the Spoolman color when the device color is blank', () => {
+    const spool = { id: 5, material: 'PLA', colorHex: 'AABBCC', remainingWeightG: 100 } as Parameters<typeof buildSlotView>[1];
+    const view = buildSlotView(loadoutSlot({ spoolId: 5, color: ' ' }), spool, { id: 'T0' });
+    expect(view.color).toBe('#AABBCC');
   });
 });
 

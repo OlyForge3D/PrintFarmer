@@ -35,7 +35,11 @@ const ACTION_ICONS: Record<SlotActionKind, LucideIcon> = {
 /** Spool glyph with the Option 4 stock states: filled, depleted (!) and unassigned (+). */
 export function SlotSpool({ slot, size, className }: { slot: FilamentSlotView; size: number; className?: string }) {
   const badge = Math.max(10, Math.round(size * 0.44));
-  const fill = slot.stock === 'assigned' ? slot.color ?? 'var(--pf-border-strong)' : null;
+  const fill = slot.stock === 'depleted'
+    ? null
+    : slot.stock === 'assigned'
+      ? slot.color ?? 'var(--pf-border-strong)'
+      : slot.color ?? null;
   return (
     <span className={clsx('relative inline-flex shrink-0', className)} aria-hidden="true" data-stock={slot.stock}>
       <SpoolIcon decorative size={size} frameColor="var(--pf-text-secondary)" fillColor={fill} />
@@ -169,7 +173,7 @@ export function SlotActionPanel({
               {showId && slot.id && <b className="shrink-0 font-semibold">{slot.id}</b>}
               {showId && slot.id && slot.displayName && <Sep />}
               {slot.displayName && <span className="min-w-0 truncate">{slot.displayName}</span>}
-              {slot.color && slot.stock !== 'none' && (
+              {slot.color && slot.stock !== 'depleted' && (
                 <span
                   aria-hidden="true"
                   className="inline-block size-2.5 shrink-0 rounded-full border border-pf-border"

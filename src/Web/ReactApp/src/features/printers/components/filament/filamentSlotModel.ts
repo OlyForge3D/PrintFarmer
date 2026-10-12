@@ -111,7 +111,9 @@ export function buildSlotView(
   const matched = spool != null && slot.spoolId != null && spool.id === slot.spoolId ? spool : undefined;
   const state = materialSlotState(slot, matched, 'unknown');
   const material = slot.material ?? matched?.material ?? undefined;
-  const color = slot.color ?? (matched?.colorHex ? `#${matched.colorHex.replace(/^#/, '')}` : undefined);
+  const reportedColor = slot.color?.trim() || undefined;
+  const matchedHex = matched?.colorHex?.trim().replace(/^#/, '');
+  const color = reportedColor ?? (matchedHex ? `#${matchedHex}` : undefined);
   const weight = matched?.remainingWeightG;
   return {
     key: slot.key,
