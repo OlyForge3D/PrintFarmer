@@ -518,3 +518,123 @@ describe('resolveQidiRackSlot', () => {
     expect(resolveQidiRackSlot({ ...mmu(gates, MmuProtocol.Qidibox), hasBypass: false }, toolheads)).toBeNull();
   });
 });
+
+describe('resolveMaterialLoadout printer-level spool fallback', () => {
+  const pa12 = {
+    hasActiveSpool: true,
+    activeSpoolId: 21,
+    material: 'PA12',
+    filamentName: 'PA12-CF black',
+    colorHex: '#111111',
+    remainingWeightG: 1000,
+  };
+
+  it('fills a persisted single toolhead that holds no spool data', () => {
+    const loadout = resolveMaterialLoadout(undefined, [toolhead(0)], 21, undefined, pa12)!;
+    expect(loadout.slots).toHaveLength(1);
+    expect(loadout.slots[0]).toMatchObject({
+      spoolId: 21,
+      material: 'PA12',
+      color: '#111111',
+      filamentName: 'PA12-CF black',
+      remainingWeightG: 1000,
+      apiIndex: 0,
+      // Unassign must clear the printer scalar, not the toolhead row.
+      legacyPrinterSpool: true,
+    });
+  });
+
+  it('takes the spool id from spoolInfo when currentSpoolId is absent and normalizes bare hex', () => {
+    const loadout = resolveMaterialLoadout(undefined, [toolhead(0)], undefined, undefined, { ...pa12, colorHex: '111111' })!;
+    expect(loadout.slots[0]).toMatchObject({ spoolId: 21, color: '#111111' });
+  });
+
+  it('lets persisted toolhead data win over spoolInfo', () => {
+    const loadout = resolveMaterialLoadout(
+      undefined,
+      [toolhead(0, { currentSpoolId: 7, currentMaterial: 'PLA', currentFilamentColor: '#ff0000' })],
+      21,
+      undefined,
+      pa12,
+    )!;
+    expect(loadout.slots[0]).toMatchObject({ spoolId: 7, material: 'PLA', color: '#ff0000' });
+    expect(loadout.slots[0].filamentName).toBeUndefined();
+    expect(loadout.slots[0].remainingWeightG).toBeUndefined();
+    expect(loadout.slots[0].legacyPrinterSpool).toBeUndefined();
+  });
+
+  it('keeps persisted material and color but still adopts the printer-level spool id', () => {
+    const loadout = resolveMaterialLoadout(
+      undefined,
+      [toolhead(0, { currentMaterial: 'PLA', currentFilamentColor: '#ff0000' })],
+      undefined,
+      undefined,
+      pa12,
+    )!;
+    expect(loadout.slots[0]).toMatchObject({ spoolId: 21, material: 'PLA', color: '#ff0000' });
+  });
+
+  it('ignores spoolInfo that is not an active spool, so an unassigned slot stays empty', () => {
+    const idle = { ...pa12, hasActiveSpool: false };
+    const persisted = resolveMaterialLoadout(undefined, [toolhead(0)], undefined, undefined, idle)!;
+    expect(persisted.slots[0]).toMatchObject({ spoolId: undefined, material: undefined, color: undefined });
+    expect(persisted.slots[0].legacyPrinterSpool).toBeUndefined();
+
+    const noInfo = resolveMaterialLoadout(undefined, [toolhead(0)], undefined, undefined, undefined)!;
+    expect(noInfo.slots[0].spoolId).toBeUndefined();
+
+    const synthesized = resolveMaterialLoadout(undefined, [], undefined, undefined, idle)!;
+    expect(synthesized.slots[0]).toMatchObject({ spoolId: undefined, legacyPrinterSpool: false });
+    expect(resolveMaterialLoadout(undefined, undefined, undefined, undefined, idle)).toBeNull();
+  });
+
+  it('does not copy descriptive fields from a snapshot of a different spool', () => {
+    const loadout = resolveMaterialLoadout(undefined, [toolhead(0)], 99, undefined, pa12)!;
+    expect(loadout.slots[0]).toMatchObject({ spoolId: 99, legacyPrinterSpool: true });
+    expect(loadout.slots[0].material).toBeUndefined();
+    expect(loadout.slots[0].remainingWeightG).toBeUndefined();
+  });
+
+  it('enriches the synthesized legacy T0 and keeps it a printer-scalar slot', () => {
+    const loadout = resolveMaterialLoadout(undefined, [], 21, undefined, pa12)!;
+    expect(loadout.slots[0]).toMatchObject({
+      key: 'toolhead-0',
+      apiIndex: 0,
+      spoolId: 21,
+      material: 'PA12',
+      color: '#111111',
+      filamentName: 'PA12-CF black',
+      remainingWeightG: 1000,
+      legacyPrinterSpool: true,
+    });
+    // While topology is pending, spoolInfo alone keeps the legacy Spool section.
+    expect(resolveMaterialLoadout(undefined, undefined, undefined, undefined, pa12)).toBeNull();
+  });
+
+  it('never applies to multi-toolhead printers', () => {
+    const loadout = resolveMaterialLoadout(undefined, [toolhead(0), toolhead(1)], 21, undefined, pa12)!;
+    expect(loadout.slots.every((slot) => slot.spoolId == null && slot.material == null)).toBe(true);
+  });
+
+  it('never applies to a toolchanger (U1) or MMU gate status', () => {
+    const u1 = resolveMaterialLoadout(
+      mmu([gate(0, { material: 'PLA', color: '#00ff00' }), gate(1, { material: '', color: '' })], MmuProtocol.SnapmakerU1),
+      [toolhead(0)],
+      21,
+      undefined,
+      pa12,
+    )!;
+    expect(u1.slots.map((slot) => slot.spoolId)).toEqual([undefined, undefined]);
+    expect(u1.slots[1].material).toBe('');
+    expect(u1.slots.every((slot) => slot.filamentName == null && slot.remainingWeightG == null)).toBe(true);
+
+    const qidi = resolveMaterialLoadout(
+      mmu([gate(0), gate(1)], MmuProtocol.Qidibox),
+      [persistedGate(1), persistedGate(2)],
+      21,
+      undefined,
+      pa12,
+    )!;
+    expect(qidi.slots.every((slot) => slot.spoolId == null && slot.filamentName == null && !slot.legacyPrinterSpool)).toBe(true);
+  });
+});

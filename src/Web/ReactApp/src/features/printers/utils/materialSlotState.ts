@@ -6,9 +6,10 @@ export type FilamentFeedState = 'loaded' | 'not-loaded' | 'available' | 'unknown
 /** Assignment, Spoolman quantity and physical feed state are independent facts. */
 export function materialSlotState(slot: LoadoutSlot, spool: SpoolmanSpool | undefined, feed: FilamentFeedState) {
   const assigned = slot.spoolId != null && slot.spoolId > 0;
-  const weight = assigned && spool != null && spool.id === slot.spoolId ? spool.remainingWeightG : null;
+  const matched = assigned && spool != null && spool.id === slot.spoolId;
+  const weight = !assigned ? null : matched ? spool.remainingWeightG : slot.remainingWeightG;
   const knownWeight = weight != null && Number.isFinite(weight) && weight >= 0 ? weight : null;
-  // Only a direct, matching Spoolman record can confirm depletion — never coverage estimates.
+  // Only a matching Spoolman record or the printer-level spool snapshot can confirm depletion — never coverage estimates.
   const depleted = knownWeight === 0;
   const assignment = !assigned ? 'No spool assigned'
     : depleted ? 'Assigned spool depleted' : `Spool #${slot.spoolId}`;

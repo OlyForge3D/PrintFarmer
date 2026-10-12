@@ -1,4 +1,4 @@
-import type { MmuGate, MmuStatus, ToolheadDto } from '@/types/api';
+import type { MmuGate, MmuStatus, PrinterSpoolInfo, ToolheadDto } from '@/types/api';
 import { MmuGateStatus } from '@/types/api';
 import { MmuProtocol } from '@/features/printers/constants/mmuProtocol';
 
@@ -41,6 +41,10 @@ export interface LoadoutSlot {
   material?: string;
   color?: string;
   spoolId?: number;
+  /** Filament name reported by the printer-level spool when the slot has no persisted row data. */
+  filamentName?: string;
+  /** Remaining grams reported by the printer-level spool; Spoolman inventory wins when it matches. */
+  remainingWeightG?: number;
   /** The binding lives on Printer.CurrentSpoolId because legacy T0 has no Toolhead row. */
   legacyPrinterSpool?: boolean;
   /** Device feed presence, never inferred from a Spoolman assignment. */
@@ -81,6 +85,53 @@ export interface MaterialLoadout {
  * (PrintersService gap-fill), so a smaller unit would gain phantom gates that
  * then exceed its live gate count. Gap-filling is only safe at or above this.
  */
+/** The printer-level spool snapshot fields a single-feed loadout may fall back to. */
+export type LoadoutSpoolInfo = Pick<
+  PrinterSpoolInfo,
+  'hasActiveSpool' | 'activeSpoolId' | 'material' | 'colorHex' | 'filamentName' | 'remainingWeightG'
+>;
+
+interface PrinterSpoolFallback {
+  spoolId?: number;
+  material?: string;
+  color?: string;
+  filamentName?: string;
+  remainingWeightG?: number;
+}
+
+function positive(id: number | null | undefined): number | undefined {
+  return id != null && id > 0 ? id : undefined;
+}
+
+/**
+ * Printer-level spool data for single-feed printers whose only spool record is
+ * the printer scalar. Nothing is returned unless the printer reports an active
+ * spool, so an unassigned printer can never resurrect stale data. Descriptive
+ * fields are dropped when the snapshot describes a different spool than
+ * `currentSpoolId`.
+ */
+function printerSpoolFallback(
+  currentSpoolId: number | null | undefined,
+  spoolInfo: LoadoutSpoolInfo | null | undefined,
+): PrinterSpoolFallback | undefined {
+  if (!spoolInfo?.hasActiveSpool) return undefined;
+  const current = positive(currentSpoolId);
+  const active = positive(spoolInfo.activeSpoolId);
+  const sameSpool = current == null || active == null || current === active;
+  const hex = spoolInfo.colorHex?.trim();
+  return {
+    spoolId: current ?? active,
+    ...(sameSpool && {
+      material: spoolInfo.material?.trim() || undefined,
+      color: hex ? (/^[0-9a-f]{3,8}$/i.test(hex) ? `#${hex}` : hex) : undefined,
+      filamentName: spoolInfo.filamentName?.trim() || undefined,
+      remainingWeightG: spoolInfo.remainingWeightG != null && Number.isFinite(spoolInfo.remainingWeightG)
+        ? spoolInfo.remainingWeightG
+        : undefined,
+    }),
+  };
+}
+
 const MIN_GAP_FILL_LIVE_GATES = 4;
 const AD5X_IFS_GATE_COUNT = 4;
 
@@ -318,6 +369,7 @@ export function resolveMaterialLoadout(
   toolheads: ToolheadDto[] | undefined,
   currentSpoolId?: number | null,
   modelName?: string,
+  spoolInfo?: LoadoutSpoolInfo | null,
 ): MaterialLoadout | null {
   const liveGates = mmuStatus?.gates;
 
@@ -360,11 +412,23 @@ export function resolveMaterialLoadout(
   // than falling through to the legacy Spool section.
   if (!toolheads || toolheads.length <= 1) {
     const single = toolheads?.[0];
+    const fallback = printerSpoolFallback(currentSpoolId, spoolInfo);
     if (single) {
+      const slot = slotFromToolhead(single, 0, 'tool');
+      // Persisted toolhead data wins; the printer-level spool only fills a row
+      // that holds no spool of its own. Unassigning it must clear that scalar.
+      if (slot.spoolId == null && fallback?.spoolId != null) {
+        slot.spoolId = fallback.spoolId;
+        slot.legacyPrinterSpool = true;
+        slot.material ??= fallback.material;
+        slot.color ??= fallback.color;
+        slot.filamentName = fallback.filamentName;
+        slot.remainingWeightG = fallback.remainingWeightG;
+      }
       return {
         kind: 'tool',
         unitLabel: unitLabelFor('tool', undefined, 1),
-        slots: [slotFromToolhead(single, 0, 'tool')],
+        slots: [slot],
         hasResolvedTopology: true,
         topologyPending: false,
       };
@@ -372,7 +436,8 @@ export function resolveMaterialLoadout(
     // Once saved topology has loaded empty, the single-feed API index is 0.
     // Keep its unassigned slot actionable too; while topology is still pending,
     // only the existing printer-level binding warrants this fallback.
-    if (toolheads !== undefined || (currentSpoolId != null && currentSpoolId > 0)) {
+    const legacySpoolId = positive(currentSpoolId) ?? fallback?.spoolId;
+    if (toolheads !== undefined || positive(currentSpoolId) != null) {
       return {
         kind: 'tool',
         unitLabel: unitLabelFor('tool', undefined, 1),
@@ -381,10 +446,12 @@ export function resolveMaterialLoadout(
           apiIndex: 0,
           gcodeIndex: 0,
           label: 'T0',
-          material: undefined,
-          color: undefined,
-          spoolId: currentSpoolId != null && currentSpoolId > 0 ? currentSpoolId : undefined,
-          legacyPrinterSpool: currentSpoolId != null && currentSpoolId > 0,
+          material: fallback?.material,
+          color: fallback?.color,
+          spoolId: legacySpoolId,
+          filamentName: fallback?.filamentName,
+          remainingWeightG: fallback?.remainingWeightG,
+          legacyPrinterSpool: legacySpoolId != null,
           source: 'tool',
         }],
         hasResolvedTopology: true,

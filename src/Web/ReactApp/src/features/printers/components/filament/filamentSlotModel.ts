@@ -114,12 +114,12 @@ export function buildSlotView(
   const reportedColor = slot.color?.trim() || undefined;
   const matchedHex = matched?.colorHex?.trim().replace(/^#/, '');
   const color = reportedColor ?? (matchedHex ? `#${matchedHex}` : undefined);
-  const weight = matched?.remainingWeightG;
+  const weight = matched ? matched.remainingWeightG : state.assigned ? slot.remainingWeightG : undefined;
   return {
     key: slot.key,
     id: options.id,
     material,
-    displayName: filamentDisplayName(material, matched?.filamentName),
+    displayName: filamentDisplayName(material, matched?.filamentName ?? slot.filamentName),
     color,
     grams: weight != null && Number.isFinite(weight) && weight >= 0 ? weight : undefined,
     spoolId: state.assigned ? slot.spoolId : undefined,

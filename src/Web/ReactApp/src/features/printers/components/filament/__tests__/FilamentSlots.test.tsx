@@ -365,3 +365,46 @@ describe('formatting helpers', () => {
     expect(filamentDisplayName(undefined, undefined)).toBeUndefined();
   });
 });
+
+describe('depleted slot panel', () => {
+  it('hides the panel color swatch for a depleted slot', () => {
+    const s = slot({ key: 'd', id: 'T0', stock: 'depleted', grams: 0, color: '#FF8800', testId: 'dep' });
+    render(<Harness slots={[s]} summarySlot={s} mode="single" />);
+
+    fireEvent.click(screen.getByTestId('dep'));
+    const panel = screen.getByTestId('slot-panel');
+    expect(within(panel).getByText('PLA Black')).toBeInTheDocument();
+    expect(panel.querySelector('span[style]')).toBeNull();
+  });
+});
+
+describe('buildSlotView printer-level spool fallback', () => {
+  const printerSlot = (overrides: Partial<LoadoutSlot>): LoadoutSlot =>
+    ({ key: 'k', apiIndex: 0, label: 'T0', source: 'tool', spoolId: 21, ...overrides }) as LoadoutSlot;
+
+  it('shows the printer-level name and grams when no inventory spool matches', () => {
+    const view = buildSlotView(
+      printerSlot({ material: 'PA12', color: '#111111', filamentName: 'PA12-CF black', remainingWeightG: 1000 }),
+      undefined,
+      { id: '' },
+    );
+    expect(view).toMatchObject({ displayName: 'PA12-CF black', grams: 1000, stock: 'assigned', color: '#111111', spoolId: 21 });
+  });
+
+  it('treats a printer-level zero as depleted', () => {
+    const view = buildSlotView(printerSlot({ material: 'PA12', remainingWeightG: 0 }), undefined, { id: '' });
+    expect(view.stock).toBe('depleted');
+  });
+
+  it('prefers a matching inventory spool over the printer-level snapshot', () => {
+    const spool = { id: 21, name: 'x', material: 'PA12', filamentName: 'Inventory name', inUse: false, remainingWeightG: 250 };
+    const view = buildSlotView(printerSlot({ material: 'PA12', filamentName: 'PA12-CF black', remainingWeightG: 1000 }), spool, { id: '' });
+    expect(view).toMatchObject({ displayName: 'PA12 Inventory name', grams: 250 });
+  });
+
+  it('ignores printer-level grams on an unassigned slot', () => {
+    const view = buildSlotView(printerSlot({ spoolId: undefined, remainingWeightG: 1000 }), undefined, { id: '' });
+    expect(view.grams).toBeUndefined();
+    expect(view.stock).toBe('none');
+  });
+});

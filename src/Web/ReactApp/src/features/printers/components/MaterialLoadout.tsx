@@ -20,6 +20,7 @@ import {
   resolveMaterialLoadout,
   resolveActiveSlot,
   type LoadoutSlot,
+  type LoadoutSpoolInfo,
 } from '@/features/printers/utils/materialLoadout';
 import { FilamentSlots } from '@/features/printers/components/filament/FilamentSlots';
 import {
@@ -48,6 +49,8 @@ export interface MaterialLoadoutProps {
   toolheads?: ToolheadDto[];
   /** Current spool loaded on a single-toolhead printer without AMS/MMU topology. */
   currentSpoolId?: number | null;
+  /** Printer-level spool snapshot; fills a single-feed slot that has no persisted spool data. */
+  spoolInfo?: LoadoutSpoolInfo | null;
   /** Catalog model name used only for model-specific persisted gate recovery. */
   modelName?: string;
   /** Printer revision required by the optimistic-concurrency spool endpoints. */
@@ -81,6 +84,7 @@ export function MaterialLoadout({
   mmuStatus,
   toolheads,
   currentSpoolId,
+  spoolInfo,
   modelName,
   reviewedRowVersion,
   compact = false,
@@ -99,8 +103,8 @@ export function MaterialLoadout({
   );
 
   const loadout = useMemo(
-    () => resolveMaterialLoadout(mmuStatus, toolheads, currentSpoolId, modelName),
-    [mmuStatus, toolheads, currentSpoolId, modelName],
+    () => resolveMaterialLoadout(mmuStatus, toolheads, currentSpoolId, modelName, spoolInfo),
+    [mmuStatus, toolheads, currentSpoolId, modelName, spoolInfo],
   );
 
   const inventory = usePrinterSpoolInventory(printerId, !!loadout?.slots.some((slot) => slot.spoolId != null));
