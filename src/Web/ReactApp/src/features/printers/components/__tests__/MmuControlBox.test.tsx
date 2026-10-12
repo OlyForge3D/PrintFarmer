@@ -187,6 +187,24 @@ describe('MmuControlBox', () => {
     expect(within(screen.getByTestId('mmu-gate-0')).queryByTestId('slot-badge-depleted')).not.toBeInTheDocument();
   });
 
+  it('treats an inventory error as unknown without a Spoolman-unavailable notice or retry', () => {
+    inventory.data = [{ id: 7, name: 'PLA', material: 'PLA', remainingWeightG: 0, inUse: false }];
+    inventory.isError = true;
+    render(
+      <MmuControlBox
+        printerId="printer-1"
+        mmuStatus={status([gate(0), gate(1, { spoolId: 7 }), gate(2), gate(3)], { mmuType: MmuProtocol.Qidibox })}
+        isOnline
+        toolheads={threePersistedGates}
+        reviewedRowVersion="rev-1"
+      />,
+    );
+
+    expect(within(screen.getByTestId('mmu-gate-1')).queryByTestId('slot-badge-depleted')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Spoolman unavailable/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
+  });
+
   it('keeps the live color of a loaded gate whose assigned spool has 0 g instead of calling it empty', () => {
     inventory.data = [{ id: 7, name: 'ASA', material: 'ASA', remainingWeightG: 0, inUse: false }];
     render(

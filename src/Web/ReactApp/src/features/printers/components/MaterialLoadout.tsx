@@ -1,7 +1,6 @@
 import { useMemo, useState } from 'react';
 import clsx from 'clsx';
 import { usePrinterSpoolInventory } from '@/features/printers/hooks/usePrinterSpoolInventory';
-import { Button } from '@/common/components/ui';
 import { SpoolPickerModal } from '@/features/printers/components/SpoolPickerModal';
 import {
   useSlotSpoolAssignment,
@@ -294,13 +293,6 @@ export function MaterialLoadout({
         panelFor={panelFor}
         testId="material-loadout-slots"
       />
-
-      {inventory.isError && (
-        <p className="mt-2 text-xs text-pf-text-secondary" role="status">
-          Spoolman unavailable — remaining amount unknown.
-          <Button variant="ghost" size="sm" onClick={() => void inventory.refetch()}>Retry</Button>
-        </p>
-      )}
 
       {pickerOpen && selected && (
         <SpoolPickerModal

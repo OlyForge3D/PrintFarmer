@@ -386,12 +386,6 @@ export function MmuControlBox({
         testId="mmu-slots"
       />
 
-      {inventory.isError && (
-        <p className="mt-2 text-xs text-pf-text-secondary" role="status">
-          Spoolman unavailable — remaining amount unknown.
-          <Button variant="ghost" size="sm" onClick={() => void inventory.refetch()}>Retry</Button>
-        </p>
-      )}
       {spoolAssignment.blockedReason && (loadout?.topologyPending || topologyMismatch) && (
         <div className="mt-2 flex items-center gap-2 text-xs text-pf-text-secondary" role="status">
           <span>{spoolAssignment.blockedReason}</span>

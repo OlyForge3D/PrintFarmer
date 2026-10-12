@@ -124,7 +124,9 @@ vi.mock('@/features/printers/components/MaterialLoadout', () => ({
   MaterialLoadout: () => <div data-testid="material-loadout" />,
 }));
 vi.mock('@/features/printers/components/TemperatureControlSection', () => ({
-  TemperatureControlSection: () => <div data-testid="temp-section" />,
+  TemperatureControlSection: ({ showHeading }: { showHeading?: boolean }) => (
+    <div data-testid="temp-section" data-show-heading={String(showHeading !== false)} />
+  ),
 }));
 vi.mock('@/features/printers/components/MovementControlSection', () => ({
   MovementControlSection: ({ rightContent }: { rightContent?: React.ReactNode }) => (
@@ -222,6 +224,12 @@ describe('DetailedPrinterCard inline details (#1584)', () => {
       }
       return { data: undefined, isLoading: false, isFetching: false, refetch: vi.fn() };
     });
+  });
+
+  it('keeps the Temps heading on the card', () => {
+    render(<DetailedPrinterCard printer={makePrinter()} />);
+
+    expect(screen.getByTestId('temp-section')).toHaveAttribute('data-show-heading', 'true');
   });
 
   it('does not render an Open details sidebar action', () => {

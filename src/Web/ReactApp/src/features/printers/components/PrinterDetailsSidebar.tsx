@@ -1241,6 +1241,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
           onToggle={setIsTempsExpanded}
         >
           <TemperatureControlSection
+            showHeading={false}
             hotendTemp={hotendTemp}
             bedTemp={bedTemp}
             hotendTarget={displayPrinter?.hotendTarget}

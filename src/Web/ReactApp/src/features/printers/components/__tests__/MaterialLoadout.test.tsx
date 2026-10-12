@@ -1150,8 +1150,8 @@ describe('MaterialLoadout independent material facts', () => {
     renderLoadout({ mmuStatus: mmu([gate(0, { spoolId: 7 })]), toolheads: persistedQidiBox.slice(0, 2) });
     expect(screen.getByTestId('loadout-slot-0')).toHaveAttribute('data-state', 'assigned');
     expect(screen.queryByTestId('slot-badge-depleted')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
-    expect(inventory.refetch).toHaveBeenCalled();
+    expect(screen.queryByText(/Spoolman unavailable/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
   });
 });
 

@@ -375,6 +375,19 @@ describe("PrinterDetailsSidebar", () => {
     expect(scrollRegion).toHaveClass("flex-1", "min-h-0", "overflow-y-auto");
   });
 
+  it("shows exactly one Temps heading", () => {
+    render(
+      <PrinterDetailsSidebar
+        printerId={printer.id}
+        printer={printer}
+        onClose={vi.fn()}
+        layout="content"
+      />,
+    );
+
+    expect(screen.getAllByText("Temps")).toHaveLength(1);
+  });
+
   it("keeps the drawer layout height contract unchanged", () => {
     const { container } = render(
       <PrinterDetailsSidebar
