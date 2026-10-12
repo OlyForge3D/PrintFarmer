@@ -9,6 +9,8 @@ interface FilamentControlSectionProps {
   filamentActionPending: boolean;
   canFilamentControl: boolean;
   canFilamentChange: boolean;
+  /** Hide duplicate load/unload macros when integrated device controls exist. */
+  showLoadUnload?: boolean;
   onFilamentAction: (action: 'load' | 'unload' | 'change') => Promise<void>;
 }
 
@@ -17,13 +19,15 @@ export function FilamentControlSection({
   canFilamentControl,
   canFilamentChange,
   onFilamentAction,
+  showLoadUnload = true,
 }: FilamentControlSectionProps) {
   return (
     <div className="flex flex-col gap-1 mt-4">
       <div className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide -ml-1">
         Filament
       </div>
-      <div className="grid grid-cols-3 gap-1 w-fit">
+      <div className="grid grid-flow-col gap-1 w-fit">
+        {showLoadUnload && <>
         <ControlPadButton
           disabled={filamentActionPending || !canFilamentControl}
           onClick={() => onFilamentAction('load')}
@@ -40,6 +44,7 @@ export function FilamentControlSection({
         >
           <FilamentUnloadIcon className="w-4 h-4" />
         </ControlPadButton>
+        </>}
         <ControlPadButton
           disabled={filamentActionPending || !canFilamentChange}
           onClick={() => onFilamentAction('change')}

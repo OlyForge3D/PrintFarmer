@@ -1099,6 +1099,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
                 />
                 {support.supportsFilamentControl && (
                   <FilamentControlSection
+                    showLoadUnload={!(mmuStatus?.enabled && !isSnapmakerU1Mmu)}
                     filamentActionPending={filamentActionPending}
                     canFilamentControl={canFilamentControl({ isOnline, isEnabled, isPrinting, support })}
                     canFilamentChange={canFilamentChange({ isOnline, isEnabled, support })}

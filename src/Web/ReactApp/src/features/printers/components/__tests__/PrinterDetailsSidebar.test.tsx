@@ -1,3 +1,4 @@
+vi.mock('@/features/printers/components/MmuControlBox', () => ({ MmuControlBox: () => <div data-testid="mmu-controls" /> }));
 const controlsModeMock = vi.hoisted(() => ({ mode: "guided" as "guided" | "expert" }));
 vi.mock("@/features/printers/hooks/use-printer-controls-mode", () => ({
   usePrinterControlsMode: () => ({ mode: controlsModeMock.mode }),
@@ -862,4 +863,19 @@ describe("PrinterDetailsSidebar", () => {
       });
     });
   });
+});
+
+
+it.each([
+  ['Qidibox', true, false], ['HappyHare', true, false], ['Afc', true, false],
+  ['SnapmakerU1', true, true], ['Qidibox', false, true],
+] as const)('sidebar retains M600 and only fallback load/unload for %s (enabled %s)', (mmuType, enabled, fallback) => {
+  const mmuPrinter = { ...printer, backend: PrinterBackend.Moonraker, mmuStatus: {
+    mmuType, enabled, gates: [], activeGate: -1, activeTool: -1,
+  } } as Printer;
+  render(<PrinterDetailsSidebar printerId={printer.id} printer={mmuPrinter} onClose={vi.fn()}
+    backendCapabilities={capabilities({ backend: PrinterBackend.Moonraker, supportsFilamentControl: true })} />);
+  expect(screen.queryByTitle('Load Filament') !== null).toBe(fallback);
+  expect(screen.queryByTitle('Unload Filament') !== null).toBe(fallback);
+  expect(screen.getByTitle('Change Filament (M600)')).toBeInTheDocument();
 });

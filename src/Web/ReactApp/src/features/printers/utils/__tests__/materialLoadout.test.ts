@@ -363,7 +363,7 @@ describe('resolveMaterialLoadout', () => {
   it('returns nothing when truly empty (no toolheads, no spool, no MMU)', () => {
     expect(resolveMaterialLoadout(undefined, undefined)).toBeNull();
     expect(resolveMaterialLoadout(mmu([]), undefined)).toBeNull();
-    expect(resolveMaterialLoadout(undefined, [])).toBeNull();
+    expect(resolveMaterialLoadout(undefined, [])!.slots[0]).toMatchObject({ apiIndex: 0, label: 'T0', spoolId: undefined });
   });
 
   it('returns a single-slot loadout for a single-toolhead printer', () => {

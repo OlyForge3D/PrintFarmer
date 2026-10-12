@@ -174,6 +174,33 @@ active lifecycle controls carry the exact job and attempt. No later dispatch may
 claim the printer while that barrier is held. Direct manual-motion uncertainty
 uses the release rules below, not print-start reconciliation.
 
+### Printer materials and spool assignment
+
+Detailed printer cards and the sidebar share the original spool-shaped imagery
+for MMU gates, QidiBox Rack feeds, multi-toolhead and single-toolhead printers.
+Selecting a tile opens its inventory actions; **In use** marks the feed that live
+telemetry confirms is loaded, not the tile selected for inspection.
+
+- **No spool assigned** means no Spoolman binding. Device-reported filament can
+  still be available or loaded.
+- **Assigned spool depleted** requires the matching Spoolman inventory record to
+  report exactly zero remaining grams. Missing weights, failed inventory reads,
+  and coverage consumption estimates never establish depletion.
+- **Filament not loaded** is a separate device-reported fact. Without telemetry,
+  loading state is shown as unknown; assigning a spool does not load filament.
+
+**Assign**, **Change**, and **Unassign** use the existing picker and revision-checked
+spool endpoints. QidiBox gates retain their persisted API indices, while Rack uses
+its supported physical toolhead binding. Inventory bookkeeping retains its existing offline support; users without
+`queue:write` cannot mutate assignments. Physical device commands require an
+online printer and `queue:start`.
+Inventory errors leave assignment information visible and offer Retry.
+
+Integrated enabled MMU controls replace only duplicate generic Load/Unload
+macros. Change Filament (M600) remains available under its existing safety rules;
+printers without enabled integrated controls retain generic filament macros.
+Coverage remains demand-driven and is not encoded in unexplained spool rings.
+
 ### QidiBox filament controls
 
 QidiBox Load, Unload, and Eject use the MMU gate-action endpoint with the

@@ -1967,6 +1967,7 @@ export function useSetToolheadSpool() {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.printerDetails(printerId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.printers }),
+        queryClient.invalidateQueries({ queryKey: ['printer-spools', printerId] }),
       ]);
       toast.success('Spool assigned to toolhead');
     },
@@ -1994,6 +1995,7 @@ export function useClearToolheadSpool() {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.printerDetails(printerId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.printers }),
+        queryClient.invalidateQueries({ queryKey: ['printer-spools', printerId] }),
       ]);
       toast.success('Spool cleared from toolhead');
     },

@@ -1,5 +1,7 @@
 import { useMemo, useState } from 'react';
 import clsx from 'clsx';
+import { MaterialSlotButton } from '@/features/printers/components/MaterialSlotButton';
+import { usePrinterSpoolInventory } from '@/features/printers/hooks/usePrinterSpoolInventory';
 import { Badge, Button, Tooltip } from '@/common/components/ui';
 import { SpoolPickerModal } from '@/features/printers/components/SpoolPickerModal';
 import {
@@ -15,11 +17,8 @@ import type { ToolheadCoverage } from '@/features/filament-coverage/types';
 import { withOfflineOverride } from '@/features/filament-coverage/utils';
 import type { MmuStatus, ToolheadDto } from '@/types/api';
 import {
-  isLightColor,
   resolveMaterialLoadout,
   resolveActiveSlot,
-  type ActiveSlotInfo,
-  type LoadoutKind,
   type LoadoutSlot,
 } from '@/features/printers/utils/materialLoadout';
 
@@ -50,185 +49,8 @@ export interface MaterialLoadoutProps {
   className?: string;
 }
 
-const RING_RADIUS = 19;
-const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
-
-function slotNoun(kind: LoadoutKind): string {
+function slotNoun(kind: 'gate' | 'tool'): string {
   return kind === 'gate' ? 'gate' : 'toolhead';
-}
-
-/**
- * How much of the ring to fill, and in which colour.
- *
- * The API reports grams remaining and grams demanded but never spool capacity, so
- * a "percent full" ring would need an invented denominator. Instead the ring shows
- * what is actually known: a complete ring when the slot covers its committed
- * demand, a partial arc when it does not (the fraction of demand it can satisfy),
- * and a muted dashed ring when there is nothing to judge.
- */
-function ringFor(coverage: ToolheadCoverage | undefined): {
-  fraction: number;
-  className: string;
-  dashed: boolean;
-} {
-  if (!coverage || coverage.status === 'unknown') {
-    return { fraction: 1, className: 'text-pf-border-light', dashed: true };
-  }
-  if (coverage.status === 'covers') {
-    return { fraction: 1, className: 'text-pf-success', dashed: false };
-  }
-  const remaining = coverage.remainingGrams ?? 0;
-  const demand = coverage.totalDemandGrams ?? 0;
-  const fraction = demand > 0 ? Math.min(1, Math.max(0.04, remaining / demand)) : 0.04;
-  return { fraction, className: 'text-pf-warning', dashed: false };
-}
-
-function describeSlot(
-  slot: LoadoutSlot,
-  kind: LoadoutKind,
-  coverage: ToolheadCoverage | undefined,
-  activeInfo?: ActiveSlotInfo | null,
-): string {
-  const noun = slot.external ? 'external spool' : slotNoun(kind);
-  const material = slot.material ? `loaded with ${slot.material}` : 'empty';
-  const risk = coverage?.status === 'runout' ? ', runout risk' : '';
-  const disabled = slot.disabled ? ', disabled' : '';
-  // Hazard 2: external slots never match activeGate.
-  const isActive = activeInfo && slot.source !== 'external' && slot.gcodeIndex === activeInfo.gcodeIndex;
-  const activeLabel = isActive
-    ? activeInfo.state === 'loaded' ? ', active and loaded' : ', active'
-    : '';
-  return `${slot.label} ${noun}, ${material}${disabled}${activeLabel}${risk}`;
-}
-
-function SlotButton({
-  slot,
-  kind,
-  coverage,
-  compact,
-  selected,
-  active,
-  onSelect,
-}: {
-  slot: LoadoutSlot;
-  kind: LoadoutKind;
-  coverage: ToolheadCoverage | undefined;
-  compact: boolean;
-  selected: boolean;
-  active?: ActiveSlotInfo | null;
-  onSelect: () => void;
-}) {
-  const ring = ringFor(coverage);
-  const size = compact ? 44 : 52;
-  const atRisk = coverage?.status === 'runout';
-  const swatch = slot.color;
-  // Hazard 2: External slots must never match activeGate.
-  const isActive = active && slot.source !== 'external' && slot.gcodeIndex === active.gcodeIndex;
-  const slotTestId = slot.source === 'external'
-    ? `loadout-slot-external-${slot.apiIndex}`
-    : `loadout-slot-${slot.gcodeIndex}`;
-
-  return (
-    // eslint-disable-next-line local/pf-no-raw-html-controls -- Composite slot control: an SVG coverage ring around a filament swatch, which <Button> cannot express
-    <button
-      type="button"
-      onClick={onSelect}
-      aria-pressed={selected}
-      aria-label={describeSlot(slot, kind, coverage, active)}
-      aria-current={isActive ? 'true' : undefined}
-      data-testid={slotTestId}
-      data-source={slot.source}
-      data-disabled={slot.disabled ? 'true' : undefined}
-      data-active={isActive ? (active!.state === 'loaded' ? 'loaded' : 'selected') : undefined}
-      data-status={coverage?.status ?? 'unknown'}
-      className={clsx(
-        'group relative flex shrink-0 flex-col items-center gap-1 rounded-lg px-1.5 py-1.5',
-        'transition-transform duration-150 ease-out will-change-transform',
-        'hover:-translate-y-0.5 motion-reduce:transform-none motion-reduce:transition-none',
-        'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pf-accent',
-        selected ? 'bg-pf-bg-2' : 'hover:bg-pf-bg-1',
-        // Kept legible rather than hidden: removing the slot would renumber
-        // every gate after it and break the mapping to the device's own labels.
-        slot.disabled && 'opacity-55 saturate-50',
-      )}
-    >
-      <span className="relative block" style={{ width: size, height: size }}>
-        <svg
-          width={size}
-          height={size}
-          viewBox="0 0 44 44"
-          className={clsx('block -rotate-90', ring.className)}
-          aria-hidden="true"
-        >
-          {!ring.dashed && ring.fraction < 1 && (
-            <circle
-              cx="22"
-              cy="22"
-              r={RING_RADIUS}
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.5"
-              opacity={0.2}
-            />
-          )}
-          <circle
-            cx="22"
-            cy="22"
-            r={RING_RADIUS}
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.5"
-            strokeLinecap="round"
-            opacity={ring.dashed ? 0.55 : 1}
-            strokeDasharray={
-              ring.dashed
-                ? '2 4'
-                : `${RING_CIRCUMFERENCE * ring.fraction} ${RING_CIRCUMFERENCE}`
-            }
-          />
-        </svg>
-        <span
-          className={clsx(
-            'absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full',
-            compact ? 'h-6 w-6' : 'h-7 w-7',
-            swatch
-              ? isLightColor(swatch)
-                ? 'ring-1 ring-pf-border'
-                : 'ring-1 ring-white/15'
-              : 'border border-dashed border-pf-border-light',
-          )}
-          style={swatch ? { backgroundColor: swatch } : undefined}
-        />
-        {atRisk && (
-          <span
-            className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-pf-warning ring-2 ring-pf-bg-1"
-            aria-hidden="true"
-          />
-        )}
-        {isActive && (
-          <span
-            className={clsx(
-              'absolute -bottom-0.5 left-1/2 h-2 w-2 -translate-x-1/2 rotate-45 rounded-[1px]',
-              active!.state === 'loaded' ? 'bg-pf-success' : 'bg-pf-accent',
-            )}
-            aria-hidden="true"
-          />
-        )}
-      </span>
-
-      <span className="font-mono text-[11px] font-semibold leading-none text-pf-text-primary">
-        {slot.label}
-      </span>
-      <span
-        className={clsx(
-          'max-w-[58px] truncate text-[10px] leading-none',
-          slot.material ? 'text-pf-text-secondary' : 'text-pf-text-tertiary',
-        )}
-      >
-        {slot.material ?? 'Empty'}
-      </span>
-    </button>
-  );
 }
 
 /**
@@ -237,7 +59,7 @@ function SlotButton({
  * Replaces the previous "Material Slots" strip plus "Spools" assignment list, which
  * derived their slots from different sources and so could disagree about how many
  * slots existed and what was loaded in them. Here one resolved slot list drives the
- * rail, the coverage rings and the assignment drawer, which makes that class of
+ * rail and the assignment drawer, which makes that class of
  * contradiction structurally impossible.
  */
 export function MaterialLoadout({
@@ -263,6 +85,8 @@ export function MaterialLoadout({
     () => resolveMaterialLoadout(mmuStatus, toolheads, currentSpoolId, modelName),
     [mmuStatus, toolheads, currentSpoolId, modelName],
   );
+
+  const inventory = usePrinterSpoolInventory(printerId, !!loadout?.slots.some((slot) => slot.spoolId != null));
 
   const {
     selectedKey,
@@ -316,7 +140,7 @@ export function MaterialLoadout({
       ? coverageByIndex.get(slot.gcodeIndex)
       : undefined;
   const selectedCoverage = selected ? coverageForSlot(selected) : undefined;
-  const loadedCount = slots.filter((s) => s.material != null || s.spoolId != null).length;
+  const assignedCount = slots.filter((s) => s.spoolId != null).length;
   // Clearing stays available on a disabled gate: if the device disabled a gate
   // that still carries a stale binding, the user needs a way to release it.
   const disabledSlotReason = DISABLED_SLOT_REASON;
@@ -362,13 +186,13 @@ export function MaterialLoadout({
       aria-label="Materials"
       data-testid="material-loadout"
     >
-      <header className="mb-1.5 flex items-center gap-2">
+      <header className="mb-1.5 flex flex-wrap items-center gap-2">
         <span className="text-xs font-bold uppercase tracking-wide text-pf-text-secondary">
           Materials
         </span>
         <Badge variant="default" size="sm">{unitLabel}</Badge>
         <span className="text-[10px] text-pf-text-tertiary">
-          {loadedCount}/{slots.length} loaded
+          {assignedCount}/{slots.length} assigned
         </span>
         <div className="ml-auto flex items-center gap-1.5">
           {coverage && (
@@ -387,18 +211,27 @@ export function MaterialLoadout({
         </div>
       </header>
 
-      <div className="flex flex-wrap items-start gap-0.5" role="group" aria-label={`${unitLabel} slots`}>
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(5.5rem,1fr))] items-stretch gap-1" role="group" aria-label={`${unitLabel} slots`}>
         {slots.map((slot) => {
           const slotCoverage = coverageForSlot(slot);
+          const isActive = slot.source !== 'external' && slot.gcodeIndex === activeSlot?.gcodeIndex;
+          const feed = isOnline && isActive && mmuStatus?.filamentState?.toLowerCase() === 'loaded' ? 'loaded'
+            : isOnline && ((isActive && mmuStatus?.filamentState?.toLowerCase() === 'unloaded') || slot.filamentPresence === 'absent') ? 'not-loaded'
+            : isOnline && slot.filamentPresence === 'available' ? 'available' : 'unknown';
           const button = (
-            <SlotButton
+            <MaterialSlotButton
               key={slot.key}
               slot={slot}
-              kind={kind}
-              coverage={slotCoverage}
+              spool={inventory.isError ? undefined : inventory.data?.find((spool) => spool.id === slot.spoolId)}
+              accessibleLabel={`${slot.label} ${slot.external ? 'external spool' : slotNoun(kind)}`}
+              feed={feed}
+              inUse={isOnline && isActive && activeSlot?.state === 'loaded'}
+              activeState={isActive ? activeSlot?.state === 'loaded' ? 'loaded' : 'selected' : undefined}
+              atRisk={slotCoverage?.status === 'runout'}
+              status={slotCoverage?.status}
+              testId={slot.source === 'external' ? `loadout-slot-external-${slot.apiIndex}` : `loadout-slot-${slot.gcodeIndex}`}
               compact={compact}
               selected={selected?.key === slot.key}
-              active={activeSlot}
               onSelect={() => selectSlot(slot)}
             />
           );
@@ -412,11 +245,18 @@ export function MaterialLoadout({
         })}
       </div>
 
+      {inventory.isError && (
+        <p className="mt-2 text-xs text-pf-text-secondary" role="status">
+          Spoolman unavailable — remaining amount unknown.
+          <Button variant="ghost" size="sm" onClick={() => void inventory.refetch()}>Retry</Button>
+        </p>
+      )}
       {selected && (
         <div
           className="pf-animate-rise mt-2 rounded-lg border border-pf-border bg-pf-bg-0/60 p-2"
           data-testid="loadout-drawer"
         >
+          <p className="mb-2 text-xs text-pf-text-secondary">Spool assignment tracks inventory; it does not load or unload filament.</p>
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
             <span className="font-mono font-semibold text-pf-text-primary">{selected.label}</span>
             <Badge variant={selected.external ? 'default' : 'primary'} size="sm">
@@ -437,7 +277,7 @@ export function MaterialLoadout({
             )}
             {selectedCoverage?.remainingGrams != null && (
               <span className="text-pf-text-tertiary">
-                {Math.round(selectedCoverage.remainingGrams)}g left
+                {Math.round(selectedCoverage.remainingGrams)}g coverage estimate
               </span>
             )}
             {selectedCoverage?.totalDemandGrams != null && selectedCoverage.totalDemandGrams > 0 && (
@@ -481,7 +321,7 @@ export function MaterialLoadout({
                   aria-describedby={!canMutate ? `loadout-clear-desc-${printerId}` : undefined}
                   onClick={() => void handleClear()}
                 >
-                  Clear
+                  Unassign
                 </Button>
               )}
             </div>
@@ -510,6 +350,8 @@ export function MaterialLoadout({
           onSelect={handlePickerSelect}
           printerId={printerId}
           activeSpoolId={selected.spoolId}
+          assignmentOnly
+          pending={busy}
         />
       )}
     </section>

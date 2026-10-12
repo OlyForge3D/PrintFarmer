@@ -41,6 +41,8 @@ export interface LoadoutSlot {
   material?: string;
   color?: string;
   spoolId?: number;
+  /** Device feed presence, never inferred from a Spoolman assignment. */
+  filamentPresence?: 'available' | 'absent';
   /** Where this slot's filament comes from. See {@link LoadoutSource}. */
   source: LoadoutSource;
   /** A physical hotend fed from an external spool alongside an MMU. */
@@ -171,6 +173,8 @@ function slotFromGate(
     color: gate.color,
     spoolId: gate.spoolId > 0 ? gate.spoolId : undefined,
     source: isTool ? 'tool' : 'gate',
+    filamentPresence: gate.status === MmuGateStatus.Available ? 'available'
+      : gate.status === MmuGateStatus.Empty ? 'absent' : undefined,
     // A toolchanger reports real toolheads over the MMU channel and has no
     // notion of a disabled gate, so only flag this for actual MMU gates.
     disabled: !isTool && gate.status === MmuGateStatus.Disabled,
@@ -191,7 +195,7 @@ function slotFromToolhead(
     name: toolhead.name,
     material: toolhead.currentMaterial,
     color: toolhead.currentFilamentColor,
-    spoolId: toolhead.currentSpoolId ?? undefined,
+    spoolId: toolhead.currentSpoolId != null && toolhead.currentSpoolId > 0 ? toolhead.currentSpoolId : undefined,
     source: isTool ? 'tool' : 'gate',
   };
 }
@@ -220,7 +224,7 @@ function externalSlotFromToolhead(
     name: toolhead.name,
     material: toolhead.currentMaterial,
     color: toolhead.currentFilamentColor,
-    spoolId: toolhead.currentSpoolId ?? undefined,
+    spoolId: toolhead.currentSpoolId != null && toolhead.currentSpoolId > 0 ? toolhead.currentSpoolId : undefined,
     source: 'external',
     external: true,
   };
@@ -345,9 +349,10 @@ export function resolveMaterialLoadout(
         topologyPending: false,
       };
     }
-    // No persisted toolheads at all — synthesize a slot from printer-level spool
-    // if one exists (Hazard 6: zero toolheads with currentSpoolId still needs a rail).
-    if (currentSpoolId != null && currentSpoolId > 0) {
+    // Once saved topology has loaded empty, the single-feed API index is 0.
+    // Keep its unassigned slot actionable too; while topology is still pending,
+    // only the existing printer-level binding warrants this fallback.
+    if (toolheads !== undefined || (currentSpoolId != null && currentSpoolId > 0)) {
       return {
         kind: 'tool',
         unitLabel: unitLabelFor('tool', undefined, 1),
@@ -358,7 +363,7 @@ export function resolveMaterialLoadout(
           label: 'T0',
           material: undefined,
           color: undefined,
-          spoolId: currentSpoolId,
+          spoolId: currentSpoolId != null && currentSpoolId > 0 ? currentSpoolId : undefined,
           source: 'tool',
         }],
         hasResolvedTopology: true,

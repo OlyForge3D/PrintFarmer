@@ -68,7 +68,9 @@ vi.mock('@/features/printers/components/TemperatureControlSection', () => ({ Tem
 vi.mock('@/features/printers/components/MovementControlSection', () => ({
   MovementControlSection: ({ rightContent }: { rightContent?: React.ReactNode }) => <div>{rightContent}</div>,
 }));
-vi.mock('@/features/printers/components/FilamentControlSection', () => ({ FilamentControlSection: () => null }));
+vi.mock('@/features/printers/components/FilamentControlSection', () => ({
+  FilamentControlSection: ({ showLoadUnload = true }: { showLoadUnload?: boolean }) => <div data-testid="filament-macros" data-load-unload={String(showLoadUnload)}>Change Filament (M600)</div>,
+}));
 vi.mock('@/features/printers/components/PrinterActionBar', () => ({ PrinterActionBar: () => null }));
 vi.mock('@/features/printers/components/BedClearBanner', () => ({ BedClearBanner: () => null }));
 vi.mock('@/features/printers/components/PrintProgressBar', () => ({ PrintProgressBar: () => null }));
@@ -147,4 +149,15 @@ describe('DetailedPrinterCard AMS controls', () => {
 
     expect(screen.queryByTestId('ams-control-box')).not.toBeInTheDocument();
   });
+});
+
+
+it.each([
+  ['Qidibox', true, false], ['HappyHare', true, false], ['Afc', true, false],
+  ['SnapmakerU1', true, true], ['Qidibox', false, true],
+] as const)('uses one load/unload path for %s (enabled %s)', (mmuType, enabled, showLoadUnload) => {
+  render(<DetailedPrinterCard printer={makePrinter({ mmuStatus: makeMmuStatus({ mmuType, enabled }) })}
+    backendCapabilities={{ supportsFilamentControl: true } as import('@/types/api').PrinterBackendCapabilitiesDto} />);
+  expect(screen.getByTestId('filament-macros')).toHaveAttribute('data-load-unload', String(showLoadUnload));
+  expect(screen.getByText('Change Filament (M600)')).toBeInTheDocument();
 });

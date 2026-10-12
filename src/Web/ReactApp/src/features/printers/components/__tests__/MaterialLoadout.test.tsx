@@ -1,3 +1,10 @@
+
+const permissions = vi.hoisted(() => ({ assign: true, operate: true }));
+vi.mock('@/features/auth/hooks/useAuth', () => ({
+  useAuth: () => ({ hasPermission: (_resource: string, action: string) => action === 'write' ? permissions.assign : permissions.operate }),
+}));
+const inventory = vi.hoisted(() => ({ data: undefined as import('@/types/api').SpoolmanSpool[] | undefined, isError: false, refetch: vi.fn() }));
+vi.mock('@/features/printers/hooks/usePrinterSpoolInventory', () => ({ usePrinterSpoolInventory: () => inventory }));
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, within, waitFor } from '@testing-library/react';
 import { MaterialLoadout } from '@/features/printers/components/MaterialLoadout';
@@ -78,6 +85,9 @@ describe('MaterialLoadout', () => {
   beforeEach(() => {
     // Real setToolheadSpool/clearToolheadSpool resolve to the new rowVersion
     // string, which lockedRevision re-anchors to on success.
+    permissions.assign = permissions.operate = true;
+    inventory.data = undefined;
+    inventory.isError = false;
     setSpool.mockReset().mockResolvedValue('rev-1');
     clearSpool.mockReset().mockResolvedValue('rev-1');
     coverage.mockReset().mockReturnValue(undefined);
@@ -198,7 +208,7 @@ describe('MaterialLoadout', () => {
     expect(change).not.toBeDisabled();
     expect(change).toHaveAttribute('aria-disabled', 'true');
 
-    const clear = screen.getByRole('button', { name: 'Clear' });
+    const clear = screen.getByRole('button', { name: 'Unassign' });
     expect(clear).toBeEnabled();
     fireEvent.click(clear);
 
@@ -236,7 +246,7 @@ describe('MaterialLoadout', () => {
       'Disabled on the device — cannot take a spool',
     );
 
-    const clear = screen.getByRole('button', { name: 'Clear' });
+    const clear = screen.getByRole('button', { name: 'Unassign' });
     const clearDescId = clear.getAttribute('aria-describedby');
     expect(clearDescId).toBeTruthy();
     expect(clearDescId).not.toBe(changeDescId);
@@ -275,7 +285,7 @@ describe('MaterialLoadout', () => {
     });
 
     fireEvent.click(screen.getByTestId('loadout-slot-1'));
-    fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Unassign' }));
 
     await waitFor(() =>
       expect(clearSpool).toHaveBeenCalledWith({
@@ -434,7 +444,7 @@ describe('MaterialLoadout', () => {
 
     fireEvent.click(screen.getByTestId('loadout-slot-2'));
     const drawer = screen.getByTestId('loadout-drawer');
-    expect(within(drawer).getByText('100g left')).toBeInTheDocument();
+    expect(within(drawer).getByText('100g coverage estimate')).toBeInTheDocument();
     expect(within(drawer).getByText('400g needed')).toBeInTheDocument();
   });
 
@@ -802,7 +812,7 @@ describe('MaterialLoadout', () => {
       ),
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Unassign' }));
 
     await waitFor(() =>
       expect(clearSpool).toHaveBeenCalledWith(
@@ -827,7 +837,7 @@ describe('MaterialLoadout', () => {
 
   // ── Behaviour inherited from the retired AmsSlotVisualization suite ──
 
-  it('reports how many slots carry filament', () => {
+  it('counts assignments rather than implying physical loading', () => {
     renderLoadout({
       mmuStatus: mmu([
         gate(0, { material: 'PLA' }),
@@ -837,7 +847,7 @@ describe('MaterialLoadout', () => {
       ]),
     });
 
-    expect(screen.getByText(/1\s*\/\s*4/)).toBeInTheDocument();
+    expect(screen.getByText('0/4 assigned')).toBeInTheDocument();
   });
 
   it('describes an empty slot as empty rather than showing a stale material', () => {
@@ -846,7 +856,7 @@ describe('MaterialLoadout', () => {
     });
 
     expect(
-      screen.getByRole('button', { name: /G1 gate, empty/i }),
+      screen.getByRole('button', { name: /G1 gate: Unknown material, No spool assigned/i }),
     ).toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId('loadout-slot-0'));
@@ -999,6 +1009,86 @@ describe('MaterialLoadout', () => {
     renderLoadout({ mmuStatus: status });
 
     const slot1 = screen.getByTestId('loadout-slot-1');
-    expect(slot1.getAttribute('aria-label')).toContain('active and loaded');
+    expect(slot1.getAttribute('aria-label')).toContain('Filament loaded, In use');
   });
+});
+
+
+describe('MaterialLoadout independent material facts', () => {
+  beforeEach(() => {
+    permissions.assign = permissions.operate = true;
+    inventory.data = undefined;
+    inventory.isError = false;
+    coverage.mockReturnValue(undefined);
+    pending.set = pending.clear = false;
+    setSpool.mockReset().mockResolvedValue('rev-2');
+    clearSpool.mockReset().mockResolvedValue('rev-2');
+  });
+
+  it('distinguishes unassigned, confirmed depleted, unknown and unloaded without rings', () => {
+    inventory.data = [{ id: 7, name: 'PLA', material: 'PLA', remainingWeightG: 0, inUse: false }];
+    renderLoadout({ mmuStatus: mmu([gate(0), gate(1, { spoolId: 7 }), gate(2, { spoolId: 8 }), gate(3, { spoolId: 9, status: MmuGateStatus.Empty })]) });
+    expect(screen.getByTestId('loadout-slot-0')).toHaveTextContent('No spool assigned');
+    expect(screen.getByTestId('loadout-slot-1')).toHaveTextContent('Assigned spool depleted');
+    expect(screen.getByTestId('loadout-slot-2')).toHaveTextContent('Remaining unknown');
+    expect(screen.getByTestId('loadout-slot-3')).toHaveTextContent('Spool #9');
+    expect(screen.getByTestId('loadout-slot-3')).toHaveTextContent('Filament not loaded');
+    expect(screen.getByTestId('material-loadout').querySelector('[stroke-dasharray]')).toBeNull();
+  });
+
+  it.each([1, 2])('assigns through the same picker for %s physical toolheads', async (count) => {
+    renderLoadout({ mmuStatus: undefined, toolheads: Array.from({ length: count }, (_, index) => ({ id: `th-${index}`, index, name: `Tool ${index}`, toolheadType: 'Physical' }) as ToolheadDto) });
+    const slot = screen.getByTestId(`loadout-slot-${count - 1}`);
+    expect(slot).toHaveTextContent('No spool assigned');
+    expect(slot).toHaveTextContent('Loading state unknown');
+    fireEvent.click(slot);
+    fireEvent.click(screen.getByRole('button', { name: 'Assign' }));
+    fireEvent.click(screen.getByTestId('spool-picker'));
+    await waitFor(() => expect(setSpool).toHaveBeenCalledWith({ printerId: 'printer-1', toolheadIndex: count - 1, spoolId: 99, reviewedRowVersion: 'rev-1' }));
+  });
+
+  it('keeps an empty single-feed printer assignable after saved topology loads', async () => {
+    renderLoadout({ mmuStatus: undefined, toolheads: [] });
+    fireEvent.click(screen.getByTestId('loadout-slot-0'));
+    fireEvent.click(screen.getByRole('button', { name: 'Assign' }));
+    fireEvent.click(screen.getByTestId('spool-picker'));
+    await waitFor(() => expect(setSpool).toHaveBeenCalledWith(expect.objectContaining({ toolheadIndex: 0 })));
+  });
+
+  it('blocks inventory writes without permission while slots remain inspectable', () => {
+    permissions.assign = false;
+    renderLoadout();
+    fireEvent.click(screen.getByTestId('loadout-slot-0'));
+    fireEvent.click(screen.getByRole('button', { name: 'Assign' }));
+    expect(screen.getByRole('button', { name: 'Assign' })).toHaveAttribute('aria-disabled', 'true');
+    expect(screen.queryByTestId('spool-picker')).not.toBeInTheDocument();
+    expect(setSpool).not.toHaveBeenCalled();
+  });
+
+  it('reports inventory errors as unknown, not depleted', () => {
+    inventory.data = [{ id: 7, name: 'PLA', material: 'PLA', remainingWeightG: 0, inUse: false }];
+    inventory.isError = true;
+    renderLoadout({ mmuStatus: mmu([gate(0, { spoolId: 7 })]), toolheads: persistedQidiBox.slice(0, 2) });
+    expect(screen.getByTestId('loadout-slot-0')).toHaveTextContent('Remaining unknown');
+    expect(screen.queryByText('Assigned spool depleted')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(inventory.refetch).toHaveBeenCalled();
+  });
+});
+
+
+it('prevents rapid repeated confirmation from dispatching concurrent spool writes', async () => {
+  permissions.assign = permissions.operate = true;
+  inventory.data = undefined;
+  inventory.isError = false;
+  let finish: (revision: string) => void = () => {};
+  setSpool.mockReset().mockImplementation(() => new Promise<string>((resolve) => { finish = resolve; }));
+  renderLoadout();
+  fireEvent.click(screen.getByTestId('loadout-slot-0'));
+  fireEvent.click(screen.getByRole('button', { name: 'Assign' }));
+  fireEvent.click(screen.getByTestId('spool-picker'));
+  fireEvent.click(screen.getByTestId('spool-picker'));
+  expect(setSpool).toHaveBeenCalledTimes(1);
+  finish('rev-2');
+  await waitFor(() => expect(screen.queryByTestId('spool-picker')).not.toBeInTheDocument());
 });

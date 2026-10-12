@@ -1214,7 +1214,8 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
             {/* Filament buttons */}
               <div className="flex flex-col gap-1">
                 <div className="text-[10px] uppercase text-pf-text-secondary font-bold tracking-wide">Macros</div>
-                <div className="grid grid-cols-1 grid-rows-3 gap-1 w-fit">
+                <div className="grid grid-cols-1 gap-1 w-fit">
+                {!(showMmuControlBox && displayPrinter.mmuStatus?.enabled) && <>
                 <ControlPadButton
                   disabled={filamentActionPending || !canFilamentControl({ isOnline, isEnabled, isPrinting, support })}
                   onClick={() => handleFilamentAction('load')}
@@ -1231,6 +1232,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                 >
                   <FilamentUnloadIcon className="h-4 w-4" />
                 </ControlPadButton>
+                </>}
                 <ControlPadButton
                   disabled={filamentActionPending || !canFilamentChange({ isOnline, isEnabled, support })}
                   onClick={() => handleFilamentAction('change')}

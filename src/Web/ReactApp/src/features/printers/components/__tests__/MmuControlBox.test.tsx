@@ -1,3 +1,10 @@
+
+const permissions = vi.hoisted(() => ({ assign: true, operate: true }));
+vi.mock('@/features/auth/hooks/useAuth', () => ({
+  useAuth: () => ({ hasPermission: (_resource: string, action: string) => action === 'write' ? permissions.assign : permissions.operate }),
+}));
+const inventory = vi.hoisted(() => ({ data: undefined as import('@/types/api').SpoolmanSpool[] | undefined, isError: false, refetch: vi.fn() }));
+vi.mock('@/features/printers/hooks/usePrinterSpoolInventory', () => ({ usePrinterSpoolInventory: () => inventory }));
 import type { ReactElement } from 'react';
 import { fireEvent, render as rtlRender, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -35,7 +42,7 @@ function render(ui: ReactElement) {
   };
 }
 
-vi.mock('@/services/api', () => ({ apiClient: { mmuGateAction: vi.fn() } }));
+vi.mock('@/services/api', () => ({ apiClient: { mmuGateAction: vi.fn(), mmuEject: vi.fn() } }));
 
 vi.mock('@/features/printers/components/SpoolPickerModal', () => ({
   SpoolPickerModal: ({ onSelect }: { onSelect: (id: number) => void }) => (
@@ -91,6 +98,9 @@ const threePersistedGates = [
 describe('MmuControlBox', () => {
   beforeEach(() => {
     queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    permissions.assign = permissions.operate = true;
+    inventory.data = undefined;
+    inventory.isError = false;
     setSpool.mockReset().mockResolvedValue('rev-2');
     clearSpool.mockReset().mockResolvedValue('rev-2');
     coverage.mockReset().mockReturnValue(undefined);
@@ -113,27 +123,21 @@ describe('MmuControlBox', () => {
 
     const activeGate = screen.getByRole('button', { name: /^Gate 1B:/ });
     expect(activeGate).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.queryByText('In use')).not.toBeInTheDocument();
+    expect(screen.getAllByText('In use')).toHaveLength(1);
     expect(screen.queryByText('Rack')).not.toBeInTheDocument();
     const gates = screen.getAllByRole('button', { name: /^Gate 1[A-D]:/ });
     expect(gates).toHaveLength(4);
     expect(Array.from(activeGate.parentElement!.children)).toEqual(gates);
   });
 
-  it.each([MmuProtocol.HappyHare, MmuProtocol.Afc])('preserves the loaded Rack tile for %s', (mmuType) => {
-    render(
-      <MmuControlBox
-        printerId="printer-1"
-        mmuStatus={status([gate(0, { material: 'PETG' }), gate(1)], { mmuType })}
-        isOnline
-      />,
-    );
-
-    const rack = screen.getByText('Rack').parentElement!;
-    expect(rack).toHaveTextContent('PETG');
-    expect(rack.querySelector('svg')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /^Gate 1A:/ })).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.queryByText('In use')).not.toBeInTheDocument();
+  it.each([MmuProtocol.HappyHare, MmuProtocol.Afc])('marks the actual feed without a duplicate Rack for %s', (mmuType) => {
+    render(<MmuControlBox printerId="printer-1" mmuStatus={status([gate(0, { material: 'PETG' }), gate(1)], { mmuType })} isOnline />);
+    expect(screen.queryByText('Rack')).not.toBeInTheDocument();
+    const active = screen.getByRole('button', { name: /^Gate 1A:/ });
+    expect(active).toHaveTextContent('PETG');
+    expect(active).toHaveTextContent('In use');
+    expect(active.querySelector('svg')).toHaveAttribute('viewBox', '0 0 100 100');
+    expect(screen.getAllByText('In use')).toHaveLength(1);
   });
 
   it.each(['Load', 'Unload', 'Eject'] as const)('surfaces the server safety title for a rejected QidiBox %s', async (action) => {
@@ -267,7 +271,7 @@ describe('MmuControlBox', () => {
     );
 
     expect(screen.getByRole('button', { name: /^(Assign|Change)$/ })).toHaveAttribute('aria-disabled', 'true');
-    const release = screen.getByRole('button', { name: 'Release' });
+    const release = screen.getByRole('button', { name: 'Unassign' });
     expect(release).not.toHaveAttribute('aria-disabled', 'true');
     fireEvent.click(release);
 
@@ -399,7 +403,7 @@ describe('MmuControlBox', () => {
     };
     const release = async (gateName: RegExp, expectedRevision: string, call: number) => {
       fireEvent.click(screen.getByRole('button', { name: gateName }));
-      fireEvent.click(screen.getByRole('button', { name: 'Release' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Unassign' }));
       await waitFor(() => expect(clearSpool).toHaveBeenCalledTimes(call));
       expect(clearSpool).toHaveBeenLastCalledWith({
         printerId: 'printer-1',
@@ -437,21 +441,21 @@ describe('MmuControlBox', () => {
       <MmuControlBox {...scopedProps} printerId="printer-1" reviewedRowVersion="rev-1" />,
     );
     fireEvent.click(screen.getByRole('button', { name: /^Gate 1A:/ }));
-    fireEvent.click(screen.getByRole('button', { name: 'Release' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Unassign' }));
     await waitFor(() => expect(clearSpool).toHaveBeenCalledTimes(1));
 
     // Same component instance switches printers before B's revision is known.
     rerender(<MmuControlBox {...scopedProps} printerId="printer-2" reviewedRowVersion={undefined} />);
     fireEvent.click(screen.getByRole('button', { name: /^Gate 1A:/ }));
     expect(screen.getByRole('button', { name: /^(Assign|Change)$/ })).toHaveAttribute('aria-disabled', 'true');
-    fireEvent.click(screen.getByRole('button', { name: 'Release' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Unassign' }));
     fireEvent.click(screen.getByRole('button', { name: /^(Assign|Change)$/ }));
     expect(clearSpool).toHaveBeenCalledTimes(1);
     expect(setSpool).not.toHaveBeenCalled();
 
     rerender(<MmuControlBox {...scopedProps} printerId="printer-2" reviewedRowVersion="b-1" />);
     fireEvent.click(screen.getByRole('button', { name: /^Gate 1A:/ }));
-    fireEvent.click(screen.getByRole('button', { name: 'Release' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Unassign' }));
     await waitFor(() => expect(clearSpool).toHaveBeenCalledTimes(2));
     expect(clearSpool).toHaveBeenLastCalledWith({ printerId: 'printer-2', toolheadIndex: 1, reviewedRowVersion: 'b-1' });
   });
@@ -465,27 +469,28 @@ describe('MmuControlBox', () => {
       <MmuControlBox {...scopedProps} printerId="printer-1" reviewedRowVersion="rev-1" />,
     );
     fireEvent.click(screen.getByRole('button', { name: /^Gate 1A:/ }));
-    fireEvent.click(screen.getByRole('button', { name: 'Release' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Unassign' }));
     await waitFor(() => expect(clearSpool).toHaveBeenCalledTimes(1));
 
     rerender(<MmuControlBox {...scopedProps} printerId="printer-2" reviewedRowVersion="b-1" />);
     resolveA('rev-2');
     await Promise.resolve();
     fireEvent.click(screen.getByRole('button', { name: /^Gate 1A:/ }));
-    fireEvent.click(screen.getByRole('button', { name: 'Release' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Unassign' }));
     await waitFor(() => expect(clearSpool).toHaveBeenCalledTimes(2));
     expect(clearSpool).toHaveBeenLastCalledWith({ printerId: 'printer-2', toolheadIndex: 1, reviewedRowVersion: 'b-1' });
   });
 
-  it('uses the live inset-surface token for every spool hub', () => {
+  it('uses the shared recognizable spool silhouette with themed frame and a through-hole', () => {
     const { container } = render(
       <MmuControlBox printerId="printer-1" mmuStatus={status([gate(0, { spoolId: 1 })])} isOnline />,
     );
 
-    const hubs = container.querySelectorAll('ellipse[cx="28"][cy="30"]');
+    const hubs = container.querySelectorAll('circle[cx="50"][cy="50"][r="12"]');
     expect(hubs.length).toBeGreaterThan(0);
     for (const hub of hubs) {
-      expect(hub).toHaveAttribute('fill', 'var(--pf-bg-2)');
+      expect(hub).toHaveAttribute('fill', 'none');
+      expect(hub).toHaveAttribute('stroke', 'var(--pf-text-secondary)');
     }
   });
 
@@ -599,16 +604,16 @@ describe('MmuControlBox', () => {
         />,
       );
 
-      const rack = screen.getByRole('button', { name: 'Rack: ASA - Spool #127' });
+      const rack = screen.getByRole('button', { name: /^Rack: ASA, Spool #127/ });
       expect(screen.getAllByText('Rack')).toHaveLength(1);
-      expect(rack).toHaveAttribute('data-active', 'false');
-      expect(screen.queryByText('In use')).not.toBeInTheDocument();
+      expect(rack).not.toHaveAttribute('data-active');
+      expect(screen.getAllByText('In use')).toHaveLength(1);
       const gates = screen.getAllByRole('button', { name: /^Gate 1[A-D]:/ });
       expect(gates).toHaveLength(4);
       for (const gateTile of gates) {
         expect(gateTile).toHaveAttribute('aria-pressed', String(gateTile === gates[1]));
       }
-      expect(rack.parentElement!.children).toHaveLength(6);
+      expect(rack.parentElement!.children).toHaveLength(5);
     });
 
     it('selecting Rack opens the picker and binds physical toolhead 0, not a gate', async () => {
@@ -620,7 +625,7 @@ describe('MmuControlBox', () => {
         />,
       );
 
-      fireEvent.click(screen.getByRole('button', { name: 'Rack: Empty' }));
+      fireEvent.click(screen.getByRole('button', { name: /^Rack: Unknown material, No spool assigned/ }));
       expect(screen.getByText('Rack (external spool)')).toBeInTheDocument();
       fireEvent.click(screen.getByRole('button', { name: 'Assign' }));
       fireEvent.click(screen.getByTestId('spool-picker'));
@@ -640,10 +645,10 @@ describe('MmuControlBox', () => {
         />,
       );
 
-      fireEvent.click(screen.getByRole('button', { name: 'Rack: ASA - Spool #127' }));
+      fireEvent.click(screen.getByRole('button', { name: /^Rack: ASA, Spool #127/ }));
       expect(screen.getByText('#127')).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Change' })).not.toHaveAttribute('aria-disabled', 'true');
-      fireEvent.click(screen.getByRole('button', { name: 'Release' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Unassign' }));
 
       await waitFor(() => expect(clearSpool).toHaveBeenCalledWith({
         printerId: 'printer-1',
@@ -720,9 +725,9 @@ describe('MmuControlBox', () => {
         />,
       );
 
-      const rack = screen.getByRole('button', { name: 'Rack: ASA - Spool #127, in use' });
+      const rack = screen.getByRole('button', { name: /^Rack: ASA, Spool #127.*In use$/ });
       expect(rack).toHaveAttribute('aria-pressed', 'true');
-      expect(rack).toHaveAttribute('data-active', 'true');
+      expect(rack).toHaveAttribute('data-active', 'loaded');
       expect(screen.getByText('In use')).toBeInTheDocument();
       expect(screen.getByText('Rack (external spool)')).toBeInTheDocument();
       expect(screen.getByText(/Feeding from/)).toBeInTheDocument();
@@ -732,7 +737,7 @@ describe('MmuControlBox', () => {
 
       fireEvent.click(screen.getByRole('button', { name: /^Gate 1A:/ }));
       expect(screen.queryByText('Rack (external spool)')).not.toBeInTheDocument();
-      expect(screen.getByRole('button', { name: /^Rack:.*in use$/ })).toHaveAttribute('aria-pressed', 'false');
+      expect(screen.getByRole('button', { name: /^Rack:.*In use$/ })).toHaveAttribute('aria-pressed', 'false');
     });
 
     it('does not mark Rack in use when the active gate is unknown (-1)', () => {
@@ -744,7 +749,7 @@ describe('MmuControlBox', () => {
         />,
       );
 
-      const rack = screen.getByRole('button', { name: 'Rack: ASA - Spool #127' });
+      const rack = screen.getByRole('button', { name: /^Rack: ASA, Spool #127/ });
       expect(rack).toHaveAttribute('aria-pressed', 'false');
       expect(screen.queryByText('In use')).not.toBeInTheDocument();
       expect(screen.queryByText(/Feeding from/)).not.toBeInTheDocument();
@@ -783,4 +788,57 @@ describe('MmuControlBox', () => {
       expect(screen.queryByRole('button', { name: /^Rack:/ })).not.toBeInTheDocument();
     });
   });
+});
+
+
+it('keeps selection separate from physical in-use and quantity on QidiBox', () => {
+  queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  permissions.assign = permissions.operate = true;
+  inventory.isError = false;
+  inventory.data = [{ id: 7, name: 'PLA', material: 'PLA', remainingWeightG: 0, inUse: false }];
+  render(<MmuControlBox printerId="printer-1" isOnline reviewedRowVersion="rev-1" toolheads={threePersistedGates}
+    mmuStatus={status([gate(0), gate(1, { spoolId: 7 }), gate(2, { spoolId: 8, status: MmuGateStatus.Empty }), gate(3)], { mmuType: MmuProtocol.Qidibox })} />);
+  const loaded = screen.getByRole('button', { name: /^Gate 1A:/ });
+  const depleted = screen.getByRole('button', { name: /^Gate 1B:/ });
+  expect(depleted).toHaveTextContent('Assigned spool depleted');
+  fireEvent.click(depleted);
+  expect(depleted).toHaveAttribute('aria-pressed', 'true');
+  expect(depleted).not.toHaveTextContent('In use');
+  expect(loaded).toHaveTextContent('In use');
+  expect(loaded).toHaveAttribute('aria-current', 'true');
+  expect(screen.getByRole('button', { name: /^Gate 1C:/ })).toHaveTextContent('Filament not loaded');
+  expect(screen.getAllByText('In use')).toHaveLength(1);
+});
+
+
+it.each(['start', 'write'])('respects the separate queue:%s permission', (action) => {
+  queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  permissions.operate = action !== 'start';
+  permissions.assign = action !== 'write';
+  inventory.data = undefined;
+  inventory.isError = false;
+  render(<MmuControlBox printerId="printer-1" isOnline reviewedRowVersion="rev-1" toolheads={threePersistedGates}
+    mmuStatus={status(qidiGates, { mmuType: MmuProtocol.Qidibox })} />);
+  if (action === 'start') {
+    expect(screen.getByRole('button', { name: 'Load' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Assign' })).not.toHaveAttribute('aria-disabled', 'true');
+  } else {
+    expect(screen.getByRole('button', { name: 'Assign' })).toHaveAttribute('aria-disabled', 'true');
+    expect(screen.getByRole('button', { name: 'Load' })).toBeEnabled();
+  }
+});
+
+
+it('preserves recovery during an apparently pending MMU action', async () => {
+  queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  permissions.assign = permissions.operate = true;
+  let complete: () => void = () => {};
+  vi.mocked(apiClient.mmuEject).mockImplementation(() => new Promise((resolve) => { complete = () => resolve({ success: true, message: 'Fixture complete' }); }));
+  render(<MmuControlBox printerId="printer-1" isOnline reviewedRowVersion="rev-1" toolheads={threePersistedGates}
+    mmuStatus={status(qidiGates, { mmuType: MmuProtocol.HappyHare, action: 'Error' })} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Unload' }));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Load' })).toBeDisabled());
+  expect(screen.getByRole('button', { name: 'Recover' })).toBeEnabled();
+  complete();
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Load' })).toBeEnabled());
 });

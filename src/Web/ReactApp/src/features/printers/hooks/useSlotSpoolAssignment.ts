@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
+import { useAuth } from '@/features/auth/hooks/useAuth';
 import {
   useSetToolheadSpool,
   useClearToolheadSpool,
@@ -54,6 +55,9 @@ export function useSlotSpoolAssignment({
   topologyPending = false,
   onSpoolChange,
 }: SlotSpoolAssignmentOptions): SlotSpoolAssignment {
+  const { hasPermission } = useAuth();
+  const canAssign = hasPermission('queue', 'write');
+  const mutationInFlight = useRef(false);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [lockedRevision, setLockedRevision] = useState<string | null>(null);
   const [capturedFallbackRevision, setCapturedFallbackRevision] = useState<string | null>(null);
@@ -134,8 +138,9 @@ export function useSlotSpoolAssignment({
   // Without persisted topology the live-gate → `Toolhead.Index` mapping is a
   // guess and could write a G1 assignment to the physical hotend at index 0
   // (#1585), so mutation stays blocked.
-  const canMutate = !!activeRevision && hasResolvedTopology;
-  const blockedReason = !activeRevision
+  const canMutate = canAssign && !!activeRevision && hasResolvedTopology;
+  const blockedReason = !canAssign ? 'You do not have permission to assign spools'
+    : !activeRevision
     ? 'Printer revision unavailable — refresh to assign spools'
     : !hasResolvedTopology
       ? topologyPending
@@ -172,6 +177,10 @@ export function useSlotSpoolAssignment({
   };
 
   const requireRevision = (): string | null => {
+    if (!canAssign) {
+      toast.error(blockedReason);
+      return null;
+    }
     const revision =
       scopedLockedRevision ?? ownWriteRevision ?? initialFallbackRevisionRef.current ?? activeRevision;
     if (!revision) {
@@ -194,8 +203,10 @@ export function useSlotSpoolAssignment({
       toast.error(`${slot.label} is disabled on the device and cannot take a spool.`);
       return false;
     }
+    if (mutationInFlight.current) return false;
     const revision = requireRevision();
     if (!revision) return false;
+    mutationInFlight.current = true;
     try {
       const newRevision = await setSpoolMutation.mutateAsync({
         printerId,
@@ -210,12 +221,16 @@ export function useSlotSpoolAssignment({
       // The mutation's onError toast already reported the failure; swallow so
       // React Query doesn't report an unhandled rejection.
       return false;
+    } finally {
+      mutationInFlight.current = false;
     }
   };
 
   const clear = async (slot: LoadoutSlot): Promise<boolean> => {
+    if (mutationInFlight.current) return false;
     const revision = requireRevision();
     if (!revision) return false;
+    mutationInFlight.current = true;
     try {
       const newRevision = await clearSpoolMutation.mutateAsync({
         printerId,
@@ -227,6 +242,8 @@ export function useSlotSpoolAssignment({
       return true;
     } catch {
       return false;
+    } finally {
+      mutationInFlight.current = false;
     }
   };
 
