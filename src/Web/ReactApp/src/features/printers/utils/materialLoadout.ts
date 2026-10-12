@@ -41,6 +41,8 @@ export interface LoadoutSlot {
   material?: string;
   color?: string;
   spoolId?: number;
+  /** The binding lives on Printer.CurrentSpoolId because legacy T0 has no Toolhead row. */
+  legacyPrinterSpool?: boolean;
   /** Device feed presence, never inferred from a Spoolman assignment. */
   filamentPresence?: 'available' | 'absent';
   /** Where this slot's filament comes from. See {@link LoadoutSource}. */
@@ -364,6 +366,7 @@ export function resolveMaterialLoadout(
           material: undefined,
           color: undefined,
           spoolId: currentSpoolId != null && currentSpoolId > 0 ? currentSpoolId : undefined,
+          legacyPrinterSpool: currentSpoolId != null && currentSpoolId > 0,
           source: 'tool',
         }],
         hasResolvedTopology: true,

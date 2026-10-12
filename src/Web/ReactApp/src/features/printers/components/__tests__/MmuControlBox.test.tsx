@@ -17,12 +17,14 @@ import { MmuGateStatus, type MmuGate, type MmuStatus, type ToolheadDto } from '@
 
 const setSpool = vi.fn();
 const clearSpool = vi.fn();
+const clearActiveSpool = vi.fn();
 const coverage = vi.fn();
 let queryClient: QueryClient;
 
 vi.mock('@/common/hooks/useApi', () => ({
   useSetToolheadSpool: () => ({ mutateAsync: setSpool, isPending: false }),
   useClearToolheadSpool: () => ({ mutateAsync: clearSpool, isPending: false }),
+  useClearActiveSpool: () => ({ mutateAsync: clearActiveSpool, isPending: false }),
   usePrinterDetails: () => ({ data: undefined }),
   queryKeys: { printerDetails: (id: string) => ['printers', id, 'details'] },
 }));

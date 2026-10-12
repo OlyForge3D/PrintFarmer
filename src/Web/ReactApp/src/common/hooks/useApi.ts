@@ -1975,6 +1975,28 @@ export function useSetToolheadSpool() {
   });
 }
 
+export function useClearActiveSpool() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      printerId,
+      reviewedRowVersion,
+    }: {
+      printerId: string;
+      reviewedRowVersion: string;
+    }) => apiClient.clearActiveSpool(printerId, reviewedRowVersion),
+    onSuccess: async (_data, { printerId }) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.printerDetails(printerId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.printers }),
+        queryClient.invalidateQueries({ queryKey: ['printer-spools', printerId] }),
+      ]);
+      toast.success('Spool cleared from printer');
+    },
+    onError: (err: Error) => toast.error(`Failed to clear spool: ${err.message}`),
+  });
+}
+
 export function useClearToolheadSpool() {
   const queryClient = useQueryClient();
   return useMutation({

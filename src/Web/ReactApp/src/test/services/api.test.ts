@@ -422,6 +422,25 @@ describe("ApiClient", () => {
     });
   });
 
+  describe("legacy active-spool clear contract", () => {
+    it("clears the printer scalar with the reviewed ETag and returns the response revision", async () => {
+      const post = vi.fn().mockResolvedValue({
+        data: { success: true },
+        headers: { etag: '"printer-after-clear"' },
+      });
+      (apiClient as unknown as { client: { post: typeof post } }).client.post = post;
+
+      await expect(apiClient.clearActiveSpool("printer-1", "printer-before-clear"))
+        .resolves.toBe("printer-after-clear");
+
+      expect(post).toHaveBeenCalledWith(
+        "/printers/printer-1/active-spool",
+        { spoolId: null },
+        { headers: { "If-Match": '"printer-before-clear"' } },
+      );
+    });
+  });
+
   describe("job scheduling wall-time contract", () => {
     it.each([
       ["scheduleJob", "post", "/job-scheduling/job-1/schedule"],

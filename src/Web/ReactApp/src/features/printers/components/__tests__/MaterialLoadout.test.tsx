@@ -15,13 +15,15 @@ import { MmuGateStatus } from '@/types/api';
 
 const setSpool = vi.fn();
 const clearSpool = vi.fn();
+const clearActiveSpool = vi.fn();
 const coverage = vi.fn();
 const printerDetails = vi.fn();
-const pending = vi.hoisted(() => ({ set: false, clear: false }));
+const pending = vi.hoisted(() => ({ set: false, clear: false, clearActive: false }));
 
 vi.mock('@/common/hooks/useApi', () => ({
   useSetToolheadSpool: () => ({ mutateAsync: setSpool, isPending: pending.set }),
   useClearToolheadSpool: () => ({ mutateAsync: clearSpool, isPending: pending.clear }),
+  useClearActiveSpool: () => ({ mutateAsync: clearActiveSpool, isPending: pending.clearActive }),
   usePrinterDetails: (...args: unknown[]) => printerDetails(...args),
 }));
 
@@ -90,10 +92,12 @@ describe('MaterialLoadout', () => {
     inventory.isError = false;
     setSpool.mockReset().mockResolvedValue('rev-1');
     clearSpool.mockReset().mockResolvedValue('rev-1');
+    clearActiveSpool.mockReset().mockResolvedValue('rev-1');
     coverage.mockReset().mockReturnValue(undefined);
     printerDetails.mockReset().mockReturnValue({ data: undefined });
     pending.set = false;
     pending.clear = false;
+    pending.clearActive = false;
   });
 
   it('renders one slot per physical filament position', () => {
@@ -1020,7 +1024,7 @@ describe('MaterialLoadout independent material facts', () => {
     inventory.data = undefined;
     inventory.isError = false;
     coverage.mockReturnValue(undefined);
-    pending.set = pending.clear = false;
+    pending.set = pending.clear = pending.clearActive = false;
     setSpool.mockReset().mockResolvedValue('rev-2');
     clearSpool.mockReset().mockResolvedValue('rev-2');
   });
@@ -1045,6 +1049,36 @@ describe('MaterialLoadout independent material facts', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Assign' }));
     fireEvent.click(screen.getByTestId('spool-picker'));
     await waitFor(() => expect(setSpool).toHaveBeenCalledWith({ printerId: 'printer-1', toolheadIndex: count - 1, spoolId: 99, reviewedRowVersion: 'rev-1' }));
+  });
+
+  it('unassigns a synthesized legacy T0 through active-spool and uses its returned revision for the next bind', async () => {
+    clearActiveSpool.mockReset().mockResolvedValue('rev-after-clear');
+    setSpool.mockReset().mockResolvedValue('rev-after-assign');
+    renderLoadout({
+      mmuStatus: undefined,
+      toolheads: [],
+      currentSpoolId: 42,
+    });
+
+    fireEvent.click(screen.getByTestId('loadout-slot-0'));
+    fireEvent.click(screen.getByRole('button', { name: 'Unassign' }));
+
+    await waitFor(() => expect(clearActiveSpool).toHaveBeenCalledWith({
+      printerId: 'printer-1',
+      reviewedRowVersion: 'rev-1',
+    }));
+    expect(clearSpool).not.toHaveBeenCalled();
+
+    // The post-clear revision must be the anchor for the next write even if
+    // the printer-detail query has not refreshed yet.
+    fireEvent.click(screen.getByRole('button', { name: 'Change' }));
+    fireEvent.click(await screen.findByTestId('spool-picker'));
+    await waitFor(() => expect(setSpool).toHaveBeenCalledWith({
+      printerId: 'printer-1',
+      toolheadIndex: 0,
+      spoolId: 99,
+      reviewedRowVersion: 'rev-after-clear',
+    }));
   });
 
   it('keeps an empty single-feed printer assignable after saved topology loads', async () => {

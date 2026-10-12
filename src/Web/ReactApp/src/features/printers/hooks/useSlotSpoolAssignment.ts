@@ -3,6 +3,7 @@ import { toast } from 'sonner';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import {
   useSetToolheadSpool,
+  useClearActiveSpool,
   useClearToolheadSpool,
   usePrinterDetails,
 } from '@/common/hooks/useApi';
@@ -67,6 +68,7 @@ export function useSlotSpoolAssignment({
   const initialFallbackRevisionRef = useRef<string | null>(null);
   const setSpoolMutation = useSetToolheadSpool();
   const clearSpoolMutation = useClearToolheadSpool();
+  const clearActiveSpoolMutation = useClearActiveSpool();
   // The compact printer DTO can arrive before its concurrency token. Fetch the
   // detail DTO only in that case.
   const { data: revisionSource } = usePrinterDetails(printerId, {
@@ -232,11 +234,16 @@ export function useSlotSpoolAssignment({
     if (!revision) return false;
     mutationInFlight.current = true;
     try {
-      const newRevision = await clearSpoolMutation.mutateAsync({
-        printerId,
-        toolheadIndex: slot.apiIndex,
-        reviewedRowVersion: revision,
-      });
+      // Legacy synthesized T0 has no Toolhead row: its binding is the printer
+      // scalar, so unassign it through the matching revision-checked endpoint.
+      // Real toolheads, MMU gates and rack slots keep their index-specific route.
+      const newRevision = slot.legacyPrinterSpool
+        ? await clearActiveSpoolMutation.mutateAsync({ printerId, reviewedRowVersion: revision })
+        : await clearSpoolMutation.mutateAsync({
+          printerId,
+          toolheadIndex: slot.apiIndex,
+          reviewedRowVersion: revision,
+        });
       recordWrite(printerId, revision, newRevision);
       onSpoolChange?.();
       return true;
@@ -252,7 +259,7 @@ export function useSlotSpoolAssignment({
     selectSlot,
     canMutate,
     blockedReason,
-    busy: setSpoolMutation.isPending || clearSpoolMutation.isPending,
+    busy: setSpoolMutation.isPending || clearSpoolMutation.isPending || clearActiveSpoolMutation.isPending,
     assign,
     clear,
   };
