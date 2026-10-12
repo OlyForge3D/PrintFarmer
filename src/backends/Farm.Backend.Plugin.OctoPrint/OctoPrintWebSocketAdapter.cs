@@ -1,5 +1,3 @@
-﻿#pragma warning disable S1144 // Unused classes and properties reserved for future use
-
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
