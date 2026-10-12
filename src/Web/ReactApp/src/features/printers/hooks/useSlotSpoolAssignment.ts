@@ -3,6 +3,7 @@ import { toast } from 'sonner';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import {
   useSetToolheadSpool,
+  useSetActiveSpool,
   useClearActiveSpool,
   useClearToolheadSpool,
   usePrinterDetails,
@@ -67,6 +68,7 @@ export function useSlotSpoolAssignment({
   // immutable token into handlers after cache or live updates arrive.
   const initialFallbackRevisionRef = useRef<string | null>(null);
   const setSpoolMutation = useSetToolheadSpool();
+  const setActiveSpoolMutation = useSetActiveSpool();
   const clearSpoolMutation = useClearToolheadSpool();
   const clearActiveSpoolMutation = useClearActiveSpool();
   // The compact printer DTO can arrive before its concurrency token. Fetch the
@@ -210,12 +212,18 @@ export function useSlotSpoolAssignment({
     if (!revision) return false;
     mutationInFlight.current = true;
     try {
-      const newRevision = await setSpoolMutation.mutateAsync({
-        printerId,
-        toolheadIndex: slot.apiIndex,
-        spoolId,
-        reviewedRowVersion: revision,
-      });
+      // A slot backed by the printer scalar (legacy single-spool binding) must
+      // be re-bound through that same scalar. Writing Toolhead.CurrentSpoolId
+      // would leave Printer.CurrentSpoolId (compact card spoolInfo) on the old
+      // spool while MATERIALS shows the new one.
+      const newRevision = slot.legacyPrinterSpool
+        ? await setActiveSpoolMutation.mutateAsync({ printerId, spoolId, reviewedRowVersion: revision })
+        : await setSpoolMutation.mutateAsync({
+          printerId,
+          toolheadIndex: slot.apiIndex,
+          spoolId,
+          reviewedRowVersion: revision,
+        });
       recordWrite(printerId, revision, newRevision);
       onSpoolChange?.();
       return true;
@@ -259,7 +267,7 @@ export function useSlotSpoolAssignment({
     selectSlot,
     canMutate,
     blockedReason,
-    busy: setSpoolMutation.isPending || clearSpoolMutation.isPending || clearActiveSpoolMutation.isPending,
+    busy: setSpoolMutation.isPending || setActiveSpoolMutation.isPending || clearSpoolMutation.isPending || clearActiveSpoolMutation.isPending,
     assign,
     clear,
   };

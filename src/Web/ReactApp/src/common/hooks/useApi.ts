@@ -1975,6 +1975,35 @@ export function useSetToolheadSpool() {
   });
 }
 
+/**
+ * Sets the printer-level (scalar) active spool — the same revision-checked
+ * endpoint the legacy single-spool UI uses. Writes `Printer.CurrentSpoolId`,
+ * not any `Toolhead` row.
+ */
+export function useSetActiveSpool() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      printerId,
+      spoolId,
+      reviewedRowVersion,
+    }: {
+      printerId: string;
+      spoolId: number;
+      reviewedRowVersion: string;
+    }) => apiClient.setActiveSpool(printerId, spoolId, reviewedRowVersion),
+    onSuccess: async (_data, { printerId }) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.printerDetails(printerId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.printers }),
+        queryClient.invalidateQueries({ queryKey: ['printer-spools', printerId] }),
+      ]);
+      toast.success('Spool assigned to printer');
+    },
+    onError: (err: Error) => toast.error(`Failed to assign spool: ${err.message}`),
+  });
+}
+
 export function useClearActiveSpool() {
   const queryClient = useQueryClient();
   return useMutation({

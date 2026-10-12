@@ -24,6 +24,7 @@ let queryClient: QueryClient;
 vi.mock('@/common/hooks/useApi', () => ({
   useSetToolheadSpool: () => ({ mutateAsync: setSpool, isPending: false }),
   useClearToolheadSpool: () => ({ mutateAsync: clearSpool, isPending: false }),
+  useSetActiveSpool: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useClearActiveSpool: () => ({ mutateAsync: clearActiveSpool, isPending: false }),
   usePrinterDetails: () => ({ data: undefined }),
   queryKeys: { printerDetails: (id: string) => ['printers', id, 'details'] },

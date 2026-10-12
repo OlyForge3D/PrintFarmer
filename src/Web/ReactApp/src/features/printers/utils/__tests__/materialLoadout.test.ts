@@ -616,6 +616,20 @@ describe('resolveMaterialLoadout printer-level spool fallback', () => {
     expect(loadout.slots.every((slot) => slot.spoolId == null && slot.material == null)).toBe(true);
   });
 
+  it('never applies to a U1/MMU topology even when live gates are empty', () => {
+    for (const mmuType of [MmuProtocol.SnapmakerU1, MmuProtocol.Qidibox, MmuProtocol.Afc, MmuProtocol.HappyHare]) {
+      const loadout = resolveMaterialLoadout(mmu([], mmuType), [toolhead(0)], 21, undefined, pa12)!;
+      expect(loadout.slots).toHaveLength(1);
+      expect(loadout.slots[0].spoolId).toBeUndefined();
+      expect(loadout.slots[0].material).toBeUndefined();
+      expect(loadout.slots[0].legacyPrinterSpool).toBeFalsy();
+    }
+    // Model identity alone is enough when no MMU status has arrived yet.
+    const byModel = resolveMaterialLoadout(undefined, [toolhead(0)], 21, 'Snapmaker U1', pa12)!;
+    expect(byModel.slots[0].spoolId).toBeUndefined();
+    expect(byModel.slots[0].legacyPrinterSpool).toBeFalsy();
+  });
+
   it('never applies to a toolchanger (U1) or MMU gate status', () => {
     const u1 = resolveMaterialLoadout(
       mmu([gate(0, { material: 'PLA', color: '#00ff00' }), gate(1, { material: '', color: '' })], MmuProtocol.SnapmakerU1),

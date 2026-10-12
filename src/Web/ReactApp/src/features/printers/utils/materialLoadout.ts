@@ -147,6 +147,21 @@ function isToolchangerProtocol(mmuType?: string): boolean {
   return mmuType === MmuProtocol.SnapmakerU1;
 }
 
+/**
+ * Whether the printer is identified as a multi-feed topology (Snapmaker U1 /
+ * toolchanger, or any MMU protocol) regardless of how many live gates are
+ * currently reported. A U1 can briefly report `gates: []` while one toolhead is
+ * persisted; its printer-level scalar spool describes no particular toolhead, so
+ * it must never be copied into T0.
+ */
+function isMultiFeedTopology(mmuStatus: MmuStatus | undefined, modelName?: string): boolean {
+  const mmuType = mmuStatus?.mmuType?.trim();
+  if (isToolchangerProtocol(mmuType)) return true;
+  if (mmuType && mmuType !== MmuProtocol.Unknown) return true;
+  if ((mmuStatus?.numGates ?? 0) > 0) return true;
+  return /(?:^|\s)U1$/i.test(modelName?.trim() ?? '');
+}
+
 function unitLabelFor(kind: LoadoutKind, mmuType?: string, slotCount?: number): string {
   if (kind === 'tool') return slotCount === 1 ? 'Toolhead' : 'Toolheads';
   switch (mmuType) {
@@ -412,7 +427,10 @@ export function resolveMaterialLoadout(
   // than falling through to the legacy Spool section.
   if (!toolheads || toolheads.length <= 1) {
     const single = toolheads?.[0];
-    const fallback = printerSpoolFallback(currentSpoolId, spoolInfo);
+    // Topology, not the live gate count, decides whether the printer scalar can
+    // describe this slot: U1/toolchanger and MMU printers never use it.
+    const multiFeed = isMultiFeedTopology(mmuStatus, modelName);
+    const fallback = multiFeed ? undefined : printerSpoolFallback(currentSpoolId, spoolInfo);
     if (single) {
       const slot = slotFromToolhead(single, 0, 'tool');
       // Persisted toolhead data wins; the printer-level spool only fills a row
@@ -436,8 +454,8 @@ export function resolveMaterialLoadout(
     // Once saved topology has loaded empty, the single-feed API index is 0.
     // Keep its unassigned slot actionable too; while topology is still pending,
     // only the existing printer-level binding warrants this fallback.
-    const legacySpoolId = positive(currentSpoolId) ?? fallback?.spoolId;
-    if (toolheads !== undefined || positive(currentSpoolId) != null) {
+    const legacySpoolId = multiFeed ? undefined : positive(currentSpoolId) ?? fallback?.spoolId;
+    if (toolheads !== undefined || (!multiFeed && positive(currentSpoolId) != null)) {
       return {
         kind: 'tool',
         unitLabel: unitLabelFor('tool', undefined, 1),

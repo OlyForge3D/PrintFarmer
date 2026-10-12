@@ -16,6 +16,7 @@ import { MmuGateStatus } from '@/types/api';
 const setSpool = vi.fn();
 const clearSpool = vi.fn();
 const clearActiveSpool = vi.fn();
+const setActiveSpool = vi.fn();
 const coverage = vi.fn();
 const printerDetails = vi.fn();
 const pending = vi.hoisted(() => ({ set: false, clear: false, clearActive: false }));
@@ -23,6 +24,7 @@ const pending = vi.hoisted(() => ({ set: false, clear: false, clearActive: false
 vi.mock('@/common/hooks/useApi', () => ({
   useSetToolheadSpool: () => ({ mutateAsync: setSpool, isPending: pending.set }),
   useClearToolheadSpool: () => ({ mutateAsync: clearSpool, isPending: pending.clear }),
+  useSetActiveSpool: () => ({ mutateAsync: setActiveSpool, isPending: false }),
   useClearActiveSpool: () => ({ mutateAsync: clearActiveSpool, isPending: pending.clearActive }),
   usePrinterDetails: (...args: unknown[]) => printerDetails(...args),
 }));
@@ -93,6 +95,7 @@ describe('MaterialLoadout', () => {
     setSpool.mockReset().mockResolvedValue('rev-1');
     clearSpool.mockReset().mockResolvedValue('rev-1');
     clearActiveSpool.mockReset().mockResolvedValue('rev-1');
+    setActiveSpool.mockReset().mockResolvedValue('rev-1');
     coverage.mockReset().mockReturnValue(undefined);
     printerDetails.mockReset().mockReturnValue({ data: undefined });
     pending.set = false;
@@ -1091,7 +1094,7 @@ describe('MaterialLoadout independent material facts', () => {
 
   it('unassigns a synthesized legacy T0 through active-spool and uses its returned revision for the next bind', async () => {
     clearActiveSpool.mockReset().mockResolvedValue('rev-after-clear');
-    setSpool.mockReset().mockResolvedValue('rev-after-assign');
+    setActiveSpool.mockReset().mockResolvedValue('rev-after-assign');
     renderLoadout({
       mmuStatus: undefined,
       toolheads: [],
@@ -1111,12 +1114,14 @@ describe('MaterialLoadout independent material facts', () => {
     // the printer-detail query has not refreshed yet.
     fireEvent.click(screen.getByTestId('slot-action-change'));
     fireEvent.click(await screen.findByTestId('spool-picker'));
-    await waitFor(() => expect(setSpool).toHaveBeenCalledWith({
+    // Props still describe a printer-scalar binding, so the rebind goes through
+    // the same scalar endpoint — never a toolhead write.
+    await waitFor(() => expect(setActiveSpool).toHaveBeenCalledWith({
       printerId: 'printer-1',
-      toolheadIndex: 0,
       spoolId: 99,
       reviewedRowVersion: 'rev-after-clear',
     }));
+    expect(setSpool).not.toHaveBeenCalled();
   });
 
   it('keeps an empty single-feed printer assignable after saved topology loads', async () => {

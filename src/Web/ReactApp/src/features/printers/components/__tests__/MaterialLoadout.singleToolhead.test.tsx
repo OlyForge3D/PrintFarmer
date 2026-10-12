@@ -20,6 +20,7 @@ import type { ToolheadDto } from '@/types/api';
 vi.mock('@/common/hooks/useApi', () => ({
   useSetToolheadSpool: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useClearToolheadSpool: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useSetActiveSpool: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useClearActiveSpool: () => ({ mutateAsync: vi.fn(), isPending: false }),
   usePrinterDetails: () => ({ data: undefined }),
 }));
