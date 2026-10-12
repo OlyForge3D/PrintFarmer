@@ -6323,6 +6323,9 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("nvarchar(256)");
 
+                    b.Property<bool>("ShowExternalSpool")
+                        .HasColumnType("bit");
+
                     b.Property<double?>("SquareCornerVelocity")
                         .HasColumnType("float");
 

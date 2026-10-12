@@ -64,6 +64,9 @@ public record UpdatePrinterDto(
     // Auto-dispatch model defaults opt-out
     bool? UseModelDispatchDefaults = null,
 
+    // Presentation-only: show the filament box external spool slot. Null leaves it unchanged.
+    bool? ShowExternalSpool = null,
+
     // Toolheads - for updating individual toolhead settings
     UpdateToolheadDto[]? Toolheads = null,
 

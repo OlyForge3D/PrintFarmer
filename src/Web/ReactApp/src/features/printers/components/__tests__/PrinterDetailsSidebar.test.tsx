@@ -867,15 +867,16 @@ describe("PrinterDetailsSidebar", () => {
 
 
 it.each([
-  ['Qidibox', true, false], ['HappyHare', true, false], ['Afc', true, false],
-  ['SnapmakerU1', true, true], ['Qidibox', false, true],
-] as const)('sidebar retains M600 and only fallback load/unload for %s (enabled %s)', (mmuType, enabled, fallback) => {
+  ['Qidibox', true], ['HappyHare', true], ['Afc', true],
+  ['SnapmakerU1', true], ['Qidibox', false],
+] as const)('sidebar keeps M600 but no duplicate load/unload group for %s (enabled %s)', (mmuType, enabled) => {
   const mmuPrinter = { ...printer, backend: PrinterBackend.Moonraker, mmuStatus: {
     mmuType, enabled, gates: [], activeGate: -1, activeTool: -1,
   } } as Printer;
   render(<PrinterDetailsSidebar printerId={printer.id} printer={mmuPrinter} onClose={vi.fn()}
     backendCapabilities={capabilities({ backend: PrinterBackend.Moonraker, supportsFilamentControl: true })} />);
-  expect(screen.queryByTitle('Load Filament') !== null).toBe(fallback);
-  expect(screen.queryByTitle('Unload Filament') !== null).toBe(fallback);
+  // Load/unload live in the shared slot panel only.
+  expect(screen.queryByTitle('Load Filament')).not.toBeInTheDocument();
+  expect(screen.queryByTitle('Unload Filament')).not.toBeInTheDocument();
   expect(screen.getByTitle('Change Filament (M600)')).toBeInTheDocument();
 });

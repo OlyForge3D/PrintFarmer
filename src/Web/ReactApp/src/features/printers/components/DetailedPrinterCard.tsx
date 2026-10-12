@@ -23,7 +23,7 @@ import type {
 import { PrinterHistoryModal } from '@/features/printers/components/PrinterHistoryModal';
 import { PrinterFilesModal } from '@/features/printers/components/PrinterFilesModal';
 import { SpoolPickerModal } from '@/features/printers/components/SpoolPickerModal';
-import { MaterialLoadout } from '@/features/printers/components/MaterialLoadout';
+import { MaterialLoadout, type FilamentMacroControl } from '@/features/printers/components/MaterialLoadout';
 import { MmuControlBox } from '@/features/printers/components/MmuControlBox';
 import { resolveMaterialLoadout } from '@/features/printers/utils/materialLoadout';
 import { MmuProtocol } from '@/features/printers/constants/mmuProtocol';
@@ -70,7 +70,7 @@ import {
   canExcludeObject,
   isActivePrintForObjects,
   canFilamentChange,
-  canFilamentControl,
+  filamentControlBlockedReason,
   canMove,
   canOpenFiles,
   canOpenHistory,
@@ -463,6 +463,16 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
       setFilamentActionPending(false);
     }
   };
+
+  // Printer-level LOAD/UNLOAD_FILAMENT macros, surfaced in the materials slot panel.
+  const filamentControl: FilamentMacroControl | undefined = support.supportsFilamentControl
+    ? {
+      blockedReason: filamentControlBlockedReason({ isOnline, isEnabled, isPrinting }),
+      pending: filamentActionPending,
+      onAction: (action) => void handleFilamentAction(action),
+    }
+    : undefined;
+  const showExternalSpool = printer.showExternalSpool ?? printerDetails?.showExternalSpool ?? false;
 
   const handleStepChange = (newStep: number) => {
     setStep(newStep);
@@ -1099,9 +1109,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
                 />
                 {support.supportsFilamentControl && (
                   <FilamentControlSection
-                    showLoadUnload={!(mmuStatus?.enabled && !isSnapmakerU1Mmu)}
                     filamentActionPending={filamentActionPending}
-                    canFilamentControl={canFilamentControl({ isOnline, isEnabled, isPrinting, support })}
                     canFilamentChange={canFilamentChange({ isOnline, isEnabled, support })}
                     onFilamentAction={handleFilamentAction}
                   />
@@ -1154,6 +1162,8 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
             toolheads={printerDetails?.toolheads}
             modelName={printer.modelName}
             reviewedRowVersion={spoolReviewedRowVersion ?? undefined}
+            showExternalSpool={showExternalSpool}
+            filamentControl={filamentControl}
           />
         </div>
       )}
@@ -1171,6 +1181,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
           reviewedRowVersion={spoolReviewedRowVersion ?? undefined}
           compact
           isOnline={isOnline}
+          filamentControl={filamentControl}
           className="mb-2"
         />
       )}

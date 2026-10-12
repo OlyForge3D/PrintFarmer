@@ -1393,7 +1393,8 @@ public class PrintersController(
             !string.IsNullOrWhiteSpace(effectivePassword),
             false,
             false,
-            rowVersion);
+            rowVersion,
+            p.ShowExternalSpool);
     }
 
     /// <summary>
@@ -2197,6 +2198,12 @@ public class PrintersController(
             p.UseModelDispatchDefaults = dto.UseModelDispatchDefaults.Value;
         }
 
+        // Presentation-only toggle: never touches hardware, telemetry, or slot spool bindings.
+        if (dto.ShowExternalSpool.HasValue)
+        {
+            p.ShowExternalSpool = dto.ShowExternalSpool.Value;
+        }
+
         // Update toolheads if provided
         if (dto.Toolheads?.Length > 0 && p.Toolheads != null)
         {
@@ -2402,7 +2409,8 @@ public class PrintersController(
             ObicoEnabled: p.ObicoEnabled,
             UseModelDispatchDefaults: p.UseModelDispatchDefaults,
             RowVersion: EncodeRowVersion(p.RowVersion),
-            ConfigurationRevision: p.ConfigurationRevision);
+            ConfigurationRevision: p.ConfigurationRevision,
+            ShowExternalSpool: p.ShowExternalSpool);
 
         return Ok(dtoResponse);
     }

@@ -27,7 +27,7 @@ import {
   canExcludeObject,
   isActivePrintForObjects,
   canFilamentChange,
-  canFilamentControl,
+  filamentControlBlockedReason,
   canMove,
   canOpenFiles,
   canOpenHistory,
@@ -69,8 +69,6 @@ import {
   HistoryIcon,
   CloseIcon,
   XCircleIcon,
-  FilamentLoadIcon,
-  FilamentUnloadIcon,
   FilamentChangeIcon,
   EjectIcon,
 } from '@/common/components/icons/MdiIcons';
@@ -80,7 +78,7 @@ import { FallbackGroupsPanel } from '@/features/fallback-groups/components/Fallb
 import { resolveMaterialLoadout } from '@/features/printers/utils/materialLoadout';
 import { MmuProtocol } from '@/features/printers/constants/mmuProtocol';
 import { MmuControlBox } from '@/features/printers/components/MmuControlBox';
-import { MaterialLoadout } from '@/features/printers/components/MaterialLoadout';
+import { MaterialLoadout, type FilamentMacroControl } from '@/features/printers/components/MaterialLoadout';
 import { useAutoDispatchStatus } from '@/features/printers/hooks/useAutoDispatch';
 import { Modal } from '@/common/components/modals/Modal';
 import { toast } from 'sonner';
@@ -629,6 +627,16 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
       setFilamentActionPending(false);
     }
   };
+
+  // Printer-level LOAD/UNLOAD_FILAMENT macros, surfaced in the materials slot panel.
+  const filamentControl: FilamentMacroControl | undefined = support.supportsFilamentControl
+    ? {
+      blockedReason: filamentControlBlockedReason({ isOnline, isEnabled, isPrinting }),
+      pending: filamentActionPending,
+      onAction: (action) => void handleFilamentAction(action),
+    }
+    : undefined;
+  const showExternalSpool = displayPrinter?.showExternalSpool ?? printerDetails?.showExternalSpool ?? false;
 
   const handleExtrude = async (direction: 'extrude' | 'retract') => {
     if (movementActionPending) return;
@@ -1215,24 +1223,6 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
               <div className="flex flex-col gap-1">
                 <div className="text-[10px] uppercase text-pf-text-secondary font-bold tracking-wide">Macros</div>
                 <div className="grid grid-cols-1 gap-1 w-fit">
-                {!(showMmuControlBox && displayPrinter.mmuStatus?.enabled) && <>
-                <ControlPadButton
-                  disabled={filamentActionPending || !canFilamentControl({ isOnline, isEnabled, isPrinting, support })}
-                  onClick={() => handleFilamentAction('load')}
-                  title="Load Filament"
-                  padSize="small"
-                >
-                  <FilamentLoadIcon className="h-4 w-4" />
-                </ControlPadButton>
-                <ControlPadButton
-                  disabled={filamentActionPending || !canFilamentControl({ isOnline, isEnabled, isPrinting, support })}
-                  onClick={() => handleFilamentAction('unload')}
-                  title="Unload Filament"
-                  padSize="small"
-                >
-                  <FilamentUnloadIcon className="h-4 w-4" />
-                </ControlPadButton>
-                </>}
                 <ControlPadButton
                   disabled={filamentActionPending || !canFilamentChange({ isOnline, isEnabled, support })}
                   onClick={() => handleFilamentAction('change')}
@@ -1294,17 +1284,21 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
         {/* MMU Control Box - the single slot representation when MMU/ERCF/AMS is
             detected via real-time status; spool assignment lives in its action row. */}
         {showMmuControlBox && displayPrinter?.mmuStatus && (
-          <MmuControlBox
-            printerId={printer.id}
-            mmuStatus={displayPrinter.mmuStatus}
-            isOnline={isOnline}
-            toolheads={printerDetails?.toolheads}
-            modelName={printer.modelName}
-            reviewedRowVersion={spoolReviewedRowVersion ?? undefined}
-            onSpoolChange={() => {
-              queryClient.invalidateQueries({ queryKey: ['printers', printer.id, 'details'] });
-            }}
-          />
+          <CollapsibleSection title="Materials" expanded={true}>
+            <MmuControlBox
+              printerId={printer.id}
+              mmuStatus={displayPrinter.mmuStatus}
+              isOnline={isOnline}
+              toolheads={printerDetails?.toolheads}
+              modelName={printer.modelName}
+              reviewedRowVersion={spoolReviewedRowVersion ?? undefined}
+              showExternalSpool={showExternalSpool}
+              filamentControl={filamentControl}
+              onSpoolChange={() => {
+                queryClient.invalidateQueries({ queryKey: ['printers', printer.id, 'details'] });
+              }}
+            />
+          </CollapsibleSection>
         )}
 
         {/* Consolidated materials module — one slot list drives the rail, the
@@ -1335,6 +1329,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                 modelName={printer?.modelName}
                 reviewedRowVersion={spoolReviewedRowVersion ?? undefined}
                 isOnline={isOnline}
+                filamentControl={filamentControl}
                 onSpoolChange={() => {
                   queryClient.invalidateQueries({ queryKey: ['printers', printer.id, 'details'] });
                 }}

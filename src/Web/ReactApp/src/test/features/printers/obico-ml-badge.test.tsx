@@ -101,7 +101,8 @@ vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() },
 }));
 
-vi.mock('lucide-react', () => ({
+vi.mock('lucide-react', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('lucide-react')>()),
   PanelRightOpen: () => <span data-testid="panel-icon" />,
   Zap: () => <span data-testid="zap-icon" />,
 }));

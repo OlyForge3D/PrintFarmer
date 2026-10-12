@@ -16,6 +16,7 @@ import { apiClient } from '@/services/api';
 import { mutationErrorMessage } from '@/common/utils/mutationError';
 import { isSafeHttpUrl } from '@/common/utils/validation';
 import { getErrorMessage } from '@/common/utils/apiErrors';
+import { hasExternalSpoolHolder } from '@/features/printers/utils/materialLoadout';
 
 export interface EditPrinterModalProps {
   printerId: string | null;
@@ -98,6 +99,7 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
         wattage: printerDetails.wattage ?? undefined,
         machineHourlyRate: printerDetails.machineHourlyRate ?? undefined,
         buddyCameraIp: printerDetails.buddyCameraIp ?? undefined,
+        showExternalSpool: printerDetails.showExternalSpool ?? false,
       };
       
       setFormData(initialFormData);
@@ -184,7 +186,7 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
       'hasHeatedBed', 'hasEnclosure', 'multiMaterial',
       'maxHotendTemp', 'maxBedTemp', 'supportsAutoLeveling', 'maxPrintSpeed',
       'backendPort', 'frontendPort', 'obicoEnabled', 'useModelDispatchDefaults',
-      'wattage', 'machineHourlyRate', 'buddyCameraIp'
+      'wattage', 'machineHourlyRate', 'buddyCameraIp', 'showExternalSpool'
     ];
     
     for (const field of fields) {
@@ -1119,6 +1121,22 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
                 label="Use model dispatch defaults"
               />
             </FormField>
+
+            {/* QidiBox external spool holder ("Rack") visibility */}
+            {(hasExternalSpoolHolder(printerDetails) || printerDetails?.showExternalSpool) && (
+              <FormField
+                label="Filament box"
+                htmlFor="show-external-spool"
+                helper="Adds the external spool holder to the filament slots. Hiding it keeps its spool assignment."
+              >
+                <Toggle
+                  id="show-external-spool"
+                  checked={formData.showExternalSpool ?? false}
+                  onChange={e => handleInputChange('showExternalSpool', e.target.checked)}
+                  label="Show external spool"
+                />
+              </FormField>
+            )}
 
             {/* Obico AI Failure Detection */}
             <FormField 

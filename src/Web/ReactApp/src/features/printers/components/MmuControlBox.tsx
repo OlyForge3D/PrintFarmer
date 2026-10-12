@@ -1,7 +1,6 @@
 import { useState, useCallback, useMemo, type ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { MmuGateStatus, type MmuStatus, type MmuGate, type ToolheadDto } from '@/types/api';
-import { MaterialSlotButton } from '@/features/printers/components/MaterialSlotButton';
+import type { MmuStatus, ToolheadDto } from '@/types/api';
 import { usePrinterSpoolInventory } from '@/features/printers/hooks/usePrinterSpoolInventory';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { SpoolPickerModal } from '@/features/printers/components/SpoolPickerModal';
@@ -9,7 +8,11 @@ import {
   useSlotSpoolAssignment,
   DISABLED_SLOT_REASON,
 } from '@/features/printers/hooks/useSlotSpoolAssignment';
-import { resolveMaterialLoadout, resolveQidiRackSlot } from '@/features/printers/utils/materialLoadout';
+import {
+  resolveMaterialLoadout,
+  resolveQidiRackSlot,
+  type LoadoutSlot,
+} from '@/features/printers/utils/materialLoadout';
 import { queryKeys } from '@/common/hooks/useApi';
 import { getErrorMessage, isApiError } from '@/common/utils/apiErrors';
 import { usePrinterCoverageFromFleet } from '@/features/filament-coverage/hooks';
@@ -22,59 +25,19 @@ import { withOfflineOverride } from '@/features/filament-coverage/utils';
 import { apiClient } from '@/services/api';
 import { toast } from 'sonner';
 import { MmuProtocol } from '../constants/mmuProtocol';
-import { Button, CollapsibleSection } from '@/common/components/ui';
+import { Button, Tooltip } from '@/common/components/ui';
+import { GearIcon, HomeIcon } from '@/common/components/icons/MdiIcons';
+import { FilamentSlots } from '@/features/printers/components/filament/FilamentSlots';
 import {
-  GearIcon,
-  EjectIcon,
-  HomeIcon,
-} from '@/common/components/icons/MdiIcons';
-
-// ── Gate status helpers ──
-
-function gateStatusLabel(status: MmuGateStatus): string {
-  switch (status) {
-    case MmuGateStatus.Disabled: return 'Disabled';
-    case MmuGateStatus.Empty: return 'Filament not loaded';
-    case MmuGateStatus.Available: return 'Filament available';
-    default: return 'Loading state unknown';
-  }
-}
-
-function gateStatusColor(status: MmuGateStatus): string {
-  switch (status) {
-    case MmuGateStatus.Disabled: return 'text-pf-text-tertiary';
-    case MmuGateStatus.Empty: return 'text-pf-error';
-    case MmuGateStatus.Available: return 'text-pf-success';
-    default: return 'text-pf-warning';
-  }
-}
-
-// ── Color swatch ──
-
-function ColorSwatch({ color }: { color?: string }) {
-  if (!color) {
-    return (
-      <span
-        role="img"
-        className="inline-block w-5 h-5 rounded-full bg-pf-bg-2 border border-pf-border"
-        title="Unknown color"
-        aria-label="Unknown color"
-      />
-    );
-  }
-
-  return (
-    <span
-      role="img"
-      className="inline-block w-5 h-5 rounded-full border border-pf-border"
-      style={{ backgroundColor: color }}
-      title={color}
-      aria-label={`Filament color: ${color}`}
-    />
-  );
-}
-
-// ── Main ControlBox component ──
+  buildSlotView,
+  slotActionLabel,
+  slotPanelTitle,
+  type FilamentSlotView,
+  type SlotAction,
+  type SlotActionKind,
+  type SlotPanelContent,
+} from '@/features/printers/components/filament/filamentSlotModel';
+import type { FilamentMacroControl } from '@/features/printers/components/MaterialLoadout';
 
 interface MmuControlBoxProps {
   /** Printer ID for API commands */
@@ -89,14 +52,32 @@ interface MmuControlBoxProps {
   modelName?: string;
   /** Printer revision required by the optimistic-concurrency spool endpoints. */
   reviewedRowVersion?: string | null;
+  /**
+   * Show the QidiBox external spool holder ("Rack") as a slot. Hidden by
+   * default; when hidden but feeding, the resting line still names it.
+   */
+  showExternalSpool?: boolean;
+  /**
+   * Printer-level LOAD/UNLOAD_FILAMENT macros. Offered from the slot panel only
+   * while the unit itself is disabled, when gate commands cannot run.
+   */
+  filamentControl?: FilamentMacroControl;
   /** Called after a spool is assigned or cleared. */
   onSpoolChange?: () => void;
+  className?: string;
 }
 
+/** QidiBox / Happy Hare gate id: four gates per unit, "1A".."1D", "2A".. */
+function mmuGateId(index: number): string {
+  return `${Math.floor(index / 4) + 1}${String.fromCharCode(65 + (index % 4))}`;
+}
+
+const NO_PERMISSION_REASON = 'You do not have permission to operate filament controls';
+
 /**
- * Control Box panel for MMU/ERCF/AMS multi-material units.
- * Displays gate status with spool visualizations and provides
- * load/unload/select and spool-assignment commands.
+ * Materials module for MMU / AFC / QidiBox units, rendered through the shared
+ * Option 4 filament slots. Each gate's panel carries both the inventory
+ * actions (assign, change, unassign) and the protocol's physical commands.
  */
 export function MmuControlBox({
   printerId,
@@ -105,11 +86,11 @@ export function MmuControlBox({
   toolheads,
   modelName,
   reviewedRowVersion,
+  showExternalSpool = false,
+  filamentControl,
   onSpoolChange,
+  className,
 }: MmuControlBoxProps) {
-  const [isExpanded, setIsExpanded] = useState(true);
-  const [selectedGate, setSelectedGate] = useState<number | null>(null);
-  const [rackSelected, setRackSelected] = useState(false);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const queryClient = useQueryClient();
@@ -153,14 +134,9 @@ export function MmuControlBox({
 
   const isQidibox = mmuStatus.mmuType === MmuProtocol.Qidibox;
   const isAfc = mmuStatus.mmuType === MmuProtocol.Afc;
-
-  // Telemetry arrays are not guaranteed to be ordered by gate index, so every
-  // lookup goes through the explicit gate identity rather than array position.
-  const findGate = (index: number | null): MmuGate | null =>
-    index === null ? null : mmuStatus.gates.find((gate) => gate.index === index) ?? null;
-
-  // Determine which gate is actually active (from MMU state)
+  const isHappyHare = !isQidibox && !isAfc;
   const activeGate = mmuStatus.activeGate >= 0 ? mmuStatus.activeGate : null;
+  const filamentUnloaded = mmuStatus.filamentState?.toLowerCase() === 'unloaded';
 
   // QidiBox external spool holder ("Rack"). It is bound through its persisted
   // physical toolhead, never through a box slot, and box commands cannot reach it.
@@ -169,88 +145,75 @@ export function MmuControlBox({
     [mmuStatus, toolheads],
   );
   const inventory = usePrinterSpoolInventory(printerId, !!rackSlot?.spoolId || !!loadout?.slots.some((slot) => slot.spoolId != null));
-  // The Qidi adapter reports a Rack feed with Happy Hare's bypass sentinel (-2);
+  // QidiBox reuses the Happy Hare bypass sentinel (-2) for the Rack (filament_slot16);
   // box slots are never reported active at the same time.
-  // QidiBox reuses the Happy Hare bypass sentinel (-2) for the Rack (filament_slot16).
-  const rackActive = isQidibox && mmuStatus.hasBypass && mmuStatus.activeGate === -2 && rackSlot !== null;
-  const showRack = rackSlot !== null && (rackSelected || (rackActive && selectedGate === null));
+  const rackActive = isOnline && isQidibox && mmuStatus.hasBypass && mmuStatus.activeGate === -2 && rackSlot !== null;
 
-  // Use selected gate or fall back to active gate for detail display
-  const displayGate = showRack ? null : selectedGate ?? activeGate;
-  const displayGateData = findGate(displayGate);
-  const displaySlot = showRack
-    ? rackSlot
-    : displayGateData
-      ? loadout?.slots.find((s) => s.key === `gate-${displayGateData.index}`) ?? null
-      : null;
-  const displaySpoolId = displaySlot?.spoolId
-    ?? (displayGateData && displayGateData.spoolId > 0 ? displayGateData.spoolId : undefined);
-  // Box slot that Eject/Unload act on; never falls back to the loaded gate while
-  // the Rack is selected, so a Rack click cannot unload a box slot.
-  const commandGate = showRack ? null : displayGate ?? activeGate;
-  const rackCommandReason = 'The Rack spool is fed manually — select a box slot to load, unload or eject';
-  const displayCoverage = displayGateData ? coverageByGate.get(displayGateData.index) : undefined;
-  const assignDisabled = !displaySlot
-    || spoolAssignment.busy
-    || !spoolAssignment.canMutate
-    || displaySlot.disabled;
-  const assignTitle = !displaySlot
-    ? 'Select a slot first'
-    : displaySlot.disabled
-      ? DISABLED_SLOT_REASON
-      : spoolAssignment.blockedReason
-        ?? `${displaySpoolId != null ? 'Change' : 'Assign'} the spool in ${displaySlot.label}`;
-  // Releasing is allowed on a device-disabled gate: it only removes a stale
-  // binding, it never asks the gate to feed filament.
-  const releaseDisabled = spoolAssignment.busy || !spoolAssignment.canMutate;
+  const spoolFor = (slot: LoadoutSlot) =>
+    inventory.isError ? undefined : inventory.data?.find((spool) => spool.id === slot.spoolId);
+
+  // Telemetry arrays are not guaranteed to be ordered by gate index, so every
+  // lookup goes through the explicit gate identity rather than array position.
+  const gateSlots = [...mmuStatus.gates]
+    .sort((a, b) => a.index - b.index)
+    .map((gate) => ({ gate, slot: loadout?.slots.find((s) => s.key === `gate-${gate.index}`) }))
+    .filter((entry): entry is { gate: MmuStatus['gates'][number]; slot: LoadoutSlot } => entry.slot != null);
+
+  const gateViews: FilamentSlotView[] = gateSlots.map(({ gate, slot }) => ({
+    ...buildSlotView(slot, spoolFor(slot), {
+      id: mmuGateId(gate.index),
+      active: isOnline && gate.index === activeGate && !filamentUnloaded,
+      atRisk: coverageByGate.get(gate.index)?.status === 'runout',
+      testId: `mmu-gate-${gate.index}`,
+    }),
+    coverageStatus: coverageByGate.get(gate.index)?.status ?? 'unknown',
+  }));
+  // The rack's backing toolhead name ("Toolhead 0") is an internal detail.
+  const rackView = rackSlot
+    ? { ...buildSlotView(rackSlot, spoolFor(rackSlot), { id: 'Rack', active: rackActive, testId: 'mmu-rack' }), deviceName: undefined }
+    : null;
+  const railViews = rackView && showExternalSpool ? [rackView, ...gateViews] : gateViews;
+  const summarySlot = gateViews.find((view) => view.active) ?? (rackView?.active ? rackView : null);
+
+  const slotForKey = (key: string | null): LoadoutSlot | null => {
+    if (!key) return null;
+    if (rackSlot?.key === key) return rackSlot;
+    return loadout?.slots.find((s) => s.key === key) ?? null;
+  };
+  const selectedSlot = slotForKey(spoolAssignment.selectedKey);
+  const selectedKey = selectedSlot && railViews.some((view) => view.key === selectedSlot.key)
+    ? selectedSlot.key
+    : null;
   const topologyMismatch = !!loadout && !loadout.hasResolvedTopology && !loadout.topologyPending;
 
-  // The picker is pinned to the slot that was open when it launched, so a live
-  // active-gate change cannot silently retarget the confirmation.
-  const pinnedSlot = pickerOpen && spoolAssignment.selectedKey
-    ? (rackSlot?.key === spoolAssignment.selectedKey
-      ? rackSlot
-      : loadout?.slots.find((s) => s.key === spoolAssignment.selectedKey) ?? null)
-    : null;
-
-  const openAssignPicker = () => {
-    if (!displaySlot) return;
-    // Anchor the reviewed revision to the moment the user opened the picker.
-    spoolAssignment.selectSlot(displaySlot.key);
+  const openAssignPicker = (slot: LoadoutSlot) => {
+    // The revision is anchored when the slot panel opens; re-selecting here
+    // would silently adopt a newer live revision.
+    if (spoolAssignment.selectedKey !== slot.key) spoolAssignment.selectSlot(slot.key);
     setPickerOpen(true);
   };
 
-  const closeAssignPicker = () => {
-    setPickerOpen(false);
-    spoolAssignment.selectSlot(null);
-  };
+  // The picker is pinned to the slot that was open when it launched, so a live
+  // active-gate change cannot silently retarget the confirmation.
+  const pinnedSlot = pickerOpen ? selectedSlot : null;
 
   // Spool id 0 from the picker's Eject action means "release this slot".
   const handlePickerSelect = async (spoolId: number) => {
     if (!pinnedSlot) {
       toast.error('That slot is no longer reported by the device. Review the slots and try again.');
-      closeAssignPicker();
+      setPickerOpen(false);
+      spoolAssignment.selectSlot(null);
       return;
     }
     const ok = spoolId > 0
       ? await spoolAssignment.assign(pinnedSlot, spoolId)
       : await spoolAssignment.clear(pinnedSlot);
-    if (ok) closeAssignPicker();
-  };
-
-  const handleRelease = async () => {
-    if (!displaySlot) return;
-    await spoolAssignment.clear(displaySlot);
-    // Deselect; the hook keeps the post-write revision until the printer's
-    // revision refreshes, so a quick second action does not 412.
-    spoolAssignment.selectSlot(null);
+    if (ok) setPickerOpen(false);
   };
 
   const handleRetryTopology = () => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.printerDetails(printerId) });
   };
-
-  const canSendCommand = isOnline && canOperate && mmuStatus.enabled && !pendingAction;
 
   const executeCommand = useCallback(async (label: string, fn: () => Promise<unknown>) => {
     setPendingAction(label);
@@ -267,455 +230,175 @@ export function MmuControlBox({
     }
   }, []);
 
-  const handleSelectGate = useCallback((gateIndex: number) => {
-    setSelectedGate(gateIndex);
-    setRackSelected(false);
-  }, []);
+  const laneName = (index: number) =>
+    mmuStatus.gates.find((gate) => gate.index === index)?.name ?? `lane${index + 1}`;
 
-  const handleSelectRack = useCallback(() => {
-    setSelectedGate(null);
-    setRackSelected(true);
-  }, []);
-
-  const handleLoad = useCallback(() => {
-    if (!canSendCommand || displayGate === null) return;
+  const runGateCommand = (kind: 'load' | 'unload' | 'eject', index: number) => {
+    const label = kind === 'load' ? 'Load' : kind === 'unload' ? 'Unload' : 'Eject';
     if (isQidibox) {
-      void executeCommand('Load', () => apiClient.mmuGateAction(printerId, {
-        protocol: 'Qidibox',
-        action: 'Load',
-        gateIndex: displayGate,
-      }));
+      void executeCommand(label, () => apiClient.mmuGateAction(printerId, { protocol: 'Qidibox', action: label, gateIndex: index }));
     } else if (isAfc) {
-      const laneName = mmuStatus.gates.find((gate) => gate.index === displayGate)?.name ?? `lane${displayGate + 1}`;
-      void executeCommand('Load', () => apiClient.mmuGateAction(printerId, {
-        protocol: 'Afc',
-        action: 'Load',
-        laneName,
-      }));
+      if (kind === 'eject') return;
+      void executeCommand(label, () => apiClient.mmuGateAction(printerId, { protocol: 'Afc', action: label, laneName: laneName(index) }));
+    } else if (kind === 'load') {
+      void executeCommand(label, () => apiClient.mmuChangeTool(printerId, index));
     } else {
-      void executeCommand('Load', () => apiClient.mmuChangeTool(printerId, displayGate));
+      void executeCommand(label, () => apiClient.mmuEject(printerId));
     }
-  }, [canSendCommand, displayGate, printerId, executeCommand, isQidibox, isAfc, mmuStatus.gates]);
+  };
 
-  const handleUnload = useCallback(() => {
-    if (!canSendCommand || showRack) return;
-    const unloadGate = commandGate;
-    if (isQidibox) {
-      if (unloadGate === null) return;
-      void executeCommand('Unload', () => apiClient.mmuGateAction(printerId, {
-        protocol: 'Qidibox',
-        action: 'Unload',
-        gateIndex: unloadGate,
-      }));
-    } else if (isAfc) {
-      if (unloadGate === null) return;
-      const laneName = mmuStatus.gates.find((gate) => gate.index === unloadGate)?.name ?? `lane${unloadGate + 1}`;
-      void executeCommand('Unload', () => apiClient.mmuGateAction(printerId, {
-        protocol: 'Afc',
-        action: 'Unload',
-        laneName,
-      }));
-    } else {
-      void executeCommand('Unload', () => apiClient.mmuEject(printerId));
-    }
-  }, [canSendCommand, printerId, executeCommand, isQidibox, isAfc, showRack, commandGate, mmuStatus.gates]);
+  const commandReason = !isOnline ? 'Printer is offline'
+    : !canOperate ? NO_PERMISSION_REASON
+      : !mmuStatus.enabled ? 'The filament unit is disabled'
+        : pendingAction ? `${pendingAction} in progress`
+          : undefined;
 
-  const handleEject = useCallback(() => {
-    if (!canSendCommand || showRack) return;
-    const ejectGate = commandGate;
-    if (isQidibox) {
-      if (ejectGate === null) return;
-      void executeCommand('Eject', () => apiClient.mmuGateAction(printerId, {
-        protocol: 'Qidibox',
-        action: 'Eject',
-        gateIndex: ejectGate,
-      }));
-    } else {
-      void executeCommand('Eject', () => apiClient.mmuEject(printerId));
-    }
-  }, [canSendCommand, printerId, executeCommand, isQidibox, showRack, commandGate]);
+  // Load, Unload and Eject per protocol. QidiBox and AFC address a gate
+  // directly; Happy Hare loads by tool change and unloads whatever is loaded,
+  // so its Unload only acts from the loaded gate and it has no separate Eject.
+  const physicalKinds: SlotActionKind[] = isQidibox ? ['load', 'unload', 'eject'] : ['load', 'unload'];
 
-  const handleHome = useCallback(() => {
-    if (!canSendCommand) return;
-    void executeCommand('Home', () => apiClient.mmuHome(printerId));
-  }, [canSendCommand, printerId, executeCommand]);
+  const panelFor = (view: FilamentSlotView): SlotPanelContent => {
+    const slot = slotForKey(view.key)!;
+    const isRack = rackSlot?.key === slot.key;
+    const target = isRack ? 'rack' : 'gate';
+    const busy = spoolAssignment.busy;
+    const mutateReason = spoolAssignment.canMutate ? undefined : spoolAssignment.blockedReason;
+    const assignReason = slot.disabled ? DISABLED_SLOT_REASON : mutateReason;
+    const actions: SlotAction[] = slot.spoolId != null
+      ? [
+        { kind: 'change', label: slotActionLabel('change', target, view.id), onClick: () => openAssignPicker(slot), disabledReason: assignReason, busy },
+        // Releasing is allowed on a device-disabled gate: it only removes a stale
+        // binding, it never asks the gate to feed filament.
+        { kind: 'unassign', label: slotActionLabel('unassign', target, view.id), onClick: () => void spoolAssignment.clear(slot), disabledReason: mutateReason, busy },
+      ]
+      : [{ kind: 'assign', label: slotActionLabel('assign', target, view.id), onClick: () => openAssignPicker(slot), disabledReason: assignReason, busy }];
 
-  const handleRecover = useCallback(() => {
-    if (!isOnline || !canOperate || !mmuStatus.enabled) return;
-    // Recover is for error states — available even when another action seems pending
-    void executeCommand('Recover', () => apiClient.mmuRecover(printerId));
-  }, [isOnline, canOperate, mmuStatus.enabled, printerId, executeCommand]);
-
-  // Action status badge
-  const actionBadge: ReactNode = mmuStatus.action && mmuStatus.action !== 'Idle' ? (
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-xs text-[10px] font-bold bg-pf-accent-bg/15 text-pf-accent">
-      <span className="w-1.5 h-1.5 rounded-full bg-pf-accent animate-pulse" />
-      {mmuStatus.action}
-    </span>
-  ) : null;
-
-  // Filament state indicator
-  const filamentBadge: ReactNode = mmuStatus.filamentState ? (
-    <span className={`text-[10px] font-bold uppercase tracking-wide ${
-      mmuStatus.filamentState === 'Loaded' ? 'text-pf-success' :
-      mmuStatus.filamentState === 'Unloaded' ? 'text-pf-text-tertiary' :
-      'text-pf-warning'
-    }`}>
-      {mmuStatus.filamentState}
-    </span>
-  ) : null;
-
-  return (
-    <CollapsibleSection
-      title="Materials"
-      collapsedTitle="Materials"
-      expanded={isExpanded}
-      onToggle={setIsExpanded}
-      headerActions={
-        <div className="flex items-center gap-2">
-          {coverage && (
-            <FilamentCoverageBadge
-              status={coverage.status}
-              ariaContext={coverage.printerName || undefined}
-              compact
-            />
-          )}
-          {coverage?.status === 'runout' && (
-            <RunoutRiskChip
-              predictedRunoutAt={coverage.earliestPredictedRunoutAt}
-              predictedRunoutLayer={null}
-            />
-          )}
-          {actionBadge}
-          {!isExpanded && filamentBadge}
-        </div>
+    if (!mmuStatus.enabled && filamentControl) {
+      const macroReason = !canOperate ? NO_PERMISSION_REASON
+        : filamentControl.blockedReason
+          ?? (filamentControl.pending ? 'Another filament command is running' : undefined);
+      for (const kind of ['load', 'unload'] as const) {
+        actions.push({
+          kind,
+          label: slotActionLabel(kind, 'single', view.id),
+          onClick: () => filamentControl.onAction(kind),
+          disabledReason: macroReason,
+        });
       }
-    >
-      <div className="space-y-3">
-        {/* Unit tab bar */}
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1 px-3 py-1.5 rounded-t-lg bg-pf-bg-1 border border-b-0 border-pf-border">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" className="text-pf-text-secondary" aria-hidden="true">
-              <path d="M2 6h20v12H2V6zm2 2v8h16V8H4zm2 2h4v2H6v-2zm6 0h4v2h-4v-2z" />
-            </svg>
-            <span className="text-sm font-bold text-pf-text-primary">1</span>
-          </div>
-          <div className="flex-1 border-b border-pf-border" />
-          {/* MMU info badges */}
-          <div className="flex items-center gap-2 text-[10px]">
-            {isQidibox && (
-              <span className="px-1.5 py-0.5 rounded bg-pf-accent-bg/15 text-pf-accent font-medium">
-                QIDIBOX
-              </span>
-            )}
-            {isAfc && (
-              <span className="px-1.5 py-0.5 rounded bg-pf-success/10 text-pf-success font-medium">
-                AFC
-              </span>
-            )}
-            {isAfc && mmuStatus.action && mmuStatus.action !== 'Idle' && mmuStatus.action !== 'Initialized' && (
-              <span className="px-1.5 py-0.5 rounded bg-pf-accent-bg/15 text-pf-accent font-medium">
-                {mmuStatus.action.toUpperCase()}
-              </span>
-            )}
-            {!isQidibox && !isAfc && mmuStatus.endlessSpool && (
-              <span className="px-1.5 py-0.5 rounded bg-pf-success/10 text-pf-success font-medium">
-                ENDLESS
-              </span>
-            )}
-            {!isQidibox && !isAfc && mmuStatus.clogDetection && (
-              <span className="px-1.5 py-0.5 rounded bg-pf-warning/10 text-pf-warning font-medium">
-                CLOG DET
-              </span>
-            )}
-            {!isQidibox && !isAfc && !mmuStatus.isHomed && (
-              <span className="px-1.5 py-0.5 rounded bg-pf-error/10 text-pf-error font-medium">
-                NOT HOMED
-              </span>
-            )}
-          </div>
-        </div>
+    } else if (!isRack) {
+      const index = slot.gcodeIndex ?? 0;
+      for (const kind of physicalKinds) {
+        const reason = commandReason
+          ?? (kind === 'load' && slot.disabled ? DISABLED_SLOT_REASON : undefined)
+          ?? (isHappyHare && kind === 'unload' && index !== activeGate ? 'Unloads the loaded gate only' : undefined);
+        actions.push({
+          kind,
+          label: slotActionLabel(kind, target, view.id),
+          onClick: () => runGateCommand(kind as 'load' | 'unload' | 'eject', index),
+          disabledReason: reason,
+        });
+      }
+    }
 
-        {/* Gates grid */}
-        <div className="grid grid-cols-[repeat(auto-fit,minmax(5.5rem,1fr))] items-stretch gap-1">
-          {/* QidiBox Rack has its own physical-toolhead binding, not a gate index. */}
-          {rackSlot && (
-            <MaterialSlotButton
-              slot={rackSlot}
-              label="Rack"
-              selected={showRack}
-              inUse={isOnline && rackActive && mmuStatus.filamentState?.toLowerCase() === 'loaded'}
-              activeState={rackActive ? mmuStatus.filamentState?.toLowerCase() === 'loaded' ? 'loaded' : 'selected' : undefined}
-              feed={isOnline && rackActive && mmuStatus.filamentState?.toLowerCase() === 'loaded' ? 'loaded'
-                : isOnline && rackActive && mmuStatus.filamentState?.toLowerCase() === 'unloaded' ? 'not-loaded' : 'unknown'}
-              spool={inventory.isError ? undefined : inventory.data?.find((spool) => spool.id === rackSlot.spoolId)}
-              onSelect={handleSelectRack}
-            />
-          )}
-
-          {mmuStatus.gates.map((gate) => {
-            const slot = loadout?.slots.find((item) => item.key === `gate-${gate.index}`);
-            if (!slot) return null;
-            const unit = Math.floor(gate.index / 4) + 1;
-            const label = `${unit}${String.fromCharCode(65 + gate.index % 4)}`;
-            const active = gate.index === activeGate;
-            return (
-              <MaterialSlotButton
-                key={slot.key}
-                slot={slot}
-                label={label}
-                accessibleLabel={`Gate ${label}`}
-                selected={!showRack && gate.index === (selectedGate ?? activeGate)}
-                inUse={isOnline && active && mmuStatus.filamentState?.toLowerCase() === 'loaded'}
-                activeState={active ? mmuStatus.filamentState?.toLowerCase() === 'loaded' ? 'loaded' : 'selected' : undefined}
-                feed={isOnline && active && mmuStatus.filamentState?.toLowerCase() === 'loaded' ? 'loaded'
-                  : isOnline && ((active && mmuStatus.filamentState?.toLowerCase() === 'unloaded') || slot.filamentPresence === 'absent') ? 'not-loaded'
-                  : isOnline && slot.filamentPresence === 'available' ? 'available' : 'unknown'}
-                spool={inventory.isError ? undefined : inventory.data?.find((spool) => spool.id === slot.spoolId)}
-                atRisk={coverageByGate.get(gate.index)?.status === 'runout'}
-                status={coverageByGate.get(gate.index)?.status}
-                onSelect={() => handleSelectGate(gate.index)}
-              />
-            );
-          })}
-        </div>
-
-        {/* Status bar: AUTO indicator + filament state */}
-        <div className="flex items-center justify-between text-xs">
-          <div className="flex items-center gap-3">
-            {filamentBadge}
-            {mmuStatus.activeTool >= 0 && (
-              <span className="text-pf-text-secondary">
-                Tool <span className="font-bold text-pf-text-primary">T{mmuStatus.activeTool}</span>
-              </span>
-            )}
-            {rackActive && (
-              <span className="text-pf-text-secondary">
-                Feeding from <span className="font-bold text-pf-text-primary">Rack</span>
-              </span>
-            )}
-          </div>
-          {pendingAction && (
-            <span className="text-pf-accent text-[10px] animate-pulse font-medium">
-              {pendingAction}…
-            </span>
-          )}
-        </div>
-
-        {/* Selected Rack detail panel */}
-        {showRack && rackSlot && (
-          <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-xs p-3 rounded-lg bg-pf-bg-1 border border-pf-border">
-            <span className="text-pf-text-secondary">Slot</span>
-            <span className="font-medium text-pf-text-primary">Rack (external spool)</span>
-
-            <span className="text-pf-text-secondary">Material</span>
-            <span className="font-medium text-pf-text-primary">{rackSlot.material || '—'}</span>
-
-            <span className="text-pf-text-secondary">Color</span>
-            <div className="flex items-center gap-2">
-              <ColorSwatch color={rackSlot.color} />
-              <span className="text-pf-text-primary">{rackSlot.color || '—'}</span>
-            </div>
-
-            <span className="text-pf-text-secondary">Spool ID</span>
-            <div className="flex items-center gap-2">
-              <span className="font-medium text-pf-text-primary">
-                {rackSlot.spoolId != null ? `#${rackSlot.spoolId}` : 'No spool assigned'}
-              </span>
-              {rackSlot.spoolId != null && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => void handleRelease()}
-                  disabled={releaseDisabled}
-                  explainedDisabled={releaseDisabled}
-                  title={spoolAssignment.blockedReason ?? 'Unassign the spool from Rack (does not unload filament)'}
-                >
-                  Unassign
-                </Button>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Selected gate detail panel */}
-        {displayGateData && (
-          <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-xs p-3 rounded-lg bg-pf-bg-1 border border-pf-border">
-            <span className="text-pf-text-secondary">Material</span>
-            <span className="font-medium text-pf-text-primary">{displayGateData.material || '—'}</span>
-
-            <span className="text-pf-text-secondary">Filament</span>
-            <span className="font-medium text-pf-text-primary">{displayGateData.filamentName || '—'}</span>
-
-            <span className="text-pf-text-secondary">Color</span>
-            <div className="flex items-center gap-2">
-              <ColorSwatch color={displayGateData.color} />
-              <span className="text-pf-text-primary">{displayGateData.color || '—'}</span>
-            </div>
-
-            <span className="text-pf-text-secondary">Status</span>
-            <span className={`font-medium ${gateStatusColor(displayGateData.status)}`}>
-              {gateStatusLabel(displayGateData.status)}
-            </span>
-
-            {displaySpoolId != null && (
-              <>
-                <span className="text-pf-text-secondary">Spool ID</span>
-                <div className="flex items-center gap-2">
-                  <span className="font-medium text-pf-text-primary">#{displaySpoolId}</span>
-                  {displaySlot?.spoolId != null && (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => void handleRelease()}
-                      disabled={releaseDisabled}
-                      explainedDisabled={releaseDisabled}
-                      title={spoolAssignment.blockedReason ?? `Unassign the spool from ${displaySlot.label} (does not unload filament)`}
-                    >
-                      Unassign
-                    </Button>
-                  )}
-                </div>
-              </>
-            )}
-
-            {displayCoverage && (
-              <>
-                <span className="text-pf-text-secondary">Coverage</span>
-                <div className="flex flex-wrap items-center gap-2">
-                  {displayCoverage.remainingGrams != null && (
-                    <span className="text-pf-text-primary">{Math.round(displayCoverage.remainingGrams)}g coverage estimate</span>
-                  )}
-                  {displayCoverage.totalDemandGrams != null && displayCoverage.totalDemandGrams > 0 && (
-                    <span className="text-pf-text-tertiary">{Math.round(displayCoverage.totalDemandGrams)}g needed</span>
-                  )}
-                  {displayCoverage.status !== 'covers' && (
-                    <FilamentCoverageBadge
-                      status={displayCoverage.status}
-                      reason={displayCoverage.statusReason}
-                      ariaContext={displaySlot ? `${displaySlot.label} gate` : 'Selected gate'}
-                    />
-                  )}
-                </div>
-              </>
-            )}
-          </div>
-        )}
-
-        {inventory.isError && (
-          <p className="text-xs text-pf-text-secondary" role="status">
-            Spoolman unavailable — remaining amount unknown.
-            <Button variant="ghost" size="sm" onClick={() => void inventory.refetch()}>Retry</Button>
-          </p>
-        )}
-        <p className="text-xs text-pf-text-secondary">Spool assignment tracks inventory; it does not load or unload filament.</p>
-        {/* Protocol commands stay distinct from inventory assignment. */}
-        <div className="flex flex-wrap gap-2">
-          {!isAfc && (
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              onClick={handleEject}
-              disabled={!canSendCommand || showRack || (isQidibox && commandGate === null)}
-              title={showRack
-                ? rackCommandReason
-                : isQidibox
-                  ? `Eject filament from slot ${commandGate ?? '?'}`
-                  : 'Eject filament out of the MMU'}
-              className="flex-1"
-              iconLeft={<EjectIcon className="w-4 h-4" ariaLabel="" />}
-            >
-              Eject
-            </Button>
-          )}
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            onClick={handleUnload}
-            disabled={!canSendCommand || showRack || ((isQidibox || isAfc) && commandGate === null)}
-            title={showRack
-              ? rackCommandReason
-              : isQidibox
-                ? `Unload filament from slot ${commandGate ?? '?'}`
-                : isAfc
-                  ? `Unload filament from lane ${commandGate !== null ? commandGate + 1 : '?'}`
-                  : 'Unload filament from MMU'}
-            className="flex-1"
-          >
-            Unload
-          </Button>
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            onClick={handleLoad}
-            disabled={!canSendCommand || displayGate === null}
-            title={showRack
-              ? rackCommandReason
-              : displayGate !== null
-              ? (isQidibox ? `Load slot ${displayGate}` : isAfc ? `Load lane ${displayGate + 1}` : `Load gate ${displayGate} into extruder`)
-              : 'Select a gate first'}
-            className="flex-1"
-          >
-            Load
-          </Button>
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            onClick={openAssignPicker}
-            disabled={assignDisabled}
-            explainedDisabled={assignDisabled}
-            title={assignTitle}
-            className="flex-1"
-          >
-            {displaySpoolId != null ? 'Change' : 'Assign'}
-          </Button>
-          {!isQidibox && !isAfc && (
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              onClick={handleHome}
-              disabled={!canSendCommand}
-              title="Home the MMU"
-            >
-              <HomeIcon className="w-4 h-4" ariaLabel="Home MMU" />
-            </Button>
-          )}
-          {!isQidibox && !isAfc && mmuStatus.action === 'Error' && (
-            <Button
-              type="button"
-              variant="danger"
-              size="sm"
-              onClick={handleRecover}
-              disabled={!isOnline || !canOperate || !mmuStatus.enabled}
-              title="Recover MMU from error"
-            >
-              <GearIcon className="w-4 h-4" ariaLabel="Recover" />
-            </Button>
-          )}
-        </div>
-        {!canOperate && <p className="text-xs text-pf-text-secondary">You do not have permission to operate filament controls.</p>}
-        {spoolAssignment.blockedReason && (
-          <div className="flex items-center gap-2 text-xs text-pf-text-secondary" role="status">
-            <span>{spoolAssignment.blockedReason}</span>
-            {topologyMismatch && (
-              <Button type="button" variant="ghost" size="sm" onClick={handleRetryTopology}>
-                Retry
-              </Button>
-            )}
-          </div>
+    const gateCoverage = isRack ? undefined : coverageByGate.get(slot.gcodeIndex ?? -1);
+    const extra = gateCoverage && gateCoverage.status !== 'covers' && gateCoverage.status !== 'unknown' ? (
+      <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-pf-text-tertiary">
+        <FilamentCoverageBadge status={gateCoverage.status} reason={gateCoverage.statusReason} ariaContext={`Slot ${view.id}`} />
+        {gateCoverage.totalDemandGrams != null && gateCoverage.totalDemandGrams > 0 && (
+          <span className="tabular-nums">Needs {Math.round(gateCoverage.totalDemandGrams)} g</span>
         )}
       </div>
+    ) : undefined;
+    return { title: isRack ? 'Rack' : slotPanelTitle('gate', view.id), actions, extra };
+  };
+
+  const statusBadges: ReactNode[] = [];
+  if (coverage?.status === 'runout') {
+    statusBadges.push(
+      <FilamentCoverageBadge key="cov" status="runout" ariaContext={coverage.printerName || undefined} compact />,
+      <RunoutRiskChip key="risk" predictedRunoutAt={coverage.earliestPredictedRunoutAt} predictedRunoutLayer={null} />,
+    );
+  }
+  if (mmuStatus.action && mmuStatus.action !== 'Idle' && mmuStatus.action !== 'Initialized') {
+    statusBadges.push(
+      <span key="action" className="inline-flex items-center gap-1 rounded-xs bg-pf-accent-bg/15 px-1.5 py-0.5 text-[11px] font-semibold text-pf-accent">
+        <span aria-hidden="true" className="size-1.5 rounded-full bg-pf-accent motion-safe:animate-pulse" />
+        {mmuStatus.action}
+      </span>,
+    );
+  } else if (pendingAction) {
+    statusBadges.push(
+      <span key="pending" role="status" className="text-[11px] font-medium text-pf-accent">{pendingAction}…</span>,
+    );
+  }
+  if (isHappyHare && mmuStatus.endlessSpool) {
+    statusBadges.push(<span key="endless" className="rounded-xs bg-pf-success/10 px-1.5 py-0.5 text-[11px] font-medium text-pf-success">Endless spool</span>);
+  }
+  if (isHappyHare && mmuStatus.clogDetection) {
+    statusBadges.push(<span key="clog" className="rounded-xs bg-pf-warning/10 px-1.5 py-0.5 text-[11px] font-medium text-pf-warning">Clog detection</span>);
+  }
+  if (isHappyHare && !mmuStatus.isHomed) {
+    statusBadges.push(<span key="homed" className="rounded-xs bg-pf-error/10 px-1.5 py-0.5 text-[11px] font-medium text-pf-error">Not homed</span>);
+  }
+
+  const homeReason = commandReason;
+  const recoverReason = !isOnline ? 'Printer is offline'
+    : !canOperate ? NO_PERMISSION_REASON
+      : !mmuStatus.enabled ? 'The filament unit is disabled' : undefined;
+
+  return (
+    <section className={className} aria-label="Materials" data-testid="mmu-control-box">
+      {(statusBadges.length > 0 || isHappyHare) && (
+        <div className="mb-1 flex flex-wrap items-center gap-1.5">
+          {statusBadges}
+          {isHappyHare && (
+            <span className="ml-auto inline-flex items-center">
+              <UnitCommandButton label="Home the MMU" reason={homeReason} onClick={() => void executeCommand('Home', () => apiClient.mmuHome(printerId))}>
+                <HomeIcon className="size-4" ariaLabel="" />
+              </UnitCommandButton>
+              {mmuStatus.action === 'Error' && (
+                // Recover is for error states — available even while another action seems pending.
+                <UnitCommandButton label="Recover the MMU from error" reason={recoverReason} danger onClick={() => void executeCommand('Recover', () => apiClient.mmuRecover(printerId))}>
+                  <GearIcon className="size-4" ariaLabel="" />
+                </UnitCommandButton>
+              )}
+            </span>
+          )}
+        </div>
+      )}
+
+      <FilamentSlots
+        slots={railViews}
+        summarySlot={summarySlot}
+        mode="multi"
+        unitWord="slots"
+        selectedKey={selectedKey}
+        onSelect={spoolAssignment.selectSlot}
+        panelFor={panelFor}
+        testId="mmu-slots"
+      />
+
+      {inventory.isError && (
+        <p className="mt-2 text-xs text-pf-text-secondary" role="status">
+          Spoolman unavailable — remaining amount unknown.
+          <Button variant="ghost" size="sm" onClick={() => void inventory.refetch()}>Retry</Button>
+        </p>
+      )}
+      {spoolAssignment.blockedReason && (loadout?.topologyPending || topologyMismatch) && (
+        <div className="mt-2 flex items-center gap-2 text-xs text-pf-text-secondary" role="status">
+          <span>{spoolAssignment.blockedReason}</span>
+          {topologyMismatch && (
+            <Button type="button" variant="ghost" size="sm" onClick={handleRetryTopology}>
+              Retry
+            </Button>
+          )}
+        </div>
+      )}
       {pickerOpen && (
         <SpoolPickerModal
           isOpen
-          onClose={closeAssignPicker}
+          onClose={() => setPickerOpen(false)}
           onSelect={handlePickerSelect}
           printerId={printerId}
           activeSpoolId={pinnedSlot?.spoolId}
@@ -723,6 +406,37 @@ export function MmuControlBox({
           pending={spoolAssignment.busy}
         />
       )}
-    </CollapsibleSection>
+    </section>
+  );
+}
+
+function UnitCommandButton({
+  label,
+  reason,
+  danger = false,
+  onClick,
+  children,
+}: {
+  label: string;
+  reason?: string;
+  danger?: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  const disabled = reason != null;
+  return (
+    <Tooltip content={disabled ? `${label} — ${reason}` : label} ariaMode={disabled ? 'describe' : 'hidden'} position="top" delay={400} className="w-max max-w-56 whitespace-normal text-center">
+      <Button
+        type="button"
+        variant="unstyled"
+        aria-label={label}
+        disabled={disabled}
+        explainedDisabled={disabled}
+        onClick={onClick}
+        className={`inline-flex size-11 items-center justify-center rounded-md transition-colors focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-pf-accent data-[pf-disabled-explained]:cursor-not-allowed data-[pf-disabled-explained]:opacity-40 ${danger ? 'text-pf-error hover:bg-pf-error/10' : 'text-pf-text-secondary hover:bg-pf-bg-2 hover:text-pf-text-primary'}`}
+      >
+        {children}
+      </Button>
+    </Tooltip>
   );
 }

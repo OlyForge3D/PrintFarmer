@@ -1,13 +1,13 @@
 import { useMemo, useState } from 'react';
 import clsx from 'clsx';
-import { MaterialSlotButton } from '@/features/printers/components/MaterialSlotButton';
 import { usePrinterSpoolInventory } from '@/features/printers/hooks/usePrinterSpoolInventory';
-import { Badge, Button, Tooltip } from '@/common/components/ui';
+import { Button } from '@/common/components/ui';
 import { SpoolPickerModal } from '@/features/printers/components/SpoolPickerModal';
 import {
   useSlotSpoolAssignment,
   DISABLED_SLOT_REASON,
 } from '@/features/printers/hooks/useSlotSpoolAssignment';
+import { useAuth } from '@/features/auth/hooks/useAuth';
 import { usePrinterCoverageFromFleet } from '@/features/filament-coverage/hooks';
 import {
   FilamentCoverageBadge,
@@ -21,6 +21,24 @@ import {
   resolveActiveSlot,
   type LoadoutSlot,
 } from '@/features/printers/utils/materialLoadout';
+import { FilamentSlots } from '@/features/printers/components/filament/FilamentSlots';
+import {
+  buildSlotView,
+  slotActionLabel,
+  slotPanelTitle,
+  type FilamentSlotView,
+  type SlotAction,
+  type SlotPanelContent,
+  type SlotTargetKind,
+} from '@/features/printers/components/filament/filamentSlotModel';
+
+/** The printer's generic LOAD_FILAMENT / UNLOAD_FILAMENT macros. */
+export interface FilamentMacroControl {
+  /** Why the macros cannot run right now (offline, disabled, printing); `undefined` when they can. */
+  blockedReason?: string;
+  pending?: boolean;
+  onAction: (action: 'load' | 'unload') => void | Promise<void>;
+}
 
 export interface MaterialLoadoutProps {
   printerId: string;
@@ -37,30 +55,26 @@ export interface MaterialLoadoutProps {
   /** Denser rendering for the printer card. */
   compact?: boolean;
   /**
-   * Whether the printer is currently reachable. Defaults to `true` so
-   * existing callers that don't yet track connectivity keep their prior
-   * behavior. When explicitly `false`, the last-known coverage snapshot is
-   * treated as stale/unverifiable: every status is downgraded to
-   * "unknown" so an offline printer never shows a "Filament OK" success
-   * indicator or a "runout" warning it can no longer verify (issue #1684).
+   * Whether the printer is currently reachable. Defaults to `true`. When
+   * `false` the last-known coverage snapshot is treated as unverifiable, so an
+   * offline printer never shows a runout warning it can no longer verify (#1684).
    */
   isOnline?: boolean;
+  /**
+   * Generic load/unload macros. Omit when the backend does not support them;
+   * the slot panel then offers inventory actions only.
+   */
+  filamentControl?: FilamentMacroControl;
   onSpoolChange?: () => void;
   className?: string;
 }
 
-function slotNoun(kind: 'gate' | 'tool'): string {
-  return kind === 'gate' ? 'gate' : 'toolhead';
-}
+const NO_PERMISSION_REASON = 'You do not have permission to operate filament controls';
 
 /**
- * Single consolidated materials module for a multi-slot printer.
- *
- * Replaces the previous "Material Slots" strip plus "Spools" assignment list, which
- * derived their slots from different sources and so could disagree about how many
- * slots existed and what was loaded in them. Here one resolved slot list drives the
- * rail and the assignment drawer, which makes that class of
- * contradiction structurally impossible.
+ * Materials module for single-toolhead, toolchanger (U1) and gate (AD5X)
+ * printers, rendered through the shared Option 4 filament slots: one resting
+ * line, a disclosable spool rail and one shared slot action panel.
  */
 export function MaterialLoadout({
   printerId,
@@ -71,10 +85,13 @@ export function MaterialLoadout({
   reviewedRowVersion,
   compact = false,
   isOnline = true,
+  filamentControl,
   onSpoolChange,
   className,
 }: MaterialLoadoutProps) {
   const [pickerOpen, setPickerOpen] = useState(false);
+  const { hasPermission } = useAuth();
+  const canOperate = hasPermission('queue', 'start');
   const { data: rawCoverage } = usePrinterCoverageFromFleet(printerId);
   const coverage = useMemo(
     () => withOfflineOverride(rawCoverage, isOnline),
@@ -90,7 +107,7 @@ export function MaterialLoadout({
 
   const {
     selectedKey,
-    selectSlot: selectSlotKey,
+    selectSlot,
     canMutate,
     blockedReason,
     busy,
@@ -117,133 +134,162 @@ export function MaterialLoadout({
 
   if (!loadout || loadout.slots.length === 0) return null;
 
-  const { kind, unitLabel, slots } = loadout;
+  const { kind, slots } = loadout;
+  const single = slots.length === 1 && kind === 'tool' && !(mmuStatus?.gates?.length);
   const selected = slots.find((s) => s.key === selectedKey) ?? null;
-  // Mirrors the non-contiguous defence in persistedGateIndicesByLiveIndex()
-  // (materialLoadout.ts): coverage is keyed by a 0-based g-code index, and
-  // joining it to `gcodeIndex` only reflects the right hardware when every
-  // gate-derived index is present and contiguous from 0. The backend only
-  // ever creates contiguous `1..N` gates today, so this never trips in
-  // production — but if it ever didn't, a gappy set of indices could
-  // silently join a slot to the wrong toolhead's coverage figures instead of
-  // falling back to "unknown".
+  // Coverage is keyed by a 0-based g-code index; joining it to `gcodeIndex`
+  // only reflects the right hardware when every index is contiguous from 0.
+  // Externals never join that index space (see materialLoadout.ts).
   const gcodeIndices = slots
     .map((s) => s.gcodeIndex)
     .filter((i): i is number => i != null)
     .sort((a, b) => a - b);
   const hasContiguousGcodeIndices = gcodeIndices.every((index, position) => index === position);
-  // Externals do not join the shared coverage-by-gcode-index space (see
-  // materialLoadout.ts). Explicitly skip coverage lookup for external slots so
-  // an external hotend never inherits the first gate's remaining-material figure.
   const coverageForSlot = (slot: LoadoutSlot): ToolheadCoverage | undefined =>
     slot.gcodeIndex != null && hasContiguousGcodeIndices
       ? coverageByIndex.get(slot.gcodeIndex)
       : undefined;
-  const selectedCoverage = selected ? coverageForSlot(selected) : undefined;
-  const assignedCount = slots.filter((s) => s.spoolId != null).length;
-  // Clearing stays available on a disabled gate: if the device disabled a gate
-  // that still carries a stale binding, the user needs a way to release it.
-  const disabledSlotReason = DISABLED_SLOT_REASON;
+  const spoolFor = (slot: LoadoutSlot) =>
+    inventory.isError ? undefined : inventory.data?.find((spool) => spool.id === slot.spoolId);
+  const isActive = (slot: LoadoutSlot) =>
+    isOnline && slot.source !== 'external' && activeSlot != null && slot.gcodeIndex === activeSlot.gcodeIndex;
 
-  const selectSlot = (slot: LoadoutSlot) => {
-    selectSlotKey(selectedKey === slot.key ? null : slot.key);
+  const views: FilamentSlotView[] = slots.map((slot) => {
+    const slotCoverage = coverageForSlot(slot);
+    const view = buildSlotView(slot, spoolFor(slot), {
+      id: single ? '' : slot.label,
+      active: !single && isActive(slot),
+      atRisk: slotCoverage?.status === 'runout',
+      testId: slot.source === 'external' ? `loadout-slot-external-${slot.apiIndex}` : `loadout-slot-${slot.gcodeIndex}`,
+    });
+    const selectedFeed = !single && isActive(slot) && activeSlot?.state !== 'loaded';
+    return {
+      ...view,
+      // Only a loaded feed is "in use"; a selected-but-unloaded feed is marked separately.
+      active: view.active && !selectedFeed,
+      selectedFeed,
+      coverageStatus: slotCoverage?.status ?? 'unknown',
+    };
+  });
+  const summarySlot = views.find((view) => view.active) ?? null;
+  const slotByKey = new Map(slots.map((slot) => [slot.key, slot]));
+
+  const target: SlotTargetKind = single ? 'single' : kind === 'gate' ? 'gate' : 'tool';
+
+  const openPicker = (slot: LoadoutSlot) => {
+    // The panel already anchored the reviewed revision when the slot opened;
+    // re-selecting here would silently adopt a newer live revision.
+    if (selectedKey !== slot.key) selectSlot(slot.key);
+    setPickerOpen(true);
   };
 
-  const closeDrawer = () => {
-    setPickerOpen(false);
-    selectSlotKey(null);
-  };
+  const closePicker = () => setPickerOpen(false);
 
-  const handleAssign = async (spoolId: number) => {
-    if (selected && await assign(selected, spoolId)) setPickerOpen(false);
-  };
-
-  const handleClear = async (): Promise<boolean> =>
-    selected ? clear(selected) : false;
-
-  // The picker's Eject action reports spool id 0, which means "release this
-  // slot" — not "bind spool 0". Route it to the clear endpoint so an eject can
-  // never persist a bogus zero binding. This is checked ahead of handleAssign's
-  // disabled-gate guard because releasing a disabled gate stays deliberately
-  // allowed; only binding to one is blocked.
   const handlePickerSelect = async (spoolId: number) => {
-    if (spoolId > 0) {
-      await handleAssign(spoolId);
-      return;
+    if (!selected) return;
+    // The picker's Eject reports spool id 0, meaning "release this slot" — route
+    // it to the clear endpoint so an eject can never persist a bogus zero binding.
+    const ok = spoolId > 0 ? await assign(selected, spoolId) : await clear(selected);
+    if (ok) setPickerOpen(false);
+  };
+
+  const macroReason = (slot: LoadoutSlot): string | undefined => {
+    if (!canOperate) return NO_PERMISSION_REASON;
+    if (filamentControl?.blockedReason) return filamentControl.blockedReason;
+    if (filamentControl?.pending) return 'Another filament command is running';
+    // The generic macros act on whatever feed the printer has selected, so a
+    // multi-feed printer may only run them from that feed's own slot.
+    if (!single && !isActive(slot)) {
+      const noun = kind === 'gate' ? 'slot' : 'tool';
+      return activeSlot == null || !isOnline
+        ? `The printer has not reported an active ${noun}`
+        : `Acts on the active ${noun} only`;
     }
-    if (await handleClear()) {
-      setPickerOpen(false);
+    return undefined;
+  };
+
+  const panelFor = (view: FilamentSlotView): SlotPanelContent => {
+    const slot = slotByKey.get(view.key)!;
+    const t = target;
+    const actions: SlotAction[] = [];
+    const assignReason = slot.disabled ? DISABLED_SLOT_REASON : canMutate ? undefined : blockedReason;
+    if (slot.spoolId != null) {
+      actions.push({
+        kind: 'change',
+        label: slotActionLabel('change', t, view.id),
+        onClick: () => openPicker(slot),
+        disabledReason: assignReason,
+        busy,
+      });
+      // Releasing stays available on a disabled gate so a stale binding can be cleared.
+      actions.push({
+        kind: 'unassign',
+        label: slotActionLabel('unassign', t, view.id),
+        onClick: () => void clear(slot),
+        disabledReason: canMutate ? undefined : blockedReason,
+        busy,
+      });
+    } else {
+      actions.push({
+        kind: 'assign',
+        label: slotActionLabel('assign', t, view.id),
+        onClick: () => openPicker(slot),
+        disabledReason: assignReason,
+        busy,
+      });
     }
+    if (filamentControl && slot.source !== 'external') {
+      const reason = macroReason(slot);
+      actions.push(
+        {
+          kind: 'load',
+          label: slotActionLabel('load', t, view.id),
+          onClick: () => void filamentControl.onAction('load'),
+          disabledReason: reason,
+        },
+        {
+          kind: 'unload',
+          label: slotActionLabel('unload', t, view.id),
+          onClick: () => void filamentControl.onAction('unload'),
+          disabledReason: reason,
+        },
+      );
+    }
+    const slotCoverage = coverageForSlot(slot);
+    const extra = slotCoverage?.status === 'runout' ? (
+      <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-pf-text-tertiary">
+        <FilamentCoverageBadge status="runout" reason={slotCoverage.statusReason} ariaContext={view.id || undefined} />
+        {slotCoverage.totalDemandGrams != null && slotCoverage.totalDemandGrams > 0 && (
+          <span className="tabular-nums">Needs {Math.round(slotCoverage.totalDemandGrams)} g</span>
+        )}
+      </div>
+    ) : undefined;
+    return { title: slotPanelTitle(t, view.id), actions, extra };
   };
 
   return (
     <section
-      className={clsx(
-        'rounded-lg border border-pf-border bg-pf-bg-1/60',
-        compact ? 'p-2' : 'p-2.5',
-        className,
-      )}
+      className={clsx(compact ? 'py-1' : undefined, className)}
       aria-label="Materials"
       data-testid="material-loadout"
     >
-      <header className="mb-1.5 flex flex-wrap items-center gap-2">
-        <span className="text-xs font-bold uppercase tracking-wide text-pf-text-secondary">
-          Materials
-        </span>
-        <Badge variant="default" size="sm">{unitLabel}</Badge>
-        <span className="text-[10px] text-pf-text-tertiary">
-          {assignedCount}/{slots.length} assigned
-        </span>
-        <div className="ml-auto flex items-center gap-1.5">
-          {coverage && (
-            <FilamentCoverageBadge
-              status={coverage.status}
-              ariaContext={coverage.printerName || undefined}
-              compact={compact}
-            />
-          )}
-          {coverage?.status === 'runout' && (
-            <RunoutRiskChip
-              predictedRunoutAt={coverage.earliestPredictedRunoutAt}
-              predictedRunoutLayer={null}
-            />
-          )}
+      {coverage?.status === 'runout' && (
+        <div className="mb-1 flex flex-wrap items-center gap-1.5">
+          <FilamentCoverageBadge status="runout" ariaContext={coverage.printerName || undefined} />
+          <RunoutRiskChip predictedRunoutAt={coverage.earliestPredictedRunoutAt} predictedRunoutLayer={null} />
         </div>
-      </header>
+      )}
 
-      <div className="grid grid-cols-[repeat(auto-fit,minmax(5.5rem,1fr))] items-stretch gap-1" role="group" aria-label={`${unitLabel} slots`}>
-        {slots.map((slot) => {
-          const slotCoverage = coverageForSlot(slot);
-          const isActive = slot.source !== 'external' && slot.gcodeIndex === activeSlot?.gcodeIndex;
-          const feed = isOnline && isActive && mmuStatus?.filamentState?.toLowerCase() === 'loaded' ? 'loaded'
-            : isOnline && ((isActive && mmuStatus?.filamentState?.toLowerCase() === 'unloaded') || slot.filamentPresence === 'absent') ? 'not-loaded'
-            : isOnline && slot.filamentPresence === 'available' ? 'available' : 'unknown';
-          const button = (
-            <MaterialSlotButton
-              key={slot.key}
-              slot={slot}
-              spool={inventory.isError ? undefined : inventory.data?.find((spool) => spool.id === slot.spoolId)}
-              accessibleLabel={`${slot.label} ${slot.external ? 'external spool' : slotNoun(kind)}`}
-              feed={feed}
-              inUse={isOnline && isActive && activeSlot?.state === 'loaded'}
-              activeState={isActive ? activeSlot?.state === 'loaded' ? 'loaded' : 'selected' : undefined}
-              atRisk={slotCoverage?.status === 'runout'}
-              status={slotCoverage?.status}
-              testId={slot.source === 'external' ? `loadout-slot-external-${slot.apiIndex}` : `loadout-slot-${slot.gcodeIndex}`}
-              compact={compact}
-              selected={selected?.key === slot.key}
-              onSelect={() => selectSlot(slot)}
-            />
-          );
-          return slot.name && slot.name !== slot.label ? (
-            <Tooltip key={slot.key} content={slot.name} position="top">
-              {button}
-            </Tooltip>
-          ) : (
-            button
-          );
-        })}
-      </div>
+      <FilamentSlots
+        slots={views}
+        summarySlot={summarySlot}
+        mode={single ? 'single' : 'multi'}
+        unitWord={kind === 'tool' ? 'tools' : 'slots'}
+        selectedKey={selected?.key ?? null}
+        onSelect={selectSlot}
+        panelFor={panelFor}
+        testId="material-loadout-slots"
+      />
 
       {inventory.isError && (
         <p className="mt-2 text-xs text-pf-text-secondary" role="status">
@@ -251,102 +297,11 @@ export function MaterialLoadout({
           <Button variant="ghost" size="sm" onClick={() => void inventory.refetch()}>Retry</Button>
         </p>
       )}
-      {selected && (
-        <div
-          className="pf-animate-rise mt-2 rounded-lg border border-pf-border bg-pf-bg-0/60 p-2"
-          data-testid="loadout-drawer"
-        >
-          <p className="mb-2 text-xs text-pf-text-secondary">Spool assignment tracks inventory; it does not load or unload filament.</p>
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
-            <span className="font-mono font-semibold text-pf-text-primary">{selected.label}</span>
-            <Badge variant={selected.external ? 'default' : 'primary'} size="sm">
-              {selected.external ? 'External' : kind === 'gate' ? 'Gate' : 'Tool'}
-            </Badge>
-            {selected.disabled && (
-              <Badge variant="warning" size="sm">
-                Disabled
-              </Badge>
-            )}
-            {selected.spoolId != null ? (
-              <>
-                <span className="text-pf-text-primary">{selected.material ?? 'Unknown material'}</span>
-                <span className="text-pf-text-tertiary">Spool #{selected.spoolId}</span>
-              </>
-            ) : (
-              <span className="italic text-pf-text-tertiary">No spool assigned</span>
-            )}
-            {selectedCoverage?.remainingGrams != null && (
-              <span className="text-pf-text-tertiary">
-                {Math.round(selectedCoverage.remainingGrams)}g coverage estimate
-              </span>
-            )}
-            {selectedCoverage?.totalDemandGrams != null && selectedCoverage.totalDemandGrams > 0 && (
-              <span className="text-pf-text-tertiary">
-                {Math.round(selectedCoverage.totalDemandGrams)}g needed
-              </span>
-            )}
-            {selectedCoverage && selectedCoverage.status !== 'covers' && (
-              <FilamentCoverageBadge
-                status={selectedCoverage.status}
-                reason={selectedCoverage.statusReason}
-                ariaContext={`${selected.label} ${slotNoun(kind)}`}
-              />
-            )}
-            <div className="ml-auto flex items-center gap-1.5">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={closeDrawer}
-              >
-                Cancel
-              </Button>
-              <Button
-                variant="secondary"
-                size="sm"
-                disabled={busy || !canMutate || selected.disabled}
-                explainedDisabled={!canMutate || selected.disabled}
-                title={selected.disabled ? disabledSlotReason : blockedReason}
-                aria-describedby={(!canMutate || selected.disabled) ? `loadout-action-desc-${printerId}` : undefined}
-                onClick={() => setPickerOpen(true)}
-              >
-                {selected.spoolId != null ? 'Change' : 'Assign'}
-              </Button>
-              {selected.spoolId != null && (
-                <Button
-                  variant="danger"
-                  size="sm"
-                  disabled={busy || !canMutate}
-                  explainedDisabled={!canMutate}
-                  title={blockedReason}
-                  aria-describedby={!canMutate ? `loadout-clear-desc-${printerId}` : undefined}
-                  onClick={() => void handleClear()}
-                >
-                  Unassign
-                </Button>
-              )}
-            </div>
-          </div>
-          {(blockedReason || (selected?.disabled && disabledSlotReason)) && (
-            <p id={`loadout-action-desc-${printerId}`} className="mt-1 text-[10px] text-pf-text-tertiary">
-              {selected?.disabled ? disabledSlotReason : blockedReason}
-            </p>
-          )}
-          {/* Clear is deliberately kept available on a disabled gate (see handleAssign
-              comment above), so its only real blocker is a missing/unresolved revision —
-              never reuse the disabled-gate text here, or a screen-reader user hearing
-              Clear's description would be told the wrong reason it's blocked. */}
-          {selected.spoolId != null && blockedReason && (
-            <p id={`loadout-clear-desc-${printerId}`} className="mt-1 text-[10px] text-pf-text-tertiary">
-              {blockedReason}
-            </p>
-          )}
-        </div>
-      )}
 
       {pickerOpen && selected && (
         <SpoolPickerModal
           isOpen
-          onClose={closeDrawer}
+          onClose={closePicker}
           onSelect={handlePickerSelect}
           printerId={printerId}
           activeSpoolId={selected.spoolId}
@@ -357,4 +312,3 @@ export function MaterialLoadout({
     </section>
   );
 }
-

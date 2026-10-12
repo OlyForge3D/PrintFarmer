@@ -1,25 +1,20 @@
 import { ControlPadButton } from '@/common/components/ui';
-import {
-  FilamentLoadIcon,
-  FilamentUnloadIcon,
-  FilamentChangeIcon,
-} from '@/common/components/icons/MdiIcons';
+import { FilamentChangeIcon } from '@/common/components/icons/MdiIcons';
 
 interface FilamentControlSectionProps {
   filamentActionPending: boolean;
-  canFilamentControl: boolean;
   canFilamentChange: boolean;
-  /** Hide duplicate load/unload macros when integrated device controls exist. */
-  showLoadUnload?: boolean;
-  onFilamentAction: (action: 'load' | 'unload' | 'change') => Promise<void>;
+  onFilamentAction: (action: 'change') => Promise<void>;
 }
 
+/**
+ * Printer-level filament change (M600). Load and unload live in the materials
+ * slot panel, so there is exactly one place to feed or retract filament.
+ */
 export function FilamentControlSection({
   filamentActionPending,
-  canFilamentControl,
   canFilamentChange,
   onFilamentAction,
-  showLoadUnload = true,
 }: FilamentControlSectionProps) {
   return (
     <div className="flex flex-col gap-1 mt-4">
@@ -27,24 +22,6 @@ export function FilamentControlSection({
         Filament
       </div>
       <div className="grid grid-flow-col gap-1 w-fit">
-        {showLoadUnload && <>
-        <ControlPadButton
-          disabled={filamentActionPending || !canFilamentControl}
-          onClick={() => onFilamentAction('load')}
-          title="Load Filament"
-          padSize="small"
-        >
-          <FilamentLoadIcon className="w-4 h-4" />
-        </ControlPadButton>
-        <ControlPadButton
-          disabled={filamentActionPending || !canFilamentControl}
-          onClick={() => onFilamentAction('unload')}
-          title="Unload Filament"
-          padSize="small"
-        >
-          <FilamentUnloadIcon className="w-4 h-4" />
-        </ControlPadButton>
-        </>}
         <ControlPadButton
           disabled={filamentActionPending || !canFilamentChange}
           onClick={() => onFilamentAction('change')}

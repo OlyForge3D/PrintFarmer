@@ -285,6 +285,24 @@ export function resolveQidiRackSlot(
 }
 
 /**
+ * Whether a saved printer has a filament box with an external spool holder
+ * (QidiBox "Rack"): a Qidi printer whose saved topology is box gates feeding a
+ * single physical toolhead. Used where only persisted details are available,
+ * e.g. to decide whether to offer the "Show external spool" preference.
+ */
+export function hasExternalSpoolHolder(details: {
+  manufacturerName?: string;
+  modelName?: string;
+  toolheads?: ToolheadDto[];
+} | undefined): boolean {
+  if (!details) return false;
+  const identity = `${details.manufacturerName ?? ''} ${details.modelName ?? ''}`;
+  if (!/qidi/i.test(identity)) return false;
+  const toolheads = details.toolheads ?? [];
+  return toolheads.some(isMmuGate) && toolheads.filter((toolhead) => !isMmuGate(toolhead)).length === 1;
+}
+
+/**
  * Collapse the live MMU status and the persisted toolhead topology into a single
  * ordered list of filament slots.
  *

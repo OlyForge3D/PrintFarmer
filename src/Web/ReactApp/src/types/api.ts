@@ -162,6 +162,11 @@ export interface PrinterMetadata {
   bedTypeName?: string;
   /** Hex color code for bed type badge (e.g., "#E67E22") */
   bedTypeColor?: string;
+  /**
+   * Presentation-only: render the filament box's external spool slot (QidiBox
+   * Rack). Defaults to hidden when absent; never changes the slot's spool binding.
+   */
+  showExternalSpool?: boolean;
 }
 
 /**
@@ -831,6 +836,8 @@ export interface UpdatePrinterDto {
   zOffsetMm?: number;
   /** Bed surface type ID. Set to empty string to clear. */
   bedTypeId?: string;
+  /** Presentation-only: show the filament box external spool slot. Omit to leave unchanged. */
+  showExternalSpool?: boolean;
   // Toolheads - for updating individual toolhead settings
   toolheads?: UpdateToolheadDto[];
 }
@@ -1457,6 +1464,11 @@ export interface PrinterDetails {
    * "unsupported" for the odometer surface but tolerant everywhere else.
    */
   supportsPerToolAttribution?: boolean;
+  /**
+   * Presentation-only: render the filament box's external spool slot (QidiBox
+   * Rack). Defaults to hidden when absent; never changes the slot's spool binding.
+   */
+  showExternalSpool?: boolean;
 }
 
 // ---------------------------------------------------------------------------

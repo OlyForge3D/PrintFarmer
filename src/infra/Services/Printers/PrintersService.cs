@@ -1062,6 +1062,7 @@ public class PrintersService(
                 ? Convert.ToBase64String(p.RowVersion)
                 : null,
             ConfigurationRevision = p.ConfigurationRevision,
+            ShowExternalSpool = p.ShowExternalSpool,
         };
     }
 #pragma warning restore CS8603
@@ -1181,6 +1182,7 @@ public class PrintersService(
                     ? Convert.ToBase64String(p.RowVersion)
                     : null,
                 ConfigurationRevision = p.ConfigurationRevision,
+                ShowExternalSpool = p.ShowExternalSpool,
                 CurrentJobThumbnailUrl = PrinterThumbnailUrl.Create(
                     dto.Id,
                     dto.State,
@@ -2178,7 +2180,8 @@ public class PrintersService(
                     BedTypeColor: p.BedType?.Color,
                     UseModelDispatchDefaults: p.UseModelDispatchDefaults,
                     RowVersion: p.RowVersion is { Length: > 0 } ? Convert.ToBase64String(p.RowVersion) : null,
-                    CurrentJobThumbnailUrl: status.CurrentJobThumbnailUrl));
+                    CurrentJobThumbnailUrl: status.CurrentJobThumbnailUrl,
+                    ShowExternalSpool: p.ShowExternalSpool));
             }
             catch (Exception ex)
             {
@@ -2229,7 +2232,8 @@ public class PrintersService(
                     BedTypeName: p.BedType?.Name,
                     BedTypeColor: p.BedType?.Color,
                     UseModelDispatchDefaults: p.UseModelDispatchDefaults,
-                    RowVersion: p.RowVersion is { Length: > 0 } ? Convert.ToBase64String(p.RowVersion) : null));
+                    RowVersion: p.RowVersion is { Length: > 0 } ? Convert.ToBase64String(p.RowVersion) : null,
+                    ShowExternalSpool: p.ShowExternalSpool));
             }
         }
 
@@ -2659,7 +2663,8 @@ public class PrintersService(
             HasCatalogUpdate: p.Model != null && p.ServiceState != null && p.ServiceState.LastModelSyncAt != null && p.Model.UpdatedAt > p.ServiceState.LastModelSyncAt,
             UseModelDispatchDefaults: p.UseModelDispatchDefaults,
             RowVersion: rowVersion,
-            ConfigurationRevision: p.ConfigurationRevision));
+            ConfigurationRevision: p.ConfigurationRevision,
+            ShowExternalSpool: p.ShowExternalSpool));
     }
 
     private static PrinterDto ApplyCameraContract(PrinterDto dto)
