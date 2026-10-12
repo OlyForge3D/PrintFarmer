@@ -71,11 +71,6 @@ vi.mock('@/features/printers/components/TemperatureControlSection', () => ({ Tem
 vi.mock('@/features/printers/components/MovementControlSection', () => ({
   MovementControlSection: ({ rightContent }: { rightContent?: React.ReactNode }) => <div>{rightContent}</div>,
 }));
-vi.mock('@/features/printers/components/FilamentControlSection', () => ({
-  FilamentControlSection: (props: Record<string, unknown>) => (
-    <div data-testid="filament-macros" data-props={Object.keys(props).sort().join(',')}>Change Filament (M600)</div>
-  ),
-}));
 vi.mock('@/features/printers/components/PrinterActionBar', () => ({ PrinterActionBar: () => null }));
 vi.mock('@/features/printers/components/BedClearBanner', () => ({ BedClearBanner: () => null }));
 vi.mock('@/features/printers/components/PrintProgressBar', () => ({ PrintProgressBar: () => null }));
@@ -85,7 +80,6 @@ vi.mock('@/features/printers/components/FailureDetectionMonitoringBadge', () => 
 vi.mock('@/features/printers/components/FailureDetectionMonitoringSummary', () => ({ FailureDetectionMonitoringSummary: () => null }));
 vi.mock('@/features/printers/components/OfflineTroubleshootingGuide', () => ({ OfflineTroubleshootingGuide: () => null }));
 vi.mock('@/features/printers/components/PrinterCameraPreview', () => ({ PrinterCameraPreview: () => null }));
-vi.mock('@/features/printers/components/ZOffsetCalibrationWizard', () => ({ ZOffsetCalibrationWizard: () => null }));
 vi.mock('@/services/api', () => ({
   apiClient: {},
 }));
@@ -163,10 +157,10 @@ it.each([
 ] as const)('routes load/unload only through the slot panel for %s (enabled %s)', (mmuType, enabled, slotsTestId) => {
   render(<DetailedPrinterCard printer={makePrinter({ mmuStatus: makeMmuStatus({ mmuType, enabled }) })}
     backendCapabilities={{ supportsFilamentControl: true } as import('@/types/api').PrinterBackendCapabilitiesDto} />);
-  // The standalone section keeps only M600; it no longer takes a load/unload toggle.
-  expect(screen.getByTestId('filament-macros')).toHaveAttribute(
-    'data-props', 'canFilamentChange,filamentActionPending,onFilamentAction');
-  expect(screen.getByText('Change Filament (M600)')).toBeInTheDocument();
+  // Filament handling lives only in the Materials slot panel: no standalone M600 or Z-offset buttons.
+  expect(screen.queryByText('Change Filament (M600)')).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /Change Filament/i })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /Calibrate Z-Offset/i })).not.toBeInTheDocument();
   expect(screen.getByTestId(slotsTestId)).toHaveAttribute('data-filament-control', 'true');
 });
 

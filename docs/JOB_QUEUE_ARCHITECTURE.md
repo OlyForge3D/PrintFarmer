@@ -203,8 +203,9 @@ macro-driven U1/AD5X buttons act only on the active slot, otherwise disabled
 with a tooltip reason. Physical commands require an online printer and
 `queue:start`, and keep existing confirmations and heat-then-unload.
 
-The slot panel replaces the generic Load/Unload macro group. Change Filament
-(M600) remains a separate printer-level control under its existing safety rules.
+The slot panel replaces the generic Load/Unload macro group. There is no
+separate printer-level Change Filament (M600) button; all filament and spool
+handling lives in the Materials group.
 
 The QidiBox **Rack** (external spool) is hidden by default. Edit Printer offers
 a per-printer **Show external spool** toggle (`showExternalSpool`, persisted

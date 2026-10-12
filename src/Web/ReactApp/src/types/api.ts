@@ -2531,14 +2531,6 @@ export interface ExcludePrintJobObjectRequest {
   name: string;
 }
 
-/** Request payload for saving a calibrated Z-offset. */
-export interface ZOffsetSaveRequest {
-  /** The Z-offset value in millimeters. Negative values move the nozzle closer to the bed. */
-  offsetMm: number;
-  /** Whether to also send save commands to the printer firmware. */
-  saveToFirmware?: boolean;
-}
-
 // Failure detail for an individual file during multi-upload.
 export interface MultiUploadFailure {
   fileName: string;

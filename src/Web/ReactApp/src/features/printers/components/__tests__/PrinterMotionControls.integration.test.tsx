@@ -95,9 +95,6 @@ vi.mock("@/features/printers/components/MaterialLoadout", () => ({
 vi.mock("@/features/printers/components/TemperatureControlSection", () => ({
   TemperatureControlSection: () => <div data-testid="temp-section" />,
 }));
-vi.mock("@/features/printers/components/FilamentControlSection", () => ({
-  FilamentControlSection: () => <div data-testid="filament-section" />,
-}));
 vi.mock("@/features/printers/components/BedClearBanner", () => ({
   BedClearBanner: () => null,
 }));
@@ -120,9 +117,6 @@ vi.mock(
 );
 vi.mock("@/features/printers/components/PrinterCameraPreview", () => ({
   PrinterCameraPreview: () => <div data-testid="camera-preview" />,
-}));
-vi.mock("@/features/printers/components/ZOffsetCalibrationWizard", () => ({
-  ZOffsetCalibrationWizard: () => <div data-testid="zoffset-wizard" />,
 }));
 vi.mock("@/services/api", () => ({
   apiClient: {

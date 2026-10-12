@@ -869,7 +869,7 @@ describe("PrinterDetailsSidebar", () => {
 it.each([
   ['Qidibox', true], ['HappyHare', true], ['Afc', true],
   ['SnapmakerU1', true], ['Qidibox', false],
-] as const)('sidebar keeps M600 but no duplicate load/unload group for %s (enabled %s)', (mmuType, enabled) => {
+] as const)('sidebar has no standalone M600 or load/unload group for %s (enabled %s)', (mmuType, enabled) => {
   const mmuPrinter = { ...printer, backend: PrinterBackend.Moonraker, mmuStatus: {
     mmuType, enabled, gates: [], activeGate: -1, activeTool: -1,
   } } as Printer;
@@ -878,5 +878,7 @@ it.each([
   // Load/unload live in the shared slot panel only.
   expect(screen.queryByTitle('Load Filament')).not.toBeInTheDocument();
   expect(screen.queryByTitle('Unload Filament')).not.toBeInTheDocument();
-  expect(screen.getByTitle('Change Filament (M600)')).toBeInTheDocument();
+  expect(screen.queryByTitle('Change Filament (M600)')).not.toBeInTheDocument();
+  expect(screen.queryByText('Macros')).not.toBeInTheDocument();
+  expect(screen.queryByText('Fallback Groups')).not.toBeInTheDocument();
 });

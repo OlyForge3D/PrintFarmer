@@ -1,4 +1,4 @@
-import React, { Suspense, useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import './DetailedPrinterCard.css';
 import { Zap } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -30,8 +30,6 @@ import { MmuProtocol } from '@/features/printers/constants/mmuProtocol';
 import { TemperatureControlSection } from '@/features/printers/components/TemperatureControlSection';
 import { MovementControlSection } from '@/features/printers/components/MovementControlSection';
 import { usePrinterMovement } from '@/features/printers/hooks/use-printer-movement';
-import { FilamentControlSection } from '@/features/printers/components/FilamentControlSection';
-import type { ZOffsetCalibrationWizardProps } from '@/features/printers/components/ZOffsetCalibrationWizard';
 import { PrinterActionBar } from '@/features/printers/components/PrinterActionBar';
 import { BedClearBanner } from '@/features/printers/components/BedClearBanner';
 import { PrintProgressBar } from '@/features/printers/components/PrintProgressBar';
@@ -69,7 +67,6 @@ import {
   canEmergencyStop,
   canExcludeObject,
   isActivePrintForObjects,
-  canFilamentChange,
   filamentControlBlockedReason,
   canMove,
   canOpenFiles,
@@ -87,15 +84,7 @@ import {
   DEFAULT_EXTRUDE_DISTANCE_MM,
   DEFAULT_EXTRUDE_SPEED_MMS,
 } from '@/features/printers/constants/temperaturePresets';
-import { lazyWithPreload } from '@/common/utils/lazyWithPreload';
 import { isSafeHttpUrl, isBrowserReachableUrl, toSafeHref } from '@/common/utils/validation';
-
-// Interaction-only: the Z-offset calibration wizard is a modal only opened
-// via an explicit "Calibrate Z-Offset" click, so it's lazy-loaded out of the
-// detailed-card bundle (#1146 item 10).
-const ZOffsetCalibrationWizard = lazyWithPreload<ZOffsetCalibrationWizardProps, React.FC<ZOffsetCalibrationWizardProps>>(
-  () => import('@/features/printers/components/ZOffsetCalibrationWizard').then(m => ({ default: m.ZOffsetCalibrationWizard }))
-);
 
 export interface DetailedPrinterCardProps {
   /** Display-ready printer — parents should pass data already merged with SignalR (usePrinterDisplays) */
@@ -166,7 +155,6 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
   const [showHistory, setShowHistory] = useState(false);
   const [showFiles, setShowFiles] = useState(false);
   const [showSpoolPicker, setShowSpoolPicker] = useState(false);
-  const [showZOffsetWizard, setShowZOffsetWizard] = useState(false);
   const [controlActionPending, setControlActionPending] = useState(false);
   const [temperatureActionPending, setTemperatureActionPending] = useState(false);
   const [localMovementActionPending, setMovementActionPending] = useState(false);
@@ -195,7 +183,6 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
   //     `MaterialLoadout` map a live gate index (offset by the shared hotend)
   //     to the backend API index. Without it `hasResolvedTopology` is false and
   //     the module blocks every assignment, so the materials UI is a dead end.
-  //   - Z-Offset wizard: this component's other `printerDetails` consumer.
   //
   // Those cases are exhaustive, so there is deliberately NO deferral condition
   // here. #1146 item 4 originally deferred the fetch until the wizard opened;
@@ -441,7 +428,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
     }
   };
 
-  const handleFilamentAction = async (action: 'load' | 'unload' | 'change') => {
+  const handleFilamentAction = async (action: 'load' | 'unload') => {
     if (filamentActionPending) {
       return;
     }
@@ -451,7 +438,6 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
       const methodMap: Record<string, () => Promise<{ success: boolean; error?: string | null }>> = {
         load: () => apiClient.loadFilament(printer.id),
         unload: () => apiClient.unloadFilament(printer.id),
-        change: () => apiClient.changeFilament(printer.id),
       };
       const result = await methodMap[action]();
       if (!result.success) {
@@ -1097,36 +1083,15 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
             onDisableMotors={() => handleControlAction('disable-motors')}
             onExtrude={handleExtrude}
             rightContent={
-              <div className="flex flex-col gap-1 items-start">
-                <PrinterActionBar
-                  isPaused={isPaused}
-                  isShutdown={isShutdown}
-                  controlActionPending={controlActionPending}
-                  canPauseOrResume={canPauseOrResumeNow}
-                  canCancel={canCancelNow}
-                  canEmergencyStop={canEmergencyStopNow}
-                  onControlAction={handleControlAction}
-                />
-                {support.supportsFilamentControl && (
-                  <FilamentControlSection
-                    filamentActionPending={filamentActionPending}
-                    canFilamentChange={canFilamentChange({ isOnline, isEnabled, support })}
-                    onFilamentAction={handleFilamentAction}
-                  />
-                )}
-                {support.supportsMovement && (
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    disabled={!isOnline || isPrinting}
-                    onClick={() => setShowZOffsetWizard(true)}
-                    onMouseEnter={() => ZOffsetCalibrationWizard.preload()}
-                    onFocus={() => ZOffsetCalibrationWizard.preload()}
-                  >
-                    Calibrate Z-Offset
-                  </Button>
-                )}
-              </div>
+              <PrinterActionBar
+                isPaused={isPaused}
+                isShutdown={isShutdown}
+                controlActionPending={controlActionPending}
+                canPauseOrResume={canPauseOrResumeNow}
+                canCancel={canCancelNow}
+                canEmergencyStop={canEmergencyStopNow}
+                onControlAction={handleControlAction}
+              />
             }
           />
       </div>
@@ -1384,18 +1349,6 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
           }
         }}
       />
-
-      {showZOffsetWizard && (
-        <Suspense fallback={null}>
-          <ZOffsetCalibrationWizard
-            isOpen={showZOffsetWizard}
-            onClose={() => setShowZOffsetWizard(false)}
-            printer={spoolRevisionUnavailable ? printer : { ...printer, rowVersion: spoolReviewedRowVersion }}
-            bedSizeX={printerDetails?.capabilities?.maxBuildVolumeX ?? 220}
-            bedSizeY={printerDetails?.capabilities?.maxBuildVolumeY ?? 220}
-          />
-        </Suspense>
-      )}
     </article>
   );
 });

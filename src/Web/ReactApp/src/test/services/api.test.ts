@@ -103,16 +103,6 @@ describe("ApiClient", () => {
 
       expect(postMock).toHaveBeenCalledWith("/printers/printer-1/fan", { speedPercent: 65 });
     });
-
-    it("adjustPrinterZOffset posts the transient offset using the adjustment route", async () => {
-      const data = { success: true, message: undefined };
-      const postMock = vi.fn().mockResolvedValue({ data });
-      (apiClient as unknown as { client: { post: typeof postMock } }).client.post = postMock;
-
-      await expect(apiClient.adjustPrinterZOffset("printer-1", 0.025)).resolves.toEqual(data);
-
-      expect(postMock).toHaveBeenCalledWith("/printers/printer-1/z-offset/adjust", { offsetMm: 0.025 });
-    });
   });
 
   it("accepts snapshot query parameters and appends the cache buster", async () => {
@@ -379,11 +369,6 @@ describe("ApiClient", () => {
       await apiClient.setPrinterMaintenance(
         "printer-1",
         true,
-        "printer-v1"
-      );
-      await apiClient.saveZOffset(
-        "printer-1",
-        { offsetMm: 0.1, saveToFirmware: false },
         "printer-v1"
       );
       expect(

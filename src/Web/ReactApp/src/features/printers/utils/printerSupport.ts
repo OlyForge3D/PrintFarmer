@@ -136,11 +136,6 @@ export function filamentControlBlockedReason(args: { isOnline: boolean; isEnable
   return undefined;
 }
 
-export function canFilamentChange(args: { isOnline: boolean; isEnabled?: boolean; support: PrinterSupport }): boolean {
-  const isEnabled = args.isEnabled ?? true;
-  return isEnabled && args.isOnline && args.support.supportsFilamentControl;
-}
-
 /** Shared active-print gate for the Objects section on every printer surface. */
 export function isActivePrintForObjects(args: { state: string | null | undefined; isOnline: boolean }): boolean {
   const state = (args.state ?? '').toLowerCase();

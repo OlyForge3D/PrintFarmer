@@ -26,7 +26,6 @@ import {
   canEmergencyStop,
   canExcludeObject,
   isActivePrintForObjects,
-  canFilamentChange,
   filamentControlBlockedReason,
   canMove,
   canOpenFiles,
@@ -74,7 +73,6 @@ import {
 } from '@/common/components/icons/MdiIcons';
 import { SpoolPickerModal } from '@/features/printers/components/SpoolPickerModal';
 import { FilamentCoverageBreakdown } from '@/features/filament-coverage/components/FilamentCoverageBreakdown';
-import { FallbackGroupsPanel } from '@/features/fallback-groups/components/FallbackGroupsPanel';
 import { resolveMaterialLoadout } from '@/features/printers/utils/materialLoadout';
 import { MmuProtocol } from '@/features/printers/constants/mmuProtocol';
 import { MmuControlBox } from '@/features/printers/components/MmuControlBox';
@@ -605,7 +603,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
     }
   };
 
-  const handleFilamentAction = async (action: 'load' | 'unload' | 'change') => {
+  const handleFilamentAction = async (action: 'load' | 'unload') => {
     if (filamentActionPending) {
       return;
     }
@@ -615,7 +613,6 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
       const methodMap: Record<string, () => Promise<{ success: boolean; error?: string | null }>> = {
         load: () => apiClient.loadFilament(printer.id),
         unload: () => apiClient.unloadFilament(printer.id),
-        change: () => apiClient.changeFilament(printer.id),
       };
       const result = await methodMap[action]();
       if (!result.success) {
@@ -1218,21 +1215,6 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
 
             </div>
             </div>
-
-            {/* Filament buttons */}
-              <div className="flex flex-col gap-1">
-                <div className="text-[10px] uppercase text-pf-text-secondary font-bold tracking-wide">Macros</div>
-                <div className="grid grid-cols-1 gap-1 w-fit">
-                <ControlPadButton
-                  disabled={filamentActionPending || !canFilamentChange({ isOnline, isEnabled, support })}
-                  onClick={() => handleFilamentAction('change')}
-                  title="Change Filament (M600)"
-                  padSize="small"
-                >
-                  <FilamentChangeIcon className="h-4 w-4" />
-                </ControlPadButton>
-                </div>
-              </div>
           </div>
           {/* Move distance slider */}
           <div className="my-4">
@@ -1304,47 +1286,24 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
         {/* Consolidated materials module — one slot list drives the rail, the
             coverage rings and the assignment drawer. Suppressed when the MMU
             control box already shows the slots so there is exactly one view. */}
-        {materialLoadout && (() => {
-          const persistedToolheads = printerDetails?.toolheads && printerDetails.toolheads.length > 1
-            ? printerDetails.toolheads
-            : undefined;
-          if (showMmuControlBox) {
-            return persistedToolheads ? (
-              <CollapsibleSection title="Fallback Groups" expanded={true}>
-                <FallbackGroupsPanel
-                  printerId={printer.id}
-                  toolheads={persistedToolheads}
-                  isOnline={isOnline}
-                />
-              </CollapsibleSection>
-            ) : null;
-          }
-          return (
-            <CollapsibleSection title="Materials" expanded={true}>
-              <MaterialLoadout
-                printerId={printer.id}
-                mmuStatus={displayPrinter?.mmuStatus}
-                toolheads={printerDetails?.toolheads}
-                currentSpoolId={printer?.currentSpoolId}
-                spoolInfo={printer?.spoolInfo}
-                modelName={printer?.modelName}
-                reviewedRowVersion={spoolReviewedRowVersion ?? undefined}
-                isOnline={isOnline}
-                filamentControl={filamentControl}
-                onSpoolChange={() => {
-                  queryClient.invalidateQueries({ queryKey: ['printers', printer.id, 'details'] });
-                }}
-              />
-              {persistedToolheads && (
-                <FallbackGroupsPanel
-                  printerId={printer.id}
-                  toolheads={persistedToolheads}
-                  isOnline={isOnline}
-                />
-              )}
-            </CollapsibleSection>
-          );
-        })()}
+        {materialLoadout && !showMmuControlBox && (
+          <CollapsibleSection title="Materials" expanded={true}>
+            <MaterialLoadout
+              printerId={printer.id}
+              mmuStatus={displayPrinter?.mmuStatus}
+              toolheads={printerDetails?.toolheads}
+              currentSpoolId={printer?.currentSpoolId}
+              spoolInfo={printer?.spoolInfo}
+              modelName={printer?.modelName}
+              reviewedRowVersion={spoolReviewedRowVersion ?? undefined}
+              isOnline={isOnline}
+              filamentControl={filamentControl}
+              onSpoolChange={() => {
+                queryClient.invalidateQueries({ queryKey: ['printers', printer.id, 'details'] });
+              }}
+            />
+          </CollapsibleSection>
+        )}
 
         {/* Single-spool printers keep the classic spool card; multi-slot printers are
             fully described by the materials module above. */}

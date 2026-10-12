@@ -131,9 +131,6 @@ vi.mock('@/features/printers/components/MovementControlSection', () => ({
     <div data-testid="movement-section">{rightContent}</div>
   ),
 }));
-vi.mock('@/features/printers/components/FilamentControlSection', () => ({
-  FilamentControlSection: () => <div data-testid="filament-section" />,
-}));
 vi.mock('@/features/printers/components/PrinterActionBar', () => ({ PrinterActionBar: () => <div data-testid="action-bar" /> }));
 vi.mock('@/features/printers/components/BedClearBanner', () => ({ BedClearBanner: () => null }));
 vi.mock('@/features/printers/components/PrintProgressBar', () => ({ PrintProgressBar: () => <div data-testid="print-progress" /> }));
@@ -143,9 +140,6 @@ vi.mock('@/features/printers/components/FailureDetectionMonitoringBadge', () => 
 vi.mock('@/features/printers/components/FailureDetectionMonitoringSummary', () => ({ FailureDetectionMonitoringSummary: () => null }));
 vi.mock('@/features/printers/components/OfflineTroubleshootingGuide', () => ({ OfflineTroubleshootingGuide: () => null }));
 vi.mock('@/features/printers/components/PrinterCameraPreview', () => ({ PrinterCameraPreview: () => <div data-testid="camera-preview" /> }));
-vi.mock('@/features/printers/components/ZOffsetCalibrationWizard', () => ({
-  ZOffsetCalibrationWizard: () => <div data-testid="zoffset-wizard" />,
-}));
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() } }));
 
 import { DetailedPrinterCard } from '../DetailedPrinterCard';

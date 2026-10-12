@@ -131,9 +131,6 @@ vi.mock('@/features/printers/components/MovementControlSection', () => ({
   MovementControlSection: () => <div data-testid="movement-section" />,
 }));
 
-vi.mock('@/features/printers/components/FilamentControlSection', () => ({
-  FilamentControlSection: () => <div data-testid="filament-section" />,
-}));
 
 vi.mock('@/features/printers/components/PrinterActionBar', () => ({
   PrinterActionBar: () => <div data-testid="action-bar" />,
