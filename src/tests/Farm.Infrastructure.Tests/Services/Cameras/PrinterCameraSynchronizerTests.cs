@@ -172,6 +172,130 @@ public sealed class PrinterCameraSynchronizerTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task SyncPrinterAsync_UserModifiedCameraNotReported_IsNeverMarkedOffline()
+    {
+        Printer printer = await AddPrinterAsync();
+        Camera existing = await AddCameraAsync(printer.Id, "My Cam", CameraSource.Moonraker, StreamUrl, isPrimary: true, userModified: true);
+        SetupDetection(null, null);
+        SetupOnline(printer.Id, isOnline: true);
+
+        PrinterCameraSyncResult result = await CreateSut().SyncPrinterAsync(printer.Id, explicitRequest: true, CancellationToken.None);
+
+        result.MarkedOffline.Should().Be(0);
+        result.Changed.Should().BeFalse();
+        Camera camera = await _db.Cameras.SingleAsync();
+        camera.Id.Should().Be(existing.Id);
+        camera.HealthStatus.Should().Be(CameraHealthStatus.Healthy);
+        camera.HealthMessage.Should().BeNull();
+        _broadcasts.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task SyncPrinterAsync_StandaloneCameraNotReported_IsNeverMarkedOffline()
+    {
+        Printer printer = await AddPrinterAsync();
+        await AddCameraAsync(printer.Id, "Bench Cam", CameraSource.Standalone, "rtsp://bench/stream", isPrimary: true);
+        SetupDetection(null, null);
+        SetupOnline(printer.Id, isOnline: true);
+
+        PrinterCameraSyncResult result = await CreateSut().SyncPrinterAsync(printer.Id, explicitRequest: true, CancellationToken.None);
+
+        result.MarkedOffline.Should().Be(0);
+        Camera camera = await _db.Cameras.SingleAsync();
+        camera.HealthStatus.Should().Be(CameraHealthStatus.Healthy);
+        camera.HealthMessage.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task SyncPrinterAsync_DiscoveredCameraSharedWithAnotherPrinter_IsNotMarkedOffline()
+    {
+        Printer printer = await AddPrinterAsync();
+        Printer other = await AddPrinterAsync();
+        Camera shared = await AddCameraAsync(printer.Id, "Voron Camera", CameraSource.Moonraker, StreamUrl, isPrimary: true);
+        shared.LinkToPrinter(other.Id, isPrimary: true, sortOrder: 0);
+        await _db.SaveChangesAsync();
+        SetupDetection(null, null);
+        SetupOnline(printer.Id, isOnline: true);
+
+        PrinterCameraSyncResult result = await CreateSut().SyncPrinterAsync(printer.Id, explicitRequest: true, CancellationToken.None);
+
+        result.MarkedOffline.Should().Be(0, "a camera still linked to another printer is not owned by this printer's plugin alone");
+        Camera camera = await _db.Cameras.Include(c => c.PrinterLinks).SingleAsync();
+        camera.HealthStatus.Should().Be(CameraHealthStatus.Healthy);
+        camera.PrinterLinks.Select(l => l.PrinterId).Should().BeEquivalentTo([printer.Id, other.Id]);
+    }
+
+    [Fact]
+    public async Task SyncPrinterAsync_ExplicitRequestForOfflinePrinter_MarksUnreportedCameraOffline()
+    {
+        Printer printer = await AddPrinterAsync();
+        Camera existing = await AddCameraAsync(printer.Id, "Voron Camera", CameraSource.Moonraker, StreamUrl, isPrimary: true);
+        SetupDetection(null, null);
+        SetupOnline(printer.Id, isOnline: false);
+
+        PrinterCameraSyncResult result = await CreateSut().SyncPrinterAsync(printer.Id, explicitRequest: true, CancellationToken.None);
+
+        result.MarkedOffline.Should().Be(1, "an explicit discover is authoritative even when the status cache says offline");
+        Camera camera = await _db.Cameras.SingleAsync();
+        camera.Id.Should().Be(existing.Id);
+        camera.HealthStatus.Should().Be(CameraHealthStatus.Unhealthy);
+        camera.HealthMessage.Should().Be(PrinterCameraSynchronizer.NotReportedHealthMessage);
+    }
+
+    /// <summary>
+    /// Documents current behavior (#3335 caveat a): deleting an auto-discovered camera does not
+    /// suppress rediscovery. While the printer plugin still reports the camera, the next sync
+    /// recreates it as a new row and makes it primary again.
+    /// </summary>
+    [Fact]
+    public async Task SyncPrinterAsync_DiscoveredCameraDeleted_IsRecreatedOnNextSync()
+    {
+        Printer printer = await AddPrinterAsync();
+        SetupDetection(StreamUrl, SnapshotUrl);
+        PrinterCameraSynchronizer sut = CreateSut();
+        await sut.SyncPrinterAsync(printer.Id, explicitRequest: false, CancellationToken.None);
+        Camera original = await _db.Cameras.SingleAsync();
+        _db.Cameras.Remove(original);
+        await _db.SaveChangesAsync();
+        _db.ChangeTracker.Clear();
+
+        PrinterCameraSyncResult result = await sut.SyncPrinterAsync(printer.Id, explicitRequest: false, CancellationToken.None);
+
+        result.Created.Should().Be(1);
+        Camera recreated = await _db.Cameras.Include(c => c.PrinterLinks).SingleAsync();
+        recreated.Id.Should().NotBe(original.Id);
+        recreated.StreamUrl.Should().Be(StreamUrl);
+        recreated.PrinterLinks.Should().ContainSingle(l => l.PrinterId == printer.Id && l.IsPrimary);
+    }
+
+    /// <summary>
+    /// Documents current behavior (#3335 caveat a): unlinking a discovered camera from its printer
+    /// leaves the old row (now user-modified) unlinked, and the next sync creates a second camera
+    /// for the same plugin stream because only cameras linked to the printer are considered.
+    /// </summary>
+    [Fact]
+    public async Task SyncPrinterAsync_DiscoveredCameraUnlinked_CreatesNewLinkedCameraBesideTheUnlinkedOne()
+    {
+        Printer printer = await AddPrinterAsync();
+        SetupDetection(StreamUrl, SnapshotUrl);
+        PrinterCameraSynchronizer sut = CreateSut();
+        await sut.SyncPrinterAsync(printer.Id, explicitRequest: false, CancellationToken.None);
+        Camera original = await _db.Cameras.Include(c => c.PrinterLinks).SingleAsync();
+        original.PrinterLinks.Clear();
+        original.UserModified = true;
+        await _db.SaveChangesAsync();
+        _db.ChangeTracker.Clear();
+
+        PrinterCameraSyncResult result = await sut.SyncPrinterAsync(printer.Id, explicitRequest: false, CancellationToken.None);
+
+        result.Created.Should().Be(1);
+        List<Camera> cameras = await _db.Cameras.Include(c => c.PrinterLinks).ToListAsync();
+        cameras.Should().HaveCount(2);
+        cameras.Single(c => c.Id == original.Id).PrinterLinks.Should().BeEmpty();
+        cameras.Single(c => c.Id != original.Id).PrinterLinks.Should().ContainSingle(l => l.PrinterId == printer.Id && l.IsPrimary);
+    }
+
+    [Fact]
     public async Task SyncPrinterAsync_CameraReappears_RestoresHealth()
     {
         Printer printer = await AddPrinterAsync();
