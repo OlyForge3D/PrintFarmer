@@ -29,9 +29,12 @@ function getChipStyles(state?: string): { border: string; glow: string; icon: st
       };
     case 'idle':
       return {
-        border: 'border-pf-status-idle-border',
-        glow: 'shadow-[0_2px_8px_rgba(59,130,246,0.35)]',
-        icon: getFailureDetectionIconColorClass(state),
+        // Idle is neutral, so like the default branch it uses translucent white
+        // instead of the theme's idle text token, which is dark slate (#475569,
+        // ~2.6:1) in the light theme against this chip's fixed bg-slate-950/80.
+        border: 'border-white/30',
+        glow: 'shadow-[0_2px_8px_rgba(255,255,255,0.15)]',
+        icon: 'text-white/80',
       };
     case 'misconfigured':
       return {
@@ -46,10 +49,11 @@ function getChipStyles(state?: string): { border: string; glow: string; icon: st
         icon: getFailureDetectionIconColorClass(state),
       };
     default:
-      // Checking/disabled intentionally diverge from the shared helper: this chip
-      // always sits on the dark camera feed, and the helper's neutral tokens
-      // (text-secondary / control-disabled-text) are dark slate in the light theme.
-      // With no state hue to convey, a translucent white stays legible everywhere.
+      // Checking/disabled intentionally diverge from the shared helper (as idle does):
+      // this chip always sits on a fixed bg-slate-950/80 over the camera feed, and the
+      // helper's neutral tokens (status-idle-text / text-secondary /
+      // control-disabled-text) are dark slate in the light theme. With no state hue
+      // to convey, a translucent white stays legible in every theme.
       return {
         border: 'border-white/20',
         glow: '',

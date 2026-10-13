@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { colorDistance } from '@/common/utils/colorDistance';
+import { colorDistance, INVALID_COLOR_DISTANCE } from '@/common/utils/colorDistance';
 import { SELECTABLE_THEMES } from '@/design-system/themes/registry';
 import { getFailureDetectionIconColorClass } from '@/features/printers/utils/failureDetectionStatus';
 
@@ -51,6 +51,19 @@ const highContrastTokens = (theme: string): Map<string, string> => {
   return merged;
 };
 
+/**
+ * CIEDE2000 distance that fails closed: `colorDistance` returns the
+ * INVALID_COLOR_DISTANCE sentinel (1e6) for any value it cannot parse (e.g. an
+ * 8-digit #rrggbbaa token), which would otherwise satisfy a `>=` threshold.
+ */
+const statusDistance = (left: string, right: string): number => {
+  const distance = colorDistance(left, right);
+  if (distance >= INVALID_COLOR_DISTANCE) {
+    throw new Error(`Cannot compare ${left} with ${right}: unsupported color format`);
+  }
+  return distance;
+};
+
 const tokenOf = (className: string): string => className.replace(/^text-pf-/, '');
 
 const VARIANTS = SELECTABLE_THEMES.flatMap((theme) => [
@@ -59,6 +72,13 @@ const VARIANTS = SELECTABLE_THEMES.flatMap((theme) => [
 ]);
 
 describe('failure-detection shield neutral tones', () => {
+  it('fails closed on colors the distance helper cannot parse', () => {
+    expect(colorDistance('#15803dff', '#15803d')).toBe(INVALID_COLOR_DISTANCE);
+    expect(() => statusDistance('#15803dff', '#15803d')).toThrow(/unsupported color format/);
+    expect(() => statusDistance('#15803d', '#15803dff')).toThrow(/unsupported color format/);
+    expect(statusDistance('#15803d', '#15803d')).toBe(0);
+  });
+
   it.each(NEUTRAL_CASES)('%s tone is a mapped Tailwind color', (_name, state, enabled) => {
     const token = tokenOf(getFailureDetectionIconColorClass(state, enabled));
     expect(indexCss).toContain(`--color-pf-${token}: var(--pf-${token});`);
@@ -75,7 +95,7 @@ describe('failure-detection shield neutral tones', () => {
         expect(statusHex, `--pf-${status}`).toBeDefined();
         expect(neutral).not.toBe(statusHex);
         expect(
-          colorDistance(neutral!, statusHex!),
+          statusDistance(neutral!, statusHex!),
           `--pf-${token} ${neutral} vs --pf-${status} ${statusHex}`,
         ).toBeGreaterThanOrEqual(MIN_STATUS_DISTANCE);
       }

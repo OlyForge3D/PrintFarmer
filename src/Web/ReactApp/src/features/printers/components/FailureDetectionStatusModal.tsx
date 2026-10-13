@@ -179,6 +179,9 @@ export function FailureDetectionStatusModal({
   const nextStep = getFailureDetectionNextStep(status, enabled);
   // Same derivation as FailureDetectionMonitoringBadge, without the raw-state fallback,
   // so a non-printing error shows the same shield tone in the badge and the modal.
+  // The status badge below intentionally keeps the `?? status?.state` fallback: the
+  // shield mirrors the summary the operator clicked ("Checking"), while the modal
+  // body reports the raw backend state ("Monitor error") for diagnosis.
   const iconColorClass = getFailureDetectionIconColorClass(getFailureDetectionDisplayState(status), enabled);
   const showReason = reason.trim() !== detail.trim();
   const needsAttention = getFailureDetectionAttentionContent(status) !== null;
