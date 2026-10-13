@@ -4853,7 +4853,12 @@ public class PrintersController(
             ? NotFound()
             : new CameraUrlResult(
                 streamUrl == null ? null : GetCameraProxyPath(id, "stream"),
-                snapshotUrl == null ? null : GetCameraProxyPath(id, "snapshot"));
+                snapshotUrl == null ? null : GetCameraProxyPath(id, "snapshot"))
+            {
+                AccessMode = Farm.Infrastructure.Services.Cameras.CameraContractClassifier.GetAccessMode(streamUrl, snapshotUrl),
+                StreamFormat = Farm.Infrastructure.Services.Cameras.CameraContractClassifier.GetStreamFormat(streamUrl),
+                SnapshotStrategy = Farm.Infrastructure.Services.Cameras.CameraContractClassifier.GetSnapshotStrategy(snapshotUrl),
+            };
     }
 
     /// <summary>Streams camera content without disclosing its private target URL.</summary>
@@ -4873,11 +4878,11 @@ public class PrintersController(
         ProxyCameraAsync(id, useSnapshot: true, ct);
 
     private static PrinterCameraUrlsDto CreateSafeCameraUrls(PrinterCameraUrlsDto camera) =>
-        new(
-            camera.Id,
-            camera.Name,
-            camera.CameraStreamUrl == null ? null : GetCameraProxyPath(camera.Id, "stream"),
-            camera.CameraSnapshotUrl == null ? null : GetCameraProxyPath(camera.Id, "snapshot"));
+        camera with
+        {
+            CameraStreamUrl = camera.CameraStreamUrl == null ? null : GetCameraProxyPath(camera.Id, "stream"),
+            CameraSnapshotUrl = camera.CameraSnapshotUrl == null ? null : GetCameraProxyPath(camera.Id, "snapshot"),
+        };
 
     private static string GetCameraProxyPath(Guid printerId, string kind) =>
         $"/api/printers/{printerId:D}/camera/{kind}";

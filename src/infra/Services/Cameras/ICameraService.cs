@@ -109,4 +109,36 @@ public interface ICameraService
     /// </summary>
     /// <param name="ct">Cancellation token for the operation.</param>
     Task<List<DisplayCameraDto>> GetDisplayCamerasAsync(CancellationToken ct);
+
+    /// <summary>
+    /// Gets cameras filtered by linked printer and/or effective location.
+    /// </summary>
+    /// <param name="printerId">When set, only cameras linked to this printer.</param>
+    /// <param name="locationId">When set, only cameras whose effective location is this location.</param>
+    /// <param name="enabledOnly">When true, only enabled cameras.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    Task<List<CameraDto>> QueryDtosAsync(Guid? printerId, Guid? locationId, bool enabledOnly, CancellationToken ct);
+
+    /// <summary>
+    /// Gets enabled display cameras filtered by linked printer and/or effective location.
+    /// </summary>
+    Task<List<DisplayCameraDto>> QueryDisplayCamerasAsync(Guid? printerId, Guid? locationId, CancellationToken ct);
+
+    /// <summary>
+    /// Links a camera to a printer (idempotent). When <paramref name="isPrimary"/> is true the camera becomes
+    /// the printer's primary camera; when omitted it becomes primary only if the printer has none.
+    /// Returns null when the camera does not exist; throws <see cref="ArgumentException"/> for an unknown printer.
+    /// </summary>
+    Task<CameraDto?> LinkToPrinterAsync(Guid cameraId, Guid printerId, bool? isPrimary, CancellationToken ct);
+
+    /// <summary>
+    /// Unlinks a camera from a printer, keeping the camera. Promotes another camera to primary when needed.
+    /// </summary>
+    Task<CameraPrinterRemovalResult> UnlinkFromPrinterAsync(Guid cameraId, Guid printerId, CancellationToken ct);
+
+    /// <summary>
+    /// Printer-scoped removal used by Edit Printer: unlinks the camera from the printer and deletes it when it
+    /// was auto-discovered (non-standalone source) and no printer links remain.
+    /// </summary>
+    Task<CameraPrinterRemovalResult> RemoveFromPrinterAsync(Guid printerId, Guid cameraId, CancellationToken ct);
 }

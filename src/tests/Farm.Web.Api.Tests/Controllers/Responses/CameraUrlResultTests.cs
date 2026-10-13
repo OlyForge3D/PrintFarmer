@@ -1,4 +1,7 @@
-﻿using Farm.Modules.PrintQueue.Controllers.Responses;
+﻿using System.Text.Json;
+using System.Text.Json.Serialization;
+using Farm.Infrastructure.Domain;
+using Farm.Modules.PrintQueue.Controllers.Responses;
 using FluentAssertions;
 
 namespace Farm.Web.Api.Tests.Controllers.Responses;
@@ -53,5 +56,41 @@ public class CameraUrlResultTests
         (string? streamUrl, string? snapshotUrl) = first;
         _ = streamUrl.Should().Be(StreamPath);
         _ = snapshotUrl.Should().Be(SnapshotPath);
+    }
+
+    private static readonly JsonSerializerOptions ApiJson = new(JsonSerializerDefaults.Web)
+    {
+        Converters = { new JsonStringEnumConverter() },
+    };
+
+    [Fact]
+    public void Serialize_WithContractHints_EmitsStringEnums()
+    {
+        var result = new CameraUrlResult(StreamPath, SnapshotPath)
+        {
+            AccessMode = CameraAccessMode.StreamAndSnapshot,
+            StreamFormat = CameraStreamFormat.Mjpeg,
+            SnapshotStrategy = CameraSnapshotStrategy.DirectUrl,
+        };
+
+        using JsonDocument json = JsonDocument.Parse(JsonSerializer.Serialize(result, ApiJson));
+
+        _ = json.RootElement.GetProperty("streamUrl").GetString().Should().Be(StreamPath);
+        _ = json.RootElement.GetProperty("accessMode").GetString().Should().Be("StreamAndSnapshot");
+        _ = json.RootElement.GetProperty("streamFormat").GetString().Should().Be("Mjpeg");
+        _ = json.RootElement.GetProperty("snapshotStrategy").GetString().Should().Be("DirectUrl");
+    }
+
+    [Fact]
+    public void Serialize_WithoutContractHints_OmitsOptionalFields()
+    {
+        var result = new CameraUrlResult(StreamPath, null);
+
+        using JsonDocument json = JsonDocument.Parse(JsonSerializer.Serialize(result, ApiJson));
+
+        _ = json.RootElement.TryGetProperty("accessMode", out _).Should().BeFalse();
+        _ = json.RootElement.TryGetProperty("streamFormat", out _).Should().BeFalse();
+        _ = json.RootElement.TryGetProperty("snapshotStrategy", out _).Should().BeFalse();
+        _ = json.RootElement.GetProperty("streamUrl").GetString().Should().Be(StreamPath);
     }
 }

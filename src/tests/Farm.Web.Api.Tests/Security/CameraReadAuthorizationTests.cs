@@ -408,6 +408,129 @@ public sealed class CameraReadAuthorizationTests : IAsyncLifetime, IDisposable
         body.Should().Contain(standaloneCameraId.ToString());
     }
 
+    // --- Multi-printer cameras (#3329): access when the caller can view ANY linked printer ------
+
+    private async Task<(Guid CameraId, Guid FirstPrinterId, Guid SecondPrinterId, Guid SecondRoleId)> SeedMultiPrinterCameraAsync()
+    {
+        (Guid firstPrinterId, _) = await SeedRestrictedPrinterWithRoleAsync();
+        (Guid secondPrinterId, Guid secondRoleId) = await SeedRestrictedPrinterWithRoleAsync();
+        Guid cameraId = Guid.NewGuid();
+        var camera = new Camera
+        {
+            Id = cameraId,
+            Name = "Shared camera",
+            PrinterLinks =
+            {
+                new CameraPrinter { PrinterId = firstPrinterId, IsPrimary = true, SortOrder = 0 },
+                new CameraPrinter { PrinterId = secondPrinterId, IsPrimary = false, SortOrder = 1 },
+            },
+            StreamUrl = "http://camera.example.invalid/stream",
+            IsEnabled = true,
+        };
+        _cameras.Setup(s => s.FindByIdAsync(cameraId, It.IsAny<CancellationToken>())).ReturnsAsync(camera);
+        _cameras.Setup(s => s.GetAllDtosAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => [ToMultiPrinterDto(cameraId, firstPrinterId, secondPrinterId)]);
+        return (cameraId, firstPrinterId, secondPrinterId, secondRoleId);
+    }
+
+    private static CameraDto ToMultiPrinterDto(Guid cameraId, Guid firstPrinterId, Guid secondPrinterId) => new()
+    {
+        Id = cameraId,
+        Name = "Shared camera",
+        PrinterId = firstPrinterId,
+        PrinterName = "First printer",
+        PrinterIds = [firstPrinterId, secondPrinterId],
+        Printers =
+        [
+            new CameraPrinterSummaryDto { Id = firstPrinterId, Name = "First printer", IsPrimary = true },
+            new CameraPrinterSummaryDto { Id = secondPrinterId, Name = "Second printer", IsPrimary = false },
+        ],
+        IsEnabled = true,
+    };
+
+    [Fact]
+    public async Task MultiPrinterCamera_CallerWhoCanViewOnlySecondPrinter_CanReadCamera()
+    {
+        (Guid cameraId, _, _, Guid secondRoleId) = await SeedMultiPrinterCameraAsync();
+        using HttpClient client = await CreateClientWithRoleAsync(secondRoleId);
+
+        HttpResponseMessage response = await client.GetAsync(BuildCameraUrl(cameraId, ""));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task MultiPrinterCamera_ListForSecondPrinterViewer_IncludesCameraAndRedactsHiddenPrinter()
+    {
+        (Guid cameraId, Guid firstPrinterId, Guid secondPrinterId, Guid secondRoleId) = await SeedMultiPrinterCameraAsync();
+        using HttpClient client = await CreateClientWithRoleAsync(secondRoleId);
+
+        HttpResponseMessage response = await client.GetAsync("/api/cameras");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        using JsonDocument json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        JsonElement camera = json.RootElement.EnumerateArray().Single(c => c.GetProperty("id").GetGuid() == cameraId);
+        camera.GetProperty("printerIds").EnumerateArray().Select(e => e.GetGuid()).Should().Equal(secondPrinterId);
+        camera.GetProperty("printerId").GetGuid().Should().Be(secondPrinterId);
+        json.RootElement.GetRawText().Should().NotContain(firstPrinterId.ToString());
+    }
+
+    [Fact]
+    public async Task MultiPrinterCamera_CallerWithoutAnyLinkedPrinterAccess_IsDenied()
+    {
+        (Guid cameraId, _, _, _) = await SeedMultiPrinterCameraAsync();
+        using HttpClient client = CreateForeignRoleClient();
+
+        HttpResponseMessage single = await client.GetAsync(BuildCameraUrl(cameraId, ""));
+        HttpResponseMessage list = await client.GetAsync("/api/cameras");
+
+        single.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        (await list.Content.ReadAsStringAsync()).Should().NotContain(cameraId.ToString());
+    }
+
+    [Fact]
+    public async Task ListFilteredByInaccessiblePrinter_ReturnsEmptyWithoutQuerying()
+    {
+        (_, Guid firstPrinterId, _, _) = await SeedMultiPrinterCameraAsync();
+        using HttpClient client = CreateForeignRoleClient();
+
+        HttpResponseMessage response = await client.GetAsync($"/api/cameras?printerId={firstPrinterId}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await response.Content.ReadAsStringAsync()).Should().Be("[]");
+        _cameras.Verify(
+            s => s.QueryDtosAsync(It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task UnlinkedCamera_IsVisibleToAnyAuthenticatedCaller()
+    {
+        Guid cameraId = Guid.NewGuid();
+        _cameras.Setup(s => s.FindByIdAsync(cameraId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Camera { Id = cameraId, Name = "Unlinked", IsEnabled = true });
+        using HttpClient client = CreateForeignRoleClient();
+
+        HttpResponseMessage response = await client.GetAsync(BuildCameraUrl(cameraId, ""));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task RemoveCameraFromPrinter_CallerWithoutPrinterAccess_Returns404WithoutMutation()
+    {
+        (Guid cameraId, Guid firstPrinterId, _, _) = await SeedMultiPrinterCameraAsync();
+        using HttpClient client = CreateForeignRoleClient();
+        client.DefaultRequestHeaders.Add("X-Test-Permissions", "printers:admin");
+
+        HttpResponseMessage response = await client.DeleteAsync($"/api/printers/{firstPrinterId}/cameras/{cameraId}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        _cameras.Verify(
+            s => s.RemoveFromPrinterAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
     // --- Architecture guard: every action taking a camera/printer id must call the
     // authorization helper, so a newly added action cannot silently regress (supplements,
     // does not replace, the behavioral tests above). ----------------------------------------
@@ -415,13 +538,16 @@ public sealed class CameraReadAuthorizationTests : IAsyncLifetime, IDisposable
     private static readonly IReadOnlyDictionary<string, (string Signature, string RequiredCall)> MethodsRequiringAuthCheck =
         new Dictionary<string, (string, string)>(StringComparer.Ordinal)
         {
-            ["GetCamerasAsync"] = ("Task<ActionResult<IEnumerable<CameraDto>>> GetCamerasAsync(CancellationToken ct)", "FilterAccessibleCamerasAsync"),
-            ["GetEnabledCamerasAsync"] = ("Task<ActionResult<IEnumerable<CameraDto>>> GetEnabledCamerasAsync(CancellationToken ct)", "FilterAccessibleCamerasAsync"),
-            ["GetDisplayCamerasAsync"] = ("Task<ActionResult<IEnumerable<DisplayCameraDto>>> GetDisplayCamerasAsync(CancellationToken ct)", "FilterAccessibleCamerasAsync"),
+            ["GetCamerasAsync"] = ("Task<ActionResult<IEnumerable<CameraDto>>> GetCamerasAsync(", "FilterAccessibleCamerasAsync"),
+            ["GetEnabledCamerasAsync"] = ("Task<ActionResult<IEnumerable<CameraDto>>> GetEnabledCamerasAsync(", "FilterAccessibleCamerasAsync"),
+            ["GetDisplayCamerasAsync"] = ("Task<ActionResult<IEnumerable<DisplayCameraDto>>> GetDisplayCamerasAsync(", "FilterAccessibleCamerasAsync"),
             ["GetCameraAsync"] = ("Task<ActionResult<CameraDto>> GetCameraAsync(Guid id, CancellationToken ct)", "CanAccessCameraPrinterAsync"),
             ["GetCamerasByPrinterAsync"] = ("Task<ActionResult<IEnumerable<CameraDto>>> GetCamerasByPrinterAsync(Guid printerId, CancellationToken ct)", "CanAccessCameraPrinterAsync"),
             ["DetectCameraEndpointsAsync"] = ("Task<ActionResult<CameraEndpointDetectionDto>> DetectCameraEndpointsAsync(DetectCameraEndpointsRequest request, CancellationToken ct)", "CanAccessCameraPrinterAsync"),
             ["ProxyCameraAsync"] = ("Task<IActionResult> ProxyCameraAsync(Guid id, bool useSnapshot, CancellationToken ct)", "CanAccessCameraPrinterAsync"),
+            ["LinkCameraToPrinterAsync"] = ("Task<ActionResult<CameraDto>> LinkCameraToPrinterAsync(", "CanAccessCameraPrinterAsync"),
+            ["UnlinkCameraFromPrinterAsync"] = ("Task<IActionResult> UnlinkCameraFromPrinterAsync(Guid id, Guid printerId, CancellationToken ct)", "CanAccessCameraPrinterAsync"),
+            ["RemoveCameraFromPrinterAsync"] = ("Task<ActionResult<RemoveCameraFromPrinterResponse>> RemoveCameraFromPrinterAsync(", "CanAccessCameraPrinterAsync"),
         };
 
     [Fact]

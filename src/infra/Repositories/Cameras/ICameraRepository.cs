@@ -93,4 +93,24 @@ public interface ICameraRepository
     /// <param name="printerId">The printer ID.</param>
     /// <param name="ct">Cancellation token.</param>
     Task<bool> HasPrimaryCameraAsync(Guid printerId, CancellationToken ct);
+
+    /// <summary>
+    /// Queries cameras with optional filters, with printer links, linked printers (and their locations)
+    /// and the assigned location loaded.
+    /// </summary>
+    /// <param name="printerId">When set, only cameras linked to this printer.</param>
+    /// <param name="locationId">When set, only cameras whose effective location is this location.</param>
+    /// <param name="enabledOnly">When true, only enabled cameras.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<List<Camera>> QueryAsync(Guid? printerId, Guid? locationId, bool enabledOnly, CancellationToken ct);
+
+    /// <summary>
+    /// Gets the tracked camera links of a printer, with each link's camera loaded.
+    /// </summary>
+    Task<List<CameraPrinter>> GetPrinterLinksAsync(Guid printerId, CancellationToken ct);
+
+    /// <summary>
+    /// Removes a camera-printer link.
+    /// </summary>
+    void RemoveLink(CameraPrinter link);
 }
