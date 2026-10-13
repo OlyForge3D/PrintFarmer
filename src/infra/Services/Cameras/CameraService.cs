@@ -578,13 +578,10 @@ public class CameraService : ICameraService
             existing.IsPrimary = true;
             await DemoteOtherPrimariesAsync(printerId, camera.Id, ct);
         }
-        else if (isPrimary == false && existing.IsPrimary)
+        else if (isPrimary == false && existing.IsPrimary && await PromoteNextPrimaryAsync(printerId, camera.Id, ct))
         {
             // Demoting is only honoured when another camera can take over as the printer's primary.
-            if (await PromoteNextPrimaryAsync(printerId, camera.Id, ct))
-            {
-                existing.IsPrimary = false;
-            }
+            existing.IsPrimary = false;
         }
 
         await ApplyLocationRuleAsync(camera, null, clearLocation: false, previousEffectiveLocationId, ct);
@@ -805,12 +802,10 @@ public class CameraService : ICameraService
 
     private async Task DemoteOtherPrimariesAsync(Guid printerId, Guid cameraId, CancellationToken ct)
     {
-        foreach (CameraPrinter other in await _unitOfWork.Cameras.GetPrinterLinksAsync(printerId, ct))
+        IEnumerable<CameraPrinter> links = await _unitOfWork.Cameras.GetPrinterLinksAsync(printerId, ct);
+        foreach (CameraPrinter other in links.Where(l => l.CameraId != cameraId && l.IsPrimary))
         {
-            if (other.CameraId != cameraId && other.IsPrimary)
-            {
-                other.IsPrimary = false;
-            }
+            other.IsPrimary = false;
         }
     }
 

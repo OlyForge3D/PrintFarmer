@@ -191,10 +191,10 @@ public sealed class PrintFailureMonitorService : BackgroundService
                 "All cameras linked to this printer are disabled. Enable a camera in printer settings.",
             PrinterCameraAvailability.NoSnapshotUrl =>
                 "Camera snapshot URL required. None of this printer's enabled cameras has a snapshot URL.",
-            PrinterCameraAvailability.CamerasOffline =>
-                string.IsNullOrWhiteSpace(selection.Camera?.HealthMessage)
-                    ? $"Camera '{selection.Camera?.Name}' is offline."
-                    : $"Camera '{selection.Camera?.Name}' is offline: {selection.Camera!.HealthMessage}",
+            PrinterCameraAvailability.CamerasOffline => selection.Camera is { HealthMessage: { } health } camera
+                && !string.IsNullOrWhiteSpace(health)
+                    ? $"Camera '{camera.Name}' is offline: {health}"
+                    : $"Camera '{selection.Camera?.Name}' is offline.",
             _ => string.Empty,
         };
     }
