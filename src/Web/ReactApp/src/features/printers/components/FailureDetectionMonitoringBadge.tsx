@@ -58,7 +58,7 @@ export function FailureDetectionMonitoringBadge({
   const resolvedPrinterId = effectiveStatus?.printerId ?? printerId;
   const resolvedPrinterName = effectiveStatus?.printerName ?? printerName;
 
-  const iconColorClass = getFailureDetectionIconColorClass(displayState);
+  const iconColorClass = getFailureDetectionIconColorClass(displayState, enabled);
 
   return (
     <>

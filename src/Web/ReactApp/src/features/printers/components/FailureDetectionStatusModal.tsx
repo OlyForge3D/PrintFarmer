@@ -1,10 +1,10 @@
 import { useMemo, useState } from 'react';
+import clsx from 'clsx';
 import { Modal } from '@/common/components/modals/Modal';
 import { Badge, Button } from '@/common/components/ui';
 import { ExternalLinkIcon, ShieldIcon } from '@/common/components/icons/MdiIcons';
 import { useFailureDetectionHistory } from '@/common/hooks/useApi';
 import type { FailureDetectionEvent, FailureDetectionPrinterStatusDto } from '@/types/api';
-import clsx from 'clsx';
 import {
   getFailureDetectionAttentionContent,
   getFailureDetectionDetail,
@@ -177,7 +177,9 @@ export function FailureDetectionStatusModal({
   const lastFailure = formatFailureDetectionDateTime(status?.lastFailureDetectedAt);
   const lastOutcome = getFailureDetectionOutcomeLabel(status);
   const nextStep = getFailureDetectionNextStep(status, enabled);
-  const iconColorClass = getFailureDetectionIconColorClass(displayState);
+  // Same derivation as FailureDetectionMonitoringBadge, without the raw-state fallback,
+  // so a non-printing error shows the same shield tone in the badge and the modal.
+  const iconColorClass = getFailureDetectionIconColorClass(getFailureDetectionDisplayState(status), enabled);
   const showReason = reason.trim() !== detail.trim();
   const needsAttention = getFailureDetectionAttentionContent(status) !== null;
   const recentIncidents = useMemo(

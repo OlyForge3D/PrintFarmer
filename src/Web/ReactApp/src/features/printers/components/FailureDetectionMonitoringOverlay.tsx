@@ -29,7 +29,7 @@ function getChipStyles(state?: string): { border: string; glow: string; icon: st
       };
     case 'idle':
       return {
-        border: 'border-pf-accent/30',
+        border: 'border-pf-status-idle-border',
         glow: 'shadow-[0_2px_8px_rgba(59,130,246,0.35)]',
         icon: getFailureDetectionIconColorClass(state),
       };
@@ -46,6 +46,10 @@ function getChipStyles(state?: string): { border: string; glow: string; icon: st
         icon: getFailureDetectionIconColorClass(state),
       };
     default:
+      // Checking/disabled intentionally diverge from the shared helper: this chip
+      // always sits on the dark camera feed, and the helper's neutral tokens
+      // (text-secondary / control-disabled-text) are dark slate in the light theme.
+      // With no state hue to convey, a translucent white stays legible everywhere.
       return {
         border: 'border-white/20',
         glow: '',

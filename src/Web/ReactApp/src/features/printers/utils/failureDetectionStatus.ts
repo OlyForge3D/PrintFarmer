@@ -116,21 +116,34 @@ export function getFailureDetectionStateVariant(state?: string, enabled = false)
   }
 }
 
-/** Shield icon color for a failure-detection state. Red is reserved for `error`. */
-export function getFailureDetectionIconColorClass(state?: string): string {
+/**
+ * Shield icon color for a failure-detection state. Red is reserved for `error`.
+ *
+ * Only semantic tokens are used — never the brand `accent`, which equals
+ * success in matrix/ratos and error in voron. The neutral tones (idle,
+ * checking, disabled) are guarded against colliding with success, warning and
+ * error in every theme by `failureDetectionIconTokens.test.ts`.
+ *
+ * `enabled` mirrors `getFailureDetectionStateVariant`: an unknown state while
+ * enabled is "checking" and an unknown state while disabled is "off". The
+ * checking tone stays neutral rather than using `info`, because `info` is
+ * within a few ΔE of warning in forge and of success in ratos; the "Checking"
+ * label carries the distinction.
+ */
+export function getFailureDetectionIconColorClass(state?: string, enabled = false): string {
   switch (state) {
     case 'monitoring':
       return 'text-pf-success';
     case 'idle':
-      return 'text-pf-accent';
+      return 'text-pf-status-idle-text';
     case 'misconfigured':
       return 'text-pf-warning';
     case 'error':
       return 'text-pf-error';
     case 'disabled':
-      return 'text-pf-text-tertiary';
+      return 'text-pf-control-disabled-text';
     default:
-      return 'text-pf-text-secondary';
+      return enabled ? 'text-pf-text-secondary' : 'text-pf-control-disabled-text';
   }
 }
 
