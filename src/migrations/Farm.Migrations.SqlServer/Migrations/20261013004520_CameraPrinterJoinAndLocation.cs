@@ -30,6 +30,17 @@ namespace Farm.Migrations.SqlServer.Migrations
                 nullable: false,
                 defaultValue: false);
 
+            // Drop the legacy Cameras.PrinterId cascade FK before creating CameraPrinters: SQL Server
+            // rejects (error 1785) a second cascade path Printers -> Cameras -> CameraPrinters alongside
+            // Printers -> CameraPrinters. The PrinterId column itself is kept until the data copy below.
+            migrationBuilder.DropForeignKey(
+                name: "FK_Cameras_Printers_PrinterId",
+                table: "Cameras");
+
+            migrationBuilder.DropIndex(
+                name: "IX_Cameras_PrinterId",
+                table: "Cameras");
+
             migrationBuilder.CreateTable(
                 name: "CameraPrinters",
                 columns: table => new
@@ -85,14 +96,6 @@ namespace Farm.Migrations.SqlServer.Migrations
                 FROM [Cameras] AS c
                 WHERE c.[Location] IS NOT NULL AND LTRIM(RTRIM(c.[Location])) <> N'';
                 """);
-
-            migrationBuilder.DropForeignKey(
-                name: "FK_Cameras_Printers_PrinterId",
-                table: "Cameras");
-
-            migrationBuilder.DropIndex(
-                name: "IX_Cameras_PrinterId",
-                table: "Cameras");
 
             migrationBuilder.DropColumn(
                 name: "PrinterId",
