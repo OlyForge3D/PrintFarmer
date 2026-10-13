@@ -226,12 +226,14 @@ uses the same dirty-draft guard as sidebar and palette navigation.
 The metadata-driven pages
 (`<SettingsPage>`) filter by group and render fields from the backend metadata
 API — no hand-written forms per property. Bespoke sub-pages (Bed Types,
-Cameras, Users, Roles, Tags, Quotas, Slicer Profiles, Webhooks) render existing embedded
+Users, Roles, Tags, Quotas, Slicer Profiles, Webhooks) render existing embedded
 components. Operations use standalone framed pages. Power Monitors, Locations and
 Catalog remain standalone configuration links, reachable from the Control Center
 only — the settings sidebar does not list them (see below).
 
-Camera editing uses the fine-grained `cameras:admin` permission and loads
+Cameras are not a settings sub-page; they live at `/cameras` in the main
+navigation (see [Cameras](./FEATURES.md#cameras)). Camera editing there uses the
+fine-grained `cameras:admin` permission and loads
 configuration before enabling fields or saving; the playback proxy paths are not
 editable camera targets. Stored URL credentials
 are hidden. Leaving a URL unchanged preserves its saved credentials, while

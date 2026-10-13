@@ -2,6 +2,13 @@
 
 ### Features
 
+- Make cameras a first-class feature at `/cameras` with all, by-location and
+  by-printer views. Cameras link to many printers (one primary per printer),
+  are auto-discovered from printer backends on connect, create and every
+  `CameraSync.intervalMinutes` (default 15), and are managed from Add/Edit
+  Printer. Existing printers are backfilled on the first sync after upgrade.
+  The admin settings Cameras entry is removed (#3335).
+
 - Add dry-run-first Mac mini Ralph setup with private unverified staging and
   explicit native-app cutover instructions, discovered policy approval and
   receipt reuse/renewal without manually copying IDs or commit pins (#2935).
