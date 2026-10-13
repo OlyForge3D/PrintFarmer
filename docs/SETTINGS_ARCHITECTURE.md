@@ -69,7 +69,7 @@ Under `/admin/settings` (`system` scope), settings navigation is organized into 
 
 1. **Farm**: Farm Defaults (`gen-farm`)
 2. **Printing & slicing**: Defaults (`slicing-defaults`), Bed Types (`slicing-bed-types`), Slicer Profiles (`slicing-profiles`)
-3. **Hardware**: Locations (`hw-locations`), Printer Groups (`hw-printer-groups`), Cameras (`hw-cameras`), Power Monitors (`hw-power-monitors`), NFC Devices (`hw-nfc`), NFC Bindings (`hw-nfc-bindings`), Custom Fields (`hw-custom-fields`)
+3. **Hardware**: Locations (`hw-locations`), Printer Groups (`hw-printer-groups`), Power Monitors (`hw-power-monitors`), NFC Devices (`hw-nfc`), NFC Bindings (`hw-nfc-bindings`), Custom Fields (`hw-custom-fields`). Cameras is no longer an admin destination; it is the top-level `/cameras` page (`?view=all|location|printer`, #3332).
 4. **Automation & costs**: Automation & Costs (`auto-costs`)
 5. **Integrations**: External Services (`int-connections`), Webhooks (`int-webhooks`)
 6. **People & access**: User Accounts (`users-accounts`), Roles & Permissions (`users-roles`)
@@ -245,7 +245,7 @@ Categories are defined in `SETTINGS_CATEGORIES` (`src/Web/ReactApp/src/features/
 - **System scope** (`/admin/settings`):
   - `general` → Farm Defaults, System Config, Automation & Costs
   - `slicing` → Defaults, Bed Types, Slicer Profiles
-  - `hardware` → Cameras, NFC Devices, Printer Groups, NFC Bindings, Custom Fields
+  - `hardware` → NFC Devices, Printer Groups, NFC Bindings, Custom Fields
   - `integrations` → External Services, Webhooks
   - `quotas` → Print Quotas (`QuotaManagementPage`)
   - `users` → User Accounts, Roles & Permissions
@@ -287,7 +287,7 @@ mapping is declared in `SUB_PAGE_CONTENT` in
 | `integrations.connections` | `['Integrations']` | Resource-gated Spoolman, Home Assistant and Telegram cards; generic editor requires `system_settings:admin`. |
 | `slicing.defaults` | `['Slicing']` | — |
 
-Other sub-pages (`users.accounts`, `data.tags`, `hardware.cameras`, etc.) render
+Other sub-pages (`users.accounts`, `data.tags`, `hardware.nfc`, etc.) render
 bespoke pages instead of a metadata-driven `<SettingsPage>`.
 
 ### Groups declared in the code but not reachable via `allowedGroups`

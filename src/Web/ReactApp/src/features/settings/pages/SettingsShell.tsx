@@ -52,7 +52,6 @@ import { SettingsPage } from '@/features/admin/pages/SettingsPage';
 import { AdminNavPinButton } from '@/features/admin/components/AdminNavPinButton';
 import { BedTypeAdminPage } from '@/features/admin/pages/BedTypeAdminPage';
 import { NfcDevicesPage } from '@/features/nfc/pages/NfcDevicesPage';
-import { CamerasPage } from '@/features/cameras/pages/CamerasPage';
 import { CustomFieldsAdminPage } from '@/features/admin/pages/CustomFieldsAdminPage';
 import { WebhooksAdminPage } from '@/features/webhooks/pages/WebhooksAdminPage';
 import { TagAdminPage } from '@/features/admin/pages/TagAdminPage';
@@ -200,7 +199,6 @@ const SUB_PAGE_CONTENT: Record<string, ReactNode> = {
       <LazySlicerProfilesPage embedded />
     </Suspense>
   ),
-  'hardware.cameras': <CamerasPage embedded />,
   'hardware.nfc': <NfcDevicesPage embedded />,
   'hardware.printer-groups': <PrinterGroupsPage embedded />,
   'hardware.nfc-bindings': <NfcBindingsPage embedded />,
@@ -424,7 +422,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
   // sub-pages by canAccessSettingsTab, not just the rendered content of the
   // active tab. Without this, SettingsSidebar/SettingsSubTabs still listed
   // every tab in scope regardless of permission, so a user with e.g. only
-  // `printers:admin` could see Cameras/NFC/other inaccessible Hardware
+  // `printers:admin` could see NFC/other inaccessible Hardware
   // sub-tabs in the nav and only find out they were denied after clicking.
   // A category with zero remaining accessible sub-pages (or, for a
   // no-sub-page category, an inaccessible root tab) is dropped entirely.

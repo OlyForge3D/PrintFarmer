@@ -59,6 +59,9 @@ const LazyFilamentManagementPage = lazy(() =>
 const LazyPrintersPage = lazy(() =>
   import('@/features/printers/pages/PrintersPage').then(mod => ({ default: mod.PrintersPage }))
 );
+const LazyCamerasPage = lazy(() =>
+  import('@/features/cameras/pages/CamerasPage').then(mod => ({ default: mod.CamerasPage }))
+);
 const LazyPrinterGroupsPage = lazy(() =>
   import('@/features/printer-groups/pages/PrinterGroupsPage').then(mod => ({ default: mod.PrinterGroupsPage }))
 );
@@ -280,6 +283,7 @@ function AuthenticatedAppRoutes() {
         <Route path="dashboard" element={lazyRoute(<LazyPrinterDashboard />)} />
         <Route path="printers" element={lazyRoute(<LazyPrintersPage />)} />
         <Route path="printers/:printerId" element={lazyRoute(<LazyPrintersPage />)} />
+        <Route path="cameras" element={lazyRoute(<LazyCamerasPage />)} />
         <Route path="printers/:printerId/maintenance" element={lazyRoute(<LazyPrinterMaintenancePage />)} />
         <Route path="printer-groups" element={<ProtectedRoute requiredPermission={{ resource: 'printers', action: 'admin' }}>{lazyRoute(<LazyPrinterGroupsPage />)}</ProtectedRoute>} />
         <Route path="printQueue" element={lazyRoute(<LazyPrintQueueDashboardPage />)} />

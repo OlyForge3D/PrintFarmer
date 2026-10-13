@@ -15,9 +15,6 @@ vi.mock('@/features/printer-groups/pages/PrinterGroupsPage', () => ({
   PrinterGroupsPage: ({ embedded }: { embedded?: boolean }) => <div data-testid="printer-groups-page" data-embedded={String(embedded)}>Printer Groups Page</div>,
 }));
 
-vi.mock('@/features/cameras/pages/CamerasPage', () => ({
-  CamerasPage: ({ embedded }: { embedded?: boolean }) => <div data-testid="cameras-page" data-embedded={String(embedded)}>Cameras Page</div>,
-}));
 
 vi.mock('@/features/nfc/pages/NfcBindingsPage', () => ({
   NfcBindingsPage: ({ embedded }: { embedded?: boolean }) => <div data-testid="nfc-bindings-page" data-embedded={String(embedded)}>NFC Bindings Page</div>,
@@ -370,15 +367,14 @@ describe('SettingsShell', () => {
     }
   });
 
-  it('renders the accessible Cameras destination on its canonical admin settings URL (#2644)', () => {
+  it('no longer hosts Cameras under admin Hardware now that it is the top-level /cameras page (#3332)', () => {
     setAuthRoles(['farm_admin']);
-    renderSettings('/admin/settings?tab=hardware&sub=cameras');
+    renderSettings('/admin/settings?tab=hardware');
 
-    expect(getCategoryButton('Cameras')).toHaveAttribute('aria-current', 'page');
-    expect(screen.getByTestId('cameras-page')).toHaveAttribute('data-embedded', 'true');
-    expect(screen.getByTestId('location-pathname')).toHaveTextContent('/admin/settings');
-    expect(screen.getByTestId('location-search')).toHaveTextContent('tab=hardware');
-    expect(screen.getByTestId('location-search')).toHaveTextContent('sub=cameras');
+    expect(getCategoryButton('NFC Devices')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Cameras' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Cameras' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: 'Cameras' })).not.toBeInTheDocument();
   });
 
   it('never falls back to personal content for a user with no admin grants', () => {    setAuthRoles(['farm_user']);
@@ -734,7 +730,7 @@ describe('SettingsShell', () => {
   it('denies a custom (non-farm_admin) role a specific tab it lacks the requiredPermission for', () => {
     setAuthRoles(['farm_user']);
     authState.permissionOverride = (resource, action) => resource === 'printers' && action === 'admin';
-    renderSettings('/admin/settings?scope=system&tab=hardware&sub=cameras');
+    renderSettings('/admin/settings?scope=system&tab=hardware&sub=nfc');
 
     expect(screen.getByText(/don't have permission to view/i)).toBeInTheDocument();
     expect(screen.queryByTestId('printer-groups-page')).not.toBeInTheDocument();

@@ -226,10 +226,6 @@ vi.mock('@/features/nfc/pages/NfcBindingsPage', () => ({
   NfcBindingsPage: () => <div>NFC Bindings Page</div>,
 }));
 
-vi.mock('@/features/cameras/pages/CamerasPage', () => ({
-  CamerasPage: () => <div>Cameras Page</div>,
-}));
-
 vi.mock('@/features/admin/pages/CustomFieldsAdminPage', () => ({
   CustomFieldsAdminPage: () => <div>Custom Fields Page</div>,
 }));

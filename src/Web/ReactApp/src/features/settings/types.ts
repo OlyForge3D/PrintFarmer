@@ -92,10 +92,9 @@ export const SETTINGS_CATEGORIES: SettingsCategory[] = [
     id: 'hardware',
     scopeId: 'system',
     label: 'Hardware',
-    description: 'Cameras, NFC, printer groups, and device metadata.',
-    keywords: ['printer', 'printers', 'hardware', 'camera', 'nfc', 'custom field', 'device', 'webcam', 'group', 'binding'],
+    description: 'NFC, printer groups, and device metadata.',
+    keywords: ['printer', 'printers', 'hardware', 'nfc', 'custom field', 'device', 'group', 'binding'],
     subPages: [
-      { id: 'cameras', label: 'Cameras', description: 'Configure camera feeds and monitoring views.', keywords: ['camera', 'webcam', 'stream', 'video'] },
       { id: 'nfc', label: 'NFC Devices', description: 'Register and manage NFC readers and hardware.', keywords: ['nfc', 'tag', 'reader', 'rfid'] },
       { id: 'printer-groups', label: 'Printer Groups', description: 'Organize printers into shared operational groups.', keywords: ['printer', 'printers', 'hardware', 'group', 'grouping', 'cluster'] },
       { id: 'nfc-bindings', label: 'NFC Bindings', description: 'Map NFC tags to printers, spools, and actions.', keywords: ['nfc', 'binding', 'bind', 'tag', 'assignment'] },

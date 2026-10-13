@@ -1,4 +1,5 @@
-import { useMemo, useState, useEffect } from 'react';
+import { useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { RotateCw } from 'lucide-react';
 import { toast } from 'sonner';
 import { PageTemplate } from '@/common/components/PageTemplate';
@@ -27,51 +28,69 @@ import {
   isUnsupportedCameraPreview,
   shouldPollPrinterSnapshot,
 } from '@/features/cameras/utils/cameraPreview';
+import {
+  groupCamerasByLocation,
+  groupCamerasByPrinter,
+  parseCameraView,
+  type CameraGroup,
+  type CameraView,
+} from '@/features/cameras/utils/cameraGrouping';
 
 const CAMERA_SNAPSHOT_REFRESH_MS = 4_000;
 
+const CAMERA_VIEW_OPTIONS: { value: CameraView; label: string }[] = [
+  { value: 'all', label: 'All' },
+  { value: 'location', label: 'By location' },
+  { value: 'printer', label: 'By printer' },
+];
+
 /**
- * CamerasPage - Display all enabled cameras in a grid view
- * 
- * Shows cameras that have been explicitly added to the system via the Camera Admin page.
+ * CamerasPage - Top-level `/cameras` page.
+ *
+ * Shows every configured camera either as a flat grid (`?view=all`, default), grouped by
+ * effective location (`?view=location`) or grouped by linked printer (`?view=printer`).
  * Supports both stream and snapshot modes for each camera.
  */
 export function CamerasPage({ embedded = false }: EmbeddablePageProps) {
   const auth = useAuth();
-  const [cameras, setCameras] = useState<DisplayCameraDto[]>([]);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [cameraToEdit, setCameraToEdit] = useState<DisplayCameraDto | null>(null);
   const [cameraToDelete, setCameraToDelete] = useState<DisplayCameraDto | null>(null);
   const [isDeletingCamera, setIsDeletingCamera] = useState(false);
 
   const [searchParams, setSearchParams] = useSearchParams();
-  // Matches the CamerasController manage endpoints' `[RequirePermission("cameras", "admin")]`
-  // and the `hw-cameras` adminDestinations.ts entry (#1457).
+  // Matches the CamerasController manage endpoints' `[RequirePermission("cameras", "admin")]` (#1457).
   const canManageCameras = auth.hasPermission('cameras', 'admin');
   const activeTab = useMemo<'view' | 'manage'>(() => {
     const requestedTab = searchParams.get('cameraTab');
     if (requestedTab === 'manage' && canManageCameras) return 'manage';
     return 'view';
   }, [canManageCameras, searchParams]);
+  const activeView = parseCameraView(searchParams.get('view'));
 
-  useEffect(() => {
-    loadCameras();
-  }, []);
+  // Lives under the ['cameras'] key so the `camerasupdated` SignalR invalidation refreshes this page.
+  const camerasQuery = useQuery({
+    queryKey: ['cameras', 'display'],
+    queryFn: async () => {
+      const data = await cameraService.getDisplayCameras();
+      return [...data].sort((a, b) => a.sortOrder - b.sortOrder);
+    },
+  });
+  const cameras = useMemo(() => camerasQuery.data ?? [], [camerasQuery.data]);
+  const cameraGroups = useMemo<CameraGroup[] | null>(() => {
+    if (activeView === 'location') return groupCamerasByLocation(cameras);
+    if (activeView === 'printer') return groupCamerasByPrinter(cameras);
+    return null;
+  }, [activeView, cameras]);
+  const loading = camerasQuery.isPending;
+  const loadError = camerasQuery.error
+    ? camerasQuery.error instanceof Error ? camerasQuery.error.message : 'Failed to load cameras'
+    : null;
+  const displayedError = error ?? loadError;
 
   const loadCameras = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const data = await cameraService.getDisplayCameras();
-      // Sort by sortOrder
-      data.sort((a, b) => a.sortOrder - b.sortOrder);
-      setCameras(data);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load cameras');
-    } finally {
-      setLoading(false);
-    }
+    setError(null);
+    await camerasQuery.refetch();
   };
 
   const setTab = (nextTab: 'view' | 'manage') => {
@@ -79,6 +98,30 @@ export function CamerasPage({ embedded = false }: EmbeddablePageProps) {
     nextSearchParams.set('cameraTab', nextTab);
     setSearchParams(nextSearchParams, { replace: true });
   };
+
+  const setView = (nextView: CameraView) => {
+    const nextSearchParams = new URLSearchParams(searchParams);
+    if (nextView === 'all') {
+      nextSearchParams.delete('view');
+    } else {
+      nextSearchParams.set('view', nextView);
+    }
+    setSearchParams(nextSearchParams, { replace: true });
+  };
+
+  const renderCameraGrid = (gridCameras: DisplayCameraDto[]) => (
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+      {gridCameras.map((camera) => (
+        <CameraViewCard
+          key={camera.id}
+          camera={camera}
+          canManage={canManageCameras}
+          onEdit={setCameraToEdit}
+          onDelete={setCameraToDelete}
+        />
+      ))}
+    </div>
+  );
 
   const handleEditSuccess = async () => {
     await loadCameras();
@@ -106,7 +149,7 @@ export function CamerasPage({ embedded = false }: EmbeddablePageProps) {
   return (
     <PageTemplate
       title="Cameras"
-      subtitle="Live camera feeds from your print farm"
+      subtitle="Live camera feeds by location, by printer, or all at once"
       icon={CameraIcon}
       actions={
         <div className="flex items-center gap-2">
@@ -133,10 +176,25 @@ export function CamerasPage({ embedded = false }: EmbeddablePageProps) {
         <CameraManagementPanel onCamerasChanged={loadCameras} />
       ) : (
         <div className="space-y-6">
+          <div role="group" aria-label="Camera view" className="inline-flex gap-0">
+            {CAMERA_VIEW_OPTIONS.map((option) => (
+              <Button
+                key={option.value}
+                type="button"
+                size="sm"
+                variant={activeView === option.value ? 'primary' : 'secondary'}
+                aria-pressed={activeView === option.value}
+                onClick={() => setView(option.value)}
+              >
+                {option.label}
+              </Button>
+            ))}
+          </div>
+
           {/* Error message */}
-          {error && (
+          {displayedError && (
             <div className="px-4 py-3 rounded-sm bg-pf-error-bg border border-pf-error text-pf-error">
-              {error}
+              {displayedError}
             </div>
           )}
 
@@ -163,18 +221,25 @@ export function CamerasPage({ embedded = false }: EmbeddablePageProps) {
                 </p>
               )}
             </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-              {cameras.map((camera) => (
-                <CameraViewCard
-                  key={camera.id}
-                  camera={camera}
-                  canManage={canManageCameras}
-                  onEdit={setCameraToEdit}
-                  onDelete={setCameraToDelete}
-                />
-              ))}
+          ) : cameraGroups ? (
+            <div className="space-y-8">
+              {cameraGroups.map((group) => {
+                const headingId = `camera-group-${group.id}`;
+                return (
+                  <section key={group.id} aria-labelledby={headingId} className="space-y-3">
+                    <h2 id={headingId} className="text-lg font-semibold text-pf-text-primary">
+                      {group.label}{' '}
+                      <span className="text-sm font-normal text-pf-text-secondary">
+                        ({group.cameras.length} {group.cameras.length === 1 ? 'camera' : 'cameras'})
+                      </span>
+                    </h2>
+                    {renderCameraGrid(group.cameras)}
+                  </section>
+                );
+              })}
             </div>
+          ) : (
+            renderCameraGrid(cameras)
           )}
 
           <EditCameraModal
@@ -337,7 +402,7 @@ function CameraViewCard({ camera, canManage, onEdit, onDelete }: CameraViewCardP
           <div className="min-w-0 flex-1">
             <h3
               className="font-medium text-pf-text-primary truncate"
-              title={[camera.name, camera.printerName, camera.location, camera.cameraType, camera.source].filter(Boolean).join(' · ')}
+              title={[camera.name, camera.printerName, camera.effectiveLocationName ?? camera.location, camera.cameraType, camera.source].filter(Boolean).join(' · ')}
             >{camera.name}</h3>
           </div>
           <CameraHealthBadge

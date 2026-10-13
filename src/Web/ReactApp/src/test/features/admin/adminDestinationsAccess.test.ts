@@ -32,7 +32,7 @@ const ROLE_GATED_WITHOUT_PERMISSION = new Set(['admin-home', 'slicing-profiles']
 describe('adminDestinations — permission gating (#1457)', () => {
   it('classifies every destination without losing stable IDs or creating a second path registry', () => {
     const groups = new Set(SETTINGS_DISPLAY_GROUPS.map((group) => group.id));
-    expect(ADMIN_DESTINATIONS).toHaveLength(29);
+    expect(ADMIN_DESTINATIONS).toHaveLength(28);
     for (const destination of ADMIN_DESTINATIONS) {
       if (destination.kind === 'configuration') {
         expect(destination.settingsGroup && groups.has(destination.settingsGroup)).toBe(true);
@@ -123,26 +123,31 @@ describe('adminDestinations — permission gating (#1457)', () => {
   });
 
   it('a custom role with only the matching resource permission sees that destination but not others', () => {
-    const target = ADMIN_DESTINATIONS.find((d) => d.id === 'hw-cameras');
-    expect(target?.requiredPermission).toEqual({ resource: 'cameras', action: 'admin' });
+    const target = ADMIN_DESTINATIONS.find((d) => d.id === 'hw-nfc');
+    expect(target?.requiredPermission).toEqual({ resource: 'nfc_devices', action: 'admin' });
 
     const accessible = filterDestinationsByAccess(ADMIN_DESTINATIONS, {
       hasRole: () => false,
-      hasPermission: (resource, action) => resource === 'cameras' && action === 'admin',
+      hasPermission: (resource, action) => resource === 'nfc_devices' && action === 'admin',
     });
 
     const accessibleIds = accessible.map((d) => d.id);
-    expect(accessibleIds).toContain('hw-cameras');
+    expect(accessibleIds).toContain('hw-nfc');
     // A destination backed by a different resource must stay hidden.
-    expect(accessibleIds).not.toContain('hw-nfc');
+    expect(accessibleIds).not.toContain('hw-printer-groups');
     // The role-only exceptions must also stay hidden — no permission grants
     // any of them.
     expect(accessibleIds).not.toContain('admin-home');
     expect(accessibleIds).not.toContain('slicing-profiles');
     // int-connections is permission-backed (requiredPermissionAnyOf), not a
-    // role-only exception, but none of its three permissions is 'cameras', so
+    // role-only exception, but none of its three permissions is 'nfc_devices', so
     // it stays hidden here too.
     expect(accessibleIds).not.toContain('int-connections');
+  });
+
+  it('no longer registers an admin Cameras destination; cameras live at the top-level /cameras page (#3332)', () => {
+    expect(ADMIN_DESTINATIONS.find((d) => d.id === 'hw-cameras')).toBeUndefined();
+    expect(ADMIN_DESTINATIONS.some((d) => d.path.includes('sub=cameras'))).toBe(false);
   });
 
   it('a custom role holding just ONE of the three int-connections permissions still reaches it (#1457)', () => {

@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { CamerasPage } from '@/features/cameras/pages/CamerasPage';
 import { CameraAccessMode, CameraHealthStatus, CameraSnapshotStrategy, CameraSource, CameraStreamFormat, CameraType } from '@/types/api';
 
@@ -67,9 +68,11 @@ afterEach(() => {
 
 function renderPage() {
   return render(
-    <MemoryRouter>
-      <CamerasPage />
-    </MemoryRouter>
+    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+      <MemoryRouter>
+        <CamerasPage />
+      </MemoryRouter>
+    </QueryClientProvider>
   );
 }
 
