@@ -114,14 +114,19 @@ public class PrinterStatusCache :
     // Optional so existing constructors/tests that predate the attention feed keep working.
     private readonly IAttentionBroadcaster? _attentionBroadcaster;
 
+    // Camera discovery on printer connect (issue #3328). Optional for the same reason.
+    private readonly Farm.Infrastructure.Services.Cameras.IPrinterCameraSyncTrigger? _cameraSyncTrigger;
+
     public PrinterStatusCache(
         ILogger<PrinterStatusCache> logger,
         IDiagnosticChannelService diagnostics,
-        IAttentionBroadcaster? attentionBroadcaster = null)
+        IAttentionBroadcaster? attentionBroadcaster = null,
+        Farm.Infrastructure.Services.Cameras.IPrinterCameraSyncTrigger? cameraSyncTrigger = null)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _diagnostics = diagnostics ?? throw new ArgumentNullException(nameof(diagnostics));
         _attentionBroadcaster = attentionBroadcaster;
+        _cameraSyncTrigger = cameraSyncTrigger;
     }
 
     public PrinterStatusDto? GetStatus(Guid printerId)
@@ -307,6 +312,11 @@ public class PrinterStatusCache :
     /// </summary>
     private void EmitOfflineTransition(Guid printerId, AttentionChangeKind? transition)
     {
+        if (transition == AttentionChangeKind.Resolved)
+        {
+            _cameraSyncTrigger?.RequestSync(printerId);
+        }
+
         if (_attentionBroadcaster is null || transition is not AttentionChangeKind kind)
         {
             return;

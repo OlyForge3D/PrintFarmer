@@ -941,8 +941,8 @@ export class ApiClient {
     return response.data;
   }
 
-  async refreshCameraUrls(id: string): Promise<Printer> {
-    const response = await this.client.post<Printer>(`/printers/${id}/refresh-cameras`);
+  async discoverCameras(id: string): Promise<import('@/types/api').CameraDto[]> {
+    const response = await this.client.post<import('@/types/api').CameraDto[]>(`/printers/${id}/cameras/discover`);
     return response.data;
   }
 

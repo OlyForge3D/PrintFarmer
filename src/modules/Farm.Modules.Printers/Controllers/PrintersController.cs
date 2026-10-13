@@ -1719,31 +1719,44 @@ public class PrintersController(
     }
 
     /// <summary>
-    /// Refreshes camera URLs for a printer by querying the backend API.
-    /// Use this to update camera configuration after adding or modifying cameras on a printer.
+    /// Runs plugin camera discovery for a printer now (the same sync the background
+    /// <c>PrinterCameraSyncService</c> performs on connect, create, and interval) and returns
+    /// the printer's linked cameras. User-modified and standalone cameras are never overwritten.
     /// </summary>
     /// <param name="id">The unique identifier of the printer.</param>
+    /// <param name="synchronizer">Printer camera synchronizer.</param>
+    /// <param name="cameraService">Camera service used to project the printer's cameras.</param>
     /// <param name="ct">Cancellation token for the operation.</param>
-    /// <returns>The updated printer DTO with refreshed camera URLs.</returns>
-    /// <response code="200">Returns the updated printer with camera URLs.</response>
+    /// <returns>The printer's cameras after discovery.</returns>
+    /// <response code="200">Returns the printer's cameras after discovery.</response>
     /// <response code="404">If the printer with the specified ID was not found.</response>
-    /// <response code="500">If there was an error refreshing camera URLs.</response>
+    /// <response code="500">If there was an error discovering cameras.</response>
     [RequirePermission("printers", "admin")]
-    [HttpPost("{id:guid}/refresh-cameras")]
-    [ProducesResponseType(typeof(PrinterDto), 200)]
+    [HttpPost("{id:guid}/cameras/discover")]
+    [ProducesResponseType(typeof(List<CameraDto>), 200)]
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
-    public async Task<ActionResult<PrinterDto>> RefreshCameraUrlsAsync(Guid id, CancellationToken ct)
+    public async Task<ActionResult<List<CameraDto>>> DiscoverCamerasAsync(
+        Guid id,
+        [FromServices] Farm.Infrastructure.Services.Cameras.IPrinterCameraSynchronizer synchronizer,
+        [FromServices] Farm.Infrastructure.Services.Cameras.ICameraService cameraService,
+        CancellationToken ct)
     {
         try
         {
-            PrinterDto? result = await _printersService.RefreshCameraUrlsAsync(id, ct);
-            return result == null ? NotFound() : Ok(result);
+            Farm.Infrastructure.Services.Cameras.PrinterCameraSyncResult result =
+                await synchronizer.SyncPrinterAsync(id, explicitRequest: true, ct);
+            if (!result.PrinterFound)
+            {
+                return NotFound();
+            }
+
+            return Ok(await cameraService.GetByPrinterIdAsync(id, ct));
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogError(ex, "Failed to refresh camera URLs for printer {Id}", id);
-            return StatusCode(500, "Failed to refresh camera URLs");
+            _logger.LogError(ex, "Failed to discover cameras for printer {Id}", id);
+            return StatusCode(500, "Failed to discover cameras");
         }
     }
 

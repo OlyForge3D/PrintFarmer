@@ -93,53 +93,6 @@ public class PrintersServiceSnapmakerU1CameraTests
         handler.RequestUrl.Should().Be("http://primary.local/snapshot.jpg");
     }
 
-    [Fact]
-    public async Task RefreshCameraUrlsAsync_WhenSnapmakerU1HasNoWebcamList_StoresSnapshotOnlyU1Strategy()
-    {
-        Printer printer = CreatePrinter("Snapmaker", "Snapmaker U1");
-        List<Camera> cameras = [];
-        Mock<ISupportsConfiguredCameraDetection> detection = CreateDetectionClient((null, null));
-        await using AppDbContext db = CreateDbContext();
-        PrintersService service = await CreateServiceAsync(db, printer, cameras, detection.Object);
-
-        PrinterDto? dto = await service.RefreshCameraUrlsAsync(printer.Id, CancellationToken.None);
-
-        cameras.Should().ContainSingle();
-        Camera camera = cameras.Single();
-        camera.PrinterLinks.Should().ContainSingle(l => l.PrinterId == printer.Id && l.IsPrimary);
-        camera.StreamUrl.Should().BeNull();
-        camera.SnapshotUrl.Should().Be("http://u1.local/server/files/camera/monitor.jpg");
-        dto.Should().NotBeNull();
-        dto!.CameraAccessMode.Should().Be(CameraAccessMode.SnapshotOnly);
-        dto.CameraStreamFormat.Should().Be(CameraStreamFormat.Unknown);
-        dto.CameraSnapshotStrategy.Should().Be(CameraSnapshotStrategy.SnapmakerU1MonitorJpeg);
-    }
-
-    [Fact]
-    public async Task RefreshCameraUrlsAsync_WhenMoonrakerIsNotU1_UsesConfiguredWebcamsListWithoutU1Fallback()
-    {
-        Printer printer = CreatePrinter("Voron", "V2.4");
-        List<Camera> cameras = [];
-        string streamUrl = "http://voron.local/webcam/?action=stream";
-        string snapshotUrl = "http://voron.local/webcam/?action=snapshot";
-        Mock<ISupportsConfiguredCameraDetection> detection = CreateDetectionClient((streamUrl, snapshotUrl));
-        await using AppDbContext db = CreateDbContext();
-        PrintersService service = await CreateServiceAsync(db, printer, cameras, detection.Object);
-
-        PrinterDto? dto = await service.RefreshCameraUrlsAsync(printer.Id, CancellationToken.None);
-
-        cameras.Should().ContainSingle();
-        Camera camera = cameras.Single();
-        camera.StreamUrl.Should().Be(streamUrl);
-        camera.SnapshotUrl.Should().Be(snapshotUrl);
-        dto.Should().NotBeNull();
-        dto!.CameraAccessMode.Should().Be(CameraAccessMode.StreamAndSnapshot);
-        dto.CameraStreamFormat.Should().Be(CameraStreamFormat.Mjpeg);
-        dto.CameraSnapshotStrategy.Should().Be(CameraSnapshotStrategy.DirectUrl);
-        detection.Verify(c => c.DetectConfiguredCameraUrlsAsync(
-            "http://voron.local:7125", 80, It.IsAny<PrinterCredential?>(), It.IsAny<CancellationToken>()), Times.Once);
-    }
-
     private static Mock<ISupportsConfiguredCameraDetection> CreateDetectionClient((string? StreamUrl, string? SnapshotUrl) urls)
     {
         var detection = new Mock<ISupportsConfiguredCameraDetection>();
