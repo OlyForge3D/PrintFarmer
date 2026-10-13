@@ -62,6 +62,17 @@ public interface ICameraService
     Task<CameraDto?> UpdateAsync(Guid id, UpdateCameraDto dto, CancellationToken ct);
 
     /// <summary>
+    /// Updates an existing camera while keeping its links to <paramref name="preservedPrinterIds"/> even when
+    /// the requested printer set omits them (used for printers the caller cannot see). Preserved links are
+    /// ordered after the requested printers.
+    /// </summary>
+    /// <param name="id">The unique identifier of the camera to update.</param>
+    /// <param name="dto">The data transfer object containing updated camera data.</param>
+    /// <param name="preservedPrinterIds">Existing printer links that must not be removed.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    Task<CameraDto?> UpdateAsync(Guid id, UpdateCameraDto dto, IReadOnlyCollection<Guid> preservedPrinterIds, CancellationToken ct);
+
+    /// <summary>
     /// Deletes a camera by its ID.
     /// </summary>
     /// <param name="id">The unique identifier of the camera to delete.</param>

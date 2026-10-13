@@ -531,6 +531,84 @@ public sealed class CameraReadAuthorizationTests : IAsyncLifetime, IDisposable
             Times.Never);
     }
 
+    // --- Camera mutations (#3329 review R-H-01/R-V-01): authorize the existing camera ----------
+
+    [Fact]
+    public async Task UpdateCamera_CrossGroupCaller_Returns404WithoutMutation()
+    {
+        (Guid cameraId, _, _, _) = await SeedMultiPrinterCameraAsync();
+        using HttpClient client = CreateForeignRoleClient();
+        client.DefaultRequestHeaders.Add("X-Test-Permissions", "cameras:admin");
+
+        HttpResponseMessage response = await client.PutAsJsonAsync($"/api/cameras/{cameraId}", new { name = "Hijacked" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        VerifyNoCameraMutation();
+    }
+
+    [Fact]
+    public async Task DeleteCamera_CrossGroupCaller_Returns404WithoutMutation()
+    {
+        (Guid cameraId, _, _, _) = await SeedMultiPrinterCameraAsync();
+        using HttpClient client = CreateForeignRoleClient();
+        client.DefaultRequestHeaders.Add("X-Test-Permissions", "cameras:admin");
+
+        HttpResponseMessage response = await client.DeleteAsync($"/api/cameras/{cameraId}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        VerifyNoCameraMutation();
+    }
+
+    [Fact]
+    public async Task ToggleCamera_CrossGroupCaller_Returns404WithoutMutation()
+    {
+        (Guid cameraId, _, _, _) = await SeedMultiPrinterCameraAsync();
+        using HttpClient client = CreateForeignRoleClient();
+        client.DefaultRequestHeaders.Add("X-Test-Permissions", "cameras:admin");
+
+        HttpResponseMessage response = await client.PatchAsJsonAsync($"/api/cameras/{cameraId}/toggle", new { isEnabled = false });
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        VerifyNoCameraMutation();
+    }
+
+    [Fact]
+    public async Task UpdateCamera_CallerSeeingOnlySecondPrinter_PreservesHiddenFirstPrinterLink()
+    {
+        (Guid cameraId, Guid firstPrinterId, Guid secondPrinterId, Guid secondRoleId) = await SeedMultiPrinterCameraAsync();
+        IReadOnlyCollection<Guid>? preserved = null;
+        _cameras
+            .Setup(s => s.UpdateAsync(cameraId, It.IsAny<UpdateCameraDto>(), It.IsAny<IReadOnlyCollection<Guid>>(), It.IsAny<CancellationToken>()))
+            .Callback<Guid, UpdateCameraDto, IReadOnlyCollection<Guid>, CancellationToken>((_, _, hidden, _) => preserved = hidden)
+            .ReturnsAsync(() => ToMultiPrinterDto(cameraId, firstPrinterId, secondPrinterId));
+        using HttpClient client = await CreateClientWithRoleAsync(secondRoleId);
+        client.DefaultRequestHeaders.Add("X-Test-Permissions", "cameras:admin");
+
+        HttpResponseMessage response = await client.PutAsJsonAsync(
+            $"/api/cameras/{cameraId}",
+            new { name = "Shared camera", printerIds = new[] { secondPrinterId } });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        preserved.Should().Equal(firstPrinterId);
+        string body = await response.Content.ReadAsStringAsync();
+        body.Should().NotContain(firstPrinterId.ToString(), "the hidden printer must stay redacted in the update response");
+        _cameras.Verify(
+            s => s.UpdateAsync(It.IsAny<Guid>(), It.IsAny<UpdateCameraDto>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    private void VerifyNoCameraMutation()
+    {
+        _cameras.Verify(
+            s => s.UpdateAsync(It.IsAny<Guid>(), It.IsAny<UpdateCameraDto>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        _cameras.Verify(
+            s => s.UpdateAsync(It.IsAny<Guid>(), It.IsAny<UpdateCameraDto>(), It.IsAny<IReadOnlyCollection<Guid>>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        _cameras.Verify(s => s.DeleteAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        _cameras.Verify(s => s.ToggleEnabledAsync(It.IsAny<Guid>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
     // --- Architecture guard: every action taking a camera/printer id must call the
     // authorization helper, so a newly added action cannot silently regress (supplements,
     // does not replace, the behavioral tests above). ----------------------------------------
@@ -548,6 +626,9 @@ public sealed class CameraReadAuthorizationTests : IAsyncLifetime, IDisposable
             ["LinkCameraToPrinterAsync"] = ("Task<ActionResult<CameraDto>> LinkCameraToPrinterAsync(", "CanAccessCameraPrinterAsync"),
             ["UnlinkCameraFromPrinterAsync"] = ("Task<IActionResult> UnlinkCameraFromPrinterAsync(Guid id, Guid printerId, CancellationToken ct)", "CanAccessCameraPrinterAsync"),
             ["RemoveCameraFromPrinterAsync"] = ("Task<ActionResult<RemoveCameraFromPrinterResponse>> RemoveCameraFromPrinterAsync(", "CanAccessCameraPrinterAsync"),
+            ["UpdateCameraAsync"] = ("Task<ActionResult<CameraDto>> UpdateCameraAsync(Guid id, UpdateCameraDto request, CancellationToken ct)", "CanAccessCameraPrinterAsync"),
+            ["DeleteCameraAsync"] = ("Task<IActionResult> DeleteCameraAsync(Guid id, CancellationToken ct)", "CanAccessCameraPrinterAsync"),
+            ["ToggleCameraAsync"] = ("Task<ActionResult<CameraDto>> ToggleCameraAsync(Guid id, ToggleCameraDto request, CancellationToken ct)", "CanAccessCameraPrinterAsync"),
         };
 
     [Fact]

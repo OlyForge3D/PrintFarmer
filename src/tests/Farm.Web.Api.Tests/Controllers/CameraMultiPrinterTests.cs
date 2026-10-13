@@ -102,6 +102,34 @@ public class CameraMultiPrinterTests : IClassFixture<CustomWebApplicationFactory
     }
 
     [Fact]
+    public async Task UpdateEndpoint_ReorderedPrinterIds_PersistsRepresentativePrinterAndLinkOrder()
+    {
+        Printer first = await CreatePrinterAsync("First");
+        Printer second = await CreatePrinterAsync("Second");
+        Printer third = await CreatePrinterAsync("Third");
+        CameraDto camera = await CreateCameraAsync(new CreateCameraDto
+        {
+            Name = "reordered",
+            StreamUrl = "http://example.com/stream",
+            PrinterIds = [first.Id, second.Id, third.Id],
+        });
+
+        HttpResponseMessage update = await Client.PutAsJsonAsync(
+            $"/api/cameras/{camera.Id}",
+            new UpdateCameraDto { PrinterIds = [second.Id, third.Id, first.Id] },
+            JsonOptions);
+        update.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        HttpResponseMessage reload = await Client.GetAsync($"/api/cameras/{camera.Id}");
+        reload.StatusCode.Should().Be(HttpStatusCode.OK);
+        CameraDto reloaded = (await reload.Content.ReadFromJsonAsync<CameraDto>(JsonOptions))!;
+        reloaded.PrinterId.Should().Be(second.Id);
+        reloaded.PrinterName.Should().Be("Second");
+        reloaded.PrinterIds.Should().Equal(second.Id, third.Id, first.Id);
+        reloaded.Printers.Select(p => p.Id).Should().Equal(second.Id, third.Id, first.Id);
+    }
+
+    [Fact]
     public async Task Create_Unlinked_AllowsExplicitLocation()
     {
         Location location = await CreateLocationAsync("Room");

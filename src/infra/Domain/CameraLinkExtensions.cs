@@ -8,15 +8,16 @@
 public static class CameraLinkExtensions
 {
     /// <summary>
-    /// Returns the camera's printer links in a deterministic order: primary links first, then by sort order, then by printer id.
+    /// Returns the camera's printer links in the camera's link order (<see cref="CameraPrinter.SortOrder"/>, then printer id).
+    /// The first link is the camera's representative printer. Per-printer <see cref="CameraPrinter.IsPrimary"/> does not
+    /// affect this order: it describes which camera a printer shows first, not which printer a camera belongs to first.
     /// </summary>
     /// <param name="camera">The camera.</param>
     public static IEnumerable<CameraPrinter> OrderedPrinterLinks(this Camera camera)
     {
         ArgumentNullException.ThrowIfNull(camera);
         return camera.PrinterLinks
-            .OrderByDescending(l => l.IsPrimary)
-            .ThenBy(l => l.SortOrder)
+            .OrderBy(l => l.SortOrder)
             .ThenBy(l => l.PrinterId);
     }
 

@@ -8,7 +8,9 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Services.Printers;
+using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Services.StorageManagement;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -24,13 +26,15 @@ public class CameraService : ICameraService
     private readonly ILogger<CameraService> _logger;
     private readonly IPrintersService _printersService;
     private readonly IStoragePathService _storagePathService;
+    private readonly IHubContext<PrinterHub>? _hubContext;
 
     public CameraService(
         IUnitOfWork unitOfWork,
         AppDbContext db,
         ILogger<CameraService> logger,
         IPrintersService printersService,
-        IStoragePathService storagePathService)
+        IStoragePathService storagePathService,
+        IHubContext<PrinterHub>? hubContext = null)
     {
         ArgumentNullException.ThrowIfNull(unitOfWork);
         ArgumentNullException.ThrowIfNull(db);
@@ -43,6 +47,7 @@ public class CameraService : ICameraService
         _logger = logger;
         _printersService = printersService;
         _storagePathService = storagePathService;
+        _hubContext = hubContext;
     }
 
     private static CameraDto ToDto(Camera camera) => CameraDtoMapper.ToDto(camera);
@@ -178,7 +183,7 @@ public class CameraService : ICameraService
 
             if (dto.PrinterIds is not null)
             {
-                await ApplyPrinterLinksAsync(camera, dto.PrinterIds, dto.IsPrimary == true, ct);
+                await ApplyPrinterLinksAsync(camera, dto.PrinterIds, dto.IsPrimary == true, preservedPrinterIds: null, ct);
             }
             else if (printer is not null)
             {
@@ -195,6 +200,7 @@ public class CameraService : ICameraService
 
             _unitOfWork.Cameras.Add(camera);
             await _unitOfWork.SaveChangesAsync(ct);
+            await NotifyCamerasUpdatedAsync(camera.PrinterLinks.Select(l => l.PrinterId), ct);
 
             _logger.LogInformation("Created camera {CameraName} with ID {CameraId}", LogSanitizer.Sanitize(camera.Name), camera.Id);
 
@@ -208,9 +214,14 @@ public class CameraService : ICameraService
     }
 
     /// <inheritdoc />
-    public async Task<CameraDto?> UpdateAsync(Guid id, UpdateCameraDto dto, CancellationToken ct)
+    public Task<CameraDto?> UpdateAsync(Guid id, UpdateCameraDto dto, CancellationToken ct) =>
+        UpdateAsync(id, dto, [], ct);
+
+    /// <inheritdoc />
+    public async Task<CameraDto?> UpdateAsync(Guid id, UpdateCameraDto dto, IReadOnlyCollection<Guid> preservedPrinterIds, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(dto);
+        ArgumentNullException.ThrowIfNull(preservedPrinterIds);
 
         if (id == Guid.Empty)
         {
@@ -278,9 +289,10 @@ public class CameraService : ICameraService
             }
 
             Guid? previousEffectiveLocationId = camera.GetEffectiveLocationId();
+            List<Guid> printersBefore = camera.PrinterLinks.Select(l => l.PrinterId).ToList();
             if (dto.PrinterIds is not null)
             {
-                await ApplyPrinterLinksAsync(camera, dto.PrinterIds, dto.IsPrimary == true, ct);
+                await ApplyPrinterLinksAsync(camera, dto.PrinterIds, dto.IsPrimary == true, preservedPrinterIds, ct);
             }
             else if (dto.PrinterId.HasValue && dto.PrinterId != camera.GetPrimaryPrinterId())
             {
@@ -290,8 +302,8 @@ public class CameraService : ICameraService
                     throw new InvalidOperationException($"Printer with ID '{dto.PrinterId.Value}' not found");
                 }
 
-                // Legacy single-printer reassignment: replace all existing links with the new printer.
-                await ApplyPrinterLinksAsync(camera, [printer.Id], dto.IsPrimary == true, ct);
+                // Legacy single-printer reassignment: replace all existing (visible) links with the new printer.
+                await ApplyPrinterLinksAsync(camera, [printer.Id], dto.IsPrimary == true, preservedPrinterIds, ct);
             }
 
             await ApplyLocationRuleAsync(camera, dto.LocationId, dto.ClearLocationId == true, previousEffectiveLocationId, ct);
@@ -300,6 +312,7 @@ public class CameraService : ICameraService
             camera.UpdatedAt = DateTime.UtcNow;
 
             await _unitOfWork.SaveChangesAsync(ct);
+            await NotifyCamerasUpdatedAsync(printersBefore.Concat(camera.PrinterLinks.Select(l => l.PrinterId)), ct);
 
             _logger.LogInformation("Updated camera {CameraName} with ID {CameraId}", LogSanitizer.Sanitize(camera.Name), camera.Id);
 
@@ -343,8 +356,10 @@ public class CameraService : ICameraService
                 await DismissDiscoveredCameraAsync(camera, link.PrinterId, ct);
             }
 
+            List<Guid> affectedPrinters = camera.PrinterLinks.Select(l => l.PrinterId).ToList();
             _unitOfWork.Cameras.Remove(camera);
             await _unitOfWork.SaveChangesAsync(ct);
+            await NotifyCamerasUpdatedAsync(affectedPrinters, ct);
 
             _logger.LogInformation("Deleted camera {CameraName} with ID {CameraId}", LogSanitizer.Sanitize(camera.Name), camera.Id);
 
@@ -378,6 +393,7 @@ public class CameraService : ICameraService
             camera.UpdatedAt = DateTime.UtcNow;
 
             await _unitOfWork.SaveChangesAsync(ct);
+            await NotifyCamerasUpdatedAsync(camera.PrinterLinks.Select(l => l.PrinterId), ct);
 
             _logger.LogInformation("Toggled camera {CameraName} enabled status to {IsEnabled}", LogSanitizer.Sanitize(camera.Name), isEnabled);
 
@@ -549,7 +565,8 @@ public class CameraService : ICameraService
         if (existing is null)
         {
             bool makePrimary = isPrimary == true || !await _unitOfWork.Cameras.HasPrimaryCameraAsync(printerId, ct);
-            camera.LinkToPrinter(printerId, makePrimary).Printer = printer;
+            int nextSortOrder = camera.PrinterLinks.Count == 0 ? 0 : camera.PrinterLinks.Max(l => l.SortOrder) + 1;
+            camera.LinkToPrinter(printerId, makePrimary, nextSortOrder).Printer = printer;
             await ClearDismissalAsync(camera, printerId, ct);
             if (makePrimary)
             {
@@ -574,6 +591,7 @@ public class CameraService : ICameraService
         MarkUserModified(camera);
         camera.UpdatedAt = DateTime.UtcNow;
         await _unitOfWork.SaveChangesAsync(ct);
+        await NotifyCamerasUpdatedAsync([printerId], ct);
 
         _logger.LogInformation("Linked camera {CameraId} to printer {PrinterId}", camera.Id, printerId);
         return ToDto(camera);
@@ -594,6 +612,7 @@ public class CameraService : ICameraService
         }
 
         await _unitOfWork.SaveChangesAsync(ct);
+        await NotifyCamerasUpdatedAsync([printerId], ct);
         _logger.LogInformation("Unlinked camera {CameraId} from printer {PrinterId}", camera.Id, printerId);
         return CameraPrinterRemovalResult.Unlinked;
     }
@@ -619,11 +638,13 @@ public class CameraService : ICameraService
             await SnapshotCleanupHelper.DeleteSnapshotsForCameraAsync(camera.Id, _db, _storagePathService, _logger, ct);
             _unitOfWork.Cameras.Remove(camera);
             await _unitOfWork.SaveChangesAsync(ct);
+            await NotifyCamerasUpdatedAsync([printerId], ct);
             _logger.LogInformation("Deleted auto-discovered camera {CameraId} after removing it from printer {PrinterId}", camera.Id, printerId);
             return CameraPrinterRemovalResult.Deleted;
         }
 
         await _unitOfWork.SaveChangesAsync(ct);
+        await NotifyCamerasUpdatedAsync([printerId], ct);
         _logger.LogInformation("Removed camera {CameraId} from printer {PrinterId}", camera.Id, printerId);
         return CameraPrinterRemovalResult.Unlinked;
     }
@@ -646,11 +667,20 @@ public class CameraService : ICameraService
 
     /// <summary>
     /// Replaces the camera's printer links with <paramref name="printerIds"/> while keeping exactly one
-    /// primary camera per affected printer.
+    /// primary camera per affected printer. The submitted order is the camera's link order: each link's
+    /// <see cref="CameraPrinter.SortOrder"/> is set from its position, so the first printer becomes the
+    /// representative printer. Links to <paramref name="preservedPrinterIds"/> (printers the caller cannot
+    /// see) are kept and ordered after the requested printers.
     /// </summary>
-    private async Task ApplyPrinterLinksAsync(Camera camera, IReadOnlyCollection<Guid> printerIds, bool makePrimary, CancellationToken ct)
+    private async Task ApplyPrinterLinksAsync(
+        Camera camera,
+        IReadOnlyCollection<Guid> printerIds,
+        bool makePrimary,
+        IReadOnlyCollection<Guid>? preservedPrinterIds,
+        CancellationToken ct)
     {
         List<Guid> requested = printerIds.Where(id => id != Guid.Empty).Distinct().ToList();
+        HashSet<Guid> preserved = preservedPrinterIds is null ? [] : [.. preservedPrinterIds.Where(id => !requested.Contains(id))];
         List<Printer> printers = requested.Count == 0
             ? []
             : await _db.Printers.Include(p => p.Location).Where(p => requested.Contains(p.Id)).ToListAsync(ct);
@@ -660,7 +690,7 @@ public class CameraService : ICameraService
             throw new ArgumentException($"Printer with ID '{missing.Value}' not found", nameof(printerIds));
         }
 
-        foreach (CameraPrinter link in camera.PrinterLinks.Where(l => !requested.Contains(l.PrinterId)).ToList())
+        foreach (CameraPrinter link in camera.PrinterLinks.Where(l => !requested.Contains(l.PrinterId) && !preserved.Contains(l.PrinterId)).ToList())
         {
             await RemoveLinkAsync(camera, link, ct);
         }
@@ -671,13 +701,13 @@ public class CameraService : ICameraService
             CameraPrinter? existing = camera.PrinterLinks.FirstOrDefault(l => l.PrinterId == printerId);
             if (existing is not null)
             {
+                existing.SortOrder = sortOrder++;
                 if (makePrimary && !existing.IsPrimary)
                 {
                     existing.IsPrimary = true;
                     await DemoteOtherPrimariesAsync(printerId, camera.Id, ct);
                 }
 
-                sortOrder++;
                 continue;
             }
 
@@ -689,7 +719,25 @@ public class CameraService : ICameraService
                 await DemoteOtherPrimariesAsync(printerId, camera.Id, ct);
             }
         }
+
+        foreach (CameraPrinter hidden in camera.PrinterLinks
+            .Where(l => preserved.Contains(l.PrinterId))
+            .OrderBy(l => l.SortOrder)
+            .ThenBy(l => l.PrinterId)
+            .ToList())
+        {
+            hidden.SortOrder = sortOrder++;
+        }
     }
+
+    /// <summary>
+    /// Raises <c>camerasupdated</c> for each affected printer with its current linked camera ids, so open
+    /// printer views refresh after a user-initiated change. No-op when SignalR is not available.
+    /// </summary>
+    private Task NotifyCamerasUpdatedAsync(IEnumerable<Guid> printerIds, CancellationToken ct) =>
+        _hubContext is null
+            ? Task.CompletedTask
+            : CamerasUpdatedNotifier.NotifyCurrentLinksAsync(_hubContext, _db, printerIds, _logger, ct);
 
     private async Task RemoveLinkAsync(Camera camera, CameraPrinter link, CancellationToken ct)
     {

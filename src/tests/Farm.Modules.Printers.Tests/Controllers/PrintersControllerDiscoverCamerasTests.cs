@@ -1,13 +1,17 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Cameras;
 using Farm.Infrastructure.Services.Printers;
+using Farm.Infrastructure.Services.Queue;
 using Farm.Modules.Printers.Controllers;
 using FluentAssertions;
 using FluentValidation;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Moq;
@@ -76,7 +80,52 @@ public class PrintersControllerDiscoverCamerasTests
         Assert.IsType<NotFoundResult>(result.Result);
     }
 
-    private static PrintersController CreateController() =>
+    [Fact]
+    public async Task DiscoverCamerasAsync_CallerWithoutPrinterGroupSubmitAccess_ReturnsNotFoundWithoutSyncing()
+    {
+        Guid printerId = Guid.NewGuid();
+        var synchronizer = new Mock<IPrinterCameraSynchronizer>(MockBehavior.Strict);
+        var cameraService = new Mock<ICameraService>(MockBehavior.Strict);
+
+        ActionResult<List<CameraDto>> result = await CreateController(allowAccess: false)
+            .DiscoverCamerasAsync(printerId, synchronizer.Object, cameraService.Object, CancellationToken.None);
+
+        Assert.IsType<NotFoundResult>(result.Result);
+        synchronizer.Verify(s => s.ClearDismissalsAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        synchronizer.Verify(s => s.SyncPrinterAsync(It.IsAny<Guid>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task DiscoverCamerasAsync_ChecksSubmitLevelPrinterAccess()
+    {
+        Guid printerId = Guid.NewGuid();
+        var authorization = new Mock<IQueueResourceAuthorizationService>();
+        authorization
+            .Setup(a => a.CanAccessPrinterAsync(It.IsAny<ClaimsPrincipal>(), printerId, It.IsAny<PrinterGroupAccessLevel>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+        var synchronizer = new Mock<IPrinterCameraSynchronizer>(MockBehavior.Strict);
+
+        _ = await CreateController(authorization).DiscoverCamerasAsync(
+            printerId,
+            synchronizer.Object,
+            Mock.Of<ICameraService>(),
+            CancellationToken.None);
+
+        authorization.Verify(
+            a => a.CanAccessPrinterAsync(It.IsAny<ClaimsPrincipal>(), printerId, PrinterGroupAccessLevel.Submit, It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    private static PrintersController CreateController(bool allowAccess = true)
+    {
+        var authorization = new Mock<IQueueResourceAuthorizationService>();
+        authorization
+            .Setup(a => a.CanAccessPrinterAsync(It.IsAny<ClaimsPrincipal>(), It.IsAny<Guid>(), It.IsAny<PrinterGroupAccessLevel>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(allowAccess);
+        return CreateController(authorization);
+    }
+
+    private static PrintersController CreateController(Mock<IQueueResourceAuthorizationService> authorization) =>
         new(
             logger: Mock.Of<ILogger<PrintersController>>(),
             printersService: Mock.Of<IPrintersService>(),
@@ -92,5 +141,9 @@ public class PrintersControllerDiscoverCamerasTests
             settingsService: Mock.Of<Farm.Infrastructure.Settings.ISettingsService>(),
             printerSessionTimelineService: Mock.Of<IPrinterSessionTimelineService>(),
             telemetryService: Mock.Of<Farm.Infrastructure.Telemetry.IPrintFarmerTelemetryService>(),
-            bedTypeService: Mock.Of<Farm.Infrastructure.Services.BedTypes.IBedTypeService>());
+            bedTypeService: Mock.Of<Farm.Infrastructure.Services.BedTypes.IBedTypeService>(),
+            queueResourceAuthorization: authorization.Object)
+        {
+            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
+        };
 }

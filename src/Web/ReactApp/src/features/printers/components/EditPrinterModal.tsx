@@ -234,7 +234,7 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
     
     // A nested camera dialog handles its own Escape; don't close the printer modal underneath it.
     if (cameraDialogOpen) return;
-    
+
     const handleEscape = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         handleClose();

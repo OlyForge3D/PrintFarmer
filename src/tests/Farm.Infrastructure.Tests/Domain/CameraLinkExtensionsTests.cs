@@ -68,17 +68,19 @@ public sealed class CameraLinkExtensionsTests
     }
 
     [Fact]
-    public void PrimaryPrinter_PrefersPrimaryLinkThenSortOrder()
+    public void PrimaryPrinter_UsesLinkSortOrderNotPerPrinterPrimaryFlag()
     {
+        // Link order is the representative-printer contract (#3329 review R-H-02); the per-printer
+        // IsPrimary flag only selects a printer's primary camera.
         var camera = new Camera { Name = "c" };
         Printer first = NewPrinter();
-        Printer primary = NewPrinter();
+        Printer primaryForItsPrinter = NewPrinter();
         Link(camera, first, sortOrder: 0);
-        Link(camera, primary, isPrimary: true, sortOrder: 5);
+        Link(camera, primaryForItsPrinter, isPrimary: true, sortOrder: 5);
 
-        camera.GetPrimaryPrinterId().Should().Be(primary.Id);
-        camera.GetPrimaryPrinter().Should().BeSameAs(primary);
-        camera.OrderedPrinterLinks().Select(l => l.PrinterId).Should().Equal(primary.Id, first.Id);
+        camera.GetPrimaryPrinterId().Should().Be(first.Id);
+        camera.GetPrimaryPrinter().Should().BeSameAs(first);
+        camera.OrderedPrinterLinks().Select(l => l.PrinterId).Should().Equal(first.Id, primaryForItsPrinter.Id);
     }
 
     [Fact]

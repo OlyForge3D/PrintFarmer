@@ -1,7 +1,6 @@
 ﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.UnitOfWork;
-using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.SignalR;
 using Microsoft.AspNetCore.SignalR;
@@ -24,15 +23,17 @@ public sealed class PrinterCameraSynchronizer(
     IPrinterStatusCacheReader statusCache,
     IHubContext<PrinterHub> hubContext,
     ILogger<PrinterCameraSynchronizer> logger,
-    TimeProvider? timeProvider = null) : IPrinterCameraSynchronizer
+    TimeProvider? timeProvider = null,
+    PrinterCameraSyncGate? syncGate = null) : IPrinterCameraSynchronizer
 {
     /// <summary>Lowercase SignalR event raised when a sync changes a printer's cameras.</summary>
-    public const string CamerasUpdatedEventName = "camerasupdated";
+    public const string CamerasUpdatedEventName = CamerasUpdatedNotifier.EventName;
 
     /// <summary>Health message recorded on cameras the backend no longer reports.</summary>
     public const string NotReportedHealthMessage = "No longer reported by the printer backend";
 
     private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
+    private readonly PrinterCameraSyncGate _syncGate = syncGate ?? PrinterCameraSyncGate.Shared;
 
     /// <inheritdoc/>
     public async Task<IReadOnlyList<PrinterCameraSyncResult>> SyncAllAsync(CancellationToken ct)
@@ -86,6 +87,12 @@ public sealed class PrinterCameraSynchronizer(
 
     /// <inheritdoc/>
     public async Task<PrinterCameraSyncResult> SyncPrinterAsync(Guid printerId, bool explicitRequest, CancellationToken ct)
+    {
+        using IDisposable gate = await _syncGate.AcquireAsync(printerId, ct).ConfigureAwait(false);
+        return await SyncPrinterCoreAsync(printerId, explicitRequest, ct).ConfigureAwait(false);
+    }
+
+    private async Task<PrinterCameraSyncResult> SyncPrinterCoreAsync(Guid printerId, bool explicitRequest, CancellationToken ct)
     {
         Printer? printer = await unitOfWork.Printers.FindByIdWithIncludesAsync(printerId, ct).ConfigureAwait(false);
         if (printer is null)
@@ -371,20 +378,8 @@ public sealed class PrinterCameraSynchronizer(
         return (true, new DiscoveredCamera(name, MapBackendToCameraSource(backend), streamUrl, snapshotUrl));
     }
 
-    private async Task BroadcastAsync(PrinterCameraSyncResult result, CancellationToken ct)
-    {
-        try
-        {
-            await hubContext.Clients
-                .Group(AuthorizedHubGroups.Printer(result.PrinterId))
-                .SendAsync(CamerasUpdatedEventName, new CamerasUpdatedEvent(result.PrinterId, result.CameraIds), ct)
-                .ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            logger.LogWarning(ex, "Failed to broadcast {EventName} for printer {PrinterId}", CamerasUpdatedEventName, result.PrinterId);
-        }
-    }
+    private Task BroadcastAsync(PrinterCameraSyncResult result, CancellationToken ct) =>
+        CamerasUpdatedNotifier.NotifyAsync(hubContext, result.PrinterId, result.CameraIds, logger, ct);
 
     /// <summary>Maps a printer backend to the camera source recorded on discovered cameras.</summary>
     /// <param name="backend">Printer backend.</param>

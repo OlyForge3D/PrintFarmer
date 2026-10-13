@@ -226,8 +226,8 @@ public class CamerasController(
             }
 
             List<CameraDto> visible = await FilterAccessibleCamerasAsync([CameraDtoMapper.ToDto(camera)], ct);
-            CameraDto dto = visible[0];
-            return Ok(dto);
+            CameraDto? dto = visible.FirstOrDefault();
+            return dto is null ? NotFound(new { message = "Camera not found" }) : Ok(dto);
         }
         catch (InvalidOperationException)
         {
@@ -493,13 +493,28 @@ public class CamerasController(
                 return BadRequest(new { message = "Request body cannot be null" });
             }
 
+            Camera? existing = await _cameraService.FindByIdAsync(id, ct);
+            if (existing is null || !await CanAccessCameraPrinterAsync(existing, ct))
+            {
+                return NotFound(new { message = "Camera not found" });
+            }
+
             if (!await CanAccessRequestedPrintersAsync(request.PrinterIds, request.PrinterId, ct))
             {
                 return InvalidCameraReference();
             }
 
-            CameraDto? camera = await _cameraService.UpdateAsync(id, request, ct);
-            return camera == null ? NotFound(new { message = "Camera not found" }) : Ok(camera);
+            // Links to printers the caller cannot see are redacted from reads, so a round-tripped printer
+            // list must not be able to remove them.
+            IReadOnlyCollection<Guid> hiddenPrinterIds = await GetInaccessibleLinkedPrinterIdsAsync(existing, ct);
+            CameraDto? camera = await _cameraService.UpdateAsync(id, request, hiddenPrinterIds, ct);
+            if (camera is null)
+            {
+                return NotFound(new { message = "Camera not found" });
+            }
+
+            CameraDto? visible = (await FilterAccessibleCamerasAsync([camera], ct)).FirstOrDefault();
+            return visible is null ? NotFound(new { message = "Camera not found" }) : Ok(visible);
         }
         catch (ArgumentException)
         {
@@ -547,6 +562,12 @@ public class CamerasController(
                 return StatusCode(503, new { message = "System is still initializing. Please wait a moment and try again." });
             }
 
+            Camera? existing = await _cameraService.FindByIdAsync(id, ct);
+            if (existing is null || !await CanAccessCameraPrinterAsync(existing, ct))
+            {
+                return NotFound(new { message = "Camera not found" });
+            }
+
             bool deleted = await _cameraService.DeleteAsync(id, ct);
             return deleted ? NoContent() : NotFound(new { message = "Camera not found" });
         }
@@ -590,8 +611,20 @@ public class CamerasController(
                 return BadRequest(new { message = "Request body cannot be null" });
             }
 
+            Camera? existing = await _cameraService.FindByIdAsync(id, ct);
+            if (existing is null || !await CanAccessCameraPrinterAsync(existing, ct))
+            {
+                return NotFound(new { message = "Camera not found" });
+            }
+
             CameraDto? camera = await _cameraService.ToggleEnabledAsync(id, request.IsEnabled, ct);
-            return camera == null ? NotFound(new { message = "Camera not found" }) : Ok(camera);
+            if (camera is null)
+            {
+                return NotFound(new { message = "Camera not found" });
+            }
+
+            CameraDto? visible = (await FilterAccessibleCamerasAsync([camera], ct)).FirstOrDefault();
+            return visible is null ? NotFound(new { message = "Camera not found" }) : Ok(visible);
         }
         catch (InvalidOperationException)
         {
@@ -650,7 +683,8 @@ public class CamerasController(
             }
 
             List<CameraDto> visible = await FilterAccessibleCamerasAsync([updated], ct);
-            return Ok(visible[0]);
+            CameraDto? dto = visible.FirstOrDefault();
+            return dto is null ? NotFound(new { message = "Camera not found" }) : Ok(dto);
         }
         catch (ArgumentException)
         {
@@ -909,6 +943,31 @@ public class CamerasController(
             PrinterGroupAccessLevel.View,
             ct);
         return allowed.Count > 0;
+    }
+
+    /// <summary>
+    /// Returns the camera's linked printers the caller cannot view. These links are hidden from the caller's
+    /// reads and must be preserved when the caller replaces the camera's printer list.
+    /// </summary>
+    private async Task<IReadOnlyCollection<Guid>> GetInaccessibleLinkedPrinterIdsAsync(Camera camera, CancellationToken ct)
+    {
+        Guid[] printerIds = camera.PrinterLinks.Select(l => l.PrinterId).Distinct().ToArray();
+        if (printerIds.Length == 0)
+        {
+            return [];
+        }
+
+        if (_queueResourceAuthorization is null)
+        {
+            return printerIds;
+        }
+
+        IReadOnlySet<Guid> allowed = await _queueResourceAuthorization.FilterAccessiblePrinterIdsAsync(
+            User,
+            printerIds,
+            PrinterGroupAccessLevel.View,
+            ct);
+        return printerIds.Where(id => !allowed.Contains(id)).ToArray();
     }
 
     /// <summary>

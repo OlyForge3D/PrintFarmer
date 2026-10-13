@@ -702,6 +702,7 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Cameras.ICameraRepository, Farm.Infrastructure.Repositories.Cameras.EfCameraRepository>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Cameras.ICameraService, Farm.Infrastructure.Services.Cameras.CameraService>();
         _ = services.AddScoped<Farm.Infrastructure.Discovery.IPrinterCameraEndpointDetectionService, Farm.Infrastructure.Discovery.PrinterCameraEndpointDetectionService>();
+        _ = services.AddSingleton<Farm.Infrastructure.Services.Cameras.PrinterCameraSyncGate>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Cameras.IPrinterCameraSynchronizer, Farm.Infrastructure.Services.Cameras.PrinterCameraSynchronizer>();
 
         // Register go2rtc service - RTSP-to-WebRTC/HLS/MSE transcoding integration

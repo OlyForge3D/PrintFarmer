@@ -1731,7 +1731,7 @@ public class PrintersController(
     /// <param name="ct">Cancellation token for the operation.</param>
     /// <returns>The printer's cameras after discovery.</returns>
     /// <response code="200">Returns the printer's cameras after discovery.</response>
-    /// <response code="404">If the printer with the specified ID was not found.</response>
+    /// <response code="404">If the printer was not found or the caller cannot submit to its printer group.</response>
     /// <response code="500">If there was an error discovering cameras.</response>
     [RequirePermission("printers", "admin")]
     [HttpPost("{id:guid}/cameras/discover")]
@@ -1744,6 +1744,11 @@ public class PrintersController(
         [FromServices] Farm.Infrastructure.Services.Cameras.ICameraService cameraService,
         CancellationToken ct)
     {
+        if (!await CanAccessPrinterAsync(id, PrinterGroupAccessLevel.Submit, ct))
+        {
+            return NotFound();
+        }
+
         try
         {
             _ = await synchronizer.ClearDismissalsAsync(id, ct);
