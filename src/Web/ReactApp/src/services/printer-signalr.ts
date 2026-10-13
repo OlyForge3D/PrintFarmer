@@ -52,6 +52,16 @@ type QueueEventCallback = (event: QueueEventEnvelope) => void;
 type QueueResourcesChangedCallback = () => void;
 type GcodeLibraryUpdatedCallback = () => void;
 
+/**
+ * Payload of the lowercase `camerasupdated` PrinterHub event, emitted to the
+ * `Printer-{id}` group when camera sync changed the printer's linked cameras.
+ */
+export interface CamerasUpdatedEvent {
+  printerId: string;
+  cameraIds: string[];
+}
+type CamerasUpdatedCallback = (event: CamerasUpdatedEvent) => void;
+
 const AUTO_DISPATCH_STATE_CHANGED_EVENT = "autodispatchstatechanged";
 
 export class PrinterSignalRService {
@@ -240,6 +250,25 @@ export class PrinterSignalRService {
         }
       });
     });
+    // Camera link changes for a subscribed printer. Only the lowercase event
+    // name is registered; do NOT add a PascalCase alias.
+    connection.on("camerasupdated", (raw: unknown) => {
+      const payload = (raw ?? {}) as Partial<CamerasUpdatedEvent>;
+      if (typeof payload.printerId !== "string" || !payload.printerId) return;
+      const event: CamerasUpdatedEvent = {
+        printerId: payload.printerId,
+        cameraIds: Array.isArray(payload.cameraIds)
+          ? payload.cameraIds.filter((id): id is string => typeof id === "string")
+          : [],
+      };
+      this.camerasUpdatedCallbacks.forEach((callback) => {
+        try {
+          callback(event);
+        } catch (error) {
+          console.error("Cameras updated callback error:", error);
+        }
+      });
+    });
     // Discovery events - register only lowercase names for consistency
     const handleDiscoveryProgress = (progress: DiscoveryProgressDto) => {
       if (typeof window !== 'undefined' && window.PrintFarmerDebug?.printerSignalR) {
@@ -425,6 +454,7 @@ export class PrinterSignalRService {
   private queueEventCallbacks: QueueEventCallback[] = [];
   private queueResourcesChangedCallbacks: QueueResourcesChangedCallback[] = [];
   private gcodeLibraryUpdatedCallbacks: GcodeLibraryUpdatedCallback[] = [];
+  private camerasUpdatedCallbacks: CamerasUpdatedCallback[] = [];
   private subscribedPrinters = new Set<string>();
   private subscribedQueueJobs = new Set<string>();
   private subscribedProjects = new Set<string>();
@@ -1050,6 +1080,15 @@ export class PrinterSignalRService {
     };
   }
 
+  /** Subscribe to `camerasupdated`; callers should refetch canonical camera queries. */
+  public onCamerasUpdated(callback: CamerasUpdatedCallback): () => void {
+    this.camerasUpdatedCallbacks.push(callback);
+    return () => {
+      const index = this.camerasUpdatedCallbacks.indexOf(callback);
+      if (index >= 0) this.camerasUpdatedCallbacks.splice(index, 1);
+    };
+  }
+
   public getQueueSubscriptionSnapshot(): {
     printerIds: string[];
     jobIds: string[];
@@ -1512,6 +1551,7 @@ export class PrinterSignalRService {
     this.queueEventCallbacks = [];
     this.queueResourcesChangedCallbacks = [];
     this.gcodeLibraryUpdatedCallbacks = [];
+    this.camerasUpdatedCallbacks = [];
     this.clearQueueSubscriptionState();
     for (const timer of this.offlineGraceTimers.values()) {
       clearTimeout(timer);
