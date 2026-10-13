@@ -112,8 +112,8 @@ final class DemoPrinterService: PrinterServiceProtocol, @unchecked Sendable {
             PrinterCameraUrls(
                 id: printer.id,
                 name: printer.name,
-                cameraStreamUrl: printer.cameraStreamUrl,
-                cameraSnapshotUrl: printer.cameraSnapshotUrl,
+                cameraStreamUrl: Self.cameraProxyPath(printer.cameraStreamUrl, printerId: printer.id, kind: "stream"),
+                cameraSnapshotUrl: Self.cameraProxyPath(printer.cameraSnapshotUrl, printerId: printer.id, kind: "snapshot"),
                 cameraAccessMode: printer.cameraAccessMode,
                 cameraStreamFormat: printer.cameraStreamFormat,
                 cameraSnapshotStrategy: printer.cameraSnapshotStrategy
@@ -126,12 +126,18 @@ final class DemoPrinterService: PrinterServiceProtocol, @unchecked Sendable {
             throw ServiceError.notImplemented("Printer not found")
         }
         return PrinterCameraUrl(
-            streamUrl: p.cameraStreamUrl,
-            snapshotUrl: p.cameraSnapshotUrl,
+            streamUrl: Self.cameraProxyPath(p.cameraStreamUrl, printerId: p.id, kind: "stream"),
+            snapshotUrl: Self.cameraProxyPath(p.cameraSnapshotUrl, printerId: p.id, kind: "snapshot"),
             accessMode: p.cameraAccessMode,
             streamFormat: p.cameraStreamFormat,
             snapshotStrategy: p.cameraSnapshotStrategy
         )
+    }
+
+    /// Mirrors the server contract: camera routes are relative, same-origin proxy paths.
+    static func cameraProxyPath(_ configured: String?, printerId: UUID, kind: String) -> String? {
+        guard configured != nil else { return nil }
+        return "/api/printers/\(printerId.uuidString.lowercased())/camera/\(kind)"
     }
 
     func getSnapshot(id: UUID) async throws -> Data {

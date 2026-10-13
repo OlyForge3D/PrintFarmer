@@ -777,6 +777,12 @@ actor APIClient {
         accessToken
     }
 
+    /// The base URL and bearer read in one actor hop, so a camera stream request
+    /// can never pair one server's URL with another server's token.
+    func currentCameraCredentials() -> (baseURL: URL, accessToken: String?) {
+        (baseURL, accessToken)
+    }
+
     /// J (issue #816 reject, Hicks): the stable server-identity id the current
     /// authenticated session was applied for. Used by tests / callers that need
     /// to prove the atomic (baseURL, accessToken, serverID) coupling.
