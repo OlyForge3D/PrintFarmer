@@ -273,8 +273,8 @@ describe("FailureDetectionMonitoringOverlay", () => {
     expect(
       screen.getAllByText(
         /Configured Obico server is not exposing a supported prediction route/,
-      ).length,
-    ).toBeGreaterThan(1);
+      ),
+    ).toHaveLength(1);
     expect(
       screen.getByText(
         "Check the Obico ML service connection and camera reachability before relying on failure detection or auto-pause.",

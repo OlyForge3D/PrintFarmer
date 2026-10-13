@@ -116,6 +116,24 @@ export function getFailureDetectionStateVariant(state?: string, enabled = false)
   }
 }
 
+/** Shield icon color for a failure-detection state. Red is reserved for `error`. */
+export function getFailureDetectionIconColorClass(state?: string): string {
+  switch (state) {
+    case 'monitoring':
+      return 'text-pf-success';
+    case 'idle':
+      return 'text-pf-accent';
+    case 'misconfigured':
+      return 'text-pf-warning';
+    case 'error':
+      return 'text-pf-error';
+    case 'disabled':
+      return 'text-pf-text-tertiary';
+    default:
+      return 'text-pf-text-secondary';
+  }
+}
+
 export function getFailureDetectionSourceLabel(source?: string): string | null {
   switch (source) {
     case 'pooled':

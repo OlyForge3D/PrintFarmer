@@ -7,6 +7,7 @@ import {
   getFailureDetectionSourceLabel,
   formatFailureDetectionTimestamp,
   getFailureDetectionDetail,
+  getFailureDetectionIconColorClass,
 } from "@/features/printers/utils/failureDetectionStatus";
 import type { FailureDetectionPrinterStatusDto } from "@/types/api";
 
@@ -545,6 +546,25 @@ describe("failureDetectionStatus utilities", () => {
       };
 
       expect(getFailureDetectionAttentionContent(status)).toBeNull();
+    });
+  });
+
+  describe("getFailureDetectionIconColorClass", () => {
+    it.each([
+      ["monitoring", "text-pf-success"],
+      ["idle", "text-pf-accent"],
+      ["misconfigured", "text-pf-warning"],
+      ["error", "text-pf-error"],
+      ["disabled", "text-pf-text-tertiary"],
+      [undefined, "text-pf-text-secondary"],
+    ] as const)("maps %s to %s", (state, expected) => {
+      expect(getFailureDetectionIconColorClass(state)).toBe(expected);
+    });
+
+    it("reserves error red for the error state only", () => {
+      for (const state of ["monitoring", "idle", "misconfigured", "disabled", "checking", undefined]) {
+        expect(getFailureDetectionIconColorClass(state)).not.toBe("text-pf-error");
+      }
     });
   });
 });

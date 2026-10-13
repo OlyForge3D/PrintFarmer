@@ -4,9 +4,12 @@ import { Badge, Button } from '@/common/components/ui';
 import { ExternalLinkIcon, ShieldIcon } from '@/common/components/icons/MdiIcons';
 import { useFailureDetectionHistory } from '@/common/hooks/useApi';
 import type { FailureDetectionEvent, FailureDetectionPrinterStatusDto } from '@/types/api';
+import clsx from 'clsx';
 import {
+  getFailureDetectionAttentionContent,
   getFailureDetectionDetail,
   getFailureDetectionDisplayState,
+  getFailureDetectionIconColorClass,
   getFailureDetectionSourceLabel,
   getFailureDetectionStateLabel,
   getFailureDetectionStateVariant,
@@ -174,6 +177,9 @@ export function FailureDetectionStatusModal({
   const lastFailure = formatFailureDetectionDateTime(status?.lastFailureDetectedAt);
   const lastOutcome = getFailureDetectionOutcomeLabel(status);
   const nextStep = getFailureDetectionNextStep(status, enabled);
+  const iconColorClass = getFailureDetectionIconColorClass(displayState);
+  const showReason = reason.trim() !== detail.trim();
+  const needsAttention = getFailureDetectionAttentionContent(status) !== null;
   const recentIncidents = useMemo(
     () => mergeFailureDetectionIncidents(recentEvents, persistedIncidents).slice(0, 5),
     [persistedIncidents, recentEvents]
@@ -241,7 +247,7 @@ export function FailureDetectionStatusModal({
       title="Spaghetti detection details"
       width="max-w-4xl"
       maxHeight="max-h-[85vh]"
-      titleIcon={<ShieldIcon className="h-5 w-5 text-pf-warning" ariaLabel="Spaghetti detection" />}
+      titleIcon={<ShieldIcon className={clsx('h-5 w-5', iconColorClass)} ariaLabel="Spaghetti detection" />}
       closeAriaLabel={`Close spaghetti detection details for ${resolvedPrinterName}`}
     >
       <div className="space-y-5">
@@ -296,20 +302,28 @@ export function FailureDetectionStatusModal({
         <div className="grid gap-5 lg:grid-cols-2">
           {/* Left column — context and operator guidance */}
           <div className="space-y-5">
-            <section className="space-y-2">
-              <h3 className="text-sm font-semibold uppercase tracking-[0.16em] text-pf-text-secondary">
-                Why this is showing
-              </h3>
-              <div className="rounded-lg border border-pf-border bg-pf-bg-0 px-4 py-3 text-sm leading-6 text-pf-text-primary">
-                {reason}
-              </div>
-            </section>
+            {showReason && (
+              <section className="space-y-2">
+                <h3 className="text-sm font-semibold uppercase tracking-[0.16em] text-pf-text-secondary">
+                  Why this is showing
+                </h3>
+                <div className="rounded-lg border border-pf-border bg-pf-bg-0 px-4 py-3 text-sm leading-6 text-pf-text-primary">
+                  {reason}
+                </div>
+              </section>
+            )}
 
             <section className="space-y-2">
               <h3 className="text-sm font-semibold uppercase tracking-[0.16em] text-pf-text-secondary">
                 Operator next step
               </h3>
-              <div className="rounded-lg border border-pf-warning/25 bg-pf-warning/10 px-4 py-3 text-sm leading-6 text-pf-text-primary">
+              <div
+                data-testid="failure-detection-next-step"
+                className={clsx(
+                  'rounded-lg border px-4 py-3 text-sm leading-6 text-pf-text-primary',
+                  needsAttention ? 'border-pf-warning/25 bg-pf-warning/10' : 'border-pf-border bg-pf-bg-0'
+                )}
+              >
                 {nextStep}
               </div>
             </section>

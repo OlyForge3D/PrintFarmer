@@ -5,6 +5,7 @@ import { Button } from '@/common/components/ui';
 import type { FailureDetectionPrinterStatusDto } from '@/types/api';
 import {
   getFailureDetectionDisplayState,
+  getFailureDetectionIconColorClass,
   getFailureDetectionStateLabel,
 } from '@/features/printers/utils/failureDetectionStatus';
 import { FailureDetectionStatusModal } from '@/features/printers/components/FailureDetectionStatusModal';
@@ -24,25 +25,25 @@ function getChipStyles(state?: string): { border: string; glow: string; icon: st
       return {
         border: 'border-pf-success/40',
         glow: 'shadow-[0_2px_8px_rgba(34,197,94,0.4)]',
-        icon: 'text-pf-success',
+        icon: getFailureDetectionIconColorClass(state),
       };
     case 'idle':
       return {
         border: 'border-pf-accent/30',
         glow: 'shadow-[0_2px_8px_rgba(59,130,246,0.35)]',
-        icon: 'text-pf-accent',
+        icon: getFailureDetectionIconColorClass(state),
       };
     case 'misconfigured':
       return {
         border: 'border-pf-warning/40',
         glow: 'shadow-[0_2px_8px_rgba(245,158,11,0.4)]',
-        icon: 'text-pf-warning',
+        icon: getFailureDetectionIconColorClass(state),
       };
     case 'error':
       return {
         border: 'border-pf-error/40',
         glow: 'shadow-[0_2px_8px_rgba(239,68,68,0.4)]',
-        icon: 'text-pf-error',
+        icon: getFailureDetectionIconColorClass(state),
       };
     default:
       return {
