@@ -229,6 +229,7 @@ public class CameraMultiPrinterTests : IClassFixture<CustomWebApplicationFactory
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         (await ReadRemovalResultAsync(response)).Should().Be("Deleted");
         (await CameraExistsAsync(camera.Id)).Should().BeFalse();
+        (await GetDismissalsAsync(printer.Id)).Should().ContainSingle(d => d.Source == CameraSource.Moonraker && d.Name == "discovered");
     }
 
     [Fact]
@@ -249,6 +250,30 @@ public class CameraMultiPrinterTests : IClassFixture<CustomWebApplicationFactory
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         (await ReadRemovalResultAsync(response)).Should().Be("Unlinked");
         (await GetPrinterLinksAsync(second.Id)).Should().ContainSingle(l => l.CameraId == camera.Id);
+        (await GetDismissalsAsync(first.Id)).Should().ContainSingle(d => d.Source == CameraSource.Moonraker);
+        (await GetDismissalsAsync(second.Id)).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task LinkEndpoint_DismissedDiscoveredCamera_ClearsDismissal()
+    {
+        Printer first = await CreatePrinterAsync("Relink first");
+        Printer second = await CreatePrinterAsync("Relink second");
+        CameraDto camera = await CreateCameraAsync(new CreateCameraDto
+        {
+            Name = "relinked-discovered",
+            StreamUrl = "http://example.com/relink",
+            PrinterIds = [first.Id, second.Id],
+            Source = CameraSource.Moonraker,
+        });
+        (await Client.DeleteAsync($"/api/printers/{first.Id}/cameras/{camera.Id}")).EnsureSuccessStatusCode();
+        (await GetDismissalsAsync(first.Id)).Should().ContainSingle();
+
+        HttpResponseMessage response = await Client.PostAsync($"/api/cameras/{camera.Id}/printers/{first.Id}", content: null);
+
+        response.EnsureSuccessStatusCode();
+        (await GetPrinterLinksAsync(first.Id)).Should().ContainSingle(l => l.CameraId == camera.Id);
+        (await GetDismissalsAsync(first.Id)).Should().BeEmpty();
     }
 
     [Fact]
@@ -263,6 +288,7 @@ public class CameraMultiPrinterTests : IClassFixture<CustomWebApplicationFactory
         (await ReadRemovalResultAsync(response)).Should().Be("Unlinked");
         (await CameraExistsAsync(camera.Id)).Should().BeTrue();
         (await GetPrinterLinksAsync(printer.Id)).Should().BeEmpty();
+        (await GetDismissalsAsync(printer.Id)).Should().BeEmpty();
     }
 
     [Fact]
@@ -340,6 +366,13 @@ public class CameraMultiPrinterTests : IClassFixture<CustomWebApplicationFactory
         await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         return await db.Set<CameraPrinter>().AsNoTracking().Where(l => l.PrinterId == printerId).ToListAsync();
+    }
+
+    private async Task<List<DismissedPrinterCamera>> GetDismissalsAsync(Guid printerId)
+    {
+        await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        return await db.DismissedPrinterCameras.AsNoTracking().Where(d => d.PrinterId == printerId).ToListAsync();
     }
 
     private async Task<bool> CameraExistsAsync(Guid cameraId)

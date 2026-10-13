@@ -1652,6 +1652,36 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.ToTable("CustomFieldValues");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.DismissedPrinterCamera", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("DismissedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<Guid>("PrinterId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PrinterId", "Source")
+                        .IsUnique();
+
+                    b.ToTable("DismissedPrinterCameras", (string)null);
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.DispatchEscalationMarker", b =>
                 {
                     b.Property<Guid>("Id")
@@ -8764,6 +8794,15 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .IsRequired();
 
                     b.Navigation("Definition");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.DismissedPrinterCamera", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.Printer", null)
+                        .WithMany()
+                        .HasForeignKey("PrinterId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.DispatchLog", b =>

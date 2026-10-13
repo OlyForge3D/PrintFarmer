@@ -243,12 +243,11 @@ public sealed class PrinterCameraSynchronizerTests : IAsyncDisposable
     }
 
     /// <summary>
-    /// Documents current behavior (#3335 caveat a): deleting an auto-discovered camera does not
-    /// suppress rediscovery. While the printer plugin still reports the camera, the next sync
-    /// recreates it as a new row and makes it primary again.
+    /// Removing an auto-discovered camera (Deleted outcome) records a dismissal for the printer, so
+    /// background sync must not re-create it while the plugin still reports the stream.
     /// </summary>
     [Fact]
-    public async Task SyncPrinterAsync_DiscoveredCameraDeleted_IsRecreatedOnNextSync()
+    public async Task SyncPrinterAsync_DiscoveredCameraDeletedAndDismissed_IsNotRecreated()
     {
         Printer printer = await AddPrinterAsync();
         SetupDetection(StreamUrl, SnapshotUrl);
@@ -256,25 +255,24 @@ public sealed class PrinterCameraSynchronizerTests : IAsyncDisposable
         await sut.SyncPrinterAsync(printer.Id, explicitRequest: false, CancellationToken.None);
         Camera original = await _db.Cameras.SingleAsync();
         _db.Cameras.Remove(original);
+        AddDismissal(printer.Id);
         await _db.SaveChangesAsync();
         _db.ChangeTracker.Clear();
 
         PrinterCameraSyncResult result = await sut.SyncPrinterAsync(printer.Id, explicitRequest: false, CancellationToken.None);
 
-        result.Created.Should().Be(1);
-        Camera recreated = await _db.Cameras.Include(c => c.PrinterLinks).SingleAsync();
-        recreated.Id.Should().NotBe(original.Id);
-        recreated.StreamUrl.Should().Be(StreamUrl);
-        recreated.PrinterLinks.Should().ContainSingle(l => l.PrinterId == printer.Id && l.IsPrimary);
+        result.Created.Should().Be(0);
+        result.Updated.Should().Be(0);
+        (await _db.Cameras.AnyAsync()).Should().BeFalse();
+        (await _db.Set<CameraPrinter>().AnyAsync()).Should().BeFalse();
     }
 
     /// <summary>
-    /// Documents current behavior (#3335 caveat a): unlinking a discovered camera from its printer
-    /// leaves the old row (now user-modified) unlinked, and the next sync creates a second camera
-    /// for the same plugin stream because only cameras linked to the printer are considered.
+    /// Removing an auto-discovered camera that stays in the library (Unlinked outcome) records a
+    /// dismissal, so sync must not create a duplicate camera beside the unlinked row.
     /// </summary>
     [Fact]
-    public async Task SyncPrinterAsync_DiscoveredCameraUnlinked_CreatesNewLinkedCameraBesideTheUnlinkedOne()
+    public async Task SyncPrinterAsync_DiscoveredCameraUnlinkedAndDismissed_DoesNotCreateDuplicate()
     {
         Printer printer = await AddPrinterAsync();
         SetupDetection(StreamUrl, SnapshotUrl);
@@ -283,16 +281,68 @@ public sealed class PrinterCameraSynchronizerTests : IAsyncDisposable
         Camera original = await _db.Cameras.Include(c => c.PrinterLinks).SingleAsync();
         original.PrinterLinks.Clear();
         original.UserModified = true;
+        AddDismissal(printer.Id);
         await _db.SaveChangesAsync();
         _db.ChangeTracker.Clear();
 
         PrinterCameraSyncResult result = await sut.SyncPrinterAsync(printer.Id, explicitRequest: false, CancellationToken.None);
 
+        result.Created.Should().Be(0);
+        Camera camera = await _db.Cameras.Include(c => c.PrinterLinks).SingleAsync();
+        camera.Id.Should().Be(original.Id);
+        camera.PrinterLinks.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task SyncAllAsync_DismissedCamera_KeepsDismissalAndDoesNotRecreate()
+    {
+        Printer printer = await AddPrinterAsync();
+        SetupDetection(StreamUrl, SnapshotUrl);
+        AddDismissal(printer.Id);
+        await _db.SaveChangesAsync();
+        _db.ChangeTracker.Clear();
+
+        await CreateSut().SyncAllAsync(CancellationToken.None);
+
+        (await _db.Cameras.AnyAsync()).Should().BeFalse();
+        (await _db.DismissedPrinterCameras.SingleAsync()).PrinterId.Should().Be(printer.Id);
+    }
+
+    [Fact]
+    public async Task ClearDismissalsAsync_ThenSync_RecreatesDismissedCamera()
+    {
+        Printer printer = await AddPrinterAsync();
+        Printer otherPrinter = await AddPrinterAsync();
+        SetupDetection(StreamUrl, SnapshotUrl);
+        AddDismissal(printer.Id);
+        AddDismissal(otherPrinter.Id);
+        await _db.SaveChangesAsync();
+        _db.ChangeTracker.Clear();
+        PrinterCameraSynchronizer sut = CreateSut();
+
+        int cleared = await sut.ClearDismissalsAsync(printer.Id, CancellationToken.None);
+        PrinterCameraSyncResult result = await sut.SyncPrinterAsync(printer.Id, explicitRequest: true, CancellationToken.None);
+
+        cleared.Should().Be(1);
         result.Created.Should().Be(1);
-        List<Camera> cameras = await _db.Cameras.Include(c => c.PrinterLinks).ToListAsync();
-        cameras.Should().HaveCount(2);
-        cameras.Single(c => c.Id == original.Id).PrinterLinks.Should().BeEmpty();
-        cameras.Single(c => c.Id != original.Id).PrinterLinks.Should().ContainSingle(l => l.PrinterId == printer.Id && l.IsPrimary);
+        Camera camera = await _db.Cameras.Include(c => c.PrinterLinks).SingleAsync();
+        camera.StreamUrl.Should().Be(StreamUrl);
+        camera.PrinterLinks.Should().ContainSingle(l => l.PrinterId == printer.Id && l.IsPrimary);
+        (await _db.DismissedPrinterCameras.SingleAsync()).PrinterId.Should().Be(otherPrinter.Id);
+    }
+
+    [Fact]
+    public async Task SyncPrinterAsync_DismissalForOtherSource_DoesNotSuppressDiscoveredCamera()
+    {
+        Printer printer = await AddPrinterAsync();
+        SetupDetection(StreamUrl, SnapshotUrl);
+        AddDismissal(printer.Id, CameraSource.PrusaLink);
+        await _db.SaveChangesAsync();
+        _db.ChangeTracker.Clear();
+
+        PrinterCameraSyncResult result = await CreateSut().SyncPrinterAsync(printer.Id, explicitRequest: false, CancellationToken.None);
+
+        result.Created.Should().Be(1);
     }
 
     [Fact]
@@ -445,6 +495,16 @@ public sealed class PrinterCameraSynchronizerTests : IAsyncDisposable
             .ReturnsAsync(printer);
         return printer;
     }
+
+    private void AddDismissal(Guid printerId, CameraSource source = CameraSource.Moonraker) =>
+        _db.DismissedPrinterCameras.Add(new DismissedPrinterCamera
+        {
+            Id = Guid.NewGuid(),
+            PrinterId = printerId,
+            Source = source,
+            Name = "Voron Camera",
+            DismissedAt = DateTime.UtcNow,
+        });
 
     private async Task<Camera> AddCameraAsync(
         Guid printerId,

@@ -38,6 +38,29 @@ public class PrintersControllerDiscoverCamerasTests
     }
 
     [Fact]
+    public async Task DiscoverCamerasAsync_ClearsDismissalsBeforeSyncing()
+    {
+        Guid printerId = Guid.NewGuid();
+        List<string> calls = [];
+        var synchronizer = new Mock<IPrinterCameraSynchronizer>(MockBehavior.Strict);
+        synchronizer
+            .Setup(s => s.ClearDismissalsAsync(printerId, It.IsAny<CancellationToken>()))
+            .Callback(() => calls.Add("clear"))
+            .ReturnsAsync(1);
+        synchronizer
+            .Setup(s => s.SyncPrinterAsync(printerId, true, It.IsAny<CancellationToken>()))
+            .Callback(() => calls.Add("sync"))
+            .ReturnsAsync(new PrinterCameraSyncResult(printerId, true, true, 1, 0, 0, [Guid.NewGuid()]));
+        var cameraService = new Mock<ICameraService>();
+        cameraService.Setup(s => s.GetByPrinterIdAsync(printerId, It.IsAny<CancellationToken>())).ReturnsAsync([]);
+
+        _ = await CreateController()
+            .DiscoverCamerasAsync(printerId, synchronizer.Object, cameraService.Object, CancellationToken.None);
+
+        calls.Should().Equal("clear", "sync");
+    }
+
+    [Fact]
     public async Task DiscoverCamerasAsync_UnknownPrinter_ReturnsNotFound()
     {
         Guid printerId = Guid.NewGuid();

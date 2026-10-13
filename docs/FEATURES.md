@@ -352,6 +352,9 @@ Configure it in **Admin Settings → Printers → Camera Sync** (section
 - **Remove** unlinks the camera from this printer. It deletes the camera only
   when it was auto-discovered and no other printer links remain; otherwise the
   camera is kept.
+- **Removal sticks:** removing an auto-discovered camera stops the background
+  sync from adding it back to that printer. Click **Discover** to bring removed
+  cameras back, or link the camera to the printer again manually.
 - **Permissions:** Remove and Discover require `printers:admin`; editing,
   adding, and linking require `cameras:admin`.
 

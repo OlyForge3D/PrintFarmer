@@ -184,6 +184,7 @@ public class CameraService : ICameraService
             {
                 bool hasPrimary = await _unitOfWork.Cameras.HasPrimaryCameraAsync(printer.Id, ct);
                 camera.LinkToPrinter(printer.Id, isPrimary: dto.IsPrimary == true || !hasPrimary).Printer = printer;
+                await ClearDismissalAsync(camera, printer.Id, ct);
                 if (dto.IsPrimary == true)
                 {
                     await DemoteOtherPrimariesAsync(printer.Id, camera.Id, ct);
@@ -337,6 +338,11 @@ public class CameraService : ICameraService
                 await PromoteNextPrimaryAsync(link.PrinterId, camera.Id, ct);
             }
 
+            foreach (CameraPrinter link in camera.PrinterLinks)
+            {
+                await DismissDiscoveredCameraAsync(camera, link.PrinterId, ct);
+            }
+
             _unitOfWork.Cameras.Remove(camera);
             await _unitOfWork.SaveChangesAsync(ct);
 
@@ -481,6 +487,7 @@ public class CameraService : ICameraService
 
             bool hasPrimaryCamera = await _unitOfWork.Cameras.HasPrimaryCameraAsync(printerId, ct);
             camera.LinkToPrinter(printerId, isPrimary: !hasPrimaryCamera).Printer = printer;
+            await ClearDismissalAsync(camera, printerId, ct);
 
             _unitOfWork.Cameras.Add(camera);
             await _unitOfWork.SaveChangesAsync(ct);
@@ -543,6 +550,7 @@ public class CameraService : ICameraService
         {
             bool makePrimary = isPrimary == true || !await _unitOfWork.Cameras.HasPrimaryCameraAsync(printerId, ct);
             camera.LinkToPrinter(printerId, makePrimary).Printer = printer;
+            await ClearDismissalAsync(camera, printerId, ct);
             if (makePrimary)
             {
                 await DemoteOtherPrimariesAsync(printerId, camera.Id, ct);
@@ -675,6 +683,7 @@ public class CameraService : ICameraService
 
             bool primary = makePrimary || !await _unitOfWork.Cameras.HasPrimaryCameraAsync(printerId, ct);
             camera.LinkToPrinter(printerId, primary, sortOrder++).Printer = printers.First(p => p.Id == printerId);
+            await ClearDismissalAsync(camera, printerId, ct);
             if (primary)
             {
                 await DemoteOtherPrimariesAsync(printerId, camera.Id, ct);
@@ -691,6 +700,59 @@ public class CameraService : ICameraService
 
         camera.PrinterLinks.Remove(link);
         _unitOfWork.Cameras.RemoveLink(link);
+        await DismissDiscoveredCameraAsync(camera, link.PrinterId, ct);
+    }
+
+    /// <summary>
+    /// Remembers that the user removed an auto-discovered camera from a printer so background camera
+    /// sync does not re-create it. Standalone and Prusa Buddy cameras are not sync-created and are skipped.
+    /// </summary>
+    private async Task DismissDiscoveredCameraAsync(Camera camera, Guid printerId, CancellationToken ct)
+    {
+        if (!PrinterCameraSynchronizer.IsDismissible(camera))
+        {
+            return;
+        }
+
+        DismissedPrinterCamera? dismissal = await FindDismissalAsync(printerId, camera.Source, ct);
+        if (dismissal is null)
+        {
+            dismissal = new DismissedPrinterCamera
+            {
+                Id = Guid.NewGuid(),
+                PrinterId = printerId,
+                Source = camera.Source,
+            };
+            _db.DismissedPrinterCameras.Add(dismissal);
+        }
+
+        dismissal.Name = camera.Name;
+        dismissal.DismissedAt = DateTime.UtcNow;
+    }
+
+    /// <summary>
+    /// Manually linking a camera that occupies a printer's discovered-camera slot clears the matching
+    /// dismissal, so the user's explicit choice wins over an earlier removal.
+    /// </summary>
+    private async Task ClearDismissalAsync(Camera camera, Guid printerId, CancellationToken ct)
+    {
+        if (!PrinterCameraSynchronizer.IsDismissible(camera))
+        {
+            return;
+        }
+
+        DismissedPrinterCamera? dismissal = await FindDismissalAsync(printerId, camera.Source, ct);
+        if (dismissal is not null)
+        {
+            _db.DismissedPrinterCameras.Remove(dismissal);
+        }
+    }
+
+    private async Task<DismissedPrinterCamera?> FindDismissalAsync(Guid printerId, CameraSource source, CancellationToken ct)
+    {
+        // Local covers dismissals added earlier in this unit of work (not yet saved).
+        return _db.DismissedPrinterCameras.Local.FirstOrDefault(d => d.PrinterId == printerId && d.Source == source)
+            ?? await _db.DismissedPrinterCameras.FirstOrDefaultAsync(d => d.PrinterId == printerId && d.Source == source, ct);
     }
 
     private async Task DemoteOtherPrimariesAsync(Guid printerId, Guid cameraId, CancellationToken ct)

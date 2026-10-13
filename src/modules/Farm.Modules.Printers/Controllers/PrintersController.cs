@@ -1722,6 +1722,8 @@ public class PrintersController(
     /// Runs plugin camera discovery for a printer now (the same sync the background
     /// <c>PrinterCameraSyncService</c> performs on connect, create, and interval) and returns
     /// the printer's linked cameras. User-modified and standalone cameras are never overwritten.
+    /// Discovered cameras the user previously removed from this printer are un-dismissed first, so
+    /// explicit discovery brings them back.
     /// </summary>
     /// <param name="id">The unique identifier of the printer.</param>
     /// <param name="synchronizer">Printer camera synchronizer.</param>
@@ -1744,6 +1746,7 @@ public class PrintersController(
     {
         try
         {
+            _ = await synchronizer.ClearDismissalsAsync(id, ct);
             Farm.Infrastructure.Services.Cameras.PrinterCameraSyncResult result =
                 await synchronizer.SyncPrinterAsync(id, explicitRequest: true, ct);
             if (!result.PrinterFound)

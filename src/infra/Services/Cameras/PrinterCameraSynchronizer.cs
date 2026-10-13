@@ -12,8 +12,9 @@ namespace Farm.Infrastructure.Services.Cameras;
 
 /// <summary>
 /// Discovers cameras through the printer's backend plugin and upserts <see cref="Camera"/> rows
-/// linked to the printer. Cameras that are user-modified or standalone are never overwritten, and
-/// cameras the backend stops reporting are marked offline rather than deleted.
+/// linked to the printer. Cameras that are user-modified or standalone are never overwritten,
+/// cameras the backend stops reporting are marked offline rather than deleted, and cameras a user
+/// removed from the printer (see <see cref="DismissedPrinterCamera"/>) are not re-created.
 /// </summary>
 public sealed class PrinterCameraSynchronizer(
     AppDbContext db,
@@ -66,6 +67,24 @@ public sealed class PrinterCameraSynchronizer(
     }
 
     /// <inheritdoc/>
+    public async Task<int> ClearDismissalsAsync(Guid printerId, CancellationToken ct)
+    {
+        List<DismissedPrinterCamera> dismissals = await db.DismissedPrinterCameras
+            .Where(d => d.PrinterId == printerId)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        if (dismissals.Count == 0)
+        {
+            return 0;
+        }
+
+        db.DismissedPrinterCameras.RemoveRange(dismissals);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        logger.LogInformation("Cleared {Count} dismissed camera(s) for printer {PrinterId}", dismissals.Count, printerId);
+        return dismissals.Count;
+    }
+
+    /// <inheritdoc/>
     public async Task<PrinterCameraSyncResult> SyncPrinterAsync(Guid printerId, bool explicitRequest, CancellationToken ct)
     {
         Printer? printer = await unitOfWork.Printers.FindByIdWithIncludesAsync(printerId, ct).ConfigureAwait(false);
@@ -75,6 +94,10 @@ public sealed class PrinterCameraSynchronizer(
         }
 
         (bool discoverySucceeded, DiscoveredCamera? discovered) = await DiscoverAsync(printer, ct).ConfigureAwait(false);
+        bool discoveredIsDismissed = discovered is not null && await db.DismissedPrinterCameras
+            .AsNoTracking()
+            .AnyAsync(d => d.PrinterId == printerId && d.Source == discovered.Source, ct)
+            .ConfigureAwait(false);
 
         List<Camera> linked = await db.Cameras
             .Include(c => c.PrinterLinks)
@@ -92,7 +115,7 @@ public sealed class PrinterCameraSynchronizer(
 
         if (discovered is not null)
         {
-            (discoveredCamera, bool wasCreated, bool wasUpdated) = ReconcileDiscovered(printer, discovered, linked, now);
+            (discoveredCamera, bool wasCreated, bool wasUpdated) = ReconcileDiscovered(printer, discovered, discoveredIsDismissed, linked, now);
             if (discoveredCamera is not null)
             {
                 touched.Add(discoveredCamera.Id);
@@ -151,6 +174,7 @@ public sealed class PrinterCameraSynchronizer(
     private (Camera? Camera, bool Created, bool Updated) ReconcileDiscovered(
         Printer printer,
         DiscoveredCamera discovered,
+        bool isDismissed,
         List<Camera> linked,
         DateTime now)
     {
@@ -207,6 +231,13 @@ public sealed class PrinterCameraSynchronizer(
             ? sameSource.Any(c => string.Equals(c.Name, discovered.Name, StringComparison.OrdinalIgnoreCase))
             : sameSource.Count > 0;
         if (claimedByProtectedCamera)
+        {
+            return (null, false, false);
+        }
+
+        // The user removed this printer's discovered camera; only an explicit discovery request
+        // (which clears the dismissal first) may bring it back.
+        if (isDismissed)
         {
             return (null, false, false);
         }
@@ -269,9 +300,17 @@ public sealed class PrinterCameraSynchronizer(
     private static bool IsSyncManaged(Camera camera) =>
         !camera.UserModified && camera.Source != CameraSource.Standalone && !IsBuddyCamera(camera);
 
+    /// <summary>
+    /// True when removing <paramref name="camera"/> from a printer must be remembered so sync does not
+    /// re-create it: plugin-discovered cameras only (not standalone or Prusa Buddy cameras).
+    /// </summary>
+    /// <param name="camera">Camera being removed from a printer.</param>
+    internal static bool IsDismissible(Camera camera) =>
+        camera.Source != CameraSource.Standalone && !IsBuddyCamera(camera);
+
     // Prusa Buddy cameras are configured from the printer's BuddyCameraIp (see
     // PrintersService.SyncBuddyCameraAsync), not reported by the PrusaLink plugin.
-    private static bool IsBuddyCamera(Camera camera) =>
+    internal static bool IsBuddyCamera(Camera camera) =>
         camera.Source == CameraSource.PrusaLink &&
         camera.StreamUrl?.StartsWith("rtsp://", StringComparison.OrdinalIgnoreCase) == true;
 

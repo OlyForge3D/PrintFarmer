@@ -1641,6 +1641,36 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.ToTable("CustomFieldValues");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.DismissedPrinterCamera", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("DismissedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("PrinterId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PrinterId", "Source")
+                        .IsUnique();
+
+                    b.ToTable("DismissedPrinterCameras", (string)null);
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.DispatchEscalationMarker", b =>
                 {
                     b.Property<Guid>("Id")
@@ -8711,6 +8741,15 @@ namespace Farm.Migrations.Sqlite.Migrations
                         .IsRequired();
 
                     b.Navigation("Definition");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.DismissedPrinterCamera", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.Printer", null)
+                        .WithMany()
+                        .HasForeignKey("PrinterId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.DispatchLog", b =>

@@ -15,6 +15,16 @@ public interface IPrinterCameraSynchronizer
     /// <param name="ct">Cancellation token.</param>
     Task<PrinterCameraSyncResult> SyncPrinterAsync(Guid printerId, bool explicitRequest, CancellationToken ct);
 
+    /// <summary>
+    /// Removes every <see cref="Domain.DismissedPrinterCamera"/> recorded for the printer so the next
+    /// sync can re-create discovered cameras the user previously removed. Only explicit discovery
+    /// requests call this; background (timer, connect, create) syncs never do.
+    /// </summary>
+    /// <param name="printerId">Printer whose dismissals to clear.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Number of dismissals removed.</returns>
+    Task<int> ClearDismissalsAsync(Guid printerId, CancellationToken ct);
+
     /// <summary>Synchronizes discovered cameras for every enabled printer.</summary>
     /// <param name="ct">Cancellation token.</param>
     Task<IReadOnlyList<PrinterCameraSyncResult>> SyncAllAsync(CancellationToken ct);

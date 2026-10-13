@@ -1287,10 +1287,18 @@ printer links remain:
 `result` is `Unlinked` (camera kept) or `Deleted`. Returns `404` when the
 printer or camera is not found, not accessible, or not linked.
 
+Removing an auto-discovered (non-`Standalone`) camera records a per-printer
+dismissal keyed by camera source, with either result. Background syncs do not
+re-create or re-link a dismissed camera. Linking a camera from that source to
+the printer again (`POST /api/cameras/{id}/printers/{printerId}` or a
+`printerIds` update) clears the dismissal.
+
 **Discovery.** `POST /api/printers/{id}/cameras/discover` performs the same sync
 the background service runs on connect, on create, and every
 `CameraSync.intervalMinutes` (default 15). User-modified and standalone cameras
 are never overwritten; cameras the backend stops reporting are marked offline.
+It first clears the printer's dismissals, so discovery brings back cameras the
+user removed. Background syncs never clear dismissals.
 
 **Printer camera URL.** `GET /api/printers/{id}/camera/url` returns relative
 proxy `streamUrl`/`snapshotUrl` plus optional `accessMode`, `streamFormat`,
