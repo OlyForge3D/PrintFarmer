@@ -6631,11 +6631,9 @@ public class PrintersService(
     {
         List<Domain.Camera> cameras = await _unitOfWork.Cameras.GetByPrinterIdAsync(printerId, ct).ConfigureAwait(false);
 
-        Domain.Camera? camera = cameras
-            .Where(c => c.IsEnabled)
-            .OrderBy(c => c.SortOrder)
-            .ThenBy(c => c.CameraType == CameraType.General ? 0 : 1)
-            .FirstOrDefault();
+        // Repository order is primary link first, then link/camera sort order.
+        Domain.Camera? camera = PrinterCameraSelector.OrderCamerasForPrinter(cameras, printerId)
+            .FirstOrDefault(c => c.IsEnabled);
 
         return camera is not null
             ? (camera.StreamUrl, camera.SnapshotUrl)
@@ -6675,17 +6673,14 @@ public class PrintersService(
         List<Domain.Camera> allCameras = await _unitOfWork.Cameras.GetEnabledAsync(ct).ConfigureAwait(false);
 
         return allCameras
-            .SelectMany(c => c.PrinterLinks.Select(l => (l.PrinterId, Camera: c)))
-            .GroupBy(x => x.PrinterId, x => x.Camera)
+            .SelectMany(c => c.PrinterLinks.Select(l => l.PrinterId))
+            .Distinct()
             .ToDictionary(
-                g => g.Key,
-                g =>
+                printerId => printerId,
+                printerId =>
                 {
-                    Domain.Camera? best = g
-                        .OrderBy(c => c.SortOrder)
-                        .ThenBy(c => c.CameraType == CameraType.General ? 0 : 1)
-                        .FirstOrDefault();
-                    return best is not null ? (best.StreamUrl, best.SnapshotUrl) : (null, null);
+                    IReadOnlyList<Domain.Camera> ordered = PrinterCameraSelector.OrderCamerasForPrinter(allCameras, printerId);
+                    return ordered.Count > 0 ? (ordered[0].StreamUrl, ordered[0].SnapshotUrl) : (null, null);
                 });
     }
 }

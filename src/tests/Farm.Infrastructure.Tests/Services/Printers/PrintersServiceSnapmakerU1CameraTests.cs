@@ -51,6 +51,49 @@ public class PrintersServiceSnapmakerU1CameraTests
     }
 
     [Fact]
+    public async Task GetCameraSnapshotAsync_UsesPrimaryLinkedCameraBeforeLowerSortOrderSecondary()
+    {
+        Printer printer = CreatePrinter("Voron", "V2.4");
+        byte[] image = [0xff, 0xd8, 0xff, 0xd9];
+        List<Camera> cameras =
+        [
+            new Camera
+            {
+                Id = Guid.NewGuid(),
+                PrinterLinks = { new CameraPrinter { PrinterId = printer.Id, IsPrimary = false, SortOrder = 0 } },
+                Name = "secondary",
+                IsEnabled = true,
+                SortOrder = -5,
+                SnapshotUrl = "http://secondary.local/snapshot.jpg",
+            },
+            new Camera
+            {
+                Id = Guid.NewGuid(),
+                PrinterLinks = { new CameraPrinter { PrinterId = printer.Id, IsPrimary = true, SortOrder = 3 } },
+                Name = "primary",
+                IsEnabled = true,
+                SortOrder = 10,
+                SnapshotUrl = "http://primary.local/snapshot.jpg",
+            },
+        ];
+        var backendClients = new Mock<IBackendClientFactory>();
+        backendClients.Setup(factory => factory.GetClient(PrinterBackend.Moonraker))
+            .Throws(new InvalidOperationException("plugin unavailable"));
+        using var handler = new SnapshotHandler(image);
+        using var http = new HttpClient(handler);
+        var httpClients = new Mock<IHttpClientFactory>();
+        httpClients.Setup(factory => factory.CreateClient(It.IsAny<string>())).Returns(http);
+        await using AppDbContext db = CreateDbContext();
+        PrintersService service = await CreateServiceAsync(
+            db, printer, cameras, CreateDetectionClient((null, null)).Object, backendClients.Object, httpClients.Object);
+
+        byte[]? result = await service.GetCameraSnapshotAsync(printer.Id, CancellationToken.None);
+
+        result.Should().Equal(image);
+        handler.RequestUrl.Should().Be("http://primary.local/snapshot.jpg");
+    }
+
+    [Fact]
     public async Task RefreshCameraUrlsAsync_WhenSnapmakerU1HasNoWebcamList_StoresSnapshotOnlyU1Strategy()
     {
         Printer printer = CreatePrinter("Snapmaker", "Snapmaker U1");
