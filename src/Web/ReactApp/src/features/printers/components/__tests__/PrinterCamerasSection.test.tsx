@@ -22,7 +22,9 @@ vi.mock('@/services/cameraService', () => ({ cameraService: cameraServiceMock })
 vi.mock('@/services/printerService', () => ({ printerService: printerServiceMock }));
 vi.mock('@/features/auth/hooks/useAuth', () => ({ useAuth: () => ({ hasPermission }) }));
 vi.mock('@/features/cameras/components/EditCameraModal', () => ({
-  EditCameraModal: ({ camera }: { camera: CameraDto }) => <div role="dialog">Editing {camera.name}</div>,
+  EditCameraModal: ({ camera, lockPrinterId }: { camera: CameraDto; lockPrinterId?: string }) => (
+    <div role="dialog" data-lock-printer-id={lockPrinterId}>Editing {camera.name}</div>
+  ),
 }));
 vi.mock('@/common/components/modals/ConfirmationModal', () => ({
   ConfirmationModal: ({ isOpen, message, onConfirm, onCancel }: {
@@ -172,6 +174,17 @@ describe('PrinterCamerasSection', () => {
     await user.click(screen.getByRole('button', { name: 'Link camera' }));
 
     await waitFor(() => expect(cameraServiceMock.linkCameraToPrinter).toHaveBeenCalledWith('cam-9', PRINTER_ID));
+  });
+
+  it('opens the edit modal with this printer locked so it cannot be unlinked there', async () => {
+    const user = userEvent.setup();
+    renderSection();
+
+    await user.click(await screen.findByRole('button', { name: 'Edit camera Shared cam' }));
+
+    const dialog = screen.getByRole('dialog');
+    expect(dialog).toHaveTextContent('Editing Shared cam');
+    expect(dialog).toHaveAttribute('data-lock-printer-id', PRINTER_ID);
   });
 
   it('hides management actions without admin permissions', async () => {

@@ -349,6 +349,7 @@ export function PrinterCamerasSection({ printerId, onDialogOpenChange }: Printer
         <EditCameraModal
           camera={editingCamera}
           isOpen
+          lockPrinterId={printerId}
           onClose={() => setEditingCamera(null)}
           onSuccess={() => {
             setEditingCamera(null);
