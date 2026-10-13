@@ -224,6 +224,13 @@ public class Printer : IRevisionedEntity
     [JsonIgnore]
     public ICollection<Camera> Cameras { get; set; } = new List<Camera>();
 
+    /// <summary>
+    /// Join rows linking cameras to this printer (carries per-printer <see cref="CameraPrinter.IsPrimary"/> and ordering).
+    /// <see cref="Cameras"/> is the skip navigation over these rows.
+    /// </summary>
+    [JsonIgnore]
+    public ICollection<CameraPrinter> CameraLinks { get; set; } = new List<CameraPrinter>();
+
     public Guid ManufacturerId { get; set; } // No longer nullable - uses default "Unknown" manufacturer
 
     public Manufacturer? Manufacturer { get; set; }

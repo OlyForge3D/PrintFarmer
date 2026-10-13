@@ -1425,13 +1425,13 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
 
+                    b.Property<Guid?>("LocationId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
-
-                    b.Property<Guid?>("PrinterId")
-                        .HasColumnType("uuid");
 
                     b.Property<string>("SnapshotUrl")
                         .HasMaxLength(500)
@@ -1453,19 +1453,49 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<bool>("UserModified")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
                     b.HasKey("Id");
 
                     b.HasIndex("IsEnabled");
 
-                    b.HasIndex("Name");
+                    b.HasIndex("LocationId");
 
-                    b.HasIndex("PrinterId");
+                    b.HasIndex("Name");
 
                     b.HasIndex("SortOrder");
 
                     b.HasIndex("Source");
 
                     b.ToTable("Cameras", (string)null);
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.CameraPrinter", b =>
+                {
+                    b.Property<Guid>("CameraId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("PrinterId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("IsPrimary")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<int>("SortOrder")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
+                    b.HasKey("CameraId", "PrinterId");
+
+                    b.HasIndex("PrinterId");
+
+                    b.ToTable("CameraPrinters", (string)null);
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.CameraSnapshot", b =>
@@ -1618,6 +1648,36 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .IsUnique();
 
                     b.ToTable("CustomFieldValues");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.DismissedPrinterCamera", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("DismissedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<Guid>("PrinterId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PrinterId", "Source")
+                        .IsUnique();
+
+                    b.ToTable("DismissedPrinterCameras", (string)null);
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.DispatchEscalationMarker", b =>
@@ -8648,10 +8708,29 @@ namespace Farm.Migrations.PostgreSQL.Migrations
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.Camera", b =>
                 {
+                    b.HasOne("Farm.Infrastructure.Domain.Location", "AssignedLocation")
+                        .WithMany()
+                        .HasForeignKey("LocationId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("AssignedLocation");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.CameraPrinter", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.Camera", "Camera")
+                        .WithMany("PrinterLinks")
+                        .HasForeignKey("CameraId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
                     b.HasOne("Farm.Infrastructure.Domain.Printer", "Printer")
-                        .WithMany("Cameras")
+                        .WithMany("CameraLinks")
                         .HasForeignKey("PrinterId")
-                        .OnDelete(DeleteBehavior.Cascade);
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Camera");
 
                     b.Navigation("Printer");
                 });
@@ -8691,6 +8770,15 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .IsRequired();
 
                     b.Navigation("Definition");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.DismissedPrinterCamera", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.Printer", null)
+                        .WithMany()
+                        .HasForeignKey("PrinterId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.DispatchLog", b =>
@@ -9946,6 +10034,11 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Navigation("Printers");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.Camera", b =>
+                {
+                    b.Navigation("PrinterLinks");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.CustomFieldDefinition", b =>
                 {
                     b.Navigation("Values");
@@ -10071,7 +10164,7 @@ namespace Farm.Migrations.PostgreSQL.Migrations
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.Printer", b =>
                 {
-                    b.Navigation("Cameras");
+                    b.Navigation("CameraLinks");
 
                     b.Navigation("DispatchState");
 

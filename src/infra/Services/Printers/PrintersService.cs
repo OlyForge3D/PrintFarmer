@@ -79,6 +79,7 @@ namespace Farm.Infrastructure.Services.Printers;
 /// <param name="configuration">Optional configuration accessor</param>
 /// <param name="membershipNotifier">Optional notifier for queue subscription membership changes (issue #1731); null in contexts that don't need it</param>
 /// <param name="spoolmanStatusCache">Optional shared status-path spool cache (issue #2338) used by <see cref="GetAllCompleteDtosAsync"/>'s DB fallback to coalesce repeated spool lookups and bound their concurrency/timeout; null falls back to direct (uncached) <see cref="Farm.Infrastructure.Services.Interfaces.ISpoolmanService"/> reads</param>
+/// <param name="cameraSyncTrigger">Optional trigger that queues plugin camera discovery for newly created printers (issue #3328)</param>
 /// <exception cref="ArgumentNullException">Thrown if any dependency is null</exception>
 public class PrintersService(
     IUnitOfWork unitOfWork,
@@ -102,7 +103,8 @@ public class PrintersService(
     Farm.Infrastructure.Services.Maintenance.IToolheadActivityAccumulator? activityAccumulator = null,
     IConfiguration? configuration = null,
     Farm.Infrastructure.Services.Queue.IQueueSubscriptionMembershipNotifier? membershipNotifier = null,
-    Farm.Infrastructure.Services.Spoolman.ISpoolmanStatusCache? spoolmanStatusCache = null) : IPrintersService
+    Farm.Infrastructure.Services.Spoolman.ISpoolmanStatusCache? spoolmanStatusCache = null,
+    Farm.Infrastructure.Services.Cameras.IPrinterCameraSyncTrigger? cameraSyncTrigger = null) : IPrintersService
 {
     private readonly IUnitOfWork _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
     private readonly AppDbContext _db = db ?? throw new ArgumentNullException(nameof(db));
@@ -143,6 +145,9 @@ public class PrintersService(
     // degrades to a direct (uncached) ISpoolmanService read, still bounded by
     // FallbackSpoolLookupTimeout.
     private readonly Farm.Infrastructure.Services.Spoolman.ISpoolmanStatusCache? _spoolmanStatusCache = spoolmanStatusCache;
+
+    // Optional (#3328): queues plugin camera discovery for newly created printers.
+    private readonly Farm.Infrastructure.Services.Cameras.IPrinterCameraSyncTrigger? _cameraSyncTrigger = cameraSyncTrigger;
 
     /// <summary>
     /// Maximum number of concurrent Spoolman spool lookups performed by
@@ -3138,11 +3143,10 @@ public class PrintersService(
         // Create Camera entity if camera URLs were provided during discovery
         if (!string.IsNullOrEmpty(dto.CameraStreamUrl) || !string.IsNullOrEmpty(dto.CameraSnapshotUrl))
         {
-            CameraSource source = MapBackendToCameraSource(dto.Backend);
+            CameraSource source = Farm.Infrastructure.Services.Cameras.PrinterCameraSynchronizer.MapBackendToCameraSource(dto.Backend);
             var camera = new Domain.Camera
             {
                 Id = Guid.NewGuid(),
-                PrinterId = p.Id,
                 Name = $"{p.Name} Camera",
                 StreamUrl = CameraContractClassifier.NormalizeTarget(dto.CameraStreamUrl),
                 SnapshotUrl = CameraContractClassifier.NormalizeTarget(dto.CameraSnapshotUrl),
@@ -3155,10 +3159,14 @@ public class PrintersService(
                 CreatedAt = DateTime.UtcNow,
             };
 
+            camera.LinkToPrinter(p.Id, isPrimary: true);
             _unitOfWork.Cameras.Add(camera);
             await SaveChangesAsync(ct);
             _logger.LogInformation("[CreatePrinterFromDto] Created Camera {CameraId} for new printer {PrinterName}", camera.Id, p.Name);
         }
+
+        // Discover plugin-reported cameras in the background (#3328); covers single and bulk create.
+        _cameraSyncTrigger?.RequestSync(p.Id);
 
         // Return offline DTO for newly imported printer (hasn't fetched status yet)
         return CreateOfflinePrinterDto(p);
@@ -5899,7 +5907,6 @@ public class PrintersService(
                 string status = "Imported";
                 string? reason = null;
                 PrinterDto? createdDto = null;
-                Guid? createdPrinterId = null;
 
                 // Check for duplicates by IP address
                 Printer? existingByIp = await FindByServerUrlAsync(printerDto.ServerUrl, ct);
@@ -5927,7 +5934,6 @@ public class PrintersService(
                         // Load a fresh copy of the CSV printer data (not the one we're removing)
                         // This avoids EF Core tracking conflicts when creating the new printer
                         createdDto = await CreatePrinterFromDtoAsync(printerDto, ct);
-                        createdPrinterId = Guid.Parse(createdDto.Id.ToString());
                         await SaveChangesAsync(ct);
                         createdPrinters.Add(createdDto);
                         _logger.LogInformation("[BulkCreate] Successfully created printer: {CreatedDtoName}", createdDto.Name);
@@ -5943,7 +5949,6 @@ public class PrintersService(
                 {
                     // Create the printer
                     createdDto = await CreatePrinterFromDtoAsync(printerDto, ct);
-                    createdPrinterId = Guid.Parse(createdDto.Id.ToString());
                     await SaveChangesAsync(ct);
                     createdPrinters.Add(createdDto);
                     _logger.LogInformation("[BulkCreate] Successfully created printer: {CreatedDtoName}", createdDto.Name);
@@ -5963,14 +5968,8 @@ public class PrintersService(
                 // Broadcast import progress update to all connected clients
                 await _broadcaster.BroadcastPrinterImportProgressAsync(result, ct);
 
-                // Queue background camera discovery for successfully imported printers
-                // This is done as fire-and-forget using ThreadPool to avoid blocking the import response
-                if (createdPrinterId.HasValue && status == "Imported")
-                {
-                    // Skip background camera discovery during bulk import to avoid DbContext threading issues
-                    // Camera discovery will happen on the next status poll from the dashboard
-                    _logger.LogDebug("[BulkCreate] Skipping background camera discovery for {PrinterDtoName} - will discover on next status poll", printerDto.Name);
-                }
+                // Camera discovery for imported printers is queued by CreatePrinterFromDtoAsync via
+                // IPrinterCameraSyncTrigger (#3328) and runs on the camera sync service's own scope.
             }
             catch (Exception ex)
             {
@@ -6378,160 +6377,6 @@ public class PrintersService(
         return totals;
     }
 
-    /// <summary>
-    /// Refreshes camera URLs for a printer by querying the backend API.
-    /// Updates the stored camera URLs in the database.
-    /// For Moonraker: queries /server/webcams/list API for actual configured cameras
-    /// For other backends: generates static URLs based on frontend port
-    /// </summary>
-    /// <param name="id">The unique identifier of the printer.</param>
-    /// <param name="ct">Cancellation token for the async operation.</param>
-    public async Task<PrinterDto?> RefreshCameraUrlsAsync(Guid id, CancellationToken ct)
-    {
-        _logger.LogInformation("RefreshCameraUrlsAsync: Starting refresh for printer {Id}", id);
-
-        Printer? printer = await FindByIdWithIncludesAsync(id, ct).ConfigureAwait(false);
-        if (printer == null)
-        {
-            _logger.LogWarning("RefreshCameraUrlsAsync: Printer {Id} not found", id);
-            return null;
-        }
-
-        _logger.LogInformation(
-            "RefreshCameraUrlsAsync: Found printer {PrinterName} ({PrinterId}), Backend={PrinterBackend}",
-            printer.Name,
-            printer.Id,
-            printer.Backend);
-
-        var backend = (PrinterBackend)printer.Backend;
-        string? streamUrl = null;
-        string? snapshotUrl = null;
-
-        try
-        {
-            // Try to use the configured camera detection interface which queries actual cameras
-            if (_capabilityFactory.TryGetConfiguredCameraDetectionClient(backend, out ISupportsConfiguredCameraDetection? detectionClient) && detectionClient != null)
-            {
-                _logger.LogInformation("RefreshCameraUrlsAsync: Using configured camera detection for backend {Backend}", backend);
-
-                string baseUrlForCamera = printer.BackendUrl;
-
-                _logger.LogInformation("RefreshCameraUrlsAsync: Using baseUrlForCamera={BaseUrlForCamera}", baseUrlForCamera);
-
-                // Call the detection method - it will ONLY return URLs if cameras actually exist
-                (streamUrl, snapshotUrl) = await detectionClient.DetectConfiguredCameraUrlsAsync(
-                    baseUrlForCamera,
-                    printer.FrontendPort,
-                    printer.Credential,
-                    ct).ConfigureAwait(false);
-
-                _logger.LogInformation("RefreshCameraUrlsAsync: Got URLs from detection - stream={StreamUrl}, snapshot={SnapshotUrl}", streamUrl, snapshotUrl);
-
-                if (string.IsNullOrWhiteSpace(streamUrl) && string.IsNullOrWhiteSpace(snapshotUrl) &&
-                    GetBackendClient(backend) is ISupportsPrinterCameraProfile profile)
-                {
-                    (streamUrl, snapshotUrl) = profile.GetDefaultCameraUrls(printer);
-                    _logger.LogInformation("RefreshCameraUrlsAsync: Applied backend camera defaults for printer {PrinterId}", printer.Id);
-                }
-            }
-            else
-            {
-                // Fallback: Use standard camera client (may return default URLs even if cameras don't exist)
-                _logger.LogWarning("RefreshCameraUrlsAsync: Configured camera detection not available for backend {Backend}, falling back to standard interface", backend);
-
-                bool gotCameraClient = _capabilityFactory.TryGetCameraClientTyped(backend, out ISupportsCamera? cameraClient);
-                if (gotCameraClient && cameraClient != null)
-                {
-                    string baseUrlForCamera = printer.BackendUrl;
-
-                    streamUrl = await cameraClient.GetCameraStreamUrlAsync(baseUrlForCamera, printer.FrontendPort, printer.Credential, ct).ConfigureAwait(false);
-                    snapshotUrl = await cameraClient.GetCameraSnapshotUrlAsync(baseUrlForCamera, printer.FrontendPort, printer.Credential, ct).ConfigureAwait(false);
-
-                    _logger.LogInformation("RefreshCameraUrlsAsync: Got URLs from standard interface - stream={StreamUrl}, snapshot={SnapshotUrl}", streamUrl, snapshotUrl);
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "RefreshCameraUrlsAsync: Failed to refresh camera URLs for printer {Id}: {Message}", id, ex.Message);
-        }
-
-        // Upsert Camera entity — Cameras table is the sole source of truth
-        _logger.LogInformation("RefreshCameraUrlsAsync: Updating cameras for printer {PrinterName}: StreamUrl={StreamUrl}, SnapshotUrl={SnapshotUrl}", printer.Name, streamUrl, snapshotUrl);
-        if (!string.IsNullOrEmpty(streamUrl) || !string.IsNullOrEmpty(snapshotUrl))
-        {
-            await UpsertCameraForPrinterAsync(printer, backend, streamUrl, snapshotUrl, ct).ConfigureAwait(false);
-        }
-
-        await SaveChangesAsync(ct).ConfigureAwait(false);
-        _logger.LogInformation("RefreshCameraUrlsAsync: SaveChangesAsync completed - URLs saved: stream={StringIsNullOrEmpty}, snapshot={StringIsNullOrEmpty1}", !string.IsNullOrEmpty(streamUrl), !string.IsNullOrEmpty(snapshotUrl));
-
-        // Return updated DTO
-        return await GetPrinterDtoAsync(id, ct).ConfigureAwait(false);
-    }
-
-    /// <summary>
-    /// Upserts a Camera entity for a printer during camera URL refresh.
-    /// Finds an existing camera by (printerId, source) and updates it, or creates a new one.
-    /// </summary>
-    /// <param name="printer">The printer entity.</param>
-    /// <param name="backend">The printer backend type.</param>
-    /// <param name="streamUrl">Detected camera stream URL.</param>
-    /// <param name="snapshotUrl">Detected camera snapshot URL.</param>
-    /// <param name="ct">Cancellation token.</param>
-    private async Task UpsertCameraForPrinterAsync(Printer printer, PrinterBackend backend, string? streamUrl, string? snapshotUrl, CancellationToken ct)
-    {
-        CameraSource source = MapBackendToCameraSource(backend);
-
-        Domain.Camera? existing = await _unitOfWork.Cameras.FindByPrinterIdAndSourceAsync(printer.Id, source, ct).ConfigureAwait(false);
-
-        if (existing is not null)
-        {
-            existing.StreamUrl = CameraContractClassifier.NormalizeTarget(streamUrl);
-            existing.SnapshotUrl = CameraContractClassifier.NormalizeTarget(snapshotUrl);
-            existing.UpdatedAt = DateTime.UtcNow;
-            existing.HealthStatus = CameraHealthStatus.Healthy;
-            existing.LastHealthCheck = DateTime.UtcNow;
-            existing.ConsecutiveFailures = 0;
-            _logger.LogInformation("UpsertCameraForPrinterAsync: Updated existing Camera {CameraId} for printer {PrinterName}", existing.Id, printer.Name);
-        }
-        else
-        {
-            var camera = new Domain.Camera
-            {
-                Id = Guid.NewGuid(),
-                PrinterId = printer.Id,
-                Name = $"{printer.Name} Camera",
-                StreamUrl = CameraContractClassifier.NormalizeTarget(streamUrl),
-                SnapshotUrl = CameraContractClassifier.NormalizeTarget(snapshotUrl),
-                IsEnabled = true,
-                SortOrder = 0,
-                Source = source,
-                CameraType = CameraType.General,
-                HealthStatus = CameraHealthStatus.Healthy,
-                LastHealthCheck = DateTime.UtcNow,
-                CreatedAt = DateTime.UtcNow,
-            };
-
-            _unitOfWork.Cameras.Add(camera);
-            _logger.LogInformation("UpsertCameraForPrinterAsync: Created new Camera {CameraId} for printer {PrinterName}", camera.Id, printer.Name);
-        }
-    }
-
-    /// <summary>
-    /// Maps a PrinterBackend enum to the corresponding CameraSource enum.
-    /// </summary>
-    /// <param name="backend">The printer backend type.</param>
-    private static CameraSource MapBackendToCameraSource(PrinterBackend backend) => backend switch
-    {
-        PrinterBackend.Moonraker => CameraSource.Moonraker,
-        PrinterBackend.PrusaLink => CameraSource.PrusaLink,
-        PrinterBackend.OctoPrint => CameraSource.OctoPrint,
-        PrinterBackend.SDCP => CameraSource.SDCP,
-        PrinterBackend.FlashForge => CameraSource.FlashForge,
-        _ => CameraSource.Standalone,
-    };
-
     /// <inheritdoc/>
     public async Task SyncBuddyCameraAsync(Printer printer, string buddyCameraIp, CancellationToken ct)
     {
@@ -6592,7 +6437,6 @@ public class PrintersService(
             var camera = new Domain.Camera
             {
                 Id = Guid.NewGuid(),
-                PrinterId = printer.Id,
                 Name = $"{printer.Name} Buddy Camera",
                 StreamUrl = rtspUrl,
                 SnapshotUrl = null,
@@ -6611,6 +6455,9 @@ public class PrintersService(
                 camera.SnapshotUrl = snapshot;
             }
 
+            bool hasPrimary = printer.CameraLinks.Any(l => l.IsPrimary)
+                || await _unitOfWork.Cameras.HasPrimaryCameraAsync(printer.Id, ct);
+            camera.LinkToPrinter(printer.Id, isPrimary: !hasPrimary);
             _unitOfWork.Cameras.Add(camera);
             _logger.LogInformation("[BuddyCamera] Created Buddy camera {CameraId} for printer {PrinterName} at {RtspUrl}", camera.Id, LogSanitizer.Sanitize(printer.Name), LogSanitizer.Sanitize(rtspUrl));
         }
@@ -6628,11 +6475,9 @@ public class PrintersService(
     {
         List<Domain.Camera> cameras = await _unitOfWork.Cameras.GetByPrinterIdAsync(printerId, ct).ConfigureAwait(false);
 
-        Domain.Camera? camera = cameras
-            .Where(c => c.IsEnabled)
-            .OrderBy(c => c.SortOrder)
-            .ThenBy(c => c.CameraType == CameraType.General ? 0 : 1)
-            .FirstOrDefault();
+        // Repository order is primary link first, then link/camera sort order.
+        Domain.Camera? camera = PrinterCameraSelector.OrderCamerasForPrinter(cameras, printerId)
+            .FirstOrDefault(c => c.IsEnabled);
 
         return camera is not null
             ? (camera.StreamUrl, camera.SnapshotUrl)
@@ -6672,17 +6517,14 @@ public class PrintersService(
         List<Domain.Camera> allCameras = await _unitOfWork.Cameras.GetEnabledAsync(ct).ConfigureAwait(false);
 
         return allCameras
-            .Where(c => c.PrinterId.HasValue)
-            .GroupBy(c => c.PrinterId!.Value)
+            .SelectMany(c => c.PrinterLinks.Select(l => l.PrinterId))
+            .Distinct()
             .ToDictionary(
-                g => g.Key,
-                g =>
+                printerId => printerId,
+                printerId =>
                 {
-                    Domain.Camera? best = g
-                        .OrderBy(c => c.SortOrder)
-                        .ThenBy(c => c.CameraType == CameraType.General ? 0 : 1)
-                        .FirstOrDefault();
-                    return best is not null ? (best.StreamUrl, best.SnapshotUrl) : (null, null);
+                    IReadOnlyList<Domain.Camera> ordered = PrinterCameraSelector.OrderCamerasForPrinter(allCameras, printerId);
+                    return ordered.Count > 0 ? (ordered[0].StreamUrl, ordered[0].SnapshotUrl) : (null, null);
                 });
     }
 }

@@ -419,6 +419,14 @@ public enum PrinterBackend
 - Custom converter handles JSON serialization automatically
 - Can be cast from int: `(PrinterBackend)1` → `Moonraker`
 
+### CameraDto - Printer Links and Location
+- A camera links to many printers through `CameraPrinter` (`isPrimary`, `sortOrder`); each printer has exactly one primary camera
+- `printerIds` (primary link first) and `printers` (`id`, `name`, `isPrimary`) list every visible linked printer; legacy `printerId`/`printerName` remain for compatibility
+- `locationId` is the camera's own location; `effectiveLocationId`/`effectiveLocationName` resolve to the single linked printer's location when `isLocationDerived` is true, otherwise to `locationId`
+- `userModified` marks discovered cameras a user edited, so printer camera sync never overwrites them
+- `CreateCameraDto`/`UpdateCameraDto` accept `printerIds`, `isPrimary`, and `locationId` (`UpdateCameraDto` also `clearLocationId`); `locationId` is ignored and cleared when exactly one printer is linked
+- See [Cameras API](./API.md#cameras-api) for endpoints
+
 ### CameraConfigDto - Admin Camera Edit Targets
 - `GET /api/cameras/{id}/config` requires `cameras:admin`, including administrator-defined group grants. Farm administrators retain their established permission bypass. Printer-group access is checked separately for printer cameras.
 - Returns `id`, `streamUrl`, `snapshotUrl`, `streamUrlHasCredentials`, `snapshotUrlHasCredentials` (camelCase)

@@ -3079,11 +3079,49 @@ export interface CameraDto {
   createdAt: string;
   updatedAt?: string;
   isStandalone: boolean;
+  /** Primary linked printer (compatibility; prefer printerIds/printers). */
   printerId?: string;
+  printerName?: string;
+  /** All linked printer ids, primary first. */
+  printerIds: string[];
+  /** Linked printers, primary first. */
+  printers: CameraPrinterSummary[];
+  /** Explicit location (only meaningful when the camera is not linked to exactly one printer). */
+  locationId?: string | null;
+  /** Location derived from the single linked printer, or the explicit locationId otherwise. */
+  effectiveLocationId?: string | null;
+  effectiveLocationName?: string | null;
+  /** True when exactly one printer is linked and the location is derived from it. */
+  isLocationDerived: boolean;
+  /** True once a user edited an auto-discovered camera; sync no longer overwrites it. */
+  userModified: boolean;
   source: CameraSource;
   cameraType: CameraType;
   healthStatus: CameraHealthStatus;
   lastHealthCheck?: string;
+}
+
+export interface CameraPrinterSummary {
+  id: string;
+  name: string;
+  isPrimary: boolean;
+}
+
+/** Optional filters for GET /api/cameras, /api/cameras/enabled and /api/cameras/display. */
+export interface CameraListFilter {
+  printerId?: string;
+  /** Matches the camera's effective location. */
+  locationId?: string;
+}
+
+export interface LinkCameraPrinterRequest {
+  isPrimary?: boolean;
+}
+
+export type CameraPrinterRemovalResult = 'Unlinked' | 'Deleted';
+
+export interface RemoveCameraFromPrinterResponse {
+  result: CameraPrinterRemovalResult;
 }
 
 export interface CreateCameraDto {
@@ -3095,6 +3133,11 @@ export interface CreateCameraDto {
   sortOrder?: number;
   location?: string;
   printerId?: string;
+  /** Linked printers; the first entry becomes primary unless isPrimary=false. Replaces the link set on update. */
+  printerIds?: string[];
+  isPrimary?: boolean;
+  /** Ignored (and cleared) when exactly one printer is linked. */
+  locationId?: string | null;
   source?: CameraSource;
   cameraType?: CameraType;
 }
@@ -3116,6 +3159,13 @@ export interface UpdateCameraDto {
   sortOrder?: number;
   location?: string;
   printerId?: string | null;
+  /** Linked printers; the first entry becomes primary unless isPrimary=false. Replaces the link set on update. */
+  printerIds?: string[];
+  isPrimary?: boolean;
+  /** Ignored (and cleared) when exactly one printer is linked. */
+  locationId?: string | null;
+  /** Explicitly clears locationId (when not derived from a single printer). */
+  clearLocationId?: boolean;
   source?: CameraSource;
   cameraType?: CameraType;
 }
@@ -3150,8 +3200,20 @@ export interface DisplayCameraDto {
   sortOrder: number;
   location?: string;
   isStandalone: boolean;
+  /** Primary linked printer (compatibility; prefer printerIds/printers). */
   printerId?: string;
   printerName?: string;
+  /** All linked printer ids, primary first. */
+  printerIds: string[];
+  /** Linked printers, primary first. */
+  printers: CameraPrinterSummary[];
+  /** Explicit location (only meaningful when the camera is not linked to exactly one printer). */
+  locationId?: string | null;
+  /** Location derived from the single linked printer, or the explicit locationId otherwise. */
+  effectiveLocationId?: string | null;
+  effectiveLocationName?: string | null;
+  /** True when exactly one printer is linked and the location is derived from it. */
+  isLocationDerived: boolean;
   printerState?: string;
   isPrinterOnline?: boolean;
   source: CameraSource;

@@ -812,13 +812,4 @@ public interface IPrintersService
     /// <param name="ct">Cancellation token</param>
     /// <returns>Object containing import results and status (successful count, failed items, etc.)</returns>
     Task<object> ImportFromStreamAsync(Stream stream, string fileName, string duplicateHandling = "skip", CancellationToken ct = default);
-
-    /// <summary>
-    /// Refreshes camera URLs for a printer by querying the backend API.
-    /// This updates the stored camera URLs in the database.
-    /// </summary>
-    /// <param name="id">The printer ID</param>
-    /// <param name="ct">Cancellation token</param>
-    /// <returns>Updated printer with refreshed camera URLs, or null if printer not found</returns>
-    Task<PrinterDto?> RefreshCameraUrlsAsync(Guid id, CancellationToken ct);
 }

@@ -136,8 +136,8 @@ export const printerService = {
     return apiClient.getPrinterSnapshot(id);
   },
 
-  async refreshCameraUrls(id: string): Promise<Printer> {
-    return apiClient.refreshCameraUrls(id);
+  async discoverCameras(id: string): Promise<import('@/types/api').CameraDto[]> {
+    return apiClient.discoverCameras(id);
   },
 
   // ── Backend Capabilities ──────────────────────────────────────────────

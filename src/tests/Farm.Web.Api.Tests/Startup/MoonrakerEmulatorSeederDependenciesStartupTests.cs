@@ -4,6 +4,7 @@ using Farm.Infrastructure.Repositories.Catalog;
 using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Repositories.Queue;
 using Farm.Infrastructure.Repositories.UnitOfWork;
+using Farm.Infrastructure.Services.Cameras;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Slicer.Module.Data;
 using Farm.Web.Api.Services.Startup;
@@ -116,17 +117,18 @@ public sealed class MoonrakerEmulatorSeederDependenciesStartupTests
                     ManufacturerId = manufacturerId,
                 });
 
-            var printersService = new Mock<IPrintersService>(MockBehavior.Strict);
-            printersService
-                .Setup(service => service.RefreshCameraUrlsAsync(
+            var cameraSynchronizer = new Mock<IPrinterCameraSynchronizer>(MockBehavior.Strict);
+            cameraSynchronizer
+                .Setup(service => service.SyncPrinterAsync(
                     It.IsAny<Guid>(),
+                    It.IsAny<bool>(),
                     It.IsAny<CancellationToken>()))
-                .ReturnsAsync((PrinterDto?)null);
+                .ReturnsAsync((Guid id, bool _, CancellationToken _) => PrinterCameraSyncResult.NotFound(id));
 
             ServiceCollection services = new();
             _ = services.AddSingleton(unitOfWork.Object);
             _ = services.AddSingleton(catalog.Object);
-            _ = services.AddSingleton(printersService.Object);
+            _ = services.AddSingleton(cameraSynchronizer.Object);
 
             // The exact wiring under test: Program.cs calls this on every split/microservices
             // API host so MoonrakerEmulatorSeeder can resolve its calibration profile

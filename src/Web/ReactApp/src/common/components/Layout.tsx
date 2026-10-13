@@ -22,6 +22,7 @@ import {
   AlertIcon,
   ClipboardListIcon,
   CalendarIcon,
+  CameraIcon,
 } from '@/common/components/icons/MdiIcons';
 import { PrintFarmerLogoIcon } from '@/common/components/icons/PrintFarmerLogoIcon';
 import { useAuth } from '@/features/auth/hooks/useAuth';
@@ -152,6 +153,13 @@ const navigation: NavigationElement[] = [
     icon: PrinterIcon,
     requiredPermission: { resource: 'printers', action: 'read' },
     matches: (pathname) => pathname === '/printers' || /^\/printers\/[^/]+$/.test(pathname)
+  },
+  {
+    id: 'cameras',
+    name: 'Cameras',
+    href: '/cameras',
+    icon: CameraIcon,
+    matches: (pathname) => pathname === '/cameras'
   },
   {
     id: 'filament-inventory',

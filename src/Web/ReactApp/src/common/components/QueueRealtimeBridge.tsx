@@ -290,6 +290,19 @@ export function QueueRealtimeBridge() {
       printerSignalRService.onGcodeLibraryUpdated?.(() => {
         void queryClient.invalidateQueries({ queryKey: ['file-browser'] });
       }) ?? (() => {});
+    // Camera sync changed a subscribed printer's linked cameras: refetch the
+    // card camera routes, camera lists, and failure-detection
+    // readiness (which depends on a usable linked camera).
+    const unsubscribeCameras =
+      printerSignalRService.onCamerasUpdated?.(() => {
+        void queryClient.invalidateQueries({
+          queryKey: [...queryKeys.printers, 'camera-urls'],
+        });
+        void queryClient.invalidateQueries({ queryKey: ['cameras'] });
+        void queryClient.invalidateQueries({
+          queryKey: ['failure-detection-status'],
+        });
+      }) ?? (() => {});
 
     void refreshBoth();
     void printerSignalRService.connect();
@@ -307,6 +320,7 @@ export function QueueRealtimeBridge() {
       unsubscribeConnection();
       unsubscribeResources();
       unsubscribeGcodeLibrary();
+      unsubscribeCameras();
       invalidateRefresher.dispose();
       reconcileRefresher.dispose();
       const lifecycle = printerSignalRService as typeof printerSignalRService & {

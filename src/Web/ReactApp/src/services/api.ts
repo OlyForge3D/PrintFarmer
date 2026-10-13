@@ -228,6 +228,19 @@ function normalizeHistoryTotals(totals: HistoryTotalsWire): HistoryTotals {
     auxiliaryTotals: totals.auxiliaryTotals ?? totals.auxiliary_totals,
   };
 }
+
+function toCameraListParams(
+  filter?: import('@/types/api').CameraListFilter
+): Record<string, string> | undefined {
+  const params: Record<string, string> = {};
+  if (filter?.printerId) {
+    params.printerId = filter.printerId;
+  }
+  if (filter?.locationId) {
+    params.locationId = filter.locationId;
+  }
+  return Object.keys(params).length > 0 ? params : undefined;
+}
 import type {
   PrintablesDownloadHistoryItem,
   GeometryUploadResultDto,
@@ -941,8 +954,8 @@ export class ApiClient {
     return response.data;
   }
 
-  async refreshCameraUrls(id: string): Promise<Printer> {
-    const response = await this.client.post<Printer>(`/printers/${id}/refresh-cameras`);
+  async discoverCameras(id: string): Promise<import('@/types/api').CameraDto[]> {
+    const response = await this.client.post<import('@/types/api').CameraDto[]>(`/printers/${id}/cameras/discover`);
     return response.data;
   }
 
@@ -4603,18 +4616,22 @@ export class ApiClient {
   // ============ Camera API methods ============
 
   /**
-   * Get all standalone cameras
+   * Get all accessible cameras, optionally filtered by linked printer and/or effective location
    */
-  async getAllCameras(): Promise<import('@/types/api').CameraDto[]> {
-    const response = await this.client.get('/cameras');
+  async getAllCameras(filter?: import('@/types/api').CameraListFilter): Promise<import('@/types/api').CameraDto[]> {
+    const params = toCameraListParams(filter);
+    const response = params ? await this.client.get('/cameras', { params }) : await this.client.get('/cameras');
     return response.data;
   }
 
   /**
-   * Get all enabled cameras (standalone only)
+   * Get all enabled accessible cameras, optionally filtered by linked printer and/or effective location
    */
-  async getEnabledCameras(): Promise<import('@/types/api').CameraDto[]> {
-    const response = await this.client.get('/cameras/enabled');
+  async getEnabledCameras(filter?: import('@/types/api').CameraListFilter): Promise<import('@/types/api').CameraDto[]> {
+    const params = toCameraListParams(filter);
+    const response = params
+      ? await this.client.get('/cameras/enabled', { params })
+      : await this.client.get('/cameras/enabled');
     return response.data;
   }
 
@@ -4622,8 +4639,11 @@ export class ApiClient {
    * Get combined display cameras (standalone + printer-attached)
    * This is what should be shown in the Camera View
    */
-  async getDisplayCameras(): Promise<import('@/types/api').DisplayCameraDto[]> {
-    const response = await this.client.get('/cameras/display');
+  async getDisplayCameras(filter?: import('@/types/api').CameraListFilter): Promise<import('@/types/api').DisplayCameraDto[]> {
+    const params = toCameraListParams(filter);
+    const response = params
+      ? await this.client.get('/cameras/display', { params })
+      : await this.client.get('/cameras/display');
     return response.data;
   }
 
@@ -4676,6 +4696,39 @@ export class ApiClient {
    */
   async getCamerasByPrinter(printerId: string): Promise<import('@/types/api').CameraDto[]> {
     const response = await this.client.get(`/cameras/by-printer/${printerId}`);
+    return response.data;
+  }
+
+  /**
+   * Link a camera to a printer (idempotent). isPrimary=true makes it the printer's primary camera.
+   */
+  async linkCameraToPrinter(
+    cameraId: string,
+    printerId: string,
+    isPrimary?: boolean
+  ): Promise<import('@/types/api').CameraDto> {
+    const body: import('@/types/api').LinkCameraPrinterRequest | undefined =
+      isPrimary === undefined ? undefined : { isPrimary };
+    const response = await this.client.post(`/cameras/${cameraId}/printers/${printerId}`, body);
+    return response.data;
+  }
+
+  /**
+   * Unlink a camera from a printer; the camera itself is kept.
+   */
+  async unlinkCameraFromPrinter(cameraId: string, printerId: string): Promise<void> {
+    await this.client.delete(`/cameras/${cameraId}/printers/${printerId}`);
+  }
+
+  /**
+   * Remove a camera from a printer (Edit Printer): unlinks it and deletes it only when it was
+   * auto-discovered and no other printer links remain.
+   */
+  async removeCameraFromPrinter(
+    printerId: string,
+    cameraId: string
+  ): Promise<import('@/types/api').RemoveCameraFromPrinterResponse> {
+    const response = await this.client.delete(`/printers/${printerId}/cameras/${cameraId}`);
     return response.data;
   }
 

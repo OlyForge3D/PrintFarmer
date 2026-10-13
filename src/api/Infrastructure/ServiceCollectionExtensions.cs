@@ -702,6 +702,8 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Cameras.ICameraRepository, Farm.Infrastructure.Repositories.Cameras.EfCameraRepository>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Cameras.ICameraService, Farm.Infrastructure.Services.Cameras.CameraService>();
         _ = services.AddScoped<Farm.Infrastructure.Discovery.IPrinterCameraEndpointDetectionService, Farm.Infrastructure.Discovery.PrinterCameraEndpointDetectionService>();
+        _ = services.AddSingleton<Farm.Infrastructure.Services.Cameras.PrinterCameraSyncGate>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Cameras.IPrinterCameraSynchronizer, Farm.Infrastructure.Services.Cameras.PrinterCameraSynchronizer>();
 
         // Register go2rtc service - RTSP-to-WebRTC/HLS/MSE transcoding integration
         _ = services.AddScoped<Farm.Infrastructure.Services.Cameras.IGo2RtcService, Farm.Infrastructure.Services.Cameras.Go2RtcService>();
@@ -941,6 +943,11 @@ public static class ServiceCollectionExtensions
 
             // Camera health monitor - periodic HTTP probes of camera snapshot URLs
             _ = services.AddHostedService<Farm.Infrastructure.Services.Cameras.CameraHealthMonitorService>();
+
+            // Printer camera sync (#3328) - discovers plugin-reported cameras on connect, create, and interval
+            _ = services.AddSingleton<Farm.Infrastructure.Services.Cameras.PrinterCameraSyncService>();
+            _ = services.AddSingleton<Farm.Infrastructure.Services.Cameras.IPrinterCameraSyncTrigger>(sp => sp.GetRequiredService<Farm.Infrastructure.Services.Cameras.PrinterCameraSyncService>());
+            _ = services.AddHostedService(sp => sp.GetRequiredService<Farm.Infrastructure.Services.Cameras.PrinterCameraSyncService>());
 
             // Print failure monitor - AI-powered failure detection using Obico ML API
             _ = services.AddHostedService<Farm.Infrastructure.Services.FailureDetection.PrintFailureMonitorService>();

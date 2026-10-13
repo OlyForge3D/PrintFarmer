@@ -579,6 +579,84 @@ final class PrinterDetailViewModelTests: XCTestCase {
         XCTAssertEqual(mockService.getSnapshotCallCount, 0)
     }
 
+    // MARK: - Relative proxy camera routes (#3334)
+
+    private var streamProxyPath: String { "/api/printers/\(TestData.testUUID.uuidString.lowercased())/camera/stream" }
+    private var snapshotProxyPath: String { "/api/printers/\(TestData.testUUID.uuidString.lowercased())/camera/snapshot" }
+
+    func testRelativeMjpegProxyRoutesSelectMjpegStream() async throws {
+        mockService.printerToReturn = try TestData.decodePrinter()
+        mockService.cameraUrlToReturn = PrinterCameraUrl(
+            streamUrl: streamProxyPath,
+            snapshotUrl: snapshotProxyPath,
+            accessMode: .streamAndSnapshot,
+            streamFormat: .mjpeg,
+            snapshotStrategy: .directUrl
+        )
+
+        await viewModel.loadPrinter()
+
+        XCTAssertEqual(viewModel.printer?.cameraStreamUrl, streamProxyPath)
+        XCTAssertEqual(viewModel.cameraPreviewMode, .mjpegStream)
+        XCTAssertFalse(viewModel.isSnapshotPollingActive)
+    }
+
+    func testRelativeSnapshotOnlyProxyRouteLoadsSnapshotThroughAuthenticatedService() async throws {
+        mockService.printerToReturn = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        mockService.cameraUrlToReturn = PrinterCameraUrl(
+            streamUrl: nil,
+            snapshotUrl: snapshotProxyPath,
+            accessMode: .snapshotOnly,
+            streamFormat: .unknown,
+            snapshotStrategy: .directUrl
+        )
+        let jpeg = Data([0xff, 0xd8, 0xff, 0xd9])
+        mockService.snapshotDataToReturn = jpeg
+
+        await viewModel.loadPrinter()
+
+        XCTAssertEqual(viewModel.cameraPreviewMode, .directSnapshot)
+        XCTAssertGreaterThan(mockService.getSnapshotCallCount, 0)
+        XCTAssertEqual(viewModel.snapshotData, jpeg)
+    }
+
+    func testRelativeMjpegRouteSnapshotFallbackRefreshUsesAuthenticatedService() async throws {
+        mockService.printerToReturn = try TestData.decodePrinter()
+        mockService.cameraUrlToReturn = PrinterCameraUrl(
+            streamUrl: streamProxyPath,
+            snapshotUrl: snapshotProxyPath,
+            accessMode: .streamAndSnapshot,
+            streamFormat: .mjpeg,
+            snapshotStrategy: .directUrl
+        )
+        let jpeg = Data([0xff, 0xd8, 0xff, 0xd9])
+        mockService.snapshotDataToReturn = jpeg
+        await viewModel.loadPrinter()
+        XCTAssertEqual(mockService.getSnapshotCallCount, 0)
+
+        let loaded = await viewModel.refreshSnapshot()
+
+        XCTAssertTrue(loaded)
+        XCTAssertEqual(mockService.getSnapshotCallCount, 1)
+        XCTAssertEqual(viewModel.snapshotData, jpeg)
+    }
+
+    func testOlderServerWithoutContractHintsStillSelectsStreamFromRelativeRoute() async throws {
+        mockService.printerToReturn = try TestData.decodePrinter()
+        let camera = try JSONDecoder().decode(
+            PrinterCameraUrl.self,
+            from: Data("{\"streamUrl\":\"\(streamProxyPath)\",\"snapshotUrl\":\"\(snapshotProxyPath)\"}".utf8)
+        )
+        XCTAssertEqual(camera.accessMode, .unknown)
+        XCTAssertEqual(camera.streamFormat, .unknown)
+        XCTAssertEqual(camera.snapshotStrategy, .none)
+        mockService.cameraUrlToReturn = camera
+
+        await viewModel.loadPrinter()
+
+        XCTAssertEqual(viewModel.cameraPreviewMode, .mjpegStream)
+    }
+
     // MARK: - Pause/Resume Commands
 
     func testPausePrinterCallsService() async throws {
@@ -2632,5 +2710,88 @@ extension PrinterDetailViewModelTests {
         XCTAssertEqual(maintenance.createLogCalledWith?.performedBy, "op")
         XCTAssertEqual(vm.lastLoggedMaintenanceTaskId, taskId)
         XCTAssertNil(vm.actionError)
+    }
+}
+
+/// Camera route resolution and stream authentication for the Printer Status camera (#3334).
+final class CameraURLResolverTests: XCTestCase {
+    private let base = URL(string: "https://farm.example.com:8443")!
+    private let proxyPath = "/api/printers/11111111-2222-3333-4444-555555555555/camera/stream"
+
+    func testRelativeProxyPathResolvesAgainstServerBaseURL() {
+        let resolved = CameraURLResolver.resolve(proxyPath, baseURL: base)
+        XCTAssertEqual(resolved?.absoluteString, "https://farm.example.com:8443\(proxyPath)")
+    }
+
+    func testRelativePathResolutionMatchesAPIClientSemanticsForBaseWithPath() {
+        let resolved = CameraURLResolver.resolve(proxyPath, baseURL: URL(string: "https://farm.example.com/ui/")!)
+        XCTAssertEqual(resolved?.absoluteString, "https://farm.example.com\(proxyPath)")
+    }
+
+    func testAbsoluteHTTPURLPassesThroughUnchanged() {
+        let absolute = "http://192.168.1.50:8080/?action=stream"
+        XCTAssertEqual(CameraURLResolver.resolve(absolute, baseURL: base)?.absoluteString, absolute)
+        XCTAssertEqual(CameraURLResolver.resolve(absolute, baseURL: nil)?.absoluteString, absolute)
+    }
+
+    func testRelativePathWithoutBaseURLIsUnresolvable() {
+        XCTAssertNil(CameraURLResolver.resolve(proxyPath, baseURL: nil))
+    }
+
+    func testNilEmptyAndNonHTTPValuesAreRejected() {
+        XCTAssertNil(CameraURLResolver.resolve(nil, baseURL: base))
+        XCTAssertNil(CameraURLResolver.resolve("   ", baseURL: base))
+        XCTAssertNil(CameraURLResolver.resolve("rtsp://printer.local/live", baseURL: base))
+    }
+
+    func testSnapshotReferenceAcceptsRelativeProxyAndAbsoluteHTTP() {
+        XCTAssertTrue(CameraURLResolver.isSnapshotReference("/api/printers/x/camera/snapshot"))
+        XCTAssertTrue(CameraURLResolver.isSnapshotReference("http://printer.local/snapshot.jpg"))
+        XCTAssertFalse(CameraURLResolver.isSnapshotReference(nil))
+        XCTAssertFalse(CameraURLResolver.isSnapshotReference(""))
+        XCTAssertFalse(CameraURLResolver.isSnapshotReference("rtsp://printer.local/live"))
+    }
+
+    func testMjpegRequestToServerOriginCarriesBearerToken() throws {
+        let url = try XCTUnwrap(CameraURLResolver.resolve(proxyPath, baseURL: base))
+        let request = CameraURLResolver.streamRequest(for: url, serverBaseURL: base, accessToken: "token-123")
+        XCTAssertEqual(request.url, url)
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer token-123")
+    }
+
+    func testMjpegRequestToDefaultPortServerOriginCarriesBearerToken() throws {
+        let server = URL(string: "https://farm.example.com")!
+        let url = try XCTUnwrap(URL(string: "https://farm.example.com:443\(proxyPath)"))
+        let request = CameraURLResolver.streamRequest(for: url, serverBaseURL: server, accessToken: "token-123")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer token-123")
+    }
+
+    func testMjpegRequestToForeignOriginOmitsBearerToken() throws {
+        let url = try XCTUnwrap(URL(string: "http://192.168.1.50:8080/?action=stream"))
+        let request = CameraURLResolver.streamRequest(for: url, serverBaseURL: base, accessToken: "token-123")
+        XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
+    }
+
+    func testMjpegRequestWithoutTokenOmitsAuthorization() throws {
+        let url = try XCTUnwrap(CameraURLResolver.resolve(proxyPath, baseURL: base))
+        XCTAssertNil(CameraURLResolver.streamRequest(for: url, serverBaseURL: base, accessToken: nil)
+            .value(forHTTPHeaderField: "Authorization"))
+    }
+
+    func testDemoServiceReturnsRelativeProxyRoutes() async throws {
+        var printer = try TestData.decodePrinter()
+        let id = printer.id
+        printer.cameraStreamUrl = "http://demo.local/stream"
+        printer.cameraSnapshotUrl = "http://demo.local/snapshot.jpg"
+        let service = DemoPrinterService(printers: [printer])
+
+        let camera = try await service.getCameraUrl(id: id)
+
+        let lowered = id.uuidString.lowercased()
+        XCTAssertEqual(camera.streamUrl, "/api/printers/\(lowered)/camera/stream")
+        XCTAssertEqual(camera.snapshotUrl, "/api/printers/\(lowered)/camera/snapshot")
+        XCTAssertNotNil(CameraURLResolver.resolve(camera.streamUrl, baseURL: base))
+        let listed = try await service.listCameraUrls()
+        XCTAssertEqual(listed.first?.cameraStreamUrl, camera.streamUrl)
     }
 }

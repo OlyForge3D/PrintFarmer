@@ -42,7 +42,6 @@ public sealed class CameraProxyEgressGuardTests
             {
                 Id = cameraId,
                 Name = "Stream-only camera",
-                PrinterId = null,
                 IsEnabled = true,
                 StreamUrl = "http://camera.example.invalid/stream",
                 SnapshotUrl = snapshotTarget,
@@ -72,7 +71,6 @@ public sealed class CameraProxyEgressGuardTests
             {
                 Id = cameraId,
                 Name = "Invalid target camera",
-                PrinterId = null,
                 IsEnabled = true,
                 StreamUrl = target,
                 SnapshotUrl = target,
@@ -103,7 +101,6 @@ public sealed class CameraProxyEgressGuardTests
             {
                 Id = cameraId,
                 Name = "Loopback camera",
-                PrinterId = null,
                 IsEnabled = true,
                 StreamUrl = target,
                 SnapshotUrl = target,
@@ -139,7 +136,6 @@ public sealed class CameraProxyEgressGuardTests
             {
                 Id = cameraId,
                 Name = "Link-local camera",
-                PrinterId = null,
                 IsEnabled = true,
                 StreamUrl = target,
                 SnapshotUrl = target,
@@ -191,7 +187,6 @@ public sealed class CameraProxyEgressGuardTests
             {
                 Id = cameraId,
                 Name = "LAN camera",
-                PrinterId = null,
                 IsEnabled = true,
                 StreamUrl = target,
                 SnapshotUrl = target,
@@ -241,7 +236,6 @@ public sealed class CameraProxyEgressGuardTests
             {
                 Id = cameraId,
                 Name = "Allowlisted hostname camera",
-                PrinterId = null,
                 IsEnabled = true,
                 StreamUrl = target,
                 SnapshotUrl = target,

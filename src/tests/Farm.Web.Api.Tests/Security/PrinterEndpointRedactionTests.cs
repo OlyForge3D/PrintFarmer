@@ -55,7 +55,7 @@ public sealed class PrinterEndpointRedactionTests
             {
                 Id = Guid.NewGuid(),
                 Name = "private camera",
-                PrinterId = printerId,
+                PrinterLinks = { new CameraPrinter { PrinterId = printerId, IsPrimary = true } },
                 StreamUrl = "http://camera.internal/stream?token=camera-secret",
                 SnapshotUrl = "http://camera.internal/snapshot?token=camera-secret",
                 IsEnabled = true,

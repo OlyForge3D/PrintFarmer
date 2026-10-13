@@ -31,7 +31,7 @@ A **production-ready** React TypeScript dashboard for managing multiple 3D print
 ✅ **Hierarchical Location System** - Organize printers into custom hierarchies (Warehouse > Floor > Room > Rack)  
 ✅ **Auto-Dispatch with 9-Factor Scoring** - Intelligent job assignment based on material, nozzle, build volume, and more  
 ✅ **Printer Discovery** - Auto-detect Moonraker and PrusaLink printers on network  
-✅ **Automatic Camera Discovery** - Detect and populate camera URLs when importing printers  
+✅ **Cameras** - First-class `/cameras` page (all, by location, by printer); cameras link to many printers and are auto-discovered and kept in sync from printer backends  
 
 Camera cards prioritize the image, camera name, and compact icon controls.
 Snapshot/Stream icons have tooltips and accessible labels; both controls appear

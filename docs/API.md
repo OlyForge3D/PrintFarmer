@@ -1242,6 +1242,68 @@ Authorization: Bearer <token>
 
 
 
+## Cameras API
+
+Camera routes require a PrintFarmer JWT. You can read a camera if you can view
+any printer linked to it; unlinked cameras are readable by any authenticated
+user. Linked printers the caller cannot view are redacted from responses.
+Raw camera targets stay server-side; clients use the `/api/cameras/{id}/stream`
+and `/api/cameras/{id}/snapshot` proxy paths.
+
+| Method | Route | Permission | Description |
+|---|---|---|---|
+| `GET` | `/api/cameras` | Authenticated | List visible cameras |
+| `GET` | `/api/cameras/display` | Authenticated | Cameras with proxy URLs for display |
+| `GET` | `/api/cameras/{id}` | Authenticated | Get one camera |
+| `GET` | `/api/cameras/by-printer/{printerId}` | Authenticated | Cameras linked to a printer |
+| `POST` | `/api/cameras` | `cameras:admin` | Create a camera; accepts `printerIds`, `isPrimary`, `locationId` |
+| `PUT` | `/api/cameras/{id}` | `cameras:admin` | Update a camera; accepts `printerIds`, `isPrimary`, `locationId`, `clearLocationId` |
+| `POST` | `/api/cameras/{id}/printers/{printerId}` | `cameras:admin` | Link a camera to a printer (idempotent); optional body `{ "isPrimary": true }` |
+| `DELETE` | `/api/cameras/{id}/printers/{printerId}` | `cameras:admin` | Unlink; the camera is kept. `204`, or `404` if not linked |
+| `DELETE` | `/api/printers/{printerId}/cameras/{cameraId}` | `printers:admin` | Remove from a printer (see below) |
+| `POST` | `/api/printers/{id}/cameras/discover` | `printers:admin` | Run plugin camera discovery now; returns the printer's cameras |
+
+**Camera fields.** `CameraDto` includes `printerIds` (primary link first),
+`printers` (`id`, `name`, `isPrimary`), `locationId`, `effectiveLocationId`,
+`effectiveLocationName`, `isLocationDerived`, and `userModified`. The legacy
+`printerId`/`printerName` fields remain for compatibility.
+
+**Primary camera.** Each printer has exactly one primary camera. Linking with
+`isPrimary: true` demotes the previous primary; when omitted, the camera
+becomes primary only if the printer has none.
+
+**Location.** When exactly one printer is linked, the effective location is that
+printer's location and `locationId` is ignored and cleared
+(`isLocationDerived: true`). Otherwise `locationId` is the effective location.
+
+**Remove from a printer.** `DELETE /api/printers/{printerId}/cameras/{cameraId}`
+unlinks the camera and deletes it only when it was auto-discovered and no
+printer links remain:
+
+```json
+{ "result": "Unlinked" }
+```
+
+`result` is `Unlinked` (camera kept) or `Deleted`. Returns `404` when the
+printer or camera is not found, not accessible, or not linked.
+
+Removing an auto-discovered (non-`Standalone`) camera records a per-printer
+dismissal keyed by camera source, with either result. Background syncs do not
+re-create or re-link a dismissed camera. Linking a camera from that source to
+the printer again (`POST /api/cameras/{id}/printers/{printerId}` or a
+`printerIds` update) clears the dismissal.
+
+**Discovery.** `POST /api/printers/{id}/cameras/discover` performs the same sync
+the background service runs on connect, on create, and every
+`CameraSync.intervalMinutes` (default 15). User-modified and standalone cameras
+are never overwritten; cameras the backend stops reporting are marked offline.
+It first clears the printer's dismissals, so discovery brings back cameras the
+user removed. Background syncs never clear dismissals.
+
+**Printer camera URL.** `GET /api/printers/{id}/camera/url` returns relative
+proxy `streamUrl`/`snapshotUrl` plus optional `accessMode`, `streamFormat`,
+and `snapshotStrategy` fields.
+
 ## Discovery API
 
 Discovery routes require a PrintFarmer JWT and the `farm_admin` role. Network
@@ -1769,6 +1831,18 @@ printer's audience. These queues remain in-memory and are lost on server restart
   "totalLayers": 180,
   "fanSpeedPercent": 65,
   "liveZOffsetMm": 0.025
+}
+```
+
+#### camerasupdated
+
+Sent when a camera sync changes a printer's cameras. Refetch the printer's
+cameras over REST.
+
+```json
+{
+  "printerId": "printer-uuid",
+  "cameraIds": ["camera-uuid"]
 }
 ```
 

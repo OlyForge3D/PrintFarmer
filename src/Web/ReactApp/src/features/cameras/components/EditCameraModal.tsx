@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Modal } from '@/common/components/modals/Modal';
-import { Alert, Button, FormField, Input, Select, Textarea, Toggle } from '@/common/components/ui';
+import { Alert, Button, Checkbox, FormField, Input, Select, Textarea, Toggle } from '@/common/components/ui';
 import { PrinterSearchIcon } from '@/common/components/icons/MdiIcons';
 import { usePrinters } from '@/common/hooks/useApi';
 import { cameraService } from '@/services/cameraService';
+import { locationService } from '@/services/locationService';
 import type { CameraConfigDto, DisplayCameraDto, UpdateCameraDto } from '@/types/api';
 
 interface EditCameraModalProps {
@@ -13,6 +14,8 @@ interface EditCameraModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: () => void | Promise<void>;
+  /** Printer whose link cannot be removed here, e.g. when opened from that printer's Edit Printer dialog. */
+  lockPrinterId?: string;
 }
 
 interface EditCameraFormData {
@@ -20,10 +23,12 @@ interface EditCameraFormData {
   description: string;
   streamUrl: string;
   snapshotUrl: string;
-  location: string;
   sortOrder: number;
   isEnabled: boolean;
-  printerId: string;
+  /** Linked printers; the primary printer is always first. */
+  printerIds: string[];
+  /** Explicit location, only used when the camera is not linked to exactly one printer. */
+  locationId: string;
 }
 
 const emptyFormData: EditCameraFormData = {
@@ -31,14 +36,33 @@ const emptyFormData: EditCameraFormData = {
   description: '',
   streamUrl: '',
   snapshotUrl: '',
-  location: '',
   sortOrder: 0,
   isEnabled: true,
-  printerId: '',
+  printerIds: [],
+  locationId: '',
 };
 
-export function EditCameraModal({ camera, isOpen, onClose, onSuccess }: EditCameraModalProps) {
+function getInitialPrinterIds(camera: DisplayCameraDto): string[] {
+  const linkedIds = camera.printerIds ?? [];
+  if (linkedIds.length > 0) return [...linkedIds];
+  return camera.printerId ? [camera.printerId] : [];
+}
+
+function getInitialLocationId(camera: DisplayCameraDto): string {
+  return camera.locationId ?? camera.effectiveLocationId ?? '';
+}
+
+const sameIds = (a: readonly string[], b: readonly string[]) =>
+  a.length === b.length && a.every((id, index) => id === b[index]);
+
+export function EditCameraModal({ camera, isOpen, onClose, onSuccess, lockPrinterId }: EditCameraModalProps) {
   const { data: printers = [] } = usePrinters({ enabled: isOpen });
+  const { data: locations = [] } = useQuery({
+    queryKey: ['locations', 'all'],
+    queryFn: () => locationService.getAllLocations(),
+    enabled: isOpen,
+    staleTime: 300_000,
+  });
   const [formData, setFormData] = useState<EditCameraFormData>(emptyFormData);
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
@@ -78,10 +102,10 @@ export function EditCameraModal({ camera, isOpen, onClose, onSuccess }: EditCame
       description: camera.description ?? '',
       streamUrl: '',
       snapshotUrl: '',
-      location: camera.location ?? '',
       sortOrder: camera.sortOrder,
       isEnabled: camera.isEnabled,
-      printerId: camera.printerId ?? '',
+      printerIds: getInitialPrinterIds(camera),
+      locationId: getInitialLocationId(camera),
     });
     setValidationErrors({});
     setError(null);
@@ -107,10 +131,10 @@ export function EditCameraModal({ camera, isOpen, onClose, onSuccess }: EditCame
       formData.description !== (camera.description ?? '') ||
       formData.streamUrl.trim() !== (config.streamUrl ?? '') ||
       formData.snapshotUrl.trim() !== (config.snapshotUrl ?? '') ||
-      formData.location !== (camera.location ?? '') ||
       formData.sortOrder !== camera.sortOrder ||
       formData.isEnabled !== camera.isEnabled ||
-      formData.printerId !== (camera.printerId ?? '')
+      !sameIds(formData.printerIds, getInitialPrinterIds(camera)) ||
+      (formData.printerIds.length !== 1 && formData.locationId !== getInitialLocationId(camera))
     );
   }, [camera, config, formData]);
 
@@ -125,10 +149,49 @@ export function EditCameraModal({ camera, isOpen, onClose, onSuccess }: EditCame
     setError(null);
   };
 
-  const selectedPrinterName = useMemo(() => {
-    if (!formData.printerId) return null;
-    return printers.find((printer) => printer.id === formData.printerId)?.name ?? camera?.printerName ?? null;
-  }, [camera?.printerName, formData.printerId, printers]);
+  const printerOptions = useMemo(() => {
+    const options = printers.map((printer) => ({
+      id: printer.id,
+      name: printer.name,
+      locationName: printer.location?.name ?? null,
+    }));
+    for (const linked of camera?.printers ?? []) {
+      if (!options.some((option) => option.id === linked.id)) {
+        options.push({ id: linked.id, name: linked.name, locationName: null });
+      }
+    }
+    return options;
+  }, [camera?.printers, printers]);
+
+  const primaryPrinterId = formData.printerIds[0] ?? '';
+  const getPrinterName = (printerId: string) =>
+    printerOptions.find((option) => option.id === printerId)?.name ?? 'Unknown printer';
+
+  // Location follows the printer when exactly one is linked, or while the server still reports a derived location.
+  const derivedLocation = useMemo(() => {
+    const unchangedDerived = !!camera?.isLocationDerived && sameIds(getInitialPrinterIds(camera), formData.printerIds);
+    if (formData.printerIds.length !== 1 && !unchangedDerived) return null;
+    const [printerId] = formData.printerIds;
+    const option = printerOptions.find((printerOption) => printerOption.id === printerId);
+    return {
+      printerName: option?.name ?? 'the linked printer',
+      locationName: (unchangedDerived ? camera?.effectiveLocationName : option?.locationName) ?? 'No location assigned',
+    };
+  }, [camera, formData.printerIds, printerOptions]);
+
+  const togglePrinter = (printerId: string, checked: boolean) => {
+    if (!checked && printerId === lockPrinterId) return;
+    setField(
+      'printerIds',
+      checked
+        ? [...formData.printerIds.filter((id) => id !== printerId), printerId]
+        : formData.printerIds.filter((id) => id !== printerId),
+    );
+  };
+
+  const setPrimaryPrinter = (printerId: string) => {
+    setField('printerIds', [printerId, ...formData.printerIds.filter((id) => id !== printerId)]);
+  };
 
   const validateForm = (): boolean => {
     const errors: Record<string, string> = {};
@@ -156,11 +219,21 @@ export function EditCameraModal({ camera, isOpen, onClose, onSuccess }: EditCame
     const request: UpdateCameraDto = {
       name: formData.name.trim(),
       description: formData.description.trim() || undefined,
-      location: formData.location.trim() || undefined,
       sortOrder: formData.sortOrder,
       isEnabled: formData.isEnabled,
-      printerId: formData.printerId || null,
     };
+    if (!sameIds(formData.printerIds, getInitialPrinterIds(camera))) {
+      request.printerIds = formData.printerIds;
+    }
+    // Unchanged links are omitted so the backend keeps every linked printer and the primary ordering.
+    // A camera linked to exactly one printer always follows that printer's location.
+    if (!derivedLocation) {
+      if (formData.locationId) {
+        request.locationId = formData.locationId;
+      } else if (camera.locationId || camera.effectiveLocationId) {
+        request.clearLocationId = true;
+      }
+    }
     if (formData.streamUrl.trim() !== (config.streamUrl ?? '')) {
       request.streamUrl = formData.streamUrl.trim();
     }
@@ -185,12 +258,12 @@ export function EditCameraModal({ camera, isOpen, onClose, onSuccess }: EditCame
   };
 
   const handleDetectEndpoints = () => {
-    if (!formData.printerId) {
+    if (!primaryPrinterId) {
       toast.error('Select a printer before detecting camera endpoints.');
       return;
     }
 
-    detectEndpointsMutation.mutate(formData.printerId);
+    detectEndpointsMutation.mutate(primaryPrinterId);
   };
 
   const handleClose = () => {
@@ -243,56 +316,105 @@ export function EditCameraModal({ camera, isOpen, onClose, onSuccess }: EditCame
             />
           </FormField>
 
-          <FormField label="Location" htmlFor="edit-camera-location">
-            <Input
-              id="edit-camera-location"
-              value={formData.location}
-              onChange={(event) => setField('location', event.target.value)}
-              placeholder="Workshop, Main Room"
-            />
-          </FormField>
-        </div>
-
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-[1fr_auto] md:items-end">
-          <FormField
-            label="Associated Printer"
-            htmlFor="edit-camera-printer"
-            helper={
-              selectedPrinterName
-                ? `Linked to ${selectedPrinterName}`
-                : 'Optional printer link for endpoint detection and camera grouping.'
-            }
-          >
-            <Select
-              id="edit-camera-printer"
-              value={formData.printerId}
-              onChange={(event) => setField('printerId', event.target.value)}
-              label="Associated Printer"
+          {derivedLocation ? (
+            <FormField
+              label="Location"
+              htmlFor="edit-camera-location"
+              helper={`Location follows ${derivedLocation.printerName}`}
             >
-              <option value="">No printer linked</option>
-              {printers.map((printer) => (
-                <option key={printer.id} value={printer.id}>
-                  {printer.name}
-                </option>
-              ))}
-              {camera?.printerId && !printers.some((printer) => printer.id === camera.printerId) && (
-                <option value={camera.printerId}>{camera.printerName ?? 'Current printer'}</option>
-              )}
-            </Select>
-          </FormField>
-
-          <Button
-            type="button"
-            variant="secondary"
-            onClick={handleDetectEndpoints}
-            loading={detectEndpointsMutation.isPending}
-            disabled={!formData.printerId || isSaving}
-            iconLeft={<PrinterSearchIcon className="w-4 h-4" />}
-            className="md:mb-0"
-          >
-            Detect Endpoints
-          </Button>
+              <Input id="edit-camera-location" value={derivedLocation.locationName} disabled readOnly />
+            </FormField>
+          ) : (
+            <FormField
+              label="Location"
+              htmlFor="edit-camera-location"
+              helper="Where this camera is installed. Cameras linked to a single printer follow that printer's location."
+            >
+              <Select
+                id="edit-camera-location"
+                value={formData.locationId}
+                onChange={(event) => setField('locationId', event.target.value)}
+              >
+                <option value="">No location</option>
+                {locations.map((location) => (
+                  <option key={location.id} value={location.id}>
+                    {location.path || location.name}
+                  </option>
+                ))}
+                {formData.locationId && !locations.some((location) => location.id === formData.locationId) && (
+                  <option value={formData.locationId}>{camera?.effectiveLocationName ?? 'Current location'}</option>
+                )}
+              </Select>
+            </FormField>
+          )}
         </div>
+
+        <fieldset className="space-y-3 rounded-sm border border-pf-border p-3" aria-describedby="edit-camera-printers-help">
+          <legend className="px-1 text-sm font-medium text-pf-text-primary">Linked Printers</legend>
+          <p id="edit-camera-printers-help" className="text-sm text-pf-text-secondary">
+            Link this camera to any number of printers. With no printers or several printers, choose the location below.
+          </p>
+          {lockPrinterId && formData.printerIds.includes(lockPrinterId) ? (
+            <p id="edit-camera-locked-printer-help" className="text-sm text-pf-text-tertiary">
+              {getPrinterName(lockPrinterId)} stays linked while editing from that printer; remove the camera from its camera list instead.
+            </p>
+          ) : null}
+          {printerOptions.length === 0 ? (
+            <p className="text-sm text-pf-text-tertiary">No printers available.</p>
+          ) : (
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              {printerOptions.map((printer) => (
+                <Checkbox
+                  key={printer.id}
+                  id={`edit-camera-printer-${printer.id}`}
+                  label={printer.name}
+                  checked={formData.printerIds.includes(printer.id)}
+                  disabled={printer.id === lockPrinterId && formData.printerIds.includes(printer.id)}
+                  aria-describedby={printer.id === lockPrinterId ? 'edit-camera-locked-printer-help' : undefined}
+                  onChange={(event) => togglePrinter(printer.id, event.target.checked)}
+                />
+              ))}
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-[1fr_auto] md:items-end">
+            {formData.printerIds.length > 1 ? (
+              <FormField
+                label="Primary Printer"
+                htmlFor="edit-camera-primary-printer"
+                helper="Used for endpoint detection and as the camera's representative printer."
+              >
+                <Select
+                  id="edit-camera-primary-printer"
+                  value={primaryPrinterId}
+                  onChange={(event) => setPrimaryPrinter(event.target.value)}
+                >
+                  {formData.printerIds.map((printerId) => (
+                    <option key={printerId} value={printerId}>
+                      {getPrinterName(printerId)}
+                    </option>
+                  ))}
+                </Select>
+              </FormField>
+            ) : (
+              <p className="text-sm text-pf-text-secondary">
+                {primaryPrinterId ? `Linked to ${getPrinterName(primaryPrinterId)}` : 'Not linked to a printer'}
+              </p>
+            )}
+
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={handleDetectEndpoints}
+              loading={detectEndpointsMutation.isPending}
+              disabled={!primaryPrinterId || isSaving}
+              iconLeft={<PrinterSearchIcon className="w-4 h-4" />}
+              className="md:mb-0"
+            >
+              Detect Endpoints
+            </Button>
+          </div>
+        </fieldset>
 
         <FormField
           label="Stream URL"

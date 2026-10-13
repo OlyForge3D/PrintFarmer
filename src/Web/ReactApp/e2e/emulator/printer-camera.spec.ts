@@ -61,4 +61,23 @@ test.describe('Printer Camera — Moonraker', () => {
         .getByRole('button', { name: /^(Show|Hide) camera preview$/ })
     ).toBeDisabled();
   });
+
+  test('the Edit Printer modal lists the synced camera as the printer\'s primary camera', async ({ page }) => {
+    const card = getPrinterCardByName(page, MOONRAKER_PRINTERS.ready);
+    await card.getByRole('button', { name: 'Edit details' }).click();
+
+    const modal = page.getByRole('dialog', { name: 'Edit Printer' });
+    await expect(modal).toBeVisible();
+
+    const linked = modal.getByRole('list', { name: 'Linked cameras' });
+    await expect(linked).toBeVisible({ timeout: 10_000 });
+    const primary = linked.getByRole('listitem').filter({ hasText: 'Primary' });
+    await expect(primary).toHaveCount(1);
+    await expect(primary).toContainText('Moonraker');
+    await expect(modal.getByText('No cameras are linked to this printer yet.')).toHaveCount(0);
+
+    // Close without saving so the shared seeded printer is left untouched.
+    await page.keyboard.press('Escape');
+    await expect(modal).toBeHidden();
+  });
 });

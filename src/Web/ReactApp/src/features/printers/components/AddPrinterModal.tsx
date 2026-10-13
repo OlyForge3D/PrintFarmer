@@ -10,6 +10,16 @@ import { Button, Input, Select, Textarea, FormField, Alert } from '@/common/comp
 import { Modal } from '@/common/components/modals/Modal';
 import { useManufacturers, useModels } from '@/common/hooks/useApi';
 import { isApiError, getErrorMessage } from '@/common/utils/apiErrors';
+import { useAuth } from '@/features/auth/hooks/useAuth';
+import { cameraService } from '@/services/cameraService';
+import { ManualCameraEntries } from '@/features/printers/components/ManualCameraEntries';
+import {
+  createEmptyManualCameraDraft,
+  toCreateCameraRequest,
+  validateManualCameraDraft,
+  type ManualCameraDraft,
+  type ManualCameraDraftErrors,
+} from '@/features/printers/utils/manualCameraDraft';
 
 interface AddPrinterModalProps {
   isOpen: boolean;
@@ -122,6 +132,10 @@ function AddPrinterModalContent({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string>('');
   const [validationErrors, setValidationErrors] = useState<Record<string, string[]>>({});
+  const { hasPermission } = useAuth();
+  const canAddCameras = hasPermission('cameras', 'admin');
+  const [manualCameras, setManualCameras] = useState<ManualCameraDraft[]>([]);
+  const [manualCameraErrors, setManualCameraErrors] = useState<Record<string, ManualCameraDraftErrors>>({});
   
   // Test connection state
   const [isTesting, setIsTesting] = useState(false);
@@ -314,7 +328,16 @@ function AddPrinterModalContent({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!validateForm()) {
+    const cameraErrors: Record<string, ManualCameraDraftErrors> = {};
+    for (const draft of manualCameras) {
+      const draftErrors = validateManualCameraDraft(draft);
+      if (Object.keys(draftErrors).length > 0) {
+        cameraErrors[draft.key] = draftErrors;
+      }
+    }
+    setManualCameraErrors(cameraErrors);
+    const formValid = validateForm();
+    if (!formValid || Object.keys(cameraErrors).length > 0) {
       return;
     }
 
@@ -322,7 +345,20 @@ function AddPrinterModalContent({
     setError('');
 
     try {
-      await apiClient.createPrinter(formData);
+      const created = await apiClient.createPrinter(formData);
+      if (manualCameras.length > 0 && created?.id) {
+        // Manual cameras are linked only to the new printer, so their location is derived from it.
+        const results = await Promise.allSettled(
+          manualCameras.map(draft => cameraService.createCamera(toCreateCameraRequest(draft, created.id)))
+        );
+        const failed = results.filter(r => r.status === 'rejected').length;
+        const added = results.length - failed;
+        if (failed > 0) {
+          toast.error(`Printer added, but ${failed} camera${failed === 1 ? '' : 's'} could not be saved. Add ${failed === 1 ? 'it' : 'them'} from Edit Printer.`);
+        } else {
+          toast.success(`Printer added with ${added} camera${added === 1 ? '' : 's'}.`);
+        }
+      }
       onSuccess();
       handleClose();
     } catch (err: unknown) {
@@ -360,6 +396,8 @@ function AddPrinterModalContent({
     setValidationErrors({});
     setError('');
     setIsTesting(false);
+    setManualCameras([]);
+    setManualCameraErrors({});
     onClose();
   }, [onClose]);
 
@@ -580,9 +618,22 @@ function AddPrinterModalContent({
               </div>
             )}
 
-            <Alert type="info" title="Camera Management">
-              Cameras are managed from the Cameras page after the printer is added.
-            </Alert>
+            <section aria-labelledby="add-printer-cameras-heading" className="space-y-3">
+              <h4 id="add-printer-cameras-heading" className="text-base font-medium text-pf-text-primary">Cameras</h4>
+              <Alert type="info" title="Automatic camera discovery">
+                Cameras exposed by the printer backend (for example Klipper/Moonraker webcams) are discovered
+                automatically after the printer is added. Cameras added here are linked to this printer and use its location.
+              </Alert>
+              {canAddCameras && (
+                <ManualCameraEntries
+                  drafts={manualCameras}
+                  errors={manualCameraErrors}
+                  disabled={isLoading}
+                  onChange={setManualCameras}
+                  onAdd={() => setManualCameras(prev => [...prev, createEmptyManualCameraDraft()])}
+                />
+              )}
+            </section>
 
             {/* Manufacturer & Model Grid */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
