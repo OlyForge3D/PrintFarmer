@@ -3142,7 +3142,6 @@ public class PrintersService(
             var camera = new Domain.Camera
             {
                 Id = Guid.NewGuid(),
-                PrinterId = p.Id,
                 Name = $"{p.Name} Camera",
                 StreamUrl = CameraContractClassifier.NormalizeTarget(dto.CameraStreamUrl),
                 SnapshotUrl = CameraContractClassifier.NormalizeTarget(dto.CameraSnapshotUrl),
@@ -3155,6 +3154,7 @@ public class PrintersService(
                 CreatedAt = DateTime.UtcNow,
             };
 
+            camera.LinkToPrinter(p.Id, isPrimary: true);
             _unitOfWork.Cameras.Add(camera);
             await SaveChangesAsync(ct);
             _logger.LogInformation("[CreatePrinterFromDto] Created Camera {CameraId} for new printer {PrinterName}", camera.Id, p.Name);
@@ -6500,7 +6500,6 @@ public class PrintersService(
             var camera = new Domain.Camera
             {
                 Id = Guid.NewGuid(),
-                PrinterId = printer.Id,
                 Name = $"{printer.Name} Camera",
                 StreamUrl = CameraContractClassifier.NormalizeTarget(streamUrl),
                 SnapshotUrl = CameraContractClassifier.NormalizeTarget(snapshotUrl),
@@ -6513,6 +6512,8 @@ public class PrintersService(
                 CreatedAt = DateTime.UtcNow,
             };
 
+            bool hasPrimary = await _unitOfWork.Cameras.HasPrimaryCameraAsync(printer.Id, ct).ConfigureAwait(false);
+            camera.LinkToPrinter(printer.Id, isPrimary: !hasPrimary);
             _unitOfWork.Cameras.Add(camera);
             _logger.LogInformation("UpsertCameraForPrinterAsync: Created new Camera {CameraId} for printer {PrinterName}", camera.Id, printer.Name);
         }
@@ -6592,7 +6593,6 @@ public class PrintersService(
             var camera = new Domain.Camera
             {
                 Id = Guid.NewGuid(),
-                PrinterId = printer.Id,
                 Name = $"{printer.Name} Buddy Camera",
                 StreamUrl = rtspUrl,
                 SnapshotUrl = null,
@@ -6611,6 +6611,9 @@ public class PrintersService(
                 camera.SnapshotUrl = snapshot;
             }
 
+            bool hasPrimary = printer.CameraLinks.Any(l => l.IsPrimary)
+                || await _unitOfWork.Cameras.HasPrimaryCameraAsync(printer.Id, ct);
+            camera.LinkToPrinter(printer.Id, isPrimary: !hasPrimary);
             _unitOfWork.Cameras.Add(camera);
             _logger.LogInformation("[BuddyCamera] Created Buddy camera {CameraId} for printer {PrinterName} at {RtspUrl}", camera.Id, LogSanitizer.Sanitize(printer.Name), LogSanitizer.Sanitize(rtspUrl));
         }
@@ -6672,8 +6675,8 @@ public class PrintersService(
         List<Domain.Camera> allCameras = await _unitOfWork.Cameras.GetEnabledAsync(ct).ConfigureAwait(false);
 
         return allCameras
-            .Where(c => c.PrinterId.HasValue)
-            .GroupBy(c => c.PrinterId!.Value)
+            .SelectMany(c => c.PrinterLinks.Select(l => (l.PrinterId, Camera: c)))
+            .GroupBy(x => x.PrinterId, x => x.Camera)
             .ToDictionary(
                 g => g.Key,
                 g =>

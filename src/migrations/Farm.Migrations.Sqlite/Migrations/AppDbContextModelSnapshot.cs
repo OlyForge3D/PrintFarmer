@@ -1416,12 +1416,12 @@ namespace Farm.Migrations.Sqlite.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("TEXT");
 
+                    b.Property<Guid?>("LocationId")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(100)
-                        .HasColumnType("TEXT");
-
-                    b.Property<Guid?>("PrinterId")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("SnapshotUrl")
@@ -1444,19 +1444,49 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<bool>("UserModified")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(false);
+
                     b.HasKey("Id");
 
                     b.HasIndex("IsEnabled");
 
-                    b.HasIndex("Name");
+                    b.HasIndex("LocationId");
 
-                    b.HasIndex("PrinterId");
+                    b.HasIndex("Name");
 
                     b.HasIndex("SortOrder");
 
                     b.HasIndex("Source");
 
                     b.ToTable("Cameras", (string)null);
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.CameraPrinter", b =>
+                {
+                    b.Property<Guid>("CameraId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("PrinterId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsPrimary")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(false);
+
+                    b.Property<int>("SortOrder")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(0);
+
+                    b.HasKey("CameraId", "PrinterId");
+
+                    b.HasIndex("PrinterId");
+
+                    b.ToTable("CameraPrinters", (string)null);
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.CameraSnapshot", b =>
@@ -8619,10 +8649,29 @@ namespace Farm.Migrations.Sqlite.Migrations
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.Camera", b =>
                 {
+                    b.HasOne("Farm.Infrastructure.Domain.Location", "AssignedLocation")
+                        .WithMany()
+                        .HasForeignKey("LocationId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("AssignedLocation");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.CameraPrinter", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.Camera", "Camera")
+                        .WithMany("PrinterLinks")
+                        .HasForeignKey("CameraId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
                     b.HasOne("Farm.Infrastructure.Domain.Printer", "Printer")
-                        .WithMany("Cameras")
+                        .WithMany("CameraLinks")
                         .HasForeignKey("PrinterId")
-                        .OnDelete(DeleteBehavior.Cascade);
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Camera");
 
                     b.Navigation("Printer");
                 });
@@ -9917,6 +9966,11 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.Navigation("Printers");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.Camera", b =>
+                {
+                    b.Navigation("PrinterLinks");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.CustomFieldDefinition", b =>
                 {
                     b.Navigation("Values");
@@ -10042,7 +10096,7 @@ namespace Farm.Migrations.Sqlite.Migrations
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.Printer", b =>
                 {
-                    b.Navigation("Cameras");
+                    b.Navigation("CameraLinks");
 
                     b.Navigation("DispatchState");
 

@@ -13,16 +13,17 @@ public class Camera
     public Guid Id { get; set; }
 
     /// <summary>
-    /// Optional foreign key to printer if this camera is attached to a printer.
-    /// Null for standalone cameras.
-    /// </summary>
-    public Guid? PrinterId { get; set; }
-
-    /// <summary>
-    /// Navigation property to the printer this camera is attached to (if any).
+    /// Links to the printers this camera is associated with (many-to-many via <see cref="CameraPrinter"/>).
+    /// Empty for standalone cameras.
     /// </summary>
     [JsonIgnore]
-    public Printer? Printer { get; set; }
+    public ICollection<CameraPrinter> PrinterLinks { get; set; } = new List<CameraPrinter>();
+
+    /// <summary>
+    /// Skip navigation to the printers linked through <see cref="PrinterLinks"/>.
+    /// </summary>
+    [JsonIgnore]
+    public ICollection<Printer> Printers { get; set; } = new List<Printer>();
 
     /// <summary>
     /// Display name for the camera
@@ -66,6 +67,25 @@ public class Camera
     /// </summary>
     [MaxLength(100)]
     public string? Location { get; set; }
+
+    /// <summary>
+    /// Optional explicit location assignment. Used as the effective location unless the camera
+    /// is linked to exactly one printer, in which case that printer's location wins
+    /// (see <see cref="CameraLinkExtensions.GetEffectiveLocationId(Camera)"/>).
+    /// </summary>
+    public Guid? LocationId { get; set; }
+
+    /// <summary>
+    /// Navigation to the explicitly assigned <see cref="Domain.Location"/> (named to avoid clashing with
+    /// the legacy free-text <see cref="Location"/> column).
+    /// </summary>
+    [JsonIgnore]
+    public Location? AssignedLocation { get; set; }
+
+    /// <summary>
+    /// True once a user has edited this camera; automatic sync must not overwrite user-modified rows.
+    /// </summary>
+    public bool UserModified { get; set; }
 
     /// <summary>
     /// When the camera was added

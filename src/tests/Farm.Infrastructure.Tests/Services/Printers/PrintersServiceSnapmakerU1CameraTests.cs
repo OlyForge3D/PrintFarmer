@@ -26,7 +26,7 @@ public class PrintersServiceSnapmakerU1CameraTests
             new Camera
             {
                 Id = Guid.NewGuid(),
-                PrinterId = printer.Id,
+                PrinterLinks = { new CameraPrinter { PrinterId = printer.Id, IsPrimary = true } },
                 Name = "camera",
                 IsEnabled = true,
                 Source = CameraSource.Moonraker,
@@ -63,6 +63,7 @@ public class PrintersServiceSnapmakerU1CameraTests
 
         cameras.Should().ContainSingle();
         Camera camera = cameras.Single();
+        camera.PrinterLinks.Should().ContainSingle(l => l.PrinterId == printer.Id && l.IsPrimary);
         camera.StreamUrl.Should().BeNull();
         camera.SnapshotUrl.Should().Be("http://u1.local/server/files/camera/monitor.jpg");
         dto.Should().NotBeNull();

@@ -53,7 +53,7 @@ public sealed class CameraReadAuthorizationTests : IAsyncLifetime, IDisposable
         {
             Id = restrictedCameraId,
             Name = "Restricted printer camera",
-            PrinterId = restrictedPrinterId,
+            PrinterLinks = { new CameraPrinter { PrinterId = restrictedPrinterId, IsPrimary = true } },
             StreamUrl = "http://camera.example.invalid/stream",
             SnapshotUrl = "http://camera.example.invalid/snapshot",
             IsEnabled = true,
@@ -62,7 +62,6 @@ public sealed class CameraReadAuthorizationTests : IAsyncLifetime, IDisposable
         {
             Id = standaloneCameraId,
             Name = "Standalone camera",
-            PrinterId = null,
             StreamUrl = "http://camera.example.invalid/stream",
             SnapshotUrl = "http://camera.example.invalid/snapshot",
             IsEnabled = true,
@@ -552,10 +551,10 @@ public sealed class CameraReadAuthorizationTests : IAsyncLifetime, IDisposable
         Guid ungroupedCameraId = Guid.NewGuid();
         _cameras
             .Setup(s => s.FindByIdAsync(zeroAclCameraId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new Camera { Id = zeroAclCameraId, Name = "Zero ACL camera", PrinterId = zeroAclPrinter.Id, IsEnabled = true });
+            .ReturnsAsync(new Camera { Id = zeroAclCameraId, Name = "Zero ACL camera", PrinterLinks = { new CameraPrinter { PrinterId = zeroAclPrinter.Id, IsPrimary = true } }, IsEnabled = true });
         _cameras
             .Setup(s => s.FindByIdAsync(ungroupedCameraId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new Camera { Id = ungroupedCameraId, Name = "Ungrouped camera", PrinterId = ungroupedPrinter.Id, IsEnabled = true });
+            .ReturnsAsync(new Camera { Id = ungroupedCameraId, Name = "Ungrouped camera", PrinterLinks = { new CameraPrinter { PrinterId = ungroupedPrinter.Id, IsPrimary = true } }, IsEnabled = true });
 
         return (zeroAclCameraId, ungroupedCameraId);
     }

@@ -58,13 +58,13 @@ public class CameraService : ICameraService
         Location = camera.Location,
         CreatedAt = camera.CreatedAt,
         UpdatedAt = camera.UpdatedAt,
-        PrinterId = camera.PrinterId,
-        PrinterName = camera.Printer?.Name,
+        PrinterId = camera.GetPrimaryPrinterId(),
+        PrinterName = camera.GetPrimaryPrinter()?.Name,
         Source = camera.Source,
         CameraType = camera.CameraType,
         HealthStatus = camera.HealthStatus,
         LastHealthCheck = camera.LastHealthCheck,
-        IsStandalone = !camera.PrinterId.HasValue
+        IsStandalone = camera.PrinterLinks.Count == 0
     };
 
     /// <inheritdoc />
@@ -190,13 +190,17 @@ public class CameraService : ICameraService
                 IsEnabled = dto.IsEnabled,
                 SortOrder = dto.SortOrder,
                 Location = dto.Location?.Trim(),
-                PrinterId = dto.PrinterId,
-                Printer = printer,
                 Source = dto.Source ?? CameraSource.Standalone,
                 CameraType = dto.CameraType ?? CameraType.General,
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow
             };
+
+            if (printer is not null)
+            {
+                bool hasPrimary = await _unitOfWork.Cameras.HasPrimaryCameraAsync(printer.Id, ct);
+                camera.LinkToPrinter(printer.Id, isPrimary: !hasPrimary).Printer = printer;
+            }
 
             _unitOfWork.Cameras.Add(camera);
             await _unitOfWork.SaveChangesAsync(ct);
@@ -282,7 +286,7 @@ public class CameraService : ICameraService
                 camera.CameraType = dto.CameraType.Value;
             }
 
-            if (dto.PrinterId.HasValue && dto.PrinterId != camera.PrinterId)
+            if (dto.PrinterId.HasValue && dto.PrinterId != camera.GetPrimaryPrinterId())
             {
                 Printer? printer = await _printersService.FindByIdAsync(dto.PrinterId.Value, ct);
                 if (printer == null)
@@ -290,8 +294,10 @@ public class CameraService : ICameraService
                     throw new InvalidOperationException($"Printer with ID '{dto.PrinterId.Value}' not found");
                 }
 
-                camera.PrinterId = dto.PrinterId;
-                camera.Printer = printer;
+                // Legacy single-printer reassignment: replace all existing links with the new printer.
+                camera.PrinterLinks.Clear();
+                bool hasPrimary = await _unitOfWork.Cameras.HasPrimaryCameraAsync(printer.Id, ct);
+                camera.LinkToPrinter(printer.Id, isPrimary: !hasPrimary).Printer = printer;
             }
 
             camera.UpdatedAt = DateTime.UtcNow;
@@ -465,13 +471,14 @@ public class CameraService : ICameraService
                 IsEnabled = dto.IsEnabled,
                 SortOrder = dto.SortOrder,
                 Location = dto.Location?.Trim(),
-                PrinterId = printerId,
-                Printer = printer,
                 Source = dto.Source ?? CameraSource.Standalone,
                 CameraType = dto.CameraType ?? CameraType.General,
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow
             };
+
+            bool hasPrimaryCamera = await _unitOfWork.Cameras.HasPrimaryCameraAsync(printerId, ct);
+            camera.LinkToPrinter(printerId, isPrimary: !hasPrimaryCamera).Printer = printer;
 
             _unitOfWork.Cameras.Add(camera);
             await _unitOfWork.SaveChangesAsync(ct);
@@ -503,9 +510,9 @@ public class CameraService : ICameraService
                 IsEnabled = c.IsEnabled,
                 SortOrder = c.SortOrder,
                 Location = c.Location,
-                PrinterId = c.PrinterId,
-                PrinterName = c.Printer?.Name,
-                IsStandalone = !c.PrinterId.HasValue,
+                PrinterId = c.GetPrimaryPrinterId(),
+                PrinterName = c.GetPrimaryPrinter()?.Name,
+                IsStandalone = c.PrinterLinks.Count == 0,
                 Source = c.Source,
                 CameraType = c.CameraType,
                 HealthStatus = c.HealthStatus

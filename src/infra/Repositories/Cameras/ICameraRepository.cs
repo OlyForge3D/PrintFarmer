@@ -58,7 +58,7 @@ public interface ICameraRepository
     void Remove(Camera camera);
 
     /// <summary>
-    /// Gets all cameras attached to a specific printer.
+    /// Gets all cameras linked to a specific printer (primary camera first).
     /// </summary>
     /// <param name="printerId">The printer ID.</param>
     /// <param name="ct">Cancellation token.</param>
@@ -73,7 +73,7 @@ public interface ICameraRepository
     Task<Camera?> FindByPrinterIdAndTypeAsync(Guid printerId, CameraType type, CancellationToken ct);
 
     /// <summary>
-    /// Gets all enabled cameras with their associated Printer navigation property loaded.
+    /// Gets all enabled cameras with their printer links (and linked printers) loaded.
     /// </summary>
     /// <param name="ct">Cancellation token.</param>
     Task<List<Camera>> GetEnabledWithPrinterAsync(CancellationToken ct);
@@ -86,4 +86,11 @@ public interface ICameraRepository
     /// <param name="source">The camera source (Moonraker, PrusaLink, etc.).</param>
     /// <param name="ct">Cancellation token.</param>
     Task<Camera?> FindByPrinterIdAndSourceAsync(Guid printerId, CameraSource source, CancellationToken ct);
+
+    /// <summary>
+    /// Returns true when the printer already has a primary camera link.
+    /// </summary>
+    /// <param name="printerId">The printer ID.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<bool> HasPrimaryCameraAsync(Guid printerId, CancellationToken ct);
 }

@@ -194,7 +194,7 @@ public class PrintersControllerBuddyCameraIpTests : IClassFixture<CustomWebAppli
             var camera = new Camera
             {
                 Id = Guid.NewGuid(),
-                PrinterId = printerId,
+                PrinterLinks = { new CameraPrinter { PrinterId = printerId, IsPrimary = true } },
                 Name = "Buddy Camera",
                 Source = CameraSource.PrusaLink,
                 StreamUrl = "rtsp://192.168.1.50:554/live/",
@@ -230,7 +230,7 @@ public class PrintersControllerBuddyCameraIpTests : IClassFixture<CustomWebAppli
         await using (AsyncServiceScope scope = _factory.Services.CreateAsyncScope())
         {
             AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            db.Cameras.Where(c => c.PrinterId == printerId).Should().BeEmpty(
+            db.Cameras.Where(c => c.PrinterLinks.Any(l => l.PrinterId == printerId)).Should().BeEmpty(
                 because: "the buddy camera must be removed when BuddyCameraIp is cleared");
             db.CameraSnapshots.Where(s => s.PrinterId == printerId).Should().BeEmpty(
                 because: "snapshots must be pre-deleted to avoid FK violation on the Restrict constraint");
@@ -254,7 +254,7 @@ public class PrintersControllerBuddyCameraIpTests : IClassFixture<CustomWebAppli
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         List<Camera> cameras = await db.Cameras
-            .Where(c => c.PrinterId == printerId && c.Source == CameraSource.PrusaLink)
+            .Where(c => c.PrinterLinks.Any(l => l.PrinterId == printerId) && c.Source == CameraSource.PrusaLink)
             .ToListAsync();
 
         cameras.Should().ContainSingle(because: "a single Buddy camera row must be created for the printer");
@@ -285,7 +285,7 @@ public class PrintersControllerBuddyCameraIpTests : IClassFixture<CustomWebAppli
             var customCamera = new Camera
             {
                 Id = Guid.NewGuid(),
-                PrinterId = printerId,
+                PrinterLinks = { new CameraPrinter { PrinterId = printerId, IsPrimary = true } },
                 Name = "Custom Camera",
                 Source = CameraSource.Standalone,
                 StreamUrl = "rtsp://custom.local:554/live/",
@@ -306,7 +306,7 @@ public class PrintersControllerBuddyCameraIpTests : IClassFixture<CustomWebAppli
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         List<Camera> cameras = await db.Cameras
-            .Where(c => c.PrinterId == printerId && c.Source == CameraSource.PrusaLink)
+            .Where(c => c.PrinterLinks.Any(l => l.PrinterId == printerId) && c.Source == CameraSource.PrusaLink)
             .ToListAsync();
 
         cameras.Should().BeEmpty(because: "clearing BuddyCameraIp must delete the Buddy camera row from the Cameras table");
@@ -316,7 +316,7 @@ public class PrintersControllerBuddyCameraIpTests : IClassFixture<CustomWebAppli
 
         // Vasquez #3: non-PrusaLink camera on same printer must survive the clear
         List<Camera> survivingCameras = await db.Cameras
-            .Where(c => c.PrinterId == printerId && c.Source == CameraSource.Standalone)
+            .Where(c => c.PrinterLinks.Any(l => l.PrinterId == printerId) && c.Source == CameraSource.Standalone)
             .ToListAsync();
         survivingCameras.Should().ContainSingle(because: "clearing BuddyCameraIp must not remove cameras from other sources");
         survivingCameras[0].StreamUrl.Should().Be("rtsp://custom.local:554/live/",
@@ -346,7 +346,7 @@ public class PrintersControllerBuddyCameraIpTests : IClassFixture<CustomWebAppli
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         List<Camera> camerasA = await db.Cameras
-            .Where(c => c.PrinterId == printerAId && c.Source == CameraSource.PrusaLink)
+            .Where(c => c.PrinterLinks.Any(l => l.PrinterId == printerAId) && c.Source == CameraSource.PrusaLink)
             .ToListAsync();
 
         camerasA.Should().ContainSingle(because: "printer A's Buddy camera must not be touched when printer B is updated");
@@ -371,7 +371,7 @@ public class PrintersControllerBuddyCameraIpTests : IClassFixture<CustomWebAppli
             var staleCamera = new Camera
             {
                 Id = Guid.NewGuid(),
-                PrinterId = printerId,
+                PrinterLinks = { new CameraPrinter { PrinterId = printerId, IsPrimary = true } },
                 Name = "Stale Buddy Camera",
                 Source = CameraSource.PrusaLink,
                 StreamUrl = "rtsp://10.0.0.1:554/live/",
@@ -396,7 +396,7 @@ public class PrintersControllerBuddyCameraIpTests : IClassFixture<CustomWebAppli
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         List<Camera> cameras = await db.Cameras
-            .Where(c => c.PrinterId == printerId && c.Source == CameraSource.PrusaLink)
+            .Where(c => c.PrinterLinks.Any(l => l.PrinterId == printerId) && c.Source == CameraSource.PrusaLink)
             .ToListAsync();
 
         cameras.Should().ContainSingle(because: "the existing disabled row must be updated in place — not duplicated");
@@ -432,7 +432,7 @@ public class PrintersControllerBuddyCameraIpTests : IClassFixture<CustomWebAppli
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         List<Camera> cameras = await db.Cameras
-            .Where(c => c.PrinterId == printerId && c.Source == CameraSource.PrusaLink)
+            .Where(c => c.PrinterLinks.Any(l => l.PrinterId == printerId) && c.Source == CameraSource.PrusaLink)
             .ToListAsync();
 
         cameras.Should().ContainSingle(because: "changing the IP must update the existing row, not create a duplicate");

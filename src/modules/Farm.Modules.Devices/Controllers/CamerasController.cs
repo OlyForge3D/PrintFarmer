@@ -184,7 +184,7 @@ public class CamerasController(
                 return NotFound(new { message = "Camera not found" });
             }
 
-            if (!await CanAccessCameraPrinterAsync(camera.PrinterId, ct))
+            if (!await CanAccessCameraPrinterAsync(camera.GetPrimaryPrinterId(), ct))
             {
                 return NotFound(new { message = "Camera not found" });
             }
@@ -204,13 +204,13 @@ public class CamerasController(
                 Location = camera.Location,
                 CreatedAt = camera.CreatedAt,
                 UpdatedAt = camera.UpdatedAt,
-                PrinterId = camera.PrinterId,
-                PrinterName = camera.Printer?.Name,
+                PrinterId = camera.GetPrimaryPrinterId(),
+                PrinterName = camera.GetPrimaryPrinter()?.Name,
                 Source = camera.Source,
                 CameraType = camera.CameraType,
                 HealthStatus = camera.HealthStatus,
                 LastHealthCheck = camera.LastHealthCheck,
-                IsStandalone = !camera.PrinterId.HasValue
+                IsStandalone = camera.PrinterLinks.Count == 0
             };
             return Ok(dto);
         }
@@ -252,7 +252,7 @@ public class CamerasController(
         }
 
         Camera? camera = await _cameraService.FindByIdAsync(id, ct);
-        if (camera == null || !await CanAccessCameraPrinterAsync(camera.PrinterId, ct))
+        if (camera == null || !await CanAccessCameraPrinterAsync(camera.GetPrimaryPrinterId(), ct))
         {
             return NotFound(new { message = "Camera not found" });
         }
@@ -598,7 +598,7 @@ public class CamerasController(
             return NotFound();
         }
 
-        if (!await CanAccessCameraPrinterAsync(camera.PrinterId, ct))
+        if (!await CanAccessCameraPrinterAsync(camera.GetPrimaryPrinterId(), ct))
         {
             return NotFound();
         }
