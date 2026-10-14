@@ -200,7 +200,10 @@ docker compose up -d obico-ml-api
 
 Snapshot downloads performed by PrintFarmer's legacy multipart fallback use
 the shared egress guard. Destinations are checked after DNS resolution and
-connections are pinned to vetted addresses. Redirects are not followed.
+connections are pinned to vetted addresses. For HTTPS, the original Host
+header preserves SNI and certificate hostname validation ([.NET transport
+contract](https://learn.microsoft.com/en-us/dotnet/core/extensions/httpclient-sni)).
+Redirects are not followed.
 Loopback, link-local (including metadata services), and other forbidden
 destinations are denied by default; administrator-configured egress exceptions
 still apply. Private LAN addresses remain permitted for printer cameras.

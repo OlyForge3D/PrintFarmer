@@ -15,7 +15,7 @@ using Xunit;
 
 namespace Farm.Infrastructure.Tests.Services.FailureDetection;
 
-public class ObicoFailureDetectionServiceTests
+public partial class ObicoFailureDetectionServiceTests
 {
     [Fact]
     public async Task AnalyzeImageFromUrlAsync_WhenUpstreamContractReturnsDetections_UsesSnapshotQueryContract()
