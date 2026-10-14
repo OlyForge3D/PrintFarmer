@@ -1,7 +1,7 @@
 import '@testing-library/jest-dom';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { MaintenanceReport } from '../MaintenanceReport';
 import { useMaintenanceTrends } from '../../hooks/useMaintenanceTrends';
 
@@ -30,8 +30,26 @@ vi.mock('jspdf-autotable', () => ({}));
 const mockedUseMaintenanceTrends = vi.mocked(useMaintenanceTrends);
 
 describe('MaintenanceReport', () => {
+  let objectUrlDescriptor: PropertyDescriptor | undefined;
+
   beforeEach(() => {
     vi.clearAllMocks();
+    // CSVLink creates an object URL on render; these tests cover PDF export,
+    // not jsdom's Blob/URL implementation.
+    objectUrlDescriptor = Object.getOwnPropertyDescriptor(window.URL, 'createObjectURL');
+    Object.defineProperty(window.URL, 'createObjectURL', {
+      configurable: true,
+      writable: true,
+      value: vi.fn(() => 'blob:maintenance-report'),
+    });
+  });
+
+  afterEach(() => {
+    if (objectUrlDescriptor) {
+      Object.defineProperty(window.URL, 'createObjectURL', objectUrlDescriptor);
+    } else {
+      Reflect.deleteProperty(window.URL, 'createObjectURL');
+    }
   });
 
   it('does not eagerly load jspdf on render', () => {

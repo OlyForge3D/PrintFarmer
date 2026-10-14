@@ -32,6 +32,18 @@ covers the second-wave boundary cases.
 
 ## React printer response contracts
 
+### DOM emulator upgrades
+
+Use concrete CSS custom-property sentinels in cascade tests. The CSS-wide
+`initial` keyword computes to the guaranteed-invalid value for an unregistered
+custom property; expecting the literal keyword depends on the emulator version.
+Keep exact high-contrast token and WCAG ratio assertions intact.
+
+Tests focused on PDF export may mock `window.URL.createObjectURL` to isolate
+an incidental CSV link's Blob handling. Restore its descriptor after every test rather
+than replacing URL or Blob globally. Validate emulator upgrades with their
+supported Node version (jsdom 30 requires Node ^22.22.2, ^24.15.0, or >=26).
+
 `npm run typecheck:app` and `npm run typecheck:test` reject every diagnostic,
 including direct test, helper, imported-source, and global errors. Neither gate
 has a diagnostic allowance: swapping errors while holding the count constant

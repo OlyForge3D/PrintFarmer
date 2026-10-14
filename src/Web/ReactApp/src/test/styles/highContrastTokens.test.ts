@@ -235,13 +235,13 @@ describe.each(THEMES_WITH_OVERRIDES)('prefers-contrast: high — %s theme', (the
     });
 
     it('every contract token changes under data-contrast=high', () => {
-      // Minimal stand-in for the theme's own base block: real base values,
-      // scoped to `[data-theme="<theme>"]` with no `data-contrast` qualifier,
-      // exactly mirroring how design-system/themes/<theme>.css declares them.
+      // Use a concrete sentinel: custom-property `initial` computes to the
+      // guaranteed-invalid value, not necessarily the literal keyword.
+      const normalValue = '#010203';
       const base = document.createElement('style');
       base.textContent = `
         [data-theme='${theme}'] {
-          ${CONTRACT_TOKENS.map((token) => `--pf-${token}: initial;`).join('\n')}
+          ${CONTRACT_TOKENS.map((token) => `--pf-${token}: ${normalValue};`).join('\n')}
         }
       `;
       const override = document.createElement('style');
@@ -257,7 +257,7 @@ describe.each(THEMES_WITH_OVERRIDES)('prefers-contrast: high — %s theme', (the
         const normalStyle = getComputedStyle(document.documentElement);
         for (const token of CONTRACT_TOKENS) {
           expect(normalStyle.getPropertyValue(`--pf-${token}`).trim(), `--pf-${token}`).toBe(
-            'initial',
+            normalValue,
           );
         }
 
@@ -268,7 +268,7 @@ describe.each(THEMES_WITH_OVERRIDES)('prefers-contrast: high — %s theme', (the
           const actual = highStyle.getPropertyValue(`--pf-${token}`).trim().toLowerCase();
           expect(actual, `--pf-${token}`).toBe(expected.get(token));
           expect(actual, `--pf-${token} should differ from the normal-mode value`).not.toBe(
-            'initial',
+            normalValue,
           );
         }
       } finally {
