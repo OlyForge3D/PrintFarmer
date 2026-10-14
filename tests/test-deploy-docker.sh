@@ -1742,6 +1742,8 @@ test_installer_standard_webauthn_configuration() {
     create_installer_docker_stub "$mock_bin"
 
     capture_output "PATH='$mock_bin:$PATH' PRINTFARMER_HOST='farm.example.com' '$INSTALL_SCRIPT' --non-interactive --profile standard --port 18909 --dir '$install_dir' --dry-run"
+    local output
+    output=$(get_output)
 
     assert_contains "$(cat "$install_dir/.env")" "WebAuthn__RelyingPartyId=farm.example.com" "Standard installer should persist the canonical passkey hostname"
     assert_contains "$(cat "$install_dir/.env")" "WebAuthn__Origin=https://farm.example.com" "Standard installer should require HTTPS for a non-loopback passkey origin"
@@ -1753,6 +1755,38 @@ test_installer_standard_webauthn_configuration() {
         "Standard installer API should reject a missing or empty passkey origin"
     assert_contains "$(cat "$install_dir/docker-compose.yml")" '127.0.0.1:${HTTP_PORT:-8080}:80' "Standard installer should bind HTTP to loopback only"
     assert_not_contains "$output" "Network:" "Standard installer must not advertise a cleartext LAN URL"
+
+    pass_test
+}
+
+test_installer_upgrade_secures_existing_http_binding() {
+    start_test "installer upgrade secures an existing published HTTP binding"
+
+    local install_dir="$TEST_TEMP_DIR/installer-upgrade-binding"
+    local mock_bin="$TEST_TEMP_DIR/installer-upgrade-binding-bin"
+    mkdir -p "$install_dir"
+    create_installer_docker_stub "$mock_bin"
+
+    cat > "$install_dir/.env" <<'EOF'
+IMAGE_TAG=latest
+DEPLOY_PROFILE=lite
+HTTP_PORT=18911
+Jwt__Key=existing-jwt-key
+EOF
+    cat > "$install_dir/docker-compose.yml" <<'EOF'
+services:
+  printfarmer:
+    container_name: printfarmer-monolith
+    ports:
+      - "${HTTP_PORT:-8080}:5000"
+    environment:
+      - Jwt__Audience=${Jwt__Audience:-PrintFarmer}
+EOF
+
+    capture_output "PATH='$mock_bin:$PATH' '$INSTALL_SCRIPT' --upgrade --dir '$install_dir'"
+
+    assert_contains "$(cat "$install_dir/docker-compose.yml")" '127.0.0.1:${HTTP_PORT:-8080}:5000' "Upgrade should secure an existing lite HTTP binding"
+    assert_not_contains "$(cat "$install_dir/docker-compose.yml")" '"${HTTP_PORT:-8080}:5000"' "Upgrade should remove the all-interface lite HTTP binding"
 
     pass_test
 }
@@ -2211,6 +2245,7 @@ run_all_tests() {
     test_pfarm_variables_sourcing
     test_installer_lite_slicer_worker_key
     test_installer_standard_webauthn_configuration
+    test_installer_upgrade_secures_existing_http_binding
     test_installer_upgrade_preserves_webauthn_configuration
     test_installer_rejects_invalid_webauthn_host
     test_installer_upgrade_adds_slicer_worker_key

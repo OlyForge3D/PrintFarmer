@@ -207,6 +207,26 @@ ensure_upgrade_slicer_worker_key() {
     info "Slicer worker authentication configuration is present"
 }
 
+ensure_upgrade_loopback_binding() {
+    local compose_file="$1"
+    local temp_file
+    temp_file="$(mktemp "${compose_file}.tmp.XXXXXX")"
+
+    if ! sed \
+        -e 's#- "${HTTP_PORT:-8080}:5000"#- "127.0.0.1:${HTTP_PORT:-8080}:5000"#' \
+        -e 's#- "${HTTP_PORT:-8080}:80"#- "127.0.0.1:${HTTP_PORT:-8080}:80"#' \
+        -e 's#- "0.0.0.0:${HTTP_PORT:-8080}:5000"#- "127.0.0.1:${HTTP_PORT:-8080}:5000"#' \
+        -e 's#- "0.0.0.0:${HTTP_PORT:-8080}:80"#- "127.0.0.1:${HTTP_PORT:-8080}:80"#' \
+        "$compose_file" > "$temp_file"; then
+        rm -f "$temp_file"
+        die "Could not secure published HTTP binding in $compose_file"
+    fi
+
+    chmod 600 "$temp_file"
+    mv "$temp_file" "$compose_file"
+    info "Published HTTP binding is loopback-only"
+}
+
 # ─── Logging ────────────────────────────────────────────────────────────────
 info()    { printf "  ${BLUE}${ARROW}${NC} %s\n" "$*"; }
 ok()      { printf "  ${GREEN}${CHECK}${NC} %s\n" "$*"; }
@@ -603,6 +623,7 @@ if [[ "$DO_UPGRADE" == "true" ]]; then
         fi
         info "Image tag → ${IMAGE_TAG}"
     fi
+    ensure_upgrade_loopback_binding "docker-compose.yml"
     ensure_upgrade_slicer_worker_key ".env" "docker-compose.yml"
     run_with_spinner "Pulling latest images" $COMPOSE_CMD pull || die "Pull failed"
     info "Restarting containers..."
