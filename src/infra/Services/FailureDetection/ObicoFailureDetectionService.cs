@@ -1,6 +1,7 @@
 ﻿using System.Net;
 using System.Text.Json;
 using Farm.Infrastructure.Logging;
+using Farm.Infrastructure.Network;
 using Farm.Infrastructure.Settings;
 using Microsoft.Extensions.Logging;
 
@@ -17,15 +18,18 @@ public sealed class ObicoFailureDetectionService : IObicoFailureDetectionService
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<ObicoFailureDetectionService> _logger;
     private readonly ISettingsService _settingsService;
+    private readonly IEgressGuard _egressGuard;
 
     public ObicoFailureDetectionService(
         IHttpClientFactory httpClientFactory,
         ISettingsService settingsService,
-        ILogger<ObicoFailureDetectionService> logger)
+        ILogger<ObicoFailureDetectionService> logger,
+        IEgressGuard egressGuard)
     {
         _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
         _settingsService = settingsService ?? throw new ArgumentNullException(nameof(settingsService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _egressGuard = egressGuard ?? throw new ArgumentNullException(nameof(egressGuard));
     }
 
     /// <inheritdoc/>
@@ -211,12 +215,25 @@ public sealed class ObicoFailureDetectionService : IObicoFailureDetectionService
     {
         try
         {
-            using HttpClient httpClient = _httpClientFactory.CreateClient();
+            EgressCheckResult egressCheck = await _egressGuard.CheckAsync(snapshotUrl, ct);
+            if (!egressCheck.IsAllowed || egressCheck.Uri is null || egressCheck.ResolvedAddress is null)
+            {
+                return FailureDetectionResult.Error(
+                    $"Snapshot URL is not allowed for local fallback: {egressCheck.DenyReason ?? "Destination could not be pinned to a vetted address"}");
+            }
+
+            using HttpClient httpClient = _httpClientFactory.CreateClient("VettedEgress");
             httpClient.Timeout = TimeSpan.FromSeconds(_settingsService.Get<ObicoSettings>().AnalysisTimeoutSeconds);
 
             _logger.LogDebug("[ObicoFailureDetection] Fetching image from {SnapshotUrl}", LogSanitizer.Sanitize(snapshotUrl));
 
-            HttpResponseMessage response = await httpClient.GetAsync(snapshotUrl, ct);
+            // Pin the vetted address to prevent DNS rebinding; retain the original authority
+            // for virtual hosting and TLS SNI. VettedEgress does not follow redirects.
+            using var request = new HttpRequestMessage(
+                HttpMethod.Get,
+                EgressGuard.CreatePinnedUri(egressCheck.Uri, egressCheck.ResolvedAddress));
+            request.Headers.Host = egressCheck.Uri.Authority;
+            using HttpResponseMessage response = await httpClient.SendAsync(request, ct);
 
             if (!response.IsSuccessStatusCode)
             {
