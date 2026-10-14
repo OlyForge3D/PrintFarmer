@@ -95,7 +95,7 @@ STACK_DIR=".daily-validation"
 rm -rf "$STACK_DIR"
 mkdir -p "$STACK_DIR"
 
-# Select a retained pre-cutover run whose complete artifact was verified.
+# Select a successful run whose complete artifact was verified.
 : "${RUN_ID:?Set an explicit successful run ID}"
 
 gh run download "$RUN_ID" \
