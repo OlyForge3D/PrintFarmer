@@ -1788,6 +1788,27 @@ EOF
     assert_contains "$(cat "$install_dir/docker-compose.yml")" '127.0.0.1:${HTTP_PORT:-8080}:5000' "Upgrade should secure an existing lite HTTP binding"
     assert_not_contains "$(cat "$install_dir/docker-compose.yml")" '"${HTTP_PORT:-8080}:5000"' "Upgrade should remove the all-interface lite HTTP binding"
 
+    local standard_install_dir="$TEST_TEMP_DIR/installer-upgrade-standard-binding"
+    mkdir -p "$standard_install_dir"
+    cat > "$standard_install_dir/.env" <<'EOF'
+IMAGE_TAG=latest
+DEPLOY_PROFILE=standard
+HTTP_PORT=18912
+Jwt__Key=existing-jwt-key
+EOF
+    cat > "$standard_install_dir/docker-compose.yml" <<'EOF'
+services:
+  nginx-proxy:
+    container_name: printfarmer-nginx-proxy
+    ports:
+      - "${HTTP_PORT:-8080}:80"
+EOF
+
+    capture_output "PATH='$mock_bin:$PATH' '$INSTALL_SCRIPT' --upgrade --dir '$standard_install_dir'"
+
+    assert_contains "$(cat "$standard_install_dir/docker-compose.yml")" '127.0.0.1:${HTTP_PORT:-8080}:80' "Upgrade should secure an existing standard HTTP binding"
+    assert_not_contains "$(cat "$standard_install_dir/docker-compose.yml")" '"${HTTP_PORT:-8080}:80"' "Upgrade should remove the all-interface standard HTTP binding"
+
     pass_test
 }
 
