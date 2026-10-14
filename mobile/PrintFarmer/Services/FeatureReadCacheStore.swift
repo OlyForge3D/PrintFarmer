@@ -374,7 +374,6 @@ actor FeatureReadCacheStore: FeatureReadCacheStoring {
                     return .snapshot(payload: payload, lastUpdatedAtMillis: decoded.lastUpdatedAtMillis)
                 }
                 // isStructurallyValid guarantees payload != nil here; defensive.
-                break
             case .disabled:
                 return .disabled(lastUpdatedAtMillis: decoded.lastUpdatedAtMillis)
             }

@@ -61,10 +61,6 @@ struct PrinterDetailPanelsHost<Status: View, Control: View, Filament: View, Queu
         current
     }
 
-    private var availablePanels: [PrinterDetailPanel] {
-        Self.availablePanels(controlsAvailable: controlsAvailable)
-    }
-
     var body: some View {
         GeometryReader { geometry in
             let inset: CGFloat = PrinterDetailLayout.usesColumns(

@@ -19,11 +19,6 @@ import Foundation
 struct FarmSnapshotNamespace: Codable, Sendable, Equatable, Hashable {
     let serverID: UUID
     let userID: UUID
-
-    init(serverID: UUID, userID: UUID) {
-        self.serverID = serverID
-        self.userID = userID
-    }
 }
 
 /// Non-secret spool display fields (subset of `PrinterSpoolInfo`).
