@@ -235,6 +235,7 @@ public class GcodeFilesController(
 
     // ---------------- Chunked Upload Endpoints ----------------
     [HttpPost("chunk/init")]
+    [Authorize(Policy = "ModelWrite")]
     [ProducesResponseType(typeof(ChunkInitResponse), 200)]
     [ProducesResponseType(400)]
     [SuppressMessage("Security", "CA3003", Justification = "All paths rooted under validated target directory; filenames sanitized and collisions resolved server-side.")]
@@ -292,6 +293,7 @@ public class GcodeFilesController(
     }
 
     [HttpPut("chunk/{uploadId}")]
+    [Authorize(Policy = "ModelWrite")]
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Security", "S5693", Justification = "Chunked G-code upload chunks are explicitly capped at 50 MB.")]
     [RequestSizeLimit(50_000_000)] // 50MB per request upper bound (clients should use recommended chunk size)
     [RequestFormLimits(MultipartBodyLengthLimit = 50_000_000)]
@@ -409,6 +411,7 @@ public class GcodeFilesController(
     /// </summary>
     /// <param name="uploadId">The unique identifier for the chunked upload session.</param>
     [HttpGet("chunk/{uploadId}")]
+    [Authorize(Policy = "ModelWrite")]
     [ProducesResponseType(typeof(ChunkStatusResponse), 200)]
     [ProducesResponseType(404)]
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Security", "CA3003", Justification = "Meta file path discovered via controlled search under validated root; uploadId only used as search token.")]
@@ -448,6 +451,7 @@ public class GcodeFilesController(
     }
 
     [HttpPost("chunk/{uploadId}/pause")]
+    [Authorize(Policy = "ModelWrite")]
     [ProducesResponseType(typeof(ChunkStatusResponse), 200)]
     [ProducesResponseType(404)]
     public ActionResult<ChunkStatusResponse> PauseChunkUpload([FromRoute] string uploadId)
@@ -481,6 +485,7 @@ public class GcodeFilesController(
     }
 
     [HttpPost("chunk/{uploadId}/resume")]
+    [Authorize(Policy = "ModelWrite")]
     [ProducesResponseType(typeof(ChunkStatusResponse), 200)]
     [ProducesResponseType(404)]
     public ActionResult<ChunkStatusResponse> ResumeChunkUpload([FromRoute] string uploadId)
@@ -514,6 +519,7 @@ public class GcodeFilesController(
     }
 
     [HttpDelete("chunk/{uploadId}")]
+    [Authorize(Policy = "ModelWrite")]
     [ProducesResponseType(204)]
     [SuppressMessage("Security", "CA3003", Justification = "Temp file path stored in validated state object created during init; deletion restricted to that path.")]
     public IActionResult CancelChunkUpload([FromRoute] string uploadId)
@@ -754,6 +760,7 @@ public class GcodeFilesController(
     /// <param name="path">Optional virtual directory path (defaults to root '/').</param>
     /// <param name="file">Uploaded G-code file (multipart form field 'file').</param>
     [HttpPost("upload")]
+    [Authorize(Policy = "ModelWrite")]
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Security", "S5693", Justification = "G-code library uploads are explicitly capped at 200 MB.")]
     [RequestSizeLimit(200_000_000)] // 200 MB hard limit
     [RequestFormLimits(MultipartBodyLengthLimit = 200_000_000)]
@@ -806,6 +813,7 @@ public class GcodeFilesController(
     /// <param name="ct">Cancellation token</param>
     /// <returns>Operation result</returns>
     [HttpPost("folder")]
+    [Authorize(Policy = "ModelWrite")]
     [ProducesResponseType(typeof(FolderOperationResultDto), StatusCodes.Status201Created)]
     [ProducesResponseType(typeof(FolderOperationResultDto), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(FolderOperationResultDto), StatusCodes.Status409Conflict)]
@@ -970,6 +978,7 @@ public class GcodeFilesController(
     /// <param name="ct">Cancellation token</param>
     /// <returns>Operation result</returns>
     [HttpPost("move")]
+    [Authorize(Policy = "ModelWrite")]
     [ProducesResponseType(typeof(FolderOperationResultDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]

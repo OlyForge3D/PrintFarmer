@@ -80,6 +80,7 @@ public sealed class PrintablesImportController(
     /// <param name="request">Import request containing the Printables URL and optional selected file IDs.</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpPost("/api/3d-models/import/printables")]
+    [Authorize(Policy = "ModelWrite")]
     [ProducesResponseType(typeof(IReadOnlyList<Model3DUploadResultDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status502BadGateway)]
@@ -118,6 +119,7 @@ public sealed class PrintablesImportController(
     /// Imports all downloadable STL files from the selected model.
     /// </summary>
     [HttpPost("/api/3d-models/import/printables/one-click")]
+    [Authorize(Policy = "ModelWrite")]
     [ProducesResponseType(typeof(IReadOnlyList<Model3DUploadResultDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status502BadGateway)]
@@ -329,6 +331,7 @@ public sealed class PrintablesImportController(
     /// <param name="request">Model ID and source Printables URL.</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpPost("attribution")]
+    [Authorize(Policy = "ModelWrite")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
