@@ -1,5 +1,27 @@
 # Features
 
+## Printer Fleet Filters
+
+On the **Printers** page, use the funnel button beside **Sort** to open an
+inline filter strip. Filters start collapsed; labels appear above the dropdowns
+when opened.
+
+- **State**: All States, Online, Printing, Paused, Shutdown, or Offline.
+- **Backend**: All Backends, Moonraker, PrusaLink, SDCP, OctoPrint, or FlashForge.
+- **Done in**: Any Time or completion within 1, 2, 4, 8, 12, or 24 hours.
+  Printers without an estimated completion time remain included.
+
+Selections update the fleet immediately—there is no Apply button. Closing the
+strip keeps selections active. The funnel is filled when any filter is active
+and outlined when none are active, whether the strip is open or collapsed.
+When any filter is active, a glyph-only **Clear filters** button
+appears beside the funnel and resets all three filters
+without changing the sort order or view mode. If nothing matches, clear or
+adjust filters to recover the fleet.
+
+Bed type is configured in printer settings, not shown on fleet cards or used
+as a fleet filter. Bed editing and temperature controls remain available.
+
 ## Location System
 
 Organize your printers by physical location for easier management.
