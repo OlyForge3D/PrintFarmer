@@ -1,19 +1,13 @@
 ## Daily Development Images
 
-**#2668 cutover:** `daily-development-images.yml` now performs validation only,
-without package/signing credentials or registry writes. Server insider
-publication runs through `consolidated-release.yml` and the shared release
-authorization/allocator. The legacy daily registry publisher was removed.
-New validation runs do **not** contain `daily-development-image-set`; do not
-select them as release artifacts. Use explicit retained pre-cutover run IDs
-for historical validation or build locally until the #2660 signed-manifest
-consumer replaces the old registry selection. Historical tags/digests remain
-unchanged and do not automatically gain managed eligibility.
+`daily-development-images.yml` validates six images, publishes only the exact
+smoke-tested images under a never-reused run-specific tag, and uploads one
+`daily-development-image-set` artifact containing digest-pinned references.
+This artifact is the atomic input for the exploratory UI validation runner.
+The workflow does not publish release aliases, `latest`, or insider release
+identities; those remain owned by `consolidated-release.yml`.
 
-The remainder of this guide describes **historical pre-cutover artifacts**
-and manual validation of an explicitly retained run, not current publication.
-
-The former **Daily development microservice images** workflow built the complete
+The **Daily development microservice images** workflow builds the complete
 repository-owned microservice image set from the exact `development` branch HEAD.
 It runs every day at `09:17 UTC` and can also be started manually.
 

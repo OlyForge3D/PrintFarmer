@@ -9,14 +9,18 @@ const validation = readFileSync('scripts/docker/compose-templates/docker-compose
 const emulator = readFileSync('scripts/docker/compose-templates/docker-compose.moonraker-emulator.yml', 'utf8');
 const services = ['api', 'frontend', 'slicer-host', 'printer-discovery', 'orcaslicer-worker', 'moonraker-emulator'];
 
-test('daily validation selects and pins development HEAD without publication credentials', () => {
+test('daily validation selects and pins development HEAD and publishes only an immutable run set', () => {
   assert.match(workflow, /cron: '17 9 \* \* \*'/);
   assert.match(workflow, /ref: refs\/heads\/development/);
   assert.match(workflow, /test "\$commit_sha" = "\$remote_sha"/);
   assert.match(workflow, /ref: \$\{\{ needs\.source\.outputs\.commit_sha \}\}/);
-  assert.doesNotMatch(workflow, /packages: write|id-token: write|docker push|docker tag|push: true/);
+  assert.match(workflow, /packages: write/);
+  assert.match(workflow, /docker push "\$reference"/);
+  assert.match(workflow, /docker tag "\$validated_image" "\$reference"/);
   assert.match(workflow, /push: false/);
-  assert.match(workflow, /consolidated-release.yml/);
+  assert.match(workflow, /name: daily-development-image-set/);
+  assert.match(workflow, /reference: \(\.image \+ "@" \+ \.digest\)/);
+  assert.doesNotMatch(workflow, /:latest|:development\b/);
 });
 
 test('all six validation builds retain live runtime health probes', () => {
@@ -39,7 +43,7 @@ test('canonical API and slicer builds retain runtime-selected SQLite migrations'
   assert.match(dockerfile, /\[ -f \/app\/publish\/api\/plugins\/slicer\/Farm\.Slicer\.Migrations\.Sqlite\.dll \]/);
 });
 
-test('historical registry overlays remain digest-only and contain all six application images', () => {
+test('registry overlays remain digest-only and contain all six application images', () => {
   for (const name of ['API', 'FRONTEND', 'SLICER_HOST', 'PRINTER_DISCOVERY', 'ORCASLICER_WORKER', 'MOONRAKER_EMULATOR']) {
     assert.ok(registry.includes(`PRINTFARMER_${name}_IMAGE`));
   }
