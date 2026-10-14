@@ -172,6 +172,18 @@ function makeObject(overrides: Partial<PrintJobObjectDto> = {}): PrintJobObjectD
 }
 
 describe('DetailedPrinterCard inline details (#1584)', () => {
+  it('does not display the configured bed type in detailed cards', () => {
+    render(<DetailedPrinterCard printer={makePrinter({
+      bedTypeId: 'textured',
+      bedTypeName: 'Textured PEI',
+      bedTypeColor: '#abcdef',
+    })} />);
+
+    expect(screen.getByText('Printer 1')).toBeInTheDocument();
+    expect(screen.queryByText('Textured PEI')).not.toBeInTheDocument();
+    expect(screen.queryByTitle(/bed type/i)).not.toBeInTheDocument();
+  });
+
   beforeEach(() => {
     usePrinterDetailsMock.mockClear();
     usePrinterDetailsMock.mockReturnValue({ data: undefined, isLoading: false });

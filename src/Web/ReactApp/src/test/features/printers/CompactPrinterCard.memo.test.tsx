@@ -518,31 +518,36 @@ describe('CompactPrinterCard memoization', () => {
 
     render(
       <CompactPrinterCard
-        printer={createPrinter()}
+        printer={createPrinter({ bedTypeId: 'textured', bedTypeName: 'Textured PEI', bedTypeColor: '#abcdef' })}
         onExpand={vi.fn()}
         onEdit={vi.fn()}
       />,
     );
 
     expect(printerTagsFromFleetMock).toHaveBeenCalledWith('printer-1');
+    expect(screen.queryByText('Textured PEI')).not.toBeInTheDocument();
+    expect(screen.queryByTitle(/bed type/i)).not.toBeInTheDocument();
     const tag = screen.getByText('Production').closest('[data-pf-radius="full"]');
     expect(tag).toHaveClass('bg-black/70', 'text-white');
     expect(tag).toHaveStyle({ borderColor: '#ffff00' });
     expect(tag).toHaveAttribute('title', 'Production-ready printer');
   });
 
-  it('renders no tag pills when the fleet query has no tags for this printer (empty-tag behavior)', () => {
+  it('omits bed type and tag rows when a printer has a bed but no tags', () => {
     printerTagsFromFleetMock.mockReturnValue({ data: [], isPending: false, isError: false, error: null });
 
-    render(
+    const { container } = render(
       <CompactPrinterCard
-        printer={createPrinter()}
+        printer={createPrinter({ bedTypeId: 'textured', bedTypeName: 'Textured PEI', bedTypeColor: '#abcdef' })}
         onExpand={vi.fn()}
         onEdit={vi.fn()}
       />,
     );
 
     expect(screen.queryByText('Production')).not.toBeInTheDocument();
+    expect(screen.queryByText('Textured PEI')).not.toBeInTheDocument();
+    expect(screen.queryByTitle(/bed type/i)).not.toBeInTheDocument();
+    expect(container.querySelector('.flex-wrap')).not.toBeInTheDocument();
   });
 
   it('threads the fleet tags-fleet pending flag into TaggingModal as tagsLoading (true) — this card renders TaggingModal unconditionally, so the modal must know when initialTags is not resolved yet', () => {

@@ -86,6 +86,7 @@ import {
   mdiDatabase,
   mdiFlask,
   mdiPackageVariant,
+  mdiFilter,
   mdiFilterOutline,
   mdiTableLargeRemove,
   mdiFileDocument,
@@ -2462,13 +2463,13 @@ export function PackageIcon({ className = 'w-4 h-4', ariaLabel = 'Package' }: Om
  * 
  * @component
  * @preview ![filter-outline](https://unpkg.com/@mdi/svg@7.4.47/svg/filter-outline.svg) — https://unpkg.com/@mdi/svg@7.4.47/svg/filter-outline.svg
- * @param {Omit<IconProps, 'isOn'>} props - Icon properties (className, ariaLabel)
+ * @param {IconProps} props - Icon properties; isOn selects the filled funnel
  * @returns {JSX.Element} SVG element
  * @example
  * <FilterIcon className="w-5 h-5" ariaLabel="Filter" />
  * @see — https://materialdesignicons.com - Material Design Icons Library
  */
-export function FilterIcon({ className = 'w-4 h-4', ariaLabel = 'Filter' }: Omit<IconProps, 'isOn'>) {
+export function FilterIcon({ className = 'w-4 h-4', ariaLabel = 'Filter', isOn = false }: IconProps) {
   return (
     <svg
       className={className}
@@ -2476,7 +2477,7 @@ export function FilterIcon({ className = 'w-4 h-4', ariaLabel = 'Filter' }: Omit
       aria-label={ariaLabel}
       role="img"
     >
-      <path fill="currentColor" d={mdiFilterOutline} />
+      <path fill="currentColor" d={isOn ? mdiFilter : mdiFilterOutline} />
     </svg>
   );
 }
@@ -3357,4 +3358,3 @@ export function FireIcon({ className = 'w-4 h-4', ariaLabel = 'Forge theme' }: O
     </svg>
   );
 }
-
