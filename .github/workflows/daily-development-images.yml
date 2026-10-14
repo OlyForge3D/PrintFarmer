@@ -153,7 +153,7 @@ jobs:
           done
           docker logs "$container"
           exit 1
-      - name: Summarize validation-only result
+      - name: Summarize validation result
         run: |
           echo "Validated image; publication is limited to this run's immutable image set." >> "$GITHUB_STEP_SUMMARY"
       - name: Save validated image archive
@@ -215,6 +215,7 @@ jobs:
             test -s "$archive/image.tar"
             test -s "$archive/image-id.txt"
             docker load --input "$archive/image.tar"
+            rm -f "$archive/image.tar"
             expected_id="$(tr -d '[:space:]' < "$archive/image-id.txt")"
             actual_id="$(docker image inspect --format '{{.Id}}' "$validated_image")"
             revision="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$validated_image")"
@@ -308,3 +309,4 @@ jobs:
           path: daily-image-set/
           if-no-files-found: error
           retention-days: 90
+          overwrite: true

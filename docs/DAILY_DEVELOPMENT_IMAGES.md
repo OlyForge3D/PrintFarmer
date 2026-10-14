@@ -96,7 +96,7 @@ rm -rf "$STACK_DIR"
 mkdir -p "$STACK_DIR"
 
 # Select a retained pre-cutover run whose complete artifact was verified.
-: "${RUN_ID:?Set an explicit historical run ID; new runs are validation-only}"
+: "${RUN_ID:?Set an explicit successful run ID}"
 
 gh run download "$RUN_ID" \
   --name daily-development-image-set \

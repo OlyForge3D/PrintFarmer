@@ -20,6 +20,8 @@ test('daily validation selects and pins development HEAD and publishes only an i
   assert.match(workflow, /push: false/);
   assert.match(workflow, /name: daily-development-image-set/);
   assert.match(workflow, /reference: \(\.image \+ "@" \+ \.digest\)/);
+  assert.match(workflow, /name: daily-development-image-set[\s\S]*overwrite: true/);
+  assert.match(workflow, /docker load --input "\$archive\/image\.tar"[\s\S]*rm -f "\$archive\/image\.tar"/);
   assert.doesNotMatch(workflow, /:latest|:development\b/);
 });
 
