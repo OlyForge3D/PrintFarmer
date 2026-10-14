@@ -14,7 +14,7 @@ export const printersTour: TourStepDefinition[] = [
     popover: {
       title: 'Filter & View Modes',
       description:
-        'Filter by state (online, printing, paused, offline) or backend type. Switch between compact cards, detailed cards, or table view.',
+        'Use the funnel button to show State, Backend, and Done in filters. Changes update the fleet immediately. Closing the strip keeps filters active; use the clear-filters button beside the funnel to reset them. Sort and view controls stay available independently.',
     },
   },
   {

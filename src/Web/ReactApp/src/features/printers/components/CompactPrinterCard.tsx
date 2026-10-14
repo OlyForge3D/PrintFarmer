@@ -49,26 +49,6 @@ interface CompactPrinterCardProps {
   onEdit?: (printer: Printer) => void;
 }
 
-function BedTypeBadge({ name, color }: { name: string; color?: string | null }) {
-  const ref = useRef<HTMLSpanElement>(null);
-
-  useEffect(() => {
-    if (!ref.current) return;
-    ref.current.style.backgroundColor = color ? `${color}33` : 'rgba(0,0,0,0.3)';
-    ref.current.style.borderColor = color ? `${color}66` : 'rgba(255,255,255,0.1)';
-  }, [color]);
-
-  return (
-    <span
-      ref={ref}
-      className="text-xs px-1.5 py-0.5 rounded-xs border text-pf-text-secondary"
-      title={`Bed type: ${name}`}
-    >
-      {name}
-    </span>
-  );
-}
-
 function MmuGateDot({ isLoaded, color, tooltip }: { isLoaded: boolean; color: string; tooltip: string }) {
   const ref = useRef<HTMLSpanElement>(null);
 
@@ -269,12 +249,9 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
             </span>
           )}
         </div>
-        {/* Tags row + bed type badge */}
-        {(printerTags.length > 0 || printer.bedTypeName) && (
+        {/* Tags row */}
+        {printerTags.length > 0 && (
           <div className="flex flex-wrap gap-1 mt-1.5">
-            {printer.bedTypeName && (
-              <BedTypeBadge name={printer.bedTypeName} color={printer.bedTypeColor} />
-            )}
             {printerTags.map(tag => (
               <TagChip
                 key={tag.id}
