@@ -1,10 +1,13 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Authorization;
+using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Locations;
+using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.Startup;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -23,11 +26,14 @@ namespace Farm.Modules.Printers.Controllers;
 public class LocationsController(
     ILocationService locationService,
     IStartupStatus startupStatus,
-    ILogger<LocationsController> logger) : ControllerBase
+    ILogger<LocationsController> logger,
+    IQueueResourceAuthorizationService resourceAuthorization) : ControllerBase
 {
     private readonly ILocationService _locationService = locationService ?? throw new ArgumentNullException(nameof(locationService));
     private readonly IStartupStatus _startupStatus = startupStatus ?? throw new ArgumentNullException(nameof(startupStatus));
     private readonly ILogger<LocationsController> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly IQueueResourceAuthorizationService _resourceAuthorization =
+        resourceAuthorization ?? throw new ArgumentNullException(nameof(resourceAuthorization));
 
     /// <summary>
     /// Gets all printer locations (flat list).
@@ -352,7 +358,9 @@ public class LocationsController(
             }
 
             List<LocationSubtreePrinterDto> printers = await _locationService.GetSubtreePrintersAsync(id, ct);
-            return Ok(printers);
+            IReadOnlySet<Guid> allowedPrinterIds = await _resourceAuthorization.FilterAccessiblePrinterIdsAsync(
+                User, printers.Select(printer => printer.PrinterId).ToArray(), PrinterGroupAccessLevel.View, ct);
+            return Ok(printers.Where(printer => allowedPrinterIds.Contains(printer.PrinterId)).ToList());
         }
         catch (Exception ex)
         {
