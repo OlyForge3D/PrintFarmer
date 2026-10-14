@@ -204,7 +204,10 @@ public sealed class MoonrakerSubscriptionService(
             }
 
             IMoonrakerClient moonrakerClient = scope.ServiceProvider.GetRequiredService<IMoonrakerClient>();
-            PrinterCompositeStatus compositeStatus = await moonrakerClient.GetCompositeStatusAsync(printer.BackendUrl, ct);
+            PrinterCompositeStatus compositeStatus = await moonrakerClient.GetCompositeStatusAsync(
+                printer.BackendUrl,
+                printer.Credential,
+                ct);
 
             if (compositeStatus is not { IsOnline: true })
             {
@@ -232,7 +235,8 @@ public sealed class MoonrakerSubscriptionService(
                 compositeStatus.BedTarget,
                 null,
                 spoolInfo,
-                FileName: PrinterStatusDto.ExtractFileName(compositeStatus.JobName));
+                FileName: PrinterStatusDto.ExtractFileName(compositeStatus.JobName),
+                ThumbnailCacheIdentity: compositeStatus.ThumbnailCacheIdentity);
 
             await hub!.Clients.Group(
                     Farm.Infrastructure.Security.AuthorizedHubGroups.Printer(printerId))
@@ -853,6 +857,7 @@ public sealed class MoonrakerSubscriptionService(
         if (_printerStates.TryGetValue(printerId, out PrinterState? state))
         {
             state.ResetMmuState();
+            state.ResetLiveReadbacks();
         }
 
         // Step 4: Send the subscription request with discovered objects
@@ -1097,6 +1102,7 @@ public sealed class MoonrakerSubscriptionService(
                     statusObj,
                     printer.Id,
                     printer.BackendUrl,
+                    printer.Credential,
                     null,
                     null,
                     originWatermark,
@@ -1155,6 +1161,7 @@ public sealed class MoonrakerSubscriptionService(
                         p[0],
                         printer.Id,
                         printer.BackendUrl,
+                        printer.Credential,
                         null,
                         null,
                         originWatermark,
@@ -1201,6 +1208,7 @@ public sealed class MoonrakerSubscriptionService(
     /// <param name="statusObj">The status JSON element from Moonraker.</param>
     /// <param name="printerId">The ID of the printer being updated.</param>
     /// <param name="serverUrl">The Moonraker server URL (for fetching additional data).</param>
+    /// <param name="credential">The printer credential used for authenticated metadata requests.</param>
     /// <param name="cameraStreamUrl">The camera stream URL from printer configuration.</param>
     /// <param name="thumbnailUrl">The thumbnail URL from printer configuration.</param>
     /// <param name="originWatermark">Watermark captured before receiving the status.</param>
@@ -1209,6 +1217,7 @@ public sealed class MoonrakerSubscriptionService(
         JsonElement statusObj,
         Guid printerId,
         string serverUrl,
+        PrinterCredential? credential,
         string? cameraStreamUrl,
         string? thumbnailUrl,
         long? originWatermark,
@@ -1268,6 +1277,11 @@ public sealed class MoonrakerSubscriptionService(
             HandleGcodeMoveUpdate(state, gcodeMove);
         }
 
+        if (statusObj.TryGetProperty("fan", out JsonElement fan))
+        {
+            HandleFanUpdate(state, fan);
+        }
+
         HandlePositionUpdate(state, statusObj);
 
         // MMU (Happy Hare) status updates
@@ -1293,7 +1307,7 @@ public sealed class MoonrakerSubscriptionService(
             statusObj.TryGetProperty("print_stats", out _) ||
             statusObj.TryGetProperty("webhooks", out _))
         {
-            await HandleStateUpdateAsync(printerId, state, statusObj, ct);
+            await HandleStateUpdateAsync(printerId, state, statusObj, serverUrl, credential, ct);
         }
 
         // Get spool information for consolidated update (cached; refreshed at most once per TTL)
@@ -1562,10 +1576,12 @@ public sealed class MoonrakerSubscriptionService(
         PrinterState state,
         JsonElement gcodeMove)
     {
-        if (!gcodeMove.TryGetProperty(
-                "homing_origin",
-                out JsonElement homingOrigin) ||
-            homingOrigin.ValueKind != JsonValueKind.Array ||
+        if (!gcodeMove.TryGetProperty("homing_origin", out JsonElement homingOrigin))
+        {
+            return;
+        }
+
+        if (homingOrigin.ValueKind != JsonValueKind.Array ||
             homingOrigin.GetArrayLength() < 3 ||
             !homingOrigin[0].TryGetDouble(out double x) ||
             !homingOrigin[1].TryGetDouble(out double y) ||
@@ -1574,11 +1590,29 @@ public sealed class MoonrakerSubscriptionService(
             !double.IsFinite(y) ||
             !double.IsFinite(z))
         {
+            state.LiveZOffsetMm = null;
             return;
         }
 
         state.CoordinateOriginOffsetMm = new SafetyVector3Dto(x, y, z);
         state.CoordinateOriginOffsetObservedAtUtc = DateTime.UtcNow;
+        state.LiveZOffsetMm = z;
+    }
+
+    private static void HandleFanUpdate(PrinterState state, JsonElement fan)
+    {
+        if (!fan.TryGetProperty("speed", out JsonElement speed))
+        {
+            return;
+        }
+
+        state.FanSpeedPercent =
+            speed.ValueKind == JsonValueKind.Number &&
+            speed.TryGetDouble(out double normalizedSpeed) &&
+            double.IsFinite(normalizedSpeed) &&
+            normalizedSpeed is >= 0 and <= 1
+                ? normalizedSpeed * 100
+                : null;
     }
 
     /// <summary>
@@ -2016,65 +2050,9 @@ public sealed class MoonrakerSubscriptionService(
             await FetchQidiboxDictionaryAsync(state, serverUrl, ct);
         }
 
-        // Parse box_count from save_variables
         if (hasBoxCount && variables.ValueKind == JsonValueKind.Object)
         {
-            if (variables.TryGetProperty("box_count", out JsonElement boxCountElem) &&
-                boxCountElem.ValueKind == JsonValueKind.Number)
-            {
-                int boxCount = boxCountElem.GetInt32();
-                if (boxCount > 0)
-                {
-                    state.QidiboxBoxCount = boxCount;
-                    state.MmuNumGates = boxCount * 4;
-                }
-            }
-
-            // Parse active slot from last_load_slot (e.g., "slot0" → 0, "slot-1" → -1)
-            if (variables.TryGetProperty("last_load_slot", out JsonElement lastSlotElem) &&
-                lastSlotElem.ValueKind == JsonValueKind.String)
-            {
-                string? lastSlot = lastSlotElem.GetString();
-                if (lastSlot is not null && lastSlot.StartsWith("slot", StringComparison.Ordinal) && int.TryParse(lastSlot.AsSpan(4), out int slotIndex))
-                {
-                    state.MmuActiveTool = slotIndex;
-                    state.MmuActiveGate = slotIndex >= 0 ? slotIndex : -1;
-                }
-            }
-
-            // Build per-slot arrays from save_variables
-            int numSlots = state.MmuNumGates > 0 ? state.MmuNumGates : 4;
-            EnsureSlotArrays(state, numSlots);
-
-            for (int i = 0; i < numSlots; i++)
-            {
-                // Filament type
-                if (variables.TryGetProperty($"filament_slot{i}", out JsonElement filTypeElem) &&
-                    filTypeElem.ValueKind == JsonValueKind.Number)
-                {
-                    int filType = filTypeElem.GetInt32();
-                    if (state.QidiboxFilamentDict.TryGetValue(filType, out string? filName))
-                    {
-                        state.MmuGateMaterial![i] = filName;
-                        state.MmuGateFilamentName![i] = filName;
-                    }
-                    else
-                    {
-                        state.MmuGateMaterial![i] = $"Type {filType}";
-                        state.MmuGateFilamentName![i] = $"Type {filType}";
-                    }
-                }
-
-                // Color
-                if (variables.TryGetProperty($"color_slot{i}", out JsonElement colorElem) &&
-                    colorElem.ValueKind == JsonValueKind.Number)
-                {
-                    int colorIdx = colorElem.GetInt32();
-                    state.MmuGateColor![i] = state.QidiboxColorDict.TryGetValue(colorIdx, out string? colorHex)
-                        ? colorHex
-                        : "#808080";
-                }
-            }
+            ApplyQidiboxSaveVariables(state, variables);
         }
 
         // Parse individual box_stepper slotN runout_button values
@@ -2117,7 +2095,7 @@ public sealed class MoonrakerSubscriptionService(
         if (state.QidiboxDetected)
         {
             // Set filament state based on active tool — only mark dirty when values change
-            string newFilamentState = state.MmuActiveTool >= 0 ? "Loaded" : "Unloaded";
+            string newFilamentState = state.MmuActiveTool >= 0 || state.MmuActiveGate == MmuGateBypass ? "Loaded" : "Unloaded";
             if (state.MmuFilamentState != newFilamentState || state.MmuAction != "Idle")
             {
                 state.MmuFilamentState = newFilamentState;
@@ -2133,6 +2111,141 @@ public sealed class MoonrakerSubscriptionService(
                 state.MmuNumGates);
         }
     }
+
+    /// <summary>Happy Hare's TOOL_GATE_BYPASS sentinel, reused for the Qidi external spool holder ("Rack").</summary>
+    internal const int MmuGateBypass = -2;
+
+    /// <summary>Qidi firmware addresses the external spool holder ("Rack") as <c>slot16</c>; it is never an MMU gate.</summary>
+    internal const int QidiboxRackSlot = 16;
+
+    /// <summary>
+    /// Applies Qidibox <c>save_variables</c> to MMU state. Box slots map to gates 0..numGates-1; the Rack
+    /// (<c>slot16</c>) is reported only as an active bypass (<see cref="MmuGateBypass"/>) and never as a gate.
+    /// </summary>
+    internal static void ApplyQidiboxSaveVariables(PrinterState state, JsonElement variables)
+    {
+        int prevTool = state.MmuActiveTool;
+        int prevGate = state.MmuActiveGate;
+        bool prevBypass = state.MmuHasBypass;
+        int prevNumGates = state.MmuNumGates;
+        string?[]? prevMaterial = (string?[]?)state.MmuGateMaterial?.Clone();
+        string?[]? prevColor = (string?[]?)state.MmuGateColor?.Clone();
+        string? prevBypassMaterial = state.MmuBypassMaterial;
+        string? prevBypassColor = state.MmuBypassColor;
+        string? prevBypassFilamentName = state.MmuBypassFilamentName;
+
+        if (variables.TryGetProperty("box_count", out JsonElement boxCountElem) &&
+            boxCountElem.ValueKind == JsonValueKind.Number)
+        {
+            int boxCount = boxCountElem.GetInt32();
+            if (boxCount > 0)
+            {
+                state.QidiboxBoxCount = boxCount;
+                state.MmuNumGates = boxCount * 4;
+            }
+        }
+
+        int numSlots = state.MmuNumGates > 0 ? state.MmuNumGates : 4;
+
+        if (variables.TryGetProperty($"filament_slot{QidiboxRackSlot}", out _))
+        {
+            state.MmuHasBypass = true;
+        }
+
+        // last_load_slot: "slotN" (box gate), "slot16" (Rack), "slot-1" (nothing loaded)
+        if (variables.TryGetProperty("last_load_slot", out JsonElement lastSlotElem) &&
+            lastSlotElem.ValueKind == JsonValueKind.String)
+        {
+            string? lastSlot = lastSlotElem.GetString();
+            if (lastSlot is not null && lastSlot.StartsWith("slot", StringComparison.Ordinal) && int.TryParse(lastSlot.AsSpan(4), out int slotIndex))
+            {
+                if (slotIndex == QidiboxRackSlot)
+                {
+                    state.MmuHasBypass = true;
+                    state.MmuActiveTool = MmuGateBypass;
+                    state.MmuActiveGate = MmuGateBypass;
+                }
+                else if (slotIndex >= 0 && slotIndex < numSlots)
+                {
+                    state.MmuActiveTool = slotIndex;
+                    state.MmuActiveGate = slotIndex;
+                }
+                else
+                {
+                    state.MmuActiveTool = -1;
+                    state.MmuActiveGate = -1;
+                }
+            }
+        }
+
+        EnsureSlotArrays(state, numSlots);
+
+        // The Rack is not a gate but carries its own live type/color, resolved like gate slots.
+        if (variables.TryGetProperty($"filament_slot{QidiboxRackSlot}", out JsonElement rackTypeElem) &&
+            rackTypeElem.ValueKind == JsonValueKind.Number)
+        {
+            int rackType = rackTypeElem.GetInt32();
+            string rackName = state.QidiboxFilamentDict.TryGetValue(rackType, out string? rackFilName)
+                ? rackFilName
+                : $"Type {rackType}";
+            state.MmuBypassMaterial = rackName;
+            state.MmuBypassFilamentName = rackName;
+        }
+
+        if (variables.TryGetProperty($"color_slot{QidiboxRackSlot}", out JsonElement rackColorElem) &&
+            rackColorElem.ValueKind == JsonValueKind.Number)
+        {
+            state.MmuBypassColor = state.QidiboxColorDict.TryGetValue(rackColorElem.GetInt32(), out string? rackColorHex)
+                ? rackColorHex
+                : "#808080";
+        }
+
+        for (int i = 0; i < numSlots; i++)
+        {
+            if (variables.TryGetProperty($"filament_slot{i}", out JsonElement filTypeElem) &&
+                filTypeElem.ValueKind == JsonValueKind.Number)
+            {
+                int filType = filTypeElem.GetInt32();
+                if (state.QidiboxFilamentDict.TryGetValue(filType, out string? filName))
+                {
+                    state.MmuGateMaterial![i] = filName;
+                    state.MmuGateFilamentName![i] = filName;
+                }
+                else
+                {
+                    state.MmuGateMaterial![i] = $"Type {filType}";
+                    state.MmuGateFilamentName![i] = $"Type {filType}";
+                }
+            }
+
+            if (variables.TryGetProperty($"color_slot{i}", out JsonElement colorElem) &&
+                colorElem.ValueKind == JsonValueKind.Number)
+            {
+                int colorIdx = colorElem.GetInt32();
+                state.MmuGateColor![i] = state.QidiboxColorDict.TryGetValue(colorIdx, out string? colorHex)
+                    ? colorHex
+                    : "#808080";
+            }
+        }
+
+        // The cached MmuStatusDto must be rebuilt when slot telemetry changes even if
+        // the Loaded/Unloaded filament state does not (e.g. slot1 -> Rack).
+        if (prevTool != state.MmuActiveTool ||
+            prevGate != state.MmuActiveGate ||
+            prevBypass != state.MmuHasBypass ||
+            prevNumGates != state.MmuNumGates ||
+            !SequenceEqualOrBothNull(prevMaterial, state.MmuGateMaterial) ||
+            !SequenceEqualOrBothNull(prevColor, state.MmuGateColor) ||
+            prevBypassMaterial != state.MmuBypassMaterial ||
+            prevBypassColor != state.MmuBypassColor ||
+            prevBypassFilamentName != state.MmuBypassFilamentName)
+        {
+            state.MmuDirty = true;
+        }
+    }
+
+    private static bool SequenceEqualOrBothNull(string?[]? a, string?[]? b) =>
+        a is null ? b is null : b is not null && a.AsSpan().SequenceEqual(b);
 
     /// <summary>
     /// Ensures the slot arrays on PrinterState are initialized to the given size.
@@ -2572,12 +2685,21 @@ public sealed class MoonrakerSubscriptionService(
     /// <param name="printerId">The ID of the printer.</param>
     /// <param name="state">The persistent printer state to update.</param>
     /// <param name="statusObj">The complete status JSON element containing display_status, print_stats, and webhooks.</param>
+    /// <param name="serverUrl">The Moonraker server URL used for file metadata requests.</param>
+    /// <param name="credential">The printer credential used for authenticated metadata requests.</param>
     /// <param name="ct">Cancellation token.</param>
-    private async Task HandleStateUpdateAsync(Guid printerId, PrinterState state, JsonElement statusObj, CancellationToken ct)
+    private async Task HandleStateUpdateAsync(
+        Guid printerId,
+        PrinterState state,
+        JsonElement statusObj,
+        string serverUrl,
+        PrinterCredential? credential,
+        CancellationToken ct)
     {
         string? stateValue = null;
         double? progress = null;
         string? jobName = null;
+        double? startTime = null;
 
         // Display status (progress)
         if (statusObj.TryGetProperty("display_status", out JsonElement ds) &&
@@ -2617,6 +2739,52 @@ public sealed class MoonrakerSubscriptionService(
                 {
                 }
             }
+
+            if (ps.TryGetProperty("start_time", out JsonElement startNode) &&
+                startNode.ValueKind == JsonValueKind.Number &&
+                startNode.TryGetDouble(out double startTimeValue) &&
+                double.IsFinite(startTimeValue))
+            {
+                startTime = startTimeValue;
+            }
+
+            ResetLayerReadbacksForNewJob(state, printStatsState, jobName, startTime);
+
+            if (ps.TryGetProperty("info", out JsonElement info))
+            {
+                if (info.ValueKind == JsonValueKind.Object)
+                {
+                    int? currentLayer = state.CurrentLayer;
+                    int? totalLayers = state.TotalLayers;
+                    if (info.TryGetProperty("current_layer", out JsonElement currentLayerNode))
+                    {
+                        currentLayer = TryReadLayerCounter(currentLayerNode);
+                    }
+
+                    if (info.TryGetProperty("total_layer", out JsonElement totalLayersNode))
+                    {
+                        totalLayers = TryReadLayerCounter(totalLayersNode);
+                    }
+
+                    if (currentLayer.HasValue &&
+                        totalLayers is > 0 &&
+                        currentLayer.Value <= totalLayers.Value)
+                    {
+                        state.CurrentLayer = currentLayer;
+                        state.TotalLayers = totalLayers;
+                    }
+                    else
+                    {
+                        state.CurrentLayer = null;
+                        state.TotalLayers = null;
+                    }
+                }
+                else
+                {
+                    state.CurrentLayer = null;
+                    state.TotalLayers = null;
+                }
+            }
         }
 
         // Webhooks state (Klipper system state)
@@ -2642,6 +2810,51 @@ public sealed class MoonrakerSubscriptionService(
         else if (!string.IsNullOrEmpty(webhooksState))
         {
             stateValue = webhooksState;
+        }
+
+        bool isActiveJob = string.Equals(stateValue, "printing", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(stateValue, "paused", StringComparison.OrdinalIgnoreCase);
+        string? activeJobName = jobName ?? state.JobName;
+        if (!isActiveJob)
+        {
+            state.ThumbnailCacheIdentity = null;
+            state.ThumbnailJobStartTime = null;
+            state.ThumbnailFileSize = null;
+            state.ThumbnailFileModified = null;
+            state.ThumbnailFileMetadataFetchedAtUtc = DateTime.MinValue;
+            state.ThumbnailUrl = null;
+        }
+        else
+        {
+            bool jobChanged = !string.IsNullOrWhiteSpace(jobName) &&
+                !string.Equals(jobName, state.JobName, StringComparison.Ordinal);
+            bool startChanged = startTime.HasValue &&
+                state.ThumbnailJobStartTime.HasValue &&
+                Math.Abs(startTime.Value - state.ThumbnailJobStartTime.Value) > 0.5;
+            if (jobChanged || startChanged)
+            {
+                state.ThumbnailFileSize = null;
+                state.ThumbnailFileModified = null;
+                state.ThumbnailFileMetadataFetchedAtUtc = DateTime.MinValue;
+                state.ThumbnailUrl = null;
+            }
+
+            if (startTime.HasValue)
+            {
+                state.ThumbnailJobStartTime = startTime;
+            }
+
+            if (!string.IsNullOrWhiteSpace(activeJobName) &&
+                DateTime.UtcNow - state.ThumbnailFileMetadataFetchedAtUtc >= TimeSpan.FromSeconds(30))
+            {
+                // Metadata supplies the file identity and thumbnail path; throttle this extra request per printer.
+                await RefreshThumbnailFileMetadataAsync(state, serverUrl, activeJobName, credential, ct);
+            }
+
+            state.ThumbnailCacheIdentity = MoonrakerThumbnailCacheIdentity.Create(
+                state.ThumbnailJobStartTime,
+                state.ThumbnailFileSize,
+                state.ThumbnailFileModified);
         }
 
         // Detect state transitions for job completion synchronization
@@ -2691,6 +2904,57 @@ public sealed class MoonrakerSubscriptionService(
         await _coverageBroadcaster
             .BroadcastJobProgressIfChangedAsync(printerId, progressChanged, ct)
             .ConfigureAwait(false);
+    }
+
+    private async Task RefreshThumbnailFileMetadataAsync(
+        PrinterState state,
+        string serverUrl,
+        string jobName,
+        PrinterCredential? credential,
+        CancellationToken ct)
+    {
+        state.ThumbnailFileMetadataFetchedAtUtc = DateTime.UtcNow;
+        try
+        {
+            Uri baseUri = new(serverUrl);
+            Uri metadataUri = new(
+                baseUri,
+                $"server/files/metadata?filename={Uri.EscapeDataString(jobName)}");
+            using HttpClient client = _httpClientFactory.CreateClient();
+            using HttpRequestMessage request = new(HttpMethod.Get, metadataUri);
+            if (!string.IsNullOrWhiteSpace(credential?.ApiKey))
+            {
+                request.Headers.Add("X-Api-Key", credential.ApiKey);
+            }
+
+            using HttpResponseMessage response = await client.SendAsync(
+                request,
+                HttpCompletionOption.ResponseHeadersRead,
+                ct).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                return;
+            }
+
+            await using Stream stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+            using JsonDocument document = await JsonDocument.ParseAsync(stream, cancellationToken: ct).ConfigureAwait(false);
+            if (!document.RootElement.TryGetProperty("result", out JsonElement result) ||
+                result.ValueKind != JsonValueKind.Object)
+            {
+                return;
+            }
+
+            (state.ThumbnailUrl, state.ThumbnailFileSize, state.ThumbnailFileModified) =
+                MoonrakerThumbnailCacheIdentity.ReadFileMetadata(serverUrl, result);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Could not refresh current-job thumbnail identity for {JobName}", jobName);
+        }
     }
 
     /// <summary>
@@ -2758,7 +3022,12 @@ public sealed class MoonrakerSubscriptionService(
                 SpoolInfo: spoolInfo,
                 MmuStatus: mmuStatus,
                 FileName: PrinterStatusDto.ExtractFileName(state.JobName),
-                SafetyTelemetry: safetyTelemetry);
+                SafetyTelemetry: safetyTelemetry,
+                ThumbnailCacheIdentity: state.ThumbnailCacheIdentity,
+                CurrentLayer: state.CurrentLayer,
+                TotalLayers: state.TotalLayers,
+                FanSpeedPercent: state.FanSpeedPercent,
+                LiveZOffsetMm: state.LiveZOffsetMm);
 
             _logger.LogDebug("Emitting consolidated status for printer {PrinterId}: IsOnline={IsOnline}, X={StateX}, Y={StateY}, Z={StateZ}, HotendTemp={StateHotendTemp}, HotendTarget={StateHotendTarget}, BedTemp={StateBedTemp}, BedTarget={StateBedTarget}, HomedAxes={StateHomedAxes}", printerId, isOnline, state.X, state.Y, state.Z, state.HotendTemp, state.HotendTarget, state.BedTemp, state.BedTarget, state.HomedAxes);
 
@@ -2791,7 +3060,12 @@ public sealed class MoonrakerSubscriptionService(
                 MmuStatus: mmuStatus,
                 PrintTimeLeftSeconds: printTimeLeftSeconds,
                 HomedAxes: state.HomedAxes,
-                SafetyTelemetry: safetyTelemetry);
+                SafetyTelemetry: safetyTelemetry,
+                ThumbnailCacheIdentity: state.ThumbnailCacheIdentity,
+                CurrentLayer: state.CurrentLayer,
+                TotalLayers: state.TotalLayers,
+                FanSpeedPercent: state.FanSpeedPercent,
+                LiveZOffsetMm: state.LiveZOffsetMm);
             _statusCacheWriter.UpdateStatus(cacheUpdate, state.OriginWatermark);
 
             _logger.LogDebug("[MoonrakerSubscriptionService] Broadcasting printerupdated for {PrinterId} via SignalR", printerId);
@@ -2806,6 +3080,43 @@ public sealed class MoonrakerSubscriptionService(
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to emit consolidated status for printer {PrinterId}", printerId);
+        }
+    }
+
+    private static int? TryReadLayerCounter(JsonElement value)
+    {
+        return value.ValueKind == JsonValueKind.Number &&
+            value.TryGetInt32(out int layer) &&
+            layer >= 0
+                ? layer
+                : null;
+    }
+
+    internal static void ResetLayerReadbacksForNewJob(
+        PrinterState state,
+        string? incomingState,
+        string? incomingJobName,
+        double? incomingStartTime)
+    {
+        bool wasActiveJob =
+            string.Equals(state.State, "printing", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(state.State, "paused", StringComparison.OrdinalIgnoreCase);
+        bool isActiveJob =
+            string.Equals(incomingState, "printing", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(incomingState, "paused", StringComparison.OrdinalIgnoreCase);
+        bool jobNameChanged =
+            !string.IsNullOrWhiteSpace(incomingJobName) &&
+            !string.IsNullOrWhiteSpace(state.JobName) &&
+            !string.Equals(incomingJobName, state.JobName, StringComparison.Ordinal);
+        bool jobStartChanged =
+            incomingStartTime.HasValue &&
+            state.ThumbnailJobStartTime.HasValue &&
+            Math.Abs(incomingStartTime.Value - state.ThumbnailJobStartTime.Value) > 0.5;
+
+        if (jobNameChanged || jobStartChanged || (isActiveJob && !wasActiveJob))
+        {
+            state.CurrentLayer = null;
+            state.TotalLayers = null;
         }
     }
 
@@ -3235,7 +3546,7 @@ public sealed class MoonrakerSubscriptionService(
     /// </summary>
     /// <param name="printer">The printer to poll.</param>
     /// <param name="ct">Cancellation token.</param>
-    private async Task TriggerHttpPollingFallbackAsync(Printer printer, CancellationToken ct)
+    internal async Task TriggerHttpPollingFallbackAsync(Printer printer, CancellationToken ct)
     {
         try
         {
@@ -3258,7 +3569,10 @@ public sealed class MoonrakerSubscriptionService(
             long? originWatermark = await OriginWatermark
                 .CaptureAsync(watermarkReader, _logger, "Moonraker HTTP status", ct)
                 .ConfigureAwait(false);
-            PrinterCompositeStatus compositeStatus = await moonrakerClient.GetCompositeStatusAsync(printer.BackendUrl, ct);
+            PrinterCompositeStatus compositeStatus = await moonrakerClient.GetCompositeStatusAsync(
+                printer.BackendUrl,
+                printer.Credential,
+                ct);
 
             if (compositeStatus != null && compositeStatus.IsOnline)
             {
@@ -3285,7 +3599,8 @@ public sealed class MoonrakerSubscriptionService(
                     compositeStatus.BedTarget,
                     null, // HomedAxes - Not available in CompositeStatus
                     spoolInfo,
-                    FileName: PrinterStatusDto.ExtractFileName(compositeStatus.JobName));
+                    FileName: PrinterStatusDto.ExtractFileName(compositeStatus.JobName),
+                    ThumbnailCacheIdentity: compositeStatus.ThumbnailCacheIdentity);
 
                 try
                 {
@@ -3295,24 +3610,9 @@ public sealed class MoonrakerSubscriptionService(
                         return;
                     }
 
-                    PrinterStatusDto cacheUpdate = new(
-                        Id: printer.Id,
-                        IsOnline: compositeStatus.IsOnline,
-                        State: PrinterStateNormalizer.NormalizeState(compositeStatus.State),
-                        Progress: compositeStatus.Progress,
-                        JobName: compositeStatus.JobName,
-                        ThumbnailUrl: compositeStatus.ThumbnailUrl,
-                        CameraStreamUrl: compositeStatus.CameraStreamUrl,
-                        CameraSnapshotUrl: compositeStatus.CameraSnapshotUrl,
-                        X: compositeStatus.X,
-                        Y: compositeStatus.Y,
-                        Z: compositeStatus.Z,
-                        HotendTemp: compositeStatus.HotendTemp,
-                        BedTemp: compositeStatus.BedTemp,
-                        HotendTarget: compositeStatus.HotendTarget,
-                        BedTarget: compositeStatus.BedTarget,
-                        SpoolInfo: spoolInfo,
-                        PrintTimeLeftSeconds: compositeStatus.PrintTimeLeftSeconds);
+                    PrinterStatusDto cacheUpdate = statusUpdate.ToStatusDto(
+                        compositeStatus.CameraSnapshotUrl,
+                        compositeStatus.PrintTimeLeftSeconds);
                     _statusCacheWriter.UpdateStatus(cacheUpdate, originWatermark);
                     _klippyReadyState[printer.Id] = compositeStatus.IsOnline;
 

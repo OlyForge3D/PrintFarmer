@@ -16,7 +16,6 @@ A **production-ready** React TypeScript dashboard for managing multiple 3D print
 | **Understand the system** | [Architecture Overview](./docs/ARCHITECTURE.md) |
 | **Choose hardware for your farm** | [Deployment Hardware Guide](./docs/DEPLOYMENT_HARDWARE.md) |
 | **Deploy to production** | [Deployment Guide](./docs/DEPLOYMENT.md) |
-| **Plan an installation update or recovery** | [Operator Runbook and Current Limits](./docs/HOST_UPDATE_RUNBOOK.md) |
 | **Set up pgAdmin** | [pgAdmin Setup Guide](./docs/PGADMIN_SETUP.md) |
 | **Use the API** | [API Reference](./docs/API.md) |
 | **Explore features** | [Features Guide](./docs/FEATURES.md) |
@@ -32,7 +31,14 @@ A **production-ready** React TypeScript dashboard for managing multiple 3D print
 ✅ **Hierarchical Location System** - Organize printers into custom hierarchies (Warehouse > Floor > Room > Rack)  
 ✅ **Auto-Dispatch with 9-Factor Scoring** - Intelligent job assignment based on material, nozzle, build volume, and more  
 ✅ **Printer Discovery** - Auto-detect Moonraker and PrusaLink printers on network  
-✅ **Automatic Camera Discovery** - Detect and populate camera URLs when importing printers  
+✅ **Cameras** - First-class `/cameras` page (all, by location, by printer); cameras link to many printers and are auto-discovered and kept in sync from printer backends  
+
+Camera cards prioritize the image, camera name, and compact icon controls.
+Snapshot/Stream icons have tooltips and accessible labels; both controls appear
+only when both modes are supported. Secondary metadata, probe health, preview
+failure status, and fallback details are available in tooltips rather than text
+chips. An unavailable preview retains one short placeholder. Stream-only cameras
+do not gain an invented snapshot endpoint.
 ✅ **Job Queue Management** - Monitor and control print jobs across all printers  
 ✅ **Integrated Slicing** - Built-in OrcaSlicer with profile management  
 ✅ **Printer Calibration Context** - Verified Klipper readiness and credential-free upstream OrcaSlicer snapshots

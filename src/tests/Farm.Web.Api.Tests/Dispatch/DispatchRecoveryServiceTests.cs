@@ -832,4 +832,3 @@ public sealed class DispatchRecoveryControllerTests
     private static string ErrorCode(ObjectResult result) =>
         result.Value!.GetType().GetProperty("error")!.GetValue(result.Value) as string ?? string.Empty;
 }
-

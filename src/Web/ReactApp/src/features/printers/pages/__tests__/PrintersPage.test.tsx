@@ -16,6 +16,7 @@ import { LG_BREAKPOINT_QUERY } from '@/common/hooks/useMediaQuery';
 
 const mockRefetchPrinters = vi.fn();
 const mockUsePrinters = vi.fn();
+const mockUsePrinterCameraUrls = vi.fn();
 const mockQueryClient = {
   invalidateQueries: vi.fn(),
   refetchQueries: vi.fn(),
@@ -52,7 +53,7 @@ vi.mock('@/common/hooks/useApi', () => ({
   usePrinters: () => mockUsePrinters(),
   useDeletePrinter: () => ({ mutateAsync: vi.fn() }),
   usePrinterBackendCapabilities: () => ({ data: [] }),
-  usePrinterCameraUrls: () => ({ data: [] }),
+  usePrinterCameraUrls: () => mockUsePrinterCameraUrls(),
   useBedTypes: () => ({ data: [] }),
 }));
 
@@ -114,14 +115,29 @@ vi.mock('@/common/components/ViewModeToggle', () => ({
 
 vi.mock('@/features/printers/components/CompactPrinterCard', () => ({
   CompactPrinterCard: ({ printer, onExpand }: { printer: Printer; onExpand: (printerId: string) => void }) => (
-    <button type="button" onClick={() => onExpand(printer.id)}>
+    <button
+      type="button"
+      onClick={() => onExpand(printer.id)}
+      data-testid={`compact-card-${printer.id}`}
+      data-camera-stream={printer.cameraStreamUrl ?? ''}
+      data-camera-snapshot={printer.cameraSnapshotUrl ?? ''}
+      data-camera-access-mode={printer.cameraAccessMode ?? ''}
+    >
       Open {printer.name}
     </button>
   ),
 }));
 
 vi.mock('@/features/printers/components/DetailedPrinterCard', () => ({
-  DetailedPrinterCard: ({ printer }: { printer: Printer }) => <div>{printer.name}</div>,
+  DetailedPrinterCard: ({ printer }: { printer: Printer }) => (
+    <div
+      data-testid={`detailed-card-${printer.id}`}
+      data-camera-stream={printer.cameraStreamUrl ?? ''}
+      data-camera-snapshot={printer.cameraSnapshotUrl ?? ''}
+    >
+      {printer.name}
+    </div>
+  ),
 }));
 
 vi.mock('@/features/printers/components/PrinterTableView', () => ({
@@ -271,6 +287,43 @@ describe('PrintersPage', () => {
     });
     mockQueryClient.invalidateQueries.mockClear();
     mockQueryClient.refetchQueries.mockClear();
+    mockUsePrinterCameraUrls.mockReturnValue({ data: [] });
+  });
+
+  it('feeds each card the primary linked camera routes from /printers/camera-urls, keyed by printer id (#3331)', async () => {
+    mockUsePrinterCameraUrls.mockReturnValue({
+      data: [
+        {
+          id: 'printer-1',
+          name: 'Printer Alpha',
+          cameraStreamUrl: '/api/printers/printer-1/camera/stream',
+          cameraSnapshotUrl: '/api/printers/printer-1/camera/snapshot',
+          cameraAccessMode: 'Stream',
+        },
+        { id: 'printer-2', name: 'Printer Beta' },
+      ],
+    });
+
+    const { unmount } = renderPage('/printers');
+
+    const alpha = screen.getByTestId('compact-card-printer-1');
+    expect(alpha).toHaveAttribute('data-camera-stream', '/api/printers/printer-1/camera/stream');
+    expect(alpha).toHaveAttribute('data-camera-snapshot', '/api/printers/printer-1/camera/snapshot');
+    expect(alpha).toHaveAttribute('data-camera-access-mode', 'Stream');
+    const beta = screen.getByTestId('compact-card-printer-2');
+    expect(beta).toHaveAttribute('data-camera-stream', '');
+    expect(beta).toHaveAttribute('data-camera-snapshot', '');
+
+    unmount();
+    renderPage('/printers?view=detailed');
+
+    await waitFor(() => {
+      expect(screen.getByTestId('detailed-card-printer-1')).toHaveAttribute(
+        'data-camera-stream',
+        '/api/printers/printer-1/camera/stream'
+      );
+    });
+    expect(screen.getByTestId('detailed-card-printer-2')).toHaveAttribute('data-camera-stream', '');
   });
 
   it('opens the details sidebar when loaded from /printers/:printerId', () => {

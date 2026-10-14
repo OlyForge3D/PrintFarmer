@@ -150,13 +150,14 @@
       <strong>In short:</strong> PrintFarmer Mobile does not include advertising or
       cross-app/cross-site tracking SDKs. The app talks directly to the self-hosted server(s)
       you add, keeps your sign-in credentials in the iOS Keychain, and keeps connection and
-      preference data on your device. The only data that leaves your device toward
-      <strong>OlyForge3D</strong> (rather than your own server) is the optional native push
-      notification path described below, which you can turn off at any time.
+      preference data on your device. OlyForge3D does not operate a PrintFarmer backend or
+      notification relay for the app, so app data is not sent to OlyForge3D.
     </div>
 
     <h2>Information we do not collect</h2>
     <ul>
+      <li>OlyForge3D does not collect data from the app. The app's App Store privacy
+        disclosure is <strong>Data Not Collected</strong>.</li>
       <li>No advertising identifiers, ad networks, or ad SDKs.</li>
       <li>No cross-app or cross-site behavioral tracking.</li>
       <li>No third-party analytics, crash-reporting, or marketing SDKs are bundled with the
@@ -177,7 +178,7 @@
         unlocked at least once since restart. This does not require a passcode or Face
         ID/Touch ID prompt on every use of the app.</li>
       <li><strong>App preferences</strong> — settings such as theme, NFC tag format, advanced
-        printer-controls opt-in, and push-notification opt-in.</li>
+        printer-controls opt-in, and notification preferences.</li>
       <li><strong>Local caches</strong> — recent printer/job status snapshots and similar
         operational data fetched from your server, cached on-device to make the app feel
         responsive and to support brief offline viewing. These caches mirror data that
@@ -219,44 +220,33 @@
       proxied by your server — the app does not access the device's camera for this feature,
       and does not record, store, or forward that video anywhere else.</p>
 
-    <h2>Optional native push notifications</h2>
-    <p>Push notifications are off by default. If you turn them on in Settings, the app
-      registers an Apple-issued device token with your selected PrintFarmer server. From
-      there, delivery depends on how that server's operator has configured native push:</p>
+    <h2>Alerts and notifications</h2>
+    <p>The app may ask for iOS notification permission so it can present a local
+      <strong>Bed Clear Required</strong> reminder when its on-device monitor observes that
+      a printer on your selected server has newly entered the <strong>PendingReady</strong>
+      state. The shipped v1 app does not register for Apple Push Notification service
+      (APNs), obtain an APNs device token, or upload a device token to any server.</p>
     <ul>
-      <li><strong>Disabled (default)</strong> — nothing is sent anywhere for native push; you
-        still receive in-app and local notifications while the app is in use.</li>
-      <li><strong>Relay mode</strong> — your server forwards a notification envelope to an
-        OlyForge3D-hosted relay service, which forwards it to Apple's Push Notification
-        service (APNs) so it can be delivered to your device. OlyForge3D operates this relay
-        because the Apple Push credential for the app's App Store listing cannot be
-        distributed to individual self-hosted servers.</li>
-      <li><strong>Direct mode</strong> — an operator who has their own Apple Push credential
-        can configure their server to talk to APNs directly, without the OlyForge3D relay.</li>
+      <li><strong>Live updates</strong> — while connected, the app receives server events
+        directly from your selected server over SignalR.</li>
+      <li><strong>Local notifications</strong> — the shipped v1 notification is the
+        on-device <strong>Bed Clear Required</strong> reminder described above. SignalR
+        updates remain in-app live updates and are not converted into general-purpose
+        system notifications.</li>
     </ul>
-    <p>The envelope forwarded for a push notification is limited to what is needed to show and
-      route the alert: your device's push token, an app installation identifier, the
-      notification's title/subtitle/body/category and thread, related printer/job/toolhead
-      identifiers, a deep link back into the app, priority and expiration, available quick
-      actions, and an identifier for the server the alert came from. It does not include your
-      server credentials, account password, or files from your print jobs.</p>
+    <p>The shipped v1 app does not use an OlyForge3D backend or notification relay.
+      OlyForge3D does not receive device tokens, notification contents, printer identifiers,
+      job identifiers, or other alert data. The App Store privacy disclosure is
+      <strong>Data Not Collected</strong>. Local notifications are created and delivered by
+      iOS on your device rather than being sent through APNs or an OlyForge3D service.</p>
 
     <h2>Data retention and logs</h2>
     <p>We describe retention in bounded, verifiable terms rather than promising guarantees we
       cannot make for infrastructure PrintFarmer does not operate:</p>
     <ul>
-      <li>Your selected PrintFarmer server stores device-push-token rows only while push is
-        registered; a row is removed when you unregister, disable push, or your account is
-        deleted, and is deactivated after repeated delivery failures reported by Apple.</li>
-      <li>The OlyForge3D-hosted relay (used only in relay mode) is an operational
-        store-and-forward path to APNs. Like most push-delivery infrastructure, it may keep
-        short-lived operational logs (for example, request/response status) for delivery
-        troubleshooting, reliability, and abuse prevention. OlyForge3D does not use relay
-        traffic for advertising and does not sell it.</li>
-      <li>We do not claim a specific guaranteed retention or deletion timeline for relay
-        operational logs beyond what is stated here, because that infrastructure is
-        operated centrally rather than per self-hosted install. If you need more detail for
-        compliance purposes, contact us using the details below.</li>
+      <li>OlyForge3D does not receive or retain app account, server, printer, job, file,
+        device-token, or notification data because it does not operate an app backend or
+        notification relay.</li>
       <li>Data held on a self-hosted PrintFarmer server (accounts, jobs, printers, files) is
         controlled entirely by that server's operator and its own retention/deletion
         settings, not by this policy.</li>
@@ -264,13 +254,12 @@
 
     <h2>Data sharing</h2>
     <p>We do not sell your data and do not share it with advertisers or data brokers. Data
-      leaves your device only to: (1) the PrintFarmer server(s) you explicitly add, as normal
-      use of the app, and (2) when you opt in to native push in relay mode, the OlyForge3D
-      relay and Apple's APNs, solely to deliver that notification.</p>
+      leaves your device only for the PrintFarmer server(s) you explicitly add as part of
+      normal app use. Those servers are controlled by you or their operator, not OlyForge3D.</p>
 
     <h2>Your choices and controls</h2>
     <ul>
-      <li>Turn native push notifications on or off at any time in <strong>Settings</strong>.</li>
+      <li>Control notification permission at any time in iOS Settings.</li>
       <li>Add, switch, or remove PrintFarmer server registrations in <strong>Settings</strong>;
         removing a server clears its stored credentials from the Keychain on your device.</li>
       <li>Sign out at any time to clear your locally stored session for the active server.</li>

@@ -17,6 +17,7 @@ using ChangePasswordRequest = Farm.Infrastructure.Contracts.Auth.ChangePasswordR
 using ConfirmEmailRequest = Farm.Infrastructure.ConfirmEmailRequest;
 using ForgotPasswordRequest = Farm.Infrastructure.Contracts.Auth.ForgotPasswordRequest;
 using LoginRequest = Farm.Infrastructure.Contracts.Auth.LoginRequest;
+using RefreshTokenRequest = Farm.Infrastructure.Contracts.Auth.RefreshTokenRequest;
 using RegisterRequest = Farm.Infrastructure.Contracts.Auth.RegisterRequest;
 using ResetPasswordRequest = Farm.Infrastructure.Contracts.Auth.ResetPasswordRequest;
 using UserDto = Farm.Infrastructure.Contracts.Auth.UserDto;
@@ -31,13 +32,15 @@ public class AuthController(
     ILoginAuditService loginAuditService,
     IPasskeyService passkeyService,
     ILogger<AuthController> logger,
-    Farm.Infrastructure.Services.Authentication.IApiKeyExchangeService apiKeyExchangeService) : ControllerBase
+    Farm.Infrastructure.Services.Authentication.IApiKeyExchangeService apiKeyExchangeService,
+    IRefreshTokenService refreshTokenService) : ControllerBase
 {
     private readonly IAuthenticationService _authService = authService;
     private readonly ILoginAuditService _loginAuditService = loginAuditService;
     private readonly IPasskeyService _passkeyService = passkeyService;
     private readonly ILogger<AuthController> _logger = logger;
     private readonly Farm.Infrastructure.Services.Authentication.IApiKeyExchangeService _apiKeyExchangeService = apiKeyExchangeService;
+    private readonly IRefreshTokenService _refreshTokenService = refreshTokenService;
 
     [HttpPost("login")]
     [AllowAnonymous] // Public because callers cannot obtain an access token until they authenticate here.
@@ -58,6 +61,15 @@ public class AuthController(
 
         string? failureReason = result.Success ? null : MapFailureReason(result.Error);
         await _loginAuditService.RecordAsync(usernameSubmitted, result.Success, ipAddress, userAgent, failureReason, HttpContext.RequestAborted);
+
+        if (result.Success && result.User is not null)
+        {
+            (string refreshToken, DateTime refreshTokenExpires) = await _refreshTokenService.CreateAsync(
+                result.User.Id,
+                ipAddress,
+                HttpContext.RequestAborted);
+            result = result with { RefreshToken = refreshToken, RefreshTokenExpires = refreshTokenExpires };
+        }
 
         return result.Success ? Ok(result) : Unauthorized(result);
     }
@@ -141,15 +153,60 @@ public class AuthController(
         });
     }
 
+    [HttpPost("refresh")]
+    [AllowAnonymous] // Public because the refresh token is the credential being exchanged for a new session.
+    [ProducesResponseType(typeof(AuthenticationResult), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(AuthenticationResult), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(AuthenticationResult), StatusCodes.Status401Unauthorized)]
+    public async Task<ActionResult<AuthenticationResult>> RefreshAsync([FromBody] RefreshTokenRequest? request)
+    {
+        if (request is null)
+        {
+            return BadRequest(new AuthenticationResult(false, Error: "Refresh token is required."));
+        }
+
+        if (string.IsNullOrWhiteSpace(request.RefreshToken))
+        {
+            return BadRequest(new AuthenticationResult(false, Error: "Refresh token is required."));
+        }
+
+        string ipAddress = ResolveClientIp(HttpContext);
+        string? rawUa = HttpContext.Request.Headers.UserAgent.ToString();
+        string? userAgent = string.IsNullOrEmpty(rawUa) ? null : rawUa;
+        AuthenticationResult result = await _refreshTokenService.RotateAsync(
+            request.RefreshToken,
+            ipAddress,
+            HttpContext.RequestAborted);
+
+        await _loginAuditService.RecordAsync(
+            result.User?.Username,
+            result.Success,
+            ipAddress,
+            userAgent,
+            result.Success ? null : "invalid_refresh_token",
+            HttpContext.RequestAborted);
+
+        return result.Success ? Ok(result) : Unauthorized(result);
+    }
+
     [HttpPost("logout")]
     [Authorize]
-    public Task<IActionResult> LogoutAsync()
+    public async Task<IActionResult> LogoutAsync(
+        [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] RefreshTokenRequest? request = null)
     {
-        // For JWT tokens, logout is typically handled client-side by removing the token
-        // In the future, we could implement a token blacklist for enhanced security
-        _logger.LogInformation("User {UserFindFirstValue} logged out", LogSanitizer.Sanitize(User.FindFirstValue(ClaimTypes.NameIdentifier)));
+        string? userIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (request is not null && !string.IsNullOrWhiteSpace(request.RefreshToken) &&
+            Guid.TryParse(userIdClaim, out Guid userId))
+        {
+            _ = await _refreshTokenService.RevokeAsync(
+                request.RefreshToken,
+                userId,
+                HttpContext.Connection.RemoteIpAddress?.ToString(),
+                HttpContext.RequestAborted);
+        }
 
-        return Task.FromResult<IActionResult>(Ok(new { message = "Logged out successfully" }));
+        _logger.LogInformation("User {UserFindFirstValue} logged out", LogSanitizer.Sanitize(userIdClaim));
+        return Ok(new { message = "Logged out successfully" });
     }
 
     // Provide GET variant used by some tests to check unauthorized behavior
@@ -547,6 +604,15 @@ public class AuthController(
         try
         {
             AuthenticationResult result = await _passkeyService.CompleteLoginAsync(request.Username, request.AssertionResponse, ct);
+            if (result.Success && result.User is not null)
+            {
+                (string refreshToken, DateTime refreshTokenExpires) = await _refreshTokenService.CreateAsync(
+                    result.User.Id,
+                    HttpContext.Connection.RemoteIpAddress?.ToString(),
+                    ct);
+                result = result with { RefreshToken = refreshToken, RefreshTokenExpires = refreshTokenExpires };
+            }
+
             return result.Success ? Ok(result) : Unauthorized(result);
         }
         catch (PasskeyChallengeNotFoundException ex)

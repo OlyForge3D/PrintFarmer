@@ -1,7 +1,7 @@
 # PrintFarmer Job Queue System Architecture
 
-**Document Date:** January 16, 2026  
-**Version:** 1.0  
+**Document Date:** January 16, 2026
+**Version:** 1.0
 **Status:** NEEDS CONSOLIDATION
 
 ---
@@ -98,6 +98,61 @@ map to `Low`; values above `3` map to `Urgent`. This clamps malformed rows to
 the nearest conservative boundary without promoting an old low-priority job
 or demoting an old high-priority job.
 
+### Queue ordering and drag-to-reorder
+
+`QueuePosition` is comparable only within one assigned-printer queue or the
+unassigned queue. General job reporting and cross-scope eligible-head comparison
+retain `Priority desc → QueuedAt asc → Id asc`; single-scope lists and
+ready-head consumers use `Priority desc → QueuePosition asc → QueuedAt asc →
+Id asc`. Mixed-scope dispatch evaluates
+each scope independently, skips ineligible jobs until it finds that scope's
+eligible head, then compares the two heads using the cross-scope ordering.
+
+The active queue client API (`GET /api/job-queue-analytics`, default
+`sortBy=priority`) is distinct from general reporting: it returns a flat array
+grouped by `job.assignedPrinterId`, unassigned first then printer ID, with queued
+rows in each group in scope-local order. The repository's internal `queue`
+sort applies the scope key before priority/position and before pagination;
+its general `priority` sort stays cross-scope FIFO. No cross-scope position
+comparison or client sorting is involved. Groups can span pages; clients
+append pages, preserve response order within groups, and restrict drag to one
+group. Printing and other active rows may also appear; clients filter queued
+rows without reordering them. Deadline and terminal-status views are reporting
+views, not drag order. The per-printer endpoint returns flat job DTOs in three
+active bands: Starting/Printing/Paused occupying rows, then Assigned
+committed-handoff rows, then Queued rows. The first two bands use priority/time/ID
+order, never queue position; only the Queued band uses scope-local position.
+The limit applies across all bands and no terminal rows are included.
+This coordinator-authorized PLAN clarification preserves queued/in-progress
+visibility rather than treating the original Printing/Queued wording as
+permission to hide active states. It changes read membership only: Assigned,
+Starting, Printing and Paused remain ineligible for reorder or new dispatch.
+
+`PUT /api/job-queue/jobs/{id}/position` requires `Queue.Write`, the moved job's
+`If-Match` ETag, and exactly one neighbor ID plus its matching body ETag. The
+moved job adopts the neighbor's priority. In one transaction, only queued
+positions in the moved job's scope are permuted among their existing values;
+assigned rows remain fixed and the allocator's `NextPosition` watermark is not
+changed. Updated rows receive new row versions. A successful reorder broadcasts
+the existing lowercase `jobqueueupdate` event.
+
+The React active-queue dashboard offers Move up/Move down buttons and native
+pointer drag in table, list, and card views. Reordering is available only to
+users with `Queue.Write` while the dashboard shows the unfiltered priority
+queue. Each interaction moves a queued job within its assigned-printer or Any
+printer group; printing, starting, paused, and assigned rows stay pinned.
+Keyboard button moves announce the resulting position. The client preserves
+the analytics response order, applies a temporary optimistic move, then
+refreshes from the server. A stale revision or semantic conflict rolls back to
+the refreshed queue with a queue-changed message; other failures remain
+visible.
+
+The endpoint returns 428 only when the moved-job `If-Match` header is missing,
+412 with current moved-job and neighbor ETags for stale revisions or row-version
+conflicts, 409 for semantic conflicts (including a missing neighbor), 404 when
+the moved job is missing, and 400 for malformed neighbor fields or invalid
+ETags. See [Queue Position API](API.md#queue-position-api) for the wire shape.
+
 ### Calibration dispatch safety contract
 
 Generated calibration G-code has one execution path: immutable artifact
@@ -118,6 +173,77 @@ check before backend I/O. Idle controls acquire a database physical-I/O barrier;
 active lifecycle controls carry the exact job and attempt. No later dispatch may
 claim the printer while that barrier is held. Direct manual-motion uncertainty
 uses the release rules below, not print-start reconciliation.
+
+### Printer materials and spool assignment
+
+Detailed printer cards and the sidebar share one `FilamentSlots` presentation,
+with spool-shaped icons, for MMUs (QidiBox, AFC, Happy Hare), multi-toolhead
+(U1), AD5X, and single-toolhead printers. At rest it shows one line for the
+active feed: slot (multi-feed only), material, and remaining grams when known.
+Unknown grams are never shown as zero. Multi-feed devices add a slot disclosure
+that expands to a rail of spools; an amber marker flags an empty slot. Without a
+known active feed, the line shows the slot spools rather than inventing one.
+Single-toolhead printers show no Tool or T0 label.
+
+- **No Spoolman binding** shows a neutral spool with **+**. Device-reported
+  filament can still be loaded.
+- **Empty** requires the matching Spoolman record to report exactly zero
+  remaining grams. Missing weights, failed reads, and coverage estimates never
+  establish depletion.
+- **In use** marks the feed that live telemetry confirms is loaded, not the
+  slot selected for inspection.
+
+Selecting a slot opens one panel of icon-only 44px buttons with accessible
+names and tooltips. **Assign**, **Change spool**, and **Unassign** use the
+existing picker and revision-checked endpoints, require `queue:write`, and keep
+offline bookkeeping; errors leave assignment information visible with Retry.
+After a divider, **Load**, **Unload**, and **Eject** appear only where
+supported: Eject is QidiBox-only, Happy Hare unload needs a loaded gate, and
+macro-driven U1/AD5X buttons act only on the active slot, otherwise disabled
+with a tooltip reason. Physical commands require an online printer and
+`queue:start`, and keep existing confirmations and heat-then-unload.
+
+The slot panel replaces the generic Load/Unload macro group. There is no
+separate printer-level Change Filament (M600) button; all filament and spool
+handling lives in the Materials group.
+
+The QidiBox **Rack** (external spool) is hidden by default. Edit Printer offers
+a per-printer **Show external spool** toggle (`showExternalSpool`, persisted
+server-side, default false). Hiding Rack keeps its spool binding and never
+unassigns or actuates; when it is the active feed, the line reads
+`Rack · <material>`. QidiBox gates keep persisted API indices; Rack uses its
+physical toolhead binding. Coverage remains demand-driven and is not encoded in
+spool rings.
+
+### QidiBox filament controls
+
+QidiBox Load, Unload, and Eject use the MMU gate-action endpoint with the
+zero-based box gate index (for example, gate 1 is 1B). Unload and Eject retain
+physical filament-unload safety validation before any firmware command is sent.
+Fresh measured hotend temperature must reach at least 220 °C, or the higher
+verified backend minimum. A requested heater target is not measured temperature.
+
+For a QidiBox or AFC **Unload** rejected solely for a cold hotend, the backend
+heats automatically under the same exclusive physical-control lease. It chooses
+the requested gate's assigned Spoolman filament print temperature, then its
+material's configured default, then the guard minimum. The target is never below
+the verified safety minimum; exceeding installed hotend/nozzle ratings rejects
+before heating (300 °C ceiling when ratings are unavailable). Another gate's or
+the primary's spool is not substituted for a missing box-gate binding.
+
+The server waits for fresh measured temperature within 1 °C of that target and
+requires the unchanged safety guard to pass, then revalidates the lease before
+sending the original unload exactly once. Warm-up is bounded to four minutes;
+the overall request is bounded to five minutes. Web unload requests allow six
+minutes for the server response. Already-hot unloads do not change temperature.
+Load/Eject and other safety failures do not initiate automatic heating.
+
+The MMU panel preserves actionable server error messages. Timeout, cancellation,
+stale telemetry, or lease loss prevents unloading; an accepted heater target
+remains set, so check the printer/target before explicitly retrying. An uncertain
+heater write retains reconciliation protection and is never automatically
+replayed. No firmware macros or printer configuration are modified. Backend
+orchestration gives every client of the shared endpoint the same behavior.
 
 ### Direct manual-motion control
 
@@ -419,46 +545,6 @@ resolves the open points of the contract above as follows:
 - **Authorization scope.** Reads require printer `View` scope; recover requires
   printer `Manage` scope and clear requires job `Manage` scope. Out-of-scope
   resources return `404`.
-- **Queue read model.** `QueuedPrintJobDto` (used by `/api/job-queue` and
-  `/api/job-queue-analytics`) carries the string-enum `blockedReasonCode`, so
-  queue surfaces can identify `OperatorRecoveryRequired` jobs without a
-  per-job reconciliation read. It is `null` (omitted) for unblocked jobs.
-
-#### Operator recovery UI (#2993)
-
-The React UI lives in `src/Web/ReactApp/src/features/dispatch-recovery/` and
-calls the four routes through `services/api/dispatchRecoveryApi.ts`.
-
-- **Warning.** `DispatchReconciliationBanner` renders on the printer card, and
-  on the queue dashboard for each printer with an `Unknown` dispatch result
-  that requires reconciliation. It shows the job, attempt, claim age,
-  escalation level, sender state, and last redacted evidence phase. It offers
-  no cancel or retry action. The resource polls every 30 seconds only while a
-  claim is indeterminate; queue SignalR events invalidate it otherwise.
-  Queue-dashboard candidates come from an unfiltered, fully paged queue read,
-  so filters and pagination cannot hide a warning. Because
-  `GET /api/job-queue-analytics` applies authorization after pagination, a
-  scoped caller can get a short page before the end; the endpoint returns
-  `X-Has-More` (`true` when the unscoped page filled `limit`) and the UI keeps
-  paging while it is `true`. A banner stays mounted
-  until the reconciliation read reports the claim closed, and a recorded
-  recovery notice (with its audit link) stays until the operator dismisses it.
-  Queue views hide Start Print and Cancel while a job's dispatch outcome is
-  `Unknown` and still requires reconciliation.
-- **Recovery.** The Recover action appears only when the server reports
-  `recoveryPermission`. The modal requires the physical-check confirmation, and
-  also sender isolation when `senderSettled` is not `true` or the server
-  returned `rejected_sender_isolation_required`. It sends the reviewed
-  reconciliation ETag as `If-Match` and a client-generated `Idempotency-Key`.
-  The same key is reused only to retry an identical body after a transport
-  failure. Any definitive response retires it. A `412` or a claim revision
-  change clears the confirmations and refetches the resource. Nothing is
-  updated optimistically; every settled mutation invalidates the
-  reconciliation and queue queries.
-- **Clear.** The queue dashboard lists `OperatorRecoveryRequired` jobs and
-  hides Start Print for them. Holders of `queue:reconcile` can confirm
-  **Allow dispatch**, which sends the job `rowVersion` as `If-Match`. The UI
-  fails closed when no auth context is mounted.
 
 The minimum validation matrix covers authorization denial, wrong-printer and
 stale-revision conflicts, duplicate/replayed assertions, concurrent
@@ -560,8 +646,8 @@ exception text.
 
 ### 1. JobQueueController (`/api/job-queue`)
 
-**Purpose:** Basic queue operations and printer management  
-**Status:** ✅ **ACTIVE & USED**  
+**Purpose:** Basic queue operations and printer management
+**Status:** ✅ **ACTIVE & USED**
 **Used By:** PrinterDashboard (simple queue view)
 
 #### Endpoints
@@ -572,6 +658,7 @@ exception text.
 | POST | `/` | Queue a new print job |
 | GET | `/{id}` | Get single job details |
 | PUT | `/{id}` | Update job (status/priority/printer assignment) |
+| PUT | `/jobs/{id}/position` | Move a queued job before or after a neighbor in the same queue |
 | DELETE | `/{id}` | Remove job from queue |
 
 #### Authoritative Job Read
@@ -619,9 +706,9 @@ revalidates every fence authoritatively.
 
 ### 2. JobQueueAnalyticsController (`/api/job-queue-analytics`)
 
-**Purpose:** Rich dashboard analytics, history, and advanced job management  
-**Status:** ✅ **ACTIVE & USED**  
-**Used By:** PrintQueueDashboard (advanced queue analytics)  
+**Purpose:** Rich dashboard analytics, history, and advanced job management
+**Status:** ✅ **ACTIVE & USED**
+**Used By:** PrintQueueDashboard (advanced queue analytics)
 **Previously Known As:** `PrintQueueController`
 
 #### Endpoints
@@ -698,8 +785,8 @@ public record DurationAnalyticsDto(
 
 ### 3. PrintJobQueueController (`/api/print-job-queue`)
 
-**Purpose:** Unknown (appears to be experimental or legacy)  
-**Status:** 🔴 **DEAD CODE - NOT REGISTERED**  
+**Purpose:** Unknown (appears to be experimental or legacy)
+**Status:** 🔴 **DEAD CODE - NOT REGISTERED**
 **Used By:** `QueueGcodeModal.tsx` (only component using `printJobQueueService`)
 
 #### Endpoints
@@ -734,8 +821,8 @@ public record DurationAnalyticsDto(
 
 ### 4. JobSchedulingController (`/api/jobscheduling`)
 
-**Purpose:** Schedule jobs for deferred/future execution with recurrence support  
-**Status:** ✅ **ACTIVE & USED**  
+**Purpose:** Schedule jobs for deferred/future execution with recurrence support
+**Status:** ✅ **ACTIVE & USED**
 **Used By:** Schedule features, recurring print jobs
 
 #### Endpoints
@@ -898,7 +985,7 @@ Dashboard displays statistics chart
 
 ### Issue #1: PrintJobQueueController is Dead Code
 
-**Severity:** Medium  
+**Severity:** Medium
 **Impact:** Maintenance burden, confusion, wasted developer time
 
 **Evidence:**
@@ -916,7 +1003,7 @@ Dashboard displays statistics chart
 
 ### Issue #2: Frontend Service Disconnect
 
-**Severity:** Medium  
+**Severity:** Medium
 **Impact:** Frontend can't use the "new" PrintJobQueueController
 
 **Evidence:**
@@ -933,14 +1020,14 @@ Dashboard displays statistics chart
 
 ### Issue #3: API Naming Ambiguity
 
-**Severity:** Low  
+**Severity:** Low
 **Impact:** Developer confusion, slow API integration, wrong endpoint selection
 
 **Current Confusion:**
 ```
 New developers see three endpoints:
 - /api/job-queue
-- /api/job-queue-analytics  
+- /api/job-queue-analytics
 - /api/print-job-queue
 
 Which should I use?
@@ -955,7 +1042,7 @@ No clear guidance exists.
 
 ### Issue #4: No Documentation
 
-**Severity:** Medium  
+**Severity:** Medium
 **Impact:** Architectural knowledge only in developers' heads
 
 **Current State:**
@@ -986,8 +1073,8 @@ No clear guidance exists.
 5. Verify in tests that QueueGcodeModal still works
 6. Update `Program.cs` to remove any references (if any)
 
-**Effort:** 30 minutes  
-**Risk:** LOW (only QueueGcodeModal affected, easily testable)  
+**Effort:** 30 minutes
+**Risk:** LOW (only QueueGcodeModal affected, easily testable)
 **Benefit:** Reduced codebase complexity, clearer queue API
 
 ---
@@ -1028,8 +1115,8 @@ Cons: Confusion about which to use
 Pros: Single source of truth, clear semantics
 Cons: One controller gets large (manageable with regions)
 
-**Effort:** 4-6 hours  
-**Risk:** MEDIUM (API contract change, need frontend updates)  
+**Effort:** 4-6 hours
+**Risk:** MEDIUM (API contract change, need frontend updates)
 **Benefit:** Simpler architecture, less confusion, easier to document
 
 ---
@@ -1071,8 +1158,8 @@ Cons: One controller gets large (manageable with regions)
 - Easier to monitor and debug
 - Better for API versioning
 
-**Effort:** 6-8 hours  
-**Risk:** MEDIUM (significant API restructuring)  
+**Effort:** 6-8 hours
+**Risk:** MEDIUM (significant API restructuring)
 **Benefit:** Production-grade architecture, better scalability
 
 ---
@@ -1117,8 +1204,8 @@ public async Task<IActionResult> EnqueueJobAsync(...)
 }
 ```
 
-**Effort:** 2 hours  
-**Risk:** LOW (output caching is safe with proper tags)  
+**Effort:** 2 hours
+**Risk:** LOW (output caching is safe with proper tags)
 **Benefit:** 10-50x faster analytics queries, reduced database load
 
 ---
@@ -1142,7 +1229,7 @@ CREATE INDEX idx_jobs_created ON Jobs(CreatedAt DESC);
 CREATE INDEX idx_jobs_status_created ON Jobs(Status, CreatedAt DESC);
 
 -- Composite for common analytics query
-CREATE INDEX idx_jobs_analytics 
+CREATE INDEX idx_jobs_analytics
     ON Jobs(Status, AssignedPrinterId, CreatedAt DESC);
 ```
 
@@ -1171,8 +1258,8 @@ var stats = await _context.Jobs
     .ToListAsync();
 ```
 
-**Effort:** 4 hours  
-**Risk:** LOW (indexes are non-breaking)  
+**Effort:** 4 hours
+**Risk:** LOW (indexes are non-breaking)
 **Benefit:** 50-100x faster complex queries, reduced CPU/memory
 
 ---
@@ -1202,8 +1289,8 @@ var stats = await _context.Jobs
 | Schedule future print | POST /api/jobscheduling/{id}/schedule | `{ scheduledTime, timezone }` |
 ```
 
-**Effort:** 3 hours  
-**Risk:** NONE (documentation only)  
+**Effort:** 3 hours
+**Risk:** NONE (documentation only)
 **Benefit:** Faster onboarding, fewer API misuses
 
 ---
@@ -1212,7 +1299,7 @@ var stats = await _context.Jobs
 
 ### Phase 1: Remove Dead Code (Week 1)
 
-**Priority:** HIGH  
+**Priority:** HIGH
 **Effort:** 2-4 hours
 
 ```
@@ -1235,7 +1322,7 @@ var stats = await _context.Jobs
 
 ### Phase 2: Document Current Architecture (Week 1-2)
 
-**Priority:** MEDIUM  
+**Priority:** MEDIUM
 **Effort:** 3-4 hours
 
 ```
@@ -1250,7 +1337,7 @@ var stats = await _context.Jobs
 
 ### Phase 3: Add Caching & Optimize (Week 2-3)
 
-**Priority:** MEDIUM  
+**Priority:** MEDIUM
 **Effort:** 4-6 hours
 
 ```
@@ -1271,8 +1358,8 @@ var stats = await _context.Jobs
 
 ### Phase 4: Consolidate Endpoints (Month 2)
 
-**Priority:** LOW (can wait)  
-**Effort:** 6-8 hours  
+**Priority:** LOW (can wait)
+**Effort:** 6-8 hours
 **Breaking Change:** YES
 
 ```
@@ -1332,6 +1419,6 @@ These changes will:
 
 ---
 
-**Document Version:** 1.0  
-**Last Updated:** January 16, 2026  
+**Document Version:** 1.0
+**Last Updated:** January 16, 2026
 **Next Review:** February 16, 2026

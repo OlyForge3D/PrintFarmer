@@ -227,19 +227,23 @@ describe('filterDestinationsByAccess', () => {
   });
 
   it('#1457 — a custom (non-admin) role granted only the matching permission reaches that destination', () => {
-    const destination = getDestinationById('hw-cameras');
-    expect(destination?.requiredPermission).toEqual({ resource: 'cameras', action: 'admin' });
+    const destination = getDestinationById('hw-nfc');
+    expect(destination?.requiredPermission).toEqual({ resource: 'nfc_devices', action: 'admin' });
 
-    // Non-admin role, and hasPermission is scoped to exactly `cameras:admin`.
+    // Non-admin role, and hasPermission is scoped to exactly `nfc_devices:admin`.
     const result = filterDestinationsByAccess(ADMIN_DESTINATIONS, {
       hasRole: () => false,
-      hasPermission: (resource, action) => resource === 'cameras' && action === 'admin',
+      hasPermission: (resource, action) => resource === 'nfc_devices' && action === 'admin',
     });
 
     const ids = result.map((d) => d.id);
-    expect(ids).toContain('hw-cameras');
+    expect(ids).toContain('hw-nfc');
     // A destination gated on a different permission must stay hidden.
-    expect(ids).not.toContain('hw-nfc');
+    expect(ids).not.toContain('hw-printer-groups');
+  });
+
+  it('#3332 — Cameras is a top-level page, not an admin destination', () => {
+    expect(getDestinationById('hw-cameras')).toBeUndefined();
   });
 
   it('respects requiredPermissionAnyOf: any one of several permissions unlocks the destination', () => {

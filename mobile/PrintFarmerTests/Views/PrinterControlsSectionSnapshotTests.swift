@@ -3,6 +3,213 @@ import SwiftUI
 import SnapshotTesting
 @testable import PrintFarmer
 
+@MainActor
+final class PrinterCardSnapshotTests: XCTestCase {
+    func testCardSnapshotsAdaptToPhoneTabletAppearanceAndLargestType() throws {
+        let printer = try TestData.decodePrinter()
+        for width: CGFloat in [320, 390, 340] {
+            for scheme in [ColorScheme.light, .dark] {
+                for size in [DynamicTypeSize.large, .accessibility5] {
+                    let card = PrinterCardView(
+                        printer: printer, attentionCount: 3,
+                        failureReason: "Obico detected a possible spaghetti failure. Review the print."
+                    )
+                    .environment(\.colorScheme, scheme)
+                    .environment(\.dynamicTypeSize, size)
+                    .frame(width: width)
+                    .fixedSize(horizontal: false, vertical: true)
+                    let host = UIHostingController(rootView: card)
+                    host.safeAreaRegions = []
+                    let fitting = host.sizeThatFits(in: CGSize(width: width, height: 2000))
+                    XCTAssertGreaterThan(fitting.height, 60)
+                    XCTAssertLessThan(fitting.height, 1800)
+                    XCTAssertEqual(fitting.width, width, accuracy: 1)
+                    host.view.frame = CGRect(origin: .zero, size: fitting)
+                    host.view.backgroundColor = .clear
+                    let window = UIWindow(frame: host.view.frame)
+                    window.rootViewController = host
+                    window.isHidden = false
+                    host.view.layoutIfNeeded()
+                    let renderer = UIGraphicsImageRenderer(size: fitting)
+                    let image = renderer.image { _ in
+                        host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: true)
+                    }
+                    let attachment = XCTAttachment(image: image)
+                    attachment.name = "printer-card-\(Int(width))-\(scheme)-\(size)-\(UIDevice.current.userInterfaceIdiom)"
+                    attachment.lifetime = .keepAlways
+                    add(attachment)
+                    window.isHidden = true
+                }
+            }
+        }
+    }
+
+    func testCombinedVoiceOverIncludesJobProgressETAAndFailureWithoutRemovedBadges() throws {
+        let printer = try TestData.decodePrinter()
+        let presentation = PrinterCardPresentation(
+            printer: printer, isPendingReady: false, attentionCount: 2,
+            failureReason: "Spaghetti detected", printTimeLeftSeconds: 8100
+        )
+        XCTAssertEqual(presentation.stateLabel, "Failure suspected")
+        XCTAssertTrue(presentation.accessibilityLabel.contains("benchy.gcode"))
+        XCTAssertTrue(presentation.accessibilityLabel.contains("46% complete"))
+        XCTAssertTrue(presentation.accessibilityLabel.contains("2h 15m left"))
+        XCTAssertTrue(presentation.accessibilityLabel.contains("Done"))
+        XCTAssertTrue(presentation.accessibilityLabel.contains("2 attention items"))
+        XCTAssertTrue(presentation.accessibilityLabel.contains("Failure suspected: Spaghetti detected"))
+        XCTAssertFalse(presentation.accessibilityLabel.contains("homed"))
+        XCTAssertFalse(presentation.accessibilityLabel.contains("coverage"))
+    }
+
+    func testUnknownPausedOfflineAndPendingReadyStatesStayHonest() throws {
+        var printer = try TestData.decodePrinter()
+        func presentation(_ seconds: Double?) -> PrinterCardPresentation {
+            PrinterCardPresentation(printer: printer, isPendingReady: false,
+                                    attentionCount: nil, failureReason: nil, printTimeLeftSeconds: seconds)
+        }
+        XCTAssertEqual(presentation(nil).etaLabel, "ETA unavailable")
+        XCTAssertEqual(presentation(.nan).etaLabel, "ETA unavailable")
+        XCTAssertEqual(presentation(-1).etaLabel, "ETA unavailable")
+        printer.state = "paused"
+        XCTAssertEqual(presentation(60).etaLabel, "1m left · Paused")
+        printer.isOnline = false
+        XCTAssertEqual(presentation(60).stateLabel, "Offline")
+        XCTAssertFalse(presentation(60).isActiveJob)
+        let bed = PrinterCardPresentation(printer: printer, isPendingReady: true,
+                                         attentionCount: 1, failureReason: nil, printTimeLeftSeconds: nil)
+        XCTAssertEqual(bed.stateLabel, "Bed clear")
+        XCTAssertTrue(bed.jobLabel.contains("Clear bed"))
+    }
+
+    func testPendingReadyCardDoesNotPresentCompletedJobAsActiveProgress() throws {
+        var printer = try TestData.decodePrinter()
+        printer.state = "printing"
+        printer.progress = 0.23
+        printer.jobName = "clip_holder_x4.gcode"
+
+        let presentation = PrinterCardPresentation(
+            printer: printer,
+            isPendingReady: true,
+            attentionCount: 1,
+            failureReason: nil,
+            printTimeLeftSeconds: 1_320
+        )
+
+        XCTAssertEqual(presentation.stateLabel, "Bed clear")
+        XCTAssertFalse(presentation.canShowJobETA)
+        XCTAssertFalse(presentation.showsJobProgress)
+        XCTAssertFalse(presentation.accessibilityLabel.contains("% complete"))
+        XCTAssertFalse(presentation.accessibilityLabel.contains("ETA unavailable"))
+        XCTAssertTrue(presentation.jobLabel.contains("Clear bed"))
+    }
+
+    func testFailureCardRetainsKnownJobProgressAndOnlyShowsServerReportedETA() throws {
+        var printer = try TestData.decodePrinter()
+        printer.state = "error"
+        printer.progress = 0.22
+        printer.jobName = "gear_set_v3.gcode"
+        printer.fileName = "gear_set_v3.gcode"
+        let failure = "The printer reported a failed job."
+
+        let withETA = PrinterCardPresentation(
+            printer: printer,
+            isPendingReady: false,
+            attentionCount: 1,
+            failureReason: failure,
+            printTimeLeftSeconds: 9_660
+        )
+        XCTAssertFalse(withETA.isActiveJob)
+        XCTAssertTrue(withETA.showsJobProgress)
+        XCTAssertTrue(withETA.canShowJobETA)
+        XCTAssertEqual(withETA.stateLabel, "Failure suspected")
+        XCTAssertEqual(withETA.jobLabel, "gear_set_v3.gcode")
+        XCTAssertTrue(withETA.etaLabel.contains("2h 41m left"))
+        XCTAssertTrue(withETA.etaLabel.contains("Done"))
+        XCTAssertTrue(withETA.accessibilityLabel.contains("22% progress at failure"))
+
+        let withoutETA = PrinterCardPresentation(
+            printer: printer,
+            isPendingReady: false,
+            attentionCount: 1,
+            failureReason: failure,
+            printTimeLeftSeconds: nil
+        )
+        XCTAssertEqual(withoutETA.etaLabel, "ETA unavailable")
+        XCTAssertTrue(withoutETA.accessibilityLabel.contains("ETA unavailable"))
+    }
+
+    func testLateThumbnailFromOldRevisionCannotReplaceNewCard() async throws {
+        let service = MockPrinterService()
+        let barrier = AsyncBarrier()
+        defer { barrier.close() }
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 2, height: 2)).image { context in
+            UIColor.red.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 2, height: 2))
+        }
+        let data = try XCTUnwrap(image.pngData())
+        service.thumbnailHandler = { _, _ in await barrier.arriveAndWait(); return data }
+        let model = PrinterCardMediaModel()
+        let old = PrinterCardRequestID(printerID: TestData.testUUID, path: "/old",
+                                       jobName: "old", state: "printing", isFailureSuspected: false,
+                                       serviceID: ObjectIdentifier(service))
+        let task = Task { await model.load(request: old, service: service) }
+        await barrier.waitUntilArrived()
+        let new = PrinterCardRequestID(printerID: TestData.testUUID, path: nil,
+                                       jobName: nil, state: "idle", isFailureSuspected: false,
+                                       serviceID: ObjectIdentifier(service))
+        await model.load(request: new, service: service)
+        barrier.release()
+        await task.value
+        XCTAssertEqual(model.request, new)
+        XCTAssertNil(model.image)
+        XCTAssertNil(model.printTimeLeftSeconds)
+        model.cancel()
+        XCTAssertNil(model.request)
+    }
+
+    func testAuthenticatedThumbnailIsDecodedAndDownsampledForCurrentRevision() async throws {
+        let service = MockPrinterService()
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 600, height: 600)).image { context in
+            UIColor.green.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 600, height: 600))
+        }
+        let data = try XCTUnwrap(image.pngData())
+        service.thumbnailHandler = { _, path in
+            XCTAssertEqual(path, "/current-version")
+            return data
+        }
+        let model = PrinterCardMediaModel()
+        let request = PrinterCardRequestID(
+            printerID: TestData.testUUID, path: "/current-version",
+            jobName: "benchy", state: "printing", isFailureSuspected: false,
+            serviceID: ObjectIdentifier(service)
+        )
+        await model.load(request: request, service: service)
+        XCTAssertEqual(model.request, request)
+        XCTAssertEqual(model.image?.size.width, 180)
+        XCTAssertEqual(model.image?.size.height, 180)
+    }
+
+    func testThumbnailMissingInvalidAndTransportFailureLeaveNeutralPlaceholder() async throws {
+        for error in [NetworkError.notFound, NetworkError.staleServerResponse] {
+            let service = MockPrinterService()
+            service.thumbnailHandler = { _, _ in throw error }
+            let model = PrinterCardMediaModel()
+            await model.load(request: .init(printerID: TestData.testUUID, path: "/thumbnail",
+                                            jobName: "benchy", state: "printing", isFailureSuspected: false,
+                                            serviceID: ObjectIdentifier(service)), service: service)
+            XCTAssertNil(model.image)
+        }
+        let service = MockPrinterService()
+        service.thumbnailHandler = { _, _ in Data("not an image".utf8) }
+        let model = PrinterCardMediaModel()
+        await model.load(request: .init(printerID: TestData.testUUID, path: "/thumbnail",
+                                        jobName: "benchy", state: "printing", isFailureSuspected: false,
+                                        serviceID: ObjectIdentifier(service)), service: service)
+        XCTAssertNil(model.image)
+    }
+}
+
 /// Snapshot tests for printer controls across backend capability profiles,
 /// loading and disabled states, and shared detail-screen control styles.
 ///
@@ -117,6 +324,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
 
     private func host(_ view: some View) -> UIViewController {
         let host = UIHostingController(rootView: view.frame(width: 390))
+        host.overrideUserInterfaceStyle = .light
         host.view.backgroundColor = .systemBackground
         return host
     }
@@ -139,6 +347,22 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(100))
         controller.view.setNeedsLayout()
         controller.view.layoutIfNeeded()
+    }
+
+    /// Settles until `condition` holds or `timeout` elapses. Button actions dispatch
+    /// through `Task { await viewModel... }`, so slower simulators can need more than
+    /// one fixed settle before the service observes the call or the lease releases.
+    /// Callers still assert the exact outcome afterward.
+    private func settle(
+        _ controller: UIViewController,
+        until condition: () -> Bool,
+        timeout: Duration = .seconds(10)
+    ) async throws {
+        let deadline = ContinuousClock.now + timeout
+        repeat {
+            try await settle(controller)
+            if condition() { return }
+        } while ContinuousClock.now < deadline
     }
 
     func test_embeddedContent_mountAndRemount_doNotLoadOrDispatch() async throws {
@@ -569,7 +793,9 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         for axis in ["X", "Y", "Z"] {
             for (direction, sign) in [("negative", -1.0), ("positive", 1.0)] {
                 try button("printer.controls.jog.\(axis.lowercased()).\(direction)").sendActions(for: .touchUpInside)
-                try await settle(controller)
+                try await settle(controller) {
+                    service.moveCalledWith?.axis == axis && service.moveCalledWith?.distanceMm == sign * 10
+                }
                 XCTAssertEqual(service.moveCalledWith?.axis, axis)
                 XCTAssertEqual(service.moveCalledWith?.distanceMm, sign * 10)
                 XCTAssertEqual(
@@ -577,7 +803,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
                     axis == "Z" ? PrinterControlsViewModel.zFeedrateMmMin : PrinterControlsViewModel.xyFeedrateMmMin
                 )
                 model.cancelPendingCommand()
-                try await settle(controller)
+                try await settle(controller) { !model.isExecuting }
             }
         }
     }
@@ -591,16 +817,18 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         for size in [CGSize(width: 390, height: 844), CGSize(width: 1068, height: 850)] {
             let tablet = size.width >= 760
             let content = PrinterDetailPanelsHost(
-                selection: .constant(.controls), controlsAvailable: true, printer: printer,
-                overview: { Text("Overview fixture") },
-                controls: {
+                selection: .constant(.control), controlsAvailable: true, printer: printer,
+                status: { Text("Status fixture") },
+                control: {
                     ScrollView {
                         PrinterSetupControlsContent(printer: printer, viewModel: model, usesColumns: tablet)
                             .padding(.horizontal, tablet ? 24 : 16)
                             .padding(.vertical, 16)
                     }
                     .background(Color.pfBackgroundTertiary)
-                }
+                },
+                filament: { Color.clear },
+                queue: { Color.clear }
             )
             .safeAreaInset(edge: .top, spacing: 0) {
                 PrinterRunActionBar(
@@ -624,7 +852,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
                 $0 as? UISegmentedControl
             }.first)
             XCTAssertEqual(selector.selectedSegmentIndex, 1)
-            XCTAssertEqual(selector.bounds.width, tablet ? 380 : size.width - 32, accuracy: 1)
+            XCTAssertEqual(selector.bounds.width, size.width - (tablet ? 48 : 32), accuracy: 1)
             XCTAssertGreaterThanOrEqual(selector.bounds.height, 44)
             XCTAssertNotNil(nativeControls(in: controller.view).first {
                 $0.accessibilityIdentifier == "printer.controls.disable-motors"
@@ -648,7 +876,8 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
                 for selection in PrinterDetailPanel.allCases {
                     let content = PrinterDetailPanelsHost(
                         selection: .constant(selection), controlsAvailable: true, printer: printer,
-                        overview: { Color.clear }, controls: { Color.clear }
+                        status: { Color.clear }, control: { Color.clear },
+                        filament: { Color.clear }, queue: { Color.clear }
                     )
                     .environment(\.dynamicTypeSize, textSize)
                     .frame(width: width, height: 844)
@@ -838,7 +1067,13 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
                 XCTAssertGreaterThanOrEqual(button.bounds.height, 48)
                 XCTAssertTrue(button.isEnabled)
                 button.sendActions(for: .touchUpInside)
-                try await settle(controller)
+                try await settle(controller) {
+                    switch id {
+                    case "all": service.homeCalledWith != nil
+                    case "xy": service.homeXYCalledWith != nil
+                    default: service.homeZCalledWith != nil
+                    }
+                }
                 switch id {
                 case "all":
                     XCTAssertEqual(service.homeCalledWith?.axes, ["X", "Y", "Z"])
@@ -851,7 +1086,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
                     XCTAssertEqual(service.homeZCalledWith, printer.id)
                 }
                 model.cancelPendingCommand()
-                try await settle(controller)
+                try await settle(controller) { !model.isExecuting }
             }
             XCTAssertNil(service.moveCalledWith, "Homing glyphs must never issue a jog")
         }
@@ -1101,8 +1336,12 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         heater.text = "0"
         heater.sendActions(for: .editingChanged)
         try await settle(controller)
+        let coolDownDispatched = expectation(description: "The UI's asynchronous zero-target command reaches the service")
+        service.afterSetTemperatures = { coolDownDispatched.fulfill() }
+        defer { service.afterSetTemperatures = nil }
         try control("printer.controls.heat.set-targets").sendActions(for: .touchUpInside)
-        try await settle(controller)
+        await fulfillment(of: [coolDownDispatched], timeout: 5)
+        service.afterSetTemperatures = nil
         XCTAssertEqual(service.setTemperaturesCalledWith?.hotend, 0)
         model.cancelPendingCommand()
         service.setTemperaturesCalledWith = nil
@@ -1674,6 +1913,10 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         "supportsHoming": false, "supportsHotendTemperature": false,
         "supportedAxes": []
         """)
+        XCTAssertFalse(caps.supportsTemperatureControl)
+        XCTAssertFalse(caps.supportsMovement)
+        XCTAssertFalse(caps.supportsHome(axes: ["X", "Y", "Z"]))
+        XCTAssertFalse(PreheatSubgroup.isVisible(capabilities: caps))
         let svc = makeService(caps: caps)
         let section = await loadedSection(printer: printer, service: svc)
         assertSnapshot(of: host(ScrollView { section }), as: .image(on: .iPhone13), named: snapshotName)
@@ -1695,8 +1938,8 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         assertSnapshot(of: host(ScrollView { section }), as: .image(on: .iPhone13), named: snapshotName)
     }
 
-    /// The starting state keeps the section visible while `canControl` is false,
-    /// exercising disabled subgroup controls without the printing lockout banner.
+    /// Starting is treated as an active job for safety: controls remain visible,
+    /// but heat, motion and filament setup are locked while verified live adjustments stay capability-gated.
     func test_snapshot_disabledState_printerStarting() async throws {
         let printer = try makePrinter(backend: .moonraker, state: "starting")
         let svc = makeService(caps: Self.layoutCaps)

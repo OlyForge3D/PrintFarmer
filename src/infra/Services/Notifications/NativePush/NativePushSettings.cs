@@ -8,7 +8,7 @@ public enum NativePushMode
     /// <summary>Sender is a no-op. Default when nothing is configured.</summary>
     Disabled = 0,
 
-    /// <summary>Forward typed envelopes to an OlyForge3D-hosted relay over HTTPS.</summary>
+    /// <summary>Forward typed envelopes to an operator-provided relay over HTTPS.</summary>
     Relay = 1,
 
     /// <summary>Sign JWTs locally and post to <c>api.push.apple.com</c>.</summary>
@@ -68,10 +68,10 @@ public sealed class NativePushSettings
 /// </summary>
 public sealed class NativePushRelaySettings
 {
-    /// <summary>HTTPS endpoint of the OlyForge3D-hosted relay.</summary>
+    /// <summary>HTTPS endpoint of the operator-provided relay.</summary>
     public string? Endpoint { get; set; }
 
-    /// <summary>Bearer token issued per install by OlyForge3D.</summary>
+    /// <summary>Credential issued by the operator for the relay deployment.</summary>
     public string? ApiKey { get; set; }
 
     /// <summary>Optional installation identifier the relay uses for per-tenant accounting.</summary>

@@ -19,8 +19,6 @@ import { FailureDetectionMonitoringSummary } from '@/features/printers/component
 import { OfflineTroubleshootingGuide } from '@/features/printers/components/OfflineTroubleshootingGuide';
 import { PrinterCameraPreview } from '@/features/printers/components/PrinterCameraPreview';
 import { EstimatedCompletionBadge } from '@/features/printers/components/EstimatedCompletionBadge';
-import { PrinterCoverageSummary } from '@/features/filament-coverage/components/FilamentCoverageBadge';
-import { usePrinterCoverageFromFleet } from '@/features/filament-coverage/hooks';
 import type { Printer, PrinterBackendCapabilitiesDto, MmuGate } from '@/types/api';
 import type { PrinterDisplay } from '@/common/hooks/usePrinterDisplay';
 import { useAutoDispatchStatus, useSetAutoDispatchEnabled } from '@/features/printers/hooks/useAutoDispatch';
@@ -151,7 +149,6 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
 
   // Auto-dispatch opt-in status
   const { data: autoDispatchStatus } = useAutoDispatchStatus(printer.id);
-  const { data: coverage } = usePrinterCoverageFromFleet(printer.id);
   const setAutoDispatchEnabled = useSetAutoDispatchEnabled();
 
   const handleAutoDispatchToggle = async () => {
@@ -327,6 +324,11 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
               printerName={printer.name}
               variant="compact"
               className="mb-3"
+              onReview={() =>
+                failureDetectionStatus?.state === 'misconfigured' && onEdit
+                  ? onEdit(printer)
+                  : onExpand(printer.id)
+              }
             />
           )}
 
@@ -505,7 +507,6 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
 
             return <span className="italic text-pf-text-tertiary">No spool loaded</span>;
           })()}
-          <PrinterCoverageSummary coverage={coverage} compact className="ml-1" isOnline={isOnline} />
         </div>
         <div className="relative shrink-0 ml-2">
           <Button

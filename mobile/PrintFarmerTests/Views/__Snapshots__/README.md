@@ -20,10 +20,15 @@ layout or UI tests.
 
 ## Regenerating
 
-Baselines are SDK-sensitive. Select the Xcode and simulator with the same
-workflow steps and preference variables used by
+Baselines are SDK-sensitive. Generate them with Xcode 26.6 build 17F113 and the approved
+iOS 26.5 (23F77) simulator runtime. CI uses the `macos-26` arm64 runner image and
+installs iOS 26.5 when it is not preinstalled. Select the simulator with the
+same workflow steps and preference variables used by
 `.github/workflows/ios-pr-ci.yml`, then run only
 `PrinterControlsSectionSnapshotTests`.
+The shared host helper forces `.light`; the dedicated destructive-button
+snapshot selects `.dark` explicitly, so host appearance cannot change the
+Controls references.
 
 1. Run the full affected snapshot class and inspect reference/actual/difference
    attachments. Identify which baselines reflect an intentional approved change,
@@ -76,8 +81,8 @@ offline and print-state gates are unchanged.
 The independent destructive-button dark-mode reference remains unchanged.
 
 References were regenerated on task-isolated iPhone 17 (3x) and iPad Pro
-13-inch M5 (2x) hosts using Xcode 26.6 (17F113), iOS 26.5 (23F77), the
-shared approved-runtime resolver and the unchanged `.iPhone13` component
+13-inch M5 (2x) hosts using Xcode 26.6 (17F113), iOS 26.5 (23F77),
+the shared approved-runtime resolver and the unchanged `.iPhone13` component
 configuration. Full-page identity/selector captures and homing dispatch tests
 supplement these component goldens.
 
@@ -109,3 +114,40 @@ not homed.
 References were regenerated on the resolver-selected iPhone 15 (3x) and iPad Pro
 13-inch M5 (2x) hosts using Xcode 26.6 (17F113) and iOS 26.5 (23F77), with the
 unchanged `.iPhone13` component configuration.
+
+## Approved printer-detail control updates (#3259)
+
+The six iPhone goldens were refreshed from the reviewed CI test captures at
+`564d7531885aff0821b1597d5cc1fd4b2ce1ae98`, produced by Xcode 26.6 on iOS
+26.5 (23F77), using the iPhone snapshot configuration at 3x. Only the six
+changed cases below were updated; the destructive-button golden and all iPad
+goldens remain unchanged.
+
+| Cases | Intentional change |
+| --- | --- |
+| Starting / printing | Keep the lockout visible and physical controls disabled while using the updated control layout and explanatory copy. |
+| FlashForge / Moonraker / SDCP | Reflect the current capability-wire profiles while preserving supported and unsupported control states. |
+| Capabilities loading | Show heater maxima as unknown until a valid hardware-limits read completes; do not reuse stale fixture limits. |
+
+These are component renderings of explicit test fixtures, not backend or
+physical-printer command evidence. Capability assertions and command tests
+remain the behavioral evidence; strict image comparison is unchanged.
+
+## Xcode 27.0 toolchain baseline (#3285)
+
+The six Controls snapshots were re-baselined against Xcode 27.0 build 27A266a and
+iOS 26.5 (23F77). The references were regenerated with the strict existing
+snapshot assertions on the resolver-selected iPhone and iPad hosts, with
+appearance pinned to light. The six iPhone references were byte-identical to
+their existing goldens; only the six iPad references changed. The dark-mode
+destructive-button reference is independent and remains unchanged.
+
+## Xcode 26.6 containment rollback
+
+The active toolchain is again Xcode 26.6 (17F113), iOS 26.5 (23F77).
+The six iPad PNGs changed by #3286 are retained pending matching-environment
+validation; this rollback does not certify those PNGs under Xcode 26.6.
+Do not restore historical images or re-record without comparing actual output
+at the exact approved Xcode/runtime, host family, scale, locale and appearance.
+Strict assertions, iPhone references and the destructive-button reference stay
+unchanged. The selected-toolchain iPad snapshot run remains required evidence.

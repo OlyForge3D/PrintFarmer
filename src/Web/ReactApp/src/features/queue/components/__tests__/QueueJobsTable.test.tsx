@@ -14,6 +14,7 @@ import type {
 import { QueueJobsTable } from "../QueueJobsTable";
 import { QueuedPrintJobWithFileMetaDto } from "@/services/printQueueService";
 import { PrintJobPriority } from "@/types/api";
+import { getQueueMoveNeighbors } from "@/features/queue/utils/queueReordering";
 import "@testing-library/jest-dom";
 
 interface MockFleetCoverageResult {
@@ -358,56 +359,6 @@ describe("QueueJobsTable Component", () => {
     },
   );
 
-  it("hides Start Print and shows a recovery hold badge for an operator-recovery-blocked job (#2993)", () => {
-    const job = createMockJob({
-      job: { ...createMockJob().job, blockedReasonCode: "OperatorRecoveryRequired" },
-    });
-
-    render(<QueueJobsTable jobs={[job]} onCancel={vi.fn()} />);
-
-    expect(screen.getByText("Recovery hold")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /^Start print/ })).not.toBeInTheDocument();
-  });
-
-  it("flags an unknown dispatch outcome that needs reconciliation (#2993)", () => {
-    const job = createMockJob({
-      job: {
-        ...createMockJob().job,
-        status: "Assigned",
-        dispatchResult: {
-          outcome: "Unknown",
-          requiresReconciliation: true,
-        } as unknown as NonNullable<QueuedPrintJobWithFileMetaDto["job"]["dispatchResult"]>,
-      },
-    });
-
-    render(<QueueJobsTable jobs={[job]} onCancel={vi.fn()} />);
-
-    expect(screen.getByText("Outcome unknown")).toBeInTheDocument();
-    // R3044-V01: the print may have started, so ordinary start/cancel must not
-    // be offered in place of operator recovery.
-    expect(screen.queryByRole("button", { name: /^Start print/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /^Cancel/ })).not.toBeInTheDocument();
-  });
-
-  it("keeps Start print and Cancel for an unknown outcome that no longer needs reconciliation", () => {
-    const job = createMockJob({
-      job: {
-        ...createMockJob().job,
-        status: "Assigned",
-        dispatchResult: {
-          outcome: "Unknown",
-          requiresReconciliation: false,
-        } as unknown as NonNullable<QueuedPrintJobWithFileMetaDto["job"]["dispatchResult"]>,
-      },
-    });
-
-    render(<QueueJobsTable jobs={[job]} onCancel={vi.fn()} />);
-
-    expect(screen.getByRole("button", { name: /^Start print/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^Cancel/ })).toBeInTheDocument();
-  });
-
   it("qualifies the Schedule accessible name without changing its visible label", () => {
     const job = createMockJob({
       job: { ...createMockJob().job, status: "Queued" },
@@ -745,6 +696,51 @@ describe("QueueJobsTable Component", () => {
     fireEvent.keyDown(cancelButton, { key: "Enter" });
     expect(onEdit).not.toHaveBeenCalled();
   });
+
+  it("exposes accessible reorder buttons and accepts a same-scope pointer drop", () => {
+    const firstBase = createMockJob();
+    const first = createMockJob({
+      job: { ...firstBase.job, rowVersion: "etag-job-1" },
+      gcodeFile: { ...firstBase.gcodeFile!, name: "first.gcode" },
+    });
+    const second = createMockJob({
+      job: { ...first.job, id: "job-2", name: "second", rowVersion: "etag-job-2" },
+      gcodeFile: { ...first.gcodeFile!, id: "file-2", name: "second.gcode", fileName: "second.gcode" },
+    });
+    const jobs = [first, second];
+    const onMoveJob = vi.fn();
+    const onDragStartJob = vi.fn();
+    const dataTransfer = {
+      effectAllowed: "",
+      dropEffect: "",
+      setData: vi.fn(),
+      getData: vi.fn().mockReturnValue("job-2"),
+    } as unknown as DataTransfer;
+    const { container } = render(
+      <QueueJobsTable
+        jobs={jobs}
+        canReorder
+        draggedJobId="job-2"
+        reorderNeighbors={getQueueMoveNeighbors(jobs)}
+        onMoveJob={onMoveJob}
+        onDragStartJob={onDragStartJob}
+        canDropOnJob={(movedId, neighborId) => movedId !== neighborId}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Move second.gcode up" })).toBeEnabled();
+    const source = container.querySelector('[data-job-id="job-2"]');
+    const target = container.querySelector('[data-job-id="job-1"]');
+    expect(source).not.toBeNull();
+    expect(target).not.toBeNull();
+    vi.spyOn(target!, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 100, 100));
+
+    fireEvent.dragStart(source!, { dataTransfer });
+    fireEvent.drop(target!, { dataTransfer, clientY: 5 });
+
+    expect(onDragStartJob).toHaveBeenCalledWith("job-2");
+    expect(onMoveJob).toHaveBeenCalledWith("job-2", "job-1", "after");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -786,6 +782,8 @@ describe("QueueJobsTable — filament coverage badge", () => {
 
   function fleetWithStatus(
     status: FilamentCoverageStatus,
+    assignedQueuedJobCount = 1,
+    activeJobId: string | null = null,
   ): MockFleetCoverageResult {
     return {
       data: {
@@ -795,11 +793,11 @@ describe("QueueJobsTable — filament coverage badge", () => {
             printerName: "Badge Printer",
             status,
             toolheads: [],
-            activeJobId: null,
+            activeJobId,
             activeJobName: null,
             activeJobProgress: null,
             earliestPredictedRunoutAt: null,
-            assignedQueuedJobCount: 0,
+            assignedQueuedJobCount,
             evaluatedAtUtc: new Date().toISOString(),
           },
         ],
@@ -818,6 +816,18 @@ describe("QueueJobsTable — filament coverage badge", () => {
       isLoading: false,
       isError: false,
     });
+  });
+
+  it('hides a stale runout verdict when the coverage snapshot has no active or assigned work', () => {
+    mockGetCoverage.mockReturnValue(fleetWithStatus('runout', 0));
+    render(<QueueJobsTable jobs={[jobWithPrinter]} />);
+    expect(screen.queryByRole('status', { name: /runout risk/i })).not.toBeInTheDocument();
+  });
+
+  it('shows a runout verdict for an active job even without queued work', () => {
+    mockGetCoverage.mockReturnValue(fleetWithStatus('runout', 0, 'active-job'));
+    render(<QueueJobsTable jobs={[jobWithPrinter]} />);
+    expect(screen.getByRole('status', { name: /runout risk/i })).toBeInTheDocument();
   });
 
   it("shows the runout badge when assigned printer status is 'runout'", async () => {

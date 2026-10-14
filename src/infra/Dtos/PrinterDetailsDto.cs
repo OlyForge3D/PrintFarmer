@@ -63,4 +63,7 @@ public record PrinterDetailsDto(
     bool PasswordConfigured = false,
     bool CameraStreamConfigured = false,
     bool CameraSnapshotConfigured = false,
-    string? RowVersion = null);
+    string? RowVersion = null,
+
+    // Presentation-only: show the filament box external spool slot.
+    bool ShowExternalSpool = false);

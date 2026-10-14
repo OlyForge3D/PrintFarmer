@@ -268,7 +268,8 @@ private struct HarvestEligibleJobPickerView: View {
     private func loadCandidates() async {
         isLoading = true
         do {
-            candidates = try await services.jobService.listAllJobs()
+            let page = try await services.jobService.listAllJobs()
+            candidates = page.jobs
         } catch {
             errorMessage = error.localizedDescription
         }

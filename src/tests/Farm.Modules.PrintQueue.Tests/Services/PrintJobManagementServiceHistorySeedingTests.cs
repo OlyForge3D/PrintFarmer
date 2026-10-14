@@ -216,6 +216,98 @@ public class PrintJobManagementServiceHistorySeedingTests
     }
 
     [Fact]
+    public async Task SyncActiveExternalJobsFromPrintersAsync_WhenKnownExternalJobIsTerminal_RefreshesStatusAndEndTime()
+    {
+        Guid printerId = Guid.NewGuid();
+        DateTime startUtc = DateTime.UtcNow.AddMinutes(-30);
+        DateTime endUtc = DateTime.UtcNow.AddMinutes(-5);
+        long startUnix = new DateTimeOffset(startUtc).ToUnixTimeSeconds();
+        long endUnix = new DateTimeOffset(endUtc).ToUnixTimeSeconds();
+
+        Printer printer = new()
+        {
+            Id = printerId,
+            Name = "Moonraker Terminal Refresh",
+            Backend = (int)PrinterBackend.Moonraker,
+            IsEnabled = true,
+            ServiceState = new PrinterServiceState { PrinterId = printerId, LastHistorySeedUtc = DateTime.UtcNow.AddHours(-1) }
+        };
+
+        PrintJob seededJob = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = "external-terminal",
+            ExternalJobId = "ext-terminal-1",
+            SourcePrinterId = printerId,
+            WasSeededFromHistory = true,
+            Status = PrintJobStatus.Printing,
+            ActiveExternalPrinterId = printerId,
+            ActualStartTime = startUtc,
+            ActualEndTime = null,
+            CreatedAt = startUtc,
+            UpdatedAt = startUtc,
+            QueuedAt = startUtc
+        };
+
+        HistoryListResponse historyResponse = new()
+        {
+            Count = 1,
+            Jobs =
+            [
+                new HistoryJob
+                {
+                    JobId = "ext-terminal-1",
+                    Filename = "external-terminal.gcode",
+                    Status = "completed",
+                    StartTime = startUnix,
+                    EndTime = endUnix,
+                    FilamentUsed = 400,
+                    Metadata = []
+                }
+            ]
+        };
+
+        Mock<IPrintJobManagementRepository> repository = new();
+        repository.Setup(r => r.GetEnabledPrintersAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync([printer]);
+        repository.Setup(r => r.GetExternalJobIdsForPrinterAsync(
+                printerId, It.IsAny<IReadOnlyCollection<string>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(["ext-terminal-1"]);
+        repository.Setup(r => r.GetActualStartTimesForPrinterAsync(
+                printerId, It.IsAny<IReadOnlyCollection<DateTime>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => []);
+        repository.Setup(r => r.GetByExternalIdAsync(printerId, "ext-terminal-1", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(seededJob);
+        repository.Setup(r => r.SaveChangesAsync(It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        repository.Setup(r => r.UpdatePrinterLastHistorySeedAsync(printerId, It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        Mock<IPrintersService> printersService = new();
+        printersService.Setup(p => p.GetHistoryListAsync(
+                printerId,
+                50,
+                0,
+                It.IsAny<DateTime?>(),
+                null,
+                "desc",
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(historyResponse);
+
+        PrintJobManagementService service = CreateService(repository, printersService);
+
+        await service.SyncActiveExternalJobsFromPrintersAsync();
+
+        repository.Verify(r => r.Add(It.IsAny<PrintJob>()), Times.Never);
+        repository.Verify(r => r.GetByExternalIdAsync(printerId, "ext-terminal-1", It.IsAny<CancellationToken>()), Times.Once);
+        repository.Verify(r => r.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
+        Assert.Equal(PrintJobStatus.Completed, seededJob.Status);
+        Assert.Equal(DateTimeOffset.FromUnixTimeSeconds(endUnix).UtcDateTime, seededJob.ActualEndTime);
+        Assert.Equal(DateTimeOffset.FromUnixTimeSeconds(endUnix).UtcDateTime - DateTimeOffset.FromUnixTimeSeconds(startUnix).UtcDateTime, seededJob.ActualPrintTime);
+        Assert.Null(seededJob.ActiveExternalPrinterId);
+    }
+
+    [Fact]
     public async Task SyncActiveExternalJobsFromPrintersAsync_DoesNotUseOrAdvanceSharedHistoryWatermark()
     {
         Guid printerId = Guid.NewGuid();

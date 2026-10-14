@@ -196,14 +196,14 @@
         "path": ".github/skills/secret-handling/SKILL.md",
         "pattern": "-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----",
         "matchSha256": "3021d90eb9437b2d8f30e8363695c4418b5e5f1870801b5c317e9398ee0f572d",
-        "contentSha256": "b9222aa132746bb312ac06b7060e3893c6b2f0126f2e33753037bd98c0c6b47b",
+        "contentSha256": "b59ecbc69e0e5d295f0dcf6a90cd555e86c244eaacef786a753fca0e78ea8765",
         "reason": "Private-key marker documented without key material in secret-handling guidance."
       },
       {
         "path": ".github/skills/secret-handling/SKILL.md",
         "pattern": "-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----",
         "matchSha256": "8bcac7908eb950419537b91e19adc83ce2c9cbfdacf4f81157fdadfec11f7017",
-        "contentSha256": "b9222aa132746bb312ac06b7060e3893c6b2f0126f2e33753037bd98c0c6b47b",
+        "contentSha256": "b59ecbc69e0e5d295f0dcf6a90cd555e86c244eaacef786a753fca0e78ea8765",
         "reason": "RSA private-key marker documented without key material in secret-handling guidance."
       },
       {
@@ -299,14 +299,14 @@
         "path": "src/tests/Farm.Web.Api.Tests/Security/PrinterEndpointRedactionTests.cs",
         "pattern": "https?://[^\\s/:]+:[^\\s/@]+@",
         "matchSha256": "2b37ca011dc0baf5ac3ceff7569d873e97e370f6c6cfa28ebfdc8fba20ed280a",
-        "contentSha256": "487b6945760d69b545397478ec9fe324b13c12ef528e3ff29a62301fd7075d3f",
+        "contentSha256": "39462edbbafd4f4286966fbd4ccff61453a853c41828f7114364881b1a10b8bc",
         "reason": "Synthetic printer credentials test endpoint redaction."
       },
       {
         "path": "src/tests/Farm.Web.Api.Tests/Security/SensitiveSerializationTests.cs",
         "pattern": "https?://[^\\s/:]+:[^\\s/@]+@",
         "matchSha256": "2b37ca011dc0baf5ac3ceff7569d873e97e370f6c6cfa28ebfdc8fba20ed280a",
-        "contentSha256": "3d25b1d4fd999194282d4691aedebba55077f47a6f00998b1745ff936db16e72",
+        "contentSha256": "d0a8b86f0072001a7dec25cdd3f2055d0f75eda1d1b3ca087a2896cdd7b869a0",
         "reason": "Synthetic printer URL tests removal of embedded credentials from computed URLs."
       }
     ]

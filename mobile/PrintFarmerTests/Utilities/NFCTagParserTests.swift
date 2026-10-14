@@ -3,6 +3,21 @@ import XCTest
 
 /// Tests for NFCTagParser: OpenSpool/OpenPrintTag parsing, payload creation, and edge cases.
 final class NFCTagParserTests: XCTestCase {
+    func testPrinterAndSpoolURITagsUseTheSharedDeepLinkParser() throws {
+        let id = UUID()
+        let printerURL = try XCTUnwrap(URL(string: "printfarmer://printer/\(id)"))
+        guard case .printerId(let parsed) = NFCTagParser.parseNavigationURL(printerURL) else {
+            return XCTFail("Expected printer tag")
+        }
+        XCTAssertEqual(parsed, id)
+        let spoolURL = try XCTUnwrap(URL(string: "printfarmer://spool/42"))
+        guard case .spoolId(let spool) = NFCTagParser.parseNavigationURL(spoolURL) else {
+            return XCTFail("Expected spool tag")
+        }
+        XCTAssertEqual(spool, 42)
+        XCTAssertNil(NFCTagParser.parseNavigationURL(try XCTUnwrap(URL(string: "printfarmer://spool/0"))))
+        XCTAssertNil(NFCTagParser.parseNavigationURL(try XCTUnwrap(URL(string: "https://example.com/printer/\(id)"))))
+    }
 
     // MARK: - OpenSpool: All Fields
 

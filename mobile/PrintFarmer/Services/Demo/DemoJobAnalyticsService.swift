@@ -61,34 +61,64 @@ final class DemoJobAnalyticsService: JobAnalyticsServiceProtocol, @unchecked Sen
     func getHistory(limit: Int?, offset: Int?, sortBy: String?, statuses: String?,
                     dateStart: Date?, dateEnd: Date?) async throws -> QueueHistoryPage {
         let now = Date()
+        var entries = [
+            QueueHistoryEntry(id: DemoData.job7ID.uuidString, jobName: "benchy_calibration.gcode",
+                              printerName: "Prusa MK4 #2", status: "Completed",
+                              completedAt: now.addingTimeInterval(-166400), durationSeconds: 3600,
+                              completionPercentage: 100, materialCostUsd: Decimal(string: "0.78"),
+                              totalCostUsd: Decimal(string: "0.78"), costIsEstimated: false,
+                              materialType: "PLA", filamentName: "Prusament PLA",
+                              filamentColor: "#000000", actualFilamentUsageGrams: 14.8,
+                              estimatedFilamentUsageGrams: 15.0, actualCost: Decimal(string: "0.78")),
+            QueueHistoryEntry(id: DemoData.job8ID.uuidString, jobName: "bracket_mount_x2.gcode",
+                              printerName: "Bambu X1C", status: "Completed",
+                              completedAt: now.addingTimeInterval(-248000), durationSeconds: 8000,
+                              completionPercentage: 100, materialCostUsd: Decimal(string: "3.15"),
+                              totalCostUsd: Decimal(string: "3.15"), costIsEstimated: false,
+                              materialType: "PETG", filamentName: "eSun PETG",
+                              filamentColor: "#FFFFFF", actualFilamentUsageGrams: 41.5,
+                              estimatedFilamentUsageGrams: 42.0, actualCost: Decimal(string: "3.15")),
+            QueueHistoryEntry(id: DemoData.job9ID.uuidString, jobName: "vase_mode_spiral.gcode",
+                              printerName: "Voron 2.4", status: "Failed",
+                              completedAt: now.addingTimeInterval(-79200), durationSeconds: 3600,
+                              completionPercentage: 42, materialCostUsd: Decimal(string: "1.06"),
+                              totalCostUsd: Decimal(string: "1.06"), costIsEstimated: true,
+                              materialType: "PLA", estimatedFilamentUsageGrams: 42.5,
+                              failureReason: "Thermal runaway detected"),
+        ]
+
+        if let statuses {
+            let requestedStatuses = Set(statuses.split(separator: ",").map {
+                $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            })
+            entries = entries.filter { requestedStatuses.contains($0.status.lowercased()) }
+        }
+        if let dateStart {
+            entries = entries.filter { ($0.completedAt ?? .distantPast) >= dateStart }
+        }
+        if let dateEnd {
+            entries = entries.filter { ($0.completedAt ?? .distantFuture) <= dateEnd }
+        }
+        if sortBy?.lowercased() == "newest" {
+            entries.sort {
+                ($0.completedAt ?? .distantPast) > ($1.completedAt ?? .distantPast)
+            }
+        }
+
+        let pageSize = max(1, limit ?? 50)
+        let pageStart = min(max(0, offset ?? 0), entries.count)
+        let pageEnd = min(pageStart + pageSize, entries.count)
         return QueueHistoryPage(
-            entries: [
-                QueueHistoryEntry(id: DemoData.job7ID.uuidString, jobName: "benchy_calibration.gcode",
-                                  printerName: "Prusa MK4 #2", status: "Completed",
-                                  completedAt: now.addingTimeInterval(-166400), durationSeconds: 3600,
-                                  completionPercentage: 100, materialCostUsd: Decimal(string: "0.78"),
-                                  totalCostUsd: Decimal(string: "0.78"), costIsEstimated: false,
-                                  materialType: "PLA", filamentName: "Prusament PLA",
-                                  filamentColor: "#000000", actualFilamentUsageGrams: 14.8,
-                                  estimatedFilamentUsageGrams: 15.0, actualCost: Decimal(string: "0.78")),
-                QueueHistoryEntry(id: DemoData.job8ID.uuidString, jobName: "bracket_mount_x2.gcode",
-                                  printerName: "Bambu X1C", status: "Completed",
-                                  completedAt: now.addingTimeInterval(-248000), durationSeconds: 8000,
-                                  completionPercentage: 100, materialCostUsd: Decimal(string: "3.15"),
-                                  totalCostUsd: Decimal(string: "3.15"), costIsEstimated: false,
-                                  materialType: "PETG", filamentName: "eSun PETG",
-                                  filamentColor: "#FFFFFF", actualFilamentUsageGrams: 41.5,
-                                  estimatedFilamentUsageGrams: 42.0, actualCost: Decimal(string: "3.15")),
-                QueueHistoryEntry(id: DemoData.job9ID.uuidString, jobName: "vase_mode_spiral.gcode",
-                                  printerName: "Voron 2.4", status: "Failed",
-                                  completedAt: now.addingTimeInterval(-79200), durationSeconds: 3600,
-                                  completionPercentage: 42, materialCostUsd: Decimal(string: "1.06"),
-                                  totalCostUsd: Decimal(string: "1.06"), costIsEstimated: true,
-                                  materialType: "PLA", estimatedFilamentUsageGrams: 42.5,
-                                  failureReason: "Thermal runaway detected"),
-            ],
-            totalCount: 3, currentPage: 1, pageSize: 20,
-            stats: QueueHistoryStats(totalCompleted: 772, totalFailed: 41, averageDurationMinutes: 132))
+            entries: Array(entries[pageStart..<pageEnd]),
+            totalCount: entries.count,
+            currentPage: pageStart / pageSize + 1,
+            pageSize: pageSize,
+            stats: QueueHistoryStats(
+                totalCompleted: 772,
+                totalFailed: 41,
+                averageDurationMinutes: 132
+            )
+        )
     }
 
     func getTimeline(dateFrom: Date?, dateTo: Date?, printerId: UUID?,

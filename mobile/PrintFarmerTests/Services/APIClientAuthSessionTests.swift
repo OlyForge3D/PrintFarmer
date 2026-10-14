@@ -9,6 +9,84 @@ import XCTest
 final class APIClientAuthSessionTests: XCTestCase {
     private static let testServerID = UUID()
 
+    func testJobThumbnailUsesVersionedAuthenticatedOriginAndNoSharedCache() async throws {
+        let transport = MockURLProtocol.makeSession()
+        transport.requestHandler = { request in
+            (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil,
+                             headerFields: ["Content-Type": "image/png"])!, Data([1, 2, 3]))
+        }
+        let client = APIClient(baseURL: TestData.testBaseURL, session: transport.urlSession)
+        await client.setAuthenticatedSession(.init(accessToken: "test-thumbnail", serverID: Self.testServerID))
+        let service = PrinterService(apiClient: client)
+        for version in ["0123456789abcdef", "fedcba9876543210"] {
+            let data = try await service.getCurrentJobThumbnail(
+                id: TestData.testUUID,
+                path: "/api/printers/\(TestData.testUUID)/current-job/thumbnail?v=\(version)"
+            )
+            XCTAssertEqual(data, Data([1, 2, 3]))
+        }
+        XCTAssertEqual(transport.capturedRequests.count, 2)
+        for request in transport.capturedRequests {
+            XCTAssertEqual(request.url?.host, TestData.testBaseURL.host)
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer test-thumbnail")
+            XCTAssertEqual(request.cachePolicy, .reloadIgnoringLocalCacheData)
+        }
+        XCTAssertNotEqual(transport.capturedRequests[0].url, transport.capturedRequests[1].url)
+    }
+
+    func testJobThumbnailRejectsExternalOrUnversionedPathsBeforeSending() async throws {
+        let transport = MockURLProtocol.makeSession()
+        let client = APIClient(baseURL: TestData.testBaseURL, session: transport.urlSession)
+        await client.setAuthenticatedSession(.init(accessToken: "test-thumbnail", serverID: Self.testServerID))
+        for path in [
+            "https://other.example.com/api/printers/\(TestData.testUUID)/current-job/thumbnail?v=0123456789abcdef",
+            "//other.example.com/image.png",
+            "/api/printers/\(UUID())/current-job/thumbnail?v=0123456789abcdef",
+            "/api/printers/\(TestData.testUUID)/current-job/thumbnail",
+            "/api/printers/\(TestData.testUUID)/current-job/thumbnail?v=0123456789abcdef&token=bad",
+            "/api/printers/\(TestData.testUUID)/snapshot"
+        ] {
+            do {
+                _ = try await client.getCurrentJobThumbnail(printerID: TestData.testUUID, path: path)
+                XCTFail("Invalid image path accepted")
+            } catch NetworkError.invalidURL { }
+        }
+        XCTAssertTrue(transport.capturedRequests.isEmpty)
+    }
+
+    func testJobThumbnailDropsChangedAuthenticationBeforeSendAndAfterResponse() async throws {
+        for afterSend in [false, true] {
+            let transport = MockURLProtocol.makeSession()
+            let client = APIClient(baseURL: TestData.testBaseURL, session: transport.urlSession)
+            await client.setAuthenticatedSession(.init(accessToken: "old-thumbnail", serverID: Self.testServerID))
+            let barrier = AsyncBarrier()
+            defer { barrier.close() }
+            if afterSend {
+                transport.asyncRequestHandler = { request in
+                    await barrier.arriveAndWait()
+                    return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil,
+                                            headerFields: ["Content-Type": "image/png"])!, Data([1]))
+                }
+            } else {
+                await client.setTokenExpiryChecker { await barrier.arriveAndWait(); return false }
+            }
+            let task = Task {
+                try await client.getCurrentJobThumbnail(
+                    printerID: TestData.testUUID,
+                    path: "/api/printers/\(TestData.testUUID)/current-job/thumbnail?v=0123456789abcdef"
+                )
+            }
+            await barrier.waitUntilArrived()
+            await client.setAuthenticatedSession(.init(accessToken: "new-thumbnail", serverID: UUID()))
+            barrier.release()
+            do {
+                _ = try await task.value
+                XCTFail("Old authentication response accepted")
+            } catch NetworkError.staleServerResponse { }
+            XCTAssertEqual(transport.capturedRequests.count, afterSend ? 1 : 0)
+        }
+    }
+
     func testControlSubmissionRejectsChangedRegistryIDEvenForSameURLAndBearer() async throws {
         let transport = MockURLProtocol.makeSession()
         let client = APIClient(baseURL: TestData.testBaseURL, session: transport.urlSession)

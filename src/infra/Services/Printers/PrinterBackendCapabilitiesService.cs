@@ -16,12 +16,14 @@ public class PrinterBackendCapabilitiesService(
     IPrintersRepository repo,
     IBackendCapabilityFactory capabilityFactory,
     IBackendClientFactory? backendClientFactory = null,
-    IPrinterVerifiedSafetyCache? verifiedSafetyCache = null) : IPrinterBackendCapabilitiesService
+    IPrinterVerifiedSafetyCache? verifiedSafetyCache = null,
+    IPrinterStatusCacheReader? statusCacheReader = null) : IPrinterBackendCapabilitiesService
 {
     private readonly IPrintersRepository _repo = repo ?? throw new ArgumentNullException(nameof(repo));
     private readonly IBackendCapabilityFactory _capabilityFactory = capabilityFactory ?? throw new ArgumentNullException(nameof(capabilityFactory));
     private readonly IBackendClientFactory? _backendClientFactory = backendClientFactory;
     private readonly IPrinterVerifiedSafetyCache? _verifiedSafetyCache = verifiedSafetyCache;
+    private readonly IPrinterStatusCacheReader? _statusCacheReader = statusCacheReader;
 
     public async Task<PrinterBackendCapabilitiesDto?> GetByPrinterIdAsync(Guid printerId, CancellationToken ct)
     {
@@ -96,6 +98,18 @@ public class PrinterBackendCapabilitiesService(
         bool movement = controlClient is ISupportsMovement;
         bool temperature = controlClient is ISupportsTemperatureControl;
         bool homing = movement && controls.SupportsHoming;
+        PrinterStatusCacheSnapshot? statusSnapshot =
+            _statusCacheReader?.GetSnapshot(printer.Id);
+        PrinterStatusDto? latestStatus = PrinterStatusFreshness.IsFreshOnline(
+            statusSnapshot,
+            DateTime.UtcNow)
+                ? statusSnapshot!.Status
+                : null;
+        bool supportsFanReadback =
+            latestStatus is { IsOnline: true, FanSpeedPercent: >= 0 and <= 100 };
+        bool supportsZOffsetReadback =
+            latestStatus is { IsOnline: true, LiveZOffsetMm: { } liveZOffsetMm } &&
+            double.IsFinite(liveZOffsetMm);
 
         PrinterVerifiedSafetyDto verifiedSafety =
             await GetVerifiedSafetyAsync(printer, backend, ct);
@@ -128,6 +142,12 @@ public class PrinterBackendCapabilitiesService(
             SupportsDisableMotors = controls.SupportsDisableMotors && controlClient is ISupportsMotorControl,
             SupportsExtrusion = controls.SupportsExtrusion && controlClient is ISupportsExtrusionControl,
             SupportsZOffset = true,
+            SupportsZOffsetAdjustment =
+                controlClient is ISupportsZOffsetAdjustment && supportsZOffsetReadback,
+            SupportsFanControl =
+                controlClient is ISupportsFanControl && supportsFanReadback,
+            SupportsFanSpeedReadback = supportsFanReadback,
+            SupportsZOffsetReadback = supportsZOffsetReadback,
 
             // SAVE_CONFIG does not persist SET_GCODE_OFFSET; M851/M500 is not universal
             // on OctoPrint firmware. Transport support alone cannot prove persistence.

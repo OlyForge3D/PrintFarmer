@@ -430,7 +430,8 @@ public sealed class PrusaLinkPollingService(
                         BedTarget: status.BedTarget,
                         SpoolInfo: spoolInfo,
                         PrintTimeLeftSeconds: status.TimeRemainingSeconds,
-                        SpeedMultiplier: status.SpeedMultiplier);
+                        SpeedMultiplier: status.SpeedMultiplier,
+                        ThumbnailCacheIdentity: status.ThumbnailCacheIdentity);
                     _statusCacheWriter.UpdateStatus(cacheUpdate, originWatermark);
 
                     var signalRUpdate = new PrinterStatusUpdate(
@@ -450,7 +451,8 @@ public sealed class PrusaLinkPollingService(
                         BedTarget: status.BedTarget,
                         HomedAxes: null,
                         SpoolInfo: spoolInfo,
-                        FileName: PrinterStatusDto.ExtractFileName(status.JobName));
+                        FileName: PrinterStatusDto.ExtractFileName(status.JobName),
+                        ThumbnailCacheIdentity: status.ThumbnailCacheIdentity);
 
                     if (PrinterStatusBroadcastGate.ShouldBroadcast(state.LastBroadcastUpdate, signalRUpdate))
                     {

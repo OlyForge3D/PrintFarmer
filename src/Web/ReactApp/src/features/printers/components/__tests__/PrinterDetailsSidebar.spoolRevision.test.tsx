@@ -1,9 +1,8 @@
 vi.mock('@/features/printers/hooks/use-printer-controls-mode', () => ({
-  usePrinterControlsMode: () => ({ mode: 'guided', canSave: true, setMode: vi.fn(), reload: vi.fn() }),
+  usePrinterControlsMode: () => ({ mode: 'guided' }),
 }));
 
 import '@testing-library/jest-dom';
-import React from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
@@ -60,7 +59,6 @@ vi.mock('@/features/printers/hooks/useAutoDispatch', () => ({
 vi.mock('@/features/printers/components/PrinterHistoryModal', () => ({ PrinterHistoryModal: () => null }));
 vi.mock('@/features/printers/components/PrinterFilesModal', () => ({ PrinterFilesModal: () => null }));
 vi.mock('@/features/filament-coverage/components/FilamentCoverageBreakdown', () => ({ FilamentCoverageBreakdown: () => null }));
-vi.mock('@/features/fallback-groups/components/FallbackGroupsPanel', () => ({ FallbackGroupsPanel: () => null }));
 vi.mock('@/features/printers/components/MaterialLoadout', () => ({ MaterialLoadout: () => null }));
 vi.mock('@/features/printers/components/SpoolPickerModal', () => ({
   SpoolPickerModal: ({

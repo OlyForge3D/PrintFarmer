@@ -79,13 +79,6 @@ struct MarkMultipleReadRequest: Codable, Sendable {
     }
 }
 
-// MARK: - Device Token Registration
-
-struct DeviceTokenRegistration: Codable, Sendable {
-    let token: String
-    let platform: String
-}
-
 // MARK: - API Response Wrappers
 
 struct PaginatedResponse<T: Codable & Sendable>: Codable, Sendable {

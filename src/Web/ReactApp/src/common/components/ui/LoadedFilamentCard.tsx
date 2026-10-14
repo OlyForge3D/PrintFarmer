@@ -1,4 +1,3 @@
-import React from 'react';
 import type { PrinterSpoolInfo } from '@/types/api';
 import { SpoolIcon } from '@/common/components/icons/SpoolIcon';
 

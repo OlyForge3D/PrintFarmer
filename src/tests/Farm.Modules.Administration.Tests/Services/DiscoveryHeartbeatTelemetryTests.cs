@@ -52,14 +52,14 @@ public sealed class DiscoveryHeartbeatTelemetryTests : IDisposable
     [MemberData(nameof(CorruptHeartbeatPayloads))]
     public void Load_CorruptHeartbeat_KeepsUnrelatedSettingsAndReportsUnknownLiveness(string payload)
     {
-        SeedSection("UpdateChannel", new UpdateChannelSettings { Channel = "insider", InsiderAcknowledged = true });
+        SeedSection("CatalogUpdates", new CatalogUpdateSettings { Enabled = false });
         SeedSection(NetworkDiscoverySettings.SectionName, new NetworkDiscoverySettings { ClientTimeoutMs = 700, LastHeartbeat = DateTime.UtcNow });
         SeedTelemetry(payload);
         Mock<ILogger<SettingsService>> logger = new();
 
         SettingsService service = CreateService(logger.Object);
 
-        service.Get<UpdateChannelSettings>().Channel.Should().Be("insider");
+        service.Get<CatalogUpdateSettings>().Enabled.Should().BeFalse();
         NetworkDiscoverySettings discovery = service.Get<NetworkDiscoverySettings>();
         discovery.ClientTimeoutMs.Should().Be(700);
         discovery.LastHeartbeat.Should().BeNull("corrupt telemetry must not fall back to the legacy timestamp");

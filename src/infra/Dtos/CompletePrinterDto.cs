@@ -62,4 +62,12 @@ public record CompletePrinterDto(
     bool UseModelDispatchDefaults = true,
 
     // Concurrency token for list consumers to guard mutations.
-    string? RowVersion = null);
+    string? RowVersion = null,
+    string? CurrentJobThumbnailUrl = null,
+    int? CurrentLayer = null,
+    int? TotalLayers = null,
+    double? FanSpeedPercent = null,
+    double? LiveZOffsetMm = null,
+
+    // Presentation-only: show the filament box external spool slot.
+    bool ShowExternalSpool = false);

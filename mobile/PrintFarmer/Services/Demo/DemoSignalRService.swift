@@ -12,22 +12,26 @@ final class DemoSignalRService: SignalRServiceProtocol, @unchecked Sendable {
     private let attentionChangedHub: SignalREventHub<AttentionChangedEvent>
     private let taskInvalidationHub: SignalREventHub<ShiftTaskInvalidation>
     private let filamentCoverageChangedHub: SignalREventHub<FilamentCoverageChangedEvent>
+    private let simulatesProgress: Bool
     private var simulationTask: Task<Void, Never>?
 
-    init() {
+    init(simulatesProgress: Bool = true) {
         self.connectionStateHub = SignalRConnectionStateHub(coordinator: coordinator)
         self.printerUpdateHub = SignalREventHub<PrinterStatusUpdate>(coordinator: coordinator)
         self.jobQueueUpdateHub = SignalREventHub<JobQueueUpdate>(coordinator: coordinator)
         self.attentionChangedHub = SignalREventHub<AttentionChangedEvent>(coordinator: coordinator)
         self.taskInvalidationHub = SignalREventHub<ShiftTaskInvalidation>(coordinator: coordinator)
         self.filamentCoverageChangedHub = SignalREventHub<FilamentCoverageChangedEvent>(coordinator: coordinator)
+        self.simulatesProgress = simulatesProgress
     }
 
     var connectionState: SignalRConnectionState { connectionStateHub.snapshot() }
 
     func connect() async throws {
         connectionStateHub.setStateSync(.connected)
-        startSimulation()
+        if simulatesProgress {
+            startSimulation()
+        }
     }
 
     func disconnect() async {

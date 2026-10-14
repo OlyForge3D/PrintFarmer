@@ -35,8 +35,19 @@ public record PrinterStatusDto(
     double? PrintTimeLeftSeconds = null,
     int? SpeedMultiplier = null,
     string? HomedAxes = null,
-    PrinterSafetyTelemetryDto? SafetyTelemetry = null)
+    PrinterSafetyTelemetryDto? SafetyTelemetry = null,
+    [property: JsonIgnore] string? ThumbnailCacheIdentity = null,
+    int? CurrentLayer = null,
+    int? TotalLayers = null,
+    double? FanSpeedPercent = null,
+    double? LiveZOffsetMm = null)
 {
+    /// <summary>
+    /// Relative authenticated proxy URL for the active job thumbnail.
+    /// </summary>
+    public string? CurrentJobThumbnailUrl =>
+        PrinterThumbnailUrl.Create(Id, State, JobName, ThumbnailUrl, ThumbnailCacheIdentity);
+
     /// <summary>
     /// Returns a copy with FileName derived from JobName (path stripped) and JobName preserved as-is.
     /// </summary>

@@ -23,6 +23,10 @@ vi.mock('@/hooks/useSlicer', () => ({
   useSlicer: () => ({ isSlicerAvailable: false }),
 }));
 
+vi.mock('@/features/printers/components/PrinterCamerasSection', () => ({
+  PrinterCamerasSection: () => null,
+}));
+
 vi.mock('@/features/cameras/hooks/usePrinterCameras', () => ({
   usePrinterCameras: () => ({ data: [] }),
 }));

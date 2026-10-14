@@ -224,6 +224,13 @@ public class Printer : IRevisionedEntity
     [JsonIgnore]
     public ICollection<Camera> Cameras { get; set; } = new List<Camera>();
 
+    /// <summary>
+    /// Join rows linking cameras to this printer (carries per-printer <see cref="CameraPrinter.IsPrimary"/> and ordering).
+    /// <see cref="Cameras"/> is the skip navigation over these rows.
+    /// </summary>
+    [JsonIgnore]
+    public ICollection<CameraPrinter> CameraLinks { get; set; } = new List<CameraPrinter>();
+
     public Guid ManufacturerId { get; set; } // No longer nullable - uses default "Unknown" manufacturer
 
     public Manufacturer? Manufacturer { get; set; }
@@ -278,6 +285,26 @@ public class Printer : IRevisionedEntity
     /// Nullable because non-Prusa backends don't report this.
     /// </summary>
     public double? NozzleDiameter { get; set; }
+
+    /// <summary>
+    /// Nozzle diameters this printer can print with: each toolhead's stored per-printer
+    /// <see cref="Toolhead.NozzleDiameter"/>, falling back to the backend-reported
+    /// <see cref="NozzleDiameter"/> when no toolhead has one. Nozzle model diameters are
+    /// deliberately excluded; they only seed the stored value at creation.
+    /// </summary>
+    public IReadOnlyList<double> GetEffectiveNozzleDiameters()
+    {
+        List<double> diameters = [.. (Toolheads ?? [])
+            .Where(t => t.NozzleDiameter is > 0)
+            .Select(t => t.NozzleDiameter!.Value)];
+
+        if (diameters.Count == 0 && NozzleDiameter is > 0)
+        {
+            diameters.Add(NozzleDiameter.Value);
+        }
+
+        return diameters;
+    }
 
     /// <summary>
     /// Whether a Multi-Material Unit is connected. Populated from PrusaLink printer info.
@@ -470,6 +497,13 @@ public class Printer : IRevisionedEntity
     /// When false, this printer uses its own custom dispatch configuration.
     /// </summary>
     public bool UseModelDispatchDefaults { get; set; } = true;
+
+    /// <summary>
+    /// Presentation-only preference: when true, clients render the filament box's external
+    /// spool slot (e.g. the QidiBox external rack/feed). Hidden by default. Toggling it never
+    /// changes hardware, telemetry, or any spool assigned to that slot.
+    /// </summary>
+    public bool ShowExternalSpool { get; set; }
 
     /// <summary>
     /// Dispatch-related state (AutoDispatchState, BedPreConfirmed) stored in a separate

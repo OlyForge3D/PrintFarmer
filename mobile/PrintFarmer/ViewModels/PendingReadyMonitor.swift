@@ -80,9 +80,6 @@ final class PendingReadyMonitor {
             let granted = try await notificationAuthorizationRequester.requestAuthorization(
                 options: [.alert, .badge, .sound]
             )
-            if granted {
-                PushNotificationManager.shared.pushEnabled = true
-            }
             logger.info("Notification permission \(granted ? "granted" : "denied")")
         } catch {
             logger.error("Failed to request notification permission: \(error.localizedDescription)")

@@ -430,6 +430,8 @@ public sealed class SdcpPollingService(
                         BedTemp: status.BedTemp,
                         HotendTarget: status.HotendTarget,
                         BedTarget: status.BedTarget,
+                        CurrentLayer: status.CurrentLayer,
+                        TotalLayers: status.TotalLayers,
                         SpoolInfo: null);
                     _statusCacheWriter.UpdateStatus(cacheUpdate, originWatermark);
 
@@ -450,7 +452,9 @@ public sealed class SdcpPollingService(
                         BedTarget: status.BedTarget,
                         HomedAxes: null,
                         SpoolInfo: null,
-                        FileName: PrinterStatusDto.ExtractFileName(status.JobName));
+                        FileName: PrinterStatusDto.ExtractFileName(status.JobName),
+                        CurrentLayer: status.CurrentLayer,
+                        TotalLayers: status.TotalLayers);
 
                     if (PrinterStatusBroadcastGate.ShouldBroadcast(state.LastBroadcastUpdate, signalRUpdate))
                     {

@@ -777,6 +777,12 @@ actor APIClient {
         accessToken
     }
 
+    /// The base URL and bearer read in one actor hop, so a camera stream request
+    /// can never pair one server's URL with another server's token.
+    func currentCameraCredentials() -> (baseURL: URL, accessToken: String?) {
+        (baseURL, accessToken)
+    }
+
     /// J (issue #816 reject, Hicks): the stable server-identity id the current
     /// authenticated session was applied for. Used by tests / callers that need
     /// to prove the atomic (baseURL, accessToken, serverID) coupling.
@@ -1075,6 +1081,39 @@ actor APIClient {
         return data
     }
 
+    func getCurrentJobThumbnail(printerID: UUID, path: String) async throws -> Data {
+        guard let components = URLComponents(string: path),
+              components.scheme == nil, components.host == nil,
+              components.fragment == nil,
+              components.path.lowercased() == "/api/printers/\(printerID.uuidString.lowercased())/current-job/thumbnail",
+              components.queryItems?.count == 1,
+              let version = components.queryItems?.first,
+              version.name == "v", let value = version.value,
+              value.count == 16,
+              value.allSatisfy({ "0123456789abcdef".contains($0) }) else {
+            throw NetworkError.invalidURL("Invalid current-job thumbnail path")
+        }
+        let captured = captureRequestSession()
+        guard captured.accessToken != nil, captured.serverID != nil else {
+            throw NetworkError.unauthorized
+        }
+        try await checkTokenExpiry(session: captured)
+        try validateControlSession(captured)
+        var request = try buildRequest(session: captured, path: path, method: "GET")
+        request.setValue("image/*", forHTTPHeaderField: "Accept")
+        // Images live only in the card's current revision, never a shared auth cache.
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        let (data, response) = try await performRequest(request, delegate: DirectCommandTaskDelegate())
+        try validateControlSession(captured)
+        try Task.checkCancellation()
+        try validateResponse(response, data: data, authSessionToken: captured.authSessionToken)
+        guard data.count <= 10 * 1024 * 1024,
+              response.mimeType?.hasPrefix("image/") == true else {
+            throw NetworkError.invalidURL("Invalid current-job thumbnail response")
+        }
+        return data
+    }
+
     // MARK: - Reachability
 
     /// Lightweight, unauthenticated reachability probe for the connection indicator.
@@ -1194,19 +1233,6 @@ actor APIClient {
         for (name, value) in headers {
             request.setValue(value, forHTTPHeaderField: name)
         }
-        try await executeVoid(request, session: requestSession)
-    }
-
-    /// DELETE with a JSON request body. Some gated endpoints (e.g. native-push
-    /// `DELETE /api/notifications/device-tokens`, issue #818) identify the
-    /// resource by a body field rather than a path segment. Routes through the
-    /// same `validateResponse` path as every other verb, so a gated 404 with
-    /// `code == "featureDisabled"` still surfaces as `NetworkError.featureDisabled`.
-    func deleteVoid<B: Encodable & Sendable>(_ path: String, body: B) async throws {
-        let requestSession = captureRequestSession()
-        var request = try buildRequest(session: requestSession, path: path, method: "DELETE")
-        request.httpBody = try encoder.encode(body)
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         try await executeVoid(request, session: requestSession)
     }
 

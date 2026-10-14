@@ -30,7 +30,10 @@ public class EfCameraRepository : ICameraRepository
     public async Task<List<Camera>> GetAllAsync(CancellationToken ct)
     {
         return await _dbContext.Cameras
-            .Include(c => c.Printer)
+            .Include(c => c.PrinterLinks)
+                .ThenInclude(l => l.Printer)
+                    .ThenInclude(p => p.Location)
+            .Include(c => c.AssignedLocation)
             .OrderBy(c => c.SortOrder)
             .ThenBy(c => c.Name)
             .ToListAsync(ct);
@@ -43,7 +46,10 @@ public class EfCameraRepository : ICameraRepository
     public async Task<List<Camera>> GetEnabledAsync(CancellationToken ct)
     {
         return await _dbContext.Cameras
-            .Include(c => c.Printer)
+            .Include(c => c.PrinterLinks)
+                .ThenInclude(l => l.Printer)
+                    .ThenInclude(p => p.Location)
+            .Include(c => c.AssignedLocation)
             .Where(c => c.IsEnabled)
             .OrderBy(c => c.SortOrder)
             .ThenBy(c => c.Name)
@@ -58,7 +64,10 @@ public class EfCameraRepository : ICameraRepository
     public async Task<Camera?> FindByIdAsync(Guid id, CancellationToken ct)
     {
         return await _dbContext.Cameras
-            .Include(c => c.Printer)
+            .Include(c => c.PrinterLinks)
+                .ThenInclude(l => l.Printer)
+                    .ThenInclude(p => p.Location)
+            .Include(c => c.AssignedLocation)
             .FirstOrDefaultAsync(c => c.Id == id, ct);
     }
 
@@ -114,16 +123,21 @@ public class EfCameraRepository : ICameraRepository
     }
 
     /// <summary>
-    /// Gets all cameras attached to a specific printer, ordered by sort order, then by name.
+    /// Gets all cameras linked to a specific printer: the printer's primary camera first, then by link sort order, camera sort order and name.
     /// </summary>
     /// <param name="printerId">The printer ID.</param>
     /// <param name="ct">Cancellation token.</param>
     public async Task<List<Camera>> GetByPrinterIdAsync(Guid printerId, CancellationToken ct)
     {
         return await _dbContext.Cameras
-            .Include(c => c.Printer)
-            .Where(c => c.PrinterId == printerId)
-            .OrderBy(c => c.SortOrder)
+            .Include(c => c.PrinterLinks)
+                .ThenInclude(l => l.Printer)
+                    .ThenInclude(p => p.Location)
+            .Include(c => c.AssignedLocation)
+            .Where(c => c.PrinterLinks.Any(l => l.PrinterId == printerId))
+            .OrderByDescending(c => c.PrinterLinks.Any(l => l.PrinterId == printerId && l.IsPrimary))
+            .ThenBy(c => c.PrinterLinks.Where(l => l.PrinterId == printerId).Select(l => l.SortOrder).FirstOrDefault())
+            .ThenBy(c => c.SortOrder)
             .ThenBy(c => c.Name)
             .ToListAsync(ct);
     }
@@ -137,19 +151,25 @@ public class EfCameraRepository : ICameraRepository
     public async Task<Camera?> FindByPrinterIdAndTypeAsync(Guid printerId, CameraType type, CancellationToken ct)
     {
         return await _dbContext.Cameras
-            .Include(c => c.Printer)
-            .Where(c => c.PrinterId == printerId && c.CameraType == type)
+            .Include(c => c.PrinterLinks)
+                .ThenInclude(l => l.Printer)
+                    .ThenInclude(p => p.Location)
+            .Include(c => c.AssignedLocation)
+            .Where(c => c.PrinterLinks.Any(l => l.PrinterId == printerId) && c.CameraType == type)
             .FirstOrDefaultAsync(ct);
     }
 
     /// <summary>
-    /// Gets all enabled cameras with their associated Printer navigation property loaded.
+    /// Gets all enabled cameras with their printer links (and linked printers) loaded.
     /// </summary>
     /// <param name="ct">Cancellation token.</param>
     public async Task<List<Camera>> GetEnabledWithPrinterAsync(CancellationToken ct)
     {
         return await _dbContext.Cameras
-            .Include(c => c.Printer)
+            .Include(c => c.PrinterLinks)
+                .ThenInclude(l => l.Printer)
+                    .ThenInclude(p => p.Location)
+            .Include(c => c.AssignedLocation)
             .Where(c => c.IsEnabled)
             .OrderBy(c => c.SortOrder)
             .ThenBy(c => c.Name)
@@ -160,8 +180,69 @@ public class EfCameraRepository : ICameraRepository
     public async Task<Camera?> FindByPrinterIdAndSourceAsync(Guid printerId, CameraSource source, CancellationToken ct)
     {
         return await _dbContext.Cameras
-            .Include(c => c.Printer)
-            .Where(c => c.PrinterId == printerId && c.Source == source)
+            .Include(c => c.PrinterLinks)
+                .ThenInclude(l => l.Printer)
+                    .ThenInclude(p => p.Location)
+            .Include(c => c.AssignedLocation)
+            .Where(c => c.PrinterLinks.Any(l => l.PrinterId == printerId) && c.Source == source)
             .FirstOrDefaultAsync(ct);
+    }
+
+    /// <inheritdoc/>
+    public async Task<bool> HasPrimaryCameraAsync(Guid printerId, CancellationToken ct)
+    {
+        return await _dbContext.Set<CameraPrinter>()
+            .AnyAsync(l => l.PrinterId == printerId && l.IsPrimary, ct);
+    }
+
+    /// <inheritdoc/>
+    public async Task<List<Camera>> QueryAsync(Guid? printerId, Guid? locationId, bool enabledOnly, CancellationToken ct)
+    {
+        IQueryable<Camera> query = _dbContext.Cameras
+            .Include(c => c.PrinterLinks)
+                .ThenInclude(l => l.Printer)
+                    .ThenInclude(p => p.Location)
+            .Include(c => c.AssignedLocation);
+
+        if (enabledOnly)
+        {
+            query = query.Where(c => c.IsEnabled);
+        }
+
+        if (printerId.HasValue)
+        {
+            Guid pid = printerId.Value;
+            query = query.Where(c => c.PrinterLinks.Any(l => l.PrinterId == pid));
+        }
+
+        if (locationId.HasValue)
+        {
+            // Effective location: a single linked printer's location, otherwise the camera's own LocationId.
+            Guid lid = locationId.Value;
+            query = query.Where(c =>
+                (c.PrinterLinks.Count == 1 && c.PrinterLinks.Any(l => l.Printer.LocationId == lid)) ||
+                (c.PrinterLinks.Count != 1 && c.LocationId == lid));
+        }
+
+        return await query
+            .OrderBy(c => c.SortOrder)
+            .ThenBy(c => c.Name)
+            .ToListAsync(ct);
+    }
+
+    /// <inheritdoc/>
+    public async Task<List<CameraPrinter>> GetPrinterLinksAsync(Guid printerId, CancellationToken ct)
+    {
+        return await _dbContext.Set<CameraPrinter>()
+            .Include(l => l.Camera)
+            .Where(l => l.PrinterId == printerId)
+            .ToListAsync(ct);
+    }
+
+    /// <inheritdoc/>
+    public void RemoveLink(CameraPrinter link)
+    {
+        ArgumentNullException.ThrowIfNull(link);
+        _dbContext.Set<CameraPrinter>().Remove(link);
     }
 }

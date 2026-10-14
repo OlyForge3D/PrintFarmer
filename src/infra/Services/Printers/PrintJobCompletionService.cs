@@ -183,6 +183,7 @@ public class PrintJobCompletionService : IPrintJobCompletionService
                 // All copies done — mark job as completed
                 job.Status = PrintJobStatus.Completed;
                 job.ActualEndTime = completedAtUtc;
+                job.ActiveExternalPrinterId = null;
 
                 if (job.ActualStartTime.HasValue)
                 {
@@ -396,6 +397,7 @@ public class PrintJobCompletionService : IPrintJobCompletionService
             job.Status = PrintJobStatus.Failed;
             job.ActualEndTime = failedAtUtc;
             job.FailureReason = failureReason;
+            job.ActiveExternalPrinterId = null;
 
             // Calculate actual duration if start time is set
             if (job.ActualStartTime.HasValue)
@@ -739,7 +741,7 @@ public class PrintJobCompletionService : IPrintJobCompletionService
 
     /// <inheritdoc />
     public async Task<int> SyncOrphanedPrintingJobsAsync(
-        Func<Guid, string?> printerStateLookup,
+        Func<Guid, PrinterStatusCacheSnapshot?> printerStateLookup,
         string actorSubject,
         CancellationToken ct = default)
     {
@@ -839,14 +841,19 @@ public class PrintJobCompletionService : IPrintJobCompletionService
                             attempt.Outcome == DispatchAttemptOutcome.Accepted,
                         ct)
                     : null;
-            if (activeState?.ActiveJobId != job.Id ||
-                activeAttempt is null ||
-                activeState.PhysicalControlCommandId.HasValue)
+            bool hasAcceptedDispatchLease =
+                activeState?.ActiveJobId == job.Id &&
+                activeAttempt is not null &&
+                !activeState.PhysicalControlCommandId.HasValue;
+            bool isExternallyObservedJob = IsExternallyObservedJob(job, printerId);
+
+            if (!hasAcceptedDispatchLease && !isExternallyObservedJob)
             {
                 continue;
             }
 
-            string? currentPrinterState = printerStateLookup(printerId);
+            PrinterStatusCacheSnapshot? currentPrinterSnapshot = printerStateLookup(printerId);
+            string? currentPrinterState = currentPrinterSnapshot?.Status.State;
 
             _logger.Log(
                 verbose ? LogLevel.Warning : LogLevel.Debug,
@@ -860,6 +867,16 @@ public class PrintJobCompletionService : IPrintJobCompletionService
             {
                 _logger.LogDebug(
                     "[PrintJobCompletionService] Printer {PrinterId} state unknown/offline, skipping job {JobId}",
+                    printerId,
+                    job.Id);
+                continue;
+            }
+
+            if (isExternallyObservedJob &&
+                !PrinterStatusFreshness.IsFreshOnline(currentPrinterSnapshot, DateTime.UtcNow))
+            {
+                _logger.LogDebug(
+                    "[PrintJobCompletionService] Printer {PrinterId} state is stale/offline, skipping external job {JobId}",
                     printerId,
                     job.Id);
                 continue;
@@ -966,12 +983,13 @@ public class PrintJobCompletionService : IPrintJobCompletionService
                     resourceId: job.Id,
                     printerId: printerId,
                     printJobId: job.Id,
-                    dispatchAttemptId: activeAttempt.Id,
+                    dispatchAttemptId: activeAttempt?.Id,
                     reasonCode: reasonCode,
                     jobRowVersion: job.RowVersion,
                     detail: new
                     {
                         source = "orphan_sync",
+                        jobSource = isExternallyObservedJob ? "external" : "dispatch",
                         observedPrinterState = currentPrinterState,
                         fromState = PrintJobStatus.Printing.ToString(),
                         toState = job.Status.ToString(),
@@ -1258,6 +1276,11 @@ public class PrintJobCompletionService : IPrintJobCompletionService
 
     private static string NormalizeIdentity(string value) =>
         value.Trim().Replace('\\', '/').TrimStart('/');
+
+    private static bool IsExternallyObservedJob(PrintJob job, Guid printerId) =>
+        job.IsExternalPrint ||
+        job.WasSeededFromHistory ||
+        job.ActiveExternalPrinterId == printerId;
 
     /// <summary>
     /// Releases the dispatch lease when the active job on the printer matches one of the

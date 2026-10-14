@@ -504,6 +504,29 @@ public interface ISupportsHistoryThumbnail
 }
 
 /// <summary>
+/// Capability for securely retrieving an active print job's thumbnail.
+/// </summary>
+public interface ISupportsCurrentJobThumbnail
+{
+    /// <summary>
+    /// Retrieves the active job whose thumbnail is served by this capability.
+    /// </summary>
+    Task<PrinterJob?> GetCurrentJobAsync(
+        string baseUrl,
+        PrinterCredential? credential = null,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Retrieves validated thumbnail content from the configured printer backend.
+    /// </summary>
+    Task<HistoryThumbnailContent?> GetCurrentJobThumbnailAsync(
+        string baseUrl,
+        string thumbnailUrl,
+        PrinterCredential? credential = null,
+        CancellationToken ct = default);
+}
+
+/// <summary>
 /// Capability marker interface for backend clients that support basic printer status retrieval.
 /// Provides standardized online/offline status and printer state information.
 /// </summary>
@@ -666,6 +689,18 @@ public interface ISupportsGcodeExecution
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>True if G-code command was sent and executed successfully, false if send/execution failed</returns>
     Task<bool> SendGcodeAsync(string baseUrl, string gcode, CancellationToken ct = default);
+}
+
+/// <summary>Typed support for bounded part-cooling fan control.</summary>
+public interface ISupportsFanControl
+{
+    Task<bool> SetFanSpeedAsync(string baseUrl, int speedPercent, PrinterCredential? credential, CancellationToken ct = default);
+}
+
+/// <summary>Typed support for a transient relative Z-offset adjustment during a print.</summary>
+public interface ISupportsZOffsetAdjustment
+{
+    Task<bool> AdjustZOffsetAsync(string baseUrl, decimal offsetMm, PrinterCredential? credential, CancellationToken ct = default);
 }
 
 /// <summary>

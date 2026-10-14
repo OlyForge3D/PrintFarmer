@@ -152,6 +152,53 @@ public sealed class PrintFailureMonitorService : BackgroundService
         return (jobName, fileName);
     }
 
+    /// <summary>
+    /// Loads Obico-enabled printers with their camera links (and linked cameras) so camera
+    /// selection reads the <see cref="CameraPrinter"/> join rather than a possibly unloaded collection.
+    /// </summary>
+    internal static Task<List<Printer>> LoadMonitoredPrintersAsync(AppDbContext dbContext, CancellationToken cancellationToken)
+    {
+        return dbContext.Printers
+            .Include(p => p.CameraLinks)
+                .ThenInclude(l => l.Camera)
+            .Where(p => p.ObicoEnabled)
+            .OrderBy(p => p.Name)
+            .AsSplitQuery()
+            .ToListAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Selects the camera used for failure detection: the printer's primary linked camera first, then link/camera
+    /// sort order, preferring an enabled, non-offline camera with a snapshot URL and falling back to the next one.
+    /// </summary>
+    internal static PrinterCameraSelection SelectDetectionCamera(Printer printer)
+    {
+        ArgumentNullException.ThrowIfNull(printer);
+        return PrinterCameraSelector.SelectSnapshotCamera(PrinterCameraSelector.OrderCameras(printer.CameraLinks));
+    }
+
+    /// <summary>
+    /// Builds the user-facing reason shown when no usable detection camera is available.
+    /// </summary>
+    internal static string DescribeCameraUnavailable(PrinterCameraSelection selection)
+    {
+        ArgumentNullException.ThrowIfNull(selection);
+        return selection.Availability switch
+        {
+            PrinterCameraAvailability.NoCameraLinked =>
+                "No camera linked to this printer. Link a camera in printer settings.",
+            PrinterCameraAvailability.AllCamerasDisabled =>
+                "All cameras linked to this printer are disabled. Enable a camera in printer settings.",
+            PrinterCameraAvailability.NoSnapshotUrl =>
+                "Camera snapshot URL required. None of this printer's enabled cameras has a snapshot URL.",
+            PrinterCameraAvailability.CamerasOffline => selection.Camera is { HealthMessage: { } health } camera
+                && !string.IsNullOrWhiteSpace(health)
+                    ? $"Camera '{camera.Name}' is offline: {health}"
+                    : $"Camera '{selection.Camera?.Name}' is offline.",
+            _ => string.Empty,
+        };
+    }
+
     private async Task RunMonitoringCycleAsync(CancellationToken cancellationToken)
     {
         var stopwatch = Stopwatch.StartNew();
@@ -179,11 +226,7 @@ public sealed class PrintFailureMonitorService : BackgroundService
                     .ToDictionaryAsync(s => s.Id, cancellationToken)
                 : [];
 
-            List<Printer> configuredPrinters = await dbContext.Printers
-                .Include(p => p.Cameras.Where(c => c.IsEnabled))
-                .Where(p => p.ObicoEnabled)
-                .OrderBy(p => p.Name)
-                .ToListAsync(cancellationToken);
+            List<Printer> configuredPrinters = await LoadMonitoredPrintersAsync(dbContext, cancellationToken);
             List<Guid> configuredPrinterIds = configuredPrinters.Select(p => p.Id).ToList();
             List<PrintJob> activeJobs = configuredPrinterIds.Count == 0
                 ? []
@@ -219,20 +262,8 @@ public sealed class PrintFailureMonitorService : BackgroundService
                 {
                     previousPrinterStatuses.TryGetValue(printer.Id, out FailureDetectionPrinterStatusDto? previousStatus);
 
-                    // Prefer cameras with Bed/Nozzle type (best angle for print failure detection),
-                    // then General, then any enabled camera with a snapshot URL
-                    Camera? camera = printer.Cameras
-                        .Where(c => !string.IsNullOrWhiteSpace(c.SnapshotUrl))
-                        .OrderBy(c => c.CameraType switch
-                        {
-                            CameraType.Bed => 0,
-                            CameraType.Nozzle => 1,
-                            CameraType.General => 2,
-                            _ => 3,
-                        })
-                        .ThenBy(c => c.SortOrder)
-                        .FirstOrDefault();
-                    string? snapshotUrl = camera?.SnapshotUrl;
+                    PrinterCameraSelection cameraSelection = SelectDetectionCamera(printer);
+                    string? snapshotUrl = cameraSelection.Camera?.SnapshotUrl;
 
                     activeJobsByPrinter.TryGetValue(printer.Id, out ActivePrintWindow? activeJob);
                     PrinterStatusDto? cachedPrinterStatus = _statusCache.GetStatus(printer.Id);
@@ -279,12 +310,14 @@ public sealed class PrintFailureMonitorService : BackgroundService
                         continue;
                     }
 
-                    if (string.IsNullOrWhiteSpace(snapshotUrl))
+                    if (cameraSelection.Availability != PrinterCameraAvailability.Available || string.IsNullOrWhiteSpace(snapshotUrl))
                     {
                         printerStatuses.Add(baseStatus with
                         {
-                            State = PrinterStateMisconfigured,
-                            Reason = "Camera snapshot URL required. Add or enable a camera in printer settings.",
+                            State = cameraSelection.Availability == PrinterCameraAvailability.CamerasOffline
+                                ? PrinterStateError
+                                : PrinterStateMisconfigured,
+                            Reason = DescribeCameraUnavailable(cameraSelection),
                         });
                         continue;
                     }

@@ -22,6 +22,39 @@ extension SpoolServiceProtocol {
         try await listSpools(limit: limit, offset: offset, search: nil, material: nil, vendor: nil)
     }
 
+    /// Returns the authoritative inventory record for a spool, paging until its
+    /// ID is found or every reported record has been checked.
+    func spool(id: Int) async throws -> SpoolmanSpool? {
+        try await spools(ids: [id])[id]
+    }
+
+    /// Loads requested spool IDs without assuming that an assigned spool is
+    /// contained in the first inventory page.
+    func spools(ids: Set<Int>) async throws -> [Int: SpoolmanSpool] {
+        guard !ids.isEmpty else { return [:] }
+        let pageSize = 500
+        var offset = 0
+        var found: [Int: SpoolmanSpool] = [:]
+        while true {
+            try Task.checkCancellation()
+            let page = try await listSpools(
+                limit: pageSize, offset: offset, search: nil, material: nil, vendor: nil
+            )
+            try Task.checkCancellation()
+            for spool in page.items where ids.contains(spool.id) {
+                found[spool.id] = spool
+            }
+            if found.count == ids.count {
+                return found
+            }
+            let nextOffset = offset + page.items.count
+            guard !page.items.isEmpty, nextOffset > offset, nextOffset < page.totalCount else {
+                return found
+            }
+            offset = nextOffset
+        }
+    }
+
     /// Active-server existence check for a specific spool ID (#714 Item
     /// C: scan-station spool routing must confirm the ID actually exists
     /// on the currently-connected server before navigating to

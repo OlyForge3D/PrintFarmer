@@ -22,7 +22,6 @@ using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Services.AutoDispatch;
 using Farm.Infrastructure.Services.FileManagement;
-using Farm.Infrastructure.Services.HostUpdates;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Queue;
@@ -4441,7 +4440,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
 
         await using AppDbContext syncContext = CreateContext();
         int synced = await CreateCompletionService(syncContext)
-            .SyncOrphanedPrintingJobsAsync(_ => "idle", QueueActorIdentity.Scheduler);
+            .SyncOrphanedPrintingJobsAsync(id => FreshPrinterSnapshot(id, "idle"), QueueActorIdentity.Scheduler);
 
         synced.Should().Be(0);
         await using AppDbContext verify = CreateContext();
@@ -4486,7 +4485,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
 
         await using AppDbContext syncContext = CreateContext();
         int synced = await CreateCompletionService(syncContext)
-            .SyncOrphanedPrintingJobsAsync(_ => "idle", actorSubject);
+            .SyncOrphanedPrintingJobsAsync(id => FreshPrinterSnapshot(id, "idle"), actorSubject);
 
         synced.Should().Be(1);
         await using AppDbContext verify = CreateContext();
@@ -4542,7 +4541,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
 
         await using AppDbContext syncContext = CreateContext();
         int synced = await CreateCompletionService(syncContext)
-            .SyncOrphanedPrintingJobsAsync(_ => "idle", actorSubject);
+            .SyncOrphanedPrintingJobsAsync(id => FreshPrinterSnapshot(id, "idle"), actorSubject);
 
         synced.Should().Be(1);
 
@@ -5332,34 +5331,6 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             row.RetryAfterUtc.Should().Be(now.AddSeconds(2 + 10 * Math.Pow(2, attemptCount - 1)));
             row.CompletedAtUtc.Should().BeNull();
         }
-    }
-
-    [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public async Task QueuePolling_FakeClock_AdvancesAndCancelsTimers(bool reconciliation)
-    {
-        var clock = new ManualTimeProvider();
-        using var reconciler = new QueueReconciliationService(
-            Mock.Of<IServiceScopeFactory>(), NullLogger<QueueReconciliationService>.Instance, timeProvider: clock);
-        using var publisher = new QueueOutboxPublisherService(
-            Mock.Of<IServiceScopeFactory>(), CreateHubContext(),
-            NullLogger<QueueOutboxPublisherService>.Instance, timeProvider: clock);
-        using var cancellation = new CancellationTokenSource();
-        async Task<bool> WaitAsync() => reconciliation
-            ? await reconciler.WaitForIntervalOrPauseAsync(cancellation.Token)
-            : await publisher.WaitForIntervalOrPauseAsync(cancellation.Token);
-
-        Task<bool> interval = WaitAsync();
-        interval.IsCompleted.Should().BeFalse();
-        clock.Advance(reconciliation ? TimeSpan.FromMinutes(2) : TimeSpan.FromSeconds(5));
-        (await interval.WaitAsync(TimeSpan.FromSeconds(5))).Should().BeFalse();
-
-        Task<bool> cancelledInterval = WaitAsync();
-        cancelledInterval.IsCompleted.Should().BeFalse();
-        await cancellation.CancelAsync();
-        Func<Task> waitForCancellation = async () => await cancelledInterval.WaitAsync(TimeSpan.FromSeconds(5));
-        await waitForCancellation.Should().ThrowAsync<OperationCanceledException>();
     }
 
     [Fact]
@@ -7817,6 +7788,12 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             })
             .AddSingleton(management)
             .BuildServiceProvider();
+
+    private static PrinterStatusCacheSnapshot FreshPrinterSnapshot(Guid printerId, string state) =>
+        new(
+            new PrinterStatusDto(printerId, IsOnline: true, State: state),
+            DateTime.UtcNow,
+            LastSeenAtUtc: DateTime.UtcNow);
 
     private async Task<IReadOnlyList<(Guid EventId, Guid JobId)>>
         SeedBackendStartCommandsAsync(int count, bool withBedClearRecords = false)

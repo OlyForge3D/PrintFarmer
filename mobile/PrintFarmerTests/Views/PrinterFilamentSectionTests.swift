@@ -148,22 +148,31 @@ final class PrinterFilamentSectionTests: XCTestCase {
     func testExpandedDetailsAreProgressivelyDisclosedAtPhoneAndTabletWidths() throws {
         let printer = try TestData.decodePrinter()
         let model = try presentation(printer: printer)
-        let actions = PrinterFilamentAction.Kind.allCases.map {
-            PrinterFilamentAction(kind: $0, target: .printer(printer.id), disabledReason: nil)
-        }
-        let collapsed = PrinterFilamentSection(presentation: model, actions: actions) { _ in }
-        let expanded = PrinterFilamentSection(
-            presentation: model, actions: actions, onAction: { _ in }, detailsExpanded: true
-        )
-        for width: CGFloat in [320, 700] {
-            for size in [DynamicTypeSize.large, .accessibility5] {
-                let proposal = CGSize(width: width, height: 10_000)
-                let small = UIHostingController(rootView: collapsed.environment(\.dynamicTypeSize, size))
-                    .sizeThatFits(in: proposal)
-                let full = UIHostingController(rootView: expanded.environment(\.dynamicTypeSize, size))
-                    .sizeThatFits(in: proposal)
-                XCTAssertGreaterThan(full.height, small.height)
-                XCTAssertLessThanOrEqual(full.width, width)
+        let actionSets: [[PrinterFilamentAction.Kind]] = [
+            [.set, .scanNFC],
+            [.change, .clearAssignment, .scanNFC]
+        ]
+        for kinds in actionSets {
+            let actions = kinds.map {
+                PrinterFilamentAction(kind: $0, target: .printer(printer.id), disabledReason: nil)
+            }
+            let collapsed = PrinterFilamentSection(presentation: model, actions: actions) { _ in }
+            let expanded = PrinterFilamentSection(
+                presentation: model, actions: actions, onAction: { _ in }, detailsExpanded: true
+            )
+            for width: CGFloat in [320, 700] {
+                for size in [DynamicTypeSize.large, .accessibility5] {
+                    let proposal = CGSize(width: width, height: 10_000)
+                    let small = UIHostingController(rootView: collapsed.environment(\.dynamicTypeSize, size))
+                        .sizeThatFits(in: proposal)
+                    let full = UIHostingController(rootView: expanded.environment(\.dynamicTypeSize, size))
+                        .sizeThatFits(in: proposal)
+                    XCTAssertGreaterThan(full.height, small.height)
+                    XCTAssertLessThanOrEqual(
+                        full.width, width,
+                        "Expanded width at proposed \(width)pt and dynamic type \(size)"
+                    )
+                }
             }
         }
     }

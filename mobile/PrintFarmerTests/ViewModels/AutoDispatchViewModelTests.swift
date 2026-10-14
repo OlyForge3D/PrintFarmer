@@ -1,6 +1,10 @@
 import XCTest
 @testable import PrintFarmer
 
+private enum AutoDispatchTestError: Error {
+    case generic
+}
+
 /// Tests for AutoDispatchViewModel: loading status, marking ready, skipping, toggling enabled state,
 /// and error handling.
 @MainActor
@@ -77,7 +81,7 @@ final class AutoDispatchViewModelTests: XCTestCase {
     // MARK: - Load Status Error
 
     func testLoadStatusHandlesError() async {
-        mockAutoDispatchService.errorToThrow = TestError.generic
+        mockAutoDispatchService.errorToThrow = AutoDispatchTestError.generic
 
         await viewModel.loadStatus(printerId: testPrinterId)
 
@@ -87,7 +91,7 @@ final class AutoDispatchViewModelTests: XCTestCase {
     }
 
     func testLoadStatusClearsPreviousError() async {
-        mockAutoDispatchService.errorToThrow = TestError.generic
+        mockAutoDispatchService.errorToThrow = AutoDispatchTestError.generic
         await viewModel.loadStatus(printerId: testPrinterId)
         XCTAssertNotNil(viewModel.error)
 
@@ -255,7 +259,7 @@ final class AutoDispatchViewModelTests: XCTestCase {
             queueDepth: 1,
             state: "PendingReady"
         )
-        mockAutoDispatchService.errorToThrow = TestError.generic
+        mockAutoDispatchService.errorToThrow = AutoDispatchTestError.generic
 
         await viewModel.markReady(printerId: testPrinterId)
 
@@ -290,7 +294,7 @@ final class AutoDispatchViewModelTests: XCTestCase {
             queueDepth: 1,
             state: "PendingReady"
         )
-        mockAutoDispatchService.errorToThrow = TestError.generic
+        mockAutoDispatchService.errorToThrow = AutoDispatchTestError.generic
 
         await viewModel.skip(printerId: testPrinterId)
 
@@ -394,7 +398,7 @@ final class AutoDispatchViewModelTests: XCTestCase {
             queueDepth: 1,
             state: "ready"
         )
-        mockAutoDispatchService.errorToThrow = TestError.generic
+        mockAutoDispatchService.errorToThrow = AutoDispatchTestError.generic
 
         await viewModel.toggleEnabled(printerId: testPrinterId)
 

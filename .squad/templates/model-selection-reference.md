@@ -4,12 +4,6 @@
 
 Before spawning an agent, determine which model to use. Check these layers in order — first match wins:
 
-**Vasquez user override:** The user explicitly authorizes `gemini-3.8-flash` for every Vasquez
-review. Resolve this exact configured ID from `.squad/config.json` →
-`agentModelOverrides.vasquez` before the normal layers. Do not pass `latest`, infer a Gemini Pro
-ID, or substitute another model. If this exact model is unavailable, do not dispatch Vasquez;
-report the reviewer blocked.
-
 **Layer 0 — Persistent Config (`.squad/config.json`):** On session start, read `.squad/config.json`. If `agentModelOverrides.{agentName}` exists, use that model for this specific agent. Otherwise, if `defaultModel` exists, use it for ALL agents. This layer survives across sessions — the user set it once and it sticks.
 
 - **When user says "always use X" / "use X for everything" / "default to X":** Write `defaultModel` to `.squad/config.json`. Acknowledge: `✅ Model preference saved: {model} — all future sessions will use this until changed.`
@@ -47,6 +41,7 @@ report the reviewer blocked.
 - **Bump UP to premium:** architecture proposals, reviewer gates, security audits, multi-agent coordination (output feeds 3+ agents)
 - **Bump DOWN to fast/cheap:** typo fixes, renames, boilerplate, scaffolding, changelogs, version bumps
 - **Switch to code specialist (`gpt-5.3-codex`):** large multi-file refactors, complex implementation from spec, heavy code generation (500+ lines)
+- **Switch to analytical diversity (`gemini-3.1-pro`):** code reviews where a second perspective helps, security reviews, architecture reviews after a rejection
 
 **Layer 4 — Default:** If nothing else matched, use `gpt-5.6-luna`. Cost wins when in doubt, unless code is being produced.
 
@@ -56,7 +51,7 @@ If a spawn fails because the selected model is unavailable (plan restriction, or
 
 ```
 Premium:  gpt-5.6-sol → claude-opus-5 → claude-opus-4.8 → claude-opus-4.7 → claude-opus-4.6 → claude-sonnet-4.6 → (omit model param)
-Standard: gpt-5.6-terra → claude-sonnet-5 → claude-sonnet-4.6 → gpt-5.5 → gpt-5.4 → gpt-5.3-codex → claude-sonnet-4.5 → (omit model param)
+Standard: gpt-5.6-terra → claude-sonnet-5 → claude-sonnet-4.6 → gpt-5.5 → gpt-5.4 → gpt-5.3-codex → claude-sonnet-4.5 → gemini-3.1-pro → (omit model param)
 Fast:     gpt-5.6-luna → claude-haiku-4.5 → gpt-5.4-mini → gpt-5-mini → (omit model param)
 ```
 
@@ -90,11 +85,11 @@ If you've exhausted the fallback chain and reached the platform default fallback
 When spawning, include the model in your acknowledgment:
 
 ```
-🔧 Fenster (claude-sonnet-5) — refactoring auth module
-🎨 Redfoot (gpt-5.6-sol · vision) — designing color system
+🔧 Runtime Engineer (claude-sonnet-5) — refactoring auth module
+🎨 Experience Engineer (gpt-5.6-sol · vision) — designing color system
 📋 Scribe (gpt-5.6-luna · fast) — logging session
-⚡ Keaton (gpt-5.6-sol · bumped for architecture) — reviewing proposal
-📝 McManus (gpt-5.6-luna · fast) — updating docs
+⚡ Lead (gpt-5.6-sol · bumped for architecture) — reviewing proposal
+📝 Docs Engineer (gpt-5.6-luna · fast) — updating docs
 ```
 
 Include tier annotation only when the model was bumped or a specialist was chosen. Default-tier spawns just show the model name.
@@ -102,5 +97,5 @@ Include tier annotation only when the model was bumped or a specialist was chose
 **Valid models (current platform catalog):**
 
 Premium: `gpt-5.6-sol`, `claude-opus-5`, `claude-opus-4.8`, `claude-opus-4.7`, `claude-opus-4.6`
-Standard: `gpt-5.6-terra`, `claude-sonnet-5`, `claude-sonnet-4.6`, `claude-sonnet-4.5`, `gpt-5.5`, `gpt-5.4`, `gpt-5.3-codex`
+Standard: `gpt-5.6-terra`, `claude-sonnet-5`, `claude-sonnet-4.6`, `claude-sonnet-4.5`, `gpt-5.5`, `gpt-5.4`, `gpt-5.3-codex`, `gemini-3.1-pro`
 Fast/Cheap: `gpt-5.6-luna`, `claude-haiku-4.5`, `gpt-5.4-mini`, `gpt-5-mini`

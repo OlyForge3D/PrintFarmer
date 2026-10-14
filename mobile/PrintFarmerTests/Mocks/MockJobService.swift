@@ -4,6 +4,7 @@ import Foundation
 final class MockJobService: JobServiceProtocol, @unchecked Sendable {
     var queueOverviewsToReturn: [QueueOverview] = []
     var queuedJobResponsesToReturn: [QueuedPrintJobResponse] = []
+    var queuedJobListMayHaveMore = false
     var jobToReturn: PrintJob?
     var errorToThrow: Error?
     var actionErrorToThrow: Error?
@@ -12,15 +13,26 @@ final class MockJobService: JobServiceProtocol, @unchecked Sendable {
     // Call tracking
     var listJobsCalled = false
     var listAllJobsCalled = false
+    var listPrinterQueueCalledWith: UUID?
     var getJobCalledWith: UUID?
     var createCalledWith: CreatePrintJobRequest?
     var updateCalledWith: (id: UUID, request: UpdatePrintJobRequest)?
     var deleteCalledWith: UUID?
     var cancelCalledWith: UUID?
     var dispatchCalledWith: UUID?
+    var dispatchReviewedRowVersion: String?
+    var rerunCalledWith: (id: UUID, reviewedRowVersion: String)?
     var abortCalledWith: UUID?
     var pauseCalledWith: UUID?
     var resumeCalledWith: UUID?
+    var moveQueuedJobCalledWith: (
+        id: UUID,
+        reviewedRowVersion: String,
+        neighbor: QueuePositionNeighbor
+    )?
+    var moveQueuedJobResponseToReturn: MoveQueuedJobResponse?
+    var beforeMoveQueuedJob: (@Sendable () async -> Void)?
+    private(set) var listAllJobsCallCount = 0
 
     // Dispatch (issue #712)
     var candidatesToReturn: [DispatchCandidate] = []
@@ -33,8 +45,32 @@ final class MockJobService: JobServiceProtocol, @unchecked Sendable {
         return queueOverviewsToReturn
     }
 
-    func listAllJobs() async throws -> [QueuedPrintJobResponse] {
+    func listAllJobs() async throws -> QueuedPrintJobPage {
         listAllJobsCalled = true
+        listAllJobsCallCount += 1
+        if let error = errorToThrow { throw error }
+        let jobs = queuedJobResponsesByLoad.isEmpty
+            ? queuedJobResponsesToReturn
+            : queuedJobResponsesByLoad.removeFirst()
+        return QueuedPrintJobPage(jobs: jobs, mayHaveMore: queuedJobListMayHaveMore)
+    }
+
+    var queuedJobResponsesByLoad: [[QueuedPrintJobResponse]] = []
+
+    func moveQueuedJob(
+        id: UUID,
+        reviewedRowVersion: String,
+        neighbor: QueuePositionNeighbor
+    ) async throws -> MoveQueuedJobResponse {
+        moveQueuedJobCalledWith = (id, reviewedRowVersion, neighbor)
+        if let beforeMoveQueuedJob { await beforeMoveQueuedJob() }
+        if let error = actionErrorToThrow ?? errorToThrow { throw error }
+        return moveQueuedJobResponseToReturn
+            ?? MoveQueuedJobResponse(id: id.uuidString, rowVersion: reviewedRowVersion)
+    }
+
+    func listPrinterQueue(printerId: UUID) async throws -> [QueuedPrintJobResponse] {
+        listPrinterQueueCalledWith = printerId
         if let error = errorToThrow { throw error }
         return queuedJobResponsesToReturn
     }
@@ -79,6 +115,7 @@ final class MockJobService: JobServiceProtocol, @unchecked Sendable {
         reviewedRowVersion: String
     ) async throws -> JobDispatchResult {
         dispatchCalledWith = id
+        dispatchReviewedRowVersion = reviewedRowVersion
         if let error = actionErrorToThrow ?? errorToThrow { throw error }
         if let dispatchResultToReturn {
             return dispatchResultToReturn
@@ -101,6 +138,11 @@ final class MockJobService: JobServiceProtocol, @unchecked Sendable {
                 )
             )
         )
+    }
+
+    func rerun(id: UUID, reviewedRowVersion: String) async throws {
+        rerunCalledWith = (id, reviewedRowVersion)
+        if let error = actionErrorToThrow ?? errorToThrow { throw error }
     }
 
     func abort(id: UUID, reviewedRowVersion: String) async throws {
@@ -148,21 +190,29 @@ final class MockJobService: JobServiceProtocol, @unchecked Sendable {
     func reset() {
         queueOverviewsToReturn = []
         queuedJobResponsesToReturn = []
+        queuedJobListMayHaveMore = false
+        queuedJobResponsesByLoad = []
         jobToReturn = nil
         errorToThrow = nil
         actionErrorToThrow = nil
         dispatchResultToReturn = nil
         listJobsCalled = false
         listAllJobsCalled = false
+        listPrinterQueueCalledWith = nil
         getJobCalledWith = nil
         createCalledWith = nil
         updateCalledWith = nil
         deleteCalledWith = nil
         cancelCalledWith = nil
         dispatchCalledWith = nil
+        rerunCalledWith = nil
         abortCalledWith = nil
         pauseCalledWith = nil
         resumeCalledWith = nil
+        moveQueuedJobCalledWith = nil
+        moveQueuedJobResponseToReturn = nil
+        beforeMoveQueuedJob = nil
+        listAllJobsCallCount = 0
         candidatesToReturn = []
         getCandidatesCalledWith = nil
         dispatchToCalledWith = nil

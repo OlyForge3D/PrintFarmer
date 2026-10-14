@@ -7,6 +7,7 @@ import {
   getFailureDetectionSourceLabel,
   formatFailureDetectionTimestamp,
   getFailureDetectionDetail,
+  getFailureDetectionIconColorClass,
 } from "@/features/printers/utils/failureDetectionStatus";
 import type { FailureDetectionPrinterStatusDto } from "@/types/api";
 
@@ -545,6 +546,41 @@ describe("failureDetectionStatus utilities", () => {
       };
 
       expect(getFailureDetectionAttentionContent(status)).toBeNull();
+    });
+  });
+
+  describe("getFailureDetectionIconColorClass", () => {
+    it.each([
+      ["monitoring", "text-pf-success"],
+      ["idle", "text-pf-status-idle-text"],
+      ["misconfigured", "text-pf-warning"],
+      ["error", "text-pf-error"],
+      ["disabled", "text-pf-control-disabled-text"],
+    ] as const)("maps %s to %s", (state, expected) => {
+      expect(getFailureDetectionIconColorClass(state)).toBe(expected);
+      expect(getFailureDetectionIconColorClass(state, true)).toBe(expected);
+    });
+
+    it.each([
+      [true, "text-pf-text-secondary"],
+      [false, "text-pf-control-disabled-text"],
+    ] as const)("maps an unknown state with enabled=%s to %s", (enabled, expected) => {
+      expect(getFailureDetectionIconColorClass(undefined, enabled)).toBe(expected);
+    });
+
+    it("never uses the brand accent, which collides with status hues in some themes", () => {
+      for (const state of ["monitoring", "idle", "misconfigured", "error", "disabled", undefined]) {
+        for (const enabled of [true, false]) {
+          expect(getFailureDetectionIconColorClass(state, enabled)).not.toMatch(/accent/);
+        }
+      }
+    });
+
+    it("reserves error red for the error state only", () => {
+      for (const state of ["monitoring", "idle", "misconfigured", "disabled", "checking", undefined]) {
+        expect(getFailureDetectionIconColorClass(state)).not.toBe("text-pf-error");
+        expect(getFailureDetectionIconColorClass(state, true)).not.toBe("text-pf-error");
+      }
     });
   });
 });

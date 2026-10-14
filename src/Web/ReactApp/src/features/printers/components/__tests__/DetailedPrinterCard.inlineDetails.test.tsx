@@ -124,15 +124,14 @@ vi.mock('@/features/printers/components/MaterialLoadout', () => ({
   MaterialLoadout: () => <div data-testid="material-loadout" />,
 }));
 vi.mock('@/features/printers/components/TemperatureControlSection', () => ({
-  TemperatureControlSection: () => <div data-testid="temp-section" />,
+  TemperatureControlSection: ({ showHeading }: { showHeading?: boolean }) => (
+    <div data-testid="temp-section" data-show-heading={String(showHeading !== false)} />
+  ),
 }));
 vi.mock('@/features/printers/components/MovementControlSection', () => ({
   MovementControlSection: ({ rightContent }: { rightContent?: React.ReactNode }) => (
     <div data-testid="movement-section">{rightContent}</div>
   ),
-}));
-vi.mock('@/features/printers/components/FilamentControlSection', () => ({
-  FilamentControlSection: () => <div data-testid="filament-section" />,
 }));
 vi.mock('@/features/printers/components/PrinterActionBar', () => ({ PrinterActionBar: () => <div data-testid="action-bar" /> }));
 vi.mock('@/features/printers/components/BedClearBanner', () => ({ BedClearBanner: () => null }));
@@ -143,9 +142,6 @@ vi.mock('@/features/printers/components/FailureDetectionMonitoringBadge', () => 
 vi.mock('@/features/printers/components/FailureDetectionMonitoringSummary', () => ({ FailureDetectionMonitoringSummary: () => null }));
 vi.mock('@/features/printers/components/OfflineTroubleshootingGuide', () => ({ OfflineTroubleshootingGuide: () => null }));
 vi.mock('@/features/printers/components/PrinterCameraPreview', () => ({ PrinterCameraPreview: () => <div data-testid="camera-preview" /> }));
-vi.mock('@/features/printers/components/ZOffsetCalibrationWizard', () => ({
-  ZOffsetCalibrationWizard: () => <div data-testid="zoffset-wizard" />,
-}));
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() } }));
 
 import { DetailedPrinterCard } from '../DetailedPrinterCard';
@@ -228,6 +224,12 @@ describe('DetailedPrinterCard inline details (#1584)', () => {
       }
       return { data: undefined, isLoading: false, isFetching: false, refetch: vi.fn() };
     });
+  });
+
+  it('keeps the Temps heading on the card', () => {
+    render(<DetailedPrinterCard printer={makePrinter()} />);
+
+    expect(screen.getByTestId('temp-section')).toHaveAttribute('data-show-heading', 'true');
   });
 
   it('does not render an Open details sidebar action', () => {
@@ -375,6 +377,77 @@ describe('DetailedPrinterCard inline details (#1584)', () => {
     );
 
     expect(screen.queryByText('Objects')).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['Idle', true],
+    ['Offline', false],
+    ['Error', true],
+    ['Complete', true],
+    ['Printing', false],
+    ['Paused', false],
+  ])('omits the Objects section and inactive-print copy when the printer is %s (online: %s)', (state, isOnline) => {
+    usePrintJobObjectsMock.mockReturnValue({
+      data: { printerId: 'printer-1', objects: [makeObject({ name: 'stale_part' })] },
+      isLoading: false,
+      isFetching: false,
+      refetch: vi.fn(),
+    });
+
+    render(
+      <DetailedPrinterCard
+        printer={makePrinter({ state, isOnline } as Partial<Printer>)}
+        backendCapabilities={{ supportsObjectExclusion: true } as unknown as Parameters<typeof DetailedPrinterCard>[0]['backendCapabilities']}
+      />
+    );
+
+    expect(screen.queryByText('Objects')).not.toBeInTheDocument();
+    expect(screen.queryByText('stale_part')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Object skipping is available/)).not.toBeInTheDocument();
+  });
+
+  it('keeps the Objects section for a paused active print', () => {
+    usePrintJobObjectsMock.mockReturnValue({
+      data: { printerId: 'printer-1', objects: [makeObject({ name: 'part_1' })] },
+      isLoading: false,
+      isFetching: false,
+      refetch: vi.fn(),
+    });
+
+    render(
+      <DetailedPrinterCard
+        printer={makePrinter({ state: 'Paused' } as Partial<Printer>)}
+        backendCapabilities={{ supportsObjectExclusion: true } as unknown as Parameters<typeof DetailedPrinterCard>[0]['backendCapabilities']}
+      />
+    );
+
+    expect(screen.getByText('Objects')).toBeInTheDocument();
+    expect(screen.getByText('part_1')).toBeInTheDocument();
+  });
+
+  it('drops a pending skip confirmation when the active print ends', async () => {
+    usePrintJobObjectsMock.mockReturnValue({
+      data: { printerId: 'printer-1', objects: [makeObject({ name: 'part_1' })] },
+      isLoading: false,
+      isFetching: false,
+      refetch: vi.fn(),
+    });
+    const capabilities = { supportsObjectExclusion: true } as unknown as Parameters<typeof DetailedPrinterCard>[0]['backendCapabilities'];
+    const card = (state: string) => (
+      <DetailedPrinterCard printer={makePrinter({ state } as Partial<Printer>)} backendCapabilities={capabilities} />
+    );
+
+    const { rerender } = render(card('Printing'));
+    fireEvent.click(screen.getAllByRole('button', { name: /skip object/i })[0]);
+    expect(screen.getByText('Skip print object?')).toBeInTheDocument();
+
+    rerender(card('Complete'));
+    await waitFor(() => expect(screen.queryByText('Skip print object?')).not.toBeInTheDocument());
+
+    rerender(card('Printing'));
+    expect(screen.queryByText('Skip print object?')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Skip object' })).not.toBeInTheDocument();
+    expect(excludePrintJobObjectMock).not.toHaveBeenCalled();
   });
 
   // Regression coverage for #1698: the card's shared sections must appear in the same

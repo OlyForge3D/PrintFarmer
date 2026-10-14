@@ -10,7 +10,7 @@
  *   Inventory  — Spare parts, consumables, replacement tracking
  */
 
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 import { format } from 'date-fns';
 import './MaintenanceDashboardPage.css';

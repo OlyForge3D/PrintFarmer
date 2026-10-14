@@ -3,7 +3,7 @@
 namespace Farm.Infrastructure.Services.Notifications.NativePush;
 
 /// <summary>
-/// Builds the fixed <c>printfarmer://</c> deep-link URLs the mobile app resolves on tap.
+/// Builds fixed <c>printfarmer://</c> deep-link URLs custom native-push clients can resolve on tap.
 /// The scheme was adjudicated by Dallas; see <c>docs/OPERATOR_NATIVE_PUSH.md</c>.
 /// </summary>
 public static class AttentionDeepLinks

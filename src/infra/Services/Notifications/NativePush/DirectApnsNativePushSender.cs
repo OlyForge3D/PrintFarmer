@@ -317,7 +317,7 @@ public sealed class DirectApnsNativePushSender : INativePushTransportSender, IDi
 
     private static string BuildApsPayload(NativePushEnvelope envelope)
     {
-        // Wire shape: standard APS root + typed custom keys the mobile app reads to route
+        // Wire shape: standard APS root + typed custom keys a native-push client reads to route
         // the tap / action to the correct in-app destination. Deep link is the fallback for
         // out-of-band launches; category drives which registered action buttons render.
         //

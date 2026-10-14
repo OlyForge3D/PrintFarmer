@@ -9,6 +9,12 @@ public static class CameraContractClassifier
 {
     public const string SnapmakerU1MonitorSnapshotPath = "/server/files/camera/monitor.jpg";
 
+    /// <summary>
+    /// Returns the trimmed camera target, or null when the target is blank so it is treated as unconfigured.
+    /// </summary>
+    public static string? NormalizeTarget(string? url) =>
+        string.IsNullOrWhiteSpace(url) ? null : url.Trim();
+
     public static CameraSnapshotStrategy GetSnapshotStrategy(string? snapshotUrl)
     {
         if (string.IsNullOrWhiteSpace(snapshotUrl))

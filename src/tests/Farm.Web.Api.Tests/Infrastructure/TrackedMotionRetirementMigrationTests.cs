@@ -109,10 +109,14 @@ public sealed class TrackedMotionRetirementMigrationTests
         // every later migration exactly as a real upgrade would.
         _ = await context.Database.ExecuteSqlRawAsync(
             """ALTER TABLE "QueueDispatchAttempts" ADD COLUMN "BackendSenderSettledAtUtc" TEXT NULL;""");
+        _ = await context.Database.ExecuteSqlRawAsync(
+            """ALTER TABLE "Printers" ADD COLUMN "ShowExternalSpool" INTEGER NOT NULL DEFAULT 0;""");
         await context.SaveChangesAsync();
         context.ChangeTracker.Clear();
         _ = await context.Database.ExecuteSqlRawAsync(
             """ALTER TABLE "QueueDispatchAttempts" DROP COLUMN "BackendSenderSettledAtUtc";""");
+        _ = await context.Database.ExecuteSqlRawAsync(
+            """ALTER TABLE "Printers" DROP COLUMN "ShowExternalSpool";""");
 
         await migrator.MigrateAsync();
 

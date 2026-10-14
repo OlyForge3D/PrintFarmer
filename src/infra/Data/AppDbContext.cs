@@ -182,6 +182,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     // Cameras (standalone webcams not attached to printers)
     public DbSet<Camera> Cameras => Set<Camera>();
 
+    // Auto-discovered cameras a user removed from a printer (suppresses re-creation by camera sync)
+    public DbSet<DismissedPrinterCamera> DismissedPrinterCameras => Set<DismissedPrinterCamera>();
+
     // Camera snapshots (captured on print events)
     public DbSet<CameraSnapshot> CameraSnapshots => Set<CameraSnapshot>();
 

@@ -1,27 +1,39 @@
 # Operator native push (F3 / #708) — backend architecture
 
-Status: **implemented (backend/API stage)** on `feature/705-operator-redesign`.
-Mobile client wiring is a separate stage; this document covers the server design
-that Bishop / Hicks / Vasquez reviewed and gated.
+Status: **optional backend capability; disabled in the shipped v1 mobile
+architecture**. OlyForge3D does not operate a notification relay. The App Store
+build uses SignalR for live in-app updates and has one on-device local
+notification path: a bed-clear reminder when `PendingReadyMonitor` observes a
+printer newly enter `PendingReady`. It does not request an APNs token or call
+the device-token registration API.
+This document covers server-side infrastructure that operators of custom
+deployments and custom clients may configure.
 
 ## 1. Constraints and the topology decision
 
 PrintFarmer is self-hosted per customer. OlyForge3D owns the App Store bundle
-identifier and the associated APNs `.p8` provider key; that key must never be
-distributed to a self-hosted install (Dallas triage on #708). At the same time
-the backend must compile, run, and pass tests without any live credentials.
+identifier and does not distribute its APNs credentials or provide a hosted
+push service. The backend must compile, run, and pass tests without any live
+credentials.
 
 We resolve this with a **provider-abstract sender** chosen by configuration:
 
-| Mode      | `NativePush__Mode` | Where APNs credentials live                    | Intended use                       |
-|-----------|--------------------|------------------------------------------------|------------------------------------|
-| `disabled`| (default / unset)  | nowhere                                        | fresh install, dev, CI             |
-| `relay`   | `relay`            | OlyForge3D-hosted relay (backend never sees)   | production TestFlight / App Store  |
-| `direct`  | `direct`           | local backend `.p8` (path or PEM)              | self-signed enterprise / dev-cert  |
+| Mode       | `NativePush__Mode` | Where APNs credentials live                  | Intended use |
+|------------|--------------------|----------------------------------------------|--------------|
+| `disabled` | (default / unset)  | nowhere                                      | shipped v1, fresh installs, dev, CI |
+| `relay`    | `relay`            | operator-selected relay (backend never sees) | optional custom deployment |
+| `direct`   | `direct`           | local backend `.p8` (path or PEM)            | custom-signed enterprise/development build |
 
-The default is **disabled**. The recommended production topology is **relay**;
-`direct` exists so an operator who signs their own build can bring their own
-provider key without a code change.
+The default and shipped v1 topology is **disabled**. SignalR supplies live
+in-app updates; the shipped local-notification scope is limited to the
+`PendingReady` bed-clear reminder described above. Relay and direct modes are
+optional building blocks for operators who own the required service and
+signing credentials; OlyForge3D does not host or recommend a relay endpoint.
+
+> **Official v1 mobile-client boundary:** the App Store client does not include
+> APNs registration, token persistence, token upload, or the APNs entitlement.
+> The registration endpoints and sender modes below are available only to
+> custom clients whose operators provide their own complete push topology.
 
 > **All `NativePushSettings` values are startup-bound and require a process
 > restart after changes.** The options are validated with `ValidateOnStart()`,
@@ -47,9 +59,9 @@ time (chosen by `Mode`); the disabled sender is a no-op that returns
   authoritative and the path is ignored; an invalid/public-only inline key fails
   startup rather than falling back to the file. The path is read only when the
   inline slot is empty.
-- Relay mode uses a bearer token (`NativePush__Relay__ApiKey`) issued per
-  installation by OlyForge3D. The relay endpoint URL is separate
-  (`NativePush__Relay__Endpoint`).
+- Relay mode uses a bearer token (`NativePush__Relay__ApiKey`) issued by the
+  operator's chosen relay service. The operator supplies the separate relay URL
+  (`NativePush__Relay__Endpoint`). OlyForge3D does not provide either value.
 - Deployment template `.env.template` documents the keys but never contains
   live values. See `.env.template` at the repository root.
 - Startup validation (`NativePushSettingsValidator`, wired via
@@ -143,10 +155,12 @@ invoked:
 
 Both guards emit metrics (`native_push_deduplicated`, `native_push_rate_limited`).
 
-## 2. Actionable categories and deep links
+## 2. Custom-client actionable categories and deep links
 
-The category identifiers and action ids are stable across the mobile app and
-the server. String enum wire values are PascalCase per the API contract.
+The category identifiers and action ids below are a server contract for custom
+native-push clients. The official v1 App Store client does not register these
+categories or route these payload deep links. String enum wire values are
+PascalCase per the API contract.
 
 | `attentionKind` | APNs `category`     | actions on lock-screen              | primary deep link                                                                     |
 |-----------------|---------------------|-------------------------------------|---------------------------------------------------------------------------------------|
@@ -156,10 +170,9 @@ the server. String enum wire values are PascalCase per the API contract.
 | `harvest`       | `HARVEST_READY`     | (tap only)                          | `printfarmer://attention/{attentionItemId}`                                           |
 | `runout`        | `FILAMENT_RUNOUT`   | `OPEN_SWAP`, `SNOOZE_15`            | `printfarmer://printer/{printerId}/swap/{toolheadIndex}?jobId={jobId}`                |
 
-Categories and action ids are also exposed at `GET /api/notifications/attention-categories`
-so the mobile client can register `UNNotificationCategory`s from server metadata
-rather than a hard-coded list. That endpoint is the authoritative contract used
-by #716 (React preferences) and by Gorman/Hudson's iOS stages.
+Categories and action ids are also exposed at
+`GET /api/notifications/attention-categories` for custom native-push clients.
+The official v1 App Store client does not consume this native-push catalog.
 
 APS payload shape (identical across relay and direct modes):
 
@@ -198,8 +211,9 @@ first use and persisted server-side (see below), so every push this server sends
 restarts. It is present on every envelope, including resolved/dismissal pushes, and
 is never a fabricated or empty value: if the server cannot resolve its own identity,
 that device's send is skipped and logged rather than going out without an origin.
-The mobile app uses this value to bind a delayed notification tap to the correct
-locally-registered server after the user has switched servers.
+A custom native-push client can use this value to associate a delayed payload
+with the correct server registration after its user switches servers. The
+official v1 App Store client does not store or consume `originServerId`.
 
 ## 3. Double gate on `nativePushEnabled`
 
@@ -230,11 +244,13 @@ take effect on the next request without a restart.
 ```
 
 `serverId` is the same value emitted as `originServerId` on push payloads, so a
-successful registration response is sufficient for the mobile app to bind that
-registration to the correct locally-registered server entry without waiting for a
-push to arrive. It is stable across repeated registrations against the same
-server. `DELETE /api/notifications/device-tokens` (unregister) is unaffected and
-still returns `204 No Content`.
+successful registration response is sufficient for a custom native-push client
+to bind that registration to its corresponding server entry without waiting
+for a push to arrive. The official v1 App Store client does not call this
+endpoint or persist the returned identity. The value is stable across repeated
+registrations against the same server.
+`DELETE /api/notifications/device-tokens` (unregister) is unaffected and still
+returns `204 No Content`.
 
 `ServerIdentityService` generates this identity once and persists it in the
 existing generic `AppSettingsEntity` table (`Key="ServerIdentity"`) rather than a
@@ -426,10 +442,10 @@ Structured logs use `attentionItemId`, `changeKind`, `installationId`,
 # Native push (F3 / #708). Default: disabled.
 NativePush__Mode=disabled
 
-# Relay mode (production)
+# Optional relay mode (operator-provided; not hosted by OlyForge3D)
 # NativePush__Mode=relay
-# NativePush__Relay__Endpoint=https://push-relay.olyforge3d.com/v1/dispatch
-# NativePush__Relay__ApiKey=<per-install bearer, obtained from OlyForge3D>
+# NativePush__Relay__Endpoint=https://push-relay.example.com/v1/dispatch
+# NativePush__Relay__ApiKey=<per-install bearer issued by your relay operator>
 
 # Direct APNs mode (self-signed / enterprise). Inline PEM takes precedence over the path.
 # NativePush__Mode=direct
@@ -458,10 +474,11 @@ Health probing: `GET /api/system/capabilities` continues to expose
 
 ## 10. Shared notification-preference contract (dependency of #716)
 
-The React and mobile clients share one preference matrix — one row per
+The API and web client share one preference matrix — one row per
 `NotificationPreferenceEventType` × four channels
 (`inApp`, `email`, `push`, `telegram`). Native push is the `push` column
-for the attention rows added in this stage.
+for the attention rows added in this stage; a custom native-push client may
+consume it, but the official v1 App Store client does not.
 
 ### Wire enum tokens
 
@@ -528,4 +545,5 @@ locks this.
   a follow-up.
 - No React preferences UI changes. #716 will consume the shared enum + the
   `GET /api/notifications/attention-categories` endpoint.
-- Provisioning of live APNs / relay credentials is Parker's release/#724 scope.
+- Provisioning custom-deployment APNs or relay credentials is the operator's
+  responsibility and is not part of the shipped v1 App Store release.

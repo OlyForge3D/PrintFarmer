@@ -81,8 +81,24 @@ public sealed class RealMoonrakerSubscriptionServiceIntegrationTests : IClassFix
         await using ServiceProvider provider = services.BuildServiceProvider();
 
         var clientProxy = new Mock<IClientProxy>();
+        PrinterStatusUpdate? latestBroadcast = null;
+        var printingBroadcast = new TaskCompletionSource<PrinterStatusUpdate>(TaskCreationOptions.RunContinuationsAsynchronously);
         var hubClients = new Mock<IHubClients>();
         hubClients.Setup(c => c.Group(It.IsAny<string>())).Returns(clientProxy.Object);
+        clientProxy
+            .Setup(p => p.SendCoreAsync(
+                "printerupdated",
+                It.IsAny<object?[]>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<string, object?[], CancellationToken>((_, args, _) =>
+            {
+                latestBroadcast = Assert.IsType<PrinterStatusUpdate>(Assert.Single(args));
+                if (latestBroadcast.CurrentJobThumbnailUrl is not null)
+                {
+                    printingBroadcast.TrySetResult(latestBroadcast);
+                }
+            })
+            .Returns(Task.CompletedTask);
         var hubContext = new Mock<IHubContext<PrinterHub>>();
         hubContext.SetupGet(h => h.Clients).Returns(hubClients.Object);
 
@@ -139,6 +155,18 @@ public sealed class RealMoonrakerSubscriptionServiceIntegrationTests : IClassFix
 
         PrinterStatusDto updated = await secondUpdate.Task.WaitAsync(TimeSpan.FromSeconds(15));
         updated.Id.Should().Be(printer.Id);
+        PrinterStatusUpdate updateBroadcast = await printingBroadcast.Task.WaitAsync(TimeSpan.FromSeconds(15));
+        Assert.NotNull(updateBroadcast.CurrentJobThumbnailUrl);
+        Assert.Contains("/server/files/gcodes/thumbs/benchy-300x300.png", updateBroadcast.ThumbnailUrl, StringComparison.Ordinal);
+        Assert.Equal(updated.CurrentJobThumbnailUrl, updateBroadcast.CurrentJobThumbnailUrl);
+        IMoonrakerClient liveClient = provider.GetRequiredService<IMoonrakerClient>();
+        ISupportsCurrentJobThumbnail liveThumbnailClient =
+            Assert.IsAssignableFrom<ISupportsCurrentJobThumbnail>(liveClient);
+        PrinterJob liveJob = Assert.IsType<PrinterJob>(
+            await liveThumbnailClient.GetCurrentJobAsync(printer.BackendUrl, printer.Credential, CancellationToken.None));
+        Assert.Equal(liveJob.ThumbnailUrl, updateBroadcast.ThumbnailUrl);
+        Assert.Equal(liveJob.ThumbnailCacheIdentity, updateBroadcast.ThumbnailCacheIdentity);
+        Assert.NotNull(liveJob.ThumbnailCacheIdentity);
 
         var shutdownUpdate = new TaskCompletionSource<PrinterStatusDto>(TaskCreationOptions.RunContinuationsAsynchronously);
         statusCacheWriter
@@ -183,6 +211,70 @@ public sealed class RealMoonrakerSubscriptionServiceIntegrationTests : IClassFix
             .Should()
             .OnlyContain(dto => dto.IsOnline);
         observedUpdates.Should().NotContain(dto => dto.State == "Error");
+    }
+
+    [Fact]
+    public async Task HttpPollingFallback_CacheAndBroadcastUrlsMatchLiveJobIdentity()
+    {
+        await _host.ResetAsync();
+        using HttpResponseMessage scenario = await _host.ControlClient.PostAsync(
+            "/__emulator/printer/scenario",
+            TestRequests.Json("""{"scenario":"Printing"}"""));
+        scenario.EnsureSuccessStatusCode();
+
+        Printer printer = BuildPrinterPointingAtEmulator();
+        var services = new ServiceCollection();
+        services.AddScoped<IMoonrakerClient>(
+            _ => new MoonrakerClient(new HttpClient(), NullLogger<MoonrakerClient>.Instance, new BackendTimeoutSettings()));
+        await using ServiceProvider provider = services.BuildServiceProvider();
+
+        PrinterStatusDto? cachedStatus = null;
+        PrinterStatusUpdate? broadcast = null;
+        var statusCacheWriter = new Mock<IPrinterStatusCacheWriter>();
+        statusCacheWriter
+            .Setup(writer => writer.UpdateStatus(It.IsAny<PrinterStatusDto>(), It.IsAny<long?>()))
+            .Callback<PrinterStatusDto, long?>((dto, _) => cachedStatus = dto);
+
+        var clientProxy = new Mock<IClientProxy>();
+        clientProxy
+            .Setup(proxy => proxy.SendCoreAsync(
+                "printerupdated",
+                It.IsAny<object?[]>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<string, object?[], CancellationToken>((_, args, _) =>
+                broadcast = Assert.IsType<PrinterStatusUpdate>(Assert.Single(args)))
+            .Returns(Task.CompletedTask);
+        var hubClients = new Mock<IHubClients>();
+        hubClients.Setup(clients => clients.Group(It.IsAny<string>())).Returns(clientProxy.Object);
+        var hubContext = new Mock<IHubContext<PrinterHub>>();
+        hubContext.SetupGet(hub => hub.Clients).Returns(hubClients.Object);
+        var httpClientFactory = new Mock<IHttpClientFactory>();
+        httpClientFactory.Setup(factory => factory.CreateClient(It.IsAny<string>())).Returns(() => new HttpClient());
+
+        using var service = new MoonrakerSubscriptionService(
+            hubContext.Object,
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            new TestOutputLogger<MoonrakerSubscriptionService>(_output),
+            httpClientFactory.Object,
+            statusCacheWriter.Object);
+
+        await service.TriggerHttpPollingFallbackAsync(printer, CancellationToken.None);
+
+        Assert.NotNull(cachedStatus);
+        Assert.NotNull(broadcast);
+        Assert.Equal(broadcast.CurrentJobThumbnailUrl, cachedStatus.CurrentJobThumbnailUrl);
+        Assert.NotNull(cachedStatus.CurrentJobThumbnailUrl);
+
+        IMoonrakerClient liveClient = provider.GetRequiredService<IMoonrakerClient>();
+        ISupportsCurrentJobThumbnail liveThumbnailClient =
+            Assert.IsAssignableFrom<ISupportsCurrentJobThumbnail>(liveClient);
+        PrinterJob liveJob = Assert.IsType<PrinterJob>(
+            await liveThumbnailClient.GetCurrentJobAsync(printer.BackendUrl, printer.Credential, CancellationToken.None));
+        Assert.Equal(liveJob.ThumbnailUrl, broadcast.ThumbnailUrl);
+        Assert.Equal(liveJob.ThumbnailCacheIdentity, broadcast.ThumbnailCacheIdentity);
+        Assert.Equal(
+            PrinterThumbnailUrl.Create(printer.Id, liveJob.PrintState, liveJob.JobName, liveJob.ThumbnailUrl, liveJob.ThumbnailCacheIdentity),
+            broadcast.CurrentJobThumbnailUrl);
     }
 
     [Fact]

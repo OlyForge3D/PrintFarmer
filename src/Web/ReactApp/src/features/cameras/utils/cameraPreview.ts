@@ -1,3 +1,4 @@
+import { isAuthenticatedCameraProxyRoute } from '@/common/auth/authenticatedCameraRoutes';
 import {
   CameraAccessMode,
   CameraSnapshotStrategy,
@@ -8,6 +9,7 @@ interface CameraPreviewContract {
   accessMode?: CameraAccessMode;
   streamFormat?: CameraStreamFormat;
   snapshotStrategy?: CameraSnapshotStrategy;
+  streamUrl?: string | null;
   snapshotUrl?: string | null;
 }
 
@@ -19,7 +21,7 @@ export function shouldPollPrinterSnapshot({
   // Same-origin printer proxy URLs are protected by the application JWT. An
   // <img> element cannot attach that header, so retrieve them through apiClient
   // and render the resulting object URL instead.
-  if (snapshotUrl?.startsWith('/api/printers/')) {
+  if (isAuthenticatedCameraProxyRoute(snapshotUrl) && snapshotUrl && new URL(snapshotUrl, window.location.origin).pathname.endsWith('/snapshot')) {
     return true;
   }
 
@@ -56,14 +58,18 @@ export function isUnsupportedCameraPreview({
 export function canUseMjpegStream({
   accessMode,
   streamFormat,
-  snapshotStrategy,
-  snapshotUrl,
+  streamUrl,
 }: CameraPreviewContract): boolean {
-  if (shouldPollPrinterSnapshot({ accessMode, snapshotStrategy, snapshotUrl })) {
+  if (!streamUrl) {
     return false;
   }
 
-  if (isUnsupportedCameraPreview({ accessMode, streamFormat, snapshotStrategy, snapshotUrl })) {
+  if (
+    accessMode === CameraAccessMode.UnsupportedStream ||
+    streamFormat === CameraStreamFormat.Unsupported ||
+    streamFormat === CameraStreamFormat.WebRtc ||
+    streamFormat === CameraStreamFormat.Rtsp
+  ) {
     return false;
   }
 

@@ -15,8 +15,12 @@ import { Download, Clock, Layers, DollarSign, Box, Palette, Timer, FolderOpen, A
 import clsx from "clsx";
 import { useFleetFilamentCoverage } from "@/features/filament-coverage/hooks";
 import { FilamentCoverageBadge } from "@/features/filament-coverage/components/FilamentCoverageBadge";
+import { hasFilamentCoverageDemand } from "@/features/filament-coverage/utils";
 import type { PrinterFilamentCoverage } from "@/features/filament-coverage/types";
-import { dispatchOutcomeLabel, isDispatchIndeterminate, isRecoveryBlocked } from "@/features/dispatch-recovery/utils";
+import { QueueJobReorderControls } from "@/features/queue/components/QueueJobReorderControls";
+import type { QueueReorderInteractions } from "@/features/queue/components/QueueJobReorderControls";
+import { getQueueMoveNeighbors } from "@/features/queue/utils/queueReordering";
+import type { QueueMoveNeighbors } from "@/features/queue/utils/queueReordering";
 
 /**
  * Job counts at or under this threshold render every row directly. Above it,
@@ -105,7 +109,7 @@ function DetailChip({ icon, label, children }: { icon: React.ReactNode; label: s
   );
 }
 
-interface QueueJobRowGroupProps {
+interface QueueJobRowGroupProps extends QueueReorderInteractions {
   jobWrapper: QueuedPrintJobWithFileMetaDto;
   isLastJob: boolean;
   coverageByPrinterId: ReadonlyMap<string, PrinterFilamentCoverage>;
@@ -122,6 +126,7 @@ interface QueueJobRowGroupProps {
   onEdit?: (jobId: string) => void;
   onDispatch?: (jobId: string) => void;
   onSchedule?: (jobId: string) => void;
+  reorderNeighbors?: Map<string, QueueMoveNeighbors>;
   /**
    * When set, this row is part of a windowed (virtualized) larger table: the
    * 1-based ARIA row index of this job's primary `<tr>` (the detail `<tr>`
@@ -158,6 +163,14 @@ const QueueJobRowGroup = forwardRef<HTMLTableSectionElement, QueueJobRowGroupPro
       onEdit,
       onDispatch,
       onSchedule,
+      canReorder = false,
+      isReordering = false,
+      draggedJobId = null,
+      onMoveJob,
+      onDragStartJob,
+      onDragEndJob,
+      canDropOnJob,
+      reorderNeighbors,
       ariaRowIndexBase,
       virtualIndex,
     },
@@ -170,6 +183,24 @@ const QueueJobRowGroup = forwardRef<HTMLTableSectionElement, QueueJobRowGroupPro
     const model = jobWrapper.assignedPrinter?.modelName || "";
     const material = jobWrapper.gcodeFile?.materialType || job.requiredMaterialType || "";
     const status = job.status || "Unknown";
+    const moveNeighbors = reorderNeighbors?.get(jobId);
+    const hasJobRevision = typeof job.rowVersion === "string" && job.rowVersion.trim().length > 0;
+    const canMoveUp =
+      canReorder &&
+      status === "Queued" &&
+      hasJobRevision &&
+      Boolean(moveNeighbors?.previous?.job.rowVersion?.trim());
+    const canMoveDown =
+      canReorder &&
+      status === "Queued" &&
+      hasJobRevision &&
+      Boolean(moveNeighbors?.next?.job.rowVersion?.trim());
+    const canDrag =
+      canReorder &&
+      !isReordering &&
+      status === "Queued" &&
+      hasJobRevision &&
+      Boolean(moveNeighbors?.previous || moveNeighbors?.next);
     const priority = job.priority;
     const projectName = job.projectName;
     // Row action buttons share visible labels (e.g. "Abort", "Cancel") across
@@ -237,8 +268,34 @@ const QueueJobRowGroup = forwardRef<HTMLTableSectionElement, QueueJobRowGroupPro
         ref={ref}
         data-index={virtualIndex}
         data-job-id={jobId}
+        {...(canDrag ? { draggable: true } : {})}
         aria-label={`Print job: ${fileName}${deadlineState === "overdue" ? ", overdue deadline" : deadlineState === "due-soon" ? ", due soon" : ""}`}
         tabIndex={0}
+        onDragStart={(event) => {
+          if (!canDrag) {
+            event.preventDefault();
+            return;
+          }
+          event.dataTransfer.effectAllowed = "move";
+          event.dataTransfer.setData("text/plain", jobId);
+          onDragStartJob?.(jobId);
+        }}
+        onDragOver={(event) => {
+          if (draggedJobId && canDropOnJob?.(draggedJobId, jobId)) {
+            event.preventDefault();
+            event.dataTransfer.dropEffect = "move";
+          }
+        }}
+        onDrop={(event) => {
+          event.preventDefault();
+          const sourceId = draggedJobId || event.dataTransfer.getData("text/plain");
+          if (!sourceId || !canDropOnJob?.(sourceId, jobId)) return;
+          const bounds = event.currentTarget.getBoundingClientRect();
+          const placement = event.clientY < bounds.top + bounds.height / 2 ? "before" : "after";
+          onMoveJob?.(sourceId, jobId, placement);
+          onDragEndJob?.();
+        }}
+        onDragEnd={onDragEndJob}
         onClick={() => onEdit?.(jobId)}
         onKeyDown={(e) => {
           if (e.target !== e.currentTarget) return;
@@ -294,21 +351,6 @@ const QueueJobRowGroup = forwardRef<HTMLTableSectionElement, QueueJobRowGroupPro
               >
                 {status}
               </span>
-              {isRecoveryBlocked(job) ? (
-                <span
-                  className="inline-block px-2 py-0.5 rounded-xs text-[10px] font-semibold whitespace-nowrap bg-pf-warning/20 text-pf-warning-text"
-                  title="Held after an operator recovered an unknown dispatch; an operator must allow dispatch."
-                >
-                  Recovery hold
-                </span>
-              ) : isDispatchIndeterminate(job) ? (
-                <span
-                  className="inline-block px-2 py-0.5 rounded-xs text-[10px] font-semibold whitespace-nowrap bg-pf-warning/20 text-pf-warning-text"
-                  title="The dispatch outcome is unknown; the print may have started. Check the printer."
-                >
-                  {dispatchOutcomeLabel("Unknown")}
-                </span>
-              ) : null}
               {showLiveProgress && (
                 <div className="w-full" title={`${liveProgressRounded}% complete`}>
                   <ProgressBar
@@ -340,7 +382,7 @@ const QueueJobRowGroup = forwardRef<HTMLTableSectionElement, QueueJobRowGroupPro
                 // warning derived from stale data.
                 if (jobWrapper.assignedPrinter?.isOnline === false) return null;
                 const cov = coverageByPrinterId.get(printerId);
-                if (cov?.status !== "runout") return null;
+                if (!hasFilamentCoverageDemand(cov) || cov.status !== "runout") return null;
                 return (
                   <FilamentCoverageBadge
                     status={cov.status}
@@ -420,7 +462,26 @@ const QueueJobRowGroup = forwardRef<HTMLTableSectionElement, QueueJobRowGroupPro
           {/* Actions */}
           <td className="px-2 py-1 align-middle" onClick={(e) => e.stopPropagation()}>
             <div className="flex gap-1.5 flex-wrap">
-              {(status === "Queued" || status === "Assigned") && jobWrapper.assignedPrinter && !isRecoveryBlocked(job) && !isDispatchIndeterminate(job) && (
+              {canReorder && status === "Queued" && (
+                <QueueJobReorderControls
+                  fileName={fileName}
+                  enabled
+                  busy={isReordering}
+                  canMoveUp={canMoveUp}
+                  canMoveDown={canMoveDown}
+                  onMoveUp={
+                    moveNeighbors?.previous
+                      ? () => onMoveJob?.(jobId, moveNeighbors.previous!.job.id, "before")
+                      : undefined
+                  }
+                  onMoveDown={
+                    moveNeighbors?.next
+                      ? () => onMoveJob?.(jobId, moveNeighbors.next!.job.id, "after")
+                      : undefined
+                  }
+                />
+              )}
+              {(status === "Queued" || status === "Assigned") && jobWrapper.assignedPrinter && (
                 <Button
                   onClick={(e) => {
                     e.stopPropagation();
@@ -495,7 +556,7 @@ const QueueJobRowGroup = forwardRef<HTMLTableSectionElement, QueueJobRowGroupPro
                   Abort
                 </Button>
               )}
-              {status !== "Completed" && status !== "Cancelled" && !isDispatchIndeterminate(job) && (
+              {status !== "Completed" && status !== "Cancelled" && (
                 <Button
                   onClick={(e) => {
                     e.stopPropagation();
@@ -649,6 +710,14 @@ type QueueJobsRowSharedProps = Pick<
   | "onEdit"
   | "onDispatch"
   | "onSchedule"
+  | "canReorder"
+  | "isReordering"
+  | "draggedJobId"
+  | "onMoveJob"
+  | "onDragStartJob"
+  | "onDragEndJob"
+  | "canDropOnJob"
+  | "reorderNeighbors"
 >;
 
 interface QueueJobsTableVariantProps extends QueueJobsRowSharedProps {
@@ -839,7 +908,7 @@ function VirtualizedQueueJobsTable({ jobs, ...rowProps }: QueueJobsTableVariantP
   );
 }
 
-export interface QueueJobsTableProps {
+export interface QueueJobsTableProps extends QueueReorderInteractions {
   jobs: QueuedPrintJobWithFileMetaDto[];
   isLoading?: boolean;
   dispatchingJobId?: string | null;
@@ -881,12 +950,20 @@ export function QueueJobsTable({
   onEdit,
   onDispatch,
   onSchedule,
+  canReorder,
+  isReordering,
+  draggedJobId,
+  onMoveJob,
+  onDragStartJob,
+  onDragEndJob,
+  canDropOnJob,
 }: QueueJobsTableProps) {
   const { data: fleetCoverage } = useFleetFilamentCoverage();
   const coverageByPrinterId = useMemo(
     () => new Map((fleetCoverage?.printers ?? []).map((p) => [p.printerId, p])),
     [fleetCoverage],
   );
+  const reorderNeighbors = useMemo(() => getQueueMoveNeighbors(jobs), [jobs]);
 
   if (isLoading) {
     return (
@@ -935,6 +1012,14 @@ export function QueueJobsTable({
     onEdit,
     onDispatch,
     onSchedule,
+    canReorder,
+    isReordering,
+    draggedJobId,
+    onMoveJob,
+    onDragStartJob,
+    onDragEndJob,
+    canDropOnJob,
+    reorderNeighbors,
   };
 
   if (jobs.length > QUEUE_TABLE_VIRTUALIZATION_THRESHOLD) {

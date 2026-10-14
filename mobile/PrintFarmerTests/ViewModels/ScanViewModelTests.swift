@@ -4,6 +4,57 @@ import Observation
 
 final class ScanViewModelTests: XCTestCase {
     @MainActor
+    private func runNFCScan(_ result: SpoolScanResult, viewModel: ScanViewModel) async {
+        let scanner = MockQRSpoolScannerService()
+        scanner.resultToReturn = result
+        viewModel.configureNFC(scanner: scanner)
+        viewModel.scanNFC()
+        XCTAssertTrue(viewModel.isScanning)
+        let finished = expectation(description: "NFC scan finishes")
+        withObservationTracking {
+            _ = viewModel.isScanning
+        } onChange: {
+            finished.fulfill()
+        }
+        await fulfillment(of: [finished], timeout: 2)
+        XCTAssertFalse(viewModel.isScanning)
+        XCTAssertEqual(scanner.scanCallCount, 1)
+    }
+
+    @MainActor
+    func testNFCPrinterRoutesToFarmDetail() async {
+        let (viewModel, _, _, _) = makeSubject()
+        let id = UUID()
+        await runNFCScan(.printerId(id), viewModel: viewModel)
+        XCTAssertEqual(viewModel.pendingDeepLinkDestination, .printerDetail(id: id))
+    }
+
+    @MainActor
+    func testNFCSpoolRoutesOnlyAfterActiveServerLookup() async {
+        let (viewModel, _, _, spoolService) = makeSubject()
+        spoolService.spoolsPageToReturn = SpoolmanPagedResult(items: [makeSpool(id: 42)], totalCount: 1)
+        await runNFCScan(.spoolId(42), viewModel: viewModel)
+        XCTAssertEqual(viewModel.pendingDeepLinkDestination, .spoolDetail(id: 42))
+        XCTAssertTrue(spoolService.listSpoolsCalled)
+    }
+
+    @MainActor
+    func testNFCNewSpoolReusesIntakeAndErrorsAreVisible() async {
+        let (viewModel, _, _, _) = makeSubject()
+        let data = ScannedSpoolData(material: "PLA", colorHex: nil, vendor: nil, weight: nil,
+                                    diameter: nil, temperature: nil, spoolmanId: nil)
+        await runNFCScan(.newSpoolData(data), viewModel: viewModel)
+        guard case .newSpool(let parsed) = viewModel.pendingOutcome else {
+            return XCTFail("Expected AddSpool intake")
+        }
+        XCTAssertEqual(parsed.material, "PLA")
+        let (failed, _, _, _) = makeSubject()
+        await runNFCScan(.error(.notSupported), viewModel: failed)
+        XCTAssertNotNil(failed.errorMessage)
+        XCTAssertNil(failed.pendingDeepLinkDestination)
+    }
+
+    @MainActor
     func testDispatchPrinterDeepLinkSetsPendingPrinterDestinationWithoutResolving() async {
         let (viewModel, partsService, barcodeService, _) = makeSubject()
 
@@ -800,7 +851,7 @@ extension ScanViewModelTests {
         XCTAssertNil(viewModel.finishNavigation(), "Redelivery must not duplicate the transferred request")
 
         router.completeScanFlowDismissal(capabilities: .defaults)
-        XCTAssertEqual(router.selectedTab, .inventory)
+        XCTAssertEqual(router.selectedTab, .filament)
         XCTAssertTrue(router.consumeExternalScanRequest())
         let (replacement, replacementScanner) = makeControlledSubject()
         replacementScanner.scanStarted = expectation(description: "New owner starts retained request")

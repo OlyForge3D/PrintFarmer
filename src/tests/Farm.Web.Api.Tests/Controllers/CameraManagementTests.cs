@@ -192,13 +192,13 @@ public class CameraManagementTests : IClassFixture<CustomWebApplicationFactory>,
         using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
         var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         Camera? dbCamera = await context.Cameras
-            .Include(c => c.Printer)
+            .Include(c => c.PrinterLinks).ThenInclude(l => l.Printer)
             .FirstOrDefaultAsync(c => c.Id == camera.Id);
 
         dbCamera.Should().NotBeNull();
-        dbCamera!.PrinterId.Should().Be(printer.Id);
-        dbCamera.Printer.Should().NotBeNull();
-        dbCamera.Printer!.Id.Should().Be(printer.Id);
+        dbCamera!.GetPrimaryPrinterId().Should().Be(printer.Id);
+        dbCamera.GetPrimaryPrinter().Should().NotBeNull();
+        dbCamera.GetPrimaryPrinter()!.Id.Should().Be(printer.Id);
     }
 
     #endregion
@@ -367,10 +367,10 @@ public class CameraManagementTests : IClassFixture<CustomWebApplicationFactory>,
 
     #endregion
 
-    #region Test 9: DeleteCamera_CascadesFromPrinter
+    #region Test 9: DeletePrinter_RemovesCameraLinkButKeepsCamera
 
     [Fact]
-    public async Task DeleteCamera_CascadesFromPrinter()
+    public async Task DeletePrinter_RemovesCameraLinkButKeepsCamera()
     {
         // Arrange - Create printer with camera
         Printer printer = await CreateTestPrinterAsync("printer-for-cascade-test");
@@ -396,12 +396,16 @@ public class CameraManagementTests : IClassFixture<CustomWebApplicationFactory>,
             await context.SaveChangesAsync();
         }
 
-        // Assert - Camera should be deleted via cascade
+        // Assert - Only the join row cascades; the camera is first-class and survives unlinked
         using (AsyncServiceScope scope = _factory.Services.CreateAsyncScope())
         {
             var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            Camera? deletedCamera = await context.Cameras.FindAsync(camera.Id);
-            deletedCamera.Should().BeNull();
+            Camera? survivingCamera = await context.Cameras
+                .Include(c => c.PrinterLinks)
+                .FirstOrDefaultAsync(c => c.Id == camera.Id);
+            survivingCamera.Should().NotBeNull();
+            survivingCamera!.PrinterLinks.Should().BeEmpty();
+            (await context.Set<CameraPrinter>().AnyAsync(l => l.PrinterId == printer.Id)).Should().BeFalse();
         }
     }
 
@@ -478,8 +482,9 @@ public class CameraManagementTests : IClassFixture<CustomWebApplicationFactory>,
         camera.IsEnabled.Should().BeTrue();
         camera.SortOrder.Should().Be(0);
         camera.ConsecutiveFailures.Should().Be(0);
-        camera.PrinterId.Should().BeNull();
-        camera.Printer.Should().BeNull();
+        camera.PrinterLinks.Should().BeEmpty();
+        camera.LocationId.Should().BeNull();
+        camera.UserModified.Should().BeFalse();
         camera.CreatedAt.Should().BeCloseTo(DateTime.UtcNow, TimeSpan.FromSeconds(5));
     }
 
@@ -499,8 +504,6 @@ public class CameraManagementTests : IClassFixture<CustomWebApplicationFactory>,
             Id = Guid.NewGuid(),
             Name = "standalone-camera-entity",
             StreamUrl = "http://example.com/stream",
-            PrinterId = null, // Explicitly null
-            Printer = null    // Explicitly null
         };
 
         context.Cameras.Add(standaloneCamera);
@@ -508,13 +511,13 @@ public class CameraManagementTests : IClassFixture<CustomWebApplicationFactory>,
 
         // Act - Retrieve the camera
         Camera? retrievedCamera = await context.Cameras
-            .Include(c => c.Printer)
+            .Include(c => c.PrinterLinks)
             .FirstOrDefaultAsync(c => c.Id == standaloneCamera.Id);
 
         // Assert - Printer relationship should be optional and null
         retrievedCamera.Should().NotBeNull();
-        retrievedCamera!.PrinterId.Should().BeNull();
-        retrievedCamera.Printer.Should().BeNull();
+        retrievedCamera!.PrinterLinks.Should().BeEmpty();
+        retrievedCamera.GetPrimaryPrinterId().Should().BeNull();
         retrievedCamera.Name.Should().Be("standalone-camera-entity");
 
         // Now test with a printer
@@ -525,7 +528,7 @@ public class CameraManagementTests : IClassFixture<CustomWebApplicationFactory>,
             Id = Guid.NewGuid(),
             Name = "printer-camera-entity",
             StreamUrl = "http://example.com/stream",
-            PrinterId = testPrinter.Id
+            PrinterLinks = { new CameraPrinter { PrinterId = testPrinter.Id, IsPrimary = true } }
         };
 
         context.Cameras.Add(printerCamera);
@@ -533,14 +536,14 @@ public class CameraManagementTests : IClassFixture<CustomWebApplicationFactory>,
 
         // Act - Retrieve the printer camera
         Camera? retrievedPrinterCamera = await context.Cameras
-            .Include(c => c.Printer)
+            .Include(c => c.PrinterLinks).ThenInclude(l => l.Printer)
             .FirstOrDefaultAsync(c => c.Id == printerCamera.Id);
 
         // Assert - Printer relationship should be populated
         retrievedPrinterCamera.Should().NotBeNull();
-        retrievedPrinterCamera!.PrinterId.Should().Be(testPrinter.Id);
-        retrievedPrinterCamera.Printer.Should().NotBeNull();
-        retrievedPrinterCamera.Printer!.Id.Should().Be(testPrinter.Id);
+        retrievedPrinterCamera!.GetPrimaryPrinterId().Should().Be(testPrinter.Id);
+        retrievedPrinterCamera.GetPrimaryPrinter().Should().NotBeNull();
+        retrievedPrinterCamera.GetPrimaryPrinter()!.Id.Should().Be(testPrinter.Id);
     }
 
     #endregion
@@ -612,5 +615,146 @@ public class CameraManagementTests : IClassFixture<CustomWebApplicationFactory>,
         HttpResponseMessage response = await anonymousClient.GetAsync("/api/cameras/display");
 
         _ = response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task GetCameraConfig_AsAdmin_ReturnsStoredTargetsNotProxyPaths()
+    {
+        CameraDto camera = await CreateTestCameraAsync(
+            streamUrl: "http://camera.internal/live.mjpg",
+            snapshotUrl: "http://camera.internal/snap.jpg");
+
+        HttpResponseMessage response = await _client!.GetAsync($"/api/cameras/{camera.Id:D}/config");
+
+        _ = response.StatusCode.Should().Be(HttpStatusCode.OK);
+        string json = await response.Content.ReadAsStringAsync();
+        using JsonDocument doc = JsonDocument.Parse(json);
+        JsonElement root = doc.RootElement;
+        _ = root.GetProperty("streamUrl").GetString().Should().Be("http://camera.internal/live.mjpg");
+        _ = root.GetProperty("snapshotUrl").GetString().Should().Be("http://camera.internal/snap.jpg");
+        _ = root.GetProperty("streamUrlHasCredentials").GetBoolean().Should().BeFalse();
+        _ = root.GetProperty("snapshotUrlHasCredentials").GetBoolean().Should().BeFalse();
+        _ = json.Should().NotContain("/api/cameras/");
+    }
+
+    [Fact]
+    public async Task GetCameraConfig_WithEmbeddedCredentials_StripsCredentialsAndFlagsThem()
+    {
+        var streamTarget = new UriBuilder("http://camera.internal/live.mjpg")
+        {
+            UserName = "viewer",
+            Password = "private-token"
+        };
+        CameraDto camera = await CreateTestCameraAsync(
+            streamUrl: streamTarget.Uri.AbsoluteUri,
+            snapshotUrl: "http://camera.internal/snap.jpg");
+
+        HttpResponseMessage response = await _client!.GetAsync($"/api/cameras/{camera.Id:D}/config");
+
+        _ = response.StatusCode.Should().Be(HttpStatusCode.OK);
+        string json = await response.Content.ReadAsStringAsync();
+        _ = json.Should().NotContain("private-token").And.NotContain("viewer");
+        using JsonDocument doc = JsonDocument.Parse(json);
+        _ = doc.RootElement.GetProperty("streamUrl").GetString().Should().Be("http://camera.internal/live.mjpg");
+        _ = doc.RootElement.GetProperty("streamUrlHasCredentials").GetBoolean().Should().BeTrue();
+        _ = doc.RootElement.GetProperty("snapshotUrlHasCredentials").GetBoolean().Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task GetCameraConfig_AsNonAdmin_IsForbiddenAndLeaksNothing()
+    {
+        CameraDto camera = await CreateTestCameraAsync(streamUrl: "http://camera.internal/live.mjpg");
+        using HttpClient operatorClient = await _factory.CreateAuthenticatedClientAsync("camera-viewer", "viewer@example.com");
+
+        HttpResponseMessage response = await operatorClient.GetAsync($"/api/cameras/{camera.Id:D}/config");
+
+        _ = response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        _ = (await response.Content.ReadAsStringAsync()).Should().NotContain("camera.internal");
+    }
+
+    [Fact]
+    public async Task GetCameraConfig_WithoutAuthentication_ReturnsUnauthorized()
+    {
+        using HttpClient anonymousClient = _factory.CreateClient();
+
+        HttpResponseMessage response = await anonymousClient.GetAsync($"/api/cameras/{Guid.NewGuid():D}/config");
+
+        _ = response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task GetCameraConfig_UnknownCamera_ReturnsNotFound()
+    {
+        HttpResponseMessage response = await _client!.GetAsync($"/api/cameras/{Guid.NewGuid():D}/config");
+
+        _ = response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    private static bool IsAbsentOrNull(JsonElement element, string propertyName) =>
+        !element.TryGetProperty(propertyName, out JsonElement value) || value.ValueKind == JsonValueKind.Null;
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task CreateCamera_WithBlankSnapshotTarget_StoresNullAndKeepsStream(string blankSnapshot)
+    {
+        CameraDto camera = await CreateTestCameraAsync(
+            streamUrl: " http://camera.internal/live.mjpg ",
+            snapshotUrl: blankSnapshot);
+
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        Camera? stored = await scope.ServiceProvider.GetRequiredService<ICameraService>().FindByIdAsync(camera.Id, CancellationToken.None);
+        _ = stored!.StreamUrl.Should().Be("http://camera.internal/live.mjpg");
+        _ = stored.SnapshotUrl.Should().BeNull();
+        _ = camera.SnapshotConfigured.Should().BeFalse();
+        _ = camera.AccessMode.Should().Be(CameraAccessMode.StreamOnly);
+    }
+
+    [Fact]
+    public async Task LegacyBlankSnapshotTarget_IsTreatedAsUnconfiguredByDisplayAndConfig()
+    {
+        Guid cameraId = Guid.NewGuid();
+        using (AsyncServiceScope scope = _factory.Services.CreateAsyncScope())
+        {
+            AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            context.Cameras.Add(new Camera
+            {
+                Id = cameraId,
+                Name = "legacy-blank-snapshot",
+                StreamUrl = "http://camera.internal/live.mjpg",
+                SnapshotUrl = "",
+                IsEnabled = true,
+                Source = CameraSource.Standalone
+            });
+            await context.SaveChangesAsync();
+        }
+
+        HttpResponseMessage displayResponse = await _client!.GetAsync("/api/cameras/display");
+        _ = displayResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        using JsonDocument display = JsonDocument.Parse(await displayResponse.Content.ReadAsStringAsync());
+        JsonElement legacy = display.RootElement.EnumerateArray().Single(c => c.GetProperty("id").GetGuid() == cameraId);
+        _ = legacy.GetProperty("streamUrl").GetString().Should().Be($"/api/cameras/{cameraId:D}/stream");
+        _ = IsAbsentOrNull(legacy, "snapshotUrl").Should().BeTrue();
+
+        HttpResponseMessage configResponse = await _client.GetAsync($"/api/cameras/{cameraId:D}/config");
+        _ = configResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        using JsonDocument config = JsonDocument.Parse(await configResponse.Content.ReadAsStringAsync());
+        _ = config.RootElement.GetProperty("streamUrl").GetString().Should().Be("http://camera.internal/live.mjpg");
+        _ = IsAbsentOrNull(config.RootElement, "snapshotUrl").Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task UpdateCamera_WithGeneratedProxyPath_IsRejectedAndStoredTargetsUnchanged()
+    {
+        CameraDto camera = await CreateTestCameraAsync(streamUrl: "http://camera.internal/live.mjpg");
+
+        HttpResponseMessage response = await _client!.PutAsJsonAsync(
+            $"/api/cameras/{camera.Id:D}",
+            new { streamUrl = $"/api/cameras/{camera.Id:D}/stream" });
+
+        _ = response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        Camera? stored = await scope.ServiceProvider.GetRequiredService<ICameraService>().FindByIdAsync(camera.Id, CancellationToken.None);
+        _ = stored!.StreamUrl.Should().Be("http://camera.internal/live.mjpg");
     }
 }

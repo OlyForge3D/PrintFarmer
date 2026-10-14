@@ -4,7 +4,6 @@
  * every action on that resource, without leaking the grant to a different resource, and
  * without introducing any broader action hierarchy.
  */
-import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { AuthProvider } from '@/common/contexts/AuthContext';

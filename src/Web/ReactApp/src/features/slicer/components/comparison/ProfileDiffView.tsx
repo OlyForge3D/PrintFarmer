@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import clsx from 'clsx';
 import { Toggle, EmptyState, Badge, Spinner } from '@/common/components/ui';
 import type { ProfileTypeSchema, ProfileFieldMetadata } from '@/types/api';

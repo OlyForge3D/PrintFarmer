@@ -2,8 +2,8 @@ import SwiftUI
 
 /// Printed-parts inventory list (#714, F9): on-hand/reorder state for every
 /// active SKU, with unified scan history feeding recognition. Distinct from
-/// `SpoolInventoryView` (filament spools) — see `InventoryView` for the
-/// tab-level wrapper combining both.
+/// `SpoolInventoryView` (filament spools), which exposes this as a secondary
+/// capability-gated sheet rather than a separate tab.
 struct PartsInventoryListView: View {
     @Environment(ServiceContainer.self) private var services
     @Environment(AppRouter.self) private var router
@@ -59,30 +59,32 @@ struct PartsInventoryListView: View {
         #if os(iOS)
         .navigationBarTitleDisplayMode(.large)
         #endif
-        .rootNavigationChrome(for: .inventory) {
-            Menu {
-                Button {
-                    showScanFlow = true
-                } label: {
-                    Label("Scan code", systemImage: "barcode.viewfinder")
-                }
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Button {
+                        showScanFlow = true
+                    } label: {
+                        Label("Scan code", systemImage: "barcode.viewfinder")
+                    }
 
-                Button {
-                    showPartLookup = true
+                    Button {
+                        showPartLookup = true
+                    } label: {
+                        Label("Look up printed part", systemImage: "cube.box")
+                    }
+                    .accessibilityIdentifier("inventory.partLookup")
                 } label: {
-                    Label("Look up printed part", systemImage: "cube.box")
+                    Image(systemName: "barcode.viewfinder")
+                        .frame(
+                            minWidth: RootNavigationChrome.minimumTouchTarget,
+                            minHeight: RootNavigationChrome.minimumTouchTarget
+                        )
                 }
-                .accessibilityIdentifier("inventory.partLookup")
-            } label: {
-                Image(systemName: "barcode.viewfinder")
-                    .frame(
-                        minWidth: RootNavigationChrome.minimumTouchTarget,
-                        minHeight: RootNavigationChrome.minimumTouchTarget
-                    )
+                .accessibilityLabel("Scan inventory")
+                .accessibilityHint("Opens camera scanning or printed-part lookup.")
+                .accessibilityIdentifier("inventory.scan")
             }
-            .accessibilityLabel("Scan inventory")
-            .accessibilityHint("Opens camera scanning or printed-part lookup.")
-            .accessibilityIdentifier("inventory.scan")
         }
         .refreshable {
             await viewModel.loadParts()

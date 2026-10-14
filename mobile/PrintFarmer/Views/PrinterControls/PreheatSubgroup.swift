@@ -249,10 +249,12 @@ private final class NativeControlButton: UIButton {
 }
 
 /// Essential Heat group (#2593): paired target inputs, one guarded setter,
-/// compact presets and Cool down. Measurements live in the strip above.
+/// compact presets and Cool down.
 struct PreheatSubgroup: View {
 
     @ObservedObject var viewModel: PrinterControlsViewModel
+    var usesSteppers = false
+    var compactForDetail = false
 
     /// Transient caption shown when the user taps a button while controls are
     /// disabled (offline / mid-print). Cleared after a few seconds. Phone
@@ -277,17 +279,37 @@ struct PreheatSubgroup: View {
 
     private var content: some View {
         VStack(alignment: .leading, spacing: 0) {
-            EssentialControlHeading(title: "Heat")
-                .padding(.bottom, 14)
+            if compactForDetail {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 6) {
+                        heatHeading
+                        Spacer(minLength: 4)
+                        detailPresets
+                    }
+                    VStack(alignment: .leading, spacing: 8) {
+                        heatHeading
+                        detailPresets
+                    }
+                }
+                .padding(.bottom, 8)
+            } else {
+                heatHeading.padding(.bottom, 14)
+            }
             PrinterControlCommandFeedback(viewModel: viewModel, section: .heat)
 
-            IndividualHeaterControls(viewModel: viewModel)
+            IndividualHeaterControls(
+                viewModel: viewModel,
+                usesSteppers: usesSteppers,
+                compactForDetail: compactForDetail
+            )
 
-            grid.padding(.top, 14).padding(.bottom, 8)
+            if !compactForDetail {
+                grid.padding(.top, 14).padding(.bottom, 8)
 
-            Text("Hotend max \(viewModel.maximum(for: .hotend).map { $0.formatted() + "°C" } ?? "unknown") · Bed max \(viewModel.maximum(for: .bed).map { $0.formatted() + "°C" } ?? "unknown").")
-                .font(.footnote.monospacedDigit()).foregroundStyle(Color.pfTextSecondary)
-                .padding(.top, 10)
+                Text("Hotend max \(viewModel.maximum(for: .hotend).map { $0.formatted() + "°C" } ?? "unknown") · Bed max \(viewModel.maximum(for: .bed).map { $0.formatted() + "°C" } ?? "unknown").")
+                    .font(.footnote.monospacedDigit()).foregroundStyle(Color.pfTextSecondary)
+                    .padding(.top, 10)
+            }
             if let message = blockedReasonMessage {
                 Text(message)
                     .font(.footnote)
@@ -296,6 +318,22 @@ struct PreheatSubgroup: View {
                     .accessibilityAddTraits(.isStaticText)
             }
         }
+    }
+
+    private var heatHeading: some View {
+        Text("Heat")
+            .font(.headline)
+            .foregroundStyle(Color.pfTextPrimary)
+            .accessibilityAddTraits(.isHeader)
+    }
+
+    private var detailPresets: some View {
+        HStack(spacing: 4) {
+            ForEach(Self.presets, id: \.self) { preset in
+                button(for: preset, compactForDetail: true)
+            }
+        }
+        .fixedSize(horizontal: true, vertical: false)
     }
 
     @ViewBuilder
@@ -323,7 +361,7 @@ struct PreheatSubgroup: View {
     }
 
     @ViewBuilder
-    private func button(for preset: PreheatPreset) -> some View {
+    private func button(for preset: PreheatPreset, compactForDetail: Bool = false) -> some View {
         let isPending: Bool = {
             if case let .preheat(pendingPreset, _, _) = viewModel.pendingCommand?.kind {
                 return pendingPreset == preset
@@ -342,11 +380,11 @@ struct PreheatSubgroup: View {
         Button {
             handleTap(preset: preset, canControl: canControl)
         } label: {
-            buttonLabel(preset: preset, isPending: isPending)
+            buttonLabel(preset: preset, isPending: isPending, compactForDetail: compactForDetail)
         }
         .buttonStyle(PreheatButtonStyle(
             preset: preset, isEnabled: isInteractive, isPending: isPending,
-            compact: !dynamicTypeSize.isAccessibilitySize
+            compact: compactForDetail || !dynamicTypeSize.isAccessibilitySize
         ))
         .disabled(isAnyPreheatInProgress || limitsReason != nil || isBlockedWithoutTapReveal(canControl: canControl))
         // On compact layouts we keep blocked buttons tappable so the user can
@@ -362,6 +400,8 @@ struct PreheatSubgroup: View {
 
     struct IndividualHeaterControls: View {
         @ObservedObject var viewModel: PrinterControlsViewModel
+        var usesSteppers = false
+        var compactForDetail = false
         @State private var hotend = ""
         @State private var bed = ""
         @State private var inputError: String?
@@ -369,14 +409,22 @@ struct PreheatSubgroup: View {
 
         var body: some View {
             VStack(alignment: .leading, spacing: 14) {
-                let layout = dynamicTypeSize.isAccessibilitySize
+                let layout = dynamicTypeSize.isAccessibilitySize || usesSteppers
                     ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
                     : AnyLayout(HStackLayout(alignment: .bottom, spacing: 12))
                 layout {
-                    HeaterTargetEditor(viewModel: viewModel, heater: .hotend, target: $hotend)
-                    HeaterTargetEditor(viewModel: viewModel, heater: .bed, target: $bed)
-                    setTargetsButton
-                        .frame(width: dynamicTypeSize.isAccessibilitySize ? nil : 52)
+                    HeaterTargetEditor(
+                        viewModel: viewModel, heater: .hotend, target: $hotend,
+                        usesStepper: usesSteppers, compactForDetail: compactForDetail
+                    )
+                    HeaterTargetEditor(
+                        viewModel: viewModel, heater: .bed, target: $bed,
+                        usesStepper: usesSteppers, compactForDetail: compactForDetail
+                    )
+                    if !compactForDetail || !hotend.isEmpty || !bed.isEmpty {
+                        setTargetsButton
+                            .frame(width: dynamicTypeSize.isAccessibilitySize || usesSteppers ? nil : 52)
+                    }
                 }
                 if let inputError {
                     Text(inputError).font(.footnote).foregroundStyle(Color.pfError)
@@ -418,6 +466,9 @@ struct PreheatSubgroup: View {
         @ObservedObject var viewModel: PrinterControlsViewModel
         let heater: Heater
         @Binding var target: String
+        var usesStepper = false
+        var compactForDetail = false
+        @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
         static func temperatureText(_ value: Double?) -> String {
             guard let value, value.isFinite else { return "Unknown" }
@@ -439,25 +490,94 @@ struct PreheatSubgroup: View {
         }
 
         var body: some View {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("\(heater.title) target")
-                    .font(.footnote)
-                    .foregroundStyle(Color.pfTextSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(minHeight: 20, alignment: .leading)
-                HStack(spacing: 6) {
-                    ControlNumberField(
-                        placeholder: placeholder, text: $target,
-                        label: "\(heater.title) target in degrees Celsius",
-                        identifier: "printer.controls.\(heater.rawValue).target",
-                        hint: targetHint,
-                        keyboardType: .decimalPad
-                    )
-                    Text("°C").font(.footnote).foregroundStyle(Color.pfTextSecondary)
-                        .accessibilityHidden(true)
+            Group {
+                if compactForDetail && !dynamicTypeSize.isAccessibilitySize {
+                    HStack(spacing: 8) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(heater == .hotend ? "Nozzle" : "Bed")
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(Color.pfTextPrimary)
+                            Text(measuredTemperatureLabel)
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(Color.pfTextSecondary)
+                                .accessibilityIdentifier("printer.controls.\(heater.rawValue).measured")
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        stepperEditor
+                    }
+                    .frame(minHeight: 48)
+                } else {
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 8) {
+                            Text("\(heater.title) target")
+                                .font(.footnote)
+                                .foregroundStyle(Color.pfTextSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            if usesStepper {
+                                Spacer(minLength: 0)
+                                Text(measuredTemperatureLabel)
+                                    .font(.caption.monospacedDigit())
+                                    .foregroundStyle(Color.pfTextSecondary)
+                                    .accessibilityIdentifier("printer.controls.\(heater.rawValue).measured")
+                            }
+                        }
+                        .frame(minHeight: 20, alignment: .leading)
+                        stepperEditor
+                    }
                 }
-                .disabled(!viewModel.supports(heater))
             }
+            .disabled(!viewModel.supports(heater))
+        }
+
+        private var stepperEditor: some View {
+            HStack(spacing: 4) {
+                if usesStepper { stepButton(delta: -5, symbol: "minus") }
+                ControlNumberField(
+                    placeholder: placeholder, text: $target,
+                    label: "\(heater.title) target in degrees Celsius",
+                    identifier: "printer.controls.\(heater.rawValue).target",
+                    hint: targetHint,
+                    keyboardType: .decimalPad
+                )
+                .frame(width: compactForDetail && !dynamicTypeSize.isAccessibilitySize ? 72 : nil)
+                Text("°C").font(.footnote).foregroundStyle(Color.pfTextSecondary)
+                    .accessibilityHidden(true)
+                if usesStepper { stepButton(delta: 5, symbol: "plus") }
+            }
+        }
+
+        static func steppedTarget(draft: String, current: Double?, maximum: Double?, delta: Double) -> Double? {
+            let value = draft.isEmpty ? current : Double(draft)
+            guard let value, value.isFinite, value >= 0, delta.isFinite,
+                  let maximum, maximum.isFinite, maximum > 0, value <= maximum else { return nil }
+            let next = min(max(value + delta, 0), maximum)
+            return next == value ? nil : next
+        }
+
+        private func stepButton(delta: Double, symbol: String) -> some View {
+            let next = Self.steppedTarget(
+                draft: target, current: currentTarget, maximum: viewModel.maximum(for: heater).map(Double.init), delta: delta
+            )
+            return ControlActionButton(
+                title: "",
+                identifier: "printer.controls.\(heater.rawValue).\(delta > 0 ? "increase" : "decrease")",
+                accessibilityTitle: "\(delta > 0 ? "Increase" : "Decrease") \(heater.title) target by 5 degrees",
+                hint: "Changes the draft only. Choose Go to apply heater targets.",
+                compact: true,
+                systemImage: symbol,
+                minimumHeight: 44
+            ) {
+                guard let next else { return }
+                target = next.formatted(.number.locale(Locale(identifier: "en_US_POSIX")).grouping(.never))
+            }
+            .frame(width: 44, height: 44)
+            .disabled(next == nil)
+        }
+
+        private var measuredTemperatureLabel: String {
+            let value = heater == .hotend ? viewModel.printer.hotendTemp : viewModel.printer.bedTemp
+            guard let value, value.isFinite else { return "now Unknown" }
+            return "now \(value.formatted(.number.precision(.fractionLength(0...1))))°"
         }
 
         private var targetHint: String {
@@ -483,9 +603,19 @@ struct PreheatSubgroup: View {
         !canControl && !shouldRevealDisabledTooltipOnTap
     }
 
-    private func buttonLabel(preset: PreheatPreset, isPending: Bool) -> some View {
+    private func buttonLabel(
+        preset: PreheatPreset,
+        isPending: Bool,
+        compactForDetail: Bool = false
+    ) -> some View {
         VStack(spacing: 3) {
-            if preset == .coolDown {
+            if compactForDetail {
+                Text(preset == .coolDown ? "Off" : preset.displayLabel)
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                    .opacity(isPending ? 0 : 1)
+            } else if preset == .coolDown {
                 // Larger snowflake icon with no text, matching web UI styling.
                 Image(systemName: "snowflake")
                     .font(.system(size: presetFontSize * 1.5, weight: .semibold))
@@ -502,7 +632,7 @@ struct PreheatSubgroup: View {
         // Height comes from the type metrics alone, never the rendered label, so
         // every preset matches Cool down and the row keeps one height whichever
         // readings the backend supports.
-        .frame(height: max(54, presetFontSize * 2 + 14))
+        .frame(height: compactForDetail ? 44 : max(54, presetFontSize * 2 + 14))
         .frame(maxWidth: .infinity)
         .overlay {
             if isPending {

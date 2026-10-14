@@ -1,10 +1,7 @@
+vi.mock('@/features/printers/components/MmuControlBox', () => ({ MmuControlBox: () => <div data-testid="mmu-controls" /> }));
+const controlsModeMock = vi.hoisted(() => ({ mode: "guided" as "guided" | "expert" }));
 vi.mock("@/features/printers/hooks/use-printer-controls-mode", () => ({
-  usePrinterControlsMode: () => ({
-    mode: "guided",
-    canSave: true,
-    setMode: vi.fn(),
-    reload: vi.fn(),
-  }),
+  usePrinterControlsMode: () => ({ mode: controlsModeMock.mode }),
 }));
 
 import {
@@ -378,6 +375,19 @@ describe("PrinterDetailsSidebar", () => {
     expect(scrollRegion).toHaveClass("flex-1", "min-h-0", "overflow-y-auto");
   });
 
+  it("shows exactly one Temps heading", () => {
+    render(
+      <PrinterDetailsSidebar
+        printerId={printer.id}
+        printer={printer}
+        onClose={vi.fn()}
+        layout="content"
+      />,
+    );
+
+    expect(screen.getAllByText("Temps")).toHaveLength(1);
+  });
+
   it("keeps the drawer layout height contract unchanged", () => {
     const { container } = render(
       <PrinterDetailsSidebar
@@ -572,6 +582,31 @@ describe("PrinterDetailsSidebar", () => {
     ).not.toBeInTheDocument();
   });
 
+  it.each([
+    ["guided", true],
+    ["expert", false],
+  ] as const)("follows the User Settings %s mode with no local mode selector", (mode, showsHelp) => {
+    controlsModeMock.mode = mode;
+    try {
+      render(
+        <PrinterDetailsSidebar
+          printerId={printer.id}
+          printer={printer}
+          onClose={vi.fn()}
+          layout="panel"
+        />,
+      );
+      expect(screen.queryByRole("group", { name: "Printer controls mode" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Guided" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Expert" })).not.toBeInTheDocument();
+      expect(screen.queryByText(/Motion help/i)).not.toBeInTheDocument();
+      if (showsHelp) expect(screen.getByText(/Jog moves by/)).toBeInTheDocument();
+      else expect(screen.queryByText(/Jog moves by/)).not.toBeInTheDocument();
+    } finally {
+      controlsModeMock.mode = "guided";
+    }
+  });
+
   it("hides object skip controls when backend capability is false", () => {
     render(
       <PrinterDetailsSidebar
@@ -585,6 +620,56 @@ describe("PrinterDetailsSidebar", () => {
 
     expect(screen.queryByText("Objects")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Skip object cube")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["Idle", true],
+    ["Offline", false],
+    ["Error", true],
+    ["Complete", true],
+    ["Printing", false],
+    ["Paused", false],
+  ])("omits the Objects section and inactive-print copy when %s (online: %s)", (state, isOnline) => {
+    mockPrintJobObjectsData = {
+      printerId: printer.id,
+      jobName: "plate.gcode",
+      objects: [{ name: "cube", isExcluded: false, isCurrent: false }],
+    };
+
+    render(
+      <PrinterDetailsSidebar
+        printerId={printer.id}
+        printer={{ ...printer, state, isOnline }}
+        backendCapabilities={capabilities({ supportsObjectExclusion: true })}
+        onClose={vi.fn()}
+        layout="panel"
+      />,
+    );
+
+    expect(screen.queryByText("Objects")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Skip object cube")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Object skipping is available/)).not.toBeInTheDocument();
+  });
+
+  it("keeps the Objects section for a paused active print", () => {
+    mockPrintJobObjectsData = {
+      printerId: printer.id,
+      jobName: "plate.gcode",
+      objects: [{ name: "cube", isExcluded: false, isCurrent: true }],
+    };
+
+    render(
+      <PrinterDetailsSidebar
+        printerId={printer.id}
+        printer={{ ...printer, state: "Paused" }}
+        backendCapabilities={capabilities({ supportsObjectExclusion: true })}
+        onClose={vi.fn()}
+        layout="panel"
+      />,
+    );
+
+    expect(screen.getByText("Objects")).toBeInTheDocument();
+    expect(screen.getByLabelText("Skip object cube")).toBeInTheDocument();
   });
 
   it("calls the skip object mutation after confirmation", async () => {
@@ -668,6 +753,38 @@ describe("PrinterDetailsSidebar", () => {
         "cube",
       );
     });
+  });
+
+  it("drops a pending skip confirmation when the active print ends", async () => {
+    mockPrintJobObjectsData = {
+      printerId: printer.id,
+      jobName: "plate.gcode",
+      objects: [{ name: "cube", isExcluded: false, isCurrent: true }],
+    };
+    const renderWithState = (state: string) => (
+      <PrinterDetailsSidebar
+        printerId={printer.id}
+        printer={{ ...printer, backend: PrinterBackend.Moonraker, state }}
+        backendCapabilities={capabilities({
+          backend: PrinterBackend.Moonraker,
+          supportsObjectExclusion: true,
+        })}
+        onClose={vi.fn()}
+        layout="panel"
+      />
+    );
+
+    const { rerender } = render(renderWithState("Printing"));
+    fireEvent.click(screen.getByLabelText("Skip object cube"));
+    expect(screen.getByText("Skip print object?")).toBeInTheDocument();
+
+    rerender(renderWithState("Complete"));
+    await waitFor(() => expect(screen.queryByText("Skip print object?")).not.toBeInTheDocument());
+
+    rerender(renderWithState("Printing"));
+    expect(screen.queryByText("Skip print object?")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Skip object" })).not.toBeInTheDocument();
+    expect(mockExcludePrintJobObject).not.toHaveBeenCalled();
   });
 
   describe("Move controls while Klippy is shutdown (#1909)", () => {
@@ -759,4 +876,30 @@ describe("PrinterDetailsSidebar", () => {
       });
     });
   });
+});
+
+
+it.each([
+  ['Qidibox', true], ['HappyHare', true], ['Afc', true],
+  ['SnapmakerU1', true], ['Qidibox', false],
+] as const)('sidebar has no standalone M600 or load/unload group for %s (enabled %s)', (mmuType, enabled) => {
+  const mmuPrinter = { ...printer, backend: PrinterBackend.Moonraker, mmuStatus: {
+    mmuType, enabled, gates: [], activeGate: -1, activeTool: -1,
+  } } as Printer;
+  render(<PrinterDetailsSidebar printerId={printer.id} printer={mmuPrinter} onClose={vi.fn()}
+    backendCapabilities={capabilities({ backend: PrinterBackend.Moonraker, supportsFilamentControl: true })} />);
+  // Load/unload live in the shared slot panel only.
+  expect(screen.queryByTitle('Load Filament')).not.toBeInTheDocument();
+  expect(screen.queryByTitle('Unload Filament')).not.toBeInTheDocument();
+  expect(screen.queryByTitle('Change Filament (M600)')).not.toBeInTheDocument();
+  expect(screen.queryByText('Macros')).not.toBeInTheDocument();
+  expect(screen.queryByText('Fallback Groups')).not.toBeInTheDocument();
+});
+
+it('labels the collapsed Move section without Macros or M600 wording', () => {
+  render(<PrinterDetailsSidebar printerId={printer.id} printer={printer} onClose={vi.fn()} />);
+  fireEvent.click(screen.getByLabelText('Collapse Move').closest('[role="button"]') as HTMLElement);
+  const header = screen.getByText('Movement and Manual Move');
+  expect(header).toBeInTheDocument();
+  expect(header.textContent).not.toMatch(/macro|m600/i);
 });

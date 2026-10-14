@@ -58,6 +58,33 @@ function renderWithQueryClient(ui: React.ReactElement) {
 }
 
 describe("FailureDetectionMonitoringOverlay", () => {
+  it.each(["idle", "disabled"] as const)(
+    "%s chip uses translucent white on the fixed dark camera surface, not a theme neutral token",
+    (state) => {
+      renderWithQueryClient(
+        <FailureDetectionMonitoringOverlay
+          enabled={true}
+          printerName="QP4-1"
+          status={
+            {
+              printerId: "p1",
+              printerName: "QP4-1",
+              state,
+              reason: "Waiting for an active print.",
+              isPrinting: false,
+              detectionSource: "global",
+              lastOutcome: "none",
+            } as FailureDetectionPrinterStatusDto
+          }
+        />,
+      );
+
+      const icon = screen.getByLabelText("Spaghetti detection");
+      expect([...icon.classList].some((c) => c.startsWith("text-white/"))).toBe(true);
+      expect([...icon.classList].some((c) => c.startsWith("text-pf-"))).toBe(false);
+    },
+  );
+
   beforeEach(() => {
     vi.mocked(apiClient.getFailureDetectionStatus).mockReset();
   });
@@ -273,8 +300,8 @@ describe("FailureDetectionMonitoringOverlay", () => {
     expect(
       screen.getAllByText(
         /Configured Obico server is not exposing a supported prediction route/,
-      ).length,
-    ).toBeGreaterThan(1);
+      ),
+    ).toHaveLength(1);
     expect(
       screen.getByText(
         "Check the Obico ML service connection and camera reachability before relying on failure detection or auto-pause.",

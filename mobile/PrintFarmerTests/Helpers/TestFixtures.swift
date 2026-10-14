@@ -30,6 +30,7 @@ enum TestJSON {
         "progress": 45.5,
         "jobName": "benchy.gcode",
         "thumbnailUrl": "http://192.168.1.100/thumb/benchy.png",
+        "currentJobThumbnailUrl": "/api/printers/550e8400-e29b-41d4-a716-446655440000/current-job/thumbnail?v=0123456789abcdef",
         "cameraStreamUrl": "http://192.168.1.100:8080/?action=stream",
         "cameraSnapshotUrl": "http://192.168.1.100/snapshot.jpg",
         "cameraAccessMode": "StreamAndSnapshot",

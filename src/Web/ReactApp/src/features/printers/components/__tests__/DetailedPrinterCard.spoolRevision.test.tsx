@@ -95,7 +95,6 @@ vi.mock('@/features/printers/components/TemperatureControlSection', () => ({ Tem
 vi.mock('@/features/printers/components/MovementControlSection', () => ({
   MovementControlSection: ({ rightContent }: { rightContent?: React.ReactNode }) => <div>{rightContent}</div>,
 }));
-vi.mock('@/features/printers/components/FilamentControlSection', () => ({ FilamentControlSection: () => null }));
 vi.mock('@/features/printers/components/PrinterActionBar', () => ({ PrinterActionBar: () => null }));
 vi.mock('@/features/printers/components/BedClearBanner', () => ({ BedClearBanner: () => null }));
 vi.mock('@/features/printers/components/PrintProgressBar', () => ({ PrintProgressBar: () => null }));
@@ -105,7 +104,6 @@ vi.mock('@/features/printers/components/FailureDetectionMonitoringBadge', () => 
 vi.mock('@/features/printers/components/FailureDetectionMonitoringSummary', () => ({ FailureDetectionMonitoringSummary: () => null }));
 vi.mock('@/features/printers/components/OfflineTroubleshootingGuide', () => ({ OfflineTroubleshootingGuide: () => null }));
 vi.mock('@/features/printers/components/PrinterCameraPreview', () => ({ PrinterCameraPreview: () => null }));
-vi.mock('@/features/printers/components/ZOffsetCalibrationWizard', () => ({ ZOffsetCalibrationWizard: () => null }));
 vi.mock('@/services/api', () => ({
   apiClient: {
     setActiveSpool: (...args: unknown[]) => setActiveSpoolMock(...args),

@@ -59,14 +59,8 @@ public class OrphanedJobSyncStartupService : BackgroundService
             var completionService = scope.ServiceProvider.GetRequiredService<IPrintJobCompletionService>();
             var statusCache = scope.ServiceProvider.GetRequiredService<IPrinterStatusCacheReader>();
 
-            string? LookupPrinterState(Guid printerId)
-            {
-                var status = statusCache.GetStatus(printerId);
-                return status?.State;
-            }
-
             int syncedCount = await completionService.SyncOrphanedPrintingJobsAsync(
-                LookupPrinterState,
+                statusCache.GetSnapshot,
                 QueueActorIdentity.Scheduler,
                 ct);
 

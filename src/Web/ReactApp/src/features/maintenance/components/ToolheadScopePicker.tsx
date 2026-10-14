@@ -1,4 +1,4 @@
-import React, { useId, useMemo } from 'react';
+import { useId, useMemo } from 'react';
 import clsx from 'clsx';
 import { RadioGroup, type RadioOption } from '@/common/components/ui/RadioGroup';
 import {

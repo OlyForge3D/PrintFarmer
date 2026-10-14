@@ -1,7 +1,6 @@
 ﻿using System.Text.Json;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Services.HostUpdates;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Settings;
 using Microsoft.EntityFrameworkCore;
@@ -37,7 +36,6 @@ public sealed class BackendStartCommandConsumerService(
     IServiceScopeFactory scopeFactory,
     ILogger<BackendStartCommandConsumerService> logger,
     IOptions<BackendTimeoutSettings> backendTimeoutSettings,
-    BackendStartCommandConsumerFenceFlag? hostUpdateFence = null,
     TimeProvider? timeProvider = null) : BackgroundService
 {
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(5);
@@ -87,17 +85,6 @@ public sealed class BackendStartCommandConsumerService(
         {
             try
             {
-                if (hostUpdateFence is not null &&
-                    await hostUpdateFence.IsPauseRequestedAsync(stoppingToken).ConfigureAwait(false))
-                {
-                    await hostUpdateFence.AcknowledgePausedAsync(stoppingToken).ConfigureAwait(false);
-                    await Task.Delay(
-                        TimeSpan.FromMilliseconds(250),
-                        _timeProvider,
-                        stoppingToken).ConfigureAwait(false);
-                    continue;
-                }
-
                 await ProcessPendingCommandsAsync(stoppingToken);
             }
             catch (OperationCanceledException)
@@ -109,10 +96,7 @@ public sealed class BackendStartCommandConsumerService(
                 logger.LogError(ex, "[BackendStartConsumer] Error processing backend-start commands");
             }
 
-            if (await WaitForIntervalOrPauseAsync(stoppingToken).ConfigureAwait(false))
-            {
-                await hostUpdateFence!.AcknowledgePausedAsync(stoppingToken).ConfigureAwait(false);
-            }
+            _ = await WaitForIntervalOrPauseAsync(stoppingToken).ConfigureAwait(false);
         }
 
         logger.LogInformation("[BackendStartConsumer] Durable backend-start command consumer stopped");
@@ -123,16 +107,7 @@ public sealed class BackendStartCommandConsumerService(
         DateTimeOffset until = _timeProvider.GetUtcNow() + PollInterval;
         while (_timeProvider.GetUtcNow() < until)
         {
-            if (hostUpdateFence is not null &&
-                await hostUpdateFence.IsPauseRequestedAsync(stoppingToken).ConfigureAwait(false))
-            {
-                return true;
-            }
-
-            await Task.Delay(
-                TimeSpan.FromMilliseconds(250),
-                _timeProvider,
-                stoppingToken).ConfigureAwait(false);
+            await Task.Delay(TimeSpan.FromMilliseconds(250), _timeProvider, stoppingToken).ConfigureAwait(false);
         }
 
         return false;

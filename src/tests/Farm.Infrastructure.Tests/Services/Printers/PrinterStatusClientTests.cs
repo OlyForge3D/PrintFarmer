@@ -185,7 +185,10 @@ public class PrinterStatusClientTests
         var movement = new PrinterStatusDto(printer.Id, true, "standby", X: 1, Y: 2, Z: 3,
             HomedAxes: "xyz", SafetyTelemetry: telemetry);
         var backend = new Mock<IMoonrakerClient>(MockBehavior.Strict);
-        backend.Setup(client => client.GetCompositeStatusAsync(printer.BackendUrl, It.IsAny<CancellationToken>()))
+        backend.Setup(client => client.GetCompositeStatusAsync(
+                printer.BackendUrl,
+                printer.Credential,
+                It.IsAny<CancellationToken>()))
             .ReturnsAsync(composite);
         backend.Setup(client => client.GetMovementStatusAsync(printer, It.IsAny<CancellationToken>()))
             .ReturnsAsync(movement);
@@ -214,7 +217,10 @@ public class PrinterStatusClientTests
     {
         var printer = new Printer { Id = Guid.NewGuid(), Name = "Missing snapshot", ServerUrl = "http://fixture.invalid" };
         var backend = new Mock<IMoonrakerClient>();
-        backend.Setup(client => client.GetCompositeStatusAsync(printer.BackendUrl, It.IsAny<CancellationToken>()))
+        backend.Setup(client => client.GetCompositeStatusAsync(
+                printer.BackendUrl,
+                printer.Credential,
+                It.IsAny<CancellationToken>()))
             .ReturnsAsync(new PrinterCompositeStatus(true, "standby", null, null, null, null, null, X: 10, Y: 20, Z: 30));
         backend.Setup(client => client.GetMovementStatusAsync(printer, It.IsAny<CancellationToken>()))
             .ThrowsAsync(new HttpRequestException("Snapshot unavailable"));

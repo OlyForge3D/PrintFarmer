@@ -4,7 +4,7 @@ import UserNotifications
 
 // MARK: - App Delegate
 
-/// UIApplicationDelegate adapter for handling push notification callbacks.
+/// UIApplicationDelegate adapter for local notification handling.
 /// Wired into SwiftUI lifecycle via `@UIApplicationDelegateAdaptor` in PFarmApp.
 class AppDelegate: NSObject, UIApplicationDelegate {
     func application(
@@ -12,30 +12,7 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         didFinishLaunchingWithOptions _: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
         UNUserNotificationCenter.current().delegate = PushNotificationManager.shared
-        // Issue #1321: category/action registration only needs
-        // `setNotificationCategories` — it does not require notification
-        // permission — so register unconditionally at launch, before the
-        // user is ever prompted to allow notifications.
-        PushNotificationManager.registerNotificationCategories()
         return true
-    }
-
-    func application(
-        _: UIApplication,
-        didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
-    ) {
-        Task { @MainActor in
-            PushNotificationManager.shared.didRegisterForRemoteNotifications(deviceToken: deviceToken)
-        }
-    }
-
-    func application(
-        _: UIApplication,
-        didFailToRegisterForRemoteNotificationsWithError error: Error
-    ) {
-        Task { @MainActor in
-            PushNotificationManager.shared.didFailToRegisterForRemoteNotifications(error: error)
-        }
     }
 
     // MARK: - Scene Configuration

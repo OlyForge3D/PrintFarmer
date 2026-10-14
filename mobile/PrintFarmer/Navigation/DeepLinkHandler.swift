@@ -1,6 +1,7 @@
 import Foundation
 
 enum DeepLinkDestination: Equatable {
+    case farm
     case scan
     case printerDetail(id: UUID)
     case printerReady(id: UUID)
@@ -21,13 +22,21 @@ struct DeepLinkHandler {
     ///   `{id}` must be a positive integer — zero/negative values are
     ///   rejected (`nil`) rather than treated as a valid spool ID (#714
     ///   Item C).
-    /// - `printfarmer://attention/{itemId}` → exact attention item
+    /// - `printfarmer://attention/{itemId}` → Farm's Needs attention filter
+    /// - Retired Oversight routes → Farm
     static func parse(url: URL) -> DeepLinkDestination? {
         guard url.scheme == "printfarmer" else { return nil }
 
         let pathComponents = url.pathComponents.filter { $0 != "/" }
 
         switch url.host {
+        case "dashboard", "overview", "fleet", "oversight", "upkeep", "reports",
+             "maintenance", "analytics", "maintenanceAnalytics", "maintenance-analytics",
+             "uptime", "uptimeReliability", "uptime-reliability", "filamentCoverage",
+             "coverage", "filament-coverage", "predictive", "predictiveInsights", "predictive-insights",
+             "dispatchDashboard", "dispatch-dashboard", "dispatch", "locations", "jobHistory",
+             "job-history", "jobTimeline", "job-timeline", "tasks":
+            return .farm
         case "scan":
             guard pathComponents.isEmpty else { return nil }
             return .scan
@@ -82,51 +91,5 @@ struct DeepLinkHandler {
         default:
             return nil
         }
-    }
-}
-
-enum NotificationDeepLinkRouting {
-    enum Failure: Error, Equatable {
-        case missingLink
-        case invalidLink
-        case unsupportedDestination
-        case wrongServer
-
-        var message: String {
-            switch self {
-            case .missingLink:
-                return "This notification does not contain a destination for the selected server."
-            case .invalidLink, .unsupportedDestination:
-                return "This notification's destination is invalid for the selected server."
-            case .wrongServer:
-                return "This notification belongs to a different server."
-            }
-        }
-    }
-
-    static func destination(
-        from userInfo: [AnyHashable: Any],
-        activeOriginServerId: UUID? = nil
-    ) -> Result<DeepLinkDestination, Failure> {
-        if let originValue = userInfo["originServerId"] {
-            guard let originString = originValue as? String,
-                  let originServerId = UUID(uuidString: originString) else {
-                return .failure(.invalidLink)
-            }
-            guard let activeOriginServerId, originServerId == activeOriginServerId else {
-                return .failure(.wrongServer)
-            }
-        }
-        let urlString = (userInfo["deepLink"] as? String) ?? (userInfo["link"] as? String)
-        guard let urlString, !urlString.isEmpty else {
-            return .failure(.missingLink)
-        }
-        guard let url = URL(string: urlString) else {
-            return .failure(.invalidLink)
-        }
-        guard let destination = DeepLinkHandler.parse(url: url) else {
-            return .failure(.unsupportedDestination)
-        }
-        return .success(destination)
     }
 }

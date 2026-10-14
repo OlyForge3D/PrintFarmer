@@ -1,5 +1,5 @@
 /* eslint-disable react-refresh/only-export-components */
-import React, { createContext, useContext, useEffect, useState, ReactNode, useCallback } from 'react';
+import { createContext, useContext, useEffect, useState, ReactNode, useCallback } from 'react';
 
 // The theme list lives in the design system, not here: this module is heavily
 // mocked in tests, and a bare vi.mock() would auto-mock the constant away.

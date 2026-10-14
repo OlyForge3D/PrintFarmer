@@ -40,12 +40,6 @@ public class JobQueueAnalyticsController(
     private readonly ILogger<JobQueueAnalyticsController> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     /// <summary>
-    /// Response header on <see cref="GetAllQueueAsync"/>: <c>true</c> when the unscoped page
-    /// filled <c>limit</c> (a later page may exist), <c>false</c> when it proves the end.
-    /// </summary>
-    public const string HasMoreHeader = "X-Has-More";
-
-    /// <summary>
     /// Get all queued and printing jobs with file metadata
     /// </summary>
     /// <param name="filterStatus">Filter by job status (Queued, Printing, Paused, etc.)</param>
@@ -55,7 +49,7 @@ public class JobQueueAnalyticsController(
     /// <param name="deadlineEnd">Filter jobs with deadline at or before this UTC timestamp</param>
     /// <param name="queuedFrom">Filter jobs queued at or after this UTC timestamp. Only honored for terminal (History-style) views; ignored for the active queue, which reflects current state and is never date-windowed.</param>
     /// <param name="queuedTo">Filter jobs queued at or before this UTC timestamp. Only honored for terminal (History-style) views; ignored for the active queue, which reflects current state and is never date-windowed.</param>
-    /// <param name="sortBy">Sort mode (priority, deadline, deadline_desc)</param>
+    /// <param name="sortBy">Sort mode (priority groups active jobs by scope in persisted queue order; deadline and deadline_desc are reporting views)</param>
     /// <param name="limit">Maximum number of results (default 100, max 1000)</param>
     /// <param name="offset">Number of results to skip (default 0)</param>
     /// <param name="cancellationToken">Cancellation token for async operation</param>
@@ -92,14 +86,6 @@ public class JobQueueAnalyticsController(
 
             List<QueuedPrintJobWithFileMetaDto> jobs = await _printJobManagementService.GetAllQueuedJobsAsync(
                 filterStatus, filterModel, filterMaterial, deadlineStart, deadlineEnd, sortBy, limit, offset, queuedFrom, queuedTo, cancellationToken);
-
-            // Pagination is applied before authorization filtering, so a scoped caller can
-            // receive a short page while later pages still hold accessible jobs. Report
-            // whether the unscoped page was full so clients know whether to keep paging.
-            if (HttpContext is not null)
-            {
-                Response.Headers[HasMoreHeader] = jobs.Count >= limit ? "true" : "false";
-            }
 
             if (resourceAuthorization is null)
             {
@@ -139,7 +125,8 @@ public class JobQueueAnalyticsController(
     }
 
     /// <summary>
-    /// Get print jobs for a specific printer
+    /// Get active print jobs for a specific printer: occupying, assigned, then queued.
+    /// Only queued rows use queue-position ordering and are eligible for reorder.
     /// </summary>
     /// <param name="printerId">The unique identifier of the printer</param>
     /// <param name="limit">Maximum number of jobs to return (default 50)</param>

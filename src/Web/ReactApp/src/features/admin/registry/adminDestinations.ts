@@ -2,7 +2,6 @@ import type { ComponentType } from 'react';
 
 import {
   AlertIcon,
-  CameraIcon,
   DashboardIcon,
   DatabaseIcon,
   FolderOpenIcon,
@@ -223,20 +222,6 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
     isHubTile: true,
   },
   {
-    id: 'ops-installer-updates',
-    kind: 'operational',
-    label: 'Installation Updates',
-    description: 'Read-only release availability, readiness, and durable update history.',
-    path: '/admin/updates',
-    icon: PackageIcon,
-    group: 'operations',
-    // Read-only inventory is system-settings admin. Execute is separately gated in the page.
-    requiredRole: null,
-    requiredPermission: { resource: 'system_settings', action: 'admin' },
-    keywords: ['updates', 'release', 'installer', 'train', 'readiness', 'auto-update'],
-    isHubTile: true,
-  },
-  {
     id: 'ops-workers',
     kind: 'operational',
     label: 'Workers & Jobs',
@@ -430,20 +415,6 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
     requiredPermission: { resource: 'printers', action: 'admin' },
     keywords: ['printer', 'printers', 'hardware', 'group', 'grouping', 'cluster'],
     isHubTile: true,
-  },
-  {
-    id: 'hw-cameras',
-    kind: 'configuration',
-    settingsGroup: 'hardware',
-    label: 'Cameras',
-    description: 'Camera feeds and monitoring views.',
-    path: '/admin/settings?tab=hardware&sub=cameras',
-    icon: CameraIcon,
-    group: 'hardware',
-    // Backed by CamerasController's manage endpoints, `[RequirePermission("cameras", "admin")]`.
-    requiredRole: null,
-    requiredPermission: { resource: 'cameras', action: 'admin' },
-    keywords: ['camera', 'webcam', 'stream', 'video', 'monitoring'],
   },
   {
     id: 'hw-nfc',
@@ -678,7 +649,7 @@ export const ADMIN_DESTINATION_GROUPS: readonly {
   { id: 'operations', label: 'Operations', description: 'Day-to-day monitoring and workflow.' },
   { id: 'users', label: 'Users', description: 'Accounts, roles, and audit trails.' },
   { id: 'data', label: 'Data', description: 'Reference data, tags, and lifecycle tools.' },
-  { id: 'hardware', label: 'Hardware', description: 'Printers, cameras, NFC, and physical layout.' },
+  { id: 'hardware', label: 'Hardware', description: 'Printers, NFC, and physical layout.' },
   { id: 'slicing', label: 'Slicing', description: 'Slicer profiles, bed types, and defaults.' },
   { id: 'integrations', label: 'Integrations', description: 'External services and webhooks.' },
   { id: 'general', label: 'General', description: 'Farm identity and system configuration.' },

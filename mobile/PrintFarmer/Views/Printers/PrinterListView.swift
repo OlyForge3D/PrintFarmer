@@ -2,14 +2,11 @@ import SwiftUI
 
 enum PrinterListNavigationContext: Equatable {
     case farm
-    case fleet
 
     var navigationTitle: String {
         switch self {
         case .farm:
             "Farm"
-        case .fleet:
-            "Fleet"
         }
     }
 
@@ -17,8 +14,6 @@ enum PrinterListNavigationContext: Equatable {
         switch self {
         case .farm:
             "farm.root"
-        case .fleet:
-            "oversight.root.fleet"
         }
     }
 
@@ -26,42 +21,52 @@ enum PrinterListNavigationContext: Equatable {
         switch self {
         case .farm:
             "farm"
-        case .fleet:
-            "oversight.fleet"
         }
+    }
+
+    func printerCardIdentifier(for printerID: UUID) -> String {
+        "\(accessibilityPrefix)-card-\(printerID.uuidString)"
     }
 
     var appTab: AppTab {
         switch self {
         case .farm:
             .farm
-        case .fleet:
-            .fleet
         }
     }
 }
 
 struct PrinterListView: View {
     let navigationContext: PrinterListNavigationContext
+    let farmViewModel: DashboardViewModel
 
     @Environment(AppRouter.self) private var router
     @Environment(ServiceContainer.self) private var services
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var viewModel = PrinterListViewModel()
-    @State private var coverageViewModel = FarmFilamentCoverageViewModel()
+    @State private var attentionViewModel = AttentionFeedViewModel()
     @State private var retryTask: Task<Void, Never>?
-    @State private var showingPrinterLookup = false
-
-    private var filamentCoverageEnabled: Bool {
-        services.capabilitiesService.resolved.filamentCoverageEnabled
-    }
+    @State private var isSearchPresented = false
 
     private var iPadColumns: [GridItem] {
-        [GridItem(.adaptive(minimum: 340))]
+        sizeClass == .regular && !dynamicTypeSize.isAccessibilitySize
+            ? [GridItem(.adaptive(minimum: 300))]
+            : [GridItem(.flexible())]
     }
 
-    init(navigationContext: PrinterListNavigationContext = .farm) {
+    init(
+        navigationContext: PrinterListNavigationContext = .farm,
+        farmViewModel: DashboardViewModel
+    ) {
         self.navigationContext = navigationContext
+        self.farmViewModel = farmViewModel
+        _viewModel = State(
+            initialValue: PrinterListViewModel(
+                initialPrinters: farmViewModel.printers,
+                pendingReadyPrinterIDs: farmViewModel.pendingReadyPrinterIDs
+            )
+        )
     }
 
     var body: some View {
@@ -71,57 +76,47 @@ struct PrinterListView: View {
             switch navigationContext {
             case .farm:
                 navigationStack(path: $router.printersPath)
-            case .fleet:
-                navigationStack(path: $router.fleetPath)
             }
         }
-        .sheet(isPresented: $showingPrinterLookup) {
-            PrinterLookupView(printerService: services.printerService) { printer in
-                showingPrinterLookup = false
-                router.printersPath.append(AppDestination.printerDetail(id: printer.id))
-            }
+        .task(id: services.activeServerGeneration) {
+            synchronizeFarmData()
         }
-        .task {
-            PrinterListViewLifecycle.taskActivate(
-                viewModel: viewModel,
-                printerService: services.printerService,
-                autoPrintService: services.autoPrintService,
-                signalRService: services.signalRService
+        .onChange(of: farmViewModel.farmDataRevision) { _, _ in
+            synchronizeFarmData()
+        }
+        .task(id: attentionAuthority) {
+            await attentionViewModel.bootstrap(
+                attentionService: services.attentionService,
+                signalRService: services.signalRService,
+                attentionEnabled: services.capabilitiesService.resolved.attentionEnabled,
+                startupPrefetchStore: services.startupPrefetchStore
             )
-            await viewModel.bootstrap(startupPrefetchStore: services.startupPrefetchStore)
         }
-        .task(id: filamentCoverageEnabled) {
-            guard filamentCoverageEnabled else {
-                coverageViewModel.disableForCapabilityGate()
-                return
+        .task(id: attentionViewModel.snapshot) {
+            if attentionViewModel.snapshot?.nextCursor != nil {
+                _ = await attentionViewModel.loadMore()
             }
-            coverageViewModel.configure(coverageService: services.filamentCoverageService)
-            coverageViewModel.configureSignalR(services.signalRService)
-            // #789: wire the read-cache before readiness-prefetch consumption or
-            // the hydrate-then-load fallback.
-            coverageViewModel.configureCache(services.filamentCoverageReadCache)
-            await coverageViewModel.bootstrap(startupPrefetchStore: services.startupPrefetchStore)
+            viewModel.attentionPrinterIDs = Set(attentionViewModel.snapshot?.items.map(\.printerId) ?? [])
         }
         .onDisappear {
-            PrinterListViewLifecycle.onDisappear(
-                viewModel: viewModel,
-                retryTask: retryTask
-            )
-            coverageViewModel.tearDownSignalR()
+            retryTask?.cancel()
+            attentionViewModel.deactivate()
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
             Task {
-                await PrinterListViewLifecycle.willEnterForeground(
-                    viewModel: viewModel,
-                    coverageViewModel: coverageViewModel,
-                    refreshCoverage: filamentCoverageEnabled
-                )
+                _ = await attentionViewModel.refresh()
             }
         }
         .onChange(of: activeNavigationPathCount) { _, newCount in
             if newCount == 0 {
-                Task { await viewModel.loadAutoDispatchStatuses() }
+                Task { await farmViewModel.refreshPendingReadyStatus() }
             }
+        }
+        .onChange(of: router.pendingNeedsAttentionFilter, initial: true) { _, needsAttention in
+            guard needsAttention else { return }
+            viewModel.selectedStatus = .needsAttention
+            viewModel.searchText = ""
+            router.pendingNeedsAttentionFilter = false
         }
         .accessibilityIdentifier(navigationContext.accessibilityIdentifier)
     }
@@ -131,26 +126,33 @@ struct PrinterListView: View {
     ) -> some View {
         NavigationStack(path: path) {
             VStack(spacing: 0) {
-                // #789: shared stale banner — honest, read-only cached coverage.
-                if filamentCoverageEnabled && coverageViewModel.isStaleCacheReportable {
-                    ConnectionStatusBar(
-                        status: .offline,
-                        lastConfirmedAt: coverageViewModel.cacheLastUpdatedAt,
-                        hasCache: true
-                    )
+                if let failure = attentionViewModel.loadFailure {
+                    Text("Attention unavailable: \(failure.message)")
+                        .font(.caption)
+                        .foregroundStyle(Color.pfWarning)
+                        .padding(.horizontal)
+                }
+                if let failure = attentionViewModel.paginationFailure {
+                    Button("Attention count unavailable. Retry") {
+                        Task { _ = await attentionViewModel.retryLoadMore(failureID: failure.id) }
+                    }
+                    .font(.caption)
+                    .foregroundStyle(Color.pfWarning)
                 }
                 Group {
-                    if viewModel.isLoading && viewModel.printers.isEmpty {
+                    // This list is mounted inside the Farm navigation stack and
+                    // reads loading/error state from its canonical Dashboard owner.
+                    if farmViewModel.isLoading && farmViewModel.printers.isEmpty {
                         ProgressView("Loading printers…")
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    } else if let error = viewModel.errorMessage, viewModel.printers.isEmpty {
+                    } else if let error = farmViewModel.errorMessage, farmViewModel.printers.isEmpty {
                         ContentUnavailableView {
                             Label("Error", systemImage: "exclamationmark.triangle")
                         } description: {
                             Text(error)
                         } actions: {
                             Button("Retry") {
-                                retryTask = Task { await viewModel.loadPrinters() }
+                                retryTask = Task { await farmViewModel.loadDashboard() }
                             }
                         }
                     } else if viewModel.printers.isEmpty {
@@ -165,30 +167,34 @@ struct PrinterListView: View {
                 }
             }
             .navigationTitle(navigationContext.navigationTitle)
-            .searchable(text: $viewModel.searchText, prompt: "Search printers")
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
             .refreshable {
-                await PrinterListViewLifecycle.refresh(
-                    viewModel: viewModel,
-                    coverageViewModel: coverageViewModel,
-                    refreshCoverage: filamentCoverageEnabled
-                )
+                await farmViewModel.loadDashboard()
+                _ = await attentionViewModel.refresh()
             }
+            .modifier(
+                PresentedFarmSearch(
+                    text: $viewModel.searchText,
+                    isPresented: $isSearchPresented
+                )
+            )
             .rootNavigationChrome(for: navigationContext.appTab) {
-                statusFilterMenu
-                if navigationContext == .farm {
-                    Button {
-                        showingPrinterLookup = true
-                    } label: {
-                        Image(systemName: "magnifyingglass")
-                            .frame(
-                                minWidth: RootNavigationChrome.minimumTouchTarget,
-                                minHeight: RootNavigationChrome.minimumTouchTarget
-                            )
-                    }
-                    .accessibilityLabel("Find printer")
-                    .accessibilityHint("Looks up a printer by name, model, or network address.")
-                    .accessibilityIdentifier("farm.printerLookup")
+                Button {
+                    isSearchPresented = true
+                } label: {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(Color.pfTextSecondary)
+                        .frame(
+                            width: RootNavigationChrome.minimumTouchTarget,
+                            height: RootNavigationChrome.minimumTouchTarget
+                        )
+                        .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Search printers")
+                .accessibilityIdentifier("farm.search")
             }
             .navigationDestination(for: AppDestination.self) { destination in
                 destinationView(for: destination)
@@ -200,265 +206,150 @@ struct PrinterListView: View {
         switch navigationContext {
         case .farm:
             router.printersPath.count
-        case .fleet:
-            router.fleetPath.count
         }
+    }
+
+    private func synchronizeFarmData() {
+        farmViewModel.synchronizeFarmData(to: viewModel)
     }
 
     // MARK: - Printer List
 
     private var printerList: some View {
-        ScrollView {
-            LazyVStack(spacing: 12) {
-                // Location filter pills
-                if viewModel.availableLocations.count > 1 {
-                    locationFilterBar
-                }
+        VStack(spacing: 0) {
+            statusFilterBar
+                .padding(.horizontal)
+                .padding(.top, 8)
 
-                if viewModel.filteredPrinters.isEmpty {
-                    ContentUnavailableView.search(text: viewModel.searchText)
-                        .padding(.top, 40)
-                } else if sizeClass == .regular {
-                    // iPad: adaptive grid of cards
-                    LazyVGrid(columns: iPadColumns, spacing: 12) {
-                        ForEach(viewModel.filteredPrinters) { printer in
-                            NavigationLink(value: AppDestination.printerDetail(id: printer.id)) {
-                                iPadPrinterCardView(
-                                    printer: printer,
-                                    isPendingReady: viewModel.isPendingReady(printer),
-                                    coverage: filamentCoverageEnabled
-                                        ? coverageViewModel.coverage(for: printer.id)
-                                        : nil
-                                )
+            ScrollView {
+                LazyVStack(spacing: 12) {
+                    Group {
+                        if viewModel.filteredPrinters.isEmpty {
+                            ContentUnavailableView {
+                                Label("No Printers in This Filter", systemImage: "line.3.horizontal.decrease.circle")
+                            } description: {
+                                Text("Choose another Farm filter to see printers.")
                             }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel(
-                                "\(printer.name), \(printer.state ?? "unknown") status"
-                                + "\(printer.isOnline ? ", online" : ", offline")"
-                            )
-                            .accessibilityHint("Opens \(printer.name) printer details.")
-                            // Stable-id scoping (F4-M #778 cycle-3 review
-                            // blocker D): XCUI tests scope badge / absence
-                            // assertions beneath this identifier so a
-                            // sibling printer's badge cannot satisfy a
-                            // per-card assertion. The id is the backend
-                            // printer UUID, never the display name.
-                            .accessibilityIdentifier(
-                                printerAccessibilityIdentifier(for: printer)
-                            )
+                            .padding(.top, 40)
+                        } else {
+                            LazyVGrid(columns: iPadColumns, spacing: 12) {
+                                ForEach(viewModel.filteredPrinters) { printer in
+                                    NavigationLink(value: AppDestination.printerDetail(id: printer.id)) {
+                                        PrinterCardView(
+                                            printer: printer,
+                                            isPendingReady: viewModel.isPendingReady(printer),
+                                            attentionCount: attentionCount(for: printer.id),
+                                            failureReason: failureReason(for: printer.id),
+                                            printerService: services.printerService
+                                        )
+                                    }
+                                    .buttonStyle(.plain)
+                                    .accessibilityElement(children: .combine)
+                                    .accessibilityHint("Opens \(printer.name) printer details.")
+                                    .accessibilityIdentifier(
+                                        printerAccessibilityIdentifier(for: printer)
+                                    )
+                                }
+                            }
                         }
                     }
-                } else {
-                    ForEach(viewModel.filteredPrinters) { printer in
-                        NavigationLink(value: AppDestination.printerDetail(id: printer.id)) {
-                            PrinterCardView(
-                                printer: printer,
-                                isPendingReady: viewModel.isPendingReady(printer),
-                                coverage: filamentCoverageEnabled
-                                    ? coverageViewModel.coverage(for: printer.id)
-                                    : nil
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("\(printer.name), \(printer.state ?? "unknown") status\(printer.isOnline ? ", online" : ", offline")")
-                        .accessibilityHint("Opens \(printer.name) printer details.")
-                        // Stable-id scoping (F4-M #778 cycle-3): same as
-                        // the iPad path above.
-                        .accessibilityIdentifier(
-                            printerAccessibilityIdentifier(for: printer)
-                        )
-                    }
+                    .padding(.horizontal)
+                    .padding(.vertical, 8)
+                    .padding(.bottom, 112)
                 }
             }
-            .padding(.horizontal)
-            .padding(.vertical, 8)
+            .accessibilityIdentifier("farm.printerList")
         }
     }
 
     // MARK: - Filters
 
-    private var statusFilterMenu: some View {
-        Menu {
-            ForEach(PrinterListViewModel.StatusFilter.allCases) { filter in
-                Button {
-                    viewModel.selectedStatus = filter
-                } label: {
-                    if viewModel.selectedStatus == filter {
-                        Label(filter.rawValue, systemImage: "checkmark")
-                    } else {
-                        Text(filter.rawValue)
-                    }
-                }
-            }
-        } label: {
-            Image(systemName: "line.3.horizontal.decrease.circle")
-                .symbolVariant(viewModel.selectedStatus != .all ? .fill : .none)
-        }
-        .frame(minWidth: 44, minHeight: 44)
-        .accessibilityLabel("Filter printers by status")
-        .accessibilityHint("Chooses which printer statuses are shown.")
-        .accessibilityIdentifier(
-            "\(navigationContext.accessibilityPrefix).statusFilter"
-        )
+    private var attentionAuthority: String {
+        "\(services.activeServerGeneration)-\(services.capabilitiesService.resolved.attentionEnabled)"
     }
 
-    private var locationFilterBar: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                FilterChip(
-                    title: "All Locations",
-                    identifier: "\(navigationContext.accessibilityPrefix).locationFilter.all",
-                    isSelected: viewModel.selectedLocationId == nil
-                ) {
-                    viewModel.selectedLocationId = nil
-                }
+    private func attentionCount(for printerID: UUID) -> Int? {
+        guard attentionViewModel.phase == .loaded,
+              attentionViewModel.snapshot?.nextCursor == nil,
+              attentionViewModel.loadFailure == nil,
+              attentionViewModel.paginationFailure == nil else { return nil }
+        return attentionViewModel.snapshot?.items.filter { $0.printerId == printerID }.count
+    }
 
-                ForEach(viewModel.availableLocations, id: \.id) { location in
-                    FilterChip(
-                        title: location.name,
-                        identifier:
-                            "\(navigationContext.accessibilityPrefix).locationFilter."
-                                + location.id.uuidString,
-                        isSelected: viewModel.selectedLocationId == location.id
-                    ) {
-                        viewModel.selectedLocationId = location.id
-                    }
+    private func failureReason(for printerID: UUID) -> String? {
+        attentionViewModel.snapshot?.items.first {
+            $0.printerId == printerID && $0.kind == .failure
+        }?.detail
+    }
+
+    private var statusFilterBar: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 8) {
+                    statusFilterChips(allowsWrapping: true)
                 }
+            } else {
+                HStack(spacing: 8) {
+                    statusFilterChips(allowsWrapping: false)
+                }
+                .fixedSize(horizontal: true, vertical: false)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("farm.filters")
+    }
+
+    private func statusFilterChips(allowsWrapping: Bool) -> some View {
+        ForEach(PrinterListViewModel.StatusFilter.allCases) { filter in
+            let count = viewModel.count(for: filter)
+            FilterChip(
+                title: filterCountTitle(filter, count: count),
+                identifier: "farm.filter.\(filter.id)",
+                isSelected: viewModel.selectedStatus == filter,
+                allowsWrapping: allowsWrapping
+            ) {
+                viewModel.selectedStatus = filter
+            }
+        }
+    }
+
+    private func filterCountTitle(
+        _ filter: PrinterListViewModel.StatusFilter,
+        count: Int
+    ) -> String {
+        guard filter == .needsAttention,
+              services.capabilitiesService.resolved.attentionEnabled,
+              !(attentionViewModel.phase == .loaded
+                && attentionViewModel.snapshot?.nextCursor == nil
+                && attentionViewModel.loadFailure == nil
+                && attentionViewModel.paginationFailure == nil) else {
+            return "\(filter.rawValue) \(count)"
+        }
+        return "\(filter.rawValue) —"
     }
 
     private func printerAccessibilityIdentifier(for printer: Printer) -> String {
-        switch navigationContext {
-        case .farm:
-            "farm-card-\(printer.id.uuidString)"
-        case .fleet:
-            "oversight.fleet.printer.\(printer.id.uuidString)"
-        }
+        navigationContext.printerCardIdentifier(for: printer.id)
     }
 }
 
-/// Direct printer lookup re-homed from the retired Scan tab.
-struct PrinterLookupView: View {
-    let printerService: any PrinterServiceProtocol
-    let onSelect: (Printer) -> Void
+private struct PresentedFarmSearch: ViewModifier {
+    @Binding var text: String
+    @Binding var isPresented: Bool
 
-    @Environment(\.dismiss) private var dismiss
-    @State private var printers: [Printer] = []
-    @State private var isLoading = false
-    @State private var errorMessage: String?
-    @State private var searchText = ""
-
-    private var filteredPrinters: [Printer] {
-        guard !searchText.isEmpty else { return printers }
-        return printers.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
-    }
-
-    var body: some View {
-        NavigationStack {
-            Group {
-                if isLoading {
-                    ProgressView("Loading printers…")
-                } else if let errorMessage {
-                    ContentUnavailableView {
-                        Label("Unable to Load Printers", systemImage: "exclamationmark.triangle")
-                    } description: {
-                        Text(errorMessage)
-                    }
-                } else if printers.isEmpty {
-                    ContentUnavailableView {
-                        Label("No Printers", systemImage: "printer")
-                    } description: {
-                        Text("Add a printer before using direct lookup.")
-                    }
-                } else {
-                    List(filteredPrinters) { printer in
-                        Button {
-                            onSelect(printer)
-                        } label: {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(printer.name)
-                                    .font(.subheadline.weight(.medium))
-                                if let notes = printer.notes, !notes.isEmpty {
-                                    Text(notes)
-                                        .font(.caption)
-                                        .foregroundStyle(Color.pfTextSecondary)
-                                }
-                            }
-                        }
-                        .frame(minHeight: 44)
-                        .accessibilityIdentifier(
-                            "farm.printerLookup.row.\(printer.id.uuidString)"
-                        )
-                    }
-                    .searchable(text: $searchText, prompt: "Search printers")
-                }
+    func body(content: Content) -> some View {
+        Group {
+            if isPresented {
+                content.searchable(
+                    text: $text,
+                    isPresented: $isPresented,
+                    prompt: "Search printers"
+                )
+            } else {
+                content
             }
-            .navigationTitle("Find Printer")
-            #if os(iOS)
-            .navigationBarTitleDisplayMode(.inline)
-            #endif
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                }
-            }
-            .task {
-                isLoading = true
-                do {
-                    printers = try await printerService.list(includeDisabled: false)
-                } catch {
-                    errorMessage = error.localizedDescription
-                }
-                isLoading = false
-            }
-        }
-    }
-}
-
-@MainActor
-enum PrinterListViewLifecycle {
-    static func taskActivate(
-        viewModel: PrinterListViewModel,
-        printerService: any PrinterServiceProtocol,
-        autoPrintService: any AutoDispatchServiceProtocol,
-        signalRService: any SignalRServiceProtocol
-    ) {
-        viewModel.activate()
-        viewModel.configure(
-            printerService: printerService,
-            autoPrintService: autoPrintService
-        )
-        viewModel.configureSignalR(signalRService)
-    }
-
-    static func onDisappear(
-        viewModel: PrinterListViewModel,
-        retryTask: Task<Void, Never>?
-    ) {
-        retryTask?.cancel()
-        viewModel.deactivate()
-    }
-
-    static func willEnterForeground(
-        viewModel: PrinterListViewModel,
-        coverageViewModel: FarmFilamentCoverageViewModel? = nil,
-        refreshCoverage: Bool = false
-    ) async {
-        await viewModel.loadAutoDispatchStatuses()
-        if refreshCoverage {
-            await coverageViewModel?.load()
-        }
-    }
-
-    static func refresh(
-        viewModel: PrinterListViewModel,
-        coverageViewModel: FarmFilamentCoverageViewModel,
-        refreshCoverage: Bool
-    ) async {
-        await viewModel.loadPrinters()
-        if refreshCoverage {
-            await coverageViewModel.load()
         }
     }
 }
@@ -469,6 +360,7 @@ private struct FilterChip: View {
     let title: String
     let identifier: String
     let isSelected: Bool
+    let allowsWrapping: Bool
     let action: () -> Void
 
     var body: some View {
@@ -479,25 +371,27 @@ private struct FilterChip: View {
                         .accessibilityHidden(true)
                 }
                 Text(title)
-                    .font(.subheadline.weight(.medium))
+                    .font(.caption.weight(.medium))
                     .fixedSize(horizontal: false, vertical: true)
             }
-                .padding(.horizontal, 12)
-                .frame(minHeight: 44)
-                .foregroundStyle(Color.pfTextPrimary)
-                .background(
-                    isSelected ? Color.pfAccent.opacity(0.18) : Color.pfCard,
-                    in: Capsule()
-                )
-                .overlay {
-                    Capsule()
-                        .strokeBorder(
-                            isSelected ? Color.pfAccentHover : Color.pfBorder,
-                            lineWidth: 1
-                        )
-                }
+            .padding(.horizontal, 8)
+            .frame(minHeight: 44)
+            .foregroundStyle(Color.pfTextPrimary)
+            .background(
+                isSelected ? Color.pfAccent.opacity(0.18) : Color.pfCard,
+                in: Capsule()
+            )
+            .overlay {
+                Capsule()
+                    .strokeBorder(
+                        isSelected ? Color.pfAccentHover : Color.pfBorder,
+                        lineWidth: 1
+                    )
+            }
+            .frame(maxWidth: allowsWrapping ? .infinity : nil, alignment: .leading)
         }
         .buttonStyle(.plain)
+        .fixedSize(horizontal: !allowsWrapping, vertical: false)
         .accessibilityLabel(title)
         .accessibilityValue(isSelected ? "Selected" : "Not selected")
         .accessibilityHint("Filters the printer list to \(title.lowercased()).")

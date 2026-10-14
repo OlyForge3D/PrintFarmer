@@ -577,8 +577,7 @@ public sealed class BackendStartCommandConsumerServiceTests
                 provider.GetRequiredService<IServiceScopeFactory>(),
                 NullLogger<BackendStartCommandConsumerService>.Instance,
                 Options.Create(new BackendTimeoutSettings()),
-                hostUpdateFence: null,
-                timeProvider: clock);
+                   timeProvider: clock);
 
             return new TestHarness(connection, provider, printJobManagement, service);
         }

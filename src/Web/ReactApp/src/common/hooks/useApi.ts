@@ -35,6 +35,7 @@ import {
   PrinterSummary,
   PrintJobPriority,
   PrintJobObjectListDto,
+  QueuedPrintJobDto,
   QueuedPrintJobWithFileMetaDto,
   RegisterDiscoveredPrinterRequest,
   StartDiscoveryRequest,
@@ -78,7 +79,7 @@ import {
   CustomFieldEntityType,
   CustomFieldValue,
 } from '@/types/api';
-import type { UseQueryOptions } from '@tanstack/react-query';
+import type { UseQueryOptions, UseQueryResult } from '@tanstack/react-query';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo } from 'react';
 import { toast } from 'sonner';
@@ -545,7 +546,7 @@ export function useCreateModel() {
       if (ctx?.previous && ctx.key) queryClient.setQueryData(ctx.key, ctx.previous);
       toast.error('Failed to create model');
     },
-    onSuccess: (created, vars, ctx) => {
+    onSuccess: (created, _vars, ctx) => {
       if (ctx?.key) {
         const list = queryClient.getQueryData<PrinterModelDto[]>(ctx.key);
         if (list) {
@@ -1314,13 +1315,34 @@ export function useRestartHarvestDiscovery() {
 
 // ============ Job Queue Hooks ============
 
-export function useJobQueue(printerId?: string, options?: QueryOptions<QueuedPrintJobWithFileMetaDto[]>) {
-  return useQuery({
+export function useJobQueue(): UseQueryResult<QueuedPrintJobWithFileMetaDto[], ApiError>;
+export function useJobQueue(
+  printerId: undefined,
+  options?: QueryOptions<QueuedPrintJobWithFileMetaDto[]>
+): UseQueryResult<QueuedPrintJobWithFileMetaDto[], ApiError>;
+export function useJobQueue(
+  printerId: string,
+  options?: QueryOptions<QueuedPrintJobDto[]>
+): UseQueryResult<QueuedPrintJobDto[], ApiError>;
+export function useJobQueue(
+  options?: QueryOptions<QueuedPrintJobWithFileMetaDto[]>
+): UseQueryResult<QueuedPrintJobWithFileMetaDto[], ApiError>;
+export function useJobQueue(
+  printerIdOrOptions?: string | QueryOptions<QueuedPrintJobWithFileMetaDto[]>,
+  options?: QueryOptions<QueuedPrintJobDto[]> | QueryOptions<QueuedPrintJobWithFileMetaDto[]>
+): UseQueryResult<QueuedPrintJobDto[] | QueuedPrintJobWithFileMetaDto[], ApiError> {
+  const printerId =
+    typeof printerIdOrOptions === 'string' ? printerIdOrOptions : undefined;
+  const queryOptions = (
+    typeof printerIdOrOptions === 'string' ? options : printerIdOrOptions
+  ) as QueryOptions<QueuedPrintJobDto[] | QueuedPrintJobWithFileMetaDto[]> | undefined;
+
+  return useQuery<QueuedPrintJobDto[] | QueuedPrintJobWithFileMetaDto[], ApiError>({
     queryKey: queryKeys.jobQueue(printerId),
-    queryFn: () => apiClient.getJobQueue(printerId),
+    queryFn: () => printerId ? apiClient.getJobQueue(printerId) : apiClient.getJobQueue(),
     staleTime: 30000, // 30 seconds
     refetchInterval: 30000, // Auto-refresh every 30 seconds
-    ...options,
+    ...queryOptions,
   });
 }
 
@@ -1361,7 +1383,7 @@ export function useQueuePrintJob() {
       if (prevGlobalQueue) queryClient.setQueryData(globalQueueKey, [temp, ...prevGlobalQueue]); else queryClient.setQueryData(globalQueueKey, [temp]);
       return { prevPrinterQueue, prevGlobalQueue, printerQueueKey, globalQueueKey, tempId };
     },
-    onError: (_e, vars, ctx) => {
+    onError: (_e, _vars, ctx) => {
       if (ctx?.prevPrinterQueue && ctx.printerQueueKey) {
         queryClient.setQueryData(ctx.printerQueueKey, ctx.prevPrinterQueue);
       } else if (ctx?.printerQueueKey) {
@@ -1945,10 +1967,62 @@ export function useSetToolheadSpool() {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.printerDetails(printerId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.printers }),
+        queryClient.invalidateQueries({ queryKey: ['printer-spools', printerId] }),
       ]);
       toast.success('Spool assigned to toolhead');
     },
     onError: (err: Error) => toast.error(`Failed to assign spool: ${err.message}`),
+  });
+}
+
+/**
+ * Sets the printer-level (scalar) active spool — the same revision-checked
+ * endpoint the legacy single-spool UI uses. Writes `Printer.CurrentSpoolId`,
+ * not any `Toolhead` row.
+ */
+export function useSetActiveSpool() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      printerId,
+      spoolId,
+      reviewedRowVersion,
+    }: {
+      printerId: string;
+      spoolId: number;
+      reviewedRowVersion: string;
+    }) => apiClient.setActiveSpool(printerId, spoolId, reviewedRowVersion),
+    onSuccess: async (_data, { printerId }) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.printerDetails(printerId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.printers }),
+        queryClient.invalidateQueries({ queryKey: ['printer-spools', printerId] }),
+      ]);
+      toast.success('Spool assigned to printer');
+    },
+    onError: (err: Error) => toast.error(`Failed to assign spool: ${err.message}`),
+  });
+}
+
+export function useClearActiveSpool() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      printerId,
+      reviewedRowVersion,
+    }: {
+      printerId: string;
+      reviewedRowVersion: string;
+    }) => apiClient.clearActiveSpool(printerId, reviewedRowVersion),
+    onSuccess: async (_data, { printerId }) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.printerDetails(printerId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.printers }),
+        queryClient.invalidateQueries({ queryKey: ['printer-spools', printerId] }),
+      ]);
+      toast.success('Spool cleared from printer');
+    },
+    onError: (err: Error) => toast.error(`Failed to clear spool: ${err.message}`),
   });
 }
 
@@ -1972,6 +2046,7 @@ export function useClearToolheadSpool() {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.printerDetails(printerId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.printers }),
+        queryClient.invalidateQueries({ queryKey: ['printer-spools', printerId] }),
       ]);
       toast.success('Spool cleared from toolhead');
     },

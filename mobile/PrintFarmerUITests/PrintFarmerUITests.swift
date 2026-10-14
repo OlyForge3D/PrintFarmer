@@ -488,6 +488,14 @@ struct ShellSnapshotFailure: Error, CustomStringConvertible {
                 $0.identifier == "launchSplash" || $0.identifier == "navigation.shellLoading"
             }) {
                 state = .notReady
+            } else if let tabBar = visible.first(where: {
+                $0.identifier == "navigation.tabBar"
+            }) {
+                let nodes = tabBar.descendants.filter {
+                    $0.type == .button && $0.enabled && !$0.frame.isEmpty
+                        && $0.frame.intersects(tabBar.frame) && $0.frame.intersects(root.frame)
+                }
+                state = nodes.isEmpty ? .notReady : .compact(nodes)
             } else if let tabBar = visible.first(where: { $0.type == .tabBar }) {
                 let nodes = tabBar.descendants.filter {
                     !$0.frame.isEmpty && $0.frame.intersects(tabBar.frame)
@@ -1890,6 +1898,18 @@ class PrintFarmerUITestCase: XCTestCase {
     private func launchForTest() {
         testBudget = UIWaitBudget(timeout: executionTimeAllowance)
         app = .printFarmerUITest(arguments: ["--uitesting"] + additionalLaunchArguments)
+        launchConfiguredApp()
+    }
+
+    /// A scenario relaunch keeps the original test allowance but must establish
+    /// readiness and heartbeat identity for the new process before navigation.
+    func relaunchAppForTest(additionalArguments: [String]) {
+        app.terminate()
+        app.launchArguments.append(contentsOf: additionalArguments)
+        launchConfiguredApp()
+    }
+
+    private func launchConfiguredApp() {
         appHeartbeat = .live(launchedAt: ProcessInfo.processInfo.systemUptime)
         app.launchForPrintFarmerUITest(willLaunch: launchWindow.begin)
         launchWindow.end()
@@ -2185,12 +2205,16 @@ class PrintFarmerUITestCase: XCTestCase {
             of: "tab.",
             with: "sidebar."
         )
+        let compactButton = app.buttons[tabIdentifier]
+        if compactButton.exists {
+            return compactButton
+        }
         if let element = waitForObservedShell(budget: budget, file: file, line: line, resolve: { observation in
             guard let destination = observation.destination(
                 tab: tabIdentifier, sidebar: sidebarIdentifier, title: self.tabTitle(for: tabIdentifier)
             ) else { return nil as XCUIElement? }
             let scope = destination.surface == .tabBar
-                ? self.app.tabBars.descendants(matching: destination.node.type)
+                ? self.app.buttons
                 : self.app.descendants(matching: destination.node.type)
             let element = self.observedElement(
                 destination.node, within: scope, allowingPromotionTo: destination.promotionIdentifier
@@ -2264,6 +2288,7 @@ class PrintFarmerUITestCase: XCTestCase {
     /// compatibility fallback.
     func compactTabExists(tabIdentifier: String) -> Bool {
         let tabBar = app.tabBars.firstMatch
+        if app.buttons[tabIdentifier].exists { return true }
         guard tabBar.exists else { return false }
 
         let identifierMatch = tabBar.descendants(matching: .any)
@@ -2277,8 +2302,8 @@ class PrintFarmerUITestCase: XCTestCase {
         switch identifier {
         case "tab.attention": "Attention"
         case "tab.farm": "Farm"
-        case "tab.tasks": "Tasks"
-        case "tab.inventory": "Inventory"
+        case "tab.queue": "Queue"
+        case "tab.filament": "Filament"
         case "tab.oversight": "Oversight"
         case "tab.overview": "Overview"
         case "tab.fleet": "Fleet"
@@ -2309,8 +2334,8 @@ class PrintFarmerUITestCase: XCTestCase {
         switch root.surface {
         case .tabBar:
             button = root.identifier.isEmpty
-                ? app.tabBars.firstMatch.buttons[root.title]
-                : app.tabBars.firstMatch.buttons[root.identifier]
+                ? app.buttons[root.title]
+                : app.buttons[root.identifier]
         case .sidebar:
             revealSidebarIfCollapsed()
             button = app.buttons[root.identifier]
@@ -2320,7 +2345,8 @@ class PrintFarmerUITestCase: XCTestCase {
     }
 
     func requireCompactAdaptiveShell() throws {
-        guard app.tabBars.firstMatch.waitForExistence(timeout: 8) else {
+        guard app.descendants(matching: .any)["navigation.tabBar"].waitForExistence(timeout: 8)
+                || app.tabBars.firstMatch.waitForExistence(timeout: 8) else {
             throw XCTSkip("Two Modes is intentionally compact-width only")
         }
     }

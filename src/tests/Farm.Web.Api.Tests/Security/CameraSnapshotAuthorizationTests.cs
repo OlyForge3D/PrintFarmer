@@ -423,7 +423,7 @@ public sealed class CameraSnapshotAuthorizationTests : IAsyncLifetime, IDisposab
         {
             Id = Guid.NewGuid(),
             Name = "Snapshot ACL camera",
-            PrinterId = printerId,
+            PrinterLinks = { new CameraPrinter { PrinterId = printerId, IsPrimary = true } },
             IsEnabled = true,
         };
         db.Cameras.Add(camera);

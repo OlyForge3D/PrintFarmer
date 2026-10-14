@@ -58,8 +58,13 @@ public class MoonrakerStatusClient : IPrinterStatusClient, IManagedSpoolProvider
             CircuitBreaker breaker = _circuitBreaker.GetCircuitBreaker($"moonraker-{printer.Id}");
 
             PrinterCompositeStatus status = await breaker.ExecuteAsync(
-                async ct => await _client.GetCompositeStatusAsync(printer.BackendUrl, ct),
+                async ct => await _client.GetCompositeStatusAsync(printer.BackendUrl, printer.Credential, ct),
                 ct);
+            if (!status.IsOnline)
+            {
+                return CreateOfflineStatus(printer.Id);
+            }
+
             PrinterStatusDto movement = await _client.GetMovementStatusAsync(printer, ct);
 
             _logger.LogInformation("[Moonraker] Status received for {PrinterName}: IsOnline={StatusIsOnline}, State={StatusState}", printer.Name, status.IsOnline, status.State);
@@ -82,7 +87,12 @@ public class MoonrakerStatusClient : IPrinterStatusClient, IManagedSpoolProvider
                 BedTarget: status.BedTarget,
                 PrintTimeLeftSeconds: status.PrintTimeLeftSeconds,
                 HomedAxes: movement.HomedAxes,
-                SafetyTelemetry: movement.SafetyTelemetry);
+                SafetyTelemetry: movement.SafetyTelemetry,
+                ThumbnailCacheIdentity: status.ThumbnailCacheIdentity,
+                CurrentLayer: status.CurrentLayer,
+                TotalLayers: status.TotalLayers,
+                FanSpeedPercent: status.FanSpeedPercent,
+                LiveZOffsetMm: status.LiveZOffsetMm);
         }
         catch (OperationCanceledException)
         {
@@ -107,7 +117,7 @@ public class MoonrakerStatusClient : IPrinterStatusClient, IManagedSpoolProvider
             CircuitBreaker breaker = _circuitBreaker.GetCircuitBreaker($"moonraker-{printer.Id}");
 
             PrinterCompositeStatus status = await breaker.ExecuteAsync(
-                async ct => await _client.GetCompositeStatusAsync(printer.BackendUrl, ct),
+                async ct => await _client.GetCompositeStatusAsync(printer.BackendUrl, printer.Credential, ct),
                 ct);
 
             // Get Spoolman integration info — try native Moonraker first, fall back to DB

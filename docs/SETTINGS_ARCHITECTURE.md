@@ -69,7 +69,7 @@ Under `/admin/settings` (`system` scope), settings navigation is organized into 
 
 1. **Farm**: Farm Defaults (`gen-farm`)
 2. **Printing & slicing**: Defaults (`slicing-defaults`), Bed Types (`slicing-bed-types`), Slicer Profiles (`slicing-profiles`)
-3. **Hardware**: Locations (`hw-locations`), Printer Groups (`hw-printer-groups`), Cameras (`hw-cameras`), Power Monitors (`hw-power-monitors`), NFC Devices (`hw-nfc`), NFC Bindings (`hw-nfc-bindings`), Custom Fields (`hw-custom-fields`)
+3. **Hardware**: Locations (`hw-locations`), Printer Groups (`hw-printer-groups`), Power Monitors (`hw-power-monitors`), NFC Devices (`hw-nfc`), NFC Bindings (`hw-nfc-bindings`), Custom Fields (`hw-custom-fields`). Cameras is no longer an admin destination; it is the top-level `/cameras` page (`?view=all|location|printer`, #3332).
 4. **Automation & costs**: Automation & Costs (`auto-costs`)
 5. **Integrations**: External Services (`int-connections`), Webhooks (`int-webhooks`)
 6. **People & access**: User Accounts (`users-accounts`), Roles & Permissions (`users-roles`)
@@ -245,7 +245,7 @@ Categories are defined in `SETTINGS_CATEGORIES` (`src/Web/ReactApp/src/features/
 - **System scope** (`/admin/settings`):
   - `general` → Farm Defaults, System Config, Automation & Costs
   - `slicing` → Defaults, Bed Types, Slicer Profiles
-  - `hardware` → Cameras, NFC Devices, Printer Groups, NFC Bindings, Custom Fields
+  - `hardware` → NFC Devices, Printer Groups, NFC Bindings, Custom Fields
   - `integrations` → External Services, Webhooks
   - `quotas` → Print Quotas (`QuotaManagementPage`)
   - `users` → User Accounts, Roles & Permissions
@@ -287,7 +287,7 @@ mapping is declared in `SUB_PAGE_CONTENT` in
 | `integrations.connections` | `['Integrations']` | Resource-gated Spoolman, Home Assistant and Telegram cards; generic editor requires `system_settings:admin`. |
 | `slicing.defaults` | `['Slicing']` | — |
 
-Other sub-pages (`users.accounts`, `data.tags`, `hardware.cameras`, etc.) render
+Other sub-pages (`users.accounts`, `data.tags`, `hardware.nfc`, etc.) render
 bespoke pages instead of a metadata-driven `<SettingsPage>`.
 
 ### Groups declared in the code but not reachable via `allowedGroups`
@@ -386,35 +386,13 @@ Spoolman uses the generic Integrations editor for users with `system_settings:ad
 A dedicated Spoolman card serves `spoolman:admin` delegates without that permission;
 the two editors never mount together for the same section.
 
-## Update Channel Setting (#2757)
+## Release Notifications
 
-`UpdateChannelSettings` (`src/infra/Settings/UpdateChannelSettings.cs`, section `UpdateChannel`)
-is a plain `IAppSetting`/`IValidatableSetting` using the same generic settings store described
-above — it is not a bespoke settings surface. It selects which signed release channel the
-production discovery path (`VerifiedReleaseDiscoveryMonitorService`) discovers/caches evidence
-for, and which channel `SystemInfoService`/`ServiceInventoryEvaluator` compare against when
-evaluating release readiness.
-
-| Property | JSON key | Type | Notes |
-|---|---|---|---|
-| `Channel` | `channel` | `string` | Must be exactly `"stable"` or `"insider"`. Defaults to `"stable"`. |
-| `InsiderAcknowledged` | `insiderAcknowledged` | `bool` | Must be `true` before `Channel` may be set to `"insider"`. Enforced in `Validate()`. |
-
-`Validate()` throws `ValidationException` (translated to `400 Bad Request` by the generic
-settings API) for any channel value other than `stable`/`insider`, and for selecting `insider`
-without `insiderAcknowledged: true`. This setting only changes what the discovery/readiness path
-evaluates — it never stages, downloads, applies, or triggers an update by itself.
-
-Both the channel selection and accepted same-version manifest bindings use the existing generic
-application-settings database, so they survive an ordinary process restart. That persistence is
-not protected anti-replay continuity: restoring an older database or replaying older settings
-storage can also restore older bindings and acknowledgement state. Issues #2666 and #2663 own
-protected continuity across storage rollback; this feature does not claim that protection.
-
-Related operational bounds for the discovery path itself (GitHub polling interval, HTTP
-timeouts, Cosign verification) live in `HostUpdates:VerifiedReleaseDiscovery` app configuration,
-validated at startup by `VerifiedReleaseDiscoveryOptionsValidator` (not a persisted setting —
-plain `IOptions<T>` bound from configuration).
+The obsolete persisted `UpdateChannel` section and signed-release discovery/readiness
+configuration were removed in #3289. Existing stored values are inert and no longer
+appear in settings metadata. Release notifications derive their channel from the
+installed application version, not a selectable setting. The notification-only
+`/api/admin/release-updates` checker remains independent and unchanged.
 
 ## Save Model — One Section At A Time
 

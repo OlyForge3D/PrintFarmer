@@ -69,6 +69,12 @@ public class CreateToolheadDto
     #endregion
 
     /// <summary>
+    /// Stored per-printer nozzle diameter in mm. When omitted, it is seeded from the nozzle
+    /// model at creation.
+    /// </summary>
+    public double? NozzleDiameter { get; set; }
+
+    /// <summary>
     /// Materials this toolhead is rated for.
     /// </summary>
     public string[]? SupportedMaterials { get; set; }
@@ -82,14 +88,14 @@ public class CreateToolheadDto
 /// <summary>
 /// Toolhead data for reading/display purposes.
 /// Includes resolved component model names for display.
-/// Nozzle diameter is derived from NozzleModel.Diameter.
+/// Nozzle diameter is the stored per-printer value (seeded from NozzleModel at creation).
 /// MaxFlowRate and MaxTemp are derived from HotendModel.
 /// </summary>
 public record ToolheadDto(
     Guid Id,
     string? Name,
     int Index,
-    double? NozzleDiameter,  // Derived from NozzleModel.Diameter
+    double? NozzleDiameter,  // Stored Toolhead.NozzleDiameter
     string? NozzleType,     // Derived from NozzleModel.NozzleMaterial.Name (open string set)
     double? MaxFlowRate,     // Derived from HotendModel.MaxFlowRate
     int? MaxTemp,            // Derived from HotendModel.MaxTemp

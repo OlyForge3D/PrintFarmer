@@ -1824,7 +1824,7 @@ public sealed class DispatchClaimService(
                 candidate.AssignedPrinterId == printer.Id &&
                 (candidate.Status == PrintJobStatus.Queued ||
                  candidate.Status == PrintJobStatus.Assigned))
-            .OrderByPriorityDescending()
+            .OrderWithinScope()
             .Select(candidate => (Guid?)candidate.Id)
             .FirstOrDefaultAsync(ct);
         if (queueHeadId != job.Id)

@@ -95,7 +95,7 @@ final class LoginFlowUITests: PrintFarmerUITestCase {
             ShellNode(.button, label: "Not Now")
         ])
         let ready = ShellObservation(ShellNode(.application, children: [
-            ShellNode(.tabBar, children: [ShellNode(.button, identifier: "tab.attention")])
+            ShellNode(.tabBar, children: [ShellNode(.button, identifier: "tab.farm")])
         ]))
         let loading = ShellObservation(ShellNode(.application))
         let embedded = ShellObservation(ShellNode(.application, children: [alert]))
@@ -171,12 +171,12 @@ final class LoginFlowUITests: PrintFarmerUITestCase {
 
         waitForAuthenticatedShell()
         let attention = shellDestinationButton(
-            tabIdentifier: "tab.attention",
+            tabIdentifier: "tab.farm",
             timeout: 10
         )
         XCTAssertTrue(
             attention.exists,
-            "Successful authentication should present tab.attention on iPhone or sidebar.attention on iPad"
+            "Successful authentication should present tab.farm on iPhone or sidebar.farm on iPad"
         )
     }
 
@@ -272,7 +272,7 @@ final class AdvancedPrinterControlsNotNowUITests: PrintFarmerUITestCase {
     }
 
     private func openSettingsFromAccount() {
-        let attention = shellDestinationButton(tabIdentifier: "tab.attention", timeout: 20)
+        let attention = shellDestinationButton(tabIdentifier: "tab.farm", timeout: 20)
         XCTAssertTrue(attention.exists)
         attention.tap()
 
@@ -331,7 +331,7 @@ final class AdvancedPrinterControlsEnableUITests: PrintFarmerUITestCase {
     }
 
     private func openSettingsFromAccount() {
-        let attention = shellDestinationButton(tabIdentifier: "tab.attention", timeout: 20)
+        let attention = shellDestinationButton(tabIdentifier: "tab.farm", timeout: 20)
         XCTAssertTrue(attention.exists)
         attention.tap()
 

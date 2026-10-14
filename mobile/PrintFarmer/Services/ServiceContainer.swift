@@ -66,6 +66,7 @@ final class ServiceContainer: @unchecked Sendable {
     @ObservationIgnored private let apiClientFactory: APIClientFactory
     @ObservationIgnored private let signalRServiceFactory: SignalRServiceFactory
     @ObservationIgnored private let farmShapeStore: FarmShapeStore
+    @ObservationIgnored private let farmShapeStartupSleep: FarmShapeService.Sleep
     @ObservationIgnored private let offlineReplayProviderResolutionHook: @Sendable () async -> Void
     @ObservationIgnored private let activeGeneration: ActiveServerGeneration
     @ObservationIgnored private var observesRegistry: Bool
@@ -305,6 +306,10 @@ final class ServiceContainer: @unchecked Sendable {
         farmSnapshotStore: (any FarmSnapshotStoring)? = nil,
         farmSnapshotOwnerStore: FarmSnapshotOwnerStore? = nil,
         farmShapeStore: FarmShapeStore? = nil,
+        /// Bounds the authenticated farm-shape startup wait. Tests inject a
+        /// causally controlled sleep so a held response cannot race the
+        /// wall-clock `FarmShapeService.startupTimeout`.
+        farmShapeStartupSleep: @escaping FarmShapeService.Sleep = { try await Task.sleep(for: $0) },
         /// H (issue #816 reject, Hicks): injectable canonical durable
         /// authority record. Tests pass a temp-rooted instance so the
         /// production-container reopen test can prove distinct record
@@ -350,6 +355,7 @@ final class ServiceContainer: @unchecked Sendable {
         let shapeStore = farmShapeStore
             ?? FarmShapeStore(userDefaults: userDefaultsBox.userDefaults)
         self.farmShapeStore = shapeStore
+        self.farmShapeStartupSleep = farmShapeStartupSleep
         self.offlineReplayProviderResolutionHook = offlineReplayProviderResolutionHook
         self.activeGeneration = ActiveServerGeneration()
         self.observesRegistry = observeRegistry
@@ -450,7 +456,8 @@ final class ServiceContainer: @unchecked Sendable {
         self.farmShapeService = FarmShapeService(
             apiClient: client,
             serverID: activeServer?.id,
-            store: shapeStore
+            store: shapeStore,
+            sleep: farmShapeStartupSleep
         )
         self.signalRService = signalRServiceFactory(resolvedURL, client)
         self.barcodeIntakeService = BarcodeIntakeService(apiClient: client)
@@ -459,22 +466,6 @@ final class ServiceContainer: @unchecked Sendable {
         self.qrScannerService = QRSpoolScannerService()
         self.barcodeScannerService = BarcodeScannerService()
         self.nfcService = NFCService()
-        PushNotificationManager.shared.configure(
-            notificationService: self.notificationService,
-            serverRegistry: serverRegistry,
-            serverID: activeServer?.id
-        )
-        // Issue #1321: keep lock-screen/Notification Center action handling
-        // wired to whichever services are currently live (not just at first
-        // launch) so job-attention actions never execute against stale
-        // service instances from a previous server/session.
-        PushNotificationManager.shared.configureActionHandling(
-            printerService: self.printerService,
-            attentionService: self.attentionService
-        )
-        if let token = PushNotificationManager.shared.deviceToken, activeServer != nil {
-            PushNotificationManager.shared.startTokenRegistration(token)
-        }
         #endif
 
         if let activeServer {
@@ -608,21 +599,6 @@ final class ServiceContainer: @unchecked Sendable {
         recordTarget(.demo)
         let epoch = transitionEpoch.current
         authOperationEpoch.advance()
-        if activeServerID != nil {
-            guard await unregisterNotificationToken(clearLocalToken: false) else {
-                return false
-            }
-            guard transitionEpoch.isCurrent(epoch) else { return false }
-        }
-        #if canImport(UIKit)
-        // Invalidate real-server notification actions before the first await.
-        PushNotificationManager.shared.configure(
-            notificationService: self.notificationService,
-            serverRegistry: nil,
-            serverID: nil,
-            allowsUnscopedRegistration: false
-        )
-        #endif
         // Revoke synchronously before advancing the generation so no stale
         // snapshot commit can apply across the demo transition.
         farmSnapshotAuthority.revoke()
@@ -660,16 +636,6 @@ final class ServiceContainer: @unchecked Sendable {
         self.activeServerID = nil
         self.activeServerGeneration = activeGeneration.advance()
         #if canImport(UIKit)
-        PushNotificationManager.shared.configure(
-            notificationService: self.notificationService,
-            serverRegistry: nil,
-            serverID: nil,
-            allowsUnscopedRegistration: false
-        )
-        PushNotificationManager.shared.configureActionHandling(
-            printerService: self.printerService,
-            attentionService: self.attentionService
-        )
         self.qrScannerService = nil
         self.barcodeScannerService = nil
         self.nfcService = nil
@@ -1112,12 +1078,6 @@ final class ServiceContainer: @unchecked Sendable {
 
     private func switchToActiveServer(_ server: RegisteredServer, epoch: Int) async {
         offlineWriteReplayAuthority.invalidate()
-        if activeServerID != nil {
-            guard await unregisterNotificationToken(clearLocalToken: false) else {
-                scheduleNotificationHandoffRetry(.server(server), epoch: epoch)
-                return
-            }
-        }
         // Capture immutable target + outgoing service/session BEFORE any await (H1).
         let outgoingSignalR = signalRService
         let outgoingSession = farmSnapshotAuthority.currentSession()
@@ -1237,10 +1197,6 @@ final class ServiceContainer: @unchecked Sendable {
             return
         }
         guard activeServerID != nil else { return }
-        guard await unregisterNotificationToken() else {
-            scheduleNotificationHandoffRetry(.none, epoch: epoch)
-            return
-        }
         let outgoingSignalR = signalRService
         let outgoingSession = farmSnapshotAuthority.currentSession()
         await outgoingSignalR.disconnect()
@@ -1256,26 +1212,6 @@ final class ServiceContainer: @unchecked Sendable {
         startupPrefetchStore.removeAll()
         activeServerGeneration = activeGeneration.advance()
         _ = rebuildRealServices(baseURL: APIClient.savedBaseURL() ?? AppConfig.baseURL, server: nil, accessToken: nil)
-    }
-
-    private func scheduleNotificationHandoffRetry(
-        _ target: DesiredTarget,
-        epoch: Int
-    ) {
-        Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .seconds(5))
-            guard let self,
-                  self.transitionEpoch.isCurrent(epoch) else { return }
-            self.requestTarget(target)
-        }
-    }
-
-    private func unregisterNotificationToken(clearLocalToken: Bool = true) async -> Bool {
-            #if canImport(UIKit)
-            return await PushNotificationManager.shared.unregisterFromServer(clearLocalToken: clearLocalToken)
-            #else
-            return true
-            #endif
     }
 
     /// After a superseded switch (which must not rebuild/publish), replace the
@@ -1330,7 +1266,8 @@ final class ServiceContainer: @unchecked Sendable {
         self.farmShapeService = FarmShapeService(
             apiClient: client,
             serverID: server?.id,
-            store: farmShapeStore
+            store: farmShapeStore,
+            sleep: farmShapeStartupSleep
         )
         self.signalRService = signalRServiceFactory(baseURL, client)
         self.barcodeIntakeService = BarcodeIntakeService(apiClient: client)
@@ -1339,23 +1276,6 @@ final class ServiceContainer: @unchecked Sendable {
         self.qrScannerService = QRSpoolScannerService()
         self.barcodeScannerService = BarcodeScannerService()
         self.nfcService = NFCService()
-        PushNotificationManager.shared.configure(
-            notificationService: self.notificationService,
-            serverRegistry: serverRegistry,
-            serverID: server?.id
-        )
-        // Issue #1321: re-wire lock-screen/Notification Center action handling
-        // to the freshly rebuilt services on every rebuild (server switch,
-        // re-login, logout->login), not just at initial launch. Without this,
-        // job-attention notification actions would keep executing against the
-        // previous server's (possibly now-invalid) service instances.
-        PushNotificationManager.shared.configureActionHandling(
-            printerService: self.printerService,
-            attentionService: self.attentionService
-        )
-        if let token = PushNotificationManager.shared.deviceToken, server != nil {
-            PushNotificationManager.shared.startTokenRegistration(token)
-        }
         #endif
         return client
     }
@@ -1425,6 +1345,7 @@ final class ServiceContainer: @unchecked Sendable {
         }
         self.offlineReplayProviderResolutionHook = {}
         self.farmShapeStore = FarmShapeStore()
+        self.farmShapeStartupSleep = { try await Task.sleep(for: $0) }
         self.activeGeneration = ActiveServerGeneration()
         self.offlineWriteQueueStore = FileOfflineWriteQueueStore(
             directory: Self.offlineWriteQueueDirectory()

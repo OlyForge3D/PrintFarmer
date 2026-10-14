@@ -423,7 +423,9 @@ struct JogSubgroup: View {
 /// every action still goes through the existing capability-gated command owner.
 struct PrinterMotionControls: View {
     @ObservedObject var viewModel: PrinterControlsViewModel
+    var compactForDetail = false
     @State private var step = 1.0
+    @State private var showsAdvancedMotion = false
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private var row: AnyLayout {
@@ -434,66 +436,44 @@ struct PrinterMotionControls: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            EssentialControlHeading(title: "Move & home", detail: homingDescription)
+            EssentialControlHeading(
+                title: compactForDetail ? "Move" : "Move & home",
+                detail: compactForDetail ? positionSummary : homingDescription
+            )
                 .padding(.bottom, 14)
             PrinterControlCommandFeedback(viewModel: viewModel, section: .motion)
-            row {
-                position("X", value: viewModel.printer.x)
-                position("Y", value: viewModel.printer.y)
-                position("Z", value: viewModel.printer.z)
-            }
-            Group {
-                let stepsLayout = dynamicTypeSize.isAccessibilitySize
-                    ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
-                    : AnyLayout(HStackLayout(spacing: 3))
-                stepsLayout {
-                    ForEach(JogSubgroup.stepOptions, id: \.self) { value in
-                        ControlActionButton(
-                            title: "\(value.formatted()) mm",
-                            identifier: "printer.controls.jog.step.\(value.formatted())",
-                            accessibilityTitle: "Jog step \(value.formatted()) millimeters",
-                            selected: step == value, compact: true, textSize: 13, segmented: true
-                        ) { step = value }
-                    }
+            if !compactForDetail {
+                row {
+                    position("X", value: viewModel.printer.x)
+                    position("Y", value: viewModel.printer.y)
+                    position("Z", value: viewModel.printer.z)
                 }
-                .padding(3)
-                .background(Color.pfBackgroundTertiary, in: RoundedRectangle(cornerRadius: 11))
-                .overlay(RoundedRectangle(cornerRadius: 11).strokeBorder(Color.pfBorder))
-                .padding(.vertical, 12)
-                .disabled(!viewModel.canControl || viewModel.isExecuting || JogSubgroup.isHidden(for: viewModel.capabilities))
             }
-            if dynamicTypeSize.isAccessibilitySize {
+            if !compactForDetail {
+                stepPicker
+                    .padding(.vertical, 12)
+            }
+            if compactForDetail {
+                compactJogLayout
+            } else if dynamicTypeSize.isAccessibilitySize {
                 ForEach(["X", "Y", "Z"], id: \.self) { axis in
                     HStack(spacing: 8) {
                         jog(axis, sign: -1, title: "\(axis) -")
                         jog(axis, sign: 1, title: "\(axis) +")
                     }
                 }
-                HStack(spacing: 8) {
+                if compactForDetail {
                     homeAll()
-                    home("XY", axes: ["X", "Y"]) { await viewModel.homeXY() }
-                    home("Z", axes: ["Z"]) { await viewModel.homeZ() }
+                } else {
+                    HStack(spacing: 8) {
+                        homeAll()
+                        home("XY", axes: ["X", "Y"]) { await viewModel.homeXY() }
+                        home("Z", axes: ["Z"]) { await viewModel.homeZ() }
+                    }
                 }
             } else {
                 HStack(spacing: 16) {
-                    Grid(horizontalSpacing: 6, verticalSpacing: 6) {
-                        GridRow {
-                            homeAll().frame(maxWidth: .infinity).frame(height: 48)
-                            jog("Y", sign: 1, symbol: "chevron.up").frame(maxWidth: .infinity).frame(height: 48)
-                            Color.clear.frame(height: 48).accessibilityHidden(true)
-                        }
-                        GridRow {
-                            jog("X", sign: -1, symbol: "chevron.left").frame(maxWidth: .infinity).frame(height: 48)
-                            home("XY", axes: ["X", "Y"]) { await viewModel.homeXY() }
-                                .frame(maxWidth: .infinity).frame(height: 48)
-                            jog("X", sign: 1, symbol: "chevron.right").frame(maxWidth: .infinity).frame(height: 48)
-                        }
-                        GridRow {
-                            Color.clear.frame(height: 48).accessibilityHidden(true)
-                            jog("Y", sign: -1, symbol: "chevron.down").frame(maxWidth: .infinity).frame(height: 48)
-                            Color.clear.frame(height: 48).accessibilityHidden(true)
-                        }
-                    }
+                    xyJogGrid
                     VStack(spacing: 6) {
                         jog("Z", sign: 1, title: "Z+").frame(height: 48)
                         home("Z", axes: ["Z"]) { await viewModel.homeZ() }.frame(height: 48)
@@ -502,11 +482,162 @@ struct PrinterMotionControls: View {
                     .frame(width: 68)
                 }
             }
-            if JogSubgroup.AbsolutePositionControls.isVisible(viewModel.capabilities) {
+            if compactForDetail {
+                if let note = jogSafetyNote {
+                    Text(note)
+                        .font(.footnote)
+                        .foregroundStyle(Color.pfWarning)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 8)
+                        .accessibilityIdentifier("printer.controls.jog.homing-safety")
+                }
+                advancedMotionDisclosure
+            } else {
+                if JogSubgroup.AbsolutePositionControls.isVisible(viewModel.capabilities) {
+                    EssentialControlSeparator()
+                    JogSubgroup.AbsolutePositionControls(viewModel: viewModel)
+                }
                 EssentialControlSeparator()
-                JogSubgroup.AbsolutePositionControls(viewModel: viewModel)
+                advancedMotionActions
             }
-            EssentialControlSeparator()
+        }
+        .foregroundStyle(Color.pfTextPrimary)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("printer.controls.motion-group")
+        .onChange(of: viewModel.calibrationStep) { _, step in
+            if step != nil { showsAdvancedMotion = true }
+        }
+    }
+
+    private var stepPicker: some View {
+        let options = compactForDetail ? [0.1, 1, 10] : JogSubgroup.stepOptions
+        let stepsLayout = dynamicTypeSize.isAccessibilitySize && !compactForDetail
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+            : AnyLayout(HStackLayout(spacing: compactForDetail ? 2 : 3))
+        return stepsLayout {
+            ForEach(options, id: \.self) { value in
+                ControlActionButton(
+                    title: compactForDetail ? value.formatted() : "\(value.formatted()) mm",
+                    identifier: "printer.controls.jog.step.\(value.formatted())",
+                    accessibilityTitle: "Jog step \(value.formatted()) millimeters",
+                    selected: step == value, compact: true, textSize: 13, segmented: true
+                ) { step = value }
+            }
+        }
+        .padding(compactForDetail ? 0 : 3)
+        .background(
+            compactForDetail ? Color.clear : Color.pfBackgroundTertiary,
+            in: RoundedRectangle(cornerRadius: 11)
+        )
+        .overlay {
+            if !compactForDetail {
+                RoundedRectangle(cornerRadius: 11).strokeBorder(Color.pfBorder)
+            }
+        }
+        .disabled(!viewModel.canControl || viewModel.isExecuting || JogSubgroup.isHidden(for: viewModel.capabilities))
+    }
+
+    private var compactJogLayout: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) {
+                xyJogPad
+                VStack(spacing: 6) {
+                    jog("Z", sign: 1, title: "Z ↑").frame(height: 44)
+                    jog("Z", sign: -1, title: "Z ↓").frame(height: 44)
+                    stepPicker
+                }
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    xyJogPad
+                    VStack(spacing: 6) {
+                        jog("Z", sign: 1, title: "Z ↑").frame(height: 44)
+                        jog("Z", sign: -1, title: "Z ↓").frame(height: 44)
+                    }
+                }
+                stepPicker
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
+    }
+
+    private var xyJogPad: some View {
+        xyJogGrid
+            .padding(2)
+            .frame(width: 144, height: 144)
+            .background(Color.pfBackgroundTertiary, in: Circle())
+            .overlay {
+                Circle().strokeBorder(Color.pfBorder, lineWidth: 1)
+            }
+    }
+
+    private var xyJogGrid: some View {
+        Grid(horizontalSpacing: compactForDetail ? 2 : 6, verticalSpacing: compactForDetail ? 2 : 6) {
+            GridRow {
+                if compactForDetail {
+                    Color.clear.frame(height: 44).accessibilityHidden(true)
+                } else {
+                    homeAll().frame(maxWidth: .infinity).frame(height: 48)
+                }
+                jog("Y", sign: 1, symbol: "chevron.up")
+                    .frame(maxWidth: .infinity).frame(height: compactForDetail ? 44 : 48)
+                Color.clear.frame(height: compactForDetail ? 44 : 48).accessibilityHidden(true)
+            }
+            GridRow {
+                jog("X", sign: -1, symbol: "chevron.left")
+                    .frame(maxWidth: .infinity).frame(height: compactForDetail ? 44 : 48)
+                if compactForDetail {
+                    homeAll(minimumHeight: 44).frame(maxWidth: .infinity).frame(height: 44)
+                } else {
+                    home("XY", axes: ["X", "Y"]) { await viewModel.homeXY() }
+                        .frame(maxWidth: .infinity).frame(height: 48)
+                }
+                jog("X", sign: 1, symbol: "chevron.right")
+                    .frame(maxWidth: .infinity).frame(height: compactForDetail ? 44 : 48)
+            }
+            GridRow {
+                Color.clear.frame(height: compactForDetail ? 44 : 48).accessibilityHidden(true)
+                jog("Y", sign: -1, symbol: "chevron.down")
+                    .frame(maxWidth: .infinity).frame(height: compactForDetail ? 44 : 48)
+                Color.clear.frame(height: compactForDetail ? 44 : 48).accessibilityHidden(true)
+            }
+        }
+    }
+
+    private var advancedMotionDisclosure: some View {
+        DisclosureGroup(isExpanded: advancedMotionBinding) {
+            VStack(alignment: .leading, spacing: 8) {
+                if JogSubgroup.AbsolutePositionControls.isVisible(viewModel.capabilities) {
+                    JogSubgroup.AbsolutePositionControls(viewModel: viewModel)
+                    EssentialControlSeparator()
+                }
+                row {
+                    home("XY", axes: ["X", "Y"]) { await viewModel.homeXY() }
+                    home("Z", axes: ["Z"]) { await viewModel.homeZ() }
+                }
+                advancedMotionActions
+            }
+            .padding(.top, 8)
+        } label: {
+            Label("Advanced motion", systemImage: "slider.horizontal.3")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Color.pfTextPrimary)
+                .frame(minHeight: 44, alignment: .leading)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("printer.controls.advanced-motion")
+    }
+
+    private var advancedMotionBinding: Binding<Bool> {
+        Binding(
+            get: { showsAdvancedMotion || viewModel.calibrationStep != nil },
+            set: { if viewModel.calibrationStep == nil { showsAdvancedMotion = $0 } }
+        )
+    }
+
+    private var advancedMotionActions: some View {
+        VStack(alignment: .leading, spacing: 8) {
             row {
                 HomeSubgroup.MotorReleaseControls(viewModel: viewModel)
                 if viewModel.calibrationStep == nil {
@@ -520,9 +651,6 @@ struct PrinterMotionControls: View {
             }
             PrinterZOffsetCalibrationControls(viewModel: viewModel, showsEntry: false)
         }
-        .foregroundStyle(Color.pfTextPrimary)
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("printer.controls.motion-group")
     }
 
     private func position(_ axis: String, value: Double?) -> some View {
@@ -539,10 +667,36 @@ struct PrinterMotionControls: View {
             .accessibilityLabel(display.accessibilityLabel)
     }
 
+    private var positionSummary: String {
+        [
+            ("X", viewModel.printer.x),
+            ("Y", viewModel.printer.y),
+            ("Z", viewModel.printer.z),
+        ]
+        .map { axis, value in
+            let display = JogSubgroup.positionDisplay(
+                axis: axis, value: value, homedAxes: viewModel.printer.homedAxes, unit: "mm"
+            ).text
+            return "\(axis) \(display)"
+        }
+        .joined(separator: " · ")
+    }
+
     private var homingDescription: String {
         guard let axes = viewModel.printer.homedAxes else { return "Homing unknown" }
         return ["x", "y", "z"].allSatisfy { axes.lowercased().contains($0) }
             ? "Homed" : axes.isEmpty ? "Not homed" : "Homed: \(axes.uppercased())"
+    }
+
+    private var jogSafetyNote: String? {
+        guard let axes = viewModel.printer.homedAxes else {
+            return "Homing status unavailable. Verify axes are homed before moving."
+        }
+        let requiredAxes = JogSubgroup.visibleAxes(for: viewModel.capabilities)
+        guard requiredAxes.allSatisfy({ axes.lowercased().contains($0.lowercased()) }) else {
+            return "Not homed. Home all axes before moving."
+        }
+        return nil
     }
 
     private func jog(_ axis: String, sign: Double, title: String = "", symbol: String? = nil) -> some View {
@@ -554,18 +708,20 @@ struct PrinterMotionControls: View {
             title: title, identifier: "printer.controls.jog.\(axis.lowercased()).\(direction)",
             accessibilityTitle: "Move \(axis) \(direction)",
             hint: available ? "Moves \(step.formatted()) millimeters." : "\(axis) movement is unavailable.",
-            compact: true, systemImage: symbol, value: pending ? "Pending" : nil, minimumHeight: 48,
+            compact: true, systemImage: symbol, value: pending ? "Pending" : nil,
+            minimumHeight: compactForDetail ? 44 : 48,
             isPending: pending
         ) { Task { await viewModel.jog(axis: axis, distanceMm: sign * step) } }
         .disabled(!available || !viewModel.canControl || viewModel.isExecuting)
     }
 
-    private func homeAll() -> some View {
-        home("all", axes: ["X", "Y", "Z"]) { await viewModel.homeAll() }
+    private func homeAll(minimumHeight: CGFloat = 48) -> some View {
+        home("all", axes: ["X", "Y", "Z"], minimumHeight: minimumHeight) { await viewModel.homeAll() }
     }
 
     private func home(
-        _ name: String, axes: [String], action: @escaping @MainActor () async -> Void
+        _ name: String, axes: [String], minimumHeight: CGFloat = 48,
+        action: @escaping @MainActor () async -> Void
     ) -> some View {
         let available = viewModel.capabilities?.supportsHome(axes: axes) == true
         return ControlActionButton(
@@ -575,7 +731,7 @@ struct PrinterMotionControls: View {
             hint: available ? "Homes \(axes.joined(separator: ", "))." : "This homing operation is unavailable.",
             compact: true, systemImage: "house.fill",
             value: viewModel.pendingCommand?.kind == .home(axes: axes) ? "Pending" : nil,
-            tinted: true, minimumHeight: 48,
+            tinted: true, minimumHeight: minimumHeight,
             isPending: viewModel.pendingCommand?.kind == .home(axes: axes)
         ) { Task { await action() } }
         .disabled(!available || !viewModel.canControl || viewModel.isExecuting)

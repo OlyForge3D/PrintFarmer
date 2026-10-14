@@ -1,5 +1,5 @@
 import { PrinterCoordinateRow } from '@/features/printers/components/PrinterCoordinateRow';
-import { PrinterControlsMode, PrinterMotionHelp } from '@/features/printers/components/PrinterControlsMode';
+import { PrinterMotionHelp } from '@/features/printers/components/PrinterControlsMode';
 import { MotionControlButton } from '@/features/printers/components/MotionControlButton';
 import { ControlPadButton, MoveDistanceSlider } from '@/common/components/ui';
 import type { MoveRequest } from '@/types/api';
@@ -97,7 +97,6 @@ export function MovementControlSection({
 
   return (
     <div className="mb-2">
-      <PrinterControlsMode />
       <div className="flex flex-wrap gap-6 items-start">
         {/* Left Column: Move */}
         <div className="flex flex-col gap-2 items-start">

@@ -1,5 +1,5 @@
 import { PrinterCoordinateRow } from '@/features/printers/components/PrinterCoordinateRow';
-import { PrinterControlsMode, PrinterMotionHelp } from '@/features/printers/components/PrinterControlsMode';
+import { PrinterMotionHelp } from '@/features/printers/components/PrinterControlsMode';
 import { MotionControlButton } from '@/features/printers/components/MotionControlButton';
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -25,8 +25,8 @@ import {
   canDisableMotors,
   canEmergencyStop,
   canExcludeObject,
-  canFilamentChange,
-  canFilamentControl,
+  isActivePrintForObjects,
+  filamentControlBlockedReason,
   canMove,
   canOpenFiles,
   canOpenHistory,
@@ -68,18 +68,15 @@ import {
   HistoryIcon,
   CloseIcon,
   XCircleIcon,
-  FilamentLoadIcon,
-  FilamentUnloadIcon,
   FilamentChangeIcon,
   EjectIcon,
 } from '@/common/components/icons/MdiIcons';
 import { SpoolPickerModal } from '@/features/printers/components/SpoolPickerModal';
 import { FilamentCoverageBreakdown } from '@/features/filament-coverage/components/FilamentCoverageBreakdown';
-import { FallbackGroupsPanel } from '@/features/fallback-groups/components/FallbackGroupsPanel';
 import { resolveMaterialLoadout } from '@/features/printers/utils/materialLoadout';
 import { MmuProtocol } from '@/features/printers/constants/mmuProtocol';
 import { MmuControlBox } from '@/features/printers/components/MmuControlBox';
-import { MaterialLoadout } from '@/features/printers/components/MaterialLoadout';
+import { MaterialLoadout, type FilamentMacroControl } from '@/features/printers/components/MaterialLoadout';
 import { useAutoDispatchStatus } from '@/features/printers/hooks/useAutoDispatch';
 import { Modal } from '@/common/components/modals/Modal';
 import { toast } from 'sonner';
@@ -279,6 +276,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
   const [extrudeStep, setExtrudeStep] = useState(DEFAULT_EXTRUDE_DISTANCE_MM);
   const [extrudeSpeed, setExtrudeSpeed] = useState(DEFAULT_EXTRUDE_SPEED_MMS);
   const [objectToSkip, setObjectToSkip] = useState<PrintJobObjectDto | null>(null);
+  const [objectToSkipPrinterId, setObjectToSkipPrinterId] = useState(printerId);
 
   // Track last known values for display fallback - use state not refs for render access
   const [lastKnownValues, setLastKnownValues] = useState({
@@ -345,8 +343,14 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
 
   const support = getPrinterSupport(backendCapabilities);
   const preRenderRawState = printer?.state ?? '';
-  const isActivePrintForObjectQuery = preRenderRawState.toLowerCase().includes('printing') ||
-    preRenderRawState.toLowerCase().includes('paused');
+  const isActivePrintForObjectQuery = isActivePrintForObjects({ state: preRenderRawState, isOnline: printer?.isOnline ?? false });
+  // A pending skip confirmation never outlives its print or its printer.
+  if (objectToSkipPrinterId !== printerId) {
+    setObjectToSkipPrinterId(printerId);
+    setObjectToSkip(null);
+  } else if (objectToSkip !== null && !(support.supportsObjectExclusion && isActivePrintForObjectQuery)) {
+    setObjectToSkip(null);
+  }
   const printJobObjectsQuery = usePrintJobObjects(printerId, {
     enabled: !!printerId && support.supportsObjectExclusion && isActivePrintForObjectQuery,
   });
@@ -387,8 +391,8 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
   // single-spool fallback, so the two guards cannot disagree. Must sit above
   // the `printerId` early-return below to keep hook order stable.
   const materialLoadout = useMemo(
-    () => resolveMaterialLoadout(printer?.mmuStatus, printerDetails?.toolheads, printer?.currentSpoolId),
-    [printer?.mmuStatus, printerDetails?.toolheads, printer?.currentSpoolId],
+    () => resolveMaterialLoadout(printer?.mmuStatus, printerDetails?.toolheads, printer?.currentSpoolId, printer?.modelName, printer?.spoolInfo),
+    [printer?.mmuStatus, printerDetails?.toolheads, printer?.currentSpoolId, printer?.modelName, printer?.spoolInfo],
   );
 
   // Guard early after all hooks are called
@@ -425,6 +429,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
   const isEnabled = displayPrinter?.isEnabled ?? true;
   const rawState = displayPrinter?.state ?? 'unknown';
   const isSnapmakerU1Mmu = displayPrinter?.mmuStatus?.mmuType === MmuProtocol.SnapmakerU1;
+  const showMmuControlBox = !!displayPrinter?.mmuStatus && !isSnapmakerU1Mmu;
   const statusLabel = getPrinterDisplayState({
     printerState: rawState,
     autoDispatchState: autoDispatchStatus?.state,
@@ -598,7 +603,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
     }
   };
 
-  const handleFilamentAction = async (action: 'load' | 'unload' | 'change') => {
+  const handleFilamentAction = async (action: 'load' | 'unload') => {
     if (filamentActionPending) {
       return;
     }
@@ -608,7 +613,6 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
       const methodMap: Record<string, () => Promise<{ success: boolean; error?: string | null }>> = {
         load: () => apiClient.loadFilament(printer.id),
         unload: () => apiClient.unloadFilament(printer.id),
-        change: () => apiClient.changeFilament(printer.id),
       };
       const result = await methodMap[action]();
       if (!result.success) {
@@ -620,6 +624,16 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
       setFilamentActionPending(false);
     }
   };
+
+  // Printer-level LOAD/UNLOAD_FILAMENT macros, surfaced in the materials slot panel.
+  const filamentControl: FilamentMacroControl | undefined = support.supportsFilamentControl
+    ? {
+      blockedReason: filamentControlBlockedReason({ isOnline, isEnabled, isPrinting }),
+      pending: filamentActionPending,
+      onAction: (action) => void handleFilamentAction(action),
+    }
+    : undefined;
+  const showExternalSpool = displayPrinter?.showExternalSpool ?? printerDetails?.showExternalSpool ?? false;
 
   const handleExtrude = async (direction: 'extrude' | 'retract') => {
     if (movementActionPending) return;
@@ -965,7 +979,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
           </div>
         </CollapsibleSection>
 
-        {support.supportsObjectExclusion && (
+        {support.supportsObjectExclusion && isActivePrintForObjectQuery && (
           <CollapsibleSection
             title="Objects"
             expanded={true}
@@ -985,8 +999,6 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
           >
             {printJobObjectsQuery.isLoading ? (
               <div className="text-sm text-pf-text-secondary">Loading print objects…</div>
-            ) : !isPrinting && !isPaused ? (
-              <div className="text-sm text-pf-text-secondary">Object skipping is available during an active print.</div>
             ) : printJobObjects.length === 0 ? (
               <div className="text-sm text-pf-text-secondary">No object metadata is available for this job.</div>
             ) : (
@@ -1031,12 +1043,11 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
         {/* Move Section */}
         <CollapsibleSection
           title="Move"
-          collapsedTitle="Movement, Macros, and Manual Move"
+          collapsedTitle="Movement and Manual Move"
           expanded={isMoveExpanded}
           onToggle={setIsMoveExpanded}
           hideExpandedTitle
         >
-          <PrinterControlsMode />
           <div className="flex flex-wrap gap-4 items-start">
             {/* XY + Z Pad */}
             <div className="flex flex-col gap-1">
@@ -1204,37 +1215,6 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
 
             </div>
             </div>
-
-            {/* Filament buttons */}
-              <div className="flex flex-col gap-1">
-                <div className="text-[10px] uppercase text-pf-text-secondary font-bold tracking-wide">Macros</div>
-                <div className="grid grid-cols-1 grid-rows-3 gap-1 w-fit">
-                <ControlPadButton
-                  disabled={filamentActionPending || !canFilamentControl({ isOnline, isEnabled, isPrinting, support })}
-                  onClick={() => handleFilamentAction('load')}
-                  title="Load Filament"
-                  padSize="small"
-                >
-                  <FilamentLoadIcon className="h-4 w-4" />
-                </ControlPadButton>
-                <ControlPadButton
-                  disabled={filamentActionPending || !canFilamentControl({ isOnline, isEnabled, isPrinting, support })}
-                  onClick={() => handleFilamentAction('unload')}
-                  title="Unload Filament"
-                  padSize="small"
-                >
-                  <FilamentUnloadIcon className="h-4 w-4" />
-                </ControlPadButton>
-                <ControlPadButton
-                  disabled={filamentActionPending || !canFilamentChange({ isOnline, isEnabled, support })}
-                  onClick={() => handleFilamentAction('change')}
-                  title="Change Filament (M600)"
-                  padSize="small"
-                >
-                  <FilamentChangeIcon className="h-4 w-4" />
-                </ControlPadButton>
-                </div>
-              </div>
           </div>
           {/* Move distance slider */}
           <div className="my-4">
@@ -1261,6 +1241,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
           onToggle={setIsTempsExpanded}
         >
           <TemperatureControlSection
+            showHeading={false}
             hotendTemp={hotendTemp}
             bedTemp={bedTemp}
             hotendTarget={displayPrinter?.hotendTarget}
@@ -1283,44 +1264,47 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
           />
         </CollapsibleSection>
 
-        {/* MMU Control Box - Show when MMU/ERCF is detected via real-time status */}
-        {displayPrinter?.mmuStatus && !isSnapmakerU1Mmu && (
-          <MmuControlBox
-            printerId={printer.id}
-            mmuStatus={displayPrinter.mmuStatus}
-            isOnline={isOnline}
-          />
+        {/* MMU Control Box - the single slot representation when MMU/ERCF/AMS is
+            detected via real-time status; spool assignment lives in its action row. */}
+        {showMmuControlBox && displayPrinter?.mmuStatus && (
+          <CollapsibleSection title="Materials" expanded={true}>
+            <MmuControlBox
+              printerId={printer.id}
+              mmuStatus={displayPrinter.mmuStatus}
+              isOnline={isOnline}
+              toolheads={printerDetails?.toolheads}
+              modelName={printer.modelName}
+              reviewedRowVersion={spoolReviewedRowVersion ?? undefined}
+              showExternalSpool={showExternalSpool}
+              filamentControl={filamentControl}
+              onSpoolChange={() => {
+                queryClient.invalidateQueries({ queryKey: ['printers', printer.id, 'details'] });
+              }}
+            />
+          </CollapsibleSection>
         )}
 
         {/* Consolidated materials module — one slot list drives the rail, the
-            coverage rings and the assignment drawer. */}
-        {materialLoadout && (() => {
-          const persistedToolheads = printerDetails?.toolheads && printerDetails.toolheads.length > 1
-            ? printerDetails.toolheads
-            : undefined;
-          return (
-            <CollapsibleSection title="Materials" expanded={true}>
-              <MaterialLoadout
-                printerId={printer.id}
-                mmuStatus={displayPrinter?.mmuStatus}
-                toolheads={printerDetails?.toolheads}
-                currentSpoolId={printer?.currentSpoolId}
-                reviewedRowVersion={spoolReviewedRowVersion ?? undefined}
-                isOnline={isOnline}
-                onSpoolChange={() => {
-                  queryClient.invalidateQueries({ queryKey: ['printers', printer.id, 'details'] });
-                }}
-              />
-              {persistedToolheads && (
-                <FallbackGroupsPanel
-                  printerId={printer.id}
-                  toolheads={persistedToolheads}
-                  isOnline={isOnline}
-                />
-              )}
-            </CollapsibleSection>
-          );
-        })()}
+            coverage rings and the assignment drawer. Suppressed when the MMU
+            control box already shows the slots so there is exactly one view. */}
+        {materialLoadout && !showMmuControlBox && (
+          <CollapsibleSection title="Materials" expanded={true}>
+            <MaterialLoadout
+              printerId={printer.id}
+              mmuStatus={displayPrinter?.mmuStatus}
+              toolheads={printerDetails?.toolheads}
+              currentSpoolId={printer?.currentSpoolId}
+              spoolInfo={printer?.spoolInfo}
+              modelName={printer?.modelName}
+              reviewedRowVersion={spoolReviewedRowVersion ?? undefined}
+              isOnline={isOnline}
+              filamentControl={filamentControl}
+              onSpoolChange={() => {
+                queryClient.invalidateQueries({ queryKey: ['printers', printer.id, 'details'] });
+              }}
+            />
+          </CollapsibleSection>
+        )}
 
         {/* Single-spool printers keep the classic spool card; multi-slot printers are
             fully described by the materials module above. */}
@@ -1427,7 +1411,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
       />
 
       <Modal
-        isOpen={objectToSkip !== null}
+        isOpen={objectToSkip !== null && support.supportsObjectExclusion && isActivePrintForObjectQuery}
         onClose={() => {
           if (!excludeObjectMutation.isPending) {
             setObjectToSkip(null);
@@ -1451,7 +1435,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
               variant="danger"
               loading={excludeObjectMutation.isPending}
               onClick={() => {
-                if (objectToSkip) {
+                if (objectToSkip && canExcludeObjectNow) {
                   excludeObjectMutation.mutate(objectToSkip.name);
                 }
               }}

@@ -15,6 +15,9 @@ interface SpoolPickerModalProps {
   onSelect: (spoolId: number, spool: SpoolmanSpool) => void;
   printerId: string;
   activeSpoolId?: number;
+  /** Inventory-only binding: unassigning never physically ejects filament. */
+  assignmentOnly?: boolean;
+  pending?: boolean;
 }
 
 type SortField = 'lastUsed' | 'weight' | 'name' | 'added';
@@ -90,7 +93,7 @@ function FilterDropdown({ label, options, value, onChange }: FilterDropdownProps
  * from the filtered list of non-empty spools of that material.
  * Uses the central Spoolman inventory registered with PrintFarmer.
  */
-export function SpoolPickerModal({ isOpen, onClose, onSelect, activeSpoolId }: SpoolPickerModalProps) {
+export function SpoolPickerModal({ isOpen, onClose, onSelect, activeSpoolId, assignmentOnly = false, pending = false }: SpoolPickerModalProps) {
   // Step 1: material selection
   const [materials, setMaterials] = useState<string[]>([]);
   const [materialsLoading, setMaterialsLoading] = useState(false);
@@ -292,12 +295,13 @@ export function SpoolPickerModal({ isOpen, onClose, onSelect, activeSpoolId }: S
             <Button
               variant="subtle"
               size="sm"
+              disabled={pending}
               onClick={() => onSelect(0, {} as SpoolmanSpool)}
               className="text-xs"
-              title="Eject current spool"
+              title={assignmentOnly ? 'Unassign current spool (does not unload filament)' : 'Eject current spool'}
               iconLeft={<EjectIcon className="w-4 h-4" ariaLabel="" />}
             >
-              Eject
+              {assignmentOnly ? 'Unassign' : 'Eject'}
             </Button>
           </div>
         )}
@@ -473,6 +477,7 @@ export function SpoolPickerModal({ isOpen, onClose, onSelect, activeSpoolId }: S
             <Button
               key={spool.id}
               variant="unstyled"
+              disabled={pending}
               onClick={() => onSelect(spool.id, spool)}
               className={clsx(
                 'w-full px-3 py-2.5 rounded-lg text-left transition-all group',
@@ -551,12 +556,13 @@ export function SpoolPickerModal({ isOpen, onClose, onSelect, activeSpoolId }: S
             <Button
               variant="subtle"
               size="sm"
+              disabled={pending}
               onClick={() => onSelect(0, {} as SpoolmanSpool)}
               className="text-xs"
-              title="Eject current spool"
+              title={assignmentOnly ? 'Unassign current spool (does not unload filament)' : 'Eject current spool'}
               iconLeft={<EjectIcon className="w-4 h-4" ariaLabel="" />}
             >
-              Eject
+              {assignmentOnly ? 'Unassign' : 'Eject'}
             </Button>
           )}
         </div>

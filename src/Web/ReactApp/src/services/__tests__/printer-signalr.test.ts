@@ -1151,6 +1151,37 @@ describe('PrinterSignalRService auto-dispatch updates', () => {
     unsubscribeDispatch();
     printerSignalRService.dispose();
   });
+
+  it('registers only the lowercase camerasupdated event and delivers normalized payloads until unsubscribed', async () => {
+    const { printerSignalRService } = await import('../printer-signalr');
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(signalRTestState.connection.on).toHaveBeenCalledWith('camerasupdated', expect.any(Function));
+    expect(signalRTestState.connectionHandlers.has('CamerasUpdated')).toBe(false);
+
+    const onCamerasUpdated = vi.fn();
+    const unsubscribe = printerSignalRService.onCamerasUpdated(onCamerasUpdated);
+    const handler = signalRTestState.connectionHandlers.get('camerasupdated');
+    expect(handler).toBeDefined();
+
+    handler?.({ printerId: 'printer-1', cameraIds: ['camera-1', 42, 'camera-2'] });
+    expect(onCamerasUpdated).toHaveBeenCalledExactlyOnceWith({
+      printerId: 'printer-1',
+      cameraIds: ['camera-1', 'camera-2'],
+    });
+
+    handler?.({ cameraIds: ['camera-3'] });
+    handler?.(null);
+    expect(onCamerasUpdated).toHaveBeenCalledOnce();
+
+    unsubscribe();
+    handler?.({ printerId: 'printer-1', cameraIds: [] });
+    expect(onCamerasUpdated).toHaveBeenCalledOnce();
+
+    printerSignalRService.dispose();
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

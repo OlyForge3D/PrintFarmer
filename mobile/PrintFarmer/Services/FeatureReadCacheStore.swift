@@ -114,7 +114,7 @@ struct FeatureReadCacheEnvelope<Payload: Codable & Sendable & Equatable>: Codabl
     }
 
     let schemaVersion: Int
-    /// Stable per-feature record key (e.g. `attention-feed`, `coverage-fleet`).
+    /// Stable per-feature record key (e.g. `attention-feed`, `coverage-printer-<id>`).
     let featureKey: String
     let namespace: FarmSnapshotNamespace
     /// Wall-clock UTC instant (epoch-millis) of the successful/authoritative

@@ -189,6 +189,22 @@ public class AuthenticationService(
         // docs/ROLE_PERMISSION_PRECEDENCE.md.
         claims.AddRange(deniedPermissions.Select(p => new Claim(PrintFarmerPermissions.DenyClaimType, $"{p.Resource}:{p.Action}")));
 
+        // JWT issue times have whole-second precision. Keep fresh logins out of the
+        // revoke-all marker's fail-safe second without weakening revocation of older JWTs.
+        DateTime? revokedAt = await _usersRepository.GetLatestTokenRevocationTimeAsync(user.Id);
+        if (revokedAt.HasValue)
+        {
+            DateTime nextSecond = new DateTime(
+                revokedAt.Value.Year, revokedAt.Value.Month, revokedAt.Value.Day,
+                revokedAt.Value.Hour, revokedAt.Value.Minute, revokedAt.Value.Second, DateTimeKind.Utc).AddSeconds(1);
+            DateTime now = DateTime.UtcNow;
+            while (now < nextSecond)
+            {
+                await Task.Delay(nextSecond - now);
+                now = DateTime.UtcNow;
+            }
+        }
+
         SecurityTokenDescriptor tokenDescriptor = new()
         {
             Subject = new ClaimsIdentity(claims),
@@ -543,7 +559,8 @@ public class AuthenticationService(
             resetToken.UsedAt = DateTime.UtcNow;
             resetToken.UsedByIp = ipAddress;
 
-            await _usersRepository.SaveChangesAsync();
+            // Persist the password replacement, reset-token consumption, and session revocation together.
+            await _usersRepository.RevokeUserRefreshTokensAsync(user.Id, ipAddress);
 
             // Audit log successful password reset
             await _authAuditService.LogPasswordResetAsync(user.Id, ipAddress, null);

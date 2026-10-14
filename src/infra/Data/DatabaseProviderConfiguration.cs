@@ -69,9 +69,8 @@ public sealed record DatabaseProviderConfiguration
     /// set; otherwise the slicer shares the application connection string.
     /// </summary>
     /// <remarks>
-    /// A distinct slicer database is honoured so the topology is visible to the host-update
-    /// preflight, which refuses split databases with <c>split_database_not_supported</c> because
-    /// the coordinated backup covers a single shared database.
+    /// A distinct slicer database is honoured so split deployments keep their application and
+    /// slicer storage boundaries explicit.
     /// </remarks>
     public static DatabaseProviderConfiguration ForSlicerDatabase(IConfiguration configuration)
     {

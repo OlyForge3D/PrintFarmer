@@ -20,6 +20,7 @@ public class PasskeyControllerTests
     private readonly Mock<IPasskeyService> _passkeySvc = new();
     private readonly Mock<ILogger<Farm.Modules.Identity.Controllers.AuthController>> _logger = new();
     private readonly Mock<IApiKeyExchangeService> _apiKeyExchangeService = new();
+    private readonly Mock<IRefreshTokenService> _refreshTokenService = new();
 
     private Farm.Modules.Identity.Controllers.AuthController CreateController(Guid? userId = null, string? username = null)
     {
@@ -28,7 +29,8 @@ public class PasskeyControllerTests
             _loginAudit.Object,
             _passkeySvc.Object,
             _logger.Object,
-            _apiKeyExchangeService.Object);
+            _apiKeyExchangeService.Object,
+            _refreshTokenService.Object);
 
         List<Claim> claims = [
             new(ClaimTypes.NameIdentifier, (userId ?? Guid.NewGuid()).ToString()),
@@ -181,10 +183,18 @@ public class PasskeyControllerTests
     [Fact]
     public async Task LoginComplete_HappyPath_Returns200()
     {
-        AuthenticationResult successResult = new(true, Token: "jwt.token.here");
+        Guid userId = Guid.NewGuid();
+        AuthenticationResult successResult = new(
+            true,
+            Token: "jwt.token.here",
+            User: new Farm.Infrastructure.Contracts.Auth.UserDto { Id = userId, Username = "testuser" });
+        DateTime refreshExpires = DateTime.UtcNow.AddDays(30);
         _passkeySvc
             .Setup(s => s.CompleteLoginAsync(It.IsAny<string>(), It.IsAny<AuthenticatorAssertionRawResponse>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(successResult);
+        _refreshTokenService
+            .Setup(s => s.CreateAsync(userId, It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(("refresh.token", refreshExpires));
 
         Farm.Modules.Identity.Controllers.AuthController controller = CreateController();
         IActionResult result = await controller.PasskeyLoginCompleteAsync(
@@ -192,7 +202,10 @@ public class PasskeyControllerTests
             CancellationToken.None);
 
         OkObjectResult ok = result.Should().BeOfType<OkObjectResult>().Subject;
-        ok.Value.Should().BeSameAs(successResult);
+        AuthenticationResult response = ok.Value.Should().BeOfType<AuthenticationResult>().Subject;
+        response.RefreshToken.Should().Be("refresh.token");
+        response.RefreshTokenExpires.Should().Be(refreshExpires);
+        _refreshTokenService.Verify(s => s.CreateAsync(userId, It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]

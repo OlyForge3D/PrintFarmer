@@ -1123,6 +1123,53 @@ public sealed class AutoDispatchServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task GetStatusAsync_MixedScopes_UsesEligibleScopeHeadsAndIgnoresOtherScopePositions()
+    {
+        Printer printer = await CreatePrinterAsync();
+        DateTime queuedAt = DateTime.UtcNow;
+        PrintJob assignedJob = await CreateQueuedJobAsync(printer, "assigned-head", queuePosition: 10);
+        PrintJob ineligibleUnassignedHead = await CreateUnassignedQueuedJobAsync("ineligible-unassigned-head", queuePosition: 1);
+        PrintJob eligibleUnassignedJob = await CreateUnassignedQueuedJobAsync("eligible-unassigned-job", queuePosition: 2);
+        assignedJob.QueuedAt = queuedAt;
+        ineligibleUnassignedHead.QueuedAt = queuedAt.AddMinutes(1);
+        eligibleUnassignedJob.QueuedAt = queuedAt.AddMinutes(2);
+        await _db.SaveChangesAsync();
+
+        DispatchScore eliminated = new(
+            printer.Id,
+            printer.Name,
+            TotalScore: 0,
+            ScoreBreakdown: new Dictionary<string, FactorScore>(),
+            Eliminated: true,
+            EliminationReasons: ["Not compatible"]);
+        DispatchScore eligible = new(
+            printer.Id,
+            printer.Name,
+            TotalScore: 100,
+            ScoreBreakdown: new Dictionary<string, FactorScore>(),
+            Eliminated: false,
+            EliminationReasons: []);
+        Mock<IDispatchScorer> dispatchScorer = new();
+        dispatchScorer
+            .Setup(scorer => scorer.ScorePrintersForJobAsync(ineligibleUnassignedHead.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([eliminated]);
+        dispatchScorer
+            .Setup(scorer => scorer.ScorePrintersForJobAsync(eligibleUnassignedJob.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([eligible]);
+
+        var (hubContext, _) = CreateHubContextMockWithProxy();
+        AutoDispatchService service = new(
+            _db,
+            hubContext.Object,
+            NullLogger<AutoDispatchService>.Instance,
+            dispatchScorer: dispatchScorer.Object);
+
+        AutoDispatchStatusDto status = await service.GetStatusAsync(printer.Id);
+
+        status.NextJobId.Should().Be(assignedJob.Id);
+    }
+
+    [Fact]
     public async Task GetAllStatusAsync_WhenNextJobIsUnassignedCandidate_RedactsNameKindAndRevision()
     {
         Printer printer = await CreatePrinterAsync();
