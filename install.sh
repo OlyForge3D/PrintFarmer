@@ -12,8 +12,8 @@
 #   --non-interactive     Skip all prompts, use sensible defaults
 #   --profile PROFILE     Deployment profile: lite, standard, or full
 #   --version TAG         Container image tag (default: latest)
-#   --port PORT           HTTP port (default: 8080)
-#   --host HOST           Canonical browser hostname for passkeys (default: localhost)
+#   --port PORT           Local HTTP port (default: 8080)
+#   --host HOST           Canonical HTTPS hostname for passkeys (default: localhost)
 #   --dir DIR             Install directory (default: ./printfarmer)
 #   --db sqlite|postgres  Database engine (default: sqlite)
 #   --with-spoolman URL   Enable Spoolman filament tracking
@@ -23,6 +23,9 @@
 #   --uninstall           Remove containers and images (preserves data)
 #   --status              Show status of a running installation
 #   --help, -h            Show this help
+#
+# The generated container port is bound to loopback. Expose the installation
+# through an HTTPS reverse proxy when LAN or remote access is required.
 #
 # Environment variables:
 #   PRINTFARMER_PORT      Same as --port
@@ -304,8 +307,8 @@ if [[ "$SHOW_HELP" == "true" ]]; then
     --non-interactive     Skip prompts, use defaults (good for automation)
     --profile PROFILE     Deployment profile (lite, standard, full)
     --version TAG         Container image tag to pull (default: latest)
-    --port PORT           HTTP port to expose (default: 8080)
-    --host HOST           Canonical browser hostname for passkeys (default: localhost)
+    --port PORT           Local HTTP port (default: 8080)
+    --host HOST           Canonical HTTPS hostname for passkeys (default: localhost)
     --dir DIR             Where to install (default: ./printfarmer)
     --db sqlite|postgres  Database engine (default: sqlite — zero config)
     --with-spoolman URL   Connect to Spoolman for filament tracking
@@ -334,7 +337,7 @@ if [[ "$SHOW_HELP" == "true" ]]; then
     # Simplest install — everything defaults, just works
     ./install.sh
 
-    # Automated install behind HTTPS at farm.example.com
+    # Install locally for an HTTPS reverse proxy at farm.example.com
     ./install.sh --non-interactive --host farm.example.com --port 9090 --db postgres
 
     # Lightweight install for Raspberry Pi
@@ -361,8 +364,9 @@ if [[ "$SHOW_HELP" == "true" ]]; then
       PFARM__Platform__ModelFilesEnabled=true PFARM__Slicer__Enabled=true ./install.sh
 
   AFTER INSTALL
-    Open http://localhost:8080 (or your chosen port) in a browser.
-    You'll be guided through creating your admin account.
+    Open http://localhost:8080 (or your chosen port) on the host.
+    For LAN or remote access, configure an HTTPS reverse proxy and use its
+    HTTPS hostname. You'll be guided through creating your admin account.
 
 HELPEOF
     exit 0
@@ -924,33 +928,6 @@ if [[ "$DEPLOY_PROFILE" == "full" ]]; then
     GRAFANA_ADMIN_PASSWORD="${GRAFANA_ADMIN_PASSWORD:-${GRAFANA_ADMIN_PASSWORD_PRESERVED:-$(generate_secret 24)}}"
 fi
 
-# ─── Detect LAN IP ──────────────────────────────────────────────────────────
-detect_lan_ip() {
-    local ip=""
-    if command -v hostname >/dev/null 2>&1; then
-        ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
-    fi
-    if [[ -z "$ip" ]] && command -v ifconfig >/dev/null 2>&1; then
-        ip="$(ifconfig 2>/dev/null | grep 'inet ' | grep -v '127.0.0.1' | head -1 | awk '{print $2}')"
-    fi
-    if [[ -z "$ip" ]] && command -v ip >/dev/null 2>&1; then
-        ip="$(ip -4 route get 1.1.1.1 2>/dev/null | head -1 | sed 's/.*src \([0-9.]*\).*/\1/')"
-    fi
-    echo "${ip:-localhost}"
-}
-
-LAN_IP="$(detect_lan_ip)"
-
-# Explicitly allowlist the detected LAN origin so the "Network:" URL printed at the end of
-# this script keeps working without falling back to ALLOW_LOCAL_NETWORK's broader RFC1918
-# reflection (see issue #1254 — CORS must never reflect an unrestricted origin set while
-# AllowCredentials() is enabled).
-if [[ "$LAN_IP" != "localhost" ]]; then
-    CORS_LAN_ORIGIN=",http://${LAN_IP}:${HTTP_PORT}"
-else
-    CORS_LAN_ORIGIN=""
-fi
-
 if [[ -z "${WEBAUTHN_ORIGIN:-}" && "$SERVER_HOST" == "localhost" ]]; then
     WEBAUTHN_ORIGIN="http://localhost:${HTTP_PORT}"
 elif [[ -z "${WEBAUTHN_ORIGIN:-}" ]]; then
@@ -1000,7 +977,7 @@ WORKER_SHARED_API_KEY=${WORKER_SHARED_API_KEY}
 # Runtime
 ASPNETCORE_ENVIRONMENT=Production
 DEVMODE_BYPASS_AUTH=false
-CORS__AllowedOrigins=http://localhost:${HTTP_PORT}${CORS_LAN_ORIGIN}
+CORS__AllowedOrigins=http://localhost:${HTTP_PORT}
 WebAuthn__RelyingPartyId=${SERVER_HOST}
 WebAuthn__RelyingPartyName=${WEBAUTHN_RP_NAME}
 WebAuthn__Origin=${WEBAUTHN_ORIGIN}
@@ -1032,7 +1009,7 @@ WORKER_SHARED_API_KEY=${WORKER_SHARED_API_KEY}
 # Runtime
 ASPNETCORE_ENVIRONMENT=Production
 DEVMODE_BYPASS_AUTH=false
-CORS__AllowedOrigins=http://localhost:${HTTP_PORT}${CORS_LAN_ORIGIN}
+CORS__AllowedOrigins=http://localhost:${HTTP_PORT}
 WebAuthn__RelyingPartyId=${SERVER_HOST}
 WebAuthn__RelyingPartyName=${WEBAUTHN_RP_NAME}
 WebAuthn__Origin=${WEBAUTHN_ORIGIN}
@@ -1213,8 +1190,9 @@ services:
     image: \${REGISTRY_HOST}/printfarmer-monolith:\${IMAGE_TAG}
     container_name: printfarmer-monolith
     restart: unless-stopped
+    # Keep the default HTTP endpoint local-only. Use an HTTPS reverse proxy for LAN access.
     ports:
-      - "\${HTTP_PORT:-8080}:5000"
+      - "127.0.0.1:\${HTTP_PORT:-8080}:5000"
     environment:
       - DEPLOYMENT_MODE=monolith
       - ASPNETCORE_ENVIRONMENT=\${ASPNETCORE_ENVIRONMENT:-Production}
@@ -1465,8 +1443,9 @@ ${compose_api_depends}
     image: nginx:alpine
     container_name: printfarmer-nginx-proxy
     restart: unless-stopped
+    # Keep the default HTTP endpoint local-only. Use an HTTPS reverse proxy for LAN access.
     ports:
-      - "\${HTTP_PORT:-8080}:80"
+      - "127.0.0.1:\${HTTP_PORT:-8080}:80"
     volumes:
       - ./nginx/nginx-proxy.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/certs:/etc/nginx/certs:ro
@@ -1562,7 +1541,7 @@ printf "  ${BOLD}Port${NC}         %s\n" "$HTTP_PORT"
 if [[ "$SERVER_HOST" == "localhost" ]]; then
     printf "  ${BOLD}Passkeys${NC}     http://localhost:%s\n" "$HTTP_PORT"
 else
-    printf "  ${BOLD}Passkeys${NC}     https://%s (configure HTTPS at this hostname)\n" "$SERVER_HOST"
+    printf "  ${BOLD}Passkeys${NC}     https://%s (HTTPS reverse proxy required)\n" "$SERVER_HOST"
 fi
 printf "  ${BOLD}Version${NC}      %s\n" "$IMAGE_TAG"
 if [[ -n "$SPOOLMAN_URL" ]]; then
@@ -1656,11 +1635,8 @@ if [[ "$START" == "true" ]]; then
     printf "  ${BOLD}Open in your browser:${NC}\n"
     if [[ "$SERVER_HOST" == "localhost" ]]; then
         printf "    Local:   ${BOLD}${CYAN}http://localhost:${HTTP_PORT}${NC}\n"
-        if [[ "$LAN_IP" != "localhost" ]]; then
-            printf "    Network: ${BOLD}${CYAN}http://${LAN_IP}:${HTTP_PORT}${NC}\n"
-        fi
     else
-        printf "    HTTPS:   ${BOLD}${CYAN}https://${SERVER_HOST}${NC}\n"
+        printf "    HTTPS:   ${BOLD}${CYAN}https://${SERVER_HOST}${NC} (reverse proxy)\n"
     fi
     echo ""
     printf "  ${BOLD}First time?${NC} You'll create your admin account in the browser.\n"

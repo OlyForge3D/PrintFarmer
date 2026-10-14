@@ -1713,6 +1713,8 @@ test_installer_lite_slicer_worker_key() {
     assert_contains "$(cat "$install_dir/.env")" "WORKER_SHARED_API_KEY=$expected_key" "Lite installer should persist the shared key"
     assert_contains "$(cat "$install_dir/docker-compose.yml")" "WorkerAuth__SharedKey=\${WORKER_SHARED_API_KEY}" "Lite monolith should receive the shared key"
     assert_contains "$(cat "$install_dir/.env")" "WebAuthn__Origin=http://localhost:18907" "Lite installer should derive the localhost passkey origin"
+    assert_contains "$(cat "$install_dir/docker-compose.yml")" '127.0.0.1:${HTTP_PORT:-8080}:5000' "Lite installer should bind HTTP to loopback only"
+    assert_not_contains "$output" "Network:" "Lite installer must not advertise a cleartext LAN URL"
     assert_contains "$(cat "$install_dir/docker-compose.yml")" \
         'WebAuthn__RelyingPartyId=${WebAuthn__RelyingPartyId:?WebAuthn__RelyingPartyId must be set to the canonical deployment hostname in .env.}' \
         "Lite monolith should reject a missing or empty passkey relying party ID"
@@ -1749,6 +1751,8 @@ test_installer_standard_webauthn_configuration() {
     assert_contains "$(cat "$install_dir/docker-compose.yml")" \
         'WebAuthn__Origin=${WebAuthn__Origin:?WebAuthn__Origin must be set to the canonical HTTPS deployment origin in .env.}' \
         "Standard installer API should reject a missing or empty passkey origin"
+    assert_contains "$(cat "$install_dir/docker-compose.yml")" '127.0.0.1:${HTTP_PORT:-8080}:80' "Standard installer should bind HTTP to loopback only"
+    assert_not_contains "$output" "Network:" "Standard installer must not advertise a cleartext LAN URL"
 
     pass_test
 }
