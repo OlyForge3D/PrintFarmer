@@ -88,7 +88,8 @@ a guessed license.
 
 - QuestPDF 2026.2.3: its bundled license permits open-source projects to use
   the Community MIT License. PrintFarmer selects that MIT option.
-- Six Labors Fonts 2.1.3, ImageSharp 3.1.12, and ImageSharp.Drawing 2.1.7:
+- Six Labors Fonts 3.2.0, ImageSharp 4.1.3, ImageSharp.Drawing 3.1.3, and
+  PolygonClipper 1.0.2:
   their bundled Six Labors Split License 1.0 grants Apache-2.0 when the work is
   consumed in software under an Open Source or Source Available license.
   PrintFarmer selects that Apache-2.0 option.

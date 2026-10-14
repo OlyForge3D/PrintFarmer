@@ -50,15 +50,15 @@ public sealed class PrusaPreviewRenderer : BasePreviewRenderer
     {
         int h = img.Height;
 
-        img.Mutate(ctx =>
+        img.Mutate(ctx => ctx.Paint(canvas =>
         {
-            ctx.Fill(new LinearGradientBrush(
+            canvas.Fill(new LinearGradientBrush(
                 new PointF(0, 0),
                 new PointF(0, h),
                 GradientRepetitionMode.None,
-                new ColorStop(0f, new Rgba32(245, 245, 248)),
-                new ColorStop(1f, options.BackgroundColor)));
-        });
+                new ColorStop(0f, Color.FromPixel(new Rgba32(245, 245, 248))),
+                new ColorStop(1f, Color.FromPixel(options.BackgroundColor))));
+        }));
     }
 
     // ---------------------------------------------------------------------
