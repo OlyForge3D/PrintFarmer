@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Inventory-owned scanner surface after scanning stops being a top-level tab.
+/// Shared scanner presented from every farm-floor tab.
 ///
 /// The underlying dispatcher and scanner service are unchanged, so camera
 /// permission is still requested only after the operator taps the primary Scan
@@ -95,6 +95,8 @@ struct ScanFlowView: View {
                                 code: code,
                                 printedPartsInventoryEnabled: partsInventoryEnabled
                             )
+                        case .newSpool(let data):
+                            AddSpoolView(scannedData: data)
                         }
                     }
                     .onAppear { viewModel.resultPresentationDidAppear() }
@@ -135,6 +137,11 @@ struct ScanFlowView: View {
                         #endif
                     }
                 )
+                #if canImport(UIKit)
+                if let nfc = services.nfcService {
+                    viewModel.configureNFC(scanner: nfc)
+                }
+                #endif
                 startExternalScanIfNeeded()
                 await services.capabilitiesService.refresh()
             }
@@ -205,15 +212,25 @@ struct ScanFlowView: View {
 
     private var nfcHintSection: some View {
         Section {
+            Button {
+                viewModel.scanNFC()
+            } label: {
+                Label("Scan NFC tag", systemImage: "wave.3.right")
+                    .frame(minHeight: 44)
+            }
+            .disabled(viewModel.isScanning)
+            .accessibilityLabel("Scan NFC tag")
+            .accessibilityHint("Reads a printer or filament spool tag.")
+            .accessibilityIdentifier("scan.nfc")
             Label(
-                "Wave your device near a tagged printer to open its detail view.",
+                "Read a printer or spool tag, or wave near a printer tag to open it from iOS.",
                 systemImage: "wave.3.right"
             )
             .font(.footnote)
             .foregroundStyle(.secondary)
             .accessibilityIdentifier("scan.nfc.hint")
         } header: {
-            Text("NFC Printer Tags")
+            Text("NFC Tags")
         } footer: {
             Text(
                 partsInventoryEnabled

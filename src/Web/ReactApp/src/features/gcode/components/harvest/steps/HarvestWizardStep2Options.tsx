@@ -1,4 +1,4 @@
-import React, { useState, forwardRef, useImperativeHandle } from 'react';
+import { useState, forwardRef, useImperativeHandle } from 'react';
 import type { HarvestOptions } from '../HarvestWizard';
 import { Checkbox } from '@/common/components/ui/Checkbox';
 import { Input } from '@/common/components/ui/Input';

@@ -19,11 +19,6 @@ import Foundation
 struct FarmSnapshotNamespace: Codable, Sendable, Equatable, Hashable {
     let serverID: UUID
     let userID: UUID
-
-    init(serverID: UUID, userID: UUID) {
-        self.serverID = serverID
-        self.userID = userID
-    }
 }
 
 /// Non-secret spool display fields (subset of `PrinterSpoolInfo`).
@@ -65,7 +60,7 @@ struct FarmSnapshotLocation: Codable, Sendable, Equatable {
 }
 
 /// Allow-list projection of a `Printer` carrying every non-secret field the
-/// iPhone (`PrinterCardView`) and iPad (`iPadPrinterCardView`) Farm cards render.
+/// iPhone and iPad Farm cards render through the shared `PrinterCardView`.
 ///
 /// Structurally absent (no property exists): `apiKey`, `originalServerUrl`,
 /// `backendUrl`, `frontendUrl`, `backendPort`, `frontendPort`, `thumbnailUrl`,

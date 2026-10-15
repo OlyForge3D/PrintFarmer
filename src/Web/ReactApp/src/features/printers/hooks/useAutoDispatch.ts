@@ -462,7 +462,6 @@ export function useAutoDispatchReadyFlow(
 
   const handleStandardResult = (
     result: AutoDispatchReadyResult,
-    status: AutoDispatchStatus,
     printerName: string
   ) => {
     if (!result.nextJob) {
@@ -528,7 +527,7 @@ export function useAutoDispatchReadyFlow(
       return;
     }
 
-    handleStandardResult(response.result, status, printerName);
+    handleStandardResult(response.result, printerName);
   };
 
   const confirmFilamentOverride = async () => {
@@ -546,7 +545,6 @@ export function useAutoDispatchReadyFlow(
     if (response.kind === 'standard') {
       handleStandardResult(
         response.result,
-        challenge.status,
         challenge.printerName
       );
     }

@@ -90,7 +90,9 @@ test.describe('Printer MMU controls — Moonraker', () => {
     await controls.getByRole('button', { name: 'Unload', exact: true }).click();
     await expect(controls).toBeVisible();
     await expect(controls.getByText('Unloaded', { exact: true })).toBeVisible({ timeout: 15_000 });
-    await expect(controls.getByText('Rack', { exact: true })).toHaveCount(0, { timeout: 15_000 });
+    // The "In use" card mirrors the loaded box slot; the separate Rack card is
+    // the external spool holder and is not tied to box-slot loading.
+    await expect(controls.getByText('In use', { exact: true })).toHaveCount(0, { timeout: 15_000 });
   });
 
   test('Snapmaker U1 physical toolheads render as four material slots', async ({ page, request }) => {

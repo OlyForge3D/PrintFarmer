@@ -9,9 +9,9 @@ const CAMERA_STREAM_FRAME = Buffer.from(
 /**
  * Cameras Page E2E Tests — Emulator-backed
  *
- * Tests the canonical System Settings camera route:
+ * Tests the canonical top-level /cameras route (#3332):
  *   - Camera grid display with mock camera URLs from emulator
- *   - View/Manage tab switching
+ *   - View/Manage tab switching and All/By location/By printer views
  *   - Camera cards with health badges
  *   - Admin camera management
  */
@@ -31,7 +31,7 @@ test.describe('Cameras — Emulator', () => {
         body: CAMERA_STREAM_FRAME,
       });
     });
-    await page.goto('/admin/settings?tab=hardware&sub=cameras');
+    await page.goto('/cameras');
     await page.waitForLoadState('networkidle');
   });
 
@@ -47,13 +47,10 @@ test.describe('Cameras — Emulator', () => {
   }
 
   test('cameras page loads with heading', async ({ page }) => {
-    // The canonical URL-driven settings shell renders one top-level H1 naming
-    // the scope ("Farm & Admin Settings" for `/admin/settings`), not a per-section
-    // "Cameras" heading — see docs/SETTINGS_ARCHITECTURE.md. `CamerasPage` is
-    // mounted `embedded`, which suppresses its own heading. The shell
-    // canonicalizes the direct sub-page URL into the system settings scope.
-    await expect(page.getByRole('heading', { name: 'Farm & Admin Settings', exact: true })).toBeVisible();
-    await expect(page).toHaveURL('/admin/settings?tab=hardware&sub=cameras&scope=system');
+    // Cameras is a first-class top-level page, no longer an admin settings sub-page.
+    await expect(page.getByRole('heading', { level: 1, name: 'Cameras', exact: true })).toBeVisible();
+    await expect(page).toHaveURL('/cameras');
+    await expect(page.getByRole('group', { name: 'Camera view' })).toBeVisible();
 
     expect(criticalErrors()).toHaveLength(0);
   });
@@ -101,8 +98,9 @@ test.describe('Cameras — Emulator', () => {
 
     for (let index = 0; index < cameraCount; index++) {
       await expect(
-        cameraCards.nth(index).getByText(/^(Healthy|Degraded|Unhealthy|Unknown)$/),
+        cameraCards.nth(index).getByRole('status', { name: /^(Probe (healthy|degraded|unhealthy|unknown)|Preview failed · probe (healthy|degraded|unhealthy|unknown))$/ }),
       ).toBeVisible();
+      await expect(cameraCards.nth(index).getByText('Standalone', { exact: true })).toHaveCount(0);
     }
 
     expect(criticalErrors()).toHaveLength(0);

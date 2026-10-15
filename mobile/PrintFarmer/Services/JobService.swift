@@ -13,8 +13,36 @@ actor JobService: JobServiceProtocol {
         try await apiClient.get("/api/job-queue")
     }
 
-    func listAllJobs() async throws -> [QueuedPrintJobResponse] {
-        try await apiClient.get("/api/job-queue-analytics?limit=200&offset=0")
+    func listAllJobs() async throws -> QueuedPrintJobPage {
+        let jobs: [QueuedPrintJobResponse] = try await apiClient.get(
+            "/api/job-queue-analytics?limit=\(QueuedPrintJobPage.pageSize)&offset=0"
+        )
+        return QueuedPrintJobPage(
+            jobs: jobs,
+            mayHaveMore: jobs.count >= QueuedPrintJobPage.pageSize
+        )
+    }
+
+    func moveQueuedJob(
+        id: UUID,
+        reviewedRowVersion: String,
+        neighbor: QueuePositionNeighbor
+    ) async throws -> MoveQueuedJobResponse {
+        try await apiClient.put(
+            "/api/job-queue/jobs/\(id)/position",
+            body: MoveQueuedJobRequest(neighbor: neighbor),
+            headers: preconditionHeaders(reviewedRowVersion)
+        )
+    }
+
+    func listPrinterQueue(printerId: UUID) async throws -> [QueuedPrintJobResponse] {
+        let jobs: [QueuedJobInfo] = try await apiClient.get("/api/job-queue-analytics/printer/\(printerId)?limit=200")
+        return jobs.map {
+            QueuedPrintJobResponse(
+                job: $0, gcodeFile: nil, assignedPrinter: nil,
+                estimatedStartTime: nil, estimatedCompletionTime: nil
+            )
+        }
     }
 
     func get(id: UUID) async throws -> PrintJob {
@@ -72,6 +100,13 @@ actor JobService: JobServiceProtocol {
         default:
             return .rejected(response.value)
         }
+    }
+
+    func rerun(id: UUID, reviewedRowVersion: String) async throws {
+        try await apiClient.postVoid(
+            "/api/job-queue/\(id)/rerun",
+            headers: preconditionHeaders(reviewedRowVersion)
+        )
     }
 
     func abort(id: UUID, reviewedRowVersion: String) async throws {

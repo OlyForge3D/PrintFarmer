@@ -156,6 +156,29 @@ final class PrinterFilamentPresentationTests: XCTestCase {
         XCTAssertEqual(model.rows.last?.remainingGrams, 1200)
     }
 
+    func testAssignedPrinterSpoolIsJoinedToItsToolheadInsteadOfDuplicated() throws {
+        let printer = try TestData.decodePrinter()
+        let toolhead = Toolhead(
+            id: UUID(), name: "Extruder 1", index: 0, isPrimary: true,
+            currentSpoolId: 8, currentMaterial: "PLA", currentFilamentColor: "#EF6B4A"
+        )
+        let model = try build(
+            printer: printer,
+            roster: [toolhead],
+            spool: PrinterSpoolInfo(
+                hasActiveSpool: true, activeSpoolId: 8,
+                spoolName: "Coral spool", material: "PLA",
+                colorHex: "#EF6B4A", remainingWeightG: 84
+            )
+        )
+
+        XCTAssertEqual(model.rows.count, 1)
+        XCTAssertEqual(model.rows[0].spoolID, 8)
+        XCTAssertEqual(model.rows[0].spoolName, "Coral spool")
+        XCTAssertEqual(model.rows[0].remainingGrams, 84)
+        XCTAssertEqual(model.rows[0].colorText, "#EF6B4A")
+    }
+
     // MARK: - Nozzle diameter (issue #2522, Hicks review finding 21)
 
     func testRosterRowCarriesNozzleDiameterFromToolhead() throws {

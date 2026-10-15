@@ -25,10 +25,10 @@ public sealed class QueueOutboxPublisherService(
     IHubContext<PrinterHub> hub,
     ILogger<QueueOutboxPublisherService> logger,
     IQueueSubscriptionMembershipNotifier? membershipNotifier = null,
-    Farm.Infrastructure.Services.HostUpdates.IHostUpdateWriterActivityFlag? hostUpdateFence = null,
     TimeProvider? timeProvider = null) : BackgroundService
 {
     private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
+
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan RetryBackoffBase = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan StaleLeaseAge = TimeSpan.FromMinutes(10);
@@ -77,19 +77,8 @@ public sealed class QueueOutboxPublisherService(
         {
             try
             {
-                // #2663: while a host update has fenced background writers, stop starting new
-                // publish work and acknowledge quiescence rather than blindly cancelling
-                // in-flight sends. Resumes automatically once the fence is released.
-                if (hostUpdateFence is not null && await hostUpdateFence.IsPauseRequestedAsync(stoppingToken))
-                {
-                    await hostUpdateFence.AcknowledgePausedAsync(stoppingToken);
-                    await Task.Delay(TimeSpan.FromMilliseconds(250), _timeProvider, stoppingToken).ConfigureAwait(false);
-                }
-                else
-                {
-                    await RecoverStaleLeasesAsync(stoppingToken);
-                    await ProcessPendingEventsAsync(stoppingToken);
-                }
+                await RecoverStaleLeasesAsync(stoppingToken);
+                await ProcessPendingEventsAsync(stoppingToken);
             }
             catch (OperationCanceledException)
             {
@@ -100,28 +89,8 @@ public sealed class QueueOutboxPublisherService(
                 logger.LogError(ex, "[OutboxPublisher] Error processing outbox events");
             }
 
-            if (await WaitForIntervalOrPauseAsync(stoppingToken).ConfigureAwait(false))
-            {
-                await hostUpdateFence!.AcknowledgePausedAsync(stoppingToken).ConfigureAwait(false);
-            }
+            await Task.Delay(PollInterval, _timeProvider, stoppingToken).ConfigureAwait(false);
         }
-    }
-
-    internal async Task<bool> WaitForIntervalOrPauseAsync(CancellationToken stoppingToken)
-    {
-        DateTimeOffset until = _timeProvider.GetUtcNow() + PollInterval;
-        while (_timeProvider.GetUtcNow() < until)
-        {
-            if (hostUpdateFence is not null &&
-                await hostUpdateFence.IsPauseRequestedAsync(stoppingToken).ConfigureAwait(false))
-            {
-                return true;
-            }
-
-            await Task.Delay(TimeSpan.FromMilliseconds(250), _timeProvider, stoppingToken).ConfigureAwait(false);
-        }
-
-        return false;
     }
 
     internal async Task RecoverStaleLeasesAsync(CancellationToken ct)

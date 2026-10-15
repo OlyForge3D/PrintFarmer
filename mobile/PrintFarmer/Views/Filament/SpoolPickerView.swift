@@ -150,6 +150,7 @@ struct SpoolPickerView: View {
                                 .foregroundStyle(Color.pfTextTertiary)
                         }
                     }
+                    .accessibilityIdentifier("spoolPicker.material.\(material)")
                 }
             }
         }
@@ -272,6 +273,7 @@ struct SpoolPickerView: View {
                 SpoolRowView(spool: spool)
             }
             .tint(Color.pfTextPrimary)
+            .accessibilityIdentifier("spoolPicker.spool.\(spool.id)")
         }
     }
 }

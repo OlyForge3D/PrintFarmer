@@ -777,6 +777,12 @@ actor APIClient {
         accessToken
     }
 
+    /// The base URL and bearer read in one actor hop, so a camera stream request
+    /// can never pair one server's URL with another server's token.
+    func currentCameraCredentials() -> (baseURL: URL, accessToken: String?) {
+        (baseURL, accessToken)
+    }
+
     /// J (issue #816 reject, Hicks): the stable server-identity id the current
     /// authenticated session was applied for. Used by tests / callers that need
     /// to prove the atomic (baseURL, accessToken, serverID) coupling.
@@ -1075,6 +1081,39 @@ actor APIClient {
         return data
     }
 
+    func getCurrentJobThumbnail(printerID: UUID, path: String) async throws -> Data {
+        guard let components = URLComponents(string: path),
+              components.scheme == nil, components.host == nil,
+              components.fragment == nil,
+              components.path.lowercased() == "/api/printers/\(printerID.uuidString.lowercased())/current-job/thumbnail",
+              components.queryItems?.count == 1,
+              let version = components.queryItems?.first,
+              version.name == "v", let value = version.value,
+              value.count == 16,
+              value.allSatisfy({ "0123456789abcdef".contains($0) }) else {
+            throw NetworkError.invalidURL("Invalid current-job thumbnail path")
+        }
+        let captured = captureRequestSession()
+        guard captured.accessToken != nil, captured.serverID != nil else {
+            throw NetworkError.unauthorized
+        }
+        try await checkTokenExpiry(session: captured)
+        try validateControlSession(captured)
+        var request = try buildRequest(session: captured, path: path, method: "GET")
+        request.setValue("image/*", forHTTPHeaderField: "Accept")
+        // Images live only in the card's current revision, never a shared auth cache.
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        let (data, response) = try await performRequest(request, delegate: DirectCommandTaskDelegate())
+        try validateControlSession(captured)
+        try Task.checkCancellation()
+        try validateResponse(response, data: data, authSessionToken: captured.authSessionToken)
+        guard data.count <= 10 * 1024 * 1024,
+              response.mimeType?.hasPrefix("image/") == true else {
+            throw NetworkError.invalidURL("Invalid current-job thumbnail response")
+        }
+        return data
+    }
+
     // MARK: - Reachability
 
     /// Lightweight, unauthenticated reachability probe for the connection indicator.
@@ -1271,30 +1310,6 @@ actor APIClient {
         }
     }
 
-    /// Convenience overload for call sites that do not need to thread an explicit
-    /// `RequestSession` through themselves. Captures a fresh session synchronously
-    /// (A1: no await precedes this capture within these wrappers) and delegates to
-    /// the session-aware implementation below.
-    private func buildRequest(path: String, method: String) throws -> URLRequest {
-        try buildRequest(session: captureRequestSession(), path: path, method: method)
-    }
-
-    private func execute<T: Decodable>(_ request: URLRequest) async throws -> T {
-        try await execute(request, session: captureRequestSession())
-    }
-
-    private func executeVoid(_ request: URLRequest) async throws {
-        try await executeVoid(request, session: captureRequestSession())
-    }
-
-    private func checkTokenExpiry() async throws {
-        try await checkTokenExpiry(session: captureRequestSession())
-    }
-
-    private func validateResponse(_ response: URLResponse, data: Data) throws {
-        try validateResponse(response, data: data, authSessionToken: authSessionToken)
-    }
-
     private func execute<T: Decodable>(_ request: URLRequest, session requestSession: RequestSession) async throws -> T {
         // A1: the caller captured `requestSession` at PUBLIC API ENTRY before ANY
         // await; downstream steps thread it through so no path re-reads mutable
@@ -1366,13 +1381,6 @@ actor APIClient {
 
     private func validateResponseGeneration(session: RequestSession) throws {
         try validateRequestGeneration(session: session)
-    }
-
-    private func validateActiveServerGeneration() throws {
-        guard let serverGeneration, let generationAtCreation else { return }
-        if !serverGeneration.isCurrent(generationAtCreation) {
-            throw NetworkError.staleServerResponse
-        }
     }
 
     private func performRequest(

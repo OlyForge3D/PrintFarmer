@@ -42,6 +42,52 @@ paths and emits outputs consumed by the conditional jobs. This produces a
 required, stable check name even when no application build runs, such as a
 docs-only PR.
 
+## iOS toolchain
+
+All iOS build, test, and release jobs use GitHub's explicit `macos-26` arm64
+runner label and select `/Applications/Xcode_26.6.app`, failing if it is missing
+or does not report Xcode 26.6 build 17F113. This is the owner-directed containment
+rollback of #3285/#3286, not a universal fix for XCUI failures. GitHub's
+[available labels](https://github.com/actions/runner-images#available-images)
+and [software manifest](https://github.com/actions/runner-images/blob/main/images/macos/macos-26-arm64-Readme.md)
+were checked on 2026-10-09: image `20260907.0351.1` lists that exact Xcode and
+iOS 26.5. Historical [run 37266273713](https://github.com/OlyForge3D/PrintFarmer/actions/runs/37266273713)
+also reports `macos-26-arm64`, Xcode 26.6 (17F113), and runtime 23F77.
+The OS label does not freeze weekly image updates; exact version/build
+checks remain mandatory and there is no unpinned fallback.
+
+The simulator jobs use the shared resolver's approved iOS 26.5 (23F77) runtime.
+CI downloads iOS 26.5 with `xcodebuild` when build 23F77 is absent and creates the preferred
+device for that runtime when needed; the resolver then validates the exact
+approved build before selecting a destination. Runtime setup is bounded to
+30 minutes per simulator runner. The download step checks the iOS runtime
+identifier and build again afterward, and fails closed with a diagnostic if
+23F77 did not become available. Inspect the Xcode download output and installed
+runtime list, then retry or repair the runner's runtime installation; do not
+substitute iOS 27.0 or change the approved resolver build without a separate
+decision.
+
+### Release eligibility
+
+Checked on 2026-10-09, Apple's
+[supported Xcode upload table](https://developer.apple.com/help/app-store-connect/manage-builds/upload-builds/#supported-xcode-versions)
+allows iOS builds made with Xcode 26 or later for customer distribution and
+TestFlight. Apple's
+[submission requirements](https://developer.apple.com/app-store/submitting/)
+announce the iOS/iPadOS 27 SDK minimum for App Store Connect uploads starting
+April 2027. Xcode 26.6's iOS 26.5 SDK is not excluded by that future requirement
+today; App Store Connect uploads include TestFlight. Requalify the release
+toolchain before that announced deadline. Apple's month-only announcement does
+not establish a precise effective day; do not infer one. This rollback adds no
+new release policy or submission automation.
+
+The rollback retains current snapshot PNGs and strict comparisons. Six iPad
+Controls references were changed by #3286; validation under the selected
+toolchain must compare the retained images before any historical restoration
+or intentional re-recording. Local Xcode 26.6 is unavailable on the containment
+author's host, so selected-toolchain build/tests and iPad baseline qualification
+remain required hosted CI evidence, not a claimed local pass.
+
 ## Jobs
 
 | Job                     | Runs when                                                    | Notes                                                                 |
@@ -199,13 +245,6 @@ The narrow exception is an API serialization-source change under
 `src/infra/Infrastructure/PartsInventory/PartsInventoryProblemDetails.cs`;
 those paths additionally select `Farm.Web.Api.Tests` so the producer
 wire-contract assertions execute.
-
-**Host-update services (issue #3210):** a non-prose change under
-`src/infra/Services/HostUpdates/**` keeps the `infra` selection and additionally
-selects `Farm.HostUpdate.Cli.Tests` (the CLI references `Farm.Infrastructure` and
-drives these services end to end) and `Farm.Web.Api.Tests` (which owns the
-host-update startup, integration, and provider tests). Before this, #3194 broke 16
-CLI topology tests without either leg being scheduled.
 
 `ci-tools` is unconditional and therefore runs for every bucket, including
 `docs`, `mobile`, and `unclassified`. `dependency-compliance` is gated on

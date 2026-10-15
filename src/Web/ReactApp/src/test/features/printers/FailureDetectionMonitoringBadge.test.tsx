@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { FailureDetectionMonitoringBadge } from "@/features/printers/components/FailureDetectionMonitoringBadge";
 import type {
@@ -225,9 +225,11 @@ describe("FailureDetectionMonitoringBadge", () => {
     // Modal should open with full detail
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     expect(screen.getByText("Spaghetti detection details")).toBeInTheDocument();
+    // Reason equals the header detail, so it is shown once (no duplicate "Why" section).
     expect(
       screen.getAllByText("Failed to contact Obico ML service."),
-    ).toHaveLength(2);
+    ).toHaveLength(1);
+    expect(screen.queryByText("Why this is showing")).not.toBeInTheDocument();
     expect(
       screen.getByText(
         "Check the Obico ML service connection and camera reachability before relying on failure detection or auto-pause.",
@@ -352,6 +354,113 @@ describe("FailureDetectionMonitoringBadge", () => {
     expect(updatedIcon?.classList.contains("text-pf-error")).toBe(true);
   });
 
+  it.each([
+    ["idle", false, "text-pf-status-idle-text"],
+    ["misconfigured", false, "text-pf-warning"],
+    ["disabled", false, "text-pf-control-disabled-text"],
+    // A non-printing error is displayed as "Checking" and must not look like an error.
+    ["error", false, "text-pf-text-secondary"],
+  ] as const)(
+    "iconColor_%s_UsesStateTone_NotErrorRed",
+    (state, isPrinting, expectedClass) => {
+      render(
+        <FailureDetectionMonitoringBadge
+          enabled={true}
+          status={
+            {
+              printerId: "p1",
+              printerName: "QP4-1",
+              state,
+              reason: "Waiting for an active print.",
+              isPrinting,
+              detectionSource: "global",
+              lastOutcome: "none",
+            } as FailureDetectionPrinterStatusDto
+          }
+        />,
+      );
+
+      const icon = screen.getByRole("button").querySelector("svg");
+      expect(icon?.classList.contains(expectedClass)).toBe(true);
+      expect(icon?.classList.contains("text-pf-error")).toBe(false);
+    },
+  );
+
+  it.each([
+    ["idle", false, "text-pf-status-idle-text", false],
+    ["monitoring", true, "text-pf-success", false],
+    ["misconfigured", false, "text-pf-warning", true],
+    ["error", true, "text-pf-error", true],
+  ] as const)(
+    "modal_%s_TitleIconAndNextStepToneFollowState",
+    (state, isPrinting, expectedIconClass, expectWarningNextStep) => {
+      render(
+        <FailureDetectionMonitoringBadge
+          enabled={true}
+          status={
+            {
+              printerId: "p1",
+              printerName: "QP4-1",
+              state,
+              reason: "Printer status reason.",
+              isPrinting,
+              detectionSource: "global",
+              lastOutcome: "none",
+            } as FailureDetectionPrinterStatusDto
+          }
+        />,
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: /qp4-1/i }));
+      const dialog = screen.getByRole("dialog");
+      const titleIcon = within(dialog).getByLabelText("Spaghetti detection");
+      expect(titleIcon.classList.contains(expectedIconClass)).toBe(true);
+      if (state !== "error" && state !== "misconfigured") {
+        expect(titleIcon.classList.contains("text-pf-warning")).toBe(false);
+        expect(titleIcon.classList.contains("text-pf-error")).toBe(false);
+      }
+
+      const nextStep = within(dialog).getByTestId("failure-detection-next-step");
+      expect(nextStep.classList.contains("bg-pf-warning/10")).toBe(
+        expectWarningNextStep,
+      );
+    },
+  );
+
+  it.each([
+    ["error", false],
+    ["idle", false],
+    ["monitoring", true],
+    ["misconfigured", false],
+    ["disabled", false],
+  ] as const)("modal_%s_isPrinting%s_TitleIconMatchesBadgeShield", (state, isPrinting) => {
+    render(
+      <FailureDetectionMonitoringBadge
+        enabled={true}
+        status={
+          {
+            printerId: "p1",
+            printerName: "QP4-1",
+            state,
+            reason: "Printer status reason.",
+            isPrinting,
+            detectionSource: "global",
+            lastOutcome: "none",
+          } as FailureDetectionPrinterStatusDto
+        }
+      />,
+    );
+
+    const badgeIcon = screen.getByRole("button", { name: /qp4-1/i }).querySelector("svg");
+    fireEvent.click(screen.getByRole("button", { name: /qp4-1/i }));
+    const titleIcon = within(screen.getByRole("dialog")).getByLabelText("Spaghetti detection");
+    const toneOf = (el: Element | null | undefined) =>
+      [...(el?.classList ?? [])].filter((c) => c.startsWith("text-pf-"));
+
+    expect(toneOf(badgeIcon)).toHaveLength(1);
+    expect(toneOf(titleIcon)).toEqual(toneOf(badgeIcon));
+  });
+
   it("withoutStatus_ShowsUnknownCoverageAndOmitsOutcome", () => {
     // No printer snapshot is available yet; reason/lastOutcome themselves are
     // required strings on a reported DTO, not nullable wire fields.
@@ -411,7 +520,8 @@ describe("FailureDetectionMonitoringBadge", () => {
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     expect(screen.getByText("Latest outcome")).toBeInTheDocument();
     expect(screen.getByText("No scans yet")).toBeInTheDocument();
-    expect(screen.getAllByText("Printer is not actively printing.")).toHaveLength(2);
+    expect(screen.getAllByText("Printer is not actively printing.")).toHaveLength(1);
+    expect(screen.queryByText("Why this is showing")).not.toBeInTheDocument();
     expect(screen.queryByText("Last scan")).not.toBeInTheDocument();
     expect(screen.queryByText("Last failure detected")).not.toBeInTheDocument();
     expect(screen.queryByText("Auto-pause")).not.toBeInTheDocument();

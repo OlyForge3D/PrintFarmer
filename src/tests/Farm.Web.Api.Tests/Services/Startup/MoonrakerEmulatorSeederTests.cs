@@ -5,6 +5,7 @@ using Farm.Infrastructure.Repositories.Catalog;
 using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Repositories.Queue;
 using Farm.Infrastructure.Repositories.UnitOfWork;
+using Farm.Infrastructure.Services.Cameras;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
@@ -156,12 +157,13 @@ public sealed class MoonrakerEmulatorSeederTests
                 ManufacturerId = manufacturerId,
             });
 
-        var printersService = new Mock<IPrintersService>(MockBehavior.Strict);
-        printersService
-            .Setup(service => service.RefreshCameraUrlsAsync(
+        var cameraSynchronizer = new Mock<IPrinterCameraSynchronizer>(MockBehavior.Strict);
+        cameraSynchronizer
+            .Setup(service => service.SyncPrinterAsync(
                 It.IsAny<Guid>(),
+                It.IsAny<bool>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync((PrinterDto?)null);
+            .ReturnsAsync((Guid id, bool _, CancellationToken _) => PrinterCameraSyncResult.NotFound(id));
 
         (
             Mock<IMachineProfileRepository> machineProfiles,
@@ -174,7 +176,7 @@ public sealed class MoonrakerEmulatorSeederTests
         ServiceProvider provider = new ServiceCollection()
             .AddSingleton(unitOfWork.Object)
             .AddSingleton(catalog.Object)
-            .AddSingleton(printersService.Object)
+            .AddSingleton(cameraSynchronizer.Object)
             .AddSingleton(machineProfiles.Object)
             .AddSingleton(processProfiles.Object)
             .AddSingleton(filamentProfiles.Object)
@@ -207,7 +209,7 @@ public sealed class MoonrakerEmulatorSeederTests
             jobs.OrderBy(job => job.Status),
             job => Assert.Equal(PrintJobStatus.Printing, job.Status),
             job => Assert.Equal(PrintJobStatus.Paused, job.Status));
-        Assert.Equal(4, printersService.Invocations.Count);
+        Assert.Equal(4, cameraSynchronizer.Invocations.Count);
 
         // #1851: every seeded printer must carry the calibration generation data that
         // calibration-scoped consumers require, not just base identity.
@@ -349,10 +351,10 @@ public sealed class MoonrakerEmulatorSeederTests
             .Setup(repository => repository.GetUnknownModelIdAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(unknownModelId);
 
-        var printersService = new Mock<IPrintersService>(MockBehavior.Strict);
-        printersService
-            .Setup(service => service.RefreshCameraUrlsAsync(seedId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync((PrinterDto?)null);
+        var cameraSynchronizer = new Mock<IPrinterCameraSynchronizer>(MockBehavior.Strict);
+        cameraSynchronizer
+            .Setup(service => service.SyncPrinterAsync(seedId, true, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid id, bool _, CancellationToken _) => PrinterCameraSyncResult.NotFound(id));
 
         (
             Mock<IMachineProfileRepository> machineProfiles,
@@ -365,7 +367,7 @@ public sealed class MoonrakerEmulatorSeederTests
         ServiceProvider provider = new ServiceCollection()
             .AddSingleton(unitOfWork.Object)
             .AddSingleton(catalog.Object)
-            .AddSingleton(printersService.Object)
+            .AddSingleton(cameraSynchronizer.Object)
             .AddSingleton(machineProfiles.Object)
             .AddSingleton(processProfiles.Object)
             .AddSingleton(filamentProfiles.Object)

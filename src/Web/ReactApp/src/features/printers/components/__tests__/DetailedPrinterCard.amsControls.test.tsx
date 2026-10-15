@@ -57,18 +57,20 @@ vi.mock('@/features/printers/components/PrinterHistoryModal', () => ({ PrinterHi
 vi.mock('@/features/printers/components/PrinterFilesModal', () => ({ PrinterFilesModal: () => null }));
 vi.mock('@/features/printers/components/SpoolPickerModal', () => ({ SpoolPickerModal: () => null }));
 vi.mock('@/features/printers/components/MaterialLoadout', () => ({
-  MaterialLoadout: () => <div data-testid="material-loadout" />,
+  MaterialLoadout: ({ filamentControl }: { filamentControl?: unknown }) => (
+    <div data-testid="material-loadout" data-filament-control={String(Boolean(filamentControl))} />
+  ),
 }));
 vi.mock('@/features/printers/components/MmuControlBox', () => ({
-  MmuControlBox: ({ printerId, isOnline }: { printerId: string; isOnline: boolean }) => (
-    <div data-testid="ams-control-box" data-printer-id={printerId} data-online={String(isOnline)} />
+  MmuControlBox: ({ printerId, isOnline, filamentControl }: { printerId: string; isOnline: boolean; filamentControl?: unknown }) => (
+    <div data-testid="ams-control-box" data-printer-id={printerId} data-online={String(isOnline)}
+      data-filament-control={String(Boolean(filamentControl))} />
   ),
 }));
 vi.mock('@/features/printers/components/TemperatureControlSection', () => ({ TemperatureControlSection: () => null }));
 vi.mock('@/features/printers/components/MovementControlSection', () => ({
   MovementControlSection: ({ rightContent }: { rightContent?: React.ReactNode }) => <div>{rightContent}</div>,
 }));
-vi.mock('@/features/printers/components/FilamentControlSection', () => ({ FilamentControlSection: () => null }));
 vi.mock('@/features/printers/components/PrinterActionBar', () => ({ PrinterActionBar: () => null }));
 vi.mock('@/features/printers/components/BedClearBanner', () => ({ BedClearBanner: () => null }));
 vi.mock('@/features/printers/components/PrintProgressBar', () => ({ PrintProgressBar: () => null }));
@@ -78,7 +80,6 @@ vi.mock('@/features/printers/components/FailureDetectionMonitoringBadge', () => 
 vi.mock('@/features/printers/components/FailureDetectionMonitoringSummary', () => ({ FailureDetectionMonitoringSummary: () => null }));
 vi.mock('@/features/printers/components/OfflineTroubleshootingGuide', () => ({ OfflineTroubleshootingGuide: () => null }));
 vi.mock('@/features/printers/components/PrinterCameraPreview', () => ({ PrinterCameraPreview: () => null }));
-vi.mock('@/features/printers/components/ZOffsetCalibrationWizard', () => ({ ZOffsetCalibrationWizard: () => null }));
 vi.mock('@/services/api', () => ({
   apiClient: {},
 }));
@@ -147,4 +148,24 @@ describe('DetailedPrinterCard AMS controls', () => {
 
     expect(screen.queryByTestId('ams-control-box')).not.toBeInTheDocument();
   });
+});
+
+
+it.each([
+  ['Qidibox', true, 'ams-control-box'], ['HappyHare', true, 'ams-control-box'], ['Afc', true, 'ams-control-box'],
+  ['Qidibox', false, 'ams-control-box'],
+] as const)('routes load/unload only through the slot panel for %s (enabled %s)', (mmuType, enabled, slotsTestId) => {
+  render(<DetailedPrinterCard printer={makePrinter({ mmuStatus: makeMmuStatus({ mmuType, enabled }) })}
+    backendCapabilities={{ supportsFilamentControl: true } as import('@/types/api').PrinterBackendCapabilitiesDto} />);
+  // Filament handling lives only in the Materials slot panel: no standalone M600 or Z-offset buttons.
+  expect(screen.queryByText('Change Filament (M600)')).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /Change Filament/i })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /Calibrate Z-Offset/i })).not.toBeInTheDocument();
+  expect(screen.getByTestId(slotsTestId)).toHaveAttribute('data-filament-control', 'true');
+});
+
+it('does not offer slot-panel macros when the backend lacks filament control', () => {
+  render(<DetailedPrinterCard printer={makePrinter({ mmuStatus: makeMmuStatus({ mmuType: 'Qidibox' }) })}
+    backendCapabilities={{ supportsFilamentControl: false } as import('@/types/api').PrinterBackendCapabilitiesDto} />);
+  expect(screen.getByTestId('ams-control-box')).toHaveAttribute('data-filament-control', 'false');
 });

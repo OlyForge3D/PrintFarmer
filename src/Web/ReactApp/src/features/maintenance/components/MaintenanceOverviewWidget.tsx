@@ -5,7 +5,6 @@
  * Displays upcoming tasks, overdue count, and quick stats.
  */
 
-import React from 'react';
 import { Link } from 'react-router';
 import { 
   WrenchIcon, 

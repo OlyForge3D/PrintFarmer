@@ -3,7 +3,12 @@ import Foundation
 // MARK: - Demo Spool Service
 
 final class DemoSpoolService: SpoolServiceProtocol, @unchecked Sendable {
-    private let allSpools = DemoData.spools
+    private let allSpools: [SpoolmanSpool]
+
+    init(spoolOverrides: [SpoolmanSpool] = []) {
+        let overrides = Dictionary(uniqueKeysWithValues: spoolOverrides.map { ($0.id, $0) })
+        allSpools = DemoData.spools.map { overrides[$0.id] ?? $0 }
+    }
 
     func listSpools(limit: Int, offset: Int, search: String?, material: String?, vendor: String?) async throws -> SpoolmanPagedResult<SpoolmanSpool> {
         var filtered = allSpools

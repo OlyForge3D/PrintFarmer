@@ -5,7 +5,6 @@
 using System.Text.Json;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Services.HostUpdates;
 using Farm.Infrastructure.Services.Printers;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -21,9 +20,10 @@ namespace Farm.Infrastructure.Services.Queue;
 public sealed class BackendControlCommandConsumerService(
     IServiceScopeFactory scopeFactory,
     ILogger<BackendControlCommandConsumerService> logger,
-    BackendControlCommandConsumerFenceFlag? hostUpdateFence = null,
     TimeProvider? timeProvider = null) : BackgroundService
 {
+    private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
+
     public const string EventType = "PrintFarmer.Queue.BackendControlCommand.v1";
 
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(5);
@@ -36,22 +36,12 @@ public sealed class BackendControlCommandConsumerService(
         PropertyNameCaseInsensitive = true,
     };
 
-    private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
-
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
-                if (hostUpdateFence is not null &&
-                    await hostUpdateFence.IsPauseRequestedAsync(stoppingToken).ConfigureAwait(false))
-                {
-                    await hostUpdateFence.AcknowledgePausedAsync(stoppingToken).ConfigureAwait(false);
-                    await Task.Delay(TimeSpan.FromMilliseconds(250), _timeProvider, stoppingToken).ConfigureAwait(false);
-                    continue;
-                }
-
                 await RecoverStaleLeasesAsync(stoppingToken);
                 await ProcessPendingAsync(stoppingToken);
             }
@@ -64,28 +54,8 @@ public sealed class BackendControlCommandConsumerService(
                 logger.LogError(exception, "Backend control command scan failed.");
             }
 
-            if (await WaitForIntervalOrPauseAsync(stoppingToken).ConfigureAwait(false))
-            {
-                await hostUpdateFence!.AcknowledgePausedAsync(stoppingToken).ConfigureAwait(false);
-            }
+            await Task.Delay(PollInterval, _timeProvider, stoppingToken);
         }
-    }
-
-    private async Task<bool> WaitForIntervalOrPauseAsync(CancellationToken stoppingToken)
-    {
-        DateTimeOffset until = _timeProvider.GetUtcNow() + PollInterval;
-        while (_timeProvider.GetUtcNow() < until)
-        {
-            if (hostUpdateFence is not null &&
-                await hostUpdateFence.IsPauseRequestedAsync(stoppingToken).ConfigureAwait(false))
-            {
-                return true;
-            }
-
-            await Task.Delay(TimeSpan.FromMilliseconds(250), _timeProvider, stoppingToken).ConfigureAwait(false);
-        }
-
-        return false;
     }
 
     internal async Task RecoverStaleLeasesAsync(CancellationToken ct)
@@ -137,9 +107,9 @@ public sealed class BackendControlCommandConsumerService(
             catch (Exception exception)
             {
                 logger.LogError(
-                    exception,
-                    "Backend control command {CommandId} failed; continuing the current poll batch.",
-                    commandId);
+                            exception,
+                            "Backend control command {CommandId} failed; continuing the current poll batch.",
+                            commandId);
             }
         }
     }
@@ -464,8 +434,7 @@ public sealed class BackendControlCommandConsumerService(
             dispatchAttemptId: payload.AttemptId,
             jobRowVersion: job.RowVersion,
             dispatchStateRowVersion: dispatchState.RowVersion,
-            detail: new { commandId },
-            timeProvider: _timeProvider);
+            detail: new { commandId });
         string lifecycleEventType = payload.Operation switch
         {
             "pause" => QueueLifecycleEventWriter.EventTypeJobPaused,
@@ -489,8 +458,7 @@ public sealed class BackendControlCommandConsumerService(
                 job.Status.ToString(),
                 job.JobKind?.ToString() ?? nameof(JobKind.Standard),
                 payload.Operation == "cancel" ? "job_cancelled" : null),
-            ct: ct,
-            timeProvider: _timeProvider);
+            ct);
         await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
     }
@@ -538,8 +506,7 @@ public sealed class BackendControlCommandConsumerService(
             printJobId: payload.JobId,
             dispatchAttemptId: payload.AttemptId,
             reasonCode: errorCode,
-            detail: new { commandId },
-            timeProvider: _timeProvider);
+            detail: new { commandId });
         PrintJob? job = await db.PrintJobs
             .FirstOrDefaultAsync(candidate => candidate.Id == payload.JobId, ct);
         if (job is not null)

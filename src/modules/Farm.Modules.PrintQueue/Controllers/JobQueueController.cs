@@ -56,8 +56,7 @@ public class JobQueueController(
     IOperatorFeatureGate operatorFeatureGate,
     ILogger<JobQueueController> logger,
     AppDbContext? db = null,
-    IQueueResourceAuthorizationService? resourceAuthorization = null,
-    Farm.Infrastructure.Services.HostUpdates.IHostUpdateAdmissionGate? hostUpdateAdmissionGate = null) : ControllerBase
+    IQueueResourceAuthorizationService? resourceAuthorization = null) : ControllerBase
 {
     /// <summary>
     /// Get queue overview with optional compatibility filtering.
@@ -125,11 +124,6 @@ public class JobQueueController(
         if (request is null)
         {
             return BadRequest("Request body is required");
-        }
-
-        if (await IsHostUpdateAdmissionClosedAsync(CancellationToken.None))
-        {
-            return Conflict(new { error = "host_update_admission_closed" });
         }
 
         try
@@ -594,6 +588,9 @@ public class JobQueueController(
                 jobETag = rev.CurrentJobRowVersion is null
                     ? null
                     : Convert.ToBase64String(rev.CurrentJobRowVersion),
+                neighborETag = rev.CurrentNeighborRowVersion is null
+                    ? null
+                    : Convert.ToBase64String(rev.CurrentNeighborRowVersion),
                 dispatchStateETag = rev.CurrentDispatchStateRowVersion is null
                     ? null
                     : Convert.ToBase64String(rev.CurrentDispatchStateRowVersion),
@@ -676,6 +673,74 @@ public class JobQueueController(
     }
 
     /// <summary>
+    /// Move a queued job immediately before or after another queued job in the same queue.
+    /// </summary>
+    /// <param name="id">The unique identifier of the job to move.</param>
+    /// <param name="request">The target neighbor that defines the new position.</param>
+    [HttpPut("jobs/{id:guid}/position")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Write)]
+    [ProducesResponseType(typeof(QueuedPrintJobDto), 200)]
+    [ProducesResponseType(400)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(409)]
+    [ProducesResponseType(412)]
+    [ProducesResponseType(428)]
+    [ProducesResponseType(500)]
+    public async Task<ActionResult<QueuedPrintJobDto>> MoveQueuedJobAsync(
+        Guid id,
+        [FromBody] MoveQueuedJobRequest request)
+    {
+        if (request is null)
+        {
+            return BadRequest("Request body is required.");
+        }
+
+        bool hasBefore = request.BeforeJobId.HasValue;
+        bool hasAfter = request.AfterJobId.HasValue;
+        if (hasBefore == hasAfter ||
+            (hasBefore && string.IsNullOrWhiteSpace(request.BeforeJobETag)) ||
+            (hasAfter && string.IsNullOrWhiteSpace(request.AfterJobETag)) ||
+            (hasBefore && request.AfterJobETag is not null) ||
+            (hasAfter && request.BeforeJobETag is not null))
+        {
+            return BadRequest("Provide exactly one neighbour ID with its matching ETag.");
+        }
+
+        try
+        {
+            QueuedPrintJobDto moved = await printJobManagementService.MoveQueuedJobAsync(
+                id,
+                request.BeforeJobId,
+                request.AfterJobId,
+                ReadIfMatch() ?? string.Empty,
+                request.BeforeJobETag ?? request.AfterJobETag!,
+                QueueActorIdentity.Resolve(User) ?? string.Empty,
+                CancellationToken.None);
+            return Ok(moved);
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new { error = ex.Message });
+        }
+        catch (Exception ex) when (ex is QueuePreconditionRequiredException
+            or QueueRevisionConflictException
+            or QueueSemanticConflictException
+            or DbUpdateConcurrencyException)
+        {
+            return MapRevisionException(ex);
+        }
+        catch (ValidationException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error moving queued job {JobId}", id);
+            return Problem("An error occurred while moving the queued job.", statusCode: 500);
+        }
+    }
+
+    /// <summary>
     /// Dispatch a queued/assigned job to its printer to start printing.
     /// The job must have an assigned printer and be in Queued or Assigned status.
     /// </summary>
@@ -689,11 +754,6 @@ public class JobQueueController(
     [ProducesResponseType(500)]
     public async Task<IActionResult> DispatchJobAsync(Guid id)
     {
-        if (await IsHostUpdateAdmissionClosedAsync(CancellationToken.None))
-        {
-            return Conflict(new { error = "host_update_admission_closed" });
-        }
-
         try
         {
             string userId = GetActorSubject();
@@ -976,15 +1036,8 @@ public class JobQueueController(
                 "[JobQueueController] Manual sync of orphaned jobs requested by {ActorSubject}",
                 actorSubject);
 
-            // Create a lookup function that gets printer state from cache
-            string? LookupPrinterState(Guid printerId)
-            {
-                PrinterStatusDto? status = printerStatusCache.GetStatus(printerId);
-                return status?.State;
-            }
-
             int syncedCount = await printJobCompletionService.SyncOrphanedPrintingJobsAsync(
-                LookupPrinterState,
+                printerStatusCache.GetSnapshot,
                 actorSubject,
                 CancellationToken.None);
 
@@ -1062,11 +1115,6 @@ public class JobQueueController(
             return BadRequest("Request body is required");
         }
 
-        if (await IsHostUpdateAdmissionClosedAsync(CancellationToken.None))
-        {
-            return Conflict(new { error = "host_update_admission_closed" });
-        }
-
         try
         {
             string userId = GetActorSubject();
@@ -1119,11 +1167,6 @@ public class JobQueueController(
         if (!request.DispatchAll && (request.JobIds is null || request.JobIds.Count == 0))
         {
             return BadRequest("Either set DispatchAll to true or provide at least one job ID.");
-        }
-
-        if (await IsHostUpdateAdmissionClosedAsync(ct))
-        {
-            return Conflict(new { error = "host_update_admission_closed" });
         }
 
         try
@@ -1333,9 +1376,6 @@ public class JobQueueController(
             bedClearCommandId = result.BedClearCommandId,
             bedClearIdempotencyKeySha256 = result.BedClearIdempotencyKeySha256,
         };
-
-    private async Task<bool> IsHostUpdateAdmissionClosedAsync(CancellationToken cancellationToken) =>
-        hostUpdateAdmissionGate is not null && await hostUpdateAdmissionGate.IsClosedAsync(cancellationToken).ConfigureAwait(false);
 
     private ObjectResult MapDispatchResponse(QueuedPrintJobDto result) =>
         result.DispatchResult?.Outcome switch

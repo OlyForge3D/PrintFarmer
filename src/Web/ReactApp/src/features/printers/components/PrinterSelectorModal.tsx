@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { SearchIcon } from '@/common/components/icons/MdiIcons';
 import { Button } from '@/common/components/ui';
 import { Checkbox } from '@/common/components/ui/Checkbox';

@@ -1,5 +1,4 @@
 import '@testing-library/jest-dom';
-import React from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -201,12 +200,6 @@ vi.mock('@/features/nfc/pages/NfcDevicesPage', () => ({
 vi.mock('@/features/nfc/pages/NfcBindingsPage', () => ({
   NfcBindingsPage: ({ embedded }: { embedded?: boolean }) => (
     <div data-testid="nfc-bindings-page" data-embedded={String(embedded)}>NFC Bindings Page</div>
-  ),
-}));
-
-vi.mock('@/features/cameras/pages/CamerasPage', () => ({
-  CamerasPage: ({ embedded }: { embedded?: boolean }) => (
-    <div data-testid="cameras-page" data-embedded={String(embedded)}>Cameras Page</div>
   ),
 }));
 

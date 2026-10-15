@@ -5,7 +5,6 @@
  * Intended for the Overview tab of the Maintenance Dashboard.
  */
 
-import React from 'react';
 import { Badge, Button } from '@/common/components/ui';
 import { AlertIcon, PackageIcon, ExternalLinkIcon } from '@/common/components/icons/MdiIcons';
 import { useLowStockComponents } from '../hooks/useMaintenanceComponents';

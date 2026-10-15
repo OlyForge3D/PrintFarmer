@@ -1,3 +1,10 @@
+
+const permissions = vi.hoisted(() => ({ assign: true, operate: true }));
+vi.mock('@/features/auth/hooks/useAuth', () => ({
+  useAuth: () => ({ hasPermission: (_resource: string, action: string) => action === 'write' ? permissions.assign : permissions.operate }),
+}));
+const inventory = vi.hoisted(() => ({ data: undefined as import('@/types/api').SpoolmanSpool[] | undefined, isError: false, refetch: vi.fn() }));
+vi.mock('@/features/printers/hooks/usePrinterSpoolInventory', () => ({ usePrinterSpoolInventory: () => inventory }));
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, within, waitFor } from '@testing-library/react';
 import { MaterialLoadout } from '@/features/printers/components/MaterialLoadout';
@@ -8,13 +15,17 @@ import { MmuGateStatus } from '@/types/api';
 
 const setSpool = vi.fn();
 const clearSpool = vi.fn();
+const clearActiveSpool = vi.fn();
+const setActiveSpool = vi.fn();
 const coverage = vi.fn();
 const printerDetails = vi.fn();
-const pending = vi.hoisted(() => ({ set: false, clear: false }));
+const pending = vi.hoisted(() => ({ set: false, clear: false, clearActive: false }));
 
 vi.mock('@/common/hooks/useApi', () => ({
   useSetToolheadSpool: () => ({ mutateAsync: setSpool, isPending: pending.set }),
   useClearToolheadSpool: () => ({ mutateAsync: clearSpool, isPending: pending.clear }),
+  useSetActiveSpool: () => ({ mutateAsync: setActiveSpool, isPending: false }),
+  useClearActiveSpool: () => ({ mutateAsync: clearActiveSpool, isPending: pending.clearActive }),
   usePrinterDetails: (...args: unknown[]) => printerDetails(...args),
 }));
 
@@ -78,32 +89,62 @@ describe('MaterialLoadout', () => {
   beforeEach(() => {
     // Real setToolheadSpool/clearToolheadSpool resolve to the new rowVersion
     // string, which lockedRevision re-anchors to on success.
+    permissions.assign = permissions.operate = true;
+    inventory.data = undefined;
+    inventory.isError = false;
     setSpool.mockReset().mockResolvedValue('rev-1');
     clearSpool.mockReset().mockResolvedValue('rev-1');
+    clearActiveSpool.mockReset().mockResolvedValue('rev-1');
+    setActiveSpool.mockReset().mockResolvedValue('rev-1');
     coverage.mockReset().mockReturnValue(undefined);
     printerDetails.mockReset().mockReturnValue({ data: undefined });
     pending.set = false;
     pending.clear = false;
+    pending.clearActive = false;
   });
 
   it('renders one slot per physical filament position', () => {
     renderLoadout();
 
-    const rail = screen.getByTestId('material-loadout');
-    expect(within(rail).getAllByRole('button')).toHaveLength(4);
+    expect(screen.getByTestId('material-loadout').querySelectorAll('[data-testid^="loadout-slot-"]')).toHaveLength(4);
     expect(screen.getByTestId('loadout-slot-3')).toBeInTheDocument();
+  });
+
+  it('renders the AD5X fourth lane from catalog identity when live MMU telemetry is absent', () => {
+    const ad5xToolheads = persistedQidiBox.slice(0, 4);
+    const { rerender } = renderLoadout({
+      mmuStatus: undefined,
+      toolheads: ad5xToolheads,
+      modelName: 'Flashforge AD5X',
+    });
+
+    expect(screen.getByTestId('material-loadout').querySelectorAll('[data-testid^="loadout-slot-"]'))
+      .toHaveLength(4);
+    expect(screen.getByText('G4')).toBeInTheDocument();
+
+    rerender(
+      <MaterialLoadout
+        printerId="printer-1"
+        mmuStatus={undefined}
+        toolheads={ad5xToolheads}
+        reviewedRowVersion="rev-1"
+      />,
+    );
+    expect(screen.getByTestId('material-loadout').querySelectorAll('[data-testid^="loadout-slot-"]'))
+      .toHaveLength(3);
+    expect(screen.queryByText('G4')).not.toBeInTheDocument();
   });
 
   it('shows a single detail panel instead of one card per slot', () => {
     renderLoadout();
 
-    expect(screen.queryByTestId('loadout-drawer')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('slot-panel')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId('loadout-slot-1'));
-    expect(screen.getAllByTestId('loadout-drawer')).toHaveLength(1);
+    expect(screen.getAllByTestId('slot-panel')).toHaveLength(1);
 
     fireEvent.click(screen.getByTestId('loadout-slot-2'));
-    expect(screen.getAllByTestId('loadout-drawer')).toHaveLength(1);
+    expect(screen.getAllByTestId('slot-panel')).toHaveLength(1);
   });
 
   it('collapses the detail panel when the selected slot is clicked again', () => {
@@ -112,7 +153,7 @@ describe('MaterialLoadout', () => {
     fireEvent.click(screen.getByTestId('loadout-slot-1'));
     fireEvent.click(screen.getByTestId('loadout-slot-1'));
 
-    expect(screen.queryByTestId('loadout-drawer')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('slot-panel')).not.toBeInTheDocument();
   });
 
   it('assigns a spool to the persisted index of the slot the user clicked', async () => {
@@ -121,7 +162,7 @@ describe('MaterialLoadout', () => {
     renderLoadout();
 
     fireEvent.click(screen.getByTestId('loadout-slot-2'));
-    fireEvent.click(screen.getByRole('button', { name: 'Assign' }));
+    fireEvent.click(screen.getByTestId('slot-action-assign'));
     fireEvent.click(await screen.findByTestId('spool-picker'));
 
     await waitFor(() =>
@@ -142,7 +183,7 @@ describe('MaterialLoadout', () => {
     });
 
     fireEvent.click(screen.getByTestId('loadout-slot-1'));
-    fireEvent.click(screen.getByRole('button', { name: 'Change' }));
+    fireEvent.click(screen.getByTestId('slot-action-change'));
     fireEvent.click(await screen.findByTestId('spool-picker-eject'));
 
     await waitFor(() =>
@@ -169,11 +210,11 @@ describe('MaterialLoadout', () => {
     });
 
     fireEvent.click(screen.getByTestId('loadout-slot-1'));
-    const change = screen.getByRole('button', { name: 'Change' });
+    const change = screen.getByTestId('slot-action-change');
     expect(change).not.toBeDisabled();
     expect(change).toHaveAttribute('aria-disabled', 'true');
 
-    const clear = screen.getByRole('button', { name: 'Clear' });
+    const clear = screen.getByTestId('slot-action-unassign');
     expect(clear).toBeEnabled();
     fireEvent.click(clear);
 
@@ -204,14 +245,14 @@ describe('MaterialLoadout', () => {
 
     fireEvent.click(screen.getByTestId('loadout-slot-1'));
 
-    const change = screen.getByRole('button', { name: 'Change' });
+    const change = screen.getByTestId('slot-action-change');
     const changeDescId = change.getAttribute('aria-describedby');
     expect(changeDescId).toBeTruthy();
     expect(document.getElementById(changeDescId!)).toHaveTextContent(
       'Disabled on the device — cannot take a spool',
     );
 
-    const clear = screen.getByRole('button', { name: 'Clear' });
+    const clear = screen.getByTestId('slot-action-unassign');
     const clearDescId = clear.getAttribute('aria-describedby');
     expect(clearDescId).toBeTruthy();
     expect(clearDescId).not.toBe(changeDescId);
@@ -231,7 +272,7 @@ describe('MaterialLoadout', () => {
     });
 
     fireEvent.click(screen.getByTestId('loadout-slot-1'));
-    fireEvent.click(screen.getByRole('button', { name: 'Assign' }));
+    fireEvent.click(screen.getByTestId('slot-action-assign'));
     fireEvent.click(await screen.findByTestId('spool-picker'));
 
     await waitFor(() =>
@@ -250,7 +291,7 @@ describe('MaterialLoadout', () => {
     });
 
     fireEvent.click(screen.getByTestId('loadout-slot-1'));
-    fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
+    fireEvent.click(screen.getByTestId('slot-action-unassign'));
 
     await waitFor(() =>
       expect(clearSpool).toHaveBeenCalledWith({
@@ -265,7 +306,7 @@ describe('MaterialLoadout', () => {
     renderLoadout({ reviewedRowVersion: undefined });
 
     fireEvent.click(screen.getByTestId('loadout-slot-0'));
-    const assign = screen.getByRole('button', { name: 'Assign' });
+    const assign = screen.getByTestId('slot-action-assign');
 
     expect(assign).not.toBeDisabled();
     expect(assign).toHaveAttribute('aria-disabled', 'true');
@@ -281,7 +322,7 @@ describe('MaterialLoadout', () => {
     const { rerender } = renderLoadout({ reviewedRowVersion: undefined });
 
     fireEvent.click(screen.getByTestId('loadout-slot-0'));
-    expect(screen.getByRole('button', { name: 'Assign' })).toHaveAttribute('aria-disabled', 'true');
+    expect(screen.getByTestId('slot-action-assign')).toHaveAttribute('aria-disabled', 'true');
 
     printerDetails.mockReturnValue({ data: { rowVersion: 'detail-rev-1' } });
     rerender(
@@ -292,7 +333,7 @@ describe('MaterialLoadout', () => {
       />,
     );
 
-    const assign = screen.getByRole('button', { name: 'Assign' });
+    const assign = screen.getByTestId('slot-action-assign');
     await waitFor(() => expect(assign).toBeEnabled());
     fireEvent.click(assign);
     fireEvent.click(await screen.findByTestId('spool-picker'));
@@ -309,7 +350,7 @@ describe('MaterialLoadout', () => {
     renderLoadout({ reviewedRowVersion: undefined });
 
     fireEvent.click(screen.getByTestId('loadout-slot-0'));
-    fireEvent.click(screen.getByRole('button', { name: 'Assign' }));
+    fireEvent.click(screen.getByTestId('slot-action-assign'));
     fireEvent.click(await screen.findByTestId('spool-picker'));
 
     await waitFor(() =>
@@ -335,7 +376,7 @@ describe('MaterialLoadout', () => {
         toolheads={persistedQidiBox}
       />,
     );
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Assign' })).toBeEnabled());
+    await waitFor(() => expect(screen.getByTestId('slot-action-assign')).toBeEnabled());
 
     printerDetails.mockReturnValue({ data: undefined });
     rerender(
@@ -346,8 +387,8 @@ describe('MaterialLoadout', () => {
       />,
     );
 
-    expect(screen.getByRole('button', { name: 'Assign' })).toBeEnabled();
-    fireEvent.click(screen.getByRole('button', { name: 'Assign' }));
+    expect(screen.getByTestId('slot-action-assign')).toBeEnabled();
+    fireEvent.click(screen.getByTestId('slot-action-assign'));
     fireEvent.click(await screen.findByTestId('spool-picker'));
 
     await waitFor(() =>
@@ -357,17 +398,58 @@ describe('MaterialLoadout', () => {
     );
   });
 
-  it('lets an operator cancel a selected slot without opening a picker', () => {
+  it('lets an operator dismiss a selected slot with Escape without opening a picker', () => {
     renderLoadout();
 
     fireEvent.click(screen.getByTestId('loadout-slot-0'));
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    fireEvent.keyDown(screen.getByTestId('slot-panel'), { key: 'Escape' });
 
-    expect(screen.queryByTestId('loadout-drawer')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('slot-panel')).not.toBeInTheDocument();
+  });
+
+  it.each(['covers', 'unknown', 'runout'])(
+    'hides idle %s badges and demand figures while keeping material slots', (status) => {
+      coverage.mockReturnValue({
+        printerId: 'printer-1', activeJobId: null, assignedQueuedJobCount: 0, status,
+        toolheads: [{ toolheadIndex: 2, status, remainingGrams: 100, totalDemandGrams: 400 }],
+      });
+      renderLoadout();
+      expect(screen.queryByRole('status')).not.toBeInTheDocument();
+      expect(screen.getByTestId('loadout-slot-2')).toHaveAttribute('data-status', 'unknown');
+      fireEvent.click(screen.getByTestId('loadout-slot-2'));
+      expect(screen.queryByRole('status')).not.toBeInTheDocument();
+      expect(screen.queryByText('400g needed')).not.toBeInTheDocument();
+      expect(screen.getByTestId('material-loadout')).toBeInTheDocument();
+    },
+  );
+
+  it('surfaces queued-job coverage only when it predicts a runout', () => {
+    coverage.mockReturnValue({
+      printerId: 'printer-1', activeJobId: null, assignedQueuedJobCount: 1,
+      status: 'covers', toolheads: [],
+    });
+    const { rerender } = renderLoadout();
+    // Option 4 keeps the resting state to one line: an all-clear adds nothing.
+    expect(screen.queryByText('Filament OK')).not.toBeInTheDocument();
+
+    coverage.mockReturnValue({
+      printerId: 'printer-1', activeJobId: null, assignedQueuedJobCount: 1,
+      status: 'runout', toolheads: [],
+    });
+    rerender(
+      <MaterialLoadout
+        printerId="printer-1"
+        mmuStatus={mmu([gate(0), gate(1), gate(2), gate(3)])}
+        toolheads={persistedQidiBox}
+        reviewedRowVersion="rev-1"
+      />,
+    );
+    expect(screen.getByText('Runout risk')).toBeInTheDocument();
   });
 
   it('joins coverage on the g-code index so figures land on the right slot', () => {
     coverage.mockReturnValue({
+      activeJobId: 'job-1',
       printerId: 'printer-1',
       printerName: 'Qidi Plus 4',
       status: 'runout',
@@ -382,9 +464,10 @@ describe('MaterialLoadout', () => {
     expect(screen.getByTestId('loadout-slot-1')).toHaveAttribute('data-status', 'unknown');
 
     fireEvent.click(screen.getByTestId('loadout-slot-2'));
-    const drawer = screen.getByTestId('loadout-drawer');
-    expect(within(drawer).getByText('100g left')).toBeInTheDocument();
-    expect(within(drawer).getByText('400g needed')).toBeInTheDocument();
+    const drawer = screen.getByTestId('slot-panel');
+    expect(within(drawer).getByText('Needs 400 g')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('loadout-slot-1'));
+    expect(within(screen.getByTestId('slot-panel')).queryByText(/Needs/)).not.toBeInTheDocument();
   });
 
   // Regression test for issue #1684: this surface (reached from the
@@ -396,6 +479,7 @@ describe('MaterialLoadout', () => {
   // ring/badge to "unknown" regardless of what the backend last reported.
   it('downgrades every coverage status to unknown when the printer is offline (#1684)', () => {
     coverage.mockReturnValue({
+      activeJobId: 'job-1',
       printerId: 'printer-1',
       printerName: 'Qidi Plus 4',
       status: 'covers',
@@ -407,15 +491,16 @@ describe('MaterialLoadout', () => {
 
     renderLoadout({ isOnline: false });
 
-    // Header badge must read "unknown", never "Filament OK".
-    expect(screen.getByText('Filament unknown')).toBeInTheDocument();
+    // Never claim "Filament OK" for a printer that cannot be verified.
     expect(screen.queryByText('Filament OK')).not.toBeInTheDocument();
+    expect(screen.queryByText('Runout risk')).not.toBeInTheDocument();
     // Per-slot status must also be downgraded, not just the header rollup.
     expect(screen.getByTestId('loadout-slot-2')).toHaveAttribute('data-status', 'unknown');
   });
 
   it('suppresses the runout chip and warning ring when offline even for a last-known runout status (#1684)', () => {
     coverage.mockReturnValue({
+      activeJobId: 'job-1',
       printerId: 'printer-1',
       printerName: 'Qidi Plus 4',
       status: 'runout',
@@ -432,17 +517,19 @@ describe('MaterialLoadout', () => {
     expect(screen.getByTestId('loadout-slot-2')).toHaveAttribute('data-status', 'unknown');
   });
 
-  it('keeps existing (online) badge behavior when isOnline is not provided (back-compat)', () => {
+  it('keeps existing (online) runout behavior when isOnline is not provided (back-compat)', () => {
     coverage.mockReturnValue({
+      activeJobId: 'job-1',
       printerId: 'printer-1',
       printerName: 'Qidi Plus 4',
-      status: 'covers',
-      toolheads: [],
+      status: 'runout',
+      toolheads: [{ toolheadIndex: 2, status: 'runout', remainingGrams: 100, totalDemandGrams: 400 }],
     });
 
     renderLoadout();
 
-    expect(screen.getByText('Filament OK')).toBeInTheDocument();
+    expect(screen.getByText('Runout risk')).toBeInTheDocument();
+    expect(screen.getByTestId('loadout-slot-2')).toHaveAttribute('data-status', 'runout');
   });
 
   it('calls a toolchanger slot a tool, never an AMS gate', () => {
@@ -451,13 +538,13 @@ describe('MaterialLoadout', () => {
       toolheads: [persistedQidiBox[0]],
     });
 
-    expect(screen.getByText('Toolheads')).toBeInTheDocument();
-    expect(screen.queryByText(/AMS/)).not.toBeInTheDocument();
+    expect(screen.getByTestId('filament-summary')).toHaveTextContent('2 tools');
+    expect(screen.queryByText(/AMS|slots/)).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId('loadout-slot-1'));
-    const drawer = screen.getByTestId('loadout-drawer');
-    expect(within(drawer).getByText('T1')).toBeInTheDocument();
-    expect(within(drawer).queryByText('Gate')).not.toBeInTheDocument();
+    const drawer = screen.getByRole('region', { name: 'T1' });
+    expect(within(drawer).getByTestId('slot-action-assign')).toHaveAccessibleName('Assign spool to T1');
+    expect(within(drawer).queryByText(/Gate|Slot/)).not.toBeInTheDocument();
   });
 
   it('sends the unshifted index on a toolchanger', async () => {
@@ -467,7 +554,7 @@ describe('MaterialLoadout', () => {
     });
 
     fireEvent.click(screen.getByTestId('loadout-slot-1'));
-    fireEvent.click(screen.getByRole('button', { name: 'Assign' }));
+    fireEvent.click(screen.getByTestId('slot-action-assign'));
     fireEvent.click(screen.getByTestId('spool-picker'));
 
     await waitFor(() =>
@@ -492,15 +579,15 @@ describe('MaterialLoadout', () => {
     renderLoadout({ toolheads: undefined });
 
     fireEvent.click(screen.getByTestId('loadout-slot-0'));
-    const assign = screen.getByRole('button', { name: 'Assign' });
+    const assign = screen.getByTestId('slot-action-assign');
 
     // explainedDisabled: not natively disabled, but aria-disabled and inert.
     expect(assign).not.toBeDisabled();
     expect(assign).toHaveAttribute('aria-disabled', 'true');
     expect(assign).toHaveAttribute('tabindex', '0');
-    expect(
-      screen.getByText(/Materials topology not yet loaded/),
-    ).toBeInTheDocument();
+    // Toolheads not fetched yet: the hint says "loading", not "mismatch".
+    expect(screen.getByText(/Loading saved gate layout/)).toBeInTheDocument();
+    expect(screen.queryByText(/does not match the attached hardware/)).not.toBeInTheDocument();
 
     fireEvent.click(assign);
     expect(screen.queryByTestId('spool-picker')).not.toBeInTheDocument();
@@ -517,11 +604,11 @@ describe('MaterialLoadout', () => {
     });
 
     fireEvent.click(screen.getByTestId('loadout-slot-0'));
-    const assign = screen.getByRole('button', { name: 'Assign' });
+    const assign = screen.getByTestId('slot-action-assign');
 
     expect(assign).not.toBeDisabled();
     expect(assign).toHaveAttribute('aria-disabled', 'true');
-    expect(screen.getByText(/Materials topology not yet loaded/)).toBeInTheDocument();
+    expect(screen.getByText(/Saved gate layout does not match the attached hardware/)).toBeInTheDocument();
     fireEvent.click(assign);
     expect(setSpool).not.toHaveBeenCalled();
   });
@@ -531,7 +618,7 @@ describe('MaterialLoadout', () => {
     renderLoadout();
 
     fireEvent.click(screen.getByTestId('loadout-slot-0'));
-    const assign = screen.getByRole('button', { name: 'Assign' });
+    const assign = screen.getByTestId('slot-action-assign');
 
     expect(assign).toBeEnabled();
     expect(assign).not.toHaveAttribute('aria-disabled');
@@ -546,7 +633,7 @@ describe('MaterialLoadout', () => {
     renderLoadout();
 
     fireEvent.click(screen.getByTestId('loadout-slot-0'));
-    const assign = screen.getByRole('button', { name: 'Assign' });
+    const assign = screen.getByTestId('slot-action-assign');
 
     expect(assign).toBeDisabled();
     expect(assign).not.toHaveAttribute('aria-disabled', 'true');
@@ -559,12 +646,14 @@ describe('MaterialLoadout', () => {
     renderLoadout({ reviewedRowVersion: undefined });
 
     fireEvent.click(screen.getByTestId('loadout-slot-0'));
-    const assign = screen.getByRole('button', { name: 'Assign' });
+    const assign = screen.getByTestId('slot-action-assign');
 
-    expect(assign).toHaveAttribute('aria-describedby', 'loadout-action-desc-printer-1');
-    const desc = document.getElementById('loadout-action-desc-printer-1');
+    const descId = assign.getAttribute('aria-describedby');
+    expect(descId).toBeTruthy();
+    const desc = document.getElementById(descId!);
     expect(desc).toBeInTheDocument();
     expect(desc).toHaveTextContent(/revision unavailable/i);
+    expect(assign).toHaveAccessibleDescription(/revision unavailable/i);
   });
 
   it('keeps external hotend testid distinct from the first MMU gate at G-code 0 (blocker 5)', () => {
@@ -573,6 +662,7 @@ describe('MaterialLoadout', () => {
     // distinguishable via testids and data-source, and only the gate row must
     // receive the g-code-indexed coverage entry.
     coverage.mockReturnValue({
+      activeJobId: 'job-1',
       printerId: 'printer-1',
       printerName: 'Qidi Plus 4',
       status: 'runout',
@@ -614,6 +704,7 @@ describe('MaterialLoadout', () => {
     // A partial/degraded coverage payload must not take the whole printer card
     // down with it — `toolheads` is optional on the wire.
     coverage.mockReturnValue({
+      activeJobId: 'job-1',
       printerId: 'printer-1',
       printerName: 'Qidi Plus 4',
       status: 'unknown',
@@ -633,10 +724,10 @@ describe('MaterialLoadout', () => {
     expect(screen.getByTestId('loadout-slot-0')).not.toHaveAttribute('data-disabled');
 
     fireEvent.click(disabledSlot);
-    const drawer = screen.getByTestId('loadout-drawer');
-    expect(within(drawer).getByText('Disabled')).toBeInTheDocument();
+    const drawer = screen.getByTestId('slot-panel');
+    expect(within(drawer).getByText('Disabled on device')).toBeInTheDocument();
 
-    const assign = screen.getByRole('button', { name: 'Assign' });
+    const assign = screen.getByTestId('slot-action-assign');
     expect(assign).not.toBeDisabled();
     expect(assign).toHaveAttribute('aria-disabled', 'true');
     fireEvent.click(assign);
@@ -683,7 +774,7 @@ describe('MaterialLoadout', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Assign' }));
+    fireEvent.click(screen.getByTestId('slot-action-assign'));
     fireEvent.click(await screen.findByTestId('spool-picker'));
 
     await waitFor(() =>
@@ -715,7 +806,7 @@ describe('MaterialLoadout', () => {
     // Opening a slot again means the user has now reviewed the newer state.
     fireEvent.click(screen.getByTestId('loadout-slot-3'));
 
-    fireEvent.click(screen.getByRole('button', { name: 'Assign' }));
+    fireEvent.click(screen.getByTestId('slot-action-assign'));
     fireEvent.click(await screen.findByTestId('spool-picker'));
 
     await waitFor(() =>
@@ -737,7 +828,7 @@ describe('MaterialLoadout', () => {
     });
 
     fireEvent.click(screen.getByTestId('loadout-slot-1'));
-    fireEvent.click(screen.getByRole('button', { name: 'Change' }));
+    fireEvent.click(screen.getByTestId('slot-action-change'));
     fireEvent.click(await screen.findByTestId('spool-picker'));
 
     await waitFor(() =>
@@ -746,7 +837,7 @@ describe('MaterialLoadout', () => {
       ),
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
+    fireEvent.click(screen.getByTestId('slot-action-unassign'));
 
     await waitFor(() =>
       expect(clearSpool).toHaveBeenCalledWith(
@@ -760,18 +851,18 @@ describe('MaterialLoadout', () => {
     renderLoadout();
 
     fireEvent.click(screen.getByTestId('loadout-slot-2'));
-    fireEvent.click(screen.getByRole('button', { name: 'Assign' }));
+    fireEvent.click(screen.getByTestId('slot-action-assign'));
     fireEvent.click(await screen.findByTestId('spool-picker'));
 
     await waitFor(() => expect(setSpool).toHaveBeenCalled());
     // The picker stays mounted so the user can retry rather than losing context.
     expect(screen.getByTestId('spool-picker')).toBeInTheDocument();
-    expect(screen.getByTestId('loadout-drawer')).toBeInTheDocument();
+    expect(screen.getByTestId('slot-panel')).toBeInTheDocument();
   });
 
   // ── Behaviour inherited from the retired AmsSlotVisualization suite ──
 
-  it('reports how many slots carry filament', () => {
+  it('marks every unassigned slot rather than implying physical loading', () => {
     renderLoadout({
       mmuStatus: mmu([
         gate(0, { material: 'PLA' }),
@@ -781,7 +872,10 @@ describe('MaterialLoadout', () => {
       ]),
     });
 
-    expect(screen.getByText(/1\s*\/\s*4/)).toBeInTheDocument();
+    for (const index of [0, 1, 2, 3]) {
+      expect(screen.getByTestId(`loadout-slot-${index}`)).toHaveAttribute('data-state', 'none');
+    }
+    expect(screen.queryByText(/assigned/)).not.toBeInTheDocument();
   });
 
   it('describes an empty slot as empty rather than showing a stale material', () => {
@@ -789,14 +883,13 @@ describe('MaterialLoadout', () => {
       mmuStatus: mmu([gate(0, { material: undefined, spoolId: 0 }), gate(1), gate(2), gate(3)]),
     });
 
-    expect(
-      screen.getByRole('button', { name: /G1 gate, empty/i }),
-    ).toBeInTheDocument();
+    expect(screen.getByTestId('loadout-slot-0')).toHaveAccessibleName('G1: Assign spool');
+    expect(screen.getByTestId('loadout-slot-0')).toHaveAttribute('data-state', 'none');
 
     fireEvent.click(screen.getByTestId('loadout-slot-0'));
-    expect(
-      within(screen.getByTestId('loadout-drawer')).getByText('No spool assigned'),
-    ).toBeInTheDocument();
+    const panel = screen.getByTestId('slot-panel');
+    expect(within(panel).getByTestId('slot-action-assign')).toBeInTheDocument();
+    expect(within(panel).queryByText('No spool assigned')).not.toBeInTheDocument();
   });
 
   it('exposes the device-reported slot name without crowding the rail', async () => {
@@ -804,30 +897,34 @@ describe('MaterialLoadout', () => {
       mmuStatus: mmu([gate(0, { name: 'Left feeder' }), gate(1), gate(2), gate(3)]),
     });
 
-    // The rail keeps the terse label; the full device name rides along as a
-    // tooltip so a 4-slot strip stays scannable.
+    // The rail keeps the terse label; the full device name appears in the
+    // slot panel so a 4-slot strip stays scannable.
     const slot = screen.getByTestId('loadout-slot-0');
     expect(within(slot).getByText('G1')).toBeInTheDocument();
     expect(screen.queryByText('Left feeder')).not.toBeInTheDocument();
 
-    fireEvent.mouseEnter(slot.parentElement as HTMLElement);
-    expect(await screen.findByRole('tooltip')).toHaveTextContent('Left feeder');
+    fireEvent.click(slot);
+    expect(await screen.findByTestId('slot-device-name')).toHaveTextContent('Left feeder');
   });
 
-  it('does not wrap a slot in a tooltip when the device name adds nothing', () => {
+  it('does not repeat the device name when it adds nothing', () => {
     renderLoadout({ mmuStatus: mmu([gate(0, { name: 'G1' }), gate(1), gate(2), gate(3)]) });
 
-    fireEvent.mouseEnter(
-      screen.getByTestId('loadout-slot-0').parentElement as HTMLElement,
-    );
-    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('loadout-slot-0'));
+    expect(screen.queryByTestId('slot-device-name')).not.toBeInTheDocument();
+  });
+
+  it('does not restate a generic positional name such as "Gate 1"', () => {
+    renderLoadout({ mmuStatus: mmu([gate(0, { name: 'Gate 1' }), gate(1), gate(2), gate(3)]) });
+
+    fireEvent.click(screen.getByTestId('loadout-slot-0'));
+    expect(screen.queryByTestId('slot-device-name')).not.toBeInTheDocument();
   });
 
   it('still renders every slot in compact mode', () => {
     renderLoadout({ compact: true });
 
-    const rail = screen.getByTestId('material-loadout');
-    expect(within(rail).getAllByRole('button')).toHaveLength(4);
+    expect(screen.getByTestId('material-loadout').querySelectorAll('[data-testid^="loadout-slot-"]')).toHaveLength(4);
   });
 
   it('renders a single-slot rail for a single-toolhead printer', () => {
@@ -866,6 +963,9 @@ describe('MaterialLoadout', () => {
 
     const slot1 = screen.getByTestId('loadout-slot-1');
     expect(slot1).toHaveAttribute('data-active', 'selected');
+    expect(slot1).not.toHaveAttribute('aria-current');
+    // A feed with nothing loaded is never presented as the in-use spool.
+    expect(screen.queryByTestId('filament-summary-line')).not.toBeInTheDocument();
   });
 
   it('marks the active slot for a toolchanger using activeTool', () => {
@@ -943,6 +1043,131 @@ describe('MaterialLoadout', () => {
     renderLoadout({ mmuStatus: status });
 
     const slot1 = screen.getByTestId('loadout-slot-1');
-    expect(slot1.getAttribute('aria-label')).toContain('active and loaded');
+    expect(slot1.getAttribute('aria-label')).toContain('in use');
   });
+});
+
+
+describe('MaterialLoadout independent material facts', () => {
+  beforeEach(() => {
+    permissions.assign = permissions.operate = true;
+    inventory.data = undefined;
+    inventory.isError = false;
+    coverage.mockReturnValue(undefined);
+    pending.set = pending.clear = pending.clearActive = false;
+    setSpool.mockReset().mockResolvedValue('rev-2');
+    clearSpool.mockReset().mockResolvedValue('rev-2');
+  });
+
+  it('distinguishes unassigned, confirmed depleted, unknown and unloaded without rings', () => {
+    inventory.data = [{ id: 7, name: 'PLA', material: 'PLA', remainingWeightG: 0, inUse: false }];
+    renderLoadout({ mmuStatus: mmu([gate(0), gate(1, { spoolId: 7 }), gate(2, { spoolId: 8 }), gate(3, { spoolId: 9, status: MmuGateStatus.Empty })]) });
+    const slot = (i: number) => screen.getByTestId(`loadout-slot-${i}`);
+    // No spool assigned: spool outline with a "+" badge.
+    expect(slot(0)).toHaveAttribute('data-state', 'none');
+    expect(within(slot(0)).getByTestId('slot-badge-assign')).toBeInTheDocument();
+    // Confirmed depleted by Spoolman: a distinct "!" badge, never the "+".
+    expect(slot(1)).toHaveAttribute('data-state', 'depleted');
+    expect(within(slot(1)).getByTestId('slot-badge-depleted')).toBeInTheDocument();
+    expect(within(slot(1)).queryByTestId('slot-badge-assign')).not.toBeInTheDocument();
+    // The gate still reports live filament, so only the inventory is at 0 g.
+    expect(slot(1)).toHaveAccessibleName(/0 g remaining/);
+    expect(slot(1)).not.toHaveAccessibleName(/empty/);
+    // Unknown remaining is still an assigned spool and never shows a gram figure.
+    expect(slot(2)).toHaveAttribute('data-state', 'assigned');
+    expect(slot(2)).not.toHaveAccessibleName(/\d+ g/);
+    // A device-empty gate keeps its binding; feed state does not fake depletion.
+    expect(slot(3)).toHaveAttribute('data-state', 'assigned');
+    fireEvent.click(slot(3));
+    expect(within(screen.getByTestId('slot-panel')).getByText('Spool #9')).toBeInTheDocument();
+    expect(screen.getByTestId('material-loadout').querySelector('[stroke-dasharray]')).toBeNull();
+  });
+
+  it.each([1, 2])('assigns through the same picker for %s physical toolheads', async (count) => {
+    renderLoadout({ mmuStatus: undefined, toolheads: Array.from({ length: count }, (_, index) => ({ id: `th-${index}`, index, name: `Tool ${index}`, toolheadType: 'Physical' }) as ToolheadDto) });
+    const slot = screen.getByTestId(`loadout-slot-${count - 1}`);
+    expect(slot).toHaveAttribute('data-state', 'none');
+    expect(screen.queryByText(/No spool assigned|Loading state unknown/)).not.toBeInTheDocument();
+    fireEvent.click(slot);
+    fireEvent.click(screen.getByTestId('slot-action-assign'));
+    fireEvent.click(screen.getByTestId('spool-picker'));
+    await waitFor(() => expect(setSpool).toHaveBeenCalledWith({ printerId: 'printer-1', toolheadIndex: count - 1, spoolId: 99, reviewedRowVersion: 'rev-1' }));
+  });
+
+  it('unassigns a synthesized legacy T0 through active-spool and uses its returned revision for the next bind', async () => {
+    clearActiveSpool.mockReset().mockResolvedValue('rev-after-clear');
+    setActiveSpool.mockReset().mockResolvedValue('rev-after-assign');
+    renderLoadout({
+      mmuStatus: undefined,
+      toolheads: [],
+      currentSpoolId: 42,
+    });
+
+    fireEvent.click(screen.getByTestId('loadout-slot-0'));
+    fireEvent.click(screen.getByTestId('slot-action-unassign'));
+
+    await waitFor(() => expect(clearActiveSpool).toHaveBeenCalledWith({
+      printerId: 'printer-1',
+      reviewedRowVersion: 'rev-1',
+    }));
+    expect(clearSpool).not.toHaveBeenCalled();
+
+    // The post-clear revision must be the anchor for the next write even if
+    // the printer-detail query has not refreshed yet.
+    fireEvent.click(screen.getByTestId('slot-action-change'));
+    fireEvent.click(await screen.findByTestId('spool-picker'));
+    // Props still describe a printer-scalar binding, so the rebind goes through
+    // the same scalar endpoint — never a toolhead write.
+    await waitFor(() => expect(setActiveSpool).toHaveBeenCalledWith({
+      printerId: 'printer-1',
+      spoolId: 99,
+      reviewedRowVersion: 'rev-after-clear',
+    }));
+    expect(setSpool).not.toHaveBeenCalled();
+  });
+
+  it('keeps an empty single-feed printer assignable after saved topology loads', async () => {
+    renderLoadout({ mmuStatus: undefined, toolheads: [] });
+    fireEvent.click(screen.getByTestId('loadout-slot-0'));
+    fireEvent.click(screen.getByTestId('slot-action-assign'));
+    fireEvent.click(screen.getByTestId('spool-picker'));
+    await waitFor(() => expect(setSpool).toHaveBeenCalledWith(expect.objectContaining({ toolheadIndex: 0 })));
+  });
+
+  it('blocks inventory writes without permission while slots remain inspectable', () => {
+    permissions.assign = false;
+    renderLoadout();
+    fireEvent.click(screen.getByTestId('loadout-slot-0'));
+    fireEvent.click(screen.getByTestId('slot-action-assign'));
+    expect(screen.getByTestId('slot-action-assign')).toHaveAttribute('aria-disabled', 'true');
+    expect(screen.queryByTestId('spool-picker')).not.toBeInTheDocument();
+    expect(setSpool).not.toHaveBeenCalled();
+  });
+
+  it('reports inventory errors as unknown, not depleted', () => {
+    inventory.data = [{ id: 7, name: 'PLA', material: 'PLA', remainingWeightG: 0, inUse: false }];
+    inventory.isError = true;
+    renderLoadout({ mmuStatus: mmu([gate(0, { spoolId: 7 })]), toolheads: persistedQidiBox.slice(0, 2) });
+    expect(screen.getByTestId('loadout-slot-0')).toHaveAttribute('data-state', 'assigned');
+    expect(screen.queryByTestId('slot-badge-depleted')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Spoolman unavailable/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
+  });
+});
+
+
+it('prevents rapid repeated confirmation from dispatching concurrent spool writes', async () => {
+  permissions.assign = permissions.operate = true;
+  inventory.data = undefined;
+  inventory.isError = false;
+  let finish: (revision: string) => void = () => {};
+  setSpool.mockReset().mockImplementation(() => new Promise<string>((resolve) => { finish = resolve; }));
+  renderLoadout();
+  fireEvent.click(screen.getByTestId('loadout-slot-0'));
+  fireEvent.click(screen.getByTestId('slot-action-assign'));
+  fireEvent.click(screen.getByTestId('spool-picker'));
+  fireEvent.click(screen.getByTestId('spool-picker'));
+  expect(setSpool).toHaveBeenCalledTimes(1);
+  finish('rev-2');
+  await waitFor(() => expect(screen.queryByTestId('spool-picker')).not.toBeInTheDocument());
 });

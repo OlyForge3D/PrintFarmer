@@ -58,7 +58,7 @@ public interface ICameraRepository
     void Remove(Camera camera);
 
     /// <summary>
-    /// Gets all cameras attached to a specific printer.
+    /// Gets all cameras linked to a specific printer (primary camera first).
     /// </summary>
     /// <param name="printerId">The printer ID.</param>
     /// <param name="ct">Cancellation token.</param>
@@ -73,7 +73,7 @@ public interface ICameraRepository
     Task<Camera?> FindByPrinterIdAndTypeAsync(Guid printerId, CameraType type, CancellationToken ct);
 
     /// <summary>
-    /// Gets all enabled cameras with their associated Printer navigation property loaded.
+    /// Gets all enabled cameras with their printer links (and linked printers) loaded.
     /// </summary>
     /// <param name="ct">Cancellation token.</param>
     Task<List<Camera>> GetEnabledWithPrinterAsync(CancellationToken ct);
@@ -86,4 +86,31 @@ public interface ICameraRepository
     /// <param name="source">The camera source (Moonraker, PrusaLink, etc.).</param>
     /// <param name="ct">Cancellation token.</param>
     Task<Camera?> FindByPrinterIdAndSourceAsync(Guid printerId, CameraSource source, CancellationToken ct);
+
+    /// <summary>
+    /// Returns true when the printer already has a primary camera link.
+    /// </summary>
+    /// <param name="printerId">The printer ID.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<bool> HasPrimaryCameraAsync(Guid printerId, CancellationToken ct);
+
+    /// <summary>
+    /// Queries cameras with optional filters, with printer links, linked printers (and their locations)
+    /// and the assigned location loaded.
+    /// </summary>
+    /// <param name="printerId">When set, only cameras linked to this printer.</param>
+    /// <param name="locationId">When set, only cameras whose effective location is this location.</param>
+    /// <param name="enabledOnly">When true, only enabled cameras.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<List<Camera>> QueryAsync(Guid? printerId, Guid? locationId, bool enabledOnly, CancellationToken ct);
+
+    /// <summary>
+    /// Gets the tracked camera links of a printer, with each link's camera loaded.
+    /// </summary>
+    Task<List<CameraPrinter>> GetPrinterLinksAsync(Guid printerId, CancellationToken ct);
+
+    /// <summary>
+    /// Removes a camera-printer link.
+    /// </summary>
+    void RemoveLink(CameraPrinter link);
 }

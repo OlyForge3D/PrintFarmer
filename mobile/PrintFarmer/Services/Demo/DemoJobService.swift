@@ -2,7 +2,24 @@ import Foundation
 
 // MARK: - Demo Job Service
 
-final class DemoJobService: JobServiceProtocol, @unchecked Sendable {
+class DemoJobService: JobServiceProtocol, @unchecked Sendable {
+
+    private let jobNameOverrides: [UUID: String]
+    private let queueJobOverrides: [QueuedPrintJobResponse]
+    private let hiddenJobIDs: Set<UUID>
+    private let dispatchEnabled: Bool
+
+    init(
+        jobNameOverrides: [UUID: String] = [:],
+        queueJobOverrides: [QueuedPrintJobResponse] = [],
+        hiddenJobIDs: Set<UUID> = [],
+        dispatchEnabled: Bool = true
+    ) {
+        self.jobNameOverrides = jobNameOverrides
+        self.queueJobOverrides = queueJobOverrides
+        self.hiddenJobIDs = hiddenJobIDs
+        self.dispatchEnabled = dispatchEnabled
+    }
 
     private static let jobs: [PrintJob] = {
         let now = Date()
@@ -131,12 +148,13 @@ final class DemoJobService: JobServiceProtocol, @unchecked Sendable {
         }
     }
 
-    func listAllJobs() async throws -> [QueuedPrintJobResponse] {
-        Self.jobs.map { job in
-            QueuedPrintJobResponse(
+    func listAllJobs() async throws -> QueuedPrintJobPage {
+        let jobs = Self.jobs.filter { !hiddenJobIDs.contains($0.id) }.map { job in
+            let displayName = jobNameOverrides[job.id] ?? job.gcodeFileName
+            return QueuedPrintJobResponse(
                 job: QueuedJobInfo(
-                    id: job.id.uuidString, name: job.gcodeFileName,
-                    fileName: job.gcodeFileName,
+                    id: job.id.uuidString, name: displayName,
+                    fileName: displayName,
                     assignedPrinterId: job.assignedPrinterId?.uuidString,
                     printerName: job.assignedPrinterName, printerModel: nil,
                     status: job.status?.rawValue ?? "Queued",
@@ -152,6 +170,21 @@ final class DemoJobService: JobServiceProtocol, @unchecked Sendable {
                     remainingCopies: job.remainingCopies),
                 gcodeFile: nil, assignedPrinter: nil,
                 estimatedStartTime: nil, estimatedCompletionTime: nil)
+        } + queueJobOverrides
+        return QueuedPrintJobPage(jobs: jobs, mayHaveMore: false)
+    }
+
+    func moveQueuedJob(
+        id: UUID,
+        reviewedRowVersion: String,
+        neighbor: QueuePositionNeighbor
+    ) async throws -> MoveQueuedJobResponse {
+        throw ServiceError.notImplemented("reorder jobs — read-only in demo mode")
+    }
+
+    func listPrinterQueue(printerId: UUID) async throws -> [QueuedPrintJobResponse] {
+        try await listAllJobs().jobs.filter {
+            $0.job.assignedPrinterId?.lowercased() == printerId.uuidString.lowercased()
         }
     }
 
@@ -179,7 +212,10 @@ final class DemoJobService: JobServiceProtocol, @unchecked Sendable {
         id: UUID,
         reviewedRowVersion: String
     ) async throws -> JobDispatchResult {
-        .accepted(
+        guard dispatchEnabled else {
+            throw ServiceError.notImplemented("job dispatch in the visual-acceptance fixture")
+        }
+        return .accepted(
             DispatchJobResponse(
                 id: id.uuidString,
                 rowVersion: reviewedRowVersion,
@@ -199,6 +235,11 @@ final class DemoJobService: JobServiceProtocol, @unchecked Sendable {
         )
     }
     func cancel(id: UUID, reviewedRowVersion: String) async throws {}
+
+    func rerun(id: UUID, reviewedRowVersion: String) async throws {
+        throw ServiceError.notImplemented("rerun jobs in demo mode")
+    }
+
     func abort(id: UUID, reviewedRowVersion: String) async throws {}
     func pause(id: UUID, reviewedRowVersion: String) async throws {}
     func resume(id: UUID, reviewedRowVersion: String) async throws {}

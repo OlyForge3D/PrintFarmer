@@ -3,7 +3,6 @@ import SwiftUI
 enum RootNavigationChrome {
     static let minimumTouchTarget: CGFloat = 44
     static let serverSwitcherIdentifier = "navigation.serverSwitcher"
-    static let modeControlIdentifier = "navigation.modeControl"
     static let accountButtonIdentifier = "navigation.account"
     static let accountContainerIdentifier = "account.root"
 }
@@ -35,70 +34,73 @@ extension View {
 
 private struct RootNavigationChromeModifier<ScreenActions: View>: ViewModifier {
     @Environment(AppRouter.self) private var router
-    @Environment(ServiceContainer.self) private var services
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     let tab: AppTab
     let screenActions: ScreenActions
 
     func body(content: Content) -> some View {
-        content
-            .safeAreaInset(edge: .top, spacing: 0) {
-                if router.shouldShowModeControl(for: tab) {
-                    modeControl
-                }
-            }
-
+        navigationContent(content)
             .toolbar {
-                if router.isAtRoot(tab) {
-                    ToolbarItem(placement: .topBarLeading) {
-                        ServerSwitcherMenu(style: .toolbar)
-                    }
-
+                if sizeClass == .regular && router.isAtRoot(tab) {
                     ToolbarItem(placement: .topBarTrailing) {
-                        HStack(spacing: 4) {
-                            screenActions
-                            accountButton
-                        }
+                        screenActions
+                    }
+                    ToolbarItem(placement: .topBarTrailing) {
+                        accountButton
                     }
                 }
             }
+            .toolbarBackground(Color.pfBackground, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
     }
 
-    private var modeControl: some View {
-        Picker(
-            "Navigation mode",
-            selection: Binding(
-                get: { router.activeMode },
-                set: {
-                    router.setNavigationMode(
-                        $0,
-                        capabilities: services.capabilitiesService.resolved
-                    )
+    @ViewBuilder
+    private func navigationContent<Content: View>(_ content: Content) -> some View {
+        if sizeClass == .compact && router.isAtRoot(tab) {
+            content
+                .toolbar(.hidden, for: .navigationBar)
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    compactHeader
                 }
-            )
-        ) {
-            Text("Floor").tag(OversightMode.floor)
-            Text("Oversight").tag(OversightMode.oversight)
+        } else {
+            content
         }
-        .pickerStyle(.segmented)
-        .frame(minHeight: RootNavigationChrome.minimumTouchTarget)
-        .padding(.horizontal)
-        .background(.bar)
-        .overlay(alignment: .bottom) {
-            Divider()
+    }
+
+    private var compactHeader: some View {
+        HStack(spacing: 12) {
+            Text(tab.title)
+                .font(.headline.weight(.semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .foregroundStyle(Color.pfTextPrimary)
+                .accessibilityAddTraits(.isHeader)
+                .accessibilityIdentifier("navigation.title")
+            Spacer(minLength: 8)
+            screenActions
+            accountButton
         }
-        .accessibilityLabel("Navigation mode")
-        .accessibilityHint("Switches between Floor work and Oversight.")
-        .accessibilityIdentifier(RootNavigationChrome.modeControlIdentifier)
+        .padding(.horizontal, 16)
+        .frame(height: 52)
+        .background(Color.pfBackground)
+        .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
     }
 
     private var accountButton: some View {
         NavigationLink(value: AppDestination.account) {
             Image(systemName: "person.crop.circle")
-                .imageScale(.large)
+                .font(.system(size: 18))
+                .foregroundStyle(Color.pfTextSecondary)
+                .frame(width: 32, height: 32)
+                .background(Color.pfBackgroundTertiary, in: Circle())
+                .overlay {
+                    Circle().strokeBorder(Color.pfBorder, lineWidth: 1)
+                }
                 .frame(
-                    minWidth: RootNavigationChrome.minimumTouchTarget,
-                    minHeight: RootNavigationChrome.minimumTouchTarget
+                    width: RootNavigationChrome.minimumTouchTarget,
+                    height: RootNavigationChrome.minimumTouchTarget
                 )
                 .contentShape(Rectangle())
         }

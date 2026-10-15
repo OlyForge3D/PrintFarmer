@@ -54,6 +54,14 @@ public interface IMoonrakerClient : IBackendClient
 
     Task<PrinterCompositeStatus> GetCompositeStatusAsync(Uri baseUrl, CancellationToken ct = default);
 
+    /// <summary>
+    /// Gets comprehensive status while authenticating job and thumbnail metadata requests.
+    /// </summary>
+    Task<PrinterCompositeStatus> GetCompositeStatusAsync(
+        string baseUrl,
+        PrinterCredential? credential,
+        CancellationToken ct = default);
+
     /// <summary>Reads current movement coordinates, effective frame, homing and readiness in one authenticated response.</summary>
     Task<PrinterStatusDto> GetMovementStatusAsync(Printer printer, CancellationToken ct);
 

@@ -17,7 +17,11 @@ public class PrinterStatusBroadcastGateTests
         double? progress = null,
         string? jobName = null,
         double? hotendTemp = 25.0,
-        double? bedTemp = 24.0) => new(
+        double? bedTemp = 24.0,
+        int? currentLayer = null,
+        int? totalLayers = null,
+        double? fanSpeedPercent = null,
+        double? liveZOffsetMm = null) => new(
             Id: Guid.Parse("11111111-1111-1111-1111-111111111111"),
             IsOnline: isOnline,
             State: state,
@@ -33,7 +37,11 @@ public class PrinterStatusBroadcastGateTests
             HotendTarget: null,
             BedTarget: null,
             HomedAxes: null,
-            SpoolInfo: null);
+            SpoolInfo: null,
+            CurrentLayer: currentLayer,
+            TotalLayers: totalLayers,
+            FanSpeedPercent: fanSpeedPercent,
+            LiveZOffsetMm: liveZOffsetMm);
 
     [Fact]
     public void ShouldBroadcast_WhenLastSentIsNull_ReturnsTrue()
@@ -68,6 +76,10 @@ public class PrinterStatusBroadcastGateTests
     [InlineData("isOnline")]
     [InlineData("hotendTemp")]
     [InlineData("bedTemp")]
+    [InlineData("currentLayer")]
+    [InlineData("totalLayers")]
+    [InlineData("fanSpeedPercent")]
+    [InlineData("liveZOffsetMm")]
     public void ShouldBroadcast_WhenAnySingleFieldDiffers_ReturnsTrue(string changedField)
     {
         PrinterStatusUpdate lastSent = MakeUpdate();
@@ -79,10 +91,34 @@ public class PrinterStatusBroadcastGateTests
             "isOnline" => MakeUpdate(isOnline: false),
             "hotendTemp" => MakeUpdate(hotendTemp: 210.0),
             "bedTemp" => MakeUpdate(bedTemp: 60.0),
+            "currentLayer" => MakeUpdate(currentLayer: 3),
+            "totalLayers" => MakeUpdate(totalLayers: 20),
+            "fanSpeedPercent" => MakeUpdate(fanSpeedPercent: 65),
+            "liveZOffsetMm" => MakeUpdate(liveZOffsetMm: 0.025),
             _ => throw new ArgumentOutOfRangeException(nameof(changedField)),
         };
 
         PrinterStatusBroadcastGate.ShouldBroadcast(lastSent, update).Should().BeTrue();
+    }
+
+    [Fact]
+    public void ToStatusDto_PreservesLayerCounters()
+    {
+        PrinterStatusDto status = MakeUpdate(currentLayer: 3, totalLayers: 20).ToStatusDto();
+
+        status.CurrentLayer.Should().Be(3);
+        status.TotalLayers.Should().Be(20);
+    }
+
+    [Fact]
+    public void ToStatusDto_PreservesFanAndLiveZOffsetReadbacks()
+    {
+        PrinterStatusDto status = MakeUpdate(
+            fanSpeedPercent: 65,
+            liveZOffsetMm: 0.025).ToStatusDto();
+
+        status.FanSpeedPercent.Should().Be(65);
+        status.LiveZOffsetMm.Should().Be(0.025);
     }
 
     [Fact]

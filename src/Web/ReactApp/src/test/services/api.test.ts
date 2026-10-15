@@ -35,207 +35,6 @@ describe("ApiClient", () => {
     });
   });
 
-  describe("update channel settings", () => {
-    it("round-trips the selected channel and acknowledgement state", async () => {
-      const getMock = vi.fn().mockResolvedValue({
-        data: { channel: "insider", insiderAcknowledged: true, rowVersion: "v1" },
-      });
-
-      (apiClient as unknown as { client: { get: typeof getMock } }).client.get = getMock;
-
-      await expect(apiClient.getUpdateChannelSettings()).resolves.toEqual({
-        channel: "insider",
-        insiderAcknowledged: true,
-        rowVersion: "v1",
-      });
-
-      expect(getMock).toHaveBeenCalledWith("/settings/UpdateChannel");
-
-      const saved = { channel: "stable", insiderAcknowledged: false, rowVersion: "v2" };
-      const postMock = vi.fn().mockResolvedValue({ data: saved });
-      (apiClient as unknown as { client: { post: typeof postMock } }).client.post = postMock;
-
-      await expect(apiClient.updateUpdateChannelSettings({ channel: "stable", insiderAcknowledged: false, rowVersion: "v1" })).resolves.toEqual(saved);
-      expect(postMock).toHaveBeenCalledWith("/settings/UpdateChannel", {
-        channel: "stable",
-        insiderAcknowledged: false,
-        rowVersion: "v1",
-      });
-
-    });
-  });
-
-  describe("host updates", () => {
-    const status = {
-      releaseId: "release/1",
-      currentState: "Applying",
-      activities: [],
-    };
-
-    it("wires authorization requests and propagates the response", async () => {
-      const data = { authorizationId: "auth-1", releaseId: "release/1" };
-      const postMock = vi.fn().mockResolvedValue({ data });
-      (apiClient as unknown as { client: { post: typeof postMock } }).client.post = postMock;
-
-      await expect(apiClient.authorizeHostUpdate({ expectedPolicyRevision: 3 })).resolves.toEqual(data);
-      expect(postMock).toHaveBeenCalledWith("/admin/host-updates/authorizations", { expectedPolicyRevision: 3 });
-    });
-
-    it("rejects malformed authorization responses before execute can use them", async () => {
-      const postMock = vi.fn().mockResolvedValue({
-        status: 200,
-        data: { authorizationId: "", releaseId: "" },
-      });
-      (apiClient as unknown as { client: { post: typeof postMock } }).client.post = postMock;
-
-      await expect(apiClient.authorizeHostUpdate()).rejects.toMatchObject({
-        message: "The host update authorization response was invalid.",
-      });
-    });
-
-    it("encodes release IDs and rejects malformed status bodies", async () => {
-      const getMock = vi.fn()
-        .mockResolvedValueOnce({ data: status })
-        .mockResolvedValueOnce({ data: { currentState: "Applying" } });
-      (apiClient as unknown as { client: { get: typeof getMock } }).client.get = getMock;
-
-      await expect(apiClient.getHostUpdateStatus("release/1?x=1")).resolves.toEqual(status);
-      expect(getMock).toHaveBeenNthCalledWith(1, "/admin/host-updates/release%2F1%3Fx%3D1/status");
-      await expect(apiClient.getHostUpdateStatus("bad")).rejects.toMatchObject({
-        message: "The host update status response was invalid.",
-      });
-    });
-
-    it("encodes recovery routes, supports both request bodies, and rejects malformed outcomes", async () => {
-      const postMock = vi.fn()
-        .mockResolvedValueOnce({ data: { outcome: "NeedsOperator", detail: "manual action" } })
-        .mockResolvedValueOnce({ data: { outcome: "FenceReleasePending", detail: "pending" } })
-        .mockResolvedValueOnce({ data: { outcome: "Unknown", detail: "bad" } });
-      (apiClient as unknown as { client: { post: typeof postMock } }).client.post = postMock;
-
-      await expect(apiClient.recoverHostUpdate("release/1", "request-1")).resolves.toEqual({
-        outcome: "NeedsOperator",
-        detail: "manual action",
-      });
-      await expect(apiClient.recoverHostUpdate("release/1")).resolves.toEqual({
-        outcome: "FenceReleasePending",
-        detail: "pending",
-      });
-      expect(postMock).toHaveBeenNthCalledWith(
-        1,
-        "/admin/host-updates/release%2F1/recover",
-        { requestId: "request-1" },
-      );
-      expect(postMock).toHaveBeenNthCalledWith(
-        2,
-        "/admin/host-updates/release%2F1/recover",
-        {},
-      );
-      await expect(apiClient.recoverHostUpdate("release/1")).rejects.toMatchObject({
-        message: "The host update recovery response was invalid.",
-      });
-    });
-
-    it("accepts recovery-required responses from execute", async () => {
-      const data = {
-          releaseId: "release-1",
-          currentState: "RecoveryRequired",
-          activities: [{
-            activityId: "activity-1",
-            releaseId: "release-1",
-            state: "RecoveryRequired",
-            phase: "apply",
-            recordedAt: "2026-09-19T19:00:00Z",
-            requestBinding: {
-              releaseId: "release-1",
-              authenticatedSequence: 4,
-              manifestDigest: "manifest",
-              sourceCommit: "commit",
-              channel: "Stable",
-              targets: [],
-              requestId: "request-1",
-              trustRoot: "root",
-              policyRevision: 1,
-              policyFingerprint: "policy",
-              hostPlatform: "linux-amd64",
-              authorizationKind: "Manual",
-            },
-          }],
-      } satisfies import("@/types/api").HostUpdateStatusResponse;
-      const response = { status: 409, data };
-      const postMock = vi.fn().mockResolvedValue(response);
-      (apiClient as unknown as { client: { post: typeof postMock } }).client.post = postMock;
-
-      await expect(apiClient.executeHostUpdate({ authorizationId: "auth-1" })).resolves.toEqual({
-        kind: "conflict",
-        status: response.data,
-      });
-      expect(postMock).toHaveBeenCalledWith(
-        "/admin/host-updates/execute",
-        { authorizationId: "auth-1" },
-        { validateStatus: expect.any(Function) },
-      );
-      const config = postMock.mock.calls[0][2] as { validateStatus: (status: number) => boolean };
-      expect(config.validateStatus(409)).toBe(true);
-      expect(config.validateStatus(503)).toBe(true);
-      expect(config.validateStatus(500)).toBe(false);
-    });
-
-    it("returns a typed conflict when execute reports an existing update", async () => {
-      const status = {
-        releaseId: "stable:1.2.4",
-        currentState: "Applying",
-        activities: [],
-      } satisfies import("@/types/api").HostUpdateStatusResponse;
-      const postMock = vi.fn().mockResolvedValue({ status: 409, data: status });
-      (apiClient as unknown as { client: { post: typeof postMock } }).client.post = postMock;
-
-      await expect(apiClient.executeHostUpdate({ authorizationId: "auth-1" })).resolves.toEqual({
-        kind: "conflict",
-        status,
-      });
-    });
-
-    it("rejects non-status conflict bodies instead of returning a success-shaped response", async () => {
-      const postMock = vi.fn().mockResolvedValue({
-        status: 409,
-        data: { code: "request_not_authorized" },
-      });
-      (apiClient as unknown as { client: { post: typeof postMock } }).client.post = postMock;
-
-      await expect(apiClient.executeHostUpdate({ authorizationId: "auth-1" })).rejects.toMatchObject({
-        statusCode: 409,
-        message: "The host update status response was invalid.",
-        data: { code: "request_not_authorized" },
-      });
-    });
-
-    it("surfaces unsupported-host responses as an API error", async () => {
-      const postMock = vi.fn().mockResolvedValue({
-        status: 503,
-        data: { detail: "Host update execution is unavailable." },
-      });
-      (apiClient as unknown as { client: { post: typeof postMock } }).client.post = postMock;
-
-      await expect(apiClient.executeHostUpdate()).rejects.toMatchObject({
-        statusCode: 503,
-        message: "Host update execution is unavailable.",
-      });
-    });
-
-    it("rejects malformed successful execute bodies", async () => {
-      const postMock = vi.fn().mockResolvedValue({
-        status: 200,
-        data: { releaseId: "release-1", currentState: "Applying" },
-      });
-      (apiClient as unknown as { client: { post: typeof postMock } }).client.post = postMock;
-
-      await expect(apiClient.executeHostUpdate()).rejects.toMatchObject({
-        message: "The host update status response was invalid.",
-      });
-    });
-  });
-
   describe("printer responses", () => {
     it.each(["getPrinters", "getPrintersFast"] as const)("%s preserves the list wire shape", async (method) => {
       const mockResponse = {
@@ -294,6 +93,31 @@ describe("ApiClient", () => {
       expect(result).not.toHaveProperty("backendUrl");
       expect(result).not.toHaveProperty("isReachable");
     });
+
+    it("setPrinterFanSpeed posts the percentage using the fan control route", async () => {
+      const data = { success: true, message: undefined };
+      const postMock = vi.fn().mockResolvedValue({ data });
+      (apiClient as unknown as { client: { post: typeof postMock } }).client.post = postMock;
+
+      await expect(apiClient.setPrinterFanSpeed("printer-1", 65)).resolves.toEqual(data);
+
+      expect(postMock).toHaveBeenCalledWith("/printers/printer-1/fan", { speedPercent: 65 });
+    });
+  });
+
+  it("accepts snapshot query parameters and appends the cache buster", async () => {
+    const snapshot = new Blob(["snapshot"], { type: "image/jpeg" });
+    const mockGet = vi.fn().mockResolvedValue({ data: snapshot });
+    (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+
+    await expect(apiClient.getSnapshotPreview("/api/cameras/camera-1/snapshot?quality=high"))
+      .resolves.toBe(snapshot);
+    expect(mockGet).toHaveBeenCalledWith(
+      expect.stringMatching(/^\/cameras\/camera-1\/snapshot\?quality=high&_=[0-9]+$/),
+      { responseType: "blob", signal: undefined },
+    );
+    await expect(apiClient.getSnapshotPreview("/api/cameras/camera-1/stream?path=/snapshot"))
+      .rejects.toThrow("Snapshot preview requires a same-origin camera proxy route.");
   });
 
   describe("getHealthStatus", () => {
@@ -508,7 +332,7 @@ describe("ApiClient", () => {
   });
 
   describe("reviewed printer mutation ETags", () => {
-    it("sends displayed revisions for edit, maintenance, Z-offset, spool, and toolhead mutations", async () => {
+    it("sends displayed revisions for edit, maintenance, spool, and toolhead mutations", async () => {
       const put = vi.fn().mockResolvedValue({
         data: { id: "printer-1", success: true },
         headers: { etag: '"printer-v2"' },
@@ -547,11 +371,6 @@ describe("ApiClient", () => {
         true,
         "printer-v1"
       );
-      await apiClient.saveZOffset(
-        "printer-1",
-        { offsetMm: 0.1, saveToFirmware: false },
-        "printer-v1"
-      );
       expect(
         await apiClient.setActiveSpool(
           "printer-1",
@@ -584,6 +403,25 @@ describe("ApiClient", () => {
       expect(del).toHaveBeenCalledWith(
         "/printers/printer-1/toolheads/0/spool",
         { headers: { "If-Match": '"printer-v2"' } }
+      );
+    });
+  });
+
+  describe("legacy active-spool clear contract", () => {
+    it("clears the printer scalar with the reviewed ETag and returns the response revision", async () => {
+      const post = vi.fn().mockResolvedValue({
+        data: { success: true },
+        headers: { etag: '"printer-after-clear"' },
+      });
+      (apiClient as unknown as { client: { post: typeof post } }).client.post = post;
+
+      await expect(apiClient.clearActiveSpool("printer-1", "printer-before-clear"))
+        .resolves.toBe("printer-after-clear");
+
+      expect(post).toHaveBeenCalledWith(
+        "/printers/printer-1/active-spool",
+        { spoolId: null },
+        { headers: { "If-Match": '"printer-before-clear"' } },
       );
     });
   });
@@ -706,6 +544,14 @@ describe("ApiClient", () => {
       }
     );
 
+    it("allows bounded backend warm-up time only for MMU unload", async () => {
+      const mockPost = vi.fn().mockResolvedValue({ data: { success: true } });
+      (apiClient as unknown as { client: { post: typeof mockPost } }).client.post = mockPost;
+      const unload = { protocol: "Qidibox", action: "Unload", gateIndex: 1 } as const;
+      await apiClient.mmuGateAction("printer-1", unload);
+      expect(mockPost).toHaveBeenCalledWith("/printers/printer-1/mmu/gate-action", unload, { timeout: 360000 });
+    });
+
     it("uses only bounded typed maintenance routes", async () => {
       const mockPost = vi.fn().mockResolvedValue({
         data: { success: true },
@@ -733,7 +579,8 @@ describe("ApiClient", () => {
           protocol: "Qidibox",
           action: "Eject",
           gateIndex: 2,
-        }
+        },
+        undefined
       );
       expect(
         mockPost.mock.calls.some(([url]) => String(url).endsWith("/gcode"))
@@ -1233,6 +1080,33 @@ describe("ApiClient", () => {
 
       const callArgs = mockGet.mock.calls[0][1] as { params?: Record<string, unknown> };
       expect(callArgs?.params?.offset).toBeUndefined();
+    });
+  });
+
+  describe("move queued job", () => {
+    it.each([
+      [
+        { beforeJobId: "neighbor-before", beforeJobETag: 'W/"before-v2"' },
+        { beforeJobId: "neighbor-before", beforeJobETag: "before-v2" },
+      ],
+      [
+        { afterJobId: "neighbor-after", afterJobETag: '"after-v3"' },
+        { afterJobId: "neighbor-after", afterJobETag: "after-v3" },
+      ],
+    ] as const)("sends one normalized neighbor ETag and the moved row revision", async (request, body) => {
+      const movedJob = { id: "moved-job", rowVersion: "next-revision" };
+      const mockPut = vi.fn().mockResolvedValue({ data: movedJob });
+      (apiClient as unknown as { client: { put: typeof mockPut } }).client.put = mockPut;
+
+      await expect(
+        apiClient.moveQueuedJob("moved-job", request, 'W/"moved-v1"')
+      ).resolves.toEqual(movedJob);
+
+      expect(mockPut).toHaveBeenCalledWith(
+        "/job-queue/jobs/moved-job/position",
+        body,
+        { headers: { "If-Match": '"moved-v1"' } }
+      );
     });
   });
 

@@ -5,6 +5,16 @@ namespace Farm.Web.Api.Tests;
 
 public class CameraContractClassifierTests
 {
+    [Theory]
+    [InlineData(null, null)]
+    [InlineData("", null)]
+    [InlineData("   ", null)]
+    [InlineData(" http://camera.local/snap.jpg ", "http://camera.local/snap.jpg")]
+    public void NormalizeTarget_TreatsBlankAsUnconfiguredAndTrimsOthers(string? input, string? expected)
+    {
+        CameraContractClassifier.NormalizeTarget(input).Should().Be(expected);
+    }
+
     [Fact]
     public void GetAccessMode_WhenStreamUnsupportedAndSnapshotPresent_ReturnsSnapshotOnly()
     {

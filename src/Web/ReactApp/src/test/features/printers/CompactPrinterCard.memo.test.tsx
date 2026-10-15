@@ -1,5 +1,4 @@
 import '@testing-library/jest-dom';
-import React from 'react';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
@@ -7,6 +6,8 @@ import {
   areCompactPrinterCardPropsEqual,
   type CompactPrinterCardMemoProps,
 } from '@/features/printers/utils/compactPrinterCardMemo';
+import type { PrinterFilamentCoverage } from '@/features/filament-coverage/types';
+import type { PrinterCoverageSummaryProps } from '@/features/filament-coverage/components/FilamentCoverageBadge';
 import type { TagDto } from '@/services/tagService';
 import { PrinterBackend, type MmuStatus, type Printer, type PrinterBackendCapabilitiesDto } from '@/types/api';
 import type { PrinterQueueSummaryDto } from '@/types/api';
@@ -22,7 +23,7 @@ const queueSummaryFromFleetMock = vi.hoisted(() =>
 );
 const failureDetectionPollingEnabledMock = vi.hoisted(() => vi.fn(() => false));
 const usePrinterFailureDetectionStatusMock = vi.hoisted(() =>
-  vi.fn(() => ({ printerStatus: undefined, data: undefined, isLoading: false }))
+  vi.fn(() => ({ printerStatus: undefined as { state?: string; printerName?: string } | undefined, data: undefined, isLoading: false }))
 );
 const taggingModalRenderMock = vi.hoisted(() => vi.fn());
 
@@ -48,18 +49,24 @@ vi.mock('@/features/printers/hooks/useAutoDispatch', () => ({
   useSetAutoDispatchEnabled: () => ({ mutateAsync: vi.fn() }),
 }));
 
+const coverageHookMock = vi.hoisted(() => vi.fn((): { data: PrinterFilamentCoverage | undefined } => ({ data: undefined })));
+
 vi.mock('@/features/filament-coverage/hooks', () => ({
-  usePrinterCoverageFromFleet: () => ({ data: undefined, isLoading: false }),
+  usePrinterCoverageFromFleet: coverageHookMock,
 }));
 
 const printerCoverageSummaryRenderMock = vi.hoisted(() => vi.fn());
 
-vi.mock('@/features/filament-coverage/components/FilamentCoverageBadge', () => ({
-  PrinterCoverageSummary: (props: Record<string, unknown>) => {
-    printerCoverageSummaryRenderMock(props);
-    return null;
-  },
-}));
+vi.mock('@/features/filament-coverage/components/FilamentCoverageBadge', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/features/filament-coverage/components/FilamentCoverageBadge')>();
+  return {
+    ...actual,
+    PrinterCoverageSummary: (props: PrinterCoverageSummaryProps) => {
+      printerCoverageSummaryRenderMock(props);
+      return <actual.PrinterCoverageSummary {...props} />;
+    },
+  };
+});
 
 vi.mock('@/features/printers/hooks/useFailureDetectionAlert', () => ({
   useFailureDetectionAlert: () => ({ event: undefined, recentEvents: [] }),
@@ -98,7 +105,10 @@ vi.mock('@/features/printers/components/FailureDetectionMonitoringBadge', () => 
 }));
 
 vi.mock('@/features/printers/components/FailureDetectionMonitoringSummary', () => ({
-  FailureDetectionMonitoringSummary: () => null,
+  FailureDetectionMonitoringSummary: ({ enabled, status, onReview }: { enabled?: boolean; status?: { state?: string }; onReview?: () => void }) =>
+    enabled && ['misconfigured', 'error'].includes(status?.state ?? '') && onReview ? (
+      <button type="button" onClick={onReview} aria-label="Review failure detection for Printer 1">Review</button>
+    ) : null,
 }));
 
 vi.mock('@/features/printers/components/OfflineTroubleshootingGuide', () => ({
@@ -317,6 +327,40 @@ describe('CompactPrinterCard memoization', () => {
       .toHaveAttribute('href', 'http://printer-1.local');
   });
 
+  it('routes the compact Review action to printer setup when failure detection is misconfigured', async () => {
+    const user = userEvent.setup();
+    const printer = createPrinter({ state: 'Printing', obicoEnabled: true });
+    const onEdit = vi.fn();
+    const onExpand = vi.fn();
+    usePrinterFailureDetectionStatusMock.mockReturnValue({
+      printerStatus: { state: 'misconfigured', printerName: printer.name },
+      data: undefined,
+      isLoading: false,
+    });
+
+    render(<CompactPrinterCard printer={printer} onEdit={onEdit} onExpand={onExpand} />);
+    await user.click(screen.getByRole('button', { name: 'Review failure detection for Printer 1' }));
+    expect(onEdit).toHaveBeenCalledWith(printer);
+    expect(onExpand).not.toHaveBeenCalled();
+  });
+
+  it('routes the compact Review action to printer details for a camera review', async () => {
+    const user = userEvent.setup();
+    const printer = createPrinter({ state: 'Printing', obicoEnabled: true });
+    const onEdit = vi.fn();
+    const onExpand = vi.fn();
+    usePrinterFailureDetectionStatusMock.mockReturnValue({
+      printerStatus: { state: 'error', printerName: printer.name },
+      data: undefined,
+      isLoading: false,
+    });
+
+    render(<CompactPrinterCard printer={printer} onEdit={onEdit} onExpand={onExpand} />);
+    await user.click(screen.getByRole('button', { name: 'Review failure detection for Printer 1' }));
+    expect(onExpand).toHaveBeenCalledWith(printer.id);
+    expect(onEdit).not.toHaveBeenCalled();
+  });
+
   it('keeps the Open details sidebar action in compact mode', async () => {
     const user = userEvent.setup();
     const onExpand = vi.fn();
@@ -474,31 +518,36 @@ describe('CompactPrinterCard memoization', () => {
 
     render(
       <CompactPrinterCard
-        printer={createPrinter()}
+        printer={createPrinter({ bedTypeId: 'textured', bedTypeName: 'Textured PEI', bedTypeColor: '#abcdef' })}
         onExpand={vi.fn()}
         onEdit={vi.fn()}
       />,
     );
 
     expect(printerTagsFromFleetMock).toHaveBeenCalledWith('printer-1');
+    expect(screen.queryByText('Textured PEI')).not.toBeInTheDocument();
+    expect(screen.queryByTitle(/bed type/i)).not.toBeInTheDocument();
     const tag = screen.getByText('Production').closest('[data-pf-radius="full"]');
     expect(tag).toHaveClass('bg-black/70', 'text-white');
     expect(tag).toHaveStyle({ borderColor: '#ffff00' });
     expect(tag).toHaveAttribute('title', 'Production-ready printer');
   });
 
-  it('renders no tag pills when the fleet query has no tags for this printer (empty-tag behavior)', () => {
+  it('omits bed type and tag rows when a printer has a bed but no tags', () => {
     printerTagsFromFleetMock.mockReturnValue({ data: [], isPending: false, isError: false, error: null });
 
-    render(
+    const { container } = render(
       <CompactPrinterCard
-        printer={createPrinter()}
+        printer={createPrinter({ bedTypeId: 'textured', bedTypeName: 'Textured PEI', bedTypeColor: '#abcdef' })}
         onExpand={vi.fn()}
         onEdit={vi.fn()}
       />,
     );
 
     expect(screen.queryByText('Production')).not.toBeInTheDocument();
+    expect(screen.queryByText('Textured PEI')).not.toBeInTheDocument();
+    expect(screen.queryByTitle(/bed type/i)).not.toBeInTheDocument();
+    expect(container.querySelector('.flex-wrap')).not.toBeInTheDocument();
   });
 
   it('threads the fleet tags-fleet pending flag into TaggingModal as tagsLoading (true) — this card renders TaggingModal unconditionally, so the modal must know when initialTags is not resolved yet', () => {
@@ -653,44 +702,39 @@ describe('CompactPrinterCard memoization', () => {
   });
 });
 
-describe('CompactPrinterCard filament coverage online gating (#1684)', () => {
+describe('CompactPrinterCard omits filament coverage badges', () => {
   beforeEach(() => {
     printerCoverageSummaryRenderMock.mockClear();
+    coverageHookMock.mockReset();
   });
 
-  // Regression test for issue #1684: the Moonraker Offline card showed
-  // "No spool loaded" alongside a green "Filament OK" check even though the
-  // printer was unreachable. `PrinterCoverageSummary` now derives its
-  // effective status from `isOnline`, but only if the card actually passes
-  // that flag through — this pins the wiring so a future refactor can't
-  // silently drop it again.
-  it('passes isOnline=false through to PrinterCoverageSummary for an offline printer', () => {
-    render(
-      <CompactPrinterCard
-        printer={createPrinter({ isOnline: false })}
-        onExpand={vi.fn()}
-        onEdit={vi.fn()}
-      />,
-    );
-
-    expect(printerCoverageSummaryRenderMock).toHaveBeenCalledWith(
-      expect.objectContaining({ isOnline: false }),
-    );
-  });
-
-  it('passes isOnline=true through to PrinterCoverageSummary for an online printer', () => {
-    render(
-      <CompactPrinterCard
-        printer={createPrinter({ isOnline: true })}
-        onExpand={vi.fn()}
-        onEdit={vi.fn()}
-      />,
-    );
-
-    expect(printerCoverageSummaryRenderMock).toHaveBeenCalledWith(
-      expect.objectContaining({ isOnline: true }),
-    );
-  });
+  for (const status of ['covers', 'unknown', 'runout'] as const) {
+    it.each([
+      ['idle', null, 0, 'Idle', true],
+      ['printing', 'job-1', 0, 'Printing', true],
+      ['queued', null, 1, 'Idle', true],
+      ['offline with demand', 'job-1', 0, 'Printing', false],
+    ] as const)(`never renders a ${status} verdict when %s, even with coverage data`, (_name, activeJobId, assignedQueuedJobCount, state, isOnline) => {
+      coverageHookMock.mockReturnValue({ data: {
+        printerId: 'printer-1', printerName: 'Alpha', status, toolheads: [],
+        activeJobId, activeJobName: null, activeJobProgress: null,
+        assignedQueuedJobCount,
+        earliestPredictedRunoutAt: new Date(Date.now() + 20 * 60_000).toISOString(),
+        evaluatedAtUtc: '',
+      } });
+      render(
+        <CompactPrinterCard
+          printer={createPrinter({ isOnline, state })}
+          onExpand={vi.fn()}
+          onEdit={vi.fn()}
+        />,
+      );
+      expect(screen.queryByTestId('printer-coverage-summary')).not.toBeInTheDocument();
+      expect(screen.queryByRole('status', { name: /Filament OK|Filament unknown|Runout risk|Runs out in/i })).not.toBeInTheDocument();
+      expect(printerCoverageSummaryRenderMock).not.toHaveBeenCalled();
+      expect(coverageHookMock).not.toHaveBeenCalled();
+    });
+  }
 });
 
 /**

@@ -1,4 +1,3 @@
-import React from 'react';
 import Button from '@/common/components/ui/Button';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import type { Printer } from '@/types/api';

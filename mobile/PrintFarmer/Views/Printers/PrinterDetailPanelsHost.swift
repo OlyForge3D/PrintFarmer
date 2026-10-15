@@ -2,47 +2,49 @@ import SwiftUI
 
 // MARK: - Panel identity (issue #2522)
 
-/// Stable identifier for the two printer-detail pages. Transient UI state
+/// Stable identifier for the four printer-detail pages. Transient UI state
 /// only — never persisted, never part of the routing/deep-link vocabulary.
 /// Session identity remains registered server + printer UUID; this enum only
 /// tracks which page is currently on screen.
 enum PrinterDetailPanel: String, CaseIterable, Hashable, Sendable {
-    case overview
-    case controls
+    case status
+    case control
+    case filament
+    case queue
 
     var title: String {
         switch self {
-        case .overview: return String(localized: "Overview")
-        case .controls: return "Controls"
+        case .status: return "Status"
+        case .control: return "Control"
+        case .filament: return "Filament"
+        case .queue: return "Queue"
         }
     }
 
-    /// Reserved by epic #2518: `printer.detail.panel.overview` / `.controls`.
+    /// Reserved by epic #2518: `printer.detail.panel.status` / `.control`.
     var accessibilityIdentifier: String {
-        switch self {
-        case .overview: return "printer.detail.panel.overview"
-        case .controls: return "printer.detail.panel.controls"
-        }
+        "printer.detail.panel.\(rawValue)"
     }
 }
 
 // MARK: - Panels host (pure paging shell)
 
-/// Narrowly scoped host for the printer-detail Overview/Controls paging
-/// (issue #2522).
+/// Paging shell for Status, Control, Filament and Queue.
 ///
 /// Purely a layout shell: a labeled selector plus native horizontal paging
-/// over the two pages the caller supplies. The host owns NO models,
+/// over the pages the caller supplies. The host owns NO models,
 /// services, camera, sheets, or confirmations — those stay in
 /// `PrinterDetailView` per the epic's "page selection sits above ownership"
 /// contract. Both the selector tap and a horizontal swipe update the same
 /// `selection` binding, so the two can never disagree.
-struct PrinterDetailPanelsHost<Overview: View, Controls: View>: View {
+struct PrinterDetailPanelsHost<Status: View, Control: View, Filament: View, Queue: View>: View {
     @Binding var selection: PrinterDetailPanel
     let controlsAvailable: Bool
     var printer: Printer? = nil
-    @ViewBuilder let overview: () -> Overview
-    @ViewBuilder let controls: () -> Controls
+    @ViewBuilder let status: () -> Status
+    @ViewBuilder let control: () -> Control
+    @ViewBuilder let filament: () -> Filament
+    @ViewBuilder let queue: () -> Queue
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     /// Discoverability is independent of command authorization. The Controls
@@ -59,43 +61,32 @@ struct PrinterDetailPanelsHost<Overview: View, Controls: View>: View {
         current
     }
 
-    private var availablePanels: [PrinterDetailPanel] {
-        Self.availablePanels(controlsAvailable: controlsAvailable)
-    }
-
     var body: some View {
         GeometryReader { geometry in
             let inset: CGFloat = PrinterDetailLayout.usesColumns(
                 width: geometry.size.width, dynamicTypeSize: dynamicTypeSize
             ) ? 24 : 16
             VStack(spacing: 0) {
-                VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 8) {
                     if let printer {
-                        if dynamicTypeSize.isAccessibilitySize {
-                            ScrollView {
-                                PrinterDetailIdentityHeader(printer: printer)
-                            }
-                            .frame(height: geometry.size.height / 4)
-                            .accessibilityIdentifier("printer.detail.identity.scroll")
-                        } else {
-                            PrinterDetailIdentityHeader(printer: printer)
-                        }
+                        PrinterDetailIdentityHeader(printer: printer)
                     }
                     PrinterDetailPanelPicker(selection: $selection)
-                    .frame(maxWidth: dynamicTypeSize.isAccessibilitySize ? .infinity : 380)
+                    .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
+                    .frame(maxWidth: .infinity)
+                    pageIndicator
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, inset)
                 .padding(.top, 12)
-                .padding(.bottom, 16)
+                .padding(.bottom, 12)
                 .background(Color.pfBackground)
 
                 TabView(selection: $selection) {
-                    page(overview(), panel: .overview)
-                        .tag(PrinterDetailPanel.overview)
-
-                    page(controls(), panel: .controls)
-                        .tag(PrinterDetailPanel.controls)
+                    page(status(), panel: .status).tag(PrinterDetailPanel.status)
+                    page(control(), panel: .control).tag(PrinterDetailPanel.control)
+                    page(filament(), panel: .filament).tag(PrinterDetailPanel.filament)
+                    page(queue(), panel: .queue).tag(PrinterDetailPanel.queue)
                 }
                 #if os(iOS)
                 .tabViewStyle(.page(indexDisplayMode: .never))
@@ -107,9 +98,29 @@ struct PrinterDetailPanelsHost<Overview: View, Controls: View>: View {
         }
     }
 
+    private var pageIndicator: some View {
+        HStack(spacing: 0) {
+            ForEach(PrinterDetailPanel.allCases, id: \.self) { panel in
+                Button { selection = panel } label: {
+                    Circle()
+                        .fill(selection == panel ? Color.pfTextPrimary : Color.pfTextTertiary)
+                        .frame(width: 6, height: 6)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(panel.title)
+                .accessibilityValue(selection == panel ? "Selected" : "")
+                .accessibilityAddTraits(selection == panel ? .isSelected : [])
+                .accessibilityIdentifier("printer.detail.pageIndicator.\(panel.rawValue)")
+            }
+        }
+        .frame(maxWidth: .infinity)
+    }
+
     private struct PrinterDetailPanelPicker: View {
         @Binding var selection: PrinterDetailPanel
-        @ScaledMetric(relativeTo: .subheadline) private var fontSize: CGFloat = 15
+        @ScaledMetric(relativeTo: .subheadline) private var fontSize: CGFloat = 13
 
         private var minimumWidth: CGFloat {
             let titleWidth = PrinterDetailPanel.allCases.flatMap { panel in
@@ -119,7 +130,7 @@ struct PrinterDetailPanelsHost<Overview: View, Controls: View>: View {
                     ]).width
                 }
             }.max() ?? 0
-            return CGFloat(PrinterDetailPanel.allCases.count) * (ceil(titleWidth) + 32)
+            return CGFloat(PrinterDetailPanel.allCases.count) * (ceil(titleWidth) + 16)
         }
 
         var body: some View {
@@ -130,23 +141,32 @@ struct PrinterDetailPanelsHost<Overview: View, Controls: View>: View {
                 .frame(minWidth: minimumWidth)
 
                 VStack(spacing: 3) {
-                    ForEach(PrinterDetailPanel.allCases, id: \.self) { panel in
-                        ControlActionButton(
-                            title: panel.title,
-                            identifier: "printer.detail.panel.select.\(panel.rawValue)",
-                            selected: selection == panel,
-                            textSize: 15, segmented: true
-                        ) {
-                            selection = panel
-                        }
+                    HStack(spacing: 3) {
+                        panelButton(.status)
+                        panelButton(.control)
+                    }
+                    HStack(spacing: 3) {
+                        panelButton(.filament)
+                        panelButton(.queue)
                     }
                 }
+                .frame(minWidth: minimumWidth / 2 + 3)
                 .padding(3)
                 .background(Color.pfBackgroundTertiary, in: RoundedRectangle(cornerRadius: 11))
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("printer.detail.panel.selector")
                 .accessibilityLabel("Printer detail panel")
+
             }
+        }
+
+        private func panelButton(_ panel: PrinterDetailPanel) -> some View {
+            ControlActionButton(
+                title: panel.title,
+                identifier: "printer.detail.panel.select.\(panel.rawValue)",
+                selected: selection == panel,
+                compact: true, textSize: 13, segmented: true
+            ) { selection = panel }
         }
     }
 
@@ -171,12 +191,12 @@ struct PrinterDetailPanelsHost<Overview: View, Controls: View>: View {
         }
 
         func sizeThatFits(_ proposal: ProposedViewSize, uiView: UISegmentedControl, context: Context) -> CGSize? {
-            CGSize(width: max(minimumWidth, proposal.width ?? minimumWidth), height: max(48, ceil(fontSize * 1.2) + 20))
+            CGSize(width: max(minimumWidth, proposal.width ?? minimumWidth), height: max(44, ceil(fontSize * 1.2) + 12))
         }
 
         func makeCoordinator() -> Coordinator { Coordinator(selection: $selection) }
 
-        final class Coordinator: NSObject {
+        @MainActor final class Coordinator: NSObject {
             var selection: Binding<PrinterDetailPanel>
             init(selection: Binding<PrinterDetailPanel>) { self.selection = selection }
 
@@ -210,13 +230,6 @@ struct PrinterDetailPanelsHost<Overview: View, Controls: View>: View {
             }
         }
 
-        private var subtitle: String {
-            [printer.manufacturerName, printer.modelName, printer.location?.name]
-                .compactMap { $0 }
-                .filter { !$0.isEmpty }
-                .joined(separator: " · ")
-        }
-
         var body: some View {
             let layout = dynamicTypeSize.isAccessibilitySize
                 ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
@@ -224,18 +237,13 @@ struct PrinterDetailPanelsHost<Overview: View, Controls: View>: View {
             layout {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(printer.name)
-                        .font(.title2.weight(.semibold))
+                        .font(.subheadline.weight(.semibold))
                         .foregroundStyle(Color.pfTextPrimary)
                         .fixedSize(horizontal: false, vertical: true)
+                        .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
                         .accessibilityAddTraits(.isHeader)
                         .accessibilityLabel("\(printer.name), printer detail")
                         .accessibilityIdentifier("printer.detail.destination.\(printer.id.uuidString.lowercased())")
-                    if !subtitle.isEmpty {
-                        Text(subtitle)
-                            .font(.subheadline)
-                            .foregroundStyle(Color.pfTextSecondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 VStack(alignment: dynamicTypeSize.isAccessibilitySize ? .leading : .trailing, spacing: 6) {
@@ -245,15 +253,13 @@ struct PrinterDetailPanelsHost<Overview: View, Controls: View>: View {
                         Text(status)
                             .font(.caption)
                             .foregroundStyle(statusColor)
-                        if printer.obicoEnabled {
-                            Image(systemName: "shield.checkered")
-                                .accessibilityLabel("Failure detection enabled")
-                        }
+                            .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
                     }
                     if printer.inMaintenance {
                         Text("Maintenance")
                             .font(.caption)
                             .foregroundStyle(Color.pfTextPrimary)
+                            .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
                     }
                 }
             }
@@ -376,29 +382,45 @@ enum PrinterDetailFilamentActionMapping {
         printerID: UUID,
         hasActiveSpool: Bool,
         isPerformingAction: Bool,
-        nfcAvailable: Bool
+        nfcAvailable: Bool,
+        isOnline: Bool = true,
+        printerState: String? = "ready"
     ) -> [PrinterFilamentAction] {
         let target = PrinterFilamentAction.Target.printer(printerID)
-        let busyReason = isPerformingAction ? "Another action is in progress" : nil
+        let state = printerState?.lowercased()
+        let safetyReason: String?
+        if !isOnline {
+            safetyReason = "Printer is offline."
+        } else if isPerformingAction {
+            safetyReason = "Another printer operation is in progress."
+        } else if ["printing", "paused"].contains(state ?? "") {
+            safetyReason = nil
+        } else if state == "starting" {
+            safetyReason = "Printer state is unknown or transitioning."
+        } else if !["idle", "ready", "standby", "complete", "completed", "cancelled"]
+            .contains(state ?? "") {
+            safetyReason = "Printer state is unknown or transitioning."
+        } else {
+            safetyReason = nil
+        }
         var actions: [PrinterFilamentAction] = []
         if hasActiveSpool {
-            actions.append(PrinterFilamentAction(kind: .change, target: target, disabledReason: busyReason))
-            actions.append(PrinterFilamentAction(kind: .clearAssignment, target: target, disabledReason: busyReason))
+            actions.append(PrinterFilamentAction(kind: .change, target: target, disabledReason: safetyReason))
+            actions.append(PrinterFilamentAction(
+                kind: .clearAssignment, target: target, disabledReason: safetyReason
+            ))
         } else {
             // `.set` must be disabled while another action is in progress
             // just like `.change`/`.clearAssignment` — it dispatches the
             // same single-flight `printerService.setActiveSpool` path via
             // the spool-picker sheet, so it is not safe to fire it
             // mid-flight either (Vasquez review finding 8).
-            actions.append(PrinterFilamentAction(kind: .set, target: target, disabledReason: busyReason))
+            actions.append(PrinterFilamentAction(kind: .set, target: target, disabledReason: safetyReason))
         }
-        // NFC availability and single-flight busy state are independent
-        // gates on the same action; combine them rather than letting a
-        // busy scan remain tappable merely because NFC hardware is present
-        // (Vasquez review finding 8).
+        // NFC availability and printer safety are independent gates.
         let scanNFCDisabledReason = !nfcAvailable
             ? "NFC scanning is not available on this device."
-            : busyReason
+            : safetyReason
         actions.append(PrinterFilamentAction(
             kind: .scanNFC,
             target: target,
@@ -518,7 +540,7 @@ enum PrinterDetailFilamentStaleMapping {
 
 // MARK: - Camera lifecycle mapping (issue #2522, Hicks review finding 19)
 
-/// Pure mirror of `PrinterDetailView.isOverviewPageForeground`, extracted so
+/// Pure mirror of `PrinterDetailView.isStatusPageForeground`, extracted so
 /// the exact gate deciding whether camera snapshot polling/the MJPEG live
 /// stream may run is unit-testable without hosting a view.
 ///
@@ -532,7 +554,7 @@ enum PrinterDetailCameraLifecycleMapping {
         scenePhase: ScenePhase,
         selectedPanel: PrinterDetailPanel
     ) -> Bool {
-        scenePhase == .active && selectedPanel == .overview
+        scenePhase == .active && selectedPanel == .status
     }
 }
 
@@ -570,15 +592,60 @@ struct PrinterDetailTemperatureStrip: View {
     var showsBed = true
     var identifier = "printer.detail.temperatures"
     var essentialControls = false
+    var compact = false
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @ScaledMetric(relativeTo: .title2) private var essentialReadingSize: CGFloat = 24
 
     var body: some View {
-        if essentialControls {
+        if compact {
+            compactRow
+        } else if essentialControls {
             essentialStrip
         } else {
             originalStrip
         }
+    }
+
+    private var compactRow: some View {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
+            : AnyLayout(HStackLayout(spacing: 12))
+        return layout {
+            statusReading(title: "Nozzle", value: hotend)
+            if showsBed {
+                if !dynamicTypeSize.isAccessibilitySize {
+                    Rectangle()
+                        .fill(Color.pfBorder)
+                        .frame(width: 1, height: 20)
+                        .accessibilityHidden(true)
+                }
+                statusReading(title: "Bed", value: bed)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.pfCard, in: RoundedRectangle(cornerRadius: 10))
+        .overlay {
+            RoundedRectangle(cornerRadius: 10)
+                .strokeBorder(Color.pfBorder, lineWidth: 1)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(identifier)
+    }
+
+    private func statusReading(title: String, value: PrinterDetailTemperatureReading) -> some View {
+        HStack(spacing: 4) {
+            Text(title)
+                .foregroundStyle(Color.pfTextSecondary)
+            Text("\(value.measuredText) / \(value.targetText)")
+                .fontWeight(.semibold)
+                .monospacedDigit()
+        }
+        .font(.caption)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(title), measured \(value.measuredText), target \(value.targetText)")
     }
 
     private var originalStrip: some View {

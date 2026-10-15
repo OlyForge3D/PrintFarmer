@@ -1,0 +1,28 @@
+{
+  "configurations" : [
+    {
+      "id" : "32790000-0000-0000-0000-000000000001",
+      "name" : "Manual",
+      "options" : {}
+    }
+  ],
+  "defaultOptions" : {
+    "defaultTestExecutionTimeAllowance" : 600,
+    "maximumTestExecutionTimeAllowance" : 600,
+    "testTimeoutsEnabled" : true
+  },
+  "testTargets" : [
+    {
+      "parallelizable" : false,
+      "selectedTests" : [
+        "AppStoreScreenshotUITests"
+      ],
+      "target" : {
+        "containerPath" : "container:PrintFarmer.xcodeproj",
+        "identifier" : "F7060002000000000000D001",
+        "name" : "PrintFarmerUITests"
+      }
+    }
+  ],
+  "version" : 1
+}

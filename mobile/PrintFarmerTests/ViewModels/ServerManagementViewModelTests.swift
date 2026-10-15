@@ -141,7 +141,6 @@ final class ServerManagementViewModelTests: XCTestCase {
                 .check(baseURL: URL(string: "https://print.example.com")!)
             XCTFail("Expected cancellation to be rethrown.")
         } catch is CancellationError {
-            XCTAssertTrue(true)
         }
     }
 

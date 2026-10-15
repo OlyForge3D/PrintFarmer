@@ -72,7 +72,10 @@ public sealed class DatabaseMigrationTests
             "20260912202053_TrackEmergencyStopSenders",
             "20260914014156_AddUserPrinterControlMode",
             "20260915042413_RetireTrackedPrinterMotion",
-            "20260925012135_AddDispatchOperatorRecovery");
+            "20260925012135_AddDispatchOperatorRecovery",
+            "20261012013745_AddPrinterShowExternalSpool",
+            "20261013004523_CameraPrinterJoinAndLocation",
+            "20261013023326_AddDismissedPrinterCameras");
         second.LegacySchemaBaselined.Should().BeFalse();
         second.AppliedMigrations.Should().BeEquivalentTo(first.AppliedMigrations);
         (await context.Database.GetPendingMigrationsAsync()).Should().BeEmpty();
@@ -722,7 +725,10 @@ public sealed class DatabaseMigrationTests
             "20260912202053_TrackEmergencyStopSenders",
             "20260914014156_AddUserPrinterControlMode",
             "20260915042413_RetireTrackedPrinterMotion",
-            "20260925012135_AddDispatchOperatorRecovery");
+            "20260925012135_AddDispatchOperatorRecovery",
+            "20261012013745_AddPrinterShowExternalSpool",
+            "20261013004523_CameraPrinterJoinAndLocation",
+            "20261013023326_AddDismissedPrinterCameras");
         startupStatus.IsDatabaseSchemaReady.Should().BeTrue();
         startupStatus.Phase.Should().Be(StartupPhase.Ready);
     }
@@ -1276,6 +1282,9 @@ public sealed class DatabaseMigrationTests
                 "20260913232205_AddUserPrinterControlMode",
                 "20260915042301_RetireTrackedPrinterMotion",
                 "20260925010702_AddDispatchOperatorRecovery",
+                "20261012013614_AddPrinterShowExternalSpool",
+                "20261013004517_CameraPrinterJoinAndLocation",
+                "20261013023320_AddDismissedPrinterCameras",
             ]
             :
             [
@@ -1313,6 +1322,9 @@ public sealed class DatabaseMigrationTests
                 "20260913232205_AddUserPrinterControlMode",
                 "20260915042335_RetireTrackedPrinterMotion",
                 "20260925010706_AddDispatchOperatorRecovery",
+                "20261012013617_AddPrinterShowExternalSpool",
+                "20261013004520_CameraPrinterJoinAndLocation",
+                "20261013023323_AddDismissedPrinterCameras",
             ];
         _ = coreMigrations.Should().Equal(expectedCoreMigrations,
             $"the {provider} core migration set must apply in the exact recorded order, including provider-specific schema guarantees");

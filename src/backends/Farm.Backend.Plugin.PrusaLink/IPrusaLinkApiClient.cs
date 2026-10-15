@@ -140,6 +140,13 @@ public interface IPrusaLinkApiClient
         PrinterCredential? credentials = null,
         CancellationToken ct = default);
 
+    /// <summary>Gets validated thumbnail content for the active print job.</summary>
+    Task<HistoryThumbnailContent?> GetCurrentJobThumbnailAsync(
+        string baseUrl,
+        string thumbnailUrl,
+        PrinterCredential? credentials = null,
+        CancellationToken ct = default);
+
     /// <summary>Gets aggregated totals computed from available history jobs.</summary>
     Task<HistoryTotals?> GetHistoryTotalsAsync(string baseUrl, PrinterCredential? credentials = null, CancellationToken ct = default);
 

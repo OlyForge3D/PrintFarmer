@@ -1,4 +1,6 @@
-﻿namespace Farm.Infrastructure.Services.Printers;
+﻿using System.Globalization;
+
+namespace Farm.Infrastructure.Services.Printers;
 
 /// <summary>Safety-sensitive operations governed by verified printer evidence.</summary>
 public enum PrinterSafetyOperation
@@ -42,7 +44,9 @@ public sealed record PrinterSafetyValidationResult(
     bool Success,
     int StatusCode = 200,
     string? Code = null,
-    string? Detail = null)
+    string? Detail = null,
+    double? RequiredHotendTemperatureC = null,
+    double? MeasuredHotendTemperatureC = null)
 {
     /// <summary>Successful validation result.</summary>
     public static PrinterSafetyValidationResult Allowed { get; } = new(true);
@@ -85,6 +89,8 @@ public sealed class PrinterSafetyGuard(
     IPrinterStatusCacheReader statusCache,
     TimeProvider timeProvider) : IPrinterSafetyGuard
 {
+    private const double MinimumFilamentLoadUnloadTemperatureC = 220;
+
     private readonly IPrinterBackendCapabilitiesService _capabilitiesService =
         capabilitiesService ??
         throw new ArgumentNullException(nameof(capabilitiesService));
@@ -163,13 +169,19 @@ public sealed class PrinterSafetyGuard(
             PrinterSafetyOperation.MmuEject =>
                 PrinterSafetyValidationResult.Allowed,
             PrinterSafetyOperation.FilamentLoad or
-            PrinterSafetyOperation.FilamentUnload or
+            PrinterSafetyOperation.FilamentUnload =>
+                ValidateExtrusion(
+                    safety,
+                    _statusCache.GetStatus(printerId),
+                    _timeProvider.GetUtcNow().UtcDateTime,
+                    MinimumFilamentLoadUnloadTemperatureC),
             PrinterSafetyOperation.FilamentChange or
             PrinterSafetyOperation.Extrusion =>
                 ValidateExtrusion(
                     safety,
                     _statusCache.GetStatus(printerId),
-                    _timeProvider.GetUtcNow().UtcDateTime),
+                    _timeProvider.GetUtcNow().UtcDateTime,
+                    null),
             _ => PrinterSafetyValidationResult.Allowed,
         };
 
@@ -234,13 +246,26 @@ public sealed class PrinterSafetyGuard(
     private static PrinterSafetyValidationResult ValidateExtrusion(
         PrinterVerifiedSafetyDto safety,
         PrinterStatusDto? status,
-        DateTime utcNow)
+        DateTime utcNow,
+        double? minimumFloorC)
     {
         VerifiedSafetyScalarFactDto minimum =
             safety.Extrusion.MinimumSafeMeasuredHotendTemperatureC;
-        if (minimum.State != VerifiedSafetyFactState.Verified ||
-            minimum.Value is not double minimumValue ||
-            !double.IsFinite(minimumValue))
+
+        // For load/unload, the policy floor replaces Unknown and floors lower verified values.
+        double? effectiveMinimumC = minimum.State switch
+        {
+            VerifiedSafetyFactState.Verified
+                when minimum.Value is double reportedMinimumC &&
+                     double.IsFinite(reportedMinimumC) =>
+                minimumFloorC is double floorC
+                    ? Math.Max(reportedMinimumC, floorC)
+                    : reportedMinimumC,
+            VerifiedSafetyFactState.Unknown when minimumFloorC is double floorC =>
+                floorC,
+            _ => null,
+        };
+        if (effectiveMinimumC is not double minimumValue)
         {
             return PrinterSafetyValidationResult.Reject(
                 503,
@@ -269,11 +294,14 @@ public sealed class PrinterSafetyGuard(
         }
 
         return measured.Value < minimumValue
-            ? PrinterSafetyValidationResult.Reject(
+            ? new PrinterSafetyValidationResult(
+                false,
                 409,
                 "printer_temperature_below_minimum",
-                "The fresh measured hotend temperature is below the verified safe minimum.")
-            : PrinterSafetyValidationResult.Allowed;
+                $"The fresh measured hotend temperature is below the required minimum of {minimumValue.ToString("0.###", CultureInfo.InvariantCulture)} °C.",
+                minimumValue,
+                measured.Value)
+            : new PrinterSafetyValidationResult(true, RequiredHotendTemperatureC: minimumValue, MeasuredHotendTemperatureC: measured.Value);
     }
 
     private static PrinterSafetyValidationResult ValidateAbsoluteMovement(

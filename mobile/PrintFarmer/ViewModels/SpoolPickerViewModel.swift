@@ -210,6 +210,8 @@ final class SpoolPickerViewModel {
 
     func handleScanResult(_ result: SpoolScanResult) async {
         switch result {
+        case .printerId:
+            scanError = "This is a printer tag, not a filament spool."
         case .spoolId(let id):
             await fetchAndSelectSpool(id: id)
 

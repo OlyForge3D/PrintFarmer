@@ -59,6 +59,9 @@ const LazyFilamentManagementPage = lazy(() =>
 const LazyPrintersPage = lazy(() =>
   import('@/features/printers/pages/PrintersPage').then(mod => ({ default: mod.PrintersPage }))
 );
+const LazyCamerasPage = lazy(() =>
+  import('@/features/cameras/pages/CamerasPage').then(mod => ({ default: mod.CamerasPage }))
+);
 const LazyPrinterGroupsPage = lazy(() =>
   import('@/features/printer-groups/pages/PrinterGroupsPage').then(mod => ({ default: mod.PrinterGroupsPage }))
 );
@@ -130,10 +133,6 @@ const LazyNewSliceJobPage = lazy(() =>
 );
 const LazyAdminControlCenterPage = lazy(() =>
   import('@/features/admin/pages/AdminControlCenterPage').then(mod => ({ default: mod.AdminControlCenterPage }))
-);
-
-const LazyInstallerUpdatesPage = lazy(() =>
-  import('@/features/admin/pages/InstallerUpdatesPage').then(mod => ({ default: mod.InstallerUpdatesPage }))
 );
 
 const LazyPartsInventoryPage = lazy(() =>
@@ -284,6 +283,7 @@ function AuthenticatedAppRoutes() {
         <Route path="dashboard" element={lazyRoute(<LazyPrinterDashboard />)} />
         <Route path="printers" element={lazyRoute(<LazyPrintersPage />)} />
         <Route path="printers/:printerId" element={lazyRoute(<LazyPrintersPage />)} />
+        <Route path="cameras" element={lazyRoute(<LazyCamerasPage />)} />
         <Route path="printers/:printerId/maintenance" element={lazyRoute(<LazyPrinterMaintenancePage />)} />
         <Route path="printer-groups" element={<ProtectedRoute requiredPermission={{ resource: 'printers', action: 'admin' }}>{lazyRoute(<LazyPrinterGroupsPage />)}</ProtectedRoute>} />
         <Route path="printQueue" element={lazyRoute(<LazyPrintQueueDashboardPage />)} />
@@ -327,7 +327,6 @@ function AuthenticatedAppRoutes() {
           <Route index element={lazyRoute(<LazyAdminControlCenterPage />)} />
           <Route path="settings" element={lazyRoute(<LazySettingsShell routeScope="system" />)} />
           <Route path="status" element={<AdminDestinationRoute destinationId="ops-status">{lazyRoute(<LazySystemStatusPage />)}</AdminDestinationRoute>} />
-          <Route path="updates" element={<AdminDestinationRoute destinationId="ops-installer-updates">{lazyRoute(<LazyInstallerUpdatesPage />)}</AdminDestinationRoute>} />
           <Route path="workers" element={<AdminDestinationRoute destinationId="ops-workers">{lazyRoute(<LazyWorkerManagementPage tabQueryParamName="workerTab" embedded />)}</AdminDestinationRoute>} />
           <Route path="login-audit" element={<AdminDestinationRoute destinationId="users-audit">{lazyRoute(<LazyLoginAuditPage embedded />)}</AdminDestinationRoute>} />
           <Route path="data-management" element={<AdminDestinationRoute destinationId="data-management">{lazyRoute(<LazyDataManagementPage embedded />)}</AdminDestinationRoute>} />

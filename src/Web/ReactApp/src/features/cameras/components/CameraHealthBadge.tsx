@@ -6,9 +6,11 @@ import { formatDistanceToNow } from 'date-fns';
 
 interface CameraHealthBadgeProps {
   healthStatus: CameraHealthStatus;
+  previewFailed?: boolean;
   lastHealthCheck?: string;
   showLastCheck?: boolean;
   size?: 'sm' | 'md';
+  details?: string;
 }
 
 const healthConfig: Record<CameraHealthStatus, { variant: 'default' | 'primary' | 'success' | 'warning' | 'error'; icon: React.ComponentType<{ className?: string }>; label: string }> = {
@@ -34,9 +36,19 @@ const healthConfig: Record<CameraHealthStatus, { variant: 'default' | 'primary' 
   },
 };
 
-export function CameraHealthBadge({ healthStatus, lastHealthCheck, showLastCheck = false, size = 'sm' }: CameraHealthBadgeProps) {
+export function CameraHealthBadge({
+  healthStatus,
+  previewFailed = false,
+  lastHealthCheck,
+  showLastCheck = false,
+  size = 'sm',
+  details,
+}: CameraHealthBadgeProps) {
   const config = healthConfig[healthStatus];
-  const Icon = config.icon;
+  const Icon = previewFailed ? AlertCircleIcon : config.icon;
+  const variant = previewFailed ? 'error' : config.variant;
+  const probeLabel = `Probe ${config.label.toLowerCase()}`;
+  const label = previewFailed ? 'Preview failed' : probeLabel;
 
   const getLastCheckText = () => {
     if (!lastHealthCheck) return null;
@@ -50,10 +62,19 @@ export function CameraHealthBadge({ healthStatus, lastHealthCheck, showLastCheck
   const lastCheckText = showLastCheck ? getLastCheckText() : null;
 
   return (
-    <div className="inline-flex flex-col items-start gap-0.5">
-      <Badge variant={config.variant} size={size} className="inline-flex items-center gap-1">
-        <Icon className="w-3 h-3" />
-        <span>{config.label}</span>
+    <div
+      className="inline-flex flex-col items-start gap-0.5"
+      title={`${previewFailed ? 'Preview failed. ' : ''}${probeLabel}. ${details ? `${details} ` : ''}Camera probe health is checked periodically by the backend; preview status reflects this browser's image load.`}
+      role="status"
+      aria-label={previewFailed ? `${label} · ${probeLabel.toLowerCase()}` : probeLabel}
+    >
+      <Badge
+        variant={variant}
+        size={size}
+        className="inline-flex items-center gap-1"
+      >
+        <span aria-hidden="true"><Icon className="w-3 h-3" /></span>
+        <span className="sr-only">{label}</span>
       </Badge>
       {lastCheckText && (
         <span className="text-xs text-pf-text-tertiary">

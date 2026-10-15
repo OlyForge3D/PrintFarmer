@@ -1,5 +1,27 @@
 # Features
 
+## Printer Fleet Filters
+
+On the **Printers** page, use the funnel button beside **Sort** to open an
+inline filter strip. Filters start collapsed; labels appear above the dropdowns
+when opened.
+
+- **State**: All States, Online, Printing, Paused, Shutdown, or Offline.
+- **Backend**: All Backends, Moonraker, PrusaLink, SDCP, OctoPrint, or FlashForge.
+- **Done in**: Any Time or completion within 1, 2, 4, 8, 12, or 24 hours.
+  Printers without an estimated completion time remain included.
+
+Selections update the fleet immediately—there is no Apply button. Closing the
+strip keeps selections active. The funnel is filled when any filter is active
+and outlined when none are active, whether the strip is open or collapsed.
+When any filter is active, a glyph-only **Clear filters** button
+appears beside the funnel and resets all three filters
+without changing the sort order or view mode. If nothing matches, clear or
+adjust filters to recover the fleet.
+
+Bed type is configured in printer settings, not shown on fleet cards or used
+as a fleet filter. Bed editing and temperature controls remain available.
+
 ## Location System
 
 Organize your printers by physical location for easier management.
@@ -267,18 +289,18 @@ Printer 3,http://192.168.1.102:7125,Moonraker,yyy_api_key_yyy,Workshop
 
 ### Automatic Camera Discovery
 
-When you import printers, the system automatically detects and configures camera URLs in the background:
+Imported printers use the same background camera sync as every other printer
+(see [Discovery and Sync](#discovery-and-sync)):
 
-- **Automatic Detection**: After a printer is imported, the system queries the printer's API to discover connected cameras
-- **Non-Blocking Import**: The import completes immediately (HTTP 201 response) while camera discovery happens in background
-- **Smart Behavior**: Only attempts discovery if no cameras are already configured (respects manual settings)
+- **Non-Blocking Import**: The import completes immediately (HTTP 201 response) while camera discovery happens in the background
+- **Respects Manual Settings**: User-edited and standalone cameras are never overwritten
 - **Supported Backends**: Works with Moonraker, PrusaLink, OctoPrint, and SDCP
 - **Graceful Fallback**: If discovery fails (e.g., camera doesn't exist or API unreachable), the printer is still created successfully
 
-Camera URLs typically appear within 1-3 seconds. If you don't see cameras after importing:
+If you don't see cameras after importing:
 1. Verify the printer actually has cameras connected
 2. Check that the API key is correct (if required by the backend)
-3. Manually refresh the printer details to see if cameras were discovered
+3. Open **Edit Printer → Cameras** and click **Discover** to run discovery now
 
 ### Export Steps
 
@@ -288,6 +310,84 @@ Camera URLs typically appear within 1-3 seconds. If you don't see cameras after 
 4. File contains all active printers
 
 ---
+
+## Cameras
+
+Cameras are a first-class feature. A camera can be linked to many printers
+(for example, one web cam watching a shelf of printers), and a printer can have
+many cameras, exactly one of which is its **primary** camera. Spaghetti/failure
+detection uses the printer's primary camera.
+
+### Cameras Page
+
+Open **Cameras** from the main navigation (`/cameras`); any signed-in user can
+use it. Choose a view with the toggle or the `?view=` query parameter:
+
+| View | URL | Shows |
+|---|---|---|
+| All | `/cameras` (or `?view=all`) | Every visible camera in one grid |
+| By location | `/cameras?view=location` | Cameras grouped by effective location; cameras without one appear under **Unassigned** |
+| By printer | `/cameras?view=printer` | Cameras grouped by linked printer; a camera linked to several printers appears under each, and unlinked cameras appear under **Not linked to a printer** |
+
+Users with `cameras:admin` also see **Manage** (`/cameras?cameraTab=manage`)
+to add, edit, enable/disable, and delete cameras. Camera management no longer
+lives in admin settings.
+
+### Location Rules
+
+- **Exactly one linked printer:** the camera's location is the printer's
+  location. The location field is read-only.
+- **Zero or two-or-more linked printers:** the camera's own location is
+  settable, which suits shared or standalone web cams.
+
+### Discovery and Sync
+
+The background printer camera sync asks each printer's backend plugin (for
+example Klipper/Moonraker webcams) which cameras it reports, then creates or
+updates linked cameras:
+
+- Runs when a printer connects, when a printer is created, and on an interval
+- Never overwrites cameras a user has edited, or standalone cameras
+- Marks cameras the printer no longer reports as offline instead of deleting them
+- Sends the `camerasupdated` SignalR event when a printer's cameras change
+
+Configure it in **Admin Settings → Printers → Camera Sync** (section
+`CameraSync`):
+
+| Setting | Key | Default |
+|---|---|---|
+| Automatic camera sync | `enabled` | `true` |
+| Camera sync interval (minutes, 1–1440) | `intervalMinutes` | `15` |
+
+> [!NOTE]
+> **Upgrading:** existing printers are backfilled on the first sync pass after
+> upgrade, so their plugin-reported cameras appear without re-adding printers.
+
+### Managing Cameras From a Printer
+
+- **Add Printer:** add manual camera entries (name, stream and/or snapshot
+  URL). They are created after the printer and linked to it. Discovered cameras
+  appear after the printer is created.
+- **Edit Printer → Cameras:** list linked cameras, edit them, **Remove**,
+  **Discover** (run discovery now), add a manual camera, or link an existing
+  camera.
+- **Remove** unlinks the camera from this printer. It deletes the camera only
+  when it was auto-discovered and no other printer links remain; otherwise the
+  camera is kept.
+- **Removal sticks:** removing an auto-discovered camera stops the background
+  sync from adding it back to that printer. Click **Discover** to bring removed
+  cameras back, or link the camera to the printer again manually.
+- **Permissions:** Remove and Discover require `printers:admin`; editing,
+  adding, and linking require `cameras:admin`.
+
+### Access Rules
+
+You can view a camera if you can view any printer linked to it. Unlinked
+cameras are visible to any signed-in user. Linked printers you cannot view are
+omitted from the camera's printer list.
+
+The iOS app shows a printer's cameras on its Printer Status page using the
+same authenticated proxy URLs.
 
 ## Printer Discovery
 

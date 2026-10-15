@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { CloseIcon, CheckCircleIcon, AlertCircleIcon, LoaderIcon } from '@/common/components/icons/MdiIcons';
 import { signalRService } from '@/services/harvest-signalr';
 import { Button } from '@/common/components/ui/Button';

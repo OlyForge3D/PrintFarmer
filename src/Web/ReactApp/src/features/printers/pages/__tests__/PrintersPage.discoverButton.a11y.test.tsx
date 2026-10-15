@@ -24,7 +24,6 @@ vi.mock('@/common/hooks/useApi', () => ({
   useDeletePrinter: () => ({ mutateAsync: vi.fn() }),
   usePrinterBackendCapabilities: () => ({ data: [] }),
   usePrinterCameraUrls: () => ({ data: [] }),
-  useBedTypes: () => ({ data: [] }),
 }));
 
 vi.mock('@/common/hooks/usePrinterDisplay', () => ({
@@ -55,10 +54,6 @@ vi.mock('@/services/api', () => ({
 
 vi.mock('@/common/components/PageTemplate', () => ({
   PageTemplate: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-}));
-
-vi.mock('@/common/components/ui/Select', () => ({
-  Select: ({ children, ...props }: React.SelectHTMLAttributes<HTMLSelectElement>) => <select {...props}>{children}</select>,
 }));
 
 vi.mock('@/common/components/ViewModeToggle', () => ({

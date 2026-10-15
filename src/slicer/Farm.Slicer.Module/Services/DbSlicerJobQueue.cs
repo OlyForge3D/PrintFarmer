@@ -14,8 +14,7 @@ namespace Farm.Slicer.Module.Services;
 public class DbSlicerJobQueue(
     ISliceJobRepository repo,
     IOptions<JobDispatchRetrySettings>? retryOptions = null,
-    TimeProvider? timeProvider = null,
-    Farm.Infrastructure.Services.HostUpdates.IHostUpdateAdmissionGate? hostUpdateAdmissionGate = null) : ISlicerJobQueue
+    TimeProvider? timeProvider = null) : ISlicerJobQueue
 {
     private const int TimingHistoryDays = 30;
     private readonly ISliceJobRepository _repo = repo ?? throw new ArgumentNullException(nameof(repo));
@@ -25,20 +24,16 @@ public class DbSlicerJobQueue(
 
     private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
 
-    public async Task EnqueueAsync(DistributedSlicingJob job, CancellationToken cancellationToken = default)
+    public Task EnqueueAsync(DistributedSlicingJob job, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(job);
 
-        await ThrowIfHostUpdateAdmissionClosedAsync(cancellationToken).ConfigureAwait(false);
-
         SliceJob sj = ToSliceJob(job);
-        await _repo.AddAsync(sj, cancellationToken).ConfigureAwait(false);
+        return _repo.AddAsync(sj, cancellationToken);
     }
 
     public async Task<DistributedSlicingJob?> DequeueAsync(string workerId, SlicerEngineType? preferredEngine = null, CancellationToken cancellationToken = default)
     {
-        await ThrowIfHostUpdateAdmissionClosedAsync(cancellationToken).ConfigureAwait(false);
-
         if (!Guid.TryParse(workerId, out Guid wid))
         {
             throw new ArgumentException("Worker ID must be a valid GUID.", nameof(workerId));
@@ -113,11 +108,8 @@ public class DbSlicerJobQueue(
         return job == null ? null : ToDistributedJob(job);
     }
 
-    public async Task CancelJobAsync(Guid jobId, CancellationToken cancellationToken = default)
-    {
-        await ThrowIfHostUpdateAdmissionClosedAsync(cancellationToken).ConfigureAwait(false);
-        await _repo.MarkFailedAsync(jobId, "Cancelled by operator", cancellationToken).ConfigureAwait(false);
-    }
+    public Task CancelJobAsync(Guid jobId, CancellationToken cancellationToken = default)
+        => _repo.MarkFailedAsync(jobId, "Cancelled by operator", cancellationToken);
 
     public async Task<SlicerQueueStats> GetQueueStatsAsync(SlicerEngineType? engine = null, CancellationToken cancellationToken = default)
     {
@@ -228,7 +220,6 @@ public class DbSlicerJobQueue(
 
     public async Task RequeueJobAsync(DistributedSlicingJob job, TimeSpan? delay = null, double jitterPercent = 0.0, CancellationToken cancellationToken = default)
     {
-        await ThrowIfHostUpdateAdmissionClosedAsync(cancellationToken).ConfigureAwait(false);
         (Guid workerId, Guid claimToken) = GetClaimIdentity(job);
         bool requeued = await _repo.TryRequeueForActiveLeaseAsync(
             job.Id,
@@ -292,14 +283,6 @@ public class DbSlicerJobQueue(
         };
 
         return dsj;
-    }
-
-    private async Task ThrowIfHostUpdateAdmissionClosedAsync(CancellationToken cancellationToken)
-    {
-        if (hostUpdateAdmissionGate is not null && await hostUpdateAdmissionGate.IsClosedAsync(cancellationToken).ConfigureAwait(false))
-        {
-            throw new Farm.Infrastructure.Services.HostUpdates.HostUpdateAdmissionClosedException();
-        }
     }
 
     private static (Guid WorkerId, Guid ClaimToken) GetClaimIdentity(DistributedSlicingJob job)

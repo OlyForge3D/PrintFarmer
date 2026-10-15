@@ -1,10 +1,24 @@
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { readReleaseIdentity } from '@/common/utils/releaseIdentity';
-import { commit, identity } from '@/test/features/system/serviceInventoryFixture';
+import type { BuildReleaseIdentity } from '@/common/utils/releaseIdentity';
 
-const buildIdentity = { ...identity, stableSequence: '0' };
+const commit = 'a'.repeat(40);
+const buildIdentity: BuildReleaseIdentity = {
+  canonicalVersion: '1.2.3-insider.10',
+  baseVersion: '1.2.3',
+  channel: 'insider',
+  releaseId: 'insider:1.2.3-insider.10',
+  sourceTag: 'v1.2.3-insider.10',
+  sourceBranch: 'development',
+  sourceCommit: commit,
+  authorizedBranchHead: commit,
+  buildId: '42',
+  buildAttempt: '1',
+  workflowIdentity: 'release-workflow',
+  stableSequence: '0',
+  allocationIdentity: 'allocation-10',
+  promotionOrigin: null,
+};
 
 describe('shared release identity consumer', () => {
   it('leaves native/legacy asset association unknown', () => { expect(readReleaseIdentity(undefined, commit)).toBeNull(); });
@@ -15,9 +29,9 @@ describe('shared release identity consumer', () => {
     expect(() => readReleaseIdentity(JSON.stringify(buildIdentity), 'b'.repeat(40))).toThrow(/exact frontend source commit/);
     expect(() => readReleaseIdentity(JSON.stringify({ ...buildIdentity, authorizedBranchHead: null }), commit)).toThrow(/authorizedBranchHead/);
   });
-  it('rejects the inventory API identity because build authority requires stable sequence evidence', () => {
-    const value = readFileSync(resolve(process.cwd(), '../../../fixtures/service-inventory/canonical-release-identity.json'), 'utf8');
-    expect(() => readReleaseIdentity(value, commit)).toThrow(/stableSequence/);
+  it('rejects release records without stable sequence evidence', () => {
+    const identityWithoutSequence = { ...buildIdentity, stableSequence: undefined };
+    expect(() => readReleaseIdentity(JSON.stringify(identityWithoutSequence), commit)).toThrow(/stableSequence/);
   });
   it('preserves promotion provenance when included in the authority record', () => {
     const promotionOrigin = { releaseId: 'insider:1.2.3-insider.9', canonicalVersion: '1.2.3-insider.9',

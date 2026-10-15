@@ -49,10 +49,6 @@ public static class ControlApiEndpoints
         // element in this single-printer-per-process model.
         group.MapGet("/printers", (PrinterRegistry registry) => Results.Ok(new[] { PrinterSummary(registry.Printer) }));
 
-        // Read-only evidence of every Moonraker protocol request received (see RequestLog
-        // for the command classification); never cleared by /reset.
-        group.MapGet("/requests", (PrinterRegistry registry) => Results.Ok(registry.Requests.Snapshot()));
-
         group.MapPost("/reset", async (
             PrinterRegistry registry,
             VirtualTimeCoordinator coordinator,

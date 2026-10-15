@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { printerSignalRService } from '@/services/printer-signalr';
 import { renderUnknown } from '@/common/utils/renderUnknown';
 

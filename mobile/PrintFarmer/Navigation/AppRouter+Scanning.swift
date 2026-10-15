@@ -3,8 +3,7 @@ import SwiftUI
 
 extension AppRouter {
     func prepareExternalScan(capabilities: ResolvedSystemCapabilities) {
-        guard makeTabVisibleIfPossible(.inventory, capabilities: capabilities) else { return }
-        selectedTab = .inventory
+        selectedTab = .filament
         inventoryPath = NavigationPath()
         pendingExternalScanRequestID = UUID()
     }
@@ -33,10 +32,9 @@ extension AppRouter {
 
     func completeScanFlowDismissal(capabilities: ResolvedSystemCapabilities) {
         isScanFlowDismissing = false
-        guard pendingExternalScanRequestID != nil,
-              makeTabVisibleIfPossible(.inventory, capabilities: capabilities) else { return }
+        guard pendingExternalScanRequestID != nil else { return }
         // A retry owns a new scan sheet, but must not invalidate the result's
         // delayed printer push, spool highlight, or navigation stacks.
-        selectedTab = .inventory
+        selectedTab = .filament
     }
 }

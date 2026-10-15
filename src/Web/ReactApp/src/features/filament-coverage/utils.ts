@@ -1,7 +1,18 @@
 import type { PrinterFilamentCoverage } from './types';
 
+/** Coverage is meaningful only for an active print or assigned queued work. */
+export function hasFilamentCoverageDemand(
+  coverage: PrinterFilamentCoverage | null | undefined,
+): coverage is PrinterFilamentCoverage {
+  return !!coverage && (
+    (typeof coverage.activeJobId === 'string' && coverage.activeJobId.trim().length > 0)
+    || (Number.isFinite(coverage.assignedQueuedJobCount) && coverage.assignedQueuedJobCount > 0)
+  );
+}
+
 /**
- * Downgrades a coverage snapshot to "unknown" for both the printer-level
+ * Hides snapshots without confirmed print demand, then downgrades coverage
+ * to "unknown" for both the printer-level
  * status and every toolhead when the printer is offline. An offline
  * printer's last-known coverage can't be verified (e.g. a spool could have
  * been pulled while unreachable), so it must never render a "covers"
@@ -17,7 +28,8 @@ export function withOfflineOverride(
   coverage: PrinterFilamentCoverage | null | undefined,
   isOnline: boolean,
 ): PrinterFilamentCoverage | null | undefined {
-  if (isOnline || !coverage) return coverage;
+  if (!hasFilamentCoverageDemand(coverage)) return null;
+  if (isOnline) return coverage;
   return {
     ...coverage,
     status: 'unknown',

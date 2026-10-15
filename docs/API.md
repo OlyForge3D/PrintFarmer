@@ -108,6 +108,40 @@ Update React and iOS together with the API. Stop all old API instances and
 workers before applying the provider migrations to avoid mixed writers.
 See [direct-motion coordination and upgrades](JOB_QUEUE_ARCHITECTURE.md#direct-manual-motion-control).
 
+## Printer Fan and Live Z-Offset Controls
+
+`POST /api/printers/{id}/fan` accepts `{"speedPercent": 0}` through
+`{"speedPercent": 100}`. `POST /api/printers/{id}/z-offset/adjust` accepts a
+non-zero `offsetMm` from `-0.2` through `0.2`. Both use the existing
+`CommandResult` response, require `Queue.Start` permission and printer Submit
+access, and are capability/readback-gated. The Z-offset command is transient;
+it does not save firmware configuration.
+
+Check `supportsFanControl` and `supportsFanSpeedReadback` before enabling fan
+controls, and `supportsZOffsetAdjustment` and `supportsZOffsetReadback` before
+enabling live Z-offset controls. A status value must also be present. At present
+these controls are supported only by Moonraker printers reporting the needed
+readback. Known online idle states use a direct actuation lease; printing and
+paused states use the active-print lease. Offline printers return `503`,
+unknown/transitional states return `409`, and unsupported controls or unknown
+readbacks return `502` without sending a command.
+
+Status DTOs and `printerupdated` events may include:
+
+- `fanSpeedPercent`: Moonraker's `fan.speed` output duty (0–1) mapped to
+  percent. This is not measured RPM; tachometer readings are not inferred.
+- `liveZOffsetMm`: the reported Z component of
+  `gcode_move.homing_origin`, in millimeters.
+- `currentLayer` and `totalLayers`: actual counters from Moonraker
+  `print_stats.info.current_layer` / `total_layer`, when the slicer emitted
+  `SET_PRINT_STATS_INFO`, or SDCP's `currentLayer` / `totalLayer` status fields.
+
+Unavailable, malformed, or unsupported readbacks are `null`; the API never
+estimates layer counts from progress or position. When Moonraker's authoritative
+status endpoint reports the printer offline, the composite status omits all
+secondary job and live telemetry readbacks rather than mixing them with an
+offline state.
+
 ## API Contract and Calibration Capabilities
 
 ### Contract negotiation
@@ -605,7 +639,23 @@ DELETE /api/printers/{printerId}/location
 
 **Response:** 204 No Content
 
+## Failure Detection History
+
+`GET /api/failure-detection/history?printerId=<guid>&take=<n>` requires
+printer-group `View` access when a printer is specified; denied access returns
+`404` without revealing incident data. Without `printerId`, only visible
+printers' incidents are returned, and filtering occurs before the result limit.
+Farm administrators retain access to all incidents.
+
 ## Locations API
+
+### Printer Visibility in a Subtree
+
+`GET /api/locations/{locationId}/printers/subtree` returns only printers for
+which the authenticated caller has printer-group `View` access, including
+printers in descendant locations. Restricted printers and their live state
+and job metadata are omitted; a subtree with no visible printers returns an
+empty collection. Farm administrators retain access to all printers.
 
 ### List All Locations (Flat)
 
@@ -933,6 +983,77 @@ Authorization: Bearer <token>
 - `404` - Location not found
 - `503` - System initializing
 
+## Queue Position API
+
+### Move a queued job
+
+`PUT /api/job-queue/jobs/{id}/position` requires the `Queue.Write` permission
+and an `If-Match` header containing the moved job's ETag. Supply exactly one
+neighbor ID and its ETag to place the queued job immediately before or after
+that neighbor:
+
+```http
+PUT /api/job-queue/jobs/{id}/position
+If-Match: "moved-job-etag"
+Content-Type: application/json
+
+{ "beforeJobId": "neighbor-guid", "beforeJobETag": "neighbor-etag" }
+```
+
+Use `afterJobId` and `afterJobETag` instead to place the job after the neighbor.
+The moved job adopts the neighbor's priority. Reordering is limited to queued
+jobs in the same assigned-printer queue (or the unassigned queue), preserves
+assigned jobs' positions, and is persisted transactionally. Queue positions are
+only compared within a queue scope; cross-scope ordering remains priority then
+FIFO by queued time and job ID **when comparing eligible dispatch heads**, not
+when flattening queue scope groups for display.
+
+### Refetch the authoritative queue order
+
+`GET /api/job-queue-analytics?sortBy=priority` (the default), with no status filter
+or `filterStatus=Queued`, returns a **flat array of scope groups**: unassigned
+(`job.assignedPrinterId = null`, "Any printer") first, then assigned-printer
+groups by printer ID. Inside each group the queued rows follow
+`Priority desc → QueuePosition asc → QueuedAt asc → Id asc`.
+Scope grouping and ordering happen **before** `offset`/`limit` pagination.
+A group can span pages; append pages in response order, using `X-Has-More`
+to continue even when authorization filtering yields a short page.
+
+Web and iOS queue clients must preserve the server order, group by
+`job.assignedPrinterId`, filter queued rows within those groups, and limit drag
+to a single group. Refetch this same endpoint after a successful move or a
+409/412. Do not sort by creation time or compare positions across scopes.
+`GET /api/job-queue-analytics/printer/{printerId}` remains the authoritative
+single-printer view, returning a flat array of `QueuedPrintJobDto` (no `job`
+wrapper). It includes exactly these active bands, sharing the requested limit:
+
+- Printer-occupying `Starting`, `Printing`, `Paused` rows first, ordered by
+  `Priority desc → QueuedAt asc → Id asc`.
+- `Assigned` committed-handoff rows next, with the same priority/time/ID order.
+- `Queued` rows last, in scope-local priority/position/time/ID order.
+
+Terminal rows are excluded. This explicitly clarifies PLAN.md's former
+Printing/Queued-only wording to preserve queued **and in-progress** visibility.
+Only Queued rows are reorderable or candidates for a new dispatch; the active
+bands are read-only visibility, not additional dispatch candidates.
+Read `name` as the display filename, `queuedAtUtc` as queue time,
+`queuePosition` as the scope-local position, and Base64 `rowVersion` as the
+job ETag. Clients retain all active rows and filter Queued for next-job/drag
+without locally sorting the array.
+
+The general repository priority/FIFO order is retained for job reporting and
+cross-scope eligible-head comparison. Terminal-status and deadline-sorted
+analytics are reporting views, not reorderable queue order. The first eligible
+queued row of each scope, rather than the first group displayed, competes for
+dispatch using `Priority desc → QueuedAt asc → Id asc`.
+
+Responses: `200` with the moved job; `428` when `If-Match` is missing; `412`
+when either ETag is stale or a concurrent row-version update occurs (the body
+includes the current moved-job and neighbor ETags); `409` when either job is no
+longer queued, the neighbor is the moved job or is outside the moved job's
+queue scope, or the neighbor no longer exists; `404` when the moved job is
+missing; and `400` for malformed neighbor fields or invalid ETags.
+
 ## Auto-Dispatch API
 
 The auto-dispatch system scores all available printers against job requirements using a 9-factor algorithm (4 hard filters + 5 soft scoring factors). This enables intelligent printer selection and automated job assignment.
@@ -1136,6 +1257,68 @@ Authorization: Bearer <token>
 - `maxConcurrentDispatches` ≥ 1
 
 
+
+## Cameras API
+
+Camera routes require a PrintFarmer JWT. You can read a camera if you can view
+any printer linked to it; unlinked cameras are readable by any authenticated
+user. Linked printers the caller cannot view are redacted from responses.
+Raw camera targets stay server-side; clients use the `/api/cameras/{id}/stream`
+and `/api/cameras/{id}/snapshot` proxy paths.
+
+| Method | Route | Permission | Description |
+|---|---|---|---|
+| `GET` | `/api/cameras` | Authenticated | List visible cameras |
+| `GET` | `/api/cameras/display` | Authenticated | Cameras with proxy URLs for display |
+| `GET` | `/api/cameras/{id}` | Authenticated | Get one camera |
+| `GET` | `/api/cameras/by-printer/{printerId}` | Authenticated | Cameras linked to a printer |
+| `POST` | `/api/cameras` | `cameras:admin` | Create a camera; accepts `printerIds`, `isPrimary`, `locationId` |
+| `PUT` | `/api/cameras/{id}` | `cameras:admin` | Update a camera; accepts `printerIds`, `isPrimary`, `locationId`, `clearLocationId` |
+| `POST` | `/api/cameras/{id}/printers/{printerId}` | `cameras:admin` | Link a camera to a printer (idempotent); optional body `{ "isPrimary": true }` |
+| `DELETE` | `/api/cameras/{id}/printers/{printerId}` | `cameras:admin` | Unlink; the camera is kept. `204`, or `404` if not linked |
+| `DELETE` | `/api/printers/{printerId}/cameras/{cameraId}` | `printers:admin` | Remove from a printer (see below) |
+| `POST` | `/api/printers/{id}/cameras/discover` | `printers:admin` | Run plugin camera discovery now; returns the printer's cameras |
+
+**Camera fields.** `CameraDto` includes `printerIds` (primary link first),
+`printers` (`id`, `name`, `isPrimary`), `locationId`, `effectiveLocationId`,
+`effectiveLocationName`, `isLocationDerived`, and `userModified`. The legacy
+`printerId`/`printerName` fields remain for compatibility.
+
+**Primary camera.** Each printer has exactly one primary camera. Linking with
+`isPrimary: true` demotes the previous primary; when omitted, the camera
+becomes primary only if the printer has none.
+
+**Location.** When exactly one printer is linked, the effective location is that
+printer's location and `locationId` is ignored and cleared
+(`isLocationDerived: true`). Otherwise `locationId` is the effective location.
+
+**Remove from a printer.** `DELETE /api/printers/{printerId}/cameras/{cameraId}`
+unlinks the camera and deletes it only when it was auto-discovered and no
+printer links remain:
+
+```json
+{ "result": "Unlinked" }
+```
+
+`result` is `Unlinked` (camera kept) or `Deleted`. Returns `404` when the
+printer or camera is not found, not accessible, or not linked.
+
+Removing an auto-discovered (non-`Standalone`) camera records a per-printer
+dismissal keyed by camera source, with either result. Background syncs do not
+re-create or re-link a dismissed camera. Linking a camera from that source to
+the printer again (`POST /api/cameras/{id}/printers/{printerId}` or a
+`printerIds` update) clears the dismissal.
+
+**Discovery.** `POST /api/printers/{id}/cameras/discover` performs the same sync
+the background service runs on connect, on create, and every
+`CameraSync.intervalMinutes` (default 15). User-modified and standalone cameras
+are never overwritten; cameras the backend stops reporting are marked offline.
+It first clears the printer's dismissals, so discovery brings back cameras the
+user removed. Background syncs never clear dismissals.
+
+**Printer camera URL.** `GET /api/printers/{id}/camera/url` returns relative
+proxy `streamUrl`/`snapshotUrl` plus optional `accessMode`, `streamFormat`,
+and `snapshotStrategy` fields.
 
 ## Discovery API
 
@@ -1659,7 +1842,23 @@ printer's audience. These queues remain in-memory and are lost on server restart
   "bedTarget": 60,
   "progress": 45.5,
   "timeRemaining": 1800,
-  "currentFile": "calibration.gcode"
+  "currentFile": "calibration.gcode",
+  "currentLayer": 42,
+  "totalLayers": 180,
+  "fanSpeedPercent": 65,
+  "liveZOffsetMm": 0.025
+}
+```
+
+#### camerasupdated
+
+Sent when a camera sync changes a printer's cameras. Refetch the printer's
+cameras over REST.
+
+```json
+{
+  "printerId": "printer-uuid",
+  "cameraIds": ["camera-uuid"]
 }
 ```
 

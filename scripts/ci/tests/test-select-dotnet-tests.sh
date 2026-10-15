@@ -546,49 +546,6 @@ case_infra_change_does_not_build_web_api_test_leg() {
   assert_not_contains "no integration leg" "$matrix" "Farm.Web.IntegrationTests" || return 1
 }
 
-case_host_updates_change_selects_host_update_cli_tests() {
-  local out="$1"
-  # Issue #3210: #3194 changed src/infra/Services/HostUpdates/** and the
-  # selector skipped Farm.HostUpdate.Cli.Tests, so 16 CLI topology tests broke
-  # on development undetected. Host-update services must also select the CLI
-  # tests and the host-update tests owned by Farm.Web.Api.Tests, on top of the
-  # ordinary infra set.
-  local path
-  for path in \
-      "src/infra/Services/HostUpdates/HostUpdateDaemon.cs" \
-      "src/infra/Services/HostUpdates/PullApproval/Example.cs"; do
-    EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
-      CHANGED_FILES_FROM_Z="" CHANGED_FILES="$path" \
-      select_run >/dev/null 2>&1
-    assert_eq "want_dotnet_build ($path)" "$(get_output "$out" want_dotnet_build)" "true" || return 1
-    assert_eq "want_dotnet_test ($path)" "$(get_output "$out" want_dotnet_test)" "true" || return 1
-    assert_eq "full_matrix ($path)" "$(get_output "$out" full_matrix)" "false" || return 1
-    local matrix ; matrix="$(get_output "$out" matrix)"
-    assert_contains "matrix host-update cli ($path)" "$matrix" "Farm.HostUpdate.Cli.Tests" || return 1
-    assert_api_shard_matrix "host-update api ($path)" "$matrix" "$TEST_MANIFEST" || return 1
-    assert_contains "matrix infra ($path)" "$matrix" "Farm.Infrastructure.Tests" || return 1
-    assert_contains "reason ($path)" "$(get_output "$out" reason)" "host-updates" || return 1
-    : > "$out"
-  done
-
-  # Other infra services keep the narrower infra-only selection.
-  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
-    CHANGED_FILES_FROM_Z="" CHANGED_FILES="src/infra/Services/HostUpdatesLookalike.cs" \
-    select_run >/dev/null 2>&1
-  local other ; other="$(get_output "$out" matrix)"
-  assert_not_contains "no host-update cli for other infra" "$other" "Farm.HostUpdate.Cli.Tests" || return 1
-  assert_not_contains "no api for other infra" "$other" "Farm.Web.Api.Tests" || return 1
-  : > "$out"
-
-  # Prose under HostUpdates/ stays inert like every other docs path.
-  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
-    CHANGED_FILES_FROM_Z="" CHANGED_FILES="src/infra/Services/HostUpdates/README.md" \
-    select_run >/dev/null 2>&1
-  assert_eq "docs want_dotnet_test" "$(get_output "$out" want_dotnet_test)" "false" || return 1
-  assert_eq "docs want_dotnet_build" "$(get_output "$out" want_dotnet_build)" "false" || return 1
-  assert_not_contains "docs no host-update cli" "$(get_output "$out" matrix)" "Farm.HostUpdate.Cli.Tests" || return 1
-}
-
 case_infra_test_project_change_selects_narrow_bucket() {
   local out="$1"
   # tests_infra bucket (mirrors tests_api): a change confined to
@@ -2379,6 +2336,7 @@ case_policy_npm_lockfiles_trigger_dependency_compliance() {
     return 1
   fi
   while IFS= read -r lock; do
+    lock="${lock%$'\r'}"
     manifest="${lock%package-lock.json}package.json"
     for p in "$lock" "$manifest"; do
       : > "$out"
@@ -2410,24 +2368,6 @@ case_workflow_dependency_compliance_uses_own_output() {
   local wanted_env_count
   wanted_env_count="$(printf '%s\n' "$body" | grep -cF 'WANT_DEPENDENCY_COMPLIANCE: ${{ needs.select.outputs.want_dependency_compliance }}' || true)"
   assert_eq "summary env bindings" "$wanted_env_count" "2" || return 1
-}
-
-case_workflow_fixture_migrations_follow_dotnet_build_selection() {
-  local workflow="$REPO_ROOT/.github/workflows/ci.yml" body block
-  body="$(tr -d '\r' < "$workflow")"
-  block="$(printf '%s\n' "$body" | awk '
-    /^  recovery-matrix-fixture-migrations:$/ { f=1; print; next }
-    f && /^  [A-Za-z_][A-Za-z0-9_-]*:$/ { exit }
-    f { print }
-  ')"
-  assert_contains "fixture migration depends on selector" "$block" \
-    'needs: [ci-tools, select]' || return 1
-  assert_contains "fixture migration selection gate" "$block" \
-    "if: \${{ needs.select.outputs.want_dotnet_build == 'true' }}" || return 1
-  assert_contains "fixture migration conditional summary check" "$body" \
-    'check_conditional recovery-matrix-fixture-migrations "$FIXTURE_MIG_RESULT" "$WANT_DOTNET_BUILD"' || return 1
-  assert_not_contains "fixture migration not unconditionally required" "$body" \
-    'require_success recovery-matrix-fixture-migrations' || return 1
 }
 
 case_workflow_ci_tools_runs_restore_free_compliance() {
@@ -4119,7 +4059,6 @@ TESTS=(
   case_infra_change_does_not_build_web_api_test_leg
   case_infra_test_project_change_selects_narrow_bucket
   case_infra_and_api_mixed_selects_both_projects
-  case_host_updates_change_selects_host_update_cli_tests
   case_infra_change_full_safe_still_includes_infra_tests
   case_backend_core_change_selects_infra_tests
   case_backend_plugin_change_selects_infra_tests
@@ -4202,7 +4141,6 @@ TESTS=(
   case_nested_package_json_lookalikes_skip_dependency_compliance
   case_policy_npm_lockfiles_trigger_dependency_compliance
   case_workflow_dependency_compliance_uses_own_output
-  case_workflow_fixture_migrations_follow_dotnet_build_selection
   case_workflow_ci_tools_runs_restore_free_compliance
   case_merge_base_diverged_pr_base_sha_mobile_only
   case_push_to_development_full_safe

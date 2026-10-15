@@ -138,6 +138,14 @@ public sealed class SensitiveSerializationTests
                 ["CameraStreamUrl"] = "http://complete-camera.internal",
                 ["BackendUrl"] = "http://complete-backend.internal",
             },
+            [typeof(PrinterDto)] = new Dictionary<string, string>
+            {
+                ["ThumbnailUrl"] = "http://printer.internal/private-thumbnail.png",
+            },
+            [typeof(PrinterStatusDto)] = new Dictionary<string, string>
+            {
+                ["ThumbnailUrl"] = "http://printer.internal/private-thumbnail.png",
+            },
             [typeof(PrinterFastDto)] = new Dictionary<string, string>
             {
                 ["ApiKey"] = "fast-api-key",
@@ -189,6 +197,45 @@ public sealed class SensitiveSerializationTests
         _ = JsonSerializer.Serialize(details)
             .Should().Contain("http://details.internal")
             .And.Contain("details-password");
+    }
+
+    [Fact]
+    public void Serialize_CurrentJobThumbnailUrl_UsesOnlyRelativeProxyTarget()
+    {
+        const string backendThumbnailUrl = "http://printer.internal:7125/server/files/gcodes/.thumbs/benchy.png";
+        var status = new PrinterStatusDto(
+            Guid.Parse("5dd72144-32fb-4577-94a1-8dfb24b58eb7"),
+            IsOnline: true,
+            State: "printing",
+            JobName: "benchy.gcode",
+            ThumbnailUrl: backendThumbnailUrl);
+
+        string json = JsonSerializer.Serialize(status, JsonSerializerOptions.Web);
+        using JsonDocument document = JsonDocument.Parse(json);
+
+        json.Should().NotContain("printer.internal");
+        json.Should().NotContain("thumbnailUrl");
+        document.RootElement.GetProperty("currentJobThumbnailUrl").GetString()
+            .Should().StartWith("/api/printers/5dd72144-32fb-4577-94a1-8dfb24b58eb7/current-job/thumbnail?v=");
+
+        var printer = new PrinterDto(
+            Guid.Parse("5dd72144-32fb-4577-94a1-8dfb24b58eb7"),
+            "printer",
+            Notes: null,
+            IsOnline: true,
+            State: "printing",
+            JobName: "benchy.gcode",
+            ThumbnailUrl: backendThumbnailUrl,
+            CurrentJobThumbnailUrl: PrinterThumbnailUrl.Create(
+                Guid.Parse("5dd72144-32fb-4577-94a1-8dfb24b58eb7"),
+                "printing",
+                "benchy.gcode",
+                backendThumbnailUrl));
+        string printerJson = JsonSerializer.Serialize(printer, JsonSerializerOptions.Web);
+        printerJson.Should().NotContain("printer.internal").And.NotContain("thumbnailUrl");
+        using JsonDocument printerDocument = JsonDocument.Parse(printerJson);
+        printerDocument.RootElement.GetProperty("currentJobThumbnailUrl").GetString()
+            .Should().StartWith("/api/printers/5dd72144-32fb-4577-94a1-8dfb24b58eb7/current-job/thumbnail?v=");
     }
 
     [Fact]

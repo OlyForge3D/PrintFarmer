@@ -5,6 +5,7 @@ import { Button } from '@/common/components/ui';
 import type { FailureDetectionEvent, FailureDetectionPrinterStatusDto } from '@/types/api';
 import {
   getFailureDetectionDisplayState,
+  getFailureDetectionIconColorClass,
   getFailureDetectionStateLabel,
 } from '@/features/printers/utils/failureDetectionStatus';
 import { FailureDetectionStatusModal } from '@/features/printers/components/FailureDetectionStatusModal';
@@ -57,14 +58,7 @@ export function FailureDetectionMonitoringBadge({
   const resolvedPrinterId = effectiveStatus?.printerId ?? printerId;
   const resolvedPrinterName = effectiveStatus?.printerName ?? printerName;
 
-  // Color mapping based on state
-  const iconColorClass = displayState === 'monitoring'
-    ? 'text-pf-success'
-    : displayState === 'checking'
-      ? 'text-pf-text-secondary'
-      : displayState === 'disabled'
-        ? 'text-pf-text-tertiary'
-        : 'text-pf-error';
+  const iconColorClass = getFailureDetectionIconColorClass(displayState, enabled);
 
   return (
     <>

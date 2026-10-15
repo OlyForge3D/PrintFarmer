@@ -1,4 +1,3 @@
-import React from 'react';
 import { render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { AddPrinterModal } from '../AddPrinterModal';
@@ -24,6 +23,14 @@ import { AddPrinterModal } from '../AddPrinterModal';
 // this asserts the structural fix directly: every footer action must be a
 // descendant of the responsive wrapper, and that wrapper must declare the
 // mobile-stack / desktop-row classes.
+
+vi.mock('@/features/auth/hooks/useAuth', () => ({
+  useAuth: () => ({ hasPermission: () => true }),
+}));
+
+vi.mock('@/services/cameraService', () => ({
+  cameraService: { createCamera: vi.fn() },
+}));
 
 vi.mock('@/common/hooks/useApi', () => ({
   useManufacturers: () => ({ data: [], isLoading: false, error: null }),

@@ -1,16 +1,18 @@
-import { useMemo, useState, useEffect } from 'react';
+import { useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { RotateCw } from 'lucide-react';
 import { toast } from 'sonner';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import type { EmbeddablePageProps } from '@/common/components/EmbeddablePageProps';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
-import { Alert, Button, Badge } from '@/common/components/ui';
-import { CameraIcon, DeleteIcon, EditIcon, ExternalLinkIcon, ImageIcon, VideoIcon, SettingsIcon } from '@/common/components/icons/MdiIcons';
+import { Button } from '@/common/components/ui';
+import { CameraIcon, DeleteIcon, EditIcon, ExternalLinkIcon, SettingsIcon } from '@/common/components/icons/MdiIcons';
 import { cameraService } from '@/services/cameraService';
-import type { DisplayCameraDto, CameraSource, CameraType } from '@/types/api';
+import type { DisplayCameraDto } from '@/types/api';
 import { useSearchParams } from 'react-router';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { CameraManagementPanel } from '@/features/cameras/components/CameraManagementPanel';
+import { CameraModeControl } from '@/features/cameras/components/CameraModeControl';
 import { CameraHealthBadge } from '@/features/cameras/components/CameraHealthBadge';
 import { EditCameraModal } from '@/features/cameras/components/EditCameraModal';
 import {
@@ -18,57 +20,77 @@ import {
   useCameraViewPreferences,
 } from '@/features/cameras/hooks/useCameraViewPreferences';
 import { usePrinterSnapshotPreview } from '@/features/cameras/hooks/usePrinterSnapshotPreview';
+import { useAuthenticatedMjpegStream } from '@/features/cameras/hooks/useAuthenticatedMjpegStream';
+import { getAuthenticatedCameraProxyRoute } from '@/common/auth/authenticatedCameraRoutes';
 import { getCameraAttentionContent } from '@/features/cameras/utils/cameraAttention';
 import {
   canUseMjpegStream,
   isUnsupportedCameraPreview,
   shouldPollPrinterSnapshot,
 } from '@/features/cameras/utils/cameraPreview';
+import {
+  groupCamerasByLocation,
+  groupCamerasByPrinter,
+  parseCameraView,
+  type CameraGroup,
+  type CameraView,
+} from '@/features/cameras/utils/cameraGrouping';
 
 const CAMERA_SNAPSHOT_REFRESH_MS = 4_000;
 
+const CAMERA_VIEW_OPTIONS: { value: CameraView; label: string }[] = [
+  { value: 'all', label: 'All' },
+  { value: 'location', label: 'By location' },
+  { value: 'printer', label: 'By printer' },
+];
+
 /**
- * CamerasPage - Display all enabled cameras in a grid view
- * 
- * Shows cameras that have been explicitly added to the system via the Camera Admin page.
+ * CamerasPage - Top-level `/cameras` page.
+ *
+ * Shows every configured camera either as a flat grid (`?view=all`, default), grouped by
+ * effective location (`?view=location`) or grouped by linked printer (`?view=printer`).
  * Supports both stream and snapshot modes for each camera.
  */
 export function CamerasPage({ embedded = false }: EmbeddablePageProps) {
   const auth = useAuth();
-  const [cameras, setCameras] = useState<DisplayCameraDto[]>([]);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [cameraToEdit, setCameraToEdit] = useState<DisplayCameraDto | null>(null);
   const [cameraToDelete, setCameraToDelete] = useState<DisplayCameraDto | null>(null);
   const [isDeletingCamera, setIsDeletingCamera] = useState(false);
 
   const [searchParams, setSearchParams] = useSearchParams();
-  // Matches the CamerasController manage endpoints' `[RequirePermission("cameras", "admin")]`
-  // and the `hw-cameras` adminDestinations.ts entry (#1457).
+  // Matches the CamerasController manage endpoints' `[RequirePermission("cameras", "admin")]` (#1457).
   const canManageCameras = auth.hasPermission('cameras', 'admin');
   const activeTab = useMemo<'view' | 'manage'>(() => {
     const requestedTab = searchParams.get('cameraTab');
     if (requestedTab === 'manage' && canManageCameras) return 'manage';
     return 'view';
   }, [canManageCameras, searchParams]);
+  const activeView = parseCameraView(searchParams.get('view'));
 
-  useEffect(() => {
-    loadCameras();
-  }, []);
+  // Lives under the ['cameras'] key so the `camerasupdated` SignalR invalidation refreshes this page.
+  const camerasQuery = useQuery({
+    queryKey: ['cameras', 'display'],
+    queryFn: async () => {
+      const data = await cameraService.getDisplayCameras();
+      return [...data].sort((a, b) => a.sortOrder - b.sortOrder);
+    },
+  });
+  const cameras = useMemo(() => camerasQuery.data ?? [], [camerasQuery.data]);
+  const cameraGroups = useMemo<CameraGroup[] | null>(() => {
+    if (activeView === 'location') return groupCamerasByLocation(cameras);
+    if (activeView === 'printer') return groupCamerasByPrinter(cameras);
+    return null;
+  }, [activeView, cameras]);
+  const loading = camerasQuery.isPending;
+  const loadError = camerasQuery.error
+    ? camerasQuery.error instanceof Error ? camerasQuery.error.message : 'Failed to load cameras'
+    : null;
+  const displayedError = error ?? loadError;
 
   const loadCameras = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const data = await cameraService.getDisplayCameras();
-      // Sort by sortOrder
-      data.sort((a, b) => a.sortOrder - b.sortOrder);
-      setCameras(data);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load cameras');
-    } finally {
-      setLoading(false);
-    }
+    setError(null);
+    await camerasQuery.refetch();
   };
 
   const setTab = (nextTab: 'view' | 'manage') => {
@@ -76,6 +98,30 @@ export function CamerasPage({ embedded = false }: EmbeddablePageProps) {
     nextSearchParams.set('cameraTab', nextTab);
     setSearchParams(nextSearchParams, { replace: true });
   };
+
+  const setView = (nextView: CameraView) => {
+    const nextSearchParams = new URLSearchParams(searchParams);
+    if (nextView === 'all') {
+      nextSearchParams.delete('view');
+    } else {
+      nextSearchParams.set('view', nextView);
+    }
+    setSearchParams(nextSearchParams, { replace: true });
+  };
+
+  const renderCameraGrid = (gridCameras: DisplayCameraDto[]) => (
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+      {gridCameras.map((camera) => (
+        <CameraViewCard
+          key={camera.id}
+          camera={camera}
+          canManage={canManageCameras}
+          onEdit={setCameraToEdit}
+          onDelete={setCameraToDelete}
+        />
+      ))}
+    </div>
+  );
 
   const handleEditSuccess = async () => {
     await loadCameras();
@@ -103,7 +149,7 @@ export function CamerasPage({ embedded = false }: EmbeddablePageProps) {
   return (
     <PageTemplate
       title="Cameras"
-      subtitle="Live camera feeds from your print farm"
+      subtitle="Live camera feeds by location, by printer, or all at once"
       icon={CameraIcon}
       actions={
         <div className="flex items-center gap-2">
@@ -130,10 +176,25 @@ export function CamerasPage({ embedded = false }: EmbeddablePageProps) {
         <CameraManagementPanel onCamerasChanged={loadCameras} />
       ) : (
         <div className="space-y-6">
+          <div role="group" aria-label="Camera view" className="inline-flex gap-0">
+            {CAMERA_VIEW_OPTIONS.map((option) => (
+              <Button
+                key={option.value}
+                type="button"
+                size="sm"
+                variant={activeView === option.value ? 'primary' : 'secondary'}
+                aria-pressed={activeView === option.value}
+                onClick={() => setView(option.value)}
+              >
+                {option.label}
+              </Button>
+            ))}
+          </div>
+
           {/* Error message */}
-          {error && (
+          {displayedError && (
             <div className="px-4 py-3 rounded-sm bg-pf-error-bg border border-pf-error text-pf-error">
-              {error}
+              {displayedError}
             </div>
           )}
 
@@ -160,18 +221,25 @@ export function CamerasPage({ embedded = false }: EmbeddablePageProps) {
                 </p>
               )}
             </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-              {cameras.map((camera) => (
-                <CameraViewCard
-                  key={camera.id}
-                  camera={camera}
-                  canManage={canManageCameras}
-                  onEdit={setCameraToEdit}
-                  onDelete={setCameraToDelete}
-                />
-              ))}
+          ) : cameraGroups ? (
+            <div className="space-y-8">
+              {cameraGroups.map((group) => {
+                const headingId = `camera-group-${group.id}`;
+                return (
+                  <section key={group.id} aria-labelledby={headingId} className="space-y-3">
+                    <h2 id={headingId} className="text-lg font-semibold text-pf-text-primary">
+                      {group.label}{' '}
+                      <span className="text-sm font-normal text-pf-text-secondary">
+                        ({group.cameras.length} {group.cameras.length === 1 ? 'camera' : 'cameras'})
+                      </span>
+                    </h2>
+                    {renderCameraGrid(group.cameras)}
+                  </section>
+                );
+              })}
             </div>
+          ) : (
+            renderCameraGrid(cameras)
           )}
 
           <EditCameraModal
@@ -204,23 +272,6 @@ interface CameraViewCardProps {
   onDelete: (camera: DisplayCameraDto) => void;
 }
 
-const sourceLabels: Record<CameraSource, string> = {
-  Standalone: 'Standalone',
-  Moonraker: 'Moonraker',
-  PrusaLink: 'PrusaLink',
-  OctoPrint: 'OctoPrint',
-  SDCP: 'SDCP',
-  FlashForge: 'FlashForge',
-};
-
-const cameraTypeLabels: Record<CameraType, string> = {
-  General: 'General',
-  Bed: 'Bed',
-  Nozzle: 'Nozzle',
-  Wide: 'Wide',
-  Timelapse: 'Timelapse',
-};
-
 /**
  * CameraViewCard - Individual camera feed card
  */
@@ -231,9 +282,10 @@ function CameraViewCard({ camera, canManage, onEdit, onDelete }: CameraViewCardP
     accessMode: camera.accessMode,
     streamFormat: camera.streamFormat,
     snapshotStrategy: camera.snapshotStrategy,
+    streamUrl: camera.streamUrl,
     snapshotUrl: camera.snapshotUrl,
   };
-  const pollSnapshotPreview = !!camera.printerId && shouldPollPrinterSnapshot(previewContract);
+  const pollSnapshotPreview = shouldPollPrinterSnapshot(previewContract);
   const unsupportedPreview = isUnsupportedCameraPreview(previewContract);
   const hasStream = !!camera.streamUrl && canUseMjpegStream(previewContract);
   const directSnapshotUrl = pollSnapshotPreview ? null : camera.snapshotUrl;
@@ -242,15 +294,16 @@ function CameraViewCard({ camera, canManage, onEdit, onDelete }: CameraViewCardP
     pollSnapshotPreview,
     CAMERA_SNAPSHOT_REFRESH_MS,
     directSnapshotUrl,
-    !!directSnapshotUrl
+    !!directSnapshotUrl,
+    getAuthenticatedCameraProxyRoute(camera.snapshotUrl)
   );
+  const snapshotPreviewUrl = snapshotSrc ?? directSnapshotUrl;
   const hasSnapshot = pollSnapshotPreview || !!directSnapshotUrl;
   const {
     cameraMode,
     setCameraMode,
     rotation,
     rotateClockwise,
-    hasModeToggle,
   } = useCameraViewPreferences({
     preferenceKey: `camera:${camera.id}`,
     defaultMode: hasStream ? 'stream' : 'snapshot',
@@ -258,31 +311,41 @@ function CameraViewCard({ camera, canManage, onEdit, onDelete }: CameraViewCardP
     hasSnapshot,
   });
 
-  // Determine which URL to show
-  const snapshotPreviewUrl = snapshotSrc ?? directSnapshotUrl;
+  // Authenticated app-proxy streams are fetched as multipart frames; external streams remain unauthenticated images.
+  const { streamSrc, streamUnsupported, streamFailed } = useAuthenticatedMjpegStream(
+    camera.streamUrl,
+    cameraMode === 'stream' && hasStream,
+  );
+  const safeStreamRoute = getAuthenticatedCameraProxyRoute(camera.streamUrl);
+  const liveStreamSrc = safeStreamRoute ? streamSrc : camera.streamUrl;
+  const streamImageFailed = !!liveStreamSrc && failedUrl === liveStreamSrc;
+  const streamFallsBackToSnapshot = cameraMode === 'stream' && (streamUnsupported || streamFailed || streamImageFailed) && !!snapshotPreviewUrl;
+  const streamIssue = cameraMode === 'stream'
+    ? streamUnsupported
+      ? 'unsupported'
+      : streamFailed || streamImageFailed
+        ? 'failed'
+        : undefined
+    : undefined;
   const activeUrl = cameraMode === 'stream' && hasStream
-    ? camera.streamUrl
+    ? streamFallsBackToSnapshot ? snapshotPreviewUrl : liveStreamSrc
     : cameraMode === 'snapshot' && snapshotPreviewUrl
-    ? snapshotPreviewUrl
-    : hasStream
-    ? camera.streamUrl
-    : snapshotPreviewUrl;
+      ? snapshotPreviewUrl
+      : hasStream
+        ? liveStreamSrc
+        : snapshotPreviewUrl;
+  const showingLiveStream = cameraMode === 'stream' && !!liveStreamSrc && !streamUnsupported && !streamFailed && !streamImageFailed;
   const imageError = !!activeUrl && failedUrl === activeUrl;
   const mediaClassName = getCameraMediaTransformClassName(rotation);
-  const externalUrl = cameraMode === 'stream' && hasStream
-    ? camera.streamUrl
-    : pollSnapshotPreview
-    ? null
-    : activeUrl;
+  const externalUrl = activeUrl && !getAuthenticatedCameraProxyRoute(activeUrl) ? activeUrl : null;
   const cameraAttention = getCameraAttentionContent({
     healthStatus: camera.healthStatus,
     healthMessage: camera.healthMessage,
     hasStream,
     hasSnapshot,
-    imageError: imageError || snapshotFailed,
+    imageError: imageError || snapshotFailed || streamFailed,
     cameraMode,
   });
-  const showInlineAttention = Boolean(cameraAttention) && !imageError && (hasStream || hasSnapshot);
 
   return (
     <article
@@ -291,38 +354,32 @@ function CameraViewCard({ camera, canManage, onEdit, onDelete }: CameraViewCardP
     >
       {/* Camera feed */}
       <div ref={previewContainerRef} className="relative w-full aspect-video bg-pf-bg-2">
-        {cameraMode === 'stream' && hasStream && activeUrl ? (
-          <iframe
-            src={activeUrl}
-            title={`${camera.name} live camera feed`}
-            className={`border-0 bg-black ${mediaClassName}`}
-            loading="lazy"
-            referrerPolicy="no-referrer"
-          />
-        ) : activeUrl && !imageError ? (
+        {activeUrl && !imageError ? (
           <img
             src={activeUrl}
-            alt={`${camera.name} camera feed`}
+            alt={showingLiveStream ? `${camera.name} live camera feed` : `${camera.name} camera preview`}
             className={`object-contain bg-black ${mediaClassName}`}
             loading="lazy"
             onError={() => setFailedUrl(activeUrl ?? '')}
           />
         ) : unsupportedPreview ? (
-          <div className="absolute inset-0 flex flex-col items-center justify-center text-pf-text-tertiary p-4">
+          <div role="status" aria-live="polite" className="absolute inset-0 flex flex-col items-center justify-center text-pf-text-tertiary p-4">
             <CameraIcon className="w-12 h-12 mb-2 opacity-30" />
             <span className="text-center text-sm font-medium text-pf-text-secondary">
               No live preview available
             </span>
-            <span className="mt-1 max-w-xs text-center text-xs text-pf-text-tertiary">
+            <span className="sr-only">
               This camera does not provide an embeddable MJPEG live stream.
             </span>
           </div>
         ) : (
-          <div className="absolute inset-0 flex flex-col items-center justify-center text-pf-text-tertiary p-4">
+          <div role="status" aria-live="polite" className="absolute inset-0 flex flex-col items-center justify-center text-pf-text-tertiary p-4">
             <CameraIcon className="w-12 h-12 mb-2 opacity-30" />
             <span className="text-center text-sm font-medium text-pf-text-secondary">
               {cameraAttention?.title
-                ?? (cameraMode === 'snapshot' ? 'Snapshot preview unavailable' : 'Camera unavailable')}
+                ?? (streamUnsupported
+                  ? hasSnapshot ? 'Live preview unsupported; showing snapshot when available' : 'Live preview unsupported; no snapshot configured'
+                  : streamFailed ? 'Live stream unavailable; reconnecting' : cameraMode === 'snapshot' ? 'Snapshot preview unavailable' : 'Connecting to camera')}
             </span>
             {cameraAttention?.issue && (
               <span className="mt-1 max-w-xs text-center text-xs text-pf-text-tertiary">
@@ -330,7 +387,7 @@ function CameraViewCard({ camera, canManage, onEdit, onDelete }: CameraViewCardP
               </span>
             )}
             {cameraAttention?.action && (
-              <span className="mt-2 max-w-xs text-center text-xs text-pf-text-secondary">
+              <span className="sr-only">
                 Action: {cameraAttention.action}
               </span>
             )}
@@ -343,16 +400,17 @@ function CameraViewCard({ camera, canManage, onEdit, onDelete }: CameraViewCardP
         <div className="flex items-start gap-2 mb-1">
           <CameraIcon className="w-4 h-4 text-pf-text-tertiary shrink-0 mt-1" />
           <div className="min-w-0 flex-1">
-            <h3 className="font-medium text-pf-text-primary truncate">{camera.name}</h3>
-            {camera.printerName && (
-              <p className="text-xs text-pf-text-secondary truncate">
-                Printer: {camera.printerName}
-              </p>
-            )}
-            {camera.location && (
-              <p className="text-xs text-pf-text-tertiary truncate">{camera.location}</p>
-            )}
+            <h3
+              className="font-medium text-pf-text-primary truncate"
+              title={[camera.name, camera.printerName, camera.effectiveLocationName ?? camera.location, camera.cameraType, camera.source].filter(Boolean).join(' · ')}
+            >{camera.name}</h3>
           </div>
+          <CameraHealthBadge
+            healthStatus={camera.healthStatus}
+            previewFailed={imageError || snapshotFailed || streamUnsupported || streamFailed || streamImageFailed}
+            details={cameraAttention ? `${cameraAttention.title}. ${cameraAttention.issue} Action: ${cameraAttention.action}` : undefined}
+            size="sm"
+          />
           {canManage && (
             <div className="flex shrink-0 items-center gap-1">
               <Button
@@ -378,33 +436,16 @@ function CameraViewCard({ camera, canManage, onEdit, onDelete }: CameraViewCardP
             </div>
           )}
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <CameraHealthBadge healthStatus={camera.healthStatus} size="sm" />
-          <Badge variant="default" size="sm">
-            {sourceLabels[camera.source]}
-          </Badge>
-          {camera.cameraType !== 'General' && (
-            <Badge variant="default" size="sm">
-              {cameraTypeLabels[camera.cameraType]}
-            </Badge>
-          )}
-        </div>
-
-        {showInlineAttention && cameraAttention && (
-          <Alert
-            type={cameraAttention.tone}
-            title={cameraAttention.title}
-            className="rounded-lg border px-3 py-2 text-xs leading-5"
-          >
-            <p>{cameraAttention.issue}</p>
-            <p className="mt-1 font-medium">Action: {cameraAttention.action}</p>
-          </Alert>
-        )}
-
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="inline-flex items-center gap-2 rounded-xs bg-pf-bg-2 px-2.5 py-1 text-[11px] text-pf-text-secondary">
-            <span>{cameraMode === 'stream' ? 'Live stream' : 'Snapshot preview'}</span>
-          </div>
+          <CameraModeControl
+            cameraName={camera.name}
+            cameraMode={cameraMode}
+            hasStream={hasStream}
+            hasSnapshot={hasSnapshot}
+            streamUnavailable={!!camera.streamUrl && !hasStream}
+            streamIssue={streamIssue}
+            onModeChange={setCameraMode}
+          />
 
           <div className="flex flex-wrap items-center gap-2">
             <Button
@@ -417,30 +458,6 @@ function CameraViewCard({ camera, canManage, onEdit, onDelete }: CameraViewCardP
               aria-label="Rotate camera clockwise"
               iconCenter={<RotateCw className="w-4 h-4" />}
             />
-            {hasModeToggle && (
-              <div className="flex gap-1 rounded-md border border-pf-border bg-pf-bg-2 p-1">
-                <Button
-                  type="button"
-                  variant={cameraMode === 'snapshot' ? 'primary' : 'ghost'}
-                  size="sm"
-                  onClick={() => setCameraMode('snapshot')}
-                  className="h-8 w-8 rounded-full p-0"
-                  title="Snapshot"
-                  aria-label="Snapshot mode"
-                  iconCenter={<ImageIcon className="w-4 h-4" />}
-                />
-                <Button
-                  type="button"
-                  variant={cameraMode === 'stream' ? 'primary' : 'ghost'}
-                  size="sm"
-                  onClick={() => setCameraMode('stream')}
-                  className="h-8 w-8 rounded-full p-0"
-                  title="Stream"
-                  aria-label="Stream mode"
-                  iconCenter={<VideoIcon className="w-4 h-4" />}
-                />
-              </div>
-            )}
             {externalUrl && (
               <a
                 href={externalUrl}

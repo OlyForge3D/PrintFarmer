@@ -66,6 +66,7 @@ final class ServiceContainer: @unchecked Sendable {
     @ObservationIgnored private let apiClientFactory: APIClientFactory
     @ObservationIgnored private let signalRServiceFactory: SignalRServiceFactory
     @ObservationIgnored private let farmShapeStore: FarmShapeStore
+    @ObservationIgnored private let farmShapeStartupSleep: FarmShapeService.Sleep
     @ObservationIgnored private let offlineReplayProviderResolutionHook: @Sendable () async -> Void
     @ObservationIgnored private let activeGeneration: ActiveServerGeneration
     @ObservationIgnored private var observesRegistry: Bool
@@ -305,6 +306,10 @@ final class ServiceContainer: @unchecked Sendable {
         farmSnapshotStore: (any FarmSnapshotStoring)? = nil,
         farmSnapshotOwnerStore: FarmSnapshotOwnerStore? = nil,
         farmShapeStore: FarmShapeStore? = nil,
+        /// Bounds the authenticated farm-shape startup wait. Tests inject a
+        /// causally controlled sleep so a held response cannot race the
+        /// wall-clock `FarmShapeService.startupTimeout`.
+        farmShapeStartupSleep: @escaping FarmShapeService.Sleep = { try await Task.sleep(for: $0) },
         /// H (issue #816 reject, Hicks): injectable canonical durable
         /// authority record. Tests pass a temp-rooted instance so the
         /// production-container reopen test can prove distinct record
@@ -350,6 +355,7 @@ final class ServiceContainer: @unchecked Sendable {
         let shapeStore = farmShapeStore
             ?? FarmShapeStore(userDefaults: userDefaultsBox.userDefaults)
         self.farmShapeStore = shapeStore
+        self.farmShapeStartupSleep = farmShapeStartupSleep
         self.offlineReplayProviderResolutionHook = offlineReplayProviderResolutionHook
         self.activeGeneration = ActiveServerGeneration()
         self.observesRegistry = observeRegistry
@@ -450,7 +456,8 @@ final class ServiceContainer: @unchecked Sendable {
         self.farmShapeService = FarmShapeService(
             apiClient: client,
             serverID: activeServer?.id,
-            store: shapeStore
+            store: shapeStore,
+            sleep: farmShapeStartupSleep
         )
         self.signalRService = signalRServiceFactory(resolvedURL, client)
         self.barcodeIntakeService = BarcodeIntakeService(apiClient: client)
@@ -464,7 +471,7 @@ final class ServiceContainer: @unchecked Sendable {
         if let activeServer {
             userDefaultsBox.userDefaults.set(activeServer.normalizedURLString, forKey: APIClient.serverURLKey)
             Task {
-                // A2: no fire-and-forget establishReconstructedAuthSession — bearer
+                // A2: no fire-and-forget reconstructed-session task — bearer
                 // AND identity were bound atomically at APIClient construction (above)
                 // from a synchronously captured epoch, so a later fire-and-forget Task
                 // cannot read a newer epoch and clobber a fresher session's identity.
@@ -1259,7 +1266,8 @@ final class ServiceContainer: @unchecked Sendable {
         self.farmShapeService = FarmShapeService(
             apiClient: client,
             serverID: server?.id,
-            store: farmShapeStore
+            store: farmShapeStore,
+            sleep: farmShapeStartupSleep
         )
         self.signalRService = signalRServiceFactory(baseURL, client)
         self.barcodeIntakeService = BarcodeIntakeService(apiClient: client)
@@ -1277,28 +1285,6 @@ final class ServiceContainer: @unchecked Sendable {
         await client.setTokenExpiryChecker {
             credentialsStore.isExpired(serverId: serverID)
         }
-    }
-
-    /// A2: identity establishment is now atomic AT APIClient CONSTRUCTION. This method
-    /// is retained only for the identity-carry test (AuthSnapshotIdentityTests /
-    /// APIClientAuthSessionTests) that exercises the compare-and-set path directly.
-    /// Production composition never calls this method — it captures the epoch
-    /// synchronously in the same synchronous scope as the factory call and passes
-    /// the token via `APIClient.init(authSessionToken:)`. A fire-and-forget Task
-    /// that reads the epoch LATE would (and did, before A2) allow a superseded
-    /// operation's identity to clobber a fresher session's identity.
-    private func establishReconstructedAuthSession(client: APIClient, accessToken: String?) async {
-        guard let accessToken else { return }
-        let token = authOperationEpoch.current
-        // E: the reconstructed client already carries its stable serverID from
-        // the factory; re-apply the session under the current epoch using that
-        // same identity, so the authenticated apply is structurally paired.
-        guard let serverID = await client.currentServerIdentity() else { return }
-        _ = await client.applyAuthenticatedSessionIfCurrent(
-            baseURL: nil,
-            identity: AuthenticatedIdentity(accessToken: accessToken, serverID: serverID),
-            epoch: authOperationEpoch, token: token
-        )
     }
 
     private static func validAccessToken(
@@ -1359,6 +1345,7 @@ final class ServiceContainer: @unchecked Sendable {
         }
         self.offlineReplayProviderResolutionHook = {}
         self.farmShapeStore = FarmShapeStore()
+        self.farmShapeStartupSleep = { try await Task.sleep(for: $0) }
         self.activeGeneration = ActiveServerGeneration()
         self.offlineWriteQueueStore = FileOfflineWriteQueueStore(
             directory: Self.offlineWriteQueueDirectory()

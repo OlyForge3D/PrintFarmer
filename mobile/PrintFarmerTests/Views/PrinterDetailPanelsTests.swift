@@ -16,6 +16,37 @@ final class PrinterDetailPanelsTests: XCTestCase {
         }
     }
 
+    func testFarmToolbarReturnsToFarmRootFromNonFarmOrigins() {
+        let router = AppRouter()
+        for origin in AppTab.allCases where origin != .farm {
+            router.selectedTab = origin
+            router.printersPath.append(AppDestination.printerDetail(id: UUID()))
+            router.inventoryPath.append(AppDestination.printerDetail(id: UUID()))
+            router.jobsPath.append(AppDestination.printerDetail(id: UUID()))
+            router.pendingFilamentSwap = .init(printerId: UUID(), toolheadIndex: 0, jobId: nil)
+
+            PrinterDetailView.returnToFarm(router: router)
+
+            XCTAssertEqual(router.selectedTab, .farm, "Origin \(origin)")
+            XCTAssertTrue(router.printersPath.isEmpty)
+            XCTAssertTrue(router.inventoryPath.isEmpty)
+            XCTAssertTrue(router.jobsPath.isEmpty)
+            XCTAssertNil(router.pendingFilamentSwap)
+        }
+    }
+
+    func testSafetyRefreshCadenceKeepsStatusFastAndDiscoveryBounded() {
+        let start = ContinuousClock.now
+        var cadence = PrinterDetailSafetyRefreshCadence(now: start)
+
+        XCTAssertEqual(PrinterDetailSafetyRefreshCadence.statusInterval, .seconds(5))
+        XCTAssertEqual(PrinterDetailSafetyRefreshCadence.discoveryInterval, .seconds(60))
+        XCTAssertFalse(cadence.shouldRefreshDiscovery(at: start.advanced(by: .seconds(59))))
+        XCTAssertTrue(cadence.shouldRefreshDiscovery(at: start.advanced(by: .seconds(60))))
+        XCTAssertFalse(cadence.shouldRefreshDiscovery(at: start.advanced(by: .seconds(119))))
+        XCTAssertTrue(cadence.shouldRefreshDiscovery(at: start.advanced(by: .seconds(120))))
+    }
+
     func testProductionDetailHostCreatesControlsWhenPendingCompositionSettles() async throws {
         executionTimeAllowance = 60
         let fixture = try detailHostFixture()
@@ -47,9 +78,12 @@ final class PrinterDetailPanelsTests: XCTestCase {
         await fixture.services.awaitActiveServerSettled()
         XCTAssertEqual(fixture.services.activeServerGeneration, generation, "Settlement must not need a remount")
         try await waitForHost("The existing controls page must replace its connection fallback", in: controller.view) {
-            self.heaterTarget(in: controller.view)?.isEnabled == true
+            self.heaterTarget(in: controller.view)?.isEnabled == true && self.capabilityRequests(fixture.api).count == 2
         }
-        XCTAssertEqual(capabilityRequests(fixture.api).count, 1)
+        try await waitForHost("The selected Control page must start foreground safety discovery", in: controller.view) {
+            self.capabilityRequests(fixture.api).count == 2
+        }
+        XCTAssertEqual(capabilityRequests(fixture.api).count, 2, "Owner load plus foreground safety discovery")
         XCTAssertEqual(capabilityRequests(fixture.api).first?.url?.host, fixture.second.baseURL.host)
         XCTAssertFalse(fixture.api.capturedRequests.contains { $0.url?.path.contains("control-operations") == true },
                        "Controls must not query the removed tracking API")
@@ -64,16 +98,20 @@ final class PrinterDetailPanelsTests: XCTestCase {
         let selector = try XCTUnwrap(views(UISegmentedControl.self, in: controller.view).first)
         selector.selectedSegmentIndex = 0
         selector.sendActions(for: .valueChanged)
+        await Task.yield()
         try await selectControls(in: controller)
+        try await waitForHost("Returning to Control must refresh discovery on the retained owner", in: controller.view) {
+            self.capabilityRequests(fixture.api).count == 3
+        }
         XCTAssertTrue(heaterTarget(in: controller.view) === field, "Page changes must retain the single owner/editor")
-        XCTAssertEqual(capabilityRequests(fixture.api).count, 1, "No capability refetch on repeated lifecycle triggers")
+        XCTAssertEqual(capabilityRequests(fixture.api).count, 3, "One new safety discovery on page return")
 
         try fixture.registry.setActive(id: fixture.first.id)
         XCTAssertNil(fixture.services.printerControlsComposition)
         try await waitForHost("A retained old-server editor must fail closed", in: controller.view) {
             self.heaterTarget(in: controller.view)?.isEnabled != true
         }
-        XCTAssertEqual(capabilityRequests(fixture.api).count, 1, "Identity churn cannot rebind or replace this host's owner")
+        XCTAssertEqual(capabilityRequests(fixture.api).count, 3, "Identity churn cannot rebind or replace this host's owner")
         XCTAssertTrue(detailRequests(fixture.api).allSatisfy { $0.httpMethod == "GET" })
         XCTAssertFalse(fixture.api.capturedRequests.contains { $0.url?.path == Self.deviceTokensPath })
     }
@@ -91,7 +129,10 @@ final class PrinterDetailPanelsTests: XCTestCase {
         try await waitForHost("Initial detail load must expose the native heater editor", in: controller.view) {
             self.heaterTarget(in: controller.view)?.isEnabled == true
         }
-        XCTAssertEqual(capabilityRequests(fixture.api).count, 1)
+        try await waitForHost("The selected Control page must start foreground safety discovery", in: controller.view) {
+            self.capabilityRequests(fixture.api).count == 2
+        }
+        XCTAssertEqual(capabilityRequests(fixture.api).count, 2, "Owner load plus foreground safety discovery")
         XCTAssertEqual(capabilityRequests(fixture.api).first?.url?.host, fixture.first.baseURL.host)
         XCTAssertFalse(fixture.api.capturedRequests.contains { $0.url?.path.contains("control-operations") == true },
                        "Controls must not query the removed tracking API")
@@ -103,9 +144,223 @@ final class PrinterDetailPanelsTests: XCTestCase {
         XCTAssertFalse(fixture.api.capturedRequests.contains { $0.url?.path == Self.deviceTokensPath })
     }
 
+    func testRuntimeReadbackResolvesAfterControlPageIsOffscreen() async throws {
+        let fixture = try detailHostFixture()
+        fixture.registry.setAdvancedPrinterControlsEnabled(true)
+        let detail = PrinterDetailViewModel(printerId: fixture.printer.id)
+        detail.configure(printerService: fixture.services.printerService)
+        await detail.loadPrinter()
+        let controller = DetailHostingController(rootView: try host(
+            PrinterDetailView(viewModel: detail), services: fixture.services, registry: fixture.registry
+        ))
+        let window = show(controller)
+        defer { window.isHidden = true; window.rootViewController = nil }
+        try await selectControls(in: controller)
+
+        let fanIncrease = {
+            self.views(UIButton.self, in: controller.view).first {
+                $0.accessibilityIdentifier == "printer.controls.runtime.fan.increase"
+            }
+        }
+        try await waitForHost("Authenticated fan adjustment must be enabled", in: controller.view) {
+            fanIncrease()?.isEnabled == true
+        }
+        try XCTUnwrap(fanIncrease()).sendActions(for: .touchUpInside)
+        try await waitForHost("Authenticated fan adjustment must reach the registered printer API", in: controller.view) {
+            fixture.api.capturedRequests.contains {
+                $0.httpMethod == "POST" && $0.url?.path == "/api/printers/\(fixture.printer.id)/fan"
+            }
+        }
+
+        let selector = try XCTUnwrap(views(UISegmentedControl.self, in: controller.view).first)
+        selector.selectedSegmentIndex = 0
+        selector.sendActions(for: .valueChanged)
+        let signal = try XCTUnwrap(fixture.services.signalRService as? MockSignalRService)
+        signal.simulatePrinterUpdate(PrinterStatusUpdate(
+            id: fixture.printer.id,
+            isOnline: true,
+            state: "idle",
+            progress: nil,
+            fanSpeedPercent: 30,
+            liveZOffsetMm: 0,
+            jobName: nil,
+            fileName: nil,
+            thumbnailUrl: nil,
+            cameraStreamUrl: nil,
+            x: nil,
+            y: nil,
+            z: nil,
+            hotendTemp: nil,
+            bedTemp: nil,
+            hotendTarget: nil,
+            bedTarget: nil,
+            homedAxes: nil,
+            spoolInfo: nil,
+            mmuStatus: nil
+        ))
+        try await waitForHost("SignalR readback must update the detail while Control is offscreen", in: controller.view) {
+            detail.printer?.fanSpeedPercent == 30
+        }
+
+        selector.selectedSegmentIndex = 1
+        selector.sendActions(for: .valueChanged)
+        try await waitForHost("Offscreen owner must release the matching runtime command", in: controller.view) {
+            fanIncrease()?.isEnabled == true
+        }
+        XCTAssertTrue(
+            fixture.api.capturedRequests.contains { $0.httpMethod == "POST" },
+            "Only the authenticated mock API command is exercised; no physical printer is contacted."
+        )
+    }
+
     private static let deviceTokensPath = "/api/notifications/device-tokens"
 
-    private func detailHostFixture() throws -> (
+    func testDelayedCapabilitiesStartAndRepeatSafetyWhileStayingOnControl() async throws {
+        try await assertDelayedCapabilitiesStartSafety(on: 1)
+    }
+
+    func testDelayedCapabilitiesStartAndRepeatSafetyWhileStayingOnFilament() async throws {
+        try await assertDelayedCapabilitiesStartSafety(on: 2)
+    }
+
+    private func assertDelayedCapabilitiesStartSafety(on panel: Int) async throws {
+        let barrier = AsyncBarrier()
+        defer { barrier.close() }
+        let fixture = try detailHostFixture(verifiedMaterial: true, capabilityBarrier: barrier)
+        fixture.registry.setAdvancedPrinterControlsEnabled(true)
+        let controller = DetailHostingController(rootView: try host(
+            PrinterDetailView(printerId: fixture.printer.id),
+            services: fixture.services, registry: fixture.registry
+        ))
+        let window = show(controller)
+        defer { window.isHidden = true; window.rootViewController = nil }
+        try await selectControls(in: controller, timeout: .seconds(15))
+        let statusReadsBeforeCapabilityLoad = safetyStatusReads(fixture.api)
+        let selector = try XCTUnwrap(views(UISegmentedControl.self, in: controller.view).first)
+        selector.selectedSegmentIndex = panel
+        selector.sendActions(for: .valueChanged)
+        try await waitForHost("Capability request must be held while the selected page is mounted", in: controller.view) {
+            !self.capabilityRequests(fixture.api).isEmpty
+        }
+        XCTAssertEqual(
+            safetyStatusReads(fixture.api),
+            statusReadsBeforeCapabilityLoad,
+            "Safety reads must wait for backend capabilities, regardless of whether the retry disclosure is open."
+        )
+        let initialStatusReads = safetyStatusReads(fixture.api)
+        barrier.release()
+        // One read comes from loadCapabilities, one from the observation task,
+        // and a third proves its five-second loop continues without navigation.
+        try await waitForHost("Capability completion alone must start and repeat safety refresh", in: controller.view, timeout: .seconds(9)) {
+            fixture.api.capturedRequests.filter { $0.url?.path.hasSuffix("/status") == true }.count >= initialStatusReads + 3
+        }
+        XCTAssertEqual(selector.selectedSegmentIndex, panel)
+        XCTAssertFalse(fixture.api.capturedRequests.contains { $0.httpMethod != "GET" })
+    }
+
+    func testFilamentSafetyRefreshSurvivesStatusQueueAndControlTraversal() async throws {
+        let fixture = try detailHostFixture(verifiedMaterial: true)
+        fixture.registry.setAdvancedPrinterControlsEnabled(true)
+        let detail = PrinterDetailView(printerId: fixture.printer.id)
+        let controller = DetailHostingController(rootView: try host(
+            detail, services: fixture.services, registry: fixture.registry
+        ))
+        let window = show(controller)
+        defer { window.isHidden = true; window.rootViewController = nil }
+        try await selectControls(in: controller)
+        let selector = try XCTUnwrap(views(UISegmentedControl.self, in: controller.view).first)
+        for panels in [[0, 3, 2], [1, 2], [0, 2]] {
+            for panel in panels {
+                let statusReadsBeforePanel = safetyStatusReads(fixture.api)
+                selector.selectedSegmentIndex = panel
+                selector.sendActions(for: .valueChanged)
+                try await waitForHost("The selected detail panel must settle at index \(panel)", in: controller.view) {
+                    selector.selectedSegmentIndex == panel
+                }
+                await Task.yield()
+                controller.view.layoutIfNeeded()
+                if panel == 1 || panel == 2 {
+                    try await waitForHost(
+                        "Control and Filament must reacquire safety evidence after page traversal \(panels)",
+                        in: controller.view
+                    ) {
+                        self.safetyStatusReads(fixture.api) > statusReadsBeforePanel
+                    }
+                }
+            }
+        }
+        let readsBeforeForeground = safetyStatusReads(fixture.api)
+        let discoveryReadsBeforeForeground = capabilityRequests(fixture.api).count
+        controller.rootView = try host(
+            detail, services: fixture.services, registry: fixture.registry, scenePhase: .background
+        )
+        // Render the background phase before foregrounding; back-to-back root
+        // updates can coalesce so the detail never observes the transition.
+        controller.view.setNeedsLayout()
+        controller.view.layoutIfNeeded()
+        await Task.yield()
+        controller.rootView = try host(
+            detail, services: fixture.services, registry: fixture.registry, scenePhase: .active
+        )
+        // A restarted observer reads discovery first; the 5s status cadence
+        // does not, so this cannot be satisfied by a cadence tick.
+        try await waitForHost(
+            "Foreground Filament must restart safety observation", in: controller.view, timeout: .seconds(15)
+        ) {
+            self.capabilityRequests(fixture.api).count > discoveryReadsBeforeForeground
+                && self.safetyStatusReads(fixture.api) > readsBeforeForeground
+        }
+        XCTAssertGreaterThanOrEqual(safetyStatusReads(fixture.api), 2)
+        XCTAssertFalse(fixture.api.capturedRequests.contains { $0.httpMethod != "GET" })
+    }
+
+    func testStationarySafetyReadFailureShowsAndClearsRetryAffordance() async throws {
+        let printer = try TestData.decodePrinter()
+        let service = MockPrinterService()
+        let statusBarrier = AsyncBarrier()
+        service.capabilitiesToReturn = .allControlsFixture
+        service.statusToReturn = VerifiedSafetyFixtures.status(id: printer.id)
+        service.statusErrorToThrow = NSError(domain: "PrinterDetailPanelsTests", code: 503)
+        service.beforeSafetyStatus = { await statusBarrier.arriveAndWait() }
+        let owner = PrinterControlsViewModel(printerService: service, printer: printer)
+        let controller = DetailHostingController(rootView: PrinterDetailSafetyRefresh(owner: owner) {
+            Task { await owner.refreshSafetyEvidence() }
+        })
+        let window = show(controller)
+        defer { statusBarrier.close(); window.isHidden = true; window.rootViewController = nil }
+
+        func refreshButton() -> UIButton? {
+            views(UIButton.self, in: controller.view).first {
+                $0.accessibilityIdentifier == "printer.detail.safety.refresh"
+            }
+        }
+
+        try await waitForHost("The safety retry action must render", in: controller.view) {
+            refreshButton() != nil
+        }
+        try XCTUnwrap(refreshButton()).sendActions(for: .touchUpInside)
+        await statusBarrier.waitUntilArrived()
+        XCTAssertFalse(try XCTUnwrap(refreshButton()).isEnabled, "Retry must be disabled while a safety read is pending")
+        statusBarrier.release()
+        try await waitForHost("A stationary safety read failure must render its recovery message and enable retry", in: controller.view) {
+            owner.safetyReadError != nil && refreshButton()?.isEnabled == true
+        }
+        XCTAssertTrue(
+            owner.safetyReadError?.contains("Safety evidence could not be read") == true,
+            "The recovery message must explain that the safety read failed"
+        )
+
+        service.statusErrorToThrow = nil
+        service.beforeSafetyStatus = nil
+        try XCTUnwrap(refreshButton()).sendActions(for: .touchUpInside)
+        try await waitForHost("Successful refresh must clear the stationary error and re-enable retry", in: controller.view) {
+            owner.safetyReadError == nil && owner.safetyStatus != nil && refreshButton()?.isEnabled == true
+        }
+    }
+    private func detailHostFixture(
+        verifiedMaterial: Bool = false,
+        capabilityBarrier: AsyncBarrier? = nil
+    ) throws -> (
         services: ServiceContainer, registry: ServerRegistry, printer: Printer,
         first: RegisteredServer, second: RegisteredServer, api: MockAPIClient,
         disconnect: AsyncBarrier, connect: AsyncBarrier
@@ -124,25 +379,69 @@ final class PrinterDetailPanelsTests: XCTestCase {
         var printer = try TestData.decodePrinter()
         printer.state = "idle"
         printer.isOnline = true
+        printer.fanSpeedPercent = 25
+        printer.liveZOffsetMm = 0
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         let printerData = try encoder.encode(printer)
+        var status = PrinterStatusDetail(
+            id: printer.id,
+            isOnline: true,
+            state: "idle",
+            progress: nil,
+            fanSpeedPercent: 25,
+            liveZOffsetMm: 0,
+            jobName: nil,
+            thumbnailUrl: nil,
+            cameraStreamUrl: nil,
+            cameraSnapshotUrl: nil,
+            x: printer.x,
+            y: printer.y,
+            z: printer.z,
+            hotendTemp: printer.hotendTemp,
+            bedTemp: printer.bedTemp,
+            hotendTarget: printer.hotendTarget,
+            bedTarget: printer.bedTarget,
+            homedAxes: printer.homedAxes,
+            spoolInfo: nil,
+            mmuStatus: nil
+        )
+        status.safetyTelemetry = VerifiedSafetyFixtures.status(id: printer.id, state: "idle").safetyTelemetry
+        let statusData = try encoder.encode(status)
         let details = try encoder.encode(PrinterDetails.controlsLimitsFixture(for: printer))
         let printerPath = "/api/printers/\(printer.id)"
+        let printerID = printer.id
         let capabilities = Data("""
-        {"printerId":"\(printer.id)","backend":"Moonraker",
-         "supportsHotendTemperature":true,"supportsBedTemperature":true}
+        {"printerId":"\(printerID)","backend":"Moonraker",
+         "supportsHotendTemperature":true,"supportsBedTemperature":true,
+         "supportsFanControl":true,"supportsFanSpeedReadback":true,
+         "supportsZOffsetAdjustment":true,"supportsZOffsetReadback":true}
         """.utf8)
         let api = MockAPIClient()
-        api.requestHandler = { request in
+        api.asyncRequestHandler = { request in
             let path = request.url?.path ?? ""
             let data: Data
             if path == printerPath {
                 data = printerData
             } else if path.hasSuffix("/backend-capabilities") {
-                data = capabilities
+                await capabilityBarrier?.arriveAndWait()
+                if verifiedMaterial {
+                    let safety = String(decoding: try encoder.encode(VerifiedSafetyFixtures.discovery()), as: UTF8.self)
+                    data = Data("""
+                    {"printerId":"\(printerID)","backend":"Moonraker",
+                     "supportsHotendTemperature":true,"supportsBedTemperature":true,
+                     "supportsFilamentLoad":true,"supportsFilamentUnload":true,
+                     "supportsFilamentChange":true,"verifiedSafety":\(safety)}
+                    """.utf8)
+                } else {
+                    data = capabilities
+                }
+            } else if path.hasSuffix("/status") {
+                data = statusData
             } else if path.hasSuffix("/details") {
                 data = details
+            } else if request.httpMethod != "GET" {
+                data = Data(#"{"success":true,"message":"Accepted"}"#.utf8)
             } else {
                 return (TestData.httpResponse(url: request.url, statusCode: 404), Data())
             }
@@ -185,7 +484,8 @@ final class PrinterDetailPanelsTests: XCTestCase {
     }
 
     private func host(
-        _ detail: PrinterDetailView, services: ServiceContainer, registry: ServerRegistry
+        _ detail: PrinterDetailView, services: ServiceContainer, registry: ServerRegistry,
+        scenePhase: ScenePhase = .active
     ) throws -> some View {
         let auth = AuthViewModel(services: services)
         auth.isAuthenticated = true
@@ -197,7 +497,7 @@ final class PrinterDetailPanelsTests: XCTestCase {
             .environment(registry)
             .environment(auth)
             .environment(AppRouter())
-            .environment(\.scenePhase, .active)
+            .environment(\.scenePhase, scenePhase)
             .transaction { $0.disablesAnimations = true }
     }
 
@@ -223,6 +523,10 @@ final class PrinterDetailPanelsTests: XCTestCase {
         api.capturedRequests.filter { $0.url?.path.hasSuffix("/backend-capabilities") == true }
     }
 
+    private func safetyStatusReads(_ api: MockAPIClient) -> Int {
+        api.capturedRequests.filter { $0.url?.path.hasSuffix("/status") == true }.count
+    }
+
     private func detailRequests(_ api: MockAPIClient) -> [URLRequest] {
         api.capturedRequests.filter { $0.url?.path != Self.deviceTokensPath }
     }
@@ -239,8 +543,11 @@ final class PrinterDetailPanelsTests: XCTestCase {
         }
     }
 
-    private func selectControls<Content: View>(in controller: DetailHostingController<Content>) async throws {
-        try await waitForHost("The production detail pager must appear", in: controller.view) {
+    private func selectControls<Content: View>(
+        in controller: DetailHostingController<Content>,
+        timeout: Duration = .seconds(5)
+    ) async throws {
+        try await waitForHost("The production detail pager must appear", in: controller.view, timeout: timeout) {
             controller.hasAppeared && !self.views(UISegmentedControl.self, in: controller.view).isEmpty
         }
         let selector = try XCTUnwrap(views(UISegmentedControl.self, in: controller.view).first)
@@ -248,15 +555,18 @@ final class PrinterDetailPanelsTests: XCTestCase {
         selector.sendActions(for: .valueChanged)
         controller.view.setNeedsLayout()
         controller.view.layoutIfNeeded()
+        try await waitForHost("The Control page selection must settle", in: controller.view) {
+            selector.selectedSegmentIndex == 1
+        }
     }
 
-    private func waitForHost(_ message: String, in view: UIView, condition: () -> Bool) async throws {
+    private func waitForHost(_ message: String, in view: UIView, timeout: Duration = .seconds(5), condition: () -> Bool) async throws {
         func layout(_ view: UIView) {
             view.setNeedsLayout()
             view.layoutIfNeeded()
             view.subviews.forEach(layout)
         }
-        let deadline = ContinuousClock.now + .seconds(5)
+        let deadline = ContinuousClock.now + timeout
         repeat {
             layout(view)
             if condition() { return }
@@ -351,6 +661,18 @@ final class PrinterDetailPanelsTests: XCTestCase {
         XCTAssertEqual(missing.targetText, Double(200).temperatureFormatted)
     }
 
+    func testHeaterStepperEditsOnlyKnownBoundedDraftTargets() {
+        typealias Editor = PreheatSubgroup.HeaterTargetEditor
+        XCTAssertEqual(Editor.steppedTarget(draft: "", current: 200, maximum: 260, delta: 5), 205)
+        XCTAssertEqual(Editor.steppedTarget(draft: "258", current: 200, maximum: 260, delta: 5), 260)
+        XCTAssertEqual(Editor.steppedTarget(draft: "2", current: 200, maximum: 260, delta: -5), 0)
+        XCTAssertNil(Editor.steppedTarget(draft: "invalid", current: 200, maximum: 260, delta: 5))
+        XCTAssertNil(Editor.steppedTarget(draft: "", current: nil, maximum: 260, delta: 5))
+        XCTAssertNil(Editor.steppedTarget(draft: "", current: 200, maximum: nil, delta: 5))
+        XCTAssertNil(Editor.steppedTarget(draft: "260", current: 200, maximum: 260, delta: 5))
+        XCTAssertNil(Editor.steppedTarget(draft: "nan", current: 200, maximum: 260, delta: 5))
+    }
+
     func testOfflineTemperaturesDoNotPresentRetainedValuesAsLive() {
         let reading = PrinterDetailTemperatureReading(measured: 210, target: 220, isOnline: false)
         XCTAssertEqual(reading.measuredText, "Unavailable")
@@ -409,50 +731,52 @@ final class PrinterDetailPanelsTests: XCTestCase {
 
     func testAvailablePanelsAlwaysIncludesControlsRegardlessOfAuthorization() {
         XCTAssertEqual(
-            PrinterDetailPanelsHost<EmptyView, EmptyView>.availablePanels(controlsAvailable: true),
-            [.overview, .controls]
+            PrinterDetailPanelsHost<EmptyView, EmptyView, EmptyView, EmptyView>.availablePanels(controlsAvailable: true),
+            [.status, .control, .filament, .queue]
         )
         XCTAssertEqual(
-            PrinterDetailPanelsHost<EmptyView, EmptyView>.availablePanels(controlsAvailable: false),
-            [.overview, .controls]
+            PrinterDetailPanelsHost<EmptyView, EmptyView, EmptyView, EmptyView>.availablePanels(controlsAvailable: false),
+            [.status, .control, .filament, .queue]
         )
     }
 
     func testResolvedSelectionKeepsControlsWhenStillAvailable() {
-        let resolved = PrinterDetailPanelsHost<EmptyView, EmptyView>.resolvedSelection(
-            current: .controls,
+        let resolved = PrinterDetailPanelsHost<EmptyView, EmptyView, EmptyView, EmptyView>.resolvedSelection(
+            current: .control,
             controlsAvailable: true
         )
-        XCTAssertEqual(resolved, .controls)
+        XCTAssertEqual(resolved, .control)
     }
 
     func testResolvedSelectionRetainsControlsWhenAccessRevoked() {
-        let resolved = PrinterDetailPanelsHost<EmptyView, EmptyView>.resolvedSelection(
-            current: .controls,
+        let resolved = PrinterDetailPanelsHost<EmptyView, EmptyView, EmptyView, EmptyView>.resolvedSelection(
+            current: .control,
             controlsAvailable: false
         )
-        XCTAssertEqual(resolved, .controls)
+        XCTAssertEqual(resolved, .control)
     }
 
     func testResolvedSelectionLeavesStatusUnaffectedByControlsAvailability() {
         XCTAssertEqual(
-            PrinterDetailPanelsHost<EmptyView, EmptyView>.resolvedSelection(
-                current: .overview, controlsAvailable: true
+            PrinterDetailPanelsHost<EmptyView, EmptyView, EmptyView, EmptyView>.resolvedSelection(
+                current: .status, controlsAvailable: true
             ),
-            .overview
+            .status
         )
         XCTAssertEqual(
-            PrinterDetailPanelsHost<EmptyView, EmptyView>.resolvedSelection(
-                current: .overview, controlsAvailable: false
+            PrinterDetailPanelsHost<EmptyView, EmptyView, EmptyView, EmptyView>.resolvedSelection(
+                current: .status, controlsAvailable: false
             ),
-            .overview
+            .status
         )
     }
 
     func testPanelAccessibilityIdentifiersMatchEpicReservation() {
-        // Reserved by epic #2518: printer.detail.panel.selector / .overview / .controls.
-        XCTAssertEqual(PrinterDetailPanel.overview.accessibilityIdentifier, "printer.detail.panel.overview")
-        XCTAssertEqual(PrinterDetailPanel.controls.accessibilityIdentifier, "printer.detail.panel.controls")
+        // Reserved by epic #2518: printer.detail.panel.selector / .status / .control.
+        XCTAssertEqual(PrinterDetailPanel.status.accessibilityIdentifier, "printer.detail.panel.status")
+        XCTAssertEqual(PrinterDetailPanel.control.accessibilityIdentifier, "printer.detail.panel.control")
+        XCTAssertEqual(PrinterDetailPanel.filament.accessibilityIdentifier, "printer.detail.panel.filament")
+        XCTAssertEqual(PrinterDetailPanel.queue.accessibilityIdentifier, "printer.detail.panel.queue")
     }
 
     // MARK: - Run-action presentation mapping
@@ -679,6 +1003,96 @@ final class PrinterDetailPanelsTests: XCTestCase {
         XCTAssertNil(scan?.disabledReason)
     }
 
+    func testFilamentAssignmentActionsRemainAvailableWhilePrinting() {
+        let actions = PrinterDetailFilamentActionMapping.actions(
+            printerID: UUID(),
+            hasActiveSpool: true,
+            isPerformingAction: false,
+            nfcAvailable: true,
+            isOnline: true,
+            printerState: "printing"
+        )
+        for kind in [PrinterFilamentAction.Kind.change, .clearAssignment, .scanNFC] {
+            XCTAssertNil(actions.first { $0.kind == kind }?.disabledReason)
+        }
+    }
+
+    func testFilamentAssignmentActionsRemainAvailableWhilePaused() {
+        let actions = PrinterDetailFilamentActionMapping.actions(
+            printerID: UUID(),
+            hasActiveSpool: true,
+            isPerformingAction: false,
+            nfcAvailable: true,
+            isOnline: true,
+            printerState: "paused"
+        )
+        for kind in [PrinterFilamentAction.Kind.change, .clearAssignment, .scanNFC] {
+            XCTAssertNil(actions.first { $0.kind == kind }?.disabledReason)
+        }
+    }
+
+    func testFilamentAssignmentActionsStayDisabledForBusyPrintingPrinter() {
+        let actions = PrinterDetailFilamentActionMapping.actions(
+            printerID: UUID(),
+            hasActiveSpool: true,
+            isPerformingAction: true,
+            nfcAvailable: true,
+            isOnline: true,
+            printerState: "printing"
+        )
+        for kind in [PrinterFilamentAction.Kind.change, .clearAssignment, .scanNFC] {
+            XCTAssertEqual(
+                actions.first { $0.kind == kind }?.disabledReason,
+                "Another printer operation is in progress."
+            )
+        }
+    }
+
+    func testFilamentAssignmentActionsFailClosedForOfflineOrUnknownPrinter() {
+        let offline = PrinterDetailFilamentActionMapping.actions(
+            printerID: UUID(),
+            hasActiveSpool: true,
+            isPerformingAction: false,
+            nfcAvailable: true,
+            isOnline: false,
+            printerState: "ready"
+        )
+        XCTAssertEqual(
+            offline.first { $0.kind == .clearAssignment }?.disabledReason,
+            "Printer is offline."
+        )
+        XCTAssertEqual(
+            offline.first { $0.kind == .scanNFC }?.disabledReason,
+            "Printer is offline."
+        )
+
+        let unknown = PrinterDetailFilamentActionMapping.actions(
+            printerID: UUID(),
+            hasActiveSpool: true,
+            isPerformingAction: false,
+            nfcAvailable: true,
+            isOnline: true,
+            printerState: nil
+        )
+        XCTAssertEqual(
+            unknown.first { $0.kind == .change }?.disabledReason,
+            "Printer state is unknown or transitioning."
+        )
+
+        let transitioning = PrinterDetailFilamentActionMapping.actions(
+            printerID: UUID(),
+            hasActiveSpool: true,
+            isPerformingAction: false,
+            nfcAvailable: true,
+            isOnline: true,
+            printerState: "starting"
+        )
+        XCTAssertEqual(
+            transitioning.first { $0.kind == .clearAssignment }?.disabledReason,
+            "Printer state is unknown or transitioning."
+        )
+    }
+
     // MARK: - Coverage state mapping
 
     func testCoverageStateMappingDisabledWhenCapabilityOff() {
@@ -818,7 +1232,7 @@ final class PrinterDetailPanelsTests: XCTestCase {
 
     func testCameraForegroundTrueOnlyWhenSceneActiveAndStatusSelected() {
         XCTAssertTrue(PrinterDetailCameraLifecycleMapping.isForeground(
-            scenePhase: .active, selectedPanel: .overview
+            scenePhase: .active, selectedPanel: .status
         ))
     }
 
@@ -828,37 +1242,23 @@ final class PrinterDetailPanelsTests: XCTestCase {
         // `scenePhase == .active` alone is not sufficient once Controls is
         // the page actually on screen.
         XCTAssertFalse(PrinterDetailCameraLifecycleMapping.isForeground(
-            scenePhase: .active, selectedPanel: .controls
+            scenePhase: .active, selectedPanel: .control
+        ))
+        XCTAssertFalse(PrinterDetailCameraLifecycleMapping.isForeground(
+            scenePhase: .active, selectedPanel: .filament
+        ))
+        XCTAssertFalse(PrinterDetailCameraLifecycleMapping.isForeground(
+            scenePhase: .active, selectedPanel: .queue
         ))
     }
 
     func testCameraNotForegroundWhenSceneInactiveOrBackgroundedEvenOnStatusPage() {
         XCTAssertFalse(PrinterDetailCameraLifecycleMapping.isForeground(
-            scenePhase: .inactive, selectedPanel: .overview
+            scenePhase: .inactive, selectedPanel: .status
         ))
         XCTAssertFalse(PrinterDetailCameraLifecycleMapping.isForeground(
-            scenePhase: .background, selectedPanel: .overview
+            scenePhase: .background, selectedPanel: .status
         ))
-    }
-
-    // MARK: - Homed-axes badge source resolution
-
-    func test_resolveHomedAxes_prefersPopulatedSourceOverStaleEmptyString() {
-        // The list DTO can carry "" while /status carries the real string. `??`
-        // only falls through on nil, so the empty value used to win and badge a
-        // homed printer as unhomed.
-        XCTAssertEqual(PrinterDetailView.resolveHomedAxes(["", "xyz"]), "xyz")
-        XCTAssertEqual(PrinterDetailView.resolveHomedAxes([nil, "xyz"]), "xyz")
-        XCTAssertEqual(PrinterDetailView.resolveHomedAxes(["xy", "xyz"]), "xy")
-    }
-
-    func test_resolveHomedAxes_keepsEmptyWhenThatIsAllTheBackendReports() {
-        // An empty string is a real "nothing is homed" signal; only a total
-        // absence of the field should hide the badges.
-        XCTAssertEqual(PrinterDetailView.resolveHomedAxes(["", nil]), "")
-        XCTAssertEqual(PrinterDetailView.resolveHomedAxes([nil, ""]), "")
-        XCTAssertNil(PrinterDetailView.resolveHomedAxes([nil, nil]))
-        XCTAssertNil(PrinterDetailView.resolveHomedAxes([]))
     }
 
 }

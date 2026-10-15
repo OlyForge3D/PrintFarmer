@@ -60,6 +60,7 @@ export interface PrintJobStatusDto {
   progress?: number;
   jobName?: string;
   thumbnailUrl?: string;
+  currentJobThumbnailUrl?: string;
   error?: string;
 }
 
@@ -161,6 +162,11 @@ export interface PrinterMetadata {
   bedTypeName?: string;
   /** Hex color code for bed type badge (e.g., "#E67E22") */
   bedTypeColor?: string;
+  /**
+   * Presentation-only: render the filament box's external spool slot (QidiBox
+   * Rack). Defaults to hidden when absent; never changes the slot's spool binding.
+   */
+  showExternalSpool?: boolean;
 }
 
 /**
@@ -206,6 +212,14 @@ export interface PrinterLiveStatus {
   isOnline: boolean;
   /** Current printer state (e.g., "Idle", "Printing", "Paused") */
   state?: string;
+  /** Current layer reported by a backend that exposes a real layer counter. */
+  currentLayer?: number | null;
+  /** Total layers reported by a backend that exposes a real layer counter. */
+  totalLayers?: number | null;
+  /** Part-fan output percentage reported by the backend, not tachometer RPM. */
+  fanSpeedPercent?: number | null;
+  /** Live transient G-code Z offset reported by the backend, in millimeters. */
+  liveZOffsetMm?: number | null;
 }
 
 /**
@@ -246,6 +260,8 @@ export interface PrinterJobInfo {
   fileName?: string;
   /** Thumbnail URL for the current job */
   thumbnailUrl?: string;
+  /** Relative authenticated proxy URL for the current job thumbnail */
+  currentJobThumbnailUrl?: string;
   /** Speed multiplier percentage (0-999, 100 = normal speed). PrusaLink only. */
   speedMultiplier?: number;
   /** Active spool identifier persisted in the PrintFarmer database */
@@ -367,7 +383,7 @@ export interface MoveLocationRequest {
  * Extends all common base interfaces for a complete printer representation.
  * Use this as the base for DTOs that need most/all printer information.
  */
-export interface PrinterBase extends 
+export interface PrinterBase extends
   PrinterIdentity,
   PrinterCredentials,
   PrinterConnection,
@@ -386,7 +402,7 @@ export interface PrinterBase extends
  * Full printer DTO with all status and configuration information.
  * This is the most complete printer representation returned by the API.
  */
-export interface Printer extends 
+export interface Printer extends
   PrinterBase,
   PrinterLiveStatus,
   PrinterTemperatures,
@@ -457,13 +473,17 @@ export interface PrinterBackendCapabilitiesDto {
   supportsHistory: boolean;
   supportsFilamentControl: boolean;
   supportsObjectExclusion: boolean;
+  supportsFanControl?: boolean;
+  supportsZOffsetAdjustment?: boolean;
+  supportsFanSpeedReadback?: boolean;
+  supportsZOffsetReadback?: boolean;
 }
 
 /**
  * Lightweight printer DTO optimized for fast list retrieval.
  * Contains essential display info without full configuration details.
  */
-export interface PrinterFast extends 
+export interface PrinterFast extends
   PrinterBase,
   PrinterLiveStatus,
   PrinterTemperatures,
@@ -543,7 +563,7 @@ export interface PrinterSpoolInfo {
 /**
  * Combined printer identity with capabilities snapshot.
  * Used for export/import operations.
- * 
+ *
  * Note: Uses standard field names (id, name, modelName) for consistency.
  * Nullable types (| null) are used instead of optional (?) for explicit JSON serialization
  * in export/import scenarios, which is why this doesn't extend the base interfaces directly.
@@ -553,22 +573,22 @@ export interface PrinterWithCapabilitiesDto {
   id: string;
   name: string;
   backend?: PrinterBackend | null;
-  
+
   // Metadata (standard naming)
   modelName: string;
   manufacturerName?: string | null;
   notes?: string | null;
-  
+
   // Connection
   serverUrl?: string | null;
   backendPort?: number | null;
   frontendPort?: number | null;
-  
+
   // Credentials
   apiKey?: string | null;
   username?: string | null;
   password?: string | null;
-  
+
   // Capabilities (unique to export DTO)
   capabilities?: PrinterCapabilitiesExportDto | null;
 }
@@ -593,7 +613,7 @@ export interface VendorInfo {
  * Basic printer info without live status.
  * Used for configuration/management scenarios where real-time data isn't needed.
  */
-export interface PrinterBasic extends 
+export interface PrinterBasic extends
   PrinterIdentity,
   PrinterCredentials,
   PrinterMetadata {
@@ -609,7 +629,7 @@ export interface PrinterBasic extends
  * Live status info for real-time updates.
  * Contains only dynamic/changing printer state, no configuration.
  */
-export interface PrinterStatus extends 
+export interface PrinterStatus extends
   PrinterLiveStatus,
   PrinterCameraInfo,
   PrinterTemperatures,
@@ -696,6 +716,12 @@ export interface MmuStatus {
   gates: MmuGate[];
   /** MMU protocol type: "HappyHare", "Qidibox", "AFC", or "SnapmakerU1" */
   mmuType?: string;
+  /** Live material on the external spool holder / bypass (QidiBox "Rack"), when the device reports it */
+  bypassMaterial?: string | null;
+  /** Live CSS color of the external spool holder / bypass filament */
+  bypassColor?: string | null;
+  /** Live filament name of the external spool holder / bypass */
+  bypassFilamentName?: string | null;
 }
 
 // File information with thumbnail
@@ -762,7 +788,7 @@ export interface BulkImportResultItem {
 export interface BulkImportResponse {
   importedCount: number;
   skippedCount: number;
-  failureCount: number; 
+  failureCount: number;
   results: BulkImportResultItem[];
 }
 
@@ -816,6 +842,8 @@ export interface UpdatePrinterDto {
   zOffsetMm?: number;
   /** Bed surface type ID. Set to empty string to clear. */
   bedTypeId?: string;
+  /** Presentation-only: show the filament box external spool slot. Omit to leave unchanged. */
+  showExternalSpool?: boolean;
   // Toolheads - for updating individual toolhead settings
   toolheads?: UpdateToolheadDto[];
 }
@@ -1358,7 +1386,7 @@ export interface ToolheadDto {
   id: string;
   name?: string;
   index: number;
-  nozzleDiameter?: number;     // Derived from NozzleModel.Diameter
+  nozzleDiameter?: number;     // Stored per-printer value (seeded from the nozzle model at creation)
   nozzleType?: NozzleType | string;  // Derived from NozzleModel.NozzleMaterial.Name (open string set)
   maxFlowRate?: number;        // Derived from HotendModel.MaxFlowRate
   maxTemp?: number;            // Derived from HotendModel.MaxTemp
@@ -1442,6 +1470,11 @@ export interface PrinterDetails {
    * "unsupported" for the odometer surface but tolerant everywhere else.
    */
   supportsPerToolAttribution?: boolean;
+  /**
+   * Presentation-only: render the filament box's external spool slot (QidiBox
+   * Rack). Defaults to hidden when absent; never changes the slot's spool binding.
+   */
+  showExternalSpool?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -2317,7 +2350,10 @@ export interface RegisterRequest {
 export interface AuthenticationResult {
   success: boolean;
   token?: string;
-  expiresAt?: Date;
+  expires?: string;
+  refreshToken?: string;
+  refreshTokenExpires?: string;
+  expiresAt?: string;
   user?: UserDto;
   error?: string;
 }
@@ -2493,14 +2529,6 @@ export interface PrintJobObjectListDto {
 
 export interface ExcludePrintJobObjectRequest {
   name: string;
-}
-
-/** Request payload for saving a calibrated Z-offset. */
-export interface ZOffsetSaveRequest {
-  /** The Z-offset value in millimeters. Negative values move the nozzle closer to the bed. */
-  offsetMm: number;
-  /** Whether to also send save commands to the printer firmware. */
-  saveToFirmware?: boolean;
 }
 
 // Failure detail for an individual file during multi-upload.
@@ -2725,23 +2753,21 @@ export interface QueuedPrintJobDto {
   /** Per-toolhead filament usage tracking */
   toolheadUsages?: PrintJobToolheadUsage[];
   dispatchResult?: DispatchAttemptResultDto | null;
-  /** Typed reason the job is held from dispatch (e.g. `OperatorRecoveryRequired`). */
-  blockedReasonCode?: JobBlockedReasonCode | null;
 }
 
-/** Mirrors backend `JobBlockedReasonCode` (serialized as a string enum). */
-export type JobBlockedReasonCode =
-  | 'None'
-  | 'FirmwareFamilyMismatch'
-  | 'GcodeDialectMismatch'
-  | 'SlicerTupleMismatch'
-  | 'ContentHashMismatch'
-  | 'PrinterConfigRevisionStale'
-  | 'HardCompatibilityFailure'
-  | 'CalibrationRecordInvalid'
-  | 'FilamentCheckFailed'
-  | 'MissingRequiredCapability'
-  | 'OperatorRecoveryRequired';
+export type MoveQueuedJobPositionRequest =
+  | {
+      beforeJobId: string;
+      beforeJobETag: string;
+      afterJobId?: never;
+      afterJobETag?: never;
+    }
+  | {
+      afterJobId: string;
+      afterJobETag: string;
+      beforeJobId?: never;
+      beforeJobETag?: never;
+    };
 
 export interface QueueGcodeFileMetaDto {
   id: string;
@@ -2826,132 +2852,6 @@ export type DispatchClientResult =
       errorCode: string;
       detail?: string;
       job?: QueuedPrintJobDto;
-    };
-
-// ---------------------------------------------------------------------------
-// Dispatch recovery (issues #2859 / #2993) — `/api/dispatch/...`
-// ---------------------------------------------------------------------------
-
-export type DispatchEscalationLevel =
-  | 'None'
-  | 'Warning'
-  | 'Operational'
-  | 'Critical'
-  | 'HardLimit';
-
-/** Redacted evidence for the printer's current indeterminate claim. */
-export interface DispatchReconciliationEvidence {
-  backendCallPhase?: string | null;
-  errorCode?: string | null;
-  startPathKind?: string | null;
-  reconciliationCount?: number | null;
-  backendCallStartedAtUtc?: string | null;
-  backendResponseAtUtc?: string | null;
-  senderSettledAtUtc?: string | null;
-  hasBackendJobId?: boolean | null;
-}
-
-/** `GET /api/dispatch/{printerId}/reconciliation`. */
-export interface DispatchReconciliationResource {
-  printerId: string;
-  printerName?: string | null;
-  hasIndeterminateClaim: boolean;
-  jobId?: string | null;
-  dispatchAttemptId?: string | null;
-  claimRevision?: number | null;
-  claimAgeSeconds?: number | null;
-  claimedAtUtc?: string | null;
-  lastReconciledAtUtc?: string | null;
-  lastEvidence?: DispatchReconciliationEvidence | null;
-  outcome?: DispatchAttemptOutcome | null;
-  escalationLevel: DispatchEscalationLevel;
-  /** `null` when no claim; `false` means no evidence the start sender settled. */
-  senderSettled?: boolean | null;
-  /** Server-derived `queue:reconcile`; printer Manage scope is still enforced on submit. */
-  recoveryPermission: boolean;
-  /** Latest accepted recovery journal id for this printer (may be historical). */
-  recoveryAuditId?: string | null;
-}
-
-export interface DispatchReconciliationSnapshot {
-  resource: DispatchReconciliationResource;
-  /** Printer dispatch-state ETag (quoted); `null` when the printer has no dispatch state. */
-  etag: string | null;
-}
-
-/** Body of `POST /api/dispatch/{printerId}/reconciliation/recover`. */
-export interface DispatchRecoveryRequest {
-  dispatchAttemptId: string;
-  claimRevision: number;
-  physicalCheckConfirmed: boolean;
-  senderIsolationConfirmed?: boolean;
-  note?: string | null;
-}
-
-export type DispatchRecoveryErrorCode =
-  | 'rejected_stale'
-  | 'rejected_not_indeterminate'
-  | 'rejected_sender_live'
-  | 'rejected_sender_isolation_required'
-  | 'idempotency_key_reused'
-  | 'invalid_request'
-  | 'physical_check_required'
-  | 'note_too_long'
-  | 'invalid_if_match'
-  | 'precondition_required'
-  | 'idempotency_key_required'
-  | 'printer_not_found'
-  | 'actor_unresolved'
-  | (string & {});
-
-export type DispatchRecoveryResult =
-  | {
-      kind: 'recovered';
-      httpStatus: 200;
-      resource: DispatchReconciliationResource;
-      etag: string | null;
-    }
-  | {
-      kind: 'stale' | 'conflict' | 'invalid' | 'forbidden' | 'not_found';
-      httpStatus: 400 | 403 | 404 | 409 | 412 | 428;
-      errorCode: DispatchRecoveryErrorCode;
-      detail?: string | null;
-      recoveryAuditId?: string | null;
-      liveSender?: string | null;
-    };
-
-/** `GET /api/dispatch/{printerId}/reconciliation/audit/{auditId}`. */
-export interface DispatchRecoveryAudit {
-  auditId: string;
-  printerId: string;
-  jobId?: string | null;
-  dispatchAttemptId: string;
-  claimRevision: number;
-  priorOutcome: string;
-  actorId: string;
-  actorRecordedAtUtc: string;
-  serverRecordedAtUtc: string;
-  assertionVersion: number;
-  physicalCheckConfirmed: boolean;
-  senderIsolationConfirmed: boolean;
-  senderSettledAtUtc?: string | null;
-  note?: string | null;
-  correlationId?: string | null;
-  transition: string;
-}
-
-export type DispatchRecoveryClearResult =
-  | {
-      kind: 'cleared';
-      httpStatus: 200;
-      jobId: string;
-      etag: string | null;
-    }
-  | {
-      kind: 'stale' | 'conflict' | 'invalid' | 'forbidden' | 'not_found';
-      httpStatus: 400 | 403 | 404 | 409 | 412 | 428;
-      errorCode: string;
-      detail?: string | null;
     };
 
 export interface QueueStatsDto {
@@ -3080,6 +2980,13 @@ export interface UpdateQueueJobRequest {
   failureReason?: string;
 }
 
+export interface MoveQueuedJobRequest {
+  beforeJobId?: string;
+  beforeJobETag?: string;
+  afterJobId?: string;
+  afterJobETag?: string;
+}
+
 export interface BulkCancelQueueJobsRequest {
   jobIds: string[];
 }
@@ -3172,11 +3079,49 @@ export interface CameraDto {
   createdAt: string;
   updatedAt?: string;
   isStandalone: boolean;
+  /** Primary linked printer (compatibility; prefer printerIds/printers). */
   printerId?: string;
+  printerName?: string;
+  /** All linked printer ids, primary first. */
+  printerIds: string[];
+  /** Linked printers, primary first. */
+  printers: CameraPrinterSummary[];
+  /** Explicit location (only meaningful when the camera is not linked to exactly one printer). */
+  locationId?: string | null;
+  /** Location derived from the single linked printer, or the explicit locationId otherwise. */
+  effectiveLocationId?: string | null;
+  effectiveLocationName?: string | null;
+  /** True when exactly one printer is linked and the location is derived from it. */
+  isLocationDerived: boolean;
+  /** True once a user edited an auto-discovered camera; sync no longer overwrites it. */
+  userModified: boolean;
   source: CameraSource;
   cameraType: CameraType;
   healthStatus: CameraHealthStatus;
   lastHealthCheck?: string;
+}
+
+export interface CameraPrinterSummary {
+  id: string;
+  name: string;
+  isPrimary: boolean;
+}
+
+/** Optional filters for GET /api/cameras, /api/cameras/enabled and /api/cameras/display. */
+export interface CameraListFilter {
+  printerId?: string;
+  /** Matches the camera's effective location. */
+  locationId?: string;
+}
+
+export interface LinkCameraPrinterRequest {
+  isPrimary?: boolean;
+}
+
+export type CameraPrinterRemovalResult = 'Unlinked' | 'Deleted';
+
+export interface RemoveCameraFromPrinterResponse {
+  result: CameraPrinterRemovalResult;
 }
 
 export interface CreateCameraDto {
@@ -3188,8 +3133,21 @@ export interface CreateCameraDto {
   sortOrder?: number;
   location?: string;
   printerId?: string;
+  /** Linked printers; the first entry becomes primary unless isPrimary=false. Replaces the link set on update. */
+  printerIds?: string[];
+  isPrimary?: boolean;
+  /** Ignored (and cleared) when exactly one printer is linked. */
+  locationId?: string | null;
   source?: CameraSource;
   cameraType?: CameraType;
+}
+
+export interface CameraConfigDto {
+  id: string;
+  streamUrl: string | null;
+  snapshotUrl: string | null;
+  streamUrlHasCredentials: boolean;
+  snapshotUrlHasCredentials: boolean;
 }
 
 export interface UpdateCameraDto {
@@ -3201,6 +3159,13 @@ export interface UpdateCameraDto {
   sortOrder?: number;
   location?: string;
   printerId?: string | null;
+  /** Linked printers; the first entry becomes primary unless isPrimary=false. Replaces the link set on update. */
+  printerIds?: string[];
+  isPrimary?: boolean;
+  /** Ignored (and cleared) when exactly one printer is linked. */
+  locationId?: string | null;
+  /** Explicitly clears locationId (when not derived from a single printer). */
+  clearLocationId?: boolean;
   source?: CameraSource;
   cameraType?: CameraType;
 }
@@ -3235,8 +3200,20 @@ export interface DisplayCameraDto {
   sortOrder: number;
   location?: string;
   isStandalone: boolean;
+  /** Primary linked printer (compatibility; prefer printerIds/printers). */
   printerId?: string;
   printerName?: string;
+  /** All linked printer ids, primary first. */
+  printerIds: string[];
+  /** Linked printers, primary first. */
+  printers: CameraPrinterSummary[];
+  /** Explicit location (only meaningful when the camera is not linked to exactly one printer). */
+  locationId?: string | null;
+  /** Location derived from the single linked printer, or the explicit locationId otherwise. */
+  effectiveLocationId?: string | null;
+  effectiveLocationName?: string | null;
+  /** True when exactly one printer is linked and the location is derived from it. */
+  isLocationDerived: boolean;
   printerState?: string;
   isPrinterOnline?: boolean;
   source: CameraSource;
@@ -4369,6 +4346,7 @@ export interface SystemDiskInfo {
 export interface SystemServiceInfo {
   name: string;
   version: string;
+  engineVersion?: string | null;
   health: SystemServiceHealth;
 }
 
@@ -4381,8 +4359,6 @@ export interface SystemDatabaseInfo {
 }
 
 export interface SystemInfo {
-  inventory?: ServiceInventory | null;
-  updateScheduling?: UpdateSchedulingStatus | null;
   app: SystemAppInfo;
   cpu: SystemCpuInfo;
   memory: SystemMemoryInfo;
@@ -5096,203 +5072,4 @@ export interface CustomFieldValue {
   value?: string;
   options?: string;
   isRequired: boolean;
-}
-
-// Read-only admin inventory (#2659); canonical release vocabulary is owned by #2668.
-export type InventoryObservationState = 'Observed' | 'Stale' | 'Unavailable' | 'Unknown' | 'NotInstalled';
-export type InventoryCompatibilityState = 'Compatible' | 'Incompatible' | 'Unknown' | 'MixedRelease' | 'MixedChannel';
-export type InventoryChannelState = 'Observed' | 'Stale' | 'Unknown' | 'Mismatch' | 'Mixed';
-export type InventoryEligibility = 'Blocked' | 'Eligible' | 'Unknown' | 'NotManaged';
-
-export type UpdateChannel = 'stable' | 'insider';
-
-export interface UpdateChannelSettings {
-  rowVersion?: string;
-  channel: UpdateChannel;
-  insiderAcknowledged: boolean;
-}
-
-export interface HostUpdateManualAuthorizationIntent {
-  authorizationId?: string | null;
-  expectedPolicyRevision?: number | null;
-  expectedPolicyFingerprint?: string | null;
-}
-
-export interface HostUpdateManualAuthorizationResponse {
-  authorizationId: string;
-  releaseId: string;
-  sequence: number;
-  channel: string;
-  candidateFingerprint: string;
-  policyRevision: number;
-  policyFingerprint: string;
-  expiresAt: string;
-}
-
-export type HostUpdateExecutionState =
-  | 'Accepted'
-  | 'Preflight'
-  | 'Draining'
-  | 'Fenced'
-  | 'BackedUp'
-  | 'Migrating'
-  | 'Applying'
-  | 'Verifying'
-  | 'Completed'
-  | 'RecoveryRequired'
-  | 'Refused';
-
-export interface HostUpdateExecutionActivity {
-  activityId: string;
-  releaseId: string;
-  state: HostUpdateExecutionState;
-  phase: string;
-  recordedAt: string;
-  requestFingerprint?: string | null;
-  requestBindingHash?: string | null;
-  requestBinding?: HostUpdateExecutionRequest | null;
-}
-
-export interface HostUpdateExecutionRequest {
-  releaseId: string;
-  authenticatedSequence: number;
-  manifestDigest: string;
-  sourceCommit: string;
-  channel: "Stable" | "Insider";
-  targets: Array<{ serviceId: string; platform: string; childDigest: string }>;
-  requestId: string;
-  trustRoot: string;
-  policyRevision: number;
-  policyFingerprint: string;
-  hostPlatform: string;
-  authorizationKind: "Manual" | "StandingPolicy";
-}
-
-export interface HostUpdateStatusResponse {
-  releaseId: string;
-  currentState: HostUpdateExecutionState;
-  activities: HostUpdateExecutionActivity[];
-}
-
-export type HostUpdateRecoveryOutcome = 'RolledBack' | 'NeedsOperator' | 'FenceReleasePending';
-
-export interface HostUpdateRecoveryResult {
-  outcome: HostUpdateRecoveryOutcome;
-  detail: string;
-}
-
-export type UpdateSchedulingBackoffState = 'Unknown' | 'None' | 'Waiting';
-
-export interface UpdateSchedulingBackoff {
-  state: UpdateSchedulingBackoffState;
-  consecutiveFailures: number;
-  until: string | null;
-  reasons: string[];
-}
-
-export interface UpdateSchedulingKillSwitch {
-  enabled: boolean;
-  reason: string | null;
-}
-
-export type UpdateSchedulingExecutorState = 'Unknown' | 'Unavailable' | 'Available' | 'Busy' | 'RecoveryRequired';
-
-export interface UpdateSchedulingExecutor {
-  state: UpdateSchedulingExecutorState;
-  reason: string | null;
-}
-
-export interface UpdateSchedulingStatus {
-  configuredEnabled: boolean;
-  effectiveEnabled: boolean;
-  selectedChannel: UpdateChannel;
-  effectiveChannel: UpdateChannel | null;
-  policyRevision: number;
-  lastAttemptAt: string | null;
-  nextAttemptAt: string | null;
-  backoff: UpdateSchedulingBackoff;
-  killSwitch: UpdateSchedulingKillSwitch;
-  executor: UpdateSchedulingExecutor;
-  reasons: string[];
-}
-
-export interface CanonicalReleaseIdentity {
-  canonicalVersion: string | null;
-  baseVersion: string | null;
-  channel: string | null;
-  releaseId: string | null;
-  sourceTag: string | null;
-  sourceBranch: string | null;
-  sourceCommit: string | null;
-  authorizedBranchHead: string | null;
-  buildId: string | null;
-  buildAttempt: string | null;
-  workflowIdentity: string | null;
-  allocationIdentity: string | null;
-  promotionOrigin: PromotionOrigin | null;
-}
-
-export interface PromotionOrigin {
-  releaseId: string | null;
-  canonicalVersion: string | null;
-  sourceCommit: string | null;
-  manifestDigest: string | null;
-  evidence: string | null;
-}
-
-export interface ServiceReplicaObservation {
-  serviceId: string;
-  instanceId: string | null;
-  component: string;
-  required: boolean;
-  applicationVersion: string | null;
-  sourceCommit: string | null;
-  engineVersion: string | null;
-  databaseProvider: string | null;
-  migrationHead: string | null;
-  observationState: InventoryObservationState;
-  observedAt: string | null;
-  lastSuccessAt: string | null;
-  source: string;
-  reasonCode: string;
-  identity: CanonicalReleaseIdentity | null;
-  verificationSource: string | null;
-  verifiedAt: string | null;
-  platform: string | null;
-  platformDigest: string | null;
-  indexDigest: string | null;
-  manifestDigest: string | null;
-  configuredImage: string | null;
-  observedChannel: string | null;
-  channelState: InventoryChannelState;
-  compatibilityState: InventoryCompatibilityState;
-  compatibilityReasons: string[];
-}
-
-export interface ServiceInventory {
-  hostUpdaterVersion: string | null;
-  selectedChannel: string;
-  selectionSource: string;
-  collectedAt: string;
-  observedChannel: string | null;
-  targetChannel: string | null;
-  channelState: InventoryChannelState;
-  compatibilityState: InventoryCompatibilityState;
-  compatibilityReasons: string[];
-  eligibility: InventoryEligibility;
-  eligibilityReasons: string[];
-  readiness: ReleaseReadiness | null;
-  updateScheduling?: UpdateSchedulingStatus | null;
-  snapshotOrigin: InventorySnapshotOrigin;
-  snapshotSource: string | null;
-  snapshotExportedAt: string | null;
-  services: ServiceReplicaObservation[];
-}
-
-export type InventorySnapshotOrigin = 'Live' | 'Imported';
-
-export interface ReleaseReadiness {
-  state: InventoryEligibility | null;
-  reasons: string[];
-  hops: readonly string[];
 }

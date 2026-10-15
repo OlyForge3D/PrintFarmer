@@ -17,9 +17,6 @@ public sealed class PrinterRegistry
 
     public FaultRuleEngine Rules { get; } = new();
 
-    /// <summary>Process-lifetime Moonraker request log; intentionally untouched by <see cref="ResetToInitial"/>.</summary>
-    public RequestLog Requests { get; } = new();
-
     public PrinterRegistry(IOptions<EmulatorOptions> options)
     {
         EmulatorOptions settings = options.Value;

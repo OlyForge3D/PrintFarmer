@@ -376,6 +376,14 @@ public interface IPrintersService
         CancellationToken ct);
 
     /// <summary>
+    /// Retrieves the active print job thumbnail when the supplied cache token matches the current image.
+    /// </summary>
+    Task<HistoryThumbnailContent?> GetCurrentJobThumbnailAsync(
+        Guid printerId,
+        string? cacheToken,
+        CancellationToken ct);
+
+    /// <summary>
     /// Probes one exact backend history ID without treating malformed, unavailable,
     /// or unsupported responses as authoritative absence.
     /// </summary>
@@ -545,8 +553,17 @@ public interface IPrintersService
     /// <summary>Saves a calibrated Z-offset through the backend's firmware capability.</summary>
     Task<bool> SaveZOffsetToFirmwareAsync(Guid id, decimal offsetMm, CancellationToken ct);
 
+    /// <summary>Sets the part-cooling fan to a bounded percentage through a semantic backend capability.</summary>
+    Task<bool> SetFanSpeedAsync(Guid id, int speedPercent, CancellationToken ct);
+
+    /// <summary>Applies a bounded transient relative Z-offset adjustment through a semantic backend capability.</summary>
+    Task<bool> AdjustZOffsetAsync(Guid id, decimal offsetMm, CancellationToken ct);
+
     /// <summary>Performs a typed multi-material action through the backend capability.</summary>
     Task<bool> ExecuteMmuAsync(Guid id, MmuControlRequest request, CancellationToken ct);
+
+    /// <summary>Resolves the requested MMU lane's unload temperature, floored by verified safety and bounded by installed hardware.</summary>
+    Task<double> GetMmuUnloadTemperatureAsync(Guid id, MmuControlRequest request, double minimumTemperatureC, CancellationToken ct);
 
     /// <summary>
     /// Sends an arbitrary G-code command to the printer.
@@ -795,13 +812,4 @@ public interface IPrintersService
     /// <param name="ct">Cancellation token</param>
     /// <returns>Object containing import results and status (successful count, failed items, etc.)</returns>
     Task<object> ImportFromStreamAsync(Stream stream, string fileName, string duplicateHandling = "skip", CancellationToken ct = default);
-
-    /// <summary>
-    /// Refreshes camera URLs for a printer by querying the backend API.
-    /// This updates the stored camera URLs in the database.
-    /// </summary>
-    /// <param name="id">The printer ID</param>
-    /// <param name="ct">Cancellation token</param>
-    /// <returns>Updated printer with refreshed camera URLs, or null if printer not found</returns>
-    Task<PrinterDto?> RefreshCameraUrlsAsync(Guid id, CancellationToken ct);
 }

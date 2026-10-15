@@ -77,26 +77,14 @@ test.describe('Printer motion feedback without physical commands', () => {
   });
   }
 
-  test('mode saves to the account and synchronizes mounted controls without browser persistence', async ({ page }) => {
+  test('mode comes only from User Settings: no local selector, guided help, no Motion help toggle', async ({ page }) => {
     await mountCoordinateFixture(page);
-    const puts: unknown[] = [];
-    await page.route('**/api/settings/user', async route => {
-      if (route.request().method() === 'PUT') puts.push(route.request().postDataJSON());
-      await route.fulfill({ json: {
-        userId: 'fixture-user', theme: 'dark', locale: 'en', itemsPerPage: 25,
-        defaultSlicerPreset: null, printablesUsername: null, printerControlMode: 'Expert', rowVersion: 'v2',
-      } });
-    });
-    const detail = page.getByRole('region', { name: 'Detail coordinates' });
-    const sidebar = page.getByRole('region', { name: 'Sidebar coordinates' });
-    await expect(detail.getByRole('button', { name: 'Guided', exact: true })).toHaveAttribute('aria-pressed', 'true');
-    await detail.getByRole('button', { name: 'Expert', exact: true }).click();
-    await expect(sidebar.getByRole('button', { name: 'Expert', exact: true })).toHaveAttribute('aria-pressed', 'true');
-    expect(puts).toEqual([{ printerControlMode: 'Expert', rowVersion: 'v1' }]);
+    for (const name of ['Detail coordinates', 'Sidebar coordinates']) {
+      const region = page.getByRole('region', { name });
+      await expect(region.getByRole('button', { name: /^(Guided|Expert)$/ })).toHaveCount(0);
+      await expect(region.getByText(/Jog moves by the selected step/)).toBeVisible();
+      await expect(region.getByText('Motion help', { exact: true })).toHaveCount(0);
+    }
     expect(await page.evaluate(() => localStorage.getItem('pf.printer-controls.mode'))).toBeNull();
-    const help = sidebar.getByText('Motion help', { exact: true });
-    await help.focus();
-    await page.keyboard.press('Enter');
-    await expect(help.locator('..')).toHaveAttribute('open', '');
   });
 });

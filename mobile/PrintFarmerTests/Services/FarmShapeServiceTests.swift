@@ -512,6 +512,8 @@ final class FarmShapeServiceTests: XCTestCase {
             farmSnapshotStore: snapshotStore,
             farmSnapshotOwnerStore: ownerStore,
             farmShapeStore: store,
+            // The held shape response must not race the 750ms wall-clock wait.
+            farmShapeStartupSleep: { _ in try await suspendUntilCancelled() },
             synchronizeOfflineQueueOnStartup: false,
             apiClientFactory: { baseURL, generation, accessToken, authSessionToken, serverID in
                 let identity = accessToken.flatMap { token in
@@ -538,8 +540,17 @@ final class FarmShapeServiceTests: XCTestCase {
         let switchTask = Task {
             await container.switchToServer(serverB)
         }
+        let capabilitiesStarted = expectation(
+            description: "Capabilities read starts while the farm-shape read is held"
+        )
+        Task {
+            await capabilitiesRequest.waitUntilArrived()
+            capabilitiesStarted.fulfill()
+        }
+        // Both reads must be in flight before either completes. Sequential
+        // startup fails this bounded wait rather than deadlocking the test.
         await shapeRequest.waitUntilArrived()
-        await capabilitiesRequest.waitUntilArrived()
+        await fulfillment(of: [capabilitiesStarted], timeout: 10)
         shapeRequest.release()
         capabilitiesRequest.release()
         await switchTask.value
@@ -781,4 +792,9 @@ private final class BlockingCapabilitiesService:
         completed = true
         return .loaded
     }
+}
+
+/// Outlives any test; production cancels it once the shape fetch wins the race.
+private func suspendUntilCancelled() async throws {
+    try await Task.sleep(for: .seconds(86_400))
 }

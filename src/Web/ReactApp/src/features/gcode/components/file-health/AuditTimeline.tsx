@@ -1,4 +1,3 @@
-import React from 'react';
 import { FileHealthAuditDto, FileAuditType } from '@/types/api';
 import { Card } from '@/common/components/ui/Card';
 import { Badge } from '@/common/components/ui/Badge';

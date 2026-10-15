@@ -84,15 +84,9 @@ public static class DispatchSafetyGates
         // --- Nozzle diameter (toolhead-aware) ---
         if (job.RequiredNozzleDiameter is { } requiredNozzle && requiredNozzle > 0m)
         {
-            List<decimal> available = printer.Toolheads
-                .Where(t => t.NozzleDiameter.HasValue)
-                .Select(t => (decimal)t.NozzleDiameter!.Value)
-                .ToList();
-
-            if (available.Count == 0 && printer.NozzleDiameter.HasValue)
-            {
-                available.Add((decimal)printer.NozzleDiameter.Value);
-            }
+            // The per-printer stored diameter is authoritative; the nozzle model only seeds it
+            // at creation (and via the legacy backfill migration).
+            List<decimal> available = [.. printer.GetEffectiveNozzleDiameters().Select(d => (decimal)d)];
 
             if (available.Count == 0)
             {

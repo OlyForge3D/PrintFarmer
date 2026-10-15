@@ -13,7 +13,6 @@ using Farm.Infrastructure.Services.Catalog.Caching;
 using Farm.Infrastructure.Services.FileManagement;
 using Farm.Infrastructure.Services.FolderManagement;
 using Farm.Infrastructure.Services.Gcode;
-using Farm.Infrastructure.Services.HostUpdates;
 using Farm.Infrastructure.Services.Models;
 using Farm.Infrastructure.Services.RateLimiting;
 using Farm.Infrastructure.Services.Security;
@@ -51,22 +50,8 @@ public static class SharedInfrastructureRegistrations
         AddCatalogServices(services);
         AddSettingsAndAliasServices(services);
         AddTokenRevocationServices(services);
-        AddHostUpdateAdmissionGate(services, configuration);
 
         return services;
-    }
-
-    /// <summary>
-    /// Registers only the host-update admission perimeter needed by split slicer-host producers.
-    /// The full executor remains owned by the main API; this durable gate shares the same
-    /// HostUpdateExecution root so a drain in the API rejects slicer submissions in this process.
-    /// </summary>
-    private static void AddHostUpdateAdmissionGate(IServiceCollection services, IConfiguration configuration)
-    {
-        HostUpdateExecutionOptions options = new();
-        configuration.GetSection(HostUpdateExecutionOptions.SectionName).Bind(options);
-        services.AddSingleton(options);
-        services.AddSingleton<IHostUpdateAdmissionGate, FileHostUpdateAdmissionGate>();
     }
 
     /// <summary>

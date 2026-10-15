@@ -10,8 +10,7 @@ import XCTest
 ///  2 only an atomic successful refresh writes        → `testNoImplicitWriteWithoutRecord`,
 ///                                                       `testPersistenceFailurePreservesPriorSnapshot`
 ///  3 offline ordering + dedupe + cursor fidelity      → `testAttentionSnapshotRoundTripOrderingDedupeHealthyCursor`
-///  4 coverage fleet/detail unknown + stable ids       → `testCoverageFleetRoundTripUnknownRunoutCoversStableIds`,
-///                                                       `testCoveragePrinterDetailRoundTrip`
+///  4 coverage printer detail + stable ids             → `testCoveragePrinterDetailRoundTrip`
 ///  5 (serverID,userID) isolation on switch/logout      → `testNamespaceIsolationOnServerUserSwitch`,
 ///                                                       `testCommitWithStaleCapturedSessionIsRejected`,
 ///                                                       `testHydrateDuringSwitchYieldsInactive`
@@ -226,62 +225,6 @@ final class FeatureReadCacheTests: XCTestCase {
             FileManager.default.fileExists(atPath: liveURL(root: root, ns, "attention-feed").path),
             "no live record may exist without an explicit successful record call"
         )
-    }
-
-    // MARK: 4 — Coverage fleet round-trip: unknown, runout±ETA, covers, stable ids
-
-    func testCoverageFleetRoundTripUnknownRunoutCoversStableIds() async throws {
-        let root = newRoot()
-        let (store, authority) = makeStore(root: root)
-        let ns = FarmSnapshotFixtures.namespace()
-        let session = try mint(authority, ns)
-        let clock = MutableClock(20_000)
-        let adapter = FilamentCoverageReadCacheAdapter(store: store, now: clock.sendableNow)
-
-        let p1 = UUID(), p2 = UUID(), p3 = UUID()
-        let th0 = UUID(), th1 = UUID()
-        // Multi-toolhead printer with DUPLICATE names but distinct stable ids.
-        let multi = printerCoverage(
-            id: p1, name: "Multi", status: .runout,
-            toolheads: [
-                toolhead(index: 0, id: th0, name: "AMS", status: .covers, remaining: 500),
-                toolhead(index: 1, id: th1, name: "AMS", status: .runout, remaining: 10,
-                         runoutAt: Date(timeIntervalSince1970: 8_888), runoutLayer: 42)
-            ]
-        )
-        // Runout WITHOUT an ETA — the honest "runout but no prediction" case.
-        let runoutNoEta = printerCoverage(
-            id: p2, name: "NoEta", status: .runout,
-            toolheads: [toolhead(index: 0, name: "T0", status: .runout, remaining: 1)]
-        )
-        // Unknown must be preserved HONESTLY, never coerced to covers/runout.
-        let unknown = printerCoverage(
-            id: p3, name: "Unk", status: .unknown,
-            toolheads: [toolhead(index: 0, name: "T0", status: .unknown)]
-        )
-        let fleet = FleetFilamentCoverage(
-            printers: [multi, runoutNoEta, unknown],
-            evaluatedAtUtc: Date(timeIntervalSince1970: 20)
-        )
-
-        let committed = await adapter.recordFleet(fleet, capturedSession: session)
-        XCTAssertEqual(committed, .committed)
-
-        let hydration = await adapter.loadCachedFleet()
-        guard case let .snapshot(payload, millis) = hydration else {
-            return XCTFail("expected fleet snapshot, got \(hydration)")
-        }
-        XCTAssertEqual(payload, fleet, "fleet DTO round-trips byte-for-byte")
-        XCTAssertEqual(millis, 20_000)
-
-        let hydratedMulti = payload.printers[0]
-        XCTAssertEqual(hydratedMulti.toolheads.map(\.id), ["id:\(th0.uuidString)", "id:\(th1.uuidString)"],
-                       "stable ids derive from toolheadId, never the duplicate name")
-        XCTAssertEqual(hydratedMulti.toolheads[1].predictedRunoutLayer, 42)
-        XCTAssertEqual(hydratedMulti.toolheads[1].predictedRunoutAt, Date(timeIntervalSince1970: 8_888))
-        XCTAssertNil(payload.printers[1].toolheads[0].predictedRunoutAt, "runout without ETA stays ETA-less")
-        XCTAssertEqual(payload.printers[2].status, .unknown, "unknown preserved honestly")
-        XCTAssertEqual(payload.printers[2].toolheads[0].status, .unknown)
     }
 
     func testCoveragePrinterDetailRoundTrip() async throws {
@@ -615,19 +558,24 @@ final class FeatureReadCacheTests: XCTestCase {
         let ns = FarmSnapshotFixtures.namespace()
         let session = try mint(authority, ns)
         let clock = MutableClock(9_000)
-        let adapter = FilamentCoverageReadCacheAdapter(store: store, now: clock.sendableNow)
+        let adapter = AttentionReadCacheAdapter(store: store, now: clock.sendableNow)
         let source = FeatureReadCacheWriteOrderSource()
         let successOrder = source.next()
 
-        let disabled = await adapter.recordFleetDisabled(writeOrder: source.next(), capturedSession: session)
+        let disabled = await adapter.recordDisabled(writeOrder: source.next(), capturedSession: session)
         XCTAssertEqual(disabled, .committed)
 
         clock.set(10_000) // earlier-confirmed success lands late
-        let fleet = FleetFilamentCoverage(printers: [], evaluatedAtUtc: Date(timeIntervalSince1970: 1))
-        let late = await adapter.recordFleet(fleet, writeOrder: successOrder, capturedSession: session)
+        let late = await adapter.recordRefresh(
+            items: [item("failure:late")],
+            nextCursor: nil,
+            healthyPrinterCount: 1,
+            writeOrder: successOrder,
+            capturedSession: session
+        )
         XCTAssertEqual(late, .notNewer)
 
-        let hydration = await adapter.loadCachedFleet()
+        let hydration = await adapter.loadCached()
         XCTAssertEqual(hydration, .disabled(lastUpdatedAtMillis: 9_000))
     }
 

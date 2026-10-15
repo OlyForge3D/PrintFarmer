@@ -168,9 +168,14 @@ struct Printer: Codable, Identifiable, Sendable {
     var isOnline: Bool
     var state: String?
     var progress: Double?
+    var currentLayer: Int?
+    var totalLayers: Int?
+    var fanSpeedPercent: Double?
+    var liveZOffsetMm: Double?
     var jobName: String?
     var fileName: String?
     var thumbnailUrl: String?
+    var currentJobThumbnailUrl: String?
     var cameraStreamUrl: String?
     var cameraSnapshotUrl: String?
     var cameraAccessMode: CameraAccessMode
@@ -202,7 +207,8 @@ struct Printer: Codable, Identifiable, Sendable {
         case manufacturerId, manufacturerName, modelId, modelName, motionType
         case backend, apiKey, originalServerUrl, backendPort, frontendPort
         case inMaintenance, isEnabled, rowVersion, configurationRevision
-        case isOnline, state, progress, jobName, fileName, thumbnailUrl
+        case isOnline, state, progress, currentLayer, totalLayers, fanSpeedPercent, liveZOffsetMm
+        case jobName, fileName, thumbnailUrl, currentJobThumbnailUrl
         case cameraStreamUrl, cameraSnapshotUrl
         case cameraAccessMode, cameraStreamFormat, cameraSnapshotStrategy
         case x, y, z, hotendTemp, bedTemp, hotendTarget, bedTarget, homedAxes
@@ -243,9 +249,14 @@ struct Printer: Codable, Identifiable, Sendable {
         // See PrinterProgressContractTests for the pin (issue #277).
         progress = try c.decodeIfPresent(Double.self, forKey: .progress)
             .map { min(max($0, 0), 100) / 100.0 }
+        currentLayer = try c.decodeIfPresent(Int.self, forKey: .currentLayer)
+        totalLayers = try c.decodeIfPresent(Int.self, forKey: .totalLayers)
+        fanSpeedPercent = try c.decodeIfPresent(Double.self, forKey: .fanSpeedPercent)
+        liveZOffsetMm = try c.decodeIfPresent(Double.self, forKey: .liveZOffsetMm)
         jobName = try c.decodeIfPresent(String.self, forKey: .jobName)
         fileName = try c.decodeIfPresent(String.self, forKey: .fileName)
         thumbnailUrl = try c.decodeIfPresent(String.self, forKey: .thumbnailUrl)
+        currentJobThumbnailUrl = try c.decodeIfPresent(String.self, forKey: .currentJobThumbnailUrl)
         cameraStreamUrl = try c.decodeIfPresent(String.self, forKey: .cameraStreamUrl)
         cameraSnapshotUrl = try c.decodeIfPresent(String.self, forKey: .cameraSnapshotUrl)
         cameraAccessMode = try c.decodeIfPresent(CameraAccessMode.self, forKey: .cameraAccessMode) ?? .unknown
@@ -407,10 +418,16 @@ struct PrinterSpoolInfo: Codable, Sendable {
 
 struct PrinterStatusDetail: Codable, Sendable {
     var safetyTelemetry: PrinterSafetyTelemetryDto?
+    var currentJobThumbnailUrl: String?
     let id: UUID
     let isOnline: Bool
     let state: String?
-    let progress: Double?
+    /// Internal 0–1 scale, normalized from the backend's 0–100 percentage in `PrinterService`.
+    var progress: Double?
+    let currentLayer: Int?
+    let totalLayers: Int?
+    let fanSpeedPercent: Double?
+    let liveZOffsetMm: Double?
     let jobName: String?
     let thumbnailUrl: String?
     let cameraStreamUrl: String?
@@ -436,6 +453,10 @@ struct PrinterStatusDetail: Codable, Sendable {
         isOnline: Bool,
         state: String?,
         progress: Double?,
+        currentLayer: Int? = nil,
+        totalLayers: Int? = nil,
+        fanSpeedPercent: Double? = nil,
+        liveZOffsetMm: Double? = nil,
         jobName: String?,
         thumbnailUrl: String?,
         cameraStreamUrl: String?,
@@ -450,12 +471,17 @@ struct PrinterStatusDetail: Codable, Sendable {
         homedAxes: String? = nil,
         spoolInfo: PrinterSpoolInfo?,
         mmuStatus: MmuStatus?,
-        printTimeLeftSeconds: Double? = nil
+        printTimeLeftSeconds: Double? = nil,
+        currentJobThumbnailUrl: String? = nil
     ) {
         self.id = id
         self.isOnline = isOnline
         self.state = state
         self.progress = progress
+        self.currentLayer = currentLayer
+        self.totalLayers = totalLayers
+        self.fanSpeedPercent = fanSpeedPercent
+        self.liveZOffsetMm = liveZOffsetMm
         self.jobName = jobName
         self.thumbnailUrl = thumbnailUrl
         self.cameraStreamUrl = cameraStreamUrl
@@ -471,6 +497,7 @@ struct PrinterStatusDetail: Codable, Sendable {
         self.spoolInfo = spoolInfo
         self.mmuStatus = mmuStatus
         self.printTimeLeftSeconds = printTimeLeftSeconds
+        self.currentJobThumbnailUrl = currentJobThumbnailUrl
     }
 }
 
@@ -489,10 +516,14 @@ struct MmuStatus: Codable, Sendable {
     let clogDetection: Bool
     let gates: [MmuGate]
     let mmuType: String
+    let bypassMaterial: String?
+    let bypassColor: String?
+    let bypassFilamentName: String?
 
     private enum CodingKeys: String, CodingKey {
         case enabled, isHomed, activeTool, activeGate, filamentState, action
         case numGates, hasBypass, endlessSpool, clogDetection, gates, mmuType
+        case bypassMaterial, bypassColor, bypassFilamentName
     }
 
     init(from decoder: Decoder) throws {
@@ -509,6 +540,9 @@ struct MmuStatus: Codable, Sendable {
         clogDetection = try c.decodeIfPresent(Bool.self, forKey: .clogDetection) ?? false
         gates = try c.decodeIfPresent([MmuGate].self, forKey: .gates) ?? []
         mmuType = try c.decodeIfPresent(String.self, forKey: .mmuType) ?? "Unknown"
+        bypassMaterial = try c.decodeIfPresent(String.self, forKey: .bypassMaterial)
+        bypassColor = try c.decodeIfPresent(String.self, forKey: .bypassColor)
+        bypassFilamentName = try c.decodeIfPresent(String.self, forKey: .bypassFilamentName)
     }
 }
 
@@ -671,6 +705,12 @@ struct QueuedPrintJobResponse: Codable, Identifiable, Sendable {
     let estimatedCompletionTime: Date?
 
     var id: String { job.id }
+
+    var displayName: String {
+        let name = gcodeFile?.name ?? job.name
+        guard job.copies > 1 else { return name }
+        return "\(name) ×\(job.copies)"
+    }
 }
 
 struct QueuedJobInfo: Codable, Identifiable, Sendable {

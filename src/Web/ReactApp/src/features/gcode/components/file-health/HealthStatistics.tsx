@@ -1,4 +1,3 @@
-import React from 'react';
 import { Card } from '@/common/components/ui/Card';
 
 interface HealthStatisticsProps {

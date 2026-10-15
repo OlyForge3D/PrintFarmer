@@ -1,4 +1,7 @@
-﻿namespace Farm.Modules.PrintQueue.Controllers.Responses;
+﻿using System.Text.Json.Serialization;
+using Farm.Infrastructure.Domain;
+
+namespace Farm.Modules.PrintQueue.Controllers.Responses;
 
 /// <summary>
 /// Authenticated same-origin camera proxy routes for a printer.
@@ -20,6 +23,21 @@ public sealed record CameraUrlResult
     public string? StreamUrl { get; }
 
     public string? SnapshotUrl { get; }
+
+    /// <summary>
+    /// Optional, additive contract hint for the printer's primary camera. Omitted when unknown so
+    /// older clients that only decode the proxy URLs keep working.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public CameraAccessMode? AccessMode { get; init; }
+
+    /// <summary>Optional stream transport of the primary camera (string enum).</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public CameraStreamFormat? StreamFormat { get; init; }
+
+    /// <summary>Optional snapshot acquisition strategy of the primary camera (string enum).</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public CameraSnapshotStrategy? SnapshotStrategy { get; init; }
 
     public void Deconstruct(out string? streamUrl, out string? snapshotUrl)
     {

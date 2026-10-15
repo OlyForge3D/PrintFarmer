@@ -26,15 +26,14 @@ public sealed class AutoDispatchBackgroundService(
     DispatchConcurrencyCoordinator concurrencyCoordinator,
     IHubContext<PrinterHub> hub,
     ILogger<AutoDispatchBackgroundService> logger,
-    Farm.Infrastructure.Services.HostUpdates.AutoDispatchFenceFlag? hostUpdateFence = null,
     TimeProvider? timeProvider = null) : BackgroundService
 {
-    private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
     private readonly SemaphoreSlim _selectionLock = new(1, 1);
     private readonly object _workerSync = new();
     private readonly object _claimSync = new();
     private readonly HashSet<Task> _workers = [];
     private readonly HashSet<Guid> _claimedJobs = [];
+    private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
     private static readonly TimeSpan DurableScanInterval = TimeSpan.FromSeconds(30);
 
     /// <inheritdoc />
@@ -69,25 +68,14 @@ public sealed class AutoDispatchBackgroundService(
                         await readCts.CancelAsync();
                         try
                         {
-                            // A trigger can arrive before cancellation wins. No worker owns
-                            // this read, so release it for the next durable reconciliation.
-                            DispatchTriggerEvent abandonedEvent = await readTask;
-                            _ = trigger.TryCompleteProcessing(abandonedEvent, allowRerun: false, out _);
+                            _ = await readTask;
                         }
                         catch (OperationCanceledException)
                         {
                             // Expected: the periodic durable scan won this wait.
                         }
 
-                        await scanDelay;
-
-                        // Idle channels must also observe the fence, even when no queued
-                        // work exists to generate a trigger during reconciliation (#2848).
-                        if (!await PauseForHostUpdateAsync(stoppingToken))
-                        {
-                            await ReconcileStartupEligiblePrintersAsync(stoppingToken);
-                        }
-
+                        await ReconcileStartupEligiblePrintersAsync(stoppingToken);
                         continue;
                     }
 
@@ -104,23 +92,6 @@ public sealed class AutoDispatchBackgroundService(
                 // Dispatch via a tracked worker so idle printers run concurrently under the
                 // configured capacity limit, with rerun coalescing and graceful drain on
                 // shutdown. The cross-process database claim prevents duplicates.
-                //
-                // Host-update fence (issue #2663 / Kane "physical admission barrier" finding):
-                // while fenced, stop *starting new dispatch workers* -- physically the same
-                // guarantee the drain step promises for active prints -- rather than merely
-                // ignoring the fence and letting new printer commands go out during a backup.
-                // Skipping this trigger event is safe: DurableScanInterval's periodic scan (see
-                // above) already re-discovers any eligible printer after a dropped event, so the
-                // same recovery path picks the printer back up once the fence is released.
-                // Acknowledge quiescence only once no dispatch worker is still in flight, so the
-                // fence coordinator cannot observe "paused" while a printer command is still
-                // physically executing.
-                if (await PauseForHostUpdateAsync(stoppingToken))
-                {
-                    _ = trigger.TryCompleteProcessing(triggerEvent, allowRerun: false, out _);
-                    continue;
-                }
-
                 StartTrackedWorker(triggerEvent, stoppingToken);
             }
         }
@@ -134,21 +105,6 @@ public sealed class AutoDispatchBackgroundService(
             await DrainWorkersAsync();
             logger.LogInformation("[AutoDispatch] Background service stopped");
         }
-    }
-
-    private async Task<bool> PauseForHostUpdateAsync(CancellationToken stoppingToken)
-    {
-        if (hostUpdateFence is null || !await hostUpdateFence.IsPauseRequestedAsync(stoppingToken))
-        {
-            return false;
-        }
-
-        if (TrackedWorkerCount == 0)
-        {
-            await hostUpdateFence.AcknowledgePausedAsync(stoppingToken);
-        }
-
-        return true;
     }
 
     private void StartTrackedWorker(
@@ -481,43 +437,92 @@ public sealed class AutoDispatchBackgroundService(
             return DispatchPlan.NoWork;
         }
 
-        // Find candidate jobs: unassigned queued jobs OR jobs assigned to this printer.
-        // Uses the SINGLE shared ordering selector so readiness/skip and dispatch agree.
-        List<PrintJob> candidateJobs = await db.PrintJobs
+        // Queue positions are scoped per printer; find each scope's first eligible job
+        // independently, then compare only those heads using the cross-scope FIFO order.
+        List<PrintJob> assignedJobs = await db.PrintJobs
             .AsNoTracking()
-            .Where(job => job.Status == PrintJobStatus.Queued
-                && (job.AssignedPrinterId == null || job.AssignedPrinterId == printerId))
+            .Where(job => job.Status == PrintJobStatus.Queued && job.AssignedPrinterId == printerId)
             .WhereNotOperatorRecoveryBlocked()
-            .OrderByPriorityDescending()
-            .Take(20) // reasonable batch to score
+            .OrderWithinScope()
             .ToListAsync(ct);
-        if (candidateJobs.Count == 0)
+        List<PrintJob> unassignedJobs = await db.PrintJobs
+            .AsNoTracking()
+            .Where(job => job.Status == PrintJobStatus.Queued && job.AssignedPrinterId == null)
+            .WhereNotOperatorRecoveryBlocked()
+            .OrderWithinScope()
+            .ToListAsync(ct);
+        HashSet<Guid> jobsThatCouldNotBeClaimed = [];
+
+        async Task<(PrintJob Job, DispatchScore Score)?> FindEligibleHeadAsync(
+            IEnumerable<PrintJob> jobs)
         {
-            logger.LogDebug(
-                "[AutoDispatch] No queued jobs available for printer {PrinterId}",
-                printerId);
-            return DispatchPlan.NoWork;
+            foreach (PrintJob job in jobs)
+            {
+                if (jobsThatCouldNotBeClaimed.Contains(job.Id) || IsJobClaimed(job.Id))
+                {
+                    continue;
+                }
+
+                DispatchScore? score = await scorer.ScorePrinterForJobAsync(job.Id, printerId, ct);
+                if (score is not null &&
+                    !score.Eliminated &&
+                    score.TotalScore >= settings.MinimumScoreThreshold)
+                {
+                    return (job, score);
+                }
+            }
+
+            return null;
         }
 
-        foreach (PrintJob job in candidateJobs)
+        while (true)
         {
-            if (IsJobClaimed(job.Id))
+            (PrintJob Job, DispatchScore Score)? assignedHead =
+                await FindEligibleHeadAsync(assignedJobs);
+            (PrintJob Job, DispatchScore Score)? unassignedHead =
+                await FindEligibleHeadAsync(unassignedJobs);
+            List<(PrintJob Job, DispatchScore Score)> eligibleHeads = [];
+            if (assignedHead.HasValue)
             {
-                continue;
+                eligibleHeads.Add(assignedHead.Value);
             }
 
-            // Targeted single-printer scoring (issue #1705): the fleet-scoring API used here
-            // previously loaded and scored every enabled printer only to discard all but this
-            // one, under the global selection lock. See IDispatchScorer.ScorePrinterForJobAsync
-            // for the equivalence guarantee this relies on.
-            DispatchScore? printerScore = await scorer.ScorePrinterForJobAsync(job.Id, printerId, ct);
-            if (printerScore is null
-                || printerScore.Eliminated
-                || printerScore.TotalScore < settings.MinimumScoreThreshold)
+            if (unassignedHead.HasValue)
             {
-                continue;
+                eligibleHeads.Add(unassignedHead.Value);
             }
 
+            (PrintJob Job, DispatchScore Score)? selectedHead = eligibleHeads
+                .OrderByDescending(candidate => candidate.Job.Priority)
+                .ThenBy(candidate => candidate.Job.QueuedAt)
+                .ThenBy(candidate => candidate.Job.Id)
+                .Select(candidate => ((PrintJob Job, DispatchScore Score)?)candidate)
+                .FirstOrDefault();
+
+            if (selectedHead is null)
+            {
+                DispatchPlanKind emptyKind = assignedJobs.Count == 0 && unassignedJobs.Count == 0
+                    ? DispatchPlanKind.NoWork
+                    : DispatchPlanKind.NoCompatibleJob;
+                if (emptyKind == DispatchPlanKind.NoWork)
+                {
+                    logger.LogDebug(
+                        "[AutoDispatch] No queued jobs available for printer {PrinterId}",
+                        printerId);
+                    return DispatchPlan.NoWork;
+                }
+
+                return new DispatchPlan(
+                    DispatchPlanKind.NoCompatibleJob,
+                    printerId,
+                    printer.Name ?? printerId.ToString(),
+                    Guid.Empty,
+                    string.Empty,
+                    Score: null,
+                    ClaimedJobId: null);
+            }
+
+            (PrintJob job, DispatchScore printerScore) = selectedHead.Value;
             string printerName = printer.Name ?? printerId.ToString();
             string jobName = job.Name ?? "Unknown";
             if (settings.AutoDispatchMode == AutoDispatchMode.Suggest)
@@ -532,29 +537,20 @@ public sealed class AutoDispatchBackgroundService(
                     ClaimedJobId: null);
             }
 
-            if (!TryClaimJob(job.Id))
+            if (TryClaimJob(job.Id))
             {
-                continue;
+                return new DispatchPlan(
+                    DispatchPlanKind.Auto,
+                    printerId,
+                    printerName,
+                    job.Id,
+                    jobName,
+                    printerScore,
+                    ClaimedJobId: job.Id);
             }
 
-            return new DispatchPlan(
-                DispatchPlanKind.Auto,
-                printerId,
-                printerName,
-                job.Id,
-                jobName,
-                printerScore,
-                ClaimedJobId: job.Id);
+            jobsThatCouldNotBeClaimed.Add(job.Id);
         }
-
-        return new DispatchPlan(
-            DispatchPlanKind.NoCompatibleJob,
-            printerId,
-            printer.Name ?? printerId.ToString(),
-            Guid.Empty,
-            string.Empty,
-            Score: null,
-            ClaimedJobId: null);
     }
 
     private async Task ExecuteDispatchPlanAsync(

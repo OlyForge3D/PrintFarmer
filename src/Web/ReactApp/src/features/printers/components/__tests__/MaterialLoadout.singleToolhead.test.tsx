@@ -1,3 +1,10 @@
+
+const permissions = vi.hoisted(() => ({ assign: true, operate: true }));
+vi.mock('@/features/auth/hooks/useAuth', () => ({
+  useAuth: () => ({ hasPermission: (_resource: string, action: string) => action === 'write' ? permissions.assign : permissions.operate }),
+}));
+const inventory = vi.hoisted(() => ({ data: undefined as import('@/types/api').SpoolmanSpool[] | undefined, isError: false, refetch: vi.fn() }));
+vi.mock('@/features/printers/hooks/usePrinterSpoolInventory', () => ({ usePrinterSpoolInventory: () => inventory }));
 /**
  * Verifies that single-toolhead printers render through the MaterialLoadout rail
  * and that FilamentCoverageBreakdown does NOT appear on that surface.
@@ -13,6 +20,8 @@ import type { ToolheadDto } from '@/types/api';
 vi.mock('@/common/hooks/useApi', () => ({
   useSetToolheadSpool: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useClearToolheadSpool: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useSetActiveSpool: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useClearActiveSpool: () => ({ mutateAsync: vi.fn(), isPending: false }),
   usePrinterDetails: () => ({ data: undefined }),
 }));
 
@@ -32,6 +41,9 @@ const singleToolhead: ToolheadDto[] = [
 describe('MaterialLoadout — single-toolhead printer (#1665)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    permissions.assign = permissions.operate = true;
+    inventory.data = undefined;
+    inventory.isError = false;
   });
 
   it('renders the material loadout rail for a single-toolhead printer', () => {

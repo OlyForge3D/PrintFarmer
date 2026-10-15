@@ -79,6 +79,7 @@ namespace Farm.Infrastructure.Services.Printers;
 /// <param name="configuration">Optional configuration accessor</param>
 /// <param name="membershipNotifier">Optional notifier for queue subscription membership changes (issue #1731); null in contexts that don't need it</param>
 /// <param name="spoolmanStatusCache">Optional shared status-path spool cache (issue #2338) used by <see cref="GetAllCompleteDtosAsync"/>'s DB fallback to coalesce repeated spool lookups and bound their concurrency/timeout; null falls back to direct (uncached) <see cref="Farm.Infrastructure.Services.Interfaces.ISpoolmanService"/> reads</param>
+/// <param name="cameraSyncTrigger">Optional trigger that queues plugin camera discovery for newly created printers (issue #3328)</param>
 /// <exception cref="ArgumentNullException">Thrown if any dependency is null</exception>
 public class PrintersService(
     IUnitOfWork unitOfWork,
@@ -102,7 +103,8 @@ public class PrintersService(
     Farm.Infrastructure.Services.Maintenance.IToolheadActivityAccumulator? activityAccumulator = null,
     IConfiguration? configuration = null,
     Farm.Infrastructure.Services.Queue.IQueueSubscriptionMembershipNotifier? membershipNotifier = null,
-    Farm.Infrastructure.Services.Spoolman.ISpoolmanStatusCache? spoolmanStatusCache = null) : IPrintersService
+    Farm.Infrastructure.Services.Spoolman.ISpoolmanStatusCache? spoolmanStatusCache = null,
+    Farm.Infrastructure.Services.Cameras.IPrinterCameraSyncTrigger? cameraSyncTrigger = null) : IPrintersService
 {
     private readonly IUnitOfWork _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
     private readonly AppDbContext _db = db ?? throw new ArgumentNullException(nameof(db));
@@ -143,6 +145,9 @@ public class PrintersService(
     // degrades to a direct (uncached) ISpoolmanService read, still bounded by
     // FallbackSpoolLookupTimeout.
     private readonly Farm.Infrastructure.Services.Spoolman.ISpoolmanStatusCache? _spoolmanStatusCache = spoolmanStatusCache;
+
+    // Optional (#3328): queues plugin camera discovery for newly created printers.
+    private readonly Farm.Infrastructure.Services.Cameras.IPrinterCameraSyncTrigger? _cameraSyncTrigger = cameraSyncTrigger;
 
     /// <summary>
     /// Maximum number of concurrent Spoolman spool lookups performed by
@@ -628,6 +633,54 @@ public class PrintersService(
             ct).ConfigureAwait(false);
     }
 
+    /// <inheritdoc />
+    public async Task<HistoryThumbnailContent?> GetCurrentJobThumbnailAsync(
+        Guid printerId,
+        string? cacheToken,
+        CancellationToken ct)
+    {
+        Printer? printer = await FindByIdAsync(printerId, ct).ConfigureAwait(false);
+        if (printer is null)
+        {
+            throw new KeyNotFoundException($"Printer {printerId} was not found.");
+        }
+
+        IBackendClient client = GetBackendClient((PrinterBackend)printer.Backend);
+        if (client is not ISupportsCurrentJobThumbnail thumbnailClient)
+        {
+            return null;
+        }
+
+        PrinterJob? job = await thumbnailClient.GetCurrentJobAsync(
+            printer.BackendUrl,
+            printer.Credential,
+            ct).ConfigureAwait(false);
+        if (job is null ||
+            (job.PrintState is null ||
+             (!job.PrintState.Equals("printing", StringComparison.OrdinalIgnoreCase) &&
+              !job.PrintState.Equals("paused", StringComparison.OrdinalIgnoreCase))) ||
+            string.IsNullOrWhiteSpace(job.JobName) ||
+            string.IsNullOrWhiteSpace(job.ThumbnailUrl))
+        {
+            return null;
+        }
+
+        if (cacheToken is not null &&
+            !string.Equals(
+                cacheToken,
+                PrinterThumbnailUrl.GetCacheToken(job.JobName, job.ThumbnailUrl, job.ThumbnailCacheIdentity),
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        return await thumbnailClient.GetCurrentJobThumbnailAsync(
+            printer.BackendUrl,
+            job.ThumbnailUrl,
+            printer.Credential,
+            ct).ConfigureAwait(false);
+    }
+
     private string? GetHistoryThumbnailUrl(
         Printer printer,
         PrinterBackend backend,
@@ -1014,6 +1067,7 @@ public class PrintersService(
                 ? Convert.ToBase64String(p.RowVersion)
                 : null,
             ConfigurationRevision = p.ConfigurationRevision,
+            ShowExternalSpool = p.ShowExternalSpool,
         };
     }
 #pragma warning restore CS8603
@@ -1133,6 +1187,13 @@ public class PrintersService(
                     ? Convert.ToBase64String(p.RowVersion)
                     : null,
                 ConfigurationRevision = p.ConfigurationRevision,
+                ShowExternalSpool = p.ShowExternalSpool,
+                CurrentJobThumbnailUrl = PrinterThumbnailUrl.Create(
+                    dto.Id,
+                    dto.State,
+                    dto.JobName,
+                    dto.ThumbnailUrl,
+                    dto.ThumbnailCacheIdentity),
             };
             return ApplyCameraContract(dto);
         }
@@ -1953,7 +2014,11 @@ public class PrintersService(
                     IsEnabled: p.IsEnabled,
 
                     CameraStreamUrl: cam.StreamUrl,
-                    CameraSnapshotUrl: cam.SnapshotUrl));
+                    CameraSnapshotUrl: cam.SnapshotUrl,
+                    CurrentLayer: status.CurrentLayer,
+                    TotalLayers: status.TotalLayers,
+                    FanSpeedPercent: status.FanSpeedPercent,
+                    LiveZOffsetMm: status.LiveZOffsetMm));
             }
             catch (Exception ex)
             {
@@ -2111,11 +2176,17 @@ public class PrintersService(
                     ObicoEnabled: p.ObicoEnabled,
                     HasCatalogUpdate: p.Model != null && p.ServiceState != null && p.ServiceState.LastModelSyncAt != null && p.Model.UpdatedAt > p.ServiceState.LastModelSyncAt,
                     EstimatedCompletionTimeUtc: status.PrintTimeLeftSeconds is { } timeLeft ? DateTime.UtcNow.AddSeconds(timeLeft) : null,
+                    CurrentLayer: status.CurrentLayer,
+                    TotalLayers: status.TotalLayers,
+                    FanSpeedPercent: status.FanSpeedPercent,
+                    LiveZOffsetMm: status.LiveZOffsetMm,
                     BedTypeId: p.BedTypeId,
                     BedTypeName: p.BedType?.Name,
                     BedTypeColor: p.BedType?.Color,
                     UseModelDispatchDefaults: p.UseModelDispatchDefaults,
-                    RowVersion: p.RowVersion is { Length: > 0 } ? Convert.ToBase64String(p.RowVersion) : null));
+                    RowVersion: p.RowVersion is { Length: > 0 } ? Convert.ToBase64String(p.RowVersion) : null,
+                    CurrentJobThumbnailUrl: status.CurrentJobThumbnailUrl,
+                    ShowExternalSpool: p.ShowExternalSpool));
             }
             catch (Exception ex)
             {
@@ -2166,7 +2237,8 @@ public class PrintersService(
                     BedTypeName: p.BedType?.Name,
                     BedTypeColor: p.BedType?.Color,
                     UseModelDispatchDefaults: p.UseModelDispatchDefaults,
-                    RowVersion: p.RowVersion is { Length: > 0 } ? Convert.ToBase64String(p.RowVersion) : null));
+                    RowVersion: p.RowVersion is { Length: > 0 } ? Convert.ToBase64String(p.RowVersion) : null,
+                    ShowExternalSpool: p.ShowExternalSpool));
             }
         }
 
@@ -2412,7 +2484,7 @@ public class PrintersService(
                 Capabilities = new PrinterCapabilitiesExportDto
                 {
                     Id = p.Id, // Use printer ID as capabilities ID
-                    NozzleDiameter = p.Toolheads?.FirstOrDefault(t => t.IsPrimary)?.NozzleModel?.Diameter ?? 0.4,
+                    NozzleDiameter = p.Toolheads?.FirstOrDefault(t => t.IsPrimary)?.NozzleDiameter ?? 0.4,
                     SupportedMaterials = p.Toolheads?.FirstOrDefault(t => t.IsPrimary)?.SupportedMaterials,
                     MaxBuildVolumeX = p.MaxBuildVolumeX,
                     MaxBuildVolumeY = p.MaxBuildVolumeY,
@@ -2530,7 +2602,7 @@ public class PrintersService(
                 ["id"] = t.Id,
                 ["name"] = t.Name,
                 ["index"] = t.Index,
-                ["nozzleDiameter"] = t.NozzleModel?.Diameter ?? 0.4,
+                ["nozzleDiameter"] = t.NozzleDiameter ?? 0.4,
 
                 // Component model references - nozzle type comes from NozzleModel.NozzleMaterial.Name
                 ["hotendModelId"] = t.HotendModelId,
@@ -2596,7 +2668,8 @@ public class PrintersService(
             HasCatalogUpdate: p.Model != null && p.ServiceState != null && p.ServiceState.LastModelSyncAt != null && p.Model.UpdatedAt > p.ServiceState.LastModelSyncAt,
             UseModelDispatchDefaults: p.UseModelDispatchDefaults,
             RowVersion: rowVersion,
-            ConfigurationRevision: p.ConfigurationRevision));
+            ConfigurationRevision: p.ConfigurationRevision,
+            ShowExternalSpool: p.ShowExternalSpool));
     }
 
     private static PrinterDto ApplyCameraContract(PrinterDto dto)
@@ -2990,6 +3063,7 @@ public class PrintersService(
                     ExtruderModelId = toolheadDto.ExtruderModelId ?? primaryModelToolhead?.ExtruderModelId,
                     ToolheadModelDefId = toolheadDto.ToolheadModelDefId ?? primaryModelToolhead?.ToolheadModelDefId,
                     NozzleModelId = toolheadDto.NozzleModelId ?? primaryModelToolhead?.NozzleModelId,
+                    NozzleDiameter = toolheadDto.NozzleDiameter is > 0 ? toolheadDto.NozzleDiameter : null,
                     SupportedMaterials = toolheadDto.SupportedMaterials ?? modelTemplate?.SupportedFilamentTypes,
                     IsPrimary = toolheadDto.IsPrimary
                 };
@@ -3035,7 +3109,10 @@ public class PrintersService(
             // Auto-create MMU virtual toolheads if MultiMaterial is enabled
             if (p.MultiMaterial)
             {
-                SyncMmuVirtualToolheads(p, mmuGateCount: 4);
+                // Seed the physical toolheads first: gates are added straight to the context
+                // (not p.Toolheads) and copy the primary's stored NozzleDiameter.
+                _ = await SeedToolheadNozzleDiametersAsync(p.Toolheads, ct);
+                await SyncMmuVirtualToolheadsAsync(p, mmuGateCount: 4, ct);
             }
         }
 
@@ -3059,19 +3136,20 @@ public class PrintersService(
         // active-tool telemetry can genuinely differentiate per-head wear.
         _ = PerToolAttributionCapability.Refresh(p);
 
+        _ = await SeedToolheadNozzleDiametersAsync(p.Toolheads, ct);
+
         await AddAsync(p, ct);
 
         // Create Camera entity if camera URLs were provided during discovery
         if (!string.IsNullOrEmpty(dto.CameraStreamUrl) || !string.IsNullOrEmpty(dto.CameraSnapshotUrl))
         {
-            CameraSource source = MapBackendToCameraSource(dto.Backend);
+            CameraSource source = Farm.Infrastructure.Services.Cameras.PrinterCameraSynchronizer.MapBackendToCameraSource(dto.Backend);
             var camera = new Domain.Camera
             {
                 Id = Guid.NewGuid(),
-                PrinterId = p.Id,
                 Name = $"{p.Name} Camera",
-                StreamUrl = dto.CameraStreamUrl,
-                SnapshotUrl = dto.CameraSnapshotUrl,
+                StreamUrl = CameraContractClassifier.NormalizeTarget(dto.CameraStreamUrl),
+                SnapshotUrl = CameraContractClassifier.NormalizeTarget(dto.CameraSnapshotUrl),
                 IsEnabled = true,
                 SortOrder = 0,
                 Source = source,
@@ -3081,10 +3159,14 @@ public class PrintersService(
                 CreatedAt = DateTime.UtcNow,
             };
 
+            camera.LinkToPrinter(p.Id, isPrimary: true);
             _unitOfWork.Cameras.Add(camera);
             await SaveChangesAsync(ct);
             _logger.LogInformation("[CreatePrinterFromDto] Created Camera {CameraId} for new printer {PrinterName}", camera.Id, p.Name);
         }
+
+        // Discover plugin-reported cameras in the background (#3328); covers single and bulk create.
+        _cameraSyncTrigger?.RequestSync(p.Id);
 
         // Return offline DTO for newly imported printer (hasn't fetched status yet)
         return CreateOfflinePrinterDto(p);
@@ -3154,16 +3236,14 @@ public class PrintersService(
             updated = true;
         }
 
+        bool createMmuGates = false;
         if (forceOverwrite || (!printer.MultiMaterial && modelTemplate.MultiMaterial))
         {
             printer.MultiMaterial = modelTemplate.MultiMaterial;
             updated = true;
 
-            // Auto-create MMU virtual toolheads when MultiMaterial is enabled
-            if (modelTemplate.MultiMaterial)
-            {
-                SyncMmuVirtualToolheads(printer, mmuGateCount: 4);
-            }
+            // Gates are created after the toolhead loop so they copy the primary's filled diameter.
+            createMmuGates = modelTemplate.MultiMaterial;
         }
 
         if (forceOverwrite || (!printer.SupportsAutoLeveling && modelTemplate.SupportsAutoLeveling))
@@ -3189,10 +3269,19 @@ public class PrintersService(
                 // Find matching toolhead template by index, otherwise use default
                 PrinterModelToolheadDto? matchingTemplate = modelTemplate.Toolheads?.FirstOrDefault(t => t.Index == toolhead.Index) ?? defaultModelToolhead;
 
-                // Apply NozzleModelId from template (nozzle diameter is derived from the nozzle model)
+                // Apply NozzleModelId from template
                 if (matchingTemplate?.NozzleModelId != null && (forceOverwrite || toolhead.NozzleModelId == null))
                 {
                     toolhead.NozzleModelId = matchingTemplate.NozzleModelId;
+                    toolhead.UpdatedAt = DateTime.UtcNow;
+                    updated = true;
+                }
+
+                // The stored nozzle diameter is per-printer and admin-owned: the template only
+                // fills a missing value, even when forceOverwrite is set.
+                if (matchingTemplate?.NozzleDiameter is > 0 && toolhead.NozzleDiameter == null)
+                {
+                    toolhead.NozzleDiameter = matchingTemplate.NozzleDiameter;
                     toolhead.UpdatedAt = DateTime.UtcNow;
                     updated = true;
                 }
@@ -3204,6 +3293,16 @@ public class PrintersService(
                     updated = true;
                 }
             }
+
+            if (await SeedToolheadNozzleDiametersAsync(printer.Toolheads, ct).ConfigureAwait(false) > 0)
+            {
+                updated = true;
+            }
+        }
+
+        if (createMmuGates)
+        {
+            await SyncMmuVirtualToolheadsAsync(printer, mmuGateCount: 4, ct).ConfigureAwait(false);
         }
 
         updated = PerToolAttributionCapability.Refresh(printer) || updated;
@@ -3921,6 +4020,20 @@ public class PrintersService(
             ct);
 
     /// <inheritdoc />
+    public Task<bool> SetFanSpeedAsync(Guid id, int speedPercent, CancellationToken ct) =>
+        ExecuteBackendControlAsync<ISupportsFanControl>(
+            id,
+            (client, printer, token) => client.SetFanSpeedAsync(printer.BackendUrl, speedPercent, printer.Credential, token),
+            ct);
+
+    /// <inheritdoc />
+    public Task<bool> AdjustZOffsetAsync(Guid id, decimal offsetMm, CancellationToken ct) =>
+        ExecuteBackendControlAsync<ISupportsZOffsetAdjustment>(
+            id,
+            (client, printer, token) => client.AdjustZOffsetAsync(printer.BackendUrl, offsetMm, printer.Credential, token),
+            ct);
+
+    /// <inheritdoc />
     public Task<bool> ExecuteMmuAsync(Guid id, MmuControlRequest request, CancellationToken ct) =>
         ExecuteBackendControlAsync<ISupportsMmuControl>(
             id,
@@ -4105,6 +4218,100 @@ public class PrintersService(
             _logger.LogError(ex, "Failed to load filament on printer {PName} ({Id})", p.Name, id);
             return new CommandResult(false, $"Failed to load filament: {ex.Message}");
         }
+    }
+
+    /// <inheritdoc />
+    public async Task<double> GetMmuUnloadTemperatureAsync(Guid id, MmuControlRequest request, double minimumTemperatureC, CancellationToken ct)
+    {
+        Printer printer = await _unitOfWork.Printers.FindByIdWithToolheadsAsync(id, ct).ConfigureAwait(false)
+            ?? throw new KeyNotFoundException("Printer not found.");
+        if (!double.IsFinite(minimumTemperatureC) || minimumTemperatureC <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(minimumTemperatureC));
+        }
+
+        // QidiBox firmware gates are zero-based; persisted virtual toolheads are gate + 1.
+        Toolhead? lane = request.Protocol switch
+        {
+            MmuControlProtocol.Qidibox when request.GateIndex is >= 0 and < 16 =>
+                printer.Toolheads.FirstOrDefault(toolhead => toolhead.ToolheadType == ToolheadType.MmuGate && toolhead.Index == request.GateIndex + 1),
+            MmuControlProtocol.Afc => printer.Toolheads.FirstOrDefault(toolhead =>
+                toolhead.ToolheadType == ToolheadType.MmuGate && toolhead.Name == request.LaneName),
+            _ => null,
+        };
+        int? spoolId = lane?.CurrentSpoolId;
+        string? material = lane?.CurrentMaterial;
+
+        // Never substitute the physical primary's spool for a different box gate.
+        if (request.Protocol == MmuControlProtocol.Qidibox && request.GateIndex == 16)
+        {
+            Toolhead? rack = printer.Toolheads.FirstOrDefault(toolhead => toolhead.ToolheadType == ToolheadType.Physical);
+            spoolId = rack?.CurrentSpoolId ?? printer.CurrentSpoolId;
+            material = rack?.CurrentMaterial ?? printer.CurrentMaterial;
+        }
+
+        double? temperature = null;
+        try
+        {
+            using var lookupTimeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            lookupTimeout.CancelAfter(FallbackSpoolLookupTimeout);
+            if (spoolId is int assignedSpool)
+            {
+                SpoolmanSpoolDto? spool = await _spoolmanService.GetSpoolByIdAsync(assignedSpool, lookupTimeout.Token).ConfigureAwait(false);
+                material = spool?.Material ?? material;
+                if (spool?.FilamentId is int filamentId)
+                {
+                    SpoolmanFilamentDto? filament = await _spoolmanService.GetFilamentByIdAsync(filamentId, lookupTimeout.Token).ConfigureAwait(false);
+                    temperature = filament?.SettingsExtruderTemp;
+                }
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception, "Unable to resolve MMU spool temperature for printer {PrinterId}; using material or safety minimum", id);
+        }
+
+        if (temperature is not > 0 || !double.IsFinite(temperature.Value))
+        {
+            var materials = await _db.FilamentTypes.AsNoTracking().Where(filament => filament.IsActive)
+                .Select(filament => new { filament.Name, filament.DefaultHotendTemp }).ToListAsync(ct).ConfigureAwait(false);
+            temperature = materials.FirstOrDefault(filament => string.Equals(filament.Name, material, StringComparison.OrdinalIgnoreCase))?.DefaultHotendTemp;
+        }
+
+        double target = temperature is > 0 && double.IsFinite(temperature.Value)
+            ? Math.Max(minimumTemperatureC, temperature.Value) : minimumTemperatureC;
+        Toolhead? physical = printer.Toolheads.FirstOrDefault(toolhead => toolhead.IsPrimary && toolhead.ToolheadType == ToolheadType.Physical)
+            ?? printer.Toolheads.FirstOrDefault(toolhead => toolhead.ToolheadType == ToolheadType.Physical);
+        int? hotendModelLimit = physical?.HotendModel?.MaxTemp;
+        if (hotendModelLimit is null && physical?.HotendModelId is Guid hotendId)
+        {
+            hotendModelLimit = await _db.HotendModelDefinitions.AsNoTracking().Where(model => model.Id == hotendId)
+                .Select(model => model.MaxTemp).FirstOrDefaultAsync(ct).ConfigureAwait(false);
+        }
+
+        int? nozzleModelLimit = physical?.NozzleModel?.MaxTemp;
+        if (nozzleModelLimit is null && physical?.NozzleModelId is Guid nozzleId)
+        {
+            nozzleModelLimit = await _db.NozzleModelDefinitions.AsNoTracking().Where(model => model.Id == nozzleId)
+                .Select(model => model.MaxTemp).FirstOrDefaultAsync(ct).ConfigureAwait(false);
+        }
+
+        int[] limits = new int?[]
+        {
+            physical?.HotendMaxTemperature, hotendModelLimit,
+            physical?.NozzleMaxTemperature, nozzleModelLimit,
+        }.Where(limit => limit is > 0).Select(limit => limit!.Value).ToArray();
+        double maximum = limits.Length > 0 ? limits.Min() : 300;
+        if (target > maximum)
+        {
+            throw new ArgumentOutOfRangeException(nameof(minimumTemperatureC), "The filament unload temperature exceeds the installed hotend/nozzle temperature limit.");
+        }
+
+        return target;
     }
 
     /// <inheritdoc/>
@@ -4571,7 +4778,7 @@ public class PrintersService(
                 if (p.MultiMaterial)
                 {
                     int gateCount = Math.Max(4, toolheadIndex);
-                    stagedGates = CreateMmuVirtualToolheads(p, gateCount);
+                    stagedGates = await CreateMmuVirtualToolheadsAsync(p, gateCount, ct).ConfigureAwait(false);
                     if (stagedGates.Count > 0)
                     {
                         _unitOfWork.Printers.AddToolheads(stagedGates);
@@ -4895,7 +5102,7 @@ public class PrintersService(
             if (p.MultiMaterial)
             {
                 int gateCount = Math.Max(4, toolheadIndex);
-                List<Toolhead> stagedGates = CreateMmuVirtualToolheads(p, gateCount);
+                List<Toolhead> stagedGates = await CreateMmuVirtualToolheadsAsync(p, gateCount, ct).ConfigureAwait(false);
                 if (stagedGates.Count > 0)
                 {
                     try
@@ -5011,7 +5218,7 @@ public class PrintersService(
 
         int existingGates = p.Toolheads.Count(t => t.ToolheadType == ToolheadType.MmuGate);
         int targetGateCount = Math.Max(4, existingGates);
-        List<Toolhead> gates = CreateMmuVirtualToolheads(p, targetGateCount);
+        List<Toolhead> gates = await CreateMmuVirtualToolheadsAsync(p, targetGateCount, ct).ConfigureAwait(false);
         if (gates.Count == 0)
         {
             return new CommandResult(true, $"Printer already has {existingGates} MMU gate(s)");
@@ -5033,7 +5240,7 @@ public class PrintersService(
         if (!wasMultiMaterial && printer.MultiMaterial)
         {
             // MultiMaterial enabled → create MmuGate toolheads
-            SyncMmuVirtualToolheads(printer, mmuGateCount);
+            await SyncMmuVirtualToolheadsAsync(printer, mmuGateCount, ct).ConfigureAwait(false);
         }
         else if (wasMultiMaterial && !printer.MultiMaterial)
         {
@@ -5104,9 +5311,9 @@ public class PrintersService(
     /// DbContext via the repository (not the navigation collection) to avoid unnecessarily
     /// marking the parent Printer as Modified.
     /// </summary>
-    private void SyncMmuVirtualToolheads(Printer printer, int mmuGateCount = 4)
+    private async Task SyncMmuVirtualToolheadsAsync(Printer printer, int mmuGateCount, CancellationToken ct)
     {
-        List<Toolhead> gates = CreateMmuVirtualToolheads(printer, mmuGateCount);
+        List<Toolhead> gates = await CreateMmuVirtualToolheadsAsync(printer, mmuGateCount, ct).ConfigureAwait(false);
         if (gates.Count > 0)
         {
             _unitOfWork.Printers.AddToolheads(gates);
@@ -5123,7 +5330,7 @@ public class PrintersService(
     /// indices has not yet been materialized as a <see cref="Toolhead"/> row: an absent T1 row
     /// is not evidence of an AMS, it is just discovery/sync that hasn't caught up yet. Gating on
     /// the *absence* of &gt;1 persisted physical toolheads (the old defense inside
-    /// <see cref="CreateMmuVirtualToolheads"/>) is order-dependent — it only catches a
+    /// <see cref="CreateMmuVirtualToolheadsAsync"/>) is order-dependent — it only catches a
     /// toolchanger once a second physical toolhead has already been persisted — so callers must
     /// require one of these confirmed-positive signals before treating an unmaterialized
     /// toolhead index &gt; 0 as an MMU gate request (issue #1600).
@@ -5142,7 +5349,7 @@ public class PrintersService(
     /// callers for existing printers should use the repository's AddToolheads method
     /// to add gates directly to the DbContext instead.
     /// </remarks>
-    private List<Toolhead> CreateMmuVirtualToolheads(Printer printer, int mmuGateCount = 4)
+    private async Task<List<Toolhead>> CreateMmuVirtualToolheadsAsync(Printer printer, int mmuGateCount, CancellationToken ct)
     {
         if (!printer.MultiMaterial)
         {
@@ -5188,6 +5395,7 @@ public class PrintersService(
                 ExtruderModelId = primaryToolhead?.ExtruderModelId,
                 ToolheadModelDefId = primaryToolhead?.ToolheadModelDefId,
                 NozzleModelId = primaryToolhead?.NozzleModelId,
+                NozzleDiameter = primaryToolhead?.NozzleDiameter,
                 SupportedMaterials = primaryToolhead?.SupportedMaterials,
                 UpdatedAt = DateTime.UtcNow
             });
@@ -5195,6 +5403,10 @@ public class PrintersService(
 
         if (gates.Count > 0)
         {
+            // Gates copy the primary's stored diameter; when that is unset, fall back to the
+            // copied nozzle model so a new gate never starts without a diameter.
+            _ = await SeedToolheadNozzleDiametersAsync(gates, ct).ConfigureAwait(false);
+
             _logger.LogInformation(
                 "CreateMmuVirtualToolheads: Created {GateCount} MMU gate(s) (indices {Indices}) for printer {PName} ({Id})",
                 gates.Count,
@@ -5204,6 +5416,36 @@ public class PrintersService(
         }
 
         return gates;
+    }
+
+    /// <summary>
+    /// Seeds each new toolhead's stored nozzle diameter from its nozzle model when no explicit
+    /// value was provided. Model values are creation-time defaults only; afterwards the stored
+    /// per-printer value is authoritative and is never re-derived from the model.
+    /// </summary>
+    private async Task<int> SeedToolheadNozzleDiametersAsync(IEnumerable<Toolhead> toolheads, CancellationToken ct)
+    {
+        List<Toolhead> unseeded = [.. toolheads.Where(t => t.NozzleDiameter == null && t.NozzleModelId != null)];
+        if (unseeded.Count == 0)
+        {
+            return 0;
+        }
+
+        List<Guid> modelIds = [.. unseeded.Select(t => t.NozzleModelId!.Value).Distinct()];
+        Dictionary<Guid, double> diameters = await _db.NozzleModelDefinitions
+            .AsNoTracking()
+            .Where(n => modelIds.Contains(n.Id) && n.Diameter > 0)
+            .ToDictionaryAsync(n => n.Id, n => n.Diameter, ct);
+
+        int seeded = 0;
+        foreach (Toolhead toolhead in unseeded.Where(t => diameters.ContainsKey(t.NozzleModelId!.Value)))
+        {
+            toolhead.NozzleDiameter = diameters[toolhead.NozzleModelId!.Value];
+            toolhead.UpdatedAt = DateTime.UtcNow;
+            seeded++;
+        }
+
+        return seeded;
     }
 
     /// <summary>
@@ -5665,7 +5907,6 @@ public class PrintersService(
                 string status = "Imported";
                 string? reason = null;
                 PrinterDto? createdDto = null;
-                Guid? createdPrinterId = null;
 
                 // Check for duplicates by IP address
                 Printer? existingByIp = await FindByServerUrlAsync(printerDto.ServerUrl, ct);
@@ -5693,7 +5934,6 @@ public class PrintersService(
                         // Load a fresh copy of the CSV printer data (not the one we're removing)
                         // This avoids EF Core tracking conflicts when creating the new printer
                         createdDto = await CreatePrinterFromDtoAsync(printerDto, ct);
-                        createdPrinterId = Guid.Parse(createdDto.Id.ToString());
                         await SaveChangesAsync(ct);
                         createdPrinters.Add(createdDto);
                         _logger.LogInformation("[BulkCreate] Successfully created printer: {CreatedDtoName}", createdDto.Name);
@@ -5709,7 +5949,6 @@ public class PrintersService(
                 {
                     // Create the printer
                     createdDto = await CreatePrinterFromDtoAsync(printerDto, ct);
-                    createdPrinterId = Guid.Parse(createdDto.Id.ToString());
                     await SaveChangesAsync(ct);
                     createdPrinters.Add(createdDto);
                     _logger.LogInformation("[BulkCreate] Successfully created printer: {CreatedDtoName}", createdDto.Name);
@@ -5729,14 +5968,8 @@ public class PrintersService(
                 // Broadcast import progress update to all connected clients
                 await _broadcaster.BroadcastPrinterImportProgressAsync(result, ct);
 
-                // Queue background camera discovery for successfully imported printers
-                // This is done as fire-and-forget using ThreadPool to avoid blocking the import response
-                if (createdPrinterId.HasValue && status == "Imported")
-                {
-                    // Skip background camera discovery during bulk import to avoid DbContext threading issues
-                    // Camera discovery will happen on the next status poll from the dashboard
-                    _logger.LogDebug("[BulkCreate] Skipping background camera discovery for {PrinterDtoName} - will discover on next status poll", printerDto.Name);
-                }
+                // Camera discovery for imported printers is queued by CreatePrinterFromDtoAsync via
+                // IPrinterCameraSyncTrigger (#3328) and runs on the camera sync service's own scope.
             }
             catch (Exception ex)
             {
@@ -5835,7 +6068,14 @@ public class PrintersService(
                     State = job.PrintState,
                     Progress = job.Progress,
                     JobName = job.JobName,
-                    ThumbnailUrl = job.ThumbnailUrl
+                    ThumbnailUrl = job.ThumbnailUrl,
+                    ThumbnailCacheIdentity = job.ThumbnailCacheIdentity,
+                    CurrentJobThumbnailUrl = PrinterThumbnailUrl.Create(
+                        id,
+                        job.PrintState,
+                        job.JobName,
+                        job.ThumbnailUrl,
+                        job.ThumbnailCacheIdentity)
                 }
                 : null;
         }
@@ -6137,160 +6377,6 @@ public class PrintersService(
         return totals;
     }
 
-    /// <summary>
-    /// Refreshes camera URLs for a printer by querying the backend API.
-    /// Updates the stored camera URLs in the database.
-    /// For Moonraker: queries /server/webcams/list API for actual configured cameras
-    /// For other backends: generates static URLs based on frontend port
-    /// </summary>
-    /// <param name="id">The unique identifier of the printer.</param>
-    /// <param name="ct">Cancellation token for the async operation.</param>
-    public async Task<PrinterDto?> RefreshCameraUrlsAsync(Guid id, CancellationToken ct)
-    {
-        _logger.LogInformation("RefreshCameraUrlsAsync: Starting refresh for printer {Id}", id);
-
-        Printer? printer = await FindByIdWithIncludesAsync(id, ct).ConfigureAwait(false);
-        if (printer == null)
-        {
-            _logger.LogWarning("RefreshCameraUrlsAsync: Printer {Id} not found", id);
-            return null;
-        }
-
-        _logger.LogInformation(
-            "RefreshCameraUrlsAsync: Found printer {PrinterName} ({PrinterId}), Backend={PrinterBackend}",
-            printer.Name,
-            printer.Id,
-            printer.Backend);
-
-        var backend = (PrinterBackend)printer.Backend;
-        string? streamUrl = null;
-        string? snapshotUrl = null;
-
-        try
-        {
-            // Try to use the configured camera detection interface which queries actual cameras
-            if (_capabilityFactory.TryGetConfiguredCameraDetectionClient(backend, out ISupportsConfiguredCameraDetection? detectionClient) && detectionClient != null)
-            {
-                _logger.LogInformation("RefreshCameraUrlsAsync: Using configured camera detection for backend {Backend}", backend);
-
-                string baseUrlForCamera = printer.BackendUrl;
-
-                _logger.LogInformation("RefreshCameraUrlsAsync: Using baseUrlForCamera={BaseUrlForCamera}", baseUrlForCamera);
-
-                // Call the detection method - it will ONLY return URLs if cameras actually exist
-                (streamUrl, snapshotUrl) = await detectionClient.DetectConfiguredCameraUrlsAsync(
-                    baseUrlForCamera,
-                    printer.FrontendPort,
-                    printer.Credential,
-                    ct).ConfigureAwait(false);
-
-                _logger.LogInformation("RefreshCameraUrlsAsync: Got URLs from detection - stream={StreamUrl}, snapshot={SnapshotUrl}", streamUrl, snapshotUrl);
-
-                if (string.IsNullOrWhiteSpace(streamUrl) && string.IsNullOrWhiteSpace(snapshotUrl) &&
-                    GetBackendClient(backend) is ISupportsPrinterCameraProfile profile)
-                {
-                    (streamUrl, snapshotUrl) = profile.GetDefaultCameraUrls(printer);
-                    _logger.LogInformation("RefreshCameraUrlsAsync: Applied backend camera defaults for printer {PrinterId}", printer.Id);
-                }
-            }
-            else
-            {
-                // Fallback: Use standard camera client (may return default URLs even if cameras don't exist)
-                _logger.LogWarning("RefreshCameraUrlsAsync: Configured camera detection not available for backend {Backend}, falling back to standard interface", backend);
-
-                bool gotCameraClient = _capabilityFactory.TryGetCameraClientTyped(backend, out ISupportsCamera? cameraClient);
-                if (gotCameraClient && cameraClient != null)
-                {
-                    string baseUrlForCamera = printer.BackendUrl;
-
-                    streamUrl = await cameraClient.GetCameraStreamUrlAsync(baseUrlForCamera, printer.FrontendPort, printer.Credential, ct).ConfigureAwait(false);
-                    snapshotUrl = await cameraClient.GetCameraSnapshotUrlAsync(baseUrlForCamera, printer.FrontendPort, printer.Credential, ct).ConfigureAwait(false);
-
-                    _logger.LogInformation("RefreshCameraUrlsAsync: Got URLs from standard interface - stream={StreamUrl}, snapshot={SnapshotUrl}", streamUrl, snapshotUrl);
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "RefreshCameraUrlsAsync: Failed to refresh camera URLs for printer {Id}: {Message}", id, ex.Message);
-        }
-
-        // Upsert Camera entity — Cameras table is the sole source of truth
-        _logger.LogInformation("RefreshCameraUrlsAsync: Updating cameras for printer {PrinterName}: StreamUrl={StreamUrl}, SnapshotUrl={SnapshotUrl}", printer.Name, streamUrl, snapshotUrl);
-        if (!string.IsNullOrEmpty(streamUrl) || !string.IsNullOrEmpty(snapshotUrl))
-        {
-            await UpsertCameraForPrinterAsync(printer, backend, streamUrl, snapshotUrl, ct).ConfigureAwait(false);
-        }
-
-        await SaveChangesAsync(ct).ConfigureAwait(false);
-        _logger.LogInformation("RefreshCameraUrlsAsync: SaveChangesAsync completed - URLs saved: stream={StringIsNullOrEmpty}, snapshot={StringIsNullOrEmpty1}", !string.IsNullOrEmpty(streamUrl), !string.IsNullOrEmpty(snapshotUrl));
-
-        // Return updated DTO
-        return await GetPrinterDtoAsync(id, ct).ConfigureAwait(false);
-    }
-
-    /// <summary>
-    /// Upserts a Camera entity for a printer during camera URL refresh.
-    /// Finds an existing camera by (printerId, source) and updates it, or creates a new one.
-    /// </summary>
-    /// <param name="printer">The printer entity.</param>
-    /// <param name="backend">The printer backend type.</param>
-    /// <param name="streamUrl">Detected camera stream URL.</param>
-    /// <param name="snapshotUrl">Detected camera snapshot URL.</param>
-    /// <param name="ct">Cancellation token.</param>
-    private async Task UpsertCameraForPrinterAsync(Printer printer, PrinterBackend backend, string? streamUrl, string? snapshotUrl, CancellationToken ct)
-    {
-        CameraSource source = MapBackendToCameraSource(backend);
-
-        Domain.Camera? existing = await _unitOfWork.Cameras.FindByPrinterIdAndSourceAsync(printer.Id, source, ct).ConfigureAwait(false);
-
-        if (existing is not null)
-        {
-            existing.StreamUrl = streamUrl;
-            existing.SnapshotUrl = snapshotUrl;
-            existing.UpdatedAt = DateTime.UtcNow;
-            existing.HealthStatus = CameraHealthStatus.Healthy;
-            existing.LastHealthCheck = DateTime.UtcNow;
-            existing.ConsecutiveFailures = 0;
-            _logger.LogInformation("UpsertCameraForPrinterAsync: Updated existing Camera {CameraId} for printer {PrinterName}", existing.Id, printer.Name);
-        }
-        else
-        {
-            var camera = new Domain.Camera
-            {
-                Id = Guid.NewGuid(),
-                PrinterId = printer.Id,
-                Name = $"{printer.Name} Camera",
-                StreamUrl = streamUrl,
-                SnapshotUrl = snapshotUrl,
-                IsEnabled = true,
-                SortOrder = 0,
-                Source = source,
-                CameraType = CameraType.General,
-                HealthStatus = CameraHealthStatus.Healthy,
-                LastHealthCheck = DateTime.UtcNow,
-                CreatedAt = DateTime.UtcNow,
-            };
-
-            _unitOfWork.Cameras.Add(camera);
-            _logger.LogInformation("UpsertCameraForPrinterAsync: Created new Camera {CameraId} for printer {PrinterName}", camera.Id, printer.Name);
-        }
-    }
-
-    /// <summary>
-    /// Maps a PrinterBackend enum to the corresponding CameraSource enum.
-    /// </summary>
-    /// <param name="backend">The printer backend type.</param>
-    private static CameraSource MapBackendToCameraSource(PrinterBackend backend) => backend switch
-    {
-        PrinterBackend.Moonraker => CameraSource.Moonraker,
-        PrinterBackend.PrusaLink => CameraSource.PrusaLink,
-        PrinterBackend.OctoPrint => CameraSource.OctoPrint,
-        PrinterBackend.SDCP => CameraSource.SDCP,
-        PrinterBackend.FlashForge => CameraSource.FlashForge,
-        _ => CameraSource.Standalone,
-    };
-
     /// <inheritdoc/>
     public async Task SyncBuddyCameraAsync(Printer printer, string buddyCameraIp, CancellationToken ct)
     {
@@ -6351,7 +6437,6 @@ public class PrintersService(
             var camera = new Domain.Camera
             {
                 Id = Guid.NewGuid(),
-                PrinterId = printer.Id,
                 Name = $"{printer.Name} Buddy Camera",
                 StreamUrl = rtspUrl,
                 SnapshotUrl = null,
@@ -6370,6 +6455,9 @@ public class PrintersService(
                 camera.SnapshotUrl = snapshot;
             }
 
+            bool hasPrimary = printer.CameraLinks.Any(l => l.IsPrimary)
+                || await _unitOfWork.Cameras.HasPrimaryCameraAsync(printer.Id, ct);
+            camera.LinkToPrinter(printer.Id, isPrimary: !hasPrimary);
             _unitOfWork.Cameras.Add(camera);
             _logger.LogInformation("[BuddyCamera] Created Buddy camera {CameraId} for printer {PrinterName} at {RtspUrl}", camera.Id, LogSanitizer.Sanitize(printer.Name), LogSanitizer.Sanitize(rtspUrl));
         }
@@ -6387,11 +6475,9 @@ public class PrintersService(
     {
         List<Domain.Camera> cameras = await _unitOfWork.Cameras.GetByPrinterIdAsync(printerId, ct).ConfigureAwait(false);
 
-        Domain.Camera? camera = cameras
-            .Where(c => c.IsEnabled)
-            .OrderBy(c => c.SortOrder)
-            .ThenBy(c => c.CameraType == CameraType.General ? 0 : 1)
-            .FirstOrDefault();
+        // Repository order is primary link first, then link/camera sort order.
+        Domain.Camera? camera = PrinterCameraSelector.OrderCamerasForPrinter(cameras, printerId)
+            .FirstOrDefault(c => c.IsEnabled);
 
         return camera is not null
             ? (camera.StreamUrl, camera.SnapshotUrl)
@@ -6431,17 +6517,14 @@ public class PrintersService(
         List<Domain.Camera> allCameras = await _unitOfWork.Cameras.GetEnabledAsync(ct).ConfigureAwait(false);
 
         return allCameras
-            .Where(c => c.PrinterId.HasValue)
-            .GroupBy(c => c.PrinterId!.Value)
+            .SelectMany(c => c.PrinterLinks.Select(l => l.PrinterId))
+            .Distinct()
             .ToDictionary(
-                g => g.Key,
-                g =>
+                printerId => printerId,
+                printerId =>
                 {
-                    Domain.Camera? best = g
-                        .OrderBy(c => c.SortOrder)
-                        .ThenBy(c => c.CameraType == CameraType.General ? 0 : 1)
-                        .FirstOrDefault();
-                    return best is not null ? (best.StreamUrl, best.SnapshotUrl) : (null, null);
+                    IReadOnlyList<Domain.Camera> ordered = PrinterCameraSelector.OrderCamerasForPrinter(allCameras, printerId);
+                    return ordered.Count > 0 ? (ordered[0].StreamUrl, ordered[0].SnapshotUrl) : (null, null);
                 });
     }
 }

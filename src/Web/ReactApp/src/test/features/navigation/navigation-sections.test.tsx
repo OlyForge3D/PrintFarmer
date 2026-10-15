@@ -166,6 +166,7 @@ describe('Navigation rail sections', () => {
   const DEFAULT_ADMIN_RAIL_HREFS = [
     '/dashboard',
     '/printers',
+    '/cameras',
     '/printQueue',
     '/scheduling',
     '/slicer',

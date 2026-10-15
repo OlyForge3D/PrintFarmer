@@ -24,7 +24,7 @@ cd PrintFarmer/src
 # Terminal 1 - API Server
 dotnet run --project api/Farm.Web.Api.csproj
 
-# Terminal 2 - React Client  
+# Terminal 2 - React Client
 cd Web/ReactApp && npm run dev
 ```
 
@@ -39,10 +39,10 @@ cd Web/ReactApp && npm run dev
 - 2GB+ RAM
 
 ### Advantages
-✅ Full WiFi access for printer discovery  
-✅ Fast development with hot reload  
-✅ Native debugging tools  
-✅ No Docker overhead  
+✅ Full WiFi access for printer discovery
+✅ Fast development with hot reload
+✅ Native debugging tools
+✅ No Docker overhead
 
 ## Docker Deployment
 
@@ -167,7 +167,7 @@ docker compose --env-file .env.monolithic up -d --build
 docker compose --env-file .env.microservices up -d --build
 ```
 
-**Architecture**: 
+**Architecture**:
 - **Frontend**: Nginx + React SPA (Port 3000)
 - **Backend**: ASP.NET API + SignalR (Port 5000)
 - **Load Balancer**: Nginx proxy (Port 8080)
@@ -210,9 +210,9 @@ Do not restore the socket when troubleshooting.
 
 Native/custom installations retain ordinary network discovery but have no
 container inventory or managed replacement guarantee. There is no supported
-host enrollment, host updater, pull reconciler or UI execution helper in this
-change. See the [host enrollment security contract](HOST_ENROLLMENT_SECURITY.md)
-for proposed opt-in boundaries and the outstanding maintainer/security gates.
+host enrollment, pull reconciler or UI execution helper in this change. See
+the [host enrollment security contract](HOST_ENROLLMENT_SECURITY.md) for
+proposed opt-in boundaries and the outstanding maintainer/security gates.
 
 ## Deployment Architectures
 
@@ -343,23 +343,6 @@ sqlcmd -S "$SQLSERVER_HOST" -Q \
   "BACKUP DATABASE [printfarmer] TO DISK = N'/var/opt/mssql/backup/printfarmer.bak' WITH COPY_ONLY"
 ```
 
-For the host-update executor's automated pre-update backups, a SQL Server
-deployment must additionally bind-mount a **shared volume** between the
-`sqlserver` container and the PrintFarmer container: `BACKUP DATABASE` writes
-from the SQL Server container's own filesystem view, not PrintFarmer's, so
-the directory PrintFarmer derives as `BackupRootDirectory`
-(`{RootDirectory}/backups` — set the root via `HostUpdateExecution__RootDirectory`;
-`BackupRootDirectory` is a computed value and is not independently
-configurable) must be mounted at the identical path in both containers — the
-same directory production backups already write to and read back from, with
-no separate "SQL Server side" setting. The SQL Server login used also needs
-`BACKUP DATABASE` permission on `master` (e.g. `sysadmin` or
-`db_backupoperator`), since the round-trip probe backs up `master`. The
-executor verifies this mapping with a real round-trip probe before trusting
-it — see "SQL Server visible backup-path mapping" in
-[`HOST_UPDATE_EXECUTOR.md`](./HOST_UPDATE_EXECUTOR.md) for the required
-configuration and failure modes.
-
 Previously supported SQLite databases created with `EnsureCreated` and without
 migration history are adopted only when the complete relational fingerprint
 matches the current model. Validation covers table and column names, store
@@ -403,6 +386,68 @@ The migration-safe contract in this release does not include MySQL because
 provider-correct migration assemblies are unavailable for both `AppDbContext`
 and `SlicerDbContext`. Do not create or upgrade a MySQL deployment with this
 release.
+
+## Upgrading to a new release
+
+### Release update alerts
+
+Release images periodically check GitHub for a newer PrintFarmer release on the
+same channel as the installed version. A stable install (`vX.Y.Z`) only sees
+newer stable releases; an insider install (`vX.Y.Z-insider.N`) only sees newer
+insider releases. Drafts and unrelated tags (for example `ios/...` or
+`v1.0-beta.N`) are ignored. Farm administrators then see a banner across the
+authenticated UI with the installed version, the available version, a link to
+the release notes, and the upgrade command. Other users never see it.
+
+- The server performs the check in the background and caches the result. Browser
+  polling reads `GET /api/admin/release-updates` (requires the `system_settings`
+  admin permission) and never contacts GitHub directly.
+- The installed version comes from `PFARM__SourceInfo__Version`, which release
+  images set automatically. Source builds report `development`, so they skip the
+  check and never show the banner.
+- A failed or rate-limited check keeps the last known result and the banner states
+  that the check failed. Results older than two check intervals are marked as
+  possibly out of date.
+- The alert is informational only. It does not download, verify or apply an
+  update, and is separate from the signed host-update discovery pipeline.
+
+| Setting | Environment variable | Default |
+|---|---|---|
+| `ApplicationReleaseUpdates:Enabled` | `PFARM__ApplicationReleaseUpdates__Enabled` | `true` |
+| `ApplicationReleaseUpdates:IntervalSeconds` (300–86400) | `PFARM__ApplicationReleaseUpdates__IntervalSeconds` | `21600` |
+| `ApplicationReleaseUpdates:HttpTimeoutSeconds` (5–120) | `PFARM__ApplicationReleaseUpdates__HttpTimeoutSeconds` | `15` |
+
+Set `PFARM__ApplicationReleaseUpdates__Enabled=false` on air-gapped hosts or
+whenever outbound GitHub access is not allowed.
+
+### Applying an upgrade
+
+1. Read the release notes linked from the banner.
+2. Follow [Migration-safe upgrades](#migration-safe-upgrades): stop writers and
+   take a provider-native database backup plus a blob snapshot.
+3. For an installer-based deployment, run from the repository root, using the
+   version shown in the banner (no leading `v`):
+
+   ```bash
+   ./install.sh --upgrade --version 0.2.3-insider.6
+   ```
+
+   This pins `IMAGE_TAG` in `.env`, pulls the matching images and restarts the
+   stack.
+4. For a source-built deployment, check out the release tag and rerun the deploy
+   script:
+
+   ```bash
+   git fetch --tags
+   git checkout v0.2.3-insider.6
+   ./scripts/deploy-docker.sh
+   ```
+
+5. Confirm `/healthz` and `/health` succeed. The banner clears once the installed
+   version matches the latest release.
+
+There is no separate `update.sh` or automated rollback script. Roll back by
+restoring the backups taken in step 2 and redeploying the previous version.
 
 ## Network Configuration
 
@@ -494,12 +539,8 @@ replay continuity, complete infrastructure coverage or a recoverable
 database/blob/key consistency point. Do not treat a subsequent installer run
 as a network-denied safe update or rollback.
 
-Use the [installation update runbook](HOST_UPDATE_RUNBOOK.md) for setup,
-manual authorization, automatic policy and failure handling. The
-[offline delivery requirements](OFFLINE_UPDATE_RECOVERY.md) distinguish
-existing caching from the remaining bounded import/export (#2981) and isolated
-restore evidence (#2982). The signed host-local status/recovery CLI is
-available as a release asset. Its remaining gaps are listed in the runbook.
+The existing offline cache is for deployment convenience only. It is not a
+managed update, rollback, or automated recovery channel.
 Managed offline update support must remain blocked until those gates pass.
 There is no download/build fallback or skip-verification recovery path.
 

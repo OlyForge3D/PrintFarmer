@@ -25,12 +25,6 @@ public static class FeatureServicesStartup
         // Farm.Modules.Devices.DevicesApiModule (issue #2043, Phase 15).
         services.Configure<Farm.Infrastructure.Settings.OctoPrintSettings>(configuration.GetSection("OctoPrint"));
 
-        // Host update executor (issue #2663): production DI wiring for the concrete
-        // preflight/drain/fence/backup/migration/apply/verify/recovery adapters and the manual
-        // admin API's dependencies. See HostUpdateExecutionStartup for details; never grants
-        // automatic scheduler execution permission.
-        services.AddHostUpdateExecution(configuration);
-
         // ApiKey repository
         services.AddScoped<Farm.Infrastructure.Repositories.Api.IApiKeyRepository, Farm.Infrastructure.Repositories.Api.EfApiKeyRepository>();
 
@@ -332,128 +326,23 @@ public static class FeatureServicesStartup
         // Monitoring services (Grafana/Jaeger auth proxy, Prometheus metrics)
         services.AddSingleton<Farm.Infrastructure.Services.Monitoring.IMonitoringSessionService, Farm.Infrastructure.Services.Monitoring.MonitoringSessionService>();
         services.AddScoped<Farm.Infrastructure.Services.Monitoring.IMonitoringHealthService, Farm.Infrastructure.Services.Monitoring.MonitoringHealthService>();
-        services.AddScoped<Farm.Infrastructure.Services.SystemStatus.IHostUpdateSchedulingStatusProvider>(sp =>
-            new Farm.Infrastructure.Services.HostUpdates.UnavailableHostUpdateSchedulingStatusProvider(
-                sp.GetRequiredService<Farm.Infrastructure.Settings.ISettingsService>(),
-                sp.GetService<Farm.Infrastructure.Services.HostUpdates.HostUpdateSchedulerStatusHolder>(),
-                sp.GetService<Farm.Infrastructure.Services.HostUpdates.IHostUpdateAutomationPolicyRepository>(),
-                sp.GetService<Farm.Infrastructure.Services.HostUpdates.IHostUpdateReplayAnchor>(),
-                sp.GetService<Farm.Infrastructure.Services.HostUpdates.IHostUpdateReplayStore>(),
-                sp.GetService<Farm.Infrastructure.Services.HostUpdates.IHostUpdateExecutor>(),
-                sp.GetService<Farm.Infrastructure.Services.HostUpdates.IHostUpdateAdmissionFence>()));
-
-        services.AddOptions<Farm.Infrastructure.Services.HostUpdates.HostStateOptions>()
-            .Bind(configuration.GetSection(Farm.Infrastructure.Services.HostUpdates.HostStateOptions.SectionName))
-            .ValidateOnStart();
-        services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<Farm.Infrastructure.Services.HostUpdates.HostStateOptions>, Farm.Infrastructure.Services.HostUpdates.HostStateOptionsValidator>();
-        bool hostStateEnabled = configuration.GetSection(Farm.Infrastructure.Services.HostUpdates.HostStateOptions.SectionName).GetValue<bool>("Enabled");
-        if (hostStateEnabled)
-        {
-            services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.HostStatePath>();
-            services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.FileHostUpdateReplayAnchor>();
-            services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.IHostUpdateReplayAnchor>(sp =>
-                sp.GetRequiredService<Farm.Infrastructure.Services.HostUpdates.FileHostUpdateReplayAnchor>());
-            services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.IHostUpdateReplayAnchorProvisioner>(sp =>
-                sp.GetRequiredService<Farm.Infrastructure.Services.HostUpdates.FileHostUpdateReplayAnchor>());
-            services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.IHostUpdateReplayStore>(sp =>
-                new Farm.Infrastructure.Services.HostUpdates.FileHostUpdateReplayStore(
-                    sp.GetRequiredService<Farm.Infrastructure.Services.HostUpdates.HostStatePath>().Root,
-                    sp.GetRequiredService<Farm.Infrastructure.Services.HostUpdates.IHostUpdateReplayAnchor>()));
-            services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.IHostUpdatePolicyFence>(sp =>
-                new Farm.Infrastructure.Services.HostUpdates.FileHostUpdatePolicyFence(
-                    sp.GetRequiredService<Farm.Infrastructure.Services.HostUpdates.HostStatePath>().Root));
-            services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.IHostUpdateManualAuthorizationStore>(sp =>
-                new Farm.Infrastructure.Services.HostUpdates.FileHostUpdateManualAuthorizationStore(
-                    sp.GetRequiredService<Farm.Infrastructure.Services.HostUpdates.HostStatePath>().Root));
-            services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.FileHostUpdateAutomationPolicyRepository>();
-            services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.IHostUpdateAutomationPolicyRepository>(sp => sp.GetRequiredService<Farm.Infrastructure.Services.HostUpdates.FileHostUpdateAutomationPolicyRepository>());
-            services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.IHostUpdateAutomationPolicyProvisioner>(sp => sp.GetRequiredService<Farm.Infrastructure.Services.HostUpdates.FileHostUpdateAutomationPolicyRepository>());
-            services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.IHostUpdateSchedulerSettings, Farm.Infrastructure.Services.HostUpdates.HostStateHostUpdateSchedulerSettings>();
-        }
-        else
-        {
-            services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.IHostUpdateReplayAnchor, Farm.Infrastructure.Services.HostUpdates.UnavailableHostUpdateReplayAnchor>();
-            services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.IHostUpdateReplayStore, Farm.Infrastructure.Services.HostUpdates.UnavailableHostUpdateReplayStore>();
-            services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.IHostUpdatePolicyFence, Farm.Infrastructure.Services.HostUpdates.UnavailableHostUpdatePolicyFence>();
-            services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.IHostUpdateAutomationPolicyRepository, Farm.Infrastructure.Services.HostUpdates.UnavailableHostUpdateAutomationPolicyRepository>();
-            services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.IHostUpdateSchedulerSettings>(_ => new Farm.Infrastructure.Services.HostUpdates.StaticHostUpdateSchedulerSettings(new Farm.Infrastructure.Services.HostUpdates.HostUpdateSchedulerSettings()));
-        }
-
-        services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.IHostUpdateAdmissionFence,
-            Farm.Infrastructure.Services.HostUpdates.UnavailableHostUpdateAdmissionFence>();
-        services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.IHostUpdateClock,
-            Farm.Infrastructure.Services.HostUpdates.SystemHostUpdateClock>();
-        services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.IHostUpdateJitter,
-            Farm.Infrastructure.Services.HostUpdates.InstallationSeededHostUpdateJitter>(sp =>
-                new Farm.Infrastructure.Services.HostUpdates.InstallationSeededHostUpdateJitter(
-                    Farm.Infrastructure.Services.HostUpdates.HostUpdateInstallationIdentity.GetOrCreate(
-                        sp.GetService<Farm.Infrastructure.Services.HostUpdates.HostStatePath>()?.Root)));
-        services.AddScoped<Farm.Infrastructure.Services.HostUpdates.IHostUpdateExecutionRequestResolver>(sp =>
-            hostStateEnabled
-                ? ActivatorUtilities.CreateInstance<Farm.Infrastructure.Services.HostUpdates.HostUpdateExecutionRequestResolver>(sp)
-                : new Farm.Infrastructure.Services.HostUpdates.UnavailableHostUpdateExecutionRequestResolver());
-        services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.IHostUpdateCandidateReadiness, Farm.Infrastructure.Services.HostUpdates.UnavailableHostUpdateCandidateReadiness>();
-        services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.IHostUpdateSchedulerCandidateCache>(sp =>
-            new Farm.Infrastructure.Services.HostUpdates.VerifiedReleaseEvidenceCandidateCache(
-                sp.GetRequiredService<Farm.Infrastructure.Services.HostUpdates.IVerifiedReleaseEvidenceCache>(),
-                sp.GetRequiredService<Farm.Infrastructure.Services.HostUpdates.IHostUpdateCandidateReadiness>(),
-                OperatingSystem.IsLinux() ? $"linux-{(System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture == System.Runtime.InteropServices.Architecture.Arm64 ? "arm64" : "amd64")}" : "unsupported",
-                TimeSpan.FromHours(2)));
-        services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.HostUpdateSchedulerStatusHolder>();
-        services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.HostUpdateSchedulerCancellationBridge>();
-        services.AddScoped<Farm.Infrastructure.Services.HostUpdates.IHostUpdateSchedulerExecutor>(sp =>
-            new Farm.Infrastructure.Services.HostUpdates.HostUpdateSchedulerExecutorAdapter(
-                sp.GetRequiredService<Farm.Infrastructure.Services.HostUpdates.IHostUpdateExecutor>(),
-                OperatingSystem.IsLinux() ? $"linux-{(System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture == System.Runtime.InteropServices.Architecture.Arm64 ? "arm64" : "amd64")}" : "unsupported"));
-        services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.HostUpdateScheduler>(sp =>
-            new Farm.Infrastructure.Services.HostUpdates.HostUpdateScheduler(
-                sp.GetRequiredService<Farm.Infrastructure.Services.HostUpdates.IHostUpdateSchedulerSettings>(),
-                sp.GetRequiredService<Farm.Infrastructure.Services.HostUpdates.IHostUpdateSchedulerCandidateCache>(),
-                sp.GetRequiredService<Farm.Infrastructure.Services.HostUpdates.IHostUpdateReplayStore>(),
-                sp.GetRequiredService<Farm.Infrastructure.Services.HostUpdates.IHostUpdatePolicyFence>(),
-                null,
-                sp.GetRequiredService<Farm.Infrastructure.Services.HostUpdates.IHostUpdateClock>(),
-                sp.GetRequiredService<Farm.Infrastructure.Services.HostUpdates.IHostUpdateJitter>(),
-                sp.GetRequiredService<ILogger<Farm.Infrastructure.Services.HostUpdates.HostUpdateScheduler>>(),
-                sp.GetRequiredService<Farm.Infrastructure.Services.HostUpdates.IHostUpdateAdmissionFence>(),
-                sp.GetRequiredService<IServiceScopeFactory>(),
-                sp.GetRequiredService<Farm.Infrastructure.Services.HostUpdates.HostUpdateSchedulerCancellationBridge>()));
-        services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.IHostUpdateSchedulerCancellation>(sp =>
-            sp.GetRequiredService<Farm.Infrastructure.Services.HostUpdates.HostUpdateScheduler>());
-        if (hostStateEnabled)
-        {
-            services.AddHostedService<Farm.Infrastructure.Services.HostUpdates.HostUpdateSchedulerHostedService>();
-        }
-
         services.AddScoped<Farm.Infrastructure.Services.SystemStatus.ISystemInfoService, Farm.Infrastructure.Services.SystemStatus.SystemInfoService>();
-        services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.IVerifiedReleaseEvidenceCache, Farm.Infrastructure.Services.HostUpdates.VerifiedReleaseEvidenceCache>();
-        services.AddScoped<Farm.Infrastructure.Services.HostUpdates.IVerifiedReleaseManifestBindingStore,
-            Farm.Infrastructure.Services.HostUpdates.VerifiedReleaseManifestBindingStore>();
 
-        // Signed release discovery (issue #2757): GitHub Releases discovery + Cosign
-        // verification + verified-metadata mapping, all wired through DI for the production
-        // discovery path. This registration ONLY discovers/verifies release metadata; it never
-        // stages, downloads, applies, or recovers an update (see VerifiedReleaseDiscoveryMonitorService).
-        services.AddOptions<Farm.Infrastructure.Services.HostUpdates.VerifiedReleaseDiscoveryOptions>()
-            .Bind(configuration.GetSection(Farm.Infrastructure.Services.HostUpdates.VerifiedReleaseDiscoveryOptions.SectionName))
+        // Application release update alert (issue #3281): unsigned GitHub release check for the
+        // installed channel, cached in-process so admin polling never reaches GitHub.
+        services.AddOptions<Farm.Infrastructure.Services.ReleaseUpdates.ApplicationReleaseUpdateOptions>()
+            .Bind(configuration.GetSection(Farm.Infrastructure.Services.ReleaseUpdates.ApplicationReleaseUpdateOptions.SectionName))
             .ValidateOnStart();
-        services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<Farm.Infrastructure.Services.HostUpdates.VerifiedReleaseDiscoveryOptions>,
-            Farm.Infrastructure.Services.HostUpdates.VerifiedReleaseDiscoveryOptionsValidator>();
-
-        // ISignedReleaseVerifier -> ProcessCosignVerifier: invokes the configured, bounded-options
-        // Cosign executable (path/timeout/diagnostics-size are all startup-validated above).
-        // ProcessCosignVerifier itself fails closed (returns false, never throws) when the
-        // executable is missing or misbehaves, so a misconfigured/unbundled Cosign binary can
-        // only ever prevent a release from verifying — never cause an unsafe "verified" result.
-        services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.ISignedReleaseVerifier>(sp =>
-            new Farm.Infrastructure.Services.HostUpdates.ProcessCosignVerifier(
-                sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<Farm.Infrastructure.Services.HostUpdates.VerifiedReleaseDiscoveryOptions>>().Value.ToCosignVerifierOptions()));
-
-        // GitHub public releases API client: pinned base address + standard GitHub REST headers.
-        services.AddHttpClient<Farm.Infrastructure.Services.HostUpdates.GitHubSignedReleaseDiscovery>((sp, client) =>
+        services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<Farm.Infrastructure.Services.ReleaseUpdates.ApplicationReleaseUpdateOptions>,
+            Farm.Infrastructure.Services.ReleaseUpdates.ApplicationReleaseUpdateOptionsValidator>();
+        services.AddSingleton<Farm.Infrastructure.Services.ReleaseUpdates.ApplicationReleaseUpdateState>();
+        services.AddSingleton<Farm.Infrastructure.Services.ReleaseUpdates.IApplicationReleaseUpdateStatusProvider>(sp =>
+            sp.GetRequiredService<Farm.Infrastructure.Services.ReleaseUpdates.ApplicationReleaseUpdateState>());
+        services.AddHttpClient<Farm.Infrastructure.Services.ReleaseUpdates.IApplicationReleaseSource,
+            Farm.Infrastructure.Services.ReleaseUpdates.GitHubApplicationReleaseSource>((sp, client) =>
             {
-                Farm.Infrastructure.Services.HostUpdates.VerifiedReleaseDiscoveryOptions options =
-                    sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<Farm.Infrastructure.Services.HostUpdates.VerifiedReleaseDiscoveryOptions>>().Value;
+                Farm.Infrastructure.Services.ReleaseUpdates.ApplicationReleaseUpdateOptions options =
+                    sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<Farm.Infrastructure.Services.ReleaseUpdates.ApplicationReleaseUpdateOptions>>().Value;
                 client.BaseAddress = new Uri("https://api.github.com/");
                 client.DefaultRequestHeaders.UserAgent.ParseAdd("PrintFarmer/1.0");
                 client.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
@@ -464,20 +353,11 @@ public static class FeatureServicesStartup
             {
                 AllowAutoRedirect = false,
             });
-        services.AddTransient<Farm.Infrastructure.Services.HostUpdates.IHostUpdateMetadataProvider,
-            Farm.Infrastructure.Services.HostUpdates.VerifiedGitHubReleaseMetadataProvider>();
 
-        // Keep host build identity and deployment policy explicit when projecting from infrastructure.
-        services.AddScoped<Farm.Infrastructure.Services.SystemStatus.IServiceInventorySource>(sp =>
-            new Farm.Infrastructure.Services.SystemStatus.LocalServiceInventorySource(
-                sp.GetRequiredService<Farm.Infrastructure.Settings.ISettingsService>(),
-                typeof(Program).Assembly,
-                Farm.Modules.Calibration.Startup.CalibrationProfileResolutionStartup.IsSplitDeployment(
-                    sp.GetRequiredService<IConfiguration>())));
-        services.AddScoped<Farm.Infrastructure.Services.SystemStatus.IServiceInventorySource>(sp =>
-            new Farm.Slicer.Module.Services.SystemInfo.SlicerServiceInventorySource(
+        services.AddScoped<Farm.Infrastructure.Services.SystemStatus.ISystemServiceInfoSource>(sp =>
+            new Farm.Slicer.Module.Services.SystemInfo.SlicerSystemServiceInfoSource(
                 sp.GetService<Farm.Slicer.Module.Data.SlicerDbContext>(),
-                sp.GetRequiredService<ILogger<Farm.Slicer.Module.Services.SystemInfo.SlicerServiceInventorySource>>()));
+                sp.GetRequiredService<ILogger<Farm.Slicer.Module.Services.SystemInfo.SlicerSystemServiceInfoSource>>()));
 
         // Admin Control Center overview aggregation (issue #933) moved to
         // Farm.Modules.Administration's IApiModule registration (issue #2042).

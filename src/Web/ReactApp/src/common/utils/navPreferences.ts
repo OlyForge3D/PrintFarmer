@@ -62,6 +62,7 @@ const DEFAULT_ORDER_BY_ROLE: Record<NavPreferenceRole, string[]> = {
     'overview',
     'print-queue',
     'printers',
+    'cameras',
     'scheduling',
     'files',
     'projects',
@@ -79,6 +80,7 @@ const DEFAULT_ORDER_BY_ROLE: Record<NavPreferenceRole, string[]> = {
   admin: [
     'overview',
     'printers',
+    'cameras',
     'print-queue',
     'scheduling',
     'files',

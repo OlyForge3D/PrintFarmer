@@ -38,13 +38,10 @@ public static class BackgroundServicesStartup
         services.Configure<Farm.Infrastructure.Settings.CatalogUpdateSettings>(configuration.GetSection(Farm.Infrastructure.Settings.CatalogUpdateSettings.SectionName));
         services.AddHostedService<Farm.Infrastructure.Services.Catalog.CatalogUpdateDetectionService>();
 
-        // Host Updates Module - Verified Release Discovery (issue #2757)
-        // Periodically discovers the selected update channel's latest signed GitHub release,
-        // verifies it with Cosign, and caches the resulting verified evidence for
-        // SystemInfoService/ReleaseReadinessEvaluator. Discover/cache only -- never applies,
-        // downloads, or stages an update. Operational options (interval/timeouts/Cosign path)
-        // are bound + startup-validated in AddPrintFarmerFeatureServices.
-        services.AddHostedService<Farm.Infrastructure.Services.HostUpdates.VerifiedReleaseDiscoveryMonitorService>();
+        // Application release update alert (issue #3281): notification-only check for a newer
+        // GitHub release on the installed channel. Options/HTTP client are registered in
+        // AddPrintFarmerFeatureServices.
+        services.AddHostedService<Farm.Infrastructure.Services.ReleaseUpdates.ApplicationReleaseUpdateCheckService>();
 
         // Orphaned Job Sync - Runs periodically (every 60s) to sync jobs stuck in "Printing" status
         // Catches missed state transitions from direct printer cancellations or WebSocket drops

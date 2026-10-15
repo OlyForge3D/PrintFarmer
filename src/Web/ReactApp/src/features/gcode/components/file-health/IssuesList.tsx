@@ -1,5 +1,5 @@
 /* eslint-disable local/pf-no-raw-html-controls */
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { FileIssuesSummaryDto } from '@/types/api';
 import { Card } from '@/common/components/ui/Card';
 import { Alert } from '@/common/components/ui/Alert';

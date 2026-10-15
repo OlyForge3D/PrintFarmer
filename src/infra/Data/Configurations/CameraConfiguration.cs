@@ -52,17 +52,43 @@ public class CameraConfiguration : IEntityTypeConfiguration<Camera>
             .HasConversion<string>()
             .IsRequired();
 
-        // Foreign key relationship to Printer
-        builder.HasOne(c => c.Printer)
+        builder.Property(c => c.UserModified)
+            .HasDefaultValue(false);
+
+        // Optional explicit location (effective location prefers the single linked printer's location).
+        builder.HasOne(c => c.AssignedLocation)
+            .WithMany()
+            .HasForeignKey(c => c.LocationId)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        // Many-to-many camera <-> printer via the explicit CameraPrinter join entity.
+        // Skip navigations (Camera.Printers / Printer.Cameras) keep existing LINQ compiling while
+        // PrinterLinks / CameraLinks expose the join payload (IsPrimary, SortOrder).
+        builder.HasMany(c => c.Printers)
             .WithMany(p => p.Cameras)
-            .HasForeignKey(c => c.PrinterId)
-            .OnDelete(DeleteBehavior.Cascade);
+            .UsingEntity<CameraPrinter>(
+                right => right.HasOne(cp => cp.Printer)
+                    .WithMany(p => p.CameraLinks)
+                    .HasForeignKey(cp => cp.PrinterId)
+                    .OnDelete(DeleteBehavior.Cascade),
+                left => left.HasOne(cp => cp.Camera)
+                    .WithMany(c => c.PrinterLinks)
+                    .HasForeignKey(cp => cp.CameraId)
+                    .OnDelete(DeleteBehavior.Cascade),
+                join =>
+                {
+                    join.ToTable("CameraPrinters");
+                    join.HasKey(cp => new { cp.CameraId, cp.PrinterId });
+                    join.Property(cp => cp.IsPrimary).HasDefaultValue(false);
+                    join.Property(cp => cp.SortOrder).HasDefaultValue(0);
+                    join.HasIndex(cp => cp.PrinterId);
+                });
 
         // Indexes
         builder.HasIndex(c => c.Name);
         builder.HasIndex(c => c.IsEnabled);
         builder.HasIndex(c => c.SortOrder);
-        builder.HasIndex(c => c.PrinterId);
+        builder.HasIndex(c => c.LocationId);
         builder.HasIndex(c => c.Source);
     }
 }

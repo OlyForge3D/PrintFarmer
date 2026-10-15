@@ -3,7 +3,6 @@
 // </copyright>
 
 using Farm.Infrastructure.Data;
-using Farm.Infrastructure.Services.HostUpdates;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -19,12 +18,11 @@ public sealed class BedClearAcknowledgementExpiryService(
     IServiceScopeFactory scopeFactory,
     ILogger<BedClearAcknowledgementExpiryService> logger,
     BedClearAcknowledgementExpiryMetrics metrics,
-    BedClearAcknowledgementExpiryFenceFlag? hostUpdateFence = null,
     TimeProvider? timeProvider = null) : BackgroundService
 {
-    private static readonly TimeSpan ScanInterval = TimeSpan.FromSeconds(15);
-
     private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
+
+    private static readonly TimeSpan ScanInterval = TimeSpan.FromSeconds(15);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -32,14 +30,6 @@ public sealed class BedClearAcknowledgementExpiryService(
         {
             try
             {
-                if (hostUpdateFence is not null &&
-                    await hostUpdateFence.IsPauseRequestedAsync(stoppingToken).ConfigureAwait(false))
-                {
-                    await hostUpdateFence.AcknowledgePausedAsync(stoppingToken).ConfigureAwait(false);
-                    await Task.Delay(TimeSpan.FromMilliseconds(250), _timeProvider, stoppingToken).ConfigureAwait(false);
-                    continue;
-                }
-
                 await ScanAsync(stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -53,28 +43,8 @@ public sealed class BedClearAcknowledgementExpiryService(
                     "Bed-clear acknowledgement lifecycle scan failed.");
             }
 
-            if (await WaitForIntervalOrPauseAsync(stoppingToken).ConfigureAwait(false))
-            {
-                await hostUpdateFence!.AcknowledgePausedAsync(stoppingToken).ConfigureAwait(false);
-            }
+            await Task.Delay(ScanInterval, _timeProvider, stoppingToken);
         }
-    }
-
-    private async Task<bool> WaitForIntervalOrPauseAsync(CancellationToken stoppingToken)
-    {
-        DateTimeOffset until = _timeProvider.GetUtcNow() + ScanInterval;
-        while (_timeProvider.GetUtcNow() < until)
-        {
-            if (hostUpdateFence is not null &&
-                await hostUpdateFence.IsPauseRequestedAsync(stoppingToken).ConfigureAwait(false))
-            {
-                return true;
-            }
-
-            await Task.Delay(TimeSpan.FromMilliseconds(250), _timeProvider, stoppingToken).ConfigureAwait(false);
-        }
-
-        return false;
     }
 
     internal async Task ScanAsync(CancellationToken ct)

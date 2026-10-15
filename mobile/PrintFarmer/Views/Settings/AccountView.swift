@@ -22,7 +22,7 @@ struct AccountDestinationRow: Identifiable, Hashable {
                 destination: .settings,
                 title: "Settings",
                 systemImage: "gear",
-                accessibilityHint: "Opens app, navigation, and account settings.",
+                accessibilityHint: "Opens app and account settings.",
                 accessibilityIdentifier: "account.destination.settings"
             ),
             AccountDestinationRow(

@@ -23,6 +23,9 @@
     },
     {
       "parallelizable" : true,
+      "skippedTests" : [
+        "AppStoreScreenshotUITests"
+      ],
       "target" : {
         "containerPath" : "container:PrintFarmer.xcodeproj",
         "identifier" : "F7060002000000000000D001",

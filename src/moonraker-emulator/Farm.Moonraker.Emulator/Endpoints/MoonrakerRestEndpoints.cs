@@ -226,7 +226,6 @@ public static class MoonrakerRestEndpoints
         try
         {
             string fileName = body?.Filename ?? "unknown.gcode";
-            RetargetRequestLog(ctx, $"/printer/print/start:{fileName}");
             p.StartPrint(fileName);
             await MoonrakerJson.WriteResultAsync(ctx, "ok");
             await BroadcastService.NotifyStatusUpdateAsync(p);
@@ -642,7 +641,6 @@ public static class MoonrakerRestEndpoints
         VirtualFile stored = Printer(ctx).Files.Put(root, path, buffer.ToArray());
 
         bool print = string.Equals(form["print"].FirstOrDefault(), "true", StringComparison.OrdinalIgnoreCase);
-        RetargetRequestLog(ctx, $"/server/files/upload:{root}/{stored.Path}:print={print.ToString().ToLowerInvariant()}");
         bool printStarted = false;
         if (print && root == "gcodes")
         {
@@ -672,14 +670,6 @@ public static class MoonrakerRestEndpoints
         if (printStarted)
         {
             await BroadcastService.NotifyStatusUpdateAsync(Printer(ctx));
-        }
-    }
-
-    private static void RetargetRequestLog(HttpContext ctx, string target)
-    {
-        if (ctx.Items["requestLogEntry"] is RequestLogEntry entry)
-        {
-            ctx.RequestServices.GetRequiredService<PrinterRegistry>().Requests.Retarget(entry.Sequence, target);
         }
     }
 

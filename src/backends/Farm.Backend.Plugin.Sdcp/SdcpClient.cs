@@ -110,9 +110,9 @@ public class SdcpPrintInfo
 {
     public int Status { get; set; }
 
-    public int CurrentLayer { get; set; }
+    public int? CurrentLayer { get; set; }
 
-    public int TotalLayer { get; set; }
+    public int? TotalLayer { get; set; }
 
     public double CurrentTicks { get; set; }
 
@@ -571,9 +571,9 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
 
         // Layer-based progress: most reliable on Elegoo SDCP firmware
         // Returns 0–100 range to match frontend expectations
-        if (printInfo.TotalLayer > 0)
+        if (printInfo.TotalLayer is > 0 && printInfo.CurrentLayer is >= 0)
         {
-            return (double)printInfo.CurrentLayer / printInfo.TotalLayer * 100.0;
+            return (double)printInfo.CurrentLayer.Value / printInfo.TotalLayer.Value * 100.0;
         }
 
         // Fallback to firmware-reported progress (already 0–100 scale)
@@ -1086,7 +1086,9 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
                         HotendTemp: status.TempOfNozzle,
                         BedTemp: status.TempOfHotbed,
                         HotendTarget: status.TempTargetNozzle,
-                        BedTarget: status.TempTargetHotbed);
+                        BedTarget: status.TempTargetHotbed,
+                        CurrentLayer: GetKnownLayer(printInfo?.CurrentLayer, printInfo?.TotalLayer),
+                        TotalLayers: GetKnownTotalLayers(printInfo?.CurrentLayer, printInfo?.TotalLayer));
                 }
 
                 await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, cts.Token);
@@ -1104,6 +1106,24 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
             throw;  // Let callers (polling service) handle failure counting
         }
     }
+
+    private static int? GetKnownLayer(int? currentLayer, int? totalLayers) =>
+        currentLayer is int current &&
+        totalLayers is int total &&
+        current >= 0 &&
+        total > 0 &&
+        current <= total
+            ? current
+            : null;
+
+    private static int? GetKnownTotalLayers(int? currentLayer, int? totalLayers) =>
+        currentLayer is int current &&
+        totalLayers is int total &&
+        current >= 0 &&
+        total > 0 &&
+        current <= total
+            ? total
+            : null;
 
     public Task<PrinterCompositeStatus> GetCompositeStatusAsync(Uri baseUrl, CancellationToken ct = default)
     {
@@ -1152,7 +1172,9 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
             BackendUrl: printer.BackendUrl,
             FrontendUrl: printer.FrontendUrl,
             ObicoEnabled: printer.ObicoEnabled,
-            Location: printer.Location == null ? null : new LocationSummaryDto(printer.Location.Id, printer.Location.Name, printer.Location.Description));
+            Location: printer.Location == null ? null : new LocationSummaryDto(printer.Location.Id, printer.Location.Name, printer.Location.Description),
+            CurrentLayer: status.CurrentLayer,
+            TotalLayers: status.TotalLayers);
     }
 
     // Print control methods (ISupportsStartPrint + ISupportsControlOperations)

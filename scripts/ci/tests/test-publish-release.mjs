@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, mkdirSync, readdirSync, readFileSync, writeFileSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import test from 'node:test';
@@ -8,68 +8,8 @@ import { load } from 'js-yaml';
 import { components, compareVersions, parseTag, validateVersion, verifyEnvironmentRestrictions } from '../release-policy.mjs';
 import { githubClient, verifyOwnerDispatch } from '../release-dispatch.mjs';
 import { buildMetadata } from '../release-metadata.mjs';
-import { buildImages, publishRelease, releaseAssetMaxBytes, releaseAssets, rejectExistingVersion, selectRelease }
-  from '../publish-release.mjs';
-import { offlineBundleName, offlineBundleSignatureName } from '../offline-update-bundle.mjs';
-import { formatSums, hostUpdateCliArchiveName, hostUpdateCliAssets, hostUpdateCliRuntimes, hostUpdateCliSbomName,
-  hostUpdateCliSumsBundleName, hostUpdateCliSumsName, packageHostUpdateCli, parseSums, validateHostUpdateCliSbom,
-  verifyHostUpdateCliSums } from '../host-update-cli-package.mjs';
-
-const spdxFixture = name => `${JSON.stringify({ spdxVersion: 'SPDX-2.3', SPDXID: 'SPDXRef-DOCUMENT', name,
-  packages: [{ SPDXID: 'SPDXRef-Package', name: 'Farm.HostUpdate.Cli', versionInfo: '1.0.0' }] })}\n`;
+import { buildImages, publishRelease, releaseAssets, rejectExistingVersion, selectRelease } from '../publish-release.mjs';
 import { imageRepository, inspectTag, publishImageTags, rejectExistingImages, verifyImages } from '../release-set.mjs';
-import { infrastructureImagesDocument, infrastructureImagesName, infrastructureImagesSignatureName, infrastructureLockKind,
-  infrastructureLockPath, mediaTypes, validateInfrastructureImages } from '../offline-bundle-images.mjs';
-import { recoveryInstructionsDocument, recoveryInstructionsName, recoveryInstructionsSignatureName }
-  from '../offline-recovery-instructions.mjs';
-import { deploymentSetDocument, deploymentSetName, deploymentSetSignatureName, deploymentTemplatePaths,
-  offlineToolsLockPath, readDeploymentTemplates, validateOfflineToolsLock } from '../offline-deployment-set.mjs';
-
-// Issue #3081: the real repository templates and tool lock back the deployment set fixtures.
-const repositoryRoot = join(import.meta.dirname, '..', '..', '..');
-const repositoryToolsLock = () => validateOfflineToolsLock(readFileSync(join(repositoryRoot, offlineToolsLockPath)));
-const deploymentSetFor = identity => deploymentSetDocument(identity,
-  { templates: readDeploymentTemplates(repositoryRoot), lock: repositoryToolsLock() });
-
-// Issue #3061: a synthetic registry for the pinned infrastructure lock -- one multi-platform index
-// and one single-manifest image -- whose raw bytes hash to the pinned digests.
-function infrastructureRegistry() {
-  const hash = bytes => `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
-  const amd64 = `sha256:${'1'.repeat(64)}`;
-  const arm64 = `sha256:${'2'.repeat(64)}`;
-  const indexRaw = JSON.stringify({ schemaVersion: 2, mediaType: mediaTypes.ociIndex, manifests: [
-    { mediaType: mediaTypes.ociManifest, digest: amd64, size: 1, platform: { os: 'linux', architecture: 'amd64' } },
-    { mediaType: mediaTypes.ociManifest, digest: arm64, size: 1,
-      platform: { os: 'linux', architecture: 'arm64', variant: 'v8' } },
-  ] });
-  const singleRaw = JSON.stringify({ schemaVersion: 2, mediaType: mediaTypes.dockerManifest,
-    config: { mediaType: 'application/vnd.docker.container.image.v1+json', digest: `sha256:${'3'.repeat(64)}`, size: 1 },
-    layers: [] });
-  const lock = { schema: 1, kind: infrastructureLockKind, images: [
-    { id: 'database', reference: 'registry.example.com/library/database:16', mediaType: mediaTypes.ociIndex,
-      digest: hash(indexRaw), platforms: { 'linux/amd64': amd64, 'linux/arm64': arm64 } },
-    { id: 'sqlserver', reference: 'registry.example.com/mssql/server:2022', mediaType: mediaTypes.dockerManifest,
-      digest: hash(singleRaw), platforms: { 'linux/amd64': hash(singleRaw) } },
-  ] };
-  const raw = { [`${lock.images[0].reference}@${lock.images[0].digest}`]: indexRaw,
-    [`${lock.images[1].reference}@${lock.images[1].digest}`]: singleRaw };
-  const inspections = [];
-  const handle = args => {
-    if (!args.includes('--raw') && !args.includes('{{json .Image}}')) return undefined;
-    const reference = args[3];
-    if (!reference?.startsWith('registry.example.com/')) return undefined;
-    inspections.push(reference);
-    if (args.includes('--raw')) {
-      assert.ok(reference in raw, `unexpected raw inspection ${reference}`);
-      return raw[reference];
-    }
-    return JSON.stringify({ os: 'linux', architecture: 'amd64' });
-  };
-  return { lock, handle, inspections, raw };
-}
-const infrastructureIdentity = chosen => ({ tag: chosen.tag, version: chosen.version, channel: chosen.channel,
-  sourceBranch: chosen.sourceBranch, sourceCommit: chosen.sourceCommit, buildId: String(chosen.buildId),
-  sequence: deriveSequence(chosen.version) });
 import { buildManifest, deriveSequence, validateManifest, validateManifestInput,
   SEQUENCE_MAJOR_MAX, SEQUENCE_MINOR_MAX, SEQUENCE_PATCH_MAX, SEQUENCE_PRERELEASE_MAX,
   SEQUENCE_STABLE_SUFFIX, MINIMUM_UPDATER_VERSION } from '../release-manifest.mjs';
@@ -512,43 +452,12 @@ test('actual build loop passes the six targets/platforms and source metadata, st
   mkdirSync(join(source, 'src'), { recursive: true });
   writeFileSync(join(source, 'VERSION'), 'v1.2.3');
   for (const file of ['LICENSE', 'THIRD-PARTY-NOTICES.md']) writeFileSync(join(source, file), file);
-  mkdirSync(join(source, 'scripts'));
-  for (const file of ['printfarmer-host-update.sh', 'common-utils.sh', 'printfarmer-host-update.ps1']) {
-    writeFileSync(join(source, 'scripts', file), file);
-  }
   mkdirSync(join(source, '.release-assets'));
   writeFileSync(join(source, '.release-assets', 'preserved.txt'), 'preserve this source content');
-  const registry = infrastructureRegistry();
-  mkdirSync(join(source, 'scripts', 'docker'));
-  writeFileSync(join(source, infrastructureLockPath), `${JSON.stringify(registry.lock, undefined, 2)}\n`);
-  for (const path of [...deploymentTemplatePaths, offlineToolsLockPath]) {
-    mkdirSync(join(source, ...path.split('/').slice(0, -1)), { recursive: true });
-    writeFileSync(join(source, ...path.split('/')), readFileSync(join(repositoryRoot, ...path.split('/'))));
-  }
   const builds = [];
   const smokes = [];
-  const cliPublishes = [];
-  const cliArchives = [];
-  const syftScans = [];
-  const enrichments = [];
   const run = (name, args) => {
     if (name === 'git') return sha;
-    if (name === 'dotnet' && args[0] === 'publish') {
-      cliPublishes.push(args);
-      const output = args[args.indexOf('--output') + 1];
-      const rid = args[args.indexOf('--runtime') + 1];
-      mkdirSync(output, { recursive: true });
-      writeFileSync(join(output, rid.startsWith('win-') ? 'Farm.HostUpdate.Cli.exe' : 'Farm.HostUpdate.Cli'), rid);
-      return '';
-    }
-    if (name === 'tar' && args[0] === '--version') return 'tar (GNU tar) 1.35\n';
-    if (name === 'tar' && args[0] === '-czf') {
-      const stage = args[args.indexOf('-C') + 1];
-      cliArchives.push({ args, manifest: JSON.parse(readFileSync(join(stage, 'host-update-cli-package.json'), 'utf8')),
-        wrapper: existsSync(join(stage, 'printfarmer-host-update.sh')) });
-      writeFileSync(args[1], `archive ${args[1]}`);
-      return '';
-    }
     if (name === 'node' && args[0] === 'scripts/compliance/create-source-bundle.mjs') {
       const outputDirectory = args[args.indexOf('--output') + 1];
       assert.ok(!relative(source, outputDirectory).startsWith('..'));
@@ -560,17 +469,12 @@ test('actual build loop passes the six targets/platforms and source metadata, st
     if (name === 'docker' && args[1] === 'build') {
       builds.push(args);
       writeFileSync(args[args.indexOf('--metadata-file') + 1], JSON.stringify({ 'containerimage.digest': digest }));
-    } else if (name === 'docker' && args[1] === 'imagetools') {
-      return registry.handle(args) ?? inspectionCommand(name, args);
-    } else if (name === 'docker' && args[0] === 'run') smokes.push(args);
-    else if (name === 'syft') {
-      syftScans.push(args);
-      writeFileSync(args[2].slice('spdx-json='.length), spdxFixture(args[0]));
-    } else if (name === 'node' && args[0] === 'scripts/compliance/enrich-sbom.mjs') enrichments.push(args);
+    } else if (name === 'docker' && args[1] === 'imagetools') return inspectionCommand(name, args);
+    else if (name === 'docker' && args[0] === 'run') smokes.push(args);
+    else if (name === 'syft') writeFileSync(args[2].slice('spdx-json='.length), '{}');
     return '';
   };
   assert.deepEqual(buildImages(release, source, assets, run, () => {}), digests);
-  const firstInspections = [...registry.inspections];
   for (const file of [`PrintFarmer-${release.tag}-source.tar.gz`, `PrintFarmer-${release.tag}-source.json`]) {
     assert.ok(existsSync(join(assets, file)));
   }
@@ -590,70 +494,12 @@ test('actual build loop passes the six targets/platforms and source metadata, st
   assert.equal(metadata.managedUpdateEligible, false);
   assert.equal(Object.keys(metadata.images).length, 6);
   assert.ok(!existsSync(join(assets, 'release-manifest.json')));
-  assert.deepEqual(cliPublishes.map(args => args[args.indexOf('--runtime') + 1]), ['linux-x64', 'linux-arm64', 'win-x64']);
-  for (const args of cliPublishes) {
-    assert.equal(args[1], 'src/tools/Farm.HostUpdate.Cli/Farm.HostUpdate.Cli.csproj');
-    assert.ok(args.includes('--self-contained') && args[args.indexOf('--self-contained') + 1] === 'true');
-    assert.ok(args.includes(`-p:Version=${release.version}`) && args.includes(`-p:SourceRevisionId=${sha}`));
-  }
-  assert.equal(cliArchives.length, 3);
-  for (const { args, manifest, wrapper } of cliArchives) {
-    assert.ok(args.includes('--owner=0') && args.includes('--group=0'), 'archive members must be root-owned');
-    assert.equal(manifest.rolloutAuthorization, false);
-    assert.equal(manifest.selfContained, true);
-    assert.equal(manifest.sourceCommit, sha);
-    assert.ok(wrapper);
-  }
-  const sums = readFileSync(join(assets, `printfarmer-host-update-cli-v${release.version}-SHA256SUMS`), 'utf8');
-  assert.equal(sums.trim().split('\n').length, 6);
-  assert.deepEqual(verifyHostUpdateCliSums(assets, release.version).size, 6);
-  const cliScans = syftScans.filter(args => args[0].startsWith('dir:'));
-  assert.deepEqual(cliScans.map(args => args[args.indexOf('--source-name') + 1]),
-    hostUpdateCliRuntimes.map(rid => `printfarmer-host-update-cli-${rid}`));
-  for (const rid of hostUpdateCliRuntimes) {
-    const sbom = join(assets, hostUpdateCliSbomName(release.version, rid));
-    assert.ok(cliScans.some(args => args[2] === `spdx-json=${sbom}`), `SBOM scanned for ${rid}`);
-    assert.ok(!enrichments.some(args => args[args.indexOf('--sbom') + 1] === sbom),
-      `CLI SBOM is a component inventory, not license-enriched, for ${rid}`);
-  }
-  assert.equal(syftScans.indexOf(cliScans[0]), 0, 'CLI SBOMs are produced before any image scan');
-  const beforeCli = builds.length;
-  assert.throws(() => buildImages(release, source, assets, (name, args) => {
-    if (name === 'dotnet' && args[0] === 'publish' && args.includes('linux-arm64')) throw new Error('cli publish failed');
-    return run(name, args);
-  }, () => {}), /cli publish failed/);
-  assert.equal(builds.length, beforeCli, 'a CLI package failure must stop before any image build');
   const before = builds.length;
   assert.throws(() => buildImages(release, source, assets, (name, args) => {
     if (name === 'docker' && args.includes('frontend-runtime')) throw new Error('frontend build failed');
     return run(name, args);
   }, () => {}), /frontend build failed/);
   assert.equal(builds.length - before, 1);
-  // Issue #3061: the pinned infrastructure list is registry-checked and bound to this release.
-  assert.deepEqual(firstInspections.sort(), [...Object.keys(registry.raw),
-    `${registry.lock.images[1].reference}@${registry.lock.images[1].digest}`].sort());
-  assert.deepEqual(validateInfrastructureImages(readFileSync(join(assets, infrastructureImagesName)),
-    infrastructureIdentity(release)), registry.lock.images);
-  // Issue #3063: the recovery instructions are generated from the same release identity.
-  assert.deepEqual(readFileSync(join(assets, recoveryInstructionsName)),
-    recoveryInstructionsDocument(infrastructureIdentity(release)));
-  // Issue #3081: the deployment set is generated from the checked-out templates and tool lock.
-  assert.deepEqual(readFileSync(join(assets, deploymentSetName)), deploymentSetFor(infrastructureIdentity(release)));
-  const movedPin = infrastructureRegistry();
-  const buildsBeforeMovedPin = builds.length;
-  assert.throws(() => buildImages(release, source, assets, (name, args) => {
-    const moved = name === 'docker' && args.includes('--raw') ? movedPin.handle(args) : undefined;
-    if (moved) return moved.replace('"amd64"', '"arm64"');
-    return run(name, args);
-  }, () => {}), /Registry content does not match the pinned digest/);
-  assert.equal(builds.length, buildsBeforeMovedPin, 'a moved infrastructure pin must stop before any build');
-  const wrongChild = structuredClone(registry.lock);
-  wrongChild.images[0].platforms['linux/arm64'] = `sha256:${'9'.repeat(64)}`;
-  writeFileSync(join(source, infrastructureLockPath), JSON.stringify(wrongChild));
-  assert.throws(() => buildImages(release, source, assets, run, () => {}), /does not select the pinned linux\/arm64/);
-  rmSync(join(source, infrastructureLockPath));
-  assert.throws(() => buildImages(release, source, assets, run, () => {}), /ENOENT/);
-  assert.equal(builds.length, buildsBeforeMovedPin);
 });
 
 function publishFixture(t, channel = 'insider') {
@@ -661,20 +507,6 @@ function publishFixture(t, channel = 'insider') {
   const chosen = channel === 'stable' ? { ...release, channel, version: '1.2.3', tag: 'v1.2.3', sourceBranch: 'main' } : release;
   const files = releaseAssets(chosen);
   for (const file of files) writeFileSync(join(assets, file), 'asset');
-  const cliSums = join(assets, hostUpdateCliSumsName(chosen.version));
-  writeFileSync(cliSums, formatSums(hostUpdateCliRuntimes.flatMap(rid => {
-    const name = hostUpdateCliArchiveName(chosen.version, rid);
-    const sbom = hostUpdateCliSbomName(chosen.version, rid);
-    writeFileSync(join(assets, name), `archive ${rid}`);
-    writeFileSync(join(assets, sbom), spdxFixture(rid));
-    return [{ name, sha256: createHash('sha256').update(`archive ${rid}`).digest('hex') },
-      { name: sbom, sha256: createHash('sha256').update(spdxFixture(rid)).digest('hex') }];
-  })));
-  writeFileSync(join(assets, hostUpdateCliSumsBundleName(chosen.version)), JSON.stringify({
-    sha256: createHash('sha256').update(readFileSync(cliSums)).digest('hex'),
-    issuer: manifestIssuer,
-    identity: manifestIdentityFor(chosen.channel),
-  }));
   writeFileSync(join(assets, 'update-manifest.json'), buildManifest(
     { ...chosen, sequence: deriveSequence(chosen.version) }, imageDetails));
   const signedManifestBytes = readFileSync(join(assets, 'update-manifest.json'));
@@ -684,31 +516,6 @@ function publishFixture(t, channel = 'insider') {
     identity: manifestIdentityFor(chosen.channel),
   }));
   writeFileSync(join(assets, 'digests.json'), JSON.stringify(digests));
-  writeFileSync(join(assets, infrastructureImagesName),
-    infrastructureImagesDocument(infrastructureIdentity(chosen), infrastructureRegistry().lock));
-  writeFileSync(join(assets, infrastructureImagesSignatureName), JSON.stringify({
-    sha256: createHash('sha256').update(readFileSync(join(assets, infrastructureImagesName))).digest('hex'),
-    issuer: manifestIssuer,
-    identity: manifestIdentityFor(chosen.channel),
-  }));
-  writeFileSync(join(assets, recoveryInstructionsName), recoveryInstructionsDocument(infrastructureIdentity(chosen)));
-  writeFileSync(join(assets, recoveryInstructionsSignatureName), JSON.stringify({
-    sha256: createHash('sha256').update(readFileSync(join(assets, recoveryInstructionsName))).digest('hex'),
-    issuer: manifestIssuer,
-    identity: manifestIdentityFor(chosen.channel),
-  }));
-  writeFileSync(join(assets, deploymentSetName), deploymentSetFor(infrastructureIdentity(chosen)));
-  writeFileSync(join(assets, deploymentSetSignatureName), JSON.stringify({
-    sha256: createHash('sha256').update(readFileSync(join(assets, deploymentSetName))).digest('hex'),
-    issuer: manifestIssuer,
-    identity: manifestIdentityFor(chosen.channel),
-  }));
-  writeFileSync(join(assets, offlineBundleName(chosen.version)), 'offline bundle archive');
-  writeFileSync(join(assets, offlineBundleSignatureName(chosen.version)), JSON.stringify({
-    sha256: createHash('sha256').update('offline bundle archive').digest('hex'),
-    issuer: manifestIssuer,
-    identity: manifestIdentityFor(chosen.channel),
-  }));
   const calls = [];
   const api = async (endpoint, options = {}) => {
     calls.push({ endpoint, ...options });
@@ -780,190 +587,6 @@ test('the exact manifest bytes and its signature bundle are re-verified immediat
     'signature must be verified before permanent Git tag creation');
 });
 
-test('the host-update CLI checksum list is verified with the channel identity before tagging and before upload', async t => {
-  for (const channel of ['stable', 'insider']) {
-    const { chosen, assets, api, deps, calls, files } = publishFixture(t, channel);
-    for (const name of hostUpdateCliAssets(chosen.version)) assert.ok(files.includes(name), `${name} must be uploaded`);
-    await publishRelease(chosen, assets, api, deps);
-    const cliChecks = calls.flatMap((call, index) =>
-      call.command === 'cosign' && call.args[7].endsWith(hostUpdateCliSumsName(chosen.version)) ? [index] : []);
-    assert.equal(cliChecks.length, 2);
-    for (const index of cliChecks) {
-      assert.match(calls[index].args[2], /SHA256SUMS\.sigstore\.json$/);
-      assert.equal(calls[index].args[4], manifestIssuer);
-      assert.equal(calls[index].args[6], manifestIdentityFor(channel));
-    }
-    assert.ok(cliChecks[0] < calls.findIndex(call => call.endpoint === 'git/refs'));
-    assert.ok(cliChecks[1] > calls.findIndex(call => call.endpoint === 'releases'));
-    assert.ok(cliChecks[1] < calls.findIndex(call => call.command === 'gh'));
-  }
-});
-
-test('the signed infrastructure image list is uploaded and verified before tagging and before upload', async t => {
-  for (const channel of ['stable', 'insider']) {
-    const { chosen, assets, api, deps, calls, files } = publishFixture(t, channel);
-    assert.ok(files.includes(infrastructureImagesName) && files.includes(infrastructureImagesSignatureName));
-    await publishRelease(chosen, assets, api, deps);
-    const checks = calls.flatMap((call, index) =>
-      call.command === 'cosign' && call.args[7].endsWith(infrastructureImagesName) ? [index] : []);
-    assert.equal(checks.length, 2);
-    for (const index of checks) {
-      assert.match(calls[index].args[2], /infrastructure-images\.sigstore\.json$/);
-      assert.equal(calls[index].args[4], manifestIssuer);
-      assert.equal(calls[index].args[6], manifestIdentityFor(channel));
-    }
-    assert.ok(checks[0] < calls.findIndex(call => call.endpoint === 'git/refs'));
-    assert.ok(checks[1] > calls.findIndex(call => call.endpoint === 'releases'));
-    assert.ok(checks[1] < calls.findIndex(call => call.command === 'gh'));
-  }
-  const { chosen, assets, api, deps, calls } = publishFixture(t);
-  writeFileSync(join(assets, infrastructureImagesName), infrastructureImagesDocument(
-    { ...infrastructureIdentity(chosen), sourceCommit: head }, infrastructureRegistry().lock));
-  await assert.rejects(publishRelease(chosen, assets, api, deps), /not bound to this release identity/);
-  assert.ok(!calls.some(call => call.endpoint === 'git/refs'), 'a list for another release must stop before tagging');
-});
-
-test('the signed recovery instructions are uploaded and verified before tagging and before upload', async t => {
-  for (const channel of ['stable', 'insider']) {
-    const { chosen, assets, api, deps, calls, files } = publishFixture(t, channel);
-    assert.ok(files.includes(recoveryInstructionsName) && files.includes(recoveryInstructionsSignatureName));
-    await publishRelease(chosen, assets, api, deps);
-    const checks = calls.flatMap((call, index) =>
-      call.command === 'cosign' && call.args[7].endsWith(recoveryInstructionsName) ? [index] : []);
-    assert.equal(checks.length, 2);
-    for (const index of checks) {
-      assert.match(calls[index].args[2], /offline-recovery-instructions\.sigstore\.json$/);
-      assert.equal(calls[index].args[6], manifestIdentityFor(channel));
-    }
-    assert.ok(checks[0] < calls.findIndex(call => call.endpoint === 'git/refs'));
-    assert.ok(checks[1] > calls.findIndex(call => call.endpoint === 'releases'));
-    assert.ok(checks[1] < calls.findIndex(call => call.command === 'gh'));
-  }
-  const { chosen, assets, api, deps, calls } = publishFixture(t);
-  writeFileSync(join(assets, recoveryInstructionsName), recoveryInstructionsDocument(
-    { ...infrastructureIdentity(chosen), buildId: '999' }));
-  await assert.rejects(publishRelease(chosen, assets, api, deps), /not the exact release-bound instructions/);
-  assert.ok(!calls.some(call => call.endpoint === 'git/refs'), 'instructions for another build must stop before tagging');
-});
-
-test('the signed deployment set is uploaded and verified before tagging and before upload', async t => {
-  for (const channel of ['stable', 'insider']) {
-    const { chosen, assets, api, deps, calls, files } = publishFixture(t, channel);
-    assert.ok(files.includes(deploymentSetName) && files.includes(deploymentSetSignatureName));
-    await publishRelease(chosen, assets, api, deps);
-    const checks = calls.flatMap((call, index) =>
-      call.command === 'cosign' && call.args[7].endsWith(deploymentSetName) ? [index] : []);
-    assert.equal(checks.length, 2);
-    for (const index of checks) {
-      assert.match(calls[index].args[2], /offline-deployment-set\.sigstore\.json$/);
-      assert.equal(calls[index].args[6], manifestIdentityFor(channel));
-    }
-    assert.ok(checks[0] < calls.findIndex(call => call.endpoint === 'git/refs'));
-    assert.ok(checks[1] > calls.findIndex(call => call.endpoint === 'releases'));
-    assert.ok(checks[1] < calls.findIndex(call => call.command === 'gh'));
-  }
-  const { chosen, assets, api, deps, calls } = publishFixture(t);
-  writeFileSync(join(assets, deploymentSetName), deploymentSetFor({ ...infrastructureIdentity(chosen), buildId: '999' }));
-  await assert.rejects(publishRelease(chosen, assets, api, deps), /deployment set/i);
-  assert.ok(!calls.some(call => call.endpoint === 'git/refs'), 'a set for another build must stop before tagging');
-});
-
-test('the signed offline recovery bundle is uploaded and verified before tagging and before upload', async t => {
-  for (const channel of ['stable', 'insider']) {
-    const { chosen, assets, api, deps, calls, files } = publishFixture(t, channel);
-    const bundle = offlineBundleName(chosen.version);
-    assert.equal(bundle, `printfarmer-offline-bundle-v${chosen.version}.tar`);
-    assert.ok(files.includes(bundle) && files.includes(offlineBundleSignatureName(chosen.version)));
-    await publishRelease(chosen, assets, api, deps);
-    const checks = calls.flatMap((call, index) =>
-      call.command === 'cosign' && call.args[7].endsWith(bundle) ? [index] : []);
-    assert.equal(checks.length, 2);
-    for (const index of checks) {
-      assert.equal(calls[index].args[2], join(assets, `${bundle}.sigstore.json`));
-      assert.equal(calls[index].args[4], manifestIssuer);
-      assert.equal(calls[index].args[6], manifestIdentityFor(channel));
-    }
-    assert.ok(checks[0] < calls.findIndex(call => call.endpoint === 'git/refs'));
-    assert.ok(checks[1] > calls.findIndex(call => call.endpoint === 'releases'));
-    assert.ok(checks[1] < calls.findIndex(call => call.command === 'gh'));
-    const upload = calls.find(call => call.command === 'gh');
-    assert.ok(upload.args.includes(join(assets, bundle)), 'the bundle archive must be uploaded');
-  }
-  assert.equal(releaseAssetMaxBytes, 2 * 1024 * 1024 * 1024 - 1);
-  const { chosen, assets, api, deps, calls } = publishFixture(t);
-  writeFileSync(join(assets, offlineBundleName(chosen.version)), 'a different archive');
-  await assert.rejects(publishRelease(chosen, assets, api, deps));
-  assert.ok(!calls.some(call => call.endpoint === 'git/refs'), 'a mismatched bundle must stop before tagging');
-  const empty = publishFixture(t);
-  writeFileSync(join(empty.assets, offlineBundleName(empty.chosen.version)), '');
-  await assert.rejects(publishRelease(empty.chosen, empty.assets, empty.api, empty.deps), /Missing release asset/);
-});
-test('host-update CLI checksum list is canonical and names exactly the supported archives and SBOMs', t => {
-  assert.deepEqual([...hostUpdateCliRuntimes], ['linux-x64', 'linux-arm64', 'win-x64']);
-  assert.throws(() => hostUpdateCliArchiveName('1.2.3', 'osx-arm64'), /Unsupported host-update CLI runtime/);
-  assert.deepEqual(hostUpdateCliAssets('1.2.3'), [
-    'printfarmer-host-update-cli-v1.2.3-linux-x64.tar.gz',
-    'printfarmer-host-update-cli-v1.2.3-linux-arm64.tar.gz',
-    'printfarmer-host-update-cli-v1.2.3-win-x64.tar.gz',
-    'printfarmer-host-update-cli-v1.2.3-linux-x64.spdx.json',
-    'printfarmer-host-update-cli-v1.2.3-linux-arm64.spdx.json',
-    'printfarmer-host-update-cli-v1.2.3-win-x64.spdx.json',
-    'printfarmer-host-update-cli-v1.2.3-SHA256SUMS',
-    'printfarmer-host-update-cli-v1.2.3-SHA256SUMS.sigstore.json',
-  ]);
-  const hash = 'a'.repeat(64);
-  assert.equal(formatSums([{ name: 'b.tar.gz', sha256: hash }, { name: 'a.tar.gz', sha256: hash }]),
-    `${hash}  a.tar.gz\n${hash}  b.tar.gz\n`);
-  assert.throws(() => formatSums([{ name: 'a b', sha256: hash }]), /Invalid checksum entry name/);
-  assert.throws(() => formatSums([{ name: 'a', sha256: 'A'.repeat(64) }]), /Invalid SHA-256/);
-  for (const bad of ['', `${hash}  a`, `${hash} a\n`, `${hash}  ../a\n`, `${hash}  a\n${hash}  a\n`, `${hash}  a\r\n`]) {
-    assert.throws(() => parseSums(bad), /malformed|Duplicate/, JSON.stringify(bad));
-  }
-  const assets = workspace(t);
-  const version = '1.2.3';
-  const write = entries => writeFileSync(join(assets, hostUpdateCliSumsName(version)), formatSums(entries));
-  const entries = hostUpdateCliRuntimes.flatMap(rid => {
-    const name = hostUpdateCliArchiveName(version, rid);
-    const sbom = hostUpdateCliSbomName(version, rid);
-    writeFileSync(join(assets, name), rid);
-    writeFileSync(join(assets, sbom), spdxFixture(rid));
-    return [{ name, sha256: createHash('sha256').update(rid).digest('hex') },
-      { name: sbom, sha256: createHash('sha256').update(spdxFixture(rid)).digest('hex') }];
-  });
-  write(entries);
-  assert.equal(verifyHostUpdateCliSums(assets, version).size, 6);
-  write(entries.filter(entry => !entry.name.endsWith('.spdx.json')));
-  assert.throws(() => verifyHostUpdateCliSums(assets, version), /exactly the supported archives and SBOMs/);
-  write(entries.slice(1));
-  assert.throws(() => verifyHostUpdateCliSums(assets, version), /exactly the supported archives/);
-  write([...entries, { name: 'extra.tar.gz', sha256: hash }]);
-  assert.throws(() => verifyHostUpdateCliSums(assets, version), /exactly the supported archives/);
-  write(entries.map((entry, index) => index === 2 ? { ...entry, sha256: hash } : entry));
-  assert.throws(() => verifyHostUpdateCliSums(assets, version), /hash mismatch/);
-  const sbom = hostUpdateCliSbomName(version, 'win-x64');
-  writeFileSync(join(assets, sbom), '{}');
-  write(entries.map(entry => entry.name === sbom
-    ? { ...entry, sha256: createHash('sha256').update('{}').digest('hex') } : entry));
-  assert.throws(() => verifyHostUpdateCliSums(assets, version), /not an SPDX 2\.x document/);
-  for (const bad of ['not json', '[]', '{"spdxVersion":"SPDX-2.3","SPDXID":"SPDXRef-DOCUMENT","packages":[]}',
-    '{"spdxVersion":"CycloneDX","SPDXID":"SPDXRef-DOCUMENT","packages":[{}]}']) {
-    assert.throws(() => validateHostUpdateCliSbom(bad, sbom), /SBOM/, bad);
-  }
-});
-
-test('host-update CLI packaging refuses a missing launcher or source commit and cleans its stage', t => {
-  const root = workspace(t);
-  const scratch = join(root, 'scratch');
-  mkdirSync(scratch);
-  const run = name => (name === 'tar' ? 'bsdtar 3.7.2' : '');
-  assert.throws(() => packageHostUpdateCli({ ...release, sourceCommit: undefined }, root, join(root, 'out'), { run, scratch }),
-    /source commit/);
-  assert.throws(() => packageHostUpdateCli(release, root, join(root, 'out'), { run, scratch, runtimes: ['linux-x64'] }),
-    /launcher missing for linux-x64/);
-  assert.deepEqual(readdirSync(scratch), []);
-  assert.ok(!existsSync(join(root, 'out', hostUpdateCliSumsName(release.version))));
-});
-
 test('missing, tampered or wrong-identity signing evidence blocks publication before upload', async t => {
   const corruptions = [
     ['missing manifest', (assets) => rmSync(join(assets, 'update-manifest.json'))],
@@ -982,61 +605,6 @@ test('missing, tampered or wrong-identity signing evidence blocks publication be
       const path = join(assets, 'update-manifest.sigstore.json');
       writeFileSync(path, JSON.stringify({ ...JSON.parse(readFileSync(path, 'utf8')),
         identity: manifestIdentity.replace('/PrintFarmer/', '/OtherRepository/') }));
-    }],
-    ['missing CLI checksum bundle', (assets) => rmSync(join(assets, hostUpdateCliSumsBundleName(release.version)))],
-    ['empty CLI checksum bundle', (assets) => writeFileSync(join(assets, hostUpdateCliSumsBundleName(release.version)), '')],
-    ['tampered CLI archive', (assets) => writeFileSync(join(assets, hostUpdateCliArchiveName(release.version, 'linux-x64')), 'evil')],
-    ['missing CLI SBOM', (assets) => rmSync(join(assets, hostUpdateCliSbomName(release.version, 'linux-arm64')))],
-    ['tampered CLI SBOM', (assets) => writeFileSync(join(assets, hostUpdateCliSbomName(release.version, 'linux-x64')),
-      spdxFixture('tampered'))],
-    ['re-hashed CLI checksum list', (assets) => {
-      const archive = hostUpdateCliArchiveName(release.version, 'win-x64');
-      writeFileSync(join(assets, archive), 'evil');
-      const path = join(assets, hostUpdateCliSumsName(release.version));
-      const entries = parseSums(readFileSync(path, 'utf8'));
-      entries.set(archive, createHash('sha256').update('evil').digest('hex'));
-      writeFileSync(path, formatSums([...entries].map(([name, sha256]) => ({ name, sha256 }))));
-    }],
-    ['CLI checksum signed by another identity', (assets) => {
-      const path = join(assets, hostUpdateCliSumsBundleName(release.version));
-      writeFileSync(path, JSON.stringify({ ...JSON.parse(readFileSync(path, 'utf8')),
-        identity: manifestIdentity.replace('@refs/heads/development', '@refs/heads/feature') }));
-    }],
-    ['missing infrastructure list bundle', (assets) => rmSync(join(assets, infrastructureImagesSignatureName))],
-    ['empty infrastructure list bundle', (assets) => writeFileSync(join(assets, infrastructureImagesSignatureName), '')],
-    ['tampered infrastructure list', (assets) => writeFileSync(join(assets, infrastructureImagesName),
-      readFileSync(join(assets, infrastructureImagesName), 'utf8').replace('"linux/arm64": "sha256:2', '"linux/arm64": "sha256:4'))],
-    ['re-signed infrastructure list for another build', (assets) => {
-      const bytes = infrastructureImagesDocument({ ...infrastructureIdentity(release), buildId: '999' },
-        infrastructureRegistry().lock);
-      writeFileSync(join(assets, infrastructureImagesName), bytes);
-      writeFileSync(join(assets, infrastructureImagesSignatureName), JSON.stringify({
-        sha256: createHash('sha256').update(bytes).digest('hex'), issuer: manifestIssuer, identity: manifestIdentity }));
-    }],
-    ['infrastructure list signed by another identity', (assets) => {
-      const path = join(assets, infrastructureImagesSignatureName);
-      writeFileSync(path, JSON.stringify({ ...JSON.parse(readFileSync(path, 'utf8')),
-        identity: manifestIdentity.replace('@refs/heads/development', '@refs/heads/feature') }));
-    }],
-    ['missing recovery instructions bundle', (assets) => rmSync(join(assets, recoveryInstructionsSignatureName))],
-    ['empty recovery instructions bundle', (assets) => writeFileSync(join(assets, recoveryInstructionsSignatureName), '')],
-    ['tampered recovery instructions', (assets) => writeFileSync(join(assets, recoveryInstructionsName),
-      readFileSync(join(assets, recoveryInstructionsName), 'utf8').replace('"rolloutAuthorization": false',
-        '"rolloutAuthorization": true'))],
-    ['recovery instructions signed by another identity', (assets) => {
-      const path = join(assets, recoveryInstructionsSignatureName);
-      writeFileSync(path, JSON.stringify({ ...JSON.parse(readFileSync(path, 'utf8')),
-        identity: manifestIdentity.replace('@refs/heads/development', '@refs/heads/feature') }));
-    }],
-    ['missing deployment set bundle', (assets) => rmSync(join(assets, deploymentSetSignatureName))],
-    ['empty deployment set bundle', (assets) => writeFileSync(join(assets, deploymentSetSignatureName), '')],
-    ['tampered deployment set', (assets) => writeFileSync(join(assets, deploymentSetName),
-      readFileSync(join(assets, deploymentSetName), 'utf8').replace('"rolloutAuthorization": false',
-        '"rolloutAuthorization": true'))],
-    ['deployment set signed by another identity', (assets) => {
-      const path = join(assets, deploymentSetSignatureName);
-      writeFileSync(path, JSON.stringify({ ...JSON.parse(readFileSync(path, 'utf8')),
-        identity: manifestIdentity.replace('@refs/heads/development', '@refs/heads/feature') }));
     }],
   ];
   for (const [name, corrupt] of corruptions) {
@@ -1165,16 +733,6 @@ test('actual workflow connects inputs, pinned source checks, environment, build 
     '${{ steps.publisher.outputs.token }}');
   assert.match(publishSteps.find(step => step.name === 'Bind signature to exact manifest bytes').run,
     /sha256sum --check signed-release\/update-manifest\.sha256/);
-  const cliSign = signSteps.find(step => step.name === 'Sign exact host-update CLI checksum list');
-  assert.ok(signSteps.indexOf(cliSign) > signSteps.findIndex(step => step.name === 'Verify owner dispatch and environment policy'));
-  assert.equal(cliSign.env.SUMS, 'release-assets/printfarmer-host-update-cli-v${{ inputs.version }}-SHA256SUMS');
-  assert.equal(cliSign.env.EXPECTED_IDENTITY, manifestIdentityTemplate);
-  assert.match(cliSign.run, /sha256sum "\$SUMS" > signed-release\/host-update-cli-sums\.sha256/);
-  assert.match(cliSign.run, /cosign sign-blob --yes --bundle "\$BUNDLE" "\$SUMS"/);
-  assert.match(cliSign.run, /cosign verify-blob --bundle "\$BUNDLE" \\\n\s+--certificate-oidc-issuer https:\/\/token\.actions\.githubusercontent\.com \\\n\s+--certificate-identity "\$EXPECTED_IDENTITY" "\$SUMS"/);
-  const bind = publishSteps.find(step => step.name === 'Bind signature to exact manifest bytes');
-  assert.match(bind.run, /sha256sum --check signed-release\/host-update-cli-sums\.sha256\n\s*cp "signed-release\/\$CLI_SUMS_BUNDLE" "release-assets\/\$CLI_SUMS_BUNDLE"/);
-  assert.equal(bind.env.CLI_SUMS_BUNDLE, 'printfarmer-host-update-cli-v${{ inputs.version }}-SHA256SUMS.sigstore.json');
   assert.equal(publishSteps.find(step => step.name === 'Verify owner dispatch immediately before credentials').run,
     'node scripts/ci/publish-release.mjs verify');
   assert.ok(publishSteps.some(step => step.uses?.startsWith('docker/setup-buildx-action@')));
