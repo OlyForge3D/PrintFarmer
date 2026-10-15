@@ -198,6 +198,18 @@ docker compose up -d obico-ml-api
 
 ## Security Considerations
 
+Snapshot downloads performed by PrintFarmer's legacy multipart fallback use
+the shared egress guard. Destinations are checked after DNS resolution and
+connections are pinned to vetted addresses. For HTTPS, the original Host
+header preserves SNI and certificate hostname validation ([.NET transport
+contract](https://learn.microsoft.com/en-us/dotnet/core/extensions/httpclient-sni)).
+Redirects are not followed.
+Loopback, link-local (including metadata services), and other forbidden
+destinations are denied by default; administrator-configured egress exceptions
+still apply. Private LAN addresses remain permitted for printer cameras.
+This is the farm's existing safe-fetch policy, not a public-internet-only
+allowlist. A blocked snapshot fails detection rather than uploading image data.
+
 ✅ **Enabled by default:**
 - Internal network only (no host exposure)
 - Minimal Linux capabilities (`cap_drop: ALL`)

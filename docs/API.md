@@ -639,7 +639,23 @@ DELETE /api/printers/{printerId}/location
 
 **Response:** 204 No Content
 
+## Failure Detection History
+
+`GET /api/failure-detection/history?printerId=<guid>&take=<n>` requires
+printer-group `View` access when a printer is specified; denied access returns
+`404` without revealing incident data. Without `printerId`, only visible
+printers' incidents are returned, and filtering occurs before the result limit.
+Farm administrators retain access to all incidents.
+
 ## Locations API
+
+### Printer Visibility in a Subtree
+
+`GET /api/locations/{locationId}/printers/subtree` returns only printers for
+which the authenticated caller has printer-group `View` access, including
+printers in descendant locations. Restricted printers and their live state
+and job metadata are omitted; a subtree with no visible printers returns an
+empty collection. Farm administrators retain access to all printers.
 
 ### List All Locations (Flat)
 
