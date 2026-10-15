@@ -1287,6 +1287,24 @@ test('documentation-only classification honours the policy carve-outs', () => {
   assert.equal(classifyChangeScope(['docs/API.md', 'src/api/Program.cs']).docsOnly, false);
   assert.equal(classifyChangeScope(['docs/screenshot.png']).highRisk, true);
   assert.equal(classifyChangeScope(['docs/security.html']).highRisk, true);
+  assert.equal(classifyChangeScope(['docs/design/MOCKUPS.HTML']).docsOnly, true);
+  for (const lookalike of [
+    'Docs/mockups.html',
+    'Mobile/docs/mockups.html',
+    'mobile/Docs/mockups.html',
+    'docs-extra/mockups.html',
+    'src/docs/mockups.html',
+  ]) {
+    assert.equal(classifyChangeScope([lookalike]).highRisk, true, lookalike);
+  }
+  for (const paths of [
+    ['mobile/docs/distill/mockups.html', 'docs/security.html'],
+    ['docs/security.html', 'mobile/docs/distill/mockups.html'],
+    ['docs/design/mockups.html', '.github/workflows/ci.yml'],
+    ['.github/workflows/ci.yml', 'docs/design/mockups.html'],
+  ]) {
+    assert.equal(classifyChangeScope(paths).highRisk, true, paths.join(','));
+  }
 });
 
 test('high-risk classification is order-independent for mixed changes', () => {
