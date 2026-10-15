@@ -35,8 +35,9 @@
 ### Fixes
 
 - Align EF Core, Microsoft.Data.Sqlite, and EF health checks on 10.0.12,
-  including the profile parser tool's logging dependency to prevent NuGet
-  downgrade failures during dependency submission (#3357).
+  including coupled logging and dependency injection pins in backend plugins,
+  discovery, shared workers, and the profile parser tool to prevent NuGet
+  downgrades and dependency-submission failures (#3357).
 
 - Honor **OctoPrint/Slicer API → Require API key** for slicer uploads: allow
   anonymous uploads and queue submission when disabled, while preserving
