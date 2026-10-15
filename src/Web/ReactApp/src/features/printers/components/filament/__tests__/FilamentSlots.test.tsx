@@ -240,6 +240,8 @@ describe('FilamentSlots (Option 4)', () => {
 
     it('closes on Escape and returns focus to the slot that opened it', async () => {
       render(<Harness slots={qidiRail} summarySlot={qidiRail[0]} />);
+      fireEvent.click(screen.getByTestId('filament-summary'));
+      expect(screen.getByTestId('gate-d')).toBeVisible();
       fireEvent.click(screen.getByTestId('gate-d'));
 
       fireEvent.keyDown(screen.getByTestId('slot-panel'), { key: 'Escape' });
