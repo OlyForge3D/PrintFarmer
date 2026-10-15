@@ -156,6 +156,7 @@ public sealed class PrintablesImportController(
     /// Starts OAuth2 linking and returns an authorization URL for Printables.
     /// </summary>
     [HttpPost("oauth/connect")]
+    [Authorize(Policy = "ModelWrite")]
     [ProducesResponseType(typeof(PrintablesOAuthConnectResponseDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
     public async Task<IActionResult> ConnectOAuthAsync(CancellationToken ct)
@@ -177,6 +178,7 @@ public sealed class PrintablesImportController(
     /// Handles OAuth2 callback code exchange and stores account-link tokens server-side.
     /// </summary>
     [HttpGet("oauth/callback")]
+    [Authorize(Policy = "ModelWrite")]
     [ProducesResponseType(typeof(PrintablesOAuthStatusDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status502BadGateway)]
@@ -217,6 +219,7 @@ public sealed class PrintablesImportController(
     /// Gets current OAuth2 linkage status for the authenticated user.
     /// </summary>
     [HttpGet("oauth/status")]
+    [Authorize(Policy = "ModelRead")]
     [ProducesResponseType(typeof(PrintablesOAuthStatusDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> OAuthStatusAsync(CancellationToken ct)
     {
@@ -229,6 +232,7 @@ public sealed class PrintablesImportController(
     /// Clears stored Printables OAuth2 linkage for the authenticated user.
     /// </summary>
     [HttpPost("oauth/disconnect")]
+    [Authorize(Policy = "ModelWrite")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
     public async Task<IActionResult> OAuthDisconnectAsync(CancellationToken ct)
@@ -250,6 +254,7 @@ public sealed class PrintablesImportController(
     /// Returns the authenticated user's liked models from Printables.
     /// </summary>
     [HttpGet("liked")]
+    [Authorize(Policy = "ModelRead")]
     [ProducesResponseType(typeof(PrintablesAuthenticatedCursorPageDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
@@ -289,6 +294,7 @@ public sealed class PrintablesImportController(
     /// Returns the authenticated user's Printables download history.
     /// </summary>
     [HttpGet("history")]
+    [Authorize(Policy = "ModelRead")]
     [ProducesResponseType(typeof(PrintablesAuthenticatedCursorPageDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]

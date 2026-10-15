@@ -489,6 +489,7 @@ public class Model3DFilesController(
     /// </summary>
     /// <param name="modelFile">The model file to validate.</param>
     [HttpPost("validate")]
+    [Authorize(Policy = "ModelRead")]
     [ProducesResponseType(typeof(Model3DValidationResultDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public IActionResult ValidateModel(IFormFile modelFile)

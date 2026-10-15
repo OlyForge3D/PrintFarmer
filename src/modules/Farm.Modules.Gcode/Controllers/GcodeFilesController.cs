@@ -58,6 +58,7 @@ public class GcodeFilesController(
     /// <param name="path">Virtual path to the G-code file.</param>
     /// <param name="algorithm">Hash algorithm to use: 'sha256' (default) or 'sha1'.</param>
     [HttpGet("hash")]
+    [Authorize(Policy = "ModelRead")]
     [ProducesResponseType(typeof(GcodeFileHashResponse), 200)]
     [ProducesResponseType(400)]
     [ProducesResponseType(404)]
@@ -133,6 +134,7 @@ public class GcodeFilesController(
     /// <param name="harvestId">Optional filter by harvest operation ID.</param>
     /// <param name="printerId">Optional filter by source printer ID.</param>
     [HttpGet]
+    [Authorize(Policy = "ModelRead")]
     [ProducesResponseType(typeof(GcodeFileListResponse), 200)]
     public async Task<ActionResult<GcodeFileListResponse>> ListAsync(
     [FromQuery] string? path = null,
@@ -179,6 +181,7 @@ public class GcodeFilesController(
     /// <param name="printerId">Optional filter by source printer ID.</param>
     /// <returns>Paginated response containing files with metadata.</returns>
     [HttpGet("query")]
+    [Authorize(Policy = "ModelRead")]
     [ProducesResponseType(typeof(GcodeFileListResponse), 200)]
     [ProducesResponseType(500)]
     public async Task<ActionResult<GcodeFileListResponse>> QueryAsync(
@@ -218,6 +221,7 @@ public class GcodeFilesController(
     /// Lists all G-code folders recursively for building a folder tree structure.
     /// </summary>
     [HttpGet("folders")]
+    [Authorize(Policy = "ModelRead")]
     [ProducesResponseType(typeof(List<GcodeFileEntryDto>), 200)]
     public async Task<ActionResult<List<GcodeFileEntryDto>>> ListAllFoldersAsync()
     {
@@ -613,6 +617,7 @@ public class GcodeFilesController(
     /// </summary>
     [HttpGet("download")]
     [HttpHead("download")]
+    [Authorize(Policy = "ModelRead")]
     [ProducesResponseType(typeof(PhysicalFileResult), 200)]
     [ProducesResponseType(404)]
     public async Task<ActionResult> DownloadAsync([FromQuery] string path)
@@ -647,6 +652,7 @@ public class GcodeFilesController(
     /// <param name="id">GCode file ID</param>
     /// <returns>GCode file</returns>
     [HttpGet("file/{id:guid}")]
+    [Authorize(Policy = "ModelRead")]
     [ProducesResponseType(typeof(FileContentResult), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetGcodeFileAsync(Guid id)
@@ -934,6 +940,7 @@ public class GcodeFilesController(
 
     // ---------------- Settings & Move endpoints ----------------
     [HttpGet("settings")]
+    [Authorize(Policy = "ModelRead")]
     [ProducesResponseType(typeof(GcodeUploadSettingsResponse), 200)]
     public async Task<ActionResult<GcodeUploadSettingsResponse>> GetSettingsAsync()
     {
