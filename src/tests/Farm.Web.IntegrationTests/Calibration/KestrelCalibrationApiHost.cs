@@ -9,8 +9,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.Sqlite;
-using Microsoft.EntityFrameworkCore.Infrastructure;
-using Microsoft.EntityFrameworkCore.Storage;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -207,11 +206,11 @@ internal sealed class KestrelCalibrationApiHost : WebApplicationFactory<Program>
         _ = builder.ConfigureWebHost(webHost => webHost
             .UseKestrel(options => options.Listen(IPAddress.Loopback, ListenPort)));
         _kestrelHost = builder.Build();
+        EnsureDatabaseMigrated(_kestrelHost);
+
         _kestrelHost.Start();
 
         VerifyListening(_kestrelHost);
-        EnsureDatabaseCreated(_kestrelHost);
-
         inMemoryHost.Start();
         return inMemoryHost;
     }
@@ -274,26 +273,16 @@ internal sealed class KestrelCalibrationApiHost : WebApplicationFactory<Program>
             lastFailure);
     }
 
-    private static void EnsureDatabaseCreated(IHost host)
+    private static void EnsureDatabaseMigrated(IHost host)
     {
         using IServiceScope scope = host.Services.CreateScope();
         AppDbContext core = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        _ = core.Database.EnsureCreated();
+        core.Database.Migrate();
 
-        // Both contexts share one database, so EnsureCreated on the slicer context is a no-op once the
-        // core tables exist. Creating the slicer tables explicitly keeps the artifact, worker and job
-        // hops routable, which is exactly what the capability probe reports on.
+        // Both contexts share one database; applying each context's migrations provisions
+        // the schema before either host runs the production startup migration checks.
         SlicerDbContext slicer = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
-        try
-        {
-            ((IInfrastructure<IServiceProvider>)slicer).Instance
-                .GetRequiredService<IRelationalDatabaseCreator>()
-                .CreateTables();
-        }
-        catch (SqliteException)
-        {
-            // The tables already exist because the sibling host created them first.
-        }
+        slicer.Database.Migrate();
     }
 
     /// <summary>
