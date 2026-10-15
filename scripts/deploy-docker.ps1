@@ -185,7 +185,7 @@ $script:BaseImages = @(
     # Ubuntu for OrcaSlicer binaries extraction stage
     "ubuntu:24.04",
     # Node.js for frontend (React build and runtime) - upgraded to v22 for compatibility
-    "node:22-alpine",
+    "node:24-alpine",
     # PostgreSQL database (primary database for PrintFarmer)
     "postgres:16-alpine",
     # Nginx reverse proxy/load balancer (required for microservices architecture)
