@@ -54,42 +54,6 @@ public class ThumbnailGenerationServiceTests
     }
 
     [Fact]
-    public void Constructor_WithNullLogger_DoesNotValidate()
-    {
-        // Act & Assert - Service does not validate null logger in constructor
-        // This is acceptable as it may be validated elsewhere or be optional
-        try
-        {
-            var service = new ThumbnailGenerationService(null!, _configurationMock.Object);
-            // If it doesn't throw, that's the actual behavior
-            Assert.NotNull(service);
-        }
-        catch (Exception)
-        {
-            // If it does throw, that's also acceptable
-            Assert.True(true);
-        }
-    }
-
-    [Fact]
-    public void Constructor_WithNullConfiguration_DoesNotValidate()
-    {
-        // Act & Assert - Service may not validate null configuration in constructor
-        // This is acceptable as it may be validated elsewhere or have defaults
-        try
-        {
-            var service = new ThumbnailGenerationService(_loggerMock.Object, null!);
-            // If it doesn't throw, that's the actual behavior
-            Assert.NotNull(service);
-        }
-        catch (Exception)
-        {
-            // If it does throw (NullReferenceException), that's also acceptable
-            Assert.True(true);
-        }
-    }
-
-    [Fact]
     public void Constructor_CreatesThumbnailDirectory_IfNotExists()
     {
         // Arrange
@@ -204,7 +168,6 @@ public class ThumbnailGenerationServiceTests
                 height);
 
             // Assert - Should complete without exception
-            Assert.True(true);
         }
         finally
         {
@@ -228,7 +191,6 @@ public class ThumbnailGenerationServiceTests
                 outputPath);
 
             // Assert - Should complete without exception
-            Assert.True(true);
         }
         finally
         {
@@ -318,7 +280,6 @@ public class ThumbnailGenerationServiceTests
             catch (OperationCanceledException)
             {
                 // This is also acceptable - cancellation was honored
-                Assert.True(true);
             }
         }
         finally
@@ -343,7 +304,6 @@ public class ThumbnailGenerationServiceTests
                 outputPath);
 
             // Assert - Should complete without exception
-            Assert.True(true);
         }
         finally
         {
