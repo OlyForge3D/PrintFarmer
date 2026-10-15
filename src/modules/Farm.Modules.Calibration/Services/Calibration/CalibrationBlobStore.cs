@@ -344,8 +344,7 @@ public sealed class CalibrationBlobStore(
             ValidateDimensions(info.Width, info.Height);
             return new(contentType, info.Width, info.Height);
         }
-        catch (Exception exception) when (
-            exception is InvalidImageContentException or UnknownImageFormatException)
+        catch (ImageFormatException)
         {
             throw new CalibrationBlobValidationException(
                 "photo_decode_invalid",
@@ -360,7 +359,20 @@ public sealed class CalibrationBlobStore(
         CancellationToken cancellationToken)
     {
         await using Stream source = _fileSystem.OpenRead(sourcePath);
-        using Image image = await Image.LoadAsync(UntrustedDecoderOptions, source, cancellationToken);
+        Image image;
+        try
+        {
+            // Identify only reads headers, so a corrupt pixel stream first surfaces here.
+            image = await Image.LoadAsync(UntrustedDecoderOptions, source, cancellationToken);
+        }
+        catch (ImageFormatException)
+        {
+            throw new CalibrationBlobValidationException(
+                "photo_decode_invalid",
+                "The photo cannot be decoded as a supported image.");
+        }
+
+        using Image decoded = image;
         ValidateDimensions(image.Width, image.Height);
 
         image.Metadata.ExifProfile = null;

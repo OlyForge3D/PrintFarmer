@@ -131,6 +131,50 @@ public sealed class CalibrationBlobStoreIccProfileTests
         _ = defaults.Metadata.IccProfile.Should().NotBeNull();
     }
 
+    [Fact]
+    public async Task PutAsync_WithCorruptPixelDataPastValidHeaders_ThrowsDecodeInvalidAndLeavesNoFiles()
+    {
+        byte[] corrupt = CorruptPngPixelStream(CreateCleanImage("image/png"));
+        // Precondition: the header-only inspection still accepts this upload, so the
+        // failure must come from the full decode in the re-encode step.
+        _ = Image.Identify(CalibrationBlobStore.UntrustedDecoderOptions, corrupt).Width.Should().Be(ImageSize);
+        TestFileSystem fileSystem = new();
+        CalibrationBlobStore store = CreateStore(fileSystem);
+        await using MemoryStream content = new(corrupt);
+
+        CalibrationBlobValidationException exception = await Assert.ThrowsAsync<CalibrationBlobValidationException>(
+            async () => await store.PutAsync(CreateRequest("image/png"), content, CancellationToken.None));
+
+        _ = exception.Code.Should().Be("photo_decode_invalid");
+        _ = exception.InnerException.Should().BeNull();
+        _ = fileSystem.GetFiles(Path.GetTempPath(), "*", SearchOption.AllDirectories)
+            .Should().NotContain(path => path.Contains("calibration-blobs-", StringComparison.Ordinal));
+    }
+
+    private static byte[] CorruptPngPixelStream(byte[] png)
+    {
+        byte[] result = (byte[])png.Clone();
+        int offset = 8;
+        while (offset + 12 <= result.Length)
+        {
+            int length = (int)BinaryPrimitives.ReadUInt32BigEndian(result.AsSpan(offset));
+            if (Encoding.ASCII.GetString(result, offset + 4, 4) == "IDAT")
+            {
+                // Garbage zlib stream with a correct chunk CRC: headers stay intact, but the
+                // pixel stream cannot be inflated.
+                result.AsSpan(offset + 8, length).Fill(0xFF);
+                BinaryPrimitives.WriteUInt32BigEndian(
+                    result.AsSpan(offset + 8 + length),
+                    Crc32.HashToUInt32(result.AsSpan(offset + 4, 4 + length)));
+                return result;
+            }
+
+            offset += 12 + length;
+        }
+
+        throw new InvalidOperationException("Encoded PNG has no IDAT chunk.");
+    }
+
     private static async Task AssertStoredImageHasNoIccAsync(CalibrationBlobStore store, string key)
     {
         await using Stream stored = await store.OpenReadAsync(key, CancellationToken.None);

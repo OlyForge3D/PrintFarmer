@@ -1,4 +1,7 @@
-﻿using System.Security.Cryptography;
+﻿using System.Buffers.Binary;
+using System.IO.Compression;
+using System.IO.Hashing;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Farm.Infrastructure.Repositories.Tags;
@@ -15,6 +18,7 @@ using Microsoft.Extensions.Logging;
 using Moq;
 using Moq.Language.Flow;
 using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.Formats;
 using SixLabors.ImageSharp.PixelFormats;
 using Xunit;
 
@@ -114,6 +118,50 @@ public class ModelUploadStreamingTests : IDisposable
 
         Assert.Contains("dimensions", exception.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Empty(fixture.FileSystem.GetFiles(fixture.StoragePath, "*", SearchOption.AllDirectories));
+    }
+
+    [Fact]
+    public void UntrustedThumbnailDecoderOptions_SkipMetadataAndNeverConvertColorProfiles()
+    {
+        Assert.True(Model3DFileService.UntrustedThumbnailDecoderOptions.SkipMetadata);
+        Assert.Equal(
+            ColorProfileHandling.Preserve,
+            Model3DFileService.UntrustedThumbnailDecoderOptions.ColorProfileHandling);
+    }
+
+    [Fact]
+    public async Task UploadModelAsync_WithCorruptThumbnailPixelStream_RejectsAndCleansArtifacts()
+    {
+        byte[] png = CreatePng(16, 16);
+        int idat = png.AsSpan().IndexOf("IDAT"u8);
+        int length = (int)BinaryPrimitives.ReadUInt32BigEndian(png.AsSpan(idat - 4));
+        png.AsSpan(idat + 4, length).Fill(0xFF);
+        BinaryPrimitives.WriteUInt32BigEndian(png.AsSpan(idat + 4 + length), Crc32.HashToUInt32(png.AsSpan(idat, 4 + length)));
+        UploadFixture fixture = CreateFixture();
+
+        ArgumentException exception = await Assert.ThrowsAsync<ArgumentException>(() => fixture.Service.UploadModelAsync(
+            CreateFormFile("model", "model.stl"),
+            CreateFormFile(png, "thumbnail.png"),
+            CancellationToken.None));
+
+        Assert.Contains("decodable PNG", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(fixture.FileSystem.GetFiles(fixture.StoragePath, "*", SearchOption.AllDirectories));
+    }
+
+    [Fact]
+    public async Task UploadModelAsync_WithClientPngCarryingMalformedIcc_StoresThumbnailUnchanged()
+    {
+        byte[] thumbnailBytes = EmbedPngIccp(CreatePng(16, 16), CreateInvalidIccHeader());
+        UploadFixture fixture = CreateFixture();
+
+        Model3DUploadResultDto result = await fixture.Service.UploadModelAsync(
+            CreateFormFile("model", "model.stl"),
+            CreateFormFile(thumbnailBytes, "thumbnail.png"),
+            CancellationToken.None);
+
+        string thumbnailName = Assert.IsType<string>(Assert.IsType<Model3D>(fixture.AddedModel).ThumbnailFileName);
+        Assert.Equal($"{result.Id}_thumb.png", thumbnailName);
+        Assert.Equal(thumbnailBytes, await fixture.FileSystem.ReadAllBytesAsync(Path.Join(fixture.StoragePath, thumbnailName)));
     }
 
     [Fact]
@@ -466,6 +514,35 @@ public class ModelUploadStreamingTests : IDisposable
         using MemoryStream stream = new();
         image.SaveAsPng(stream);
         return stream.ToArray();
+    }
+
+    private static byte[] CreateInvalidIccHeader()
+    {
+        // Declared size far exceeds the payload: ImageSharp rejects it if it ever parses it.
+        byte[] icc = new byte[128];
+        BinaryPrimitives.WriteUInt32BigEndian(icc, 0x7FFF_FFFF);
+        Encoding.ASCII.GetBytes("acsp").CopyTo(icc, 36);
+        return icc;
+    }
+
+    private static byte[] EmbedPngIccp(byte[] png, byte[] icc)
+    {
+        const int afterIhdr = 8 + 4 + 4 + 13 + 4;
+        using MemoryStream chunkData = new();
+        chunkData.Write(Encoding.ASCII.GetBytes("icc\0"));
+        chunkData.WriteByte(0);
+        using (ZLibStream zlib = new(chunkData, CompressionLevel.Optimal, leaveOpen: true))
+        {
+            zlib.Write(icc);
+        }
+
+        byte[] type = Encoding.ASCII.GetBytes("iCCP");
+        byte[] data = chunkData.ToArray();
+        byte[] header = new byte[4];
+        byte[] crc = new byte[4];
+        BinaryPrimitives.WriteUInt32BigEndian(header, (uint)data.Length);
+        BinaryPrimitives.WriteUInt32BigEndian(crc, Crc32.HashToUInt32([.. type, .. data]));
+        return [.. png.AsSpan(0, afterIhdr), .. header, .. type, .. data, .. crc, .. png.AsSpan(afterIhdr)];
     }
 
     private sealed record UploadFixture(
