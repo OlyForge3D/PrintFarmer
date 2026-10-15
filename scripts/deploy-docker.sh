@@ -1577,7 +1577,7 @@ pull_base_images() {
     print_info "Pulling essential images for PrintFarmer core services:"
     print_info "  - .NET SDK $DOTNET_MAJOR_VERSION (multi-stage builds during deployment)"
     print_info "  - .NET ASP.NET $DOTNET_MAJOR_VERSION (API runtime)"
-    print_info "  - Node.js 22 Alpine (React frontend)"
+    print_info "  - Node.js 24 Alpine (React frontend)"
     print_info "  - PostgreSQL 16 Alpine (database)"
     print_info "  - Nginx Alpine (reverse proxy/load balancer for microservices)"
     print_info ""
