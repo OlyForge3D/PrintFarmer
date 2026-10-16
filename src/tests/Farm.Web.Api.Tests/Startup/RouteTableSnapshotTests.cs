@@ -1,12 +1,16 @@
 ﻿using Farm.Infrastructure.Authorization;
 using Farm.Modules.Devices.Filters;
+using Farm.Slicer.Module.Api.Filters;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Authorization.Infrastructure;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc.Abstractions;
 using Microsoft.AspNetCore.Mvc.Controllers;
+using Microsoft.AspNetCore.Mvc.Filters;
 using Microsoft.AspNetCore.Mvc.Infrastructure;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
+using SlicerRequirePermissionAttribute = Farm.Slicer.Module.Api.Filters.RequirePermissionAttribute;
 
 namespace Farm.Web.Api.Tests.Startup;
 
@@ -30,8 +34,20 @@ namespace Farm.Web.Api.Tests.Startup;
 /// <para>
 /// This intentionally covers controller-action endpoints only. Minimal APIs (including health,
 /// liveness, and network-discovery mappings) and SignalR hub endpoints are outside this snapshot.
-/// Authorization implemented by action filters or handler bodies is also outside the declared
-/// endpoint metadata view.
+/// </para>
+/// <para>
+/// Each line records two independent authorization views. The first bracket is declared endpoint
+/// metadata only: <see cref="IAllowAnonymous"/>, <see cref="IAuthorizeData"/>, and
+/// <see cref="IPermissionMetadata"/>, falling back to the configured fallback policy's requirement
+/// types. The optional second bracket (<c>[filter-auth=...]</c>) is projected from the action's
+/// runtime MVC filter pipeline (<see cref="ActionDescriptor.FilterDescriptors"/>, without
+/// re-parsing attributes): every <see cref="IAuthorizationFilter"/> /
+/// <see cref="IAsyncAuthorizationFilter"/> (for example the OctoPrint API-key filter), plus the
+/// known authorization action filters in the slicer module (filter-based
+/// <c>RequirePermissionAttribute</c> and the slicer API-key filters). It is emitted even when the
+/// route is anonymous at the endpoint-metadata level. Not observed: authorization performed by other
+/// action filters, filter factories, middleware, or handler bodies, and resolved policy
+/// requirements behind named policies.
 /// </para>
 /// <para>
 /// Renaming a controller/action or intentionally changing a route requires regenerating the
@@ -155,6 +171,94 @@ public sealed class RouteTableSnapshotTests
     }
 
     [Fact]
+    public async Task ControllerActionRouteTable_ReportsOctoPrintApiKeyFilterOnPublicActions()
+    {
+        using CustomWebApplicationFactory factory = new();
+
+        string[] actual = await BuildRouteTableAsync(
+            factory.Services.GetRequiredService<EndpointDataSource>(),
+            factory.Services.GetRequiredService<IAuthorizationPolicyProvider>());
+
+        const string octoPrintSuffix =
+            "[auth=anonymous:AllowAnonymousAttribute] [filter-auth=octoprint-api-key:requireValidKeyForAnonymous=false]";
+        _ = actual.Should().ContainSingle(line =>
+                line.StartsWith("GET /api/version -> ", StringComparison.Ordinal) &&
+                line.Contains("OctoPrintCompatController.GetVersion", StringComparison.Ordinal))
+            .Which.Should().EndWith(octoPrintSuffix);
+        _ = actual.Should().ContainSingle(line =>
+                line.StartsWith("GET /api/server -> ", StringComparison.Ordinal) &&
+                line.Contains("OctoPrintCompatController.GetServer", StringComparison.Ordinal))
+            .Which.Should().EndWith(octoPrintSuffix);
+    }
+
+    [Theory]
+    [InlineData("GET /api/file-consistency/audits/history -> ")]
+    [InlineData("GET /api/file-consistency/gcode/{gcodeId}/health -> ")]
+    [InlineData("GET /api/file-consistency/health/summary -> ")]
+    [InlineData("GET /api/file-consistency/issues -> ")]
+    [InlineData("GET /api/file-consistency/model3d/{modelId}/health -> ")]
+    public async Task ControllerActionRouteTable_ReportsSlicerFilterPermissionOnFileConsistencyRoutes(string routePrefix)
+    {
+        using CustomWebApplicationFactory factory = new();
+
+        string[] actual = await BuildRouteTableAsync(
+            factory.Services.GetRequiredService<EndpointDataSource>(),
+            factory.Services.GetRequiredService<IAuthorizationPolicyProvider>());
+
+        _ = actual.Should().ContainSingle(line =>
+                line.StartsWith(routePrefix, StringComparison.Ordinal) &&
+                line.Contains("FileConsistencyController.", StringComparison.Ordinal))
+            .Which.Should().EndWith(" [filter-auth=permission=slicer_engines:admin]");
+    }
+
+    [Fact]
+    public void BuildFilterAuthorization_ProjectsAuthorizationFiltersCanonically()
+    {
+        FilterDescriptor[] descriptors =
+        [
+            new(new RequireSlicerServiceApiKeyAttribute(), FilterScope.Action),
+            new(new NonAuthorizationActionFilter(), FilterScope.Global),
+            new(new SlicerRequirePermissionAttribute("slicer_engines:admin"), FilterScope.Controller),
+            new(new OctoPrintApiKeyAttribute { RequireValidKeyForAnonymous = true }, FilterScope.Action),
+            new(new RequireSlicerApiKeyAttribute(), FilterScope.Action),
+            new(new UnknownAuthorizationFilter(), FilterScope.Global),
+        ];
+
+        string projected = BuildFilterAuthorization(descriptors);
+
+        _ = projected.Should().Be(
+            "filter-auth=" +
+            $"authorization-filter={typeof(UnknownAuthorizationFilter).FullName}|" +
+            "octoprint-api-key:requireValidKeyForAnonymous=true|" +
+            "permission=slicer_engines:admin|" +
+            "slicer-api-key|" +
+            "slicer-service-api-key");
+        _ = BuildFilterAuthorization(descriptors.Reverse()).Should().Be(
+            projected,
+            "the projection is canonical and independent of filter registration order");
+    }
+
+    [Fact]
+    public void BuildFilterAuthorization_ChangesWhenAuthorizationFilterIsRemovedOrReconfigured()
+    {
+        FilterDescriptor octoPrint = new(new OctoPrintApiKeyAttribute(), FilterScope.Action);
+        FilterDescriptor permission = new(
+            new SlicerRequirePermissionAttribute("slicer_engines:admin"), FilterScope.Controller);
+        FilterDescriptor nonAuthorization = new(new NonAuthorizationActionFilter(), FilterScope.Global);
+
+        _ = BuildFilterAuthorization([nonAuthorization]).Should().BeEmpty(
+            "ordinary action filters are not authorization and must not be reported");
+        _ = BuildFilterAuthorization([octoPrint, nonAuthorization]).Should().NotBe(
+            BuildFilterAuthorization([nonAuthorization]));
+        _ = BuildFilterAuthorization([permission]).Should().NotBe(
+            BuildFilterAuthorization(
+                [new FilterDescriptor(new SlicerRequirePermissionAttribute("slicer_engines:read"), FilterScope.Controller)]));
+        _ = BuildFilterAuthorization([octoPrint]).Should().NotBe(
+            BuildFilterAuthorization(
+                [new FilterDescriptor(new OctoPrintApiKeyAttribute { RequireValidKeyForAnonymous = true }, FilterScope.Action)]));
+    }
+
+    [Fact]
     public void AssertSnapshotMatches_ReportsDeepDifferenceAndLengthMismatch()
     {
         string[] expected = Enumerable.Range(0, 881)
@@ -181,9 +285,9 @@ public sealed class RouteTableSnapshotTests
     /// <summary>
     /// Builds the sorted, checked-in-snapshot line format: one line per runtime controller
     /// endpoint, each listing every HTTP verb it accepts, its attribute-route template,
-    /// declared endpoint authorization metadata, and its <c>Assembly::Controller.Action</c>
-    /// identity. This does not observe authorization implemented by action filters or handler
-    /// bodies.
+    /// declared endpoint authorization metadata, its <c>Assembly::Controller.Action</c>
+    /// identity, and (when present) its filter-based authorization projected by
+    /// <see cref="BuildFilterAuthorization"/>. Handler-body authorization is not observed.
     /// The assembly qualifier deliberately makes
     /// two identically-named controllers in different assemblies produce distinct lines (see
     /// class remarks); no <c>Distinct()</c> is applied afterward, so a genuine duplicate route
@@ -221,7 +325,10 @@ public sealed class RouteTableSnapshotTests
                 string assemblyName = action.ControllerTypeInfo.Assembly.GetName().Name ?? "?";
                 string identity = $"{assemblyName}::{action.ControllerTypeInfo.FullName}.{action.MethodInfo.Name}";
                 string authorization = await BuildAuthorizationAsync(endpoint.Metadata, policyProvider);
-                return $"{methods} /{template} -> {identity} [{authorization}]";
+                string filterAuthorization = BuildFilterAuthorization(action.FilterDescriptors);
+                return filterAuthorization.Length == 0
+                    ? $"{methods} /{template} -> {identity} [{authorization}]"
+                    : $"{methods} /{template} -> {identity} [{authorization}] [{filterAuthorization}]";
             })
             .ToArray();
 
@@ -229,6 +336,40 @@ public sealed class RouteTableSnapshotTests
             .OrderBy(line => line, StringComparer.Ordinal)
             .ToArray();
     }
+
+    /// <summary>
+    /// Projects the runtime MVC filter pipeline of an action (its
+    /// <see cref="ActionDescriptor.FilterDescriptors"/>, i.e. the filter instances MVC
+    /// will actually execute, including inherited controller-level and global filters) into a
+    /// canonical, order-independent authorization annotation. Known authorization action filters
+    /// are rendered with their configuration; any other <see cref="IAuthorizationFilter"/> or
+    /// <see cref="IAsyncAuthorizationFilter"/> is rendered by type name so a newly introduced
+    /// authorization filter surfaces as a snapshot diff instead of being silently ignored.
+    /// Returns an empty string when the action has no authorization filters. This is computed
+    /// independently of the endpoint-metadata view, so it is reported even for anonymous routes.
+    /// </summary>
+    private static string BuildFilterAuthorization(IEnumerable<FilterDescriptor> filterDescriptors)
+    {
+        string[] filters = filterDescriptors
+            .Select(descriptor => DescribeAuthorizationFilter(descriptor.Filter))
+            .OfType<string>()
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(filter => filter, StringComparer.Ordinal)
+            .ToArray();
+
+        return filters.Length == 0 ? string.Empty : $"filter-auth={string.Join("|", filters)}";
+    }
+
+    private static string? DescribeAuthorizationFilter(IFilterMetadata filter) => filter switch
+    {
+        OctoPrintApiKeyAttribute octoPrint =>
+            $"octoprint-api-key:requireValidKeyForAnonymous={(octoPrint.RequireValidKeyForAnonymous ? "true" : "false")}",
+        SlicerRequirePermissionAttribute slicerPermission => $"permission={slicerPermission.Permission}",
+        RequireSlicerApiKeyAttribute => "slicer-api-key",
+        RequireSlicerServiceApiKeyAttribute => "slicer-service-api-key",
+        IAuthorizationFilter or IAsyncAuthorizationFilter => $"authorization-filter={filter.GetType().FullName}",
+        _ => null
+    };
 
     private static async Task<string> BuildAuthorizationAsync(
         EndpointMetadataCollection metadata,
@@ -257,8 +398,6 @@ public sealed class RouteTableSnapshotTests
             .Concat(
                 metadata
                     .GetOrderedMetadata<IPermissionMetadata>()
-                    // Slicer filter-based RequirePermissionAttribute is intentionally not
-                    // IPermissionMetadata; track that observability gap in follow-up #2818.
                     .Select(permission => permission is IAuthorizationRequirementData data &&
                         data.GetRequirements().Any()
                         ? $"permission={permission.Permission}"
@@ -312,5 +451,23 @@ public sealed class RouteTableSnapshotTests
             "the controller-action route table and declared endpoint authorization metadata must not change; " +
             "confirm an authorization annotation change is intended before regenerating " +
             "Startup/RouteTableSnapshot.txt");
+    }
+
+    private sealed class NonAuthorizationActionFilter : IActionFilter
+    {
+        public void OnActionExecuting(ActionExecutingContext context)
+        {
+        }
+
+        public void OnActionExecuted(ActionExecutedContext context)
+        {
+        }
+    }
+
+    private sealed class UnknownAuthorizationFilter : IAuthorizationFilter
+    {
+        public void OnAuthorization(AuthorizationFilterContext context)
+        {
+        }
     }
 }
