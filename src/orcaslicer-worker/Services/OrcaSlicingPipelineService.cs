@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
@@ -2314,48 +2314,48 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         // Block-scoped so the handle is released before the fallback logic, matching ReadAllLinesAsync.
         using (StreamReader reader = new StreamReader(gcodeFilePath, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, fileOptions))
         {
-        while (await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false) is { } line)
-        {
-            if (line.StartsWith("G1 Z", StringComparison.Ordinal) || line.StartsWith("G0 Z", StringComparison.Ordinal))
+            while (await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false) is { } line)
             {
-                zMoveLineCount++;
-            }
-
-            Match tm = printTimeRegex.Match(line);
-            if (tm.Success)
-            {
-                // Multiply in double space (not int) before assigning to the double PrintTimeSeconds field,
-                // so an unexpectedly large parsed hour/minute value cannot silently overflow as int arithmetic.
-                metadata.PrintTimeSeconds = ((double)int.Parse(tm.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture) * 3600) + ((double)int.Parse(tm.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture) * 60);
-            }
-            else
-            {
-                Match ts = printTimeSecondsRegex.Match(line);
-                if (ts.Success)
+                if (line.StartsWith("G1 Z", StringComparison.Ordinal) || line.StartsWith("G0 Z", StringComparison.Ordinal))
                 {
-                    metadata.PrintTimeSeconds = int.Parse(ts.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+                    zMoveLineCount++;
+                }
+
+                Match tm = printTimeRegex.Match(line);
+                if (tm.Success)
+                {
+                    // Multiply in double space (not int) before assigning to the double PrintTimeSeconds field,
+                    // so an unexpectedly large parsed hour/minute value cannot silently overflow as int arithmetic.
+                    metadata.PrintTimeSeconds = ((double)int.Parse(tm.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture) * 3600) + ((double)int.Parse(tm.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture) * 60);
+                }
+                else
+                {
+                    Match ts = printTimeSecondsRegex.Match(line);
+                    if (ts.Success)
+                    {
+                        metadata.PrintTimeSeconds = int.Parse(ts.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+                    }
+                }
+
+                Match fm = filamentRegex.Match(line);
+                if (fm.Success)
+                {
+                    double amount = double.Parse(fm.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+                    metadata.FilamentUsageGrams = line.Contains("mm", StringComparison.Ordinal) ? amount * 0.0025 : amount;
+                }
+
+                Match lc = layerRegex.Match(line);
+                if (lc.Success)
+                {
+                    metadata.LayerCount = int.Parse(lc.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+                }
+
+                Match lcm = layerCommentRegex.Match(line);
+                if (lcm.Success)
+                {
+                    maxLayer = Math.Max(maxLayer, int.Parse(lcm.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture));
                 }
             }
-
-            Match fm = filamentRegex.Match(line);
-            if (fm.Success)
-            {
-                double amount = double.Parse(fm.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
-                metadata.FilamentUsageGrams = line.Contains("mm", StringComparison.Ordinal) ? amount * 0.0025 : amount;
-            }
-
-            Match lc = layerRegex.Match(line);
-            if (lc.Success)
-            {
-                metadata.LayerCount = int.Parse(lc.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
-            }
-
-            Match lcm = layerCommentRegex.Match(line);
-            if (lcm.Success)
-            {
-                maxLayer = Math.Max(maxLayer, int.Parse(lcm.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture));
-            }
-        }
         }
 
         if (metadata.LayerCount == 0 && maxLayer > 0)
