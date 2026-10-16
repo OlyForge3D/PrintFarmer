@@ -53,6 +53,9 @@ public sealed class GcodeMetadataStreamingEquivalenceTests : IDisposable
 
         await AssertEquivalentAsync(withoutBom);
         await AssertEquivalentAsync(withBom);
+        await AssertEquivalentAsync(WriteFile($"{name}.utf16le.gcode", content, new UnicodeEncoding(bigEndian: false, byteOrderMark: true)));
+        await AssertEquivalentAsync(WriteFile($"{name}.utf16be.gcode", content, new UnicodeEncoding(bigEndian: true, byteOrderMark: true)));
+        await AssertEquivalentAsync(WriteFile($"{name}.utf32le.gcode", content, new UTF32Encoding(bigEndian: false, byteOrderMark: true)));
     }
 
     [Fact]
@@ -160,11 +163,11 @@ public sealed class GcodeMetadataStreamingEquivalenceTests : IDisposable
         double printTimeSeconds = 0;
         double filamentUsageGrams = 0;
         int layerCount = 0;
-        Regex printTimeRegex = new Regex(@";\s*estimated printing time.*?(\d+)h\s*(\d+)m", RegexOptions.IgnoreCase, TimeSpan.FromSeconds(5));
-        Regex printTimeSecondsRegex = new Regex(@";\s*estimated printing time.*?(\d+)s", RegexOptions.IgnoreCase, TimeSpan.FromSeconds(5));
-        Regex filamentRegex = new Regex(@";\s*filament used.*?(\d+\.?\d*)(?:mm|g)", RegexOptions.IgnoreCase, TimeSpan.FromSeconds(5));
-        Regex layerRegex = new Regex(@";\s*layer_count\s*=\s*(\d+)", RegexOptions.IgnoreCase, TimeSpan.FromSeconds(5));
-        Regex layerCommentRegex = new Regex(@";\s*LAYER:(\d+)", RegexOptions.IgnoreCase, TimeSpan.FromSeconds(5));
+        Regex printTimeRegex = new Regex(@";\s*estimated printing time.*?(\d+)h\s*(\d+)m", RegexOptions.IgnoreCase);
+        Regex printTimeSecondsRegex = new Regex(@";\s*estimated printing time.*?(\d+)s", RegexOptions.IgnoreCase);
+        Regex filamentRegex = new Regex(@";\s*filament used.*?(\d+\.?\d*)(?:mm|g)", RegexOptions.IgnoreCase);
+        Regex layerRegex = new Regex(@";\s*layer_count\s*=\s*(\d+)", RegexOptions.IgnoreCase);
+        Regex layerCommentRegex = new Regex(@";\s*LAYER:(\d+)", RegexOptions.IgnoreCase);
         int maxLayer = 0;
         foreach (string line in lines)
         {

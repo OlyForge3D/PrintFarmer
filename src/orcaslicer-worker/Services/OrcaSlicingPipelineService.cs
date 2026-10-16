@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
@@ -2310,7 +2310,10 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
             Share = FileShare.Read,
             Options = FileOptions.Asynchronous | FileOptions.SequentialScan,
         };
-        using StreamReader reader = new StreamReader(gcodeFilePath, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, fileOptions);
+
+        // Block-scoped so the handle is released before the fallback logic, matching ReadAllLinesAsync.
+        using (StreamReader reader = new StreamReader(gcodeFilePath, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, fileOptions))
+        {
         while (await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false) is { } line)
         {
             if (line.StartsWith("G1 Z", StringComparison.Ordinal) || line.StartsWith("G0 Z", StringComparison.Ordinal))
@@ -2352,6 +2355,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
             {
                 maxLayer = Math.Max(maxLayer, int.Parse(lcm.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture));
             }
+        }
         }
 
         if (metadata.LayerCount == 0 && maxLayer > 0)
