@@ -5199,8 +5199,14 @@ public class PrintersService(
         }
     }
 
+    private const int MaxMmuGateCount = 16;
+
     /// <inheritdoc/>
-    public async Task<CommandResult> EnsureMmuToolheadsAsync(Guid id, CancellationToken ct)
+    public Task<CommandResult> EnsureMmuToolheadsAsync(Guid id, CancellationToken ct) =>
+        EnsureMmuToolheadsAsync(id, 0, ct);
+
+    /// <inheritdoc/>
+    public async Task<CommandResult> EnsureMmuToolheadsAsync(Guid id, int minGateCount, CancellationToken ct)
     {
         Printer? p = await _unitOfWork.Printers
             .FindByIdWithToolheadsAsync(id, ct)
@@ -5220,7 +5226,7 @@ public class PrintersService(
         for (int attempt = 1; attempt <= maxAttempts; attempt++)
         {
             int existingGates = p.Toolheads.Count(t => t.ToolheadType == ToolheadType.MmuGate);
-            int targetGateCount = Math.Max(4, existingGates);
+            int targetGateCount = Math.Max(Math.Max(4, existingGates), Math.Min(minGateCount, MaxMmuGateCount));
             List<Toolhead> gates = await CreateMmuVirtualToolheadsAsync(p, targetGateCount, ct).ConfigureAwait(false);
             if (gates.Count == 0)
             {

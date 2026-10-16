@@ -705,7 +705,14 @@ public interface IPrintersService
     Task<CommandResult> EnsureMmuToolheadsAsync(Guid id, CancellationToken ct);
 
     /// <summary>
-    /// Runs <see cref="EnsureMmuToolheadsAsync"/> for every multi-material printer so persisted
+    /// Like <see cref="EnsureMmuToolheadsAsync(Guid, CancellationToken)"/> but grows the persisted
+    /// MMU gate rows to at least <paramref name="minGateCount"/> (capped at 16) so a live-reported
+    /// port count above the default 4 is persisted (issue #3390). Additive and idempotent.
+    /// </summary>
+    Task<CommandResult> EnsureMmuToolheadsAsync(Guid id, int minGateCount, CancellationToken ct);
+
+    /// <summary>
+    /// Runs <see cref="EnsureMmuToolheadsAsync(Guid, CancellationToken)"/> for every multi-material printer so persisted
     /// MMU gate rows that are missing (e.g. a legacy AD5X with only Gate 1-3) are repaired
     /// (issue #3323). Idempotent and safe to race with explicit ensure requests; a failure on
     /// one printer is logged and does not stop the rest. Intended to run in a dedicated DI

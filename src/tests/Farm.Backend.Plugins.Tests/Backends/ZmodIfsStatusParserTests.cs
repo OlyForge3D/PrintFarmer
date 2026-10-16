@@ -34,6 +34,48 @@ public class ZmodIfsStatusParserTests
         """;
 
     [Fact]
+    public void TryGetStableZmodGateCount_FiresOnceAfterStableLiveReading()
+    {
+        var state = new PrinterState();
+        Apply(state, RigFrame);
+
+        state.TryGetStableZmodGateCount(out _).Should().BeFalse();
+        state.TryGetStableZmodGateCount(out _).Should().BeFalse();
+        state.TryGetStableZmodGateCount(out int count).Should().BeTrue();
+        count.Should().Be(4);
+        state.TryGetStableZmodGateCount(out _).Should().BeFalse();
+
+        state.ResetMmuState();
+        Apply(state, RigFrame);
+        state.TryGetStableZmodGateCount(out _).Should().BeFalse();
+    }
+
+    [Fact]
+    public void TryGetStableZmodGateCount_ChangingCountRestartsDebounce()
+    {
+        var state = new PrinterState();
+        string sixPorts = """{"zmod_ifs":{"available":true,"Ports":[true,false,false,true,false,false],"Chan":1}}""";
+        Apply(state, RigFrame);
+        state.TryGetStableZmodGateCount(out _).Should().BeFalse();
+        state.TryGetStableZmodGateCount(out _).Should().BeFalse();
+        Apply(state, sixPorts);
+        state.TryGetStableZmodGateCount(out _).Should().BeFalse();
+        state.TryGetStableZmodGateCount(out _).Should().BeFalse();
+        state.TryGetStableZmodGateCount(out int count).Should().BeTrue();
+        count.Should().Be(6);
+    }
+
+    [Fact]
+    public void TryGetStableZmodGateCount_NeverFiresWithoutLiveReport()
+    {
+        var state = new PrinterState();
+        for (int i = 0; i < 10; i++)
+        {
+            state.TryGetStableZmodGateCount(out _).Should().BeFalse();
+        }
+    }
+
+    [Fact]
     public void Apply_RigFrame_PopulatesFourLiveGatesWithActiveChannel()
     {
         var state = new PrinterState();

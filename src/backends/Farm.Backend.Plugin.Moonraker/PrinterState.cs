@@ -285,6 +285,60 @@ internal sealed class PrinterState
     /// <summary>Last reported <c>zmod_color.channel</c> (1-based active channel, -1 = unparseable); null until reported.</summary>
     public int? ZmodColorChannel { get; set; }
 
+    /// <summary>Consecutive status frames that reported <see cref="ZmodGrowthCandidateCount"/> live gates.</summary>
+    private int _zmodGrowthStableFrames;
+
+    /// <summary>Live gate count currently being debounced for persisted-row growth (issue #3390).</summary>
+    public int ZmodGrowthCandidateCount { get; private set; }
+
+    /// <summary>True once persisted MMU gate growth was attempted for the current connection.</summary>
+    public bool ZmodGrowthAttempted { get; private set; }
+
+    /// <summary>Frames the same live gate count must be reported before persisted rows are grown.</summary>
+    public const int ZmodGrowthStableFrameThreshold = 3;
+
+    /// <summary>
+    /// Debounces the live-reported ZMOD gate count. Returns true exactly once per connection, when the
+    /// same live-reported (not defaulted) count has been seen for <see cref="ZmodGrowthStableFrameThreshold"/>
+    /// consecutive frames. The count is capped at 16.
+    /// </summary>
+    public bool TryGetStableZmodGateCount(out int gateCount)
+    {
+        gateCount = 0;
+        if (ZmodGrowthAttempted)
+        {
+            return false;
+        }
+
+        int ports = ZmodIfsPorts?.Length ?? 0;
+        int live = Math.Min(ports > 0 ? ports : ZmodSlotCount, 16);
+        if (live <= 0)
+        {
+            ZmodGrowthCandidateCount = 0;
+            _zmodGrowthStableFrames = 0;
+            return false;
+        }
+
+        if (live != ZmodGrowthCandidateCount)
+        {
+            ZmodGrowthCandidateCount = live;
+            _zmodGrowthStableFrames = 1;
+        }
+        else
+        {
+            _zmodGrowthStableFrames++;
+        }
+
+        if (_zmodGrowthStableFrames < ZmodGrowthStableFrameThreshold)
+        {
+            return false;
+        }
+
+        ZmodGrowthAttempted = true;
+        gateCount = live;
+        return true;
+    }
+
     /// <summary>Highest slot count reported by <c>zmod_color.slots</c>.</summary>
     public int ZmodSlotCount { get; set; }
 
@@ -415,6 +469,9 @@ internal sealed class PrinterState
         ZmodColorChannel = null;
         ZmodSlotCount = 0;
         ZmodSlotHasFilament = null;
+        ZmodGrowthCandidateCount = 0;
+        ZmodGrowthAttempted = false;
+        _zmodGrowthStableFrames = 0;
 
         MmuDirty = true;
         _cachedMmuStatus = null;
