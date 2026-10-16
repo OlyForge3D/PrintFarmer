@@ -149,6 +149,10 @@ describe('service worker offline shell cache (#3368)', () => {
     '/ca.cer',
     '/health',
     '/healthz',
+    '/livez',
+    '/metrics',
+    '/openapi/v1.json',
+    '/swagger/index.html',
     '/slicer/healthz',
     '/grafana/d/abc',
     '/jaeger/search',
@@ -167,6 +171,33 @@ describe('service worker offline shell cache (#3368)', () => {
     expect(sw.fetchSpy).not.toHaveBeenCalled();
     expect(await sw.cachedShell()).toBe(SHELL_HTML);
   });
+
+  it('does not intercept an absolute cross-origin navigation', async () => {
+    const sw = await installedWorker();
+    sw.setFetch(async (req) => html('<h1>elsewhere</h1>', { url: req.url }));
+
+    const res = await sw.navigate('https://idp.example/printers');
+
+    expect(res).toBeUndefined();
+    expect(sw.fetchSpy).not.toHaveBeenCalled();
+    expect(await sw.cachedShell()).toBe(SHELL_HTML);
+  });
+
+  it.each(['/health-dashboard', '/licenses-report', '/metrics-overview', '/apis', '/livez2'])(
+    'keeps the same-origin SPA route %s intercepted despite sharing a reserved prefix',
+    async (path) => {
+      const sw = await installedWorker();
+      const updated = `<!doctype html><div id="root" data-route="${path}"></div>`;
+      sw.setFetch(async (req) => html(updated, { url: req.url }));
+
+      expect(await (await sw.navigate(path))!.text()).toBe(updated);
+      expect(sw.fetchSpy).toHaveBeenCalledTimes(1);
+      expect(await sw.cachedShell()).toBe(updated);
+
+      sw.setFetch(async () => { throw new TypeError('Failed to fetch'); });
+      expect(await (await sw.navigate(path))!.text()).toBe(updated);
+    },
+  );
 
   it('still treats SPA routes that share a reserved prefix as SPA navigations', async () => {
     const sw = await installedWorker();

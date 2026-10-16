@@ -20,8 +20,9 @@ const CORE = [
   '/printfarmer-logo.svg'
 ];
 
-// Paths served by nginx/the API rather than the React router. Matched on whole
-// path segments so SPA routes such as `/licenses-report` are not caught.
+// Paths served by nginx (deploy/nginx/*) or the monolith API (src/api/Program.cs)
+// rather than the React router. Matched on whole path segments so SPA routes
+// such as `/health-dashboard` are not caught. Keep in sync with both.
 const NON_SPA_PREFIXES = [
   '/api',
   '/hubs',
@@ -29,6 +30,10 @@ const NON_SPA_PREFIXES = [
   '/licenses',
   '/health',
   '/healthz',
+  '/livez',
+  '/metrics',
+  '/openapi',
+  '/swagger',
   '/slicer/healthz',
   '/grafana',
   '/jaeger'
