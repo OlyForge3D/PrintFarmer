@@ -1,0 +1,10 @@
+{
+  "machine": "Jeffs-MacBook-M4Max",
+  "capabilities": ["xcode"],
+  "missing": [],
+  "maxConcurrent": {
+    "xcode": 1,
+    "other": 2
+  },
+  "lastUpdated": "2026-10-16T17:36:37Z"
+}
