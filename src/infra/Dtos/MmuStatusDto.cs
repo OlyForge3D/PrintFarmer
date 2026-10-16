@@ -2,7 +2,7 @@
 
 /// <summary>
 /// Represents the status of a Multi-Material Unit (MMU/ERCF/AMS/Qidibox/AFC) or U1 physical lane set attached to a printer.
-/// Supports Happy Hare MMU, Qidibox filament box, AFC (BoxTurtle/NightOwl/QuattroBox), and Snapmaker U1 protocols via Moonraker.
+/// Supports Happy Hare MMU, Qidibox filament box, AFC (BoxTurtle/NightOwl/QuattroBox), Snapmaker U1, and ZMOD IFS (Flashforge AD5X) protocols via Moonraker.
 /// </summary>
 /// <param name="Enabled">Whether the MMU is detected and enabled.</param>
 /// <param name="IsHomed">Whether the MMU has been homed.</param>
@@ -15,7 +15,7 @@
 /// <param name="EndlessSpool">Whether endless spool mode is active.</param>
 /// <param name="ClogDetection">Whether clog detection is active.</param>
 /// <param name="Gates">Per-gate slot information.</param>
-/// <param name="MmuType">The MMU protocol type: "HappyHare", "Qidibox", "AFC", or "SnapmakerU1".</param>
+/// <param name="MmuType">The MMU protocol type: "HappyHare", "Qidibox", "AFC", "SnapmakerU1", or "ZmodIfs".</param>
 /// <param name="BypassMaterial">Material loaded on the external spool holder / bypass (Qidi "Rack"), or null when not reported.</param>
 /// <param name="BypassColor">CSS color of the external spool holder / bypass filament, or null when not reported.</param>
 /// <param name="BypassFilamentName">Filament name of the external spool holder / bypass, or null when not reported.</param>

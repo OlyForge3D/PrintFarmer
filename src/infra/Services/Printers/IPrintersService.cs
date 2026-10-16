@@ -705,6 +705,17 @@ public interface IPrintersService
     Task<CommandResult> EnsureMmuToolheadsAsync(Guid id, CancellationToken ct);
 
     /// <summary>
+    /// Runs <see cref="EnsureMmuToolheadsAsync"/> for every multi-material printer so persisted
+    /// MMU gate rows that are missing (e.g. a legacy AD5X with only Gate 1-3) are repaired
+    /// (issue #3323). Idempotent and safe to race with explicit ensure requests; a failure on
+    /// one printer is logged and does not stop the rest. Intended to run in a dedicated DI
+    /// scope because it clears the scoped change tracker after a failed printer.
+    /// </summary>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>The number of multi-material printers whose repair reported success.</returns>
+    Task<int> RepairMissingMmuGatesAsync(CancellationToken ct);
+
+    /// <summary>
     /// Synchronizes MMU virtual toolheads on an already-loaded Printer entity after
     /// the MultiMaterial property changes. Creates MmuGate toolheads when toggled on,
     /// removes them and their fallback memberships when toggled off. Does NOT save changes —

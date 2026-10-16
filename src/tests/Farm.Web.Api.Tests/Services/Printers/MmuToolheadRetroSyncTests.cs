@@ -383,6 +383,102 @@ public class MmuToolheadRetroSyncTests : IAsyncLifetime
         result.Message.Should().Contain("not found");
     }
 
+    // ------- RepairMissingMmuGatesAsync / startup backfill (issue #3323) -------
+
+    [Fact]
+    public async Task RepairMissingMmuGatesAsync_GapFillsThreeGatePrinter_AndLeavesOthersUntouched()
+    {
+        // The production AD5X (adx5-1) was persisted with only Gate 1-3 and nothing ever
+        // invoked the ensure path, so the fourth gate row was never created.
+        Printer ad5x = await SeedMmuPrinterWithGatesAsync(gateCount: 3, name: "adx5-1");
+        Printer u1 = await SeedSnapmakerU1StylePrinterAsync();
+        Printer single = await SeedSingleToolheadPrinterAsync();
+
+        int repaired = await _printersService.RepairMissingMmuGatesAsync(CancellationToken.None);
+
+        int multiMaterialCount = await _dbContext.Printers.AsNoTracking().CountAsync(p => p.MultiMaterial);
+        repaired.Should().Be(multiMaterialCount);
+
+        List<Toolhead> ad5xGates = await _dbContext.Toolheads.AsNoTracking()
+            .Where(t => t.PrinterId == ad5x.Id && t.ToolheadType == ToolheadType.MmuGate)
+            .OrderBy(t => t.Index)
+            .ToListAsync();
+        ad5xGates.Select(t => t.Index).Should().Equal(1, 2, 3, 4);
+        ad5xGates.Select(t => t.Name).Should().Equal("Gate 1", "Gate 2", "Gate 3", "Gate 4");
+
+        List<Toolhead> u1Toolheads = await _dbContext.Toolheads.AsNoTracking()
+            .Where(t => t.PrinterId == u1.Id)
+            .ToListAsync();
+        u1Toolheads.Should().HaveCount(4);
+        u1Toolheads.Should().OnlyContain(t => t.ToolheadType == ToolheadType.Physical);
+
+        int singleCount = await _dbContext.Toolheads.AsNoTracking().CountAsync(t => t.PrinterId == single.Id);
+        singleCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task RepairMissingMmuGatesAsync_IsIdempotent_AcrossRepeatedRuns()
+    {
+        Printer ad5x = await SeedMmuPrinterWithGatesAsync(gateCount: 3, name: "adx5-idempotent");
+
+        _ = await _printersService.RepairMissingMmuGatesAsync(CancellationToken.None);
+        _ = await _printersService.RepairMissingMmuGatesAsync(CancellationToken.None);
+
+        List<int> gateIndexes = await _dbContext.Toolheads.AsNoTracking()
+            .Where(t => t.PrinterId == ad5x.Id && t.ToolheadType == ToolheadType.MmuGate)
+            .Select(t => t.Index)
+            .OrderBy(i => i)
+            .ToListAsync();
+        gateIndexes.Should().Equal(1, 2, 3, 4);
+    }
+
+    [Fact]
+    public async Task RepairMissingMmuGatesAsync_PreservesLargerGateSets()
+    {
+        Printer eightGate = await SeedMmuPrinterWithGatesAsync(gateCount: 8, name: "Eight Gate MMU");
+
+        _ = await _printersService.RepairMissingMmuGatesAsync(CancellationToken.None);
+
+        int gateCount = await _dbContext.Toolheads.AsNoTracking()
+            .CountAsync(t => t.PrinterId == eightGate.Id && t.ToolheadType == ToolheadType.MmuGate);
+        gateCount.Should().Be(8);
+    }
+
+    [Fact]
+    public async Task MmuGateRowBackfillHostedService_RunBackfillAsync_RepairsMissingGateRows()
+    {
+        Printer ad5x = await SeedMmuPrinterWithGatesAsync(gateCount: 3, name: "adx5-backfill");
+        var backfill = ActivatorUtilities.CreateInstance<MmuGateRowBackfillHostedService>(_factory.Services);
+
+        int repaired = await backfill.RunBackfillAsync(CancellationToken.None);
+
+        repaired.Should().BeGreaterThanOrEqualTo(1);
+        int gateCount = await _dbContext.Toolheads.AsNoTracking()
+            .CountAsync(t => t.PrinterId == ad5x.Id && t.ToolheadType == ToolheadType.MmuGate);
+        gateCount.Should().Be(4);
+    }
+
+    [Fact]
+    public async Task MmuGateRowBackfillHostedService_RunBackfillAsync_ReturnsZero_WhenCancelled()
+    {
+        var backfill = ActivatorUtilities.CreateInstance<MmuGateRowBackfillHostedService>(_factory.Services);
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+
+        int repaired = await backfill.RunBackfillAsync(cts.Token);
+
+        repaired.Should().Be(0);
+    }
+
+    [Fact]
+    public void MmuGateRowBackfillHostedService_IsRegisteredAsHostedService()
+    {
+        IEnumerable<Microsoft.Extensions.Hosting.IHostedService> hosted =
+            _factory.Services.GetServices<Microsoft.Extensions.Hosting.IHostedService>();
+
+        hosted.Should().ContainSingle(s => s is MmuGateRowBackfillHostedService);
+    }
+
     // ------- On-demand auto-creation in spool endpoints -------
 
     [Fact]

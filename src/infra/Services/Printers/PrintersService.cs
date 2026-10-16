@@ -5216,18 +5216,134 @@ public class PrintersService(
             return new CommandResult(true, "Printer is not multi-material; no MMU gates needed");
         }
 
-        int existingGates = p.Toolheads.Count(t => t.ToolheadType == ToolheadType.MmuGate);
-        int targetGateCount = Math.Max(4, existingGates);
-        List<Toolhead> gates = await CreateMmuVirtualToolheadsAsync(p, targetGateCount, ct).ConfigureAwait(false);
-        if (gates.Count == 0)
+        const int maxAttempts = 2;
+        for (int attempt = 1; attempt <= maxAttempts; attempt++)
         {
-            return new CommandResult(true, $"Printer already has {existingGates} MMU gate(s)");
+            int existingGates = p.Toolheads.Count(t => t.ToolheadType == ToolheadType.MmuGate);
+            int targetGateCount = Math.Max(4, existingGates);
+            List<Toolhead> gates = await CreateMmuVirtualToolheadsAsync(p, targetGateCount, ct).ConfigureAwait(false);
+            if (gates.Count == 0)
+            {
+                return new CommandResult(true, $"Printer already has {existingGates} MMU gate(s)");
+            }
+
+            _unitOfWork.Printers.AddToolheads(gates);
+            try
+            {
+                await _unitOfWork.SaveChangesAsync(ct).ConfigureAwait(false);
+                return new CommandResult(true, $"Created {gates.Count} MMU gate(s) for printer \"{p.Name}\"");
+            }
+            catch (DbUpdateException ex) when (
+                ex is DbUpdateConcurrencyException ||
+                Repositories.Tasks.EfUserTaskRepository.IsUniqueConstraintViolation(ex))
+            {
+                // A concurrent repair (startup backfill vs. an explicit ensure request, or two API
+                // replicas) can commit the same (PrinterId, Index) gate between our read and our
+                // save. Depending on statement order that surfaces either as a unique violation or
+                // as a Printer revision conflict (adding a toolhead advances the parent revision).
+                // The failed save rolled back, so stop tracking the stale printer graph (including
+                // our losing inserts) and let the database decide whether the repair is already done.
+                Guid printerId = p.Id;
+                string printerName = p.Name;
+                DetachPrinterGraph(p, gates);
+
+                List<int> persistedGateIndexList = await _db.Toolheads
+                    .AsNoTracking()
+                    .Where(t => t.PrinterId == printerId && t.ToolheadType == ToolheadType.MmuGate)
+                    .Select(t => t.Index)
+                    .ToListAsync(ct)
+                    .ConfigureAwait(false);
+                HashSet<int> persistedGateIndexes = [.. persistedGateIndexList];
+                bool repairedConcurrently = gates.All(gate => persistedGateIndexes.Contains(gate.Index));
+                if (repairedConcurrently)
+                {
+                    _logger.LogInformation(
+                        "EnsureMmuToolheads: MMU gates for printer {PName} ({Id}) were created concurrently; skipping duplicate insert",
+                        LogSanitizer.Sanitize(printerName),
+                        printerId);
+                    return new CommandResult(true, $"MMU gates for printer \"{printerName}\" were already repaired concurrently");
+                }
+
+                if (attempt >= maxAttempts)
+                {
+                    throw;
+                }
+
+                // An unrelated printer edit won the revision race; retry against fresh state.
+                _logger.LogInformation(
+                    ex,
+                    "EnsureMmuToolheads: save conflict for printer {PName} ({Id}) left gates missing; retrying",
+                    LogSanitizer.Sanitize(printerName),
+                    printerId);
+
+                Printer? refreshed = await _unitOfWork.Printers
+                    .FindByIdWithToolheadsAsync(printerId, ct)
+                    .ConfigureAwait(false);
+                if (refreshed is null)
+                {
+                    return new CommandResult(false, $"Printer {printerId} not found");
+                }
+
+                p = refreshed;
+            }
         }
 
-        _unitOfWork.Printers.AddToolheads(gates);
-        await _unitOfWork.SaveChangesAsync(ct).ConfigureAwait(false);
+        throw new InvalidOperationException("EnsureMmuToolheads retry loop exited without a result");
+    }
 
-        return new CommandResult(true, $"Created {gates.Count} MMU gate(s) for printer \"{p.Name}\"");
+    private void DetachPrinterGraph(Printer printer, IEnumerable<Toolhead> losingGates)
+    {
+        foreach (Toolhead gate in losingGates)
+        {
+            _db.Entry(gate).State = EntityState.Detached;
+        }
+
+        foreach (Toolhead toolhead in printer.Toolheads.ToList())
+        {
+            _db.Entry(toolhead).State = EntityState.Detached;
+        }
+
+        _db.Entry(printer).State = EntityState.Detached;
+    }
+
+    /// <inheritdoc/>
+    public async Task<int> RepairMissingMmuGatesAsync(CancellationToken ct)
+    {
+        List<Guid> printerIds = await _db.Printers
+            .AsNoTracking()
+            .Where(p => p.MultiMaterial)
+            .Select(p => p.Id)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        int repaired = 0;
+        foreach (Guid printerId in printerIds)
+        {
+            ct.ThrowIfCancellationRequested();
+            try
+            {
+                CommandResult result = await EnsureMmuToolheadsAsync(printerId, ct).ConfigureAwait(false);
+                if (result.Success)
+                {
+                    repaired++;
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "RepairMissingMmuGates: repair for printer {Id} reported failure: {Message}",
+                        printerId,
+                        LogSanitizer.Sanitize(result.Message));
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // Drop this printer's unsaved inserts so they are not replayed by the next save.
+                _db.ChangeTracker.Clear();
+                _logger.LogError(ex, "RepairMissingMmuGates: repair failed for printer {Id}", printerId);
+            }
+        }
+
+        return repaired;
     }
 
     /// <inheritdoc />

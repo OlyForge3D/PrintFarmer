@@ -268,11 +268,98 @@ internal sealed class PrinterState
     /// </summary>
     public List<string> AfcLaneNames { get; set; } = [];
 
+    // ── ZMOD IFS (Flashforge AD5X) fields — issue #3323 ──
+
+    /// <summary>True once a ZMOD <c>zmod_ifs</c> or <c>zmod_color</c> object has been seen.</summary>
+    public bool ZmodIfsDetected { get; set; }
+
+    /// <summary>Last reported <c>zmod_ifs.available</c>; null until reported.</summary>
+    public bool? ZmodIfsAvailable { get; set; }
+
+    /// <summary>Last reported <c>zmod_ifs.Ports</c> filament-sensor states, one per IFS port.</summary>
+    public bool[]? ZmodIfsPorts { get; set; }
+
+    /// <summary>Last reported <c>zmod_ifs.Chan</c> (1-based active channel, 0 = none); null until reported.</summary>
+    public int? ZmodIfsChannel { get; set; }
+
+    /// <summary>Last reported <c>zmod_color.channel</c> (1-based active channel); null until reported.</summary>
+    public int? ZmodColorChannel { get; set; }
+
+    /// <summary>Highest slot count reported by <c>zmod_color.slots</c>.</summary>
+    public int ZmodSlotCount { get; set; }
+
+    /// <summary>Per-slot <c>zmod_color.slots[].hasFilament</c>; fallback presence when ports are absent.</summary>
+    public bool?[]? ZmodSlotHasFilament { get; set; }
+
     /// <summary>Set to true when any MMU field changes; cleared after BuildMmuStatus builds a new snapshot.</summary>
     public bool MmuDirty { get; set; }
 
     /// <summary>Cached MmuStatusDto, rebuilt only when <see cref="MmuDirty"/> is set.</summary>
     private MmuStatusDto? _cachedMmuStatus;
+
+    /// <summary>
+    /// Ensures the per-gate MMU arrays are sized to <paramref name="numSlots"/>, preserving existing
+    /// entries. New status entries default to 2 (unknown) and new spool IDs to -1.
+    /// </summary>
+    public void EnsureMmuGateArrays(int numSlots)
+    {
+        if (MmuGateStatus == null || MmuGateStatus.Length != numSlots)
+        {
+            int[] newArr = new int[numSlots];
+            Array.Fill(newArr, 2); // Default: Unknown
+            if (MmuGateStatus is not null)
+            {
+                Array.Copy(MmuGateStatus, newArr, Math.Min(MmuGateStatus.Length, numSlots));
+            }
+
+            MmuGateStatus = newArr;
+        }
+
+        if (MmuGateMaterial == null || MmuGateMaterial.Length != numSlots)
+        {
+            string[] newArr = new string[numSlots];
+            if (MmuGateMaterial is not null)
+            {
+                Array.Copy(MmuGateMaterial, newArr, Math.Min(MmuGateMaterial.Length, numSlots));
+            }
+
+            MmuGateMaterial = newArr;
+        }
+
+        if (MmuGateColor == null || MmuGateColor.Length != numSlots)
+        {
+            string[] newArr = new string[numSlots];
+            if (MmuGateColor is not null)
+            {
+                Array.Copy(MmuGateColor, newArr, Math.Min(MmuGateColor.Length, numSlots));
+            }
+
+            MmuGateColor = newArr;
+        }
+
+        if (MmuGateFilamentName == null || MmuGateFilamentName.Length != numSlots)
+        {
+            string[] newArr = new string[numSlots];
+            if (MmuGateFilamentName is not null)
+            {
+                Array.Copy(MmuGateFilamentName, newArr, Math.Min(MmuGateFilamentName.Length, numSlots));
+            }
+
+            MmuGateFilamentName = newArr;
+        }
+
+        if (MmuGateSpoolId == null || MmuGateSpoolId.Length != numSlots)
+        {
+            int[] newArr = new int[numSlots];
+            Array.Fill(newArr, -1);
+            if (MmuGateSpoolId is not null)
+            {
+                Array.Copy(MmuGateSpoolId, newArr, Math.Min(MmuGateSpoolId.Length, numSlots));
+            }
+
+            MmuGateSpoolId = newArr;
+        }
+    }
 
     /// <summary>
     /// Clears topology-dependent MMU state before a new Moonraker object subscription snapshot
@@ -321,6 +408,14 @@ internal sealed class PrinterState
         SnapmakerU1ActiveTool = -1;
         SnapmakerU1Lanes = SnapmakerU1PrintTaskConfigParser.CreateEmptyLanes();
 
+        ZmodIfsDetected = false;
+        ZmodIfsAvailable = null;
+        ZmodIfsPorts = null;
+        ZmodIfsChannel = null;
+        ZmodColorChannel = null;
+        ZmodSlotCount = 0;
+        ZmodSlotHasFilament = null;
+
         MmuDirty = true;
         _cachedMmuStatus = null;
     }
@@ -354,6 +449,9 @@ internal sealed class PrinterState
                 // Snapmaker U1 touchscreen labels are T1-T4, while Moonraker/API extruders are zero-based T0-T3.
                 // This mapping is inferred from U1Hub/SnapCon behavior and needs real-hardware confirmation.
                 MmuProtocol.SnapmakerU1 => $"T{i + 1}",
+
+                // ZMOD IFS slots are reported with 1-based IDs matching the AD5X touchscreen.
+                MmuProtocol.ZmodIfs => $"Gate {i + 1}",
                 _ => null,
             };
 

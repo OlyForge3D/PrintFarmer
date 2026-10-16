@@ -47,6 +47,10 @@ public static class BackgroundServicesStartup
         // Catches missed state transitions from direct printer cancellations or WebSocket drops
         services.AddHostedService<Farm.Web.Api.Services.Startup.OrphanedJobSyncStartupService>();
 
+        // MMU gate row backfill (issue #3323) - one-shot startup repair of missing persisted
+        // MMU gate rows (e.g. a legacy AD5X with only Gate 1-3). Idempotent and race-safe.
+        services.AddHostedService<Farm.Infrastructure.Services.Printers.MmuGateRowBackfillHostedService>();
+
         // History Seeding - Periodically seeds job history from connected printers
         // This captures jobs dispatched outside of PrintFarmer (e.g., via Mainsail/Fluidd)
         services.Configure<Farm.Modules.Observability.Services.Workers.HistorySeedingSettings>(configuration.GetSection(Farm.Modules.Observability.Services.Workers.HistorySeedingSettings.SectionName));
