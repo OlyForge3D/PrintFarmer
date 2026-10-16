@@ -236,7 +236,6 @@ internal sealed class KestrelCalibrationApiHost : WebApplicationFactory<Program>
                 "reach. Kestrel must be the registered server for the listening host.");
         }
 
-        using TcpClient probe = new();
         SocketException? lastFailure = null;
         DateTime deadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
         while (DateTime.UtcNow < deadline)
