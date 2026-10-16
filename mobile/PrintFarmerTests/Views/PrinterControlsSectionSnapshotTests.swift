@@ -1000,6 +1000,10 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
                     window.frame.size = controller.sizeThatFits(in: CGSize(width: width, height: 10000))
                     controller.view.frame = window.bounds
                     try await settle(controller)
+                    // Content can grow while settling; a stale window would center it and shift every row.
+                    window.frame.size = controller.sizeThatFits(in: CGSize(width: width, height: 10000))
+                    controller.view.frame = window.bounds
+                    try await settle(controller)
                     let controls = nativeControls(in: controller.view)
                     let visibleIdentifiers = Set(controls.compactMap(\.accessibilityIdentifier))
                     let hotend = try XCTUnwrap(controls.first {
