@@ -128,6 +128,9 @@ See **[Deployment Hardware Guide](./docs/DEPLOYMENT_HARDWARE.md)** for hardware 
 
 ### Option 2: Local Development (Recommended for Development)
 
+Use Node.js 24.15+ within the 24.x release line, or Node.js 26+,
+for the React app and its jsdom-based tests.
+
 ```bash
 git clone https://github.com/OlyForge3D/PrintFarmer.git
 cd PrintFarmer/src

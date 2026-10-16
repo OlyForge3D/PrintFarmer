@@ -34,6 +34,10 @@
 
 ### Fixes
 
+- Update the frontend test environment to jsdom 30 and exercise filament-slot
+  focus restoration through a visible rail. Frontend development now requires
+  Node.js 24.15+ within 24.x, or Node.js 26+.
+
 - Align EF Core, Microsoft.Data.Sqlite, and EF health checks on 10.0.12,
   including coupled logging and dependency injection pins in backend plugins,
   discovery, shared workers, and the profile parser tool to prevent NuGet

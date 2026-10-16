@@ -44,7 +44,7 @@ declare -a IMAGES_TO_BUILD=(
     "aspnet:10.0.1-alpine-upgraded|Dockerfile.base-aspnet|dockerfiles"
     "ubuntu:24.04-upgraded|Dockerfile.base-ubuntu|dockerfiles"
     "nginx:alpine-upgraded|Dockerfile.base-nginx|dockerfiles"
-    "node:22-alpine-upgraded|Dockerfile.base-node|dockerfiles"
+    "node:24-alpine-upgraded|Dockerfile.base-node|dockerfiles"
     "postgres:17-alpine-upgraded|Dockerfile.base-postgres|dockerfiles"
 )
 

@@ -25,7 +25,7 @@ declare -a DOCKERFILES=(
 
 declare -a IMAGES=(
     "nginx:alpine-upgraded"
-    "node:22-alpine-upgraded"
+    "node:24-alpine-upgraded"
     "postgres:17-alpine-upgraded"
     "sdk:10.0.101-alpine-upgraded"
     "aspnet:10.0.1-alpine-upgraded"

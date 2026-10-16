@@ -184,8 +184,8 @@ $script:BaseImages = @(
     "mcr.microsoft.com/dotnet/aspnet:10.0-bookworm-slim",
     # Ubuntu for OrcaSlicer binaries extraction stage
     "ubuntu:24.04",
-    # Node.js for frontend (React build and runtime) - upgraded to v22 for compatibility
-    "node:22-alpine",
+    # Node.js for frontend (React build and runtime) - upgraded to v24 for compatibility
+    "node:24-alpine",
     # PostgreSQL database (primary database for PrintFarmer)
     "postgres:16-alpine",
     # Nginx reverse proxy/load balancer (required for microservices architecture)
@@ -608,7 +608,7 @@ function Pull-BaseImages {
     Write-Info "Pulling essential images for PrintFarmer core services:"
     Write-Info "  - .NET SDK 10.0 (multi-stage builds during deployment)"
     Write-Info "  - .NET ASP.NET 10.0 (API runtime)"
-    Write-Info "  - Node.js 22 Alpine (React frontend)"
+    Write-Info "  - Node.js 24 Alpine (React frontend)"
     Write-Info "  - PostgreSQL 16 Alpine (database)"
     Write-Info "  - Nginx Alpine (reverse proxy/load balancer for microservices)"
     Write-Info ""
