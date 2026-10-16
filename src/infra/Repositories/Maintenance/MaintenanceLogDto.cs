@@ -56,11 +56,10 @@ public sealed class MaintenanceLogDto
 /// Filter for <see cref="IMaintenanceLogRepository.GetPrinterLogsAsync"/>.
 /// </summary>
 /// <param name="PrinterId">Printer whose history is requested.</param>
-/// <param name="PrinterWideOnly">When true, only logs with no toolhead scope are returned.</param>
-/// <param name="ToolheadId">When set, only logs scoped to this toolhead are returned.</param>
+/// <param name="PrinterWideOnly">When true, only logs with no toolhead scope are returned
+/// (used when the multi-slot feature gate is off).</param>
 /// <param name="Limit">Maximum rows to return (most recent first); null returns the full history.</param>
 public sealed record MaintenanceLogListQuery(
     Guid PrinterId,
     bool PrinterWideOnly = false,
-    Guid? ToolheadId = null,
     int? Limit = null);

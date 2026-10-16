@@ -18,8 +18,8 @@ namespace Farm.Web.Api.Tests.Controllers;
 
 /// <summary>
 /// Integration tests for the bounded printer maintenance-history list (issue #3297):
-/// <c>GET /api/maintenance/printers/{printerId}/logs?limit=&amp;scope=</c>.
-/// Omitting both parameters must keep today's response byte-for-byte; a limit returns only the
+/// <c>GET /api/maintenance/printers/{printerId}/logs?limit=</c>.
+/// Omitting the parameter must keep today's response byte-for-byte; a limit returns only the
 /// newest rows plus an <c>X-Total-Count</c> header; invalid input is a 400 validation problem.
 /// </summary>
 [Collection(IntegrationTestCollection.Name)]
@@ -198,45 +198,19 @@ public sealed class PrinterMaintenanceLogListTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task PrinterScope_ReturnsOnlyPrinterWideLogs_WithScopedTotal()
-    {
-        Seed seed = await SeedAsync();
-        MaintenanceController controller = CreateController();
-
-        List<MaintenanceLogDto> body = Body(await controller.GetPrinterMaintenanceLogsAsync(
-            seed.PrinterId, limit: 1, scope: "printer"));
-
-        body.Select(l => l.Id).Should().Equal(seed.PrinterWideNewestFirst.Take(1));
-        TotalCount(controller).Should().Be("2");
-    }
-
-    [Fact]
-    public async Task ToolheadScope_ReturnsOnlyThatToolheadsLogs()
-    {
-        Seed seed = await SeedAsync();
-        MaintenanceController controller = CreateController();
-
-        List<MaintenanceLogDto> body = Body(await controller.GetPrinterMaintenanceLogsAsync(
-            seed.PrinterId, limit: 10, scope: seed.ToolheadId.ToString()));
-
-        body.Should().HaveCount(2).And.OnlyContain(l => l.ToolheadId == seed.ToolheadId);
-        TotalCount(controller).Should().Be("2");
-    }
-
-    [Fact]
-    public async Task FeatureDisabled_HidesToolheadLogs_EvenWhenToolheadScopeRequested()
+    public async Task FeatureDisabled_HidesToolheadLogs_WithAndWithoutLimit()
     {
         Seed seed = await SeedAsync();
 
         List<MaintenanceLogDto> all = Body(await CreateController(multiSlotEnabled: false)
             .GetPrinterMaintenanceLogsAsync(seed.PrinterId));
-        MaintenanceController scopedController = CreateController(multiSlotEnabled: false);
-        List<MaintenanceLogDto> scoped = Body(await scopedController.GetPrinterMaintenanceLogsAsync(
-            seed.PrinterId, limit: 10, scope: seed.ToolheadId.ToString()));
+        MaintenanceController limitedController = CreateController(multiSlotEnabled: false);
+        List<MaintenanceLogDto> limited = Body(await limitedController.GetPrinterMaintenanceLogsAsync(
+            seed.PrinterId, limit: 1));
 
         all.Select(l => l.Id).Should().Equal(seed.PrinterWideNewestFirst);
-        scoped.Should().BeEmpty();
-        TotalCount(scopedController).Should().Be("0");
+        limited.Select(l => l.Id).Should().Equal(seed.PrinterWideNewestFirst.Take(1));
+        TotalCount(limitedController).Should().Be("2");
     }
 
     [Theory]
@@ -253,20 +227,5 @@ public sealed class PrinterMaintenanceLogListTests : IAsyncLifetime
         ObjectResult problem = Assert.IsAssignableFrom<ObjectResult>(result.Result);
         problem.StatusCode.Should().Be(StatusCodes.Status400BadRequest);
         Assert.IsType<ValidationProblemDetails>(problem.Value).Errors.Should().ContainKey("limit");
-    }
-
-    [Theory]
-    [InlineData("toolhead-0")]
-    [InlineData("all")]
-    public async Task InvalidScope_ReturnsValidationProblem(string scope)
-    {
-        MaintenanceController controller = CreateController();
-
-        ActionResult<IEnumerable<MaintenanceLogDto>> result =
-            await controller.GetPrinterMaintenanceLogsAsync(Guid.NewGuid(), limit: 10, scope: scope);
-
-        ObjectResult problem = Assert.IsAssignableFrom<ObjectResult>(result.Result);
-        problem.StatusCode.Should().Be(StatusCodes.Status400BadRequest);
-        Assert.IsType<ValidationProblemDetails>(problem.Value).Errors.Should().ContainKey("scope");
     }
 }

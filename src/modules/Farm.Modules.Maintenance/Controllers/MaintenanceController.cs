@@ -651,12 +651,7 @@ public class MaintenanceController(
     public const int MaxPrinterLogLimit = 100;
 
     /// <summary>
-    /// <c>scope</c> query value selecting only printer-wide (non-toolhead) maintenance logs.
-    /// </summary>
-    public const string PrinterWideLogScope = "printer";
-
-    /// <summary>
-    /// Response header carrying the number of logs matching the scope when <c>limit</c> is supplied.
+    /// Response header carrying the number of logs in the full history when <c>limit</c> is supplied.
     /// </summary>
     public const string TotalCountHeader = "X-Total-Count";
 
@@ -667,8 +662,6 @@ public class MaintenanceController(
     /// <param name="limit">Optional maximum number of rows (1..<see cref="MaxPrinterLogLimit"/>).
     /// When supplied, the total matching count is returned in the <c>X-Total-Count</c> header.
     /// When omitted, the full history is returned as before.</param>
-    /// <param name="scope">Optional scope filter: <c>printer</c> for printer-wide logs only, or a
-    /// toolhead id for that toolhead's logs. When omitted, every scope is returned.</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpGet("printers/{printerId:guid}/logs")]
     [ProducesResponseType(typeof(IEnumerable<MaintenanceLogDto>), 200)]
@@ -676,7 +669,6 @@ public class MaintenanceController(
     public async Task<ActionResult<IEnumerable<MaintenanceLogDto>>> GetPrinterMaintenanceLogsAsync(
         Guid printerId,
         [FromQuery] int? limit = null,
-        [FromQuery] string? scope = null,
         CancellationToken ct = default)
     {
         if (limit is < 1 or > MaxPrinterLogLimit)
@@ -684,41 +676,16 @@ public class MaintenanceController(
             ModelState.AddModelError(
                 nameof(limit),
                 $"limit must be between 1 and {MaxPrinterLogLimit}.");
-        }
-
-        bool printerWideOnly = false;
-        Guid? toolheadId = null;
-        if (scope is not null)
-        {
-            if (string.Equals(scope, PrinterWideLogScope, StringComparison.OrdinalIgnoreCase))
-            {
-                printerWideOnly = true;
-            }
-            else if (Guid.TryParse(scope, out Guid parsedToolheadId))
-            {
-                toolheadId = parsedToolheadId;
-            }
-            else
-            {
-                ModelState.AddModelError(
-                    nameof(scope),
-                    $"scope must be '{PrinterWideLogScope}' or a toolhead id.");
-            }
-        }
-
-        if (!ModelState.IsValid)
-        {
             return ValidationProblem(ModelState);
         }
 
         try
         {
-            if (!await _operatorFeatureGate.IsEnabledAsync(OperatorFeature.MultiSlotFallback, ct).ConfigureAwait(false))
-            {
-                printerWideOnly = true;
-            }
+            bool printerWideOnly = !await _operatorFeatureGate
+                .IsEnabledAsync(OperatorFeature.MultiSlotFallback, ct)
+                .ConfigureAwait(false);
 
-            MaintenanceLogListQuery query = new(printerId, printerWideOnly, toolheadId, limit);
+            MaintenanceLogListQuery query = new(printerId, printerWideOnly, limit);
             List<MaintenanceLogDto> logs = await _logRepository.GetPrinterLogsAsync(query, ct);
             if (limit.HasValue)
             {

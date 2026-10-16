@@ -36,10 +36,8 @@ import { useUpcomingMaintenance } from '../hooks/useUpcomingMaintenance';
 import { queryKeys } from '@/common/hooks/useApi';
 import { maintenanceQueryKeys } from '../queryKeys';
 
-/** The history card renders this many rows, so it only fetches this many (#3297). */
+/** The history card renders this many rows, so it only fetches this many when it can (#3297). */
 const MAINTENANCE_HISTORY_LIMIT = 10;
-/** API `scope` value selecting printer-wide (non-toolhead) logs. */
-const PRINTER_WIDE_LOG_API_SCOPE = 'printer';
 
 function shouldRetryStatisticsQuery(failureCount: number, error: unknown) {
   const statusCode = typeof error === 'object' && error
@@ -168,15 +166,13 @@ export function PrinterMaintenancePage() {
   // calendar/manual scopes (or plain logs) the backend still considers
   // fully valid regardless of attribution support.
   const logEligibleToolheads = eligibleToolheadsRaw;
-  // Server-side equivalent of `scopeMatches` below for the history card:
-  // no filter while the scope picker is hidden (fewer than two eligible
-  // toolheads), otherwise printer-wide or the selected toolhead.
-  const logApiScope: string | undefined =
-    eligibleToolheads.length < 2
-      ? undefined
-      : scope === PRINTER_WIDE_SCOPE
-        ? PRINTER_WIDE_LOG_API_SCOPE
-        : scope;
+  // The history card renders at most MAINTENANCE_HISTORY_LIMIT rows. While the
+  // scope picker is hidden (fewer than two eligible toolheads, so `scopeMatches`
+  // keeps every row) those are exactly the newest rows, so only that many are
+  // requested. With the picker shown, rows are filtered client-side by scope,
+  // so a printer-wide limit could leave a scope short; fetch the full history.
+  const historyLimit: number | undefined =
+    eligibleToolheads.length < 2 ? MAINTENANCE_HISTORY_LIMIT : undefined;
 
   // Fetch printer statistics
   const { data: statistics, isLoading: statsLoading } = useQuery({
@@ -186,16 +182,12 @@ export function PrinterMaintenancePage() {
     retry: shouldRetryStatisticsQuery,
   });
 
-  // Fetch only the maintenance history rows the card renders (#3297). The
-  // scope is part of the request, so wait for the toolhead list before the
-  // first fetch rather than fetching an unscoped page and then refetching.
+  // Fetch maintenance history (#3297). Whether a limit applies depends on the
+  // toolhead list, so wait for it rather than fetching twice.
   const { data: logPage, isLoading: logsLoading } = useQuery({
-    queryKey: ['printerMaintenanceLogs', printerId, logApiScope ?? 'all'],
+    queryKey: ['printerMaintenanceLogs', printerId, historyLimit ?? 'all'],
     queryFn: () =>
-      maintenanceService.getRecentPrinterMaintenanceLogs(printerId!, {
-        limit: MAINTENANCE_HISTORY_LIMIT,
-        scope: logApiScope,
-      }),
+      maintenanceService.getPrinterMaintenanceLogs(printerId!, { limit: historyLimit }),
     enabled: !!printerId && !printerDetailsLoading,
   });
   const logs = logPage?.logs ?? [];
@@ -365,7 +357,10 @@ export function PrinterMaintenancePage() {
   );
   const scopedDeployments = deployments.filter(d => scopeMatches(d.toolheadId));
   const scopedLogs = logs.filter(l => scopeMatches(l.toolheadId));
-  const totalScopedLogs = logPage?.totalCount ?? scopedLogs.length;
+  // With a limit, the server reports the full total; without one, every row is here.
+  const totalScopedLogs = historyLimit !== undefined
+    ? logPage?.totalCount ?? scopedLogs.length
+    : scopedLogs.length;
 
   const handleLogMaintenance = (toolheadId?: string | null) => {
     // Nullish coalescing (`??`) would convert an EXPLICIT `null` — the

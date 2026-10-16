@@ -86,12 +86,6 @@ public class EfMaintenanceLogRepository(AppDbContext context) : IMaintenanceLogR
             logs = logs.Where(l => l.ToolheadId == null);
         }
 
-        if (query.ToolheadId.HasValue)
-        {
-            Guid toolheadId = query.ToolheadId.Value;
-            logs = logs.Where(l => l.ToolheadId == toolheadId);
-        }
-
         return logs;
     }
 

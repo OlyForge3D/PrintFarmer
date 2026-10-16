@@ -295,10 +295,10 @@ public sealed class MaintenanceControllerFleetToolheadScopeTests
             .ReturnsAsync([printerAlert, toolheadAlert]);
         _alertRepository.Setup(r => r.GetByIdAsync(toolheadAlert.Id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(toolheadAlert);
-        // The scope filter now runs in the database: with the feature off the controller
+        // The feature-gate filter now runs in the database: with the feature off the controller
         // must request printer-wide rows only.
         _logRepository.Setup(r => r.GetPrinterLogsAsync(
-                It.Is<MaintenanceLogListQuery>(q => q.PrinterId == printerId && q.PrinterWideOnly && q.ToolheadId == null && q.Limit == null),
+                It.Is<MaintenanceLogListQuery>(q => q.PrinterId == printerId && q.PrinterWideOnly && q.Limit == null),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync([printerLog]);
         _multiSlotEnabled = false;

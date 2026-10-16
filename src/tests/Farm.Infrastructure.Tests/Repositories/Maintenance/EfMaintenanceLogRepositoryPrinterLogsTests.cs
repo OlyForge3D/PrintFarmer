@@ -12,8 +12,8 @@ namespace Farm.Infrastructure.Tests.Repositories.Maintenance;
 
 /// <summary>
 /// Relational SQLite coverage for <see cref="EfMaintenanceLogRepository.GetPrinterLogsAsync"/> and
-/// <see cref="EfMaintenanceLogRepository.CountPrinterLogsAsync"/> (issue #3297): the limit and scope
-/// filter run in the database, ordering is deterministic, and nothing is change-tracked.
+/// <see cref="EfMaintenanceLogRepository.CountPrinterLogsAsync"/> (issue #3297): the limit and
+/// feature-gate filter run in the database, ordering is deterministic, and nothing is change-tracked.
 /// </summary>
 public sealed class EfMaintenanceLogRepositoryPrinterLogsTests : IDisposable
 {
@@ -130,18 +130,6 @@ public sealed class EfMaintenanceLogRepositoryPrinterLogsTests : IDisposable
 
         result.Select(l => l.Id).Should().Equal(ExpectedOrder(seeded.Where(l => l.ToolheadId == null)).Take(1));
         total.Should().Be(3);
-    }
-
-    [Fact]
-    public async Task ToolheadScope_ReturnsOnlyThatToolheadsLogs()
-    {
-        List<MaintenanceLog> seeded = await SeedAsync();
-        MaintenanceLogListQuery query = new(_printerId, ToolheadId: _toolheadId);
-
-        List<MaintenanceLogDto> result = await _repo.GetPrinterLogsAsync(query);
-
-        result.Select(l => l.Id).Should().Equal(ExpectedOrder(seeded.Where(l => l.ToolheadId == _toolheadId)));
-        (await _repo.CountPrinterLogsAsync(query)).Should().Be(2);
     }
 
     [Fact]
