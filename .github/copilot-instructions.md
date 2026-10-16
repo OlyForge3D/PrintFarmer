@@ -210,6 +210,14 @@ Draft status does not waive checks on existing links. Use
 unmarked epics, flat-graph opt-out, first-wave declaration, and verifier.
 The verifier supplies issue-level feedback, not a PR merge gate.
 
+## Issue Dispatch Protocol
+
+Before any coordinator or Ralph session selects, claims, or dispatches issue work, it
+must read and follow `.squad/ralph-instructions.md`, including "Claim before
+starting", Host Limits, and the round report. Only `squad watch --execute` loads that
+file today, so in-app sessions otherwise skip it (bradygaster/squad#2233). Remove this
+section once upstream loads the file for every coordinator session.
+
 ## Readiness and Merge Review Gate
 
 **Draft PRs may open early; review gates readiness and merge, not PR creation.**
