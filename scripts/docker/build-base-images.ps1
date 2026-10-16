@@ -33,10 +33,10 @@ $images = @(
         tarName = "ubuntu-24.04-upgraded.tar"
     },
     @{
-        base = "node:22-alpine"
+        base = "node:24-alpine"
         dockerfile = "Dockerfile.base-node"
-        tag = "node:22-alpine-upgraded"
-        tarName = "node-22-alpine-upgraded.tar"
+        tag = "node:24-alpine-upgraded"
+        tarName = "node-24-alpine-upgraded.tar"
     },
     @{
         base = "mcr.microsoft.com/dotnet/aspnet:10.0-bookworm-slim"
@@ -141,7 +141,7 @@ Write-Host ""
 Write-Host "To deploy offline:" -ForegroundColor Yellow
 Write-Host "  1. Transfer all .tar files from $CacheDir to offline system"
 Write-Host "  2. Run: docker load -i ubuntu-24.04-upgraded.tar"
-Write-Host "  3. Run: docker load -i node-22-alpine-upgraded.tar"
+Write-Host "  3. Run: docker load -i node-24-alpine-upgraded.tar"
 Write-Host "  4. Run: docker load -i aspnet-10.0-bookworm-slim-upgraded.tar"
 Write-Host "  5. Run: docker load -i dotnet-sdk-10.0-upgraded.tar"
 Write-Host "  6. Run: docker load -i postgres-16-alpine-upgraded.tar"
