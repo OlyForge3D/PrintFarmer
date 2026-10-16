@@ -17,7 +17,10 @@ database. Strict validation then correctly rejects obsolete columns such as
 `CalibrationAttempts.PrinterConfigurationSnapshotId`, which later migrations
 remove. `KestrelCalibrationApiHostTests` reproduces that interleaving without sleeps,
 retains the production rejection, and checks independent complete schemas and a
-single real listener. Production schema validation must not be weakened (#3366).
+single real listener. Its fixture build-boundary callback asserts that neither
+context has pending migrations before the entry point is built; moving fixture
+provisioning below `Services` deterministically fails that assertion.
+Production schema validation must not be weakened (#3366).
 
 For intermittent fixture failures, preserve a separate log for each CI-filtered
 integration run; five passing runs are useful evidence, not proof that every

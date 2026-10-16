@@ -20,10 +20,14 @@ public sealed class KestrelCalibrationApiHostTests
     public async Task Start_IsolatedFixtures_UsesOneHostAndCompleteIndependentSchemas()
     {
         string workspace = Path.Join(Path.GetTempPath(), $"pfarm-kestrel-regression-{Guid.NewGuid():N}");
+        int buildBoundaryChecks = 0;
         try
         {
-            await using KestrelCalibrationApiHost first = KestrelCalibrationApiHost.Start(Path.Join(workspace, "first"));
-            await using KestrelCalibrationApiHost second = KestrelCalibrationApiHost.Start(Path.Join(workspace, "second"));
+            await using KestrelCalibrationApiHost first = KestrelCalibrationApiHost.Start(
+                Path.Join(workspace, "first"), VerifySchemaBeforeBuild);
+            await using KestrelCalibrationApiHost second = KestrelCalibrationApiHost.Start(
+                Path.Join(workspace, "second"), VerifySchemaBeforeBuild);
+            Assert.Equal(2, buildBoundaryChecks);
             Assert.Same(first.Services, first.ListeningServices);
             Assert.Same(second.Services, second.ListeningServices);
             Assert.IsNotType<Microsoft.AspNetCore.TestHost.TestServer>(
@@ -51,6 +55,19 @@ public sealed class KestrelCalibrationApiHostTests
             {
                 Directory.Delete(workspace, recursive: true);
             }
+        }
+
+        void VerifySchemaBeforeBuild(SqliteConnection connection)
+        {
+            using AppDbContext core = new(new DbContextOptionsBuilder<AppDbContext>()
+                .UseSqlite(connection, options => options.MigrationsAssembly("Farm.Migrations.Sqlite"))
+                .Options);
+            using SlicerDbContext slicer = new(new DbContextOptionsBuilder<SlicerDbContext>()
+                .UseSqlite(connection, options => options.MigrationsAssembly("Farm.Slicer.Migrations.Sqlite"))
+                .Options);
+            Assert.Empty(core.Database.GetPendingMigrations());
+            Assert.Empty(slicer.Database.GetPendingMigrations());
+            buildBoundaryChecks++;
         }
     }
 

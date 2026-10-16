@@ -36,15 +36,18 @@ internal sealed class KestrelCalibrationApiHost : WebApplicationFactory<Program>
 {
     private readonly SqliteConnection _keepAliveConnection;
     private readonly IReadOnlyDictionary<string, string?> _hostConfiguration;
+    private readonly Action<SqliteConnection>? _beforeHostBuild;
     private int _disposed;
 
     private KestrelCalibrationApiHost(
         SqliteConnection keepAliveConnection,
         string workerSharedKey,
         string storageRoot,
-        int listenPort)
+        int listenPort,
+        Action<SqliteConnection>? beforeHostBuild)
     {
         _keepAliveConnection = keepAliveConnection;
+        _beforeHostBuild = beforeHostBuild;
         WorkerSharedKey = workerSharedKey;
         StorageRoot = storageRoot;
         ListenPort = listenPort;
@@ -91,8 +94,11 @@ internal sealed class KestrelCalibrationApiHost : WebApplicationFactory<Program>
     /// Starts the production pipeline on a free loopback port.
     /// </summary>
     /// <param name="storageRoot">Directory that backs model and G-code storage for this run.</param>
+    /// <param name="beforeHostBuild">Optional assertion at the deferred entry-point build boundary.</param>
     /// <returns>The started host.</returns>
-    public static KestrelCalibrationApiHost Start(string storageRoot)
+    public static KestrelCalibrationApiHost Start(
+        string storageRoot,
+        Action<SqliteConnection>? beforeHostBuild = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(storageRoot);
         _ = Directory.CreateDirectory(Path.Join(storageRoot, "models"));
@@ -107,7 +113,8 @@ internal sealed class KestrelCalibrationApiHost : WebApplicationFactory<Program>
             keepAlive,
             $"orca-smoke-{Guid.NewGuid():N}",
             storageRoot,
-            ReserveLoopbackPort());
+            ReserveLoopbackPort(),
+            beforeHostBuild);
 
         host.UseKestrel(options => options.Listen(IPAddress.Loopback, host.ListenPort));
         _ = host.Services;
@@ -195,6 +202,7 @@ internal sealed class KestrelCalibrationApiHost : WebApplicationFactory<Program>
             config.AddInMemoryCollection(_hostConfiguration));
         _ = builder.UseEnvironment("Testing");
 
+        _beforeHostBuild?.Invoke(_keepAliveConnection);
         return base.CreateHost(builder);
     }
 
