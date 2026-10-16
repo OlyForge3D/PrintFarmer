@@ -2287,10 +2287,9 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
     private static extern int CloseFileDescriptor(int fileDescriptor);
 #pragma warning restore CA2101, SYSLIB1054
 
-    private static async Task<GcodeMetadata> ExtractGcodeMetadataAsync(string gcodeFilePath, CancellationToken cancellationToken)
+    internal static async Task<GcodeMetadata> ExtractGcodeMetadataAsync(string gcodeFilePath, CancellationToken cancellationToken)
     {
         FileInfo fileInfo = new FileInfo(gcodeFilePath);
-        string[] lines = await File.ReadAllLinesAsync(gcodeFilePath, cancellationToken).ConfigureAwait(false);
         GcodeMetadata metadata = new GcodeMetadata();
         Regex printTimeRegex = MyRegex();
         Regex printTimeSecondsRegex = new Regex(@";\s*estimated printing time.*?(\d+)s", RegexOptions.IgnoreCase);
@@ -2298,8 +2297,27 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         Regex layerRegex = new Regex(@";\s*layer_count\s*=\s*(\d+)", RegexOptions.IgnoreCase);
         Regex layerCommentRegex = new Regex(@";\s*LAYER:(\d+)", RegexOptions.IgnoreCase);
         int maxLayer = 0;
-        foreach (string line in lines)
+        int zMoveLineCount = 0;
+
+        // Stream a single forward pass (issue #3341). Mirrors File.ReadAllLinesAsync exactly:
+        // UTF-8 default with BOM detection, the same \r / \n / \r\n line splitting, and a final
+        // unterminated line is still yielded — so parse results are unchanged, but peak memory is
+        // O(longest line) instead of O(file size).
+        var fileOptions = new FileStreamOptions
         {
+            Mode = FileMode.Open,
+            Access = FileAccess.Read,
+            Share = FileShare.Read,
+            Options = FileOptions.Asynchronous | FileOptions.SequentialScan,
+        };
+        using StreamReader reader = new StreamReader(gcodeFilePath, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, fileOptions);
+        while (await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false) is { } line)
+        {
+            if (line.StartsWith("G1 Z", StringComparison.Ordinal) || line.StartsWith("G0 Z", StringComparison.Ordinal))
+            {
+                zMoveLineCount++;
+            }
+
             Match tm = printTimeRegex.Match(line);
             if (tm.Success)
             {
@@ -2354,7 +2372,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
 
         if (metadata.LayerCount == 0)
         {
-            metadata.LayerCount = lines.Count(l => l.StartsWith("G1 Z", StringComparison.Ordinal) || l.StartsWith("G0 Z", StringComparison.Ordinal));
+            metadata.LayerCount = zMoveLineCount;
         }
 
         if (metadata.LayerCount == 0)
@@ -2365,7 +2383,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         return metadata;
     }
 
-    private sealed class GcodeMetadata
+    internal sealed class GcodeMetadata
     {
         public double PrintTimeSeconds { get; set; }
 
