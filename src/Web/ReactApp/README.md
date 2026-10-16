@@ -79,6 +79,13 @@ real-symlink dedup harness test needs Developer Mode or an elevated shell and
 skips otherwise; an injected-resolver test covers the same dedup on every host.
 See [testing patterns](../../../docs/TESTING_PATTERNS.md) for the policy.
 
+Vitest and `@vitest/coverage-v8` must resolve to the same version (currently
+5.0.3). `src/test/setup.ts` registers jest-dom's runtime matchers;
+`src/test/vitest-matchers.d.ts` bridges jest-dom 7's matcher signatures into
+Vitest 5's `Matchers` interface, preserving `void` versus `Promise<void>`
+returns. Do not use jest-dom's pre-v5 `Assertion<T>` augmentation as a substitute.
+The matcher compatibility tests exercise both return types and runtime behavior.
+
 ### Using Shared Components
 
 Always use shared components from `components/ui/` for consistency:

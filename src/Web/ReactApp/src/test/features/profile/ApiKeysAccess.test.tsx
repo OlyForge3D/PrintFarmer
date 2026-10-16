@@ -29,28 +29,24 @@ vi.mock('@/services/apiKeysService', () => ({
 }));
 
 // Mock for regular (non-admin) user
-function mockRegularUser() {
-  vi.mock('@/features/auth/hooks/useAuth', () => ({
-    useAuth: () => ({
-      user: { id: '2', email: 'user@test.com', isActive: true, roles: ['farm_user'] },
-      isAuthenticated: true,
-      isLoading: false,
-      hasRole: (role: string) => role === 'farm_user',
-      hasPermission: () => false,
-      logout: vi.fn(),
-    }),
-    useAuthInternal: () => ({
-      user: { id: '2', email: 'user@test.com', isActive: true, roles: ['farm_user'] },
-      isAuthenticated: true,
-      isLoading: false,
-      hasRole: (role: string) => role === 'farm_user',
-      hasPermission: () => false,
-      logout: vi.fn(),
-    }),
-  }));
-}
-
-mockRegularUser();
+vi.mock('@/features/auth/hooks/useAuth', () => ({
+  useAuth: () => ({
+    user: { id: '2', email: 'user@test.com', isActive: true, roles: ['farm_user'] },
+    isAuthenticated: true,
+    isLoading: false,
+    hasRole: (role: string) => role === 'farm_user',
+    hasPermission: () => false,
+    logout: vi.fn(),
+  }),
+  useAuthInternal: () => ({
+    user: { id: '2', email: 'user@test.com', isActive: true, roles: ['farm_user'] },
+    isAuthenticated: true,
+    isLoading: false,
+    hasRole: (role: string) => role === 'farm_user',
+    hasPermission: () => false,
+    logout: vi.fn(),
+  }),
+}));
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: false } },
