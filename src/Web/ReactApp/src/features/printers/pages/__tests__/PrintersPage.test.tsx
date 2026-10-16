@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -472,6 +472,7 @@ describe('PrintersPage', () => {
     await user.tab();
     expect(toggle).toHaveFocus();
     expect(screen.getByRole('tooltip')).toHaveTextContent('Show printer filters');
+    expect(screen.getByRole('tooltip')).toHaveClass('bottom-full');
     await user.keyboard('{Enter}');
 
     expect(toggle).toHaveAttribute('aria-expanded', 'true');
@@ -547,6 +548,15 @@ describe('PrintersPage', () => {
       expect(screen.getByText('Open Printer Alpha')).toBeVisible();
       expect(screen.getByText('Open Printer Beta')).toBeVisible();
       expect(screen.queryByText('Open Later Printer')).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Printer filters (1 active)' })).toBeVisible();
+      await user.selectOptions(completion, '4');
+      expect(screen.getByText('Open Later Printer')).toBeVisible();
+      expect(screen.getByRole('button', { name: 'Printer filters (1 active)' })).toBeVisible();
+      await user.selectOptions(completion, 'all');
+      expect(screen.getByText('Open Later Printer')).toBeVisible();
+      expect(screen.getByRole('button', { name: 'Printer filters' })).toBeVisible();
+      expect(screen.queryByRole('button', { name: 'Clear filters' })).not.toBeInTheDocument();
+      await user.selectOptions(completion, '1');
       await user.click(screen.getByRole('button', { name: 'Printer filters (1 active)' }));
       await user.click(screen.getByRole('button', { name: 'Clear filters' }));
       expect(screen.getByText('Open Later Printer')).toBeVisible();
@@ -554,6 +564,33 @@ describe('PrintersPage', () => {
     } finally {
       clock.mockRestore();
     }
+  });
+
+  it('keeps the tour spotlight around the toggle and the filters it describes', async () => {
+    const user = userEvent.setup();
+    renderPage('/printers');
+    const toggle = screen.getByRole('button', { name: 'Printer filters' });
+    await user.click(toggle);
+
+    expect(toggle.closest('[data-tour="printers-filters"]'))
+      .toContainElement(screen.getByRole('group', { name: 'Printer filters' }));
+  });
+
+  it('shows the clear tooltip above the controls without repeating the accessible name', async () => {
+    const user = userEvent.setup();
+    renderPage('/printers');
+    await user.click(screen.getByRole('button', { name: 'Printer filters' }));
+    await user.selectOptions(screen.getByLabelText('Filter by printer state'), 'printing');
+    const clear = screen.getByRole('button', { name: 'Clear filters' });
+
+    act(() => clear.focus());
+
+    const tooltip = screen.getByRole('tooltip', { hidden: true });
+    expect(tooltip).toHaveTextContent('Clear filters');
+    expect(tooltip).toHaveAttribute('aria-hidden', 'true');
+    expect(clear).not.toHaveAttribute('aria-describedby');
+    expect(clear).toHaveAccessibleName('Clear filters');
+    expect(tooltip).toHaveClass('bottom-full');
   });
 
   it('retains combined filters when collapsed, fills the funnel without a badge, and offers a glyph-only clear button beside the toggle', async () => {
@@ -564,15 +601,16 @@ describe('PrintersPage', () => {
     await user.selectOptions(screen.getByLabelText('Filter by backend'), 'Moonraker');
     await user.selectOptions(screen.getByLabelText('Done in (estimated completion time)'), '4');
     const toggle = screen.getByRole('button', { name: 'Printer filters (3 active)' });
+    expect(screen.getByRole('group', { name: 'Printer filters' })).toBeVisible();
     await user.click(toggle);
 
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
     expect(toggle).toHaveTextContent(/^$/);
     expect(toggle.querySelector('svg path')).toHaveAttribute('d', mdiFilter);
+    expect(screen.queryByRole('group', { name: 'Printer filters' })).not.toBeInTheDocument();
     expect(screen.queryByRole('combobox', { name: 'Filter by backend' })).not.toBeInTheDocument();
     expect(screen.queryByText('Open Printer Alpha')).not.toBeInTheDocument();
     expect(screen.getByText('Open Printer Beta')).toBeVisible();
-    expect(screen.queryByRole('group', { name: 'Active printer filters' })).not.toBeInTheDocument();
     const clear = screen.getByRole('button', { name: 'Clear filters' });
     expect(clear).toBeVisible();
     expect(clear).toHaveTextContent(/^$/);
@@ -594,6 +632,7 @@ describe('PrintersPage', () => {
     await user.selectOptions(screen.getByLabelText('Filter by printer state'), 'printing');
     await user.selectOptions(screen.getByLabelText('Filter by backend'), 'Moonraker');
     await user.selectOptions(screen.getByLabelText('Done in (estimated completion time)'), '2');
+    expect(screen.getByRole('group', { name: 'Printer filters' })).toBeVisible();
     expect(within(screen.getByTestId('printer-table')).queryByText('Printer Alpha')).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Printer filters (3 active)' }));
     await user.click(screen.getByRole('button', { name: 'Clear filters' }));
@@ -602,7 +641,8 @@ describe('PrintersPage', () => {
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
     expect(toggle).toHaveFocus();
     expect(toggle.querySelector('svg path')).toHaveAttribute('d', mdiFilterOutline);
-    expect(screen.queryByRole('group', { name: 'Active printer filters' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'Printer filters' })).not.toBeInTheDocument();
+    expect(screen.getByRole('tooltip')).toHaveTextContent('Show printer filters');
     expect(screen.getByRole('combobox', { name: 'Sort printers by' })).toHaveValue('name');
     expect(localStorage.getItem('printerSortMode')).toBe('name');
     expect(localStorage.getItem('printerViewMode')).toBe('table');
@@ -642,6 +682,7 @@ describe('PrintersPage', () => {
     expect(screen.queryByRole('combobox', { name: 'Filter by backend' })).not.toBeInTheDocument();
     // Clearing filters restores the full list.
     const emptyState = screen.getByText('No printers match these filters').parentElement!;
+    expect(within(emptyState).queryByRole('img')).not.toBeInTheDocument();
     await user.click(within(emptyState).getByRole('button', { name: 'Clear filters' }));
     expect(screen.queryByText('No printers match these filters')).not.toBeInTheDocument();
     expect(screen.getByText('Open Printer Alpha')).toBeInTheDocument();

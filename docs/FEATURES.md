@@ -19,6 +19,12 @@ appears beside the funnel and resets all three filters
 without changing the sort order or view mode. If nothing matches, clear or
 adjust filters to recover the fleet.
 
+Filter tooltips appear above the controls to avoid covering Sort. Clearing filters
+returns focus to the funnel; its tooltip intentionally appears immediately, just
+as it does for keyboard focus, so the restored control remains identifiable.
+The clear tooltip does not repeat the button's name to screen readers.
+The filter tour spotlight includes both the toolbar and the expanded strip.
+
 Bed type is configured in printer settings, not shown on fleet cards or used
 as a fleet filter. Bed editing and temperature controls remain available.
 

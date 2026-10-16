@@ -265,7 +265,7 @@ export function PrintersPage() {
   const expandedPrinterId = routePrinterId && printersById[routePrinterId] ? routePrinterId : null;
 
   // Hours value for availability filter — cutoff is derived dynamically so it never goes stale
-  const [availabilityHours, setAvailabilityHours] = useState<number | null>(null);
+  const availabilityHours = availabilityFilter === 'all' ? null : Number(availabilityFilter);
 
   // Ticking now value for availability filter — updates every 30s so filter stays fresh
   const [filterNow, setFilterNow] = useState(Date.now);
@@ -326,7 +326,6 @@ export function PrintersPage() {
     setStateFilter('all');
     setBackendFilter('all');
     setAvailabilityFilter('all');
-    setAvailabilityHours(null);
     filterToggleRef.current?.focus();
   }, []);
 
@@ -554,7 +553,7 @@ export function PrintersPage() {
       <div className={isSidebarOpen ? 'min-w-0 lg:grid lg:grid-cols-[minmax(0,1fr)_24rem] lg:items-start lg:gap-6' : 'min-w-0'}>
         <div className="min-w-0">
           {/* Actions, sort and view remain available while filters are collapsed. */}
-          <div className="flex flex-col gap-4 mb-6">
+          <div data-tour="printers-filters" className="flex flex-col gap-4 mb-6">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               {/* Primary Actions (Left) */}
               <div data-tour="printers-actions" className="flex flex-col sm:flex-row sm:items-center gap-2">
@@ -579,9 +578,9 @@ export function PrintersPage() {
               </div>
 
               {/* View & Filters (Right) */}
-              <div data-tour="printers-filters" className="flex flex-wrap items-center gap-2 sm:justify-end">
+              <div className="flex flex-wrap items-center gap-2 sm:justify-end">
                 <div className="flex items-center gap-0.5">
-                <Tooltip content={filtersExpanded ? 'Hide printer filters' : 'Show printer filters'} position="right">
+                <Tooltip content={filtersExpanded ? 'Hide printer filters' : 'Show printer filters'} position="top">
                   <Button
                     ref={filterToggleRef}
                     type="button"
@@ -596,7 +595,7 @@ export function PrintersPage() {
                   />
                 </Tooltip>
                 {hasActiveFilters && (
-                  <Tooltip content="Clear filters" position="right">
+                  <Tooltip content="Clear filters" position="top" ariaMode="hidden">
                     <Button
                       type="button"
                       variant="ghost"
@@ -682,11 +681,7 @@ export function PrintersPage() {
                   <Select
                     id="availability-filter"
                     value={availabilityFilter}
-                    onChange={e => {
-                      const val = e.target.value as AvailabilityFilter;
-                      setAvailabilityFilter(val);
-                      setAvailabilityHours(val !== 'all' ? parseInt(val, 10) : null);
-                    }}
+                    onChange={e => setAvailabilityFilter(e.target.value as AvailabilityFilter)}
                     aria-label="Done in (estimated completion time)"
                     className="min-h-11 min-w-0"
                   >
@@ -732,7 +727,9 @@ export function PrintersPage() {
                 </div>
               ) : (deferredUserPrinters.length === 0 && hasActiveFilters) ? (
                 <div className="text-center py-12">
-                  <ClearFiltersIcon className="h-12 w-12 text-pf-text-tertiary mx-auto mb-4" />
+                  <span aria-hidden="true">
+                    <ClearFiltersIcon className="h-12 w-12 text-pf-text-tertiary mx-auto mb-4" />
+                  </span>
                   <h3 className="text-xl font-semibold text-pf-text-primary mb-2">No printers match these filters</h3>
                   <p className="text-pf-text-secondary mb-6">Try adjusting or clearing your filters to see more printers.</p>
                   <Button variant="secondary" size="sm" onClick={handleClearFilters}>
