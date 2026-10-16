@@ -9,8 +9,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.Sqlite;
-using Microsoft.EntityFrameworkCore.Infrastructure;
-using Microsoft.EntityFrameworkCore.Storage;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -23,11 +22,9 @@ namespace Farm.Web.IntegrationTests.Calibration;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <see cref="WebApplicationFactory{TEntryPoint}"/> always installs an in-memory <c>TestServer</c>,
-/// whose address no container can dial. This host therefore uses the documented two-host arrangement:
-/// the factory keeps its in-memory host so its own internals stay satisfied, while the host this class
-/// exposes is a second, identically configured instance bound to a real TCP port. Both instances share
-/// one SQLite database and one storage root, so the smoke asserts on exactly what the container talked to.
+/// Uses <see cref="WebApplicationFactory{TEntryPoint}.UseKestrel(Action{Microsoft.AspNetCore.Server.Kestrel.Core.KestrelServerOptions})"/>
+/// to run a single production host on a real TCP port. Building the deferred entry point twice starts
+/// competing application instances against the same database, racing schema initialization.
 /// </para>
 /// <para>
 /// Nothing about the application pipeline is replaced. The only test-specific configuration is the
@@ -39,7 +36,6 @@ internal sealed class KestrelCalibrationApiHost : WebApplicationFactory<Program>
 {
     private readonly SqliteConnection _keepAliveConnection;
     private readonly IReadOnlyDictionary<string, string?> _hostConfiguration;
-    private IHost? _kestrelHost;
     private int _disposed;
 
     private KestrelCalibrationApiHost(
@@ -89,8 +85,7 @@ internal sealed class KestrelCalibrationApiHost : WebApplicationFactory<Program>
     public string BaseAddress => string.Create(CultureInfo.InvariantCulture, $"http://127.0.0.1:{ListenPort}");
 
     /// <summary>Gets the service provider of the host bound to <see cref="BaseAddress"/>.</summary>
-    public IServiceProvider ListeningServices => _kestrelHost?.Services
-        ?? throw new InvalidOperationException("The Kestrel host has not been started yet.");
+    public IServiceProvider ListeningServices => Services;
 
     /// <summary>
     /// Starts the production pipeline on a free loopback port.
@@ -113,7 +108,9 @@ internal sealed class KestrelCalibrationApiHost : WebApplicationFactory<Program>
             storageRoot,
             ReserveLoopbackPort());
 
-        // Touching Services forces WebApplicationFactory to build both hosts.
+        host.UseKestrel(options => options.Listen(IPAddress.Loopback, host.ListenPort));
+
+        // Touching Services forces WebApplicationFactory to start the real listener.
         _ = host.Services;
         return host;
     }
@@ -198,22 +195,11 @@ internal sealed class KestrelCalibrationApiHost : WebApplicationFactory<Program>
             config.AddInMemoryCollection(_hostConfiguration));
         _ = builder.UseEnvironment("Testing");
 
-        // Build the in-memory host first, while TestServer is still the registered server.
-        IHost inMemoryHost = builder.Build();
-
-        // Then add Kestrel and build the second host. The endpoint is bound explicitly so the listener
-        // never depends on URL configuration reaching the entry point, and its IServer registration
-        // wins because it is applied after the factory's TestServer registration.
-        _ = builder.ConfigureWebHost(webHost => webHost
-            .UseKestrel(options => options.Listen(IPAddress.Loopback, ListenPort)));
-        _kestrelHost = builder.Build();
-        _kestrelHost.Start();
-
-        VerifyListening(_kestrelHost);
-        EnsureDatabaseCreated(_kestrelHost);
-
-        inMemoryHost.Start();
-        return inMemoryHost;
+        IHost host = builder.Build();
+        EnsureDatabaseMigrated(host);
+        host.Start();
+        VerifyListening(host);
+        return host;
     }
 
     /// <inheritdoc/>
@@ -226,15 +212,10 @@ internal sealed class KestrelCalibrationApiHost : WebApplicationFactory<Program>
 
         try
         {
-            if (_kestrelHost is not null)
-            {
-                await _kestrelHost.StopAsync(TimeSpan.FromSeconds(15));
-                _kestrelHost.Dispose();
-            }
+            await base.DisposeAsync();
         }
         finally
         {
-            await base.DisposeAsync();
             await _keepAliveConnection.DisposeAsync();
         }
 
@@ -274,26 +255,15 @@ internal sealed class KestrelCalibrationApiHost : WebApplicationFactory<Program>
             lastFailure);
     }
 
-    private static void EnsureDatabaseCreated(IHost host)
+    private static void EnsureDatabaseMigrated(IHost host)
     {
         using IServiceScope scope = host.Services.CreateScope();
         AppDbContext core = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        _ = core.Database.EnsureCreated();
+        core.Database.Migrate();
 
-        // Both contexts share one database, so EnsureCreated on the slicer context is a no-op once the
-        // core tables exist. Creating the slicer tables explicitly keeps the artifact, worker and job
-        // hops routable, which is exactly what the capability probe reports on.
+        // Both contexts share one database; apply their migrations before production startup checks.
         SlicerDbContext slicer = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
-        try
-        {
-            ((IInfrastructure<IServiceProvider>)slicer).Instance
-                .GetRequiredService<IRelationalDatabaseCreator>()
-                .CreateTables();
-        }
-        catch (SqliteException)
-        {
-            // The tables already exist because the sibling host created them first.
-        }
+        slicer.Database.Migrate();
     }
 
     /// <summary>
