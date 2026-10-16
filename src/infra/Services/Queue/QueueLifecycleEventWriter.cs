@@ -83,6 +83,29 @@ public static class QueueLifecycleEventWriter
     /// <summary>Backend confirmed the paused print was resumed.</summary>
     public const string EventTypeJobResumed = "PrintFarmer.Queue.JobResumed.v1";
 
+    /// <summary>
+    /// A job's queue-visible attributes changed without a status transition: priority,
+    /// manual queue position, editable details, or a requeue/rerun of an existing job (#3296).
+    /// NOT membership-changing for an already-active job; a rerun that re-enters the active
+    /// set from a terminal state uses <see cref="EventTypeJobQueued"/> instead.
+    /// </summary>
+    public const string EventTypeJobUpdated = "PrintFarmer.Queue.JobUpdated.v1";
+
+    /// <summary><c>changeKind</c> payload token: job priority changed.</summary>
+    public const string JobChangeKindPriority = "priority";
+
+    /// <summary><c>changeKind</c> payload token: manual queue position changed.</summary>
+    public const string JobChangeKindReorder = "reorder";
+
+    /// <summary><c>changeKind</c> payload token: editable job details changed.</summary>
+    public const string JobChangeKindDetails = "details";
+
+    /// <summary><c>changeKind</c> payload token: a new job was created by rerunning another.</summary>
+    public const string JobChangeKindRerun = "rerun";
+
+    /// <summary><c>changeKind</c> payload token: the generic job update endpoint changed the job.</summary>
+    public const string JobChangeKindUpdate = "update";
+
     public const string EventTypeBedClearAcknowledged =
         "PrintFarmer.Queue.BedClearAcknowledged.v1";
 
@@ -195,5 +218,27 @@ public static class QueueLifecycleEventWriter
             jobStatus,
             jobKind,
             failureCode,
+        });
+
+    /// <summary>
+    /// Builds the canonical payload for <see cref="EventTypeJobUpdated"/> and for
+    /// <see cref="EventTypeJobQueued"/> rows emitted by the management/analytics paths (#3296).
+    /// <paramref name="changeKind"/> is a fixed, server-chosen token (never user input).
+    /// </summary>
+    public static string BuildJobChangePayload(
+        Guid jobId,
+        Guid? printerId,
+        string jobStatus,
+        string jobKind,
+        int priority,
+        string changeKind) =>
+        JsonSerializer.Serialize(new
+        {
+            jobId,
+            printerId,
+            jobStatus,
+            jobKind,
+            priority,
+            changeKind,
         });
 }

@@ -280,6 +280,35 @@ describe('QueueRealtimeBridge', () => {
     );
   });
 
+  it('#3296: a JobUpdated queue event invalidates both Print Queue dashboard keys without reconciling subscriptions', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <QueueRealtimeBridge />
+      </QueryClientProvider>
+    );
+    await waitFor(() =>
+      expect(mocks.replaceQueueResourceSubscriptions).toHaveBeenCalledTimes(1)
+    );
+
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+    invalidate.mockClear();
+
+    mocks.emitQueueEvent({
+      jobId: 'job-1',
+      printerId: 'assigned-printer',
+      eventType: 'PrintFarmer.Queue.JobUpdated.v1',
+    });
+
+    await waitFor(() =>
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: ['queue-jobs'] })
+    );
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['queue-stats'] });
+    expect(mocks.replaceQueueResourceSubscriptions).toHaveBeenCalledTimes(1);
+  });
+
   it('#1731: a burst of ordinary queue events does not reconcile subscriptions or refetch printers/resources beyond the initial mount reconcile', async () => {
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false } },

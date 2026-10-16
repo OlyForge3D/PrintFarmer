@@ -135,15 +135,17 @@ export function PrintQueueDashboardPage() {
       undefined,
       undefined,
     ),
+    // No refetchInterval (#3296): the globally mounted QueueRealtimeBridge invalidates
+    // ['queue-jobs'] and ['queue-stats'] together on every queue `queueevent` (including
+    // PrintFarmer.Queue.JobUpdated.v1 for priority/reorder/edit/rerun), on reconnect, and
+    // on its 60s self-heal, so the list and the stats chiclets stay in step.
     staleTime: 10_000,
-    refetchInterval: 10_000,
   });
 
   const { data: stats = null } = useQuery({
     queryKey: ['queue-stats'],
     queryFn: () => apiClient.getAnalyticsQueueStats() as Promise<QueueStatsDto>,
     staleTime: 10_000,
-    refetchInterval: 10_000,
   });
 
   const invalidateQueue = useCallback(async () => {
