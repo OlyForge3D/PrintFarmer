@@ -17,17 +17,6 @@ import type {
   UpdateMaintenanceModeRequest,
 } from '@/types/maintenance';
 
-/** Axios exposes response header names in lower case. */
-const TOTAL_COUNT_HEADER = 'x-total-count';
-
-/** A printer's maintenance history, possibly bounded server-side (#3297). */
-export interface PrinterMaintenanceLogPage {
-  /** Newest logs first; at most the requested limit when one was sent. */
-  logs: MaintenanceLog[];
-  /** Total logs in the history (`X-Total-Count`); `null` when the server did not report it. */
-  totalCount: number | null;
-}
-
 // Analytics response types
 export interface MaintenanceTrendEntry {
   date: string;
@@ -220,25 +209,26 @@ export class MaintenanceService {
   // ============================================================================
 
   /**
-   * Gets maintenance history for a printer, most recent first.
+   * Gets the most recent maintenance history for a printer, bounded server-side (#3297).
    * @param printerId - The printer ID
-   * @param options.limit - Maximum rows to fetch (1..100), applied server-side (#3297).
-   *   Omit for the full history.
-   * @returns The rows plus, when a limit was sent, the total number of logs in the history
+   * @param options.limit - Maximum rows to fetch (1..100)
+   * @param options.scope - `'printer'` for printer-wide logs only, a toolhead id for that
+   *   toolhead's logs, or omitted for every scope
+   * @returns The newest rows matching the scope, most recent first
    */
-  async getPrinterMaintenanceLogs(
+  async getRecentPrinterMaintenanceLogs(
     printerId: string,
-    options: { limit?: number } = {},
-  ): Promise<PrinterMaintenanceLogPage> {
+    options: { limit: number; scope?: string },
+  ): Promise<MaintenanceLog[]> {
+    const params: Record<string, string | number> = { limit: options.limit };
+    if (options.scope !== undefined) {
+      params.scope = options.scope;
+    }
     const response = await apiClient.get<MaintenanceLog[]>(
       `/maintenance/printers/${printerId}/logs`,
-      options.limit === undefined ? undefined : { params: { limit: options.limit } },
+      { params },
     );
-    const header = Number.parseInt(String(response.headers?.[TOTAL_COUNT_HEADER] ?? ''), 10);
-    return {
-      logs: response.data,
-      totalCount: Number.isFinite(header) ? header : null,
-    };
+    return response.data;
   }
 
   /**

@@ -70,11 +70,6 @@ public class EfMaintenanceLogRepository(AppDbContext context) : IMaintenanceLogR
             .ToListAsync(cancellationToken);
     }
 
-    public Task<int> CountPrinterLogsAsync(MaintenanceLogListQuery query, CancellationToken cancellationToken = default)
-    {
-        return FilterPrinterLogs(query).CountAsync(cancellationToken);
-    }
-
     private IQueryable<MaintenanceLog> FilterPrinterLogs(MaintenanceLogListQuery query)
     {
         IQueryable<MaintenanceLog> logs = _context.MaintenanceLogs
@@ -84,6 +79,12 @@ public class EfMaintenanceLogRepository(AppDbContext context) : IMaintenanceLogR
         if (query.PrinterWideOnly)
         {
             logs = logs.Where(l => l.ToolheadId == null);
+        }
+
+        if (query.ToolheadId.HasValue)
+        {
+            Guid toolheadId = query.ToolheadId.Value;
+            logs = logs.Where(l => l.ToolheadId == toolheadId);
         }
 
         return logs;

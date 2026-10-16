@@ -33,17 +33,9 @@ public interface IMaintenanceLogRepository
     /// the database. Ordered most recent first (<see cref="MaintenanceLog.PerformedAt"/>
     /// descending, then <see cref="MaintenanceLog.Id"/> descending as a stable tiebreaker).
     /// </summary>
-    /// <param name="query">Printer, feature-gate filter and optional row limit.</param>
+    /// <param name="query">Printer, scope filter and optional row limit.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     Task<List<MaintenanceLogDto>> GetPrinterLogsAsync(MaintenanceLogListQuery query, CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Counts the logs matching <paramref name="query"/>'s printer and feature-gate filter,
-    /// ignoring <see cref="MaintenanceLogListQuery.Limit"/>.
-    /// </summary>
-    /// <param name="query">Printer and feature-gate filter.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    Task<int> CountPrinterLogsAsync(MaintenanceLogListQuery query, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Gets all maintenance logs for a specific printer and task combination.

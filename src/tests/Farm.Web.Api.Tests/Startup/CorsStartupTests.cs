@@ -36,18 +36,6 @@ public class CorsStartupTests
     }
 
     [Fact]
-    public async Task PrinterMaintenanceLogList_ExposesTotalCountHeaderToCrossOriginClients()
-    {
-        var services = new ServiceCollection();
-        services.AddPrintFarmerCors();
-        await using ServiceProvider provider = services.BuildServiceProvider();
-        CorsPolicy policy = Assert.IsType<CorsPolicy>(provider.GetRequiredService<IOptions<CorsOptions>>().Value.GetPolicy("Default"));
-
-        // Issue #3297: the React maintenance history reads "Showing 10 of N" from this header.
-        Assert.Contains("X-Total-Count", policy.ExposedHeaders);
-    }
-
-    [Fact]
     public void ConfiguredOrigin_IsAllowed_RegardlessOfLocalNetworkFlag()
     {
         Assert.True(CorsStartup.IsOriginAllowed("http://localhost:3000", ConfiguredOrigins, allowLocalNetwork: false));

@@ -23,7 +23,7 @@ vi.mock('@/services/api', () => ({
 vi.mock('@/services/maintenanceService', () => ({
   maintenanceService: {
     getPrinterStatistics: vi.fn(),
-    getPrinterMaintenanceLogs: vi.fn(),
+    getRecentPrinterMaintenanceLogs: vi.fn(),
     getPrinterAlerts: vi.fn(),
     createMaintenanceLog: vi.fn(),
     getUpcomingMaintenance: vi.fn(),
@@ -207,7 +207,6 @@ function seedDefaults(overrides: {
   detailsError?: Error;
   alerts?: MaintenanceAlert[];
   logs?: MaintenanceLog[];
-  logTotal?: number | null;
   deployments?: PrinterMaintenanceScheduleDto[];
   upcoming?: unknown[];
 } = {}) {
@@ -228,18 +227,13 @@ function seedDefaults(overrides: {
     totalMaintenanceCost: 0,
     averageMaintenanceHours: 0,
   });
-  // Simulates GET /maintenance/printers/{id}/logs?limit= (#3297): a limit truncates and
-  // reports X-Total-Count; no limit returns everything with no total.
-  (maintenanceService.getPrinterMaintenanceLogs as unknown as ReturnType<typeof vi.fn>).mockImplementation(
-    async (_printerId: string, { limit }: { limit?: number } = {}) => {
+  // Simulates the server-side scope filter of GET /maintenance/printers/{id}/logs (#3297).
+  (maintenanceService.getRecentPrinterMaintenanceLogs as unknown as ReturnType<typeof vi.fn>).mockImplementation(
+    async (_printerId: string, { scope }: { limit: number; scope?: string }) => {
       const all = overrides.logs ?? [legacyLog, scopedLog];
-      if (limit === undefined) {
-        return { logs: all, totalCount: null };
-      }
-      return {
-        logs: all.slice(0, limit),
-        totalCount: overrides.logTotal !== undefined ? overrides.logTotal : all.length,
-      };
+      return scope === undefined
+        ? all
+        : all.filter(l => (scope === 'printer' ? l.toolheadId == null : l.toolheadId === scope));
     }
   );
   (maintenanceService.getPrinterAlerts as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
@@ -733,7 +727,7 @@ describe('PrinterMaintenancePage — per-toolhead scope', () => {
       totalMaintenanceCost: 0,
       averageMaintenanceHours: 0,
     });
-    (maintenanceService.getPrinterMaintenanceLogs as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ logs: [], totalCount: 0 });
+    (maintenanceService.getRecentPrinterMaintenanceLogs as unknown as ReturnType<typeof vi.fn>).mockResolvedValue([]);
     (maintenanceService.getPrinterAlerts as unknown as ReturnType<typeof vi.fn>).mockResolvedValue([]);
     (maintenanceService.getUpcomingMaintenance as unknown as ReturnType<typeof vi.fn>).mockResolvedValue([]);
     (maintenancePlanService.getScheduleDeployments as unknown as ReturnType<typeof vi.fn>).mockResolvedValue([]);
@@ -846,7 +840,7 @@ describe('PrinterMaintenancePage — per-toolhead scope', () => {
       totalMaintenanceCost: 0,
       averageMaintenanceHours: 0,
     });
-    (maintenanceService.getPrinterMaintenanceLogs as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ logs: [], totalCount: 0 });
+    (maintenanceService.getRecentPrinterMaintenanceLogs as unknown as ReturnType<typeof vi.fn>).mockResolvedValue([]);
     (maintenanceService.getPrinterAlerts as unknown as ReturnType<typeof vi.fn>).mockResolvedValue([]);
     (maintenanceService.getUpcomingMaintenance as unknown as ReturnType<typeof vi.fn>).mockResolvedValue([]);
     (maintenancePlanService.getScheduleDeployments as unknown as ReturnType<typeof vi.fn>).mockResolvedValue([]);
@@ -1098,62 +1092,48 @@ describe('PrinterMaintenancePage — bounded maintenance history (#3297)', () =>
   beforeEach(() => vi.clearAllMocks());
 
   const getLogs = () =>
-    maintenanceService.getPrinterMaintenanceLogs as unknown as ReturnType<typeof vi.fn>;
+    maintenanceService.getRecentPrinterMaintenanceLogs as unknown as ReturnType<typeof vi.fn>;
 
-  const manyLogs = (count: number, toolheadId: string | null = null) =>
-    Array.from({ length: count }, (_, i) => ({
-      ...legacyLog,
-      id: `l-${toolheadId ?? 'wide'}-${i}`,
-      toolheadId,
-      taskName: `Log ${toolheadId ?? 'wide'} ${i}`,
-    })) as MaintenanceLog[];
-
-  it('requests only the 10 rendered rows when the scope picker is hidden', async () => {
-    seedDefaults({ details: printerDetailsSingle });
-    renderPage();
-
-    await waitFor(() => expect(screen.getByText('Log for T1')).toBeInTheDocument());
-    expect(getLogs()).toHaveBeenCalledTimes(1);
-    expect(getLogs()).toHaveBeenCalledWith(printerId, { limit: 10 });
-  });
-
-  it('shows the server-reported total when more history exists than is rendered', async () => {
-    seedDefaults({ details: printerDetailsSingle, logs: manyLogs(10), logTotal: 37 });
-    renderPage();
-
-    await waitFor(() => expect(screen.getByText('Showing 10 of 37 entries')).toBeInTheDocument());
-  });
-
-  it('omits the "Showing" footer when everything fits and no total is reported', async () => {
-    seedDefaults({ details: printerDetailsSingle, logTotal: null });
-    renderPage();
-
-    await waitFor(() => expect(screen.getByText('Legacy log')).toBeInTheDocument());
-    expect(screen.queryByText(/Showing \d+ of/)).not.toBeInTheDocument();
-  });
-
-  it('fetches the full history once when the scope picker filters client-side', async () => {
+  it('requests only the 10 rendered rows, already scoped to printer-wide on the first fetch', async () => {
     seedDefaults();
     renderPage();
-    const user = userEvent.setup();
+
     await waitFor(() => expect(screen.getByText('Legacy log')).toBeInTheDocument());
-
-    await user.click(screen.getByLabelText(/T1 · T1/));
-
-    await waitFor(() => expect(screen.getByText('Log for T1')).toBeInTheDocument());
     expect(getLogs()).toHaveBeenCalledTimes(1);
-    expect(getLogs()).toHaveBeenCalledWith(printerId, { limit: undefined });
+    expect(getLogs()).toHaveBeenCalledWith(printerId, { limit: 10, scope: 'printer' });
   });
 
-  it('fills a toolhead scope with 10 rows even when newer printer-wide logs exist', async () => {
-    seedDefaults({ logs: [...manyLogs(12), ...manyLogs(11, 'th-1')] });
+  it('requests the selected toolhead scope when the picker changes', async () => {
+    seedDefaults();
     renderPage();
     const user = userEvent.setup();
     await waitFor(() => expect(screen.getByTestId('printer-maintenance-scope')).toBeInTheDocument());
 
     await user.click(screen.getByLabelText(/T1 · T1/));
 
-    await waitFor(() => expect(screen.getByText('Showing 10 of 11 entries')).toBeInTheDocument());
-    expect(screen.getAllByText(/^Log th-1 \d+$/)).toHaveLength(10);
+    await waitFor(() => expect(screen.getByText('Log for T1')).toBeInTheDocument());
+    expect(getLogs()).toHaveBeenLastCalledWith(printerId, { limit: 10, scope: 'th-1' });
+  });
+
+  it('requests every scope when the picker is hidden (single toolhead)', async () => {
+    seedDefaults({ details: printerDetailsSingle });
+    renderPage();
+
+    await waitFor(() => expect(screen.getByText('Log for T1')).toBeInTheDocument());
+    expect(getLogs()).toHaveBeenCalledWith(printerId, { limit: 10, scope: undefined });
+  });
+
+  it('renders the bounded rows without an "of N" footer', async () => {
+    const tenLogs = Array.from({ length: 10 }, (_, i) => ({
+      ...legacyLog,
+      id: `l-${i}`,
+      taskName: `Log ${i}`,
+    })) as MaintenanceLog[];
+    seedDefaults({ logs: tenLogs });
+    renderPage();
+
+    await waitFor(() => expect(screen.getByText('Log 9')).toBeInTheDocument());
+    expect(screen.getByText('Log 0')).toBeInTheDocument();
+    expect(screen.queryByText(/Showing \d+ of/)).not.toBeInTheDocument();
   });
 });

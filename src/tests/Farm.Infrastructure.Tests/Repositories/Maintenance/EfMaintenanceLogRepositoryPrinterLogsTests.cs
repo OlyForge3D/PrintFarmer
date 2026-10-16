@@ -11,9 +11,9 @@ using Xunit;
 namespace Farm.Infrastructure.Tests.Repositories.Maintenance;
 
 /// <summary>
-/// Relational SQLite coverage for <see cref="EfMaintenanceLogRepository.GetPrinterLogsAsync"/> and
-/// <see cref="EfMaintenanceLogRepository.CountPrinterLogsAsync"/> (issue #3297): the limit and
-/// feature-gate filter run in the database, ordering is deterministic, and nothing is change-tracked.
+/// Relational SQLite coverage for <see cref="EfMaintenanceLogRepository.GetPrinterLogsAsync"/>
+/// (issue #3297): the limit and scope
+/// filter run in the database, ordering is deterministic, and nothing is change-tracked.
 /// </summary>
 public sealed class EfMaintenanceLogRepositoryPrinterLogsTests : IDisposable
 {
@@ -120,16 +120,25 @@ public sealed class EfMaintenanceLogRepositoryPrinterLogsTests : IDisposable
     }
 
     [Fact]
-    public async Task PrinterWideOnly_ReturnsOnlyUnscopedLogs_AndCountIgnoresLimit()
+    public async Task PrinterWideOnly_ReturnsOnlyUnscopedLogs_WithLimit()
     {
         List<MaintenanceLog> seeded = await SeedAsync();
-        MaintenanceLogListQuery query = new(_printerId, PrinterWideOnly: true, Limit: 1);
+        MaintenanceLogListQuery query = new(_printerId, PrinterWideOnly: true, Limit: 2);
 
         List<MaintenanceLogDto> result = await _repo.GetPrinterLogsAsync(query);
-        int total = await _repo.CountPrinterLogsAsync(query);
 
-        result.Select(l => l.Id).Should().Equal(ExpectedOrder(seeded.Where(l => l.ToolheadId == null)).Take(1));
-        total.Should().Be(3);
+        result.Select(l => l.Id).Should().Equal(ExpectedOrder(seeded.Where(l => l.ToolheadId == null)).Take(2));
+    }
+
+    [Fact]
+    public async Task ToolheadScope_ReturnsOnlyThatToolheadsLogs()
+    {
+        List<MaintenanceLog> seeded = await SeedAsync();
+        MaintenanceLogListQuery query = new(_printerId, ToolheadId: _toolheadId);
+
+        List<MaintenanceLogDto> result = await _repo.GetPrinterLogsAsync(query);
+
+        result.Select(l => l.Id).Should().Equal(ExpectedOrder(seeded.Where(l => l.ToolheadId == _toolheadId)));
     }
 
     [Fact]

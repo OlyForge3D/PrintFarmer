@@ -18,9 +18,9 @@ namespace Farm.Web.Api.Tests.Controllers;
 
 /// <summary>
 /// Integration tests for the bounded printer maintenance-history list (issue #3297):
-/// <c>GET /api/maintenance/printers/{printerId}/logs?limit=</c>.
-/// Omitting the parameter must keep today's response byte-for-byte; a limit returns only the
-/// newest rows plus an <c>X-Total-Count</c> header; invalid input is a 400 validation problem.
+/// <c>GET /api/maintenance/printers/{printerId}/logs?limit=&amp;scope=</c>.
+/// Omitting both parameters must keep today's response byte-for-byte; a limit returns only the
+/// newest rows; invalid input is a 400 validation problem.
 /// </summary>
 [Collection(IntegrationTestCollection.Name)]
 public sealed class PrinterMaintenanceLogListTests : IAsyncLifetime
@@ -140,11 +140,6 @@ public sealed class PrinterMaintenanceLogListTests : IAsyncLifetime
     private static List<MaintenanceLogDto> Body(ActionResult<IEnumerable<MaintenanceLogDto>> result) =>
         Assert.IsType<List<MaintenanceLogDto>>(Assert.IsType<OkObjectResult>(result.Result).Value);
 
-    private static string? TotalCount(ControllerBase controller) =>
-        controller.Response.Headers.TryGetValue(MaintenanceController.TotalCountHeader, out var values)
-            ? values.ToString()
-            : null;
-
     [Fact]
     public async Task OmittedLimit_ReturnsFullHistory_SerializedExactlyLikeTheLegacyEntityResponse()
     {
@@ -169,11 +164,10 @@ public sealed class PrinterMaintenanceLogListTests : IAsyncLifetime
         JsonNode.DeepEquals(actual, expected).Should().BeTrue(
             $"the DTO must keep the wire shape.\nexpected: {expected?.ToJsonString()}\nactual:   {actual?.ToJsonString()}");
         expected!.AsArray()[0]!["maintenanceTask"].Should().NotBeNull("the baseline must exercise the embedded task");
-        TotalCount(controller).Should().BeNull();
     }
 
     [Fact]
-    public async Task Limit_ReturnsOnlyNewestRows_WithTotalCountHeader()
+    public async Task Limit_ReturnsOnlyNewestRows()
     {
         Seed seed = await SeedAsync();
         MaintenanceController controller = CreateController();
@@ -181,11 +175,10 @@ public sealed class PrinterMaintenanceLogListTests : IAsyncLifetime
         List<MaintenanceLogDto> body = Body(await controller.GetPrinterMaintenanceLogsAsync(seed.PrinterId, limit: 2));
 
         body.Select(l => l.Id).Should().Equal(seed.NewestFirst.Take(2));
-        TotalCount(controller).Should().Be("4");
     }
 
     [Fact]
-    public async Task LimitLargerThanHistory_ReturnsEverything_WithExactTotal()
+    public async Task LimitLargerThanHistory_ReturnsEverything()
     {
         Seed seed = await SeedAsync();
         MaintenanceController controller = CreateController();
@@ -194,23 +187,45 @@ public sealed class PrinterMaintenanceLogListTests : IAsyncLifetime
             seed.PrinterId, limit: MaintenanceController.MaxPrinterLogLimit));
 
         body.Select(l => l.Id).Should().Equal(seed.NewestFirst);
-        TotalCount(controller).Should().Be("4");
     }
 
     [Fact]
-    public async Task FeatureDisabled_HidesToolheadLogs_WithAndWithoutLimit()
+    public async Task PrinterScope_ReturnsOnlyPrinterWideLogs()
+    {
+        Seed seed = await SeedAsync();
+        MaintenanceController controller = CreateController();
+
+        List<MaintenanceLogDto> body = Body(await controller.GetPrinterMaintenanceLogsAsync(
+            seed.PrinterId, limit: 1, scope: "printer"));
+
+        body.Select(l => l.Id).Should().Equal(seed.PrinterWideNewestFirst.Take(1));
+    }
+
+    [Fact]
+    public async Task ToolheadScope_ReturnsOnlyThatToolheadsLogs()
+    {
+        Seed seed = await SeedAsync();
+        MaintenanceController controller = CreateController();
+
+        List<MaintenanceLogDto> body = Body(await controller.GetPrinterMaintenanceLogsAsync(
+            seed.PrinterId, limit: 10, scope: seed.ToolheadId.ToString()));
+
+        body.Should().HaveCount(2).And.OnlyContain(l => l.ToolheadId == seed.ToolheadId);
+    }
+
+    [Fact]
+    public async Task FeatureDisabled_HidesToolheadLogs_EvenWhenToolheadScopeRequested()
     {
         Seed seed = await SeedAsync();
 
         List<MaintenanceLogDto> all = Body(await CreateController(multiSlotEnabled: false)
             .GetPrinterMaintenanceLogsAsync(seed.PrinterId));
-        MaintenanceController limitedController = CreateController(multiSlotEnabled: false);
-        List<MaintenanceLogDto> limited = Body(await limitedController.GetPrinterMaintenanceLogsAsync(
-            seed.PrinterId, limit: 1));
+        MaintenanceController scopedController = CreateController(multiSlotEnabled: false);
+        List<MaintenanceLogDto> scoped = Body(await scopedController.GetPrinterMaintenanceLogsAsync(
+            seed.PrinterId, limit: 10, scope: seed.ToolheadId.ToString()));
 
         all.Select(l => l.Id).Should().Equal(seed.PrinterWideNewestFirst);
-        limited.Select(l => l.Id).Should().Equal(seed.PrinterWideNewestFirst.Take(1));
-        TotalCount(limitedController).Should().Be("2");
+        scoped.Should().BeEmpty();
     }
 
     [Theory]
@@ -227,5 +242,20 @@ public sealed class PrinterMaintenanceLogListTests : IAsyncLifetime
         ObjectResult problem = Assert.IsAssignableFrom<ObjectResult>(result.Result);
         problem.StatusCode.Should().Be(StatusCodes.Status400BadRequest);
         Assert.IsType<ValidationProblemDetails>(problem.Value).Errors.Should().ContainKey("limit");
+    }
+
+    [Theory]
+    [InlineData("toolhead-0")]
+    [InlineData("all")]
+    public async Task InvalidScope_ReturnsValidationProblem(string scope)
+    {
+        MaintenanceController controller = CreateController();
+
+        ActionResult<IEnumerable<MaintenanceLogDto>> result =
+            await controller.GetPrinterMaintenanceLogsAsync(Guid.NewGuid(), limit: 10, scope: scope);
+
+        ObjectResult problem = Assert.IsAssignableFrom<ObjectResult>(result.Result);
+        problem.StatusCode.Should().Be(StatusCodes.Status400BadRequest);
+        Assert.IsType<ValidationProblemDetails>(problem.Value).Errors.Should().ContainKey("scope");
     }
 }
