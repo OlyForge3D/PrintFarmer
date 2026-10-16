@@ -391,6 +391,7 @@ describe('resolveMaterialLoadout', () => {
     expect(label(MmuProtocol.Qidibox)).toBe('QidiBox');
     expect(label(MmuProtocol.Afc)).toBe('AFC');
     expect(label(MmuProtocol.HappyHare)).toBe('MMU');
+    expect(label(MmuProtocol.ZmodIfs)).toBe('IFS');
     expect(label(undefined)).toBe('AMS');
   });
 

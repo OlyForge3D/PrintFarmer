@@ -66,11 +66,18 @@ export function SlotSpool({ slot, size, className }: { slot: FilamentSlotView; s
   );
 }
 
-function ActiveDot() {
+function ActiveDot({ selectedOnly = false }: { selectedOnly?: boolean }) {
+  // A hollow ring marks a feed the printer has selected without confirming it is loaded.
   return (
     <span
       aria-hidden="true"
-      className="inline-block size-1.5 shrink-0 rounded-full bg-pf-accent shadow-[0_0_0_2px_color-mix(in_srgb,var(--pf-accent)_22%,transparent)]"
+      data-feed={selectedOnly ? 'selected' : 'loaded'}
+      className={clsx(
+        'inline-block size-1.5 shrink-0 rounded-full',
+        selectedOnly
+          ? 'border border-pf-accent bg-transparent'
+          : 'bg-pf-accent shadow-[0_0_0_2px_color-mix(in_srgb,var(--pf-accent)_22%,transparent)]',
+      )}
     />
   );
 }
@@ -402,7 +409,7 @@ export function FilamentSlots({
                 )}
               >
                 <span className="flex items-center gap-1 text-[11px] font-semibold leading-none text-pf-text-primary">
-                  {slot.active && <ActiveDot />}
+                  {slot.active ? <ActiveDot /> : slot.selectedFeed && <ActiveDot selectedOnly />}
                   {slot.id}
                 </span>
                 <SlotSpool slot={slot} size={32} />
