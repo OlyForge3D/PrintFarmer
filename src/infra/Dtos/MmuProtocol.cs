@@ -17,6 +17,9 @@ public static class MmuProtocol
     /// <summary>Snapmaker U1 four-lane physical toolhead status via Moonraker print_task_config.</summary>
     public const string SnapmakerU1 = "SnapmakerU1";
 
+    /// <summary>Flashforge AD5X Intelligent Filament Switch via ZMOD zmod_ifs/zmod_color Moonraker objects.</summary>
+    public const string ZmodIfs = "ZmodIfs";
+
     /// <summary>Default/fallback when protocol has not yet been identified.</summary>
     public const string Unknown = "Unknown";
 }

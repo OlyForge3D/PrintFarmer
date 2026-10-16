@@ -337,6 +337,20 @@ public sealed class FilamentRunoutSwitchEvaluatorTests
         result.Should().Be(RunoutSwitchAssessment.BackupAvailable);
     }
 
+    // R3389-B01 (#3323): ZMOD IFS reports a selected channel with live presence and material but no
+    // load-completion signal (FilamentState "Unknown", no action) → never SwitchConfirmed.
+    [Fact]
+    public async Task AssessAsync_ZmodIfsSelectedChannelWithoutLoadSignal_ReturnsBackupAvailable()
+    {
+        RunoutSwitchAssessment result = await AssessGateAsync(
+            filamentState: "Unknown",
+            action: null,
+            gateMaterial: "PLA",
+            gateStatus: 1);
+
+        result.Should().Be(RunoutSwitchAssessment.BackupAvailable);
+    }
+
     [Fact]
     public async Task AssessAsync_SelectedGateEmptyWithRetainedLoadedMetadata_ReturnsBackupAvailable()
     {

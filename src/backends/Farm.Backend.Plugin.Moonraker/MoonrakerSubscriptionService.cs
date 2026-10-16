@@ -1298,6 +1298,9 @@ public sealed class MoonrakerSubscriptionService(
         // AFC uses "AFC" Moonraker object + "AFC_stepper <lane>" per-lane objects
         HandleAfcUpdates(printerId, state, statusObj);
 
+        // ZMOD IFS (Flashforge AD5X) live gate telemetry via zmod_ifs / zmod_color objects
+        HandleZmodIfsUpdates(printerId, state, statusObj);
+
         // Snapmaker U1 lane updates
         // U1 exposes four physical toolheads through print_task_config, not MMU virtual gates.
         await HandleSnapmakerU1PrintTaskConfigUpdateAsync(printerId, state, statusObj, ct);
@@ -2251,64 +2254,32 @@ public sealed class MoonrakerSubscriptionService(
     /// Ensures the slot arrays on PrinterState are initialized to the given size.
     /// Preserves existing data when resizing via Array.Copy.
     /// </summary>
-    private static void EnsureSlotArrays(PrinterState state, int numSlots)
+    private static void EnsureSlotArrays(PrinterState state, int numSlots) => state.EnsureMmuGateArrays(numSlots);
+
+    /// <summary>
+    /// Applies ZMOD IFS (Flashforge AD5X) live gate telemetry from <c>zmod_ifs</c> / <c>zmod_color</c>.
+    /// </summary>
+    private void HandleZmodIfsUpdates(Guid printerId, PrinterState state, JsonElement statusObj)
     {
-        if (state.MmuGateStatus == null || state.MmuGateStatus.Length != numSlots)
+        bool wasDetected = state.ZmodIfsDetected;
+        if (!ZmodIfsStatusParser.Apply(state, statusObj))
         {
-            int[] newArr = new int[numSlots];
-            Array.Fill(newArr, 2); // Default: Unknown
-            if (state.MmuGateStatus is not null)
-            {
-                Array.Copy(state.MmuGateStatus, newArr, Math.Min(state.MmuGateStatus.Length, numSlots));
-            }
-
-            state.MmuGateStatus = newArr;
+            return;
         }
 
-        if (state.MmuGateMaterial == null || state.MmuGateMaterial.Length != numSlots)
+        if (!wasDetected)
         {
-            string[] newArr = new string[numSlots];
-            if (state.MmuGateMaterial is not null)
-            {
-                Array.Copy(state.MmuGateMaterial, newArr, Math.Min(state.MmuGateMaterial.Length, numSlots));
-            }
-
-            state.MmuGateMaterial = newArr;
+            _logger.LogInformation(
+                "ZMOD IFS detected on printer {PrinterId}: {GateCount} gates",
+                printerId,
+                state.MmuNumGates);
         }
 
-        if (state.MmuGateColor == null || state.MmuGateColor.Length != numSlots)
-        {
-            string[] newArr = new string[numSlots];
-            if (state.MmuGateColor is not null)
-            {
-                Array.Copy(state.MmuGateColor, newArr, Math.Min(state.MmuGateColor.Length, numSlots));
-            }
-
-            state.MmuGateColor = newArr;
-        }
-
-        if (state.MmuGateFilamentName == null || state.MmuGateFilamentName.Length != numSlots)
-        {
-            string[] newArr = new string[numSlots];
-            if (state.MmuGateFilamentName is not null)
-            {
-                Array.Copy(state.MmuGateFilamentName, newArr, Math.Min(state.MmuGateFilamentName.Length, numSlots));
-            }
-
-            state.MmuGateFilamentName = newArr;
-        }
-
-        if (state.MmuGateSpoolId == null || state.MmuGateSpoolId.Length != numSlots)
-        {
-            int[] newArr = new int[numSlots];
-            Array.Fill(newArr, -1);
-            if (state.MmuGateSpoolId is not null)
-            {
-                Array.Copy(state.MmuGateSpoolId, newArr, Math.Min(state.MmuGateSpoolId.Length, numSlots));
-            }
-
-            state.MmuGateSpoolId = newArr;
-        }
+        _logger.LogDebug(
+            "ZMOD IFS update for printer {PrinterId}: active gate {ActiveGate}, filament {FilamentState}",
+            printerId,
+            state.MmuActiveGate,
+            state.MmuFilamentState);
     }
 
     // ── AFC (BoxTurtle / NightOwl / QuattroBox) handling ──
