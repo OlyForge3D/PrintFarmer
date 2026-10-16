@@ -1359,7 +1359,9 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         service.setTemperaturesCalledWith = nil
         service.detailsToReturn = .controlsLimitsFixture(for: printer, hotend: 260, bed: 110)
         try control("printer.controls.retry-limits").sendActions(for: .touchUpInside)
-        try await settle(controller)
+        try await settle(controller, "the asynchronous heater-limits retry to load") {
+            !model.isLoadingHardware && model.maximum(for: .hotend) == 260
+        }
         XCTAssertEqual(model.maximum(for: .hotend), 260)
         XCTAssertNil(model.hardwareLoadError)
         XCTAssertNil(service.setTemperaturesCalledWith, "A read retry never replays a target")
