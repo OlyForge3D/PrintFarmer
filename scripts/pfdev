@@ -258,6 +258,10 @@ Commands:
   uninstall              Remove global symlink
   help                   Show this help message
 
+After every deploy/redeploy, a running nginx-proxy is validated (nginx -t)
+and reloaded so it re-resolves upstream container addresses. A failed
+validation or reload fails the command.
+
 Available Services:
   • Any current docker compose service from docker-compose.yml
   • Alias: nginx -> nginx-proxy
@@ -313,6 +317,51 @@ build_image() {
     echo "✅ Successfully built $service [$(date '+%H:%M:%S')] (${elapsed}s)"
 }
 
+# nginx resolves static upstream hostnames (api, frontend, ...) only when its
+# configuration is loaded. Recreating an upstream container gives it a new IP,
+# so the running proxy must validate and reload its config after every deploy;
+# otherwise it keeps proxying to stale addresses and returns HTTP 502 (#3316).
+refresh_nginx_proxy() {
+    local deployed_service=$1
+    local proxy_service="nginx-proxy"
+    local proxy_container
+    local output
+
+    if ! compose_service_exists "$proxy_service"; then
+        return 0
+    fi
+
+    if ! proxy_container=$(docker compose ps --status running --quiet "$proxy_service"); then
+        echo "❌ Could not query $proxy_service status; nginx was not refreshed"
+        return 1
+    fi
+
+    if [[ -z "$proxy_container" ]]; then
+        if [[ "$deployed_service" == "$proxy_service" ]]; then
+            echo "❌ $proxy_service is not running after deploy"
+            return 1
+        fi
+        echo "ℹ️  $proxy_service is not running; skipping nginx refresh"
+        return 0
+    fi
+
+    echo "🔄 Refreshing nginx upstreams after $deployed_service deploy... [$(date '+%H:%M:%S')]"
+
+    if ! output=$(docker compose exec -T "$proxy_service" nginx -t 2>&1); then
+        echo "❌ nginx configuration test failed; nginx was not reloaded:"
+        echo "$output"
+        return 1
+    fi
+
+    if ! output=$(docker compose exec -T "$proxy_service" nginx -s reload 2>&1); then
+        echo "❌ nginx reload failed:"
+        echo "$output"
+        return 1
+    fi
+
+    echo "✅ nginx reloaded [$(date '+%H:%M:%S')]"
+}
+
 deploy_service() {
     local service=$1
     local compose_service
@@ -334,12 +383,12 @@ deploy_service() {
 
     echo "🚀 Deploying $service... [$(date '+%H:%M:%S')]"
     cd "$REPO_ROOT"
-    docker compose up "${compose_args[@]}" "$compose_service"
-
-    if [[ "$service" == "nginx" ]] && docker ps --format '{{.Names}}' | grep -q '^printfarmer-nginx-proxy$'; then
-        echo "🔄 Reloading nginx TLS/config after deploy... [$(date '+%H:%M:%S')]"
-        docker exec printfarmer-nginx-proxy nginx -s reload >/dev/null 2>&1 || true
+    if ! docker compose up "${compose_args[@]}" "$compose_service"; then
+        echo "❌ docker compose up failed for $compose_service"
+        return 1
     fi
+
+    refresh_nginx_proxy "$compose_service" || return 1
 
     local end_time=$(date +%s)
     local elapsed=$((end_time - start_time))
