@@ -44,9 +44,9 @@ prose alone is not a dependency graph.
 
 ## Model
 
-- **Preferred:** `claude-opus-5`
+- **Preferred:** `claude-opus-5.5`
 - **Reasoning effort:** `max`
-- **Rationale:** Claude Opus 5 with maximum reasoning for architecture, system design, and cross-domain technical decisions
+- **Rationale:** Claude Opus 5.5 with maximum reasoning for architecture, system design, and cross-domain technical decisions
 - **Fallback:** Standard chain — the coordinator handles fallback automatically
 
 ## Collaboration

@@ -10,7 +10,7 @@
     "gorman": "claude-opus-5.5",
     "parker": "claude-opus-5.5",
     "newt": "claude-opus-4.7-xhigh",
-    "bishop": "claude-opus-5",
+    "bishop": "claude-opus-5.5",
     "hicks": "gpt-5.6-sol",
     "vasquez": "gemini-3.8-flash"
   },

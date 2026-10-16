@@ -22,13 +22,13 @@
 | 🔍 Brett        | Researcher                      | .squad/agents/brett/charter.md        | Active |
 | ⚙️ Parker        | DevOps & Deployment Engineer    | .squad/agents/parker/charter.md       | Active |
 | 🎨 Newt         | Designer (Industrial UI)        | .squad/agents/newt/charter.md         | Active |
-| 🔍 Bishop       | Code Reviewer (Claude Opus 5)   | .squad/agents/bishop/charter.md       | Active |
+| 🔍 Bishop       | Code Reviewer (Claude Opus 5.5)   | .squad/agents/bishop/charter.md       | Active |
 | 🔍 Hicks        | Code Reviewer (GPT-5.6 Sol)     | .squad/agents/hicks/charter.md        | Active |
 | 🔍 Vasquez      | Code Reviewer (Gemini 3.8 Flash, user-authorized) | .squad/agents/vasquez/charter.md | Active |
 | ⚛️  Drake        | Frontend Dev                    | .squad/agents/drake/charter.md        | Active |
 | 📋 Scribe       | Session Logger                  | .squad/agents/scribe/charter.md       | Active |
 | 🔄 Ralph        | Work Monitor                    | —                                     | Active |
-| 🛡️  Rai          | RAI Reviewer                    | .squad/agents/rai/charter.md          | Active |
+| 🛡️  Rai          | RAI Reviewer                    | .squad/agents/Rai/charter.md          | Active |
 | 🔍 Fact Checker | Fact Checker / Devil's Advocate | .squad/agents/fact-checker/charter.md | Active |
 
 ## Coding Agent
