@@ -744,7 +744,7 @@ test('isCleanThreeWayMerge accepts only the exact conflict-free combination', ()
   assert.equal(merge(overlapOurs), false, 'dropping the base change is not a clean merge');
   assert.equal(merge(overlapTheirs), false, 'dropping the PR change is not a clean merge');
   assert.equal(merge(`${overlapCleanMerge}smuggled\n`), false, 'an extra appended line is rejected');
-  assert.equal(merge(overlapCleanMerge.replace('\n', '\r\n')), false, 'byte-exact, including line endings');
+  assert.equal(merge(overlapCleanMerge.replaceAll('\n', '\r\n')), false, 'byte-exact, including line endings');
 
   // True conflict: both sides change the same line; whatever the human
   // resolution looks like, it never passes.
