@@ -595,6 +595,12 @@ function isProse(path) {
   return proseExtensions.some((extension) => lower.endsWith(extension));
 }
 
+// Directory prefixes are case-sensitive in Git, so match them against the
+// original path; only the extension is case-insensitive.
+function isStaticDocumentationHtml(path) {
+  return /^(?:docs|mobile\/docs)\/.+\.[hH][tT][mM][lL]$/.test(path);
+}
+
 function isDependencyManifest(path, basename) {
   return manifestBasenames.has(basename) ||
     /^appsettings(?:\.[^.]+)?\.json$/i.test(basename) ||
@@ -655,10 +661,11 @@ export function classifyChangeScope(paths) {
     if (highRiskPaths.test(normalizedPath)) {
       return { docsOnly: false, highRisk: true, reason: `${path} is high-risk infrastructure or access-control code` };
     }
-    if (normalizedPath.startsWith('docs/') && !isProse(normalizedPath)) {
+    const staticDocumentationHtml = isStaticDocumentationHtml(path);
+    if (normalizedPath.startsWith('docs/') && !isProse(normalizedPath) && !staticDocumentationHtml) {
       return { docsOnly: false, highRisk: true, reason: `${path} is a non-prose documentation asset` };
     }
-    if (!isProse(normalizedPath)) {
+    if (!isProse(normalizedPath) && !staticDocumentationHtml) {
       if (!isKnownLowRiskPath(normalizedPath)) {
         return { docsOnly: false, highRisk: true, reason: `${path} is not a known low-risk path` };
       }

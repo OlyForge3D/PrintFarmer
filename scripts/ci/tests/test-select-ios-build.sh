@@ -219,13 +219,16 @@ case_ios_support_paths_run_build() {
   done
 }
 
-# Paths that merely LOOK iOS-relevant must not match: the regex is anchored,
-# so a nested `mobile/` or a same-named script elsewhere in the tree is not
-# a reason to boot the Xcode toolchain.
+# Paths that merely LOOK iOS-relevant must not match: a nested `mobile/`, mobile
+# documentation, Markdown under mobile/, or a same-named script elsewhere in
+# the tree is not a reason to boot the Xcode toolchain.
 case_lookalike_paths_do_not_run_build() {
   local out="$1" repo base_sha path
   for path in \
       "docs/mobile/README.md" \
+      "mobile/docs/distill/PLAN.md" \
+      "mobile/docs/distill/mockups.html" \
+      "mobile/README.md" \
       "fixtures/wire-contracts/README.md" \
       "fixtures/wire-contracts/manifest.json.lock" \
       "fixtures/other/api/inventory/parts.populated.json" \
