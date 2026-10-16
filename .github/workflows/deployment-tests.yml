@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'scripts/deploy-docker.sh'
+      - 'scripts/pfdev'
       - 'scripts/fix-*.sh'
       - 'scripts/common-utils.sh'
       - 'scripts/deploy-docker.ps1'
@@ -20,6 +21,7 @@ on:
       - master
     paths:
       - 'scripts/deploy-docker.sh'
+      - 'scripts/pfdev'
       - 'scripts/fix-*.sh'
       - 'scripts/common-utils.sh'
       - 'scripts/deploy-docker.ps1'
@@ -104,6 +106,10 @@ jobs:
 
       - name: Run interactive_prompt_harness.sh
         run: bash tests/interactive_prompt_harness.sh
+
+      # Issue #3316: upstream redeploys must validate and reload nginx-proxy.
+      - name: Run test-pfdev-nginx-refresh.sh
+        run: bash tests/test-pfdev-nginx-refresh.sh
 
       # Issue #1692: enforce the #1687 nginx routing regression test in CI.
       # test-compose-generator.sh as a whole remains out of scope per #1308,
