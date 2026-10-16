@@ -134,9 +134,8 @@ internal static class ZmodIfsStatusParser
                                materialElem.ValueKind is JsonValueKind.String or JsonValueKind.Null;
             bool hasHex = slot.TryGetProperty("HEX", out JsonElement hexElem) &&
                           hexElem.ValueKind is JsonValueKind.String or JsonValueKind.Null;
-            bool? hasFilament = slot.TryGetProperty("hasFilament", out JsonElement filamentElem)
-                ? ParseNullableBool(filamentElem)
-                : null;
+            bool hasFilamentField = slot.TryGetProperty("hasFilament", out JsonElement filamentElem);
+            bool? hasFilament = hasFilamentField ? ParseNullableBool(filamentElem) : null;
 
             slots.Add(new ZmodSlot(
                 index,
@@ -144,6 +143,7 @@ internal static class ZmodIfsStatusParser
                 hasMaterial ? NormalizeMaterial(materialElem) : string.Empty,
                 hasHex,
                 hasHex ? NormalizeHex(hexElem) : string.Empty,
+                hasFilamentField,
                 hasFilament));
         }
 
@@ -177,7 +177,8 @@ internal static class ZmodIfsStatusParser
                 state.MmuGateColor![slot.Index] = slot.Hex;
             }
 
-            if (slot.HasFilament.HasValue)
+            // A present but malformed value clears the cache to unknown rather than keeping stale presence.
+            if (slot.HasFilamentField)
             {
                 state.ZmodSlotHasFilament![slot.Index] = slot.HasFilament;
             }
@@ -282,5 +283,6 @@ internal static class ZmodIfsStatusParser
         string Material,
         bool HasHex,
         string Hex,
+        bool HasFilamentField,
         bool? HasFilament);
 }

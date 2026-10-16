@@ -118,6 +118,24 @@ public class ZmodIfsStatusParserTests
         state.MmuGateStatus.Should().Equal(2, 1);
     }
 
+    // R3389-H01: a malformed delta must not leave the previously cached presence in place.
+    [Fact]
+    public void Apply_MalformedSlotHasFilamentDelta_ClearsCachedPresenceToUnknown()
+    {
+        var state = new PrinterState();
+        Apply(
+            state,
+            """
+            { "zmod_color": { "slots": [ { "ID": 1, "Material": "PLA", "HEX": "FFFFFF", "hasFilament": true } ] } }
+            """);
+        state.MmuGateStatus.Should().Equal(1);
+
+        Apply(state, """{ "zmod_color": { "slots": [ { "ID": 1, "hasFilament": "maybe" } ] } }""");
+
+        state.MmuGateStatus.Should().Equal(2);
+        state.MmuGateMaterial.Should().Equal("PLA");
+    }
+
     // R3389-H01: an invalid nonzero channel is unknown, not an explicit "nothing loaded".
     [Theory]
     [InlineData("5")]
