@@ -1,5 +1,15 @@
 <Project>
 
+  <!--
+    Six Labors ImageSharp/ImageSharp.Drawing validate a license before CoreCompile and only
+    search the consuming project's directory tree by default. Point every project at the
+    repository-root license (assembly-scoped Community license; see docs/DEVELOPMENT.md).
+    An explicitly supplied SixLaborsLicenseFile still wins.
+  -->
+  <PropertyGroup Condition="'$(SixLaborsLicenseFile)' == '' and Exists('$(MSBuildThisFileDirectory)sixlabors.lic')">
+    <SixLaborsLicenseFile>$(MSBuildThisFileDirectory)sixlabors.lic</SixLaborsLicenseFile>
+  </PropertyGroup>
+
   <PropertyGroup>
     <RepoVersionRaw>$([System.IO.File]::ReadAllText('$(MSBuildThisFileDirectory)VERSION').Trim())</RepoVersionRaw>
     <RepoVersion>$([System.Text.RegularExpressions.Regex]::Replace('$(RepoVersionRaw)', '^v', ''))</RepoVersion>

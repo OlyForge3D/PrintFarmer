@@ -42,6 +42,9 @@ COPY src/modules/Farm.Modules.Inventory/*.csproj ./modules/Farm.Modules.Inventor
 COPY src/modules/Farm.Modules.Administration/*.csproj ./modules/Farm.Modules.Administration/
 COPY src/api/*.csproj ./api/
 COPY Directory.Build.props ./
+# Six Labors license, passed explicitly to publish below (the root props is
+# shadowed by src/Directory.Build.props in this layout).
+COPY sixlabors.lic /sixlabors.lic
 COPY global.json ./
 
 # Restore dependencies
@@ -55,6 +58,7 @@ RUN dotnet publish ./api/Farm.Web.Api.csproj \
     -c Release \
     -o /app/publish \
     -p:GitCommitSha=${GIT_SHA} \
+    -p:SixLaborsLicenseFile=/sixlabors.lic \
     --no-restore \
     --verbosity minimal
 
