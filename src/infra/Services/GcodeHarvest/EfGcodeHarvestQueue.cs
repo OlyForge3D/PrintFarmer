@@ -52,18 +52,37 @@ public class EfGcodeHarvestQueue(AppDbContext db, ILogger<EfGcodeHarvestQueue> l
             .ToListAsync();
     }
 
-    public async Task<IReadOnlyList<GcodeHarvestQueueItem>> GetQueuedItemsAsync(GcodeHarvestQueueItemStatus? status = null)
+    public async Task<IReadOnlyList<GcodeHarvestQueueItemDto>> GetQueuedItemsAsync(
+        GcodeHarvestQueueItemStatus? status = null,
+        Guid? printerId = null)
     {
-        IQueryable<GcodeHarvestQueueItem> query = db.GcodeHarvestQueueItems.AsQueryable();
+        IQueryable<GcodeHarvestQueueItem> query = db.GcodeHarvestQueueItems.AsNoTracking();
 
         if (status.HasValue)
         {
             query = query.Where(q => q.Status == status.Value);
         }
 
+        if (printerId.HasValue)
+        {
+            query = query.Where(q => q.PrinterId == printerId.Value);
+        }
+
         return await query
             .OrderByDescending(q => q.Priority)
             .ThenBy(q => q.QueuedAt)
+            .Select(q => new GcodeHarvestQueueItemDto(
+                q.Id,
+                q.PrinterId,
+                q.Printer != null ? q.Printer.Name : "Unknown",
+                q.QueuedAt,
+                q.ProcessingStartedAt,
+                q.CompletedAt,
+                q.Status,
+                q.Priority,
+                q.ErrorMessage,
+                q.FilesFound,
+                q.FilesAdded))
             .ToListAsync();
     }
 
