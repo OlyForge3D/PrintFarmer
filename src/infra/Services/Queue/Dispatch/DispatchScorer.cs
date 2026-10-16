@@ -189,11 +189,12 @@ public class DispatchScorer(
 
     /// <summary>
     /// Summarizes printer compatibility for unassigned queued jobs (issue #3280) by running the
-    /// same <see cref="ScorePrinter"/> evaluation used for dispatch against every enabled
-    /// printer. A printer is compatible when no hard-requirement factor other than
-    /// availability eliminates it, and ready when the scorer does not eliminate it at all.
-    /// Soft-only inputs (queue depth, per-tool loadout) are skipped because they never
-    /// eliminate a candidate and so cannot change either count.
+    /// same <see cref="ScorePrinter"/> evaluation, with the same inputs (queue depths,
+    /// multi-slot feature gate, per-tool gram coverage), used for dispatch against every enabled
+    /// printer. A printer is compatible when no hard-requirement factor other than availability
+    /// eliminates it. It is ready when it is not eliminated and its total score meets the
+    /// configured <see cref="DispatchSettings.MinimumScoreThreshold"/> — the same predicate the
+    /// auto-dispatch and batch-dispatch selection loops apply.
     /// </summary>
     public async Task<IReadOnlyDictionary<Guid, PrinterCompatibilitySummaryDto>> SummarizeCompatibilityAsync(
         IReadOnlyCollection<Guid> jobIds,
@@ -221,12 +222,27 @@ public class DispatchScorer(
         }
 
         List<Printer> printers = await LoadPrintersAsync(printerId: null, ct).ConfigureAwait(false);
+        Dictionary<Guid, int> queueDepths = await LoadQueueDepthsAsync(printerId: null, ct).ConfigureAwait(false);
+        bool multiSlotEnabled = featureGate is null
+            || await featureGate.IsEnabledAsync(OperatorFeature.MultiSlotFallback, ct).ConfigureAwait(false);
+        DispatchSettings? settings = await db.DispatchSettings.AsNoTracking().FirstOrDefaultAsync(ct).ConfigureAwait(false);
+        double minimumScoreThreshold = settings?.MinimumScoreThreshold ?? 0;
         Dictionary<string, FilamentType?> filamentByMaterial = new(StringComparer.Ordinal);
         Dictionary<string, HashSet<string>> clusterMatesByMaterial = new(StringComparer.Ordinal);
-        Dictionary<Guid, int> noQueueDepths = [];
 
         foreach (PrintJob job in jobs)
         {
+            IReadOnlyList<PrintJobToolMaterialRequirement>? perToolReqs = job.RequiredMaterialsPerTool;
+            bool gramsAware = multiSlotEnabled
+                && perToolReqs is { Count: > 0 }
+                && perToolReqs.Any(r => r.EstimatedGrams is > 0);
+            Dictionary<(Guid PrinterId, int Tool), PerToolGramsContext>? gramsContexts = null;
+            if (gramsAware && coverageService is not null)
+            {
+                gramsContexts = await BuildPerToolGramsContextAsync(printers, perToolReqs!, [], ct)
+                    .ConfigureAwait(false);
+            }
+
             string? requiredMaterial = job.RequiredMaterialType ?? job.GcodeFile?.RequiredMaterial;
             FilamentType? requiredFilament = null;
             HashSet<string> clusterMateNames = [];
@@ -257,11 +273,11 @@ public class DispatchScorer(
                     job,
                     printer,
                     requiredFilament,
-                    noQueueDepths,
+                    queueDepths,
                     clusterMateNames,
-                    multiSlotEnabled: false,
-                    gramsAware: false,
-                    gramsContexts: null);
+                    multiSlotEnabled,
+                    gramsAware,
+                    gramsContexts);
 
                 bool failsConstraint = false;
                 foreach ((string factorName, FactorScore factor) in score.ScoreBreakdown)
@@ -276,7 +292,7 @@ public class DispatchScorer(
                 if (!failsConstraint)
                 {
                     compatible++;
-                    if (!score.Eliminated)
+                    if (!score.Eliminated && score.TotalScore >= minimumScoreThreshold)
                     {
                         ready++;
                     }

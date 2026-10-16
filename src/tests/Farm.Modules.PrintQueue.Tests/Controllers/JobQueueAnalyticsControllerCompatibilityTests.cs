@@ -5,6 +5,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.PrintQueue;
 using Farm.Infrastructure.Services.Cost;
 using Farm.Infrastructure.Services.Interfaces;
+using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Modules.PrintQueue.Controllers;
 using Microsoft.AspNetCore.Http;
@@ -65,6 +66,62 @@ public class JobQueueAnalyticsControllerCompatibilityTests
     }
 
     [Fact]
+    public async Task GetJobDetailsAsync_UnassignedQueuedJob_AttachesSummary()
+    {
+        Guid id = Guid.NewGuid();
+        Mock<IPrintJobManagementService> service = new();
+        service.Setup(s => s.GetJobByIdAsync(id.ToString(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new QueuedPrintJobDto { Id = id.ToString(), Status = "Queued" });
+        Mock<IJobCompatibilitySummarizer> summarizer = new();
+        summarizer.Setup(s => s.SummarizeCompatibilityAsync(
+                It.Is<IReadOnlyCollection<Guid>>(ids => ids.Count == 1 && ids.Single() == id),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Dictionary<Guid, PrinterCompatibilitySummaryDto> { [id] = Summary });
+
+        IActionResult result = await CreateController(service.Object, summarizer.Object)
+            .GetJobDetailsAsync(id.ToString());
+
+        QueuedPrintJobDto body = Assert.IsType<QueuedPrintJobDto>(Assert.IsType<OkObjectResult>(result).Value);
+        Assert.Same(Summary, body.Compatibility);
+        summarizer.VerifyAll();
+    }
+
+    [Theory]
+    [InlineData("Queued", "printer-1")]
+    [InlineData("Printing", null)]
+    public async Task GetJobDetailsAsync_AssignedOrNonQueuedJob_HasNoSummary(string status, string? assignedPrinterId)
+    {
+        Guid id = Guid.NewGuid();
+        Mock<IPrintJobManagementService> service = new();
+        service.Setup(s => s.GetJobByIdAsync(id.ToString(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new QueuedPrintJobDto { Id = id.ToString(), Status = status, AssignedPrinterId = assignedPrinterId });
+        Mock<IJobCompatibilitySummarizer> summarizer = new(MockBehavior.Strict);
+
+        IActionResult result = await CreateController(service.Object, summarizer.Object)
+            .GetJobDetailsAsync(id.ToString());
+
+        QueuedPrintJobDto body = Assert.IsType<QueuedPrintJobDto>(Assert.IsType<OkObjectResult>(result).Value);
+        Assert.Null(body.Compatibility);
+    }
+
+    [Fact]
+    public async Task GetJobDetailsAsync_Unauthorized_DoesNotSummarize()
+    {
+        Guid id = Guid.NewGuid();
+        Mock<IQueueResourceAuthorizationService> authorization = new();
+        authorization.Setup(a => a.CanAccessJobAsync(
+                It.IsAny<ClaimsPrincipal>(), id, It.IsAny<PrinterGroupAccessLevel>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+        Mock<IJobCompatibilitySummarizer> summarizer = new(MockBehavior.Strict);
+
+        IActionResult result = await CreateController(
+                Mock.Of<IPrintJobManagementService>(), summarizer.Object, authorization.Object)
+            .GetJobDetailsAsync(id.ToString());
+
+        Assert.IsType<NotFoundObjectResult>(result);
+    }
+
+    [Fact]
     public void Compatibility_SerializesCamelCase()
     {
         JsonSerializerOptions options = new()
@@ -81,14 +138,15 @@ public class JobQueueAnalyticsControllerCompatibilityTests
 
     private static JobQueueAnalyticsController CreateController(
         IPrintJobManagementService service,
-        IJobCompatibilitySummarizer summarizer)
+        IJobCompatibilitySummarizer summarizer,
+        IQueueResourceAuthorizationService? resourceAuthorization = null)
     {
         var controller = new JobQueueAnalyticsController(
             service,
             Mock.Of<IJobCostCalculationService>(),
             Mock.Of<ILogger<JobQueueAnalyticsController>>(),
             db: null,
-            resourceAuthorization: null,
+            resourceAuthorization: resourceAuthorization,
             compatibilitySummarizer: summarizer);
         controller.ControllerContext = new ControllerContext
         {

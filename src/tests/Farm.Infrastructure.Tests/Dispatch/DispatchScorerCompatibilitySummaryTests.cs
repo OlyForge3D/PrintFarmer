@@ -141,6 +141,42 @@ public class DispatchScorerCompatibilitySummaryTests : IDisposable
         result.Keys.Should().BeEquivalentTo([queued.Id]);
     }
 
+    [Fact]
+    [Trait("Category", "Dispatch")]
+    public async Task Summarize_QueueDepthPushesScoreBelowConfiguredThreshold_ExcludesFromReady()
+    {
+        Printer idle = CreatePrinter("Idle", "ABS");
+        Printer backlogged = CreatePrinter("Backlogged", "ABS");
+        _context.Printers.AddRange(idle, backlogged);
+        for (int i = 0; i < 6; i++)
+        {
+            PrintJob backlog = CreateJob($"Backlog {i}", "ABS");
+            backlog.AssignedPrinterId = backlogged.Id;
+            backlog.QueuePosition = i + 1;
+            _context.PrintJobs.Add(backlog);
+        }
+
+        PrintJob job = CreateJob("ABS job", "ABS");
+        _context.PrintJobs.Add(job);
+        await _context.SaveChangesAsync();
+
+        var scorer = new DispatchScorer(_context, NullLogger<DispatchScorer>.Instance);
+        List<DispatchScore> fleet = await scorer.ScorePrintersForJobAsync(job.Id);
+        double idleScore = fleet.Single(s => s.PrinterId == idle.Id).TotalScore;
+        double backloggedScore = fleet.Single(s => s.PrinterId == backlogged.Id).TotalScore;
+        backloggedScore.Should().BeLessThan(idleScore, "queue depth is a scored dispatch input");
+
+        DispatchSettings settings = await _context.DispatchSettings.SingleAsync();
+        settings.MinimumScoreThreshold = (idleScore + backloggedScore) / 2;
+        await _context.SaveChangesAsync();
+
+        PrinterCompatibilitySummaryDto summary = await SummarizeSingleAsync(job.Id);
+
+        summary.CompatiblePrinterCount.Should().Be(2, "the threshold is not a compatibility constraint");
+        summary.ReadyPrinterCount.Should().Be(1, "auto-dispatch rejects candidates below MinimumScoreThreshold");
+        await AssertAgreesWithFleetScoringAsync(job.Id, summary);
+    }
+
     private async Task<PrinterCompatibilitySummaryDto> SummarizeSingleAsync(Guid jobId)
     {
         var scorer = new DispatchScorer(_context, NullLogger<DispatchScorer>.Instance);
@@ -153,9 +189,10 @@ public class DispatchScorerCompatibilitySummaryTests : IDisposable
     {
         var scorer = new DispatchScorer(_context, NullLogger<DispatchScorer>.Instance);
         List<DispatchScore> fleet = await scorer.ScorePrintersForJobAsync(jobId);
+        double threshold = (await _context.DispatchSettings.AsNoTracking().SingleAsync()).MinimumScoreThreshold;
 
         fleet.Count.Should().Be(summary.EvaluatedPrinterCount);
-        fleet.Count(s => !s.Eliminated).Should().Be(summary.ReadyPrinterCount);
+        fleet.Count(s => !s.Eliminated && s.TotalScore >= threshold).Should().Be(summary.ReadyPrinterCount);
         fleet.Count(s => s.ScoreBreakdown.All(f =>
                 f.Key == "Availability" || f.Value is not { IsHardRequirement: true, Score: 0 }))
             .Should().Be(summary.CompatiblePrinterCount);

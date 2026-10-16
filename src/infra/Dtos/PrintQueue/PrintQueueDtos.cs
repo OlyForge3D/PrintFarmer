@@ -231,8 +231,9 @@ public sealed class PrinterCompatibilitySummaryDto
     public int CompatiblePrinterCount { get; set; }
 
     /// <summary>
-    /// Compatible printers that are also available right now — the dispatcher would not
-    /// eliminate them for this job at this moment.
+    /// Compatible printers that auto-dispatch would accept for this job right now: not
+    /// eliminated (including availability) and scoring at or above the configured
+    /// <c>MinimumScoreThreshold</c>. A point-in-time hint, not a dispatch guarantee.
     /// </summary>
     public int ReadyPrinterCount { get; set; }
 

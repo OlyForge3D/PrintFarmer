@@ -2783,7 +2783,7 @@ export interface PrinterCompatibilitySummaryDto {
   evaluatedPrinterCount: number;
   /** Printers passing every hard dispatch constraint except transient availability. */
   compatiblePrinterCount: number;
-  /** Compatible printers that are available right now. */
+  /** Compatible printers auto-dispatch would accept now (available and at/above the minimum score threshold). */
   readyPrinterCount: number;
   basis: PrinterCompatibilityBasisDto;
   excludedBy: PrinterCompatibilityExclusionDto[];
