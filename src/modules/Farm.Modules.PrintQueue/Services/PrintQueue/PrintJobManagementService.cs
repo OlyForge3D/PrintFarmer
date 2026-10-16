@@ -990,6 +990,8 @@ public class PrintJobManagementService(
 
             job.Priority = (int)newPriority;
             job.UpdatedAt = _timeProvider.GetUtcNow().UtcDateTime;
+            await using QueueOutboxTransactionScope? outboxScope =
+                await BeginJobChangeOutboxScopeAsync(cancellationToken);
             if (job.AssignedPrinterId.HasValue)
             {
                 await AdvanceQueueRevisionAsync(
@@ -998,7 +1000,17 @@ public class PrintJobManagementService(
                     cancellationToken);
             }
 
+            await AddJobChangeOutboxEventAsync(
+                job,
+                QueueLifecycleEventWriter.EventTypeJobUpdated,
+                QueueLifecycleEventWriter.JobChangeKindPriority,
+                cancellationToken);
             _ = await _repository.UpdateAsync(job, cancellationToken);
+            if (outboxScope is not null)
+            {
+                await outboxScope.CommitAsync(cancellationToken);
+            }
+
             _logger.LogInformation("Print job {JobId} priority updated to {Priority} by user {UserId}", LogSanitizer.Sanitize(jobId), newPriority, LogSanitizer.Sanitize(userId));
 
             return MapToQueuedPrintJobDto(job);
@@ -1215,6 +1227,11 @@ public class PrintJobManagementService(
                     cancellationToken);
             }
 
+            await AddJobChangeOutboxEventAsync(
+                job,
+                QueueLifecycleEventWriter.EventTypeJobUpdated,
+                QueueLifecycleEventWriter.JobChangeKindReorder,
+                cancellationToken);
             await db.SaveChangesAsync(cancellationToken);
 
             for (int index = 0; index < reorderedJobs.Count; index++)
@@ -2945,6 +2962,8 @@ public class PrintJobManagementService(
                 newJob.AssignedPrinterId,
                 cancellationToken);
 
+            await using QueueOutboxTransactionScope? outboxScope =
+                await BeginJobChangeOutboxScopeAsync(cancellationToken);
             if (newJob.AssignedPrinterId.HasValue)
             {
                 await AdvanceQueueRevisionAsync(
@@ -2953,7 +2972,21 @@ public class PrintJobManagementService(
                     cancellationToken);
             }
 
+            // A rerun creates a new active job, so it is membership-changing: emit JobQueued
+            // (not JobUpdated) so subscribers re-reconcile their resource subscriptions (#3296).
+            // The new job is not tracked yet (AddAsync below adds and saves both rows), so the
+            // row's job columns are stamped explicitly rather than resolved from the context.
+            await AddJobChangeOutboxEventAsync(
+                newJob,
+                QueueLifecycleEventWriter.EventTypeJobQueued,
+                QueueLifecycleEventWriter.JobChangeKindRerun,
+                cancellationToken);
             await _repository.AddAsync(newJob, cancellationToken);
+            if (outboxScope is not null)
+            {
+                await outboxScope.CommitAsync(cancellationToken);
+            }
+
             if (_coverageBroadcaster is not null && newJob.AssignedPrinterId.HasValue)
             {
                 await _coverageBroadcaster.BroadcastPrinterChangedAsync(
@@ -4286,6 +4319,57 @@ public class PrintJobManagementService(
     }
 
     /// <summary>
+    /// Opens the queue outbox transaction scope when durable outbox writes are available, so a
+    /// job change and its <see cref="QueueLifecycleEventWriter.EventTypeJobUpdated"/> row commit
+    /// atomically (#3296). Returns <see langword="null"/> when the outbox is not configured.
+    /// </summary>
+    private async Task<QueueOutboxTransactionScope?> BeginJobChangeOutboxScopeAsync(
+        CancellationToken cancellationToken) =>
+        _appDbContext is not null && _outboxSequenceAllocator is not null
+            ? await QueueOutboxTransactionScope.BeginAsync(_appDbContext, cancellationToken)
+            : null;
+
+    /// <summary>
+    /// Stages a durable queue outbox row describing a management-path job change (#3296) in the
+    /// same unit of work as the job mutation. The caller must save (and commit any scope from
+    /// <see cref="BeginJobChangeOutboxScopeAsync"/>) for the row to become visible.
+    /// </summary>
+    private async Task AddJobChangeOutboxEventAsync(
+        PrintJob job,
+        string eventType,
+        string changeKind,
+        CancellationToken cancellationToken)
+    {
+        if (_appDbContext is null || _outboxSequenceAllocator is null)
+        {
+            return;
+        }
+
+        string payloadJson = QueueLifecycleEventWriter.BuildJobChangePayload(
+            job.Id,
+            job.AssignedPrinterId,
+            job.Status.ToString(),
+            job.JobKind?.ToString() ?? nameof(JobKind.Standard),
+            job.Priority,
+            changeKind);
+        await QueueLifecycleEventWriter.AddEventAsync(
+            _appDbContext,
+            _outboxSequenceAllocator,
+            eventType,
+            aggregateId: job.Id,
+            printerId: job.AssignedPrinterId,
+            attemptId: null,
+            aggregateRowVersion: job.RowVersion,
+            failureCode: null,
+            payloadJson: payloadJson,
+            projectId: job.CalibrationProjectId ?? job.ProjectId,
+            jobStatus: job.Status.ToString(),
+            jobKind: job.JobKind?.ToString() ?? nameof(JobKind.Standard),
+            timeProvider: _timeProvider,
+            ct: cancellationToken);
+    }
+
+    /// <summary>
     /// Advances the queue generation and invalidates any outstanding exact-job acknowledgement.
     /// </summary>
     private async Task AdvanceQueueRevisionAsync(
@@ -5215,7 +5299,18 @@ public class PrintJobManagementService(
             }
 
             job.UpdatedAt = _timeProvider.GetUtcNow().UtcDateTime;
+            await using QueueOutboxTransactionScope? outboxScope =
+                await BeginJobChangeOutboxScopeAsync(cancellationToken);
+            await AddJobChangeOutboxEventAsync(
+                job,
+                QueueLifecycleEventWriter.EventTypeJobUpdated,
+                QueueLifecycleEventWriter.JobChangeKindDetails,
+                cancellationToken);
             await _repository.SaveChangesAsync(cancellationToken);
+            if (outboxScope is not null)
+            {
+                await outboxScope.CommitAsync(cancellationToken);
+            }
 
             _logger.LogInformation(
                 "Job {JobId} details updated: Name={Name}, Priority={Priority}, Notes={NotesLength}",
@@ -5306,7 +5401,18 @@ public class PrintJobManagementService(
 
             job.Notes = notes;
             job.UpdatedAt = _timeProvider.GetUtcNow().UtcDateTime;
+            await using QueueOutboxTransactionScope? outboxScope =
+                await BeginJobChangeOutboxScopeAsync(cancellationToken);
+            await AddJobChangeOutboxEventAsync(
+                job,
+                QueueLifecycleEventWriter.EventTypeJobUpdated,
+                QueueLifecycleEventWriter.JobChangeKindDetails,
+                cancellationToken);
             await _repository.SaveChangesAsync(cancellationToken);
+            if (outboxScope is not null)
+            {
+                await outboxScope.CommitAsync(cancellationToken);
+            }
 
             _logger.LogInformation("Notes updated for job {JobId}", LogSanitizer.Sanitize(jobId));
             return true;

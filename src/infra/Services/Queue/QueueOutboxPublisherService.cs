@@ -65,7 +65,14 @@ public sealed class QueueOutboxPublisherService(
         // next copy), same as an abort. Only EventTypeJobCompleted (all copies done, job truly
         // exits the active set) is membership-changing; see PrintJobCompletionService and
         // PR #1741 review (Bishop).
+        //
+        // NOTE: EventTypeJobUpdated is deliberately excluded (#3296) -- priority, reorder, and
+        // detail edits change a queued job's presentation, never its active-set membership.
     };
+
+    /// <summary>Whether <paramref name="eventType"/> re-fires the <c>queueresourceschanged</c> hint.</summary>
+    internal static bool IsMembershipChangingEventType(string eventType) =>
+        MembershipChangingEventTypes.Contains(eventType);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -240,7 +247,7 @@ public sealed class QueueOutboxPublisherService(
             // events, so MembershipChangingEventTypes (above) narrowly re-fires the same hint
             // for exactly those transitions, below.
             if (membershipNotifier is not null &&
-                MembershipChangingEventTypes.Contains(evt.EventType))
+                IsMembershipChangingEventType(evt.EventType))
             {
                 sends.Add(membershipNotifier.NotifyMembershipChangedAsync(ct));
             }

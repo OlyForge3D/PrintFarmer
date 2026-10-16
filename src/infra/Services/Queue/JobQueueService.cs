@@ -1243,6 +1243,10 @@ public class JobQueueService : IJobQueueService
 
         job.UpdatedAt = _timeProvider.GetUtcNow().UtcDateTime;
 
+        await using QueueOutboxTransactionScope? updateOutboxScope =
+            _db is not null && _sequenceAllocator is not null
+                ? await QueueOutboxTransactionScope.BeginAsync(_db, ct)
+                : null;
         if (queueShapeChanged)
         {
             foreach (Guid printerId in new[] { originalPrinterId, job.AssignedPrinterId }
@@ -1254,7 +1258,60 @@ public class JobQueueService : IJobQueueService
             }
         }
 
+        if (_db is not null && _sequenceAllocator is not null)
+        {
+            // #3296: a status transition that changes active-set membership must emit the
+            // matching membership-changing lifecycle event (re-entry -> JobQueued, terminal ->
+            // JobCompleted/JobFailed/JobCancelled); every other generic edit is a
+            // non-membership JobUpdated.
+            bool statusTransitioned = request.Status.HasValue && priorStatus != job.Status;
+            (string changeEventType, string? changeFailureCode) = statusTransitioned
+                ? job.Status switch
+                {
+                    PrintJobStatus.Queued => (QueueLifecycleEventWriter.EventTypeJobQueued, null),
+                    PrintJobStatus.Completed => (QueueLifecycleEventWriter.EventTypeJobCompleted, null),
+                    PrintJobStatus.Failed => (QueueLifecycleEventWriter.EventTypeJobFailed, "job_failed"),
+                    PrintJobStatus.Cancelled => (QueueLifecycleEventWriter.EventTypeJobCancelled, "job_cancelled"),
+                    _ => (QueueLifecycleEventWriter.EventTypeJobUpdated, null),
+                }
+                : (QueueLifecycleEventWriter.EventTypeJobUpdated, null);
+            bool terminalTransition = statusTransitioned
+                && job.Status is PrintJobStatus.Completed or PrintJobStatus.Failed or PrintJobStatus.Cancelled;
+            string jobKind = job.JobKind?.ToString() ?? nameof(JobKind.Standard);
+            string changePayload = terminalTransition
+                ? QueueLifecycleEventWriter.BuildTerminalPayload(
+                    job.Id,
+                    job.AssignedPrinterId,
+                    attemptId: null,
+                    job.Status.ToString(),
+                    jobKind,
+                    changeFailureCode)
+                : QueueLifecycleEventWriter.BuildJobChangePayload(
+                    job.Id,
+                    job.AssignedPrinterId,
+                    job.Status.ToString(),
+                    jobKind,
+                    job.Priority,
+                    QueueLifecycleEventWriter.JobChangeKindUpdate);
+            await QueueLifecycleEventWriter.AddEventAsync(
+                _db,
+                _sequenceAllocator,
+                changeEventType,
+                aggregateId: job.Id,
+                printerId: job.AssignedPrinterId,
+                attemptId: null,
+                aggregateRowVersion: job.RowVersion,
+                failureCode: changeFailureCode,
+                payloadJson: changePayload,
+                timeProvider: _timeProvider,
+                ct: ct);
+        }
+
         await _repo.SaveChangesAsync(ct);
+        if (updateOutboxScope is not null)
+        {
+            await updateOutboxScope.CommitAsync(ct);
+        }
 
         bool assignmentChanged = request.AssignedPrinterId.HasValue
             && priorAssignedPrinterId != job.AssignedPrinterId;
