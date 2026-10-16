@@ -190,6 +190,9 @@ jobs:
             const gate = await import(
               `${process.env.GITHUB_WORKSPACE}/scripts/ci/squad-verdict-gate.mjs`
             );
+            const { gitMergeFile } = await import(
+              `${process.env.GITHUB_WORKSPACE}/scripts/ci/git-merge-file.mjs`
+            );
 
             const prNumberInput = String(process.env.PR_NUMBER ?? '');
             if (!/^[1-9]\d*$/.test(prNumberInput)) {
@@ -484,7 +487,9 @@ jobs:
             // a file, its merged blob — and therefore both fingerprints —
             // legitimately differ even for a clean sync. Such a file is
             // accepted only after fetching its merge-base/p1/p2/merge
-            // contents and proving `gate.isCleanThreeWayMerge`; (2) then
+            // contents and proving `gate.isCleanThreeWayMerge` (which also
+            // requires real `git merge-file` to report the identical clean
+            // result — see scripts/ci/git-merge-file.mjs); (2) then
             // tolerates a difference only on those content-verified paths.
             const distinctOldShas = new Set();
             for (const raw of rawComments) {
@@ -632,6 +637,13 @@ jobs:
                           ours: ours?.text,
                           theirs: theirs?.text,
                           result: merged?.text,
+                          // Real Git must agree (R3365-01): the gate's own
+                          // LCS alignment is ambiguous on repeated lines.
+                          gitMerge: gitMergeFile({
+                            base: base?.text,
+                            ours: ours?.text,
+                            theirs: theirs?.text,
+                          }),
                         })
                       ) {
                         allClean = false;

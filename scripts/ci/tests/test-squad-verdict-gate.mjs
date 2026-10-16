@@ -5,6 +5,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import yaml from 'js-yaml';
 import './test-reviewer-dispatch.mjs';
+import { gitMergeFile } from '../git-merge-file.mjs';
 import {
   canAutoScope,
   classifyChangeScope,
@@ -576,9 +577,17 @@ const overlapOurs = 'title\nintro\n\nsection a\nalpha (reviewed edit)\n\nsection
 const overlapTheirs = `${overlapBase}\nsection c\ngamma\n`;
 const overlapCleanMerge = 'title\nintro\n\nsection a\nalpha (reviewed edit)\n\nsection b\nbeta\n\nsection c\ngamma\n';
 
+// Same evidence the workflow supplies: the gate's own proof plus real Git.
+const cleanMerge = ({ base, ours, theirs, result }) => isCleanThreeWayMerge({
+  base, ours, theirs, result, gitMerge: gitMergeFile({ base, ours, theirs }),
+});
+
 // Mirrors the workflow's per-merge logic so the regression tests exercise the
 // same composition of pure predicates the workflow runs.
-function simulateOverlapCarry({ merged, reviewedPatch, currentPatch }) {
+function simulateOverlapCarry({
+  merged, reviewedPatch, currentPatch,
+  base = overlapBase, ours = overlapOurs, theirs = overlapTheirs,
+}) {
   const docPath = 'docs/ARCH.md';
   const singleCommitFiles = [
     file({ filename: docPath, sha: '1'.repeat(40), patch: '@@ -8 +8,3 @@ merged' }),
@@ -593,9 +602,7 @@ function simulateOverlapCarry({ merged, reviewedPatch, currentPatch }) {
   const contentVerifiedPaths = new Set();
   let clean = true;
   for (const filePath of proof.paths) {
-    if (!isCleanThreeWayMerge({
-      base: overlapBase, ours: overlapOurs, theirs: overlapTheirs, result: merged,
-    })) {
+    if (!cleanMerge({ base, ours, theirs, result: merged })) {
       clean = false;
       break;
     }
@@ -640,8 +647,96 @@ test('issue #2801: an overlapping-file conflict resolution that changes content 
   );
 });
 
+test('R3365-01: a repeated-line merge Git reports as conflicted is NOT carried forward', () => {
+  // Hicks's reproduction: the gate's single LCS alignment sees disjoint
+  // edits, but `git merge-file` aligns the repeated lines differently and
+  // reports a conflict between the final `a` and `b`.
+  const repro = { base: 'a\nb\n', ours: 'a\nb\na\n', theirs: 'b\na\nb\nb\n' };
+  const lcsOnlyResult = 'b\na\nb\nb\na\n';
+  assert.deepEqual(gitMergeFile(repro), { clean: false, output: null });
+  assert.equal(
+    isCleanThreeWayMerge({ ...repro, result: lcsOnlyResult, gitMerge: { clean: true, output: lcsOnlyResult } }),
+    true,
+    'precondition: the LCS proof alone accepts this merge (the R3365-01 hole)',
+  );
+  assert.equal(cleanMerge({ ...repro, result: lcsOnlyResult }), false);
+  assert.equal(
+    simulateOverlapCarry({
+      ...repro,
+      merged: lcsOnlyResult,
+      reviewedPatch: '@@ -1,2 +1,3 @@\n a\n b\n+a',
+      currentPatch: '@@ -1,4 +1,5 @@ shifted\n b\n a\n b\n b\n+a',
+    }),
+    false,
+  );
+});
+
+test('R3365-01: no Git-conflicting merge can pass isCleanThreeWayMerge (exhaustive small-alphabet oracle)', () => {
+  // Every base/ours/theirs over {a, b} with up to two lines each. Repeated
+  // lines are the norm here, so alignment ambiguity is exercised heavily.
+  const texts = [''];
+  for (const length of [1, 2]) {
+    for (let mask = 0; mask < 2 ** length; mask += 1) {
+      texts.push(Array.from({ length }, (_, i) => ((mask >> i) & 1 ? 'b\n' : 'a\n')).join(''));
+    }
+  }
+  let gitConflicts = 0;
+  let gitClean = 0;
+  for (const base of texts) {
+    for (const ours of texts) {
+      for (const theirs of texts) {
+        const gitMerge = gitMergeFile({ base, ours, theirs });
+        // Candidates: every text the gate might plausibly be shown as a merge
+        // result, including Git's own output when clean.
+        const candidates = new Set([ours, theirs, base, `${ours}${theirs}`, `${theirs}${ours}`]);
+        if (gitMerge.clean) {
+          gitClean += 1;
+          candidates.add(gitMerge.output);
+        } else {
+          gitConflicts += 1;
+        }
+        for (const result of candidates) {
+          const accepted = isCleanThreeWayMerge({ base, ours, theirs, result, gitMerge });
+          if (accepted) {
+            assert.equal(gitMerge.clean, true, JSON.stringify({ base, ours, theirs, result }));
+            assert.equal(result, gitMerge.output, JSON.stringify({ base, ours, theirs, result }));
+          }
+        }
+      }
+    }
+  }
+  assert.ok(gitConflicts > 0 && gitClean > 0, 'oracle must cover both outcomes');
+});
+
+test('isCleanThreeWayMerge fails closed without matching Git evidence', () => {
+  const texts = { base: overlapBase, ours: overlapOurs, theirs: overlapTheirs, result: overlapCleanMerge };
+  assert.equal(isCleanThreeWayMerge(texts), false, 'missing gitMerge evidence');
+  assert.equal(isCleanThreeWayMerge({ ...texts, gitMerge: { clean: false, output: null } }), false);
+  assert.equal(isCleanThreeWayMerge({ ...texts, gitMerge: { clean: true, output: overlapOurs } }), false);
+  assert.equal(isCleanThreeWayMerge({ ...texts, gitMerge: { clean: 'yes', output: overlapCleanMerge } }), false);
+  assert.equal(isCleanThreeWayMerge({ ...texts, gitMerge: { clean: true, output: overlapCleanMerge } }), true);
+});
+
+test('gitMergeFile reports Git verdicts and round-trips raw bytes', () => {
+  assert.deepEqual(
+    gitMergeFile({ base: 'a\nb\nc\nd\ne\n', ours: 'A\nb\nc\nd\ne\n', theirs: 'a\nb\nc\nd\nE\n' }),
+    { clean: true, output: 'A\nb\nc\nd\nE\n' },
+  );
+  assert.deepEqual(
+    gitMergeFile({ base: 'a\n', ours: 'x\n', theirs: 'y\n' }),
+    { clean: false, output: null },
+  );
+  // Invalid UTF-8 and CRLF survive exactly (latin1 is one char per byte).
+  const bytes = 'caf\xe9\r\n\xff\xfe\n';
+  assert.deepEqual(
+    gitMergeFile({ base: `head\n${bytes}tail\n`, ours: `HEAD\n${bytes}tail\n`, theirs: `head\n${bytes}tail\n` }),
+    { clean: true, output: `HEAD\n${bytes}tail\n` },
+  );
+  assert.deepEqual(gitMergeFile({ base: null, ours: '', theirs: '' }), { clean: false, output: null });
+});
+
 test('isCleanThreeWayMerge accepts only the exact conflict-free combination', () => {
-  const merge = (result, overrides = {}) => isCleanThreeWayMerge({
+  const merge = (result, overrides = {}) => cleanMerge({
     base: overlapBase, ours: overlapOurs, theirs: overlapTheirs, result, ...overrides,
   });
   assert.equal(merge(overlapCleanMerge), true, 'disjoint edits merge cleanly');
@@ -664,21 +759,21 @@ test('isCleanThreeWayMerge accepts only the exact conflict-free combination', ()
 
   // Adjacent changes are treated as conflicting (stricter than git).
   assert.equal(
-    isCleanThreeWayMerge({
+    cleanMerge({
       base: 'a\nb\nc\n', ours: 'a\nB\nc\n', theirs: 'a\nb\nC\n', result: 'a\nB\nC\n',
     }),
     false,
     'adjacent line edits conflict',
   );
   assert.equal(
-    isCleanThreeWayMerge({ base: 'a\n', ours: 'a\nx\n', theirs: 'a\ny\n', result: 'a\nx\ny\n' }),
+    cleanMerge({ base: 'a\n', ours: 'a\nx\n', theirs: 'a\ny\n', result: 'a\nx\ny\n' }),
     false,
     'insertions at the same point conflict',
   );
 
   // Both sides making the identical change is clean, applied once.
   assert.equal(
-    isCleanThreeWayMerge({ base: 'a\nb\nc\nd\n', ours: 'a\nB\nc\nd\n', theirs: 'a\nB\nc\nd\n', result: 'a\nB\nc\nd\n' }),
+    cleanMerge({ base: 'a\nb\nc\nd\n', ours: 'a\nB\nc\nd\n', theirs: 'a\nB\nc\nd\n', result: 'a\nB\nc\nd\n' }),
     true,
   );
 
@@ -689,7 +784,7 @@ test('isCleanThreeWayMerge accepts only the exact conflict-free combination', ()
   const bigText = big.join('');
   const rewritten = big.map((line) => `x${line}`).join('');
   assert.equal(
-    isCleanThreeWayMerge({ base: bigText, ours: rewritten, theirs: bigText, result: rewritten }),
+    cleanMerge({ base: bigText, ours: rewritten, theirs: bigText, result: rewritten }),
     false,
     'a diff beyond the work bound is unprovable',
   );
@@ -798,6 +893,17 @@ test('a pure base-sync merge carries the record forward with the carried-status 
     result.notes.some((note) => note.startsWith('Carried across sync:')),
     'the audit trail must record that records were carried, not freshly earned',
   );
+  // R3365-02: carried evidence may include content-verified overlap files
+  // whose blobs/patches differ, so it must not be described as byte-identical.
+  const carriedNote = result.notes.find((note) => note.startsWith('Carried across sync:'));
+  assert.doesNotMatch(carriedNote, /byte-for-byte/);
+  assert.match(carriedNote, /content-verified as a clean three-way merge/);
+});
+
+test('R3365-02: verifier contract does not claim byte-for-byte carry-forward evidence', async () => {
+  const verifier = await readFile(path.join(repositoryRoot, 'scripts/ci/verify-squad-verdict.mjs'), 'utf8');
+  assert.doesNotMatch(verifier, /byte-for-byte/);
+  assert.match(verifier, /content-verified as a clean three-way/);
 });
 
 test('a mix of fresh and carried approvals is still reported and still carries', () => {
@@ -1894,6 +2000,8 @@ test('the sync carry-forward workflow wiring stays intact', async () => {
   // blob SHAs, and only proven paths reach condition 2's relaxation.
   assert.match(workflow, /parentsCompare\.merge_base_commit\?\.sha/);
   assert.match(workflow, /gate\.isCleanThreeWayMerge\(/);
+  assert.match(workflow, /scripts\/ci\/git-merge-file\.mjs/);
+  assert.match(workflow, /gitMerge: gitMergeFile\(\{/);
   assert.match(workflow, /merged\?\.sha !== blobShaFor\(singleCommitFiles, filePath\)/);
   assert.match(workflow, /theirs\?\.sha !== blobShaFor\(parentsCompareFiles, filePath\)/);
   assert.match(workflow, /contentVerifiedPaths\.add\(filePath\)/);

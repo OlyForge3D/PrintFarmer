@@ -809,8 +809,12 @@ add, delete, rename, or binary file; at most 20 such files per merge). It fetche
 the file at the reported merge base, both parents, and the merge commit through the
 contents API. It cross-checks the parent-two and merge blob SHAs against the listed
 entries, then proves with `isCleanThreeWayMerge` that the merged bytes equal a
-conflict-free three-way merge. This proof is stricter than git: overlapping or
-merely adjacent hunks conflict unless both sides made the identical change. A
+conflict-free three-way merge. Two independent proofs must agree. The gate's own
+line merge is stricter than git: overlapping or merely adjacent hunks conflict
+unless both sides made the identical change. Because its single line alignment can
+be ambiguous when lines repeat, real `git merge-file`
+(`scripts/ci/git-merge-file.mjs`) must also exit cleanly with exactly the merged
+bytes; any Git conflict or error fails closed. A
 hand-resolved conflict, a dropped side, or any extra edit therefore never passes.
 Inputs too large to diff, or files the contents API will not inline (over 1 MB),
 also fail closed. Condition 2 then allows a mismatch only on those content-verified

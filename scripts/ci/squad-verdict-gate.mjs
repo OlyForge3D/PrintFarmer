@@ -399,7 +399,11 @@ export function parseVerdictComment(comment) {
  *      already handled as a direct SHA match upstream — and `'behind'` /
  *      `'diverged'` mean history was rewritten, so ancestry fails.)
  *   2. The PR's *own* contribution — its diff against the base branch — is
- *      byte-for-byte unchanged between the reviewed SHA and the new head.
+ *      unchanged between the reviewed SHA and the new head: identical compare
+ *      entries for every file, except base-overlapping files whose merged
+ *      content was separately proven a clean three-way merge
+ *      (`contentVerifiedPaths`; those keep the same path and status but their
+ *      blob/patch may legitimately differ).
  *
  * Condition 2 is deliberately NOT a check of "every new commit is an ancestor
  * of base": a plain `git merge development` always creates a fresh merge
@@ -694,9 +698,20 @@ function diffLineHunks(from, to) {
  * is not a string, or any input too large to diff returns `false`. A
  * conflict resolved by hand — whatever it contains — therefore never passes,
  * and neither does a clean merge with an extra edit smuggled in.
+ *
+ * The line alignment below is a single LCS choice; with repeated lines other
+ * equally short alignments exist, and Git may pick one under which the same
+ * edits conflict (finding R3365-01). This function therefore also requires
+ * `gitMerge` — the result of real `git merge-file` over the same inputs
+ * (see `git-merge-file.mjs`, which performs the I/O this module must not) —
+ * to report a clean merge whose output is exactly `result`. Missing or
+ * malformed `gitMerge` evidence fails closed. Both proofs must agree.
  */
-export function isCleanThreeWayMerge({ base, ours, theirs, result } = {}) {
+export function isCleanThreeWayMerge({ base, ours, theirs, result, gitMerge } = {}) {
   if (![base, ours, theirs, result].every((text) => typeof text === 'string')) {
+    return false;
+  }
+  if (gitMerge?.clean !== true || gitMerge.output !== result) {
     return false;
   }
   const baseLines = splitLines(base);
@@ -1297,9 +1312,11 @@ export function evaluateGate({
     notes.push(
       `Carried across sync: ${carried
         .map((record) => `${record.reviewer}@${shortSha(record.headSha)}`)
-        .join(', ')} — the PR's own diff against its base branch is proven ` +
-      'byte-for-byte unchanged since that review (a pure base sync), so the ' +
-      'record was carried forward rather than re-earned.',
+        .join(', ')} — the PR's own contribution against its base branch is ` +
+      'proven unchanged since that review (a pure base sync: identical diff ' +
+      'entries, except base-overlapping files content-verified as a clean ' +
+      'three-way merge by Git and the gate), so the record was carried ' +
+      'forward rather than re-earned.',
     );
   }
   const carriedSuffix = carried.length > 0 ? ', carried across sync' : '';
