@@ -39,7 +39,7 @@ public sealed class OptionalUrlAttribute : ValidationAttribute
 /// Camera DTO for reading and listing cameras (standalone and printer-attached).
 /// Contains all camera properties for display and management.
 /// </summary>
-public class CameraDto
+public class CameraDto : ICameraPrinterLinksDto
 {
     public Guid Id { get; set; }
 
@@ -119,7 +119,107 @@ public class CameraDto
     /// Used to differentiate from printer-attached cameras in the UI.
     /// </summary>
     public bool IsStandalone { get; set; } = true;
+
+    /// <summary>
+    /// Ids of every printer linked to this camera, in deterministic order (primary link first).
+    /// </summary>
+    public List<Guid> PrinterIds { get; set; } = [];
+
+    /// <summary>
+    /// Every printer linked to this camera, in the same order as <see cref="PrinterIds"/>.
+    /// </summary>
+    public List<CameraPrinterSummaryDto> Printers { get; set; } = [];
+
+    /// <summary>
+    /// The location explicitly assigned to the camera. Only settable when the camera is linked
+    /// to zero or two-or-more printers; null when the location is derived from a single printer.
+    /// </summary>
+    public Guid? LocationId { get; set; }
+
+    /// <summary>
+    /// Effective location: the single linked printer's location, otherwise <see cref="LocationId"/>.
+    /// </summary>
+    public Guid? EffectiveLocationId { get; set; }
+
+    /// <summary>
+    /// Name of <see cref="EffectiveLocationId"/>, when resolved.
+    /// </summary>
+    public string? EffectiveLocationName { get; set; }
+
+    /// <summary>
+    /// True when exactly one printer is linked, so the location derives from that printer and is not user-settable.
+    /// </summary>
+    public bool IsLocationDerived { get; set; }
+
+    /// <summary>
+    /// True when a user edited this (discovered) camera, so printer camera sync must not overwrite it.
+    /// </summary>
+    public bool UserModified { get; set; }
 }
+
+/// <summary>
+/// Summary of a printer linked to a camera.
+/// </summary>
+public class CameraPrinterSummaryDto
+{
+    public Guid Id { get; set; }
+
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>
+    /// True when this camera is the linked printer's primary camera.
+    /// </summary>
+    public bool IsPrimary { get; set; }
+}
+
+/// <summary>
+/// Common printer-link shape shared by camera read DTOs so authorization filtering and redaction
+/// can be applied uniformly.
+/// </summary>
+public interface ICameraPrinterLinksDto
+{
+    Guid? PrinterId { get; set; }
+
+    string? PrinterName { get; set; }
+
+    List<Guid> PrinterIds { get; set; }
+
+    List<CameraPrinterSummaryDto> Printers { get; set; }
+}
+
+/// <summary>
+/// Optional body for <c>POST /api/cameras/{id}/printers/{printerId}</c>.
+/// </summary>
+public class LinkCameraPrinterRequest
+{
+    /// <summary>
+    /// When true, the camera becomes the printer's primary camera (demoting any other).
+    /// When omitted, the camera becomes primary only if the printer has no primary camera.
+    /// </summary>
+    public bool? IsPrimary { get; set; }
+}
+
+/// <summary>
+/// Outcome of removing a camera from a printer via <c>DELETE /api/printers/{printerId}/cameras/{cameraId}</c>.
+/// </summary>
+public enum CameraPrinterRemovalResult
+{
+    /// <summary>The camera does not exist.</summary>
+    CameraNotFound,
+
+    /// <summary>The camera is not linked to the printer.</summary>
+    NotLinked,
+
+    /// <summary>The link was removed; the camera was kept.</summary>
+    Unlinked,
+
+    /// <summary>The link was removed and the auto-discovered camera, now unlinked, was deleted.</summary>
+    Deleted,
+}
+
+/// <summary>Response of <c>DELETE /api/printers/{printerId}/cameras/{cameraId}</c>.</summary>
+/// <param name="Result"><c>Unlinked</c> when the camera was kept, <c>Deleted</c> when it was removed.</param>
+public sealed record RemoveCameraFromPrinterResponse(CameraPrinterRemovalResult Result);
 
 /// <summary>
 /// DTO for creating a new camera (standalone or printer-attached).
@@ -159,6 +259,23 @@ public class CreateCameraDto
     /// Null for standalone cameras.
     /// </summary>
     public Guid? PrinterId { get; set; }
+
+    /// <summary>
+    /// Printers to link this camera to. Takes precedence over <see cref="PrinterId"/> when supplied.
+    /// </summary>
+    public List<Guid>? PrinterIds { get; set; }
+
+    /// <summary>
+    /// When true, the camera becomes the primary camera of every linked printer; otherwise it is
+    /// primary only for printers that have no primary camera yet.
+    /// </summary>
+    public bool? IsPrimary { get; set; }
+
+    /// <summary>
+    /// Location for the camera. Ignored (and cleared) when exactly one printer is linked, because the
+    /// location then derives from that printer.
+    /// </summary>
+    public Guid? LocationId { get; set; }
 
     /// <summary>
     /// Source that discovered or created this camera.
@@ -206,6 +323,27 @@ public class UpdateCameraDto
     public Guid? PrinterId { get; set; }
 
     /// <summary>
+    /// When supplied, replaces the camera's printer links with exactly this set (empty unlinks all).
+    /// Takes precedence over <see cref="PrinterId"/>. Omit to keep the current links.
+    /// </summary>
+    public List<Guid>? PrinterIds { get; set; }
+
+    /// <summary>
+    /// When true, the camera becomes the primary camera of every newly linked printer.
+    /// </summary>
+    public bool? IsPrimary { get; set; }
+
+    /// <summary>
+    /// New location for the camera. Ignored (and cleared) when exactly one printer is linked.
+    /// </summary>
+    public Guid? LocationId { get; set; }
+
+    /// <summary>
+    /// When true, clears <see cref="LocationId"/>.
+    /// </summary>
+    public bool? ClearLocationId { get; set; }
+
+    /// <summary>
     /// Source that discovered or created this camera
     /// </summary>
     public CameraSource? Source { get; set; }
@@ -214,6 +352,26 @@ public class UpdateCameraDto
     /// Purpose/position classification of the camera
     /// </summary>
     public CameraType? CameraType { get; set; }
+}
+
+/// <summary>
+/// Admin-only editable camera target configuration. Unlike the public camera DTOs this exposes the
+/// stored stream/snapshot targets so an edit form can show real values instead of generated proxy paths.
+/// Embedded URL credentials are never returned: the URL is credential-stripped and the matching
+/// <c>*HasCredentials</c> flag is set. Clients must omit a URL field from the update request when the
+/// user did not change it so stored credentials are preserved.
+/// </summary>
+public class CameraConfigDto
+{
+    public Guid Id { get; set; }
+
+    public string? StreamUrl { get; set; }
+
+    public string? SnapshotUrl { get; set; }
+
+    public bool StreamUrlHasCredentials { get; set; }
+
+    public bool SnapshotUrlHasCredentials { get; set; }
 }
 
 /// <summary>
@@ -253,7 +411,7 @@ public class CameraEndpointDetectionDto
 /// Combined camera DTO that includes both standalone and printer-attached cameras.
 /// Used for the Camera View page to display all available camera feeds.
 /// </summary>
-public class DisplayCameraDto
+public class DisplayCameraDto : ICameraPrinterLinksDto
 {
     public Guid Id { get; set; }
 
@@ -310,4 +468,35 @@ public class DisplayCameraDto
     /// Health status from periodic connectivity probes
     /// </summary>
     public CameraHealthStatus HealthStatus { get; set; } = CameraHealthStatus.Unknown;
+
+    /// <summary>
+    /// Ids of every printer linked to this camera, in deterministic order (primary link first).
+    /// </summary>
+    public List<Guid> PrinterIds { get; set; } = [];
+
+    /// <summary>
+    /// Every printer linked to this camera, in the same order as <see cref="PrinterIds"/>.
+    /// </summary>
+    public List<CameraPrinterSummaryDto> Printers { get; set; } = [];
+
+    /// <summary>
+    /// The location explicitly assigned to the camera. Only settable when the camera is linked
+    /// to zero or two-or-more printers; null when the location is derived from a single printer.
+    /// </summary>
+    public Guid? LocationId { get; set; }
+
+    /// <summary>
+    /// Effective location: the single linked printer's location, otherwise <see cref="LocationId"/>.
+    /// </summary>
+    public Guid? EffectiveLocationId { get; set; }
+
+    /// <summary>
+    /// Name of <see cref="EffectiveLocationId"/>, when resolved.
+    /// </summary>
+    public string? EffectiveLocationName { get; set; }
+
+    /// <summary>
+    /// True when exactly one printer is linked, so the location derives from that printer and is not user-settable.
+    /// </summary>
+    public bool IsLocationDerived { get; set; }
 }

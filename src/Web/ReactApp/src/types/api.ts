@@ -162,6 +162,11 @@ export interface PrinterMetadata {
   bedTypeName?: string;
   /** Hex color code for bed type badge (e.g., "#E67E22") */
   bedTypeColor?: string;
+  /**
+   * Presentation-only: render the filament box's external spool slot (QidiBox
+   * Rack). Defaults to hidden when absent; never changes the slot's spool binding.
+   */
+  showExternalSpool?: boolean;
 }
 
 /**
@@ -711,6 +716,12 @@ export interface MmuStatus {
   gates: MmuGate[];
   /** MMU protocol type: "HappyHare", "Qidibox", "AFC", or "SnapmakerU1" */
   mmuType?: string;
+  /** Live material on the external spool holder / bypass (QidiBox "Rack"), when the device reports it */
+  bypassMaterial?: string | null;
+  /** Live CSS color of the external spool holder / bypass filament */
+  bypassColor?: string | null;
+  /** Live filament name of the external spool holder / bypass */
+  bypassFilamentName?: string | null;
 }
 
 // File information with thumbnail
@@ -831,6 +842,8 @@ export interface UpdatePrinterDto {
   zOffsetMm?: number;
   /** Bed surface type ID. Set to empty string to clear. */
   bedTypeId?: string;
+  /** Presentation-only: show the filament box external spool slot. Omit to leave unchanged. */
+  showExternalSpool?: boolean;
   // Toolheads - for updating individual toolhead settings
   toolheads?: UpdateToolheadDto[];
 }
@@ -1373,7 +1386,7 @@ export interface ToolheadDto {
   id: string;
   name?: string;
   index: number;
-  nozzleDiameter?: number;     // Derived from NozzleModel.Diameter
+  nozzleDiameter?: number;     // Stored per-printer value (seeded from the nozzle model at creation)
   nozzleType?: NozzleType | string;  // Derived from NozzleModel.NozzleMaterial.Name (open string set)
   maxFlowRate?: number;        // Derived from HotendModel.MaxFlowRate
   maxTemp?: number;            // Derived from HotendModel.MaxTemp
@@ -1457,6 +1470,11 @@ export interface PrinterDetails {
    * "unsupported" for the odometer surface but tolerant everywhere else.
    */
   supportsPerToolAttribution?: boolean;
+  /**
+   * Presentation-only: render the filament box's external spool slot (QidiBox
+   * Rack). Defaults to hidden when absent; never changes the slot's spool binding.
+   */
+  showExternalSpool?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -2332,7 +2350,10 @@ export interface RegisterRequest {
 export interface AuthenticationResult {
   success: boolean;
   token?: string;
-  expiresAt?: Date;
+  expires?: string;
+  refreshToken?: string;
+  refreshTokenExpires?: string;
+  expiresAt?: string;
   user?: UserDto;
   error?: string;
 }
@@ -2508,14 +2529,6 @@ export interface PrintJobObjectListDto {
 
 export interface ExcludePrintJobObjectRequest {
   name: string;
-}
-
-/** Request payload for saving a calibrated Z-offset. */
-export interface ZOffsetSaveRequest {
-  /** The Z-offset value in millimeters. Negative values move the nozzle closer to the bed. */
-  offsetMm: number;
-  /** Whether to also send save commands to the printer firmware. */
-  saveToFirmware?: boolean;
 }
 
 // Failure detail for an individual file during multi-upload.
@@ -3066,11 +3079,49 @@ export interface CameraDto {
   createdAt: string;
   updatedAt?: string;
   isStandalone: boolean;
+  /** Primary linked printer (compatibility; prefer printerIds/printers). */
   printerId?: string;
+  printerName?: string;
+  /** All linked printer ids, primary first. */
+  printerIds: string[];
+  /** Linked printers, primary first. */
+  printers: CameraPrinterSummary[];
+  /** Explicit location (only meaningful when the camera is not linked to exactly one printer). */
+  locationId?: string | null;
+  /** Location derived from the single linked printer, or the explicit locationId otherwise. */
+  effectiveLocationId?: string | null;
+  effectiveLocationName?: string | null;
+  /** True when exactly one printer is linked and the location is derived from it. */
+  isLocationDerived: boolean;
+  /** True once a user edited an auto-discovered camera; sync no longer overwrites it. */
+  userModified: boolean;
   source: CameraSource;
   cameraType: CameraType;
   healthStatus: CameraHealthStatus;
   lastHealthCheck?: string;
+}
+
+export interface CameraPrinterSummary {
+  id: string;
+  name: string;
+  isPrimary: boolean;
+}
+
+/** Optional filters for GET /api/cameras, /api/cameras/enabled and /api/cameras/display. */
+export interface CameraListFilter {
+  printerId?: string;
+  /** Matches the camera's effective location. */
+  locationId?: string;
+}
+
+export interface LinkCameraPrinterRequest {
+  isPrimary?: boolean;
+}
+
+export type CameraPrinterRemovalResult = 'Unlinked' | 'Deleted';
+
+export interface RemoveCameraFromPrinterResponse {
+  result: CameraPrinterRemovalResult;
 }
 
 export interface CreateCameraDto {
@@ -3082,8 +3133,21 @@ export interface CreateCameraDto {
   sortOrder?: number;
   location?: string;
   printerId?: string;
+  /** Linked printers; the first entry becomes primary unless isPrimary=false. Replaces the link set on update. */
+  printerIds?: string[];
+  isPrimary?: boolean;
+  /** Ignored (and cleared) when exactly one printer is linked. */
+  locationId?: string | null;
   source?: CameraSource;
   cameraType?: CameraType;
+}
+
+export interface CameraConfigDto {
+  id: string;
+  streamUrl: string | null;
+  snapshotUrl: string | null;
+  streamUrlHasCredentials: boolean;
+  snapshotUrlHasCredentials: boolean;
 }
 
 export interface UpdateCameraDto {
@@ -3095,6 +3159,13 @@ export interface UpdateCameraDto {
   sortOrder?: number;
   location?: string;
   printerId?: string | null;
+  /** Linked printers; the first entry becomes primary unless isPrimary=false. Replaces the link set on update. */
+  printerIds?: string[];
+  isPrimary?: boolean;
+  /** Ignored (and cleared) when exactly one printer is linked. */
+  locationId?: string | null;
+  /** Explicitly clears locationId (when not derived from a single printer). */
+  clearLocationId?: boolean;
   source?: CameraSource;
   cameraType?: CameraType;
 }
@@ -3129,8 +3200,20 @@ export interface DisplayCameraDto {
   sortOrder: number;
   location?: string;
   isStandalone: boolean;
+  /** Primary linked printer (compatibility; prefer printerIds/printers). */
   printerId?: string;
   printerName?: string;
+  /** All linked printer ids, primary first. */
+  printerIds: string[];
+  /** Linked printers, primary first. */
+  printers: CameraPrinterSummary[];
+  /** Explicit location (only meaningful when the camera is not linked to exactly one printer). */
+  locationId?: string | null;
+  /** Location derived from the single linked printer, or the explicit locationId otherwise. */
+  effectiveLocationId?: string | null;
+  effectiveLocationName?: string | null;
+  /** True when exactly one printer is linked and the location is derived from it. */
+  isLocationDerived: boolean;
   printerState?: string;
   isPrinterOnline?: boolean;
   source: CameraSource;

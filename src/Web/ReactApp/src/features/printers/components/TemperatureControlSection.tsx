@@ -27,6 +27,7 @@ interface TemperatureControlSectionProps {
   onBedTempKeyDown: (e: React.KeyboardEvent) => void;
   onApplyPreset: (preset: string) => void;
   onApplySingleHeaterPreset: (heater: 'hotend' | 'bed', preset: string) => void;
+  showHeading?: boolean;
 }
 
 export function TemperatureControlSection({
@@ -45,15 +46,18 @@ export function TemperatureControlSection({
   onBedTempKeyDown,
   onApplyPreset,
   onApplySingleHeaterPreset,
+  showHeading = true,
 }: TemperatureControlSectionProps) {
   const temperatureControlsDisabled = temperatureActionPending || !canSetTemperatures;
   const cooldownDisabled = temperatureActionPending || !canCooldown;
 
   return (
     <div className="mb-2">
-      <div className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide mb-1 -ml-1">
-        Temps
-      </div>
+      {showHeading && (
+        <div className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide mb-1 -ml-1">
+          Temps
+        </div>
+      )}
       <div className="space-y-1">
         <div className="flex justify-end gap-1 items-stretch h-8 pb-1">
           <Button

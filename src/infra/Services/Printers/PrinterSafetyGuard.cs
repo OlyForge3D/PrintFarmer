@@ -44,7 +44,9 @@ public sealed record PrinterSafetyValidationResult(
     bool Success,
     int StatusCode = 200,
     string? Code = null,
-    string? Detail = null)
+    string? Detail = null,
+    double? RequiredHotendTemperatureC = null,
+    double? MeasuredHotendTemperatureC = null)
 {
     /// <summary>Successful validation result.</summary>
     public static PrinterSafetyValidationResult Allowed { get; } = new(true);
@@ -292,11 +294,14 @@ public sealed class PrinterSafetyGuard(
         }
 
         return measured.Value < minimumValue
-            ? PrinterSafetyValidationResult.Reject(
+            ? new PrinterSafetyValidationResult(
+                false,
                 409,
                 "printer_temperature_below_minimum",
-                $"The fresh measured hotend temperature is below the required minimum of {minimumValue.ToString("0.###", CultureInfo.InvariantCulture)} °C.")
-            : PrinterSafetyValidationResult.Allowed;
+                $"The fresh measured hotend temperature is below the required minimum of {minimumValue.ToString("0.###", CultureInfo.InvariantCulture)} °C.",
+                minimumValue,
+                measured.Value)
+            : new PrinterSafetyValidationResult(true, RequiredHotendTemperatureC: minimumValue, MeasuredHotendTemperatureC: measured.Value);
     }
 
     private static PrinterSafetyValidationResult ValidateAbsoluteMovement(

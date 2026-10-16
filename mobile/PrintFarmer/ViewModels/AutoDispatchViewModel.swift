@@ -1,5 +1,4 @@
 import Foundation
-import os
 
 @MainActor @Observable
 final class AutoDispatchViewModel {
@@ -13,7 +12,6 @@ final class AutoDispatchViewModel {
     var error: String?
     var isViewActive = true
 
-    private let logger = Logger(subsystem: "com.printfarmer.ios", category: "AutoDispatch")
     private var autoDispatchService: (any AutoDispatchServiceProtocol)?
 
     func configure(autoDispatchService: any AutoDispatchServiceProtocol) {

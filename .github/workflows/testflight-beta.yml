@@ -68,7 +68,7 @@ permissions:
 
 jobs:
   build-and-upload:
-    runs-on: xcode-27
+    runs-on: macos-26
     defaults:
       run:
         working-directory: mobile
@@ -211,21 +211,21 @@ jobs:
           echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
           echo "📦 Version: $VERSION | Build: $BUILD_NUMBER | Tag: $TAG_NAME"
 
-      - name: Select Xcode 27.0
+      - name: Select Xcode 26.6
         run: |
-          XCODE_PATH="/Applications/Xcode_27.0.app"
+          XCODE_PATH="/Applications/Xcode_26.6.app"
           if [ ! -d "$XCODE_PATH" ]; then
-            echo "::error::Xcode 27.0 is missing from the xcode-27 runner at $XCODE_PATH."
+            echo "::error::Xcode 26.6 is missing from the macos-26 runner at $XCODE_PATH."
             exit 1
           fi
           sudo xcode-select -s "$XCODE_PATH/Contents/Developer"
           XCODE_VERSION="$(xcodebuild -version)"
-          if [ "$(printf '%s\n' "$XCODE_VERSION" | head -n 1)" != "Xcode 27.0" ]; then
-            echo "::error::Expected Xcode 27.0 at $XCODE_PATH, found: $XCODE_VERSION"
+          if [ "$(printf '%s\n' "$XCODE_VERSION" | head -n 1)" != "Xcode 26.6" ]; then
+            echo "::error::Expected Xcode 26.6 at $XCODE_PATH, found: $XCODE_VERSION"
             exit 1
           fi
-          if [ "$(printf '%s\n' "$XCODE_VERSION" | sed -n '2s/^Build version //p')" != "27A266a" ]; then
-            echo "::error::Expected Xcode build 27A266a at $XCODE_PATH, found: $XCODE_VERSION"
+          if [ "$(printf '%s\n' "$XCODE_VERSION" | sed -n '2s/^Build version //p')" != "17F113" ]; then
+            echo "::error::Expected Xcode build 17F113 at $XCODE_PATH, found: $XCODE_VERSION"
             exit 1
           fi
           printf '%s\n' "$XCODE_VERSION"

@@ -22,6 +22,10 @@ const mocks = vi.hoisted(() => {
   let resourcesChangedCallback: (() => void) | undefined;
   let gcodeLibraryUpdatedCallback: (() => void) | undefined;
   const unsubscribeGcodeLibraryUpdated = vi.fn();
+  let camerasUpdatedCallback:
+    | ((event: { printerId: string; cameraIds: string[] }) => void)
+    | undefined;
+  const unsubscribeCamerasUpdated = vi.fn();
   return {
     getQueueSubscriptionResources: vi.fn(),
     getPrinters: vi.fn(),
@@ -57,6 +61,15 @@ const mocks = vi.hoisted(() => {
       return unsubscribeGcodeLibraryUpdated;
     }),
     unsubscribeGcodeLibraryUpdated,
+    onCamerasUpdated: vi.fn(
+      (callback: (event: { printerId: string; cameraIds: string[] }) => void) => {
+        camerasUpdatedCallback = callback;
+        return unsubscribeCamerasUpdated;
+      }
+    ),
+    unsubscribeCamerasUpdated,
+    emitCamerasUpdated: (event: { printerId: string; cameraIds: string[] }) =>
+      camerasUpdatedCallback?.(event),
     // Defaults to a generic, non-actuation-only event type -- matching real
     // ordinary queue events (job dispatched/completed/etc.) that #1731's
     // narrowing must still fall back to the full invalidation set for.
@@ -95,6 +108,7 @@ vi.mock('@/services/printer-signalr', () => ({
     onConnectionStateChange: mocks.onConnectionStateChange,
     onQueueResourcesChanged: mocks.onQueueResourcesChanged,
     onGcodeLibraryUpdated: mocks.onGcodeLibraryUpdated,
+    onCamerasUpdated: mocks.onCamerasUpdated,
   },
 }));
 
@@ -131,6 +145,46 @@ describe('QueueRealtimeBridge', () => {
 
     unmount();
     expect(mocks.unsubscribeGcodeLibraryUpdated).toHaveBeenCalledOnce();
+  });
+
+  it('invalidates card camera routes, camera lists and failure-detection status on camerasupdated, and unsubscribes on teardown', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const cameraUrlsKey = [...queryKeys.printers, 'camera-urls'];
+    const printerCamerasKey = ['cameras', 'by-printer', 'printer-1'];
+    const printerDetailsKey = queryKeys.printerDetails('printer-1');
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+    const { unmount } = render(
+      <QueryClientProvider client={queryClient}>
+        <QueueRealtimeBridge />
+      </QueryClientProvider>
+    );
+    await waitFor(() =>
+      expect(mocks.replaceQueueResourceSubscriptions).toHaveBeenCalledOnce()
+    );
+    invalidate.mockClear();
+    // Seeded after the bridge's initial printers refresh so they start fresh.
+    queryClient.setQueryData(cameraUrlsKey, []);
+    queryClient.setQueryData(printerCamerasKey, []);
+    queryClient.setQueryData(['failure-detection-status'], { printers: [] });
+    queryClient.setQueryData(printerDetailsKey, { id: 'printer-1' });
+    expect(queryClient.getQueryState(cameraUrlsKey)?.isInvalidated).toBe(false);
+
+    mocks.emitCamerasUpdated({ printerId: 'printer-1', cameraIds: ['camera-1'] });
+
+    expect(invalidate).toHaveBeenCalledTimes(3);
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: cameraUrlsKey });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['cameras'] });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['failure-detection-status'] });
+    expect(queryClient.getQueryState(cameraUrlsKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(printerCamerasKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(['failure-detection-status'])?.isInvalidated).toBe(true);
+    // Camera sync must not force a refetch of unrelated printer data.
+    expect(queryClient.getQueryState(printerDetailsKey)?.isInvalidated).toBe(false);
+
+    unmount();
+    expect(mocks.unsubscribeCamerasUpdated).toHaveBeenCalledOnce();
   });
 
   it('invalidates the file browser exactly once after a successful PrinterHub recovery', async () => {

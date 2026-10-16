@@ -20,8 +20,8 @@ layout or UI tests.
 
 ## Regenerating
 
-Baselines are SDK-sensitive. Generate them with Xcode 27.0 build 27A266a and the approved
-iOS 26.5 (23F77) simulator runtime. CI uses the `xcode-27` runner image and
+Baselines are SDK-sensitive. Generate them with Xcode 26.6 build 17F113 and the approved
+iOS 26.5 (23F77) simulator runtime. CI uses the `macos-26` arm64 runner image and
 installs iOS 26.5 when it is not preinstalled. Select the simulator with the
 same workflow steps and preference variables used by
 `.github/workflows/ios-pr-ci.yml`, then run only
@@ -135,9 +135,19 @@ remain the behavioral evidence; strict image comparison is unchanged.
 
 ## Xcode 27.0 toolchain baseline (#3285)
 
-The six Controls snapshots are maintained against Xcode 27.0 build 27A266a and
+The six Controls snapshots were re-baselined against Xcode 27.0 build 27A266a and
 iOS 26.5 (23F77). The references were regenerated with the strict existing
 snapshot assertions on the resolver-selected iPhone and iPad hosts, with
 appearance pinned to light. The six iPhone references were byte-identical to
 their existing goldens; only the six iPad references changed. The dark-mode
 destructive-button reference is independent and remains unchanged.
+
+## Xcode 26.6 containment rollback
+
+The active toolchain is again Xcode 26.6 (17F113), iOS 26.5 (23F77).
+The six iPad PNGs changed by #3286 are retained pending matching-environment
+validation; this rollback does not certify those PNGs under Xcode 26.6.
+Do not restore historical images or re-record without comparing actual output
+at the exact approved Xcode/runtime, host family, scale, locale and appearance.
+Strict assertions, iPhone references and the destructive-button reference stay
+unchanged. The selected-toolchain iPad snapshot run remains required evidence.

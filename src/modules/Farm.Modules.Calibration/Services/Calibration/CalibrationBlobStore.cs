@@ -2,6 +2,7 @@
 using Farm.Infrastructure.IO;
 using Microsoft.Extensions.Options;
 using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.Formats;
 using SixLabors.ImageSharp.Formats.Jpeg;
 using SixLabors.ImageSharp.Formats.Png;
 using SixLabors.ImageSharp.Formats.Webp;
@@ -119,6 +120,16 @@ public sealed class CalibrationBlobStore(
     IFileSystem fileSystem)
     : ICalibrationBlobStore
 {
+    // Uploads are untrusted (#3324, GHSA-gwg2-r3hj-4w44). SkipMetadata stops JPEG/WebP
+    // decoders from reading EXIF/ICC/XMP. ImageSharp's PNG loader still captures iCCP bytes,
+    // so Preserve is required too: it prevents ICC color conversion, the only decode step
+    // that parses ICC tag data (including CLUTs). Profiles are discarded before re-encode.
+    internal static readonly DecoderOptions UntrustedDecoderOptions = new()
+    {
+        SkipMetadata = true,
+        ColorProfileHandling = ColorProfileHandling.Preserve,
+    };
+
     private readonly CalibrationBlobStorageOptions _options =
         options?.Value ?? throw new ArgumentNullException(nameof(options));
 
@@ -322,7 +333,7 @@ public sealed class CalibrationBlobStore(
         source.Position = 0;
         try
         {
-            var info = await Image.IdentifyAsync(source, cancellationToken);
+            var info = await Image.IdentifyAsync(UntrustedDecoderOptions, source, cancellationToken);
             if (info is null)
             {
                 throw new CalibrationBlobValidationException(
@@ -333,8 +344,7 @@ public sealed class CalibrationBlobStore(
             ValidateDimensions(info.Width, info.Height);
             return new(contentType, info.Width, info.Height);
         }
-        catch (Exception exception) when (
-            exception is InvalidImageContentException or UnknownImageFormatException)
+        catch (ImageFormatException)
         {
             throw new CalibrationBlobValidationException(
                 "photo_decode_invalid",
@@ -349,7 +359,20 @@ public sealed class CalibrationBlobStore(
         CancellationToken cancellationToken)
     {
         await using Stream source = _fileSystem.OpenRead(sourcePath);
-        using Image image = await Image.LoadAsync(source, cancellationToken);
+        Image image;
+        try
+        {
+            // Identify only reads headers, so a corrupt pixel stream first surfaces here.
+            image = await Image.LoadAsync(UntrustedDecoderOptions, source, cancellationToken);
+        }
+        catch (ImageFormatException)
+        {
+            throw new CalibrationBlobValidationException(
+                "photo_decode_invalid",
+                "The photo cannot be decoded as a supported image.");
+        }
+
+        using Image decoded = image;
         ValidateDimensions(image.Width, image.Height);
 
         image.Metadata.ExifProfile = null;

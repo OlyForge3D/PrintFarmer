@@ -418,3 +418,20 @@ public enum PrinterBackend
 - Use enum values: `PrinterBackend.Moonraker`, `PrinterBackend.PrusaLink`, etc.
 - Custom converter handles JSON serialization automatically
 - Can be cast from int: `(PrinterBackend)1` → `Moonraker`
+
+### CameraDto - Printer Links and Location
+- A camera links to many printers through `CameraPrinter` (`isPrimary`, `sortOrder`); each printer has exactly one primary camera
+- `printerIds` (primary link first) and `printers` (`id`, `name`, `isPrimary`) list every visible linked printer; legacy `printerId`/`printerName` remain for compatibility
+- `locationId` is the camera's own location; `effectiveLocationId`/`effectiveLocationName` resolve to the single linked printer's location when `isLocationDerived` is true, otherwise to `locationId`
+- `userModified` marks discovered cameras a user edited, so printer camera sync never overwrites them
+- `CreateCameraDto`/`UpdateCameraDto` accept `printerIds`, `isPrimary`, and `locationId` (`UpdateCameraDto` also `clearLocationId`); `locationId` is ignored and cleared when exactly one printer is linked
+- See [Cameras API](./API.md#cameras-api) for endpoints
+
+### CameraConfigDto - Admin Camera Edit Targets
+- `GET /api/cameras/{id}/config` requires `cameras:admin`, including administrator-defined group grants. Farm administrators retain their established permission bypass. Printer-group access is checked separately for printer cameras.
+- Returns `id`, `streamUrl`, `snapshotUrl`, `streamUrlHasCredentials`, `snapshotUrlHasCredentials` (camelCase)
+- URLs are the stored targets, not the `/api/cameras/{id}/stream|snapshot` proxy paths returned by `GET /api/cameras/display`
+- Embedded `user:pass@` credentials are stripped and flagged; the public camera DTOs still hide targets
+- Edit flow: load this DTO, then `PUT /api/cameras/{id}` with `streamUrl`/`snapshotUrl` only when the user changed them (omitted/null = unchanged, which preserves stored credentials)
+- Blank targets are unconfigured: create paths store empty/whitespace targets as `null`; legacy blank values return `null` here, have no proxy URL in `GET /api/cameras/display`, and their proxy route returns 404 (not 502 `camera_target_invalid`). Sending an empty string in `PUT` clears a target.
+- Errors: 503 only while startup is not ready; 404 for a missing or inaccessible camera. Unexpected failures return a generic 500 `application/problem+json` with `code: camera_config_read_failed` and `correlationId`; exception details are logged server-side only. Client aborts are left to the global exception middleware (499).

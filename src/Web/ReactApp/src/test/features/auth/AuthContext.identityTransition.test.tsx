@@ -317,6 +317,7 @@ describe('Identity transition cache isolation (#762)', () => {
 
     await act(async () => {
       localStorage.setItem('auth-token', 'token-b');
+      localStorage.setItem('auth-user-id', 'user-b');
       window.dispatchEvent(new StorageEvent('storage', {
         key: 'auth-token',
         oldValue: 'token-a',
@@ -337,6 +338,7 @@ describe('Identity transition cache isolation (#762)', () => {
 
     await act(async () => {
       localStorage.removeItem('auth-token');
+      localStorage.setItem('auth-user-id', 'user-b');
       window.dispatchEvent(new StorageEvent('storage', {
         key: 'auth-token',
         oldValue: 'token-b',
@@ -359,6 +361,7 @@ describe('Identity transition cache isolation (#762)', () => {
 
     await act(async () => {
       localStorage.setItem('auth-token', 'token-b');
+      localStorage.setItem('auth-user-id', 'user-b');
       window.dispatchEvent(new StorageEvent('storage', {
         key: 'auth-token',
         oldValue: null,
@@ -382,6 +385,7 @@ describe('Identity transition cache isolation (#762)', () => {
 
     await act(async () => {
       localStorage.setItem('auth-token', 'token-b');
+      localStorage.setItem('auth-user-id', 'user-b');
       window.dispatchEvent(new StorageEvent('storage', {
         key: 'auth-token',
         oldValue: 'token-a',
@@ -416,6 +420,7 @@ describe('Identity transition cache isolation (#762)', () => {
 
     await act(async () => {
       localStorage.setItem('auth-token', 'token-b');
+      localStorage.setItem('auth-user-id', 'user-b');
       window.dispatchEvent(new StorageEvent('storage', {
         key: 'auth-token',
         oldValue: null,
@@ -528,6 +533,7 @@ describe('Identity transition cache isolation (#762)', () => {
     vi.mocked(getCurrentUser).mockRejectedValueOnce(validationError);
     await act(async () => {
       localStorage.setItem('auth-token', 'token-b');
+      localStorage.setItem('auth-user-id', 'user-b');
       window.dispatchEvent(new StorageEvent('storage', {
         key: 'auth-token',
         oldValue: 'token-a',
@@ -558,6 +564,7 @@ describe('Identity transition cache isolation (#762)', () => {
     });
     await act(async () => {
       localStorage.setItem('auth-token', 'token-b');
+      localStorage.setItem('auth-user-id', 'user-b');
       window.dispatchEvent(new StorageEvent('storage', {
         key: 'auth-token',
         oldValue: 'token-a',

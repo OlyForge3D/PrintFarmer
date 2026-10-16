@@ -18,6 +18,10 @@ function createCamera(overrides: Partial<CameraDto> = {}): CameraDto {
     sortOrder: 0,
     createdAt: "2024-01-01T00:00:00Z",
     isStandalone: true,
+    userModified: false,
+    printerIds: [],
+    printers: [],
+    isLocationDerived: false,
     source: CameraSource.Standalone,
     cameraType: CameraType.General,
     healthStatus: CameraHealthStatus.Unknown,
@@ -35,6 +39,9 @@ function createDisplayCamera(
     isEnabled: true,
     sortOrder: 0,
     isStandalone: true,
+    printerIds: [],
+    printers: [],
+    isLocationDerived: false,
     source: CameraSource.Standalone,
     cameraType: CameraType.General,
     healthStatus: CameraHealthStatus.Unknown,
@@ -49,10 +56,14 @@ vi.mock("../api", () => ({
     getEnabledCameras: vi.fn(),
     getDisplayCameras: vi.fn(),
     getCameraById: vi.fn(),
+    getCameraConfig: vi.fn(),
     createCamera: vi.fn(),
     updateCamera: vi.fn(),
     deleteCamera: vi.fn(),
     toggleCamera: vi.fn(),
+    linkCameraToPrinter: vi.fn(),
+    unlinkCameraFromPrinter: vi.fn(),
+    removeCameraFromPrinter: vi.fn(),
   },
 }));
 
@@ -125,6 +136,20 @@ describe("cameraService", () => {
       expect(result).toEqual(mockCamera);
       expect(apiClient.getCameraById).toHaveBeenCalledWith("1");
     });
+  });
+
+  it("gets editable camera configuration through the API client", async () => {
+    const config = {
+      id: "1",
+      streamUrl: "http://camera.local/stream",
+      snapshotUrl: null,
+      streamUrlHasCredentials: true,
+      snapshotUrlHasCredentials: false,
+    };
+    vi.mocked(apiClient.getCameraConfig).mockResolvedValue(config);
+
+    expect(await cameraService.getCameraConfig("1")).toEqual(config);
+    expect(apiClient.getCameraConfig).toHaveBeenCalledWith("1");
   });
 
   describe("createCamera", () => {
@@ -202,6 +227,48 @@ describe("cameraService", () => {
 
       expect(result).toEqual(mockCamera);
       expect(apiClient.toggleCamera).toHaveBeenCalledWith("1", false);
+    });
+  });
+
+  describe("multi-printer links", () => {
+    it("passes list filters through", async () => {
+      vi.mocked(apiClient.getAllCameras).mockResolvedValue([] as never);
+
+      await cameraService.getAllCameras({ printerId: "p1", locationId: "l1" });
+
+      expect(apiClient.getAllCameras).toHaveBeenCalledWith({
+        printerId: "p1",
+        locationId: "l1",
+      });
+    });
+
+    it("links a camera to a printer as primary", async () => {
+      const linked = createCamera({ printerIds: ["p1"], isStandalone: false });
+      vi.mocked(apiClient.linkCameraToPrinter).mockResolvedValue(linked as never);
+
+      const result = await cameraService.linkCameraToPrinter("1", "p1", true);
+
+      expect(result).toEqual(linked);
+      expect(apiClient.linkCameraToPrinter).toHaveBeenCalledWith("1", "p1", true);
+    });
+
+    it("unlinks a camera from a printer", async () => {
+      vi.mocked(apiClient.unlinkCameraFromPrinter).mockResolvedValue(undefined as never);
+
+      await cameraService.unlinkCameraFromPrinter("1", "p1");
+
+      expect(apiClient.unlinkCameraFromPrinter).toHaveBeenCalledWith("1", "p1");
+    });
+
+    it("removes a camera from a printer and reports the outcome", async () => {
+      vi.mocked(apiClient.removeCameraFromPrinter).mockResolvedValue({
+        result: "Deleted",
+      } as never);
+
+      const result = await cameraService.removeCameraFromPrinter("p1", "1");
+
+      expect(result).toEqual({ result: "Deleted" });
+      expect(apiClient.removeCameraFromPrinter).toHaveBeenCalledWith("p1", "1");
     });
   });
 });

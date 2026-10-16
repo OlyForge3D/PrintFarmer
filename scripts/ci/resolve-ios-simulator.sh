@@ -18,8 +18,8 @@ readonly OUTPUT_MODE
 XCODE_VERSION_OUTPUT="$(xcodebuild -version)"
 XCODE_VERSION="${XCODE_VERSION_OUTPUT%%$'\n'*}"
 XCODE_BUILD="${XCODE_VERSION_OUTPUT#*$'\n'}"
-if [[ "$XCODE_VERSION" != "Xcode 27.0" || "$XCODE_BUILD" != "Build version 27A266a" ]]; then
-  log_error "Xcode 27.0 build 27A266a is required to resolve iOS simulator destinations; found '$XCODE_VERSION_OUTPUT'." >&2
+if [[ "$XCODE_VERSION" != "Xcode 26.6" || "$XCODE_BUILD" != "Build version 17F113" ]]; then
+  log_error "Xcode 26.6 build 17F113 is required to resolve iOS simulator destinations; found '$XCODE_VERSION_OUTPUT'." >&2
   exit 1
 fi
 readonly XCODE_VERSION

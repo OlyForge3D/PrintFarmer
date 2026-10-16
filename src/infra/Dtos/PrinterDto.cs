@@ -52,6 +52,7 @@ namespace Farm.Infrastructure;
 /// <param name="TotalLayers">Total layers reported by the backend, when available.</param>
 /// <param name="FanSpeedPercent">Part-fan output percentage reported by the backend, when available.</param>
 /// <param name="LiveZOffsetMm">Live G-code Z offset in millimeters, when available.</param>
+/// <param name="ShowExternalSpool">Presentation-only preference to show the filament box external spool slot.</param>
 public record PrinterDto(
     Guid Id,
     string Name,
@@ -97,4 +98,5 @@ public record PrinterDto(
     int? CurrentLayer = null,
     int? TotalLayers = null,
     double? FanSpeedPercent = null,
-    double? LiveZOffsetMm = null);
+    double? LiveZOffsetMm = null,
+    bool ShowExternalSpool = false);

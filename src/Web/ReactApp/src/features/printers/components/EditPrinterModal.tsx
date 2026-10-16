@@ -16,6 +16,8 @@ import { apiClient } from '@/services/api';
 import { mutationErrorMessage } from '@/common/utils/mutationError';
 import { isSafeHttpUrl } from '@/common/utils/validation';
 import { getErrorMessage } from '@/common/utils/apiErrors';
+import { hasExternalSpoolHolder } from '@/features/printers/utils/materialLoadout';
+import { PrinterCamerasSection } from '@/features/printers/components/PrinterCamerasSection';
 
 export interface EditPrinterModalProps {
   printerId: string | null;
@@ -27,6 +29,7 @@ export interface EditPrinterModalProps {
 export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: EditPrinterModalProps) {
   const { data: printerDetails } = usePrinterDetails(printerId || '');
   const { data: linkedCameras = [] } = usePrinterCameras(printerId || undefined);
+  const [cameraDialogOpen, setCameraDialogOpen] = useState(false);
   const { data: manufacturers } = useManufacturers();
   const { isSlicerAvailable } = useSlicer();
   const { data: filamentTypes } = useFilamentTypes();
@@ -98,6 +101,7 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
         wattage: printerDetails.wattage ?? undefined,
         machineHourlyRate: printerDetails.machineHourlyRate ?? undefined,
         buddyCameraIp: printerDetails.buddyCameraIp ?? undefined,
+        showExternalSpool: printerDetails.showExternalSpool ?? false,
       };
       
       setFormData(initialFormData);
@@ -184,7 +188,7 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
       'hasHeatedBed', 'hasEnclosure', 'multiMaterial',
       'maxHotendTemp', 'maxBedTemp', 'supportsAutoLeveling', 'maxPrintSpeed',
       'backendPort', 'frontendPort', 'obicoEnabled', 'useModelDispatchDefaults',
-      'wattage', 'machineHourlyRate', 'buddyCameraIp'
+      'wattage', 'machineHourlyRate', 'buddyCameraIp', 'showExternalSpool'
     ];
     
     for (const field of fields) {
@@ -228,6 +232,9 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
   useEffect(() => {
     if (!isOpen) return;
     
+    // A nested camera dialog handles its own Escape; don't close the printer modal underneath it.
+    if (cameraDialogOpen) return;
+
     const handleEscape = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         handleClose();
@@ -236,7 +243,7 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
     
     document.addEventListener('keydown', handleEscape);
     return () => document.removeEventListener('keydown', handleEscape);
-  }, [isOpen, handleClose]);
+  }, [isOpen, handleClose, cameraDialogOpen]);
   
   // Update capability fields when default capabilities are fetched for a new model
   useEffect(() => {
@@ -309,7 +316,8 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
           extruderModelId: template.extruderModelId ?? th.extruderModelId,
           toolheadModelDefId: template.toolheadModelDefId ?? th.toolheadModelDefId,
           nozzleModelId: template.nozzleModelId ?? th.nozzleModelId,
-          nozzleDiameter: template.nozzleDiameter ?? th.nozzleDiameter,
+          // Stored per-printer diameter is authoritative; the template only fills a blank value.
+          nozzleDiameter: th.nozzleDiameter ?? template.nozzleDiameter,
           supportedMaterials: template.supportedMaterials ?? selectedModel.supportedFilamentTypes ?? th.supportedMaterials,
         };
       });
@@ -1038,14 +1046,12 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
             {/* Camera Configuration */}
             <div className="border-t pt-5 mt-5">
               <div className="mb-4">
-                <h4 className="text-lg font-medium text-pf-text-primary">Camera Configuration</h4>
+                <h4 className="text-lg font-medium text-pf-text-primary">Cameras</h4>
               </div>
               <div className="space-y-4">
-                <Alert type="info" title="Manage Cameras From Cameras Page">
-                  {linkedCameras.length > 0
-                    ? `This printer has ${linkedCameras.length} linked camera${linkedCameras.length === 1 ? '' : 's'}.`
-                    : 'No cameras are currently linked to this printer.'} Configure, attach, and enable cameras from the Cameras page.
-                </Alert>
+                {printerId && (
+                  <PrinterCamerasSection printerId={printerId} onDialogOpenChange={setCameraDialogOpen} />
+                )}
                 {formData.backend === PrinterBackend.PrusaLink && (
                   <FormField label="Buddy Camera IP" htmlFor="buddy-camera-ip">
                     <Input
@@ -1118,6 +1124,22 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
                 label="Use model dispatch defaults"
               />
             </FormField>
+
+            {/* QidiBox external spool holder ("Rack") visibility */}
+            {(hasExternalSpoolHolder(printerDetails) || printerDetails?.showExternalSpool) && (
+              <FormField
+                label="Filament box"
+                htmlFor="show-external-spool"
+                helper="Adds the external spool holder to the filament slots. Hiding it keeps its spool assignment."
+              >
+                <Toggle
+                  id="show-external-spool"
+                  checked={formData.showExternalSpool ?? false}
+                  onChange={e => handleInputChange('showExternalSpool', e.target.checked)}
+                  label="Show external spool"
+                />
+              </FormField>
+            )}
 
             {/* Obico AI Failure Detection */}
             <FormField 

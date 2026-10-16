@@ -203,12 +203,6 @@ vi.mock('@/features/nfc/pages/NfcBindingsPage', () => ({
   ),
 }));
 
-vi.mock('@/features/cameras/pages/CamerasPage', () => ({
-  CamerasPage: ({ embedded }: { embedded?: boolean }) => (
-    <div data-testid="cameras-page" data-embedded={String(embedded)}>Cameras Page</div>
-  ),
-}));
-
 vi.mock('@/features/admin/pages/CustomFieldsAdminPage', () => ({
   CustomFieldsAdminPage: ({ embedded }: { embedded?: boolean }) => (
     <div data-testid="custom-fields-page" data-embedded={String(embedded)}>Custom Fields Page</div>

@@ -1,6 +1,4 @@
-﻿#pragma warning disable S1144 // Unused classes and properties reserved for future use
-
-using System.Net.WebSockets;
+﻿using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
 using Farm.Infrastructure;
@@ -42,7 +40,6 @@ public sealed class OctoPrintWebSocketAdapter(
     private ClientWebSocket? _webSocket;
     private Task? _receiveLoopTask;
     private bool _disposed = false;
-    private DateTime _lastSuccessfulUpdate = DateTime.UtcNow;
     private int _consecutiveFailures = 0;
     private bool _isAuthenticated = false;
     private string? _sessionToken;
@@ -154,7 +151,6 @@ public sealed class OctoPrintWebSocketAdapter(
                         _logger.LogDebug("OctoPrint WebSocket {PrinterId}: Received message: {Value1}...", _printerId, message.Substring(0, Math.Min(100, message.Length)));
 
                         await HandleWebSocketMessageAsync(message, originWatermark, ct);
-                        _lastSuccessfulUpdate = DateTime.UtcNow;
                         _consecutiveFailures = 0;
                     }
                 }
@@ -583,37 +579,4 @@ public sealed class OctoPrintWebSocketAdapter(
         _receiveLoopTask?.Wait(TimeSpan.FromSeconds(5));
         _webSocket?.Dispose();
     }
-
-    /// <summary>
-    /// Data class for parsed printer state from HTTP fallback.
-    /// Used for JSON deserialization - properties must have setters.
-    /// </summary>
-#pragma warning disable S3459, S1144 // Suppress "unassigned property" and "unused setter" warnings for DTO
-    private sealed class PrinterStateData
-    {
-        public bool IsOnline { get; set; }
-
-        public bool Operational { get; set; }
-
-        public string? State { get; set; }
-
-        public double? X { get; set; }
-
-        public double? Y { get; set; }
-
-        public double? Z { get; set; }
-
-        public double? HotendTemp { get; set; }
-
-        public double? BedTemp { get; set; }
-
-        public double? HotendTarget { get; set; }
-
-        public double? BedTarget { get; set; }
-
-        public string? ThumbnailUrl { get; set; }
-
-        public string? CameraStreamUrl { get; set; }
-    }
-#pragma warning restore S3459, S1144
 }

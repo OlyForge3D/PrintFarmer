@@ -3,12 +3,15 @@ import { useState } from 'react';
 import clsx from 'clsx';
 import { RotateCw } from 'lucide-react';
 import { Button } from '@/common/components/ui';
-import { CameraIcon, ExternalLinkIcon, ImageIcon, VideoIcon } from '@/common/components/icons/MdiIcons';
+import { CameraIcon, ExternalLinkIcon } from '@/common/components/icons/MdiIcons';
 import {
   getCameraMediaTransformClassName,
   useCameraViewPreferences,
 } from '@/features/cameras/hooks/useCameraViewPreferences';
 import { usePrinterSnapshotPreview } from '@/features/cameras/hooks/usePrinterSnapshotPreview';
+import { useAuthenticatedMjpegStream } from '@/features/cameras/hooks/useAuthenticatedMjpegStream';
+import { CameraModeControl } from '@/features/cameras/components/CameraModeControl';
+import { getAuthenticatedCameraProxyRoute } from '@/common/auth/authenticatedCameraRoutes';
 import {
   canUseMjpegStream,
   isUnsupportedCameraPreview,
@@ -52,6 +55,7 @@ export function PrinterCameraPreview({
     accessMode: cameraAccessMode,
     streamFormat: cameraStreamFormat,
     snapshotStrategy: cameraSnapshotStrategy,
+    streamUrl: cameraStreamUrl,
     snapshotUrl: cameraSnapshotUrl,
   };
   const pollSnapshotPreview = shouldPollPrinterSnapshot(previewContract);
@@ -72,7 +76,8 @@ export function PrinterCameraPreview({
     pollSnapshotPreview,
     refreshIntervalMs,
     directSnapshotUrl,
-    !!directSnapshotUrl
+    !!directSnapshotUrl,
+    getAuthenticatedCameraProxyRoute(cameraSnapshotUrl)
   );
   const previewSrc = snapshotSrc ?? directSnapshotUrl;
   const hasSnapshot = pollSnapshotPreview || !!directSnapshotUrl;
@@ -81,7 +86,6 @@ export function PrinterCameraPreview({
     setCameraMode,
     rotation,
     rotateClockwise,
-    hasModeToggle,
     hasMedia,
   } = useCameraViewPreferences({
     preferenceKey: `printer:${printerId}`,
@@ -89,14 +93,31 @@ export function PrinterCameraPreview({
     hasStream,
     hasSnapshot,
   });
-  const externalUrl = hasStream
+  const candidateExternalUrl = hasStream
     ? cameraStreamUrl
     : pollSnapshotPreview
-    ? null
-    : cameraSnapshotUrl ?? null;
+      ? null
+      : cameraSnapshotUrl ?? null;
+  const externalUrl = candidateExternalUrl && !getAuthenticatedCameraProxyRoute(candidateExternalUrl)
+    ? candidateExternalUrl
+    : null;
   const mediaClassName = getCameraMediaTransformClassName(rotation);
   const showLiveStream = cameraMode === 'stream' && hasStream;
-  const shouldUseImageStream = showLiveStream && failedRawStreamKey !== rawStreamKey;
+  const { streamSrc, streamUnsupported, streamFailed } = useAuthenticatedMjpegStream(
+    cameraStreamUrl,
+    showLiveStream && failedRawStreamKey !== rawStreamKey,
+  );
+  const safeStreamRoute = getAuthenticatedCameraProxyRoute(cameraStreamUrl);
+  const liveStreamSrc = safeStreamRoute ? streamSrc : cameraStreamUrl;
+  const streamHasFailed = streamUnsupported || streamFailed || failedRawStreamKey === rawStreamKey;
+  const streamIssue = showLiveStream
+    ? streamUnsupported
+      ? 'unsupported'
+      : streamFailed || failedRawStreamKey === rawStreamKey
+        ? 'failed'
+        : undefined
+    : undefined;
+  const shouldRenderLiveStream = showLiveStream && !!liveStreamSrc && !streamHasFailed;
   // CameraContractClassifier emits UnsupportedStream only when no snapshot exists; keep the snapshot branch defensive.
   const placeholderTitle = unsupportedPreview
     ? 'No live preview available'
@@ -115,15 +136,13 @@ export function PrinterCameraPreview({
         ref={previewContainerRef}
         className="relative aspect-video w-full overflow-hidden bg-pf-bg-0"
       >
-        {showLiveStream && cameraStreamUrl && shouldUseImageStream ? (
+        {shouldRenderLiveStream ? (
           <img
-            src={cameraStreamUrl}
+            src={liveStreamSrc}
             alt={`${printerName} live camera feed`}
             className={`h-full w-full object-contain bg-black ${mediaClassName}`}
             loading="eager"
-            onError={() => {
-              setFailedRawStreamKey(rawStreamKey);
-            }}
+            onError={() => setFailedRawStreamKey(rawStreamKey)}
           />
         ) : previewSrc ? (
           <img
@@ -140,23 +159,15 @@ export function PrinterCameraPreview({
             }}
           />
         ) : unsupportedPreview ? (
-          <div className="absolute inset-0 flex flex-col items-center justify-center px-4 text-center text-pf-text-secondary">
+          <div role="status" aria-live="polite" className="absolute inset-0 flex flex-col items-center justify-center px-4 text-center text-pf-text-secondary">
             <CameraIcon className="mb-2 h-8 w-8 opacity-45" />
             <p className="text-sm font-medium">{placeholderTitle}</p>
-            <p className="mt-1 text-xs text-pf-text-tertiary">
+            <p className="sr-only">
               This camera does not provide an embeddable MJPEG live stream.
             </p>
           </div>
-        ) : showLiveStream && cameraStreamUrl ? (
-          <iframe
-            src={cameraStreamUrl}
-            title={`${printerName} live camera feed`}
-            className={`h-full w-full border-0 bg-black ${mediaClassName}`}
-            loading="lazy"
-            referrerPolicy="no-referrer"
-          />
         ) : (
-          <div className="absolute inset-0 flex flex-col items-center justify-center px-4 text-center text-pf-text-secondary">
+          <div role="status" aria-live="polite" className="absolute inset-0 flex flex-col items-center justify-center px-4 text-center text-pf-text-secondary">
             <CameraIcon className="mb-2 h-8 w-8 opacity-45" />
             <p className="text-sm font-medium">
               {hasCameraSource
@@ -164,8 +175,16 @@ export function PrinterCameraPreview({
                 : 'No linked camera configured'}
             </p>
             {hasCameraSource && (
-              <p className="mt-1 text-xs text-pf-text-tertiary">
-                {snapshotFailed
+              <p className="sr-only">
+                {streamUnsupported
+                  ? hasSnapshot
+                    ? 'This stream format is not supported in preview; showing snapshots when available.'
+                    : 'This stream format is not supported in preview; no snapshot is configured.'
+                  : streamFailed || failedRawStreamKey === rawStreamKey
+                  ? hasSnapshot
+                    ? 'Live stream unavailable; reconnecting or showing snapshots when available.'
+                    : 'Live stream unavailable; no snapshot is configured.'
+                  : snapshotFailed
                   ? 'Snapshot polling is temporarily unavailable; the preview will retry automatically.'
                   : isPollingPaused
                   ? 'Snapshot polling is paused while the page is hidden.'
@@ -184,28 +203,6 @@ export function PrinterCameraPreview({
 
       {hasCameraSource && (
         <div className="flex items-center justify-end gap-2 overflow-x-auto border-t border-pf-border bg-pf-bg-1/90 px-3 py-2">
-          <div
-            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-pf-bg-2 text-pf-text-secondary"
-            role="status"
-            title={showLiveStream ? 'Live stream active' : 'Snapshot preview active'}
-          >
-            <span className="sr-only">{showLiveStream ? 'Live stream active' : 'Snapshot preview active'}</span>
-            <span className="relative inline-flex items-center justify-center">
-              {showLiveStream ? (
-                <VideoIcon className="h-3.5 w-3.5" />
-              ) : (
-                <ImageIcon className="h-3.5 w-3.5" />
-              )}
-              <span
-                className={clsx(
-                  'absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full',
-                  showLiveStream ? 'bg-pf-success' : 'bg-pf-accent'
-                )}
-                aria-hidden="true"
-              />
-            </span>
-          </div>
-
           <div className="flex shrink-0 items-center gap-2">
             {hasMedia && (
               <Button
@@ -220,30 +217,15 @@ export function PrinterCameraPreview({
               />
             )}
 
-            {hasModeToggle && (
-              <div className="flex gap-1 rounded-md border border-pf-border bg-pf-bg-2 p-1">
-                <Button
-                  type="button"
-                  variant={cameraMode === 'snapshot' ? 'primary' : 'ghost'}
-                  size="sm"
-                  onClick={() => setCameraMode('snapshot')}
-                  className="h-8 w-8 rounded-full p-0"
-                  title="Show snapshot preview"
-                  aria-label="Show snapshot preview"
-                  iconCenter={<ImageIcon className="h-3.5 w-3.5" />}
-                />
-                <Button
-                  type="button"
-                  variant={cameraMode === 'stream' ? 'primary' : 'ghost'}
-                  size="sm"
-                  onClick={() => setCameraMode('stream')}
-                  className="h-8 w-8 rounded-full p-0"
-                  title="Show live stream"
-                  aria-label="Show live stream"
-                  iconCenter={<VideoIcon className="h-3.5 w-3.5" />}
-                />
-              </div>
-            )}
+            <CameraModeControl
+              cameraName={printerName}
+              cameraMode={cameraMode}
+              hasStream={hasStream}
+              hasSnapshot={hasSnapshot}
+              streamUnavailable={!!cameraStreamUrl && !hasStream}
+              streamIssue={streamIssue}
+              onModeChange={setCameraMode}
+            />
 
             {externalUrl && (
               <a

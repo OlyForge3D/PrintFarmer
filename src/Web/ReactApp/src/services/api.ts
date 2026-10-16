@@ -1,5 +1,6 @@
 /* eslint-disable local/pf-no-unguarded-console */
 // Get hash for a G-code file (returns string)
+import { getAuthenticatedCameraProxyRoute } from "@/common/auth/authenticatedCameraRoutes";
 import { generateUUID } from "@/utils/uuid";
 import { getApiBaseUrl } from "@/common/utils/apiUrlHelpers";
 import type { PrinterStatus } from "@/types/api";
@@ -152,7 +153,6 @@ import {
   UserBalanceDto,
   BalanceTransactionDto,
   BalanceAdjustRequest,
-  ZOffsetSaveRequest,
   CustomFieldDefinition,
   CustomFieldEntityType,
   CustomFieldValue,
@@ -227,6 +227,19 @@ function normalizeHistoryTotals(totals: HistoryTotalsWire): HistoryTotals {
     },
     auxiliaryTotals: totals.auxiliaryTotals ?? totals.auxiliary_totals,
   };
+}
+
+function toCameraListParams(
+  filter?: import('@/types/api').CameraListFilter
+): Record<string, string> | undefined {
+  const params: Record<string, string> = {};
+  if (filter?.printerId) {
+    params.printerId = filter.printerId;
+  }
+  if (filter?.locationId) {
+    params.locationId = filter.locationId;
+  }
+  return Object.keys(params).length > 0 ? params : undefined;
 }
 import type {
   PrintablesDownloadHistoryItem,
@@ -676,14 +689,34 @@ export class ApiClient {
     return response.data;
   }
 
-  async getPrinterSnapshot(id: string): Promise<Blob> {
+  async getPrinterSnapshot(id: string, signal?: AbortSignal): Promise<Blob> {
     const response = await this.client.get<Blob>(
       `/printers/${id}/snapshot`,
       {
         params: { _: Date.now() },
         responseType: "blob",
+        signal,
       }
     );
+    return response.data;
+  }
+
+  async getCameraSnapshot(id: string): Promise<Blob> {
+    const response = await this.client.get<Blob>(`/cameras/${id}/snapshot`, {
+      params: { _: Date.now() },
+      responseType: "blob",
+    });
+    return response.data;
+  }
+
+  async getSnapshotPreview(proxyRoute: string, signal?: AbortSignal): Promise<Blob> {
+    const safeRoute = getAuthenticatedCameraProxyRoute(proxyRoute);
+    if (!safeRoute || !new URL(safeRoute, window.location.origin).pathname.endsWith('/snapshot')) {
+      throw new Error('Snapshot preview requires a same-origin camera proxy route.');
+    }
+    const cacheBustedRoute = `${safeRoute}${safeRoute.includes("?") ? "&" : "?"}_=${Date.now()}`;
+    const apiPath = cacheBustedRoute.replace(/^\/api(?=\/)/, "");
+    const response = await this.client.get<Blob>(apiPath, { responseType: "blob", signal });
     return response.data;
   }
 
@@ -716,13 +749,6 @@ export class ApiClient {
   async setPrinterFanSpeed(id: string, speedPercent: number): Promise<CommandResult> {
     const response = await this.client.post<CommandResult>(`/printers/${id}/fan`, {
       speedPercent,
-    });
-    return response.data;
-  }
-
-  async adjustPrinterZOffset(id: string, offsetMm: number): Promise<CommandResult> {
-    const response = await this.client.post<CommandResult>(`/printers/${id}/z-offset/adjust`, {
-      offsetMm,
     });
     return response.data;
   }
@@ -928,8 +954,8 @@ export class ApiClient {
     return response.data;
   }
 
-  async refreshCameraUrls(id: string): Promise<Printer> {
-    const response = await this.client.post<Printer>(`/printers/${id}/refresh-cameras`);
+  async discoverCameras(id: string): Promise<import('@/types/api').CameraDto[]> {
+    const response = await this.client.post<import('@/types/api').CameraDto[]>(`/printers/${id}/cameras/discover`);
     return response.data;
   }
 
@@ -1114,13 +1140,6 @@ export class ApiClient {
     return response.data;
   }
 
-  async changeFilament(printerId: string): Promise<CommandResult> {
-    const response = await this.client.post<CommandResult>(
-      `/printers/${printerId}/filament-change`
-    );
-    return response.data;
-  }
-
   async extrudeFilament(
     printerId: string,
     distanceMm: number,
@@ -1194,7 +1213,8 @@ export class ApiClient {
   ): Promise<CommandResult> {
     const response = await this.client.post<CommandResult>(
       `/printers/${printerId}/mmu/gate-action`,
-      request
+      request,
+      request.action === 'Unload' ? { timeout: 360000 } : undefined
     );
     return response.data;
   }
@@ -1203,24 +1223,6 @@ export class ApiClient {
     const response = await this.client.post<CommandResult>(
       `/printers/${printerId}/printjob/objects/exclude`,
       { name }
-    );
-    return response.data;
-  }
-
-  /**
-   * Save calibrated Z-offset to the printer and optionally to firmware.
-   * @param printerId The printer's GUID
-   * @param request The Z-offset save payload
-   */
-  async saveZOffset(
-    printerId: string,
-    request: ZOffsetSaveRequest,
-    reviewedRowVersion: string
-  ): Promise<CommandResult> {
-    const response = await this.client.post<CommandResult>(
-      `/printers/${printerId}/z-offset`,
-      request,
-      { headers: { "If-Match": this.reviewedEtag(reviewedRowVersion, "The reviewed printer") } }
     );
     return response.data;
   }
@@ -4614,18 +4616,22 @@ export class ApiClient {
   // ============ Camera API methods ============
 
   /**
-   * Get all standalone cameras
+   * Get all accessible cameras, optionally filtered by linked printer and/or effective location
    */
-  async getAllCameras(): Promise<import('@/types/api').CameraDto[]> {
-    const response = await this.client.get('/cameras');
+  async getAllCameras(filter?: import('@/types/api').CameraListFilter): Promise<import('@/types/api').CameraDto[]> {
+    const params = toCameraListParams(filter);
+    const response = params ? await this.client.get('/cameras', { params }) : await this.client.get('/cameras');
     return response.data;
   }
 
   /**
-   * Get all enabled cameras (standalone only)
+   * Get all enabled accessible cameras, optionally filtered by linked printer and/or effective location
    */
-  async getEnabledCameras(): Promise<import('@/types/api').CameraDto[]> {
-    const response = await this.client.get('/cameras/enabled');
+  async getEnabledCameras(filter?: import('@/types/api').CameraListFilter): Promise<import('@/types/api').CameraDto[]> {
+    const params = toCameraListParams(filter);
+    const response = params
+      ? await this.client.get('/cameras/enabled', { params })
+      : await this.client.get('/cameras/enabled');
     return response.data;
   }
 
@@ -4633,8 +4639,11 @@ export class ApiClient {
    * Get combined display cameras (standalone + printer-attached)
    * This is what should be shown in the Camera View
    */
-  async getDisplayCameras(): Promise<import('@/types/api').DisplayCameraDto[]> {
-    const response = await this.client.get('/cameras/display');
+  async getDisplayCameras(filter?: import('@/types/api').CameraListFilter): Promise<import('@/types/api').DisplayCameraDto[]> {
+    const params = toCameraListParams(filter);
+    const response = params
+      ? await this.client.get('/cameras/display', { params })
+      : await this.client.get('/cameras/display');
     return response.data;
   }
 
@@ -4643,6 +4652,11 @@ export class ApiClient {
    */
   async getCameraById(id: string): Promise<import('@/types/api').CameraDto> {
     const response = await this.client.get(`/cameras/${id}`);
+    return response.data;
+  }
+
+  async getCameraConfig(id: string): Promise<import('@/types/api').CameraConfigDto> {
+    const response = await this.client.get(`/cameras/${id}/config`);
     return response.data;
   }
 
@@ -4682,6 +4696,39 @@ export class ApiClient {
    */
   async getCamerasByPrinter(printerId: string): Promise<import('@/types/api').CameraDto[]> {
     const response = await this.client.get(`/cameras/by-printer/${printerId}`);
+    return response.data;
+  }
+
+  /**
+   * Link a camera to a printer (idempotent). isPrimary=true makes it the printer's primary camera.
+   */
+  async linkCameraToPrinter(
+    cameraId: string,
+    printerId: string,
+    isPrimary?: boolean
+  ): Promise<import('@/types/api').CameraDto> {
+    const body: import('@/types/api').LinkCameraPrinterRequest | undefined =
+      isPrimary === undefined ? undefined : { isPrimary };
+    const response = await this.client.post(`/cameras/${cameraId}/printers/${printerId}`, body);
+    return response.data;
+  }
+
+  /**
+   * Unlink a camera from a printer; the camera itself is kept.
+   */
+  async unlinkCameraFromPrinter(cameraId: string, printerId: string): Promise<void> {
+    await this.client.delete(`/cameras/${cameraId}/printers/${printerId}`);
+  }
+
+  /**
+   * Remove a camera from a printer (Edit Printer): unlinks it and deletes it only when it was
+   * auto-discovered and no other printer links remain.
+   */
+  async removeCameraFromPrinter(
+    printerId: string,
+    cameraId: string
+  ): Promise<import('@/types/api').RemoveCameraFromPrinterResponse> {
+    const response = await this.client.delete(`/printers/${printerId}/cameras/${cameraId}`);
     return response.data;
   }
 

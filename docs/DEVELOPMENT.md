@@ -466,6 +466,22 @@ dotnet build ./farm-web.sln -c Debug
 dotnet build ./farm-web.sln -c Release
 ```
 
+### Six Labors License
+
+ImageSharp and ImageSharp.Drawing validate a license before compiling. Release builds and
+Docker publishes fail without one; Debug builds only warn.
+
+- The license lives at the repository root as `sixlabors.lic`. It is a Six Labors
+  Community license, approved by Six Labors for this public repository, scoped to the
+  `Farm.Web.Api`, `Farm.Modules.Calibration`, and `Farm.Slicer.Module` assemblies, and
+  valid until 2028-01-14.
+- The root `Directory.Build.props` sets `SixLaborsLicenseFile` to that file, because the
+  package only searches the consuming project's directory tree by default. Pass
+  `-p:SixLaborsLicenseFile=<path>` to override it.
+- The Docker templates under `scripts/docker/dockerfiles/` copy the file into the build.
+- Renewing: replace `sixlabors.lic` in place. Adding ImageSharp to another assembly
+  requires a license that covers that assembly name.
+
 ### Docker Build
 
 ```bash

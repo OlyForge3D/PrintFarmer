@@ -119,7 +119,7 @@ describe("PrinterCoverageSummary", () => {
     printerName: "Alpha",
     status: "runout",
     toolheads: [],
-    activeJobId: null,
+    activeJobId: "job-1",
     activeJobName: null,
     activeJobProgress: null,
     earliestPredictedRunoutAt: new Date(Date.now() + 20 * 60_000).toISOString(),
@@ -130,6 +130,18 @@ describe("PrinterCoverageSummary", () => {
   it("renders nothing when coverage is not available", () => {
     const { container } = render(<PrinterCoverageSummary coverage={null} />);
     expect(container.firstChild).toBeNull();
+  });
+
+  it.each(['covers', 'unknown', 'runout'] as const)(
+    'hides an idle %s verdict and prediction without assigned work', (status) => {
+      const { container } = render(<PrinterCoverageSummary coverage={{ ...coverage, activeJobId: null, status }} />);
+      expect(container.firstChild).toBeNull();
+    },
+  );
+
+  it('shows coverage for assigned queued work on an idle printer', () => {
+    render(<PrinterCoverageSummary coverage={{ ...coverage, activeJobId: null, assignedQueuedJobCount: 1, status: 'covers' }} />);
+    expect(screen.getByRole('status')).toHaveTextContent('Filament OK');
   });
 
   it("shows both the badge and the runout chip when at risk", () => {

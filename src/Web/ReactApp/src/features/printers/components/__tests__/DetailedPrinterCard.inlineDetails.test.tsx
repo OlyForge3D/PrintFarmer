@@ -124,15 +124,14 @@ vi.mock('@/features/printers/components/MaterialLoadout', () => ({
   MaterialLoadout: () => <div data-testid="material-loadout" />,
 }));
 vi.mock('@/features/printers/components/TemperatureControlSection', () => ({
-  TemperatureControlSection: () => <div data-testid="temp-section" />,
+  TemperatureControlSection: ({ showHeading }: { showHeading?: boolean }) => (
+    <div data-testid="temp-section" data-show-heading={String(showHeading !== false)} />
+  ),
 }));
 vi.mock('@/features/printers/components/MovementControlSection', () => ({
   MovementControlSection: ({ rightContent }: { rightContent?: React.ReactNode }) => (
     <div data-testid="movement-section">{rightContent}</div>
   ),
-}));
-vi.mock('@/features/printers/components/FilamentControlSection', () => ({
-  FilamentControlSection: () => <div data-testid="filament-section" />,
 }));
 vi.mock('@/features/printers/components/PrinterActionBar', () => ({ PrinterActionBar: () => <div data-testid="action-bar" /> }));
 vi.mock('@/features/printers/components/BedClearBanner', () => ({ BedClearBanner: () => null }));
@@ -143,9 +142,6 @@ vi.mock('@/features/printers/components/FailureDetectionMonitoringBadge', () => 
 vi.mock('@/features/printers/components/FailureDetectionMonitoringSummary', () => ({ FailureDetectionMonitoringSummary: () => null }));
 vi.mock('@/features/printers/components/OfflineTroubleshootingGuide', () => ({ OfflineTroubleshootingGuide: () => null }));
 vi.mock('@/features/printers/components/PrinterCameraPreview', () => ({ PrinterCameraPreview: () => <div data-testid="camera-preview" /> }));
-vi.mock('@/features/printers/components/ZOffsetCalibrationWizard', () => ({
-  ZOffsetCalibrationWizard: () => <div data-testid="zoffset-wizard" />,
-}));
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() } }));
 
 import { DetailedPrinterCard } from '../DetailedPrinterCard';
@@ -176,6 +172,18 @@ function makeObject(overrides: Partial<PrintJobObjectDto> = {}): PrintJobObjectD
 }
 
 describe('DetailedPrinterCard inline details (#1584)', () => {
+  it('does not display the configured bed type in detailed cards', () => {
+    render(<DetailedPrinterCard printer={makePrinter({
+      bedTypeId: 'textured',
+      bedTypeName: 'Textured PEI',
+      bedTypeColor: '#abcdef',
+    })} />);
+
+    expect(screen.getByText('Printer 1')).toBeInTheDocument();
+    expect(screen.queryByText('Textured PEI')).not.toBeInTheDocument();
+    expect(screen.queryByTitle(/bed type/i)).not.toBeInTheDocument();
+  });
+
   beforeEach(() => {
     usePrinterDetailsMock.mockClear();
     usePrinterDetailsMock.mockReturnValue({ data: undefined, isLoading: false });
@@ -228,6 +236,12 @@ describe('DetailedPrinterCard inline details (#1584)', () => {
       }
       return { data: undefined, isLoading: false, isFetching: false, refetch: vi.fn() };
     });
+  });
+
+  it('keeps the Temps heading on the card', () => {
+    render(<DetailedPrinterCard printer={makePrinter()} />);
+
+    expect(screen.getByTestId('temp-section')).toHaveAttribute('data-show-heading', 'true');
   });
 
   it('does not render an Open details sidebar action', () => {

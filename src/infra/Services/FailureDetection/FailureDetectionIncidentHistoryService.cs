@@ -1,7 +1,9 @@
-﻿using Farm.Infrastructure.Data;
+﻿using System.Security.Claims;
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.Attention;
 using Farm.Infrastructure.Services.Attention;
+using Farm.Infrastructure.Services.Queue;
 using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Infrastructure.Services.FailureDetection;
@@ -31,6 +33,11 @@ public interface IFailureDetectionIncidentHistoryService
     Task<List<FailureDetectionDto>> GetRecentAsync(Guid? printerId, int take, CancellationToken ct = default);
 
     /// <summary>
+    /// Returns incidents visible to the caller, applying printer-group authorization before pagination.
+    /// </summary>
+    Task<List<FailureDetectionDto>> GetRecentAsync(ClaimsPrincipal principal, Guid? printerId, int take, CancellationToken ct = default);
+
+    /// <summary>
     /// Marks a failure incident as resolved by a successful operator attention action so it
     /// is suppressed from the unified attention feed on the next refetch (issue #707, R2).
     /// The incident row is preserved for history/audit. Callers MUST invoke this only after
@@ -55,6 +62,7 @@ public sealed class FailureDetectionIncidentHistoryService : IFailureDetectionIn
     public const int MaxTake = 200;
 
     private readonly AppDbContext _dbContext;
+    private readonly IQueueResourceAuthorizationService? _resourceAuthorization;
 
     // Attention feed invalidation (issue #707). Optional to preserve existing test constructors.
     private readonly IAttentionBroadcaster? _attentionBroadcaster;
@@ -64,11 +72,16 @@ public sealed class FailureDetectionIncidentHistoryService : IFailureDetectionIn
     /// </summary>
     /// <param name="dbContext">The application database context.</param>
     /// <param name="attentionBroadcaster">Optional broadcaster for attention-feed invalidation.</param>
-    public FailureDetectionIncidentHistoryService(AppDbContext dbContext, IAttentionBroadcaster? attentionBroadcaster = null)
+    /// <param name="resourceAuthorization">Printer-group authorization for caller-scoped history reads.</param>
+    public FailureDetectionIncidentHistoryService(
+        AppDbContext dbContext,
+        IAttentionBroadcaster? attentionBroadcaster = null,
+        IQueueResourceAuthorizationService? resourceAuthorization = null)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
         _dbContext = dbContext;
         _attentionBroadcaster = attentionBroadcaster;
+        _resourceAuthorization = resourceAuthorization;
     }
 
     /// <summary>
@@ -131,7 +144,6 @@ public sealed class FailureDetectionIncidentHistoryService : IFailureDetectionIn
     /// <returns>Recent incidents ordered newest first.</returns>
     public Task<List<FailureDetectionDto>> GetRecentAsync(Guid? printerId, int take, CancellationToken ct = default)
     {
-        int normalizedTake = NormalizeTake(take);
         IQueryable<FailureDetectionIncident> query = _dbContext.FailureDetectionIncidents.AsNoTracking();
 
         if (printerId.HasValue)
@@ -140,6 +152,44 @@ public sealed class FailureDetectionIncidentHistoryService : IFailureDetectionIn
             query = query.Where(incident => incident.PrinterId == printerIdValue);
         }
 
+        return GetRecentAsync(query, take, ct);
+    }
+
+    /// <inheritdoc />
+    public async Task<List<FailureDetectionDto>> GetRecentAsync(
+        ClaimsPrincipal principal,
+        Guid? printerId,
+        int take,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(principal);
+        if (_resourceAuthorization is null)
+        {
+            return [];
+        }
+
+        IQueryable<FailureDetectionIncident> query = _dbContext.FailureDetectionIncidents.AsNoTracking();
+        if (printerId.HasValue)
+        {
+            query = query.Where(incident => incident.PrinterId == printerId.Value);
+        }
+
+        List<Guid> candidatePrinterIds = await query
+            .Select(incident => incident.PrinterId)
+            .Distinct()
+            .ToListAsync(ct);
+        IReadOnlySet<Guid> allowedPrinterIds = await _resourceAuthorization.FilterAccessiblePrinterIdsAsync(
+            principal, candidatePrinterIds, PrinterGroupAccessLevel.View, ct);
+        Guid[] allowedIds = allowedPrinterIds.ToArray();
+        return await GetRecentAsync(query.Where(incident => allowedIds.Contains(incident.PrinterId)), take, ct);
+    }
+
+    private static Task<List<FailureDetectionDto>> GetRecentAsync(
+        IQueryable<FailureDetectionIncident> query,
+        int take,
+        CancellationToken ct)
+    {
+        int normalizedTake = NormalizeTake(take);
         return query
             .OrderByDescending(incident => incident.DetectedAt)
             .Select(incident => new FailureDetectionDto

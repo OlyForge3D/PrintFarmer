@@ -91,7 +91,7 @@ Keep API servers and test commands in separate terminals or background processes
 
 ## Mobile App
 
-The SwiftUI iOS app lives in `mobile/` and was merged in from `OlyForge3D/PFarm-Ios`. It targets iOS 17+ and requires Xcode 27.0 (Swift 5.9+). Architecture is MVVM + repository pattern.
+The SwiftUI iOS app lives in `mobile/` and was merged in from `OlyForge3D/PFarm-Ios`. It targets iOS 17+ and requires Xcode 26.6 (Swift 5.9+). Architecture is MVVM + repository pattern.
 
 API integration:
 
@@ -101,7 +101,7 @@ API integration:
   installs migrate into the registry on first launch.
 - The mobile app consumes the same `/api/*` JSON contract as the React frontend — camelCase property names, string enums (see Serialization Rules below). Do not introduce mobile-only DTOs unless absolutely required; extend the shared API instead.
 
-Common commands (start at the repository root). Use Xcode 27.0 build 27A266a;
+Common commands (start at the repository root). Use Xcode 26.6 build 17F113;
 the shared resolver approves only iOS 26.5 (23F77). Install that runtime in Xcode
 Settings > Components and create an available matching simulator. It fails
 before tests if no approved destination exists. Python 3 is required; no GitHub
@@ -504,9 +504,11 @@ following **always** take the full gate, even when the only change is markdown:
 
 Whether a given edit moves an agent's safety boundary cannot be judged from the path, so a
 single review record must never be able to rewrite these. Prose is matched by extension
-(`.md`, `.markdown`, `.rst`, `.adoc`, `.txt`), so binary or image assets under `docs/`
-correctly take the full gate. If a change is misclassified as full-gate, the cost is one extra
-review record; the reverse would be a real review gap.
+(`.md`, `.markdown`, `.rst`, `.adoc`, `.txt`). Static HTML design mockups under `docs/**`
+and `mobile/docs/**` are also documentation; product workflows do not execute them. Other
+non-prose assets under `docs/`, such as binary or image files, correctly take the full gate.
+If a change is misclassified as full-gate, the cost is one extra review record; the reverse
+would be a real review gap.
 
 This list is exported from the module as `fullGatePrefixes` / `fullGateFiles`, and a test
 asserts that this section enumerates exactly it — the code and this documentation drifted apart
@@ -730,7 +732,9 @@ but relabelled, to a new head `SHA_h` only when **all three** hold: (1) `SHA_r` 
 strict ancestor of `SHA_h` (GitHub's compare API reports `status: 'ahead'` for
 `compare(SHA_r...SHA_h)`, never `'behind'`/`'diverged'`/`'identical'` — a rebase or
 force-push always fails this), (2) the PR's own diff against the base branch — not
-its raw commit list — is byte-for-byte unchanged between `SHA_r` and `SHA_h`, and
+its raw commit list — is unchanged between `SHA_r` and `SHA_h`: every compare entry
+is identical, except base-overlapping files content-verified as a clean three-way
+merge (see the issue #2801 paragraph below), and
 (3) every commit introduced since review that isn't already reachable from base is
 a clean two-parent merge introducing nothing beyond its own two parents (see below —
 NOT "content-empty against its own first parent", which is a real, verified-wrong
@@ -796,6 +800,28 @@ if either fires. `compare(parent1...parent2)` exposes no equivalent total, so
 `parentsCompare.files` uses only the length-vs-cap heuristic used for the top-level
 diffs. Either signal
 fails condition 3 closed (treats it as unproven) rather than guessing.
+
+Overlapping files (issue #2801) need one more step. When the base advance and the
+PR both modify the same file, a clean sync legitimately changes that file's merged
+blob, so its fingerprint can match neither `compare(parent1...parent2)` (condition 3)
+nor the reviewed PR diff (condition 2). Exact matching would reject every such sync.
+For each file whose merge-commit entry differs from `compare(parent1...parent2)`, the
+workflow therefore requires a plain in-place text modification on both sides (no
+add, delete, rename, or binary file; at most 20 such files per merge). It fetches
+the file at the reported merge base, both parents, and the merge commit through the
+contents API. It cross-checks the parent-two and merge blob SHAs against the listed
+entries, then proves with `isCleanThreeWayMerge` that the merged bytes equal a
+conflict-free three-way merge. Two independent proofs must agree. The gate's own
+line merge is stricter than git: overlapping or merely adjacent hunks conflict
+unless both sides made the identical change. Because its single line alignment can
+be ambiguous when lines repeat, real `git merge-file`
+(`scripts/ci/git-merge-file.mjs`) must also exit cleanly with exactly the merged
+bytes; any Git conflict or error fails closed. A
+hand-resolved conflict, a dropped side, or any extra edit therefore never passes.
+Inputs too large to diff, or files the contents API will not inline (over 1 MB),
+also fail closed. Condition 2 then allows a mismatch only on those content-verified
+paths. The set of changed paths and the status of each path must remain identical.
+Every other condition above is unchanged.
 
 When a record is carried forward this way, the status and audit trail say so
 explicitly — `REVIEWED (self-attested, carried across sync)`, never a bare

@@ -3,7 +3,7 @@ import {
   ExternalLinkIcon,
   ShieldIcon,
 } from '@/common/components/icons/MdiIcons';
-import { Badge } from '@/common/components/ui';
+import { Badge, Button } from '@/common/components/ui';
 import type { FailureDetectionEvent, FailureDetectionPrinterStatusDto } from '@/types/api';
 import { ConfidenceGauge } from '@/features/printers/components/ConfidenceGauge';
 import {
@@ -22,6 +22,7 @@ interface FailureDetectionMonitoringSummaryProps {
   printerName?: string;
   variant?: FailureDetectionMonitoringSummaryVariant;
   className?: string;
+  onReview?: () => void;
 }
 
 interface ToneStyle {
@@ -134,6 +135,7 @@ export function FailureDetectionMonitoringSummary({
   printerName,
   variant = 'compact',
   className,
+  onReview,
 }: FailureDetectionMonitoringSummaryProps) {
   if (!enabled && !status && recentEvents.length === 0) return null;
 
@@ -172,6 +174,23 @@ export function FailureDetectionMonitoringSummary({
         </div>
         {isMonitoring && confidence != null && tone === 'healthy' ? (
           <ConfidenceGauge value={printHealth} size="sm" />
+        ) : needsAction && onReview ? (
+          <Button
+            type="button"
+            variant="subtle"
+            size="sm"
+            onClick={onReview}
+            aria-label={`${tone === 'critical' ? 'Action' : 'Review'}: failure detection for ${resolvedPrinterName}`}
+            data-pf-radius="full"
+            className={clsx(
+              'inline-flex min-h-6 shrink-0 items-center rounded-full border px-2 text-xs font-medium transition-colors',
+              tone === 'critical'
+                ? 'border-pf-error/40 bg-pf-error-bg text-pf-error-text hover:bg-pf-error/20'
+                : 'border-pf-warning/40 bg-pf-warning-bg text-pf-warning-text hover:bg-pf-warning/20'
+            )}
+          >
+            {tone === 'critical' ? 'Action' : 'Review'}
+          </Button>
         ) : (
           <Badge
             variant={tone === 'critical' ? 'error' : tone === 'attention' ? 'warning' : tone === 'healthy' ? 'success' : 'default'}

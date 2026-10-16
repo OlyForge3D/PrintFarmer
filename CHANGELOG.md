@@ -2,6 +2,13 @@
 
 ### Features
 
+- Make cameras a first-class feature at `/cameras` with all, by-location and
+  by-printer views. Cameras link to many printers (one primary per printer),
+  are auto-discovered from printer backends on connect, create and every
+  `CameraSync.intervalMinutes` (default 15), and are managed from Add/Edit
+  Printer. Existing printers are backfilled on the first sync after upgrade.
+  The admin settings Cameras entry is removed (#3335).
+
 - Add dry-run-first Mac mini Ralph setup with private unverified staging and
   explicit native-app cutover instructions, discovered policy approval and
   receipt reuse/renewal without manually copying IDs or commit pins (#2935).
@@ -26,6 +33,20 @@
   genesis before its four general slots become operational.
 
 ### Fixes
+
+- Fix the slicer 3D text tool producing empty geometry (and empty STLs) for
+  every font family since #2901, and upgrade `three` to 0.186.1. The Droid
+  serif, sans and mono typefaces that three no longer publishes are now bundled
+  under Apache-2.0 with their upstream NOTICE (supersedes #3178).
+
+- Update the frontend test environment to jsdom 30 and exercise filament-slot
+  focus restoration through a visible rail. Frontend development now requires
+  Node.js 24.15+ within 24.x, or Node.js 26+.
+
+- Align EF Core, Microsoft.Data.Sqlite, and EF health checks on 10.0.12,
+  including coupled logging and dependency injection pins in backend plugins,
+  discovery, shared workers, and the profile parser tool to prevent NuGet
+  downgrades and dependency-submission failures (#3357).
 
 - Honor **OctoPrint/Slicer API → Require API key** for slicer uploads: allow
   anonymous uploads and queue submission when disabled, while preserving

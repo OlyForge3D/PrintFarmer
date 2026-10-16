@@ -19,8 +19,6 @@ import { FailureDetectionMonitoringSummary } from '@/features/printers/component
 import { OfflineTroubleshootingGuide } from '@/features/printers/components/OfflineTroubleshootingGuide';
 import { PrinterCameraPreview } from '@/features/printers/components/PrinterCameraPreview';
 import { EstimatedCompletionBadge } from '@/features/printers/components/EstimatedCompletionBadge';
-import { PrinterCoverageSummary } from '@/features/filament-coverage/components/FilamentCoverageBadge';
-import { usePrinterCoverageFromFleet } from '@/features/filament-coverage/hooks';
 import type { Printer, PrinterBackendCapabilitiesDto, MmuGate } from '@/types/api';
 import type { PrinterDisplay } from '@/common/hooks/usePrinterDisplay';
 import { useAutoDispatchStatus, useSetAutoDispatchEnabled } from '@/features/printers/hooks/useAutoDispatch';
@@ -49,26 +47,6 @@ interface CompactPrinterCardProps {
   /** Receives the printer ID so parents can pass one stable callback for all cards */
   onExpand: (printerId: string) => void;
   onEdit?: (printer: Printer) => void;
-}
-
-function BedTypeBadge({ name, color }: { name: string; color?: string | null }) {
-  const ref = useRef<HTMLSpanElement>(null);
-
-  useEffect(() => {
-    if (!ref.current) return;
-    ref.current.style.backgroundColor = color ? `${color}33` : 'rgba(0,0,0,0.3)';
-    ref.current.style.borderColor = color ? `${color}66` : 'rgba(255,255,255,0.1)';
-  }, [color]);
-
-  return (
-    <span
-      ref={ref}
-      className="text-xs px-1.5 py-0.5 rounded-xs border text-pf-text-secondary"
-      title={`Bed type: ${name}`}
-    >
-      {name}
-    </span>
-  );
 }
 
 function MmuGateDot({ isLoaded, color, tooltip }: { isLoaded: boolean; color: string; tooltip: string }) {
@@ -151,7 +129,6 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
 
   // Auto-dispatch opt-in status
   const { data: autoDispatchStatus } = useAutoDispatchStatus(printer.id);
-  const { data: coverage } = usePrinterCoverageFromFleet(printer.id);
   const setAutoDispatchEnabled = useSetAutoDispatchEnabled();
 
   const handleAutoDispatchToggle = async () => {
@@ -272,12 +249,9 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
             </span>
           )}
         </div>
-        {/* Tags row + bed type badge */}
-        {(printerTags.length > 0 || printer.bedTypeName) && (
+        {/* Tags row */}
+        {printerTags.length > 0 && (
           <div className="flex flex-wrap gap-1 mt-1.5">
-            {printer.bedTypeName && (
-              <BedTypeBadge name={printer.bedTypeName} color={printer.bedTypeColor} />
-            )}
             {printerTags.map(tag => (
               <TagChip
                 key={tag.id}
@@ -327,6 +301,11 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
               printerName={printer.name}
               variant="compact"
               className="mb-3"
+              onReview={() =>
+                failureDetectionStatus?.state === 'misconfigured' && onEdit
+                  ? onEdit(printer)
+                  : onExpand(printer.id)
+              }
             />
           )}
 
@@ -505,7 +484,6 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
 
             return <span className="italic text-pf-text-tertiary">No spool loaded</span>;
           })()}
-          <PrinterCoverageSummary coverage={coverage} compact className="ml-1" isOnline={isOnline} />
         </div>
         <div className="relative shrink-0 ml-2">
           <Button

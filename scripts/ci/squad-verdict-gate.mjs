@@ -399,7 +399,11 @@ export function parseVerdictComment(comment) {
  *      already handled as a direct SHA match upstream — and `'behind'` /
  *      `'diverged'` mean history was rewritten, so ancestry fails.)
  *   2. The PR's *own* contribution — its diff against the base branch — is
- *      byte-for-byte unchanged between the reviewed SHA and the new head.
+ *      unchanged between the reviewed SHA and the new head: identical compare
+ *      entries for every file, except base-overlapping files whose merged
+ *      content was separately proven a clean three-way merge
+ *      (`contentVerifiedPaths`; those keep the same path and status but their
+ *      blob/patch may legitimately differ).
  *
  * Condition 2 is deliberately NOT a check of "every new commit is an ancestor
  * of base": a plain `git merge development` always creates a fresh merge
@@ -484,6 +488,20 @@ export function parseVerdictComment(comment) {
  *     must positively prove every non-base commit is a clean merge (or that
  *     there are none), not rely on a default meaning "assume clean".
  *
+ * Overlapping files (issue #2801): when the base advance and the PR both
+ * modify the same file, a clean sync legitimately changes that file's
+ * resulting blob, and three-dot compare against the advanced base also shifts
+ * its patch context. Identical compare entries are therefore impossible for that
+ * file even though the author authored nothing. `contentVerifiedPaths` names
+ * paths the workflow has positively proven — by fetching the merge base, both
+ * parents and the merge result of every sync merge that touched them, and
+ * checking `isCleanThreeWayMerge` — to contain nothing beyond a conflict-free
+ * combination of the two sides. Only those paths may differ between the
+ * reviewed and current diffs, and only as an in-place modification
+ * (identical `status` `'modified'`, no rename). Every other path must still
+ * match exactly, and the set of changed paths must be identical. It defaults
+ * to empty, so omitting it requires every compare entry to be identical.
+ *
  * This function performs no I/O; the workflow computes the compares and the
  * per-commit lookups and passes their results in.
  */
@@ -493,6 +511,7 @@ export function isCarriedAcrossSync({
   currentDiffFiles = [],
   filesMayBeTruncated = false,
   nonBaseCommitsIntroduceNoExtraContent = false,
+  contentVerifiedPaths = [],
 } = {}) {
   if (recordAncestryStatus !== 'ahead') {
     return false;
@@ -508,15 +527,237 @@ export function isCarriedAcrossSync({
   if (reviewed.length === 0) {
     return false;
   }
-  return diffFingerprint(reviewed) === diffFingerprint(current);
+  if (diffFingerprint(reviewed) === diffFingerprint(current)) {
+    return true;
+  }
+  const verified = new Set(contentVerifiedPaths ?? []);
+  if (verified.size === 0) {
+    return false;
+  }
+  const reviewedByPath = filesByPath(reviewed);
+  const currentByPath = filesByPath(current);
+  if (!reviewedByPath || !currentByPath || reviewedByPath.size !== currentByPath.size) {
+    return false;
+  }
+  for (const [filename, reviewedFile] of reviewedByPath) {
+    const currentFile = currentByPath.get(filename);
+    if (!currentFile) {
+      return false;
+    }
+    if (diffFingerprint([reviewedFile]) === diffFingerprint([currentFile])) {
+      continue;
+    }
+    if (!verified.has(filename) ||
+        !isPlainModification(reviewedFile) ||
+        !isPlainModification(currentFile)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function filesByPath(files) {
+  const byPath = new Map();
+  for (const entry of files) {
+    const filename = entry?.filename;
+    if (typeof filename !== 'string' || filename === '' || byPath.has(filename)) {
+      return null;
+    }
+    byPath.set(filename, entry);
+  }
+  return byPath;
+}
+
+function isPlainModification(entry) {
+  return entry?.status === 'modified' &&
+    !entry?.previous_filename &&
+    typeof entry?.patch === 'string';
+}
+
+/**
+ * Upper bound on files per sync merge that may be content-verified. Beyond
+ * it the workflow refuses to fetch contents and the merge counts as unproven.
+ */
+export const maxContentVerifiedPathsPerMerge = 20;
+
+/**
+ * Decide which files of a two-parent merge commit still need a content-level
+ * proof (issue #2801). `singleCommitFiles` is the merge commit's own diff
+ * against its first parent; `parentsCompareFiles` is `compare(p1...p2).files`.
+ * A file whose entries are identical on both sides is already proven (the
+ * merge took the second parent's change verbatim). Any other file needs a
+ * three-way content proof, and is only eligible for one when it is a plain
+ * in-place text modification on BOTH sides — present in both lists, status
+ * `'modified'`, no rename, with a patch (so not binary). Anything else
+ * (a file only one side lists, an add/delete/rename, a binary file, or more
+ * than `maxContentVerifiedPathsPerMerge` candidates) returns `ok: false`.
+ */
+export function mergePathsNeedingContentProof(singleCommitFiles, parentsCompareFiles) {
+  const own = filesByPath(Array.isArray(singleCommitFiles) ? singleCommitFiles : []);
+  const parents = filesByPath(Array.isArray(parentsCompareFiles) ? parentsCompareFiles : []);
+  if (!own || !parents) {
+    return { ok: false, paths: [] };
+  }
+  const paths = [];
+  for (const filename of new Set([...own.keys(), ...parents.keys()])) {
+    const ownFile = own.get(filename);
+    const parentsFile = parents.get(filename);
+    if (ownFile && parentsFile &&
+        diffFingerprint([ownFile]) === diffFingerprint([parentsFile])) {
+      continue;
+    }
+    if (!ownFile || !parentsFile ||
+        !isPlainModification(ownFile) || !isPlainModification(parentsFile)) {
+      return { ok: false, paths: [] };
+    }
+    paths.push(filename);
+  }
+  if (paths.length > maxContentVerifiedPathsPerMerge) {
+    return { ok: false, paths: [] };
+  }
+  return { ok: true, paths: paths.sort() };
+}
+
+/** Bound on the line-diff work matrix; larger inputs fail closed. */
+const maxDiffCells = 4_000_000;
+
+function splitLines(text) {
+  return text === '' ? [] : text.split(/(?<=\n)/);
+}
+
+/**
+ * Line diff of `from` → `to` as hunks `{ start, end, lines }` over `from`
+ * (replace `from[start, end)` with `lines`). Returns `null` when the input is
+ * too large to diff within `maxDiffCells`, so callers fail closed.
+ */
+function diffLineHunks(from, to) {
+  let prefix = 0;
+  while (prefix < from.length && prefix < to.length && from[prefix] === to[prefix]) {
+    prefix += 1;
+  }
+  let suffix = 0;
+  while (suffix < from.length - prefix && suffix < to.length - prefix &&
+         from[from.length - 1 - suffix] === to[to.length - 1 - suffix]) {
+    suffix += 1;
+  }
+  const a = from.slice(prefix, from.length - suffix);
+  const b = to.slice(prefix, to.length - suffix);
+  if (a.length === 0 && b.length === 0) {
+    return [];
+  }
+  const width = b.length + 1;
+  if ((a.length + 1) * width > maxDiffCells) {
+    return null;
+  }
+  const lcs = new Uint32Array((a.length + 1) * width);
+  for (let i = a.length - 1; i >= 0; i -= 1) {
+    for (let j = b.length - 1; j >= 0; j -= 1) {
+      lcs[i * width + j] = a[i] === b[j]
+        ? lcs[(i + 1) * width + j + 1] + 1
+        : Math.max(lcs[(i + 1) * width + j], lcs[i * width + j + 1]);
+    }
+  }
+  const hunks = [];
+  let current = null;
+  const flush = () => {
+    if (current) {
+      hunks.push(current);
+      current = null;
+    }
+  };
+  let i = 0;
+  let j = 0;
+  while (i < a.length || j < b.length) {
+    if (i < a.length && j < b.length && a[i] === b[j]) {
+      flush();
+      i += 1;
+      j += 1;
+      continue;
+    }
+    current ??= { start: prefix + i, end: prefix + i, lines: [] };
+    if (j < b.length && (i >= a.length || lcs[i * width + j + 1] >= lcs[(i + 1) * width + j])) {
+      current.lines.push(b[j]);
+      j += 1;
+    } else {
+      i += 1;
+      current.end = prefix + i;
+    }
+  }
+  flush();
+  return hunks;
+}
+
+/**
+ * Prove that `result` is exactly a conflict-free three-way merge of `ours`
+ * and `theirs` over their common ancestor `base` (issue #2801) — i.e. it
+ * contains every change each side made relative to `base`, and nothing else.
+ *
+ * Deliberately stricter than git: two changes conflict when their base ranges
+ * overlap OR merely touch (adjacent lines, or insertions at the same point),
+ * unless both sides made the identical change. Any conflict, any input that
+ * is not a string, or any input too large to diff returns `false`. A
+ * conflict resolved by hand — whatever it contains — therefore never passes,
+ * and neither does a clean merge with an extra edit smuggled in.
+ *
+ * The line alignment below is a single LCS choice; with repeated lines other
+ * equally short alignments exist, and Git may pick one under which the same
+ * edits conflict (finding R3365-01). This function therefore also requires
+ * `gitMerge` — the result of real `git merge-file` over the same inputs
+ * (see `git-merge-file.mjs`, which performs the I/O this module must not) —
+ * to report a clean merge whose output is exactly `result`. Missing or
+ * malformed `gitMerge` evidence fails closed. Both proofs must agree.
+ */
+export function isCleanThreeWayMerge({ base, ours, theirs, result, gitMerge } = {}) {
+  if (![base, ours, theirs, result].every((text) => typeof text === 'string')) {
+    return false;
+  }
+  if (gitMerge?.clean !== true || gitMerge.output !== result) {
+    return false;
+  }
+  const baseLines = splitLines(base);
+  const oursHunks = diffLineHunks(baseLines, splitLines(ours));
+  const theirsHunks = diffLineHunks(baseLines, splitLines(theirs));
+  if (!oursHunks || !theirsHunks) {
+    return false;
+  }
+  const merged = [...oursHunks];
+  for (const theirsHunk of theirsHunks) {
+    let duplicate = false;
+    for (const oursHunk of oursHunks) {
+      const sameChange = oursHunk.start === theirsHunk.start &&
+        oursHunk.end === theirsHunk.end &&
+        oursHunk.lines.length === theirsHunk.lines.length &&
+        oursHunk.lines.every((line, index) => line === theirsHunk.lines[index]);
+      if (sameChange) {
+        duplicate = true;
+        break;
+      }
+      if (oursHunk.start <= theirsHunk.end && theirsHunk.start <= oursHunk.end) {
+        return false;
+      }
+    }
+    if (!duplicate) {
+      merged.push(theirsHunk);
+    }
+  }
+  merged.sort((left, right) => left.start - right.start);
+  const output = [];
+  let position = 0;
+  for (const hunk of merged) {
+    output.push(...baseLines.slice(position, hunk.start), ...hunk.lines);
+    position = hunk.end;
+  }
+  output.push(...baseLines.slice(position));
+  return output.join('') === result;
 }
 
 /**
  * Canonical, order-independent fingerprint of a compare-API `files` array,
- * used to test two diffs for byte-for-byte equality: once for the PR's own
- * diff (see `isCarriedAcrossSync`), and again by the workflow to test a
- * merge commit's own diff against `compare(parent1...parent2).files` when
- * proving it introduced nothing beyond a clean merge of its two parents.
+ * used to test two diffs for exact entry equality: once for the PR's own
+ * diff (see `isCarriedAcrossSync`), and again per file (see
+ * `mergePathsNeedingContentProof`) to test a merge commit's own diff against
+ * `compare(parent1...parent2).files` when proving it introduced nothing
+ * beyond a clean merge of its two parents.
  * Not a content hash of anything beyond the fields the compare API actually
  * exposes, and not used for anything except these equality tests. Exported
  * so both call sites share one definition of "identical diff".
@@ -595,6 +836,12 @@ function isProse(path) {
   return proseExtensions.some((extension) => lower.endsWith(extension));
 }
 
+// Directory prefixes are case-sensitive in Git, so match them against the
+// original path; only the extension is case-insensitive.
+function isStaticDocumentationHtml(path) {
+  return /^(?:docs|mobile\/docs)\/.+\.[hH][tT][mM][lL]$/.test(path);
+}
+
 function isDependencyManifest(path, basename) {
   return manifestBasenames.has(basename) ||
     /^appsettings(?:\.[^.]+)?\.json$/i.test(basename) ||
@@ -655,10 +902,11 @@ export function classifyChangeScope(paths) {
     if (highRiskPaths.test(normalizedPath)) {
       return { docsOnly: false, highRisk: true, reason: `${path} is high-risk infrastructure or access-control code` };
     }
-    if (normalizedPath.startsWith('docs/') && !isProse(normalizedPath)) {
+    const staticDocumentationHtml = isStaticDocumentationHtml(path);
+    if (normalizedPath.startsWith('docs/') && !isProse(normalizedPath) && !staticDocumentationHtml) {
       return { docsOnly: false, highRisk: true, reason: `${path} is a non-prose documentation asset` };
     }
-    if (!isProse(normalizedPath)) {
+    if (!isProse(normalizedPath) && !staticDocumentationHtml) {
       if (!isKnownLowRiskPath(normalizedPath)) {
         return { docsOnly: false, highRisk: true, reason: `${path} is not a known low-risk path` };
       }
@@ -1064,9 +1312,11 @@ export function evaluateGate({
     notes.push(
       `Carried across sync: ${carried
         .map((record) => `${record.reviewer}@${shortSha(record.headSha)}`)
-        .join(', ')} — the PR's own diff against its base branch is proven ` +
-      'byte-for-byte unchanged since that review (a pure base sync), so the ' +
-      'record was carried forward rather than re-earned.',
+        .join(', ')} — the PR's own contribution against its base branch is ` +
+      'proven unchanged since that review (a pure base sync: identical diff ' +
+      'entries, except base-overlapping files content-verified as a clean ' +
+      'three-way merge by Git and the gate), so the record was carried ' +
+      'forward rather than re-earned.',
     );
   }
   const carriedSuffix = carried.length > 0 ? ', carried across sync' : '';

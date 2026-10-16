@@ -26,7 +26,7 @@ public class PrintersServiceSnapmakerU1CameraTests
             new Camera
             {
                 Id = Guid.NewGuid(),
-                PrinterId = printer.Id,
+                PrinterLinks = { new CameraPrinter { PrinterId = printer.Id, IsPrimary = true } },
                 Name = "camera",
                 IsEnabled = true,
                 Source = CameraSource.Moonraker,
@@ -51,49 +51,46 @@ public class PrintersServiceSnapmakerU1CameraTests
     }
 
     [Fact]
-    public async Task RefreshCameraUrlsAsync_WhenSnapmakerU1HasNoWebcamList_StoresSnapshotOnlyU1Strategy()
-    {
-        Printer printer = CreatePrinter("Snapmaker", "Snapmaker U1");
-        List<Camera> cameras = [];
-        Mock<ISupportsConfiguredCameraDetection> detection = CreateDetectionClient((null, null));
-        await using AppDbContext db = CreateDbContext();
-        PrintersService service = await CreateServiceAsync(db, printer, cameras, detection.Object);
-
-        PrinterDto? dto = await service.RefreshCameraUrlsAsync(printer.Id, CancellationToken.None);
-
-        cameras.Should().ContainSingle();
-        Camera camera = cameras.Single();
-        camera.StreamUrl.Should().BeNull();
-        camera.SnapshotUrl.Should().Be("http://u1.local/server/files/camera/monitor.jpg");
-        dto.Should().NotBeNull();
-        dto!.CameraAccessMode.Should().Be(CameraAccessMode.SnapshotOnly);
-        dto.CameraStreamFormat.Should().Be(CameraStreamFormat.Unknown);
-        dto.CameraSnapshotStrategy.Should().Be(CameraSnapshotStrategy.SnapmakerU1MonitorJpeg);
-    }
-
-    [Fact]
-    public async Task RefreshCameraUrlsAsync_WhenMoonrakerIsNotU1_UsesConfiguredWebcamsListWithoutU1Fallback()
+    public async Task GetCameraSnapshotAsync_UsesPrimaryLinkedCameraBeforeLowerSortOrderSecondary()
     {
         Printer printer = CreatePrinter("Voron", "V2.4");
-        List<Camera> cameras = [];
-        string streamUrl = "http://voron.local/webcam/?action=stream";
-        string snapshotUrl = "http://voron.local/webcam/?action=snapshot";
-        Mock<ISupportsConfiguredCameraDetection> detection = CreateDetectionClient((streamUrl, snapshotUrl));
+        byte[] image = [0xff, 0xd8, 0xff, 0xd9];
+        List<Camera> cameras =
+        [
+            new Camera
+            {
+                Id = Guid.NewGuid(),
+                PrinterLinks = { new CameraPrinter { PrinterId = printer.Id, IsPrimary = false, SortOrder = 0 } },
+                Name = "secondary",
+                IsEnabled = true,
+                SortOrder = -5,
+                SnapshotUrl = "http://secondary.local/snapshot.jpg",
+            },
+            new Camera
+            {
+                Id = Guid.NewGuid(),
+                PrinterLinks = { new CameraPrinter { PrinterId = printer.Id, IsPrimary = true, SortOrder = 3 } },
+                Name = "primary",
+                IsEnabled = true,
+                SortOrder = 10,
+                SnapshotUrl = "http://primary.local/snapshot.jpg",
+            },
+        ];
+        var backendClients = new Mock<IBackendClientFactory>();
+        backendClients.Setup(factory => factory.GetClient(PrinterBackend.Moonraker))
+            .Throws(new InvalidOperationException("plugin unavailable"));
+        using var handler = new SnapshotHandler(image);
+        using var http = new HttpClient(handler);
+        var httpClients = new Mock<IHttpClientFactory>();
+        httpClients.Setup(factory => factory.CreateClient(It.IsAny<string>())).Returns(http);
         await using AppDbContext db = CreateDbContext();
-        PrintersService service = await CreateServiceAsync(db, printer, cameras, detection.Object);
+        PrintersService service = await CreateServiceAsync(
+            db, printer, cameras, CreateDetectionClient((null, null)).Object, backendClients.Object, httpClients.Object);
 
-        PrinterDto? dto = await service.RefreshCameraUrlsAsync(printer.Id, CancellationToken.None);
+        byte[]? result = await service.GetCameraSnapshotAsync(printer.Id, CancellationToken.None);
 
-        cameras.Should().ContainSingle();
-        Camera camera = cameras.Single();
-        camera.StreamUrl.Should().Be(streamUrl);
-        camera.SnapshotUrl.Should().Be(snapshotUrl);
-        dto.Should().NotBeNull();
-        dto!.CameraAccessMode.Should().Be(CameraAccessMode.StreamAndSnapshot);
-        dto.CameraStreamFormat.Should().Be(CameraStreamFormat.Mjpeg);
-        dto.CameraSnapshotStrategy.Should().Be(CameraSnapshotStrategy.DirectUrl);
-        detection.Verify(c => c.DetectConfiguredCameraUrlsAsync(
-            "http://voron.local:7125", 80, It.IsAny<PrinterCredential?>(), It.IsAny<CancellationToken>()), Times.Once);
+        result.Should().Equal(image);
+        handler.RequestUrl.Should().Be("http://primary.local/snapshot.jpg");
     }
 
     private static Mock<ISupportsConfiguredCameraDetection> CreateDetectionClient((string? StreamUrl, string? SnapshotUrl) urls)

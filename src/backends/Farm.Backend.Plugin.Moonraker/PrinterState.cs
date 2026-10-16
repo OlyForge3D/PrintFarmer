@@ -132,6 +132,15 @@ internal sealed class PrinterState
     /// <summary>Per-gate Spoolman spool IDs (-1 = none).</summary>
     public int[]? MmuGateSpoolId { get; set; }
 
+    /// <summary>Material of the external spool holder / bypass (Qidi "Rack"), or null when not reported.</summary>
+    public string? MmuBypassMaterial { get; set; }
+
+    /// <summary>CSS color of the external spool holder / bypass (Qidi "Rack"), or null when not reported.</summary>
+    public string? MmuBypassColor { get; set; }
+
+    /// <summary>Filament name of the external spool holder / bypass (Qidi "Rack"), or null when not reported.</summary>
+    public string? MmuBypassFilamentName { get; set; }
+
     /// <summary>The MMU protocol type. Default <see cref="MmuProtocol.Unknown"/> until protocol is identified.</summary>
     public string MmuType { get; set; } = MmuProtocol.Unknown;
 
@@ -288,6 +297,9 @@ internal sealed class PrinterState
         MmuGateColor = null;
         MmuGateFilamentName = null;
         MmuGateSpoolId = null;
+        MmuBypassMaterial = null;
+        MmuBypassColor = null;
+        MmuBypassFilamentName = null;
         MmuType = MmuProtocol.Unknown;
 
         QidiboxDetected = false;
@@ -367,7 +379,10 @@ internal sealed class PrinterState
             EndlessSpool: MmuEndlessSpool,
             ClogDetection: MmuClogDetection,
             Gates: gates,
-            MmuType: MmuType);
+            MmuType: MmuType,
+            BypassMaterial: MmuBypassMaterial,
+            BypassColor: MmuBypassColor,
+            BypassFilamentName: MmuBypassFilamentName);
         MmuDirty = false;
         return _cachedMmuStatus;
     }

@@ -40,6 +40,7 @@ public sealed class PrinterMutationEtagTests : IAsyncLifetime, IDisposable
             ModelId = model.Id,
             IsEnabled = true,
             IsAvailable = true,
+            Backend = (int)PrinterBackend.OctoPrint,
         };
         db.Manufacturers.Add(manufacturer);
         db.PrinterModels.Add(model);
@@ -59,6 +60,56 @@ public sealed class PrinterMutationEtagTests : IAsyncLifetime, IDisposable
     {
         _client?.Dispose();
         _factory.Dispose();
+    }
+
+    [Fact]
+    public async Task LegacyActiveSpoolClear_ClearsPrinterScalarAndReturnsRevisionUsableByNextWrite()
+    {
+        using (IServiceScope scope = _factory.Services.CreateScope())
+        {
+            AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            Printer printer = (await db.Printers.FindAsync(_printerId))!;
+            printer.CurrentSpoolId = 42;
+            await db.SaveChangesAsync();
+        }
+
+        HttpResponseMessage before = await _client.GetAsync($"/api/printers/{_printerId}");
+        before.EnsureSuccessStatusCode();
+        string reviewedEtag = before.Headers.ETag?.Tag
+            ?? throw new InvalidOperationException("Printer GET omitted ETag.");
+
+        using var clear = new HttpRequestMessage(
+            HttpMethod.Post,
+            $"/api/printers/{_printerId}/active-spool")
+        {
+            Content = JsonContent.Create(new { spoolId = (int?)null }),
+        };
+        clear.Headers.TryAddWithoutValidation("If-Match", reviewedEtag);
+        HttpResponseMessage cleared = await _client.SendAsync(clear);
+
+        string clearBody = await cleared.Content.ReadAsStringAsync();
+        cleared.StatusCode.Should().Be(HttpStatusCode.OK, clearBody);
+        string clearEtag = cleared.Headers.ETag?.Tag
+            ?? throw new InvalidOperationException($"Successful active-spool clear omitted ETag. Body: {clearBody}");
+        clearEtag.Should().NotBe(reviewedEtag);
+
+        using (IServiceScope scope = _factory.Services.CreateScope())
+        {
+            AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            (await db.Printers.FindAsync(_printerId))!.CurrentSpoolId.Should().BeNull();
+        }
+
+        // A subsequent revision-checked mutation proves the clear response token
+        // is fresh, rather than merely present on a mocked success response.
+        using var nextWrite = new HttpRequestMessage(
+            HttpMethod.Put,
+            $"/api/printers/{_printerId}/maintenance")
+        {
+            Content = JsonContent.Create(true),
+        };
+        nextWrite.Headers.TryAddWithoutValidation("If-Match", clearEtag);
+        HttpResponseMessage next = await _client.SendAsync(nextWrite);
+        next.StatusCode.Should().Be(HttpStatusCode.OK, await next.Content.ReadAsStringAsync());
     }
 
     [Fact]

@@ -35,7 +35,7 @@ cd Web/ReactApp && npm run dev
 
 ### Requirements
 - .NET 10.0.101 SDK
-- Node.js >=24.13
+- Node.js 24.15+ within 24.x, or 26+ (including the jsdom test environment)
 - 2GB+ RAM
 
 ### Advantages

@@ -50,12 +50,4 @@ describe('PrinterCameraPreview — Camera Fit Regression Tests', () => {
     expect(snapshot.className).not.toContain('object-cover');
   });
 
-  it('DetailedPrinterCard camera preview has sufficient size constraints', () => {
-    // RESOLVED: DetailedPrinterCard.tsx line 544 now uses max-w-[40rem] (640px)
-    // Previously was max-w-[28rem] (448px) — 43% size increase for better visibility
-    
-    // This is a documentation test — validates the structure exists.
-    // The actual size constraint is tested implicitly through the component.
-    expect(true).toBe(true);
-  });
 });

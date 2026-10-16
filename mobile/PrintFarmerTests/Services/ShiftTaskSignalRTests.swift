@@ -197,7 +197,6 @@ final class ShiftTaskSignalRTests: XCTestCase {
         #if DEBUG
         let queue = ShiftTaskCallbackQueue()
         _ = ShiftTasksViewModel(callbackEnqueuer: queue.enqueuer)
-        XCTAssertTrue(true)
         #else
         XCTFail("The unit proof target must compile with DEBUG test seams")
         #endif

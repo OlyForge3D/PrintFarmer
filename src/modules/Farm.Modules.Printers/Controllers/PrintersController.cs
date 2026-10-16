@@ -48,6 +48,7 @@ using MoonrakerEndpointResolution = Farm.Infrastructure.Services.Printers.Moonra
 using MoonrakerOnboardingResolver = Farm.Infrastructure.Services.Printers.MoonrakerOnboardingResolver;
 using PerToolAttributionCapability = Farm.Infrastructure.Services.Printers.PerToolAttributionCapability;
 using PrinterControlException = Farm.Infrastructure.Services.Printers.PrinterControlException;
+using PrinterControlOutcome = Farm.Infrastructure.Services.Printers.PrinterControlOutcome;
 using PrinterDirectControl = Farm.Infrastructure.Services.Printers.PrinterDirectControl;
 using PrinterSafetyMoveRequest = Farm.Infrastructure.Services.Printers.PrinterSafetyMoveRequest;
 using PrinterSafetyOperation = Farm.Infrastructure.Services.Printers.PrinterSafetyOperation;
@@ -1287,7 +1288,7 @@ public class PrintersController(
             p.Id,
             p.Name,
             p.ServiceState?.LastCapabilityUpdate ?? DateTime.UtcNow,
-            primaryToolhead?.NozzleModel?.Diameter ?? 0.4,  // Nozzle diameter from NozzleModel
+            primaryToolhead?.NozzleDiameter ?? 0.4,  // Stored per-printer nozzle diameter
             primaryToolhead?.SupportedMaterials,
             p.MaxBuildVolumeX,
             p.MaxBuildVolumeY,
@@ -1308,12 +1309,12 @@ public class PrintersController(
             t.Id,
             t.Name,
             t.Index,
-            t.NozzleModel?.Diameter,  // Nozzle diameter from NozzleModel
+            t.NozzleDiameter,  // Stored per-printer value; NozzleModel only seeds it at creation
             t.NozzleModel?.NozzleMaterial?.Name ?? t.NozzleModel?.NozzleType.ToString(),  // Nozzle material name from NozzleModel (open string set)
             t.HotendModel?.MaxFlowRate,  // Max flow rate from HotendModel
             t.HotendModel?.MaxTemp,      // Max temp from HotendModel
 
-            // Component model references - nozzle diameter comes from NozzleModel.Diameter
+            // Component model references
             t.HotendModelId,
             t.HotendModel?.Name,
             t.ExtruderModelId,
@@ -1392,7 +1393,8 @@ public class PrintersController(
             !string.IsNullOrWhiteSpace(effectivePassword),
             false,
             false,
-            rowVersion);
+            rowVersion,
+            p.ShowExternalSpool);
     }
 
     /// <summary>
@@ -1717,31 +1719,52 @@ public class PrintersController(
     }
 
     /// <summary>
-    /// Refreshes camera URLs for a printer by querying the backend API.
-    /// Use this to update camera configuration after adding or modifying cameras on a printer.
+    /// Runs plugin camera discovery for a printer now (the same sync the background
+    /// <c>PrinterCameraSyncService</c> performs on connect, create, and interval) and returns
+    /// the printer's linked cameras. User-modified and standalone cameras are never overwritten.
+    /// Discovered cameras the user previously removed from this printer are un-dismissed first, so
+    /// explicit discovery brings them back.
     /// </summary>
     /// <param name="id">The unique identifier of the printer.</param>
+    /// <param name="synchronizer">Printer camera synchronizer.</param>
+    /// <param name="cameraService">Camera service used to project the printer's cameras.</param>
     /// <param name="ct">Cancellation token for the operation.</param>
-    /// <returns>The updated printer DTO with refreshed camera URLs.</returns>
-    /// <response code="200">Returns the updated printer with camera URLs.</response>
-    /// <response code="404">If the printer with the specified ID was not found.</response>
-    /// <response code="500">If there was an error refreshing camera URLs.</response>
+    /// <returns>The printer's cameras after discovery.</returns>
+    /// <response code="200">Returns the printer's cameras after discovery.</response>
+    /// <response code="404">If the printer was not found or the caller cannot submit to its printer group.</response>
+    /// <response code="500">If there was an error discovering cameras.</response>
     [RequirePermission("printers", "admin")]
-    [HttpPost("{id:guid}/refresh-cameras")]
-    [ProducesResponseType(typeof(PrinterDto), 200)]
+    [HttpPost("{id:guid}/cameras/discover")]
+    [ProducesResponseType(typeof(List<CameraDto>), 200)]
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
-    public async Task<ActionResult<PrinterDto>> RefreshCameraUrlsAsync(Guid id, CancellationToken ct)
+    public async Task<ActionResult<List<CameraDto>>> DiscoverCamerasAsync(
+        Guid id,
+        [FromServices] Farm.Infrastructure.Services.Cameras.IPrinterCameraSynchronizer synchronizer,
+        [FromServices] Farm.Infrastructure.Services.Cameras.ICameraService cameraService,
+        CancellationToken ct)
     {
+        if (!await CanAccessPrinterAsync(id, PrinterGroupAccessLevel.Submit, ct))
+        {
+            return NotFound();
+        }
+
         try
         {
-            PrinterDto? result = await _printersService.RefreshCameraUrlsAsync(id, ct);
-            return result == null ? NotFound() : Ok(result);
+            _ = await synchronizer.ClearDismissalsAsync(id, ct);
+            Farm.Infrastructure.Services.Cameras.PrinterCameraSyncResult result =
+                await synchronizer.SyncPrinterAsync(id, explicitRequest: true, ct);
+            if (!result.PrinterFound)
+            {
+                return NotFound();
+            }
+
+            return Ok(await cameraService.GetByPrinterIdAsync(id, ct));
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogError(ex, "Failed to refresh camera URLs for printer {Id}", id);
-            return StatusCode(500, "Failed to refresh camera URLs");
+            _logger.LogError(ex, "Failed to discover cameras for printer {Id}", id);
+            return StatusCode(500, "Failed to discover cameras");
         }
     }
 
@@ -2196,6 +2219,12 @@ public class PrintersController(
             p.UseModelDispatchDefaults = dto.UseModelDispatchDefaults.Value;
         }
 
+        // Presentation-only toggle: never touches hardware, telemetry, or slot spool bindings.
+        if (dto.ShowExternalSpool.HasValue)
+        {
+            p.ShowExternalSpool = dto.ShowExternalSpool.Value;
+        }
+
         // Update toolheads if provided
         if (dto.Toolheads?.Length > 0 && p.Toolheads != null)
         {
@@ -2401,7 +2430,8 @@ public class PrintersController(
             ObicoEnabled: p.ObicoEnabled,
             UseModelDispatchDefaults: p.UseModelDispatchDefaults,
             RowVersion: EncodeRowVersion(p.RowVersion),
-            ConfigurationRevision: p.ConfigurationRevision);
+            ConfigurationRevision: p.ConfigurationRevision,
+            ShowExternalSpool: p.ShowExternalSpool);
 
         return Ok(dtoResponse);
     }
@@ -2742,12 +2772,13 @@ public class PrintersController(
         CancellationToken ct,
         PrinterActuationResult? acquired = null,
         PrinterSafetyOperation? safetyOperation = null,
-        PrinterSafetyMoveRequest? move = null)
+        PrinterSafetyMoveRequest? move = null,
+        MmuControlRequest? heatedUnload = null)
     {
         CancellationToken requestCancellation = ct;
         using var timeout = new CancellationTokenSource(
             operation == "emergencystop" ? TimeSpan.FromSeconds(20) :
-                PrinterDirectControl.IsManualMotion(operation) ? PrinterDirectControl.CommandTimeout : Timeout.InfiniteTimeSpan,
+                PrinterDirectControl.IsManualMotion(operation) || heatedUnload is not null ? PrinterDirectControl.CommandTimeout : Timeout.InfiniteTimeSpan,
             timeProvider ?? TimeProvider.System);
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct, timeout.Token);
         ct = deadline.Token;
@@ -2765,7 +2796,8 @@ public class PrintersController(
             safetyOperation,
             move,
             ct,
-            requestCancellation);
+            requestCancellation,
+            heatedUnload);
         if (validationFailure is not null)
         {
             return validationFailure;
@@ -3134,7 +3166,8 @@ public class PrintersController(
         PrinterSafetyOperation? safetyOperation,
         PrinterSafetyMoveRequest? move,
         CancellationToken ct,
-        CancellationToken? requestCancellation = null)
+        CancellationToken? requestCancellation = null,
+        MmuControlRequest? heatedUnload = null)
     {
         bool dispatchAuthorized = false;
         bool leaseSettled = false;
@@ -3200,6 +3233,17 @@ public class PrintersController(
                         safetyOperation.Value,
                         move,
                         ct);
+                if (!safety.Success && heatedUnload is not null && safety.Code == "printer_temperature_below_minimum")
+                {
+                    (safety, bool heatingOutcomeUnknown) = await WarmMmuForUnloadAsync(lease, heatedUnload, safety, ct);
+                    if (heatingOutcomeUnknown)
+                    {
+                        leaseSettled = true;
+                        await _physicalActuationService!.MarkDirectUnknownAsync(lease, "backend_heating_outcome_unknown", CancellationToken.None);
+                        return SafetyProblem(safety);
+                    }
+                }
+
                 if (!safety.Success)
                 {
                     await _physicalActuationService!.CompleteDirectAsync(
@@ -3237,11 +3281,23 @@ public class PrintersController(
             return SafetyProblem(PrinterSafetyValidationResult.Reject(
                 503, "printer_safety_evidence_unknown", "Fresh printer safety evidence is unavailable; no motion command was sent."));
         }
+        catch (OperationCanceledException) when (heatedUnload is not null && !(requestCancellation ?? ct).IsCancellationRequested)
+        {
+            cleanupFailureCode = "printer_heating_timeout";
+            return SafetyProblem(PrinterSafetyValidationResult.Reject(
+                504, cleanupFailureCode, "The hotend did not reach the filament unload temperature within four minutes. No unload command was sent; check the printer and its heater target before retrying."));
+        }
         catch (OperationCanceledException)
         {
             cleanupFailureCode =
                 "printer_operation_cancelled_before_dispatch";
             throw;
+        }
+        catch (Exception exception) when (heatedUnload is not null)
+        {
+            _logger.LogWarning(exception, "Automatic unload preparation failed for printer {PrinterId}; no unload command sent", lease.PrinterId);
+            return SafetyProblem(PrinterSafetyValidationResult.Reject(
+                503, "printer_safety_evidence_unknown", "Automatic unload preparation could not be verified. No unload command was sent; check the printer and its heater target before retrying."));
         }
         finally
         {
@@ -3251,6 +3307,87 @@ public class PrintersController(
                     lease,
                     cleanupFailureCode);
             }
+        }
+    }
+
+    private async Task<(PrinterSafetyValidationResult Safety, bool HeatingOutcomeUnknown)> WarmMmuForUnloadAsync(
+        PrinterActuationLease lease, MmuControlRequest request, PrinterSafetyValidationResult cold, CancellationToken ct)
+    {
+        using var heatingTimeout = new CancellationTokenSource(TimeSpan.FromMinutes(4), timeProvider ?? TimeProvider.System);
+        using var heatingDeadline = CancellationTokenSource.CreateLinkedTokenSource(ct, heatingTimeout.Token);
+        ct = heatingDeadline.Token;
+        if (cold.RequiredHotendTemperatureC is not double minimum || !double.IsFinite(minimum) || minimum <= 0)
+        {
+            return (cold, false);
+        }
+
+        double target;
+        try
+        {
+            target = await _printersService.GetMmuUnloadTemperatureAsync(lease.PrinterId, request, minimum, ct);
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            return (PrinterSafetyValidationResult.Reject(422, "printer_unload_temperature_invalid",
+                "The filament unload temperature exceeds the installed hotend/nozzle temperature limit."), false);
+        }
+
+        if (!double.IsFinite(target) || target < minimum)
+        {
+            return (PrinterSafetyValidationResult.Reject(503, "printer_safety_evidence_unknown", "A safe filament unload temperature could not be resolved."), false);
+        }
+
+        PrinterActuationResult heatingLease = await _physicalActuationService!.RevalidateDirectAsync(lease, ct);
+        if (!heatingLease.Success)
+        {
+            return (PrinterSafetyValidationResult.Reject(409, "printer_actuation_revalidation_failed", "The printer control lease changed before heating; no heater command was sent."), false);
+        }
+
+        // The heater and unload share the same fenced lease. Never retry an uncertain heater write.
+        try
+        {
+            ct.ThrowIfCancellationRequested();
+            PrinterControlOutcome heating = await _printersService.SetTempsAsync(lease.PrinterId, target, null, ct);
+            if (heating != PrinterControlOutcome.Ok)
+            {
+                bool uncertain = heating == PrinterControlOutcome.BackendUnreachable;
+                string message = uncertain
+                    ? "The heater command outcome is unknown; check the printer before retrying. No unload command was sent."
+                    : "The printer rejected automatic heating; no unload command was sent.";
+                return (PrinterSafetyValidationResult.Reject(503, "printer_heating_failed", message), uncertain);
+            }
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception, "Automatic unload heater command has an unknown outcome for printer {PrinterId}", lease.PrinterId);
+            return (PrinterSafetyValidationResult.Reject(503, "printer_heating_failed",
+                "The heater command outcome is unknown; check the printer before retrying. No unload command was sent."), true);
+        }
+
+        while (true)
+        {
+            ct.ThrowIfCancellationRequested();
+            PrinterSafetyValidationResult safety = await _printerSafetyGuard!.ValidateAsync(
+                lease.PrinterId, PrinterSafetyOperation.FilamentUnload, null, ct);
+            if (!safety.Success && safety.Code != "printer_temperature_below_minimum")
+            {
+                return (safety, false);
+            }
+
+            // A heater target is not proof of heat: require the guard's fresh measured temperature.
+            if (safety.Success && safety.MeasuredHotendTemperatureC is double measured && measured >= target - 1)
+            {
+                return (safety, false);
+            }
+
+            PrinterActuationResult waitingLease = await _physicalActuationService.RevalidateDirectAsync(lease, ct);
+            if (!waitingLease.Success)
+            {
+                return (PrinterSafetyValidationResult.Reject(409, "printer_actuation_revalidation_failed",
+                    "The printer control lease changed during heating; no unload command was sent."), false);
+            }
+
+            await Task.Delay(TimeSpan.FromSeconds(2), timeProvider ?? TimeProvider.System, ct);
         }
     }
 
@@ -4208,7 +4345,8 @@ public class PrintersController(
             "mmu_gate_action",
             token => _printersService.ExecuteMmuAsync(id, control, token),
             ct,
-            safetyOperation: safetyOperation);
+            safetyOperation: safetyOperation,
+            heatedUnload: control.Action == MmuControlAction.Unload ? control : null);
     }
 
     /// <summary>
@@ -4723,7 +4861,12 @@ public class PrintersController(
             ? NotFound()
             : new CameraUrlResult(
                 streamUrl == null ? null : GetCameraProxyPath(id, "stream"),
-                snapshotUrl == null ? null : GetCameraProxyPath(id, "snapshot"));
+                snapshotUrl == null ? null : GetCameraProxyPath(id, "snapshot"))
+            {
+                AccessMode = Farm.Infrastructure.Services.Cameras.CameraContractClassifier.GetAccessMode(streamUrl, snapshotUrl),
+                StreamFormat = Farm.Infrastructure.Services.Cameras.CameraContractClassifier.GetStreamFormat(streamUrl),
+                SnapshotStrategy = Farm.Infrastructure.Services.Cameras.CameraContractClassifier.GetSnapshotStrategy(snapshotUrl),
+            };
     }
 
     /// <summary>Streams camera content without disclosing its private target URL.</summary>
@@ -4743,11 +4886,11 @@ public class PrintersController(
         ProxyCameraAsync(id, useSnapshot: true, ct);
 
     private static PrinterCameraUrlsDto CreateSafeCameraUrls(PrinterCameraUrlsDto camera) =>
-        new(
-            camera.Id,
-            camera.Name,
-            camera.CameraStreamUrl == null ? null : GetCameraProxyPath(camera.Id, "stream"),
-            camera.CameraSnapshotUrl == null ? null : GetCameraProxyPath(camera.Id, "snapshot"));
+        camera with
+        {
+            CameraStreamUrl = camera.CameraStreamUrl == null ? null : GetCameraProxyPath(camera.Id, "stream"),
+            CameraSnapshotUrl = camera.CameraSnapshotUrl == null ? null : GetCameraProxyPath(camera.Id, "snapshot"),
+        };
 
     private static string GetCameraProxyPath(Guid printerId, string kind) =>
         $"/api/printers/{printerId:D}/camera/{kind}";

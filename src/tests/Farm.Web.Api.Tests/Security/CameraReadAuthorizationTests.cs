@@ -1,5 +1,6 @@
 ﻿using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Discovery;
@@ -52,7 +53,7 @@ public sealed class CameraReadAuthorizationTests : IAsyncLifetime, IDisposable
         {
             Id = restrictedCameraId,
             Name = "Restricted printer camera",
-            PrinterId = restrictedPrinterId,
+            PrinterLinks = { new CameraPrinter { PrinterId = restrictedPrinterId, IsPrimary = true } },
             StreamUrl = "http://camera.example.invalid/stream",
             SnapshotUrl = "http://camera.example.invalid/snapshot",
             IsEnabled = true,
@@ -61,7 +62,6 @@ public sealed class CameraReadAuthorizationTests : IAsyncLifetime, IDisposable
         {
             Id = standaloneCameraId,
             Name = "Standalone camera",
-            PrinterId = null,
             StreamUrl = "http://camera.example.invalid/stream",
             SnapshotUrl = "http://camera.example.invalid/snapshot",
             IsEnabled = true,
@@ -311,6 +311,75 @@ public sealed class CameraReadAuthorizationTests : IAsyncLifetime, IDisposable
         body.Should().Contain(cameraId.ToString());
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task GetCameraConfig_DelegatedCameraAdmin_RespectsSeparatePrinterAccess(bool restricted)
+    {
+        (_, Guid restrictedCameraId, Guid standaloneCameraId) = await SeedRestrictedFixtureAsync();
+        Guid cameraId = restricted ? restrictedCameraId : standaloneCameraId;
+        using HttpClient client = CreateForeignRoleClient();
+        client.DefaultRequestHeaders.Add("X-Test-Permissions", "cameras:admin");
+
+        HttpResponseMessage response = await client.GetAsync($"/api/cameras/{cameraId}/config");
+
+        response.StatusCode.Should().Be(restricted ? HttpStatusCode.NotFound : HttpStatusCode.OK);
+        _cameras.Verify(s => s.FindByIdAsync(cameraId, It.IsAny<CancellationToken>()), Times.Once);
+        if (!restricted)
+        {
+            CameraConfigDto? config = await response.Content.ReadFromJsonAsync<CameraConfigDto>();
+            config!.StreamUrl.Should().Be("http://camera.example.invalid/stream");
+        }
+    }
+
+    [Fact]
+    public async Task GetCameraConfig_FarmAdmin_RetainsRestrictedPrinterAccess()
+    {
+        (_, Guid cameraId, _) = await SeedRestrictedFixtureAsync();
+        using HttpClient client = CreateAdminClient();
+
+        HttpResponseMessage response = await client.GetAsync($"/api/cameras/{cameraId}/config");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        CameraConfigDto? config = await response.Content.ReadFromJsonAsync<CameraConfigDto>();
+        config!.StreamUrl.Should().Be("http://camera.example.invalid/stream");
+    }
+
+    [Fact]
+    public async Task GetCameraConfig_UnexpectedFailure_ReturnsSanitizedCorrelatedProblem()
+    {
+        Guid cameraId = Guid.NewGuid();
+        string credentialedTarget = new UriBuilder("http", "camera.example.invalid")
+        {
+            UserName = "sentinel-user",
+            Password = "sentinel-pass-4417",
+            Path = "/stream",
+        }.Uri.AbsoluteUri;
+        NotSupportedException failure = new(
+            $"outer-sentinel-message {credentialedTarget}",
+            new InvalidOperationException("inner-sentinel-message database provider detail"));
+        _cameras.Setup(s => s.FindByIdAsync(cameraId, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(failure);
+        using HttpClient client = CreateAdminClient();
+
+        HttpResponseMessage response = await client.GetAsync($"/api/cameras/{cameraId}/config");
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        response.Content.Headers.ContentType?.MediaType.Should().Be("application/problem+json");
+        string body = await response.Content.ReadAsStringAsync();
+        using JsonDocument json = JsonDocument.Parse(body);
+        json.RootElement.GetProperty("code").GetString().Should().Be("camera_config_read_failed");
+        json.RootElement.GetProperty("correlationId").GetString().Should().NotBeNullOrWhiteSpace();
+        json.RootElement.TryGetProperty("details", out _).Should().BeFalse();
+        body.Should().NotContain(nameof(NotSupportedException));
+        body.Should().NotContain(nameof(InvalidOperationException));
+        body.Should().NotContain("outer-sentinel-message");
+        body.Should().NotContain("inner-sentinel-message");
+        body.Should().NotContain("sentinel-user");
+        body.Should().NotContain("sentinel-pass-4417");
+        body.Should().NotContain("camera.example.invalid");
+    }
+
     // --- Open-by-default scenarios stay visible (documents current behavior) ---------------
 
     [Fact]
@@ -339,6 +408,207 @@ public sealed class CameraReadAuthorizationTests : IAsyncLifetime, IDisposable
         body.Should().Contain(standaloneCameraId.ToString());
     }
 
+    // --- Multi-printer cameras (#3329): access when the caller can view ANY linked printer ------
+
+    private async Task<(Guid CameraId, Guid FirstPrinterId, Guid SecondPrinterId, Guid SecondRoleId)> SeedMultiPrinterCameraAsync()
+    {
+        (Guid firstPrinterId, _) = await SeedRestrictedPrinterWithRoleAsync();
+        (Guid secondPrinterId, Guid secondRoleId) = await SeedRestrictedPrinterWithRoleAsync();
+        Guid cameraId = Guid.NewGuid();
+        var camera = new Camera
+        {
+            Id = cameraId,
+            Name = "Shared camera",
+            PrinterLinks =
+            {
+                new CameraPrinter { PrinterId = firstPrinterId, IsPrimary = true, SortOrder = 0 },
+                new CameraPrinter { PrinterId = secondPrinterId, IsPrimary = false, SortOrder = 1 },
+            },
+            StreamUrl = "http://camera.example.invalid/stream",
+            IsEnabled = true,
+        };
+        _cameras.Setup(s => s.FindByIdAsync(cameraId, It.IsAny<CancellationToken>())).ReturnsAsync(camera);
+        _cameras.Setup(s => s.GetAllDtosAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => [ToMultiPrinterDto(cameraId, firstPrinterId, secondPrinterId)]);
+        return (cameraId, firstPrinterId, secondPrinterId, secondRoleId);
+    }
+
+    private static CameraDto ToMultiPrinterDto(Guid cameraId, Guid firstPrinterId, Guid secondPrinterId) => new()
+    {
+        Id = cameraId,
+        Name = "Shared camera",
+        PrinterId = firstPrinterId,
+        PrinterName = "First printer",
+        PrinterIds = [firstPrinterId, secondPrinterId],
+        Printers =
+        [
+            new CameraPrinterSummaryDto { Id = firstPrinterId, Name = "First printer", IsPrimary = true },
+            new CameraPrinterSummaryDto { Id = secondPrinterId, Name = "Second printer", IsPrimary = false },
+        ],
+        IsEnabled = true,
+    };
+
+    [Fact]
+    public async Task MultiPrinterCamera_CallerWhoCanViewOnlySecondPrinter_CanReadCamera()
+    {
+        (Guid cameraId, _, _, Guid secondRoleId) = await SeedMultiPrinterCameraAsync();
+        using HttpClient client = await CreateClientWithRoleAsync(secondRoleId);
+
+        HttpResponseMessage response = await client.GetAsync(BuildCameraUrl(cameraId, ""));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task MultiPrinterCamera_ListForSecondPrinterViewer_IncludesCameraAndRedactsHiddenPrinter()
+    {
+        (Guid cameraId, Guid firstPrinterId, Guid secondPrinterId, Guid secondRoleId) = await SeedMultiPrinterCameraAsync();
+        using HttpClient client = await CreateClientWithRoleAsync(secondRoleId);
+
+        HttpResponseMessage response = await client.GetAsync("/api/cameras");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        using JsonDocument json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        JsonElement camera = json.RootElement.EnumerateArray().Single(c => c.GetProperty("id").GetGuid() == cameraId);
+        camera.GetProperty("printerIds").EnumerateArray().Select(e => e.GetGuid()).Should().Equal(secondPrinterId);
+        camera.GetProperty("printerId").GetGuid().Should().Be(secondPrinterId);
+        json.RootElement.GetRawText().Should().NotContain(firstPrinterId.ToString());
+    }
+
+    [Fact]
+    public async Task MultiPrinterCamera_CallerWithoutAnyLinkedPrinterAccess_IsDenied()
+    {
+        (Guid cameraId, _, _, _) = await SeedMultiPrinterCameraAsync();
+        using HttpClient client = CreateForeignRoleClient();
+
+        HttpResponseMessage single = await client.GetAsync(BuildCameraUrl(cameraId, ""));
+        HttpResponseMessage list = await client.GetAsync("/api/cameras");
+
+        single.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        (await list.Content.ReadAsStringAsync()).Should().NotContain(cameraId.ToString());
+    }
+
+    [Fact]
+    public async Task ListFilteredByInaccessiblePrinter_ReturnsEmptyWithoutQuerying()
+    {
+        (_, Guid firstPrinterId, _, _) = await SeedMultiPrinterCameraAsync();
+        using HttpClient client = CreateForeignRoleClient();
+
+        HttpResponseMessage response = await client.GetAsync($"/api/cameras?printerId={firstPrinterId}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await response.Content.ReadAsStringAsync()).Should().Be("[]");
+        _cameras.Verify(
+            s => s.QueryDtosAsync(It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task UnlinkedCamera_IsVisibleToAnyAuthenticatedCaller()
+    {
+        Guid cameraId = Guid.NewGuid();
+        _cameras.Setup(s => s.FindByIdAsync(cameraId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Camera { Id = cameraId, Name = "Unlinked", IsEnabled = true });
+        using HttpClient client = CreateForeignRoleClient();
+
+        HttpResponseMessage response = await client.GetAsync(BuildCameraUrl(cameraId, ""));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task RemoveCameraFromPrinter_CallerWithoutPrinterAccess_Returns404WithoutMutation()
+    {
+        (Guid cameraId, Guid firstPrinterId, _, _) = await SeedMultiPrinterCameraAsync();
+        using HttpClient client = CreateForeignRoleClient();
+        client.DefaultRequestHeaders.Add("X-Test-Permissions", "printers:admin");
+
+        HttpResponseMessage response = await client.DeleteAsync($"/api/printers/{firstPrinterId}/cameras/{cameraId}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        _cameras.Verify(
+            s => s.RemoveFromPrinterAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    // --- Camera mutations (#3329 review R-H-01/R-V-01): authorize the existing camera ----------
+
+    [Fact]
+    public async Task UpdateCamera_CrossGroupCaller_Returns404WithoutMutation()
+    {
+        (Guid cameraId, _, _, _) = await SeedMultiPrinterCameraAsync();
+        using HttpClient client = CreateForeignRoleClient();
+        client.DefaultRequestHeaders.Add("X-Test-Permissions", "cameras:admin");
+
+        HttpResponseMessage response = await client.PutAsJsonAsync($"/api/cameras/{cameraId}", new { name = "Hijacked" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        VerifyNoCameraMutation();
+    }
+
+    [Fact]
+    public async Task DeleteCamera_CrossGroupCaller_Returns404WithoutMutation()
+    {
+        (Guid cameraId, _, _, _) = await SeedMultiPrinterCameraAsync();
+        using HttpClient client = CreateForeignRoleClient();
+        client.DefaultRequestHeaders.Add("X-Test-Permissions", "cameras:admin");
+
+        HttpResponseMessage response = await client.DeleteAsync($"/api/cameras/{cameraId}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        VerifyNoCameraMutation();
+    }
+
+    [Fact]
+    public async Task ToggleCamera_CrossGroupCaller_Returns404WithoutMutation()
+    {
+        (Guid cameraId, _, _, _) = await SeedMultiPrinterCameraAsync();
+        using HttpClient client = CreateForeignRoleClient();
+        client.DefaultRequestHeaders.Add("X-Test-Permissions", "cameras:admin");
+
+        HttpResponseMessage response = await client.PatchAsJsonAsync($"/api/cameras/{cameraId}/toggle", new { isEnabled = false });
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        VerifyNoCameraMutation();
+    }
+
+    [Fact]
+    public async Task UpdateCamera_CallerSeeingOnlySecondPrinter_PreservesHiddenFirstPrinterLink()
+    {
+        (Guid cameraId, Guid firstPrinterId, Guid secondPrinterId, Guid secondRoleId) = await SeedMultiPrinterCameraAsync();
+        IReadOnlyCollection<Guid>? preserved = null;
+        _cameras
+            .Setup(s => s.UpdateAsync(cameraId, It.IsAny<UpdateCameraDto>(), It.IsAny<IReadOnlyCollection<Guid>>(), It.IsAny<CancellationToken>()))
+            .Callback<Guid, UpdateCameraDto, IReadOnlyCollection<Guid>, CancellationToken>((_, _, hidden, _) => preserved = hidden)
+            .ReturnsAsync(() => ToMultiPrinterDto(cameraId, firstPrinterId, secondPrinterId));
+        using HttpClient client = await CreateClientWithRoleAsync(secondRoleId);
+        client.DefaultRequestHeaders.Add("X-Test-Permissions", "cameras:admin");
+
+        HttpResponseMessage response = await client.PutAsJsonAsync(
+            $"/api/cameras/{cameraId}",
+            new { name = "Shared camera", printerIds = new[] { secondPrinterId } });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        preserved.Should().Equal(firstPrinterId);
+        string body = await response.Content.ReadAsStringAsync();
+        body.Should().NotContain(firstPrinterId.ToString(), "the hidden printer must stay redacted in the update response");
+        _cameras.Verify(
+            s => s.UpdateAsync(It.IsAny<Guid>(), It.IsAny<UpdateCameraDto>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    private void VerifyNoCameraMutation()
+    {
+        _cameras.Verify(
+            s => s.UpdateAsync(It.IsAny<Guid>(), It.IsAny<UpdateCameraDto>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        _cameras.Verify(
+            s => s.UpdateAsync(It.IsAny<Guid>(), It.IsAny<UpdateCameraDto>(), It.IsAny<IReadOnlyCollection<Guid>>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        _cameras.Verify(s => s.DeleteAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        _cameras.Verify(s => s.ToggleEnabledAsync(It.IsAny<Guid>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
     // --- Architecture guard: every action taking a camera/printer id must call the
     // authorization helper, so a newly added action cannot silently regress (supplements,
     // does not replace, the behavioral tests above). ----------------------------------------
@@ -346,13 +616,19 @@ public sealed class CameraReadAuthorizationTests : IAsyncLifetime, IDisposable
     private static readonly IReadOnlyDictionary<string, (string Signature, string RequiredCall)> MethodsRequiringAuthCheck =
         new Dictionary<string, (string, string)>(StringComparer.Ordinal)
         {
-            ["GetCamerasAsync"] = ("Task<ActionResult<IEnumerable<CameraDto>>> GetCamerasAsync(CancellationToken ct)", "FilterAccessibleCamerasAsync"),
-            ["GetEnabledCamerasAsync"] = ("Task<ActionResult<IEnumerable<CameraDto>>> GetEnabledCamerasAsync(CancellationToken ct)", "FilterAccessibleCamerasAsync"),
-            ["GetDisplayCamerasAsync"] = ("Task<ActionResult<IEnumerable<DisplayCameraDto>>> GetDisplayCamerasAsync(CancellationToken ct)", "FilterAccessibleCamerasAsync"),
+            ["GetCamerasAsync"] = ("Task<ActionResult<IEnumerable<CameraDto>>> GetCamerasAsync(", "FilterAccessibleCamerasAsync"),
+            ["GetEnabledCamerasAsync"] = ("Task<ActionResult<IEnumerable<CameraDto>>> GetEnabledCamerasAsync(", "FilterAccessibleCamerasAsync"),
+            ["GetDisplayCamerasAsync"] = ("Task<ActionResult<IEnumerable<DisplayCameraDto>>> GetDisplayCamerasAsync(", "FilterAccessibleCamerasAsync"),
             ["GetCameraAsync"] = ("Task<ActionResult<CameraDto>> GetCameraAsync(Guid id, CancellationToken ct)", "CanAccessCameraPrinterAsync"),
             ["GetCamerasByPrinterAsync"] = ("Task<ActionResult<IEnumerable<CameraDto>>> GetCamerasByPrinterAsync(Guid printerId, CancellationToken ct)", "CanAccessCameraPrinterAsync"),
             ["DetectCameraEndpointsAsync"] = ("Task<ActionResult<CameraEndpointDetectionDto>> DetectCameraEndpointsAsync(DetectCameraEndpointsRequest request, CancellationToken ct)", "CanAccessCameraPrinterAsync"),
             ["ProxyCameraAsync"] = ("Task<IActionResult> ProxyCameraAsync(Guid id, bool useSnapshot, CancellationToken ct)", "CanAccessCameraPrinterAsync"),
+            ["LinkCameraToPrinterAsync"] = ("Task<ActionResult<CameraDto>> LinkCameraToPrinterAsync(", "CanAccessCameraPrinterAsync"),
+            ["UnlinkCameraFromPrinterAsync"] = ("Task<IActionResult> UnlinkCameraFromPrinterAsync(Guid id, Guid printerId, CancellationToken ct)", "CanAccessCameraPrinterAsync"),
+            ["RemoveCameraFromPrinterAsync"] = ("Task<ActionResult<RemoveCameraFromPrinterResponse>> RemoveCameraFromPrinterAsync(", "CanAccessCameraPrinterAsync"),
+            ["UpdateCameraAsync"] = ("Task<ActionResult<CameraDto>> UpdateCameraAsync(Guid id, UpdateCameraDto request, CancellationToken ct)", "CanAccessCameraPrinterAsync"),
+            ["DeleteCameraAsync"] = ("Task<IActionResult> DeleteCameraAsync(Guid id, CancellationToken ct)", "CanAccessCameraPrinterAsync"),
+            ["ToggleCameraAsync"] = ("Task<ActionResult<CameraDto>> ToggleCameraAsync(Guid id, ToggleCameraDto request, CancellationToken ct)", "CanAccessCameraPrinterAsync"),
         };
 
     [Fact]
@@ -482,10 +758,10 @@ public sealed class CameraReadAuthorizationTests : IAsyncLifetime, IDisposable
         Guid ungroupedCameraId = Guid.NewGuid();
         _cameras
             .Setup(s => s.FindByIdAsync(zeroAclCameraId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new Camera { Id = zeroAclCameraId, Name = "Zero ACL camera", PrinterId = zeroAclPrinter.Id, IsEnabled = true });
+            .ReturnsAsync(new Camera { Id = zeroAclCameraId, Name = "Zero ACL camera", PrinterLinks = { new CameraPrinter { PrinterId = zeroAclPrinter.Id, IsPrimary = true } }, IsEnabled = true });
         _cameras
             .Setup(s => s.FindByIdAsync(ungroupedCameraId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new Camera { Id = ungroupedCameraId, Name = "Ungrouped camera", PrinterId = ungroupedPrinter.Id, IsEnabled = true });
+            .ReturnsAsync(new Camera { Id = ungroupedCameraId, Name = "Ungrouped camera", PrinterLinks = { new CameraPrinter { PrinterId = ungroupedPrinter.Id, IsPrimary = true } }, IsEnabled = true });
 
         return (zeroAclCameraId, ungroupedCameraId);
     }

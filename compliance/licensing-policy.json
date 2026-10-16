@@ -35,6 +35,16 @@
         "scripts/dotnet-install.sh",
         "src/dotnet-install.sh"
       ]
+    },
+    {
+      "path": "src/Web/ReactApp/public/licenses/droid-fonts/NOTICE.txt",
+      "sha256": "92d336191c9ec51cc39f0b2fc44e5153f685c661c3d1e44e088fad4e68358ab2",
+      "source": "https://github.com/mrdoob/three.js/blob/a58e9ecf225b50e4a28a934442e854878bc2a959/examples/fonts/droid/NOTICE",
+      "appliesTo": [
+        "src/Web/ReactApp/src/assets/fonts/droid/droid_sans_mono_regular.typeface.json",
+        "src/Web/ReactApp/src/assets/fonts/droid/droid_sans_regular.typeface.json",
+        "src/Web/ReactApp/src/assets/fonts/droid/droid_serif_regular.typeface.json"
+      ]
     }
   ],
   "packageManifests": [
@@ -196,14 +206,14 @@
         "path": ".github/skills/secret-handling/SKILL.md",
         "pattern": "-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----",
         "matchSha256": "3021d90eb9437b2d8f30e8363695c4418b5e5f1870801b5c317e9398ee0f572d",
-        "contentSha256": "b9222aa132746bb312ac06b7060e3893c6b2f0126f2e33753037bd98c0c6b47b",
+        "contentSha256": "b59ecbc69e0e5d295f0dcf6a90cd555e86c244eaacef786a753fca0e78ea8765",
         "reason": "Private-key marker documented without key material in secret-handling guidance."
       },
       {
         "path": ".github/skills/secret-handling/SKILL.md",
         "pattern": "-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----",
         "matchSha256": "8bcac7908eb950419537b91e19adc83ce2c9cbfdacf4f81157fdadfec11f7017",
-        "contentSha256": "b9222aa132746bb312ac06b7060e3893c6b2f0126f2e33753037bd98c0c6b47b",
+        "contentSha256": "b59ecbc69e0e5d295f0dcf6a90cd555e86c244eaacef786a753fca0e78ea8765",
         "reason": "RSA private-key marker documented without key material in secret-handling guidance."
       },
       {
@@ -299,7 +309,7 @@
         "path": "src/tests/Farm.Web.Api.Tests/Security/PrinterEndpointRedactionTests.cs",
         "pattern": "https?://[^\\s/:]+:[^\\s/@]+@",
         "matchSha256": "2b37ca011dc0baf5ac3ceff7569d873e97e370f6c6cfa28ebfdc8fba20ed280a",
-        "contentSha256": "487b6945760d69b545397478ec9fe324b13c12ef528e3ff29a62301fd7075d3f",
+        "contentSha256": "39462edbbafd4f4286966fbd4ccff61453a853c41828f7114364881b1a10b8bc",
         "reason": "Synthetic printer credentials test endpoint redaction."
       },
       {

@@ -6,10 +6,6 @@ import XCTest
 @MainActor
 final class AttentionFeedViewModelTests: XCTestCase {
 
-    // Concrete Sendable identifiers used to seed distinct fixtures.
-    private let printerA = "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA"
-    private let printerB = "BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB"
-
     // MARK: - Loading & success
 
     func testInitialRefreshTransitionsLoadingToLoadedWithGroupedItems() async {

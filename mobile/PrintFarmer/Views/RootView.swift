@@ -350,12 +350,6 @@ struct RootView: View {
         )
     }
 
-    /// Abandons an external scan request that can no longer be honoured
-    /// coherently: logout or a server/account switch.
-    private func cancelPendingExternalScan() {
-        ExternalScanRouting.cancelPending(router: router)
-    }
-
     private struct BackendConnectionCheckView: View {
         let isChecking: Bool
         let statusText: String

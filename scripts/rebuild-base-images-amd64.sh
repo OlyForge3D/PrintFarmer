@@ -18,7 +18,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 # Array of images: (name:tag | dockerfile_path)
 declare -a IMAGES=(
     "nginx:alpine-upgraded|dockerfiles/Dockerfile.base-nginx"
-    "node:22-alpine-upgraded|dockerfiles/Dockerfile.base-node"
+    "node:24-alpine-upgraded|dockerfiles/Dockerfile.base-node"
     "postgres:17-alpine-upgraded|dockerfiles/Dockerfile.base-postgres"
     "sdk:10.0.101-alpine-upgraded|dockerfiles/Dockerfile.base-sdk"
     "aspnet:10.0.1-alpine-upgraded|dockerfiles/Dockerfile.base-aspnet"

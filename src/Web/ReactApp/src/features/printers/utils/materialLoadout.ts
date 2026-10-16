@@ -1,4 +1,4 @@
-import type { MmuGate, MmuStatus, ToolheadDto } from '@/types/api';
+import type { MmuGate, MmuStatus, PrinterSpoolInfo, ToolheadDto } from '@/types/api';
 import { MmuGateStatus } from '@/types/api';
 import { MmuProtocol } from '@/features/printers/constants/mmuProtocol';
 
@@ -41,6 +41,14 @@ export interface LoadoutSlot {
   material?: string;
   color?: string;
   spoolId?: number;
+  /** Filament name reported by the printer-level spool when the slot has no persisted row data. */
+  filamentName?: string;
+  /** Remaining grams reported by the printer-level spool; Spoolman inventory wins when it matches. */
+  remainingWeightG?: number;
+  /** The binding lives on Printer.CurrentSpoolId because legacy T0 has no Toolhead row. */
+  legacyPrinterSpool?: boolean;
+  /** Device feed presence, never inferred from a Spoolman assignment. */
+  filamentPresence?: 'available' | 'absent';
   /** Where this slot's filament comes from. See {@link LoadoutSource}. */
   source: LoadoutSource;
   /** A physical hotend fed from an external spool alongside an MMU. */
@@ -77,7 +85,55 @@ export interface MaterialLoadout {
  * (PrintersService gap-fill), so a smaller unit would gain phantom gates that
  * then exceed its live gate count. Gap-filling is only safe at or above this.
  */
+/** The printer-level spool snapshot fields a single-feed loadout may fall back to. */
+export type LoadoutSpoolInfo = Pick<
+  PrinterSpoolInfo,
+  'hasActiveSpool' | 'activeSpoolId' | 'material' | 'colorHex' | 'filamentName' | 'remainingWeightG'
+>;
+
+interface PrinterSpoolFallback {
+  spoolId?: number;
+  material?: string;
+  color?: string;
+  filamentName?: string;
+  remainingWeightG?: number;
+}
+
+function positive(id: number | null | undefined): number | undefined {
+  return id != null && id > 0 ? id : undefined;
+}
+
+/**
+ * Printer-level spool data for single-feed printers whose only spool record is
+ * the printer scalar. Nothing is returned unless the printer reports an active
+ * spool, so an unassigned printer can never resurrect stale data. Descriptive
+ * fields are dropped when the snapshot describes a different spool than
+ * `currentSpoolId`.
+ */
+function printerSpoolFallback(
+  currentSpoolId: number | null | undefined,
+  spoolInfo: LoadoutSpoolInfo | null | undefined,
+): PrinterSpoolFallback | undefined {
+  if (!spoolInfo?.hasActiveSpool) return undefined;
+  const current = positive(currentSpoolId);
+  const active = positive(spoolInfo.activeSpoolId);
+  const sameSpool = current == null || active == null || current === active;
+  const hex = spoolInfo.colorHex?.trim();
+  return {
+    spoolId: current ?? active,
+    ...(sameSpool && {
+      material: spoolInfo.material?.trim() || undefined,
+      color: hex ? (/^[0-9a-f]{3,8}$/i.test(hex) ? `#${hex}` : hex) : undefined,
+      filamentName: spoolInfo.filamentName?.trim() || undefined,
+      remainingWeightG: spoolInfo.remainingWeightG != null && Number.isFinite(spoolInfo.remainingWeightG)
+        ? spoolInfo.remainingWeightG
+        : undefined,
+    }),
+  };
+}
+
 const MIN_GAP_FILL_LIVE_GATES = 4;
+const AD5X_IFS_GATE_COUNT = 4;
 
 function isMmuGate(toolhead: ToolheadDto): boolean {
   return String(toolhead.toolheadType) === 'MmuGate';
@@ -89,6 +145,21 @@ function isMmuGate(toolhead: ToolheadDto): boolean {
  */
 function isToolchangerProtocol(mmuType?: string): boolean {
   return mmuType === MmuProtocol.SnapmakerU1;
+}
+
+/**
+ * Whether the printer is identified as a multi-feed topology (Snapmaker U1 /
+ * toolchanger, or any MMU protocol) regardless of how many live gates are
+ * currently reported. A U1 can briefly report `gates: []` while one toolhead is
+ * persisted; its printer-level scalar spool describes no particular toolhead, so
+ * it must never be copied into T0.
+ */
+function isMultiFeedTopology(mmuStatus: MmuStatus | undefined, modelName?: string): boolean {
+  const mmuType = mmuStatus?.mmuType?.trim();
+  if (isToolchangerProtocol(mmuType)) return true;
+  if (mmuType && mmuType !== MmuProtocol.Unknown) return true;
+  if ((mmuStatus?.numGates ?? 0) > 0) return true;
+  return /(?:^|\s)U1$/i.test(modelName?.trim() ?? '');
 }
 
 function unitLabelFor(kind: LoadoutKind, mmuType?: string, slotCount?: number): string {
@@ -170,6 +241,8 @@ function slotFromGate(
     color: gate.color,
     spoolId: gate.spoolId > 0 ? gate.spoolId : undefined,
     source: isTool ? 'tool' : 'gate',
+    filamentPresence: gate.status === MmuGateStatus.Available ? 'available'
+      : gate.status === MmuGateStatus.Empty ? 'absent' : undefined,
     // A toolchanger reports real toolheads over the MMU channel and has no
     // notion of a disabled gate, so only flag this for actual MMU gates.
     disabled: !isTool && gate.status === MmuGateStatus.Disabled,
@@ -190,7 +263,7 @@ function slotFromToolhead(
     name: toolhead.name,
     material: toolhead.currentMaterial,
     color: toolhead.currentFilamentColor,
-    spoolId: toolhead.currentSpoolId ?? undefined,
+    spoolId: toolhead.currentSpoolId != null && toolhead.currentSpoolId > 0 ? toolhead.currentSpoolId : undefined,
     source: isTool ? 'tool' : 'gate',
   };
 }
@@ -219,10 +292,44 @@ function externalSlotFromToolhead(
     name: toolhead.name,
     material: toolhead.currentMaterial,
     color: toolhead.currentFilamentColor,
-    spoolId: toolhead.currentSpoolId ?? undefined,
+    spoolId: toolhead.currentSpoolId != null && toolhead.currentSpoolId > 0 ? toolhead.currentSpoolId : undefined,
     source: 'external',
     external: true,
   };
+}
+
+/**
+ * Slots for AD5X IFS lanes missing from persisted toolhead data. Model identity
+ * is required: a short canonical gate prefix alone cannot distinguish a damaged
+ * four-lane IFS from a legitimate smaller AFC/ERCf/Box Turtle unit.
+ */
+function missingCanonicalGateSlots(
+  gates: ToolheadDto[],
+  physical: ToolheadDto[],
+  modelName?: string,
+): LoadoutSlot[] {
+  const isAd5x = /(?:^|\s)AD5X$/i.test(modelName?.trim() ?? '');
+  const isCanonicalPrefix = isAd5x
+    && gates.length > 0
+    && gates.length < AD5X_IFS_GATE_COUNT
+    && physical.length <= 1
+    && gates.every((gate, position) => gate.index === position + 1)
+    && !physical.some((toolhead) =>
+      toolhead.index > gates.length && toolhead.index <= AD5X_IFS_GATE_COUNT);
+  if (!isCanonicalPrefix) return [];
+
+  const missing: LoadoutSlot[] = [];
+  for (let index = gates.length + 1; index <= AD5X_IFS_GATE_COUNT; index++) {
+    missing.push({
+      key: `toolhead-${index}`,
+      apiIndex: index,
+      gcodeIndex: index - 1,
+      label: `G${index}`,
+      name: `Gate ${index}`,
+      source: 'gate',
+    });
+  }
+  return missing;
 }
 
 /**
@@ -231,7 +338,9 @@ function externalSlotFromToolhead(
  * slots. Its spool binding lives on the persisted physical toolhead, never on a
  * gate, so it is surfaced from that toolhead's own index. With more than one
  * physical toolhead the holder's identity is ambiguous, so nothing is surfaced.
- * The holder is only surfaced when the device reports it (`hasBypass`).
+ * The holder is only surfaced when the device reports it (`hasBypass`). Its
+ * material, color and filament name prefer the live `bypass*` status fields over
+ * the persisted toolhead.
  */
 export function resolveQidiRackSlot(
   mmuStatus: MmuStatus | null | undefined,
@@ -240,7 +349,34 @@ export function resolveQidiRackSlot(
   if (mmuStatus?.mmuType !== MmuProtocol.Qidibox || !mmuStatus.hasBypass) return null;
   const physical = (toolheads ?? []).filter((toolhead) => !isMmuGate(toolhead));
   if (physical.length !== 1) return null;
-  return { ...externalSlotFromToolhead(physical[0]), label: 'Rack' };
+  const rack = externalSlotFromToolhead(physical[0]);
+  // The holder's live telemetry beats the persisted toolhead, which only records what was last saved.
+  const live = (value: string | null | undefined) => value?.trim() || undefined;
+  return {
+    ...rack,
+    label: 'Rack',
+    material: live(mmuStatus.bypassMaterial) ?? rack.material,
+    color: live(mmuStatus.bypassColor) ?? rack.color,
+    filamentName: live(mmuStatus.bypassFilamentName) ?? rack.filamentName,
+  };
+}
+
+/**
+ * Whether a saved printer has a filament box with an external spool holder
+ * (QidiBox "Rack"): a Qidi printer whose saved topology is box gates feeding a
+ * single physical toolhead. Used where only persisted details are available,
+ * e.g. to decide whether to offer the "Show external spool" preference.
+ */
+export function hasExternalSpoolHolder(details: {
+  manufacturerName?: string;
+  modelName?: string;
+  toolheads?: ToolheadDto[];
+} | undefined): boolean {
+  if (!details) return false;
+  const identity = `${details.manufacturerName ?? ''} ${details.modelName ?? ''}`;
+  if (!/qidi/i.test(identity)) return false;
+  const toolheads = details.toolheads ?? [];
+  return toolheads.some(isMmuGate) && toolheads.filter((toolhead) => !isMmuGate(toolhead)).length === 1;
 }
 
 /**
@@ -258,6 +394,8 @@ export function resolveMaterialLoadout(
   mmuStatus: MmuStatus | undefined,
   toolheads: ToolheadDto[] | undefined,
   currentSpoolId?: number | null,
+  modelName?: string,
+  spoolInfo?: LoadoutSpoolInfo | null,
 ): MaterialLoadout | null {
   const liveGates = mmuStatus?.gates;
 
@@ -300,18 +438,35 @@ export function resolveMaterialLoadout(
   // than falling through to the legacy Spool section.
   if (!toolheads || toolheads.length <= 1) {
     const single = toolheads?.[0];
+    // Topology, not the live gate count, decides whether the printer scalar can
+    // describe this slot: U1/toolchanger and MMU printers never use it.
+    const multiFeed = isMultiFeedTopology(mmuStatus, modelName);
+    const fallback = multiFeed ? undefined : printerSpoolFallback(currentSpoolId, spoolInfo);
     if (single) {
+      const slot = slotFromToolhead(single, 0, 'tool');
+      // Persisted toolhead data wins; the printer-level spool only fills a row
+      // that holds no spool of its own. Unassigning it must clear that scalar.
+      if (slot.spoolId == null && fallback?.spoolId != null) {
+        slot.spoolId = fallback.spoolId;
+        slot.legacyPrinterSpool = true;
+        slot.material ??= fallback.material;
+        slot.color ??= fallback.color;
+        slot.filamentName = fallback.filamentName;
+        slot.remainingWeightG = fallback.remainingWeightG;
+      }
       return {
         kind: 'tool',
         unitLabel: unitLabelFor('tool', undefined, 1),
-        slots: [slotFromToolhead(single, 0, 'tool')],
+        slots: [slot],
         hasResolvedTopology: true,
         topologyPending: false,
       };
     }
-    // No persisted toolheads at all — synthesize a slot from printer-level spool
-    // if one exists (Hazard 6: zero toolheads with currentSpoolId still needs a rail).
-    if (currentSpoolId != null && currentSpoolId > 0) {
+    // Once saved topology has loaded empty, the single-feed API index is 0.
+    // Keep its unassigned slot actionable too; while topology is still pending,
+    // only the existing printer-level binding warrants this fallback.
+    const legacySpoolId = multiFeed ? undefined : positive(currentSpoolId) ?? fallback?.spoolId;
+    if (toolheads !== undefined || (!multiFeed && positive(currentSpoolId) != null)) {
       return {
         kind: 'tool',
         unitLabel: unitLabelFor('tool', undefined, 1),
@@ -320,9 +475,12 @@ export function resolveMaterialLoadout(
           apiIndex: 0,
           gcodeIndex: 0,
           label: 'T0',
-          material: undefined,
-          color: undefined,
-          spoolId: currentSpoolId,
+          material: fallback?.material,
+          color: fallback?.color,
+          spoolId: legacySpoolId,
+          filamentName: fallback?.filamentName,
+          remainingWeightG: fallback?.remainingWeightG,
+          legacyPrinterSpool: legacySpoolId != null,
           source: 'tool',
         }],
         hasResolvedTopology: true,
@@ -349,15 +507,18 @@ export function resolveMaterialLoadout(
     .filter((t) => t.currentSpoolId != null || t.currentMaterial != null)
     .map((t) => externalSlotFromToolhead(t));
 
+  const gateSlots = gates.map((t, position) => slotFromToolhead(t, position, 'gate'));
+  gateSlots.push(...missingCanonicalGateSlots(gates, physical, modelName));
+
   // Persisted-only gate fallback (no live MMU status). Slots key gcodeIndex by
   // position, which coincides with activeGate only when persisted gates are
   // 0-based and contiguous. In practice activeGate is -1/-2 on this path (no
   // live MMU data), so the active indicator is intentionally suppressed here.
   return {
     kind: 'gate',
-    unitLabel: unitLabelFor('gate', undefined, gates.length),
+    unitLabel: unitLabelFor('gate', undefined, gateSlots.length),
     slots: [
-      ...gates.map((t, position) => slotFromToolhead(t, position, 'gate')),
+      ...gateSlots,
       ...externals,
     ],
     hasResolvedTopology: true,

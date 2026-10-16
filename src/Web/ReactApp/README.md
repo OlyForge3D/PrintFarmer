@@ -21,6 +21,16 @@ npm test
 npm run lint
 ```
 
+## Filament coverage
+
+Filament coverage badges, demand summaries, and runout indicators appear only
+on detailed printer and material surfaces when a printer has an active print
+job or at least one assigned queued job. Compact printer cards never show
+filament coverage badges.
+Idle printers without assigned work still show loaded materials and spool
+assignments, but no coverage verdict. Unknown or unavailable demand is hidden;
+offline printers with demand show unverified coverage as "Filament unknown".
+
 ## Documentation
 
 - **[UI Components Guide](./UI_COMPONENTS_GUIDE.md)** - Comprehensive guide to shared UI components (Button, Alert, FormField, Input, Select, ProgressBar) with usage examples
@@ -68,6 +78,13 @@ regenerating `applicationNoCheckFileCount` in the same commit. On Windows, the
 real-symlink dedup harness test needs Developer Mode or an elevated shell and
 skips otherwise; an injected-resolver test covers the same dedup on every host.
 See [testing patterns](../../../docs/TESTING_PATTERNS.md) for the policy.
+
+Vitest and `@vitest/coverage-v8` must resolve to the same version (currently
+5.0.3). `src/test/setup.ts` registers jest-dom's runtime matchers;
+`src/test/vitest-matchers.d.ts` bridges jest-dom 7's matcher signatures into
+Vitest 5's `Matchers` interface, preserving `void` versus `Promise<void>`
+returns. Do not use jest-dom's pre-v5 `Assertion<T>` augmentation as a substitute.
+The matcher compatibility tests exercise both return types and runtime behavior.
 
 ### Using Shared Components
 

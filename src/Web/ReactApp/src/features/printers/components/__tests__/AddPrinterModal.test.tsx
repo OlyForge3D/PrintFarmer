@@ -5,6 +5,8 @@ import { AddPrinterModal } from '../AddPrinterModal';
 
 const createPrinter = vi.fn();
 const testConnection = vi.fn();
+const createCamera = vi.fn();
+const hasPermission = vi.fn<(resource: string, action: string) => boolean>(() => true);
 
 const { mockToast } = vi.hoisted(() => ({
   mockToast: { success: vi.fn(), error: vi.fn(), dismiss: vi.fn() },
@@ -17,6 +19,16 @@ vi.mock('@/services/api', () => ({
     createPrinter: (...args: unknown[]) => createPrinter(...args),
     testConnection: (...args: unknown[]) => testConnection(...args),
   },
+}));
+
+vi.mock('@/services/cameraService', () => ({
+  cameraService: {
+    createCamera: (...args: unknown[]) => createCamera(...args),
+  },
+}));
+
+vi.mock('@/features/auth/hooks/useAuth', () => ({
+  useAuth: () => ({ hasPermission }),
 }));
 
 vi.mock('@/common/hooks/useApi', () => ({
@@ -39,6 +51,7 @@ vi.mock('@/common/components/modals/Modal', () => ({
 describe('AddPrinterModal', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    hasPermission.mockReturnValue(true);
   });
 
   const fillRequiredFields = async (user: ReturnType<typeof userEvent.setup>, name: string) => {
@@ -463,6 +476,84 @@ describe('AddPrinterModal', () => {
 
       await waitFor(() => expect(createPrinter).toHaveBeenCalled());
       expect(screen.queryByText('Date acquired cannot be in the future')).not.toBeInTheDocument();
+    });
+  });
+  describe('cameras section', () => {
+    it('explains automatic discovery and shows no location field for manual cameras', async () => {
+      const user = userEvent.setup();
+      render(<AddPrinterModal isOpen onClose={vi.fn()} onSuccess={vi.fn()} />);
+
+      expect(screen.getByText(/discovered\s+automatically after the printer is added/i)).toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: 'Add camera manually' }));
+
+      expect(screen.getByLabelText(/camera name/i)).toBeInTheDocument();
+      expect(screen.getByLabelText('Stream URL')).toBeInTheDocument();
+      expect(screen.queryByLabelText(/location/i)).not.toBeInTheDocument();
+    });
+
+    it('hides manual camera entry without cameras:admin permission', () => {
+      hasPermission.mockImplementation((resource: string) => resource !== 'cameras');
+      render(<AddPrinterModal isOpen onClose={vi.fn()} onSuccess={vi.fn()} />);
+
+      expect(screen.queryByRole('button', { name: 'Add camera manually' })).not.toBeInTheDocument();
+    });
+
+    it('creates manual cameras linked to the newly created printer', async () => {
+      const user = userEvent.setup();
+      const onSuccess = vi.fn();
+      createPrinter.mockResolvedValueOnce({ id: 'new-printer-id' });
+      createCamera.mockResolvedValue({ id: 'cam-1', name: 'Bed cam' });
+      render(<AddPrinterModal isOpen onClose={vi.fn()} onSuccess={onSuccess} />);
+      await fillRequiredFields(user, 'Printer With Camera');
+
+      await user.click(screen.getByRole('button', { name: 'Add camera manually' }));
+      await user.type(screen.getByLabelText(/camera name/i), 'Bed cam');
+      await user.type(screen.getByLabelText('Stream URL'), 'http://cam.local/stream');
+      await user.click(screen.getByRole('button', { name: /^add printer$/i }));
+
+      await waitFor(() => expect(createCamera).toHaveBeenCalledTimes(1));
+      const request = createCamera.mock.calls[0][0];
+      expect(request).toEqual(expect.objectContaining({
+        name: 'Bed cam',
+        streamUrl: 'http://cam.local/stream',
+        printerIds: ['new-printer-id'],
+      }));
+      expect(request).not.toHaveProperty('locationId');
+      expect(request).not.toHaveProperty('location');
+      expect(createPrinter.mock.invocationCallOrder[0]).toBeLessThan(createCamera.mock.invocationCallOrder[0]);
+      await waitFor(() => expect(onSuccess).toHaveBeenCalled());
+      expect(mockToast.success).toHaveBeenCalledWith('Printer added with 1 camera.');
+    });
+
+    it('blocks submission when a manual camera has no URL', async () => {
+      const user = userEvent.setup();
+      render(<AddPrinterModal isOpen onClose={vi.fn()} onSuccess={vi.fn()} />);
+      await fillRequiredFields(user, 'Printer With Camera');
+
+      await user.click(screen.getByRole('button', { name: 'Add camera manually' }));
+      await user.type(screen.getByLabelText(/camera name/i), 'Bed cam');
+      await user.click(screen.getByRole('button', { name: /^add printer$/i }));
+
+      expect(await screen.findAllByText('Add a stream URL or snapshot URL.')).toHaveLength(2);
+      expect(createPrinter).not.toHaveBeenCalled();
+      expect(createCamera).not.toHaveBeenCalled();
+    });
+
+    it('reports camera failures without failing the printer creation', async () => {
+      const user = userEvent.setup();
+      const onSuccess = vi.fn();
+      createPrinter.mockResolvedValueOnce({ id: 'new-printer-id' });
+      createCamera.mockRejectedValueOnce(new Error('boom'));
+      render(<AddPrinterModal isOpen onClose={vi.fn()} onSuccess={onSuccess} />);
+      await fillRequiredFields(user, 'Printer With Camera');
+
+      await user.click(screen.getByRole('button', { name: 'Add camera manually' }));
+      await user.type(screen.getByLabelText(/camera name/i), 'Bed cam');
+      await user.type(screen.getByLabelText('Snapshot URL'), 'http://cam.local/snap.jpg');
+      await user.click(screen.getByRole('button', { name: /^add printer$/i }));
+
+      await waitFor(() => expect(onSuccess).toHaveBeenCalled());
+      expect(mockToast.error).toHaveBeenCalledWith(expect.stringContaining('1 camera could not be saved'));
     });
   });
 });

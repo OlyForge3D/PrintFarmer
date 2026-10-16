@@ -5,6 +5,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import yaml from 'js-yaml';
 import './test-reviewer-dispatch.mjs';
+import { gitMergeFile } from '../git-merge-file.mjs';
 import {
   canAutoScope,
   classifyChangeScope,
@@ -17,6 +18,9 @@ import {
   hasSquadScopeLabel,
   hasWriteAccess,
   isCarriedAcrossSync,
+  isCleanThreeWayMerge,
+  maxContentVerifiedPathsPerMerge,
+  mergePathsNeedingContentProof,
   normalizeMember,
   parseVerdictComment,
   resolveAuthorMembers,
@@ -371,8 +375,9 @@ test('rejects verdicts pinned to a stale SHA', () => {
 //
 // A record at an old head SHA stays valid at the new head when (1) the old
 // SHA is a strict ancestor of the new head, (2) the PR's own diff against the
-// base branch is byte-for-byte unchanged between the old SHA and the new
-// head, AND (3) every commit introduced since review that isn't already
+// base branch is unchanged between the old SHA and the new head (identical
+// compare entries, except base-overlapping files content-verified as a clean
+// three-way merge, issue #2801), AND (3) every commit introduced since review that isn't already
 // reachable from base is a clean two-parent merge introducing nothing beyond
 // merging its own two parents (proven via `compare(parent1...parent2)` — see
 // below, NOT "content-empty against its own first parent", which is a real,
@@ -561,6 +566,312 @@ test('diffFingerprint is order-independent and detects content changes (regressi
   );
 });
 
+// Issue #2801: base and PR both modify the same file. A clean sync then
+// legitimately changes that file's merged blob, so byte-for-byte equality is
+// impossible; the workflow instead proves the merged content is a
+// conflict-free three-way merge and passes the proven paths to
+// `isCarriedAcrossSync` as `contentVerifiedPaths`.
+const overlapBase = 'title\nintro\n\nsection a\nalpha\n\nsection b\nbeta\n';
+// PR edits section a.
+const overlapOurs = 'title\nintro\n\nsection a\nalpha (reviewed edit)\n\nsection b\nbeta\n';
+// Base advance appends a new section at the end.
+const overlapTheirs = `${overlapBase}\nsection c\ngamma\n`;
+const overlapCleanMerge = 'title\nintro\n\nsection a\nalpha (reviewed edit)\n\nsection b\nbeta\n\nsection c\ngamma\n';
+
+// Same evidence the workflow supplies: the gate's own proof plus real Git.
+const cleanMerge = ({ base, ours, theirs, result }) => isCleanThreeWayMerge({
+  base, ours, theirs, result, gitMerge: gitMergeFile({ base, ours, theirs }),
+});
+
+// Mirrors the workflow's per-merge logic so the regression tests exercise the
+// same composition of pure predicates the workflow runs.
+function simulateOverlapCarry({
+  merged, reviewedPatch, currentPatch,
+  base = overlapBase, ours = overlapOurs, theirs = overlapTheirs,
+}) {
+  const docPath = 'docs/ARCH.md';
+  const singleCommitFiles = [
+    file({ filename: docPath, sha: '1'.repeat(40), patch: '@@ -8 +8,3 @@ merged' }),
+    file({ filename: 'src/BaseOnly.cs', sha: '2'.repeat(40) }),
+  ];
+  const parentsCompareFiles = [
+    file({ filename: docPath, sha: '3'.repeat(40), patch: '@@ -8 +8,3 @@ base' }),
+    file({ filename: 'src/BaseOnly.cs', sha: '2'.repeat(40) }),
+  ];
+  const proof = mergePathsNeedingContentProof(singleCommitFiles, parentsCompareFiles);
+  assert.deepEqual(proof, { ok: true, paths: [docPath] });
+  const contentVerifiedPaths = new Set();
+  let clean = true;
+  for (const filePath of proof.paths) {
+    if (!cleanMerge({ base, ours, theirs, result: merged })) {
+      clean = false;
+      break;
+    }
+    contentVerifiedPaths.add(filePath);
+  }
+  return isCarriedAcrossSync({
+    recordAncestryStatus: 'ahead',
+    reviewedDiffFiles: [
+      file({ filename: docPath, sha: '4'.repeat(40), patch: reviewedPatch }),
+      file({ filename: 'src/Pr.cs', sha: '5'.repeat(40) }),
+    ],
+    currentDiffFiles: [
+      file({ filename: docPath, sha: '1'.repeat(40), patch: currentPatch }),
+      file({ filename: 'src/Pr.cs', sha: '5'.repeat(40) }),
+    ],
+    nonBaseCommitsIntroduceNoExtraContent: clean,
+    contentVerifiedPaths,
+  });
+}
+
+test('issue #2801: an overlapping-file clean sync is carried forward', () => {
+  assert.equal(
+    simulateOverlapCarry({
+      merged: overlapCleanMerge,
+      reviewedPatch: '@@ -5 +5 @@\n-alpha\n+alpha (reviewed edit)',
+      currentPatch: '@@ -5 +5 @@ shifted\n-alpha\n+alpha (reviewed edit)',
+    }),
+    true,
+  );
+});
+
+test('issue #2801: an overlapping-file conflict resolution that changes content is NOT carried forward', () => {
+  // Same overlapping file, but the merge result carries an author edit the
+  // reviewer never saw (folded into the merge commit as a "resolution").
+  assert.equal(
+    simulateOverlapCarry({
+      merged: overlapCleanMerge.replace('beta', 'beta (unreviewed logic)'),
+      reviewedPatch: '@@ -5 +5 @@\n-alpha\n+alpha (reviewed edit)',
+      currentPatch: '@@ -5,4 +5,4 @@\n-alpha\n+alpha (reviewed edit)\n-beta\n+beta (unreviewed logic)',
+    }),
+    false,
+  );
+});
+
+test('R3365-01: a repeated-line merge Git reports as conflicted is NOT carried forward', () => {
+  // Hicks's reproduction: the gate's single LCS alignment sees disjoint
+  // edits, but `git merge-file` aligns the repeated lines differently and
+  // reports a conflict between the final `a` and `b`.
+  const repro = { base: 'a\nb\n', ours: 'a\nb\na\n', theirs: 'b\na\nb\nb\n' };
+  const lcsOnlyResult = 'b\na\nb\nb\na\n';
+  assert.deepEqual(gitMergeFile(repro), { clean: false, output: null });
+  assert.equal(
+    isCleanThreeWayMerge({ ...repro, result: lcsOnlyResult, gitMerge: { clean: true, output: lcsOnlyResult } }),
+    true,
+    'precondition: the LCS proof alone accepts this merge (the R3365-01 hole)',
+  );
+  assert.equal(cleanMerge({ ...repro, result: lcsOnlyResult }), false);
+  assert.equal(
+    simulateOverlapCarry({
+      ...repro,
+      merged: lcsOnlyResult,
+      reviewedPatch: '@@ -1,2 +1,3 @@\n a\n b\n+a',
+      currentPatch: '@@ -1,4 +1,5 @@ shifted\n b\n a\n b\n b\n+a',
+    }),
+    false,
+  );
+});
+
+test('R3365-01: no Git-conflicting merge can pass isCleanThreeWayMerge (exhaustive small-alphabet oracle)', () => {
+  // Every base/ours/theirs over {a, b} with up to two lines each. Repeated
+  // lines are the norm here, so alignment ambiguity is exercised heavily.
+  const texts = [''];
+  for (const length of [1, 2]) {
+    for (let mask = 0; mask < 2 ** length; mask += 1) {
+      texts.push(Array.from({ length }, (_, i) => ((mask >> i) & 1 ? 'b\n' : 'a\n')).join(''));
+    }
+  }
+  let gitConflicts = 0;
+  let gitClean = 0;
+  for (const base of texts) {
+    for (const ours of texts) {
+      for (const theirs of texts) {
+        const gitMerge = gitMergeFile({ base, ours, theirs });
+        // Candidates: every text the gate might plausibly be shown as a merge
+        // result, including Git's own output when clean.
+        const candidates = new Set([ours, theirs, base, `${ours}${theirs}`, `${theirs}${ours}`]);
+        if (gitMerge.clean) {
+          gitClean += 1;
+          candidates.add(gitMerge.output);
+        } else {
+          gitConflicts += 1;
+        }
+        for (const result of candidates) {
+          const accepted = isCleanThreeWayMerge({ base, ours, theirs, result, gitMerge });
+          if (accepted) {
+            assert.equal(gitMerge.clean, true, JSON.stringify({ base, ours, theirs, result }));
+            assert.equal(result, gitMerge.output, JSON.stringify({ base, ours, theirs, result }));
+          }
+        }
+      }
+    }
+  }
+  assert.ok(gitConflicts > 0 && gitClean > 0, 'oracle must cover both outcomes');
+});
+
+test('isCleanThreeWayMerge fails closed without matching Git evidence', () => {
+  const texts = { base: overlapBase, ours: overlapOurs, theirs: overlapTheirs, result: overlapCleanMerge };
+  assert.equal(isCleanThreeWayMerge(texts), false, 'missing gitMerge evidence');
+  assert.equal(isCleanThreeWayMerge({ ...texts, gitMerge: { clean: false, output: null } }), false);
+  assert.equal(isCleanThreeWayMerge({ ...texts, gitMerge: { clean: true, output: overlapOurs } }), false);
+  assert.equal(isCleanThreeWayMerge({ ...texts, gitMerge: { clean: 'yes', output: overlapCleanMerge } }), false);
+  assert.equal(isCleanThreeWayMerge({ ...texts, gitMerge: { clean: true, output: overlapCleanMerge } }), true);
+});
+
+test('gitMergeFile reports Git verdicts and round-trips raw bytes', () => {
+  assert.deepEqual(
+    gitMergeFile({ base: 'a\nb\nc\nd\ne\n', ours: 'A\nb\nc\nd\ne\n', theirs: 'a\nb\nc\nd\nE\n' }),
+    { clean: true, output: 'A\nb\nc\nd\nE\n' },
+  );
+  assert.deepEqual(
+    gitMergeFile({ base: 'a\n', ours: 'x\n', theirs: 'y\n' }),
+    { clean: false, output: null },
+  );
+  // Invalid UTF-8 and CRLF survive exactly (latin1 is one char per byte).
+  const bytes = 'caf\xe9\r\n\xff\xfe\n';
+  assert.deepEqual(
+    gitMergeFile({ base: `head\n${bytes}tail\n`, ours: `HEAD\n${bytes}tail\n`, theirs: `head\n${bytes}tail\n` }),
+    { clean: true, output: `HEAD\n${bytes}tail\n` },
+  );
+  assert.deepEqual(gitMergeFile({ base: null, ours: '', theirs: '' }), { clean: false, output: null });
+});
+
+test('isCleanThreeWayMerge accepts only the exact conflict-free combination', () => {
+  const merge = (result, overrides = {}) => cleanMerge({
+    base: overlapBase, ours: overlapOurs, theirs: overlapTheirs, result, ...overrides,
+  });
+  assert.equal(merge(overlapCleanMerge), true, 'disjoint edits merge cleanly');
+  assert.equal(merge(overlapOurs), false, 'dropping the base change is not a clean merge');
+  assert.equal(merge(overlapTheirs), false, 'dropping the PR change is not a clean merge');
+  assert.equal(merge(`${overlapCleanMerge}smuggled\n`), false, 'an extra appended line is rejected');
+  assert.equal(merge(overlapCleanMerge.replaceAll('\n', '\r\n')), false, 'byte-exact, including line endings');
+
+  // True conflict: both sides change the same line; whatever the human
+  // resolution looks like, it never passes.
+  const conflictTheirs = overlapBase.replace('alpha', 'alpha (base edit)');
+  for (const resolution of [
+    overlapOurs,
+    conflictTheirs,
+    overlapBase.replace('alpha', 'alpha (reviewed edit)\nalpha (base edit)'),
+    overlapBase.replace('alpha', 'something else entirely'),
+  ]) {
+    assert.equal(merge(resolution, { theirs: conflictTheirs }), false, resolution);
+  }
+
+  // Adjacent changes are treated as conflicting (stricter than git).
+  assert.equal(
+    cleanMerge({
+      base: 'a\nb\nc\n', ours: 'a\nB\nc\n', theirs: 'a\nb\nC\n', result: 'a\nB\nC\n',
+    }),
+    false,
+    'adjacent line edits conflict',
+  );
+  assert.equal(
+    cleanMerge({ base: 'a\n', ours: 'a\nx\n', theirs: 'a\ny\n', result: 'a\nx\ny\n' }),
+    false,
+    'insertions at the same point conflict',
+  );
+
+  // Both sides making the identical change is clean, applied once.
+  assert.equal(
+    cleanMerge({ base: 'a\nb\nc\nd\n', ours: 'a\nB\nc\nd\n', theirs: 'a\nB\nc\nd\n', result: 'a\nB\nc\nd\n' }),
+    true,
+  );
+
+  // Fail closed on non-string inputs and inputs too large to diff.
+  assert.equal(merge(undefined), false);
+  assert.equal(merge(overlapCleanMerge, { base: null }), false);
+  const big = Array.from({ length: 3000 }, (_, index) => `line ${index}\n`);
+  const bigText = big.join('');
+  const rewritten = big.map((line) => `x${line}`).join('');
+  assert.equal(
+    cleanMerge({ base: bigText, ours: rewritten, theirs: bigText, result: rewritten }),
+    false,
+    'a diff beyond the work bound is unprovable',
+  );
+});
+
+test('mergePathsNeedingContentProof only admits plain modifications on both sides', () => {
+  const same = file({ filename: 'src/Same.cs' });
+  assert.deepEqual(mergePathsNeedingContentProof([same], [same]), { ok: true, paths: [] });
+  assert.deepEqual(
+    mergePathsNeedingContentProof(
+      [same, file({ filename: 'docs/A.md', sha: '1'.repeat(40) })],
+      [same, file({ filename: 'docs/A.md', sha: '2'.repeat(40) })],
+    ),
+    { ok: true, paths: ['docs/A.md'] },
+  );
+  const notOk = { ok: false, paths: [] };
+  // A file only the merge commit touched is a smuggled edit.
+  assert.deepEqual(mergePathsNeedingContentProof([same, file({ filename: 'src/Evil.cs' })], [same]), notOk);
+  // A base change the merge dropped.
+  assert.deepEqual(mergePathsNeedingContentProof([], [same]), notOk);
+  // Renames, adds, deletes and binary (patch-less) files are never proven.
+  for (const variant of [
+    { status: 'renamed', previous_filename: 'docs/Old.md' },
+    { status: 'added' },
+    { status: 'removed' },
+    { patch: undefined },
+  ]) {
+    assert.deepEqual(
+      mergePathsNeedingContentProof(
+        [file({ filename: 'docs/A.md', sha: '1'.repeat(40), ...variant })],
+        [file({ filename: 'docs/A.md', sha: '2'.repeat(40) })],
+      ),
+      notOk,
+      JSON.stringify(variant),
+    );
+  }
+  // Too many candidates fails closed rather than fetching unbounded content.
+  const many = (sha) => Array.from(
+    { length: maxContentVerifiedPathsPerMerge + 1 },
+    (_, index) => file({ filename: `docs/${index}.md`, sha }),
+  );
+  assert.deepEqual(mergePathsNeedingContentProof(many('1'.repeat(40)), many('2'.repeat(40))), notOk);
+});
+
+test('contentVerifiedPaths only relaxes condition 2 for proven in-place modifications', () => {
+  const reviewed = [
+    file({ filename: 'docs/A.md', sha: '1'.repeat(40) }),
+    file({ filename: 'src/Pr.cs', sha: '2'.repeat(40) }),
+  ];
+  const overlapChanged = [
+    file({ filename: 'docs/A.md', sha: '3'.repeat(40), patch: 'shifted' }),
+    file({ filename: 'src/Pr.cs', sha: '2'.repeat(40) }),
+  ];
+  const carry = (currentDiffFiles, extra = {}) => isCarriedAcrossSync({
+    recordAncestryStatus: 'ahead',
+    reviewedDiffFiles: reviewed,
+    currentDiffFiles,
+    nonBaseCommitsIntroduceNoExtraContent: true,
+    contentVerifiedPaths: ['docs/A.md'],
+    ...extra,
+  });
+  assert.equal(carry(overlapChanged), true);
+  assert.equal(carry(overlapChanged, { contentVerifiedPaths: [] }), false, 'unproven path');
+  assert.equal(carry(overlapChanged, { contentVerifiedPaths: undefined }), false, 'omitted proof');
+  assert.equal(
+    carry([overlapChanged[0], file({ filename: 'src/Pr.cs', sha: '9'.repeat(40) })]),
+    false,
+    'a different, unproven path changed',
+  );
+  assert.equal(carry([overlapChanged[0]]), false, 'a PR file disappeared');
+  assert.equal(
+    carry([...overlapChanged, file({ filename: 'src/New.cs' })]),
+    false,
+    'a PR file appeared',
+  );
+  assert.equal(
+    carry([file({ filename: 'docs/A.md', status: 'renamed', previous_filename: 'docs/Old.md' }), overlapChanged[1]]),
+    false,
+    'status/rename change',
+  );
+  // Every pre-existing fail-closed condition still dominates.
+  assert.equal(carry(overlapChanged, { nonBaseCommitsIntroduceNoExtraContent: false }), false, 'revert-then-readd / author commit');
+  assert.equal(carry(overlapChanged, { recordAncestryStatus: 'diverged' }), false, 'rebase / force-push');
+  assert.equal(carry(overlapChanged, { filesMayBeTruncated: true }), false, 'truncation');
+});
+
 test('a pure base-sync merge carries the record forward with the carried-status wording', () => {
   const reviewedSha = staleSha;
   const result = gate({
@@ -583,6 +894,38 @@ test('a pure base-sync merge carries the record forward with the carried-status 
     result.notes.some((note) => note.startsWith('Carried across sync:')),
     'the audit trail must record that records were carried, not freshly earned',
   );
+  // R3365-02: carried evidence may include content-verified overlap files
+  // whose blobs/patches differ, so it must not be described as byte-identical.
+  const carriedNote = result.notes.find((note) => note.startsWith('Carried across sync:'));
+  assert.doesNotMatch(carriedNote, /byte-for-byte/);
+  assert.match(carriedNote, /content-verified as a clean three-way merge/);
+});
+
+test('R3365-02: no carry-forward contract claims byte-for-byte diff equality', async () => {
+  const sources = {
+    verifier: 'scripts/ci/verify-squad-verdict.mjs',
+    gate: 'scripts/ci/squad-verdict-gate.mjs',
+    workflow: '.github/workflows/squad-review-verdict.yml',
+    instructions: '.github/copilot-instructions.md',
+  };
+  const text = {};
+  for (const [name, relative] of Object.entries(sources)) {
+    text[name] = (await readFile(path.join(repositoryRoot, relative), 'utf8'))
+      .replace(/\r?\n[ \t]*(?:\/\/|\*(?!\*)|#)?/g, ' ')
+      .replace(/\s+/g, ' ');
+    assert.doesNotMatch(text[name], /byte-for-byte/i, `${relative} must not claim byte-for-byte equality`);
+  }
+  assert.match(text.verifier, /content-verified as a clean three-way/);
+  // Every condition-2 summary must state the overlap exception.
+  assert.match(text.instructions, /is unchanged between `SHA_r` and `SHA_h`: every compare entry is identical, except base-overlapping files content-verified as a clean three-way merge/);
+  assert.match(text.workflow, /is unchanged between the old SHA and the current head \(identical compare entries, except base-overlapping files content-verified as a clean three-way merge/);
+  assert.match(text.gate, /identical compare entries for every file, except base-overlapping files whose merged content was separately proven a clean three-way merge/);
+  // The test suite's own contract comment (it cannot be scanned for the stale
+  // phrase, since this assertion names it).
+  const suite = (await readFile(fileURLToPath(import.meta.url), 'utf8'))
+    .replace(/\r?\n[ \t]*\/\//g, ' ').replace(/\s+/g, ' ');
+  assert.match(suite, /\(2\) the PR's own diff against the base branch is unchanged between the old SHA and the new head \(identical compare entries, except base-overlapping files content-verified as a clean three-way merge/);
+  assert.doesNotMatch(suite, new RegExp(`base branch is ${'byte'}-for-${'byte'} unchanged`, 'i'));
 });
 
 test('a mix of fresh and carried approvals is still reported and still carries', () => {
@@ -1252,6 +1595,14 @@ test('unresolved head SHA fails closed', () => {
 test('documentation-only classification honours the policy carve-outs', () => {
   assert.equal(classifyChangeScope(['docs/API.md']).docsOnly, true);
   assert.equal(classifyChangeScope(['README.md']).docsOnly, true);
+  for (const path of [
+    'docs/design/mockups.html',
+    'mobile/docs/distill/mockups.html',
+    'mobile/docs/distill/PLAN.md',
+  ]) {
+    assert.equal(classifyChangeScope([path]).docsOnly, true, path);
+    assert.equal(classifyChangeScope([path]).highRisk, false, path);
+  }
   assert.equal(classifyChangeScope([]).docsOnly, false);
   for (const carveOut of [
     '.github/workflows/ci.yml',
@@ -1278,6 +1629,25 @@ test('documentation-only classification honours the policy carve-outs', () => {
   }
   assert.equal(classifyChangeScope(['docs/API.md', 'src/api/Program.cs']).docsOnly, false);
   assert.equal(classifyChangeScope(['docs/screenshot.png']).highRisk, true);
+  assert.equal(classifyChangeScope(['docs/security.html']).highRisk, true);
+  assert.equal(classifyChangeScope(['docs/design/MOCKUPS.HTML']).docsOnly, true);
+  for (const lookalike of [
+    'Docs/mockups.html',
+    'Mobile/docs/mockups.html',
+    'mobile/Docs/mockups.html',
+    'docs-extra/mockups.html',
+    'src/docs/mockups.html',
+  ]) {
+    assert.equal(classifyChangeScope([lookalike]).highRisk, true, lookalike);
+  }
+  for (const paths of [
+    ['mobile/docs/distill/mockups.html', 'docs/security.html'],
+    ['docs/security.html', 'mobile/docs/distill/mockups.html'],
+    ['docs/design/mockups.html', '.github/workflows/ci.yml'],
+    ['.github/workflows/ci.yml', 'docs/design/mockups.html'],
+  ]) {
+    assert.equal(classifyChangeScope(paths).highRisk, true, paths.join(','));
+  }
 });
 
 test('high-risk classification is order-independent for mixed changes', () => {
@@ -1646,8 +2016,19 @@ test('the sync carry-forward workflow wiring stays intact', async () => {
   assert.match(workflow, /getCommit\(/);
   assert.match(workflow, /parentShas\.length !== 2/);
   assert.match(workflow, /basehead: `\$\{parentShas\[0\]\}\.\.\.\$\{parentShas\[1\]\}`/);
-  assert.match(workflow, /gate\.diffFingerprint\(singleCommitFiles\)/);
-  assert.match(workflow, /gate\.diffFingerprint\(parentsCompareFiles\)/);
+  assert.match(workflow, /gate\.mergePathsNeedingContentProof\(\s*singleCommitFiles, parentsCompareFiles,?\s*\)/);
+  // Issue #2801: overlapping files get a content-level three-way proof
+  // against the GitHub-reported merge base, cross-checked against the listed
+  // blob SHAs, and only proven paths reach condition 2's relaxation.
+  assert.match(workflow, /parentsCompare\.merge_base_commit\?\.sha/);
+  assert.match(workflow, /gate\.isCleanThreeWayMerge\(/);
+  assert.match(workflow, /scripts\/ci\/git-merge-file\.mjs/);
+  assert.match(workflow, /gitMerge: gitMergeFile\(\{/);
+  assert.match(workflow, /merged\?\.sha !== blobShaFor\(singleCommitFiles, filePath\)/);
+  assert.match(workflow, /theirs\?\.sha !== blobShaFor\(parentsCompareFiles, filePath\)/);
+  assert.match(workflow, /contentVerifiedPaths\.add\(filePath\)/);
+  assert.match(workflow, /contentVerifiedPaths,\s*\n\s*\}\);/);
+  assert.match(workflow, /toString\('latin1'\)/);
   assert.doesNotMatch(workflow, /singleCommit\.files\s*\?\?\s*\[\]\)\.length\s*>\s*0/);
   // This per-commit equality check has its own truncation exposure. For
   // `singleCommit`, the workflow checks BOTH the length-vs-cap heuristic

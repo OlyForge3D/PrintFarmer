@@ -24,6 +24,14 @@ import { AddPrinterModal } from '../AddPrinterModal';
 // descendant of the responsive wrapper, and that wrapper must declare the
 // mobile-stack / desktop-row classes.
 
+vi.mock('@/features/auth/hooks/useAuth', () => ({
+  useAuth: () => ({ hasPermission: () => true }),
+}));
+
+vi.mock('@/services/cameraService', () => ({
+  cameraService: { createCamera: vi.fn() },
+}));
+
 vi.mock('@/common/hooks/useApi', () => ({
   useManufacturers: () => ({ data: [], isLoading: false, error: null }),
   useModels: () => ({ data: [], isLoading: false, error: null }),

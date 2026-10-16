@@ -9,9 +9,11 @@ using Farm.Infrastructure.Discovery;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Network;
+using Farm.Infrastructure.Normalization;
 using Farm.Infrastructure.Services.Cameras;
 using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.Startup;
+using Farm.Modules.Devices.Filters;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -46,8 +48,10 @@ public class CamerasController(
     private readonly IQueueResourceAuthorizationService? _queueResourceAuthorization = queueResourceAuthorization;
 
     /// <summary>
-    /// Gets all standalone cameras.
+    /// Gets all cameras the caller can access, optionally filtered by linked printer and/or effective location.
     /// </summary>
+    /// <param name="printerId">Optional: only cameras linked to this printer.</param>
+    /// <param name="locationId">Optional: only cameras whose effective location is this location.</param>
     /// <param name="ct">Cancellation token for the operation</param>
     /// <returns>List of all standalone cameras</returns>
     /// <response code="200">Returns the list of cameras</response>
@@ -55,7 +59,10 @@ public class CamerasController(
     [HttpGet]
     [ProducesResponseType(typeof(IEnumerable<CameraDto>), 200)]
     [ProducesResponseType(503)]
-    public async Task<ActionResult<IEnumerable<CameraDto>>> GetCamerasAsync(CancellationToken ct)
+    public async Task<ActionResult<IEnumerable<CameraDto>>> GetCamerasAsync(
+        [FromQuery] Guid? printerId,
+        [FromQuery] Guid? locationId,
+        CancellationToken ct)
     {
         try
         {
@@ -64,8 +71,15 @@ public class CamerasController(
                 return StatusCode(503, new { message = "System is still initializing. Please wait a moment and try again." });
             }
 
-            CameraDto[] cameras = await _cameraService.GetAllDtosAsync(ct);
-            List<CameraDto> accessible = await FilterAccessibleCamerasAsync(cameras.ToList(), c => c.PrinterId, ct);
+            if (printerId.HasValue && !await CanAccessCameraPrinterAsync(printerId, ct))
+            {
+                return Ok(new List<CameraDto>());
+            }
+
+            List<CameraDto> cameras = printerId.HasValue || locationId.HasValue
+                ? await _cameraService.QueryDtosAsync(printerId, locationId, enabledOnly: false, ct)
+                : (await _cameraService.GetAllDtosAsync(ct)).ToList();
+            List<CameraDto> accessible = await FilterAccessibleCamerasAsync(cameras, ct);
             return Ok(accessible);
         }
         catch (InvalidOperationException)
@@ -80,8 +94,10 @@ public class CamerasController(
     }
 
     /// <summary>
-    /// Gets all enabled standalone cameras.
+    /// Gets all enabled cameras the caller can access, optionally filtered by linked printer and/or effective location.
     /// </summary>
+    /// <param name="printerId">Optional: only cameras linked to this printer.</param>
+    /// <param name="locationId">Optional: only cameras whose effective location is this location.</param>
     /// <param name="ct">Cancellation token for the operation</param>
     /// <returns>List of enabled standalone cameras</returns>
     /// <response code="200">Returns the list of enabled cameras</response>
@@ -89,7 +105,10 @@ public class CamerasController(
     [HttpGet("enabled")]
     [ProducesResponseType(typeof(IEnumerable<CameraDto>), 200)]
     [ProducesResponseType(503)]
-    public async Task<ActionResult<IEnumerable<CameraDto>>> GetEnabledCamerasAsync(CancellationToken ct)
+    public async Task<ActionResult<IEnumerable<CameraDto>>> GetEnabledCamerasAsync(
+        [FromQuery] Guid? printerId,
+        [FromQuery] Guid? locationId,
+        CancellationToken ct)
     {
         try
         {
@@ -98,8 +117,15 @@ public class CamerasController(
                 return StatusCode(503, new { message = "System is still initializing. Please wait a moment and try again." });
             }
 
-            CameraDto[] cameras = await _cameraService.GetEnabledCamerasAsync(ct);
-            List<CameraDto> accessible = await FilterAccessibleCamerasAsync(cameras.ToList(), c => c.PrinterId, ct);
+            if (printerId.HasValue && !await CanAccessCameraPrinterAsync(printerId, ct))
+            {
+                return Ok(new List<CameraDto>());
+            }
+
+            List<CameraDto> cameras = printerId.HasValue || locationId.HasValue
+                ? await _cameraService.QueryDtosAsync(printerId, locationId, enabledOnly: true, ct)
+                : (await _cameraService.GetEnabledCamerasAsync(ct)).ToList();
+            List<CameraDto> accessible = await FilterAccessibleCamerasAsync(cameras, ct);
             return Ok(accessible);
         }
         catch (InvalidOperationException)
@@ -117,6 +143,8 @@ public class CamerasController(
     /// Gets all enabled cameras (standalone and printer-attached) for display in the Camera View.
     /// Includes printer names resolved via navigation properties.
     /// </summary>
+    /// <param name="printerId">Optional: only cameras linked to this printer.</param>
+    /// <param name="locationId">Optional: only cameras whose effective location is this location.</param>
     /// <param name="ct">Cancellation token for the operation</param>
     /// <returns>List of display cameras with printer names</returns>
     /// <response code="200">Returns the list of display cameras</response>
@@ -124,7 +152,10 @@ public class CamerasController(
     [HttpGet("display")]
     [ProducesResponseType(typeof(IEnumerable<DisplayCameraDto>), 200)]
     [ProducesResponseType(503)]
-    public async Task<ActionResult<IEnumerable<DisplayCameraDto>>> GetDisplayCamerasAsync(CancellationToken ct)
+    public async Task<ActionResult<IEnumerable<DisplayCameraDto>>> GetDisplayCamerasAsync(
+        [FromQuery] Guid? printerId,
+        [FromQuery] Guid? locationId,
+        CancellationToken ct)
     {
         try
         {
@@ -133,12 +164,19 @@ public class CamerasController(
                 return StatusCode(503, new { message = "System is still initializing. Please wait a moment and try again." });
             }
 
-            List<DisplayCameraDto> cameras = await _cameraService.GetDisplayCamerasAsync(ct);
-            cameras = await FilterAccessibleCamerasAsync(cameras, c => c.PrinterId, ct);
+            if (printerId.HasValue && !await CanAccessCameraPrinterAsync(printerId, ct))
+            {
+                return Ok(new List<DisplayCameraDto>());
+            }
+
+            List<DisplayCameraDto> cameras = printerId.HasValue || locationId.HasValue
+                ? await _cameraService.QueryDisplayCamerasAsync(printerId, locationId, ct)
+                : await _cameraService.GetDisplayCamerasAsync(ct);
+            cameras = await FilterAccessibleCamerasAsync(cameras, ct);
             foreach (DisplayCameraDto camera in cameras)
             {
-                camera.StreamProxyUrl = camera.StreamUrl == null ? null : GetCameraProxyPath(camera.Id, "stream");
-                camera.SnapshotProxyUrl = camera.SnapshotUrl == null ? null : GetCameraProxyPath(camera.Id, "snapshot");
+                camera.StreamProxyUrl = string.IsNullOrWhiteSpace(camera.StreamUrl) ? null : GetCameraProxyPath(camera.Id, "stream");
+                camera.SnapshotProxyUrl = string.IsNullOrWhiteSpace(camera.SnapshotUrl) ? null : GetCameraProxyPath(camera.Id, "snapshot");
             }
 
             return Ok(cameras);
@@ -182,35 +220,14 @@ public class CamerasController(
                 return NotFound(new { message = "Camera not found" });
             }
 
-            if (!await CanAccessCameraPrinterAsync(camera.PrinterId, ct))
+            if (!await CanAccessCameraPrinterAsync(camera, ct))
             {
                 return NotFound(new { message = "Camera not found" });
             }
 
-            // Map manually since we have the entity
-            CameraDto dto = new()
-            {
-                Id = camera.Id,
-                Name = camera.Name,
-                Description = camera.Description,
-                StreamUrl = camera.StreamUrl,
-                SnapshotUrl = camera.SnapshotUrl,
-                StreamConfigured = !string.IsNullOrWhiteSpace(camera.StreamUrl),
-                SnapshotConfigured = !string.IsNullOrWhiteSpace(camera.SnapshotUrl),
-                IsEnabled = camera.IsEnabled,
-                SortOrder = camera.SortOrder,
-                Location = camera.Location,
-                CreatedAt = camera.CreatedAt,
-                UpdatedAt = camera.UpdatedAt,
-                PrinterId = camera.PrinterId,
-                PrinterName = camera.Printer?.Name,
-                Source = camera.Source,
-                CameraType = camera.CameraType,
-                HealthStatus = camera.HealthStatus,
-                LastHealthCheck = camera.LastHealthCheck,
-                IsStandalone = !camera.PrinterId.HasValue
-            };
-            return Ok(dto);
+            List<CameraDto> visible = await FilterAccessibleCamerasAsync([CameraDtoMapper.ToDto(camera)], ct);
+            CameraDto? dto = visible.FirstOrDefault();
+            return dto is null ? NotFound(new { message = "Camera not found" }) : Ok(dto);
         }
         catch (InvalidOperationException)
         {
@@ -221,6 +238,62 @@ public class CamerasController(
             _logger?.LogError(ex, "[CamerasController] Exception in GetCameraAsync for ID {CameraId}: {Message}", id.ToString(), ex.Message);
             return CameraProblem("camera_read_failed", "The camera could not be read.");
         }
+    }
+
+    /// <summary>
+    /// Gets the stored stream/snapshot targets of a camera for the admin edit form.
+    /// Embedded URL credentials are stripped and reported via the HasCredentials flags.
+    /// </summary>
+    /// <param name="id">The camera ID</param>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <response code="200">Returns the editable camera configuration</response>
+    /// <response code="404">If the camera is not found or not accessible</response>
+    /// <response code="500">Generic correlated problem; failure details are logged server-side only</response>
+    /// <response code="503">If the system is still initializing</response>
+    [RequirePermission("cameras", "admin")]
+    [HttpGet("{id:guid}/config")]
+    [CameraConfigErrorFilter]
+    [ProducesResponseType(typeof(CameraConfigDto), 200)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(typeof(ProblemDetails), 500)]
+    [ProducesResponseType(503)]
+    public async Task<ActionResult<CameraConfigDto>> GetCameraConfigAsync(Guid id, CancellationToken ct)
+    {
+        // Unexpected failures are sanitized by CameraConfigErrorFilter; client aborts reach
+        // GlobalExceptionMiddleware as cancellations.
+        if (!_startupStatus.IsReady)
+        {
+            return StatusCode(503, new { message = "System is still initializing. Please wait a moment and try again." });
+        }
+
+        Camera? camera = await _cameraService.FindByIdAsync(id, ct);
+        if (camera == null || !await CanAccessCameraPrinterAsync(camera, ct))
+        {
+            return NotFound(new { message = "Camera not found" });
+        }
+
+        (string? streamUrl, bool streamHasCredentials) = StripCredentials(CameraContractClassifier.NormalizeTarget(camera.StreamUrl));
+        (string? snapshotUrl, bool snapshotHasCredentials) = StripCredentials(CameraContractClassifier.NormalizeTarget(camera.SnapshotUrl));
+        return Ok(new CameraConfigDto
+        {
+            Id = camera.Id,
+            StreamUrl = streamUrl,
+            SnapshotUrl = snapshotUrl,
+            StreamUrlHasCredentials = streamHasCredentials,
+            SnapshotUrlHasCredentials = snapshotHasCredentials
+        });
+    }
+
+    private static (string? Url, bool HasCredentials) StripCredentials(string? url)
+    {
+        string? redacted = UrlCredentialRedactor.Redact(url);
+        if (string.Equals(redacted, url, StringComparison.Ordinal))
+        {
+            return (url, false);
+        }
+
+        // An unparseable credentialed value redacts to a placeholder, which is not a usable URL.
+        return (Uri.TryCreate(redacted, UriKind.Absolute, out _) ? redacted : null, true);
     }
 
     /// <summary>
@@ -360,8 +433,17 @@ public class CamerasController(
                 return BadRequest(new { message = "Camera name is required" });
             }
 
+            if (!await CanAccessRequestedPrintersAsync(request.PrinterIds, request.PrinterId, ct))
+            {
+                return InvalidCameraReference();
+            }
+
             CameraDto camera = await _cameraService.CreateAsync(request, ct);
             return StatusCode(201, camera);
+        }
+        catch (ArgumentException)
+        {
+            return InvalidCameraReference();
         }
         catch (InvalidOperationException ex)
         {
@@ -411,8 +493,32 @@ public class CamerasController(
                 return BadRequest(new { message = "Request body cannot be null" });
             }
 
-            CameraDto? camera = await _cameraService.UpdateAsync(id, request, ct);
-            return camera == null ? NotFound(new { message = "Camera not found" }) : Ok(camera);
+            Camera? existing = await _cameraService.FindByIdAsync(id, ct);
+            if (existing is null || !await CanAccessCameraPrinterAsync(existing, ct))
+            {
+                return NotFound(new { message = "Camera not found" });
+            }
+
+            if (!await CanAccessRequestedPrintersAsync(request.PrinterIds, request.PrinterId, ct))
+            {
+                return InvalidCameraReference();
+            }
+
+            // Links to printers the caller cannot see are redacted from reads, so a round-tripped printer
+            // list must not be able to remove them.
+            IReadOnlyCollection<Guid> hiddenPrinterIds = await GetInaccessibleLinkedPrinterIdsAsync(existing, ct);
+            CameraDto? camera = await _cameraService.UpdateAsync(id, request, hiddenPrinterIds, ct);
+            if (camera is null)
+            {
+                return NotFound(new { message = "Camera not found" });
+            }
+
+            CameraDto? visible = (await FilterAccessibleCamerasAsync([camera], ct)).FirstOrDefault();
+            return visible is null ? NotFound(new { message = "Camera not found" }) : Ok(visible);
+        }
+        catch (ArgumentException)
+        {
+            return InvalidCameraReference();
         }
         catch (InvalidOperationException ex)
         {
@@ -454,6 +560,12 @@ public class CamerasController(
             if (!_startupStatus.IsReady)
             {
                 return StatusCode(503, new { message = "System is still initializing. Please wait a moment and try again." });
+            }
+
+            Camera? existing = await _cameraService.FindByIdAsync(id, ct);
+            if (existing is null || !await CanAccessCameraPrinterAsync(existing, ct))
+            {
+                return NotFound(new { message = "Camera not found" });
             }
 
             bool deleted = await _cameraService.DeleteAsync(id, ct);
@@ -499,8 +611,20 @@ public class CamerasController(
                 return BadRequest(new { message = "Request body cannot be null" });
             }
 
+            Camera? existing = await _cameraService.FindByIdAsync(id, ct);
+            if (existing is null || !await CanAccessCameraPrinterAsync(existing, ct))
+            {
+                return NotFound(new { message = "Camera not found" });
+            }
+
             CameraDto? camera = await _cameraService.ToggleEnabledAsync(id, request.IsEnabled, ct);
-            return camera == null ? NotFound(new { message = "Camera not found" }) : Ok(camera);
+            if (camera is null)
+            {
+                return NotFound(new { message = "Camera not found" });
+            }
+
+            CameraDto? visible = (await FilterAccessibleCamerasAsync([camera], ct)).FirstOrDefault();
+            return visible is null ? NotFound(new { message = "Camera not found" }) : Ok(visible);
         }
         catch (InvalidOperationException)
         {
@@ -511,6 +635,131 @@ public class CamerasController(
             _logger?.LogError(ex, "[CamerasController] Exception in ToggleCameraAsync for ID {CameraId}: {Message}", id.ToString(), ex.Message);
             return CameraProblem("camera_update_failed", "The camera could not be updated.");
         }
+    }
+
+    /// <summary>
+    /// Links a camera to a printer. Idempotent; the optional body controls whether the camera becomes the
+    /// printer's primary camera (each printer keeps exactly one primary camera).
+    /// </summary>
+    /// <param name="id">The camera ID</param>
+    /// <param name="printerId">The printer ID</param>
+    /// <param name="request">Optional body: <c>{ "isPrimary": true }</c></param>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <response code="200">Returns the updated camera</response>
+    /// <response code="404">If the camera or printer is not found or not accessible</response>
+    [RequirePermission("cameras", "admin")]
+    [HttpPost("{id:guid}/printers/{printerId:guid}")]
+    [ProducesResponseType(typeof(CameraDto), 200)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(503)]
+    public async Task<ActionResult<CameraDto>> LinkCameraToPrinterAsync(
+        Guid id,
+        Guid printerId,
+        [FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)] LinkCameraPrinterRequest? request,
+        CancellationToken ct)
+    {
+        if (!_startupStatus.IsReady)
+        {
+            return StatusCode(503, new { message = "System is still initializing. Please wait a moment and try again." });
+        }
+
+        Camera? camera = await _cameraService.FindByIdAsync(id, ct);
+        if (camera is null || !await CanAccessCameraPrinterAsync(camera, ct))
+        {
+            return NotFound(new { message = "Camera not found" });
+        }
+
+        if (!await CanAccessCameraPrinterAsync(printerId, ct))
+        {
+            return NotFound(new { message = "Printer not found" });
+        }
+
+        try
+        {
+            CameraDto? updated = await _cameraService.LinkToPrinterAsync(id, printerId, request?.IsPrimary, ct);
+            if (updated is null)
+            {
+                return NotFound(new { message = "Camera not found" });
+            }
+
+            List<CameraDto> visible = await FilterAccessibleCamerasAsync([updated], ct);
+            CameraDto? dto = visible.FirstOrDefault();
+            return dto is null ? NotFound(new { message = "Camera not found" }) : Ok(dto);
+        }
+        catch (ArgumentException)
+        {
+            return NotFound(new { message = "Printer not found" });
+        }
+    }
+
+    /// <summary>
+    /// Unlinks a camera from a printer. The camera itself is kept.
+    /// </summary>
+    /// <param name="id">The camera ID</param>
+    /// <param name="printerId">The printer ID</param>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <response code="204">The link was removed</response>
+    /// <response code="404">If the camera is not found, not accessible, or not linked to the printer</response>
+    [RequirePermission("cameras", "admin")]
+    [HttpDelete("{id:guid}/printers/{printerId:guid}")]
+    [ProducesResponseType(204)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(503)]
+    public async Task<IActionResult> UnlinkCameraFromPrinterAsync(Guid id, Guid printerId, CancellationToken ct)
+    {
+        if (!_startupStatus.IsReady)
+        {
+            return StatusCode(503, new { message = "System is still initializing. Please wait a moment and try again." });
+        }
+
+        Camera? camera = await _cameraService.FindByIdAsync(id, ct);
+        if (camera is null || !await CanAccessCameraPrinterAsync(camera, ct) || !await CanAccessCameraPrinterAsync(printerId, ct))
+        {
+            return NotFound(new { message = "Camera not found" });
+        }
+
+        CameraPrinterRemovalResult result = await _cameraService.UnlinkFromPrinterAsync(id, printerId, ct);
+        return result == CameraPrinterRemovalResult.Unlinked
+            ? NoContent()
+            : NotFound(new { message = "Camera is not linked to this printer" });
+    }
+
+    /// <summary>
+    /// Removes a camera from a printer (Edit Printer). Unlinks the camera and deletes it only when it was
+    /// auto-discovered and no printer links remain; user-created cameras are kept as unlinked cameras.
+    /// </summary>
+    /// <param name="printerId">The printer ID</param>
+    /// <param name="cameraId">The camera ID</param>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <response code="200">Returns <c>{ "result": "unlinked" | "deleted" }</c></response>
+    /// <response code="404">If the printer or camera is not found, not accessible, or not linked</response>
+    [RequirePermission("printers", "admin")]
+    [HttpDelete("/api/printers/{printerId:guid}/cameras/{cameraId:guid}")]
+    [ProducesResponseType(typeof(RemoveCameraFromPrinterResponse), 200)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(503)]
+    public async Task<ActionResult<RemoveCameraFromPrinterResponse>> RemoveCameraFromPrinterAsync(
+        Guid printerId,
+        Guid cameraId,
+        CancellationToken ct)
+    {
+        if (!_startupStatus.IsReady)
+        {
+            return StatusCode(503, new { message = "System is still initializing. Please wait a moment and try again." });
+        }
+
+        if (!await CanAccessCameraPrinterAsync(printerId, ct))
+        {
+            return NotFound(new { message = "Printer not found" });
+        }
+
+        CameraPrinterRemovalResult result = await _cameraService.RemoveFromPrinterAsync(printerId, cameraId, ct);
+        return result switch
+        {
+            CameraPrinterRemovalResult.Unlinked or CameraPrinterRemovalResult.Deleted =>
+                Ok(new RemoveCameraFromPrinterResponse(result)),
+            _ => NotFound(new { message = "Camera is not linked to this printer" }),
+        };
     }
 
     /// <summary>Streams camera content without disclosing its private target URL.</summary>
@@ -540,13 +789,13 @@ public class CamerasController(
             return NotFound();
         }
 
-        if (!await CanAccessCameraPrinterAsync(camera.PrinterId, ct))
+        if (!await CanAccessCameraPrinterAsync(camera, ct))
         {
             return NotFound();
         }
 
         string? target = useSnapshot ? camera.SnapshotUrl : camera.StreamUrl;
-        if (target is null)
+        if (string.IsNullOrWhiteSpace(target))
         {
             return NotFound();
         }
@@ -672,21 +921,67 @@ public class CamerasController(
     }
 
     /// <summary>
-    /// Applies the same PrinterGroup access rules as <see cref="CanAccessCameraPrinterAsync"/> to
-    /// a collection of cameras, so restricted printers' cameras are omitted from list/display
-    /// responses instead of merely blocking per-id reads (mirrors
-    /// <c>PrintersController.FilterAccessiblePrintersAsync</c>). Standalone cameras (no
-    /// <paramref name="getPrinterId"/> value) are always retained.
+    /// A camera is accessible when it has no printer links (unlinked cameras are visible to any
+    /// authenticated caller by design) or when the caller can view ANY of its linked printers.
     /// </summary>
-    private async Task<List<T>> FilterAccessibleCamerasAsync<T>(
-        List<T> cameras,
-        Func<T, Guid?> getPrinterId,
-        CancellationToken ct)
+    private async Task<bool> CanAccessCameraPrinterAsync(Camera camera, CancellationToken ct)
+    {
+        Guid[] printerIds = camera.PrinterLinks.Select(l => l.PrinterId).Distinct().ToArray();
+        if (printerIds.Length == 0)
+        {
+            return true;
+        }
+
+        if (_queueResourceAuthorization is null)
+        {
+            return false;
+        }
+
+        IReadOnlySet<Guid> allowed = await _queueResourceAuthorization.FilterAccessiblePrinterIdsAsync(
+            User,
+            printerIds,
+            PrinterGroupAccessLevel.View,
+            ct);
+        return allowed.Count > 0;
+    }
+
+    /// <summary>
+    /// Returns the camera's linked printers the caller cannot view. These links are hidden from the caller's
+    /// reads and must be preserved when the caller replaces the camera's printer list.
+    /// </summary>
+    private async Task<IReadOnlyCollection<Guid>> GetInaccessibleLinkedPrinterIdsAsync(Camera camera, CancellationToken ct)
+    {
+        Guid[] printerIds = camera.PrinterLinks.Select(l => l.PrinterId).Distinct().ToArray();
+        if (printerIds.Length == 0)
+        {
+            return [];
+        }
+
+        if (_queueResourceAuthorization is null)
+        {
+            return printerIds;
+        }
+
+        IReadOnlySet<Guid> allowed = await _queueResourceAuthorization.FilterAccessiblePrinterIdsAsync(
+            User,
+            printerIds,
+            PrinterGroupAccessLevel.View,
+            ct);
+        return printerIds.Where(id => !allowed.Contains(id)).ToArray();
+    }
+
+    /// <summary>
+    /// Applies the same PrinterGroup access rules as <see cref="CanAccessCameraPrinterAsync(Camera, CancellationToken)"/>
+    /// to a collection of cameras, so cameras whose linked printers are all restricted are omitted from
+    /// list/display responses instead of merely blocking per-id reads (mirrors
+    /// <c>PrintersController.FilterAccessiblePrintersAsync</c>). Unlinked cameras are always retained.
+    /// Linked printers the caller cannot view are redacted from the returned DTOs.
+    /// </summary>
+    private async Task<List<T>> FilterAccessibleCamerasAsync<T>(List<T> cameras, CancellationToken ct)
+        where T : ICameraPrinterLinksDto
     {
         Guid[] printerIds = cameras
-            .Select(getPrinterId)
-            .Where(id => id.HasValue)
-            .Select(id => id!.Value)
+            .SelectMany(c => GetLinkedPrinterIds(c))
             .Distinct()
             .ToArray();
         if (printerIds.Length == 0)
@@ -696,9 +991,9 @@ public class CamerasController(
 
         if (_queueResourceAuthorization is null)
         {
-            // Fail closed to match CanAccessCameraPrinterAsync: an unavailable authorization
-            // dependency must not silently disclose every printer-attached camera.
-            return cameras.Where(c => !getPrinterId(c).HasValue).ToList();
+            // Fail closed: an unavailable authorization dependency must not silently disclose every
+            // printer-attached camera.
+            return cameras.Where(c => GetLinkedPrinterIds(c).Count == 0).ToList();
         }
 
         IReadOnlySet<Guid> allowed = await _queueResourceAuthorization.FilterAccessiblePrinterIdsAsync(
@@ -706,8 +1001,90 @@ public class CamerasController(
             printerIds,
             PrinterGroupAccessLevel.View,
             ct);
-        return cameras
-            .Where(c => getPrinterId(c) is not Guid printerId || allowed.Contains(printerId))
-            .ToList();
+
+        List<T> result = [];
+        foreach (T camera in cameras)
+        {
+            List<Guid> linked = GetLinkedPrinterIds(camera);
+            if (linked.Count == 0)
+            {
+                result.Add(camera);
+                continue;
+            }
+
+            if (!linked.Any(allowed.Contains))
+            {
+                continue;
+            }
+
+            RedactInaccessiblePrinters(camera, allowed);
+            result.Add(camera);
+        }
+
+        return result;
     }
+
+    private static List<Guid> GetLinkedPrinterIds(ICameraPrinterLinksDto camera)
+    {
+        if (camera.PrinterIds.Count > 0)
+        {
+            return camera.PrinterIds;
+        }
+
+        return camera.PrinterId is Guid printerId ? [printerId] : [];
+    }
+
+    private static void RedactInaccessiblePrinters(ICameraPrinterLinksDto camera, IReadOnlySet<Guid> allowed)
+    {
+        if (camera.PrinterIds.Count == 0 || camera.PrinterIds.All(allowed.Contains))
+        {
+            return;
+        }
+
+        camera.PrinterIds = camera.PrinterIds.Where(allowed.Contains).ToList();
+        camera.Printers = camera.Printers.Where(p => allowed.Contains(p.Id)).ToList();
+        if (camera.PrinterId is not Guid primary || !allowed.Contains(primary))
+        {
+            CameraPrinterSummaryDto? first = camera.Printers.FirstOrDefault();
+            camera.PrinterId = first?.Id;
+            camera.PrinterName = first?.Name;
+        }
+    }
+
+    /// <summary>
+    /// Verifies the caller can view every printer referenced by a create/update request, so cameras cannot be
+    /// attached to printers outside the caller's PrinterGroup scope.
+    /// </summary>
+    private async Task<bool> CanAccessRequestedPrintersAsync(
+        IReadOnlyCollection<Guid>? printerIds,
+        Guid? legacyPrinterId,
+        CancellationToken ct)
+    {
+        Guid[] requested = (printerIds ?? (legacyPrinterId.HasValue ? [legacyPrinterId.Value] : []))
+            .Where(id => id != Guid.Empty)
+            .Distinct()
+            .ToArray();
+        if (requested.Length == 0)
+        {
+            return true;
+        }
+
+        if (_queueResourceAuthorization is null)
+        {
+            return false;
+        }
+
+        IReadOnlySet<Guid> allowed = await _queueResourceAuthorization.FilterAccessiblePrinterIdsAsync(
+            User,
+            requested,
+            PrinterGroupAccessLevel.View,
+            ct);
+        return requested.All(allowed.Contains);
+    }
+
+    private ObjectResult InvalidCameraReference() =>
+        CameraProblem(
+            "camera_invalid_reference",
+            "A referenced printer or location does not exist.",
+            StatusCodes.Status400BadRequest);
 }

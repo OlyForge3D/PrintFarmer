@@ -58,6 +58,20 @@ locally so the slicer workspace has no third-party runtime host dependency
 (issue #2405). CC0 requires no attribution, but it is recorded here per the
 distributed-asset review requirement below.
 
+## 3D text tool fonts
+
+| Component | Distributed form | License | Upstream |
+|---|---|---|---|
+| Droid Serif, Droid Sans, Droid Sans Mono (regular) | typeface.json glyph outlines bundled at `src/Web/ReactApp/src/assets/fonts/droid/` and lazy-loaded by the slicer 3D text tool | Apache-2.0, Copyright (c) 2005-2008 The Android Open Source Project | [three.js r182 `examples/fonts/droid`](https://github.com/mrdoob/three.js/tree/a58e9ecf225b50e4a28a934442e854878bc2a959/examples/fonts/droid) |
+
+These files were previously consumed from the `three` npm package, which stopped
+publishing `examples/fonts` in 0.186. The bundled copies are byte-identical to
+three.js tag `r182` and to the `three@0.182.0` npm package. The upstream
+`NOTICE` (full Apache-2.0 text, stored as `NOTICE.txt` so it is served as
+`text/plain`) and `README.txt` are redistributed with unmodified contents at
+`src/Web/ReactApp/public/licenses/droid-fonts/`, which the web client serves at
+`/licenses/droid-fonts/NOTICE.txt` and `/licenses/droid-fonts/README.txt`.
+
 ## Frameworks, libraries, and base images
 
 Release SBOMs enumerate the exact NuGet, npm, operating-system, and container
@@ -88,7 +102,8 @@ a guessed license.
 
 - QuestPDF 2026.2.3: its bundled license permits open-source projects to use
   the Community MIT License. PrintFarmer selects that MIT option.
-- Six Labors Fonts 2.1.3, ImageSharp 3.1.12, and ImageSharp.Drawing 2.1.7:
+- Six Labors Fonts 3.2.0, ImageSharp 4.1.3, ImageSharp.Drawing 3.1.3, and
+  PolygonClipper 1.0.2:
   their bundled Six Labors Split License 1.0 grants Apache-2.0 when the work is
   consumed in software under an Open Source or Source Available license.
   PrintFarmer selects that Apache-2.0 option.

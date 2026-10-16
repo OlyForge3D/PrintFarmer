@@ -62,6 +62,7 @@ struct PrinterDetailView: View {
     @State private var showsSafetyChecks = false
     @State private var printPreviewImage: UIImage?
     @State private var printPreviewPath: String?
+    @State private var directSnapshotLoadFailedFor: UUID?
     // Transient UI state only (issue #2522) — never persisted, resets to
     // `.status` whenever this view is (re)constructed for a printer/server,
     // matching `viewModel`/`coverageViewModel`'s own per-identity lifetime.
@@ -1428,20 +1429,21 @@ struct PrinterDetailView: View {
         switch viewModel.cameraPreviewMode {
         case .mjpegStream:
             return viewModel.showLivestream
-                ? validURL(printer.cameraStreamUrl) || validURL(printer.cameraSnapshotUrl)
-                : validURL(printer.cameraSnapshotUrl)
+                ? resolvedCameraURL(printer.cameraStreamUrl) != nil
+                    || CameraURLResolver.isSnapshotReference(printer.cameraSnapshotUrl)
+                : CameraURLResolver.isSnapshotReference(printer.cameraSnapshotUrl)
         case .snapshotPolling, .directSnapshot:
             return viewModel.cameraPreviewMode == .snapshotPolling
                 ? printer.isOnline
-                : validURL(printer.cameraSnapshotUrl)
+                : CameraURLResolver.isSnapshotReference(printer.cameraSnapshotUrl)
         case .unsupported, .none:
             return false
         }
     }
 
-    private func validURL(_ value: String?) -> Bool {
-        guard let value, let url = URL(string: value) else { return false }
-        return url.scheme == "http" || url.scheme == "https"
+    /// Camera routes are server-relative proxy paths; resolve them against the active server.
+    private func resolvedCameraURL(_ value: String?) -> URL? {
+        CameraURLResolver.resolve(value, baseURL: serverRegistry.activeServer?.baseURL)
     }
 
     @MainActor
@@ -1484,23 +1486,26 @@ struct PrinterDetailView: View {
             // camera state the user left, not a reset one.
             if viewModel.showLivestream,
                isStatusPageForeground,
-               let streamUrlString = printer.cameraStreamUrl,
-               let streamUrl = URL(string: streamUrlString) {
-                MJPEGStreamContainer(url: streamUrl, rotation: viewModel.cameraRotation)
+               let streamUrl = resolvedCameraURL(printer.cameraStreamUrl) {
+                MJPEGStreamContainer(
+                    url: streamUrl,
+                    rotation: viewModel.cameraRotation,
+                    credentials: { [apiClient = services.apiClient] in
+                        await apiClient?.currentCameraCredentials()
+                    }
+                )
             } else if let data = viewModel.snapshotData {
                 snapshotImage(from: data)
-            } else if let urlString = printer.cameraSnapshotUrl,
-                      let url = URL(string: urlString) {
-                asyncSnapshotImage(url: url)
+            } else if CameraURLResolver.isSnapshotReference(printer.cameraSnapshotUrl) {
+                authenticatedSnapshotImage(printerId: printer.id)
             } else {
                 noCameraPlaceholder()
             }
             #else
             if let data = viewModel.snapshotData {
                 snapshotImage(from: data)
-            } else if let urlString = printer.cameraSnapshotUrl,
-                      let url = URL(string: urlString) {
-                asyncSnapshotImage(url: url)
+            } else if CameraURLResolver.isSnapshotReference(printer.cameraSnapshotUrl) {
+                authenticatedSnapshotImage(printerId: printer.id)
             } else {
                 noCameraPlaceholder()
             }
@@ -1516,9 +1521,8 @@ struct PrinterDetailView: View {
         case .directSnapshot:
             if let data = viewModel.snapshotData {
                 snapshotImage(from: data)
-            } else if let urlString = printer.cameraSnapshotUrl,
-                      let url = URL(string: urlString) {
-                asyncSnapshotImage(url: url)
+            } else if CameraURLResolver.isSnapshotReference(printer.cameraSnapshotUrl) {
+                authenticatedSnapshotImage(printerId: printer.id)
             } else {
                 snapshotUnavailable()
             }
@@ -1549,24 +1553,24 @@ struct PrinterDetailView: View {
     }
     #endif
 
-    private func asyncSnapshotImage(url: URL) -> some View {
-        AsyncImage(url: url) { phase in
-            switch phase {
-            case .success(let image):
-                image
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .rotationEffect(.degrees(Double(viewModel.cameraRotation)))
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-            case .failure:
+    /// Loads the snapshot through the authenticated printer service; once it arrives,
+    /// `viewModel.snapshotData` switches the preview to `snapshotImage(from:)`.
+    @ViewBuilder
+    private func authenticatedSnapshotImage(printerId: UUID) -> some View {
+        Group {
+            if directSnapshotLoadFailedFor == printerId, !viewModel.isLoadingSnapshot {
                 snapshotUnavailable()
-            case .empty:
+            } else {
                 ProgressView()
                     .frame(height: 200)
                     .frame(maxWidth: .infinity)
-            @unknown default:
-                EmptyView()
             }
+        }
+        .task(id: printerId) {
+            directSnapshotLoadFailedFor = nil
+            let loaded = await viewModel.refreshSnapshot()
+            guard !Task.isCancelled else { return }
+            directSnapshotLoadFailedFor = loaded ? nil : printerId
         }
     }
 

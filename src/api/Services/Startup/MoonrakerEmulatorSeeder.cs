@@ -5,6 +5,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.PrinterCalibration;
 using Farm.Infrastructure.Repositories.Catalog;
 using Farm.Infrastructure.Repositories.UnitOfWork;
+using Farm.Infrastructure.Services.Cameras;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
@@ -137,7 +138,8 @@ public sealed class MoonrakerEmulatorSeeder(
         using IServiceScope scope = scopeFactory.CreateScope();
         IUnitOfWork unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
         ICatalogRepository catalog = scope.ServiceProvider.GetRequiredService<ICatalogRepository>();
-        IPrintersService printersService = scope.ServiceProvider.GetRequiredService<IPrintersService>();
+        IPrinterCameraSynchronizer cameraSynchronizer =
+            scope.ServiceProvider.GetRequiredService<IPrinterCameraSynchronizer>();
         IMachineProfileRepository machineProfiles =
             scope.ServiceProvider.GetRequiredService<IMachineProfileRepository>();
         IProcessProfileRepository processProfiles =
@@ -276,7 +278,7 @@ public sealed class MoonrakerEmulatorSeeder(
         foreach (MoonrakerEmulatorPrinterSeed seed in settings.Printers.Where(seed =>
                      !seed.Name.Equals("Moonraker Offline", StringComparison.Ordinal)))
         {
-            await printersService.RefreshCameraUrlsAsync(seed.Id, cancellationToken);
+            _ = await cameraSynchronizer.SyncPrinterAsync(seed.Id, explicitRequest: true, cancellationToken);
         }
 
         logger.LogInformation(

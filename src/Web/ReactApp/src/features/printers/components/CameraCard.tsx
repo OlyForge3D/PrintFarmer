@@ -1,15 +1,18 @@
 import { useState } from 'react';
 import { RotateCw } from 'lucide-react';
-import { CameraHealthStatus } from '@/types/api';
 import type { Printer } from '@/types/api';
-import { CameraIcon, ExternalLinkIcon, ImageIcon, VideoIcon } from '@/common/components/icons/MdiIcons';
-import { Button, Badge } from '@/common/components/ui';
+import { CameraIcon, ExternalLinkIcon } from '@/common/components/icons/MdiIcons';
+import { Button } from '@/common/components/ui';
+import { CameraModeControl } from '@/features/cameras/components/CameraModeControl';
+import { CameraHealthBadge } from '@/features/cameras/components/CameraHealthBadge';
 import { usePrinterCameras } from '@/features/cameras/hooks/usePrinterCameras';
 import {
   getCameraMediaTransformClassName,
   useCameraViewPreferences,
 } from '@/features/cameras/hooks/useCameraViewPreferences';
 import { usePrinterSnapshotPreview } from '@/features/cameras/hooks/usePrinterSnapshotPreview';
+import { useAuthenticatedMjpegStream } from '@/features/cameras/hooks/useAuthenticatedMjpegStream';
+import { getAuthenticatedCameraProxyRoute } from '@/common/auth/authenticatedCameraRoutes';
 import {
   canUseMjpegStream,
   isUnsupportedCameraPreview,
@@ -42,6 +45,7 @@ export function CameraCard({
     accessMode: p.cameraAccessMode,
     streamFormat: p.cameraStreamFormat,
     snapshotStrategy: p.cameraSnapshotStrategy,
+    streamUrl: cameraStreamUrl,
     snapshotUrl: cameraSnapshotUrl,
   };
   const pollSnapshotPreview = shouldPollPrinterSnapshot(previewContract);
@@ -54,7 +58,8 @@ export function CameraCard({
     pollSnapshotPreview,
     refreshIntervalMs,
     directSnapshotUrl,
-    !!directSnapshotUrl
+    !!directSnapshotUrl,
+    getAuthenticatedCameraProxyRoute(cameraSnapshotUrl)
   );
   const hasCameraUrls = unsupportedPreview || hasStream || pollSnapshotPreview || !!directSnapshotUrl;
   const hasSnapshot = pollSnapshotPreview || !!directSnapshotUrl;
@@ -63,7 +68,6 @@ export function CameraCard({
     setCameraMode,
     rotation,
     rotateClockwise,
-    hasModeToggle,
   } = useCameraViewPreferences({
     preferenceKey: `printer:${p.id}`,
     defaultMode: hasStream ? 'stream' : 'snapshot',
@@ -76,67 +80,62 @@ export function CameraCard({
   const primaryCamera = printerCameras?.[0];
   const cameraCount = printerCameras?.length ?? 0;
 
-  // Determine which URL to show
+  const { streamSrc, streamUnsupported, streamFailed } = useAuthenticatedMjpegStream(
+    cameraStreamUrl,
+    cameraMode === 'stream' && hasStream,
+  );
+  const safeStreamRoute = getAuthenticatedCameraProxyRoute(cameraStreamUrl);
+  const liveStreamSrc = safeStreamRoute ? streamSrc : cameraStreamUrl;
   const snapshotPreviewUrl = snapshotSrc ?? directSnapshotUrl;
-  const activeUrl = cameraMode === 'stream' && hasStream 
-    ? cameraStreamUrl 
+  const streamImageFailed = !!liveStreamSrc && failedUrl === liveStreamSrc;
+  const streamFallsBackToSnapshot = cameraMode === 'stream' && (streamUnsupported || streamFailed || streamImageFailed) && !!snapshotPreviewUrl;
+  const streamIssue = cameraMode === 'stream'
+    ? streamUnsupported
+      ? 'unsupported'
+      : streamFailed || streamImageFailed
+        ? 'failed'
+        : undefined
+    : undefined;
+  const activeUrl = cameraMode === 'stream' && hasStream
+    ? streamFallsBackToSnapshot ? snapshotPreviewUrl : liveStreamSrc
     : cameraMode === 'snapshot' && snapshotPreviewUrl
-    ? snapshotPreviewUrl
-    : hasStream 
-    ? cameraStreamUrl 
-    : snapshotPreviewUrl;
+      ? snapshotPreviewUrl
+      : hasStream
+        ? liveStreamSrc
+        : snapshotPreviewUrl;
+  const showingLiveStream = cameraMode === 'stream' && !!liveStreamSrc && !streamUnsupported && !streamFailed && !streamImageFailed;
   const imageError = !!activeUrl && failedUrl === activeUrl;
   const mediaClassName = getCameraMediaTransformClassName(rotation);
-  const externalUrl = cameraMode === 'stream' && hasStream
-    ? cameraStreamUrl
-    : pollSnapshotPreview
-    ? null
-    : activeUrl;
-
-  // Health status dot color
-  const getHealthDotColor = (health: CameraHealthStatus) => {
-    switch (health) {
-      case CameraHealthStatus.Healthy: return 'bg-pf-success';
-      case CameraHealthStatus.Degraded: return 'bg-pf-warning';
-      case CameraHealthStatus.Unhealthy: return 'bg-pf-error';
-      default: return 'bg-pf-text-tertiary';
-    }
-  };
+  const externalUrl = activeUrl && !getAuthenticatedCameraProxyRoute(activeUrl) ? activeUrl : null;
 
   return (
     <div className="rounded-lg shadow-lg backdrop-blur-xl bg-pf-bg-0/5 border border-white/10 hover:border-white/20 transition-colors overflow-hidden flex flex-col min-h-0">
       {/* Camera feed - main content */}
       <div ref={previewContainerRef} className="relative w-full aspect-video bg-pf-bg-2">
-        {cameraMode === 'stream' && hasStream && activeUrl ? (
-          <iframe
-            src={activeUrl}
-            title={`${p.name} live camera feed`}
-            className={`border-0 bg-black ${mediaClassName}`}
-            loading="lazy"
-            referrerPolicy="no-referrer"
-          />
-        ) : hasCameraUrls && !imageError ? (
+        {activeUrl && !imageError ? (
           <img
             src={activeUrl ?? ''}
-            alt={`${p.name} camera feed`}
+            alt={showingLiveStream ? `${p.name} live camera feed` : `${p.name} camera preview`}
             className={`object-contain bg-black ${mediaClassName}`}
             loading="lazy"
             onError={() => setFailedUrl(activeUrl ?? '')}
           />
         ) : unsupportedPreview ? (
-          <div className="absolute inset-0 flex flex-col items-center justify-center text-pf-text-tertiary p-4">
+          <div role="status" aria-live="polite" className="absolute inset-0 flex flex-col items-center justify-center text-pf-text-tertiary p-4">
             <CameraIcon className="w-12 h-12 mb-2 opacity-30" />
             <span className="text-center text-sm font-medium text-pf-text-secondary">No live preview available</span>
-            <span className="mt-1 max-w-xs text-center text-xs text-pf-text-tertiary">
+            <span className="sr-only">
               This camera does not provide an embeddable MJPEG live stream.
             </span>
           </div>
         ) : (
-          <div className="absolute inset-0 flex flex-col items-center justify-center text-pf-text-tertiary p-4">
+          <div role="status" aria-live="polite" className="absolute inset-0 flex flex-col items-center justify-center text-pf-text-tertiary p-4">
             <CameraIcon className="w-12 h-12 mb-2 opacity-30" />
-            <span className="text-sm">{hasCameraUrls ? 'Camera unavailable' : 'No linked camera configured'}</span>
+            <span className="text-sm">{streamUnsupported
+              ? hasSnapshot ? 'Live preview unsupported; using snapshot preview' : 'Live preview unsupported; no snapshot configured'
+              : streamFailed ? 'Live stream unavailable; reconnecting' : hasCameraUrls ? 'Camera unavailable' : 'No linked camera configured'}</span>
             {snapshotFailed && (
-              <span className="mt-1 max-w-xs text-center text-xs text-pf-text-tertiary">
+              <span className="sr-only">
                 Snapshot polling is temporarily unavailable; the preview will retry automatically.
               </span>
             )}
@@ -145,64 +144,22 @@ export function CameraCard({
       </div>
 
       {/* Footer - printer name and info */}
-      <div className="space-y-3 p-3">
-        <div className="font-bold text-base text-pf-text-primary font-bebas uppercase truncate">
+      <div className="flex flex-wrap items-center gap-2 p-3">
+        <div
+          className="min-w-0 flex-1 font-bold text-base text-pf-text-primary font-bebas uppercase truncate"
+          title={[p.name, p.modelName, isOnline ? 'Online' : 'Offline', isPrinting ? 'Printing' : state, cameraCount > 1 ? `${cameraCount} cameras` : undefined].filter(Boolean).join(' · ')}
+        >
           {p.name}
         </div>
-        {p.modelName && (
-          <div className="text-pf-text-secondary text-xs truncate">
-            {p.modelName}
-          </div>
+
+        {primaryCamera && (
+          <CameraHealthBadge
+            healthStatus={primaryCamera.healthStatus}
+            previewFailed={imageError || snapshotFailed || streamUnsupported || streamFailed || streamImageFailed}
+          />
         )}
 
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge
-            variant={isOnline ? 'success' : 'default'}
-            size="sm"
-          >
-            {isOnline ? 'Online' : 'Offline'}
-          </Badge>
-          {isPrinting && (
-            <Badge variant="warning" size="sm">
-              Printing
-            </Badge>
-          )}
-          {primaryCamera && (
-            <span className="inline-flex items-center gap-1.5 rounded-xs bg-pf-bg-2 px-2 py-1 text-[11px] text-pf-text-secondary">
-              <span
-                className={`h-2 w-2 rounded-full ${getHealthDotColor(primaryCamera.healthStatus)}`}
-                title={`Camera health: ${primaryCamera.healthStatus}`}
-              />
-              <span>{primaryCamera.healthStatus}</span>
-            </span>
-          )}
-          {cameraCount > 1 && (
-            <Badge variant="default" size="sm">
-              {cameraCount} cameras
-            </Badge>
-          )}
-        </div>
-
         <div className="flex items-center justify-end gap-2 overflow-x-auto">
-          <div
-            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-pf-bg-2 text-pf-text-secondary"
-            role="status"
-            title={cameraMode === 'stream' ? 'Live stream active' : 'Snapshot preview active'}
-          >
-            <span className="sr-only">{cameraMode === 'stream' ? 'Live stream active' : 'Snapshot preview active'}</span>
-            <span className="relative inline-flex items-center justify-center">
-              {cameraMode === 'stream' ? (
-                <VideoIcon className="w-4 h-4" />
-              ) : (
-                <ImageIcon className="w-4 h-4" />
-              )}
-              <span
-                className={`absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full ${cameraMode === 'stream' ? 'bg-pf-success' : 'bg-pf-accent'}`}
-                aria-hidden="true"
-              />
-            </span>
-          </div>
-
           <div className="flex shrink-0 items-center gap-2">
             <Button
               type="button"
@@ -214,30 +171,15 @@ export function CameraCard({
               aria-label="Rotate camera clockwise"
               iconCenter={<RotateCw className="w-4 h-4" />}
             />
-            {hasModeToggle && (
-              <div className="flex gap-1 rounded-md border border-pf-border bg-pf-bg-2 p-1">
-                <Button
-                  type="button"
-                  variant={cameraMode === 'snapshot' ? 'primary' : 'ghost'}
-                  size="sm"
-                  onClick={() => setCameraMode('snapshot')}
-                  className="h-8 w-8 rounded-full p-0"
-                  title="Snapshot"
-                  aria-label="Snapshot mode"
-                  iconCenter={<ImageIcon className="w-4 h-4" />}
-                />
-                <Button
-                  type="button"
-                  variant={cameraMode === 'stream' ? 'primary' : 'ghost'}
-                  size="sm"
-                  onClick={() => setCameraMode('stream')}
-                  className="h-8 w-8 rounded-full p-0"
-                  title="Stream"
-                  aria-label="Stream mode"
-                  iconCenter={<VideoIcon className="w-4 h-4" />}
-                />
-              </div>
-            )}
+            <CameraModeControl
+              cameraName={p.name}
+              cameraMode={cameraMode}
+              hasStream={hasStream}
+              hasSnapshot={hasSnapshot}
+              streamUnavailable={!!cameraStreamUrl && !hasStream}
+              streamIssue={streamIssue}
+              onModeChange={setCameraMode}
+            />
             {externalUrl && (
               <a
                 href={externalUrl}

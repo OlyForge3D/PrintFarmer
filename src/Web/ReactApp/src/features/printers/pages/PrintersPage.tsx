@@ -1,6 +1,6 @@
-import React, { Suspense, useCallback, useDeferredValue, useMemo, useState, useOptimistic, useTransition, useEffect } from 'react';
+import React, { Suspense, useCallback, useDeferredValue, useMemo, useState, useOptimistic, useTransition, useEffect, useRef } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
-import { usePrinters, useDeletePrinter, usePrinterBackendCapabilities, useBedTypes, usePrinterCameraUrls } from '@/common/hooks/useApi';
+import { usePrinters, useDeletePrinter, usePrinterBackendCapabilities, usePrinterCameraUrls } from '@/common/hooks/useApi';
 import { usePrinterDisplays } from '@/common/hooks/usePrinterDisplay';
 import { useQueryClient } from '@tanstack/react-query';
 import { useKeyboardShortcuts } from '@/common/hooks/useKeyboardShortcuts';
@@ -23,6 +23,7 @@ import { PrinterCardSkeleton } from '@/common/components/skeletons/PrinterCardSk
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { Button } from '@/common/components/ui/Button';
 import { Select } from '@/common/components/ui/Select';
+import { Tooltip } from '@/common/components/ui/Tooltip';
 import { ViewModeToggle, type ViewMode } from '@/common/components/ViewModeToggle';
 import type { Printer, PrinterBackendCapabilitiesDto } from '@/types/api';
 import { requiresBedClearConfirmation } from '@/common/utils/printerStateDisplay';
@@ -31,7 +32,7 @@ import { sortPrintersForDisplay, getBackendName, type PrinterSortMode } from '@/
 import { computeIsSidebarOpen } from '@/features/printers/utils/printerSidebarVisibility';
 import { useIsLgBreakpoint } from '@/common/hooks/useMediaQuery';
 
-import { PrinterIcon, PrinterSearchIcon, ClearFiltersIcon } from '@/common/components/icons/MdiIcons';
+import { PrinterIcon, PrinterSearchIcon, ClearFiltersIcon, FilterIcon } from '@/common/components/icons/MdiIcons';
 import PrinterImportExportControls from '@/features/printers/components/admin/PrinterImportExportControls';
 import PrinterBulkControls from '@/features/printers/components/admin/PrinterBulkControls';
 import { usePageTour } from '@/common/hooks/usePageTour';
@@ -111,8 +112,6 @@ export function PrintersPage() {
   const showPrintersError = isPrintersError || (!!stalePrintersError && !printers);
   const displayedPrintersError = isPrintersError ? printersError : stalePrintersError;
   const { data: cameraUrls = [] } = usePrinterCameraUrls();
-
-  const { data: bedTypes = [] } = useBedTypes();
 
   const printersWithCameraUrls = useMemo(() => {
     const cameraUrlsByPrinterId = new Map(
@@ -242,7 +241,8 @@ export function PrintersPage() {
   const [stateFilter, setStateFilter] = useState<PrinterStateFilter>('all');
   const [backendFilter, setBackendFilter] = useState<BackendFilter>('all');
   const [availabilityFilter, setAvailabilityFilter] = useState<AvailabilityFilter>('all');
-  const [bedTypeFilter, setBedTypeFilter] = useState<string>('all');
+  const [filtersExpanded, setFiltersExpanded] = useState(false);
+  const filterToggleRef = useRef<HTMLButtonElement>(null);
   const [sortMode, setSortMode] = useState<PrinterSortMode>(() => {
     const saved = localStorage.getItem('printerSortMode');
     if (saved === 'state' || saved === 'name' || saved === 'backend') return saved;
@@ -265,7 +265,7 @@ export function PrintersPage() {
   const expandedPrinterId = routePrinterId && printersById[routePrinterId] ? routePrinterId : null;
 
   // Hours value for availability filter — cutoff is derived dynamically so it never goes stale
-  const [availabilityHours, setAvailabilityHours] = useState<number | null>(null);
+  const availabilityHours = availabilityFilter === 'all' ? null : Number(availabilityFilter);
 
   // Ticking now value for availability filter — updates every 30s so filter stays fresh
   const [filterNow, setFilterNow] = useState(Date.now);
@@ -308,29 +308,25 @@ export function PrintersPage() {
         return new Date(p.estimatedCompletionTimeUtc).getTime() <= cutoffMs;
       });
     }
-    // Bed type filter
-    if (bedTypeFilter !== 'all') {
-      filtered = filtered.filter(p => p.bedTypeId === bedTypeFilter);
-    }
     return sortPrintersForDisplay(filtered, sortMode, pendingPrinterIds);
-  }, [optimisticPrinters, stateFilter, backendFilter, availabilityHours, filterNow, sortMode, pendingPrinterIds, bedTypeFilter]);
+  }, [optimisticPrinters, stateFilter, backendFilter, availabilityHours, filterNow, sortMode, pendingPrinterIds]);
 
   const deferredUserPrinters = useDeferredValue(userPrinters);
 
   // Whether any filter is narrowing the printer list. Used to distinguish the
   // genuine "no printers in the farm" onboarding state from a "filters matched
   // nothing" state (#1713) — the two need different empty-state messaging.
-  const hasActiveFilters = stateFilter !== 'all'
-    || backendFilter !== 'all'
-    || availabilityHours !== null
-    || bedTypeFilter !== 'all';
+  const activeFilterCount =
+    (stateFilter !== 'all' ? 1 : 0) +
+    (backendFilter !== 'all' ? 1 : 0) +
+    (availabilityFilter !== 'all' ? 1 : 0);
+  const hasActiveFilters = activeFilterCount > 0;
 
   const handleClearFilters = useCallback(() => {
     setStateFilter('all');
     setBackendFilter('all');
     setAvailabilityFilter('all');
-    setAvailabilityHours(null);
-    setBedTypeFilter('all');
+    filterToggleRef.current?.focus();
   }, []);
 
   // Keyboard shortcuts for printer management
@@ -556,8 +552,10 @@ export function PrintersPage() {
       <FailureDetectionPollingProvider value={anyObicoEnabled}>
       <div className={isSidebarOpen ? 'min-w-0 lg:grid lg:grid-cols-[minmax(0,1fr)_24rem] lg:items-start lg:gap-6' : 'min-w-0'}>
         <div className="min-w-0">
-          {/* Toolbar with three-zone layout: Primary Actions | Spacer | View & Filters */}
-          <div className="flex flex-col gap-4 mb-6">
+          {/* Actions, sort and view remain available while filters are collapsed.
+              The full-width strip cannot be spotlit without the actions row, so the
+              tour anchor widens only while the strip is open. */}
+          <div data-tour={filtersExpanded ? 'printers-filters' : undefined} className="flex flex-col gap-4 mb-6">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               {/* Primary Actions (Left) */}
               <div data-tour="printers-actions" className="flex flex-col sm:flex-row sm:items-center gap-2">
@@ -582,16 +580,74 @@ export function PrintersPage() {
               </div>
 
               {/* View & Filters (Right) */}
-              <div data-tour="printers-filters" className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center sm:justify-end gap-3">
-                {/* State Filter */}
-                <div className="flex items-center gap-2">
-                  <label htmlFor="state-filter" className="text-sm text-pf-text-secondary hidden sm:inline">State:</label>
+              <div data-tour={filtersExpanded ? undefined : 'printers-filters'} className="flex flex-wrap items-center gap-2 sm:justify-end">
+                <div className="flex items-center gap-0.5">
+                <Tooltip content={filtersExpanded ? 'Hide printer filters' : 'Show printer filters'} position="top">
+                  <Button
+                    ref={filterToggleRef}
+                    type="button"
+                    variant={filtersExpanded || hasActiveFilters ? 'subtle' : 'secondary'}
+                    size="sm"
+                    className="min-h-11 min-w-11"
+                    aria-label={`Printer filters${hasActiveFilters ? ` (${activeFilterCount} active)` : ''}`}
+                    aria-expanded={filtersExpanded}
+                    aria-controls="printer-filter-strip"
+                    onClick={() => setFiltersExpanded(expanded => !expanded)}
+                    iconLeft={<FilterIcon className="h-5 w-5" isOn={hasActiveFilters} />}
+                  />
+                </Tooltip>
+                {hasActiveFilters && (
+                  <Tooltip content="Clear filters" position="top" ariaMode="hidden">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="min-h-11 min-w-11"
+                      aria-label="Clear filters"
+                      onClick={handleClearFilters}
+                      iconLeft={<ClearFiltersIcon className="h-5 w-5" />}
+                    />
+                  </Tooltip>
+                )}
+                </div>
+
+                {/* Sort Order */}
+                <div className="flex min-w-[8.5rem] flex-1 items-center gap-2 sm:flex-none">
+                  <label htmlFor="sort-mode" className="sr-only text-sm text-pf-text-secondary sm:not-sr-only">Sort:</label>
+                  <Select
+                    id="sort-mode"
+                    value={sortMode}
+                    onChange={e => setSortMode(e.target.value as PrinterSortMode)}
+                    aria-label="Sort printers by"
+                    className="min-h-11 min-w-0"
+                    containerClassName="sm:w-40"
+                  >
+                    <option value="state">State</option>
+                    <option value="name">Name</option>
+                    <option value="backend">Backend</option>
+                  </Select>
+                </div>
+
+                <ViewModeToggle viewMode={viewMode} onChange={setViewMode} />
+              </div>
+            </div>
+
+            <div
+              id="printer-filter-strip"
+              hidden={!filtersExpanded}
+              role="group"
+              aria-label="Printer filters"
+              className="rounded-lg border border-pf-border bg-pf-bg-1 p-3"
+            >
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <div className="flex min-w-0 flex-col gap-1">
+                  <label htmlFor="state-filter" className="text-sm font-medium text-pf-text-secondary">State</label>
                   <Select
                     id="state-filter"
                     value={stateFilter}
                     onChange={e => setStateFilter(e.target.value as PrinterStateFilter)}
                     aria-label="Filter by printer state"
-                    className="min-w-0"
+                    className="min-h-11 min-w-0"
                   >
                     <option value="all">All States</option>
                     <option value="online">Online</option>
@@ -603,14 +659,14 @@ export function PrintersPage() {
                 </div>
 
                 {/* Backend Filter */}
-                <div className="flex items-center gap-2">
-                  <label htmlFor="backend-filter" className="text-sm text-pf-text-secondary hidden sm:inline">Backend:</label>
+                <div className="flex min-w-0 flex-col gap-1">
+                  <label htmlFor="backend-filter" className="text-sm font-medium text-pf-text-secondary">Backend</label>
                   <Select
                     id="backend-filter"
                     value={backendFilter}
                     onChange={e => setBackendFilter(e.target.value as BackendFilter)}
                     aria-label="Filter by backend"
-                    className="min-w-0"
+                    className="min-h-11 min-w-0"
                   >
                     <option value="all">All Backends</option>
                     <option value="Moonraker">Moonraker</option>
@@ -622,18 +678,14 @@ export function PrintersPage() {
                 </div>
 
                 {/* Availability Filter */}
-                <div className="flex items-center gap-2">
-                  <label htmlFor="availability-filter" className="text-sm text-pf-text-secondary hidden sm:inline">Done in:</label>
+                <div className="flex min-w-0 flex-col gap-1">
+                  <label htmlFor="availability-filter" className="text-sm font-medium text-pf-text-secondary">Done in</label>
                   <Select
                     id="availability-filter"
                     value={availabilityFilter}
-                    onChange={e => {
-                      const val = e.target.value as AvailabilityFilter;
-                      setAvailabilityFilter(val);
-                      setAvailabilityHours(val !== 'all' ? parseInt(val, 10) : null);
-                    }}
-                    aria-label="Filter by estimated completion time"
-                    className="min-w-0"
+                    onChange={e => setAvailabilityFilter(e.target.value as AvailabilityFilter)}
+                    aria-label="Done in (estimated completion time)"
+                    className="min-h-11 min-w-0"
                   >
                     <option value="all">Any Time</option>
                     <option value="1">≤ 1 hour</option>
@@ -645,45 +697,9 @@ export function PrintersPage() {
                   </Select>
                 </div>
 
-                {/* Bed Type Filter */}
-                {bedTypes.length > 0 && (
-                  <div className="flex items-center gap-2">
-                    <label htmlFor="bed-type-filter" className="text-sm text-pf-text-secondary hidden sm:inline">Bed:</label>
-                    <Select
-                      id="bed-type-filter"
-                      value={bedTypeFilter}
-                      onChange={e => setBedTypeFilter(e.target.value)}
-                      aria-label="Filter by bed type"
-                      className="min-w-0"
-                    >
-                      <option value="all">All Beds</option>
-                      {bedTypes.map(bt => (
-                        <option key={bt.id} value={bt.id}>{bt.name}</option>
-                      ))}
-                    </Select>
-                  </div>
-                )}
-
-                {/* Sort Order */}
-                <div className="flex items-center gap-2">
-                  <label htmlFor="sort-mode" className="text-sm text-pf-text-secondary hidden sm:inline">Sort:</label>
-                  <Select
-                    id="sort-mode"
-                    value={sortMode}
-                    onChange={e => setSortMode(e.target.value as PrinterSortMode)}
-                    aria-label="Sort printers by"
-                    className="min-w-0"
-                  >
-                    <option value="state">State</option>
-                    <option value="name">Name</option>
-                    <option value="backend">Backend</option>
-                  </Select>
-                </div>
-
-                {/* View Mode Toggle */}
-                <ViewModeToggle viewMode={viewMode} onChange={setViewMode} />
               </div>
             </div>
+
           </div>
 
           {/* Printer details sidebar on small screens: between toolbar and grid.
@@ -713,7 +729,9 @@ export function PrintersPage() {
                 </div>
               ) : (deferredUserPrinters.length === 0 && hasActiveFilters) ? (
                 <div className="text-center py-12">
-                  <ClearFiltersIcon className="h-12 w-12 text-pf-text-tertiary mx-auto mb-4" />
+                  <span aria-hidden="true">
+                    <ClearFiltersIcon className="h-12 w-12 text-pf-text-tertiary mx-auto mb-4" />
+                  </span>
                   <h3 className="text-xl font-semibold text-pf-text-primary mb-2">No printers match these filters</h3>
                   <p className="text-pf-text-secondary mb-6">Try adjusting or clearing your filters to see more printers.</p>
                   <Button variant="secondary" size="sm" onClick={handleClearFilters}>

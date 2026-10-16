@@ -119,9 +119,11 @@ function parseDisplayTitle(displayTitle) {
 // The record encodes its outcome in the status state and description:
 //   success  `REVIEWED (self-attested) @ <sha12> by <agents>`             -> agents reviewed
 //   success  `REVIEWED (self-attested, carried across sync) @ <sha12> by <agents>`
-//            -> agents reviewed an earlier head, and the PR's own diff against
-//               its base branch is proven byte-for-byte unchanged since then
-//               (a pure base-branch sync merge), so the record was carried
+//            -> agents reviewed an earlier head, and the PR's own contribution
+//               against its base branch is proven unchanged since then (a pure
+//               base-branch sync merge: identical diff entries, except
+//               base-overlapping files content-verified as a clean three-way
+//               merge, issue #2801), so the record was carried
 //               forward rather than re-earned (issue #1633, "Option A")
 //   success  `APPROVE (owner) @ <sha12> by <login>; dissent=N; short=N`
 //            -> owner authorised; agent dissent and quorum shortfall preserved

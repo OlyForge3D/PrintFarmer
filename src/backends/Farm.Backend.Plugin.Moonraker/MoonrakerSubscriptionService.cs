@@ -2130,6 +2130,9 @@ public sealed class MoonrakerSubscriptionService(
         int prevNumGates = state.MmuNumGates;
         string?[]? prevMaterial = (string?[]?)state.MmuGateMaterial?.Clone();
         string?[]? prevColor = (string?[]?)state.MmuGateColor?.Clone();
+        string? prevBypassMaterial = state.MmuBypassMaterial;
+        string? prevBypassColor = state.MmuBypassColor;
+        string? prevBypassFilamentName = state.MmuBypassFilamentName;
 
         if (variables.TryGetProperty("box_count", out JsonElement boxCountElem) &&
             boxCountElem.ValueKind == JsonValueKind.Number)
@@ -2177,6 +2180,26 @@ public sealed class MoonrakerSubscriptionService(
 
         EnsureSlotArrays(state, numSlots);
 
+        // The Rack is not a gate but carries its own live type/color, resolved like gate slots.
+        if (variables.TryGetProperty($"filament_slot{QidiboxRackSlot}", out JsonElement rackTypeElem) &&
+            rackTypeElem.ValueKind == JsonValueKind.Number)
+        {
+            int rackType = rackTypeElem.GetInt32();
+            string rackName = state.QidiboxFilamentDict.TryGetValue(rackType, out string? rackFilName)
+                ? rackFilName
+                : $"Type {rackType}";
+            state.MmuBypassMaterial = rackName;
+            state.MmuBypassFilamentName = rackName;
+        }
+
+        if (variables.TryGetProperty($"color_slot{QidiboxRackSlot}", out JsonElement rackColorElem) &&
+            rackColorElem.ValueKind == JsonValueKind.Number)
+        {
+            state.MmuBypassColor = state.QidiboxColorDict.TryGetValue(rackColorElem.GetInt32(), out string? rackColorHex)
+                ? rackColorHex
+                : "#808080";
+        }
+
         for (int i = 0; i < numSlots; i++)
         {
             if (variables.TryGetProperty($"filament_slot{i}", out JsonElement filTypeElem) &&
@@ -2212,7 +2235,10 @@ public sealed class MoonrakerSubscriptionService(
             prevBypass != state.MmuHasBypass ||
             prevNumGates != state.MmuNumGates ||
             !SequenceEqualOrBothNull(prevMaterial, state.MmuGateMaterial) ||
-            !SequenceEqualOrBothNull(prevColor, state.MmuGateColor))
+            !SequenceEqualOrBothNull(prevColor, state.MmuGateColor) ||
+            prevBypassMaterial != state.MmuBypassMaterial ||
+            prevBypassColor != state.MmuBypassColor ||
+            prevBypassFilamentName != state.MmuBypassFilamentName)
         {
             state.MmuDirty = true;
         }

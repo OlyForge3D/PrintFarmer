@@ -12,6 +12,7 @@ import { extractValidationErrorMessage } from "@/common/utils/apiErrors";
 import { resetAuthenticatedSignalRSession } from "@/common/auth/authenticatedSignalRSession";
 import { notifyAuthenticationExpired } from "@/common/auth/authenticationExpiration";
 import type { ApiError } from "@/types/api";
+import { clearStoredAuthentication, renewAccessToken } from "@/common/auth/sessionTokens";
 
 declare module "axios" {
   interface AxiosRequestConfig {
@@ -37,6 +38,8 @@ export interface PfRequestConfig extends AxiosRequestConfig {
 
 interface PfInternalRequestConfig extends PfRequestConfig {
   authTokenAtRequest?: string | null;
+  authChangedWhileInFlight?: boolean;
+  authRetried?: boolean;
 }
 
 // Utility to generate a correlation ID (UUID v4)
@@ -86,32 +89,42 @@ function createHttpClient(): AxiosInstance {
       // the caller set skipAuthRedirect:true on the request config to handle
       // the 401 inline (e.g. passkey assertion, which the backend signals
       // with 401 for failed credentials rather than as a session expiry).
+      const requestPath = requestConfig?.url ?? '';
+      const isAuthEndpoint = /\/auth\/(?:login|refresh)(?:\?|$)/i.test(requestPath);
       if (
         error.response?.status === 401 &&
         !requestConfig?.skipAuthRedirect &&
-        requestConfig?.authTokenAtRequest === localStorage.getItem("auth-token")
+        !isAuthEndpoint &&
+        requestConfig?.authTokenAtRequest
       ) {
-        let invalidatedCurrentSession = false;
-        try {
-          await resetAuthenticatedSignalRSession();
-        } catch (resetError) {
-          console.error(
-            "Failed to reset authenticated SignalR session after a 401 response.",
-            resetError,
-          );
+        const currentToken = localStorage.getItem("auth-token");
+        if (!requestConfig.authRetried && currentToken !== requestConfig.authTokenAtRequest && currentToken) {
+          requestConfig.authRetried = true;
+          requestConfig.authChangedWhileInFlight = true;
+          return instance.request(requestConfig);
         }
-        if (requestConfig.authTokenAtRequest === localStorage.getItem("auth-token")) {
-          localStorage.removeItem("auth-token");
-          notifyAuthenticationExpired();
-          invalidatedCurrentSession = true;
+        if (!requestConfig.authRetried && currentToken === requestConfig.authTokenAtRequest && localStorage.getItem('auth-refresh-token')) {
+          const renewedToken = await renewAccessToken();
+          if (renewedToken) {
+            requestConfig.authRetried = true;
+            requestConfig.headers = requestConfig.headers ?? {};
+            requestConfig.headers.Authorization = ['Bearer', renewedToken].join(' ');
+            return instance.request(requestConfig);
+          }
         }
-        // Only redirect if not already on auth pages
-        if (
-          invalidatedCurrentSession &&
-          window.location.pathname !== "/login" &&
-          window.location.pathname !== "/register"
-        ) {
-          window.location.href = "/login";
+        if (!requestConfig.authChangedWhileInFlight && localStorage.getItem("auth-token") === requestConfig.authTokenAtRequest) {
+          try {
+            await resetAuthenticatedSignalRSession();
+          } catch (resetError) {
+            console.error("Failed to reset authenticated SignalR session after a 401 response.", resetError);
+          }
+          if (localStorage.getItem("auth-token") === requestConfig.authTokenAtRequest) {
+            clearStoredAuthentication();
+            notifyAuthenticationExpired();
+            if (window.location.pathname !== "/login" && window.location.pathname !== "/register") {
+              window.location.href = "/login";
+            }
+          }
         }
       }
 

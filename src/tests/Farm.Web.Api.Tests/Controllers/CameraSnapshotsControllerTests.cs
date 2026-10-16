@@ -90,7 +90,7 @@ public class CameraSnapshotsControllerTests : IClassFixture<CustomWebApplication
         {
             Id = Guid.NewGuid(),
             Name = "Test Camera",
-            PrinterId = printer.Id,
+            PrinterLinks = { new CameraPrinter { PrinterId = printer.Id, IsPrimary = true } },
             IsEnabled = true,
         };
         db.Cameras.Add(camera);

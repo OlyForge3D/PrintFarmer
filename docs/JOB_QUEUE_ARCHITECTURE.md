@@ -174,6 +174,77 @@ active lifecycle controls carry the exact job and attempt. No later dispatch may
 claim the printer while that barrier is held. Direct manual-motion uncertainty
 uses the release rules below, not print-start reconciliation.
 
+### Printer materials and spool assignment
+
+Detailed printer cards and the sidebar share one `FilamentSlots` presentation,
+with spool-shaped icons, for MMUs (QidiBox, AFC, Happy Hare), multi-toolhead
+(U1), AD5X, and single-toolhead printers. At rest it shows one line for the
+active feed: slot (multi-feed only), material, and remaining grams when known.
+Unknown grams are never shown as zero. Multi-feed devices add a slot disclosure
+that expands to a rail of spools; an amber marker flags an empty slot. Without a
+known active feed, the line shows the slot spools rather than inventing one.
+Single-toolhead printers show no Tool or T0 label.
+
+- **No Spoolman binding** shows a neutral spool with **+**. Device-reported
+  filament can still be loaded.
+- **Empty** requires the matching Spoolman record to report exactly zero
+  remaining grams. Missing weights, failed reads, and coverage estimates never
+  establish depletion.
+- **In use** marks the feed that live telemetry confirms is loaded, not the
+  slot selected for inspection.
+
+Selecting a slot opens one panel of icon-only 44px buttons with accessible
+names and tooltips. **Assign**, **Change spool**, and **Unassign** use the
+existing picker and revision-checked endpoints, require `queue:write`, and keep
+offline bookkeeping; errors leave assignment information visible with Retry.
+After a divider, **Load**, **Unload**, and **Eject** appear only where
+supported: Eject is QidiBox-only, Happy Hare unload needs a loaded gate, and
+macro-driven U1/AD5X buttons act only on the active slot, otherwise disabled
+with a tooltip reason. Physical commands require an online printer and
+`queue:start`, and keep existing confirmations and heat-then-unload.
+
+The slot panel replaces the generic Load/Unload macro group. There is no
+separate printer-level Change Filament (M600) button; all filament and spool
+handling lives in the Materials group.
+
+The QidiBox **Rack** (external spool) is hidden by default. Edit Printer offers
+a per-printer **Show external spool** toggle (`showExternalSpool`, persisted
+server-side, default false). Hiding Rack keeps its spool binding and never
+unassigns or actuates; when it is the active feed, the line reads
+`Rack · <material>`. QidiBox gates keep persisted API indices; Rack uses its
+physical toolhead binding. Coverage remains demand-driven and is not encoded in
+spool rings.
+
+### QidiBox filament controls
+
+QidiBox Load, Unload, and Eject use the MMU gate-action endpoint with the
+zero-based box gate index (for example, gate 1 is 1B). Unload and Eject retain
+physical filament-unload safety validation before any firmware command is sent.
+Fresh measured hotend temperature must reach at least 220 °C, or the higher
+verified backend minimum. A requested heater target is not measured temperature.
+
+For a QidiBox or AFC **Unload** rejected solely for a cold hotend, the backend
+heats automatically under the same exclusive physical-control lease. It chooses
+the requested gate's assigned Spoolman filament print temperature, then its
+material's configured default, then the guard minimum. The target is never below
+the verified safety minimum; exceeding installed hotend/nozzle ratings rejects
+before heating (300 °C ceiling when ratings are unavailable). Another gate's or
+the primary's spool is not substituted for a missing box-gate binding.
+
+The server waits for fresh measured temperature within 1 °C of that target and
+requires the unchanged safety guard to pass, then revalidates the lease before
+sending the original unload exactly once. Warm-up is bounded to four minutes;
+the overall request is bounded to five minutes. Web unload requests allow six
+minutes for the server response. Already-hot unloads do not change temperature.
+Load/Eject and other safety failures do not initiate automatic heating.
+
+The MMU panel preserves actionable server error messages. Timeout, cancellation,
+stale telemetry, or lease loss prevents unloading; an accepted heater target
+remains set, so check the printer/target before explicitly retrying. An uncertain
+heater write retains reconciliation protection and is never automatically
+replayed. No firmware macros or printer configuration are modified. Backend
+orchestration gives every client of the shared endpoint the same behavior.
+
 ### Direct manual-motion control
 
 React and iOS submit `HomeAll`, `HomeXY`, `HomeZ`, relative jog, and absolute

@@ -110,6 +110,7 @@ public class Model3DFilesController(
     /// <param name="thumbnailFile">The replacement PNG thumbnail.</param>
     /// <param name="ct">Cancellation token for the request.</param>
     [HttpPut("{id:guid}/thumbnail")]
+    [Authorize(Policy = "ModelWrite")]
     [Consumes("multipart/form-data")]
     [ProducesResponseType(typeof(Model3DThumbnailUpdateResultDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -488,6 +489,7 @@ public class Model3DFilesController(
     /// </summary>
     /// <param name="modelFile">The model file to validate.</param>
     [HttpPost("validate")]
+    [Authorize(Policy = "ModelRead")]
     [ProducesResponseType(typeof(Model3DValidationResultDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public IActionResult ValidateModel(IFormFile modelFile)
@@ -509,6 +511,7 @@ public class Model3DFilesController(
     /// <param name="geometryFile">The STL geometry file to upload.</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpPost("upload-geometry")]
+    [Authorize(Policy = "ModelWrite")]
     [ProducesResponseType(typeof(GeometryUploadResultDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Security", "S5693", Justification = "Cut-model geometry uploads are explicitly capped at 200 MB for slicer workflows.")]

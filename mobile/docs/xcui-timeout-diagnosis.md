@@ -473,6 +473,8 @@ than private defaults or running a second collector.
   previously used 840s/15 minutes; on the `xcode-27` runner, first launch on
   the downloaded iOS 26.5 runtime took ~8 minutes and tests ran ~2x slower, so
   that budget expired mid-suite (#3286).
+  The Xcode 26.6/macOS 26 containment rollback retains these ceilings unchanged;
+  the measurements above describe the historical Xcode 27 runner.
   Local overrides are explicit `--invocation-timeout` and
   `--finalization-timeout` arguments before `--`, both greater than 10s.
 - The runner forces enabled XCTest timeouts and serial execution; it rejects
