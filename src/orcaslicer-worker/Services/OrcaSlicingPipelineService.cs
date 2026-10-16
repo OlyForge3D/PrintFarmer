@@ -2287,10 +2287,9 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
     private static extern int CloseFileDescriptor(int fileDescriptor);
 #pragma warning restore CA2101, SYSLIB1054
 
-    private static async Task<GcodeMetadata> ExtractGcodeMetadataAsync(string gcodeFilePath, CancellationToken cancellationToken)
+    internal static async Task<GcodeMetadata> ExtractGcodeMetadataAsync(string gcodeFilePath, CancellationToken cancellationToken)
     {
         FileInfo fileInfo = new FileInfo(gcodeFilePath);
-        string[] lines = await File.ReadAllLinesAsync(gcodeFilePath, cancellationToken).ConfigureAwait(false);
         GcodeMetadata metadata = new GcodeMetadata();
         Regex printTimeRegex = MyRegex();
         Regex printTimeSecondsRegex = new Regex(@";\s*estimated printing time.*?(\d+)s", RegexOptions.IgnoreCase);
@@ -2298,41 +2297,64 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         Regex layerRegex = new Regex(@";\s*layer_count\s*=\s*(\d+)", RegexOptions.IgnoreCase);
         Regex layerCommentRegex = new Regex(@";\s*LAYER:(\d+)", RegexOptions.IgnoreCase);
         int maxLayer = 0;
-        foreach (string line in lines)
+        int zMoveLineCount = 0;
+
+        // Stream a single forward pass (issue #3341). Mirrors File.ReadAllLinesAsync exactly:
+        // UTF-8 default with BOM detection, the same \r / \n / \r\n line splitting, and a final
+        // unterminated line is still yielded — so parse results are unchanged, but peak memory is
+        // O(longest line) instead of O(file size).
+        var fileOptions = new FileStreamOptions
         {
-            Match tm = printTimeRegex.Match(line);
-            if (tm.Success)
+            Mode = FileMode.Open,
+            Access = FileAccess.Read,
+            Share = FileShare.Read,
+            Options = FileOptions.Asynchronous | FileOptions.SequentialScan,
+        };
+
+        // Block-scoped so the handle is released before the fallback logic, matching ReadAllLinesAsync.
+        using (StreamReader reader = new StreamReader(gcodeFilePath, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, fileOptions))
+        {
+            while (await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false) is { } line)
             {
-                // Multiply in double space (not int) before assigning to the double PrintTimeSeconds field,
-                // so an unexpectedly large parsed hour/minute value cannot silently overflow as int arithmetic.
-                metadata.PrintTimeSeconds = ((double)int.Parse(tm.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture) * 3600) + ((double)int.Parse(tm.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture) * 60);
-            }
-            else
-            {
-                Match ts = printTimeSecondsRegex.Match(line);
-                if (ts.Success)
+                if (line.StartsWith("G1 Z", StringComparison.Ordinal) || line.StartsWith("G0 Z", StringComparison.Ordinal))
                 {
-                    metadata.PrintTimeSeconds = int.Parse(ts.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+                    zMoveLineCount++;
                 }
-            }
 
-            Match fm = filamentRegex.Match(line);
-            if (fm.Success)
-            {
-                double amount = double.Parse(fm.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
-                metadata.FilamentUsageGrams = line.Contains("mm", StringComparison.Ordinal) ? amount * 0.0025 : amount;
-            }
+                Match tm = printTimeRegex.Match(line);
+                if (tm.Success)
+                {
+                    // Multiply in double space (not int) before assigning to the double PrintTimeSeconds field,
+                    // so an unexpectedly large parsed hour/minute value cannot silently overflow as int arithmetic.
+                    metadata.PrintTimeSeconds = ((double)int.Parse(tm.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture) * 3600) + ((double)int.Parse(tm.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture) * 60);
+                }
+                else
+                {
+                    Match ts = printTimeSecondsRegex.Match(line);
+                    if (ts.Success)
+                    {
+                        metadata.PrintTimeSeconds = int.Parse(ts.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+                    }
+                }
 
-            Match lc = layerRegex.Match(line);
-            if (lc.Success)
-            {
-                metadata.LayerCount = int.Parse(lc.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
-            }
+                Match fm = filamentRegex.Match(line);
+                if (fm.Success)
+                {
+                    double amount = double.Parse(fm.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+                    metadata.FilamentUsageGrams = line.Contains("mm", StringComparison.Ordinal) ? amount * 0.0025 : amount;
+                }
 
-            Match lcm = layerCommentRegex.Match(line);
-            if (lcm.Success)
-            {
-                maxLayer = Math.Max(maxLayer, int.Parse(lcm.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture));
+                Match lc = layerRegex.Match(line);
+                if (lc.Success)
+                {
+                    metadata.LayerCount = int.Parse(lc.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+                }
+
+                Match lcm = layerCommentRegex.Match(line);
+                if (lcm.Success)
+                {
+                    maxLayer = Math.Max(maxLayer, int.Parse(lcm.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture));
+                }
             }
         }
 
@@ -2354,7 +2376,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
 
         if (metadata.LayerCount == 0)
         {
-            metadata.LayerCount = lines.Count(l => l.StartsWith("G1 Z", StringComparison.Ordinal) || l.StartsWith("G0 Z", StringComparison.Ordinal));
+            metadata.LayerCount = zMoveLineCount;
         }
 
         if (metadata.LayerCount == 0)
@@ -2365,7 +2387,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         return metadata;
     }
 
-    private sealed class GcodeMetadata
+    internal sealed class GcodeMetadata
     {
         public double PrintTimeSeconds { get; set; }
 
