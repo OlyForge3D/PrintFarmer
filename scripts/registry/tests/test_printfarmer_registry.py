@@ -1068,6 +1068,14 @@ class ExpressionShieldTests(unittest.TestCase):
         self.assertIn("${PLAIN}", shielded)
         self.assertEqual(reg.restore_expressions({"k": [shielded]}, found), {"k": [text]})
 
+    def test_identical_expressions_share_a_token(self):
+        found = []
+        first = reg.shield_expressions("a: ${X:-1}\n", found)
+        second = reg.shield_expressions("b: ${X:-1}\nc: ${Y:-2}\n", found)
+        self.assertEqual(found, ["${X:-1}", "${Y:-2}"])
+        self.assertEqual(first, "a: ${__PFREG_EXPR_0__}\n")
+        self.assertEqual(second, "b: ${__PFREG_EXPR_0__}\nc: ${__PFREG_EXPR_1__}\n")
+
     def test_shield_refuses_files_already_using_the_marker(self):
         with self.assertRaises(reg.MigrationError):
             reg.shield_expressions("x: ${__PFREG_EXPR_0__}", [])
@@ -1150,6 +1158,17 @@ class RealComposeTests(RegistryTestCase):
                          [("${EXTERNAL_MODELS_PATH:-.volumes/models}", "/app/models", True),
                           ("${EXTERNAL_DATA_PATH:-./.volumes/data}", "/data", False),
                           ("$$HOME/literal", "/literal", False)])
+
+    def test_raw_render_merges_identical_colon_expressions_across_files(self):
+        self.write_text("base.yml", "services:\n  api:\n    image: alpine\n    volumes:\n"
+                                    "      - ${DATA_SRC:-./a}:${DATA_TARGET:-/data}\n")
+        self.write_text("over.yml", "services:\n  api:\n    volumes:\n"
+                                    "      - ${OTHER_SRC:-./b}:${DATA_TARGET:-/data}:ro\n")
+        controller = reg.Controller(self.root, runner=self.docker, fetch=self.fetch, out=self.output)
+        raw = controller.compose_config(PROJECT, [self.p("base.yml"), self.p("over.yml")], [], raw=True)
+        volumes = raw["services"]["api"]["volumes"]
+        self.assertEqual([(v["source"], v["target"], v.get("read_only", False)) for v in volumes],
+                         [("${OTHER_SRC:-./b}", "${DATA_TARGET:-/data}", True)])
 
     def test_release_compose_refuses_to_start_without_pinned_images(self):
         self.migrate()

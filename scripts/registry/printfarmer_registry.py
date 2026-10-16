@@ -144,8 +144,10 @@ def shield_expressions(text, expressions):
             if j < len(text):
                 expression = text[i:j + 1]
                 if ":" in expression:
-                    out.append("${%s%d__}" % (SHIELD_MARKER, len(expressions)))
-                    expressions.append(expression)
+                    # Identical expressions share one token so multi-file merges still match them.
+                    if expression not in expressions:
+                        expressions.append(expression)
+                    out.append("${%s%d__}" % (SHIELD_MARKER, expressions.index(expression)))
                 else:
                     out.append(expression)
                 i = j + 1
