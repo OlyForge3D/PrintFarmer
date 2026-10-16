@@ -138,10 +138,11 @@ random project GUIDs, plus their `GlobalSection` build-configuration lines —
 mirror the `Farm.Modules.Abstractions` / `Farm.Modules.Abstractions.Tests`
 block exactly.
 
-### 7. Route-table snapshot regeneration (if the module owns any controller)
+### 7. Route-table snapshot regeneration (if the module owns any controller, minimal-API endpoint, or SignalR hub)
 
 `RouteTableSnapshotTests` (`src/tests/Farm.Web.Api.Tests/Startup/`) is a
-guardrail against accidental route changes; it is not selected by a
+guardrail against accidental route and authorization changes covering
+controller actions, minimal APIs, and SignalR hub endpoints and methods; it is not selected by a
 filter like `FullyQualifiedName~<Name>` because its own test method name
 never contains the module name — **run it explicitly by class name** in
 addition to your module's targeted filter. Moving a controller changes only

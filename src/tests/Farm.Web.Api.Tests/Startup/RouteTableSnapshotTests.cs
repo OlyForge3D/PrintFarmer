@@ -65,6 +65,7 @@ namespace Farm.Web.Api.Tests.Startup;
 /// never be regenerated reflexively to make a failing test pass.
 /// </para>
 /// </summary>
+[Collection("SlicerDisabled")]
 public sealed class RouteTableSnapshotTests
 {
     private static readonly string SnapshotPath = Path.GetFullPath(
@@ -73,7 +74,7 @@ public sealed class RouteTableSnapshotTests
     [Fact]
     public async Task ControllerActionRouteTable_MatchesCheckedInSnapshot()
     {
-        using CustomWebApplicationFactory factory = new();
+        using RouteTopologyWebApplicationFactory factory = RouteTopologyWebApplicationFactory.SlicerEnabled();
 
         EndpointDataSource endpointDataSource = factory.Services.GetRequiredService<EndpointDataSource>();
         IAuthorizationPolicyProvider policyProvider =
@@ -88,7 +89,7 @@ public sealed class RouteTableSnapshotTests
     [Fact]
     public async Task ControllerActionRouteTable_RejectsAnonymousRegressionOnPrivilegedRoute()
     {
-        using CustomWebApplicationFactory factory = new();
+        using RouteTopologyWebApplicationFactory factory = RouteTopologyWebApplicationFactory.SlicerEnabled();
 
         EndpointDataSource endpointDataSource = factory.Services.GetRequiredService<EndpointDataSource>();
         IAuthorizationPolicyProvider policyProvider =
@@ -116,7 +117,7 @@ public sealed class RouteTableSnapshotTests
     [Fact]
     public async Task ControllerActionRouteTable_RecordsDeclaredAuthorizationMetadata()
     {
-        using CustomWebApplicationFactory factory = new();
+        using RouteTopologyWebApplicationFactory factory = RouteTopologyWebApplicationFactory.SlicerEnabled();
 
         string[] actual = await BuildRouteTableAsync(
             factory.Services.GetRequiredService<EndpointDataSource>(),
@@ -158,7 +159,7 @@ public sealed class RouteTableSnapshotTests
     [Fact]
     public async Task RouteTable_CoversMinimalApiAndSignalRHubEndpoints()
     {
-        using CustomWebApplicationFactory factory = new();
+        using RouteTopologyWebApplicationFactory factory = RouteTopologyWebApplicationFactory.SlicerEnabled();
 
         string[] actual = await BuildRouteTableAsync(
             factory.Services.GetRequiredService<EndpointDataSource>(),
@@ -182,10 +183,41 @@ public sealed class RouteTableSnapshotTests
             "client-invocable hub methods must be part of the authorization snapshot");
     }
 
+    /// <summary>
+    /// Microservices (and ARM-default) startup drops the inline slicer module and maps
+    /// authenticated stub endpoints instead. The canonical snapshot covers the slicer-enabled
+    /// topology, so this pins the other branch: the only lines it may add are the reviewed stubs,
+    /// and every line it keeps must be byte-identical to the canonical snapshot.
+    /// </summary>
+    [Fact]
+    public async Task RouteTable_MicroservicesModeReplacesSlicerSurfaceWithAuthenticatedStubs()
+    {
+        using RouteTopologyWebApplicationFactory factory = RouteTopologyWebApplicationFactory.Microservices();
+
+        string[] actual = await BuildRouteTableAsync(
+            factory.Services.GetRequiredService<EndpointDataSource>(),
+            factory.Services.GetRequiredService<IAuthorizationPolicyProvider>());
+        HashSet<string> canonical = new(File.ReadAllLines(SnapshotPath), StringComparer.Ordinal);
+
+        _ = actual.Where(line => !canonical.Contains(line)).Should().BeEquivalentTo(
+            "GET /api/3d-models -> endpoint [auth=policy=;roles=;schemes=] [effective=authenticated]",
+            "GET /api/3d-models/folders -> endpoint [auth=policy=;roles=;schemes=] [effective=authenticated]",
+            "POST /api/3d-models/query -> endpoint [auth=policy=;roles=;schemes=] [effective=authenticated]");
+        _ = actual.Should().NotContain(line =>
+            line.Contains("Farm.Slicer.Module", StringComparison.Ordinal) ||
+            line.Contains("/hubs/slicer", StringComparison.Ordinal),
+            "the slicer module and its hubs run in slicer-host in microservices mode");
+
+        string[] removed = canonical.Except(actual, StringComparer.Ordinal).ToArray();
+        _ = removed.Should().NotBeEmpty().And.OnlyContain(
+            line => line.Contains("Farm.Slicer.Module", StringComparison.Ordinal),
+            "microservices mode must remove only slicer-module routes");
+    }
+
     [Fact]
     public async Task RouteTable_ReportsHubMethodRequirementDataThatSignalRDoesNotEnforce()
     {
-        using CustomWebApplicationFactory factory = new();
+        using RouteTopologyWebApplicationFactory factory = RouteTopologyWebApplicationFactory.SlicerEnabled();
 
         string[] actual = await BuildRouteTableAsync(
             factory.Services.GetRequiredService<EndpointDataSource>(),
@@ -224,7 +256,7 @@ public sealed class RouteTableSnapshotTests
     [Fact]
     public async Task EffectiveAuthorization_ChangesWhenDefaultPolicyIsRedefinedOnRealEndpoint()
     {
-        using CustomWebApplicationFactory factory = new();
+        using RouteTopologyWebApplicationFactory factory = RouteTopologyWebApplicationFactory.SlicerEnabled();
         EndpointMetadataCollection metadata = factory.Services.GetRequiredService<EndpointDataSource>().Endpoints
             .OfType<RouteEndpoint>()
             .Single(endpoint =>
@@ -276,7 +308,7 @@ public sealed class RouteTableSnapshotTests
     [Fact]
     public void ControllerActionRouteTable_BindsOctoPrintApiKeyFiltersToPublicActions()
     {
-        using CustomWebApplicationFactory factory = new();
+        using RouteTopologyWebApplicationFactory factory = RouteTopologyWebApplicationFactory.SlicerEnabled();
 
         EndpointDataSource endpointDataSource = factory.Services.GetRequiredService<EndpointDataSource>();
         ControllerActionDescriptor[] actions = endpointDataSource.Endpoints
@@ -301,7 +333,7 @@ public sealed class RouteTableSnapshotTests
     [Fact]
     public async Task ControllerActionRouteTable_ReportsOctoPrintApiKeyFilterOnPublicActions()
     {
-        using CustomWebApplicationFactory factory = new();
+        using RouteTopologyWebApplicationFactory factory = RouteTopologyWebApplicationFactory.SlicerEnabled();
 
         string[] actual = await BuildRouteTableAsync(
             factory.Services.GetRequiredService<EndpointDataSource>(),
@@ -327,7 +359,7 @@ public sealed class RouteTableSnapshotTests
     [InlineData("GET /api/file-consistency/model3d/{modelId}/health -> ")]
     public async Task ControllerActionRouteTable_ReportsSlicerFilterPermissionOnFileConsistencyRoutes(string routePrefix)
     {
-        using CustomWebApplicationFactory factory = new();
+        using RouteTopologyWebApplicationFactory factory = RouteTopologyWebApplicationFactory.SlicerEnabled();
 
         string[] actual = await BuildRouteTableAsync(
             factory.Services.GetRequiredService<EndpointDataSource>(),
@@ -411,10 +443,13 @@ public sealed class RouteTableSnapshotTests
     }
 
     /// <summary>
-    /// Builds the sorted, checked-in-snapshot line format: one line per runtime controller
-    /// endpoint, each listing every HTTP verb it accepts, its attribute-route template,
-    /// declared endpoint authorization metadata, its <c>Assembly::Controller.Action</c>
-    /// identity, and (when present) its filter-based authorization projected by
+    /// Builds the sorted, checked-in-snapshot line format: one line per runtime
+    /// <see cref="RouteEndpoint"/> (controller actions, minimal APIs, and SignalR hub
+    /// connect/negotiate endpoints) plus one <c>INVOKE</c> line per client-invocable hub method.
+    /// Each line lists every HTTP verb it accepts, its route template, declared endpoint
+    /// authorization metadata, the resolved <c>[effective=...]</c> requirements, its
+    /// <c>Assembly::Type.Member</c> identity (or <c>endpoint</c>/<c>hub</c> kind), and (when present) its
+    /// filter-based authorization projected by
     /// <see cref="BuildFilterAuthorization"/>. Handler-body authorization is not observed.
     /// The assembly qualifier deliberately makes
     /// two identically-named controllers in different assemblies produce distinct lines (see
