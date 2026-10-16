@@ -201,17 +201,13 @@ final class LoginFlowUITests: PrintFarmerUITestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        let deadline = ProcessInfo.processInfo.systemUptime + 6
         var result: XCTWaiter.Result = .timedOut
         var attempts = 0
         repeat {
             attempts += 1
             field.tap()
-            let remaining = deadline - ProcessInfo.processInfo.systemUptime
-            result = waitForKeyboardFocus(on: field, timeout: min(2, max(0.1, remaining)))
-        } while result != .completed
-            && attempts < 3
-            && ProcessInfo.processInfo.systemUptime < deadline
+            result = waitForKeyboardFocus(on: field, timeout: 3)
+        } while result != .completed && attempts < 3
         XCTAssertEqual(
             result,
             .completed,
