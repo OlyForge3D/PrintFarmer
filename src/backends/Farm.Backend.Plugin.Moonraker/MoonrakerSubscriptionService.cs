@@ -1213,7 +1213,7 @@ public sealed class MoonrakerSubscriptionService(
     /// <param name="thumbnailUrl">The thumbnail URL from printer configuration.</param>
     /// <param name="originWatermark">Watermark captured before receiving the status.</param>
     /// <param name="ct">Cancellation token.</param>
-    private async Task ProcessStatusUpdateAsync(
+    internal async Task ProcessStatusUpdateAsync(
         JsonElement statusObj,
         Guid printerId,
         string serverUrl,
