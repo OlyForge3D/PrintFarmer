@@ -363,7 +363,6 @@ GET /api/printers/{id:guid}/files/thumbnail -> Farm.Modules.Printers::Farm.Modul
 GET /api/printers/{id:guid}/history/{jobId}/thumbnail -> Farm.Modules.Printers::Farm.Modules.Printers.Controllers.PrintersController.GetHistoryThumbnailAsync [auth=policy=;roles=;schemes=] [effective=authenticated]
 GET /api/printers/{id:guid}/printjob -> Farm.Modules.Printers::Farm.Modules.Printers.Controllers.PrintersController.GetPrintJobStatusAsync [auth=policy=;roles=;schemes=] [effective=authenticated]
 GET /api/printers/{id:guid}/printjob/objects -> Farm.Modules.Printers::Farm.Modules.Printers.Controllers.PrintersController.GetPrintJobObjectsAsync [auth=policy=;roles=;schemes=] [effective=authenticated]
-GET /api/printers/{id:guid}/session-timeline -> Farm.Modules.Printers::Farm.Modules.Printers.Controllers.PrintersController.GetSessionTimelineAsync [auth=policy=;roles=;schemes=] [effective=authenticated]
 GET /api/printers/{id:guid}/snapshot -> Farm.Modules.Printers::Farm.Modules.Printers.Controllers.PrintersController.GetSnapshotAsync [auth=policy=;roles=;schemes=] [effective=authenticated]
 GET /api/printers/{id:guid}/spoolman/spools -> Farm.Modules.Printers::Farm.Modules.Printers.Controllers.PrintersController.GetPrinterSpoolsAsync [auth=policy=;roles=;schemes=] [effective=authenticated]
 GET /api/printers/{id:guid}/status -> Farm.Modules.Printers::Farm.Modules.Printers.Controllers.PrintersController.GetStatusAsync [auth=policy=;roles=;schemes=] [effective=authenticated]

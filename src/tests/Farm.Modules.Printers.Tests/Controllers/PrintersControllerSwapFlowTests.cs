@@ -119,7 +119,6 @@ public class PrintersControllerSwapFlowTests
             egressGuard: Farm.Testing.Shared.AppDbTestHelpers.PermissiveEgressGuard(),
             obicoServerAssignment: Mock.Of<Farm.Infrastructure.Services.FailureDetection.IObicoServerAssignmentService>(),
             settingsService: Mock.Of<Farm.Infrastructure.Settings.ISettingsService>(),
-            printerSessionTimelineService: Mock.Of<IPrinterSessionTimelineService>(),
             telemetryService: telemetry.Object,
             bedTypeService: Mock.Of<Farm.Infrastructure.Services.BedTypes.IBedTypeService>(),
             appDbContext: db,
