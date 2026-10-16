@@ -49,14 +49,90 @@ public class ZmodIfsStatusParserTests
         state.MmuGateColor.Should().Equal("#A03CF7", "", "", "#FFFFFF");
         state.MmuActiveGate.Should().Be(3);
         state.MmuActiveTool.Should().Be(3);
-        state.MmuFilamentState.Should().Be("Loaded");
 
         MmuStatusDto? status = state.BuildMmuStatus();
         status.Should().NotBeNull();
         status!.MmuType.Should().Be(MmuProtocol.ZmodIfs);
+        status.ActiveGate.Should().Be(3);
+        status.ActiveTool.Should().Be(3);
         status.Gates.Select(g => g.Name).Should().Equal("Gate 1", "Gate 2", "Gate 3", "Gate 4");
         status.Gates.Select(g => g.Status).Should().Equal(1, 0, 0, 1);
         status.Gates[3].Color.Should().Be("#FFFFFF");
+    }
+
+    // R3389-B01: ZMOD reports channel selection only (no head sensor / load-completion signal), so a
+    // selected channel must never be published as a settled load that runout-switch logic trusts.
+    [Fact]
+    public void Apply_SelectedChannel_IsNeverReportedAsSettledLoad()
+    {
+        var state = new PrinterState();
+
+        Apply(state, RigFrame);
+
+        MmuStatusDto status = state.BuildMmuStatus()!;
+        status.FilamentState.Should().Be("Unknown");
+        new[] { "Loaded", "Ready" }.Should().NotContain(status.FilamentState);
+        new[] { "Idle", "Printing" }.Should().NotContain(status.Action);
+    }
+
+    [Fact]
+    public void Apply_SelectedChannelAfterOtherAction_DoesNotRetainSettledAction()
+    {
+        var state = new PrinterState { MmuAction = "Idle" };
+
+        Apply(state, RigFrame);
+
+        state.MmuAction.Should().BeNull();
+    }
+
+    // R3389-H01: malformed sensor values are unknown (status 2), not empty.
+    [Fact]
+    public void Apply_MalformedPortValues_ReportUnknownGateStatus()
+    {
+        var state = new PrinterState();
+
+        Apply(state, """{ "zmod_ifs": { "Ports": [true, "yes", null, 7, false, 1, 0] } }""");
+
+        state.ZmodIfsPorts.Should().Equal(true, null, null, null, false, true, false);
+        state.MmuGateStatus.Should().Equal(1, 2, 2, 2, 0, 1, 0);
+    }
+
+    [Fact]
+    public void Apply_MalformedSlotHasFilament_ReportsUnknownGateStatus()
+    {
+        var state = new PrinterState();
+
+        Apply(
+            state,
+            """
+            {
+              "zmod_color": {
+                "slots": [
+                  { "ID": 1, "Material": "PLA", "HEX": "FFFFFF", "hasFilament": "maybe" },
+                  { "ID": 2, "Material": "PLA", "HEX": "FFFFFF", "hasFilament": 1 }
+                ]
+              }
+            }
+            """);
+
+        state.MmuGateStatus.Should().Equal(2, 1);
+    }
+
+    // R3389-H01: an invalid nonzero channel is unknown, not an explicit "nothing loaded".
+    [Theory]
+    [InlineData("5")]
+    [InlineData("-1")]
+    [InlineData("\"two\"")]
+    public void Apply_InvalidNonzeroChannel_ReportsUnknownWithNoActiveGate(string chan)
+    {
+        var state = new PrinterState();
+        Apply(state, RigFrame);
+
+        Apply(state, $$"""{ "zmod_ifs": { "Chan": {{chan}} }, "zmod_color": { "channel": {{chan}} } }""");
+
+        state.MmuActiveGate.Should().Be(-1);
+        state.MmuActiveTool.Should().Be(-1);
+        state.MmuFilamentState.Should().Be("Unknown");
     }
 
     [Fact]
@@ -83,7 +159,7 @@ public class ZmodIfsStatusParserTests
         Apply(state, """{ "zmod_ifs": { "Chan": 0 }, "zmod_color": { "channel": 0 } }""");
 
         state.MmuActiveTool.Should().Be(-1);
-        state.MmuActiveGate.Should().Be(0);
+        state.MmuActiveGate.Should().Be(-1);
         state.MmuFilamentState.Should().Be("Unloaded");
     }
 
@@ -147,6 +223,8 @@ public class ZmodIfsStatusParserTests
         applied.Should().BeFalse();
         state.MmuType.Should().Be(MmuProtocol.HappyHare);
         state.MmuNumGates.Should().Be(8);
+        state.ZmodIfsDetected.Should().BeFalse();
+        state.MmuDirty.Should().BeFalse();
     }
 
     [Fact]

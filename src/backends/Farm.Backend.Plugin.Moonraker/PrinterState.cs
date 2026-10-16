@@ -276,13 +276,13 @@ internal sealed class PrinterState
     /// <summary>Last reported <c>zmod_ifs.available</c>; null until reported.</summary>
     public bool? ZmodIfsAvailable { get; set; }
 
-    /// <summary>Last reported <c>zmod_ifs.Ports</c> filament-sensor states, one per IFS port.</summary>
-    public bool[]? ZmodIfsPorts { get; set; }
+    /// <summary>Last reported <c>zmod_ifs.Ports</c> filament-sensor states, one per IFS port; null entries are malformed/unknown.</summary>
+    public bool?[]? ZmodIfsPorts { get; set; }
 
-    /// <summary>Last reported <c>zmod_ifs.Chan</c> (1-based active channel, 0 = none); null until reported.</summary>
+    /// <summary>Last reported <c>zmod_ifs.Chan</c> (1-based active channel, 0 = none, -1 = unparseable); null until reported.</summary>
     public int? ZmodIfsChannel { get; set; }
 
-    /// <summary>Last reported <c>zmod_color.channel</c> (1-based active channel); null until reported.</summary>
+    /// <summary>Last reported <c>zmod_color.channel</c> (1-based active channel, -1 = unparseable); null until reported.</summary>
     public int? ZmodColorChannel { get; set; }
 
     /// <summary>Highest slot count reported by <c>zmod_color.slots</c>.</summary>

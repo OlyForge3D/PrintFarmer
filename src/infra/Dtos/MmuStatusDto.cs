@@ -9,7 +9,7 @@
 /// <param name="ActiveTool">Currently selected tool index (-1 = none, -2 = unknown).</param>
 /// <param name="ActiveGate">Currently selected gate index.</param>
 /// <param name="FilamentState">Filament load state: "Loaded", "Unloaded", or "Unknown".</param>
-/// <param name="Action">Current action: "Idle", "Loading", "Unloading", "Forming Tip", etc.</param>
+/// <param name="Action">Current action: "Idle", "Loading", "Unloading", "Forming Tip", etc.; null when the protocol reports no action (ZMOD IFS).</param>
 /// <param name="NumGates">Total number of gates/slots available.</param>
 /// <param name="HasBypass">Whether the MMU has a bypass (direct-drive override).</param>
 /// <param name="EndlessSpool">Whether endless spool mode is active.</param>

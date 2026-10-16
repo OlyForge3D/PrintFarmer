@@ -18,6 +18,12 @@ namespace Farm.Backend.Plugin.Moonraker;
 /// mean unset.</item>
 /// </list>
 /// Moonraker sends diffs, so every field is applied independently and merged into state.
+/// <para>
+/// ZMOD reports channel <em>selection</em> and per-port sensors only; it has no head sensor or
+/// load-completion signal. A selected channel is therefore published with filament state
+/// "Unknown" and no action, so downstream consumers never treat it as a confirmed, settled load.
+/// Malformed sensor or channel values are reported as unknown rather than empty/unloaded.
+/// </para>
 /// </remarks>
 internal static class ZmodIfsStatusParser
 {
@@ -29,6 +35,9 @@ internal static class ZmodIfsStatusParser
 
     /// <summary>Upper bound guarding against malformed payloads allocating huge arrays.</summary>
     public const int MaxGateCount = 16;
+
+    // A present but unparseable channel: unknown selection, never "nothing selected".
+    private const int InvalidChannel = -1;
 
     /// <summary>
     /// Applies any ZMOD IFS objects present in <paramref name="statusObj"/> to <paramref name="state"/>.
@@ -81,21 +90,21 @@ internal static class ZmodIfsStatusParser
         {
             state.ZmodIfsPorts = ports.EnumerateArray()
                 .Take(MaxGateCount)
-                .Select(ParseBool)
+                .Select(ParseNullableBool)
                 .ToArray();
         }
 
-        if (ifs.TryGetProperty("Chan", out JsonElement chan) && TryParseInt(chan, out int channel))
+        if (ifs.TryGetProperty("Chan", out JsonElement chan))
         {
-            state.ZmodIfsChannel = channel;
+            state.ZmodIfsChannel = TryParseInt(chan, out int channel) ? channel : InvalidChannel;
         }
     }
 
     private static List<ZmodSlot> ApplyColor(PrinterState state, JsonElement color)
     {
-        if (color.TryGetProperty("channel", out JsonElement channelElem) && TryParseInt(channelElem, out int channel))
+        if (color.TryGetProperty("channel", out JsonElement channelElem))
         {
-            state.ZmodColorChannel = channel;
+            state.ZmodColorChannel = TryParseInt(channelElem, out int channel) ? channel : InvalidChannel;
         }
 
         List<ZmodSlot> slots = [];
@@ -125,9 +134,8 @@ internal static class ZmodIfsStatusParser
                                materialElem.ValueKind is JsonValueKind.String or JsonValueKind.Null;
             bool hasHex = slot.TryGetProperty("HEX", out JsonElement hexElem) &&
                           hexElem.ValueKind is JsonValueKind.String or JsonValueKind.Null;
-            bool? hasFilament = slot.TryGetProperty("hasFilament", out JsonElement filamentElem) &&
-                                filamentElem.ValueKind is JsonValueKind.True or JsonValueKind.False or JsonValueKind.Number
-                ? ParseBool(filamentElem)
+            bool? hasFilament = slot.TryGetProperty("hasFilament", out JsonElement filamentElem)
+                ? ParseNullableBool(filamentElem)
                 : null;
 
             slots.Add(new ZmodSlot(
@@ -178,36 +186,41 @@ internal static class ZmodIfsStatusParser
         // IFS port sensors are the authority on presence; slot hasFilament is the fallback.
         for (int i = 0; i < gateCount; i++)
         {
-            state.MmuGateStatus![i] = state.ZmodIfsPorts is { } ports && i < ports.Length
-                ? ports[i] ? 1 : 0
-                : state.ZmodSlotHasFilament![i] switch
-                {
-                    true => 1,
-                    false => 0,
-                    null => 2,
-                };
+            bool? present = state.ZmodIfsPorts is { } ports && i < ports.Length
+                ? ports[i]
+                : state.ZmodSlotHasFilament![i];
+            state.MmuGateStatus![i] = present switch
+            {
+                true => 1,
+                false => 0,
+                null => 2,
+            };
         }
 
+        // A selected channel is not proof that filament reached the hotend (no head sensor), so it is
+        // never reported as "Loaded". Only channel 0 is an explicit "nothing selected".
         int? activeChannel = state.ZmodIfsChannel ?? state.ZmodColorChannel;
         if (activeChannel is int chan && chan >= 1 && chan <= gateCount)
         {
             state.MmuActiveGate = chan - 1;
             state.MmuActiveTool = chan - 1;
-            state.MmuFilamentState = "Loaded";
+            state.MmuFilamentState = "Unknown";
         }
         else
         {
-            state.MmuActiveGate = 0;
+            state.MmuActiveGate = -1;
             state.MmuActiveTool = -1;
-            state.MmuFilamentState = activeChannel is null ? "Unknown" : "Unloaded";
+            state.MmuFilamentState = activeChannel == 0 ? "Unloaded" : "Unknown";
         }
+
+        // ZMOD reports no MMU action; never retain a settled action from earlier state.
+        state.MmuAction = null;
 
         bool available = state.ZmodIfsAvailable != false;
         state.MmuType = MmuProtocol.ZmodIfs;
         state.MmuDetected = available;
         state.MmuEnabled = available;
         state.MmuIsHomed = available;
-        state.MmuAction ??= "Idle";
         state.MmuDirty = true;
     }
 
@@ -244,11 +257,12 @@ internal static class ZmodIfsStatusParser
         return "#" + hex[..6].ToUpperInvariant();
     }
 
-    private static bool ParseBool(JsonElement element) => element.ValueKind switch
+    private static bool? ParseNullableBool(JsonElement element) => element.ValueKind switch
     {
         JsonValueKind.True => true,
-        JsonValueKind.Number => element.TryGetInt32(out int value) && value != 0,
-        _ => false,
+        JsonValueKind.False => false,
+        JsonValueKind.Number when element.TryGetInt32(out int value) && value is 0 or 1 => value == 1,
+        _ => null,
     };
 
     private static bool TryParseInt(JsonElement element, out int value)
