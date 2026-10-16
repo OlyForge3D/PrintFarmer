@@ -186,4 +186,38 @@ final class LoginViewModelTests: XCTestCase {
         let vm = LoginViewModel()
         XCTAssertTrue(vm.isServerURLExpanded)
     }
+
+    func testApplyingInitialActiveServerPreservesInProgressCredentials() {
+        viewModel.usernameOrEmail = "admin"
+        viewModel.password = "password123"
+        let server = RegisteredServer(
+            displayName: "Print Farm",
+            baseURL: URL(string: "https://print.example.com")!,
+            normalizedURLString: "https://print.example.com"
+        )
+
+        viewModel.apply(activeServer: server, resetCredentials: false)
+
+        XCTAssertEqual(viewModel.serverURL, "https://print.example.com")
+        XCTAssertFalse(viewModel.isServerURLExpanded)
+        XCTAssertEqual(viewModel.usernameOrEmail, "admin")
+        XCTAssertEqual(viewModel.password, "password123")
+    }
+
+    func testApplyingChangedActiveServerClearsCredentials() {
+        viewModel.usernameOrEmail = "admin"
+        viewModel.password = "password123"
+        let server = RegisteredServer(
+            displayName: "Backup Farm",
+            baseURL: URL(string: "https://backup.example.com")!,
+            normalizedURLString: "https://backup.example.com"
+        )
+
+        viewModel.apply(activeServer: server, resetCredentials: true)
+
+        XCTAssertEqual(viewModel.serverURL, "https://backup.example.com")
+        XCTAssertFalse(viewModel.isServerURLExpanded)
+        XCTAssertEqual(viewModel.usernameOrEmail, "")
+        XCTAssertEqual(viewModel.password, "")
+    }
 }

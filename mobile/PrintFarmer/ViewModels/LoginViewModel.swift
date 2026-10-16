@@ -48,6 +48,15 @@ final class LoginViewModel {
         }
     }
 
+    func apply(activeServer: RegisteredServer, resetCredentials: Bool) {
+        serverURL = activeServer.normalizedURLString
+        isServerURLExpanded = false
+        if resetCredentials {
+            usernameOrEmail = ""
+            password = ""
+        }
+    }
+
     // MARK: - Login
 
     func login(using authViewModel: AuthViewModel) async {
