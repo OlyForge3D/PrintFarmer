@@ -313,10 +313,7 @@ struct LoginView: View {
     private func applyActiveServerIfNeeded() {
         guard let activeServer = serverRegistry.activeServer,
               appliedActiveServerID != activeServer.id else { return }
-        viewModel.apply(
-            activeServer: activeServer,
-            resetCredentials: appliedActiveServerID != nil
-        )
+        viewModel = LoginViewModel(activeServer: activeServer)
         appliedActiveServerID = activeServer.id
     }
 }
