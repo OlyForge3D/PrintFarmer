@@ -920,6 +920,12 @@ test('R3365-02: no carry-forward contract claims byte-for-byte diff equality', a
   assert.match(text.instructions, /is unchanged between `SHA_r` and `SHA_h`: every compare entry is identical, except base-overlapping files content-verified as a clean three-way merge/);
   assert.match(text.workflow, /is unchanged between the old SHA and the current head \(identical compare entries, except base-overlapping files content-verified as a clean three-way merge/);
   assert.match(text.gate, /identical compare entries for every file, except base-overlapping files whose merged content was separately proven a clean three-way merge/);
+  // The test suite's own contract comment (it cannot be scanned for the stale
+  // phrase, since this assertion names it).
+  const suite = (await readFile(fileURLToPath(import.meta.url), 'utf8'))
+    .replace(/\r?\n[ \t]*\/\//g, ' ').replace(/\s+/g, ' ');
+  assert.match(suite, /\(2\) the PR's own diff against the base branch is unchanged between the old SHA and the new head \(identical compare entries, except base-overlapping files content-verified as a clean three-way merge/);
+  assert.doesNotMatch(suite, new RegExp(`base branch is ${'byte'}-for-${'byte'} unchanged`, 'i'));
 });
 
 test('a mix of fresh and carried approvals is still reported and still carries', () => {
