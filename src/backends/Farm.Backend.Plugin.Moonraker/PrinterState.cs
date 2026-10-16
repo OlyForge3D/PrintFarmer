@@ -302,22 +302,16 @@ internal sealed class PrinterState
     /// same live-reported (not defaulted) count has been seen for <see cref="ZmodGrowthStableFrameThreshold"/>
     /// consecutive frames. The count is capped at 16.
     /// </summary>
-    public bool TryGetStableZmodGateCount(out int gateCount)
+    public bool TryGetStableZmodGateCount(int frameReportedCount, out int gateCount)
     {
         gateCount = 0;
-        if (ZmodGrowthAttempted)
+        if (ZmodGrowthAttempted || frameReportedCount <= 0)
         {
+            // Frames that report no count neither advance nor reset the debounce.
             return false;
         }
 
-        int ports = ZmodIfsPorts?.Length ?? 0;
-        int live = Math.Min(ports > 0 ? ports : ZmodSlotCount, 16);
-        if (live <= 0)
-        {
-            ZmodGrowthCandidateCount = 0;
-            _zmodGrowthStableFrames = 0;
-            return false;
-        }
+        int live = Math.Min(frameReportedCount, 16);
 
         if (live != ZmodGrowthCandidateCount)
         {

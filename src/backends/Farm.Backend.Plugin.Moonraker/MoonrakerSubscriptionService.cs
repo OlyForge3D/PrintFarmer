@@ -2275,8 +2275,7 @@ public sealed class MoonrakerSubscriptionService(
                 state.MmuNumGates);
         }
 
-        if (ZmodIfsStatusParser.ReportsGateCount(statusObj) &&
-            state.TryGetStableZmodGateCount(out int liveGateCount))
+        if (state.TryGetStableZmodGateCount(ZmodIfsStatusParser.ReportedGateCount(statusObj), out int liveGateCount))
         {
             _ = Task.Run(() => GrowPersistedMmuGatesAsync(printerId, liveGateCount));
         }

@@ -79,26 +79,28 @@ internal static class ZmodIfsStatusParser
     }
 
     /// <summary>
-    /// True when this frame itself carries a live gate count (a non-empty <c>zmod_ifs.Ports</c> or
-    /// <c>zmod_color.slots</c> array), as opposed to unrelated deltas that leave cached counts untouched.
+    /// The gate count this frame itself reports: the length of a non-empty <c>zmod_ifs.Ports</c> array,
+    /// else of a non-empty <c>zmod_color.slots</c> array. Returns 0 for unrelated deltas that leave
+    /// cached counts untouched.
     /// </summary>
-    public static bool ReportsGateCount(JsonElement statusObj)
+    public static int ReportedGateCount(JsonElement statusObj)
     {
         if (statusObj.ValueKind != JsonValueKind.Object)
         {
-            return false;
+            return 0;
         }
 
-        return HasNonEmptyArray(statusObj, IfsObjectName, "Ports") ||
-               HasNonEmptyArray(statusObj, ColorObjectName, "slots");
+        int ports = ArrayLength(statusObj, IfsObjectName, "Ports");
+        return ports > 0 ? ports : ArrayLength(statusObj, ColorObjectName, "slots");
     }
 
-    private static bool HasNonEmptyArray(JsonElement statusObj, string objectName, string propertyName) =>
+    private static int ArrayLength(JsonElement statusObj, string objectName, string propertyName) =>
         statusObj.TryGetProperty(objectName, out JsonElement obj) &&
         obj.ValueKind == JsonValueKind.Object &&
         obj.TryGetProperty(propertyName, out JsonElement arr) &&
-        arr.ValueKind == JsonValueKind.Array &&
-        arr.GetArrayLength() > 0;
+        arr.ValueKind == JsonValueKind.Array
+            ? arr.GetArrayLength()
+            : 0;
 
     private static void ApplyIfs(PrinterState state, JsonElement ifs)
     {

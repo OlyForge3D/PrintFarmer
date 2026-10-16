@@ -37,8 +37,8 @@ public class ZmodIfsStatusParserTests
     {
         Apply(state, json);
         count = 0;
-        return ZmodIfsStatusParser.ReportsGateCount(JsonDocument.Parse(json).RootElement) &&
-               state.TryGetStableZmodGateCount(out count);
+        return state.TryGetStableZmodGateCount(
+            ZmodIfsStatusParser.ReportedGateCount(JsonDocument.Parse(json).RootElement), out count);
     }
 
     private const string UnrelatedDelta = """{"zmod_ifs":{"Chan":2}}""";
@@ -94,8 +94,22 @@ public class ZmodIfsStatusParserTests
         var state = new PrinterState();
         for (int i = 0; i < 10; i++)
         {
-            state.TryGetStableZmodGateCount(out _).Should().BeFalse();
+            state.TryGetStableZmodGateCount(0, out _).Should().BeFalse();
         }
+    }
+
+    [Fact]
+    public void TryGetStableZmodGateCount_ConflictingSlotCountDoesNotConfirmCachedPortCount()
+    {
+        var state = new PrinterState();
+        string sixSlots = """{"zmod_color":{"channel":1,"slots":[{"ID":1},{"ID":2},{"ID":3},{"ID":4},{"ID":5},{"ID":6}]}}""";
+
+        Frame(state, RigFrame, out _).Should().BeFalse();
+        Frame(state, RigFrame, out _).Should().BeFalse();
+        Frame(state, sixSlots, out _).Should().BeFalse();
+        Frame(state, sixSlots, out _).Should().BeFalse();
+        Frame(state, sixSlots, out int count).Should().BeTrue();
+        count.Should().Be(6);
     }
 
     [Fact]
