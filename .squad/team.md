@@ -28,7 +28,7 @@
 | ⚛️  Drake        | Frontend Dev                    | .squad/agents/drake/charter.md        | Active |
 | 📋 Scribe       | Session Logger                  | .squad/agents/scribe/charter.md       | Active |
 | 🔄 Ralph        | Work Monitor                    | —                                     | Active |
-| 🛡️  Rai          | RAI Reviewer                    | .squad/agents/rai/charter.md          | Active |
+| 🛡️  Rai          | RAI Reviewer                    | .squad/agents/Rai/charter.md          | Active |
 | 🔍 Fact Checker | Fact Checker / Devil's Advocate | .squad/agents/fact-checker/charter.md | Active |
 
 ## Coding Agent
