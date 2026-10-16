@@ -65,6 +65,9 @@ public sealed class QueueOutboxPublisherService(
         // next copy), same as an abort. Only EventTypeJobCompleted (all copies done, job truly
         // exits the active set) is membership-changing; see PrintJobCompletionService and
         // PR #1741 review (Bishop).
+        //
+        // NOTE: EventTypeJobUpdated is deliberately excluded (#3296) -- priority, reorder, and
+        // detail edits change a queued job's presentation, never its active-set membership.
     };
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
