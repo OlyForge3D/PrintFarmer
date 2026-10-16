@@ -1,7 +1,7 @@
 import type { BufferGeometry } from 'three';
 import { Font, TextGeometry } from 'three-stdlib';
-import { describe, expect, it } from 'vitest';
-import { generateTextGeometry, type FontFamily } from '@/features/models3d/utils/textGeometry';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { generateTextGeometry, geometryToStlBlobUrl, type FontFamily } from '@/features/models3d/utils/textGeometry';
 
 const TEXT = 'PrintFarmer 0123 AaGg@#&?';
 const FONT_SIZE = 10;
@@ -60,5 +60,36 @@ describe('generateTextGeometry', () => {
       0,
     );
     expect(sortedVertices(geometry)).toEqual(sortedVertices(reference));
+  });
+});
+
+describe('geometryToStlBlobUrl', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('exports every generated triangle as a binary STL', async () => {
+    const { geometry } = await generateTextGeometry({
+      text: TEXT,
+      fontSize: FONT_SIZE,
+      extrusionDepth: EXTRUSION_DEPTH,
+      fontFamily: 'sans-serif',
+    });
+    const triangles = geometry.getAttribute('position').count / 3;
+    let exported: Blob | undefined;
+    const createObjectURL = vi.fn((blob: Blob) => {
+      exported = blob;
+      return 'blob:text-stl';
+    });
+    vi.stubGlobal('URL', Object.assign(Object.create(URL) as typeof URL, { createObjectURL }));
+
+    expect(geometryToStlBlobUrl(geometry)).toBe('blob:text-stl');
+
+    expect(createObjectURL).toHaveBeenCalledTimes(1);
+    expect(triangles).toBe(expected['sans-serif'].vertices / 3);
+    // Binary STL: 80-byte header, uint32 triangle count, then 50 bytes per triangle.
+    expect(exported!.size).toBe(84 + 50 * triangles);
+    const view = new DataView(await exported!.arrayBuffer());
+    expect(view.getUint32(80, true)).toBe(triangles);
   });
 });

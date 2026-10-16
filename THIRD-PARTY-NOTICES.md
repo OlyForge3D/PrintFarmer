@@ -67,9 +67,10 @@ distributed-asset review requirement below.
 These files were previously consumed from the `three` npm package, which stopped
 publishing `examples/fonts` in 0.186. The bundled copies are byte-identical to
 three.js tag `r182` and to the `three@0.182.0` npm package. The upstream
-`NOTICE` (full Apache-2.0 text) and `README.txt` are redistributed unmodified at
+`NOTICE` (full Apache-2.0 text, stored as `NOTICE.txt` so it is served as
+`text/plain`) and `README.txt` are redistributed with unmodified contents at
 `src/Web/ReactApp/public/licenses/droid-fonts/`, which the web client serves at
-`/licenses/droid-fonts/`.
+`/licenses/droid-fonts/NOTICE.txt` and `/licenses/droid-fonts/README.txt`.
 
 ## Frameworks, libraries, and base images
 

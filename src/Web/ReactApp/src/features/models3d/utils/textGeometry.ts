@@ -28,55 +28,51 @@ export interface TextGeometryResult {
 }
 
 // ── Font cache ──────────────────────────────────────────────────────────
+type FontData = ConstructorParameters<typeof Font>[0];
+
+interface RawTypeface {
+  boundingBox: { yMax: number; yMin: number };
+  familyName: string;
+  glyphs: Record<string, { ha: number; o?: string }>;
+  resolution: number;
+  underlineThickness: number;
+}
+
+function toFontData(raw: RawTypeface): FontData {
+  return {
+    boundingBox: { yMax: raw.boundingBox.yMax, yMin: raw.boundingBox.yMin },
+    familyName: raw.familyName,
+    glyphs: Object.fromEntries(
+      Object.entries(raw.glyphs).map(([key, glyph]) => {
+        const outline = glyph.o ?? '';
+        // three-stdlib reuses a truthy _cachedOutline instead of parsing o, so it
+        // must hold the split outline; an empty array would yield empty geometry.
+        return [key, { _cachedOutline: outline ? outline.split(' ') : [], ha: glyph.ha, o: outline }];
+      }),
+    ),
+    resolution: raw.resolution,
+    underlineThickness: raw.underlineThickness,
+  };
+}
+
+async function importTypeface(family: FontFamily): Promise<RawTypeface> {
+  switch (family) {
+    case 'serif':
+      return (await import('@/assets/fonts/droid/droid_serif_regular.typeface.json')).default;
+    case 'monospace':
+      return (await import('@/assets/fonts/droid/droid_sans_mono_regular.typeface.json')).default;
+    default:
+      return (await import('@/assets/fonts/droid/droid_sans_regular.typeface.json')).default;
+  }
+}
+
 const fontCache = new Map<FontFamily, Font>();
 
 async function loadFont(family: FontFamily): Promise<Font> {
   const cached = fontCache.get(family);
   if (cached) return cached;
 
-  // three-stdlib reuses a truthy _cachedOutline instead of parsing o, so it
-  // must hold the split outline; an empty array would yield empty geometry.
-  let data: ConstructorParameters<typeof Font>[0];
-  switch (family) {
-    case 'serif': {
-      const mod = await import('@/assets/fonts/droid/droid_serif_regular.typeface.json');
-      const raw = mod.default ?? mod;
-      data = {
-        boundingBox: { yMax: raw.boundingBox.yMax, yMin: raw.boundingBox.yMin },
-        familyName: raw.familyName,
-        glyphs: Object.fromEntries(Object.entries(raw.glyphs).map(([key, glyph]) => [key, { _cachedOutline: 'o' in glyph ? glyph.o.split(' ') : [], ha: glyph.ha, o: 'o' in glyph ? glyph.o : '' }])),
-        resolution: raw.resolution,
-        underlineThickness: raw.underlineThickness,
-      };
-      break;
-    }
-    case 'monospace': {
-      const mod = await import('@/assets/fonts/droid/droid_sans_mono_regular.typeface.json');
-      const raw = mod.default ?? mod;
-      data = {
-        boundingBox: { yMax: raw.boundingBox.yMax, yMin: raw.boundingBox.yMin },
-        familyName: raw.familyName,
-        glyphs: Object.fromEntries(Object.entries(raw.glyphs).map(([key, glyph]) => [key, { _cachedOutline: 'o' in glyph ? glyph.o.split(' ') : [], ha: glyph.ha, o: 'o' in glyph ? glyph.o : '' }])),
-        resolution: raw.resolution,
-        underlineThickness: raw.underlineThickness,
-      };
-      break;
-    }
-    default: {
-      const mod = await import('@/assets/fonts/droid/droid_sans_regular.typeface.json');
-      const raw = mod.default ?? mod;
-      data = {
-        boundingBox: { yMax: raw.boundingBox.yMax, yMin: raw.boundingBox.yMin },
-        familyName: raw.familyName,
-        glyphs: Object.fromEntries(Object.entries(raw.glyphs).map(([key, glyph]) => [key, { _cachedOutline: 'o' in glyph ? glyph.o.split(' ') : [], ha: glyph.ha, o: 'o' in glyph ? glyph.o : '' }])),
-        resolution: raw.resolution,
-        underlineThickness: raw.underlineThickness,
-      };
-      break;
-    }
-  }
-
-  const font = new Font(data);
+  const font = new Font(toFontData(await importTypeface(family)));
   fontCache.set(family, font);
   return font;
 }

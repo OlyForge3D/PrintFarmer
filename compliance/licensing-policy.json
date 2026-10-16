@@ -37,7 +37,7 @@
       ]
     },
     {
-      "path": "src/Web/ReactApp/public/licenses/droid-fonts/NOTICE",
+      "path": "src/Web/ReactApp/public/licenses/droid-fonts/NOTICE.txt",
       "sha256": "92d336191c9ec51cc39f0b2fc44e5153f685c661c3d1e44e088fad4e68358ab2",
       "source": "https://github.com/mrdoob/three.js/blob/a58e9ecf225b50e4a28a934442e854878bc2a959/examples/fonts/droid/NOTICE",
       "appliesTo": [
