@@ -44,12 +44,15 @@ function loadServiceWorker() {
   const keyOf = (key: string | { url: string }) =>
     new URL(typeof key === 'string' ? key : key.url, ORIGIN).href;
 
+  let cacheFault: 'open' | 'put' | null = null;
   const caches = {
     open: async (name: string) => {
+      if (cacheFault === 'open') throw new DOMException('quota', 'QuotaExceededError');
       if (!stores.has(name)) stores.set(name, new Map());
       const store = stores.get(name)!;
       return {
         put: async (key: string | { url: string }, res: Response) => {
+          if (cacheFault === 'put') throw new DOMException('quota', 'QuotaExceededError');
           store.set(keyOf(key), res);
         },
         addAll: async (keys: string[]) => {
@@ -87,6 +90,9 @@ function loadServiceWorker() {
     fetchSpy,
     setFetch(impl: FetchImpl) {
       fetchImpl = impl;
+    },
+    setCacheFault(fault: 'open' | 'put' | null) {
+      cacheFault = fault;
     },
     async install() {
       let done: Promise<unknown> = Promise.resolve();
@@ -171,6 +177,61 @@ describe('service worker offline shell cache (#3368)', () => {
     expect(sw.fetchSpy).not.toHaveBeenCalled();
     expect(await sw.cachedShell()).toBe(SHELL_HTML);
   });
+
+  it.each([
+    '//install-ca',
+    '///install-ca',
+    '//licenses//droid-fonts/README',
+    '//livez',
+    '//metrics',
+    '//health',
+    '//api/artifacts/1/download',
+    '//hubs/printers',
+  ])('does not intercept the repeated-slash non-SPA navigation %s (#3376, R3374-V02)', async (path) => {
+    const sw = await installedWorker();
+    // nginx merges slashes, so the server answers with a valid-looking HTML page.
+    sw.setFetch(async (req) => html('<h1>Install CA</h1>', { url: req.url }));
+
+    const res = await sw.navigate(`${ORIGIN}${path}`);
+
+    expect(res).toBeUndefined();
+    expect(sw.fetchSpy).not.toHaveBeenCalled();
+    expect(await sw.cachedShell()).toBe(SHELL_HTML);
+  });
+
+  it('keeps bypassing repeated-slash /api and /hubs for non-navigation requests (#3376)', async () => {
+    const sw = await installedWorker();
+
+    expect(await sw.navigate(`${ORIGIN}//api/printers`, 'cors', '')).toBeUndefined();
+    expect(await sw.navigate(`${ORIGIN}//hubs//printers/negotiate`, 'cors', '')).toBeUndefined();
+    expect(sw.fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('still intercepts a repeated-slash SPA route', async () => {
+    const sw = await installedWorker();
+    const updated = '<!doctype html><div id="root" data-route="jobs"></div>';
+    sw.setFetch(async (req) => html(updated, { url: req.url }));
+
+    expect(await (await sw.navigate(`${ORIGIN}//jobs`))!.text()).toBe(updated);
+    expect(await sw.cachedShell()).toBe(updated);
+  });
+
+  it.each(['open', 'put'] as const)(
+    'returns the live SPA response when caches.%s rejects (#3376, R3374-V01)',
+    async (fault) => {
+      const sw = await installedWorker();
+      const live = '<!doctype html><div id="root" data-build="live"></div>';
+      sw.setFetch(async (req) => html(live, { url: req.url }));
+      sw.setCacheFault(fault);
+
+      const res = await sw.navigate('/printers/7');
+
+      expect(res!.status).toBe(200);
+      expect(await res!.text()).toBe(live);
+      sw.setCacheFault(null);
+      expect(await sw.cachedShell()).toBe(SHELL_HTML);
+    },
+  );
 
   it('does not intercept an absolute cross-origin navigation', async () => {
     const sw = await installedWorker();

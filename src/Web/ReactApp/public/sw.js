@@ -39,9 +39,15 @@ const NON_SPA_PREFIXES = [
   '/jaeger'
 ];
 
+// nginx (`merge_slashes on`) and ASP.NET Core route `//install-ca` to the
+// same handler as `/install-ca`, so classify on the collapsed path.
+function normalizedPath(url) {
+  return new URL(url).pathname.replace(/\/{2,}/g, '/');
+}
+
 function isSpaNavigation(url) {
-  const { origin, pathname } = new URL(url);
-  if (origin !== self.location.origin) return false;
+  if (new URL(url).origin !== self.location.origin) return false;
+  const pathname = normalizedPath(url);
   if (NON_SPA_PREFIXES.some(p => pathname === p || pathname.startsWith(p + '/'))) {
     return false;
   }
@@ -89,7 +95,7 @@ self.addEventListener('fetch', (event) => {
   // Never cache authenticated or live application traffic. Cache keys do not
   // vary by Authorization, and serving an API response from a shared browser
   // cache can expose stale or another user's data.
-  const requestPath = new URL(req.url).pathname;
+  const requestPath = normalizedPath(req.url);
   if (requestPath === '/api' || requestPath.startsWith('/api/') ||
       requestPath === '/hubs' || requestPath.startsWith('/hubs/')) {
     return;
@@ -102,16 +108,23 @@ self.addEventListener('fetch', (event) => {
     if (!isSpaNavigation(req.url)) return;
 
     event.respondWith((async () => {
+      let fresh;
       try {
-        const fresh = await fetch(req);
-        if (isShellResponse(fresh)) {
-          const cache = await caches.open(SHELL_CACHE);
-          await cache.put('/', fresh.clone());
-        }
-        return fresh;
+        fresh = await fetch(req);
       } catch {
         return (await caches.match('/')) || (await caches.match('/index.html')) || Response.error();
       }
+      if (isShellResponse(fresh)) {
+        // Persisting the shell is best-effort: a storage failure (e.g.
+        // QuotaExceededError) must not replace a good live response.
+        try {
+          const cache = await caches.open(SHELL_CACHE);
+          await cache.put('/', fresh.clone());
+        } catch {
+          // Keep the previous shell entry.
+        }
+      }
+      return fresh;
     })());
     return;
   }
