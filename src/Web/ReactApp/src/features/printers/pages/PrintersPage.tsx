@@ -552,8 +552,10 @@ export function PrintersPage() {
       <FailureDetectionPollingProvider value={anyObicoEnabled}>
       <div className={isSidebarOpen ? 'min-w-0 lg:grid lg:grid-cols-[minmax(0,1fr)_24rem] lg:items-start lg:gap-6' : 'min-w-0'}>
         <div className="min-w-0">
-          {/* Actions, sort and view remain available while filters are collapsed. */}
-          <div data-tour="printers-filters" className="flex flex-col gap-4 mb-6">
+          {/* Actions, sort and view remain available while filters are collapsed.
+              The full-width strip cannot be spotlit without the actions row, so the
+              tour anchor widens only while the strip is open. */}
+          <div data-tour={filtersExpanded ? 'printers-filters' : undefined} className="flex flex-col gap-4 mb-6">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               {/* Primary Actions (Left) */}
               <div data-tour="printers-actions" className="flex flex-col sm:flex-row sm:items-center gap-2">
@@ -578,7 +580,7 @@ export function PrintersPage() {
               </div>
 
               {/* View & Filters (Right) */}
-              <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+              <div data-tour={filtersExpanded ? undefined : 'printers-filters'} className="flex flex-wrap items-center gap-2 sm:justify-end">
                 <div className="flex items-center gap-0.5">
                 <Tooltip content={filtersExpanded ? 'Hide printer filters' : 'Show printer filters'} position="top">
                   <Button

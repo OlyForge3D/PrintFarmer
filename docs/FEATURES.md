@@ -23,7 +23,7 @@ Filter tooltips appear above the controls to avoid covering Sort. Clearing filte
 returns focus to the funnel; its tooltip intentionally appears immediately, just
 as it does for keyboard focus, so the restored control remains identifiable.
 The clear tooltip does not repeat the button's name to screen readers.
-The filter tour spotlight includes both the toolbar and the expanded strip.
+The filter tour spotlight covers only the filter, sort and view controls while the strip is collapsed. While the strip is expanded it widens to the whole toolbar, because the full-width strip cannot be spotlit without the actions row.
 
 Bed type is configured in printer settings, not shown on fleet cards or used
 as a fleet filter. Bed editing and temperature controls remain available.

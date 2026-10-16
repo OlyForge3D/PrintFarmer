@@ -568,12 +568,24 @@ describe('PrintersPage', () => {
 
   it('keeps the tour spotlight around the toggle and the filters it describes', async () => {
     const user = userEvent.setup();
-    renderPage('/printers');
+    const { container } = renderPage('/printers');
     const toggle = screen.getByRole('button', { name: 'Printer filters' });
     await user.click(toggle);
 
+    expect(container.querySelectorAll('[data-tour="printers-filters"]')).toHaveLength(1);
     expect(toggle.closest('[data-tour="printers-filters"]'))
       .toContainElement(screen.getByRole('group', { name: 'Printer filters' }));
+  });
+
+  it('narrows the collapsed tour spotlight to the filter, sort and view controls', () => {
+    const { container } = renderPage('/printers');
+    const anchors = container.querySelectorAll('[data-tour="printers-filters"]');
+    expect(anchors).toHaveLength(1);
+
+    const anchor = anchors[0];
+    expect(anchor).toContainElement(screen.getByRole('button', { name: 'Printer filters' }));
+    expect(anchor).toContainElement(screen.getByLabelText('Sort printers by'));
+    expect(anchor).not.toContainElement(container.querySelector('[data-tour="printers-actions"]') as HTMLElement);
   });
 
   it('shows the clear tooltip above the controls without repeating the accessible name', async () => {
