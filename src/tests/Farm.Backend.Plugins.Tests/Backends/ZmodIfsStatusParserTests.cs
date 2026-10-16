@@ -33,21 +33,45 @@ public class ZmodIfsStatusParserTests
         }
         """;
 
+    private static bool Frame(PrinterState state, string json, out int count)
+    {
+        Apply(state, json);
+        count = 0;
+        return ZmodIfsStatusParser.ReportsGateCount(JsonDocument.Parse(json).RootElement) &&
+               state.TryGetStableZmodGateCount(out count);
+    }
+
+    private const string UnrelatedDelta = """{"zmod_ifs":{"Chan":2}}""";
+
     [Fact]
-    public void TryGetStableZmodGateCount_FiresOnceAfterStableLiveReading()
+    public void TryGetStableZmodGateCount_FiresOnceAfterThreeReportingFrames()
     {
         var state = new PrinterState();
-        Apply(state, RigFrame);
 
-        state.TryGetStableZmodGateCount(out _).Should().BeFalse();
-        state.TryGetStableZmodGateCount(out _).Should().BeFalse();
-        state.TryGetStableZmodGateCount(out int count).Should().BeTrue();
+        Frame(state, RigFrame, out _).Should().BeFalse();
+        Frame(state, RigFrame, out _).Should().BeFalse();
+        Frame(state, RigFrame, out int count).Should().BeTrue();
         count.Should().Be(4);
-        state.TryGetStableZmodGateCount(out _).Should().BeFalse();
+        Frame(state, RigFrame, out _).Should().BeFalse();
 
         state.ResetMmuState();
-        Apply(state, RigFrame);
-        state.TryGetStableZmodGateCount(out _).Should().BeFalse();
+        Frame(state, RigFrame, out _).Should().BeFalse();
+    }
+
+    [Fact]
+    public void TryGetStableZmodGateCount_UnrelatedDeltasDoNotAdvanceDebounce()
+    {
+        var state = new PrinterState();
+
+        Frame(state, RigFrame, out _).Should().BeFalse();
+        for (int i = 0; i < 10; i++)
+        {
+            Frame(state, UnrelatedDelta, out _).Should().BeFalse();
+        }
+
+        Frame(state, RigFrame, out _).Should().BeFalse();
+        Frame(state, RigFrame, out int count).Should().BeTrue();
+        count.Should().Be(4);
     }
 
     [Fact]
@@ -55,13 +79,12 @@ public class ZmodIfsStatusParserTests
     {
         var state = new PrinterState();
         string sixPorts = """{"zmod_ifs":{"available":true,"Ports":[true,false,false,true,false,false],"Chan":1}}""";
-        Apply(state, RigFrame);
-        state.TryGetStableZmodGateCount(out _).Should().BeFalse();
-        state.TryGetStableZmodGateCount(out _).Should().BeFalse();
-        Apply(state, sixPorts);
-        state.TryGetStableZmodGateCount(out _).Should().BeFalse();
-        state.TryGetStableZmodGateCount(out _).Should().BeFalse();
-        state.TryGetStableZmodGateCount(out int count).Should().BeTrue();
+
+        Frame(state, RigFrame, out _).Should().BeFalse();
+        Frame(state, RigFrame, out _).Should().BeFalse();
+        Frame(state, sixPorts, out _).Should().BeFalse();
+        Frame(state, sixPorts, out _).Should().BeFalse();
+        Frame(state, sixPorts, out int count).Should().BeTrue();
         count.Should().Be(6);
     }
 

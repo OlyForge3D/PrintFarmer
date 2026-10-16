@@ -78,6 +78,28 @@ internal static class ZmodIfsStatusParser
         return true;
     }
 
+    /// <summary>
+    /// True when this frame itself carries a live gate count (a non-empty <c>zmod_ifs.Ports</c> or
+    /// <c>zmod_color.slots</c> array), as opposed to unrelated deltas that leave cached counts untouched.
+    /// </summary>
+    public static bool ReportsGateCount(JsonElement statusObj)
+    {
+        if (statusObj.ValueKind != JsonValueKind.Object)
+        {
+            return false;
+        }
+
+        return HasNonEmptyArray(statusObj, IfsObjectName, "Ports") ||
+               HasNonEmptyArray(statusObj, ColorObjectName, "slots");
+    }
+
+    private static bool HasNonEmptyArray(JsonElement statusObj, string objectName, string propertyName) =>
+        statusObj.TryGetProperty(objectName, out JsonElement obj) &&
+        obj.ValueKind == JsonValueKind.Object &&
+        obj.TryGetProperty(propertyName, out JsonElement arr) &&
+        arr.ValueKind == JsonValueKind.Array &&
+        arr.GetArrayLength() > 0;
+
     private static void ApplyIfs(PrinterState state, JsonElement ifs)
     {
         if (ifs.TryGetProperty("available", out JsonElement available) &&
