@@ -1,5 +1,4 @@
-﻿using System.Globalization;
-using System.Reflection;
+﻿using System.Reflection;
 using Farm.Infrastructure.Authorization;
 using Farm.Modules.Devices.Filters;
 using Farm.Slicer.Module.Api.Filters;
@@ -291,11 +290,38 @@ public sealed class RouteTableSnapshotTests
                 provider))
             .Should().Be("effective=desktop-scope:ModelRead");
         _ = (await BuildEffectiveAuthorizationAsync(
-                new EndpointMetadataCollection(new TestRequirementData(new UnknownRequirement { Limit = 3, Name = "x" })),
+                new EndpointMetadataCollection(new TestRequirementData(new InteractiveSessionRequirement())),
                 provider))
-            .Should().Be($"effective=requirement:{typeof(UnknownRequirement).FullName}(Limit=3,Name=x)");
+            .Should().Be($"effective=requirement:{typeof(InteractiveSessionRequirement).FullName}");
         _ = (await BuildEffectiveAuthorizationAsync(new EndpointMetadataCollection(), provider))
             .Should().Be("effective=none");
+
+        Func<Task> unknown = () => BuildEffectiveAuthorizationAsync(
+            new EndpointMetadataCollection(new TestRequirementData(new UnknownRequirement { Limit = 3, Name = "x" })),
+            provider);
+        _ = (await unknown.Should().ThrowAsync<InvalidOperationException>())
+            .Which.Message.Should().Contain(typeof(UnknownRequirement).FullName!);
+    }
+
+    [Fact]
+    public async Task EffectiveAuthorization_CountsDistinctAssertionRequirements()
+    {
+        IAuthorizationPolicyProvider provider = CreatePolicyProvider(_ => { });
+        AssertionRequirement first = new(_ => true);
+        AssertionRequirement second = new(_ => false);
+
+        _ = (await BuildEffectiveAuthorizationAsync(
+                new EndpointMetadataCollection(new TestRequirementData(first)),
+                provider))
+            .Should().Be("effective=assertion");
+        _ = (await BuildEffectiveAuthorizationAsync(
+                new EndpointMetadataCollection(new TestRequirementData(first), new TestRequirementData(first)),
+                provider))
+            .Should().Be("effective=assertion", "the same assertion instance repeated is still one assertion");
+        _ = (await BuildEffectiveAuthorizationAsync(
+                new EndpointMetadataCollection(new TestRequirementData(first), new TestRequirementData(second)),
+                provider))
+            .Should().Be("effective=assertion*2", "adding a second assertion must change the snapshot");
     }
 
     private static DefaultAuthorizationPolicyProvider CreatePolicyProvider(Action<AuthorizationOptions> configure)
@@ -663,8 +689,23 @@ public sealed class RouteTableSnapshotTests
 
     private static string DescribePolicy(AuthorizationPolicy policy)
     {
+        // Assertions carry no comparable configuration, so collapsing them by description would hide
+        // an added assertion. Count distinct instances instead (the same instance repeated by policy
+        // combination is still one assertion).
+        int assertionCount = policy.Requirements
+            .OfType<AssertionRequirement>()
+            .Distinct(ReferenceEqualityComparer.Instance)
+            .Count();
+        string[] assertions = assertionCount switch
+        {
+            0 => [],
+            1 => ["assertion"],
+            _ => [$"assertion*{assertionCount}"],
+        };
         string[] requirements = policy.Requirements
+            .Where(requirement => requirement is not AssertionRequirement)
             .Select(DescribeRequirement)
+            .Concat(assertions)
             .Distinct(StringComparer.Ordinal)
             .OrderBy(requirement => requirement, StringComparer.Ordinal)
             .ToArray();
@@ -678,6 +719,8 @@ public sealed class RouteTableSnapshotTests
 
     private static string DescribeRequirement(IAuthorizationRequirement requirement) => requirement switch
     {
+        // Stateless marker requirement; rendered by type name for snapshot continuity.
+        InteractiveSessionRequirement => $"requirement:{typeof(InteractiveSessionRequirement).FullName}",
         DenyAnonymousAuthorizationRequirement => "authenticated",
         RequirePermissionAttribute permission => $"permission:{permission.Permission}",
         DesktopScopeRequirement scope => $"desktop-scope:{scope.RequiredScope}",
@@ -687,29 +730,14 @@ public sealed class RouteTableSnapshotTests
             $"claim:{claim.ClaimType}={string.Join(",", (claim.AllowedValues ?? []).Order(StringComparer.Ordinal))}",
         NameAuthorizationRequirement name => $"name:{name.RequiredName}",
         AssertionRequirement => "assertion",
-        _ => DescribeUnknownRequirement(requirement)
+        // Reflection over arbitrary requirement state is incomplete (inherited, collection, and
+        // private state) and unstable, so an unrecognised requirement type fails the snapshot and
+        // forces an explicit, reviewed rendering of its configuration here.
+        _ => throw new InvalidOperationException(
+            $"Authorization requirement type '{requirement.GetType().FullName}' has no explicit rendering in " +
+            $"{nameof(RouteTableSnapshotTests)}.{nameof(DescribeRequirement)}. Add a case that renders " +
+            "every value that affects its authorization decision, then regenerate and review the snapshot.")
     };
-
-    /// <summary>
-    /// Renders a requirement type this projection does not know explicitly by its full type name
-    /// plus its declared public scalar properties, so a new or reconfigured custom requirement
-    /// still produces a snapshot diff rather than collapsing to an opaque name.
-    /// </summary>
-    private static string DescribeUnknownRequirement(IAuthorizationRequirement requirement)
-    {
-        Type type = requirement.GetType();
-        string[] properties = type
-            .GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly)
-            .Where(property => property.GetIndexParameters().Length == 0 &&
-                (property.PropertyType.IsPrimitive || property.PropertyType.IsEnum ||
-                 property.PropertyType == typeof(string)))
-            .OrderBy(property => property.Name, StringComparer.Ordinal)
-            .Select(property => $"{property.Name}={Convert.ToString(property.GetValue(requirement), CultureInfo.InvariantCulture)}")
-            .ToArray();
-        return properties.Length == 0
-            ? $"requirement:{type.FullName}"
-            : $"requirement:{type.FullName}({string.Join(",", properties)})";
-    }
 
     /// <summary>
     /// Projects the runtime MVC filter pipeline of an action (its

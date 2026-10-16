@@ -1,4 +1,5 @@
-﻿using Farm.Web.Api.Tests.TestInfrastructure;
+﻿using Farm.Web.Api.Tests.Startup;
+using Farm.Web.Api.Tests.TestInfrastructure;
 using FluentAssertions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
@@ -174,18 +175,34 @@ public sealed class AnonymousEndpointArchitectureTests
         };
 
     [Fact]
-    public void AnonymousNonControllerEndpoints_MatchReviewedAllowlist()
+    public async Task AnonymousNonControllerEndpoints_MatchReviewedAllowlist()
     {
         using var factory = new CustomWebApplicationFactory(
             new Dictionary<string, string?> { ["Security:DevModeBypassAuth"] = "false" });
+        IAuthorizationPolicyProvider policyProvider =
+            factory.Services.GetRequiredService<IAuthorizationPolicyProvider>();
 
         RouteEndpoint[] endpoints = factory.Services.GetRequiredService<EndpointDataSource>().Endpoints
             .OfType<RouteEndpoint>()
             .Where(endpoint => endpoint.Metadata.GetMetadata<ControllerActionDescriptor>() is null)
             .ToArray();
 
-        string[] actual = endpoints
-            .Where(endpoint => endpoint.Metadata.GetMetadata<IAllowAnonymous>() is not null)
+        // Classify by the policy the authorization middleware actually evaluates (explicit
+        // [AllowAnonymous], or no policy at all once the fallback policy is applied), not by the
+        // presence of an [AllowAnonymous] marker.
+        List<RouteEndpoint> reachableWithoutLogin = [];
+        foreach (RouteEndpoint endpoint in endpoints)
+        {
+            string effective = await RouteTableSnapshotTests.BuildEffectiveAuthorizationAsync(
+                endpoint.Metadata, policyProvider);
+            if (effective is "effective=anonymous" or "effective=none")
+            {
+                reachableWithoutLogin.Add(endpoint);
+            }
+        }
+
+        string[] actual = reachableWithoutLogin
+            .Where(endpoint => endpoint.Metadata.GetMetadata<HubMetadata>() is null)
             .Select(GetEndpointId)
             .Order(StringComparer.Ordinal)
             .ToArray();
@@ -194,15 +211,19 @@ public sealed class AnonymousEndpointArchitectureTests
         actual.Should().Equal(
             ReviewedAnonymousNonControllerEndpoints.Keys.Order(StringComparer.Ordinal),
             "adding or removing anonymous minimal-API endpoints requires a deliberate review of this allowlist");
+        ReviewedAnonymousNonControllerEndpoints.Values.Should().OnlyContain(
+            rationale => !string.IsNullOrWhiteSpace(rationale),
+            "every reviewed anonymous endpoint must explain why it is public");
 
         string[] anonymousHubEndpoints = endpoints
             .Where(endpoint => endpoint.Metadata.GetMetadata<HubMetadata>() is not null &&
-                (endpoint.Metadata.GetMetadata<IAllowAnonymous>() is not null ||
+                (reachableWithoutLogin.Contains(endpoint) ||
                  !endpoint.Metadata.GetOrderedMetadata<IAuthorizeData>().Any()))
             .Select(GetEndpointId)
             .ToArray();
         anonymousHubEndpoints.Should().BeEmpty(
-            "every SignalR hub connect and negotiate endpoint must carry explicit [Authorize] metadata");
+            "every SignalR hub connect and negotiate endpoint must carry explicit [Authorize] metadata " +
+            "and resolve to an authenticated policy");
     }
 
     private static string GetEndpointId(RouteEndpoint endpoint)
