@@ -443,6 +443,11 @@ whenever outbound GitHub access is not allowed.
    ./scripts/deploy-docker.sh
    ```
 
+   To stop building on the host, convert the source-built deployment in place to
+   release images with the
+   [build-free registry migration](DEPLOYMENT_REGISTRY_MIGRATION.md), then use
+   `.printfarmer/bin/printfarmer-registry update` for later releases.
+
 5. Confirm `/healthz` and `/health` succeed. The banner clears once the installed
    version matches the latest release.
 

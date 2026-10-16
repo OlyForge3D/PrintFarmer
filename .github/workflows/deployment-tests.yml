@@ -8,6 +8,7 @@ on:
       - 'scripts/common-utils.sh'
       - 'scripts/deploy-docker.ps1'
       - 'scripts/docker/**'
+      - 'scripts/registry/**'
       - 'docs/**'
       - 'tests/**'
       - 'deploy/nginx/**'
@@ -23,6 +24,7 @@ on:
       - 'scripts/common-utils.sh'
       - 'scripts/deploy-docker.ps1'
       - 'scripts/docker/**'
+      - 'scripts/registry/**'
       - 'docs/**'
       - 'tests/**'
       - 'deploy/nginx/**'
@@ -55,6 +57,9 @@ jobs:
 
       - name: Show Docker Compose version
         run: docker compose version
+
+      - name: Run registry migration controller tests
+        run: python3 -m unittest discover -s scripts/registry/tests -v
 
       - name: Run discovery socket boundary regression tests
         run: |
