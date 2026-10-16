@@ -55,7 +55,13 @@ public sealed class GcodeFilesControllerSettingsTests : IAsyncLifetime, IDisposa
                 services.AddLogging();
                 services.AddAuthentication("Test")
                     .AddScheme<AuthenticationSchemeOptions, SettingsTestAuthHandler>("Test", _ => { });
-                services.AddAuthorization();
+                services.AddAuthorization(options =>
+                    options.AddPolicy("ModelRead", policy =>
+                    {
+                        policy.RequireAuthenticatedUser();
+                        policy.AddRequirements(new DesktopScopeRequirement("ModelRead"));
+                    }));
+                services.AddSingleton<IAuthorizationHandler, DesktopScopeAuthorizationHandler>();
                 services.AddSingleton<IAuthorizationHandler, PermissionAuthorizationHandler>();
                 services.AddControllers().AddApplicationPart(typeof(GcodeFilesController).Assembly);
                 services.AddSingleton<IGcodeUploadSettings>(uploadSettings);

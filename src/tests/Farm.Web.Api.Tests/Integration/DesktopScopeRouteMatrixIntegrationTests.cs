@@ -626,4 +626,171 @@ public class DesktopScopeRouteMatrixIntegrationTests : IClassFixture<DesktopScop
     }
 
     #endregion
+
+    #region Model/G-code upload write boundary (issue #3269)
+
+    /// <summary>
+    /// Every model-geometry and G-code upload/mutation route that previously relied on bare
+    /// <c>[Authorize]</c>. Multipart routes are sent a part whose name deliberately does not bind,
+    /// so the positive case stops at a 400 after authorization instead of persisting a file.
+    /// </summary>
+    public static TheoryData<string, string, bool> ModelWriteRoutes()
+    {
+        const string uploadId = "3269a5c0d4b14f8e9c7a1b2c3d4e5f60";
+        const string modelId = "3269c0de-0000-4000-8000-000000003269";
+        return new TheoryData<string, string, bool>
+        {
+            { "POST", "/api/3d-models/upload-geometry", true },
+            { "PUT", $"/api/3d-models/{modelId}/thumbnail", true },
+            { "POST", "/api/3d-models/import/printables", false },
+            { "POST", "/api/3d-models/import/printables/one-click", false },
+            { "POST", "/api/3d-models/printables/attribution", false },
+            { "POST", "/api/gcode-files/chunk/init", false },
+            { "PUT", $"/api/gcode-files/chunk/{uploadId}?offset=0", false },
+            { "GET", $"/api/gcode-files/chunk/{uploadId}", false },
+            { "POST", $"/api/gcode-files/chunk/{uploadId}/pause", false },
+            { "POST", $"/api/gcode-files/chunk/{uploadId}/resume", false },
+            { "DELETE", $"/api/gcode-files/chunk/{uploadId}", false },
+            { "POST", "/api/gcode-files/upload", true },
+            { "POST", "/api/gcode-files/folder", false },
+            { "POST", "/api/gcode-files/move", false },
+        };
+    }
+
+    private static HttpRequestMessage CreateScopeMatrixRequest(string method, string path, bool multipart)
+    {
+        HttpRequestMessage request = new(new HttpMethod(method), path);
+        if (method is "GET" or "DELETE")
+        {
+            return request;
+        }
+
+        if (multipart)
+        {
+            MultipartFormDataContent content = [];
+            ByteArrayContent part = new([0x00]);
+            part.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+            content.Add(part, "unbound-part", "unbound.bin");
+            request.Content = content;
+        }
+        else
+        {
+            request.Content = JsonContent.Create(new { });
+        }
+
+        return request;
+    }
+
+    /// <summary>
+    /// A Desktop token holding every legacy model/library scope except <c>ModelWrite</c> must be
+    /// refused by each upload/mutation route; the same request with <c>ModelWrite</c> must clear
+    /// authorization. The paired assertions also pin route existence: a mistyped path would 404
+    /// for the denied token rather than 403.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(ModelWriteRoutes))]
+    public async Task ModelUploadMutationRoutes_RequireModelWriteScope(string method, string path, bool multipart)
+    {
+        using HttpClient readOnly = await ScopedClientAsync(ApiKeyScope.ModelRead | ApiKeyScope.LibrarySync);
+        using HttpClient writer = await ScopedClientAsync(ApiKeyScope.ModelWrite);
+
+        using (HttpRequestMessage deniedRequest = CreateScopeMatrixRequest(method, path, multipart))
+        using (HttpResponseMessage denied = await readOnly.SendAsync(deniedRequest))
+        {
+            ShouldBeDenied(denied, $"{method} {path} mutates model/G-code resources and must require ModelWrite");
+        }
+
+        using HttpRequestMessage allowedRequest = CreateScopeMatrixRequest(method, path, multipart);
+        using HttpResponseMessage allowed = await writer.SendAsync(allowedRequest);
+        ShouldClearAuthorization(allowed, $"ModelWrite was granted for {method} {path}");
+    }
+
+    #endregion
+
+    #region Model/G-code read boundary
+
+    /// <summary>
+    /// Private model and G-code reads, including Printables data tied to the user's linked account.
+    /// Public Printables browsing and explicitly anonymous thumbnails are intentionally excluded.
+    /// </summary>
+    public static TheoryData<string, string, bool> ModelReadRoutes()
+    {
+        const string fileId = "3269c0de-0000-4000-8000-000000003269";
+        return new TheoryData<string, string, bool>
+        {
+            { "POST", "/api/3d-models/validate", true },
+            { "GET", "/api/gcode-files/hash?path=sample.gcode", false },
+            { "GET", "/api/gcode-files", false },
+            { "GET", "/api/gcode-files/query", false },
+            { "GET", "/api/gcode-files/folders", false },
+            { "GET", "/api/gcode-files/download?path=sample.gcode", false },
+            { "HEAD", "/api/gcode-files/download?path=sample.gcode", false },
+            { "GET", $"/api/gcode-files/file/{fileId}", false },
+            { "GET", "/api/gcode-files/settings", false },
+            { "GET", "/api/3d-models/printables/oauth/status", false },
+            { "GET", "/api/3d-models/printables/liked?limit=1", false },
+            { "GET", "/api/3d-models/printables/history?limit=1", false },
+        };
+    }
+
+    /// <summary>
+    /// A Desktop token without ModelRead must be refused by every private model/G-code read route,
+    /// while a ModelRead token clears authorization.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(ModelReadRoutes))]
+    public async Task ModelAndGcodeReadRoutes_RequireModelReadScope(string method, string path, bool multipart)
+    {
+        using HttpClient underScoped = await ScopedClientAsync(ApiKeyScope.CalibrationRead);
+        using HttpClient reader = await ScopedClientAsync(ApiKeyScope.ModelRead);
+
+        using (HttpRequestMessage deniedRequest = CreateScopeMatrixRequest(method, path, multipart))
+        using (HttpResponseMessage denied = await underScoped.SendAsync(deniedRequest))
+        {
+            ShouldBeDenied(denied, $"{method} {path} reads model/G-code data and must require ModelRead");
+        }
+
+        using HttpRequestMessage allowedRequest = CreateScopeMatrixRequest(method, path, multipart);
+        using HttpResponseMessage allowed = await reader.SendAsync(allowedRequest);
+        ShouldClearAuthorization(allowed, $"ModelRead was granted for {method} {path}");
+    }
+
+    #endregion
+
+    #region Printables account-linking write boundary
+
+    /// <summary>Printables routes that change the authenticated user's linked account.</summary>
+    public static TheoryData<string, string, bool> PrintablesAccountWriteRoutes()
+    {
+        return new TheoryData<string, string, bool>
+        {
+            { "POST", "/api/3d-models/printables/oauth/connect", false },
+            { "GET", "/api/3d-models/printables/oauth/callback?code=invalid&state=invalid", false },
+            { "POST", "/api/3d-models/printables/oauth/disconnect", false },
+        };
+    }
+
+    /// <summary>
+    /// A Desktop token without ModelWrite cannot link, complete linking, or unlink a Printables
+    /// account; a ModelWrite token clears the authorization boundary.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(PrintablesAccountWriteRoutes))]
+    public async Task PrintablesAccountWriteRoutes_RequireModelWriteScope(string method, string path, bool multipart)
+    {
+        using HttpClient readOnly = await ScopedClientAsync(ApiKeyScope.ModelRead);
+        using HttpClient writer = await ScopedClientAsync(ApiKeyScope.ModelWrite);
+
+        using (HttpRequestMessage deniedRequest = CreateScopeMatrixRequest(method, path, multipart))
+        using (HttpResponseMessage denied = await readOnly.SendAsync(deniedRequest))
+        {
+            ShouldBeDenied(denied, $"{method} {path} changes Printables account linkage and must require ModelWrite");
+        }
+
+        using HttpRequestMessage allowedRequest = CreateScopeMatrixRequest(method, path, multipart);
+        using HttpResponseMessage allowed = await writer.SendAsync(allowedRequest);
+        ShouldClearAuthorization(allowed, $"ModelWrite was granted for {method} {path}");
+    }
+
+    #endregion
 }
