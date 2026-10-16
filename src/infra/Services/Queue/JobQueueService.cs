@@ -1268,7 +1268,7 @@ public class JobQueueService : IJobQueueService
             (string changeEventType, string? changeFailureCode) = statusTransitioned
                 ? job.Status switch
                 {
-                    PrintJobStatus.Queued => (QueueLifecycleEventWriter.EventTypeJobQueued, (string?)null),
+                    PrintJobStatus.Queued => (QueueLifecycleEventWriter.EventTypeJobQueued, null),
                     PrintJobStatus.Completed => (QueueLifecycleEventWriter.EventTypeJobCompleted, null),
                     PrintJobStatus.Failed => (QueueLifecycleEventWriter.EventTypeJobFailed, "job_failed"),
                     PrintJobStatus.Cancelled => (QueueLifecycleEventWriter.EventTypeJobCancelled, "job_cancelled"),
