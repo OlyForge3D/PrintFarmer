@@ -20,6 +20,49 @@ const CORE = [
   '/printfarmer-logo.svg'
 ];
 
+// Paths served by nginx (deploy/nginx/*) or the monolith API (src/api/Program.cs)
+// rather than the React router. Matched on whole path segments so SPA routes
+// such as `/health-dashboard` are not caught. Keep in sync with both.
+const NON_SPA_PREFIXES = [
+  '/api',
+  '/hubs',
+  '/install-ca',
+  '/licenses',
+  '/health',
+  '/healthz',
+  '/livez',
+  '/metrics',
+  '/openapi',
+  '/swagger',
+  '/slicer/healthz',
+  '/grafana',
+  '/jaeger'
+];
+
+function isSpaNavigation(url) {
+  const { origin, pathname } = new URL(url);
+  if (origin !== self.location.origin) return false;
+  if (NON_SPA_PREFIXES.some(p => pathname === p || pathname.startsWith(p + '/'))) {
+    return false;
+  }
+  // React routes never carry a file extension; `/ca.cer`, `/sw.js`, and
+  // static downloads do.
+  const lastSegment = pathname.slice(pathname.lastIndexOf('/') + 1);
+  return !lastSegment.includes('.');
+}
+
+// Only a successful, same-origin, non-redirected HTML document may replace the
+// cached shell. Polluted entries from older workers are discarded on upgrade:
+// the shell cache name is build-versioned, install re-fetches `/`, and
+// activate deletes every other `pf-shell-*` cache.
+function isShellResponse(res) {
+  if (!res || res.status !== 200 || res.redirected) return false;
+  if (res.type && res.type !== 'basic' && res.type !== 'default') return false;
+  if (res.url && new URL(res.url).origin !== self.location.origin) return false;
+  const contentType = (res.headers.get('content-type') || '').toLowerCase();
+  return contentType.split(';')[0].trim() === 'text/html';
+}
+
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(SHELL_CACHE).then(cache => cache.addAll(CORE)).then(() => self.skipWaiting())
@@ -53,11 +96,18 @@ self.addEventListener('fetch', (event) => {
   }
 
   if (req.mode === 'navigate') {
+    // Server-owned documents (license text, /install-ca, health, proxied
+    // tools) are not the SPA shell: let the browser fetch them directly so
+    // they can never be stored under, or answered with, the `/` shell entry.
+    if (!isSpaNavigation(req.url)) return;
+
     event.respondWith((async () => {
       try {
         const fresh = await fetch(req);
-        const cache = await caches.open(SHELL_CACHE);
-        cache.put('/', fresh.clone());
+        if (isShellResponse(fresh)) {
+          const cache = await caches.open(SHELL_CACHE);
+          await cache.put('/', fresh.clone());
+        }
         return fresh;
       } catch {
         return (await caches.match('/')) || (await caches.match('/index.html')) || Response.error();
