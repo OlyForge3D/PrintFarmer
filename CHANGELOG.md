@@ -34,6 +34,15 @@
 
 ### Fixes
 
+- Fix the slicer 3D text tool producing empty geometry (and empty STLs) for
+  every font family since #2901, and upgrade `three` to 0.186.1. The Droid
+  serif, sans and mono typefaces that three no longer publishes are now bundled
+  under Apache-2.0 with their upstream NOTICE (supersedes #3178).
+
+- Update the frontend test environment to jsdom 30 and exercise filament-slot
+  focus restoration through a visible rail. Frontend development now requires
+  Node.js 24.15+ within 24.x, or Node.js 26+.
+
 - Align EF Core, Microsoft.Data.Sqlite, and EF health checks on 10.0.12,
   including coupled logging and dependency injection pins in backend plugins,
   discovery, shared workers, and the profile parser tool to prevent NuGet

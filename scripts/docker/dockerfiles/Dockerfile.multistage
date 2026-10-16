@@ -150,6 +150,8 @@ ARG GIT_SHA=unknown
 # Copy root-level files and the pruned (manifest-only) src directory.
 # The context root is the repository root (/home/pi/pfarm)
 COPY Directory.Build.props ./
+# Six Labors license; root Directory.Build.props points SixLaborsLicenseFile at it.
+COPY sixlabors.lic ./
 COPY global.json ./
 COPY VERSION ./
 COPY proto ./proto

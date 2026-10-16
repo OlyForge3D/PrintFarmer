@@ -732,7 +732,9 @@ but relabelled, to a new head `SHA_h` only when **all three** hold: (1) `SHA_r` 
 strict ancestor of `SHA_h` (GitHub's compare API reports `status: 'ahead'` for
 `compare(SHA_r...SHA_h)`, never `'behind'`/`'diverged'`/`'identical'` — a rebase or
 force-push always fails this), (2) the PR's own diff against the base branch — not
-its raw commit list — is byte-for-byte unchanged between `SHA_r` and `SHA_h`, and
+its raw commit list — is unchanged between `SHA_r` and `SHA_h`: every compare entry
+is identical, except base-overlapping files content-verified as a clean three-way
+merge (see the issue #2801 paragraph below), and
 (3) every commit introduced since review that isn't already reachable from base is
 a clean two-parent merge introducing nothing beyond its own two parents (see below —
 NOT "content-empty against its own first parent", which is a real, verified-wrong
@@ -798,6 +800,28 @@ if either fires. `compare(parent1...parent2)` exposes no equivalent total, so
 `parentsCompare.files` uses only the length-vs-cap heuristic used for the top-level
 diffs. Either signal
 fails condition 3 closed (treats it as unproven) rather than guessing.
+
+Overlapping files (issue #2801) need one more step. When the base advance and the
+PR both modify the same file, a clean sync legitimately changes that file's merged
+blob, so its fingerprint can match neither `compare(parent1...parent2)` (condition 3)
+nor the reviewed PR diff (condition 2). Exact matching would reject every such sync.
+For each file whose merge-commit entry differs from `compare(parent1...parent2)`, the
+workflow therefore requires a plain in-place text modification on both sides (no
+add, delete, rename, or binary file; at most 20 such files per merge). It fetches
+the file at the reported merge base, both parents, and the merge commit through the
+contents API. It cross-checks the parent-two and merge blob SHAs against the listed
+entries, then proves with `isCleanThreeWayMerge` that the merged bytes equal a
+conflict-free three-way merge. Two independent proofs must agree. The gate's own
+line merge is stricter than git: overlapping or merely adjacent hunks conflict
+unless both sides made the identical change. Because its single line alignment can
+be ambiguous when lines repeat, real `git merge-file`
+(`scripts/ci/git-merge-file.mjs`) must also exit cleanly with exactly the merged
+bytes; any Git conflict or error fails closed. A
+hand-resolved conflict, a dropped side, or any extra edit therefore never passes.
+Inputs too large to diff, or files the contents API will not inline (over 1 MB),
+also fail closed. Condition 2 then allows a mismatch only on those content-verified
+paths. The set of changed paths and the status of each path must remain identical.
+Every other condition above is unchanged.
 
 When a record is carried forward this way, the status and audit trail say so
 explicitly — `REVIEWED (self-attested, carried across sync)`, never a bare

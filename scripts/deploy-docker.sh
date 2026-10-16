@@ -218,7 +218,7 @@ declare -a DOCKER_IMAGES_CONFIG=(
     "mcr.microsoft.com/dotnet/sdk:${SDK_TAG:-10.0-noble}|Dockerfile.base-sdk|mcr.microsoft.com/dotnet/sdk:${SDK_TAG:-10.0-noble}-upgraded"
     "mcr.microsoft.com/dotnet/aspnet:${ASPNET_TAG:-10.0-noble}|Dockerfile.base-aspnet|mcr.microsoft.com/dotnet/aspnet:${ASPNET_TAG:-10.0-noble}-upgraded"
     "ubuntu:${UBUNTU_TAG:-24.04}|Dockerfile.base-ubuntu|ubuntu:${UBUNTU_TAG:-24.04}-upgraded"
-    "node:${NODE_TAG:-22-alpine}|Dockerfile.base-node|node:${NODE_TAG:-22-alpine}-upgraded"
+    "node:${NODE_TAG:-24-alpine}|Dockerfile.base-node|node:${NODE_TAG:-24-alpine}-upgraded"
     "postgres:16-alpine|Dockerfile.base-postgres|postgres:16-alpine-upgraded"
     "nginx:${NGINX_TAG:-alpine}|Dockerfile.base-nginx|nginx:${NGINX_TAG:-alpine}-upgraded"
 )
@@ -1577,7 +1577,7 @@ pull_base_images() {
     print_info "Pulling essential images for PrintFarmer core services:"
     print_info "  - .NET SDK $DOTNET_MAJOR_VERSION (multi-stage builds during deployment)"
     print_info "  - .NET ASP.NET $DOTNET_MAJOR_VERSION (API runtime)"
-    print_info "  - Node.js 22 Alpine (React frontend)"
+    print_info "  - Node.js 24 Alpine (React frontend)"
     print_info "  - PostgreSQL 16 Alpine (database)"
     print_info "  - Nginx Alpine (reverse proxy/load balancer for microservices)"
     print_info ""
@@ -5088,7 +5088,7 @@ ORCASLICER_CONTAINER_DIGEST=$ORCASLICER_CONTAINER_DIGEST
 # Check for upgraded images and use them if available (appends -upgraded suffix)
 SDK_TAG=$(resolve_image_tag "mcr.microsoft.com/dotnet/sdk" "${SDK_TAG:-10.0-noble}")
 ASPNET_TAG=$(resolve_image_tag "mcr.microsoft.com/dotnet/aspnet" "${ASPNET_TAG:-10.0-noble}")
-NODE_TAG=$(resolve_image_tag "node" "${NODE_TAG:-22-alpine}")
+NODE_TAG=$(resolve_image_tag "node" "${NODE_TAG:-24-alpine}")
 NGINX_TAG=$(resolve_image_tag "nginx" "${NGINX_TAG:-alpine}")
 UBUNTU_TAG=$(resolve_image_tag "ubuntu" "${UBUNTU_TAG:-24.04}")
 
@@ -7947,7 +7947,7 @@ main() {
 
         # Minimal set of images used in compose; expand as needed
         # Uses ASPNET_TAG from container-versions.conf for consistency
-        local images=("nginx:alpine" "postgres:15" "mcr.microsoft.com/dotnet/aspnet:${ASPNET_TAG}" "node:22-alpine")
+        local images=("nginx:alpine" "postgres:15" "mcr.microsoft.com/dotnet/aspnet:${ASPNET_TAG}" "node:24-alpine")
         for img in "${images[@]}"; do
             print_info "Pulling $img ($platform_arg)"
             if docker pull $platform_arg "$img"; then

@@ -44,7 +44,7 @@ UPGRADED_IMAGES=(
     "mcr.microsoft.com/dotnet/sdk:10.0-upgraded"
     "mcr.microsoft.com/dotnet/aspnet:10.0-bookworm-slim-upgraded"
     "ubuntu:24.04-upgraded"
-    "node:22-alpine-upgraded"
+    "node:24-alpine-upgraded"
     "postgres:16-alpine-upgraded"
     "nginx:alpine-upgraded"
 )

@@ -106,10 +106,10 @@ Reasoning effort is resolved independently **after** the model is selected. Chec
 
 **Layer 0 — Agent-Specific Override (`.squad/config.json`):** On this machine, specific agents use elevated reasoning effort defined in `agentReasoningEffortOverrides.{agentName}`:
 
-- **Lead/Architect** Dallas (`claude-opus-5`): reasoning effort `max`
+- **Lead/Architect** Dallas (`claude-opus-5.5`): reasoning effort `max`
 - **Implementation agents** (Lambert, Ripley, Hudson, Gorman, Parker; all `gpt-5.6-sol`): reasoning effort `medium`
 - **Code reviewers:**
-  - Bishop (`claude-opus-5`): reasoning effort `medium`
+  - Bishop (`claude-opus-5.5`): reasoning effort `medium`
   - Hicks (`gpt-5.6-sol`): reasoning effort `medium`
   - Vasquez (`gemini-3.8-flash`, user-authorized): reasoning effort `medium`
 
