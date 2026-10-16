@@ -17,6 +17,17 @@ import type {
   UpdateMaintenanceModeRequest,
 } from '@/types/maintenance';
 
+/** Axios exposes response header names in lower case. */
+const TOTAL_COUNT_HEADER = 'x-total-count';
+
+/** A bounded slice of a printer's maintenance history (#3297). */
+export interface PrinterMaintenanceLogPage {
+  /** Newest logs first, at most the requested limit. */
+  logs: MaintenanceLog[];
+  /** Number of logs matching the requested scope, ignoring the limit; `null` when the server did not report it. */
+  totalCount: number | null;
+}
+
 // Analytics response types
 export interface MaintenanceTrendEntry {
   date: string;
@@ -209,12 +220,30 @@ export class MaintenanceService {
   // ============================================================================
 
   /**
-   * Gets maintenance history for a specific printer.
+   * Gets the most recent maintenance history for a printer, bounded server-side (#3297).
    * @param printerId - The printer ID
+   * @param options.limit - Maximum rows to fetch (1..100)
+   * @param options.scope - `'printer'` for printer-wide logs only, a toolhead id for that
+   *   toolhead's logs, or omitted for every scope
+   * @returns The newest rows plus the total number of logs matching the scope
    */
-  async getPrinterMaintenanceLogs(printerId: string): Promise<MaintenanceLog[]> {
-    const response = await apiClient.get<MaintenanceLog[]>(`/maintenance/printers/${printerId}/logs`);
-    return response.data;
+  async getRecentPrinterMaintenanceLogs(
+    printerId: string,
+    options: { limit: number; scope?: string },
+  ): Promise<PrinterMaintenanceLogPage> {
+    const params: Record<string, string | number> = { limit: options.limit };
+    if (options.scope !== undefined) {
+      params.scope = options.scope;
+    }
+    const response = await apiClient.get<MaintenanceLog[]>(
+      `/maintenance/printers/${printerId}/logs`,
+      { params },
+    );
+    const header = Number.parseInt(String(response.headers?.[TOTAL_COUNT_HEADER] ?? ''), 10);
+    return {
+      logs: response.data,
+      totalCount: Number.isFinite(header) ? header : null,
+    };
   }
 
   /**

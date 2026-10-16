@@ -646,18 +646,86 @@ public class MaintenanceController(
     #region Maintenance Logs
 
     /// <summary>
-    /// Gets maintenance history for a specific printer.
+    /// Upper bound for the <c>limit</c> query parameter on the printer maintenance-history list.
     /// </summary>
+    public const int MaxPrinterLogLimit = 100;
+
+    /// <summary>
+    /// <c>scope</c> query value selecting only printer-wide (non-toolhead) maintenance logs.
+    /// </summary>
+    public const string PrinterWideLogScope = "printer";
+
+    /// <summary>
+    /// Response header carrying the number of logs matching the scope when <c>limit</c> is supplied.
+    /// </summary>
+    public const string TotalCountHeader = "X-Total-Count";
+
+    /// <summary>
+    /// Gets maintenance history for a specific printer, most recent first.
+    /// </summary>
+    /// <param name="printerId">Printer whose history is requested.</param>
+    /// <param name="limit">Optional maximum number of rows (1..<see cref="MaxPrinterLogLimit"/>).
+    /// When supplied, the total matching count is returned in the <c>X-Total-Count</c> header.
+    /// When omitted, the full history is returned as before.</param>
+    /// <param name="scope">Optional scope filter: <c>printer</c> for printer-wide logs only, or a
+    /// toolhead id for that toolhead's logs. When omitted, every scope is returned.</param>
+    /// <param name="ct">Cancellation token.</param>
     [HttpGet("printers/{printerId:guid}/logs")]
-    [ProducesResponseType(typeof(IEnumerable<MaintenanceLog>), 200)]
-    public async Task<ActionResult<IEnumerable<MaintenanceLog>>> GetPrinterMaintenanceLogsAsync(Guid printerId, CancellationToken ct)
+    [ProducesResponseType(typeof(IEnumerable<MaintenanceLogDto>), 200)]
+    [ProducesResponseType(400)]
+    public async Task<ActionResult<IEnumerable<MaintenanceLogDto>>> GetPrinterMaintenanceLogsAsync(
+        Guid printerId,
+        [FromQuery] int? limit = null,
+        [FromQuery] string? scope = null,
+        CancellationToken ct = default)
     {
+        if (limit is < 1 or > MaxPrinterLogLimit)
+        {
+            ModelState.AddModelError(
+                nameof(limit),
+                $"limit must be between 1 and {MaxPrinterLogLimit}.");
+        }
+
+        bool printerWideOnly = false;
+        Guid? toolheadId = null;
+        if (scope is not null)
+        {
+            if (string.Equals(scope, PrinterWideLogScope, StringComparison.OrdinalIgnoreCase))
+            {
+                printerWideOnly = true;
+            }
+            else if (Guid.TryParse(scope, out Guid parsedToolheadId))
+            {
+                toolheadId = parsedToolheadId;
+            }
+            else
+            {
+                ModelState.AddModelError(
+                    nameof(scope),
+                    $"scope must be '{PrinterWideLogScope}' or a toolhead id.");
+            }
+        }
+
+        if (!ModelState.IsValid)
+        {
+            return ValidationProblem(ModelState);
+        }
+
         try
         {
-            List<MaintenanceLog> logs = await _logRepository.GetByPrinterIdAsync(printerId, ct);
             if (!await _operatorFeatureGate.IsEnabledAsync(OperatorFeature.MultiSlotFallback, ct).ConfigureAwait(false))
             {
-                logs = logs.Where(l => !l.ToolheadId.HasValue).ToList();
+                printerWideOnly = true;
+            }
+
+            MaintenanceLogListQuery query = new(printerId, printerWideOnly, toolheadId, limit);
+            List<MaintenanceLogDto> logs = await _logRepository.GetPrinterLogsAsync(query, ct);
+            if (limit.HasValue)
+            {
+                int totalCount = logs.Count < limit.Value
+                    ? logs.Count
+                    : await _logRepository.CountPrinterLogsAsync(query, ct);
+                Response.Headers[TotalCountHeader] = totalCount.ToString(System.Globalization.CultureInfo.InvariantCulture);
             }
 
             return Ok(logs);

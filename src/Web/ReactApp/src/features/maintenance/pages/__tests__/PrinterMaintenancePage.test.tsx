@@ -23,7 +23,7 @@ vi.mock('@/services/api', () => ({
 vi.mock('@/services/maintenanceService', () => ({
   maintenanceService: {
     getPrinterStatistics: vi.fn(),
-    getPrinterMaintenanceLogs: vi.fn(),
+    getRecentPrinterMaintenanceLogs: vi.fn(),
     getPrinterAlerts: vi.fn(),
     createMaintenanceLog: vi.fn(),
     getUpcomingMaintenance: vi.fn(),
@@ -207,6 +207,7 @@ function seedDefaults(overrides: {
   detailsError?: Error;
   alerts?: MaintenanceAlert[];
   logs?: MaintenanceLog[];
+  logTotal?: number | null;
   deployments?: PrinterMaintenanceScheduleDto[];
   upcoming?: unknown[];
 } = {}) {
@@ -227,8 +228,16 @@ function seedDefaults(overrides: {
     totalMaintenanceCost: 0,
     averageMaintenanceHours: 0,
   });
-  (maintenanceService.getPrinterMaintenanceLogs as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
-    overrides.logs ?? [legacyLog, scopedLog]
+  // Simulates the server-side scope filter of GET /maintenance/printers/{id}/logs (#3297).
+  (maintenanceService.getRecentPrinterMaintenanceLogs as unknown as ReturnType<typeof vi.fn>).mockImplementation(
+    async (_printerId: string, { scope }: { limit: number; scope?: string }) => {
+      const all = overrides.logs ?? [legacyLog, scopedLog];
+      const logs =
+        scope === undefined
+          ? all
+          : all.filter(l => (scope === 'printer' ? l.toolheadId == null : l.toolheadId === scope));
+      return { logs, totalCount: overrides.logTotal !== undefined ? overrides.logTotal : logs.length };
+    }
   );
   (maintenanceService.getPrinterAlerts as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
     overrides.alerts ?? [legacyAlert, scopedAlert]
@@ -721,7 +730,7 @@ describe('PrinterMaintenancePage — per-toolhead scope', () => {
       totalMaintenanceCost: 0,
       averageMaintenanceHours: 0,
     });
-    (maintenanceService.getPrinterMaintenanceLogs as unknown as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    (maintenanceService.getRecentPrinterMaintenanceLogs as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ logs: [], totalCount: 0 });
     (maintenanceService.getPrinterAlerts as unknown as ReturnType<typeof vi.fn>).mockResolvedValue([]);
     (maintenanceService.getUpcomingMaintenance as unknown as ReturnType<typeof vi.fn>).mockResolvedValue([]);
     (maintenancePlanService.getScheduleDeployments as unknown as ReturnType<typeof vi.fn>).mockResolvedValue([]);
@@ -834,7 +843,7 @@ describe('PrinterMaintenancePage — per-toolhead scope', () => {
       totalMaintenanceCost: 0,
       averageMaintenanceHours: 0,
     });
-    (maintenanceService.getPrinterMaintenanceLogs as unknown as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    (maintenanceService.getRecentPrinterMaintenanceLogs as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ logs: [], totalCount: 0 });
     (maintenanceService.getPrinterAlerts as unknown as ReturnType<typeof vi.fn>).mockResolvedValue([]);
     (maintenanceService.getUpcomingMaintenance as unknown as ReturnType<typeof vi.fn>).mockResolvedValue([]);
     (maintenancePlanService.getScheduleDeployments as unknown as ReturnType<typeof vi.fn>).mockResolvedValue([]);
@@ -1079,5 +1088,61 @@ describe('PrinterMaintenancePage — per-toolhead scope', () => {
     expect(within(modalScope).getByLabelText('Printer-wide')).toBeChecked();
     // T1 radio is present in the picker but not selected.
     expect(within(modalScope).getByLabelText(/T1 · T1/)).not.toBeChecked();
+  });
+});
+
+describe('PrinterMaintenancePage — bounded maintenance history (#3297)', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  const getLogs = () =>
+    maintenanceService.getRecentPrinterMaintenanceLogs as unknown as ReturnType<typeof vi.fn>;
+
+  it('requests only the 10 rendered rows, already scoped to printer-wide on the first fetch', async () => {
+    seedDefaults();
+    renderPage();
+
+    await waitFor(() => expect(screen.getByText('Legacy log')).toBeInTheDocument());
+    expect(getLogs()).toHaveBeenCalledTimes(1);
+    expect(getLogs()).toHaveBeenCalledWith(printerId, { limit: 10, scope: 'printer' });
+  });
+
+  it('requests the selected toolhead scope when the picker changes', async () => {
+    seedDefaults();
+    renderPage();
+    const user = userEvent.setup();
+    await waitFor(() => expect(screen.getByTestId('printer-maintenance-scope')).toBeInTheDocument());
+
+    await user.click(screen.getByLabelText(/T1 · T1/));
+
+    await waitFor(() => expect(screen.getByText('Log for T1')).toBeInTheDocument());
+    expect(getLogs()).toHaveBeenLastCalledWith(printerId, { limit: 10, scope: 'th-1' });
+  });
+
+  it('requests every scope when the picker is hidden (single toolhead)', async () => {
+    seedDefaults({ details: printerDetailsSingle });
+    renderPage();
+
+    await waitFor(() => expect(screen.getByText('Log for T1')).toBeInTheDocument());
+    expect(getLogs()).toHaveBeenCalledWith(printerId, { limit: 10, scope: undefined });
+  });
+
+  it('shows the server-reported total when more history exists than is rendered', async () => {
+    const tenLogs = Array.from({ length: 10 }, (_, i) => ({
+      ...legacyLog,
+      id: `l-${i}`,
+      taskName: `Log ${i}`,
+    })) as MaintenanceLog[];
+    seedDefaults({ logs: tenLogs, logTotal: 37 });
+    renderPage();
+
+    await waitFor(() => expect(screen.getByText('Showing 10 of 37 entries')).toBeInTheDocument());
+  });
+
+  it('omits the "Showing" footer when everything fits and no total is reported', async () => {
+    seedDefaults({ logTotal: null });
+    renderPage();
+
+    await waitFor(() => expect(screen.getByText('Legacy log')).toBeInTheDocument());
+    expect(screen.queryByText(/Showing \d+ of/)).not.toBeInTheDocument();
   });
 });

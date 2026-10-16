@@ -34,6 +34,67 @@ public class EfMaintenanceLogRepository(AppDbContext context) : IMaintenanceLogR
             .ToListAsync(cancellationToken);
     }
 
+    public async Task<List<MaintenanceLogDto>> GetPrinterLogsAsync(MaintenanceLogListQuery query, CancellationToken cancellationToken = default)
+    {
+        IQueryable<MaintenanceLog> logs = FilterPrinterLogs(query)
+            .OrderByDescending(l => l.PerformedAt)
+            .ThenByDescending(l => l.Id);
+
+        if (query.Limit.HasValue)
+        {
+            logs = logs.Take(query.Limit.Value);
+        }
+
+        return await logs
+            .Select(l => new MaintenanceLogDto
+            {
+                Id = l.Id,
+                PrinterId = l.PrinterId,
+                PrinterMaintenanceScheduleId = l.PrinterMaintenanceScheduleId,
+                ResolvedAlertId = l.ResolvedAlertId,
+                MaintenanceTaskId = l.MaintenanceTaskId,
+                MaintenanceTask = l.MaintenanceTask,
+                ToolheadId = l.ToolheadId,
+                TaskName = l.TaskName,
+                Notes = l.Notes,
+                Component = l.Component,
+                PerformedBy = l.PerformedBy,
+                PerformedAt = l.PerformedAt,
+                DurationMinutes = l.DurationMinutes,
+                PartsReplaced = l.PartsReplaced,
+                Cost = l.Cost,
+                PrinterHoursAtMaintenance = l.PrinterHoursAtMaintenance,
+                ToolheadHoursAtMaintenance = l.ToolheadHoursAtMaintenance,
+                CreatedAt = l.CreatedAt,
+            })
+            .ToListAsync(cancellationToken);
+    }
+
+    public Task<int> CountPrinterLogsAsync(MaintenanceLogListQuery query, CancellationToken cancellationToken = default)
+    {
+        return FilterPrinterLogs(query).CountAsync(cancellationToken);
+    }
+
+    private IQueryable<MaintenanceLog> FilterPrinterLogs(MaintenanceLogListQuery query)
+    {
+        IQueryable<MaintenanceLog> logs = _context.MaintenanceLogs
+            .AsNoTracking()
+            .Where(l => l.PrinterId == query.PrinterId);
+
+        if (query.PrinterWideOnly)
+        {
+            logs = logs.Where(l => l.ToolheadId == null);
+        }
+
+        if (query.ToolheadId.HasValue)
+        {
+            Guid toolheadId = query.ToolheadId.Value;
+            logs = logs.Where(l => l.ToolheadId == toolheadId);
+        }
+
+        return logs;
+    }
+
     public async Task<List<MaintenanceLog>> GetByPrinterAndTaskAsync(Guid printerId, Guid taskId, CancellationToken cancellationToken = default)
     {
         return await _context.MaintenanceLogs
