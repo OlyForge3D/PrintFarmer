@@ -205,6 +205,79 @@ public class QueuedPrintJobDto
 
     /// <summary>Typed result of the most recent physical dispatch invocation.</summary>
     public DispatchAttemptResultDto? DispatchResult { get; set; }
+
+    /// <summary>
+    /// Printer-compatibility summary computed by the dispatcher's eligibility rules
+    /// (issue #3280). Present only for unassigned <c>Queued</c> jobs on the queue list and
+    /// job-detail endpoints; null otherwise.
+    /// </summary>
+    public PrinterCompatibilitySummaryDto? Compatibility { get; set; }
+}
+
+/// <summary>
+/// Authoritative printer-compatibility summary for an unassigned queued job (issue #3280).
+/// Every count is derived from the dispatch scorer's hard-requirement factors, so it matches
+/// what dispatch would actually accept.
+/// </summary>
+public sealed class PrinterCompatibilitySummaryDto
+{
+    /// <summary>Number of enabled printers the dispatcher evaluated.</summary>
+    public int EvaluatedPrinterCount { get; set; }
+
+    /// <summary>
+    /// Printers that satisfy every hard dispatch constraint except transient availability
+    /// (busy, maintenance, awaiting bed-clear). These can run the job once free.
+    /// </summary>
+    public int CompatiblePrinterCount { get; set; }
+
+    /// <summary>
+    /// Compatible printers that are also available right now — the dispatcher would not
+    /// eliminate them for this job at this moment.
+    /// </summary>
+    public int ReadyPrinterCount { get; set; }
+
+    /// <summary>The job constraints the dispatcher evaluated.</summary>
+    public PrinterCompatibilityBasisDto Basis { get; set; } = new();
+
+    /// <summary>
+    /// Per-constraint count of printers eliminated by that constraint (excluding
+    /// availability). A printer failing several constraints is counted under each.
+    /// </summary>
+    public List<PrinterCompatibilityExclusionDto> ExcludedBy { get; set; } = [];
+}
+
+/// <summary>Job constraints evaluated by the dispatcher for a compatibility summary.</summary>
+public sealed class PrinterCompatibilityBasisDto
+{
+    /// <summary>Required material (job override, else G-code metadata); null when unconstrained.</summary>
+    public string? RequiredMaterial { get; set; }
+
+    /// <summary>Required nozzle diameter in mm (job override, else G-code metadata).</summary>
+    public decimal? RequiredNozzleDiameter { get; set; }
+
+    /// <summary>True when the required material needs an enclosed printer.</summary>
+    public bool RequiresEnclosure { get; set; }
+
+    /// <summary>True when the required material is abrasive and needs a hardened nozzle.</summary>
+    public bool RequiresHardenedNozzle { get; set; }
+
+    /// <summary>Printer group the G-code is restricted to, when set.</summary>
+    public Guid? PrinterGroupId { get; set; }
+
+    /// <summary>
+    /// Always false today: the dispatcher scores build-volume fit as a soft preference and
+    /// never eliminates a printer on bed size, so it does not affect compatibility.
+    /// </summary>
+    public bool BuildVolumeEnforced { get; set; }
+}
+
+/// <summary>Count of printers eliminated by one dispatch constraint.</summary>
+public sealed class PrinterCompatibilityExclusionDto
+{
+    /// <summary>Dispatch factor name, e.g. <c>MaterialMatch</c> or <c>NozzleDiameter</c>.</summary>
+    public string Constraint { get; set; } = string.Empty;
+
+    public int PrinterCount { get; set; }
 }
 
 /// <summary>

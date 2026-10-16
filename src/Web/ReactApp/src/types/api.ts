@@ -2753,6 +2753,40 @@ export interface QueuedPrintJobDto {
   /** Per-toolhead filament usage tracking */
   toolheadUsages?: PrintJobToolheadUsage[];
   dispatchResult?: DispatchAttemptResultDto | null;
+  /**
+   * Dispatcher-derived printer compatibility (issue #3280). Present only for
+   * unassigned `Queued` jobs on the queue list and job-detail endpoints.
+   */
+  compatibility?: PrinterCompatibilitySummaryDto | null;
+}
+
+/** Job constraints the dispatcher evaluated for a compatibility summary. */
+export interface PrinterCompatibilityBasisDto {
+  requiredMaterial?: string | null;
+  requiredNozzleDiameter?: number | null;
+  requiresEnclosure: boolean;
+  requiresHardenedNozzle: boolean;
+  printerGroupId?: string | null;
+  /** Always false today: dispatch treats build-volume fit as a soft preference. */
+  buildVolumeEnforced: boolean;
+}
+
+/** Count of printers eliminated by one dispatch constraint (e.g. `MaterialMatch`). */
+export interface PrinterCompatibilityExclusionDto {
+  constraint: string;
+  printerCount: number;
+}
+
+/** Authoritative printer-compatibility summary for an unassigned queued job (issue #3280). */
+export interface PrinterCompatibilitySummaryDto {
+  /** Enabled printers the dispatcher evaluated. */
+  evaluatedPrinterCount: number;
+  /** Printers passing every hard dispatch constraint except transient availability. */
+  compatiblePrinterCount: number;
+  /** Compatible printers that are available right now. */
+  readyPrinterCount: number;
+  basis: PrinterCompatibilityBasisDto;
+  excludedBy: PrinterCompatibilityExclusionDto[];
 }
 
 export type MoveQueuedJobPositionRequest =

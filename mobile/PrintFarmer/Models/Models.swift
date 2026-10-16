@@ -746,6 +746,10 @@ struct QueuedJobInfo: Codable, Identifiable, Sendable {
     var harvestedAt: Date? = nil
     var jobKind: String? = nil
     var calibrationProjectId: String? = nil
+    /// Dispatcher-derived printer compatibility (#3280). Present only for
+    /// unassigned queued jobs. Optional `var` so older servers and the
+    /// memberwise-init call sites keep working; UI is owned by #3262.
+    var compatibility: PrinterCompatibilitySummary? = nil
 
     var jobStatus: PrintJobStatus? {
         PrintJobStatus(rawValue: status)
@@ -763,6 +767,32 @@ struct QueuedJobInfo: Codable, Identifiable, Sendable {
         guard let seconds = estimatedPrintTimeSeconds else { return nil }
         return TimeInterval(seconds)
     }
+}
+
+// MARK: - Printer Compatibility Summary (matches PrinterCompatibilitySummaryDto, #3280)
+
+/// Decode-only mirror. Every field is optional so a partial or older payload
+/// never fails decoding of the surrounding queue row.
+struct PrinterCompatibilitySummary: Codable, Sendable {
+    let evaluatedPrinterCount: Int?
+    let compatiblePrinterCount: Int?
+    let readyPrinterCount: Int?
+    let basis: PrinterCompatibilityBasis?
+    let excludedBy: [PrinterCompatibilityExclusion]?
+}
+
+struct PrinterCompatibilityBasis: Codable, Sendable {
+    let requiredMaterial: String?
+    let requiredNozzleDiameter: Double?
+    let requiresEnclosure: Bool?
+    let requiresHardenedNozzle: Bool?
+    let printerGroupId: String?
+    let buildVolumeEnforced: Bool?
+}
+
+struct PrinterCompatibilityExclusion: Codable, Sendable {
+    let constraint: String?
+    let printerCount: Int?
 }
 
 struct QueuePrinterMeta: Codable, Sendable {

@@ -1,5 +1,6 @@
 ﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Dtos.PrintQueue;
 using Farm.Infrastructure.Services.AutoTagging;
 using Farm.Infrastructure.Services.Mutations;
 using Farm.Infrastructure.Services.OperatorFeatures;
@@ -34,7 +35,7 @@ public class DispatchScorer(
     IOperatorFeatureGate? featureGate = null,
     IFilamentCoverageService? coverageService = null,
     IFilamentFallbackGroupResolver? fallbackService = null,
-    IMutationWatermarkReader? watermarkReader = null) : IDispatchScorerWithOrigin
+    IMutationWatermarkReader? watermarkReader = null) : IDispatchScorerWithOrigin, IJobCompatibilitySummarizer
 {
     // Factor weight constants
     private const double WeightMaterialMatch = 100;
@@ -184,6 +185,125 @@ public class DispatchScorer(
         return new DispatchScoreResult(
             results,
             OriginWatermark.Combine([.. context.RequiredOrigins]));
+    }
+
+    /// <summary>
+    /// Summarizes printer compatibility for unassigned queued jobs (issue #3280) by running the
+    /// same <see cref="ScorePrinter"/> evaluation used for dispatch against every enabled
+    /// printer. A printer is compatible when no hard-requirement factor other than
+    /// availability eliminates it, and ready when the scorer does not eliminate it at all.
+    /// Soft-only inputs (queue depth, per-tool loadout) are skipped because they never
+    /// eliminate a candidate and so cannot change either count.
+    /// </summary>
+    public async Task<IReadOnlyDictionary<Guid, PrinterCompatibilitySummaryDto>> SummarizeCompatibilityAsync(
+        IReadOnlyCollection<Guid> jobIds,
+        CancellationToken ct = default)
+    {
+        Dictionary<Guid, PrinterCompatibilitySummaryDto> summaries = [];
+        if (jobIds.Count == 0)
+        {
+            return summaries;
+        }
+
+        Guid[] ids = [.. jobIds.Distinct()];
+        List<PrintJob> jobs = await db.PrintJobs
+            .Include(j => j.GcodeFile)
+                .ThenInclude(g => g!.PrinterModel)
+            .AsNoTracking()
+            .Where(j => ids.Contains(j.Id)
+                && j.Status == PrintJobStatus.Queued
+                && j.AssignedPrinterId == null)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        if (jobs.Count == 0)
+        {
+            return summaries;
+        }
+
+        List<Printer> printers = await LoadPrintersAsync(printerId: null, ct).ConfigureAwait(false);
+        Dictionary<string, FilamentType?> filamentByMaterial = new(StringComparer.Ordinal);
+        Dictionary<string, HashSet<string>> clusterMatesByMaterial = new(StringComparer.Ordinal);
+        Dictionary<Guid, int> noQueueDepths = [];
+
+        foreach (PrintJob job in jobs)
+        {
+            string? requiredMaterial = job.RequiredMaterialType ?? job.GcodeFile?.RequiredMaterial;
+            FilamentType? requiredFilament = null;
+            HashSet<string> clusterMateNames = [];
+            if (!string.IsNullOrWhiteSpace(requiredMaterial))
+            {
+                if (!filamentByMaterial.TryGetValue(requiredMaterial, out requiredFilament))
+                {
+                    requiredFilament = await db.FilamentTypes
+                        .AsNoTracking()
+                        .FirstOrDefaultAsync(f => f.Name == requiredMaterial && f.IsActive, ct)
+                        .ConfigureAwait(false);
+                    filamentByMaterial[requiredMaterial] = requiredFilament;
+                }
+
+                if (!clusterMatesByMaterial.TryGetValue(requiredMaterial, out clusterMateNames!))
+                {
+                    clusterMateNames = await GetClusterMateNamesAsync(requiredMaterial, ct).ConfigureAwait(false);
+                    clusterMatesByMaterial[requiredMaterial] = clusterMateNames;
+                }
+            }
+
+            int compatible = 0;
+            int ready = 0;
+            Dictionary<string, int> excluded = new(StringComparer.Ordinal);
+            foreach (Printer printer in printers)
+            {
+                DispatchScore score = ScorePrinter(
+                    job,
+                    printer,
+                    requiredFilament,
+                    noQueueDepths,
+                    clusterMateNames,
+                    multiSlotEnabled: false,
+                    gramsAware: false,
+                    gramsContexts: null);
+
+                bool failsConstraint = false;
+                foreach ((string factorName, FactorScore factor) in score.ScoreBreakdown)
+                {
+                    if (factor is { IsHardRequirement: true, Score: 0 } && factorName != "Availability")
+                    {
+                        failsConstraint = true;
+                        excluded[factorName] = excluded.GetValueOrDefault(factorName) + 1;
+                    }
+                }
+
+                if (!failsConstraint)
+                {
+                    compatible++;
+                    if (!score.Eliminated)
+                    {
+                        ready++;
+                    }
+                }
+            }
+
+            summaries[job.Id] = new PrinterCompatibilitySummaryDto
+            {
+                EvaluatedPrinterCount = printers.Count,
+                CompatiblePrinterCount = compatible,
+                ReadyPrinterCount = ready,
+                Basis = new PrinterCompatibilityBasisDto
+                {
+                    RequiredMaterial = string.IsNullOrWhiteSpace(requiredMaterial) ? null : requiredMaterial,
+                    RequiredNozzleDiameter = job.RequiredNozzleDiameter ?? (decimal?)job.GcodeFile?.RequiredNozzleDiameter,
+                    RequiresEnclosure = requiredFilament?.NeedsEnclosure ?? false,
+                    RequiresHardenedNozzle = requiredFilament?.IsAbrasive ?? false,
+                    PrinterGroupId = job.GcodeFile?.PrinterGroupId,
+                    BuildVolumeEnforced = false,
+                },
+                ExcludedBy = [.. excluded
+                    .OrderBy(e => e.Key, StringComparer.Ordinal)
+                    .Select(e => new PrinterCompatibilityExclusionDto { Constraint = e.Key, PrinterCount = e.Value })],
+            };
+        }
+
+        return summaries;
     }
 
     /// <summary>

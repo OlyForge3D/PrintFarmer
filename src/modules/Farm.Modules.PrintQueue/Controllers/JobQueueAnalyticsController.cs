@@ -8,6 +8,7 @@ using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.Cost;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Queue;
+using Farm.Infrastructure.Services.Queue.Dispatch;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -33,7 +34,8 @@ public class JobQueueAnalyticsController(
     IJobCostCalculationService jobCostCalculationService,
     ILogger<JobQueueAnalyticsController> logger,
     AppDbContext? db = null,
-    IQueueResourceAuthorizationService? resourceAuthorization = null) : ControllerBase
+    IQueueResourceAuthorizationService? resourceAuthorization = null,
+    IJobCompatibilitySummarizer? compatibilitySummarizer = null) : ControllerBase
 {
     private readonly IPrintJobManagementService _printJobManagementService = printJobManagementService ?? throw new ArgumentNullException(nameof(printJobManagementService));
     private readonly IJobCostCalculationService _jobCostCalculationService = jobCostCalculationService ?? throw new ArgumentNullException(nameof(jobCostCalculationService));
@@ -89,6 +91,7 @@ public class JobQueueAnalyticsController(
 
             if (resourceAuthorization is null)
             {
+                await AttachCompatibilityAsync(jobs.Select(j => j.Job), cancellationToken);
                 return Ok(jobs);
             }
 
@@ -97,6 +100,7 @@ public class JobQueueAnalyticsController(
             // DB-backed batched authorization check below.
             if (PrintFarmerPermissions.IsFarmAdmin(User))
             {
+                await AttachCompatibilityAsync(jobs.Select(j => j.Job), cancellationToken);
                 return Ok(jobs);
             }
 
@@ -115,12 +119,52 @@ public class JobQueueAnalyticsController(
                 .Where(job => Guid.TryParse(job.Job.Id, out Guid id) && authorizedJobIds.Contains(id))
                 .ToList();
 
+            await AttachCompatibilityAsync(authorized.Select(j => j.Job), cancellationToken);
             return Ok(authorized);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error retrieving queue");
             return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to retrieve queue" });
+        }
+    }
+
+    /// <summary>
+    /// Attaches the dispatcher-derived compatibility summary (issue #3280) to unassigned queued
+    /// jobs. The summarizer re-checks status/assignment against the database; jobs that are not
+    /// unassigned and queued keep a null summary.
+    /// </summary>
+    private async Task AttachCompatibilityAsync(IEnumerable<QueuedPrintJobDto> jobs, CancellationToken cancellationToken)
+    {
+        if (compatibilitySummarizer is null)
+        {
+            return;
+        }
+
+        Dictionary<Guid, QueuedPrintJobDto> candidates = [];
+        foreach (QueuedPrintJobDto job in jobs)
+        {
+            if (string.IsNullOrEmpty(job.AssignedPrinterId)
+                && string.Equals(job.Status, nameof(PrintJobStatus.Queued), StringComparison.OrdinalIgnoreCase)
+                && Guid.TryParse(job.Id, out Guid id))
+            {
+                candidates[id] = job;
+            }
+        }
+
+        if (candidates.Count == 0)
+        {
+            return;
+        }
+
+        IReadOnlyDictionary<Guid, PrinterCompatibilitySummaryDto> summaries =
+            await compatibilitySummarizer.SummarizeCompatibilityAsync(candidates.Keys, cancellationToken);
+        foreach ((Guid id, PrinterCompatibilitySummaryDto summary) in summaries)
+        {
+            if (candidates.TryGetValue(id, out QueuedPrintJobDto? job))
+            {
+                job.Compatibility = summary;
+            }
         }
     }
 
@@ -711,6 +755,10 @@ public class JobQueueAnalyticsController(
             }
 
             QueuedPrintJobDto? job = await _printJobManagementService.GetJobByIdAsync(jobId, cancellationToken);
+            if (job is not null)
+            {
+                await AttachCompatibilityAsync([job], cancellationToken);
+            }
 
             return job == null ? NotFound(new { error = $"Job '{jobId}' not found" }) : Ok(job);
         }
