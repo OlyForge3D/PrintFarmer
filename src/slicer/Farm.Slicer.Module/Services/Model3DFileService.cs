@@ -25,6 +25,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.Formats;
 
 namespace Farm.Slicer.Module.Services;
 
@@ -50,6 +51,14 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
     private const int MaxSymbolicLinkDepth = 64;
 
     private static readonly byte[] PngSignature = [0x89, (byte)'P', (byte)'N', (byte)'G', 0x0D, 0x0A, 0x1A, 0x0A];
+
+    // Client thumbnails are untrusted (#3324). Validation only needs pixels, so skip metadata
+    // and never apply embedded ICC profiles (Preserve avoids parsing ICC tag data on decode).
+    internal static readonly DecoderOptions UntrustedThumbnailDecoderOptions = new()
+    {
+        SkipMetadata = true,
+        ColorProfileHandling = ColorProfileHandling.Preserve,
+    };
 
     private readonly IModel3DFileRepository _model3dFiles;
     private readonly ITagRepository _tagRepository;
@@ -990,7 +999,7 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
 
         try
         {
-            ImageInfo? imageInfo = await Image.IdentifyAsync(stream, ct);
+            ImageInfo? imageInfo = await Image.IdentifyAsync(UntrustedThumbnailDecoderOptions, stream, ct);
             if (imageInfo is null
                 || !string.Equals(imageInfo.Metadata.DecodedImageFormat?.Name, "PNG", StringComparison.OrdinalIgnoreCase))
             {
@@ -1009,18 +1018,16 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
             }
 
             stream.Position = 0;
-            using Image image = await Image.LoadAsync(stream, ct);
+            using Image image = await Image.LoadAsync(UntrustedThumbnailDecoderOptions, stream, ct);
             if (!string.Equals(image.Metadata.DecodedImageFormat?.Name, "PNG", StringComparison.OrdinalIgnoreCase))
             {
                 throw new ArgumentException("Client thumbnail is not a decodable PNG");
             }
         }
-        catch (UnknownImageFormatException ex)
+        catch (ImageFormatException ex)
         {
-            throw new ArgumentException("Client thumbnail is not a decodable PNG", ex);
-        }
-        catch (InvalidImageContentException ex)
-        {
+            // Covers InvalidImageContentException, UnknownImageFormatException, and corrupt
+            // pixel streams (e.g. bad zlib data) that only surface as the base type.
             throw new ArgumentException("Client thumbnail is not a decodable PNG", ex);
         }
     }
