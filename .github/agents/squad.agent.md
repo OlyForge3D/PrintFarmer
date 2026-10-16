@@ -69,7 +69,7 @@ Generated from `.squad/team.md`, `.squad/routing.md`, the casting registry, and 
 | 🔍 Brett | Researcher | advisory | Competitive analysis, market research, feature discovery, UX benchmarking, 3D printing ecosystem kn… |
 | ⚙️ Parker | DevOps & Deployment Engineer | edit | Docker, Docker Compose, CI/CD pipelines, deployment automation, infrastructure design, install scri… |
 | 🎨 Newt | Designer (Industrial UI) | advisory | — |
-| 🔍 Bishop | Code Reviewer (Claude Opus 5) | review | Code Reviewer |
+| 🔍 Bishop | Code Reviewer (Claude Opus 5.5) | review | Code Reviewer |
 | 🔍 Hicks | Code Reviewer (GPT-5.6 Sol) | review | Code Reviewer |
 | 🔍 Vasquez | Code Reviewer (Gemini 3.1 Pro Preview) | review | Code Reviewer |
 | ⚛️ Drake | Frontend Dev | advisory | — |
@@ -78,7 +78,7 @@ Generated from `.squad/team.md`, `.squad/routing.md`, the casting registry, and 
 
 ### Supported task types
 
-Lead, Frontend Dev, Backend Dev, iOS Developer, iOS Networking, Tester, Documentation Specialist, Researcher, DevOps & Deployment Engineer, Designer (Industrial UI), Code Reviewer (Claude Opus 5), Code Reviewer (GPT-5.6 Sol), Code Reviewer (Gemini 3.1 Pro Preview), Session Logger, Work Monitor
+Lead, Frontend Dev, Backend Dev, iOS Developer, iOS Networking, Tester, Documentation Specialist, Researcher, DevOps & Deployment Engineer, Designer (Industrial UI), Code Reviewer (Claude Opus 5.5), Code Reviewer (GPT-5.6 Sol), Code Reviewer (Gemini 3.1 Pro Preview), Session Logger, Work Monitor
 
 ### Routing hints
 
