@@ -2,6 +2,28 @@
 
 This document captures common patterns and best practices discovered during test development for PrintFarmer.
 
+## Deferred integration-host database provisioning
+
+`KestrelCalibrationApiHost` provisions both SQLite contexts directly, using their
+production migration assemblies, before building the API. Do not resolve host
+services to provision the database: minimal hosting's deferred `Build()` returns
+while `Program` continues its explicit database initialization on another thread.
+Use the factory's native `UseKestrel` support rather than building two entry points.
+Each fixture retains its own GUID-named database and keep-alive connection.
+
+An initially empty migration-history read followed by a concurrent `InitialV2`
+commit can make startup classify the partially migrated schema as a legacy
+database. Strict validation then correctly rejects obsolete columns such as
+`CalibrationAttempts.PrinterConfigurationSnapshotId`, which later migrations
+remove. `KestrelCalibrationApiHostTests` reproduces that interleaving without sleeps,
+retains the production rejection, and checks independent complete schemas and a
+single real listener. Production schema validation must not be weakened (#3366).
+
+For intermittent fixture failures, preserve a separate log for each CI-filtered
+integration run; five passing runs are useful evidence, not proof that every
+possible schedule is safe. The pinned Orca CLI still requires its separate worker
+publication/Docker gate; successful fixture startup does not prove real slicing.
+
 ## Queue lifecycle clocks
 
 Inject the same `TimeProvider` into dispatch claims, reconciliation, the SignalR
