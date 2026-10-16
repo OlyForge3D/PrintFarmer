@@ -2974,6 +2974,8 @@ public class PrintJobManagementService(
 
             // A rerun creates a new active job, so it is membership-changing: emit JobQueued
             // (not JobUpdated) so subscribers re-reconcile their resource subscriptions (#3296).
+            // The new job is not tracked yet (AddAsync below adds and saves both rows), so the
+            // row's job columns are stamped explicitly rather than resolved from the context.
             await AddJobChangeOutboxEventAsync(
                 newJob,
                 QueueLifecycleEventWriter.EventTypeJobQueued,
@@ -4360,6 +4362,9 @@ public class PrintJobManagementService(
             aggregateRowVersion: job.RowVersion,
             failureCode: null,
             payloadJson: payloadJson,
+            projectId: job.CalibrationProjectId ?? job.ProjectId,
+            jobStatus: job.Status.ToString(),
+            jobKind: job.JobKind?.ToString() ?? nameof(JobKind.Standard),
             timeProvider: _timeProvider,
             ct: cancellationToken);
     }

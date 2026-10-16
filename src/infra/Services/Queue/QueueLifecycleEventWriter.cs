@@ -179,6 +179,9 @@ public static class QueueLifecycleEventWriter
         DateTime? bedClearExpiresAtUtc = null,
         bool? failureRetryable = null,
         bool? failureRequiresReconciliation = null,
+        Guid? projectId = null,
+        string? jobStatus = null,
+        string? jobKind = null,
         TimeProvider? timeProvider = null,
         CancellationToken ct = default) =>
         Dispatch.DispatchClaimService.AddLifecycleOutboxEventAsync(
@@ -192,6 +195,9 @@ public static class QueueLifecycleEventWriter
             failureCode,
             payloadJson,
             ct,
+            projectId: projectId,
+            jobStatus: jobStatus,
+            jobKind: jobKind,
             bedClearState: bedClearState,
             bedClearCommandId: bedClearCommandId,
             bedClearExpiresAtUtc: bedClearExpiresAtUtc,

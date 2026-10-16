@@ -150,6 +150,8 @@ public class PrintJobManagementServiceJobUpdatedOutboxTests
         Assert.Equal(QueueLifecycleEventWriter.EventTypeJobQueued, row.EventType);
         Assert.NotEqual(original.Id, row.AggregateId);
         Assert.Equal(rerun.Id, row.AggregateId.ToString());
+        Assert.Equal(nameof(PrintJobStatus.Queued), row.JobStatus);
+        Assert.Equal(nameof(JobKind.Standard), row.JobKind);
     }
 
     private static async Task<QueueDispatchOutbox> SingleOutboxRowAsync(AppDbContext db) =>

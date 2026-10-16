@@ -1260,21 +1260,39 @@ public class JobQueueService : IJobQueueService
 
         if (_db is not null && _sequenceAllocator is not null)
         {
-            // #3296: a terminal job set back to Queued re-enters the active set (membership
-            // change); every other generic edit is a non-membership JobUpdated.
-            bool reenteredQueue = request.Status.HasValue
-                && priorStatus != job.Status
-                && job.Status == PrintJobStatus.Queued;
-            string changeEventType = reenteredQueue
-                ? QueueLifecycleEventWriter.EventTypeJobQueued
-                : QueueLifecycleEventWriter.EventTypeJobUpdated;
-            string changePayload = QueueLifecycleEventWriter.BuildJobChangePayload(
-                job.Id,
-                job.AssignedPrinterId,
-                job.Status.ToString(),
-                job.JobKind?.ToString() ?? nameof(JobKind.Standard),
-                job.Priority,
-                QueueLifecycleEventWriter.JobChangeKindUpdate);
+            // #3296: a status transition that changes active-set membership must emit the
+            // matching membership-changing lifecycle event (re-entry -> JobQueued, terminal ->
+            // JobCompleted/JobFailed/JobCancelled); every other generic edit is a
+            // non-membership JobUpdated.
+            bool statusTransitioned = request.Status.HasValue && priorStatus != job.Status;
+            (string changeEventType, string? changeFailureCode) = statusTransitioned
+                ? job.Status switch
+                {
+                    PrintJobStatus.Queued => (QueueLifecycleEventWriter.EventTypeJobQueued, (string?)null),
+                    PrintJobStatus.Completed => (QueueLifecycleEventWriter.EventTypeJobCompleted, null),
+                    PrintJobStatus.Failed => (QueueLifecycleEventWriter.EventTypeJobFailed, "job_failed"),
+                    PrintJobStatus.Cancelled => (QueueLifecycleEventWriter.EventTypeJobCancelled, "job_cancelled"),
+                    _ => (QueueLifecycleEventWriter.EventTypeJobUpdated, null),
+                }
+                : (QueueLifecycleEventWriter.EventTypeJobUpdated, null);
+            bool terminalTransition = statusTransitioned
+                && job.Status is PrintJobStatus.Completed or PrintJobStatus.Failed or PrintJobStatus.Cancelled;
+            string jobKind = job.JobKind?.ToString() ?? nameof(JobKind.Standard);
+            string changePayload = terminalTransition
+                ? QueueLifecycleEventWriter.BuildTerminalPayload(
+                    job.Id,
+                    job.AssignedPrinterId,
+                    attemptId: null,
+                    job.Status.ToString(),
+                    jobKind,
+                    changeFailureCode)
+                : QueueLifecycleEventWriter.BuildJobChangePayload(
+                    job.Id,
+                    job.AssignedPrinterId,
+                    job.Status.ToString(),
+                    jobKind,
+                    job.Priority,
+                    QueueLifecycleEventWriter.JobChangeKindUpdate);
             await QueueLifecycleEventWriter.AddEventAsync(
                 _db,
                 _sequenceAllocator,
@@ -1283,7 +1301,7 @@ public class JobQueueService : IJobQueueService
                 printerId: job.AssignedPrinterId,
                 attemptId: null,
                 aggregateRowVersion: job.RowVersion,
-                failureCode: null,
+                failureCode: changeFailureCode,
                 payloadJson: changePayload,
                 timeProvider: _timeProvider,
                 ct: ct);

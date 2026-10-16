@@ -70,6 +70,10 @@ public sealed class QueueOutboxPublisherService(
         // detail edits change a queued job's presentation, never its active-set membership.
     };
 
+    /// <summary>Whether <paramref name="eventType"/> re-fires the <c>queueresourceschanged</c> hint.</summary>
+    internal static bool IsMembershipChangingEventType(string eventType) =>
+        MembershipChangingEventTypes.Contains(eventType);
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         logger.LogInformation("[OutboxPublisher] Queue outbox publisher (SignalR hints) started");
@@ -243,7 +247,7 @@ public sealed class QueueOutboxPublisherService(
             // events, so MembershipChangingEventTypes (above) narrowly re-fires the same hint
             // for exactly those transitions, below.
             if (membershipNotifier is not null &&
-                MembershipChangingEventTypes.Contains(evt.EventType))
+                IsMembershipChangingEventType(evt.EventType))
             {
                 sends.Add(membershipNotifier.NotifyMembershipChangedAsync(ct));
             }

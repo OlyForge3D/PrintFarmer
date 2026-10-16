@@ -69,6 +69,45 @@ public class JobQueueServiceJobUpdatedOutboxTests
         Assert.Equal(job.Id, row.AggregateId);
     }
 
+    public static TheoryData<PrintJobStatus, string> TerminalTransitions => new()
+    {
+        { PrintJobStatus.Cancelled, QueueLifecycleEventWriter.EventTypeJobCancelled },
+        { PrintJobStatus.Failed, QueueLifecycleEventWriter.EventTypeJobFailed },
+        { PrintJobStatus.Completed, QueueLifecycleEventWriter.EventTypeJobCompleted },
+    };
+
+    // R3393-01: a PUT that moves an active job to a terminal status leaves the active set, so it
+    // must emit the matching membership-changing lifecycle event, never a plain JobUpdated.
+    [Theory]
+    [MemberData(nameof(TerminalTransitions))]
+    public async Task UpdateJobAsync_ActiveJobSetTerminal_EnqueuesMatchingLifecycleRowAsync(
+        PrintJobStatus terminalStatus,
+        string expectedEventType)
+    {
+        await using SqliteConnection connection = await OpenAsync();
+        await using AppDbContext db = await CreateContextAsync(connection);
+        PrintJob job = await SeedJobAsync(db, PrintJobStatus.Queued);
+
+        _ = await CreateService(db).UpdateJobAsync(
+            job.Id,
+            new UpdatePrintJobStatusDto
+            {
+                Status = terminalStatus,
+                IfMatchJobRowVersion = Convert.ToBase64String(job.RowVersion!),
+            },
+            CancellationToken.None);
+
+        QueueDispatchOutbox row = Assert.Single(await db.QueueDispatchOutbox.AsNoTracking().ToListAsync());
+        Assert.Equal(expectedEventType, row.EventType);
+        Assert.Equal(job.Id, row.AggregateId);
+        Assert.Equal(terminalStatus.ToString(), row.JobStatus);
+        using JsonDocument payload = JsonDocument.Parse(row.PayloadJson!);
+        Assert.Equal(terminalStatus.ToString(), payload.RootElement.GetProperty("jobStatus").GetString());
+        Assert.True(
+            QueueOutboxPublisherService.IsMembershipChangingEventType(row.EventType),
+            $"{row.EventType} must trigger queueresourceschanged.");
+    }
+
     private static async Task<PrintJob> SeedJobAsync(AppDbContext db, PrintJobStatus status)
     {
         PrintJob job = new()
