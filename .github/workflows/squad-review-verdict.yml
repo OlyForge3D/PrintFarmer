@@ -479,6 +479,13 @@ jobs:
             // with any other parent count (an ordinary single-parent commit,
             // i.e. real author work, or a rare octopus merge this check
             // can't validate) always disqualifies.
+            //
+            // Overlapping files (issue #2801): when base and PR both modified
+            // a file, its merged blob — and therefore both fingerprints —
+            // legitimately differ even for a clean sync. Such a file is
+            // accepted only after fetching its merge-base/p1/p2/merge
+            // contents and proving `gate.isCleanThreeWayMerge`; (2) then
+            // tolerates a difference only on those content-verified paths.
             const distinctOldShas = new Set();
             for (const raw of rawComments) {
               const shape = gate.parseVerdictComment({ ...raw, squadWriteAccess: true });
@@ -499,7 +506,27 @@ jobs:
               (compare.total_commits ?? (compare.commits ?? []).length) >
               (compare.commits ?? []).length;
             const carriedShas = new Set();
+            // Reads one file's exact content at a commit for the issue #2801
+            // three-way proof. The contents API inlines base64 only up to
+            // 1 MB; a larger file (or any other shape) yields null, which the
+            // proof treats as unprovable — fail closed. Decoded as latin1 so
+            // the byte→char mapping is lossless: invalid UTF-8 can never
+            // collapse two different contents into the same string.
+            const readFileAt = async (filePath, ref) => {
+              const { data } = await github.rest.repos.getContent({
+                owner, repo, path: filePath, ref,
+              });
+              if (Array.isArray(data) || data?.type !== 'file' ||
+                  data.encoding !== 'base64' || typeof data.content !== 'string') {
+                return null;
+              }
+              return {
+                sha: data.sha,
+                text: Buffer.from(data.content, 'base64').toString('latin1'),
+              };
+            };
             for (const oldSha of distinctOldShas) {
+              const contentVerifiedPaths = new Set();
               try {
                 const { data: ancestryCompare } =
                   await github.rest.repos.compareCommitsWithBasehead({
@@ -572,14 +599,47 @@ jobs:
                       allClean = false;
                       break;
                     }
-                    if (
-                      gate.diffFingerprint(singleCommitFiles) !==
-                      gate.diffFingerprint(parentsCompareFiles)
-                    ) {
-                      // The merge commit's own diff differs from what
-                      // merging its two parents alone would produce — it
-                      // added something beyond a clean merge.
+                    // Files whose merge-commit entry is identical to
+                    // `compare(p1...p2)` took the second parent's change
+                    // verbatim. Any other file (issue #2801: base and PR both
+                    // modified it, so its merged blob legitimately differs)
+                    // must be a plain text modification on both sides AND
+                    // its merged content must equal a conflict-free
+                    // three-way merge of merge-base/p1/p2. Anything else —
+                    // a hand-resolved conflict, a smuggled edit, a rename,
+                    // a binary file — means the merge commit added
+                    // something beyond a clean merge.
+                    const proof = gate.mergePathsNeedingContentProof(
+                      singleCommitFiles, parentsCompareFiles,
+                    );
+                    const mergeBaseSha = parentsCompare.merge_base_commit?.sha;
+                    if (!proof.ok || (proof.paths.length > 0 && !mergeBaseSha)) {
                       allClean = false;
+                      break;
+                    }
+                    const blobShaFor = (files, filename) =>
+                      files.find((f) => f.filename === filename)?.sha;
+                    for (const filePath of proof.paths) {
+                      const [base, ours, theirs, merged] = await Promise.all(
+                        [mergeBaseSha, parentShas[0], parentShas[1], nonBaseSha]
+                          .map((ref) => readFileAt(filePath, ref)),
+                      );
+                      if (
+                        merged?.sha !== blobShaFor(singleCommitFiles, filePath) ||
+                        theirs?.sha !== blobShaFor(parentsCompareFiles, filePath) ||
+                        !gate.isCleanThreeWayMerge({
+                          base: base?.text,
+                          ours: ours?.text,
+                          theirs: theirs?.text,
+                          result: merged?.text,
+                        })
+                      ) {
+                        allClean = false;
+                        break;
+                      }
+                      contentVerifiedPaths.add(filePath);
+                    }
+                    if (!allClean) {
                       break;
                     }
                   }
@@ -594,13 +654,16 @@ jobs:
                     reviewedFiles.length >= compareFilesCap ||
                     currentFiles.length >= compareFilesCap,
                   nonBaseCommitsIntroduceNoExtraContent,
+                  contentVerifiedPaths,
                 });
                 if (eligible) {
                   carriedShas.add(oldSha);
                   core.notice(
                     `Carrying review record at ${oldSha.slice(0, 12)} forward to ` +
                     `${headSha.slice(0, 12)}: the PR's own diff against ` +
-                    `${baseRef} is unchanged since review, and every new ` +
+                    `${baseRef} is unchanged since review (apart from ` +
+                    `${contentVerifiedPaths.size} base-overlapping file(s) ` +
+                    'proven to be a conflict-free three-way merge), and every new ' +
                     'non-base commit since then is a clean merge introducing ' +
                     'nothing beyond its own two parents.',
                   );

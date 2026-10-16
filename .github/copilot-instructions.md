@@ -799,6 +799,24 @@ if either fires. `compare(parent1...parent2)` exposes no equivalent total, so
 diffs. Either signal
 fails condition 3 closed (treats it as unproven) rather than guessing.
 
+Overlapping files (issue #2801) need one more step. When the base advance and the
+PR both modify the same file, a clean sync legitimately changes that file's merged
+blob, so its fingerprint can match neither `compare(parent1...parent2)` (condition 3)
+nor the reviewed PR diff (condition 2). Exact matching would reject every such sync.
+For each file whose merge-commit entry differs from `compare(parent1...parent2)`, the
+workflow therefore requires a plain in-place text modification on both sides (no
+add, delete, rename, or binary file; at most 20 such files per merge). It fetches
+the file at the reported merge base, both parents, and the merge commit through the
+contents API. It cross-checks the parent-two and merge blob SHAs against the listed
+entries, then proves with `isCleanThreeWayMerge` that the merged bytes equal a
+conflict-free three-way merge. This proof is stricter than git: overlapping or
+merely adjacent hunks conflict unless both sides made the identical change. A
+hand-resolved conflict, a dropped side, or any extra edit therefore never passes.
+Inputs too large to diff, or files the contents API will not inline (over 1 MB),
+also fail closed. Condition 2 then allows a mismatch only on those content-verified
+paths. The set of changed paths and the status of each path must remain identical.
+Every other condition above is unchanged.
+
 When a record is carried forward this way, the status and audit trail say so
 explicitly — `REVIEWED (self-attested, carried across sync)`, never a bare
 `REVIEWED` — so nobody mistakes "the reviewed diff is provably unchanged" for "this
