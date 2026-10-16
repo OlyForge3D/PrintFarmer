@@ -157,8 +157,18 @@ public class JobQueueAnalyticsController(
             return;
         }
 
-        IReadOnlyDictionary<Guid, PrinterCompatibilitySummaryDto> summaries =
-            await compatibilitySummarizer.SummarizeCompatibilityAsync(candidates.Keys, cancellationToken);
+        IReadOnlyDictionary<Guid, PrinterCompatibilitySummaryDto> summaries;
+        try
+        {
+            summaries = await compatibilitySummarizer.SummarizeCompatibilityAsync(candidates.Keys, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // The summary is additive display data; never let it take down the queue endpoints.
+            logger.LogWarning(ex, "Failed to compute printer compatibility for {JobCount} queued jobs", candidates.Count);
+            return;
+        }
+
         foreach ((Guid id, PrinterCompatibilitySummaryDto summary) in summaries)
         {
             if (candidates.TryGetValue(id, out QueuedPrintJobDto? job))

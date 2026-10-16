@@ -66,6 +66,30 @@ public class JobQueueAnalyticsControllerCompatibilityTests
     }
 
     [Fact]
+    public async Task GetAllQueueAsync_SummarizerThrows_FailsOpenWithNullSummary()
+    {
+        List<QueuedPrintJobWithFileMetaDto> jobs =
+        [
+            new() { Job = new QueuedPrintJobDto { Id = Guid.NewGuid().ToString(), Status = "Queued" } },
+        ];
+        Mock<IPrintJobManagementService> service = new();
+        service.Setup(s => s.GetAllQueuedJobsAsync(
+                It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<DateTime?>(), It.IsAny<DateTime?>(),
+                It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<DateTime?>(), It.IsAny<DateTime?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(jobs);
+        Mock<IJobCompatibilitySummarizer> summarizer = new();
+        summarizer.Setup(s => s.SummarizeCompatibilityAsync(It.IsAny<IReadOnlyCollection<Guid>>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("db timeout"));
+
+        IActionResult result = await CreateController(service.Object, summarizer.Object).GetAllQueueAsync(null, null, null);
+
+        List<QueuedPrintJobWithFileMetaDto> body = Assert.IsType<List<QueuedPrintJobWithFileMetaDto>>(
+            Assert.IsType<OkObjectResult>(result).Value);
+        Assert.Null(body[0].Job.Compatibility);
+    }
+
+    [Fact]
     public async Task GetJobDetailsAsync_UnassignedQueuedJob_AttachesSummary()
     {
         Guid id = Guid.NewGuid();

@@ -798,6 +798,10 @@ Counts come from the same `DispatchScorer` evaluation that dispatch uses, not a 
 `readyPrinterCount` is a point-in-time hint, not a dispatch guarantee. Build volume is a soft
 score today, so `buildVolumeEnforced` is always `false`.
 
+Counts reflect the dispatcher's farm-wide scope, so a group-restricted caller can infer the
+number of enabled printers outside their groups. No printer IDs or names are returned. If the
+summary cannot be computed, the endpoints still return `200` with `compatibility: null`.
+
 ---
 
 ### 3. PrintJobQueueController (`/api/print-job-queue`)
