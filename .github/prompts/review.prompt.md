@@ -15,7 +15,7 @@ Draft PRs may open early; review, CI, and current-head evidence gate readiness a
    a critical finding, or unresolved cross-domain risk; record why.
    Dispatch selected reviewers as parallel read-only task agents using canonical
    `agent_type: "code-review"` with explicit model overrides:
-   - **Bishop**: `name: "bishop"`, `agent_type: "code-review"`, `model: "claude-opus-5"`, `reasoning_effort: "medium"`
+   - **Bishop**: `name: "bishop"`, `agent_type: "code-review"`, `model: "claude-opus-5.5"`, `reasoning_effort: "medium"`
    - **Hicks**: `name: "hicks"`, `agent_type: "code-review"`, `model: "gpt-5.6-sol"`, `reasoning_effort: "medium"`
    - **Vasquez**: `name: "vasquez"`, `agent_type: "code-review"`, `model: "gemini-3.8-flash"`, `reasoning_effort: "medium"`
    Generic `agent_type: "code-review"` does not load custom agent markdown.

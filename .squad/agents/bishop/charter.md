@@ -8,8 +8,8 @@
 
 ## Model
 
-- **Preferred:** `claude-opus-5`
-- **Rationale:** Claude Opus 5 for correctness-focused branch diff review and reviewer gate analysis.
+- **Preferred:** `claude-opus-5.5`
+- **Rationale:** Claude Opus 5.5 for correctness-focused branch diff review and reviewer gate analysis.
 
 ## Responsibilities
 

@@ -453,7 +453,7 @@ When the resolved context tier is not `auto` or default, include it in the agent
 
 **Spawn output format — show the model choice and tier:**
 
-Follow `.squad/templates/model-selection-reference.md` for the base model-selection rules. When an agent uses a non-default context tier, append it in the acknowledgment (for example, `🧠 DeepThink (claude-opus-5 · long context) — 1M-token window for deep architecture analysis`).
+Follow `.squad/templates/model-selection-reference.md` for the base model-selection rules. When an agent uses a non-default context tier, append it in the acknowledgment (for example, `🧠 DeepThink (claude-opus-5.5 · long context) — 1M-token window for deep architecture analysis`).
 
 ### Client Compatibility
 

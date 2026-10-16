@@ -36,7 +36,7 @@ const members = [
   { name: '🔍 Brett', role: 'Researcher' },
   { name: '⚙️ Parker', role: 'DevOps & Deployment Engineer' },
   { name: '🎨 Newt', role: 'Designer (Industrial UI)' },
-  { name: '🔍 Bishop', role: 'Code Reviewer (Claude Opus 5)' },
+  { name: '🔍 Bishop', role: 'Code Reviewer (Claude Opus 5.5)' },
   { name: '🔍 Hicks', role: 'Code Reviewer (GPT-5.6 Sol)' },
   { name: '🔍 Vasquez', role: 'Code Reviewer (Gemini 3.1 Pro Preview)' },
   { name: '⚛️ Drake', role: 'Frontend Dev' },
