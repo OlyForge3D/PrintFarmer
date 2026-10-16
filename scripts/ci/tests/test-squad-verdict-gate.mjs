@@ -375,8 +375,9 @@ test('rejects verdicts pinned to a stale SHA', () => {
 //
 // A record at an old head SHA stays valid at the new head when (1) the old
 // SHA is a strict ancestor of the new head, (2) the PR's own diff against the
-// base branch is byte-for-byte unchanged between the old SHA and the new
-// head, AND (3) every commit introduced since review that isn't already
+// base branch is unchanged between the old SHA and the new head (identical
+// compare entries, except base-overlapping files content-verified as a clean
+// three-way merge, issue #2801), AND (3) every commit introduced since review that isn't already
 // reachable from base is a clean two-parent merge introducing nothing beyond
 // merging its own two parents (proven via `compare(parent1...parent2)` — see
 // below, NOT "content-empty against its own first parent", which is a real,
@@ -900,10 +901,25 @@ test('a pure base-sync merge carries the record forward with the carried-status 
   assert.match(carriedNote, /content-verified as a clean three-way merge/);
 });
 
-test('R3365-02: verifier contract does not claim byte-for-byte carry-forward evidence', async () => {
-  const verifier = await readFile(path.join(repositoryRoot, 'scripts/ci/verify-squad-verdict.mjs'), 'utf8');
-  assert.doesNotMatch(verifier, /byte-for-byte/);
-  assert.match(verifier, /content-verified as a clean three-way/);
+test('R3365-02: no carry-forward contract claims byte-for-byte diff equality', async () => {
+  const sources = {
+    verifier: 'scripts/ci/verify-squad-verdict.mjs',
+    gate: 'scripts/ci/squad-verdict-gate.mjs',
+    workflow: '.github/workflows/squad-review-verdict.yml',
+    instructions: '.github/copilot-instructions.md',
+  };
+  const text = {};
+  for (const [name, relative] of Object.entries(sources)) {
+    text[name] = (await readFile(path.join(repositoryRoot, relative), 'utf8'))
+      .replace(/\r?\n[ \t]*(?:\/\/|\*(?!\*)|#)?/g, ' ')
+      .replace(/\s+/g, ' ');
+    assert.doesNotMatch(text[name], /byte-for-byte/i, `${relative} must not claim byte-for-byte equality`);
+  }
+  assert.match(text.verifier, /content-verified as a clean three-way/);
+  // Every condition-2 summary must state the overlap exception.
+  assert.match(text.instructions, /is unchanged between `SHA_r` and `SHA_h`: every compare entry is identical, except base-overlapping files content-verified as a clean three-way merge/);
+  assert.match(text.workflow, /is unchanged between the old SHA and the current head \(identical compare entries, except base-overlapping files content-verified as a clean three-way merge/);
+  assert.match(text.gate, /identical compare entries for every file, except base-overlapping files whose merged content was separately proven a clean three-way merge/);
 });
 
 test('a mix of fresh and carried approvals is still reported and still carries', () => {

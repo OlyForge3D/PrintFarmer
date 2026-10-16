@@ -732,7 +732,9 @@ but relabelled, to a new head `SHA_h` only when **all three** hold: (1) `SHA_r` 
 strict ancestor of `SHA_h` (GitHub's compare API reports `status: 'ahead'` for
 `compare(SHA_r...SHA_h)`, never `'behind'`/`'diverged'`/`'identical'` — a rebase or
 force-push always fails this), (2) the PR's own diff against the base branch — not
-its raw commit list — is byte-for-byte unchanged between `SHA_r` and `SHA_h`, and
+its raw commit list — is unchanged between `SHA_r` and `SHA_h`: every compare entry
+is identical, except base-overlapping files content-verified as a clean three-way
+merge (see the issue #2801 paragraph below), and
 (3) every commit introduced since review that isn't already reachable from base is
 a clean two-parent merge introducing nothing beyond its own two parents (see below —
 NOT "content-empty against its own first parent", which is a real, verified-wrong

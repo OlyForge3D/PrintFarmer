@@ -455,8 +455,10 @@ jobs:
             // head when (1) the old SHA is a strict ancestor of the current
             // head, (2) the PR's own diff against the base branch — NOT the
             // raw commit list, which always contains the sync merge commit
-            // itself even for a clean sync — is byte-for-byte unchanged
-            // between the old SHA and the current head, AND (3) every commit
+            // itself even for a clean sync — is unchanged between the old
+            // SHA and the current head (identical compare entries, except
+            // base-overlapping files content-verified as a clean three-way
+            // merge; see the issue #2801 note below), AND (3) every commit
             // introduced since review that isn't already reachable from base
             // introduces nothing beyond what a clean merge of its own two
             // parents would produce. (3) exists because (1)+(2) alone would

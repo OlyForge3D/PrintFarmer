@@ -491,7 +491,7 @@ export function parseVerdictComment(comment) {
  * Overlapping files (issue #2801): when the base advance and the PR both
  * modify the same file, a clean sync legitimately changes that file's
  * resulting blob, and three-dot compare against the advanced base also shifts
- * its patch context. Byte-for-byte equality is therefore impossible for that
+ * its patch context. Identical compare entries are therefore impossible for that
  * file even though the author authored nothing. `contentVerifiedPaths` names
  * paths the workflow has positively proven — by fetching the merge base, both
  * parents and the merge result of every sync merge that touched them, and
@@ -500,7 +500,7 @@ export function parseVerdictComment(comment) {
  * reviewed and current diffs, and only as an in-place modification
  * (identical `status` `'modified'`, no rename). Every other path must still
  * match exactly, and the set of changed paths must be identical. It defaults
- * to empty, so omitting it keeps the strict byte-for-byte rule.
+ * to empty, so omitting it requires every compare entry to be identical.
  *
  * This function performs no I/O; the workflow computes the compares and the
  * per-commit lookups and passes their results in.
@@ -753,7 +753,7 @@ export function isCleanThreeWayMerge({ base, ours, theirs, result, gitMerge } = 
 
 /**
  * Canonical, order-independent fingerprint of a compare-API `files` array,
- * used to test two diffs for byte-for-byte equality: once for the PR's own
+ * used to test two diffs for exact entry equality: once for the PR's own
  * diff (see `isCarriedAcrossSync`), and again per file (see
  * `mergePathsNeedingContentProof`) to test a merge commit's own diff against
  * `compare(parent1...parent2).files` when proving it introduced nothing
