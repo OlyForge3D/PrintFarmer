@@ -171,6 +171,8 @@ function unitLabelFor(kind: LoadoutKind, mmuType?: string, slotCount?: number): 
       return 'AFC';
     case MmuProtocol.HappyHare:
       return 'MMU';
+    case MmuProtocol.ZmodIfs:
+      return 'IFS';
     default:
       return 'AMS';
   }

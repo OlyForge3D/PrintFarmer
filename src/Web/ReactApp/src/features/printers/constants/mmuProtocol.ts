@@ -4,6 +4,8 @@ export const MmuProtocol = {
   Qidibox: 'Qidibox',
   Afc: 'AFC',
   SnapmakerU1: 'SnapmakerU1',
+  /** Flashforge AD5X Intelligent Filament Switch via ZMOD. Reports gate selection, not a confirmed load. */
+  ZmodIfs: 'ZmodIfs',
   Unknown: 'Unknown',
 } as const;
 
