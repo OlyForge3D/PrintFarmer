@@ -22,9 +22,11 @@ namespace Farm.Web.IntegrationTests.Calibration;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Uses <see cref="WebApplicationFactory{TEntryPoint}.UseKestrel(Action{Microsoft.AspNetCore.Server.Kestrel.Core.KestrelServerOptions})"/>
-/// to run a single production host on a real TCP port. Building the deferred entry point twice starts
-/// competing application instances against the same database, racing schema initialization.
+/// <see cref="WebApplicationFactory{TEntryPoint}"/> always installs an in-memory <c>TestServer</c>,
+/// whose address no container can dial. This host therefore uses the documented two-host arrangement:
+/// the factory keeps its in-memory host so its own internals stay satisfied, while the host this class
+/// exposes is a second, identically configured instance bound to a real TCP port. Both instances share
+/// one SQLite database and one storage root, so the smoke asserts on exactly what the container talked to.
 /// </para>
 /// <para>
 /// Nothing about the application pipeline is replaced. The only test-specific configuration is the
@@ -36,6 +38,7 @@ internal sealed class KestrelCalibrationApiHost : WebApplicationFactory<Program>
 {
     private readonly SqliteConnection _keepAliveConnection;
     private readonly IReadOnlyDictionary<string, string?> _hostConfiguration;
+    private IHost? _kestrelHost;
     private int _disposed;
 
     private KestrelCalibrationApiHost(
@@ -85,7 +88,8 @@ internal sealed class KestrelCalibrationApiHost : WebApplicationFactory<Program>
     public string BaseAddress => string.Create(CultureInfo.InvariantCulture, $"http://127.0.0.1:{ListenPort}");
 
     /// <summary>Gets the service provider of the host bound to <see cref="BaseAddress"/>.</summary>
-    public IServiceProvider ListeningServices => Services;
+    public IServiceProvider ListeningServices => _kestrelHost?.Services
+        ?? throw new InvalidOperationException("The Kestrel host has not been started yet.");
 
     /// <summary>
     /// Starts the production pipeline on a free loopback port.
@@ -108,9 +112,7 @@ internal sealed class KestrelCalibrationApiHost : WebApplicationFactory<Program>
             storageRoot,
             ReserveLoopbackPort());
 
-        host.UseKestrel(options => options.Listen(IPAddress.Loopback, host.ListenPort));
-
-        // Touching Services forces WebApplicationFactory to start the real listener.
+        // Touching Services forces WebApplicationFactory to build both hosts.
         _ = host.Services;
         return host;
     }
@@ -195,11 +197,22 @@ internal sealed class KestrelCalibrationApiHost : WebApplicationFactory<Program>
             config.AddInMemoryCollection(_hostConfiguration));
         _ = builder.UseEnvironment("Testing");
 
-        IHost host = builder.Build();
-        EnsureDatabaseMigrated(host);
-        host.Start();
-        VerifyListening(host);
-        return host;
+        // Build the in-memory host first, while TestServer is still the registered server.
+        IHost inMemoryHost = builder.Build();
+
+        // Then add Kestrel and build the second host. The endpoint is bound explicitly so the listener
+        // never depends on URL configuration reaching the entry point, and its IServer registration
+        // wins because it is applied after the factory's TestServer registration.
+        _ = builder.ConfigureWebHost(webHost => webHost
+            .UseKestrel(options => options.Listen(IPAddress.Loopback, ListenPort)));
+        _kestrelHost = builder.Build();
+        EnsureDatabaseMigrated(_kestrelHost);
+
+        _kestrelHost.Start();
+
+        VerifyListening(_kestrelHost);
+        inMemoryHost.Start();
+        return inMemoryHost;
     }
 
     /// <inheritdoc/>
@@ -212,10 +225,15 @@ internal sealed class KestrelCalibrationApiHost : WebApplicationFactory<Program>
 
         try
         {
-            await base.DisposeAsync();
+            if (_kestrelHost is not null)
+            {
+                await _kestrelHost.StopAsync(TimeSpan.FromSeconds(15));
+                _kestrelHost.Dispose();
+            }
         }
         finally
         {
+            await base.DisposeAsync();
             await _keepAliveConnection.DisposeAsync();
         }
 
@@ -261,7 +279,8 @@ internal sealed class KestrelCalibrationApiHost : WebApplicationFactory<Program>
         AppDbContext core = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         core.Database.Migrate();
 
-        // Both contexts share one database; apply their migrations before production startup checks.
+        // Both contexts share one database; applying each context's migrations provisions
+        // the schema before either host runs the production startup migration checks.
         SlicerDbContext slicer = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
         slicer.Database.Migrate();
     }
