@@ -473,27 +473,8 @@ public class GcodeHarvestController(
 
         try
         {
-            IReadOnlyList<GcodeHarvestQueueItem> items = await _harvestQueue.GetQueuedItemsAsync(status);
-
-            // Filter by printer ID if provided
-            IEnumerable<GcodeHarvestQueueItem> filtered = printerId.HasValue
-                ? items.Where(i => i.PrinterId == printerId.Value)
-                : items;
-
-            GcodeHarvestQueueItemDto[] dtos = filtered.Select(item => new GcodeHarvestQueueItemDto(
-                item.Id,
-                item.PrinterId,
-                item.Printer?.Name ?? "Unknown",
-                item.QueuedAt,
-                item.ProcessingStartedAt,
-                item.CompletedAt,
-                item.Status,
-                item.Priority,
-                item.ErrorMessage,
-                item.FilesFound,
-                item.FilesAdded)).ToArray();
-
-            return Ok(dtos);
+            IReadOnlyList<GcodeHarvestQueueItemDto> items = await _harvestQueue.GetQueuedItemsAsync(status, printerId);
+            return Ok(items.ToArray());
         }
         catch (Exception ex)
         {

@@ -17,6 +17,20 @@ The harvesting system scans a printer's G-code storage, filters candidate files,
 | GET | `/api/gcode-harvest/printers/{printerId}/active` | Active operation for printer |
 | GET | `/api/gcode-harvest/printers/{printerId}/recent?count=10` | Recent operations for printer |
 | GET | `/api/gcode-harvest/active` | All active operations |
+| GET | `/api/gcode-harvest/queue?printerId={printerId}&status=Pending` | Queue summaries with optional printer and status filters |
+
+## Harvest Queue
+
+`GET /api/gcode-harvest/queue` returns an array of queue summaries, ordered by
+priority descending and then queued time ascending. Both `printerId` and `status`
+are optional, combined filters applied in the database. Reads do not track
+entities and select only summary fields, including the current printer name.
+The endpoint remains unpaginated and requires `gcode_harvest:admin`.
+
+Each summary contains `id`, `printerId`, `printerName`, `queuedAt`,
+`processingStartedAt`, `completedAt`, `status`, `priority`, `errorMessage`,
+`filesFound`, and `filesAdded`. Status values are strings (`Pending`,
+`Processing`, `Completed`, `Failed`, or `Cancelled`).
 
 ## Start Harvest
 `POST /api/gcode-harvest/start`
@@ -132,4 +146,3 @@ Operation progress & completion events are broadcast through the existing printe
 - Retry queue for transient download errors
 - Hash pre-check via printer metadata where available
 - Optional auto-import on completion
-
