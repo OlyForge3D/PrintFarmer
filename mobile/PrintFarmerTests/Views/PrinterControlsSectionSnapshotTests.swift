@@ -349,20 +349,32 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         controller.view.layoutIfNeeded()
     }
 
+    private struct SettleTimeout: Error, CustomStringConvertible {
+        let description: String
+    }
+
     /// Settles until `condition` holds or `timeout` elapses. Button actions dispatch
-    /// through `Task { await viewModel... }`, so slower simulators can need more than
-    /// one fixed settle before the service observes the call or the lease releases.
-    /// Callers still assert the exact outcome afterward.
+    /// through `Task { await viewModel... }` and then a nested command task, so slower
+    /// simulators can need more than one fixed settle before the service observes the
+    /// call or the lease releases. A timeout records a failure and throws so the test
+    /// stops instead of asserting against the previous command's state. Callers still
+    /// assert the exact outcome afterward.
     private func settle(
         _ controller: UIViewController,
-        until condition: () -> Bool,
-        timeout: Duration = .seconds(10)
+        _ description: String = "the expected asynchronous UI outcome",
+        timeout: Duration = .seconds(10),
+        file: StaticString = #filePath,
+        line: UInt = #line,
+        until condition: () -> Bool
     ) async throws {
         let deadline = ContinuousClock.now + timeout
         repeat {
             try await settle(controller)
             if condition() { return }
         } while ContinuousClock.now < deadline
+        let message = "Timed out after \(timeout) waiting for \(description)"
+        XCTFail(message, file: file, line: line)
+        throw SettleTimeout(description: message)
     }
 
     func test_embeddedContent_mountAndRemount_doNotLoadOrDispatch() async throws {
@@ -1371,7 +1383,9 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         z.sendActions(for: .editingChanged)
         try await settle(controller)
         try control("printer.controls.absolute.move").sendActions(for: .touchUpInside)
-        try await settle(controller)
+        try await settle(controller, "the absolute move request to reach the service") {
+            service.moveToCalledWith != nil
+        }
         XCTAssertEqual(service.moveToCalledWith?.x, 1)
         XCTAssertEqual(service.moveToCalledWith?.y, 2)
         XCTAssertEqual(service.moveToCalledWith?.z, 3)
@@ -1528,7 +1542,9 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         try await settle(controller)
         XCTAssertTrue(move.isEnabled)
         move.sendActions(for: .touchUpInside)
-        try await settle(controller)
+        try await settle(controller, "the absolute move request to reach the service") {
+            service.moveToCalledWith != nil
+        }
         XCTAssertEqual(service.moveToCalledWith?.x, 0)
         XCTAssertEqual(service.moveToCalledWith?.y, -2.5)
         XCTAssertEqual(service.moveToCalledWith?.z, 10)
@@ -1809,8 +1825,18 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
             XCTAssertFalse(button.accessibilityLabel?.isEmpty ?? true)
             return button
         }
-        func capture(_ step: ZOffsetCalibrationStep) async throws {
-            try await settle(controller)
+        func capture(
+            _ step: ZOffsetCalibrationStep,
+            file: StaticString = #filePath,
+            line: UInt = #line,
+            alsoUntil extra: () -> Bool = { true }
+        ) async throws {
+            try await settle(
+                controller, "calibration step \(step.rawValue) with no command or review in flight",
+                file: file, line: line
+            ) {
+                model.calibrationStep == step && !model.isExecuting && !model.isReviewingCalibration && extra()
+            }
             XCTAssertEqual(model.calibrationStep, step)
             let image = UIGraphicsImageRenderer(bounds: controller.view.bounds).image { _ in
                 XCTAssertTrue(controller.view.drawHierarchy(in: controller.view.bounds, afterScreenUpdates: true))
@@ -1823,27 +1849,36 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
 
         try await settle(controller)
         try action("start").sendActions(for: .touchUpInside)
-        try await capture(.introduction)
+        // beginCalibrationHome() requires the stored baseline that startCalibration reads.
+        try await capture(.introduction) { model.calibrationOffset != nil }
         model.beginCalibrationHome()
         try await capture(.home)
         try action("home").sendActions(for: .touchUpInside)
-        try await settle(controller)
+        try await settle(controller, "the calibration home request to reach the service") {
+            service.homeCalledWith != nil
+        }
         XCTAssertNotNil(service.homeCalledWith)
         service.statusToReturn = VerifiedSafetyFixtures.status(id: printer.id)
         await model.refreshSafetyEvidence()
         try await capture(.position)
         try action("position").sendActions(for: .touchUpInside)
-        try await settle(controller)
+        try await settle(controller, "the calibration position request to reach the service") {
+            service.moveToCalledWith?.x == 40
+        }
         XCTAssertEqual(service.moveToCalledWith?.x, 40)
         service.statusToReturn = VerifiedSafetyFixtures.status(id: printer.id, position: .init(x: 40, y: 30, z: 10))
         await model.refreshSafetyEvidence()
         try await capture(.adjust)
         try action("closer").sendActions(for: .touchUpInside)
-        try await settle(controller)
+        try await settle(controller, "the closer adjustment to reach the service at Z 9.95") {
+            service.moveToCalledWith?.z == 9.95
+        }
         XCTAssertEqual(service.moveToCalledWith?.z, 9.95)
         service.statusToReturn = VerifiedSafetyFixtures.status(id: printer.id, position: .init(x: 40, y: 30, z: 9.95))
         await model.refreshSafetyEvidence()
-        try await settle(controller)
+        try await settle(controller, "the telemetry-confirmed adjustment to finish before review") {
+            model.calibrationStep == .adjust && !model.isExecuting && !model.isReviewingCalibration
+        }
         try action("review").sendActions(for: .touchUpInside)
         try await capture(.save)
         try action("save").sendActions(for: .touchUpInside)
