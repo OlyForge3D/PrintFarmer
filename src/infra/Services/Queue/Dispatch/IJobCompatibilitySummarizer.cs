@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Dtos.PrintQueue;
+﻿using Farm.Infrastructure.Dtos.PrintQueue;
 
 namespace Farm.Infrastructure.Services.Queue.Dispatch;
 
