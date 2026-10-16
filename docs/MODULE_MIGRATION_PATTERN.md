@@ -138,10 +138,11 @@ random project GUIDs, plus their `GlobalSection` build-configuration lines —
 mirror the `Farm.Modules.Abstractions` / `Farm.Modules.Abstractions.Tests`
 block exactly.
 
-### 7. Route-table snapshot regeneration (if the module owns any controller)
+### 7. Route-table snapshot regeneration (if the module owns any controller, minimal-API endpoint, or SignalR hub)
 
 `RouteTableSnapshotTests` (`src/tests/Farm.Web.Api.Tests/Startup/`) is a
-guardrail against accidental route changes; it is not selected by a
+guardrail against accidental route and authorization changes covering
+controller actions, minimal APIs, and SignalR hub endpoints and methods; it is not selected by a
 filter like `FullyQualifiedName~<Name>` because its own test method name
 never contains the module name — **run it explicitly by class name** in
 addition to your module's targeted filter. Moving a controller changes only
@@ -172,13 +173,14 @@ string substitution (not a blind re-dump) so the diff is auditable as
    "≤7 min, only its leg" acceptance criterion. If the module depends on
    `Farm.Infrastructure` (most will), also add its test project name to the
    existing `has_infra` block so an infra-only change doesn't miss it.
-   **If the module owns a controller** (as SmartPlug does), and that
-   controller's own coverage — `RouteTableSnapshotTests` and/or a
+   **If the module owns a controller, minimal API, or SignalR hub** (as
+   SmartPlug owns a controller), and that endpoint's own coverage —
+   `RouteTableSnapshotTests` and/or a
    `CustomWebApplicationFactory`-based integration test — stays behind in
    `Farm.Web.Api.Tests` rather than moving with the module (see step 7),
    the new bucket must **also** select `Farm.Web.Api.Tests`, or a change to
-   that controller silently loses CI coverage of its own route/contract.
-   A module that moves only services with no owned controller (e.g. a
+   that endpoint silently loses CI coverage of its own route/contract.
+   A module that moves only services with no owned endpoint (e.g. a
    future pure-worker module) can stay as narrow as `orca_worker`.
 3. **`scripts/ci/tests/test-select-dotnet-tests.sh`**: add positive
    (production-path-only), test-path-only, and mixed-path (module path +

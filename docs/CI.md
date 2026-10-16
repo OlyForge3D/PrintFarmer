@@ -263,9 +263,10 @@ moved into `Farm.Modules.SmartPlug`, but its own coverage
 (`RouteTableSnapshotTests`, the `CustomWebApplicationFactory`-based
 `AdminPowerMonitorsControllerTests`) intentionally stayed behind in
 `Farm.Web.Api.Tests` — see `docs/MODULE_MIGRATION_PATTERN.md`. Any future
-`Farm.Modules.*` phase (9-18) that owns a controller must add its API-tests
-project the same way; a phase that moves only services (no controller) can
-stay as narrow as `orca_worker`.
+`Farm.Modules.*` phase (9-18) that owns a controller, minimal-API endpoint, or
+SignalR hub (all of which `RouteTableSnapshotTests` snapshots) must add its
+API-tests project the same way; a phase that moves only services (no routed
+endpoint) can stay as narrow as `orca_worker`.
 
 `printqueue` (issue #2040, Phase 12) follows the same controller-owning
 pattern as `smartplug`: `PrintJobManagementService` and its 8 dependent
