@@ -1223,10 +1223,11 @@ public abstract class BasePreviewRenderer
             RegisterEdge(MakeEdgeKey(p2, p0));
         }
 
-        img.Mutate(ctx =>
+        img.Mutate(ctx => ctx.Paint(canvas =>
         {
             Rgba32 color = options.SilhouetteColor;
             float width = options.SilhouetteEdgeWidth <= 0f ? 1.0f : options.SilhouetteEdgeWidth;
+            var pen = new SolidPen(Color.FromPixel(color), width);
 
             foreach (KeyValuePair<(PointF, PointF), List<(Vector3 FaceNormal, bool FrontFacing, Vector2 S0, Vector2 S1, Vector2 S2, float D0, float D1, float D2)>> kvp in edgeMap)
             {
@@ -1288,9 +1289,9 @@ public abstract class BasePreviewRenderer
 
                 var pb = new PathBuilder();
                 pb.AddLine(a, b);
-                ctx.Draw(color, width, pb.Build());
+                canvas.Draw(pen, pb.Build());
             }
-        });
+        }));
     }
 
     // ---------------------------------------------------------------------

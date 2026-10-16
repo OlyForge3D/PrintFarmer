@@ -1252,6 +1252,14 @@ test('unresolved head SHA fails closed', () => {
 test('documentation-only classification honours the policy carve-outs', () => {
   assert.equal(classifyChangeScope(['docs/API.md']).docsOnly, true);
   assert.equal(classifyChangeScope(['README.md']).docsOnly, true);
+  for (const path of [
+    'docs/design/mockups.html',
+    'mobile/docs/distill/mockups.html',
+    'mobile/docs/distill/PLAN.md',
+  ]) {
+    assert.equal(classifyChangeScope([path]).docsOnly, true, path);
+    assert.equal(classifyChangeScope([path]).highRisk, false, path);
+  }
   assert.equal(classifyChangeScope([]).docsOnly, false);
   for (const carveOut of [
     '.github/workflows/ci.yml',
@@ -1278,6 +1286,25 @@ test('documentation-only classification honours the policy carve-outs', () => {
   }
   assert.equal(classifyChangeScope(['docs/API.md', 'src/api/Program.cs']).docsOnly, false);
   assert.equal(classifyChangeScope(['docs/screenshot.png']).highRisk, true);
+  assert.equal(classifyChangeScope(['docs/security.html']).highRisk, true);
+  assert.equal(classifyChangeScope(['docs/design/MOCKUPS.HTML']).docsOnly, true);
+  for (const lookalike of [
+    'Docs/mockups.html',
+    'Mobile/docs/mockups.html',
+    'mobile/Docs/mockups.html',
+    'docs-extra/mockups.html',
+    'src/docs/mockups.html',
+  ]) {
+    assert.equal(classifyChangeScope([lookalike]).highRisk, true, lookalike);
+  }
+  for (const paths of [
+    ['mobile/docs/distill/mockups.html', 'docs/security.html'],
+    ['docs/security.html', 'mobile/docs/distill/mockups.html'],
+    ['docs/design/mockups.html', '.github/workflows/ci.yml'],
+    ['.github/workflows/ci.yml', 'docs/design/mockups.html'],
+  ]) {
+    assert.equal(classifyChangeScope(paths).highRisk, true, paths.join(','));
+  }
 });
 
 test('high-risk classification is order-independent for mixed changes', () => {

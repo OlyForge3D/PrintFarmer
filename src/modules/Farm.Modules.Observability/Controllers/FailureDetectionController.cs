@@ -1,5 +1,7 @@
 ﻿using Farm.Infrastructure;
+using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.FailureDetection;
+using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.Startup;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -21,19 +23,22 @@ public class FailureDetectionController : ControllerBase
     private readonly IFailureDetectionMonitorStatus _monitorStatus;
     private readonly IStartupStatus _startupStatus;
     private readonly ILogger<FailureDetectionController> _logger;
+    private readonly IQueueResourceAuthorizationService _resourceAuthorization;
 
     public FailureDetectionController(
         IObicoFailureDetectionService failureDetectionService,
         IFailureDetectionIncidentHistoryService incidentHistoryService,
         IFailureDetectionMonitorStatus monitorStatus,
         IStartupStatus startupStatus,
-        ILogger<FailureDetectionController> logger)
+        ILogger<FailureDetectionController> logger,
+        IQueueResourceAuthorizationService resourceAuthorization)
     {
         _failureDetectionService = failureDetectionService ?? throw new ArgumentNullException(nameof(failureDetectionService));
         _incidentHistoryService = incidentHistoryService ?? throw new ArgumentNullException(nameof(incidentHistoryService));
         _monitorStatus = monitorStatus ?? throw new ArgumentNullException(nameof(monitorStatus));
         _startupStatus = startupStatus ?? throw new ArgumentNullException(nameof(startupStatus));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _resourceAuthorization = resourceAuthorization ?? throw new ArgumentNullException(nameof(resourceAuthorization));
     }
 
     /// <summary>
@@ -132,9 +137,11 @@ public class FailureDetectionController : ControllerBase
     /// <param name="ct">Cancellation token.</param>
     /// <returns>List of recent failure detection events</returns>
     /// <response code="200">Returns the event history</response>
+    /// <response code="404">If the requested printer is not visible to the caller</response>
     /// <response code="503">If the system is still initializing</response>
     [HttpGet("history")]
     [ProducesResponseType(typeof(IEnumerable<FailureDetectionDto>), 200)]
+    [ProducesResponseType(404)]
     [ProducesResponseType(503)]
     public async Task<ActionResult<IEnumerable<FailureDetectionDto>>> GetHistoryAsync(
         [FromQuery] Guid? printerId = null,
@@ -148,7 +155,13 @@ public class FailureDetectionController : ControllerBase
                 return StatusCode(503, new { message = "System is still initializing. Please wait a moment and try again." });
             }
 
-            List<FailureDetectionDto> incidents = await _incidentHistoryService.GetRecentAsync(printerId, take, ct);
+            if (printerId.HasValue &&
+                !await _resourceAuthorization.CanAccessPrinterAsync(User, printerId.Value, PrinterGroupAccessLevel.View, ct))
+            {
+                return NotFound($"Printer with ID {printerId.Value} not found");
+            }
+
+            List<FailureDetectionDto> incidents = await _incidentHistoryService.GetRecentAsync(User, printerId, take, ct);
             return Ok(incidents);
         }
         catch (Exception ex)

@@ -41,7 +41,7 @@ set -uo pipefail
 # Paths whose modification requires the real iOS build. Canonical API corpus
 # inputs and the backend source files that define their serialized shape must
 # exercise the real APIClient decoders alongside direct mobile changes.
-IOS_RELEVANT_PATHS_RE='^(mobile/|fixtures/wire-contracts/(manifest\.json|api/.*\.json)$|src/api/Program\.cs$|src/api/Startup/(Controller|SignalR)Startup\.cs$|src/infra/Infrastructure/PartsInventory/PartsInventoryProblemDetails\.cs$|src/infra/(Contracts|Domain|Dtos|Json|Models|Serialization)/.*\.cs$|src/infra/.*Contract\.cs$|\.github/workflows/ios-pr-ci\.yml$|scripts/ci/resolve-ios-simulator\.sh$|scripts/ci/test-resolve-ios-simulator\.sh$|scripts/ci/select-ios-build\.sh$|scripts/ci/tests/test-select-ios-build\.sh$)'
+IOS_RELEVANT_PATHS_RE='^(fixtures/wire-contracts/(manifest\.json|api/.*\.json)$|src/api/Program\.cs$|src/api/Startup/(Controller|SignalR)Startup\.cs$|src/infra/Infrastructure/PartsInventory/PartsInventoryProblemDetails\.cs$|src/infra/(Contracts|Domain|Dtos|Json|Models|Serialization)/.*\.cs$|src/infra/.*Contract\.cs$|\.github/workflows/ios-pr-ci\.yml$|scripts/ci/resolve-ios-simulator\.sh$|scripts/ci/test-resolve-ios-simulator\.sh$|scripts/ci/select-ios-build\.sh$|scripts/ci/tests/test-select-ios-build\.sh$)'
 
 should_run=true
 reason="non-pull_request event — running full iOS build"
@@ -125,7 +125,14 @@ if [[ "${EVENT_NAME:-}" == "pull_request" ]]; then
       should_run=false
       reason="no iOS-relevant paths changed"
       for changed_path in "${changed_paths[@]}"; do
-        if [[ "$changed_path" =~ $IOS_RELEVANT_PATHS_RE ]]; then
+        # Mobile documentation is not part of the shipped iOS app. Markdown
+        # under mobile/ is prose even when it lives beside app sources.
+        if [[ "$changed_path" == mobile/docs/* ]] ||
+          [[ "$changed_path" =~ ^mobile/.*\.[mM][dD]$ ]]; then
+          continue
+        fi
+        if [[ "$changed_path" == mobile/* ]] ||
+          [[ "$changed_path" =~ $IOS_RELEVANT_PATHS_RE ]]; then
           should_run=true
           reason="iOS-relevant paths changed"
           break

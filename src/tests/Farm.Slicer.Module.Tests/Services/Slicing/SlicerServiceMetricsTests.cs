@@ -58,7 +58,6 @@ public class SlicerServiceMetricsTests : IDisposable
         _metrics.UpdateCapacitySnapshot(totalCapacity: 100, availableCapacity: 50, activeJobs: 50);
 
         // Assert - can be verified by observing no exceptions thrown
-        Assert.True(true);
     }
 
     [Fact]
@@ -67,7 +66,6 @@ public class SlicerServiceMetricsTests : IDisposable
         // Act & Assert - zero counters are a valid (e.g. no workers registered) snapshot
         _metrics.UpdateCapacitySnapshot(totalCapacity: 0, availableCapacity: 0, activeJobs: 0);
 
-        Assert.True(true);
     }
 
     [Fact]
@@ -78,7 +76,6 @@ public class SlicerServiceMetricsTests : IDisposable
         _metrics.UpdateCapacitySnapshot(totalCapacity: 20, availableCapacity: 15, activeJobs: 5);
 
         // Assert - no exception; gauge callbacks read the snapshot set by the last call
-        Assert.True(true);
     }
 
     #endregion
@@ -92,7 +89,6 @@ public class SlicerServiceMetricsTests : IDisposable
         _metrics.RecordJobSubmitted("OrcaSlicer");
 
         // Assert - metric recorded successfully
-        Assert.True(true);
     }
 
     [Fact]
@@ -102,7 +98,6 @@ public class SlicerServiceMetricsTests : IDisposable
         _metrics.RecordJobSubmitted("PrusaSlicer", "service-123");
 
         // Assert - metric recorded with tags
-        Assert.True(true);
     }
 
     [Fact]
@@ -112,7 +107,6 @@ public class SlicerServiceMetricsTests : IDisposable
         _metrics.RecordJobSubmitted("");
 
         // Assert - no exception
-        Assert.True(true);
     }
 
     [Fact]
@@ -122,7 +116,6 @@ public class SlicerServiceMetricsTests : IDisposable
         _metrics.RecordJobSubmitted("OrcaSlicer", null);
 
         // Assert - no exception
-        Assert.True(true);
     }
 
     #endregion
@@ -141,7 +134,6 @@ public class SlicerServiceMetricsTests : IDisposable
         _metrics.RecordJobStarted(slicerType, serviceId, queueDuration);
 
         // Assert - no exception, metric recorded
-        Assert.True(true);
     }
 
     [Fact]
@@ -151,7 +143,6 @@ public class SlicerServiceMetricsTests : IDisposable
         _metrics.RecordJobStarted("PrusaSlicer", "svc-789", 0.0);
 
         // Assert - no exception
-        Assert.True(true);
     }
 
     [Fact]
@@ -161,7 +152,6 @@ public class SlicerServiceMetricsTests : IDisposable
         _metrics.RecordJobStarted("OrcaSlicer", "svc-999", 3600.0);
 
         // Assert - no exception
-        Assert.True(true);
     }
 
     #endregion
@@ -181,7 +171,6 @@ public class SlicerServiceMetricsTests : IDisposable
         _metrics.RecordJobCompleted(slicerType, serviceId, executionDuration, totalDuration);
 
         // Assert - no exception
-        Assert.True(true);
     }
 
     [Fact]
@@ -191,7 +180,6 @@ public class SlicerServiceMetricsTests : IDisposable
         _metrics.RecordJobCompleted("PrusaSlicer", "svc-222", 0.0, 0.0);
 
         // Assert - no exception
-        Assert.True(true);
     }
 
     [Fact]
@@ -201,7 +189,6 @@ public class SlicerServiceMetricsTests : IDisposable
         _metrics.RecordJobCompleted("OrcaSlicer", "svc-333", 1000.0, 1005.0);
 
         // Assert - no exception
-        Assert.True(true);
     }
 
     #endregion
@@ -219,7 +206,6 @@ public class SlicerServiceMetricsTests : IDisposable
         _metrics.RecordJobFailed(slicerType, null, failureReason);
 
         // Assert - no exception
-        Assert.True(true);
     }
 
     [Fact]
@@ -235,7 +221,6 @@ public class SlicerServiceMetricsTests : IDisposable
         _metrics.RecordJobFailed(slicerType, serviceId, reason, duration);
 
         // Assert - no exception
-        Assert.True(true);
     }
 
     [Fact]
@@ -245,7 +230,6 @@ public class SlicerServiceMetricsTests : IDisposable
         _metrics.RecordJobFailed("OrcaSlicer", "svc-555", "Timeout", null);
 
         // Assert - no exception
-        Assert.True(true);
     }
 
     [Fact]
@@ -255,7 +239,6 @@ public class SlicerServiceMetricsTests : IDisposable
         _metrics.RecordJobFailed("PrusaSlicer", null, "InvalidInput");
 
         // Assert - no exception
-        Assert.True(true);
     }
 
     #endregion
@@ -269,7 +252,6 @@ public class SlicerServiceMetricsTests : IDisposable
         _metrics.RecordJobCancelled("OrcaSlicer");
 
         // Assert - no exception
-        Assert.True(true);
     }
 
     [Fact]
@@ -279,7 +261,6 @@ public class SlicerServiceMetricsTests : IDisposable
         _metrics.RecordJobCancelled("PrusaSlicer", "svc-666");
 
         // Assert - no exception
-        Assert.True(true);
     }
 
     [Fact]
@@ -289,7 +270,6 @@ public class SlicerServiceMetricsTests : IDisposable
         _metrics.RecordJobCancelled("OrcaSlicer", null);
 
         // Assert - no exception
-        Assert.True(true);
     }
 
     #endregion
@@ -307,7 +287,6 @@ public class SlicerServiceMetricsTests : IDisposable
         _metrics.RecordServiceRegistration(slicerType, serviceId);
 
         // Assert - no exception
-        Assert.True(true);
     }
 
     [Fact]
@@ -319,7 +298,6 @@ public class SlicerServiceMetricsTests : IDisposable
         _metrics.RecordServiceRegistration("OrcaSlicer", "svc-3");
 
         // Assert - all recorded without exception
-        Assert.True(true);
     }
 
     #endregion
@@ -338,7 +316,6 @@ public class SlicerServiceMetricsTests : IDisposable
         _metrics.RecordServiceDeregistration(slicerType, serviceId, reason);
 
         // Assert - no exception
-        Assert.True(true);
     }
 
     [Fact]
@@ -350,7 +327,6 @@ public class SlicerServiceMetricsTests : IDisposable
         _metrics.RecordServiceDeregistration("OrcaSlicer", "svc-3", "HealthCheckFailed");
 
         // Assert - all recorded
-        Assert.True(true);
     }
 
     #endregion
@@ -370,7 +346,6 @@ public class SlicerServiceMetricsTests : IDisposable
         _metrics.RecordServiceHeartbeat(slicerType, serviceId, success, latency);
 
         // Assert - no exception
-        Assert.True(true);
     }
 
     [Fact]
@@ -386,7 +361,6 @@ public class SlicerServiceMetricsTests : IDisposable
         _metrics.RecordServiceHeartbeat(slicerType, serviceId, success, latency);
 
         // Assert - failure recorded
-        Assert.True(true);
     }
 
     [Fact]
@@ -404,7 +378,6 @@ public class SlicerServiceMetricsTests : IDisposable
         _metrics.RecordServiceHeartbeat(slicerType, serviceId, success, latency, freeSlots, totalSlots);
 
         // Assert - capacity utilization recorded (80% utilized)
-        Assert.True(true);
     }
 
     [Fact]
@@ -414,7 +387,6 @@ public class SlicerServiceMetricsTests : IDisposable
         _metrics.RecordServiceHeartbeat("OrcaSlicer", "svc-1002", true, 15.0, 0, 100);
 
         // Assert - 100% utilization recorded
-        Assert.True(true);
     }
 
     [Fact]
@@ -424,7 +396,6 @@ public class SlicerServiceMetricsTests : IDisposable
         _metrics.RecordServiceHeartbeat("PrusaSlicer", "svc-1003", true, 8.0, 100, 100);
 
         // Assert - 0% utilization recorded
-        Assert.True(true);
     }
 
     [Fact]
@@ -434,7 +405,6 @@ public class SlicerServiceMetricsTests : IDisposable
         _metrics.RecordServiceHeartbeat("OrcaSlicer", "svc-1004", true, 12.0, 0, 0);
 
         // Assert - no exception (guard against division by zero)
-        Assert.True(true);
     }
 
     [Fact]
@@ -444,7 +414,6 @@ public class SlicerServiceMetricsTests : IDisposable
         _metrics.RecordServiceHeartbeat("OrcaSlicer", "svc-1005", true, 18.0, 50, null);
 
         // Assert - heartbeat recorded, no utilization (incomplete info)
-        Assert.True(true);
     }
 
     #endregion
@@ -463,7 +432,6 @@ public class SlicerServiceMetricsTests : IDisposable
         _metrics.RecordApiKeyRotation(slicerType, serviceId, success);
 
         // Assert - no exception
-        Assert.True(true);
     }
 
     [Fact]
@@ -478,7 +446,6 @@ public class SlicerServiceMetricsTests : IDisposable
         _metrics.RecordApiKeyRotation(slicerType, serviceId, success);
 
         // Assert - failure recorded
-        Assert.True(true);
     }
 
     [Fact]
@@ -488,7 +455,6 @@ public class SlicerServiceMetricsTests : IDisposable
         _metrics.RecordApiKeyRotation("OrcaSlicer", "svc-1008", true, true);
 
         // Assert - admin flag recorded
-        Assert.True(true);
     }
 
     [Fact]
@@ -498,7 +464,6 @@ public class SlicerServiceMetricsTests : IDisposable
         _metrics.RecordApiKeyRotation("PrusaSlicer", "svc-1009", true, false);
 
         // Assert - recorded as user-initiated
-        Assert.True(true);
     }
 
     #endregion
@@ -518,7 +483,6 @@ public class SlicerServiceMetricsTests : IDisposable
 #pragma warning restore IDISP017
 
         // Assert - no exception on disposal
-        Assert.True(true);
     }
 
     [Fact]
@@ -536,7 +500,6 @@ public class SlicerServiceMetricsTests : IDisposable
 #pragma warning restore IDISP017
 
         // Assert - no exception on second dispose
-        Assert.True(true);
     }
 
     [Fact]
@@ -550,7 +513,6 @@ public class SlicerServiceMetricsTests : IDisposable
         GC.WaitForPendingFinalizers();
 
         // Assert - GC handled cleanup
-        Assert.True(true);
     }
 
     #endregion
@@ -576,7 +538,6 @@ public class SlicerServiceMetricsTests : IDisposable
         _metrics.RecordServiceDeregistration("OrcaSlicer", "svc-final-2", "Normal");
 
         // Assert - all operations completed successfully
-        Assert.True(true);
     }
 
     [Fact]
@@ -593,7 +554,6 @@ public class SlicerServiceMetricsTests : IDisposable
         _metrics.RecordJobCompleted("PrusaSlicer", "svc-fail-2", 20.0, 21.0);
 
         // Assert - transitions work
-        Assert.True(true);
     }
 
     [Fact]
@@ -605,7 +565,6 @@ public class SlicerServiceMetricsTests : IDisposable
         _metrics.RecordJobCancelled("OrcaSlicer", "svc-cancel-1");
 
         // Assert - cancellation recorded
-        Assert.True(true);
     }
 
     #endregion
