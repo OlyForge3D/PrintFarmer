@@ -69,13 +69,21 @@ final class LoginFlowUITests: PrintFarmerUITestCase {
         XCTAssertTrue(usernameField.waitForExistence(timeout: 5))
 
         assertKeyboardFocus(on: usernameField)
-        usernameField.typeText("admin")
+        typeTextAndAwaitAcceptance(
+            "admin",
+            in: usernameField,
+            expectedValue: { String($0) }
+        )
         XCTAssertEqual(usernameField.value as? String, "admin")
 
         let passwordField = app.secureTextFields["passwordField"]
         XCTAssertTrue(passwordField.waitForExistence(timeout: 3))
         assertKeyboardFocus(on: passwordField)
-        passwordField.typeText("password123")
+        typeTextAndAwaitAcceptance(
+            "password123",
+            in: passwordField,
+            expectedValue: { String(repeating: "•", count: $0.count) }
+        )
         XCTAssertEqual(passwordField.value as? String, "•••••••••••")
     }
 
@@ -159,12 +167,20 @@ final class LoginFlowUITests: PrintFarmerUITestCase {
         let usernameField = app.textFields["usernameField"]
         XCTAssertTrue(usernameField.waitForExistence(timeout: 3))
         assertKeyboardFocus(on: usernameField)
-        usernameField.typeText("admin")
+        typeTextAndAwaitAcceptance(
+            "admin",
+            in: usernameField,
+            expectedValue: { String($0) }
+        )
 
         let passwordField = app.secureTextFields["passwordField"]
         XCTAssertTrue(passwordField.waitForExistence(timeout: 3))
         assertKeyboardFocus(on: passwordField)
-        passwordField.typeText("password")
+        typeTextAndAwaitAcceptance(
+            "password",
+            in: passwordField,
+            expectedValue: { String(repeating: "•", count: $0.count) }
+        )
 
         XCTAssertTrue(loginButton.isEnabled)
         loginButton.tap()
@@ -185,20 +201,17 @@ final class LoginFlowUITests: PrintFarmerUITestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        field.tap()
-        var result = waitForKeyboardFocus(on: field, timeout: 3)
-        if result != .completed {
-            // Xcode 26 can occasionally synthesize a tap without delivering it
-            // to the field on a loaded simulator. A second tap is harmless when
-            // focus was not acquired and avoids treating that dropped event as
-            // an app regression.
+        var result: XCTWaiter.Result = .timedOut
+        var attempts = 0
+        repeat {
+            attempts += 1
             field.tap()
             result = waitForKeyboardFocus(on: field, timeout: 3)
-        }
+        } while result != .completed && attempts < 3
         XCTAssertEqual(
             result,
             .completed,
-            "Tapping the field should retain keyboard focus",
+            "Tapping the field should retain keyboard focus within \(attempts) observed attempts",
             file: file,
             line: line
         )
@@ -213,6 +226,79 @@ final class LoginFlowUITests: PrintFarmerUITestCase {
             object: field
         )
         return XCTWaiter.wait(for: [focused], timeout: timeout)
+    }
+
+    private func typeTextAndAwaitAcceptance(
+        _ text: String,
+        in field: XCUIElement,
+        expectedValue: (Substring) -> String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        for offset in text.indices {
+            let nextOffset = text.index(after: offset)
+            let previousPrefix = text[..<offset]
+            let acceptedPrefix = text[..<nextOffset]
+            let previousValue = previousPrefix.isEmpty
+                ? field.value as? String
+                : expectedValue(previousPrefix)
+            let acceptedValue = expectedValue(acceptedPrefix)
+            var result: XCTWaiter.Result = .timedOut
+            var attempts = 0
+
+            repeat {
+                attempts += 1
+                field.typeText(String(text[offset]))
+                result = waitForAcceptedValue(acceptedValue, in: field, timeout: 3)
+                if result == .completed {
+                    break
+                }
+
+                let observedValue = field.value as? String
+                if observedValue == acceptedValue {
+                    assertKeyboardFocus(on: field, file: file, line: line)
+                    result = waitForAcceptedValue(acceptedValue, in: field, timeout: 0.5)
+                    break
+                }
+
+                guard observedValue == previousValue else {
+                    XCTFail(
+                        "Expected text value \(acceptedValue), but observed \(observedValue ?? "<non-string>")",
+                        file: file,
+                        line: line
+                    )
+                    return
+                }
+
+                assertKeyboardFocus(on: field, file: file, line: line)
+            } while attempts < 3
+
+            XCTAssertEqual(
+                result,
+                .completed,
+                "The focused field should accept the complete text prefix within \(attempts) observed attempts",
+                file: file,
+                line: line
+            )
+            if result != .completed {
+                return
+            }
+        }
+    }
+
+    private func waitForAcceptedValue(
+        _ value: String,
+        in field: XCUIElement,
+        timeout: TimeInterval
+    ) -> XCTWaiter.Result {
+        let accepted = XCTNSPredicateExpectation(
+            predicate: NSPredicate(
+                format: "value == %@ AND hasKeyboardFocus == true",
+                value
+            ),
+            object: field
+        )
+        return XCTWaiter.wait(for: [accepted], timeout: timeout)
     }
 }
 
