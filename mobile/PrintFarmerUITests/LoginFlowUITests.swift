@@ -201,20 +201,21 @@ final class LoginFlowUITests: PrintFarmerUITestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        field.tap()
-        var result = waitForKeyboardFocus(on: field, timeout: 3)
-        if result != .completed {
-            // Xcode 26 can occasionally synthesize a tap without delivering it
-            // to the field on a loaded simulator. A second tap is harmless when
-            // focus was not acquired and avoids treating that dropped event as
-            // an app regression.
+        let deadline = ProcessInfo.processInfo.systemUptime + 6
+        var result: XCTWaiter.Result = .timedOut
+        var attempts = 0
+        repeat {
+            attempts += 1
             field.tap()
-            result = waitForKeyboardFocus(on: field, timeout: 3)
-        }
+            let remaining = deadline - ProcessInfo.processInfo.systemUptime
+            result = waitForKeyboardFocus(on: field, timeout: min(2, max(0.1, remaining)))
+        } while result != .completed
+            && attempts < 3
+            && ProcessInfo.processInfo.systemUptime < deadline
         XCTAssertEqual(
             result,
             .completed,
-            "Tapping the field should retain keyboard focus",
+            "Tapping the field should retain keyboard focus within \(attempts) observed attempts",
             file: file,
             line: line
         )
