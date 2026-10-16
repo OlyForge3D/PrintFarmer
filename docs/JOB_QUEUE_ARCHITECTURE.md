@@ -781,6 +781,27 @@ public record DurationAnalyticsDto(
 
 **Use Case:** "Show queue analytics, historical trends, and allow advanced job management"
 
+#### Printer compatibility summary
+
+`GET /` and `GET /jobs/{jobId}` add an optional `compatibility` object to each
+unassigned `Queued` job (issue #3280). It is `null` for assigned or non-queued jobs.
+Counts come from the same `DispatchScorer` evaluation that dispatch uses, not a heuristic:
+
+| Field | Meaning |
+|-------|---------|
+| `evaluatedPrinterCount` | Enabled printers the dispatcher scored |
+| `compatiblePrinterCount` | Printers passing every hard constraint except transient availability |
+| `readyPrinterCount` | Printers auto-dispatch would accept now: not eliminated and at or above `MinimumScoreThreshold` |
+| `basis` | Evaluated constraints: material, nozzle diameter, enclosure, hardened nozzle, printer group, `buildVolumeEnforced` |
+| `excludedBy` | Per-constraint elimination counts, e.g. `MaterialMatch` |
+
+`readyPrinterCount` is a point-in-time hint, not a dispatch guarantee. Build volume is a soft
+score today, so `buildVolumeEnforced` is always `false`.
+
+Counts reflect the dispatcher's farm-wide scope, so a group-restricted caller can infer the
+number of enabled printers outside their groups. No printer IDs or names are returned. If the
+summary cannot be computed, the endpoints still return `200` with `compatibility: null`.
+
 ---
 
 ### 3. PrintJobQueueController (`/api/print-job-queue`)

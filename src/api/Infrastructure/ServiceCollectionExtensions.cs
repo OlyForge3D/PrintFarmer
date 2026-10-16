@@ -181,6 +181,7 @@ public static class ServiceCollectionExtensions
         // Dispatch scoring engine and service
         _ = services.AddSingleton<Farm.Infrastructure.Services.Queue.Dispatch.DispatchConcurrencyCoordinator>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Queue.Dispatch.IDispatchScorer, Farm.Infrastructure.Services.Queue.Dispatch.DispatchScorer>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Queue.Dispatch.IJobCompatibilitySummarizer, Farm.Infrastructure.Services.Queue.Dispatch.DispatchScorer>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Queue.Dispatch.IJobDispatchService, Farm.Infrastructure.Services.Queue.Dispatch.JobDispatchService>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Queue.Dispatch.IBatchDispatchService, Farm.Infrastructure.Services.Queue.Dispatch.BatchDispatchService>();
 
