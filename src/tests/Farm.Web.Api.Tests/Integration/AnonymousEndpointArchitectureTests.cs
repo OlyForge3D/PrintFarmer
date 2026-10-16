@@ -1,8 +1,11 @@
 ﻿using Farm.Web.Api.Tests.TestInfrastructure;
 using FluentAssertions;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Controllers;
 using Microsoft.AspNetCore.Mvc.Infrastructure;
+using Microsoft.AspNetCore.Routing;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Farm.Web.Api.Tests.Integration;
@@ -151,6 +154,64 @@ public sealed class AnonymousEndpointArchitectureTests
         ReviewedAnonymousActions.Values.Should().OnlyContain(
             rationale => !string.IsNullOrWhiteSpace(rationale),
             "every reviewed anonymous action must explain why it is public");
+    }
+
+    /// <summary>
+    /// Anonymous endpoints that are not controller actions (minimal APIs, health checks,
+    /// OpenAPI, and metrics), keyed by verb(s) and route pattern. Issue #2821 ratchet: any new
+    /// anonymous non-controller endpoint must be reviewed and added here.
+    /// </summary>
+    private static readonly IReadOnlyDictionary<string, string> ReviewedAnonymousNonControllerEndpoints =
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["ANY /health"] = "Health-check endpoint for container and load-balancer probes.",
+            ["ANY /api/health"] = "Health-check endpoint polled by the monitoring service and proxies.",
+            ["ANY /metrics"] = "Prometheus scrape endpoint; access is restricted by network policy, not user credentials.",
+            ["GET /healthz"] = "Liveness/readiness probe used by Docker and integration hosts.",
+            ["GET /livez"] = "Process liveness probe that touches no dependencies.",
+            ["GET /api/system/version"] = "Non-sensitive build version used for client and slicer-host compatibility checks.",
+            ["GET /openapi/{documentName}.json"] = "OpenAPI document; mapped only in Development for pre-login API tooling.",
+        };
+
+    [Fact]
+    public void AnonymousNonControllerEndpoints_MatchReviewedAllowlist()
+    {
+        using var factory = new CustomWebApplicationFactory(
+            new Dictionary<string, string?> { ["Security:DevModeBypassAuth"] = "false" });
+
+        RouteEndpoint[] endpoints = factory.Services.GetRequiredService<EndpointDataSource>().Endpoints
+            .OfType<RouteEndpoint>()
+            .Where(endpoint => endpoint.Metadata.GetMetadata<ControllerActionDescriptor>() is null)
+            .ToArray();
+
+        string[] actual = endpoints
+            .Where(endpoint => endpoint.Metadata.GetMetadata<IAllowAnonymous>() is not null)
+            .Select(GetEndpointId)
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+
+        actual.Should().OnlyHaveUniqueItems();
+        actual.Should().Equal(
+            ReviewedAnonymousNonControllerEndpoints.Keys.Order(StringComparer.Ordinal),
+            "adding or removing anonymous minimal-API endpoints requires a deliberate review of this allowlist");
+
+        string[] anonymousHubEndpoints = endpoints
+            .Where(endpoint => endpoint.Metadata.GetMetadata<HubMetadata>() is not null &&
+                (endpoint.Metadata.GetMetadata<IAllowAnonymous>() is not null ||
+                 !endpoint.Metadata.GetOrderedMetadata<IAuthorizeData>().Any()))
+            .Select(GetEndpointId)
+            .ToArray();
+        anonymousHubEndpoints.Should().BeEmpty(
+            "every SignalR hub connect and negotiate endpoint must carry explicit [Authorize] metadata");
+    }
+
+    private static string GetEndpointId(RouteEndpoint endpoint)
+    {
+        string[] methods = endpoint.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
+            .ToArray() ?? [];
+        return $"{(methods.Length == 0 ? "ANY" : string.Join("+", methods))} /{endpoint.RoutePattern.RawText?.TrimStart('/')}";
     }
 
     private static string GetActionId(ControllerActionDescriptor action) =>
