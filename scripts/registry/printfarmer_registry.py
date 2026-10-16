@@ -68,6 +68,8 @@ VERSION_RE = re.compile(r"^\d+\.\d+\.\d+(-insider\.\d+)?$")
 COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 IGNORED_SERVICE_KEYS = {"build", "image", "pull_policy"}
+SHIELD_MARKER = "__PFREG_EXPR_"
+SHIELD_TOKEN_RE = re.compile(r"\$\{__PFREG_EXPR_(\d+)__\}")
 
 
 class MigrationError(Exception):
@@ -110,6 +112,58 @@ def sha256_file(path):
 
 
 PROFILE_COPY_TOOLS = ("cp", "diff", "find", "ls", "sort")
+
+
+def shield_expressions(text, expressions):
+    """Replace each colon-bearing `${...}` expression with a colon-free `${__PFREG_EXPR_n__}` reference.
+
+    Compose releases before v2.40 split short-syntax volume specs on every colon, including the one
+    inside `${VAR:-default}`, so an uninterpolated render fails ("too many colons") or misreads the
+    target. `$$` escapes are left untouched; originals are appended to `expressions` for restoring.
+    """
+    if SHIELD_MARKER in text:
+        raise MigrationError("compose file already contains the reserved marker %s" % SHIELD_MARKER)
+    out, i = [], 0
+    while i < len(text):
+        if text.startswith("$$", i):
+            out.append("$$")
+            i += 2
+            continue
+        if text.startswith("${", i):
+            depth, j = 0, i
+            while j < len(text):
+                if text.startswith("${", j):
+                    depth += 1
+                    j += 2
+                    continue
+                if text[j] == "}":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                j += 1
+            if j < len(text):
+                expression = text[i:j + 1]
+                if ":" in expression:
+                    out.append("${%s%d__}" % (SHIELD_MARKER, len(expressions)))
+                    expressions.append(expression)
+                else:
+                    out.append(expression)
+                i = j + 1
+                continue
+        out.append(text[i])
+        i += 1
+    return "".join(out)
+
+
+def restore_expressions(value, expressions):
+    if isinstance(value, str):
+        return SHIELD_TOKEN_RE.sub(lambda match: expressions[int(match.group(1))], value)
+    if isinstance(value, list):
+        return [restore_expressions(item, expressions) for item in value]
+    if isinstance(value, dict):
+        return {restore_expressions(key, expressions): restore_expressions(item, expressions)
+                for key, item in value.items()}
+    return value
 
 
 def profile_copy_script(recopy=False):
@@ -217,11 +271,30 @@ class Controller:
     def compose_config(self, project, files, profiles, env=None, raw=False, unresolved_paths=False):
         extra = ["config", "--format", "json"]
         if raw:
-            extra += ["--no-interpolate", "--no-path-resolution"]
-        elif unresolved_paths:
+            return self.raw_compose_config(project, files, profiles, env=env)
+        if unresolved_paths:
             extra += ["--no-path-resolution"]
         _, text = self.compose(project, files, profiles, *extra, env=env)
         return json.loads(text)
+
+    def raw_compose_config(self, project, files, profiles, env=None):
+        """Uninterpolated render that keeps `${...}` sources verbatim on every supported Compose version."""
+        expressions, shielded = [], []
+        scratch = tempfile.mkdtemp(prefix="printfarmer-registry-")
+        try:
+            for index, name in enumerate(files):
+                source = name if os.path.isabs(name) else self.path(name)
+                with open(source, encoding="utf-8", newline="") as handle:
+                    text = shield_expressions(handle.read(), expressions)
+                copy = os.path.join(scratch, "%d-%s" % (index, os.path.basename(source)))
+                with open(copy, "w", encoding="utf-8", newline="") as handle:
+                    handle.write(text)
+                shielded.append(copy)
+            _, text = self.compose(project, shielded, profiles, "config", "--format", "json",
+                                   "--no-interpolate", "--no-path-resolution", env=env)
+        finally:
+            shutil.rmtree(scratch, ignore_errors=True)
+        return restore_expressions(json.loads(text), expressions)
 
     def project_containers(self, project):
         _, text = self.docker("ps", "-a", "--filter", "label=com.docker.compose.project=%s" % project,

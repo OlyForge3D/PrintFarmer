@@ -1058,6 +1058,21 @@ volumes:
 """
 
 
+class ExpressionShieldTests(unittest.TestCase):
+    def test_shield_round_trips_only_colon_bearing_expressions(self):
+        text = "a: ${X:-./p}:/t:ro\nb: ${PLAIN}\nc: $${ESC:-x}\nd: ${O:-${I:-v}}/s\n"
+        found = []
+        shielded = reg.shield_expressions(text, found)
+        self.assertEqual(found, ["${X:-./p}", "${O:-${I:-v}}"])
+        self.assertNotIn(":-", shielded.replace("$${ESC:-x}", ""))
+        self.assertIn("${PLAIN}", shielded)
+        self.assertEqual(reg.restore_expressions({"k": [shielded]}, found), {"k": [text]})
+
+    def test_shield_refuses_files_already_using_the_marker(self):
+        with self.assertRaises(reg.MigrationError):
+            reg.shield_expressions("x: ${__PFREG_EXPR_0__}", [])
+
+
 class RealComposeDocker(FakeDocker):
     """Delegates `compose config` to the real Docker Compose CLI (no daemon required)."""
 
@@ -1121,6 +1136,20 @@ class RealComposeTests(RegistryTestCase):
         self.assertEqual(code, 0, err)
         self.assertEqual(self.docker.containers["api"]["Config"]["Image"], data["images"]["api"]["reference"])
         self.assertEqual(self.docker.containers["api"]["Mounts"][0]["Source"], self.p(".volumes/data"))
+
+    def test_raw_render_keeps_colon_defaults_in_short_volume_specs(self):
+        # Compose < v2.40 (CI's Linux runner) splits `${VAR:-default}:/target:ro` on every colon.
+        self.write_text("models.yml", "services:\n  api:\n    image: alpine\n    volumes:\n"
+                                      "      - ${EXTERNAL_MODELS_PATH:-.volumes/models}:/app/models:ro\n"
+                                      "      - ${EXTERNAL_DATA_PATH:-./.volumes/data}:/data\n"
+                                      "      - $$HOME/literal:/literal\n")
+        controller = reg.Controller(self.root, runner=self.docker, fetch=self.fetch, out=self.output)
+        raw = controller.compose_config(PROJECT, [self.p("models.yml")], [], raw=True)
+        volumes = raw["services"]["api"]["volumes"]
+        self.assertEqual([(v["source"], v["target"], v.get("read_only", False)) for v in volumes],
+                         [("${EXTERNAL_MODELS_PATH:-.volumes/models}", "/app/models", True),
+                          ("${EXTERNAL_DATA_PATH:-./.volumes/data}", "/data", False),
+                          ("$$HOME/literal", "/literal", False)])
 
     def test_release_compose_refuses_to_start_without_pinned_images(self):
         self.migrate()
