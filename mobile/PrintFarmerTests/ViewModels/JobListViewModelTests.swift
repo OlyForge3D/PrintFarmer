@@ -224,6 +224,82 @@ final class JobListViewModelTests: XCTestCase {
         XCTAssertTrue(viewModel.hasAnyJobs)
     }
 
+    func testLoadJobsStillLoadsQueueWhenAnalyticsServiceIsMissing() async throws {
+        let printing = try TestData.decodeQueuedPrintJobResponse(
+            from: TestJSON.queuedPrintJobResponsePrinting
+        )
+        mockJobService.queuedJobResponsesToReturn = [printing]
+        let bare = JobListViewModel()
+        bare.configure(jobService: mockJobService)
+
+        await bare.loadJobs()
+
+        XCTAssertEqual(bare.jobs.map(\.id), [printing.id])
+        XCTAssertTrue(bare.hasFreshQueueSnapshot)
+        XCTAssertEqual(bare.recentFailuresError, "Recent failures are unavailable.")
+        XCTAssertNil(bare.errorMessage)
+    }
+
+    // MARK: - Active Printer Status Polling
+
+    private func statusDetail(_ id: UUID) -> PrinterStatusDetail {
+        PrinterStatusDetail(
+            id: id, isOnline: true, state: "printing", progress: nil,
+            jobName: nil, thumbnailUrl: nil, cameraStreamUrl: nil, cameraSnapshotUrl: nil,
+            x: nil, y: nil, z: nil, hotendTemp: nil, bedTemp: nil,
+            hotendTarget: nil, bedTarget: nil, spoolInfo: nil, mmuStatus: nil
+        )
+    }
+
+    func testPollFetchesStatusesConcurrentlyAndMarksFailuresUnavailable() async {
+        let printerService = MockPrinterService()
+        let slow = UUID(), fast = UUID(), failing = UUID()
+        printerService.statusByPrinterID = [slow: statusDetail(slow), fast: statusDetail(fast)]
+        printerService.statusDelayByPrinterID = [slow: .milliseconds(400)]
+        viewModel.configure(printerService: printerService)
+
+        let task = Task { @MainActor in
+            await viewModel.pollActivePrinterStatuses(
+                printerIDs: [slow, fast, failing], interval: .seconds(60)
+            )
+        }
+        try? await Task.sleep(for: .milliseconds(150))
+        XCTAssertEqual(Set(printerService.statusRequestedIDs), [slow, fast, failing],
+                       "A slow printer must not delay requests for the others.")
+        try? await Task.sleep(for: .milliseconds(600))
+        task.cancel()
+        await task.value
+
+        XCTAssertEqual(Set(viewModel.activePrinterStatuses.keys), [slow, fast])
+        XCTAssertEqual(viewModel.unavailableActivePrinterStatuses, [failing])
+    }
+
+    func testPollDiscardsResultsWhenGenerationIsStale() async {
+        let printerService = MockPrinterService()
+        let id = UUID()
+        printerService.statusByPrinterID = [id: statusDetail(id)]
+        viewModel.configure(printerService: printerService)
+
+        await viewModel.pollActivePrinterStatuses(
+            printerIDs: [id], interval: .seconds(60), isCurrent: { false }
+        )
+
+        XCTAssertTrue(viewModel.activePrinterStatuses.isEmpty)
+        XCTAssertTrue(viewModel.unavailableActivePrinterStatuses.isEmpty)
+    }
+
+    func testPollStopsWhenViewDeactivated() async {
+        let printerService = MockPrinterService()
+        let id = UUID()
+        printerService.statusByPrinterID = [id: statusDetail(id)]
+        viewModel.configure(printerService: printerService)
+        viewModel.deactivate()
+
+        await viewModel.pollActivePrinterStatuses(printerIDs: [id], interval: .milliseconds(10))
+
+        XCTAssertTrue(printerService.statusRequestedIDs.isEmpty)
+    }
+
     func testLoadJobsSetsLoadingState() async {
         mockJobService.queuedJobResponsesToReturn = []
         await viewModel.loadJobs()

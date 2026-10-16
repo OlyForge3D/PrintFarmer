@@ -12,17 +12,11 @@ struct JobListView: View {
     @State private var retryTask: Task<Void, Never>?
     @State private var showsJobHistory = false
     @State private var historyNavigationPath: [AppDestination] = []
-    @State private var activePrinterStatuses: [UUID: PrinterStatusDetail] = [:]
-    @State private var unavailableActivePrinterStatuses: Set<UUID> = []
-
-    private var activePrinterIDs: [UUID] {
-        Array(Set(viewModel.activeJobs.compactMap { item in
-            item.job.assignedPrinterId.flatMap(UUID.init(uuidString:))
-        })).sorted { $0.uuidString < $1.uuidString }
-    }
+    @Environment(\.scenePhase) private var scenePhase
 
     private var activePrinterStatusRequestKey: String {
-        "\(services.activeServerGeneration):\(activePrinterIDs.map(\.uuidString).joined(separator: ","))"
+        let ids = viewModel.activePrinterIDs.map(\.uuidString).joined(separator: ",")
+        return "\(services.activeServerGeneration):\(scenePhase == .active):\(ids)"
     }
 
     init(ownsNavigationStack: Bool = true) {
@@ -92,37 +86,19 @@ struct JobListView: View {
     }
 
     private func refreshActivePrinterStatuses() async {
-        let printerIDs = activePrinterIDs
+        guard scenePhase == .active else { return }
+        let printerIDs = viewModel.activePrinterIDs
         guard !printerIDs.isEmpty else {
-            activePrinterStatuses = [:]
-            unavailableActivePrinterStatuses = []
+            await viewModel.pollActivePrinterStatuses(printerIDs: [])
             return
         }
 
         let generation = services.activeServerGeneration
         await services.awaitActiveServerSettled()
         guard !Task.isCancelled, services.isActiveGeneration(generation) else { return }
-
-        activePrinterStatuses = [:]
-        unavailableActivePrinterStatuses = []
-        while !Task.isCancelled {
-            for printerID in printerIDs {
-                do {
-                    let status = try await services.printerService.getStatus(id: printerID)
-                    guard !Task.isCancelled, services.isActiveGeneration(generation) else { return }
-                    activePrinterStatuses[printerID] = status
-                    unavailableActivePrinterStatuses.remove(printerID)
-                } catch {
-                    guard !Task.isCancelled, services.isActiveGeneration(generation) else { return }
-                    activePrinterStatuses.removeValue(forKey: printerID)
-                    unavailableActivePrinterStatuses.insert(printerID)
-                }
-            }
-            do {
-                try await Task.sleep(for: .seconds(15))
-            } catch {
-                return
-            }
+        viewModel.configure(printerService: services.printerService)
+        await viewModel.pollActivePrinterStatuses(printerIDs: printerIDs) {
+            services.isActiveGeneration(generation)
         }
     }
 
@@ -449,7 +425,7 @@ struct JobListView: View {
     @ViewBuilder
     private func activeJobDetails(_ item: QueuedPrintJobResponse) -> some View {
         let printerID = item.job.assignedPrinterId.flatMap(UUID.init(uuidString:))
-        let status = printerID.flatMap { activePrinterStatuses[$0] }
+        let status = printerID.flatMap { viewModel.activePrinterStatuses[$0] }
         VStack(alignment: .leading, spacing: 4) {
             if let printerName = item.job.printerName {
                 Label(printerName, systemImage: "printer")
@@ -493,7 +469,7 @@ struct JobListView: View {
                             .accessibilityIdentifier("job.active.eta.\(item.job.id)")
                     }
                 }
-            } else if printerID == nil || printerID.map(unavailableActivePrinterStatuses.contains) == true {
+            } else if printerID == nil || printerID.map(viewModel.unavailableActivePrinterStatuses.contains) == true {
                 Text("Live status unavailable")
                     .font(.caption2)
                     .foregroundStyle(Color.pfTextSecondary)
@@ -628,6 +604,8 @@ struct JobListView: View {
         if let assignedPrinter = item.assignedPrinter,
            !assignedPrinter.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             parts.append("Assigned to \(assignedPrinter.name)")
+        } else if item.job.assignedPrinterId != nil || item.assignedPrinter != nil {
+            parts.append("Assigned to printer")
         } else {
             parts.append("Unassigned")
         }

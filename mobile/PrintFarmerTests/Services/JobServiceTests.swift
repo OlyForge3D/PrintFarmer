@@ -37,6 +37,26 @@ final class JobServiceTests: XCTestCase {
         )
     }
 
+    func testListAllJobsHonorsXHasMoreHeaderOnAShortPage() async throws {
+        mockAPIClient.stubResponse(
+            json: "[\(TestJSON.queuedPrintJobResponseQueued)]",
+            headers: ["X-Has-More": "true"]
+        )
+
+        let page = try await service.listAllJobs()
+
+        XCTAssertEqual(page.jobs.count, 1)
+        XCTAssertTrue(page.mayHaveMore)
+    }
+
+    func testListAllJobsShortPageWithoutHeaderIsComplete() async throws {
+        mockAPIClient.stubResponse(json: "[\(TestJSON.queuedPrintJobResponseQueued)]")
+
+        let page = try await service.listAllJobs()
+
+        XCTAssertFalse(page.mayHaveMore)
+    }
+
     func testGetPreservesRowVersionForConditionalRetry() async throws {
         mockAPIClient.stubResponse(
             json: """

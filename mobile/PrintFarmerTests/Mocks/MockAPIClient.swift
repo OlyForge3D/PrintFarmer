@@ -38,9 +38,9 @@ final class MockAPIClient: @unchecked Sendable {
         transport.reset()
     }
 
-    func stubResponse(json: String, statusCode: Int = 200) {
+    func stubResponse(json: String, statusCode: Int = 200, headers: [String: String] = [:]) {
         requestHandler = { request in
-            let response = TestData.httpResponse(url: request.url, statusCode: statusCode)
+            let response = TestData.httpResponse(url: request.url, statusCode: statusCode, headers: headers)
             return (response, json.data(using: .utf8)!)
         }
     }
