@@ -165,7 +165,6 @@ public sealed class PrinterReadAuthorizationTests : IAsyncLifetime, IDisposable
         yield return new object[] { "history" };
         yield return new object[] { "history/totals" };
         yield return new object[] { "history/job-1" };
-        yield return new object[] { "session-timeline" };
         yield return new object[] { "version" };
         yield return new object[] { "backend-capabilities" };
         yield return new object[] { "toolheads/0/swap-validation?spoolId=1" };

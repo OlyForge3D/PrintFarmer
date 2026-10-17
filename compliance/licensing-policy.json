@@ -274,7 +274,7 @@
         "path": "src/tests/Farm.Modules.Printers.Tests/Controllers/PrintersControllerTestConnectionTests.cs",
         "pattern": "https?://[^\\s/:]+:[^\\s/@]+@",
         "matchSha256": "2b37ca011dc0baf5ac3ceff7569d873e97e370f6c6cfa28ebfdc8fba20ed280a",
-        "contentSha256": "d5a053417c9ab9828e84c5d6ad1c05762140f0aacfa00630701bef0fa6a7d163",
+        "contentSha256": "123344e4c95e9ab437be6c672afca61333dd55a66341ed26a4498200532399db",
         "reason": "Synthetic credentialed printer.local URL tests rejection before network egress."
       },
       {
