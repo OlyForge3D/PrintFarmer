@@ -1,4 +1,5 @@
 vi.mock('@/features/printers/components/MmuControlBox', () => ({ MmuControlBox: () => <div data-testid="mmu-controls" /> }));
+vi.mock('@/features/auth/hooks/useAuth', () => ({ useAuth: () => ({ hasPermission: () => true }) }));
 const controlsModeMock = vi.hoisted(() => ({ mode: "guided" as "guided" | "expert" }));
 vi.mock("@/features/printers/hooks/use-printer-controls-mode", () => ({
   usePrinterControlsMode: () => ({ mode: controlsModeMock.mode }),

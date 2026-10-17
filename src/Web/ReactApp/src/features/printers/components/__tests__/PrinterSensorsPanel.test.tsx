@@ -124,7 +124,7 @@ describe('PrinterSensorsPanel', () => {
     const user = userEvent.setup();
     let resolve: (v: { success: boolean }) => void = () => {};
     mocks.setPrinterSensor.mockReturnValue(new Promise((r) => (resolve = r)));
-    renderPanel([fan], { canControl: true });
+    const { rerender } = renderPanel([fan], { canControl: true });
     const input = screen.getByRole('spinbutton', { name: 'Set Part fan Speed' });
     await user.clear(input);
     await user.type(input, '65');
@@ -132,7 +132,38 @@ describe('PrinterSensorsPanel', () => {
     expect(mocks.setPrinterSensor).toHaveBeenCalledWith('p1', 'fan part', { quantity: 'FanSpeed', value: 65 });
     expect(screen.getByLabelText('Part fan Speed: 65%')).toBeInTheDocument();
     resolve({ success: true });
-    await waitFor(() => expect(screen.getByLabelText('Part fan Speed: 40%')).toBeInTheDocument());
+    await waitFor(() => expect(mocks.setPrinterSensor).toHaveBeenCalledTimes(1));
+    // Confirmed value is retained until live data changes, then live data wins.
+    expect(screen.getByLabelText('Part fan Speed: 65%')).toBeInTheDocument();
+    const live = { ...fan, readings: [{ quantity: 'FanSpeed' as const, value: 70, unit: 'Percent' as const }, fan.readings[1]] };
+    rerender(<PrinterSensorsPanel printerId="p1" sensors={[live]} canControl />);
+    expect(screen.getByLabelText('Part fan Speed: 70%')).toBeInTheDocument();
+  });
+
+  it('rejects values not aligned to the writable step', async () => {
+    const user = userEvent.setup();
+    const stepped = { ...fan, writable: [{ quantity: 'FanSpeed' as const, min: 0, max: 100, step: 0.5, unit: 'Percent' as const }] };
+    renderPanel([stepped], { canControl: true });
+    const input = screen.getByRole('spinbutton', { name: 'Set Part fan Speed' });
+    await user.clear(input);
+    await user.type(input, '10.3');
+    expect(screen.getByRole('button', { name: /Apply/ })).toBeDisabled();
+    expect(input).toHaveAttribute('aria-invalid', 'true');
+    await user.clear(input);
+    await user.type(input, '10.5');
+    expect(screen.getByRole('button', { name: /Apply/ })).toBeEnabled();
+  });
+
+  it('stops editing on blur so live values show again', async () => {
+    const user = userEvent.setup();
+    const { rerender } = renderPanel([fan], { canControl: true });
+    const input = screen.getByRole('spinbutton', { name: 'Set Part fan Speed' });
+    await user.clear(input);
+    await user.type(input, '12');
+    await user.tab();
+    const live = { ...fan, readings: [{ quantity: 'FanSpeed' as const, value: 55, unit: 'Percent' as const }] };
+    rerender(<PrinterSensorsPanel printerId="p1" sensors={[live]} canControl />);
+    expect(screen.getByRole('spinbutton', { name: 'Set Part fan Speed' })).toHaveValue(55);
   });
 
   it('rejects out-of-range values without calling the API', async () => {

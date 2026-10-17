@@ -18,6 +18,7 @@ import { PrinterBackend, type ApiError, type MoveRequest, type Printer, type Pri
 import { PrinterHistoryModal } from '@/features/printers/components/PrinterHistoryModal';
 import { PrinterFilesModal } from '@/features/printers/components/PrinterFilesModal';
 import { TemperatureControlSection } from '@/features/printers/components/TemperatureControlSection';
+import { useAuth } from '@/features/auth/hooks/useAuth';
 import { PrinterSensorsPanel } from '@/features/printers/components/PrinterSensorsPanel';
 import { usePrinterMovement } from '@/features/printers/hooks/use-printer-movement';
 import {
@@ -165,6 +166,8 @@ interface PrinterDetailsSidebarProps {
 }
 
 export function PrinterDetailsSidebar({ printerId, printer: printerProp, backendCapabilities, onClose, layout = 'panel' }: PrinterDetailsSidebarProps) {
+  const { hasPermission } = useAuth();
+  const canOperateSensors = hasPermission('queue', 'start');
   // Call hooks first before any early returns (React Rules of Hooks)
   // Only fetch if printer prop is not provided
   const shouldFetch = !printerProp && !!printerId;
@@ -1275,7 +1278,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
             <PrinterSensorsPanel
               printerId={printer.id}
               sensors={displayPrinter?.sensors}
-              canControl={backendCapabilities?.supportsSensorControl ?? false}
+              canControl={(backendCapabilities?.supportsSensorControl ?? false) && canOperateSensors && isEnabled}
               isOnline={isOnline}
             />
           </CollapsibleSection>

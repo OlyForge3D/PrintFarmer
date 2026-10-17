@@ -40,7 +40,7 @@ function getSensorGroup(sensor: PrinterSensor): SensorGroup {
     case 'Host':
       return 'Temperatures';
     default: {
-      const quantities = sensor.readings.map((r) => r.quantity);
+      const quantities = (sensor.readings ?? []).map((r) => r.quantity);
       if (quantities.some((q) => q === 'FilamentDetected')) return 'Filament';
       if (quantities.some((q) => q === 'FanSpeed' || q === 'FanRpm')) return 'Fans';
       if (quantities.every((q) => q === 'Temperature' || q === 'TargetTemperature')) return 'Temperatures';
@@ -80,6 +80,16 @@ function describeReading(sensor: PrinterSensor, reading: PrinterSensorReading): 
   return `${sensor.displayName} ${QUANTITY_LABEL[reading.quantity] ?? 'Value'}`;
 }
 
+function isStepAligned(value: number, min: number, step: number): boolean {
+  const steps = (value - min) / step;
+  return Math.abs(steps - Math.round(steps)) < 1e-6;
+}
+
+function baselineOf(sensor: PrinterSensor, descriptor: PrinterSensorWritable): number | undefined {
+  const value = (sensor.readings ?? []).find((r) => r.quantity === descriptor.quantity)?.value;
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
 function sensorKey(sensorId: string, quantity: PrinterSensorQuantity) {
   return `${sensorId}\u0000${quantity}`;
 }
@@ -97,7 +107,7 @@ interface WritableControlProps {
   descriptor: PrinterSensorWritable;
   current: number | undefined;
   disabled: boolean;
-  onSubmit: (sensor: PrinterSensor, descriptor: PrinterSensorWritable, value: number) => Promise<void>;
+  onSubmit: (sensor: PrinterSensor, descriptor: PrinterSensorWritable, value: number, baseline: number | undefined) => Promise<void>;
 }
 
 function WritableControl({ sensor, descriptor, current, disabled, onSubmit }: WritableControlProps) {
@@ -107,12 +117,14 @@ function WritableControl({ sensor, descriptor, current, disabled, onSubmit }: Wr
   const unitText = UNIT_SUFFIX[descriptor.unit];
   const shown = editing ? draft : current === undefined ? '' : String(Math.round(current * 10) / 10);
   const parsed = draft.trim() === '' ? NaN : Number(draft);
-  const valid = Number.isFinite(parsed) && parsed >= descriptor.min && parsed <= descriptor.max;
+  const inRange = Number.isFinite(parsed) && parsed >= descriptor.min && parsed <= descriptor.max;
+  const stepAligned = !descriptor.step || descriptor.step <= 0 || isStepAligned(parsed, descriptor.min, descriptor.step);
+  const valid = inRange && stepAligned;
   const rangeId = `${sensor.id}-${descriptor.quantity}-range`.replace(/\s+/g, '-');
 
   const submit = async () => {
     if (!valid || disabled) return;
-    await onSubmit(sensor, descriptor, parsed);
+    await onSubmit(sensor, descriptor, parsed, baselineOf(sensor, descriptor));
     setEditing(false);
   };
 
@@ -139,6 +151,7 @@ function WritableControl({ sensor, descriptor, current, disabled, onSubmit }: Wr
           setEditing(true);
           setDraft(event.target.value);
         }}
+        onBlur={() => setEditing(false)}
         onKeyDown={(event) => {
           if (event.key === 'Enter') {
             event.preventDefault();
@@ -151,6 +164,8 @@ function WritableControl({ sensor, descriptor, current, disabled, onSubmit }: Wr
       <span id={rangeId} className="text-xs text-pf-text-tertiary">
         {descriptor.min}–{descriptor.max}
         {unitText ? ` ${unitText}` : ''}
+        {descriptor.step ? `, step ${descriptor.step}` : ''}
+        {editing && draft !== '' && !valid ? ' — invalid value' : ''}
       </span>
       <Button
         size="sm"
@@ -168,14 +183,26 @@ function WritableControl({ sensor, descriptor, current, disabled, onSubmit }: Wr
 }
 
 export function PrinterSensorsPanel({ printerId, sensors, canControl = false, isOnline = true }: PrinterSensorsPanelProps) {
-  // Optimistic values keyed by sensor+quantity; cleared once the write settles, after which the
-  // authoritative value arrives through the shared printerupdated subscription.
-  const [optimistic, setOptimistic] = useState<Record<string, number>>({});
+  // Optimistic values keyed by sensor+quantity. A failed write rolls back immediately; a successful
+  // one is shown until the live reading changes from the value it replaced, after which the
+  // authoritative value from the shared printerupdated subscription wins.
+  const [optimistic, setOptimistic] = useState<Record<string, { value: number; baseline: number | undefined }>>({});
   const [pending, setPending] = useState<Record<string, boolean>>({});
 
-  const handleSubmit = async (sensor: PrinterSensor, descriptor: PrinterSensorWritable, value: number) => {
+  const handleSubmit = async (
+    sensor: PrinterSensor,
+    descriptor: PrinterSensorWritable,
+    value: number,
+    baseline: number | undefined,
+  ) => {
     const key = sensorKey(sensor.id, descriptor.quantity);
-    setOptimistic((prev) => ({ ...prev, [key]: value }));
+    const rollback = () =>
+      setOptimistic((prev) => {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+    setOptimistic((prev) => ({ ...prev, [key]: { value, baseline } }));
     setPending((prev) => ({ ...prev, [key]: true }));
     try {
       const result = await apiClient.setPrinterSensor(printerId, sensor.id, {
@@ -183,16 +210,13 @@ export function PrinterSensorsPanel({ printerId, sensors, canControl = false, is
         value,
       });
       if (result && result.success === false) {
+        rollback();
         toast.error(result.error || result.message || `Failed to set ${sensor.displayName}`);
       }
     } catch (error) {
+      rollback();
       toast.error(mutationErrorMessage(error, `Failed to set ${sensor.displayName}`));
     } finally {
-      setOptimistic((prev) => {
-        const next = { ...prev };
-        delete next[key];
-        return next;
-      });
       setPending((prev) => {
         const next = { ...prev };
         delete next[key];
@@ -235,13 +259,14 @@ export function PrinterSensorsPanel({ printerId, sensors, canControl = false, is
                     )}
                   </div>
                   <dl className="space-y-1">
-                    {sensor.readings.map((reading) => {
+                    {(sensor.readings ?? []).map((reading) => {
                       const descriptor = writableByQuantity.get(reading.quantity);
                       const key = sensorKey(sensor.id, reading.quantity);
                       const numeric = typeof reading.value === 'number' && Number.isFinite(reading.value) ? reading.value : undefined;
-                      const current = optimistic[key] ?? numeric;
-                      const shownReading =
-                        optimistic[key] !== undefined ? { ...reading, value: optimistic[key] } : reading;
+                      const pendingValue = optimistic[key];
+                      const showOptimistic = pendingValue !== undefined && pendingValue.baseline === numeric;
+                      const current = showOptimistic ? pendingValue.value : numeric;
+                      const shownReading = showOptimistic ? { ...reading, value: pendingValue.value } : reading;
                       return (
                         <div key={reading.quantity} className="flex items-center justify-between gap-2">
                           <dt className="text-xs text-pf-text-secondary">{QUANTITY_LABEL[reading.quantity] ?? 'Value'}</dt>
