@@ -155,6 +155,52 @@ public sealed class SdcpPollingServiceSensorTests : IDisposable
         last.Sensors!.Should().ContainSingle().Which.Available.Should().BeFalse();
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PartialPacket_PreservesLegacyHotendAndBedTemperatures(bool fanOnly)
+    {
+        await RunPollsAsync(
+            () => Online(Temp("TempOfNozzle", PrinterSensorKind.Nozzle, 210)) with
+            {
+                HotendTemp = 210,
+                HotendTarget = 215,
+                BedTemp = 60,
+                BedTarget = 65,
+            },
+            () => fanOnly
+                ? Online(Fan("BoxFan", PrinterFanRole.Chamber, 60))
+                : Online(Temp("TempOfBox", PrinterSensorKind.Chamber, 33)));
+
+        PrinterStatusUpdate last = Broadcasts()[^1];
+        last.HotendTemp.Should().Be(210);
+        last.HotendTarget.Should().Be(215);
+        last.BedTemp.Should().Be(60);
+        last.BedTarget.Should().Be(65);
+        PrinterStatusDto cached = CachedStatuses()[^1];
+        cached.HotendTemp.Should().Be(210);
+        cached.HotendTarget.Should().Be(215);
+        cached.BedTemp.Should().Be(60);
+        cached.BedTarget.Should().Be(65);
+    }
+
+    [Fact]
+    public async Task DirectOfflineThenReconnectWithoutModelFan_DoesNotResurrectStaleLegacyTelemetry()
+    {
+        await RunPollsAsync(
+            () => Online() with { FanSpeedPercent = 50, HotendTemp = 200 },
+            () => Online() with { IsOnline = false, State = "offline" },
+            () => Online(Temp("TempOfBox", PrinterSensorKind.Chamber, 30)));
+
+        PrinterStatusUpdate recovered = Broadcasts()[^1];
+        recovered.IsOnline.Should().BeTrue();
+        recovered.FanSpeedPercent.Should().BeNull();
+        recovered.HotendTemp.Should().BeNull();
+        PrinterStatusDto cached = CachedStatuses()[^1];
+        cached.FanSpeedPercent.Should().BeNull();
+        cached.HotendTemp.Should().BeNull();
+    }
+
     private static PrinterCompositeStatus Online(params PrinterSensorDto[] sensors) =>
         new(IsOnline: true, State: "IDLE", Progress: null, JobName: null, ThumbnailUrl: null, CameraStreamUrl: null, CameraSnapshotUrl: null)
         {

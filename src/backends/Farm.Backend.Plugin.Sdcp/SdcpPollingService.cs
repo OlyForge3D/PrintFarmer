@@ -101,6 +101,42 @@ public sealed class SdcpPollingService(
 
         public double? FanSpeedPercent { get; set; }
 
+        public double? HotendTemp { get; set; }
+
+        public double? BedTemp { get; set; }
+
+        public double? HotendTarget { get; set; }
+
+        public double? BedTarget { get; set; }
+
+        /// <summary>
+        /// Holds legacy telemetry across partial SDCP packets while online; offline clears it so a
+        /// reconnect that omits a field cannot resurrect a stale value.
+        /// </summary>
+        public void ApplyLegacyTelemetry(PrinterCompositeStatus status)
+        {
+            if (!status.IsOnline)
+            {
+                ClearLegacyTelemetry();
+                return;
+            }
+
+            FanSpeedPercent = status.FanSpeedPercent ?? FanSpeedPercent;
+            HotendTemp = status.HotendTemp ?? HotendTemp;
+            BedTemp = status.BedTemp ?? BedTemp;
+            HotendTarget = status.HotendTarget ?? HotendTarget;
+            BedTarget = status.BedTarget ?? BedTarget;
+        }
+
+        public void ClearLegacyTelemetry()
+        {
+            FanSpeedPercent = null;
+            HotendTemp = null;
+            BedTemp = null;
+            HotendTarget = null;
+            BedTarget = null;
+        }
+
         /// <summary>
         /// The last "printerupdated" payload actually broadcast for this printer, used to suppress
         /// byte-identical re-broadcasts. Null until the first broadcast (including after a backend
@@ -423,7 +459,7 @@ public sealed class SdcpPollingService(
                         state.Sensors = PrinterSensorNormalizer.MarkUnavailable(state.Sensors);
                     }
 
-                    state.FanSpeedPercent = status.FanSpeedPercent ?? state.FanSpeedPercent;
+                    state.ApplyLegacyTelemetry(status);
 
                     // Update cache before broadcasting to clients
                     var cacheUpdate = new PrinterStatusDto(
@@ -438,14 +474,14 @@ public sealed class SdcpPollingService(
                         X: status.X,
                         Y: status.Y,
                         Z: status.Z,
-                        HotendTemp: status.HotendTemp,
-                        BedTemp: status.BedTemp,
-                        HotendTarget: status.HotendTarget,
-                        BedTarget: status.BedTarget,
+                        HotendTemp: state.HotendTemp,
+                        BedTemp: state.BedTemp,
+                        HotendTarget: state.HotendTarget,
+                        BedTarget: state.BedTarget,
                         CurrentLayer: status.CurrentLayer,
                         TotalLayers: status.TotalLayers,
                         SpoolInfo: null,
-                        FanSpeedPercent: status.IsOnline ? state.FanSpeedPercent : null)
+                        FanSpeedPercent: state.FanSpeedPercent)
                     {
                         Sensors = state.Sensors,
                     };
@@ -462,16 +498,16 @@ public sealed class SdcpPollingService(
                         X: status.X,
                         Y: status.Y,
                         Z: status.Z,
-                        HotendTemp: status.HotendTemp,
-                        BedTemp: status.BedTemp,
-                        HotendTarget: status.HotendTarget,
-                        BedTarget: status.BedTarget,
+                        HotendTemp: state.HotendTemp,
+                        BedTemp: state.BedTemp,
+                        HotendTarget: state.HotendTarget,
+                        BedTarget: state.BedTarget,
                         HomedAxes: null,
                         SpoolInfo: null,
                         FileName: PrinterStatusDto.ExtractFileName(status.JobName),
                         CurrentLayer: status.CurrentLayer,
                         TotalLayers: status.TotalLayers,
-                        FanSpeedPercent: status.IsOnline ? state.FanSpeedPercent : null)
+                        FanSpeedPercent: state.FanSpeedPercent)
                     {
                         Sensors = state.Sensors,
                     };
@@ -510,7 +546,7 @@ public sealed class SdcpPollingService(
                         _logger.LogWarning("SDCP printer {PrinterId} marked offline after {StateConsecutiveFailures} failures", printerId, state.ConsecutiveFailures);
                         state.LastKnownIsOnline = false;
                         state.Sensors = PrinterSensorNormalizer.MarkUnavailable(state.Sensors);
-                        state.FanSpeedPercent = null;
+                        state.ClearLegacyTelemetry();
 
                         _logger.LogWarning(
                             "SDCP printer marked Offline after consecutive failures. PrinterId={PrinterId}, BackendUrl={BackendUrl}, Failures={Failures}",
