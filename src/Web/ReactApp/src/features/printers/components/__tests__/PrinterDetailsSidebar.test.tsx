@@ -1,5 +1,6 @@
 vi.mock('@/features/printers/components/MmuControlBox', () => ({ MmuControlBox: () => <div data-testid="mmu-controls" /> }));
-vi.mock('@/features/auth/hooks/useAuth', () => ({ useAuth: () => ({ hasPermission: () => true }) }));
+const authMock = vi.hoisted(() => ({ allowed: true }));
+vi.mock('@/features/auth/hooks/useAuth', () => ({ useAuth: () => ({ hasPermission: () => authMock.allowed }) }));
 const controlsModeMock = vi.hoisted(() => ({ mode: "guided" as "guided" | "expert" }));
 vi.mock("@/features/printers/hooks/use-printer-controls-mode", () => ({
   usePrinterControlsMode: () => ({ mode: controlsModeMock.mode }),
@@ -227,6 +228,7 @@ function capabilities(
 
 describe("PrinterDetailsSidebar", () => {
   beforeEach(() => {
+    authMock.allowed = true;
     capturedStatisticsQueryOptions = undefined;
     mockStatisticsData = undefined;
     mockPrintJobObjectsData = undefined;
@@ -374,6 +376,36 @@ describe("PrinterDetailsSidebar", () => {
 
     const scrollRegion = shell?.querySelector(".overflow-y-auto");
     expect(scrollRegion).toHaveClass("flex-1", "min-h-0", "overflow-y-auto");
+  });
+
+  it.each([
+    ["queue/start permission is denied", false, true],
+    ["the printer is disabled", true, false],
+    ["control is permitted and the printer is enabled", true, true],
+  ])("gates sensor write controls when %s", (_label, allowed, enabled) => {
+    authMock.allowed = allowed;
+    const fan = {
+      id: "fan0",
+      displayName: "Part fan",
+      kind: "Fan",
+      fanRole: "PartCooling",
+      readings: [{ quantity: "FanSpeed", value: 40, unit: "Percent" }],
+      available: true,
+      writable: [{ quantity: "FanSpeed", min: 0, max: 100, step: null, unit: "Percent" }],
+    };
+    render(
+      <PrinterDetailsSidebar
+        printerId={printer.id}
+        printer={{ ...printer, isEnabled: enabled, sensors: [fan] } as unknown as Printer}
+        backendCapabilities={capabilities({ supportsSensorControl: true })}
+        onClose={vi.fn()}
+        layout="content"
+      />,
+    );
+
+    const input = screen.getByLabelText(/^Set Part fan/);
+    if (allowed && enabled) expect(input).toBeEnabled();
+    else expect(input).toBeDisabled();
   });
 
   it("shows exactly one Temps heading", () => {

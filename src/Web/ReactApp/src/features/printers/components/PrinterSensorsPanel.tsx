@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { apiClient } from '@/services/api';
 import { mutationErrorMessage } from '@/common/utils/mutationError';
@@ -82,7 +82,7 @@ function describeReading(sensor: PrinterSensor, reading: PrinterSensorReading): 
 
 function isStepAligned(value: number, min: number, step: number): boolean {
   const steps = (value - min) / step;
-  return Math.abs(steps - Math.round(steps)) < 1e-6;
+  return Math.abs(steps - Math.round(steps)) <= 1e-6;
 }
 
 function baselineOf(sensor: PrinterSensor, descriptor: PrinterSensorWritable): number | undefined {
@@ -188,6 +188,27 @@ export function PrinterSensorsPanel({ printerId, sensors, canControl = false, is
   // authoritative value from the shared printerupdated subscription wins.
   const [optimistic, setOptimistic] = useState<Record<string, { value: number; baseline: number | undefined }>>({});
   const [pending, setPending] = useState<Record<string, boolean>>({});
+
+  // Retire an optimistic entry permanently once the live reading moves off its baseline, so it
+  // cannot resurface if the reading later returns to that baseline value.
+  useEffect(() => {
+    setOptimistic((prev) => {
+      const keys = Object.keys(prev);
+      if (keys.length === 0) return prev;
+      const next = { ...prev };
+      let changed = false;
+      for (const sensor of sensors ?? []) {
+        for (const descriptor of sensor.writable ?? []) {
+          const key = sensorKey(sensor.id, descriptor.quantity);
+          if (next[key] && baselineOf(sensor, descriptor) !== next[key].baseline) {
+            delete next[key];
+            changed = true;
+          }
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [sensors]);
 
   const handleSubmit = async (
     sensor: PrinterSensor,

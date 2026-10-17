@@ -138,6 +138,9 @@ describe('PrinterSensorsPanel', () => {
     const live = { ...fan, readings: [{ quantity: 'FanSpeed' as const, value: 70, unit: 'Percent' as const }, fan.readings[1]] };
     rerender(<PrinterSensorsPanel printerId="p1" sensors={[live]} canControl />);
     expect(screen.getByLabelText('Part fan Speed: 70%')).toBeInTheDocument();
+    const back = { ...fan, readings: [{ quantity: 'FanSpeed' as const, value: 40, unit: 'Percent' as const }, fan.readings[1]] };
+    rerender(<PrinterSensorsPanel printerId="p1" sensors={[back]} canControl />);
+    expect(screen.getByLabelText('Part fan Speed: 40%')).toBeInTheDocument();
   });
 
   it('rejects values not aligned to the writable step', async () => {
