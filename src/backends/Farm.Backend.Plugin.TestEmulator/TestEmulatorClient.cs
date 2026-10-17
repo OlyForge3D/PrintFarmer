@@ -1,5 +1,6 @@
 ﻿#pragma warning disable CS1998 // Async methods that don't use await — intentional for emulator stubs
 
+using Farm.Infrastructure;
 using Farm.Infrastructure.Contracts.Printers;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Printers;
@@ -17,9 +18,48 @@ public class TestEmulatorClient(TestEmulatorStateManager stateManager)
       ISupportsCompositeStatus,
       ISupportsStartPrint,
       ISupportsControlOperations,
-      ISupportsCamera
+      ISupportsCamera,
+      ISupportsSensorControl
 {
     private readonly TestEmulatorStateManager _stateManager = stateManager;
+
+    public Task<bool> SetSensorValueAsync(
+        string baseUrl,
+        string sensorId,
+        PrinterSensorQuantity quantity,
+        double value,
+        PrinterCredential? credential,
+        CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        EmulatedPrinterState? state = _stateManager.GetState(ExtractPrinterId(baseUrl));
+        if (state is null)
+        {
+            throw new InvalidOperationException("The emulated printer is not registered.");
+        }
+
+        PrinterSensorControlValidation validation = PrinterSensorNormalizer.ValidateControl(
+            state.GetSensors(state.GetHotendTemp(), state.GetBedTemp()),
+            sensorId, quantity, PrinterSensorValue.FromNumber(value));
+        if (!validation.IsValid)
+        {
+            throw new ArgumentException(validation.Detail, nameof(sensorId));
+        }
+
+        switch (sensorId)
+        {
+            case "chamber":
+                state.ChamberTarget = value;
+                break;
+            case "fan_part":
+                state.PartCoolingFanPercent = value;
+                break;
+            default:
+                throw new InvalidOperationException("The advertised sensor has no emulator control.");
+        }
+
+        return Task.FromResult(true);
+    }
 
     // ISupportsConnectionTest
     public async Task<bool> TestConnectionAsync(string baseUrl, CancellationToken ct = default) => true;

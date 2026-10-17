@@ -806,6 +806,11 @@ public sealed class OctoPrintPollingService(
                             BedTarget: statusData.BedTarget,
                             SpoolInfo: spoolInfo,
                             PrintTimeLeftSeconds: statusData.PrintTimeLeftSeconds);
+                        IReadOnlyList<PrinterSensorDto>? sensors = wsAdapter.ResolveSensors(statusData);
+                        if (sensors is not null)
+                        {
+                            cacheUpdate = cacheUpdate with { Sensors = sensors };
+                        }
 
                         // Update cache before broadcasting to clients
                         _statusCacheWriter.UpdateStatus(cacheUpdate, statusData.OriginWatermark);
@@ -829,6 +834,10 @@ public sealed class OctoPrintPollingService(
                             HomedAxes: null,
                             SpoolInfo: spoolInfo,
                             FileName: PrinterStatusDto.ExtractFileName(statusData.JobName));
+                        if (sensors is not null)
+                        {
+                            signalRUpdate = signalRUpdate with { Sensors = sensors };
+                        }
 
                         if (PrinterStatusBroadcastGate.ShouldBroadcast(state.LastBroadcastUpdate, signalRUpdate))
                         {
@@ -899,7 +908,10 @@ public sealed class OctoPrintPollingService(
                             BedTarget: null,
                             HomedAxes: null,
                             SpoolInfo: null,
-                            FileName: null);
+                            FileName: null)
+                        {
+                            Sensors = wsAdapter.MarkSensorsUnavailable(),
+                        };
 
                         if (PrinterStatusBroadcastGate.ShouldBroadcast(state.LastBroadcastUpdate, offlineSignalRUpdate))
                         {

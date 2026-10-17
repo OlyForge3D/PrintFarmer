@@ -16,7 +16,8 @@ namespace Farm.Backend.Plugin.FlashForge;
 /// Protocol reference: OrcaSlicer Flashforge.cpp implementation.
 /// </summary>
 public sealed partial class FlashForgeClient : IFlashForgeClient,
-    ISupportsUploadAndPrint
+    ISupportsUploadAndPrint,
+    ISupportsSensorTelemetry
 {
     private readonly ILogger<FlashForgeClient> _logger;
     private readonly BackendTimeoutSettings _timeouts;

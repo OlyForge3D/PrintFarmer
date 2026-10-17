@@ -430,6 +430,12 @@ public sealed class FlashForgePollingService(
                         ExtruderTemperatures: status.ExtruderTemperatures,
                         DetectedExtruderCount: status.DetectedExtruderCount,
                         PrintTimeLeftSeconds: status.PrintTimeLeftSeconds);
+                    IReadOnlyList<PrinterSensorDto>? sensors = FlashForgeSensorMapper.Map(status);
+                    if (sensors is not null)
+                    {
+                        cacheUpdate = cacheUpdate with { Sensors = sensors };
+                    }
+
                     _statusCacheWriter.UpdateStatus(cacheUpdate, originWatermark);
 
                     var signalRUpdate = new PrinterStatusUpdate(
@@ -450,6 +456,18 @@ public sealed class FlashForgePollingService(
                         HomedAxes: null,
                         SpoolInfo: spoolInfo,
                         FileName: PrinterStatusDto.ExtractFileName(status.JobName));
+                    if (sensors is not null)
+                    {
+                        signalRUpdate = signalRUpdate with { Sensors = sensors };
+                    }
+                    else
+                    {
+                        // The cache marks its sensors unavailable itself; clients need the same view.
+                        signalRUpdate = signalRUpdate with
+                        {
+                            Sensors = PrinterSensorNormalizer.MarkUnavailable(state.LastBroadcastUpdate?.Sensors ?? []),
+                        };
+                    }
 
                     if (PrinterStatusBroadcastGate.ShouldBroadcast(state.LastBroadcastUpdate, signalRUpdate))
                     {
@@ -514,7 +532,10 @@ public sealed class FlashForgePollingService(
                             BedTarget: null,
                             HomedAxes: null,
                             SpoolInfo: null,
-                            FileName: null);
+                            FileName: null)
+                        {
+                            Sensors = PrinterSensorNormalizer.MarkUnavailable(state.LastBroadcastUpdate?.Sensors ?? []),
+                        };
 
                         if (PrinterStatusBroadcastGate.ShouldBroadcast(state.LastBroadcastUpdate, offlineSignalRUpdate))
                         {

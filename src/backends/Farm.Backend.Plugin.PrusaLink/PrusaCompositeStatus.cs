@@ -26,6 +26,13 @@ public record PrusaCompositeStatus(
     double? AxisZ = null,
     int? TimeRemainingSeconds = null,
     int? SpeedMultiplier = null,
-    string? ThumbnailCacheIdentity = null);
+    string? ThumbnailCacheIdentity = null)
+{
+    /// <summary>
+    /// Complete backend-neutral sensor snapshot mapped from the status response, or null when
+    /// no status was read (the printer is unreachable).
+    /// </summary>
+    public IReadOnlyList<PrinterSensorDto>? Sensors { get; init; }
+}
 
 #pragma warning restore CS1066
