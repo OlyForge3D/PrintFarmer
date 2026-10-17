@@ -53,8 +53,10 @@ internal static class MoonrakerSensorMapper
 
     /// <summary>Whether an object of this type is mapped explicitly (not by the generic field rule).</summary>
     internal static bool IsKnownType(string type) =>
-        IsExtruder(type) || type is PartFan or TemperatureSensor or TemperatureFan or HeaterGeneric or HeaterBed or
+        IsExtruder(type) || IsVendorFan(type) || type is PartFan or TemperatureSensor or TemperatureFan or HeaterGeneric or HeaterBed or
             HeaterFan or ControllerFan or FanGeneric or FilamentSwitchSensor or FilamentMotionSensor;
+
+    private static bool IsVendorFan(string type) => type.EndsWith("_fan", StringComparison.Ordinal);
 
     /// <summary>
     /// Whether <paramref name="objectName"/> is a well-formed Klipper object name that may be
@@ -108,12 +110,26 @@ internal static class MoonrakerSensorMapper
                     ? sensorType.GetString()
                     : null;
             result[section.Name] = new MoonrakerSectionSettings(
-                ReadFiniteNumber(section.Value, "min_temp"),
-                ReadFiniteNumber(section.Value, "max_temp"),
+                ReadTargetBound(section.Value, "min_temp", "target_min_temp", Math.Max),
+                ReadTargetBound(section.Value, "max_temp", "target_max_temp", Math.Min),
                 sensorTypeName);
         }
 
         return result;
+    }
+
+    // Some Klipper forks distinguish allowable targets from the sensor's shutdown limits.
+    private static double? ReadTargetBound(JsonElement section, string limitName, string targetName, Func<double, double, double> intersect)
+    {
+        double? limit = ReadFiniteNumber(section, limitName);
+        if (!section.TryGetProperty(targetName, out _))
+        {
+            return limit;
+        }
+
+        return limit is double bound && ReadFiniteNumber(section, targetName) is double target
+            ? intersect(bound, target)
+            : null;
     }
 
     private static double? ReadFiniteNumber(JsonElement element, string property) =>
@@ -149,8 +165,8 @@ internal static class MoonrakerSensorMapper
                 settings.TryGetValue(objectName, out MoonrakerSectionSettings? section) &&
                 section.MinTemp is double min &&
                 section.MaxTemp is double max &&
-                min <= max:
-                return [new PrinterSensorWritableDto(PrinterSensorQuantity.TargetTemperature, min, max, null, PrinterSensorUnit.Celsius)];
+                Math.Max(0, min) <= max:
+                return [new PrinterSensorWritableDto(PrinterSensorQuantity.TargetTemperature, Math.Max(0, min), max, null, PrinterSensorUnit.Celsius)];
             default:
                 return [];
         }
@@ -219,6 +235,7 @@ internal static class MoonrakerSensorMapper
             HeaterFan => (PrinterSensorKind.Fan, PrinterFanRole.Hotend),
             ControllerFan => (PrinterSensorKind.Fan, PrinterFanRole.Controller),
             FanGeneric or TemperatureFan => (PrinterSensorKind.Fan, HintFanRole(name)),
+            _ when IsVendorFan(type) => (PrinterSensorKind.Fan, HintFanRole(name)),
             FilamentSwitchSensor or FilamentMotionSensor => (PrinterSensorKind.FilamentRunout, null),
             TemperatureSensor => (SourceKind(settings?.SensorType) ?? HintKind(name), null),
             HeaterGeneric => (HintKind(name), null),
@@ -285,6 +302,7 @@ internal static class MoonrakerSensorMapper
             TemperatureSensor => EnvironmentalFields,
             TemperatureFan => TemperatureFanFields,
             PartFan or HeaterFan or ControllerFan or FanGeneric => FanFields,
+            _ when IsVendorFan(type) => FanFields,
             FilamentSwitchSensor or FilamentMotionSensor => FilamentFields,
             _ => GenericFieldMappings,
         };

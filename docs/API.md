@@ -237,6 +237,7 @@ availability.
 | `fan` | `Fan` / `PartCooling` | speed, rpm | `FanSpeed` 0–100 (`M106`) |
 | `fan_generic <name>` | `Fan` / `Chamber` by name hint, else `Auxiliary` | speed, rpm | `FanSpeed` 0–100 (`SET_FAN_SPEED`) |
 | `heater_fan`, `controller_fan` | `Fan` / `Hotend`, `Controller` | speed, rpm | — (firmware-managed) |
+| Vendor-specific `*_fan` objects | `Fan` / name hint, else `Auxiliary` | speed, rpm | — |
 | `filament_switch_sensor`, `filament_motion_sensor` | `FilamentRunout` | filament detected, enabled (`Other`) | — |
 | Other objects with `temperature`/`humidity`/`pressure` | name hint, else `Other` | those fields | — |
 
@@ -244,6 +245,10 @@ Name hints: `chamber`, `enclosure`, or `exhaust` map to `Chamber`; `ambient`
 maps to `Ambient`. Writes are rejected without sending G-code unless the object
 name is a safe Klipper identifier that is currently listed by the printer and the
 value is in range.
+Temperature controls require finite configured sensor limits, exclude negative
+targets, and intersect those limits with `target_min_temp`/`target_max_temp`
+when a Klipper fork reports separate target limits. Invalid or conflicting
+limits make the control read-only.
 
 ## API Contract and Calibration Capabilities
 
