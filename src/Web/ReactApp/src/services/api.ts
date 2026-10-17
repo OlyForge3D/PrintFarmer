@@ -3,7 +3,7 @@
 import { getAuthenticatedCameraProxyRoute } from "@/common/auth/authenticatedCameraRoutes";
 import { generateUUID } from "@/utils/uuid";
 import { getApiBaseUrl } from "@/common/utils/apiUrlHelpers";
-import type { PrinterStatus } from "@/types/api";
+import type { PrinterSensorSetRequest, PrinterStatus } from "@/types/api";
 import {
   PrintJobStatusDto,
   BedType,
@@ -750,6 +750,18 @@ export class ApiClient {
     const response = await this.client.post<CommandResult>(`/printers/${id}/fan`, {
       speedPercent,
     });
+    return response.data;
+  }
+
+  async setPrinterSensor(
+    id: string,
+    sensorId: string,
+    request: PrinterSensorSetRequest
+  ): Promise<CommandResult> {
+    const response = await this.client.post<CommandResult>(
+      `/printers/${id}/sensors/${encodeURIComponent(sensorId)}`,
+      request
+    );
     return response.data;
   }
 

@@ -1,3 +1,4 @@
+vi.mock('@/features/auth/hooks/useAuth', () => ({ useAuth: () => ({ hasPermission: () => true }) }));
 vi.mock('@/features/printers/hooks/use-printer-controls-mode', () => ({
   usePrinterControlsMode: () => ({ mode: 'guided' }),
 }));
