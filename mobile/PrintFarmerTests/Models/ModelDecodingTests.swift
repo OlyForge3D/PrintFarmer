@@ -952,6 +952,18 @@ final class PrinterSensorModelTests: XCTestCase {
         try TestData.decoder.decode([PrinterSensor].self, from: json.data(using: .utf8)!)
     }
 
+    func test_steppedTarget_snapsToGridAndClampsToLargestOnGridValue() {
+        let d = SensorWritable(quantity: .fanSpeed, min: 0, max: 98, step: 5, unit: .percent)
+        XCTAssertEqual(PrinterSensorFormatting.steppedTarget(current: 33.3, increasing: true, descriptor: d), 35)
+        XCTAssertEqual(PrinterSensorFormatting.steppedTarget(current: 33.3, increasing: false, descriptor: d), 30)
+        XCTAssertEqual(PrinterSensorFormatting.steppedTarget(current: 35, increasing: true, descriptor: d), 40)
+        XCTAssertEqual(PrinterSensorFormatting.steppedTarget(current: 35, increasing: false, descriptor: d), 30)
+        XCTAssertEqual(PrinterSensorFormatting.steppedTarget(current: 95, increasing: true, descriptor: d), 95)
+        XCTAssertEqual(PrinterSensorFormatting.steppedTarget(current: 2, increasing: false, descriptor: d), 0)
+        XCTAssertTrue(PrinterSensorFormatting.isOnGrid(95, descriptor: d))
+        XCTAssertFalse(PrinterSensorFormatting.isOnGrid(98, descriptor: d))
+    }
+
     func test_decodesReadingsWritableAndBoolValues() throws {
         let sensors = try decode("""
         [{"id":"runout","displayName":"Runout","kind":"FilamentRunout",

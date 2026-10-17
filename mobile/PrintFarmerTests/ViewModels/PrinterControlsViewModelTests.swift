@@ -207,6 +207,13 @@ final class PrinterControlsViewModelTests: XCTestCase {
         XCTAssertEqual(model.controllableSensors.map(\.id), ["fan part"])
     }
 
+    func test_sensorControl_offGridValueIsRejectedWithoutServiceCall() async throws {
+        let model = try await sensorViewModel()
+        await model.setSensorValue(sensorId: "fan part", quantity: .fanSpeed, value: 38.3)
+        XCTAssertNotNil(model.lastError)
+        XCTAssertEqual(mockService.setSensorValueCallCount, 0)
+    }
+
     func test_sensorControl_outOfRangeValueIsRejectedWithoutServiceCall() async throws {
         let model = try await sensorViewModel()
         await model.setSensorValue(sensorId: "fan part", quantity: .fanSpeed, value: 150)

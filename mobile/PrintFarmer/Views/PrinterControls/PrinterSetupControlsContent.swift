@@ -377,7 +377,6 @@ private struct PrinterSensorControlRows: View {
     private func row(sensor: PrinterSensor, descriptor: SensorWritable) -> some View {
         let reading = sensor.reading(descriptor.quantity)
         let current = reading?.value.number
-        let step = (descriptor.step ?? 1) > 0 ? (descriptor.step ?? 1) : 1
         let reason = viewModel.sensorControlUnavailableReason
             ?? (sensor.available ? (current == nil ? "Current value is unknown; controls are disabled." : nil)
                                  : "Unavailable; controls are disabled.")
@@ -389,7 +388,7 @@ private struct PrinterSensorControlRows: View {
                 Spacer(minLength: 0)
                 if let current, reason == nil {
                     stepButton("minus", "Decrease \(title)", id + ".decrease",
-                               target: current - step, descriptor: descriptor, sensor: sensor)
+                               increasing: false, current: current, descriptor: descriptor, sensor: sensor)
                 }
                 Text(reading.map(PrinterSensorFormatting.valueText) ?? "—")
                     .font(.subheadline.monospacedDigit())
@@ -397,7 +396,7 @@ private struct PrinterSensorControlRows: View {
                     .accessibilityIdentifier(id + ".value")
                 if let current, reason == nil {
                     stepButton("plus", "Increase \(title)", id + ".increase",
-                               target: current + step, descriptor: descriptor, sensor: sensor)
+                               increasing: true, current: current, descriptor: descriptor, sensor: sensor)
                 }
             }
             if let reason {
@@ -409,9 +408,9 @@ private struct PrinterSensorControlRows: View {
 
     private func stepButton(
         _ symbol: String, _ label: String, _ identifier: String,
-        target: Double, descriptor: SensorWritable, sensor: PrinterSensor
+        increasing: Bool, current: Double, descriptor: SensorWritable, sensor: PrinterSensor
     ) -> some View {
-        let clamped = Swift.min(Swift.max(target, descriptor.min), descriptor.max)
+        let clamped = PrinterSensorFormatting.steppedTarget(current: current, increasing: increasing, descriptor: descriptor)
         return Button {
             Task { await viewModel.setSensorValue(sensorId: sensor.id, quantity: descriptor.quantity, value: clamped) }
         } label: {

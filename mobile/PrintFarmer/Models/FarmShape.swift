@@ -198,6 +198,26 @@ enum PrinterSensorGroup: Int, CaseIterable, Hashable, Sendable {
 
 /// Pure display helpers shared by Status and Control rows.
 enum PrinterSensorFormatting {
+    private static let gridEpsilon = 1e-9
+
+    /// Next on-grid (min + n*step) value at least one step from `current` in the
+    /// pressed direction, clamped to the largest on-grid value at or below max.
+    static func steppedTarget(current: Double, increasing: Bool, descriptor: SensorWritable) -> Double {
+        let step = (descriptor.step ?? 1) > 0 ? (descriptor.step ?? 1) : 1
+        let maxIndex = ((descriptor.max - descriptor.min) / step + gridEpsilon).rounded(.down)
+        let position = (current - descriptor.min) / step
+        let index = increasing
+            ? (position + gridEpsilon).rounded(.down) + 1
+            : (position - gridEpsilon).rounded(.up) - 1
+        return descriptor.min + Swift.min(Swift.max(index, 0), Swift.max(maxIndex, 0)) * step
+    }
+
+    static func isOnGrid(_ value: Double, descriptor: SensorWritable) -> Bool {
+        guard let step = descriptor.step, step > 0 else { return true }
+        let n = (value - descriptor.min) / step
+        return abs(n - n.rounded()) <= 1e-6
+    }
+
     static func valueText(_ reading: SensorReading) -> String {
         switch reading.value {
         case .bool(let v):
@@ -247,8 +267,7 @@ enum PrinterSensorFormatting {
         return "\(sensor.displayName), " + parts.joined(separator: ", ")
     }
 
-    /// Replaces/merges per the documented semantics: a reported list replaces the
-    /// cache; omitted sensors/readings inside a partial update keep last values.
+    /// A reported list replaces the cache; an omitted list keeps it.
     static func merge(cached: [PrinterSensor], update: [PrinterSensor]?) -> [PrinterSensor] {
         guard let update else { return cached }
         return update.sorted { $0.id < $1.id }

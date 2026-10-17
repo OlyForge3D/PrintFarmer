@@ -1349,8 +1349,9 @@ final class PrinterControlsViewModel: ObservableObject {
               let sensor = printer.sensors.first(where: { $0.id == sensorId }),
               sensor.available,
               let descriptor = sensor.descriptor(for: quantity),
-              value >= descriptor.min, value <= descriptor.max else {
-            setError(command: command, message: "Sensor control requires a supported, available, writable entry and a value within its limits.", isRetryable: false)
+              value >= descriptor.min, value <= descriptor.max,
+              PrinterSensorFormatting.isOnGrid(value, descriptor: descriptor) else {
+            setError(command: command, message: "Sensor control requires a supported, available, writable entry and a value within its limits and step.", isRetryable: false)
             return
         }
         await perform(command) { [printerService, printer] in
