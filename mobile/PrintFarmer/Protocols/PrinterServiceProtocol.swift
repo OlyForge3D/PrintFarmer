@@ -56,6 +56,7 @@ protocol PrinterServiceProtocol: Sendable {
     func setTemperatures(printerId: UUID, hotend: Double?, bed: Double?) async throws
     func setFanSpeed(printerId: UUID, speedPercent: Int) async throws -> CommandResult
     func adjustZOffset(printerId: UUID, offsetMm: Double) async throws -> CommandResult
+    func setSensorValue(printerId: UUID, sensorId: String, quantity: SensorQuantity, value: Double) async throws -> CommandResult
     func home(printerId: UUID, axes: [String]) async throws
     func homeXY(printerId: UUID) async throws
     func homeZ(printerId: UUID) async throws
@@ -105,6 +106,10 @@ protocol PrinterServiceProtocol: Sendable {
 extension PrinterServiceProtocol {
     func setFanSpeed(printerId: UUID, speedPercent: Int) async throws -> CommandResult {
         throw ServiceError.notImplemented("Fan control is unavailable in this printer service")
+    }
+
+    func setSensorValue(printerId: UUID, sensorId: String, quantity: SensorQuantity, value: Double) async throws -> CommandResult {
+        throw ServiceError.notImplemented("Sensor control is unavailable in this printer service")
     }
 
     func adjustZOffset(printerId: UUID, offsetMm: Double) async throws -> CommandResult {
