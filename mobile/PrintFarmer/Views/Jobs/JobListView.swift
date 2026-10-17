@@ -86,10 +86,11 @@ struct JobListView: View {
     }
 
     private func refreshActivePrinterStatuses() async {
-        guard scenePhase == .active else { return }
         let printerIDs = viewModel.activePrinterIDs
-        guard !printerIDs.isEmpty else {
-            await viewModel.pollActivePrinterStatuses(printerIDs: [])
+        guard scenePhase == .active, !printerIDs.isEmpty else {
+            await viewModel.pollActivePrinterStatuses(
+                printerIDs: printerIDs, isForeground: scenePhase == .active
+            )
             return
         }
 
@@ -568,7 +569,7 @@ struct JobListView: View {
     ) -> some View {
         if stacksMetadata {
             VStack(alignment: .leading, spacing: 4) {
-                Text(queuedJobMetadata(item))
+                Text(Self.queuedJobMetadata(item))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -579,14 +580,14 @@ struct JobListView: View {
                 }
             }
         } else {
-            Text(queuedJobMetadata(item))
+            Text(Self.queuedJobMetadata(item))
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
         }
     }
 
-    private func queuedJobMetadata(_ item: QueuedPrintJobResponse) -> String {
+    static func queuedJobMetadata(_ item: QueuedPrintJobResponse) -> String {
         var parts: [String] = []
         switch item.job.priority {
         case .low:

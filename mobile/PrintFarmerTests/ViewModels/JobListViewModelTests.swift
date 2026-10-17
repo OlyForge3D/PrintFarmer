@@ -254,8 +254,16 @@ final class JobListViewModelTests: XCTestCase {
     func testPollFetchesStatusesConcurrentlyAndMarksFailuresUnavailable() async {
         let printerService = MockPrinterService()
         let slow = UUID(), fast = UUID(), failing = UUID()
-        printerService.statusByPrinterID = [slow: statusDetail(slow), fast: statusDetail(fast)]
-        printerService.statusDelayByPrinterID = [slow: .milliseconds(400)]
+        let slowGate = QueueMoveGate()
+        let slowStatus = statusDetail(slow), fastStatus = statusDetail(fast)
+        printerService.statusHandler = { id in
+            if id == slow {
+                await slowGate.suspend()
+                return slowStatus
+            }
+            if id == fast { return fastStatus }
+            throw NetworkError.notFound
+        }
         viewModel.configure(printerService: printerService)
 
         let task = Task { @MainActor in
@@ -263,10 +271,17 @@ final class JobListViewModelTests: XCTestCase {
                 printerIDs: [slow, fast, failing], interval: .seconds(60)
             )
         }
-        try? await Task.sleep(for: .milliseconds(150))
+        await slowGate.waitUntilEntered()
+        await waitForStatusResult(fast)
+        await waitForStatusResult(failing)
         XCTAssertEqual(Set(printerService.statusRequestedIDs), [slow, fast, failing],
                        "A slow printer must not delay requests for the others.")
-        try? await Task.sleep(for: .milliseconds(600))
+        XCTAssertNotNil(viewModel.activePrinterStatuses[fast],
+                        "Fast status must be displayed before the slow request finishes.")
+        XCTAssertNil(viewModel.activePrinterStatuses[slow])
+        XCTAssertTrue(viewModel.unavailableActivePrinterStatuses.contains(failing))
+        await slowGate.release()
+        await waitForStatusResult(slow)
         task.cancel()
         await task.value
 
@@ -286,6 +301,89 @@ final class JobListViewModelTests: XCTestCase {
 
         XCTAssertTrue(viewModel.activePrinterStatuses.isEmpty)
         XCTAssertTrue(viewModel.unavailableActivePrinterStatuses.isEmpty)
+        XCTAssertTrue(printerService.statusRequestedIDs.isEmpty)
+    }
+
+    func testPollDoesNotStartInBackgroundAndResumesInForeground() async {
+        let printerService = MockPrinterService()
+        let id = UUID()
+        printerService.statusByPrinterID = [id: statusDetail(id)]
+        viewModel.configure(printerService: printerService)
+
+        await viewModel.pollActivePrinterStatuses(printerIDs: [id], isForeground: false)
+        XCTAssertTrue(printerService.statusRequestedIDs.isEmpty)
+
+        let task = Task {
+            await viewModel.pollActivePrinterStatuses(printerIDs: [id])
+        }
+        await waitForStatusResult(id)
+        task.cancel()
+        await task.value
+        XCTAssertNotNil(viewModel.activePrinterStatuses[id])
+        XCTAssertEqual(printerService.statusRequestedIDs, [id])
+    }
+
+    func testCancelledPollCannotPublishLateResults() async {
+        let printerService = MockPrinterService()
+        let id = UUID()
+        let gate = QueueMoveGate()
+        let status = statusDetail(id)
+        printerService.statusHandler = { _ in
+            await gate.suspend()
+            return status
+        }
+        viewModel.configure(printerService: printerService)
+        let task = Task {
+            await viewModel.pollActivePrinterStatuses(printerIDs: [id])
+        }
+        await gate.waitUntilEntered()
+        task.cancel()
+        await gate.release()
+        await task.value
+
+        XCTAssertTrue(viewModel.activePrinterStatuses.isEmpty)
+        XCTAssertTrue(viewModel.unavailableActivePrinterStatuses.isEmpty)
+        XCTAssertEqual(printerService.statusRequestedIDs, [id])
+    }
+
+    func testChangingPrinterSetDiscardsOldPollResults() async {
+        let printerService = MockPrinterService()
+        let oldID = UUID(), newID = UUID()
+        let gate = QueueMoveGate()
+        let oldStatus = statusDetail(oldID), newStatus = statusDetail(newID)
+        printerService.statusHandler = { id in
+            if id == oldID {
+                await gate.suspend()
+                return oldStatus
+            }
+            return newStatus
+        }
+        viewModel.configure(printerService: printerService)
+        let oldTask = Task {
+            await viewModel.pollActivePrinterStatuses(printerIDs: [oldID])
+        }
+        await gate.waitUntilEntered()
+        let newTask = Task {
+            await viewModel.pollActivePrinterStatuses(printerIDs: [newID, newID])
+        }
+        await waitForStatusResult(newID)
+        await gate.release()
+        await oldTask.value
+        newTask.cancel()
+        await newTask.value
+
+        XCTAssertEqual(Set(viewModel.activePrinterStatuses.keys), [newID])
+        XCTAssertEqual(printerService.statusRequestedIDs.filter { $0 == newID }.count, 1)
+    }
+
+    private func waitForStatusResult(_ id: UUID) async {
+        let deadline = ContinuousClock.now.advanced(by: .seconds(2))
+        while ContinuousClock.now < deadline {
+            if viewModel.activePrinterStatuses[id] != nil
+                || viewModel.unavailableActivePrinterStatuses.contains(id) { return }
+            try? await Task.sleep(for: .milliseconds(1))
+        }
+        XCTFail("Timed out waiting for printer status \(id)")
     }
 
     func testPollStopsWhenViewDeactivated() async {
@@ -298,6 +396,57 @@ final class JobListViewModelTests: XCTestCase {
         await viewModel.pollActivePrinterStatuses(printerIDs: [id], interval: .milliseconds(10))
 
         XCTAssertTrue(printerService.statusRequestedIDs.isEmpty)
+    }
+
+    func testBackgroundTransitionInvalidatesAnInFlightPoll() async {
+        let printerService = MockPrinterService()
+        let id = UUID()
+        let gate = QueueMoveGate()
+        let status = statusDetail(id)
+        printerService.statusHandler = { _ in
+            await gate.suspend()
+            return status
+        }
+        viewModel.configure(printerService: printerService)
+        let task = Task {
+            await viewModel.pollActivePrinterStatuses(printerIDs: [id])
+        }
+        await gate.waitUntilEntered()
+        await viewModel.pollActivePrinterStatuses(printerIDs: [id], isForeground: false)
+        await gate.release()
+        await task.value
+
+        XCTAssertTrue(viewModel.activePrinterStatuses.isEmpty)
+        XCTAssertTrue(viewModel.unavailableActivePrinterStatuses.isEmpty)
+        XCTAssertEqual(printerService.statusRequestedIDs, [id])
+    }
+
+    func testAssignedPrinterWhitespaceNameDoesNotRenderUnassigned() throws {
+        let item = try TestData.decodeQueuedPrintJobResponse(
+            from: TestJSON.queuedPrintJobResponseQueued.replacingOccurrences(
+                of: "\"assignedPrinter\": null",
+                with: """
+                "assignedPrinter": {
+                    "id": "\(UUID().uuidString)",
+                    "name": "   ",
+                    "modelName": "MK4",
+                    "status": "Idle",
+                    "isOnline": true
+                }
+                """
+            )
+        )
+
+        XCTAssertTrue(JobListView.queuedJobMetadata(item).contains("Assigned to printer"))
+        XCTAssertFalse(JobListView.queuedJobMetadata(item).contains("Unassigned"))
+    }
+
+    func testUnassignedPrinterStillRendersUnassigned() throws {
+        let item = try TestData.decodeQueuedPrintJobResponse(
+            from: TestJSON.queuedPrintJobResponseQueued
+        )
+
+        XCTAssertTrue(JobListView.queuedJobMetadata(item).contains("Unassigned"))
     }
 
     func testLoadJobsSetsLoadingState() async {

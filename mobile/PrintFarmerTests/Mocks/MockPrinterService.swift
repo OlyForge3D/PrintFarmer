@@ -125,17 +125,18 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
     private let statusLock = NSLock()
     private var _statusRequestedIDs: [UUID] = []
     var statusRequestedIDs: [UUID] {
-        statusLock.lock(); defer { statusLock.unlock() }
-        return _statusRequestedIDs
+        statusLock.withLock { _statusRequestedIDs }
     }
     var statusByPrinterID: [UUID: PrinterStatusDetail] = [:]
-    var statusDelayByPrinterID: [UUID: Duration] = [:]
+    var statusHandler: (@Sendable (UUID) async throws -> PrinterStatusDetail)?
 
     func getStatus(id: UUID) async throws -> PrinterStatusDetail {
-        statusLock.lock(); _statusRequestedIDs.append(id); statusLock.unlock()
-        if let delay = statusDelayByPrinterID[id] { try await Task.sleep(for: delay) }
+        statusLock.withLock {
+            _statusRequestedIDs.append(id)
+            getStatusCalledWith = id
+        }
+        if let statusHandler { return try await statusHandler(id) }
         if let perPrinter = statusByPrinterID[id] { return perPrinter }
-        getStatusCalledWith = id
         if let beforeSafetyStatus { await beforeSafetyStatus() }
         if let error = statusErrorToThrow { throw error }
         if let error = errorToThrow { throw error }

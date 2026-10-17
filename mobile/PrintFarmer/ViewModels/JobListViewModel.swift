@@ -40,6 +40,7 @@ final class JobListViewModel {
     @ObservationIgnored private var queueStateEpoch: UInt64 = 0
     @ObservationIgnored private var loadGeneration: UInt64 = 0
     @ObservationIgnored private var activeLoadCount = 0
+    @ObservationIgnored private var statusPollGeneration: UInt64 = 0
 
     func configure(jobService: any JobServiceProtocol) {
         self.jobService = jobService
@@ -63,9 +64,14 @@ final class JobListViewModel {
     /// Statuses are fetched concurrently so one slow printer cannot delay the rest.
     func pollActivePrinterStatuses(
         printerIDs: [UUID],
+        isForeground: Bool = true,
         interval: Duration = .seconds(15),
         isCurrent: @MainActor () -> Bool = { true }
     ) async {
+        guard !Task.isCancelled, isCurrent() else { return }
+        statusPollGeneration &+= 1
+        let generation = statusPollGeneration
+        guard isForeground, isViewActive else { return }
         guard !printerIDs.isEmpty else {
             activePrinterStatuses = [:]
             unavailableActivePrinterStatuses = []
@@ -75,29 +81,37 @@ final class JobListViewModel {
 
         activePrinterStatuses = [:]
         unavailableActivePrinterStatuses = []
-        while !Task.isCancelled, isViewActive {
-            let results = await withTaskGroup(
+        while !Task.isCancelled, isViewActive, isCurrent(),
+              generation == statusPollGeneration {
+            await withTaskGroup(
                 of: (UUID, PrinterStatusDetail?).self
             ) { group in
-                for id in printerIDs {
+                for id in Set(printerIDs) {
                     group.addTask {
-                        (id, try? await printerService.getStatus(id: id))
+                        do {
+                            return (id, try await printerService.getStatus(id: id))
+                        } catch {
+                            return (id, nil)
+                        }
                     }
                 }
-                var collected: [(UUID, PrinterStatusDetail?)] = []
-                for await result in group { collected.append(result) }
-                return collected
-            }
-            guard !Task.isCancelled, isViewActive, isCurrent() else { return }
-            for (id, status) in results {
-                if let status {
-                    activePrinterStatuses[id] = status
-                    unavailableActivePrinterStatuses.remove(id)
-                } else {
-                    activePrinterStatuses.removeValue(forKey: id)
-                    unavailableActivePrinterStatuses.insert(id)
+                for await (id, status) in group {
+                    guard !Task.isCancelled, isViewActive, isCurrent(),
+                          generation == statusPollGeneration else {
+                        group.cancelAll()
+                        return
+                    }
+                    if let status {
+                        activePrinterStatuses[id] = status
+                        unavailableActivePrinterStatuses.remove(id)
+                    } else {
+                        activePrinterStatuses.removeValue(forKey: id)
+                        unavailableActivePrinterStatuses.insert(id)
+                    }
                 }
             }
+            guard !Task.isCancelled, isViewActive, isCurrent(),
+                  generation == statusPollGeneration else { return }
             do {
                 try await Task.sleep(for: interval)
             } catch {
@@ -202,6 +216,7 @@ final class JobListViewModel {
     func deactivate() {
         guard isViewActive else { return }
         isViewActive = false
+        statusPollGeneration &+= 1
         queueStateEpoch &+= 1
         loadGeneration &+= 1
         tearDownSignalR()

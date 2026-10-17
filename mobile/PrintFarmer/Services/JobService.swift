@@ -17,10 +17,12 @@ actor JobService: JobServiceProtocol {
         let response: HTTPDecodedResponse<[QueuedPrintJobResponse]> = try await apiClient.getWithHeaders(
             "/api/job-queue-analytics?limit=\(QueuedPrintJobPage.pageSize)&offset=0"
         )
-        let hasMoreHeader = response.header("X-Has-More")?.lowercased() == "true"
+        let hasMoreHeader = response.header("X-Has-More").flatMap {
+            Bool($0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
+        }
         return QueuedPrintJobPage(
             jobs: response.value,
-            mayHaveMore: hasMoreHeader || response.value.count >= QueuedPrintJobPage.pageSize
+            mayHaveMore: hasMoreHeader ?? (response.value.count >= QueuedPrintJobPage.pageSize)
         )
     }
 
