@@ -52,7 +52,7 @@ public class PrusaLinkStatusClient : IPrinterStatusClient, IManagedSpoolProvider
                 async ct => await _client.GetCompositeStatusAsync(printer.BackendUrl, printer.Credential, ct),
                 ct);
 
-            return new PrinterStatusDto(
+            PrinterStatusDto dto = new(
                 Id: printer.Id,
                 IsOnline: status.IsOnline,
                 State: status.State,
@@ -71,6 +71,7 @@ public class PrusaLinkStatusClient : IPrinterStatusClient, IManagedSpoolProvider
                 PrintTimeLeftSeconds: status.TimeRemainingSeconds,
                 SpeedMultiplier: status.SpeedMultiplier,
                 ThumbnailCacheIdentity: status.ThumbnailCacheIdentity);
+            return status.Sensors is null ? dto : dto with { Sensors = status.Sensors };
         }
         catch (OperationCanceledException)
         {

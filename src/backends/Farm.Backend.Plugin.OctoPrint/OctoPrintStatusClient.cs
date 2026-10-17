@@ -70,7 +70,10 @@ public class OctoPrintStatusClient : IPrinterStatusClient, IManagedSpoolProvider
                     JobName: jobStatus.Filename,
                     ThumbnailUrl: null,
                     CameraStreamUrl: null,
-                    CameraSnapshotUrl: null);
+                    CameraSnapshotUrl: null)
+                {
+                    Sensors = OctoPrintSensorMapper.Map(printerState.Temperatures),
+                };
             }
             else if (printerState != null)
             {
@@ -82,7 +85,10 @@ public class OctoPrintStatusClient : IPrinterStatusClient, IManagedSpoolProvider
                     JobName: null,
                     ThumbnailUrl: null,
                     CameraStreamUrl: null,
-                    CameraSnapshotUrl: null);
+                    CameraSnapshotUrl: null)
+                {
+                    Sensors = OctoPrintSensorMapper.Map(printerState.Temperatures),
+                };
             }
             else
             {

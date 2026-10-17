@@ -16,7 +16,8 @@ namespace Farm.Backend.Plugin.FlashForge;
 /// Protocol reference: OrcaSlicer Flashforge.cpp implementation.
 /// </summary>
 public sealed partial class FlashForgeClient : IFlashForgeClient,
-    ISupportsUploadAndPrint
+    ISupportsUploadAndPrint,
+    ISupportsSensorTelemetry
 {
     private readonly ILogger<FlashForgeClient> _logger;
     private readonly BackendTimeoutSettings _timeouts;
@@ -161,7 +162,7 @@ public sealed partial class FlashForgeClient : IFlashForgeClient,
             bool isOnline = true;
             bool isPrinting = string.Equals(state, "Printing", StringComparison.OrdinalIgnoreCase);
 
-            return new PrinterCompositeStatus(
+            var status = new PrinterCompositeStatus(
                 IsOnline: isOnline,
                 State: state ?? "Idle",
                 Progress: isPrinting ? progress : null,
@@ -175,6 +176,7 @@ public sealed partial class FlashForgeClient : IFlashForgeClient,
                 BedTarget: bedTarget,
                 ExtruderTemperatures: extruders.Count > 0 ? extruders : null,
                 DetectedExtruderCount: extruderCount);
+            return status with { Sensors = FlashForgeSensorMapper.Map(status) };
         }
         catch (Exception ex) when (ex is SocketException or TimeoutException or OperationCanceledException)
         {

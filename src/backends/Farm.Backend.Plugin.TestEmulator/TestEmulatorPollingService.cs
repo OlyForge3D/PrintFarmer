@@ -171,6 +171,9 @@ public sealed class TestEmulatorPollingService(
         bool isHeating = state.State is EmulatorPrinterState.Printing or EmulatorPrinterState.Paused;
         double? hotendTarget = isHeating ? EmulatedPrinterState.TargetHotendTemp : null;
         double? bedTarget = isHeating ? EmulatedPrinterState.TargetBedTemp : null;
+        double hotendTemp = Math.Round(state.GetHotendTemp(), 1);
+        double bedTemp = Math.Round(state.GetBedTemp(), 1);
+        IReadOnlyList<PrinterSensorDto> sensors = state.GetSensors(hotendTemp, bedTemp);
 
         var cacheUpdate = new PrinterStatusDto(
             Id: printerId,
@@ -184,11 +187,14 @@ public sealed class TestEmulatorPollingService(
             X: null,
             Y: null,
             Z: null,
-            HotendTemp: Math.Round(state.GetHotendTemp(), 1),
-            BedTemp: Math.Round(state.GetBedTemp(), 1),
+            HotendTemp: hotendTemp,
+            BedTemp: bedTemp,
             HotendTarget: hotendTarget,
             BedTarget: bedTarget,
-            SpoolInfo: null);
+            SpoolInfo: null)
+        {
+            Sensors = sensors,
+        };
         statusCacheWriter.UpdateStatus(cacheUpdate, originWatermark);
 
         var signalRUpdate = new PrinterStatusUpdate(
@@ -202,13 +208,16 @@ public sealed class TestEmulatorPollingService(
             X: null,
             Y: null,
             Z: null,
-            HotendTemp: Math.Round(state.GetHotendTemp(), 1),
-            BedTemp: Math.Round(state.GetBedTemp(), 1),
+            HotendTemp: hotendTemp,
+            BedTemp: bedTemp,
             HotendTarget: hotendTarget,
             BedTarget: bedTarget,
             HomedAxes: null,
             SpoolInfo: null,
-            FileName: PrinterStatusDto.ExtractFileName(jobName));
+            FileName: PrinterStatusDto.ExtractFileName(jobName))
+        {
+            Sensors = sensors,
+        };
 
         PrinterStatusUpdate? lastBroadcast = _lastBroadcastUpdates.GetValueOrDefault(printerId);
         if (PrinterStatusBroadcastGate.ShouldBroadcast(lastBroadcast, signalRUpdate))
