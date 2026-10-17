@@ -432,6 +432,27 @@ final class JobListViewModelTests: XCTestCase {
         XCTAssertTrue(printerService.statusRequestedIDs.isEmpty)
     }
 
+    func testReactivationRestartsPollingForTheSamePrinterSet() async {
+        let printerService = MockPrinterService()
+        let id = UUID()
+        printerService.statusByPrinterID = [id: statusDetail(id)]
+        viewModel.configure(printerService: printerService)
+        viewModel.deactivate()
+        await viewModel.pollActivePrinterStatuses(printerIDs: [id])
+        XCTAssertTrue(printerService.statusRequestedIDs.isEmpty)
+
+        viewModel.activate()
+        let task = Task {
+            await viewModel.pollActivePrinterStatuses(printerIDs: [id])
+        }
+        await waitForStatusResult(id)
+        task.cancel()
+        await task.value
+
+        XCTAssertEqual(printerService.statusRequestedIDs, [id])
+        XCTAssertNotNil(viewModel.activePrinterStatuses[id])
+    }
+
     func testBackgroundTransitionInvalidatesAnInFlightPoll() async {
         let printerService = MockPrinterService()
         let id = UUID()

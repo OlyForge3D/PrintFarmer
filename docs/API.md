@@ -1093,6 +1093,9 @@ groups by printer ID. Inside each group the queued rows follow
 Scope grouping and ordering happen **before** `offset`/`limit` pagination.
 A group can span pages; append pages in response order, using `X-Has-More`
 to continue even when authorization filtering yields a short page.
+The header is `true` when the unfiltered page fills the requested limit and
+`false` otherwise, on admin, unrestricted, and authorization-filtered responses.
+It is a conservative continuation hint, not an exact remaining-row count.
 
 Web and iOS queue clients must preserve the server order, group by
 `job.assignedPrinterId`, filter queued rows within those groups, and limit drag
