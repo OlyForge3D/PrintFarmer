@@ -1997,6 +1997,11 @@ final class PrinterDetailViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.layerLabel(for: printer), "7/200",
                        "Printer counters take precedence over statusDetail")
 
+        printer.totalLayers = nil
+        viewModel.statusDetail = makeLayerStatusDetail(currentLayer: 99, totalLayers: 150)
+        XCTAssertEqual(viewModel.layerLabel(for: printer), "7/150",
+                       "Missing printer totalLayers must fall back to statusDetail while keeping the printer's currentLayer")
+
         printer.currentLayer = nil
         printer.totalLayers = nil
         viewModel.statusDetail = nil
