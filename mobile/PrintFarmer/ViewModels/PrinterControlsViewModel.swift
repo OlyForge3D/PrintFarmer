@@ -45,7 +45,7 @@ struct ControlCommand: Equatable, Sendable {
             return .motion
         case .extrusion, .filament:
             return .material
-        case .fanSpeed, .transientZOffset:
+        case .fanSpeed, .transientZOffset, .sensorControl:
             return .runtime
         }
     }
@@ -71,6 +71,7 @@ struct ControlCommand: Equatable, Sendable {
         case calibrationSave(offsetMm: Double)
         case fanSpeed(targetPercent: Int)
         case transientZOffset(targetMm: Double, deltaMm: Double)
+        case sensorControl(sensorId: String, quantity: SensorQuantity, value: Double)
     }
 }
 
@@ -547,6 +548,7 @@ final class PrinterControlsViewModel: ObservableObject {
             printer.state = status.state
             printer.fanSpeedPercent = status.fanSpeedPercent
             printer.liveZOffsetMm = status.liveZOffsetMm
+            if let sensors = status.sensors { printer.sensors = sensors }
             safetyCheckedAt = clock()
             safetyReadError = nil
             if !status.isOnline || ["printing", "paused", "starting"].contains(status.state?.lowercased() ?? "") {
@@ -1217,6 +1219,10 @@ final class PrinterControlsViewModel: ObservableObject {
         case let .transientZOffset(targetMm, _):
             guard let actual = status.liveZOffsetMm, actual.isFinite else { return }
             matches = abs(actual - targetMm) < 0.001
+        case let .sensorControl(sensorId, quantity, value):
+            guard let actual = status.sensors?.first(where: { $0.id == sensorId })?
+                .reading(quantity)?.value.number else { return }
+            matches = abs(actual - value) < 0.5
         default:
             return
         }
@@ -1311,6 +1317,46 @@ final class PrinterControlsViewModel: ObservableObject {
         await perform(command) { [printerService, printer] in
             let result = try await printerService.setFanSpeed(
                 printerId: printer.id, speedPercent: targetPercent
+            )
+            guard result.success else { throw PrinterControlError.rejected(result.message) }
+        }
+        guard pendingCommand == command, lastError == nil else { return }
+        await refreshSafetyEvidence(refreshDiscovery: false)
+    }
+
+    /// Writable sensor entries (read-only entries never expose inputs).
+    var controllableSensors: [PrinterSensor] {
+        printer.sensors.filter { !$0.writable.isEmpty }
+    }
+
+    var sensorControlUnavailableReason: String? {
+        guard let capabilities else { return "Checking sensor control support…" }
+        guard capabilities.supportsSensorControl else {
+            return "Sensor control is unavailable on this printer."
+        }
+        return runtimeControlAccessReason
+    }
+
+    func setSensorValue(sensorId: String, quantity: SensorQuantity, value: Double) async {
+        let command = ControlCommand(
+            kind: .sensorControl(sensorId: sensorId, quantity: quantity, value: value),
+            startedAt: clock()
+        )
+        guard beginCommand(command) else { return }
+        defer { endCommand(command) }
+        guard capabilities?.supportsSensorControl == true,
+              value.isFinite,
+              let sensor = printer.sensors.first(where: { $0.id == sensorId }),
+              sensor.available,
+              let descriptor = sensor.descriptor(for: quantity),
+              value >= descriptor.min, value <= descriptor.max,
+              PrinterSensorFormatting.isOnGrid(value, descriptor: descriptor) else {
+            setError(command: command, message: "Sensor control requires a supported, available, writable entry and a value within its limits and step.", isRetryable: false)
+            return
+        }
+        await perform(command) { [printerService, printer] in
+            let result = try await printerService.setSensorValue(
+                printerId: printer.id, sensorId: sensorId, quantity: quantity, value: value
             )
             guard result.success else { throw PrinterControlError.rejected(result.message) }
         }
@@ -1618,6 +1664,10 @@ final class PrinterControlsViewModel: ObservableObject {
             guard let actual = updated.liveZOffsetMm, actual.isFinite,
                   previous.liveZOffsetMm != actual else { return false }
             return abs(actual - targetMm) < 0.001
+        case let .sensorControl(sensorId, quantity, value):
+            let read = { (p: Printer) in p.sensors.first(where: { $0.id == sensorId })?.reading(quantity)?.value.number }
+            guard let actual = read(updated), read(previous) != actual else { return false }
+            return abs(actual - value) < 0.5
         case .disableMotors, .extrusion, .filament, .calibrationSave:
             return false
         case .calibrationHome, .calibrationPosition, .calibrationAdjust:
@@ -1682,7 +1732,7 @@ final class PrinterControlsViewModel: ObservableObject {
     private func canExecute(_ command: ControlCommand) -> Bool {
         let permitsActivePrint: Bool
         switch command.kind {
-        case .fanSpeed, .transientZOffset:
+        case .fanSpeed, .transientZOffset, .sensorControl:
             permitsActivePrint = true
         default:
             permitsActivePrint = false
@@ -1890,7 +1940,7 @@ final class PrinterControlsViewModel: ObservableObject {
         switch command.kind {
         case .preheat, .heater, .heaterTargets:
             return "Matching telemetry received. A heater target is a setpoint, not a measured temperature."
-        case .fanSpeed, .transientZOffset:
+        case .fanSpeed, .transientZOffset, .sensorControl:
             return "Matching readback received. This reports the backend value, not a physical inspection."
         default:
             return "Matching telemetry received. Check the machine before further setup."
