@@ -143,7 +143,10 @@ public class TestEmulatorClient(TestEmulatorStateManager stateManager)
             HotendTemp: Math.Round(hotendTemp, 1),
             BedTemp: Math.Round(bedTemp, 1),
             HotendTarget: hotendTarget,
-            BedTarget: bedTarget);
+            BedTarget: bedTarget)
+        {
+            Sensors = state.GetSensors(Math.Round(hotendTemp, 1), Math.Round(bedTemp, 1)),
+        };
     }
 
     // ISupportsStartPrint

@@ -430,7 +430,9 @@ public sealed class FlashForgePollingService(
                         ExtruderTemperatures: status.ExtruderTemperatures,
                         DetectedExtruderCount: status.DetectedExtruderCount,
                         PrintTimeLeftSeconds: status.PrintTimeLeftSeconds);
-                    IReadOnlyList<PrinterSensorDto>? sensors = FlashForgeSensorMapper.Map(status);
+                    IReadOnlyList<PrinterSensorDto>? sensors = status.IsOnline
+                        ? status.Sensors ?? FlashForgeSensorMapper.Map(status)
+                        : null;
                     if (sensors is not null)
                     {
                         cacheUpdate = cacheUpdate with { Sensors = sensors };

@@ -110,6 +110,21 @@ public class TestEmulatorSensorTelemetryTests : IDisposable
         Number(sensors.Single(s => s.Id == "chamber"), PrinterSensorQuantity.Temperature).Should().Be(25);
     }
 
+    [Theory]
+    [InlineData(EmulatorPrinterState.Idle, true)]
+    [InlineData(EmulatorPrinterState.Offline, false)]
+    public async Task GetCompositeStatusAsync_IncludesSensorSnapshot(EmulatorPrinterState printerState, bool available)
+    {
+        Guid printerId = Guid.NewGuid();
+        _stateManager.Register(printerId, new EmulatedPrinterState { State = printerState });
+
+        PrinterCompositeStatus status = await _client.GetCompositeStatusAsync(BaseUrl(printerId));
+
+        status.Sensors.Should().NotBeNull().And.HaveCount(7);
+        status.Sensors!.Should().OnlyContain(s => s.Available == available);
+        Number(status.Sensors.Single(s => s.Id == "chamber"), PrinterSensorQuantity.Temperature).Should().Be(25);
+    }
+
     [Fact]
     public async Task TickPrinterAsync_PublishesSameSensorsToCacheAndSignalR()
     {

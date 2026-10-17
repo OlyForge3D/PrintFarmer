@@ -162,7 +162,7 @@ public sealed partial class FlashForgeClient : IFlashForgeClient,
             bool isOnline = true;
             bool isPrinting = string.Equals(state, "Printing", StringComparison.OrdinalIgnoreCase);
 
-            return new PrinterCompositeStatus(
+            var status = new PrinterCompositeStatus(
                 IsOnline: isOnline,
                 State: state ?? "Idle",
                 Progress: isPrinting ? progress : null,
@@ -176,6 +176,7 @@ public sealed partial class FlashForgeClient : IFlashForgeClient,
                 BedTarget: bedTarget,
                 ExtruderTemperatures: extruders.Count > 0 ? extruders : null,
                 DetectedExtruderCount: extruderCount);
+            return status with { Sensors = FlashForgeSensorMapper.Map(status) };
         }
         catch (Exception ex) when (ex is SocketException or TimeoutException or OperationCanceledException)
         {

@@ -133,6 +133,20 @@ public class FlashForgeSensorTelemetryTests : IDisposable
     }
 
     [Fact]
+    public async Task PollPrinterAsync_CompositeSensors_TakePrecedenceOverLegacyTemperatures()
+    {
+        Guid printerId = Guid.NewGuid();
+        SeedCachedPrinter(printerId);
+        IReadOnlyList<PrinterSensorDto> sensors = FlashForgeSensorMapper.Map(Status(t0: 210, t1: 182, bed: 60))!;
+        PrinterCompositeStatus status = Status(t0: 210, t1: 180, bed: 60) with { Sensors = sensors };
+
+        await RunOneTickAsync(printerId, status);
+
+        _cacheWrites.Should().ContainSingle().Which.Sensors.Should().Equal(sensors);
+        SignalRUpdates().Should().ContainSingle().Which.Sensors.Should().Equal(sensors);
+    }
+
+    [Fact]
     public async Task PollPrinterAsync_SensorOnlyChange_IsBroadcast()
     {
         Guid printerId = Guid.NewGuid();
