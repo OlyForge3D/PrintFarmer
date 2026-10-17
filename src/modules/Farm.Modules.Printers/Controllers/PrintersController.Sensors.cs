@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -42,10 +42,10 @@ public partial class PrintersController
     {
         if (request?.Quantity is not PrinterSensorQuantity quantity || request.Value is not PrinterSensorValue value)
         {
-            return Problem(
-                statusCode: StatusCodes.Status400BadRequest,
-                title: "Invalid sensor request",
-                detail: "quantity and value are required.");
+            return SensorProblem(
+                StatusCodes.Status400BadRequest,
+                "Invalid sensor request",
+                "quantity and value are required.");
         }
 
         if (!await CanAccessPrinterAsync(id, PrinterGroupAccessLevel.Submit, ct))
@@ -62,10 +62,10 @@ public partial class PrintersController
 
         if (!capabilities.SupportsSensorControl)
         {
-            return Problem(
-                statusCode: StatusCodes.Status501NotImplemented,
-                title: "Sensor control not supported",
-                detail: "This printer backend does not support targeted sensor control; no command was sent.");
+            return SensorProblem(
+                StatusCodes.Status501NotImplemented,
+                "Sensor control not supported",
+                "This printer backend does not support targeted sensor control; no command was sent.");
         }
 
         (bool useActiveLease, _, ActionResult? stateFailure) = await ResolveFanControlLeaseAsync(id, ct);
@@ -82,10 +82,10 @@ public partial class PrintersController
             int status = validation.Code is PrinterSensorControlValidationCode.InvalidValue or PrinterSensorControlValidationCode.OutOfRange
                 ? StatusCodes.Status400BadRequest
                 : StatusCodes.Status409Conflict;
-            return Problem(
-                statusCode: status,
-                title: "Sensor control rejected",
-                detail: $"{validation.Detail} No command was sent.");
+            return SensorProblem(
+                status,
+                "Sensor control rejected",
+                $"{validation.Detail} No command was sent.");
         }
 
         string targetId = validation.SensorId!;
@@ -110,4 +110,11 @@ public partial class PrintersController
             ct,
             mapUnconfirmedAsUnavailable: true);
     }
+
+    private static ObjectResult SensorProblem(int statusCode, string title, string detail) =>
+        new(new ProblemDetails { Status = statusCode, Title = title, Detail = detail })
+        {
+            StatusCode = statusCode,
+            ContentTypes = { "application/problem+json" },
+        };
 }

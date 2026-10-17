@@ -1,4 +1,4 @@
-namespace Farm.Infrastructure.Services.Printers;
+﻿namespace Farm.Infrastructure.Services.Printers;
 
 /// <summary>
 /// Shared normalization, merge and control-validation rules for backend-neutral sensor lists.

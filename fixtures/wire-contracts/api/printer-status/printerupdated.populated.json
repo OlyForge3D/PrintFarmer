@@ -29,5 +29,6 @@
     "coordinateOriginOffsetMm": {
       "staleAfterSeconds": 15
     }
-  }
+  },
+  "sensors": []
 }

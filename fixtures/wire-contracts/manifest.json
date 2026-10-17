@@ -249,14 +249,14 @@
     "Endpoint": "SignalR PrinterHub \u0022printerupdated\u0022 (RequestPrinterStatus)",
     "ProducingTest": "PrinterStatusContractTests.RequestPrinterStatus_MinimalStatus_OmitsOptionalKeys",
     "SchemaVersion": "1.0",
-    "RefreshCommit": "4170ef47acdf8206bbf0bc53e1669326f638f93f"
+    "RefreshCommit": "f101c6cd7d21be1be1a2b9cf4eaa5b0c72c5c237"
   },
   {
     "Path": "api/printer-status/printerupdated.populated.json",
     "Endpoint": "SignalR PrinterHub \u0022printerupdated\u0022 (RequestPrinterStatus)",
     "ProducingTest": "PrinterStatusContractTests.RequestPrinterStatus_CachedStatus_SendsPrinterUpdatedEventMatchingCorpus",
     "SchemaVersion": "1.0",
-    "RefreshCommit": "4170ef47acdf8206bbf0bc53e1669326f638f93f"
+    "RefreshCommit": "f101c6cd7d21be1be1a2b9cf4eaa5b0c72c5c237"
   },
   {
     "Path": "api/signalr-events/SlicerRegistered.populated.json",

@@ -121,6 +121,50 @@ public class PrinterStatusBroadcastGateTests
         status.LiveZOffsetMm.Should().Be(0.025);
     }
 
+    private static PrinterSensorDto Chamber(double temperature, bool available = true) =>
+        new("temperature_sensor chamber", "Chamber", PrinterSensorKind.Chamber)
+        {
+            Available = available,
+            Readings = [new(PrinterSensorQuantity.Temperature, PrinterSensorValue.FromNumber(temperature), PrinterSensorUnit.Celsius)],
+        };
+
+    [Fact]
+    public void ShouldBroadcast_SensorContentEqualAcrossInstances_ReturnsFalse()
+    {
+        PrinterStatusUpdate lastSent = MakeUpdate() with { Sensors = [Chamber(30)] };
+        PrinterStatusUpdate update = MakeUpdate() with { Sensors = [Chamber(30)] };
+
+        PrinterStatusBroadcastGate.ShouldBroadcast(lastSent, update).Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData(31, true)]
+    [InlineData(30, false)]
+    public void ShouldBroadcast_SensorOnlyOrAvailabilityOnlyChange_ReturnsTrue(double temperature, bool available)
+    {
+        PrinterStatusUpdate lastSent = MakeUpdate() with { Sensors = [Chamber(30)] };
+        PrinterStatusUpdate update = MakeUpdate() with { Sensors = [Chamber(temperature, available)] };
+
+        PrinterStatusBroadcastGate.ShouldBroadcast(lastSent, update).Should().BeTrue();
+    }
+
+    [Fact]
+    public void ShouldBroadcast_LegacyFieldChangeWithEqualSensors_ReturnsTrue()
+    {
+        PrinterStatusUpdate lastSent = MakeUpdate() with { Sensors = [Chamber(30)] };
+        PrinterStatusUpdate update = MakeUpdate(bedTemp: 60) with { Sensors = [Chamber(30)] };
+
+        PrinterStatusBroadcastGate.ShouldBroadcast(lastSent, update).Should().BeTrue();
+    }
+
+    [Fact]
+    public void ToStatusDto_PreservesSensors()
+    {
+        PrinterStatusDto status = (MakeUpdate() with { Sensors = [Chamber(30)] }).ToStatusDto();
+
+        status.Sensors.Should().ContainSingle().Which.Should().Be(Chamber(30));
+    }
+
     [Fact]
     public void ShouldBroadcast_OfflineThenRecovered_RecoveryIsNotSuppressed()
     {

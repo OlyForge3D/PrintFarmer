@@ -82,6 +82,8 @@ public class PrinterBackendCapabilitiesServiceTests
         Assert.False(dto.SupportsFilamentLoad);
         Assert.False(dto.SupportsFilamentUnload);
         Assert.False(dto.SupportsFilamentChange);
+        Assert.False(dto.SupportsSensorTelemetry);
+        Assert.False(dto.SupportsSensorControl);
         Assert.Equal(
             VerifiedSafetyDiscoveryState.Unavailable,
             dto.VerifiedSafety.Discovery.State);
@@ -148,6 +150,44 @@ public class PrinterBackendCapabilitiesServiceTests
         Assert.True(known.SupportsFanSpeedReadback);
         Assert.True(known.SupportsZOffsetAdjustment);
         Assert.True(known.SupportsZOffsetReadback);
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task GetByPrinterIdAsync_SensorFlagsFollowOptInInterfaces(bool telemetry, bool control)
+    {
+        Guid printerId = Guid.NewGuid();
+        var backendClient = new Mock<IBackendClient>();
+        if (control)
+        {
+            backendClient.As<ISupportsSensorControl>();
+        }
+        else if (telemetry)
+        {
+            backendClient.As<ISupportsSensorTelemetry>();
+        }
+
+        var backendClients = new Mock<IBackendClientFactory>();
+        backendClients.Setup(factory => factory.GetClient(PrinterBackend.Moonraker))
+            .Returns(backendClient.Object);
+        var capabilityFactory = new Mock<IBackendCapabilityFactory>();
+        capabilityFactory.Setup(factory => factory.GetSupportedCapabilities(PrinterBackend.Moonraker))
+            .Returns(BackendCapabilities.None);
+        var repo = new Mock<IPrintersRepository>();
+        repo.Setup(repository => repository.FindByIdAsync(printerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Printer { Id = printerId, Backend = (int)PrinterBackend.Moonraker });
+        var service = new PrinterBackendCapabilitiesService(
+            repo.Object,
+            capabilityFactory.Object,
+            backendClients.Object);
+
+        PrinterBackendCapabilitiesDto dto = (await service.GetByPrinterIdAsync(printerId, CancellationToken.None))!;
+
+        Assert.Equal(telemetry, dto.SupportsSensorTelemetry);
+        Assert.Equal(control, dto.SupportsSensorControl);
+        Assert.False(dto.SupportsFanControl);
     }
 
     [Fact]

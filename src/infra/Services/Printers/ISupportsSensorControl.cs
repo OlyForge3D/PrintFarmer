@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Domain;
+﻿using Farm.Infrastructure.Domain;
 
 namespace Farm.Infrastructure.Services.Printers;
 
@@ -6,6 +6,10 @@ namespace Farm.Infrastructure.Services.Printers;
 /// Marker for backend clients whose status pipeline publishes backend-neutral
 /// <see cref="PrinterSensorDto"/> entries. Backends that do not implement it report an empty
 /// <c>sensors</c> list and advertise <c>supportsSensorTelemetry = false</c>.
+/// Implementers must populate <c>Sensors</c> on both the cached status and the
+/// <c>PrinterStatusUpdate</c> they broadcast, or publish sensor-only changes through
+/// <c>IPrinterStatusCacheWriter.UpdateSensors</c> and
+/// <c>IPrinterStatusBroadcaster.BroadcastSensorChangeAsync</c>.
 /// </summary>
 #pragma warning disable CA1040 // Marker interface intentionally empty
 public interface ISupportsSensorTelemetry
