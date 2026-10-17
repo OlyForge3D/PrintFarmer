@@ -118,6 +118,7 @@ extension NetworkPathSnapshot {
     }
 }
 
+#if DEBUG
 /// Reports a permanently satisfied path. Used only by hermetic UI-test scenarios.
 @MainActor
 final class FixedSatisfiedPathObserver: NetworkPathObserving {
@@ -127,3 +128,4 @@ final class FixedSatisfiedPathObserver: NetworkPathObserving {
 
     func cancel() {}
 }
+#endif

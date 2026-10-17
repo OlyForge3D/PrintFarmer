@@ -93,12 +93,14 @@ final class JobListViewModel {
     }
 
     private static func defaultPathObserver() -> any NetworkPathObserving {
+        #if DEBUG
         // The queue-reorder UI scenario is hermetic; a live NWPathMonitor delivers
         // reachability late or flaps on simulators, making drag handles intermittent.
         if UITestBootstrap.isEnabled,
            CommandLine.arguments.contains(UITestBootstrap.queueReorderLaunchArgument) {
             return FixedSatisfiedPathObserver()
         }
+        #endif
         return NWPathMonitorObserver()
     }
 
