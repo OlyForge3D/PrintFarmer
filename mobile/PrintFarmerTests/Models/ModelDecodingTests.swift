@@ -946,3 +946,67 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertFalse(job.isMultiCopy)
     }
 }
+
+final class PrinterSensorModelTests: XCTestCase {
+    private func decode(_ json: String) throws -> [PrinterSensor] {
+        try TestData.decoder.decode([PrinterSensor].self, from: json.data(using: .utf8)!)
+    }
+
+    func test_steppedTarget_snapsToGridAndClampsToLargestOnGridValue() {
+        let d = SensorWritable(quantity: .fanSpeed, min: 0, max: 98, step: 5, unit: .percent)
+        XCTAssertEqual(PrinterSensorFormatting.steppedTarget(current: 33.3, increasing: true, descriptor: d), 35)
+        XCTAssertEqual(PrinterSensorFormatting.steppedTarget(current: 33.3, increasing: false, descriptor: d), 30)
+        XCTAssertEqual(PrinterSensorFormatting.steppedTarget(current: 35, increasing: true, descriptor: d), 40)
+        XCTAssertEqual(PrinterSensorFormatting.steppedTarget(current: 35, increasing: false, descriptor: d), 30)
+        XCTAssertEqual(PrinterSensorFormatting.steppedTarget(current: 95, increasing: true, descriptor: d), 95)
+        XCTAssertEqual(PrinterSensorFormatting.steppedTarget(current: 2, increasing: false, descriptor: d), 0)
+        XCTAssertTrue(PrinterSensorFormatting.isOnGrid(95, descriptor: d))
+        XCTAssertFalse(PrinterSensorFormatting.isOnGrid(98, descriptor: d))
+    }
+
+    func test_decodesReadingsWritableAndBoolValues() throws {
+        let sensors = try decode("""
+        [{"id":"runout","displayName":"Runout","kind":"FilamentRunout",
+          "readings":[{"quantity":"FilamentDetected","value":true,"unit":"None"}],
+          "available":true,"lastUpdated":"2026-01-01T00:00:00Z","writable":[]},
+         {"id":"fan part","displayName":"Part fan","kind":"Fan","fanRole":"PartCooling",
+          "readings":[{"quantity":"FanSpeed","value":40.5,"unit":"Percent"}],"available":false,
+          "writable":[{"quantity":"FanSpeed","min":0,"max":100,"step":5,"unit":"Percent"}]}]
+        """)
+        XCTAssertEqual(sensors[0].readings[0].value, .bool(true))
+        XCTAssertNil(sensors[0].readings[0].value.number)
+        XCTAssertNotNil(sensors[0].lastUpdated)
+        XCTAssertEqual(sensors[1].readings[0].value.number, 40.5)
+        XCTAssertFalse(sensors[1].available)
+        XCTAssertEqual(sensors[1].descriptor(for: .fanSpeed)?.step, 5)
+    }
+
+    func test_unknownEnumValuesDecodeToUnknownFallback() throws {
+        let sensors = try decode("""
+        [{"id":"x","displayName":"X","kind":"Quantum","fanRole":"Warp",
+          "readings":[{"quantity":"Flux","value":1,"unit":"Parsec"}],"available":true,"writable":[]}]
+        """)
+        XCTAssertEqual(sensors[0].kind, .unknown)
+        XCTAssertEqual(sensors[0].readings[0].quantity, .unknown)
+        XCTAssertEqual(sensors[0].readings[0].unit, .unknown)
+    }
+
+    func test_printerDecodesWithAndWithoutSensors() throws {
+        XCTAssertEqual(try TestData.decodePrinter().sensors, [])
+        let json = TestJSON.printer.replacingOccurrences(
+            of: "{", with: "{\"sensors\":[{\"id\":\"a\",\"displayName\":\"A\",\"kind\":\"Bed\",\"readings\":[],\"available\":true,\"writable\":[]}],",
+            options: [], range: TestJSON.printer.range(of: "{"))
+        XCTAssertEqual(try TestData.decodePrinter(from: json).sensors.map(\.id), ["a"])
+    }
+
+    func test_mergeKeepsCacheWhenOmittedAndReplacesWhenReported() throws {
+        let cached = try decode(#"[{"id":"a","displayName":"A","kind":"Bed","readings":[],"available":true,"writable":[]}]"#)
+        XCTAssertEqual(PrinterSensorFormatting.merge(cached: cached, update: nil), cached)
+        XCTAssertEqual(PrinterSensorFormatting.merge(cached: cached, update: []), [])
+    }
+
+    func test_capabilityFlagsDefaultFalseAndDecodeTrue() throws {
+        XCTAssertFalse(PrinterBackendCapabilities.fallback(for: .moonraker).supportsSensorControl)
+        XCTAssertFalse(PrinterBackendCapabilities.fallback(for: .moonraker).supportsSensorTelemetry)
+    }
+}
