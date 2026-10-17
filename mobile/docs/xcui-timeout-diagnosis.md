@@ -1,5 +1,36 @@
 ## XCUI timeout diagnosis (#2573)
 
+### One-shot iPad watchdog capture (#3263)
+
+**Diagnostic branch only; never merge.** The newly retained #3404 artifact
+`12087937468` reproduces the watchdog on Xcode 26.6 / iOS 26.5, during
+`JobDetailIPadNavigationUITests`' negative TabBar query. Main-thread AX callbacks
+continue until the fatal; a 9.038s gap occurs after attributes return, before an
+empty-children dictionary is logged. No retained crash report proves the
+responsible stack, so AX timing alone is not a causal conclusion.
+
+One newly authorized execution uses the original iPad shard 4 selectors and
+unchanged test setup, assertions, budgets and watchdog. `PFARM_STALL_CAPTURE`
+compiles an independent background marker writer, enabled only by a diagnostic
+argument in the JobDetail suite. It publishes PID, beat, uptime, wall-clock time
+and missing-beat duration to the app's cache. It does not run I/O on the main
+thread or watchdog queue and cannot refresh the real heartbeat.
+
+The host wrapper resolves the selected simulator's app container, rejects stale
+markers, and verifies the live PID's command belongs to that simulator and app.
+After two missing-beat seconds it takes two five-second samples at 10ms
+intervals, bounded by eight seconds per sampler, twelve samples and a 50MB
+pre-sample storage ceiling. Every sample records timestamps, PID, command,
+simulator and exit status. Capture failures are explicit; they cannot turn a
+failing test into success. The unchanged bounded test runner executes once.
+
+The draft's diagnostic-only workflow responds to opening only, runs no other
+shard, pins Xcode 26.6 (17F113) / iOS 26.5 (23F77), and uploads samples, marker
+events, native diagnostics, text/event/timing logs and xcresult even on failure.
+Opening the draft consumes the authorization, including setup failure. Do not
+rerun it. A passing run without a captured stall is inconclusive, not a fix or
+green release baseline. The normal workflow must be restored before any fix PR.
+
 ### Harvest queue failures (#3265)
 
 The retained iPad shard 2 bundle from run `37296414762`, original job

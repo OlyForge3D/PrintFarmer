@@ -2706,6 +2706,11 @@ enum UITestMainThreadHeartbeat {
         // turns means slow initial rendering is never reported as a stall.
         if beats.increment() == 1 {
             UITestMainThreadWatchdog(beats: beats, limit: stallLimit).start()
+            #if DEBUG && PFARM_STALL_CAPTURE
+            if CommandLine.arguments.contains("--uitesting-capture-main-thread") {
+                UITestMainThreadCapture(beats: beats).start()
+            }
+            #endif
         }
         publish()
     }
@@ -2798,6 +2803,48 @@ private final class UITestMainThreadWatchdog: @unchecked Sendable {
         )
     }
 }
+
+#if DEBUG && PFARM_STALL_CAPTURE
+/// Diagnostic branch only: an independent queue signals the host sampler.
+/// File I/O must never run on the main thread or delay the real watchdog.
+private final class UITestMainThreadCapture: @unchecked Sendable {
+    private let beats: UITestMainThreadBeatCounter
+    private let queue = DispatchQueue(label: "com.olyforge3d.printfarmer.uitesting.capture")
+    private var meter = UITestMainThreadStallMeter(limit: 20)
+    private var timer: DispatchSourceTimer?
+    private let destination = URL(fileURLWithPath: NSHomeDirectory())
+        .appendingPathComponent("Library/Caches/pfarm-main-thread-capture.json")
+
+    init(beats: UITestMainThreadBeatCounter) {
+        self.beats = beats
+    }
+
+    func start() {
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(deadline: .now(), repeating: 1)
+        timer.setEventHandler { [self] in
+            let beat = beats.value
+            let uptime = ProcessInfo.processInfo.systemUptime
+            _ = meter.tick(beat: beat, at: uptime)
+            do {
+                let record: [String: Any] = [
+                    "pid": ProcessInfo.processInfo.processIdentifier,
+                    "uptime": uptime,
+                    "unixTime": Date().timeIntervalSince1970,
+                    "beat": beat,
+                    "stalled": meter.stalled
+                ]
+                let data = try JSONSerialization.data(withJSONObject: record)
+                try data.write(to: destination, options: .atomic)
+            } catch {
+                fputs("PFARM_STALL_CAPTURE: marker write failed: \(error)\n", stderr)
+            }
+        }
+        self.timer = timer
+        timer.resume()
+    }
+}
+#endif
 
 #if DEBUG
 private final class QueueReorderUITestJobService: DemoJobService, @unchecked Sendable {
