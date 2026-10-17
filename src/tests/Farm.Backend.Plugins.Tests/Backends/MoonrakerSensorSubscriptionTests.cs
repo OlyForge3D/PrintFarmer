@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using Farm.Backend.Plugin.Moonraker;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Contracts.Printers.Moonraker;
@@ -219,6 +219,65 @@ public sealed class MoonrakerSensorSubscriptionTests : IAsyncDisposable
         sensors["fan_generic aux"].Available.Should().BeTrue();
         sensors["fan_generic aux"].Writable.Should().ContainSingle(w => w.Quantity == PrinterSensorQuantity.FanSpeed);
         sensors["extruder"].Available.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task NotifyStatusUpdate_TemperatureHumidityAndFanOnlyFixtures_BroadcastMergedSnapshotsAndRestoreAfterReconnect()
+    {
+        await ProcessStatusAsync(InitialStatus);
+        List<string> sent = [];
+        _service.RegisterJsonRpcSender(_printerId, (json, _) =>
+        {
+            sent.Add(json);
+            return Task.CompletedTask;
+        });
+
+        _broadcasts.Clear();
+        await ProcessMessageAsync(
+            """{"jsonrpc":"2.0","method":"notify_status_update","params":[{"temperature_sensor chamber":{"temperature":31.5}},10.0]}""");
+        await ProcessMessageAsync(
+            """{"jsonrpc":"2.0","method":"notify_status_update","params":[{"temperature_sensor chamber":{"humidity":42}},10.5]}""");
+        await ProcessMessageAsync(
+            """{"jsonrpc":"2.0","method":"notify_status_update","params":[{"fan":{"speed":0.25}},11.0]}""");
+
+        List<PrinterStatusUpdate> updates = [.. _broadcasts.OfType<PrinterStatusUpdate>()];
+        updates.Should().HaveCount(3);
+        Dictionary<string, PrinterSensorDto> last = ById(updates[^1].Sensors);
+        last.Keys.Should().BeEquivalentTo("extruder", "heater_bed", "fan", "temperature_sensor chamber");
+        last["temperature_sensor chamber"].Readings.Select(r => (r.Quantity, r.Value.Number)).Should().Equal(
+            (PrinterSensorQuantity.Temperature, 31.5d),
+            (PrinterSensorQuantity.Humidity, 42d),
+            (PrinterSensorQuantity.Pressure, 1010d));
+        last["fan"].Readings.Single(r => r.Quantity == PrinterSensorQuantity.FanSpeed).Value.Number.Should().Be(25);
+        last["extruder"].Readings.Single(r => r.Quantity == PrinterSensorQuantity.Temperature).Value.Number.Should().Be(200);
+        updates[^1].FanSpeedPercent.Should().Be(25);
+
+        await ProcessMessageAsync("""{"jsonrpc":"2.0","method":"notify_klippy_disconnected"}""");
+        _sensorWrites[^1].Sensors.Should().OnlyContain(s => !s.Available);
+
+        await ProcessMessageAsync("""{"jsonrpc":"2.0","method":"notify_klippy_ready"}""");
+        await ProcessMessageAsync(
+            """{"jsonrpc":"2.0","id":103,"result":{"objects":["webhooks","print_stats","extruder","heater_bed","fan","temperature_sensor chamber"]}}""");
+        sent.Select(s => JsonDocument.Parse(s).RootElement.GetProperty("method").GetString()).Should()
+            .Equal("printer.objects.list", "printer.objects.subscribe");
+
+        _broadcasts.Clear();
+        await ProcessMessageAsync(
+            """
+            {"jsonrpc":"2.0","id":101,"result":{"eventtime":20,"status":{
+              "webhooks":{"state":"ready"},"print_stats":{"state":"standby"},
+              "extruder":{"temperature":190,"target":0,"power":0},"heater_bed":{"temperature":55,"target":0,"power":0},
+              "fan":{"speed":0},"temperature_sensor chamber":{"temperature":29,"humidity":50,"pressure":1005}
+            }}}
+            """);
+
+        Dictionary<string, PrinterSensorDto> restored = ById(_broadcasts.OfType<PrinterStatusUpdate>().Last().Sensors);
+        restored.Values.Should().OnlyContain(s => s.Available);
+        restored.Keys.Should().BeEquivalentTo("extruder", "heater_bed", "fan", "temperature_sensor chamber");
+        restored["temperature_sensor chamber"].Readings.Select(r => (r.Quantity, r.Value.Number)).Should().Equal(
+            (PrinterSensorQuantity.Temperature, 29d),
+            (PrinterSensorQuantity.Humidity, 50d),
+            (PrinterSensorQuantity.Pressure, 1005d));
     }
 
     [Fact]
