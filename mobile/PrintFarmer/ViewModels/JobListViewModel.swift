@@ -84,12 +84,24 @@ final class JobListViewModel {
         with observer: (any NetworkPathObserving)? = nil
     ) {
         guard pathObserver == nil else { return }
-        let observer = observer ?? NWPathMonitorObserver()
+        let observer = observer ?? Self.defaultPathObserver()
         pathObserver = observer
         observer.start { [weak self] snapshot in
             guard let self else { return }
             self.isNetworkReachable = snapshot.reachability == .satisfied
         }
+    }
+
+    private static func defaultPathObserver() -> any NetworkPathObserving {
+        #if DEBUG
+        // The queue-reorder UI scenario is hermetic; a live NWPathMonitor delivers
+        // reachability late or flaps on simulators, making drag handles intermittent.
+        if UITestBootstrap.isEnabled,
+           CommandLine.arguments.contains(UITestBootstrap.queueReorderLaunchArgument) {
+            return FixedSatisfiedPathObserver()
+        }
+        #endif
+        return NWPathMonitorObserver()
     }
 
     func configureSignalR(_ service: any SignalRServiceProtocol) {
