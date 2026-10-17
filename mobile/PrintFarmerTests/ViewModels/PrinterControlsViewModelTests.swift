@@ -182,6 +182,62 @@ final class PrinterControlsViewModelTests: XCTestCase {
         XCTAssertNil(mockService.homeCalledWith)
     }
 
+    // MARK: - Sensors & fans
+
+    private static let sensorJSON = """
+    [{"id":"fan part","displayName":"Part fan","kind":"Fan","fanRole":"PartCooling",
+      "readings":[{"quantity":"FanSpeed","value":40,"unit":"Percent"}],"available":true,
+      "writable":[{"quantity":"FanSpeed","min":0,"max":100,"step":5,"unit":"Percent"}]},
+     {"id":"fan hotend","displayName":"Hotend fan","kind":"Fan","fanRole":"Hotend",
+      "readings":[{"quantity":"FanRpm","value":4200,"unit":"Rpm"}],"available":true,"writable":[]}]
+    """
+
+    private func sensorViewModel(supportsControl: Bool = true) async throws -> PrinterControlsViewModel {
+        var printer = try idlePrinter()
+        printer.sensors = try JSONDecoder().decode([PrinterSensor].self, from: Self.sensorJSON.data(using: .utf8)!)
+        var caps = Self.fullCaps
+        caps.supportsSensorControl = supportsControl
+        let model = try makeViewModel(printer: printer, capabilities: caps)
+        await model.loadCapabilities()
+        return model
+    }
+
+    func test_sensorControl_onlyWritableEntriesExposeControls() async throws {
+        let model = try await sensorViewModel()
+        XCTAssertEqual(model.controllableSensors.map(\.id), ["fan part"])
+    }
+
+    func test_sensorControl_outOfRangeValueIsRejectedWithoutServiceCall() async throws {
+        let model = try await sensorViewModel()
+        await model.setSensorValue(sensorId: "fan part", quantity: .fanSpeed, value: 150)
+        XCTAssertEqual(mockService.setSensorValueCallCount, 0)
+        XCTAssertNotNil(model.lastError)
+    }
+
+    func test_sensorControl_readOnlyEntryAndUnsupportedCapabilityNeverReachService() async throws {
+        let model = try await sensorViewModel()
+        await model.setSensorValue(sensorId: "fan hotend", quantity: .fanRpm, value: 10)
+        XCTAssertEqual(mockService.setSensorValueCallCount, 0)
+        let unsupported = try await sensorViewModel(supportsControl: false)
+        await unsupported.setSensorValue(sensorId: "fan part", quantity: .fanSpeed, value: 50)
+        XCTAssertEqual(mockService.setSensorValueCallCount, 0)
+    }
+
+    func test_sensorControl_failureSurfacesErrorAndSuccessCallsServiceOnce() async throws {
+        let model = try await sensorViewModel()
+        mockService.errorToThrow = NetworkError.timeout
+        await model.setSensorValue(sensorId: "fan part", quantity: .fanSpeed, value: 60)
+        XCTAssertNotNil(model.lastError)
+        XCTAssertEqual(mockService.setSensorValueCallCount, 1)
+
+        mockService.errorToThrow = nil
+        let ok = try await sensorViewModel()
+        await ok.setSensorValue(sensorId: "fan part", quantity: .fanSpeed, value: 60)
+        XCTAssertNil(ok.lastError)
+        XCTAssertEqual(mockService.setSensorValueCalledWith?.sensorId, "fan part")
+        XCTAssertEqual(mockService.setSensorValueCalledWith?.value, 60)
+    }
+
     private func makeViewModel(
         printer: Printer? = nil,
         capabilities: PrinterBackendCapabilities? = nil,
