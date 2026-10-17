@@ -18,6 +18,7 @@ import { PrinterBackend, type ApiError, type MoveRequest, type Printer, type Pri
 import { PrinterHistoryModal } from '@/features/printers/components/PrinterHistoryModal';
 import { PrinterFilesModal } from '@/features/printers/components/PrinterFilesModal';
 import { TemperatureControlSection } from '@/features/printers/components/TemperatureControlSection';
+import { PrinterSensorsPanel } from '@/features/printers/components/PrinterSensorsPanel';
 import { usePrinterMovement } from '@/features/printers/hooks/use-printer-movement';
 import {
   canCancel,
@@ -218,6 +219,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
   const [isMoveExpanded, setIsMoveExpanded] = useState(true);
 
   const [isTempsExpanded, setIsTempsExpanded] = useState(true);
+  const [isSensorsExpanded, setIsSensorsExpanded] = useState(true);
   const [isSpoolExpanded, setIsSpoolExpanded] = useState(true);
   const [showSpoolPicker, setShowSpoolPicker] = useState(false);
   const [controlActionPending, setControlActionPending] = useState(false);
@@ -1263,6 +1265,21 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
             }}
           />
         </CollapsibleSection>
+
+        {(backendCapabilities?.supportsSensorTelemetry || (displayPrinter?.sensors?.length ?? 0) > 0) && (
+          <CollapsibleSection
+            title="Sensors & fans"
+            expanded={isSensorsExpanded}
+            onToggle={setIsSensorsExpanded}
+          >
+            <PrinterSensorsPanel
+              printerId={printer.id}
+              sensors={displayPrinter?.sensors}
+              canControl={backendCapabilities?.supportsSensorControl ?? false}
+              isOnline={isOnline}
+            />
+          </CollapsibleSection>
+        )}
 
         {/* MMU Control Box - the single slot representation when MMU/ERCF/AMS is
             detected via real-time status; spool assignment lives in its action row. */}
