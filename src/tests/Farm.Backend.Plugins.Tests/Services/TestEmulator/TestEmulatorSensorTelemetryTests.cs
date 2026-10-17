@@ -1,4 +1,4 @@
-using System.Reflection;
+﻿using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Backend.Plugin.TestEmulator;
@@ -159,6 +159,47 @@ public class TestEmulatorSensorTelemetryTests : IDisposable
         updates[1].IsOnline.Should().BeFalse();
         updates[1].Sensors.Should().HaveCount(7).And.OnlyContain(s => !s.Available);
         updates[2].Sensors.Should().Equal(updates[0].Sensors);
+    }
+
+    [Theory]
+    [InlineData("chamber", PrinterSensorQuantity.Temperature, 31)]
+    [InlineData("environment", PrinterSensorQuantity.Humidity, 55)]
+    [InlineData("fan_part", PrinterSensorQuantity.FanSpeed, 75)]
+    public async Task TickPrinterAsync_ReadingOnlyChange_PropagatesAcrossReconnect(
+        string sensorId, PrinterSensorQuantity quantity, double value)
+    {
+        Guid printerId = Guid.NewGuid();
+        EmulatedPrinterState state = new() { State = EmulatorPrinterState.Idle };
+        _stateManager.Register(printerId, state);
+        await TickAsync(printerId);
+
+        switch (quantity)
+        {
+            case PrinterSensorQuantity.Temperature:
+                state.ChamberTemp = value;
+                break;
+            case PrinterSensorQuantity.Humidity:
+                state.Humidity = value;
+                break;
+            case PrinterSensorQuantity.FanSpeed:
+                await _client.SetSensorValueAsync(BaseUrl(printerId), sensorId, quantity, value, null);
+                break;
+        }
+
+        await TickAsync(printerId);
+        state.State = EmulatorPrinterState.Offline;
+        await TickAsync(printerId);
+        state.State = EmulatorPrinterState.Idle;
+        await TickAsync(printerId);
+
+        List<PrinterStatusUpdate> updates = SignalRUpdates();
+        updates.Should().HaveCount(4);
+        updates[1].HotendTemp.Should().Be(updates[0].HotendTemp);
+        updates[1].BedTemp.Should().Be(updates[0].BedTemp);
+        Number(updates[1].Sensors.Single(s => s.Id == sensorId), quantity).Should().Be(value);
+        updates[2].Sensors.Should().OnlyContain(s => !s.Available);
+        updates[3].Sensors.Should().Equal(updates[1].Sensors);
+        _cacheWrites[^1].Sensors.Should().Equal(updates[3].Sensors);
     }
 
     [Fact]

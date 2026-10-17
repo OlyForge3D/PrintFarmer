@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Services.Printers;
 
