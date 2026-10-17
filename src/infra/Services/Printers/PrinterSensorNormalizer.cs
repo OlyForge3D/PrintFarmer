@@ -45,12 +45,9 @@ public static class PrinterSensorNormalizer
         }
 
         Dictionary<string, PrinterSensorDto> byId = new(StringComparer.Ordinal);
-        foreach (PrinterSensorDto? sensor in sensors)
+        foreach (PrinterSensorDto sensor in sensors.Where(IsAcceptedId).Select(sensor => sensor!))
         {
-            if (IsAcceptedId(sensor))
-            {
-                byId[sensor!.Id] = NormalizeEntry(sensor);
-            }
+            byId[sensor.Id] = NormalizeEntry(sensor);
         }
 
         return byId.Count == 0
@@ -79,12 +76,9 @@ public static class PrinterSensorNormalizer
         }
 
         Dictionary<string, PrinterSensorDto> rawById = new(StringComparer.Ordinal);
-        foreach (PrinterSensorDto? raw in updates ?? [])
+        foreach (PrinterSensorDto raw in (updates ?? []).Where(IsAcceptedId).Select(raw => raw!))
         {
-            if (IsAcceptedId(raw))
-            {
-                rawById[raw!.Id] = raw;
-            }
+            rawById[raw.Id] = raw;
         }
 
         foreach (PrinterSensorDto raw in rawById.Values)
