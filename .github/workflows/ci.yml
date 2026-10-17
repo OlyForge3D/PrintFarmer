@@ -400,6 +400,9 @@ jobs:
       - name: Test bounded gh API transport
         run: node --test scripts/ci/tests/test-gh-api.mjs
 
+      - name: Test live review-thread preflight
+        run: node --test scripts/ci/tests/test-verify-pr-review-threads.mjs
+
       - name: Test squad verdict gate rules
         run: node --test scripts/ci/tests/test-squad-verdict-gate.mjs
 

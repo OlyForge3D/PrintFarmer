@@ -199,9 +199,27 @@ or rejection from a PR that never had squad evidence.
   - `reviewer <agent> is the PR author` — the only record came from the author.
   Act on the named condition — do not park the PR, and do not route it back to
   the author as review feedback.
-- Merge an approved PR with
+- Immediately before merging, after verifying verdict evidence and required CI,
+  run the read-only thread preflight against the same reviewed head:
+
+  ```bash
+  node scripts/ci/verify-pr-review-threads.mjs \
+    --repo <owner>/<repository> --pr <number> \
+    --expected-head <reviewedHeadSha> --json
+  ```
+
+  Exit `0` means no unresolved threads at that observed head; exit `2` names
+  `UNRESOLVED_REVIEW_THREADS: N`, including outdated threads and every author.
+  Route the reported URLs to the PR author agent or owner to fix or reply with
+  a reason, then resolve. Never auto-resolve or treat this as missing panel review.
+  Exit `1` (API/permission/GraphQL error or malformed/incomplete pagination) and
+  exit `3` (head mismatch) block merge; report the named reason and obtain fresh
+  evidence. An error report never means zero unresolved threads.
+- Only after the thread preflight passes, merge an approved PR with
   `gh pr merge <number> --match-head-commit <reviewedHeadSha> ...`. Never
-  leave a force-push window between evidence verification and merge.
+  leave a force-push window between evidence verification and merge. GitHub
+  remains authoritative: threads can open or reopen without changing the SHA.
+  Report a merge refusal after a clean preflight; do not retry blindly.
 - Exit codes are `0` for `REVIEWED`/`APPROVED`, `2` for `CHANGES_REQUESTED`,
   `3` for missing, invalid, or superseded evidence, `4` for `NOT_APPLICABLE`
   (out of scope — no `squad` label), and `1` for verifier/tool failure. Prefer
