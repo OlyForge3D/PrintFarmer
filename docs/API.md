@@ -223,7 +223,10 @@ Moonraker advertises both sensor capabilities. Sensor ids are the Klipper object
 names (for example `temperature_sensor chamber`), so they stay stable across
 reconnects. Objects are re-enumerated on reconnect and `notify_klippy_ready`;
 removed objects and all objects during a Klippy disconnect are reported with
-`available: false`.
+`available: false`. While the WebSocket subscription is degraded to HTTP polling,
+broadcasts report the last known sensors with `available: false`, because HTTP
+polling does not read Klipper sensors. The next WebSocket status update restores
+availability.
 
 | Klipper object | Kind / role | Readings | Writable |
 |---|---|---|---|

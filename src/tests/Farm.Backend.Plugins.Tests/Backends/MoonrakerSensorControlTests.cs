@@ -105,6 +105,8 @@ public sealed class MoonrakerSensorControlTests
     [Theory]
     [InlineData(HttpStatusCode.ServiceUnavailable, "{}")]
     [InlineData(HttpStatusCode.OK, """{"result":{"objects":"nope"}}""")]
+    [InlineData(HttpStatusCode.OK, "<html>proxy login</html>")]
+    [InlineData(HttpStatusCode.OK, "[]")]
     public async Task SetSensorValueAsync_ObjectListUnavailableOrMalformed_SendsNoGcode(HttpStatusCode status, string body)
     {
         using var handler = new SensorHandler { ObjectsStatus = status, ObjectsBody = body };
@@ -120,6 +122,19 @@ public sealed class MoonrakerSensorControlTests
     public async Task SetSensorValueAsync_ConfigQueryFails_SendsNoGcode()
     {
         using var handler = new SensorHandler { SettingsStatus = HttpStatusCode.InternalServerError };
+        using var http = new HttpClient(handler);
+
+        bool accepted = await CreateClient(http).SetSensorValueAsync(
+            BaseUrl, "temperature_fan exhaust_fan", PrinterSensorQuantity.TargetTemperature, 40, Credential);
+
+        accepted.Should().BeFalse();
+        handler.Scripts.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task SetSensorValueAsync_ConfigQueryNotJson_SendsNoGcode()
+    {
+        using var handler = new SensorHandler { SettingsBody = "<html>gateway error</html>" };
         using var http = new HttpClient(handler);
 
         bool accepted = await CreateClient(http).SetSensorValueAsync(
@@ -155,6 +170,8 @@ public sealed class MoonrakerSensorControlTests
 
         public HttpStatusCode SettingsStatus { get; init; } = HttpStatusCode.OK;
 
+        public string? SettingsBody { get; init; }
+
         public double HeaterMaxTemp { get; init; } = 80;
 
         public List<string> Requests { get; } = [];
@@ -182,7 +199,7 @@ public sealed class MoonrakerSensorControlTests
                           "heater_generic chamber_heater":{"min_temp":0,"max_temp":{{{{{{HeaterMaxTemp}}}}}}}
                         }}}}}
                         """);
-                    return Json(SettingsStatus, settings);
+                    return Json(SettingsStatus, SettingsBody ?? settings);
                 case "/printer/gcode/script":
                     using (JsonDocument doc = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(cancellationToken)))
                     {

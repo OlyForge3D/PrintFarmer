@@ -1014,6 +1014,16 @@ public sealed class MoonrakerSubscriptionService(
             : update;
 
     /// <summary>
+    /// HTTP polling fallback means the WebSocket is not delivering trustworthy sensor notifications,
+    /// so the broadcast reports the last tracked sensors as unavailable instead of presenting frozen
+    /// values as live. The tracker is left untouched so a recovered subscription restores it.
+    /// </summary>
+    private PrinterStatusUpdate WithStaleTrackedSensors(Guid printerId, PrinterStatusUpdate update) =>
+        _printerStates.TryGetValue(printerId, out PrinterState? state) && state.Sensors.HasSensors
+            ? update with { Sensors = [.. state.Sensors.Snapshot().Select(sensor => sensor with { Available = false })] }
+            : update;
+
+    /// <summary>
     /// Marks the printer's tracked sensors unavailable and returns the complete snapshot, or null
     /// when the printer has no tracked state.
     /// </summary>
@@ -3832,7 +3842,7 @@ public sealed class MoonrakerSubscriptionService(
 
                     await hub.Clients.Group(
                             Farm.Infrastructure.Security.AuthorizedHubGroups.Printer(printer.Id))
-                        .SendAsync("printerupdated", WithTrackedSensors(printer.Id, statusUpdate), ct);
+                        .SendAsync("printerupdated", WithStaleTrackedSensors(printer.Id, statusUpdate), ct);
 
                     // Update last poll time and reset parse error count since HTTP polling succeeded
                     _lastHttpPollTimes[printer.Id] = DateTime.UtcNow;

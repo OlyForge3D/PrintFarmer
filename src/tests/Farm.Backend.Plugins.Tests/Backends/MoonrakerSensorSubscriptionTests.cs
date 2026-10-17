@@ -23,6 +23,7 @@ public sealed class MoonrakerSensorSubscriptionTests : IAsyncDisposable
 {
     private readonly Guid _printerId = Guid.NewGuid();
     private readonly Mock<IPrinterStatusCacheWriter> _cacheWriter = new();
+    private readonly Mock<IMoonrakerClient> _client = new();
     private readonly List<PrinterStatusDto> _cached = [];
     private readonly List<(IReadOnlyList<PrinterSensorDto> Sensors, bool ReplaceAll)> _sensorWrites = [];
     private readonly List<object?> _broadcasts = [];
@@ -55,7 +56,7 @@ public sealed class MoonrakerSensorSubscriptionTests : IAsyncDisposable
         hub.Setup(h => h.Clients).Returns(clients.Object);
 
         var services = new ServiceCollection();
-        services.AddScoped(_ => new Mock<IMoonrakerClient>().Object);
+        services.AddScoped(_ => _client.Object);
         _provider = services.BuildServiceProvider();
 
         _service = new MoonrakerSubscriptionService(
@@ -278,6 +279,29 @@ public sealed class MoonrakerSensorSubscriptionTests : IAsyncDisposable
             (PrinterSensorQuantity.Temperature, 29d),
             (PrinterSensorQuantity.Humidity, 50d),
             (PrinterSensorQuantity.Pressure, 1005d));
+    }
+
+    [Fact]
+    public async Task TriggerHttpPollingFallbackAsync_TrackedSensors_BroadcastsThemUnavailableWithoutLosingWebSocketState()
+    {
+        await ProcessStatusAsync(InitialStatus);
+        _client
+            .Setup(c => c.GetCompositeStatusAsync(It.IsAny<string>(), It.IsAny<PrinterCredential?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PrinterCompositeStatus(true, "standby", null, null, null, null, null, HotendTemp: 201, BedTemp: 60));
+        _broadcasts.Clear();
+        _cached.Clear();
+
+        await _service.TriggerHttpPollingFallbackAsync(Printer, _cts.Token);
+
+        PrinterStatusUpdate fallback = _broadcasts.OfType<PrinterStatusUpdate>().Should().ContainSingle().Subject;
+        fallback.Sensors.Should().HaveCount(4).And.OnlyContain(s => !s.Available && s.Readings.Count > 0);
+        fallback.HotendTemp.Should().Be(201);
+        _cached.Should().ContainSingle().Which.SensorsReported.Should().BeFalse();
+
+        _broadcasts.Clear();
+        await ProcessStatusAsync("""{ "fan": { "speed": 0.1 } }""");
+
+        ById(_broadcasts.OfType<PrinterStatusUpdate>().Last().Sensors).Values.Should().OnlyContain(s => s.Available);
     }
 
     [Fact]

@@ -66,10 +66,11 @@ public partial class MoonrakerClient : ISupportsPrinterControlCapabilities, ISup
                 return false;
             }
 
-            await using (Stream objectsStream = await objectsResponse.Content.ReadAsStreamAsync(timeout.Token).ConfigureAwait(false))
+            using (JsonDocument? objectsDocument = await TryParseSensorDiscoveryAsync(objectsResponse, sensorId, timeout.Token).ConfigureAwait(false))
             {
-                using JsonDocument objectsDocument = await JsonDocument.ParseAsync(objectsStream, cancellationToken: timeout.Token).ConfigureAwait(false);
-                objects = objectsDocument.RootElement.TryGetProperty("result", out JsonElement result) &&
+                objects = objectsDocument is not null &&
+                    objectsDocument.RootElement.ValueKind == JsonValueKind.Object &&
+                    objectsDocument.RootElement.TryGetProperty("result", out JsonElement result) &&
                     MoonrakerSubscriptionService.TryReadObjectNames(result, out List<string> names)
                         ? new HashSet<string>(names, StringComparer.Ordinal)
                         : null;
@@ -96,9 +97,14 @@ public partial class MoonrakerClient : ISupportsPrinterControlCapabilities, ISup
                     return false;
                 }
 
-                await using Stream settingsStream = await settingsResponse.Content.ReadAsStreamAsync(timeout.Token).ConfigureAwait(false);
-                using JsonDocument settingsDocument = await JsonDocument.ParseAsync(settingsStream, cancellationToken: timeout.Token).ConfigureAwait(false);
-                if (settingsDocument.RootElement.TryGetProperty("result", out JsonElement settingsResult) &&
+                using JsonDocument? settingsDocument = await TryParseSensorDiscoveryAsync(settingsResponse, sensorId, timeout.Token).ConfigureAwait(false);
+                if (settingsDocument is null)
+                {
+                    return false;
+                }
+
+                if (settingsDocument.RootElement.ValueKind == JsonValueKind.Object &&
+                    settingsDocument.RootElement.TryGetProperty("result", out JsonElement settingsResult) &&
                     settingsResult.TryGetProperty("status", out JsonElement status) &&
                     status.TryGetProperty("configfile", out JsonElement configfile) &&
                     configfile.TryGetProperty("settings", out JsonElement settingsElement))
@@ -120,6 +126,21 @@ public partial class MoonrakerClient : ISupportsPrinterControlCapabilities, ISup
         }
 
         return await SendControlScriptAsync(baseUrl, command, credential, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Parses a sensor-write discovery response, failing closed on non-JSON bodies such as proxy error pages.</summary>
+    private async Task<JsonDocument?> TryParseSensorDiscoveryAsync(HttpResponseMessage response, string sensorId, CancellationToken ct)
+    {
+        try
+        {
+            await using Stream stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+            return await JsonDocument.ParseAsync(stream, cancellationToken: ct).ConfigureAwait(false);
+        }
+        catch (JsonException)
+        {
+            _logger.LogWarning("Rejected Moonraker sensor write to {SensorId}: discovery response was not valid JSON", sensorId);
+            return null;
+        }
     }
 
     public Task<bool> AdjustZOffsetAsync(string baseUrl, decimal offsetMm, PrinterCredential? credential, CancellationToken ct = default)
