@@ -13,21 +13,22 @@ import XCTest
 @MainActor
 final class JobDetailIPadNavigationUITests: QueueUITestBase {
 
+    #if PFARM_STALL_CAPTURE
+    override var additionalLaunchArguments: [String] {
+        super.additionalLaunchArguments + ["--uitesting-capture-main-thread"]
+    }
+    #endif
+
     private let completedJobIdentifier = "job.row.30000000-0003-0000-0000-000000000007"
 
     /// Skips on the compact (iPhone) layout so the strict assertions below
     /// only run against the iPad (regular-width) sidebar shell. Selection is
     /// by layout, not best-effort: on iPad every assertion on the core path
-    /// is required. The regular-width shell is identified positively by its
-    /// sidebar or collapsed-sidebar toggle, never by the absence of a tab bar
-    /// (#3263); an unresolved shell fails rather than skips. Sidebar navigation
-    /// itself is exercised by `openQueueDestination()`, which handles a
-    /// collapsed iPad sidebar.
+    /// is required. The regular-width shell is identified by the absence of
+    /// the compact tab-bar surface; sidebar navigation itself is exercised
+    /// by `openQueueDestination()`, which handles a collapsed iPad sidebar.
     private func requireRegularWidthShell() throws {
-        if UIDevice.current.userInterfaceIdiom == .phone {
-            throw XCTSkip("iPad-only navigation coverage; compact (iPhone) shell is covered by HarvestUITests")
-        }
-        if try observedShellWidth() == .compact {
+        if UIDevice.current.userInterfaceIdiom == .phone || app.tabBars.firstMatch.waitForExistence(timeout: 8) {
             throw XCTSkip("iPad-only navigation coverage; compact (iPhone) shell is covered by HarvestUITests")
         }
     }

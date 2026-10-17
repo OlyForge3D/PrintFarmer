@@ -1,5 +1,44 @@
 ## XCUI timeout diagnosis (#2573)
 
+### One-shot iPad watchdog capture (#3263)
+
+**Diagnostic branch only; never merge.** The newly retained #3404 artifact
+`12087937468` reproduces the watchdog on Xcode 26.6 / iOS 26.5, during
+`JobDetailIPadNavigationUITests`' negative TabBar query. Main-thread AX callbacks
+continue until the fatal; a 9.038s gap occurs after attributes return, before an
+empty-children dictionary is logged. No retained crash report proves the
+responsible stack, so AX timing alone is not a causal conclusion.
+
+One newly authorized execution uses the original iPad shard 4 selectors and
+unchanged test setup, assertions, budgets and watchdog. `PFARM_STALL_CAPTURE`
+compiles an independent background marker writer, enabled only by a diagnostic
+argument in the JobDetail suite. It publishes PID, beat, uptime, wall-clock time
+and missing-beat duration to the app's cache. It does not run I/O on the main
+thread or watchdog queue and cannot refresh the real heartbeat.
+
+The host wrapper resolves the selected simulator's app container, rejects stale
+markers, and verifies the live PID's command belongs to that simulator and app.
+After two missing-beat seconds it takes two five-second samples at 10ms
+intervals, bounded by eight seconds per sampler, twelve samples and a 50MB
+pre-sample storage ceiling. Every sample records timestamps, PID, command,
+simulator and exit status. Capture failures are explicit; they cannot turn a
+failing test into success. The unchanged bounded test runner executes once.
+
+The draft's diagnostic-only workflow responds only to the next `synchronize`
+event on `jpapiez-squad-3263-ipad-xcui-tabbar-stall` whose prior head is exactly
+`bcb9f1f07902b065aec000b2a009e4920928a898`. That one reviewed push consumes the
+owner's new authorization, including setup failure. A later normal push or a
+reopen cannot enter the capture job. Never force-reset to reuse the prior-head
+guard, rerun a job, or repeat the execution.
+
+It runs no other shard, pins Xcode 26.6 (17F113) / iOS 26.5 (23F77), and uploads
+samples, marker events, native diagnostics, text/event/timing logs and xcresult
+even on failure. The host verifies macOS `ps comm` (executable path), separately
+from the full command, so trailing launch arguments cannot reject the real app
+or authorize a different executable. A passing run without a captured stall is
+inconclusive, not a fix or green release baseline. The normal workflow must be
+restored before any fix PR.
+
 ### Harvest queue failures (#3265)
 
 The retained iPad shard 2 bundle from run `37296414762`, original job
@@ -420,42 +459,6 @@ carried `AG_ASYNC_LAYOUTS=0`. A launch without it is still exposed to this
 cause. A signature that recurs with it present means the switch did not take
 effect or the livelock has another trigger. A launch-class failure without the
 signature has a different cause.
-
-### Negative layout probes (#3263)
-
-**Symptom.** On iPad, `JobDetailIPadNavigationUITests` intermittently died with
-the `UITestBootstrap` 20s main-run-loop watchdog. The fatal always landed
-inside XCTest accessibility work for `TabBar (First Match)`, never in app code.
-
-**Cause.** The suite chose its layout with
-`app.tabBars.firstMatch.waitForExistence(timeout: 8)` and treated absence as
-"regular width". On iPad that probe is designed to fail:
-
-1. No tab bar ever matches, so `firstMatch` cannot stop early. Each poll
-   evaluates the whole tree in one main-run-loop block in the app.
-2. When the 8s wait expires, XCTest cancels its future but the app keeps
-   evaluating the in-flight request on main.
-3. XCTest then issues an implicit final `exists` check with its own 30s
-   budget and retries. That check queues behind the cancelled evaluation.
-
-Run 38996745319 (PR #3404, iPad shard 4) shows the full chain. Polls took
-about 0.2s until host contention slowed per-element AX work. One poll then took
-about 5s. The final `exists` started at 03:23:52 and occupied main from
-03:23:55 until the watchdog fired at 03:24:21. The runner was still inside its
-30s query budget. Earlier occurrences on shards 2 and 3 had the same
-XCTest-owned frames.
-
-**Fix.** `observedShellWidth()` classifies the shell from positive evidence:
-the compact dock or a native tab bar means compact, and the sidebar or its
-collapsed toggle means regular. It uses the bounded `UIWaitBudget` snapshot
-loop, so it returns on the first ready snapshot. It starts no remote work after
-its deadline and never reveals or taps. An unresolved shell fails the test
-instead of skipping it. `requireCompactAdaptiveShell()` uses the same helper.
-
-**Rule.** Do not infer a layout or state from the *absence* of an element with
-`waitForExistence`. Wait for a positive marker of the expected state. Use a
-single `exists` check only after the positive state is established. The 20s
-watchdog and all wait budgets are unchanged.
 
 ### After-correction evidence
 

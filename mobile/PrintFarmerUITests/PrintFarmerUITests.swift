@@ -2345,7 +2345,8 @@ class PrintFarmerUITestCase: XCTestCase {
     }
 
     func requireCompactAdaptiveShell() throws {
-        guard try observedShellWidth() == .compact else {
+        guard app.descendants(matching: .any)["navigation.tabBar"].waitForExistence(timeout: 8)
+                || app.tabBars.firstMatch.waitForExistence(timeout: 8) else {
             throw XCTSkip("Two Modes is intentionally compact-width only")
         }
     }
@@ -2460,43 +2461,5 @@ class PrintFarmerUITestCase: XCTestCase {
                 line: line
             )
         }
-    }
-}
-
-extension PrintFarmerUITestCase {
-    enum ShellWidth: Equatable {
-        case compact
-        case regular
-    }
-
-    struct ShellWidthUnresolved: Error, CustomStringConvertible {
-        let description: String
-    }
-
-    /// Classifies the rendered shell from positive evidence in one bounded
-    /// snapshot loop: the compact dock (or a native tab bar) means compact, the
-    /// sidebar or its collapsed toggle means regular. Never infer a layout from
-    /// the absence of an element (#3263): a negative `waitForExistence` polls the
-    /// full tree until timeout, then XCTest issues an implicit final `exists`
-    /// with its own 30s budget that outlives the caller's wait and can hold the
-    /// app main thread past the `UITestBootstrap` watchdog. This never reveals,
-    /// taps or otherwise changes the shell.
-    func observedShellWidth(
-        timeout: TimeInterval = 8,
-        file: StaticString = #filePath,
-        line: UInt = #line
-    ) throws -> ShellWidth {
-        let budget = testBudget?.child(timeout: timeout) ?? UIWaitBudget(timeout: timeout)
-        let width = waitForObservedShell(budget: budget, file: file, line: line) { observation -> ShellWidth? in
-            switch observation.state {
-            case .compact: .compact
-            case .sidebar, .collapsed: .regular
-            case .notReady: nil
-            }
-        }
-        guard let width else {
-            throw ShellWidthUnresolved(description: "Shell width never resolved; \(budget.shellDiagnostic)")
-        }
-        return width
     }
 }
