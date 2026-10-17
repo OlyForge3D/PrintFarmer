@@ -1,4 +1,5 @@
 ﻿using System.Text.Json;
+using System.Threading.Channels;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
@@ -174,6 +175,88 @@ public sealed class PrinterStatusContractTests : IAsyncLifetime
         string proxyUrl = received.GetProperty("currentJobThumbnailUrl").GetString()!;
         proxyUrl.Should().StartWith($"/api/printers/{printerId:D}/current-job/thumbnail?v=");
         received.GetRawText().Should().NotContain("printer.internal");
+    }
+
+    [Fact]
+    public async Task SensorChanges_BroadcastMergedSnapshotsAndReplayAfterReconnect()
+    {
+        Guid printerId = Guid.NewGuid();
+        using IServiceScope scope = _factory.Services.CreateScope();
+        IPrinterStatusCacheWriter cache = scope.ServiceProvider.GetRequiredService<IPrinterStatusCacheWriter>();
+        IPrinterStatusBroadcaster broadcaster = scope.ServiceProvider.GetRequiredService<IPrinterStatusBroadcaster>();
+        cache.UpdateStatus(new PrinterStatusDto(printerId, IsOnline: true, State: "idle"));
+        string token = await CreateFarmAdminTokenAsync();
+        Channel<JsonElement> events = Channel.CreateUnbounded<JsonElement>();
+        await using HubConnection connection = BuildHubConnection(token);
+        using IDisposable subscription = connection.On<JsonElement>(
+            "printerupdated", payload => events.Writer.TryWrite(payload));
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+
+        await connection.StartAsync(timeout.Token);
+        await connection.InvokeAsync("SubscribeToPrinterAsync", printerId.ToString(), timeout.Token);
+        JsonElement initial = await events.Reader.ReadAsync(timeout.Token);
+        Assert.Empty(initial.GetProperty("sensors").EnumerateArray());
+
+        var chamber = new PrinterSensorDto("temperature_sensor chamber", "Chamber", PrinterSensorKind.Chamber)
+        {
+            Readings =
+            [
+                new(PrinterSensorQuantity.Temperature, PrinterSensorValue.FromNumber(35), PrinterSensorUnit.Celsius),
+                new(PrinterSensorQuantity.Humidity, PrinterSensorValue.FromNumber(42), PrinterSensorUnit.Percent),
+            ],
+        };
+        var filament = new PrinterSensorDto("filament_switch_sensor runout", "Runout", PrinterSensorKind.FilamentRunout)
+        {
+            Readings = [new(PrinterSensorQuantity.FilamentDetected, PrinterSensorValue.FromBoolean(true), PrinterSensorUnit.None)],
+        };
+
+        Assert.True(await broadcaster.BroadcastSensorChangeAsync(printerId, [chamber, filament], replaceAll: true, timeout.Token));
+        JsonElement first = await events.Reader.ReadAsync(timeout.Token);
+        Assert.Equal(printerId, first.GetProperty("id").GetGuid());
+        Assert.Equal("idle", first.GetProperty("state").GetString());
+        JsonElement[] sensors = first.GetProperty("sensors").EnumerateArray().ToArray();
+        Assert.Equal(2, sensors.Length);
+        Assert.Equal("filament_switch_sensor runout", sensors[0].GetProperty("id").GetString());
+        Assert.Equal("FilamentRunout", sensors[0].GetProperty("kind").GetString());
+        Assert.True(sensors[0].GetProperty("readings")[0].GetProperty("value").GetBoolean());
+        Assert.Equal("None", sensors[0].GetProperty("readings")[0].GetProperty("unit").GetString());
+        Assert.Equal(chamber.Id, sensors[1].GetProperty("id").GetString());
+        Assert.True(sensors[1].GetProperty("available").GetBoolean());
+        Assert.Equal("Temperature", sensors[1].GetProperty("readings")[0].GetProperty("quantity").GetString());
+        Assert.Equal(35, sensors[1].GetProperty("readings")[0].GetProperty("value").GetDouble());
+        Assert.Equal("Celsius", sensors[1].GetProperty("readings")[0].GetProperty("unit").GetString());
+
+        PrinterSensorDto partial = chamber with
+        {
+            Readings = [new(PrinterSensorQuantity.Temperature, PrinterSensorValue.FromNumber(36), PrinterSensorUnit.Celsius)],
+        };
+        Assert.True(await broadcaster.BroadcastSensorChangeAsync(printerId, [partial], replaceAll: false, timeout.Token));
+        JsonElement merged = await events.Reader.ReadAsync(timeout.Token);
+        JsonElement mergedChamber = merged.GetProperty("sensors")[1];
+        Assert.Equal(chamber.Id, mergedChamber.GetProperty("id").GetString());
+        Assert.Equal(2, mergedChamber.GetProperty("readings").GetArrayLength());
+        JsonElement temperature = mergedChamber.GetProperty("readings").EnumerateArray()
+            .Single(reading => reading.GetProperty("quantity").GetString() == "Temperature");
+        JsonElement humidity = mergedChamber.GetProperty("readings").EnumerateArray()
+            .Single(reading => reading.GetProperty("quantity").GetString() == "Humidity");
+        Assert.Equal(36, temperature.GetProperty("value").GetDouble());
+        Assert.Equal(42, humidity.GetProperty("value").GetDouble());
+        Assert.Equal("Percent", humidity.GetProperty("unit").GetString());
+        Assert.Equal(filament.Id, merged.GetProperty("sensors")[0].GetProperty("id").GetString());
+
+        Assert.True(await broadcaster.BroadcastSensorChangeAsync(
+            printerId, [partial with { Available = false }], replaceAll: false, timeout.Token));
+        JsonElement unavailable = await events.Reader.ReadAsync(timeout.Token);
+        Assert.False(unavailable.GetProperty("sensors")[1].GetProperty("available").GetBoolean());
+        Assert.False(await broadcaster.BroadcastSensorChangeAsync(
+            printerId, [partial with { Available = false }], replaceAll: false, timeout.Token));
+
+        await connection.StopAsync(timeout.Token);
+        await connection.StartAsync(timeout.Token);
+        await connection.InvokeAsync("SubscribeToPrinterAsync", printerId.ToString(), timeout.Token);
+        JsonElement replay = await events.Reader.ReadAsync(timeout.Token);
+        Assert.Equal(unavailable.GetProperty("sensors").GetRawText(), replay.GetProperty("sensors").GetRawText());
+        Assert.Equal(printerId, replay.GetProperty("id").GetGuid());
     }
 
     private HubConnection BuildHubConnection(string token) =>
