@@ -1060,6 +1060,7 @@ public sealed class MoonrakerSubscriptionService(
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
+            _logger.LogDebug("Sensor unavailability broadcast cancelled for printer {PrinterId}", printerId);
         }
         catch (Exception ex)
         {

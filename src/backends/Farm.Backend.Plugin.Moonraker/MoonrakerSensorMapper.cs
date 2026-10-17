@@ -502,12 +502,10 @@ internal sealed class MoonrakerSensorTracker
         (PrinterSensorKind kind, PrinterFanRole? role) = MoonrakerSensorMapper.Classify(entry.ObjectName, section);
 
         List<PrinterSensorReadingDto> readings = [];
-        foreach (MoonrakerSensorMapper.FieldMapping field in MoonrakerSensorMapper.FieldsFor(type))
+        foreach (MoonrakerSensorMapper.FieldMapping field in MoonrakerSensorMapper.FieldsFor(type).Where(f => entry.Values.ContainsKey(f.Field)))
         {
-            if (entry.Values.TryGetValue(field.Field, out PrinterSensorValue value))
-            {
-                readings.Add(new PrinterSensorReadingDto(field.Quantity, value, value.IsBoolean ? PrinterSensorUnit.None : field.Unit));
-            }
+            PrinterSensorValue value = entry.Values[field.Field];
+            readings.Add(new PrinterSensorReadingDto(field.Quantity, value, value.IsBoolean ? PrinterSensorUnit.None : field.Unit));
         }
 
         return new PrinterSensorDto(entry.ObjectName, MoonrakerSensorMapper.DisplayName(entry.ObjectName), kind)
