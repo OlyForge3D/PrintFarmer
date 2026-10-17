@@ -64,6 +64,9 @@ internal sealed class PrinterState
 
     public double? LiveZOffsetMm { get; set; }
 
+    /// <summary>Backend-neutral Klipper sensor/fan telemetry (issue #3407).</summary>
+    public MoonrakerSensorTracker Sensors { get; } = new();
+
     public void ResetLiveReadbacks()
     {
         CurrentLayer = null;

@@ -1,12 +1,14 @@
 ﻿using System.Globalization;
 using System.Text;
 using System.Text.Json;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Printers;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Backend.Plugin.Moonraker;
 
-public partial class MoonrakerClient : ISupportsPrinterControlCapabilities, ISupportsMotorControl, ISupportsExtrusionControl, ISupportsMmuControl, ISupportsZOffsetCalibration, ISupportsFanControl, ISupportsZOffsetAdjustment
+public partial class MoonrakerClient : ISupportsPrinterControlCapabilities, ISupportsMotorControl, ISupportsExtrusionControl, ISupportsMmuControl, ISupportsZOffsetCalibration, ISupportsFanControl, ISupportsZOffsetAdjustment, ISupportsSensorControl
 {
     public PrinterControlCapabilities ControlCapabilities { get; } = new()
     {
@@ -23,16 +25,101 @@ public partial class MoonrakerClient : ISupportsPrinterControlCapabilities, ISup
     public Task<bool> DisableMotorsAsync(string baseUrl, PrinterCredential? credential, CancellationToken ct = default) =>
         SendControlScriptAsync(baseUrl, "M84", credential, ct);
 
-    public Task<bool> SetFanSpeedAsync(string baseUrl, int speedPercent, PrinterCredential? credential, CancellationToken ct = default)
+    public Task<bool> SetFanSpeedAsync(string baseUrl, int speedPercent, PrinterCredential? credential, CancellationToken ct = default) =>
+        SendControlScriptAsync(baseUrl, MoonrakerSensorMapper.BuildPartFanCommand(speedPercent), credential, ct);
+
+    /// <summary>
+    /// Targeted Klipper sensor/fan write (issue #3407). The printer's live object list and, for
+    /// temperature targets, its configured <c>min_temp</c>/<c>max_temp</c> are re-read before any
+    /// G-code is built, so only a currently discovered, safely named, writable object with an
+    /// in-range value is ever commanded. Anything else is rejected without sending G-code.
+    /// </summary>
+    public async Task<bool> SetSensorValueAsync(
+        string baseUrl,
+        string sensorId,
+        PrinterSensorQuantity quantity,
+        double value,
+        PrinterCredential? credential,
+        CancellationToken ct = default)
     {
-        ArgumentOutOfRangeException.ThrowIfLessThan(speedPercent, 0);
-        ArgumentOutOfRangeException.ThrowIfGreaterThan(speedPercent, 100);
-        int gcodeSpeed = (int)Math.Round(speedPercent * 255d / 100d, MidpointRounding.AwayFromZero);
-        return SendControlScriptAsync(
-            baseUrl,
-            string.Create(CultureInfo.InvariantCulture, $"M106 S{gcodeSpeed}"),
-            credential,
-            ct);
+        if (!MoonrakerSensorMapper.IsSafeObjectName(sensorId))
+        {
+            _logger.LogWarning("Rejected Moonraker sensor write: unsafe sensor id");
+            return false;
+        }
+
+        HashSet<string>? objects;
+        Dictionary<string, MoonrakerSectionSettings> settings = new(StringComparer.OrdinalIgnoreCase);
+        using (CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(ct))
+        {
+            timeout.CancelAfter(_timeouts.StatusPollTimeout);
+            Uri root = new(baseUrl.TrimEnd('/') + "/");
+
+            using HttpRequestMessage objectsRequest = CreateSafetyDiscoveryRequest(new Uri(root, "printer/objects/list"), credential);
+            using HttpResponseMessage objectsResponse = await _http.SendAsync(objectsRequest, timeout.Token).ConfigureAwait(false);
+            if (!objectsResponse.IsSuccessStatusCode)
+            {
+                _logger.LogWarning(
+                    "Rejected Moonraker sensor write to {SensorId}: object list returned {StatusCode}",
+                    sensorId,
+                    (int)objectsResponse.StatusCode);
+                return false;
+            }
+
+            await using (Stream objectsStream = await objectsResponse.Content.ReadAsStreamAsync(timeout.Token).ConfigureAwait(false))
+            {
+                using JsonDocument objectsDocument = await JsonDocument.ParseAsync(objectsStream, cancellationToken: timeout.Token).ConfigureAwait(false);
+                objects = objectsDocument.RootElement.TryGetProperty("result", out JsonElement result) &&
+                    MoonrakerSubscriptionService.TryReadObjectNames(result, out List<string> names)
+                        ? new HashSet<string>(names, StringComparer.Ordinal)
+                        : null;
+            }
+
+            if (objects is null)
+            {
+                _logger.LogWarning("Rejected Moonraker sensor write to {SensorId}: malformed object list", sensorId);
+                return false;
+            }
+
+            if (quantity == PrinterSensorQuantity.TargetTemperature)
+            {
+                using HttpRequestMessage settingsRequest = CreateSafetyDiscoveryRequest(
+                    new Uri(root, "printer/objects/query?configfile=settings"),
+                    credential);
+                using HttpResponseMessage settingsResponse = await _http.SendAsync(settingsRequest, timeout.Token).ConfigureAwait(false);
+                if (!settingsResponse.IsSuccessStatusCode)
+                {
+                    _logger.LogWarning(
+                        "Rejected Moonraker sensor write to {SensorId}: config query returned {StatusCode}",
+                        sensorId,
+                        (int)settingsResponse.StatusCode);
+                    return false;
+                }
+
+                await using Stream settingsStream = await settingsResponse.Content.ReadAsStreamAsync(timeout.Token).ConfigureAwait(false);
+                using JsonDocument settingsDocument = await JsonDocument.ParseAsync(settingsStream, cancellationToken: timeout.Token).ConfigureAwait(false);
+                if (settingsDocument.RootElement.TryGetProperty("result", out JsonElement settingsResult) &&
+                    settingsResult.TryGetProperty("status", out JsonElement status) &&
+                    status.TryGetProperty("configfile", out JsonElement configfile) &&
+                    configfile.TryGetProperty("settings", out JsonElement settingsElement))
+                {
+                    settings = MoonrakerSensorMapper.ReadSettings(settingsElement);
+                }
+            }
+        }
+
+        string? command = MoonrakerSensorMapper.TryBuildCommand(sensorId, quantity, value, objects, settings);
+        if (command is null)
+        {
+            _logger.LogWarning(
+                "Rejected Moonraker sensor write to {SensorId}: {Quantity}={Value} is not a supported, in-range write for a discovered object",
+                sensorId,
+                quantity,
+                value);
+            return false;
+        }
+
+        return await SendControlScriptAsync(baseUrl, command, credential, ct).ConfigureAwait(false);
     }
 
     public Task<bool> AdjustZOffsetAsync(string baseUrl, decimal offsetMm, PrinterCredential? credential, CancellationToken ct = default)

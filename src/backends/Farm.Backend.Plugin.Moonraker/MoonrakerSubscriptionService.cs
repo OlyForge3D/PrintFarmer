@@ -47,6 +47,9 @@ public sealed class MoonrakerSubscriptionService(
 
     // Persistent state tracking for each printer
     private readonly ConcurrentDictionary<Guid, PrinterState> _printerStates = new();
+    private readonly ConcurrentDictionary<Guid, Func<string, CancellationToken, Task>> _jsonRpcSenders = new();
+    private const int SubscriptionRequestId = 101;
+    private const int ObjectRediscoveryRequestId = 103;
     private readonly ConcurrentDictionary<Guid, int> _parseErrorCounts = new();
     private readonly ConcurrentDictionary<Guid, DateTime> _lastHttpPollTimes = new();
     private readonly ConcurrentDictionary<Guid, DateTime> _lastStatusUpdateTimes = new();
@@ -240,7 +243,7 @@ public sealed class MoonrakerSubscriptionService(
 
             await hub!.Clients.Group(
                     Farm.Infrastructure.Security.AuthorizedHubGroups.Printer(printerId))
-                .SendAsync("printerupdated", statusUpdate, ct);
+                .SendAsync("printerupdated", WithTrackedSensors(printerId, statusUpdate), ct);
             _lastHttpPollTimes[printerId] = DateTime.UtcNow;
 
             _logger.LogInformation(
@@ -533,6 +536,8 @@ public sealed class MoonrakerSubscriptionService(
             ClientWebSocket? ws = null;
             CancellationTokenSource? heartbeatCts = null;
             Task? heartbeatTask = null;
+            SemaphoreSlim? sendLock = null;
+            Func<string, CancellationToken, Task>? jsonRpcSender = null;
 
             try
             {
@@ -586,9 +591,27 @@ public sealed class MoonrakerSubscriptionService(
                     _logger.LogWarning(ex, "Failed to query initial toolhead data for printer {PrinterName}", printer.Name);
                 }
 
+                // ClientWebSocket allows only one outstanding send, so the heartbeat and in-loop
+                // requests (klippy_ready re-enumeration) share one serialized sender.
+                ClientWebSocket connectedWs = ws;
+                SemaphoreSlim connectedSendLock = sendLock = new SemaphoreSlim(1, 1);
+                jsonRpcSender = async (json, token) =>
+                {
+                    await connectedSendLock.WaitAsync(token);
+                    try
+                    {
+                        await connectedWs.SendAsync(Encoding.UTF8.GetBytes(json), WebSocketMessageType.Text, endOfMessage: true, token);
+                    }
+                    finally
+                    {
+                        _ = connectedSendLock.Release();
+                    }
+                };
+                RegisterJsonRpcSender(id, jsonRpcSender);
+
                 // Step 3: Start heartbeat mechanism
                 heartbeatCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                heartbeatTask = StartHeartbeatAsync(ws, printer, heartbeatCts.Token);
+                heartbeatTask = StartHeartbeatAsync(ws, jsonRpcSender, printer, heartbeatCts.Token);
 
                 // Connection successful - reset metrics
                 metrics.Reset();
@@ -653,12 +676,26 @@ public sealed class MoonrakerSubscriptionService(
 
                 heartbeatCts?.Dispose();
 
+                if (jsonRpcSender is not null)
+                {
+                    UnregisterJsonRpcSender(id, jsonRpcSender);
+                }
+
                 try
                 {
                     ws?.Dispose();
                 }
                 catch
                 {
+                }
+
+                sendLock?.Dispose();
+
+                // The transport is gone: report every known sensor unavailable until the next
+                // discovery/subscription snapshot restores it (issue #3407).
+                if (!ct.IsCancellationRequested)
+                {
+                    await MarkSensorsUnavailableAsync(id, ct);
                 }
             }
         }
@@ -811,69 +848,28 @@ public sealed class MoonrakerSubscriptionService(
 
         // Step 3: Parse the objects list and build subscription params
         Dictionary<string, string[]?> subscriptionObjects = new Dictionary<string, string[]?>();
+        List<string>? discoveredObjects = null;
 
         if (!string.IsNullOrEmpty(objectsListJson))
         {
             using JsonDocument doc = JsonDocument.Parse(objectsListJson);
             if (doc.RootElement.TryGetProperty("result", out JsonElement resultElem) &&
-                resultElem.TryGetProperty("objects", out JsonElement objectsElem) &&
-                objectsElem.ValueKind == JsonValueKind.Array)
+                TryReadObjectNames(resultElem, out discoveredObjects))
             {
-                string[] blocklist = new[] { "menu" }; // Objects to skip (same as Mainsail)
-                List<string> subscribedObjects = [];
-                List<string> skippedObjects = [];
-
-                foreach (JsonElement objElem in objectsElem.EnumerateArray().Where(objElem => objElem.ValueKind == JsonValueKind.String))
-                {
-                    string objectName = objElem.GetString() ?? string.Empty;
-                    string objectType = objectName.Split(' ')[0]; // Get base type (e.g., "extruder" from "extruder 0")
-
-                    // Skip blocklisted object types
-                    if (!blocklist.Contains(objectType))
-                    {
-                        subscriptionObjects[objectName] = null; // null = subscribe to all properties
-                        subscribedObjects.Add(objectName);
-                    }
-                    else
-                    {
-                        skippedObjects.Add(objectName);
-                    }
-                }
-
-                _logger.LogInformation(
-                    "Discovered {ObjectCount} objects from Moonraker, subscribing to {SubscriptionCount}",
-                    objectsElem.GetArrayLength().ToString(),
-                    subscribedObjects.Count.ToString());
-
-                _logger.LogDebug("Subscribing to objects: {SubscribedObjects}", string.Join(", ", subscribedObjects));
-
-                if (skippedObjects.Count > 0)
-                {
-                    _logger.LogDebug("Skipped blocklisted objects: {SkippedObjects}", string.Join(", ", skippedObjects));
-                }
+                subscriptionObjects = BuildSubscriptionObjects(discoveredObjects);
             }
         }
 
-        if (_printerStates.TryGetValue(printerId, out PrinterState? state))
+        PrinterState state = _printerStates.GetOrAdd(printerId, _ => new PrinterState());
+        state.ResetMmuState();
+        state.ResetLiveReadbacks();
+        if (discoveredObjects is not null)
         {
-            state.ResetMmuState();
-            state.ResetLiveReadbacks();
+            state.Sensors.Discover(discoveredObjects);
         }
 
         // Step 4: Send the subscription request with discovered objects
-        ObjectSubscriptionRequest subscriptionParams = new()
-        {
-            Objects = subscriptionObjects
-        };
-
-        JsonRpcRequest subscriptionRequest = new()
-        {
-            Method = "printer.objects.subscribe",
-            Params = subscriptionParams,
-            Id = 101
-        };
-
-        string subJson = JsonSerializer.Serialize(subscriptionRequest);
+        string subJson = BuildSubscriptionRequestJson(subscriptionObjects);
         byte[] subBytes = Encoding.UTF8.GetBytes(subJson);
         await ws.SendAsync(subBytes, WebSocketMessageType.Text, endOfMessage: true, ct);
 
@@ -883,15 +879,194 @@ public sealed class MoonrakerSubscriptionService(
             string.Join(", ", subscriptionObjects.Keys));
     }
 
+    /// <summary>Reads the object names from a <c>printer.objects.list</c> result.</summary>
+    internal static bool TryReadObjectNames(JsonElement result, out List<string> objectNames)
+    {
+        objectNames = [];
+        if (result.ValueKind != JsonValueKind.Object ||
+            !result.TryGetProperty("objects", out JsonElement objectsElem) ||
+            objectsElem.ValueKind != JsonValueKind.Array)
+        {
+            return false;
+        }
+
+        objectNames.AddRange(objectsElem.EnumerateArray()
+            .Where(objElem => objElem.ValueKind == JsonValueKind.String)
+            .Select(objElem => objElem.GetString() ?? string.Empty)
+            .Where(name => name.Length > 0));
+        return true;
+    }
+
+    private Dictionary<string, string[]?> BuildSubscriptionObjects(List<string> objectNames)
+    {
+        string[] blocklist = new[] { "menu" }; // Objects to skip (same as Mainsail)
+        Dictionary<string, string[]?> subscriptionObjects = new();
+        List<string> skippedObjects = [];
+
+        foreach (string objectName in objectNames)
+        {
+            string objectType = objectName.Split(' ')[0]; // Get base type (e.g., "extruder" from "extruder 0")
+
+            // Skip blocklisted object types
+            if (!blocklist.Contains(objectType))
+            {
+                subscriptionObjects[objectName] = null; // null = subscribe to all properties
+            }
+            else
+            {
+                skippedObjects.Add(objectName);
+            }
+        }
+
+        _logger.LogInformation(
+            "Discovered {ObjectCount} objects from Moonraker, subscribing to {SubscriptionCount}",
+            objectNames.Count.ToString(),
+            subscriptionObjects.Count.ToString());
+
+        _logger.LogDebug("Subscribing to objects: {SubscribedObjects}", string.Join(", ", subscriptionObjects.Keys));
+
+        if (skippedObjects.Count > 0)
+        {
+            _logger.LogDebug("Skipped blocklisted objects: {SkippedObjects}", string.Join(", ", skippedObjects));
+        }
+
+        return subscriptionObjects;
+    }
+
+    private static string BuildSubscriptionRequestJson(Dictionary<string, string[]?> subscriptionObjects)
+    {
+        JsonRpcRequest subscriptionRequest = new()
+        {
+            Method = "printer.objects.subscribe",
+            Params = new ObjectSubscriptionRequest { Objects = subscriptionObjects },
+            Id = SubscriptionRequestId
+        };
+
+        return JsonSerializer.Serialize(subscriptionRequest);
+    }
+
+    internal void RegisterJsonRpcSender(Guid printerId, Func<string, CancellationToken, Task> sender) =>
+        _jsonRpcSenders[printerId] = sender;
+
+    private void UnregisterJsonRpcSender(Guid printerId, Func<string, CancellationToken, Task> sender) =>
+        _ = _jsonRpcSenders.TryRemove(new KeyValuePair<Guid, Func<string, CancellationToken, Task>>(printerId, sender));
+
+    /// <summary>
+    /// Re-enumerates Klipper objects after <c>notify_klippy_ready</c> (a firmware restart can add or
+    /// remove sensors). The <see cref="ObjectRediscoveryRequestId"/> response re-subscribes.
+    /// </summary>
+    private async Task RequestObjectRediscoveryAsync(Guid printerId, CancellationToken ct)
+    {
+        if (!_jsonRpcSenders.TryGetValue(printerId, out Func<string, CancellationToken, Task>? sender))
+        {
+            return;
+        }
+
+        try
+        {
+            await sender(
+                string.Create(
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    $$"""{"jsonrpc":"2.0","method":"printer.objects.list","params":{},"id":{{ObjectRediscoveryRequestId}}}"""),
+                ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex, "Failed to request Klipper object re-enumeration for printer {PrinterId}", printerId);
+        }
+    }
+
+    private async Task HandleObjectRediscoveryResponseAsync(JsonElement result, Printer printer, CancellationToken ct)
+    {
+        if (!TryReadObjectNames(result, out List<string> objectNames))
+        {
+            _logger.LogWarning(
+                "Klipper object re-enumeration for printer {PrinterName} returned no object list; keeping the previous subscription",
+                printer.Name);
+            return;
+        }
+
+        PrinterState state = _printerStates.GetOrAdd(printer.Id, _ => new PrinterState());
+        state.Sensors.Discover(objectNames);
+
+        if (!_jsonRpcSenders.TryGetValue(printer.Id, out Func<string, CancellationToken, Task>? sender))
+        {
+            _logger.LogDebug("Connection for printer {PrinterName} closed before re-subscribing", printer.Name);
+            return;
+        }
+
+        Dictionary<string, string[]?> subscriptionObjects = BuildSubscriptionObjects(objectNames);
+        await sender(BuildSubscriptionRequestJson(subscriptionObjects), ct);
+        _logger.LogInformation(
+            "Re-subscribed to {ObjectCount} Klipper objects for printer {PrinterName} after Klippy ready",
+            subscriptionObjects.Count.ToString(),
+            printer.Name);
+    }
+
+    /// <summary>
+    /// HTTP refresh paths do not read Klipper sensors. Their cache writes leave <c>Sensors</c>
+    /// unassigned (preserving cached sensors without refreshing control freshness), while the
+    /// broadcast carries the last tracked snapshot so it never blanks the client's sensor list.
+    /// </summary>
+    private PrinterStatusUpdate WithTrackedSensors(Guid printerId, PrinterStatusUpdate update) =>
+        _printerStates.TryGetValue(printerId, out PrinterState? state) && state.Sensors.HasSensors
+            ? update with { Sensors = state.Sensors.Snapshot() }
+            : update;
+
+    /// <summary>
+    /// Marks the printer's tracked sensors unavailable and returns the complete snapshot, or null
+    /// when the printer has no tracked state.
+    /// </summary>
+    private IReadOnlyList<PrinterSensorDto>? TakeUnavailableSensorSnapshot(Guid printerId)
+    {
+        if (!_printerStates.TryGetValue(printerId, out PrinterState? state))
+        {
+            return null;
+        }
+
+        _ = state.Sensors.MarkAllUnavailable();
+        return state.Sensors.Snapshot();
+    }
+
+    /// <summary>
+    /// Marks every tracked Klipper sensor unavailable and pushes the sensor-only change to the cache
+    /// and subscribed clients (Klippy or transport disconnect, issue #3407).
+    /// </summary>
+    internal async Task MarkSensorsUnavailableAsync(Guid printerId, CancellationToken ct)
+    {
+        if (!_printerStates.TryGetValue(printerId, out PrinterState? state) || !state.Sensors.MarkAllUnavailable())
+        {
+            return;
+        }
+
+        try
+        {
+            PrinterStatusDto? updated = _statusCacheWriter.UpdateSensors(printerId, state.Sensors.Snapshot(), replaceAll: true);
+            if (updated is not null && hub is not null)
+            {
+                await hub.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Printer(printerId))
+                    .SendAsync("printerupdated", updated, ct);
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to broadcast sensor unavailability for printer {PrinterId}", printerId);
+        }
+    }
+
     /// <summary>
     /// Starts a heartbeat mechanism that sends ping frames to the WebSocket at regular intervals.
     /// Keeps the connection alive and detects broken connections.
     /// </summary>
     /// <param name="ws">The WebSocket connection.</param>
+    /// <param name="send">Serialized JSON-RPC sender shared with in-loop requests.</param>
     /// <param name="printer">The printer being monitored (for logging).</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>A task representing the heartbeat loop.</returns>
-    private Task StartHeartbeatAsync(ClientWebSocket ws, Printer printer, CancellationToken ct)
+    private Task StartHeartbeatAsync(ClientWebSocket ws, Func<string, CancellationToken, Task> send, Printer printer, CancellationToken ct)
     {
         return Task.Run(
             async () =>
@@ -915,9 +1090,7 @@ public sealed class MoonrakerSubscriptionService(
                     // accumulated parse errors and forced healthy connections into polling.
                     try
                     {
-                        byte[] pingData = Encoding.UTF8.GetBytes(
-                            """{"jsonrpc":"2.0","method":"server.info","id":-1}""");
-                        await ws.SendAsync(pingData, WebSocketMessageType.Text, endOfMessage: true, ct);
+                        await send("""{"jsonrpc":"2.0","method":"server.info","id":-1}""", ct);
                         _logger.LogDebug("Sent heartbeat ping to printer {PrinterName}", printer.Name);
                     }
                     catch (Exception ex)
@@ -1013,7 +1186,7 @@ public sealed class MoonrakerSubscriptionService(
     /// <param name="printer">The printer being monitored.</param>
     /// <param name="originWatermark">Watermark captured before receiving the message.</param>
     /// <param name="ct">Cancellation token.</param>
-    private async Task ProcessJsonRpcMessageAsync(
+    internal async Task ProcessJsonRpcMessageAsync(
         string message,
         Printer printer,
         long? originWatermark,
@@ -1092,9 +1265,16 @@ public sealed class MoonrakerSubscriptionService(
                 return;
             }
 
+            if (root.TryGetProperty("id", out JsonElement rediscoveryId) &&
+                rediscoveryId.TryGetInt32(out int responseId) && responseId == ObjectRediscoveryRequestId &&
+                root.TryGetProperty("result", out JsonElement rediscoveryResult))
+            {
+                await HandleObjectRediscoveryResponseAsync(rediscoveryResult, printer, ct);
+            }
+
             // Handle subscription acknowledgement which carries current state
             if (root.TryGetProperty("result", out JsonElement res) && res.ValueKind == JsonValueKind.Object &&
-                root.TryGetProperty("id", out JsonElement idProp) && idProp.GetInt32() == 101 &&
+                root.TryGetProperty("id", out JsonElement idProp) && idProp.GetInt32() == SubscriptionRequestId &&
                 res.TryGetProperty("status", out JsonElement statusObj))
             {
                 _logger.LogDebug("Processing initial status from subscription acknowledgement for printer {PrinterName}", printer.Name);
@@ -1173,6 +1353,7 @@ public sealed class MoonrakerSubscriptionService(
             case "notify_klippy_disconnected":
                 _logger.LogWarning("Klippy disconnected for printer {PrinterName}, starting offline grace period", printer.Name);
                 _klippyReadyState[printer.Id] = false;
+                await MarkSensorsUnavailableAsync(printer.Id, ct);
                 SetPollingMode(printer.Id, PollingMode.HttpPollingOnly, "Klippy disconnected");
                 RecordHealthTransition(printer.Id, printer.Name, PrinterConnectionState.Reconnecting, "Klippy disconnected");
                 StartOfflineGraceTimer(printer.Id, printer.Name, ct);
@@ -1184,6 +1365,7 @@ public sealed class MoonrakerSubscriptionService(
                 SetPollingMode(printer.Id, PollingMode.WebSocketRealTime, "Klippy ready");
                 CancelOfflineGraceTimer(printer.Id);
                 RecordHealthTransition(printer.Id, printer.Name, PrinterConnectionState.Connected, "Klippy ready");
+                await RequestObjectRediscoveryAsync(printer.Id, ct);
                 await RefreshPrinterStatusAsync(printer.Id, delayMs: 0, ct);
                 break;
 
@@ -1311,6 +1493,12 @@ public sealed class MoonrakerSubscriptionService(
             statusObj.TryGetProperty("webhooks", out _))
         {
             await HandleStateUpdateAsync(printerId, state, statusObj, serverUrl, credential, ct);
+        }
+
+        _ = state.Sensors.Apply(statusObj, DateTime.UtcNow);
+        if (resolvedReady == false)
+        {
+            _ = state.Sensors.MarkAllUnavailable();
         }
 
         // Get spool information for consolidated update (cached; refreshed at most once per TTL)
@@ -2976,6 +3164,9 @@ public sealed class MoonrakerSubscriptionService(
             // be shut down or disconnected while the Moonraker host remains reachable.
             const bool isOnline = true;
 
+            // Complete sensor snapshot (issue #3407): sensor-only notifications reach clients too.
+            IReadOnlyList<PrinterSensorDto> sensors = state.Sensors.Snapshot();
+
             // Build MMU status if detected
             MmuStatusDto? mmuStatus = state.BuildMmuStatus();
             PrinterSafetyTelemetryDto safetyTelemetry = new(
@@ -3029,7 +3220,10 @@ public sealed class MoonrakerSubscriptionService(
                 CurrentLayer: state.CurrentLayer,
                 TotalLayers: state.TotalLayers,
                 FanSpeedPercent: state.FanSpeedPercent,
-                LiveZOffsetMm: state.LiveZOffsetMm);
+                LiveZOffsetMm: state.LiveZOffsetMm)
+            {
+                Sensors = sensors,
+            };
 
             _logger.LogDebug("Emitting consolidated status for printer {PrinterId}: IsOnline={IsOnline}, X={StateX}, Y={StateY}, Z={StateZ}, HotendTemp={StateHotendTemp}, HotendTarget={StateHotendTarget}, BedTemp={StateBedTemp}, BedTarget={StateBedTarget}, HomedAxes={StateHomedAxes}", printerId, isOnline, state.X, state.Y, state.Z, state.HotendTemp, state.HotendTarget, state.BedTemp, state.BedTarget, state.HomedAxes);
 
@@ -3067,7 +3261,10 @@ public sealed class MoonrakerSubscriptionService(
                 CurrentLayer: state.CurrentLayer,
                 TotalLayers: state.TotalLayers,
                 FanSpeedPercent: state.FanSpeedPercent,
-                LiveZOffsetMm: state.LiveZOffsetMm);
+                LiveZOffsetMm: state.LiveZOffsetMm)
+            {
+                Sensors = sensors,
+            };
             _statusCacheWriter.UpdateStatus(cacheUpdate, state.OriginWatermark);
 
             _logger.LogDebug("[MoonrakerSubscriptionService] Broadcasting printerupdated for {PrinterId} via SignalR", printerId);
@@ -3168,6 +3365,12 @@ public sealed class MoonrakerSubscriptionService(
                 SpoolInfo: null);
             _statusCacheWriter.UpdateStatus(offlineCacheUpdate, originWatermark: null);
 
+            IReadOnlyList<PrinterSensorDto>? offlineSensors = TakeUnavailableSensorSnapshot(printerId);
+            if (offlineSensors is not null)
+            {
+                offlineUpdate = offlineUpdate with { Sensors = offlineSensors };
+            }
+
             _logger.LogInformation("[MoonrakerSubscriptionService] Broadcasting printerupdated (offline) for {PrinterId} via SignalR", printerId);
             await hub.Clients.Group(
                     Farm.Infrastructure.Security.AuthorizedHubGroups.Printer(printerId))
@@ -3228,6 +3431,15 @@ public sealed class MoonrakerSubscriptionService(
                 HotendTarget: null,
                 BedTarget: null,
                 SpoolInfo: null);
+
+            // Klippy is down: keep the last values but report every sensor unavailable.
+            IReadOnlyList<PrinterSensorDto>? shutdownSensors = TakeUnavailableSensorSnapshot(printerId);
+            if (shutdownSensors is not null)
+            {
+                shutdownUpdate = shutdownUpdate with { Sensors = shutdownSensors };
+                shutdownCacheUpdate = shutdownCacheUpdate with { Sensors = shutdownSensors };
+            }
+
             _statusCacheWriter.UpdateStatus(shutdownCacheUpdate, originWatermark: null);
 
             _logger.LogInformation("[MoonrakerSubscriptionService] Broadcasting printerupdated (shutdown) for {PrinterId} via SignalR", printerId);
@@ -3620,7 +3832,7 @@ public sealed class MoonrakerSubscriptionService(
 
                     await hub.Clients.Group(
                             Farm.Infrastructure.Security.AuthorizedHubGroups.Printer(printer.Id))
-                        .SendAsync("printerupdated", statusUpdate, ct);
+                        .SendAsync("printerupdated", WithTrackedSensors(printer.Id, statusUpdate), ct);
 
                     // Update last poll time and reset parse error count since HTTP polling succeeded
                     _lastHttpPollTimes[printer.Id] = DateTime.UtcNow;
