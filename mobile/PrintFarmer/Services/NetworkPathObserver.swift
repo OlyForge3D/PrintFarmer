@@ -117,3 +117,13 @@ extension NetworkPathSnapshot {
         self.init(reachability: reachability, interface: interface)
     }
 }
+
+/// Reports a permanently satisfied path. Used only by hermetic UI-test scenarios.
+@MainActor
+final class FixedSatisfiedPathObserver: NetworkPathObserving {
+    func start(onChange: @escaping @Sendable @MainActor (NetworkPathSnapshot) -> Void) {
+        onChange(NetworkPathSnapshot(reachability: .satisfied, interface: .wifi))
+    }
+
+    func cancel() {}
+}
