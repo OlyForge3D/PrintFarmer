@@ -37,6 +37,56 @@ final class JobServiceTests: XCTestCase {
         )
     }
 
+    func testListAllJobsHonorsXHasMoreHeaderOnAShortPage() async throws {
+        mockAPIClient.stubResponse(
+            json: "[\(TestJSON.queuedPrintJobResponseQueued)]",
+            headers: ["X-Has-More": "true"]
+        )
+
+        let page = try await service.listAllJobs()
+
+        XCTAssertEqual(page.jobs.count, 1)
+        XCTAssertTrue(page.mayHaveMore)
+    }
+
+    func testListAllJobsShortPageWithoutHeaderIsComplete() async throws {
+        mockAPIClient.stubResponse(json: "[\(TestJSON.queuedPrintJobResponseQueued)]")
+
+        let page = try await service.listAllJobs()
+
+        XCTAssertFalse(page.mayHaveMore)
+    }
+
+    func testListAllJobsExplicitFalseHeaderOverridesLengthFallback() async throws {
+        let rows = Array(
+            repeating: TestJSON.queuedPrintJobResponseQueued,
+            count: QueuedPrintJobPage.pageSize
+        )
+        mockAPIClient.stubResponse(
+            json: "[\(rows.joined(separator: ","))]",
+            headers: ["x-has-more": "FALSE"]
+        )
+
+        let page = try await service.listAllJobs()
+
+        XCTAssertFalse(page.mayHaveMore)
+    }
+
+    func testListAllJobsMalformedHeaderUsesLengthFallback() async throws {
+        let rows = Array(
+            repeating: TestJSON.queuedPrintJobResponseQueued,
+            count: QueuedPrintJobPage.pageSize
+        )
+        mockAPIClient.stubResponse(
+            json: "[\(rows.joined(separator: ","))]",
+            headers: ["X-Has-More": "invalid"]
+        )
+
+        let page = try await service.listAllJobs()
+
+        XCTAssertTrue(page.mayHaveMore)
+    }
+
     func testGetPreservesRowVersionForConditionalRetry() async throws {
         mockAPIClient.stubResponse(
             json: """

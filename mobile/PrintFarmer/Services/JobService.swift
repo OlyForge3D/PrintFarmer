@@ -14,12 +14,15 @@ actor JobService: JobServiceProtocol {
     }
 
     func listAllJobs() async throws -> QueuedPrintJobPage {
-        let jobs: [QueuedPrintJobResponse] = try await apiClient.get(
+        let response: HTTPDecodedResponse<[QueuedPrintJobResponse]> = try await apiClient.getWithHeaders(
             "/api/job-queue-analytics?limit=\(QueuedPrintJobPage.pageSize)&offset=0"
         )
+        let hasMoreHeader = response.header("X-Has-More").flatMap {
+            Bool($0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
+        }
         return QueuedPrintJobPage(
-            jobs: jobs,
-            mayHaveMore: jobs.count >= QueuedPrintJobPage.pageSize
+            jobs: response.value,
+            mayHaveMore: hasMoreHeader ?? (response.value.count >= QueuedPrintJobPage.pageSize)
         )
     }
 
