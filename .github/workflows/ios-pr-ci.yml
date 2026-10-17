@@ -1,55 +1,180 @@
 name: iOS PR CI
 
-# Diagnostic branch only, NEVER MERGE. Opening the draft consumes the single
-# authorized execution; pushes/reopens cannot automatically start another.
 on:
   pull_request:
-    types: [opened]
+    types: [opened, synchronize, reopened]
+    # No `paths:` filter — every PR must produce the required "Build (iOS)"
+    # status (see #1365: a path-filtered trigger meant non-mobile PRs never
+    # got a "Build (iOS)" check at all, leaving branch protection permanently
+    # BLOCKED). The `select` job below decides whether the Xcode toolchain
+    # actually needs to run; PRs that don't touch iOS-relevant paths still see
+    # "Build (iOS)" turn green quickly instead of never posting.
+
+concurrency:
+  group: ios-pr-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
 
-concurrency:
-  group: ios-stall-capture-${{ github.event.pull_request.number }}
-  cancel-in-progress: false
+env:
+  # Preferences only order devices/runtimes; the resolver enforces build approval.
+  IOS_SIMULATOR_DEVICE_PREFERENCE: iPhone 15,iPhone 16,iPhone 17,iPhone 17 Pro,iPhone 17e
+  IOS_SIMULATOR_RUNTIME_PREFERENCE: iOS 26.5
 
 jobs:
-  capture:
-    name: DIAGNOSTIC ONLY - iPad shard 4 (not release evidence)
-    if: github.head_ref == 'jpapiez-squad-3263-ipad-xcui-tabbar-stall'
+  # ---------------------------------------------------------------------------
+  # select — always runs on a cheap ubuntu runner and decides whether the
+  # expensive macOS jobs below have real work to do. This mirrors the
+  # selector pattern in ci.yml: the trigger has no path filter so the
+  # required check always posts, and downstream jobs use the selector output
+  # to skip work cheaply instead of never running.
+  # ---------------------------------------------------------------------------
+  select:
+    name: Select iOS build
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.selector.outputs.should_run }}
+      reason: ${{ steps.selector.outputs.reason }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Determine whether iOS-relevant paths changed
+        id: selector
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        # Logic lives in the script so scripts/ci/tests/test-select-ios-build.sh
+        # can exercise the real git plumbing; `fetch-depth: 0` above guarantees
+        # the merge-base it resolves is reachable. Mirrors ci.yml's use of
+        # scripts/ci/compute-change-set.sh.
+        run: bash scripts/ci/select-ios-build.sh
+
+  build:
+    name: Build (iOS)
+    needs: select
+    # `select` failing/being cancelled must NOT let this required check skip
+    # (skip counts as a pass for branch protection) — so this job runs even
+    # when `select` didn't succeed, and the step-level conditions below treat
+    # a non-successful `select` the same as `should_run == 'true'`: fail safe
+    # toward running the real build rather than silently passing unvalidated.
+    if: ${{ !cancelled() }}
     runs-on: macos-26
-    timeout-minutes: 75
     defaults:
       run:
         working-directory: mobile
-    env:
-      IOS_SIMULATOR_DEVICE_FAMILY: iPad
-      IOS_SIMULATOR_DEVICE_PREFIX: iPad
-      IOS_SIMULATOR_DEVICE_PREFERENCE: iPad Pro 13-inch (M5)
-      IOS_SIMULATOR_RUNTIME_PREFERENCE: iOS 26.5
     steps:
-      - name: Checkout exact diagnostic head
+      - name: Checkout
         uses: actions/checkout@v7
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
 
-      - name: Record source and enforce approved Xcode
+      - name: Report skip reason
+        if: needs.select.result == 'success' && needs.select.outputs.should_run != 'true'
+        run: echo "Skipping iOS build — ${{ needs.select.outputs.reason }}"
+
+      - name: Verify marketing version consistency
+        if: needs.select.result != 'success' || needs.select.outputs.should_run == 'true'
+        run: ./scripts/verify-marketing-version.sh source 1.0
+
+      - name: Select Xcode 26.6
+        if: needs.select.result != 'success' || needs.select.outputs.should_run == 'true'
         run: |
-          set -euo pipefail
-          mkdir -p build-capture
-          git rev-parse HEAD | tee build-capture/head.txt
-          export DEVELOPER_DIR="/Applications/Xcode_26.6.app/Contents/Developer"
-          test -d "$DEVELOPER_DIR"
-          echo "DEVELOPER_DIR=$DEVELOPER_DIR" >> "$GITHUB_ENV"
-          xcodebuild -version | tee build-capture/xcode.txt
-          test "$(head -n 1 build-capture/xcode.txt)" = "Xcode 26.6"
-          test "$(sed -n '2s/^Build version //p' build-capture/xcode.txt)" = "17F113"
+          XCODE_PATH="/Applications/Xcode_26.6.app"
+          if [ ! -d "$XCODE_PATH" ]; then
+            echo "::error::Xcode 26.6 is missing from the macos-26 runner at $XCODE_PATH."
+            exit 1
+          fi
+          sudo xcode-select -s "$XCODE_PATH/Contents/Developer"
+          XCODE_VERSION="$(xcodebuild -version)"
+          if [ "$(printf '%s\n' "$XCODE_VERSION" | head -n 1)" != "Xcode 26.6" ]; then
+            echo "::error::Expected Xcode 26.6 at $XCODE_PATH, found: $XCODE_VERSION"
+            exit 1
+          fi
+          if [ "$(printf '%s\n' "$XCODE_VERSION" | sed -n '2s/^Build version //p')" != "17F113" ]; then
+            echo "::error::Expected Xcode build 17F113 at $XCODE_PATH, found: $XCODE_VERSION"
+            exit 1
+          fi
+          printf '%s\n' "$XCODE_VERSION"
 
-      - name: Install exact approved runtime and device
+      - name: Resolve package dependencies
+        if: needs.select.result != 'success' || needs.select.outputs.should_run == 'true'
+        run: |
+          xcodebuild -project PrintFarmer.xcodeproj \
+            -scheme PrintFarmer \
+            -resolvePackageDependencies \
+            -clonedSourcePackagesDirPath build/SourcePackages
+
+      - name: Archive future marketing version
+        if: needs.select.result != 'success' || needs.select.outputs.should_run == 'true'
+        timeout-minutes: 20
+        run: |
+          xcodebuild \
+            -project PrintFarmer.xcodeproj \
+            -scheme PrintFarmer \
+            -configuration Release \
+            -destination "generic/platform=iOS" \
+            -derivedDataPath build \
+            -clonedSourcePackagesDirPath build/SourcePackages \
+            -archivePath build/MarketingVersion.xcarchive \
+            CODE_SIGNING_ALLOWED=NO \
+            MARKETING_VERSION=1.1 \
+            SKIP_INSTALL=NO \
+            SWIFT_STRICT_CONCURRENCY=minimal \
+            archive
+
+      - name: Verify future archived marketing version
+        if: needs.select.result != 'success' || needs.select.outputs.should_run == 'true'
+        run: |
+          ./scripts/verify-marketing-version.sh resolved 1.1 \
+            build/MarketingVersion.xcarchive/Products/Applications/PrintFarmer.app/Info.plist
+
+  test:
+    name: Unit Tests (iOS)
+    runs-on: macos-26
+    timeout-minutes: 120
+    needs: [select, build]
+    # Skip ONLY when the selector explicitly said `false`. If `select` itself
+    # failed, `should_run` is empty — and a skipped job reports "Success" to
+    # branch protection, so a bare `== 'true'` would turn a selector crash into
+    # a silent green. Gated on `build` succeeding so a real build failure isn't
+    # reported twice.
+    if: ${{ !cancelled() && needs.build.result == 'success' && needs.select.outputs.should_run != 'false' }}
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Select Xcode 26.6
+        run: |
+          XCODE_PATH="/Applications/Xcode_26.6.app"
+          if [ ! -d "$XCODE_PATH" ]; then
+            echo "::error::Xcode 26.6 is missing from the macos-26 runner at $XCODE_PATH."
+            exit 1
+          fi
+          sudo xcode-select -s "$XCODE_PATH/Contents/Developer"
+          XCODE_VERSION="$(xcodebuild -version)"
+          if [ "$(printf '%s\n' "$XCODE_VERSION" | head -n 1)" != "Xcode 26.6" ]; then
+            echo "::error::Expected Xcode 26.6 at $XCODE_PATH, found: $XCODE_VERSION"
+            exit 1
+          fi
+          if [ "$(printf '%s\n' "$XCODE_VERSION" | sed -n '2s/^Build version //p')" != "17F113" ]; then
+            echo "::error::Expected Xcode build 17F113 at $XCODE_PATH, found: $XCODE_VERSION"
+            exit 1
+          fi
+          printf '%s\n' "$XCODE_VERSION"
+
+      - name: Install approved iOS 26.5 simulator runtime
         timeout-minutes: 30
+        env:
+          IOS_SIMULATOR_DEVICE_FAMILY: iPhone
         run: |
-          set -euo pipefail
           RUNTIME_ID="com.apple.CoreSimulator.SimRuntime.iOS-26-5"
+          DEVICE_PREFIX="${IOS_SIMULATOR_DEVICE_PREFIX:-${IOS_SIMULATOR_DEVICE_FAMILY} }"
           has_approved_runtime() {
             xcrun simctl list runtimes -j | jq -e \
               --arg runtime "$RUNTIME_ID" \
@@ -57,87 +182,344 @@ jobs:
               >/dev/null
           }
           if ! has_approved_runtime; then
-            sudo env DEVELOPER_DIR="$DEVELOPER_DIR" xcodebuild \
-              -downloadPlatform iOS -buildVersion 23F77 -architectureVariant arm64
-            has_approved_runtime
+            # Request the exact build: "-buildVersion 26.5" is resolved
+            # server-side and has served both 23F77 and 23F73 (#3286).
+            sudo xcodebuild -downloadPlatform iOS \
+              -buildVersion 23F77 \
+              -architectureVariant arm64
+            if ! has_approved_runtime; then
+              echo "::error::iOS 26.5 runtime build 23F77 remained unavailable after download; inspect the download output and install the exact approved runtime."
+              exit 1
+            fi
           fi
           if ! xcrun simctl list devices available -j | jq -e \
-            --arg runtime "$RUNTIME_ID" \
-            '.devices[$runtime][]? | select(.isAvailable and .name == "iPad Pro 13-inch (M5)")' >/dev/null; then
-            TYPE_ID="$(xcrun simctl list devicetypes -j | jq -er \
-              '.devicetypes[] | select(.name == "iPad Pro 13-inch (M5)") | .identifier')"
-            xcrun simctl create "iPad Pro 13-inch (M5)" "$TYPE_ID" "$RUNTIME_ID"
+            --arg runtime "$RUNTIME_ID" --arg prefix "$DEVICE_PREFIX" \
+            '.devices[$runtime][]? | select(.isAvailable == true and (.name | startswith($prefix)))' >/dev/null; then
+            if ! DEVICE_TYPE="$(xcrun simctl list devicetypes -j | jq -e \
+              --arg family "$IOS_SIMULATOR_DEVICE_FAMILY" \
+              --arg preferences "$IOS_SIMULATOR_DEVICE_PREFERENCE" \
+              '[($preferences | split(","))[] as $name
+                | .devicetypes[]
+                | select(.name == $name and .productFamily == $family)] | first')"; then
+              echo "::error::No installed $IOS_SIMULATOR_DEVICE_FAMILY simulator type matches its preference list."
+              exit 1
+            fi
+            DEVICE_NAME="$(printf '%s\n' "$DEVICE_TYPE" | jq -r '.name')"
+            DEVICE_TYPE_ID="$(printf '%s\n' "$DEVICE_TYPE" | jq -r '.identifier')"
+            xcrun simctl create "$DEVICE_NAME" "$DEVICE_TYPE_ID" "$RUNTIME_ID"
           fi
-          xcrun simctl list runtimes -j > build-capture/runtimes.json
-          xcrun simctl list devices available -j > build-capture/devices.json
 
-      - name: Resolve and boot pinned iPad
+      - name: Resolve pinned iOS simulator destination
+        run: ../scripts/ci/resolve-ios-simulator.sh
+
+      - name: Test bounded XCTest runner
+        run: python3 -m unittest discover -s scripts/tests -p 'test_run_tests.py' -v
+
+      - name: Reset and boot iOS simulator
         run: |
-          set -euo pipefail
-          SIMULATOR_UDID="$(../scripts/ci/resolve-ios-simulator.sh --udid)"
-          printf '%s\n' "$SIMULATOR_UDID" > build-capture/simulator-udid.txt
+          xcrun simctl shutdown "$SIMULATOR_UDID" || true
+          xcrun simctl erase "$SIMULATOR_UDID"
           ../scripts/ci/boot-ios-simulator.sh "$SIMULATOR_UDID"
 
-      - name: Validate capture wrapper
-        run: python3 -m unittest discover -s scripts/tests -p 'test_capture_main_thread_stall.py' -v
-
-      - name: Build diagnostic XCUI
+      - name: Build unit tests for testing
         timeout-minutes: 20
         run: |
-          set -o pipefail
-          xcodebuild -project PrintFarmer.xcodeproj -scheme PrintFarmer \
+          xcodebuild \
+            -project PrintFarmer.xcodeproj \
+            -scheme PrintFarmer \
             -configuration Debug \
             -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
-            -destination-timeout 90 -derivedDataPath build-capture \
-            -clonedSourcePackagesDirPath build-capture/SourcePackages \
-            CODE_SIGN_IDENTITY="-" CODE_SIGNING_REQUIRED=NO \
+            -destination-timeout 90 \
+            -derivedDataPath build \
+            -clonedSourcePackagesDirPath build/SourcePackages \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGNING_REQUIRED=NO \
             SWIFT_STRICT_CONCURRENCY=minimal \
-            'SWIFT_ACTIVE_COMPILATION_CONDITIONS=$(inherited) PFARM_STALL_CAPTURE' \
-            build-for-testing 2>&1 | tee build-capture/build.log
+            build-for-testing
 
-      - name: Single original iPad shard 4 invocation with live stack capture
+      - name: Run unit tests
+        # Preserve the bounded runner's 1440s ceiling, one minute inside
+        # this step limit, across the containment toolchain rollback.
         timeout-minutes: 25
         run: |
           set -o pipefail
-          python3 scripts/capture-main-thread-stall.py \
-            --udid "$SIMULATOR_UDID" --output build-capture/stacks -- \
-            python3 scripts/run-tests.py -- test-without-building \
-            -project PrintFarmer.xcodeproj -scheme PrintFarmer \
+          python3 scripts/run-tests.py -- \
+            -project PrintFarmer.xcodeproj \
+            -scheme PrintFarmer \
             -configuration Debug \
             -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
-            -destination-timeout 90 -derivedDataPath build-capture \
-            -clonedSourcePackagesDirPath build-capture/SourcePackages \
-            CODE_SIGN_IDENTITY="-" CODE_SIGNING_REQUIRED=NO \
-            -only-testing:PrintFarmerUITests/ColdOfflineShellUITests \
-            -only-testing:PrintFarmerUITests/UIWaitBudgetTests \
-            -only-testing:PrintFarmerUITests/JobDetailIPadNavigationUITests \
-            -parallel-testing-enabled NO -disable-concurrent-destination-testing \
-            -resultBundlePath build-capture/XCUIShard.xcresult \
-            2>&1 | tee build-capture/XCUIShard.log
+            -destination-timeout 90 \
+            -derivedDataPath build \
+            -clonedSourcePackagesDirPath build/SourcePackages \
+            -parallel-testing-enabled NO \
+            -disable-concurrent-destination-testing \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGNING_REQUIRED=NO \
+            test-without-building \
+            -only-testing:PrintFarmerTests \
+            -resultBundlePath build/TestResults.xcresult \
+            2>&1 | tee build/TestResults.log
 
-      - name: Export native diagnostics even after test failure
-        if: always()
-        run: |
-          if [ -d build-capture/XCUIShard.xcresult ]; then
-            xcrun xcresulttool export diagnostics \
-              --path build-capture/XCUIShard.xcresult \
-              --output-path build-capture/diagnostics
-          fi
-
-      - name: Upload diagnostic evidence even after setup failure
+      - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: issue3263-single-capture
+          name: ios-test-results
           path: |
-            mobile/build-capture/head.txt
-            mobile/build-capture/xcode.txt
-            mobile/build-capture/runtimes.json
-            mobile/build-capture/devices.json
-            mobile/build-capture/simulator-udid.txt
-            mobile/build-capture/build.log
-            mobile/build-capture/XCUIShard*
-            mobile/build-capture/stacks/
-            mobile/build-capture/diagnostics/
-          retention-days: 14
-          if-no-files-found: error
+            mobile/build/TestResults.xcresult
+            mobile/build/TestResults.log
+            mobile/build/TestResults.events.jsonl
+            mobile/build/TestResults.timing.json
+          retention-days: 7
+
+  xcui-shards:
+    name: XCUI (${{ matrix.family }}, shard ${{ matrix.shard }})
+    runs-on: macos-26
+    timeout-minutes: 120
+    needs: [select, test]
+    # Avoid allocating eight macOS runners until unit coverage passes; retain
+    # the selector's fail-safe behavior by skipping only explicit false.
+    if: ${{ !cancelled() && needs.test.result == 'success' && needs.select.outputs.should_run != 'false' }}
+    # Retired Attention/Tasks/Two-modes screens have no shipping destinations.
+    # Shell, capability-gated parts, Scan/harvest and offline suites cover retained flows.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - key: iphone-1
+            family: iPhone
+            shard: 1
+            prefix: iPhone
+            device_preference: iPhone 15,iPhone 16,iPhone 17,iPhone 17 Pro,iPhone 17e
+            selectors: >-
+              -only-testing:PrintFarmerUITests/LoginFlowUITests
+              -only-testing:PrintFarmerUITests/OperatorShellUITests
+          - key: iphone-2
+            family: iPhone
+            shard: 2
+            prefix: iPhone
+            device_preference: iPhone 15,iPhone 16,iPhone 17,iPhone 17 Pro,iPhone 17e
+            selectors: >-
+              -only-testing:PrintFarmerUITests/ScanStationUITests
+              -only-testing:PrintFarmerUITests/HarvestUITests
+          - key: iphone-3
+            family: iPhone
+            shard: 3
+            prefix: iPhone
+            device_preference: iPhone 15,iPhone 16,iPhone 17,iPhone 17 Pro,iPhone 17e
+            selectors: >-
+              -only-testing:PrintFarmerUITests/PartsInventoryUITests
+              -only-testing:PrintFarmerUITests/PrinterListUITests
+              -only-testing:PrintFarmerUITests/FilamentCoverageUITests
+          - key: iphone-4
+            family: iPhone
+            shard: 4
+            prefix: iPhone
+            device_preference: iPhone 15,iPhone 16,iPhone 17,iPhone 17 Pro,iPhone 17e
+            selectors: >-
+              -only-testing:PrintFarmerUITests/ColdOfflineShellUITests
+              -only-testing:PrintFarmerUITests/UIWaitBudgetTests
+          - key: ipad-1
+            family: iPad
+            shard: 1
+            prefix: iPad
+            device_preference: iPad Pro 13-inch (M5),iPad Pro 11-inch (M5),iPad Air 13-inch (M4),iPad Air 11-inch (M4),iPad (A16),iPad mini (A17 Pro)
+            selectors: >-
+              -only-testing:PrintFarmerUITests/LoginFlowUITests
+              -only-testing:PrintFarmerUITests/OperatorShellUITests
+          - key: ipad-2
+            family: iPad
+            shard: 2
+            prefix: iPad
+            device_preference: iPad Pro 13-inch (M5),iPad Pro 11-inch (M5),iPad Air 13-inch (M4),iPad Air 11-inch (M4),iPad (A16),iPad mini (A17 Pro)
+            selectors: >-
+              -only-testing:PrintFarmerUITests/ScanStationUITests
+              -only-testing:PrintFarmerUITests/HarvestUITests
+          - key: ipad-3
+            family: iPad
+            shard: 3
+            prefix: iPad
+            device_preference: iPad Pro 13-inch (M5),iPad Pro 11-inch (M5),iPad Air 13-inch (M4),iPad Air 11-inch (M4),iPad (A16),iPad mini (A17 Pro)
+            selectors: >-
+              -only-testing:PrintFarmerUITests/PartsInventoryUITests
+              -only-testing:PrintFarmerUITests/PrinterListUITests
+              -only-testing:PrintFarmerUITests/FilamentCoverageUITests
+          - key: ipad-4
+            family: iPad
+            shard: 4
+            prefix: iPad
+            device_preference: iPad Pro 13-inch (M5),iPad Pro 11-inch (M5),iPad Air 13-inch (M4),iPad Air 11-inch (M4),iPad (A16),iPad mini (A17 Pro)
+            selectors: >-
+              -only-testing:PrintFarmerUITests/ColdOfflineShellUITests
+              -only-testing:PrintFarmerUITests/UIWaitBudgetTests
+              -only-testing:PrintFarmerUITests/JobDetailIPadNavigationUITests
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Select Xcode 26.6
+        run: |
+          XCODE_PATH="/Applications/Xcode_26.6.app"
+          if [ ! -d "$XCODE_PATH" ]; then
+            echo "::error::Xcode 26.6 is missing from the macos-26 runner at $XCODE_PATH."
+            exit 1
+          fi
+          sudo xcode-select -s "$XCODE_PATH/Contents/Developer"
+          XCODE_VERSION="$(xcodebuild -version)"
+          if [ "$(printf '%s\n' "$XCODE_VERSION" | head -n 1)" != "Xcode 26.6" ]; then
+            echo "::error::Expected Xcode 26.6 at $XCODE_PATH, found: $XCODE_VERSION"
+            exit 1
+          fi
+          if [ "$(printf '%s\n' "$XCODE_VERSION" | sed -n '2s/^Build version //p')" != "17F113" ]; then
+            echo "::error::Expected Xcode build 17F113 at $XCODE_PATH, found: $XCODE_VERSION"
+            exit 1
+          fi
+          printf '%s\n' "$XCODE_VERSION"
+
+      - name: Test simulator resolver
+        if: matrix.key == 'iphone-1'
+        run: ../scripts/ci/test-resolve-ios-simulator.sh
+
+      - name: Resolve package dependencies
+        run: |
+          xcodebuild -project PrintFarmer.xcodeproj \
+            -scheme PrintFarmer \
+            -resolvePackageDependencies \
+            -clonedSourcePackagesDirPath "build-${{ matrix.key }}/SourcePackages"
+
+      - name: Install approved iOS 26.5 simulator runtime
+        timeout-minutes: 30
+        env:
+          IOS_SIMULATOR_DEVICE_FAMILY: ${{ matrix.family }}
+          IOS_SIMULATOR_DEVICE_PREFIX: ${{ matrix.prefix }}
+          IOS_SIMULATOR_DEVICE_PREFERENCE: ${{ matrix.device_preference }}
+        run: |
+          RUNTIME_ID="com.apple.CoreSimulator.SimRuntime.iOS-26-5"
+          DEVICE_PREFIX="${IOS_SIMULATOR_DEVICE_PREFIX:-${IOS_SIMULATOR_DEVICE_FAMILY} }"
+          has_approved_runtime() {
+            xcrun simctl list runtimes -j | jq -e \
+              --arg runtime "$RUNTIME_ID" \
+              '.runtimes[] | select(.identifier == $runtime and .buildversion == "23F77" and .isAvailable)' \
+              >/dev/null
+          }
+          if ! has_approved_runtime; then
+            # Request the exact build: "-buildVersion 26.5" is resolved
+            # server-side and has served both 23F77 and 23F73 (#3286).
+            sudo xcodebuild -downloadPlatform iOS \
+              -buildVersion 23F77 \
+              -architectureVariant arm64
+            if ! has_approved_runtime; then
+              echo "::error::iOS 26.5 runtime build 23F77 remained unavailable after download; inspect the download output and install the exact approved runtime."
+              exit 1
+            fi
+          fi
+          if ! xcrun simctl list devices available -j | jq -e \
+            --arg runtime "$RUNTIME_ID" --arg prefix "$DEVICE_PREFIX" \
+            '.devices[$runtime][]? | select(.isAvailable == true and (.name | startswith($prefix)))' >/dev/null; then
+            if ! DEVICE_TYPE="$(xcrun simctl list devicetypes -j | jq -e \
+              --arg family "$IOS_SIMULATOR_DEVICE_FAMILY" \
+              --arg preferences "$IOS_SIMULATOR_DEVICE_PREFERENCE" \
+              '[($preferences | split(","))[] as $name
+                | .devicetypes[]
+                | select(.name == $name and .productFamily == $family)] | first')"; then
+              echo "::error::No installed $IOS_SIMULATOR_DEVICE_FAMILY simulator type matches its preference list."
+              exit 1
+            fi
+            DEVICE_NAME="$(printf '%s\n' "$DEVICE_TYPE" | jq -r '.name')"
+            DEVICE_TYPE_ID="$(printf '%s\n' "$DEVICE_TYPE" | jq -r '.identifier')"
+            xcrun simctl create "$DEVICE_NAME" "$DEVICE_TYPE_ID" "$RUNTIME_ID"
+          fi
+
+      - name: Resolve ${{ matrix.family }} simulator destination
+        env:
+          IOS_SIMULATOR_DEVICE_FAMILY: ${{ matrix.family }}
+          IOS_SIMULATOR_DEVICE_PREFIX: ${{ matrix.prefix }}
+          IOS_SIMULATOR_DEVICE_PREFERENCE: ${{ matrix.device_preference }}
+        run: ../scripts/ci/resolve-ios-simulator.sh
+
+      - name: Boot ${{ matrix.family }} simulator
+        run: ../scripts/ci/boot-ios-simulator.sh "$SIMULATOR_UDID"
+
+      - name: Build XCUI shard for testing
+        timeout-minutes: 20
+        run: |
+          xcodebuild \
+            -project PrintFarmer.xcodeproj \
+            -scheme PrintFarmer \
+            -configuration Debug \
+            -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
+            -destination-timeout 90 \
+            -derivedDataPath "build-${{ matrix.key }}" \
+            -clonedSourcePackagesDirPath "build-${{ matrix.key }}/SourcePackages" \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGNING_REQUIRED=NO \
+            SWIFT_STRICT_CONCURRENCY=minimal \
+            build-for-testing
+
+      - name: Run login XCUI
+        id: login-xcui
+        if: matrix.shard == 1
+        timeout-minutes: 25
+        run: |
+          set -o pipefail
+          python3 scripts/run-tests.py -- test-without-building \
+            -project PrintFarmer.xcodeproj \
+            -scheme PrintFarmer \
+            -configuration Debug \
+            -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
+            -destination-timeout 90 \
+            -derivedDataPath "build-${{ matrix.key }}" \
+            -clonedSourcePackagesDirPath "build-${{ matrix.key }}/SourcePackages" \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGNING_REQUIRED=NO \
+            -only-testing:PrintFarmerUITests/LoginFlowUITests \
+            -parallel-testing-enabled NO \
+            -disable-concurrent-destination-testing \
+            -resultBundlePath "build-${{ matrix.key }}/Login.xcresult" \
+            2>&1 | tee "build-${{ matrix.key }}/Login.log"
+
+      - name: Run XCUI shard
+        if: ${{ !cancelled() && (success() || steps.login-xcui.conclusion == 'failure') }}
+        timeout-minutes: 25
+        env:
+          SELECTORS: ${{ matrix.selectors }}
+        run: |
+          set -o pipefail
+          read -r -a selectors <<< "$SELECTORS"
+          if [[ "${{ matrix.shard }}" == "1" ]]; then
+            selectors=("${selectors[@]:1}")
+          fi
+          python3 scripts/run-tests.py -- test-without-building \
+            -project PrintFarmer.xcodeproj \
+            -scheme PrintFarmer \
+            -configuration Debug \
+            -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
+            -destination-timeout 90 \
+            -derivedDataPath "build-${{ matrix.key }}" \
+            -clonedSourcePackagesDirPath "build-${{ matrix.key }}/SourcePackages" \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGNING_REQUIRED=NO \
+            "${selectors[@]}" \
+            -parallel-testing-enabled NO \
+            -disable-concurrent-destination-testing \
+            -resultBundlePath "build-${{ matrix.key }}/XCUIShard.xcresult" \
+            2>&1 | tee "build-${{ matrix.key }}/XCUIShard.log"
+
+      - name: Upload XCUI shard results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ios-xcui-${{ matrix.key }}
+          path: |
+            mobile/build-${{ matrix.key }}/Login.xcresult
+            mobile/build-${{ matrix.key }}/Login.log
+            mobile/build-${{ matrix.key }}/Login.events.jsonl
+            mobile/build-${{ matrix.key }}/Login.timing.json
+            mobile/build-${{ matrix.key }}/XCUIShard.xcresult
+            mobile/build-${{ matrix.key }}/XCUIShard.log
+            mobile/build-${{ matrix.key }}/XCUIShard.events.jsonl
+            mobile/build-${{ matrix.key }}/XCUIShard.timing.json
+          retention-days: 7

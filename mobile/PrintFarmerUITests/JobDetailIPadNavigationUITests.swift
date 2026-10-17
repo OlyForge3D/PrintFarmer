@@ -13,12 +13,6 @@ import XCTest
 @MainActor
 final class JobDetailIPadNavigationUITests: QueueUITestBase {
 
-    #if PFARM_STALL_CAPTURE
-    override var additionalLaunchArguments: [String] {
-        super.additionalLaunchArguments + ["--uitesting-capture-main-thread"]
-    }
-    #endif
-
     private let completedJobIdentifier = "job.row.30000000-0003-0000-0000-000000000007"
 
     /// Skips on the compact (iPhone) layout so the strict assertions below
