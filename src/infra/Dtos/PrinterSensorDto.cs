@@ -189,6 +189,44 @@ public sealed record PrinterSensorDto(
         HashCode.Combine(StringComparer.Ordinal.GetHashCode(Id), Kind, FanRole, Available, Readings.Count);
 }
 
+/// <summary>
+/// An immutable sensor list already normalized by
+/// <see cref="Services.Printers.PrinterSensorNormalizer"/>, compared by content so record
+/// equality of status payloads reflects sensor values rather than list references.
+/// </summary>
+internal sealed class PrinterSensorList : IReadOnlyList<PrinterSensorDto>, IEquatable<PrinterSensorList>
+{
+    public static readonly PrinterSensorList Empty = new([]);
+
+    private readonly PrinterSensorDto[] _items;
+
+    internal PrinterSensorList(PrinterSensorDto[] items) => _items = items;
+
+    public PrinterSensorDto this[int index] => _items[index];
+
+    public int Count => _items.Length;
+
+    public IEnumerator<PrinterSensorDto> GetEnumerator() => ((IEnumerable<PrinterSensorDto>)_items).GetEnumerator();
+
+    System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+
+    public bool Equals(PrinterSensorList? other) =>
+        other is not null && (ReferenceEquals(this, other) || _items.SequenceEqual(other._items));
+
+    public override bool Equals(object? obj) => Equals(obj as PrinterSensorList);
+
+    public override int GetHashCode()
+    {
+        HashCode hash = default;
+        foreach (PrinterSensorDto item in _items)
+        {
+            hash.Add(item);
+        }
+
+        return hash.ToHashCode();
+    }
+}
+
 /// <summary>A sensor value requested through the targeted sensor-control endpoint.</summary>
 /// <param name="Quantity">Quantity to set; must match an advertised writable descriptor.</param>
 /// <param name="Value">Requested numeric value.</param>

@@ -6,9 +6,10 @@ namespace Farm.Infrastructure.Services.Printers;
 /// Marker for backend clients whose status pipeline publishes backend-neutral
 /// <see cref="PrinterSensorDto"/> entries. Backends that do not implement it report an empty
 /// <c>sensors</c> list and advertise <c>supportsSensorTelemetry = false</c>.
-/// Implementers must populate <c>Sensors</c> on both the cached status and the
-/// <c>PrinterStatusUpdate</c> they broadcast, or publish sensor-only changes through
-/// <c>IPrinterStatusCacheWriter.UpdateSensors</c> and
+/// Implementers must assign their complete current sensor snapshot to <c>Sensors</c> on every
+/// cached status and <c>PrinterStatusUpdate</c> they broadcast (an assigned empty list clears
+/// the cached sensors; leaving it unassigned preserves them), and may publish sensor-only
+/// changes between status updates through <c>IPrinterStatusCacheWriter.UpdateSensors</c> and
 /// <c>IPrinterStatusBroadcaster.BroadcastSensorChangeAsync</c>.
 /// </summary>
 #pragma warning disable CA1040 // Marker interface intentionally empty

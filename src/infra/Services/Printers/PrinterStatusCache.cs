@@ -66,7 +66,8 @@ public sealed record PrinterStatusCacheSnapshot(
     DateTime UpdatedAtUtc,
     long? OriginWatermark = null,
     DateTime? LastSeenAtUtc = null,
-    string Source = "backend");
+    string Source = "backend",
+    DateTime? SensorsUpdatedAtUtc = null);
 
 /// <summary>
 /// Shared freshness policy for decisions that require live printer telemetry.
@@ -89,6 +90,18 @@ public static class PrinterStatusFreshness
             && snapshot.Status.IsOnline
             && snapshot.UpdatedAtUtc <= utcNow
             && utcNow - snapshot.UpdatedAtUtc <= MaximumAge;
+    }
+
+    /// <summary>
+    /// Like <see cref="IsFreshOnline"/>, but a sensor-only report
+    /// (<see cref="PrinterStatusCacheSnapshot.SensorsUpdatedAtUtc"/>) also counts as live
+    /// telemetry. Use only for decisions about the sensor list itself.
+    /// </summary>
+    public static bool IsSensorFreshOnline(PrinterStatusCacheSnapshot? snapshot, DateTime utcNow)
+    {
+        return IsFreshOnline(snapshot, utcNow)
+            || (snapshot?.SensorsUpdatedAtUtc is DateTime sensorsUpdatedAtUtc
+                && IsFreshOnline(snapshot with { UpdatedAtUtc = sensorsUpdatedAtUtc }, utcNow));
     }
 }
 
@@ -280,6 +293,7 @@ public class PrinterStatusCache :
             }
 
             PrinterStatusDto existing = existingSnapshot.Status;
+            DateTime observedAtUtc = DateTime.UtcNow;
             IReadOnlyList<PrinterSensorDto> merged = replaceAll
                 ? PrinterSensorNormalizer.Normalize(sensors)
                 : PrinterSensorNormalizer.Merge(existing.Sensors, sensors);
@@ -288,26 +302,29 @@ public class PrinterStatusCache :
                 merged = PrinterSensorNormalizer.MarkUnavailable(merged);
             }
 
+            // A sensor report proves the backend link is live even when values are unchanged.
+            PrinterStatusCacheSnapshot refreshed = existingSnapshot with { SensorsUpdatedAtUtc = observedAtUtc };
             if (PrinterSensorNormalizer.ContentEquals(existing.Sensors, merged))
             {
+                _cache[printerId] = refreshed;
                 return null;
             }
 
             PrinterStatusDto updated = existing with { Sensors = merged };
-            _cache[printerId] = existingSnapshot with { Status = updated };
+            _cache[printerId] = refreshed with { Status = updated };
             return updated;
         }
     }
 
     /// <summary>
-    /// A backend status write that carries no sensors preserves the cached sensor set (sensor
-    /// state may be published separately through <see cref="UpdateSensors"/>); a non-empty
-    /// list replaces it. Offline statuses keep the last values but mark every sensor unavailable.
+    /// A backend status write that does not report sensors (<see cref="PrinterStatusDto.SensorsReported"/>
+    /// is false) preserves the cached sensor set; a reported list, including an empty one,
+    /// replaces it. Offline statuses keep the last values but mark every sensor unavailable.
     /// </summary>
     private static PrinterStatusDto ApplySensorPolicy(PrinterStatusDto normalized, PrinterStatusDto? existing)
     {
-        IReadOnlyList<PrinterSensorDto> sensors = normalized.Sensors is { Count: > 0 }
-            ? PrinterSensorNormalizer.Normalize(normalized.Sensors)
+        IReadOnlyList<PrinterSensorDto> sensors = normalized.SensorsReported
+            ? normalized.Sensors
             : existing?.Sensors ?? [];
         if (!normalized.IsOnline)
         {

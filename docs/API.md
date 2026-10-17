@@ -179,11 +179,15 @@ The server normalizes every list: at most 64 sensors, at most 16 readings and
 16 writable descriptors per sensor, ids of 1–128 characters, duplicates
 removed (last wins, one reading/descriptor per quantity), non-finite values
 dropped, and entries ordered by `id`. `Hotend` and `Controller` fans are
-firmware-managed and are always read-only.
+firmware-managed and are always read-only, regardless of `kind`.
 
-Each `printerupdated` event carries the complete current list. Backends may
-deliver partial sensor updates internally; omitted sensors and readings keep
-their last values. A sensor-only or availability-only change still emits
+Each `printerupdated` event carries the complete current list. Internally, a
+status update that does not report sensors keeps the cached list, while a
+reported list (even `[]`) replaces it. Backends may also deliver partial sensor
+updates; omitted sensors and readings keep their last values, and omitted
+`displayName`, `fanRole`, `lastUpdated`, and `writable` keep their previous
+values. A sensor update also refreshes the freshness check used by sensor
+control, even when values are unchanged. A sensor-only or availability-only change still emits
 `printerupdated`. When a printer goes offline, all entries are kept with
 `available: false`. `SubscribeToPrinter`, `SubscribeToPrinters`, and
 `RequestPrinterStatus` replay the cached snapshot (including sensors), so

@@ -4030,7 +4030,7 @@ public class PrintersService(
     public IReadOnlyList<PrinterSensorDto> GetLiveSensors(Guid id)
     {
         PrinterStatusCacheSnapshot? snapshot = _statusCache.GetSnapshot(id);
-        return PrinterStatusFreshness.IsFreshOnline(snapshot, DateTime.UtcNow)
+        return PrinterStatusFreshness.IsSensorFreshOnline(snapshot, DateTime.UtcNow)
             ? snapshot!.Status.Sensors
             : [];
     }

@@ -25,33 +25,47 @@ public static class PrinterSensorNormalizer
     /// and writable descriptors are deduplicated per quantity (last wins) with non-finite values
     /// removed, and firmware-automatic fans (hotend/controller) are forced read-only.
     /// </summary>
-    public static IReadOnlyList<PrinterSensorDto> Normalize(IEnumerable<PrinterSensorDto?>? sensors)
+    public static IReadOnlyList<PrinterSensorDto> Normalize(IEnumerable<PrinterSensorDto?>? sensors) =>
+        sensors is null ? PrinterSensorList.Empty : ToList(sensors)!;
+
+    /// <summary>
+    /// Normalizes <paramref name="sensors"/> into the content-equal list stored by status
+    /// payloads; returns <see langword="null"/> for <see langword="null"/> input.
+    /// </summary>
+    internal static PrinterSensorList? ToList(IEnumerable<PrinterSensorDto?>? sensors)
     {
         if (sensors is null)
         {
-            return [];
+            return null;
+        }
+
+        if (sensors is PrinterSensorList normalized)
+        {
+            return normalized;
         }
 
         Dictionary<string, PrinterSensorDto> byId = new(StringComparer.Ordinal);
         foreach (PrinterSensorDto? sensor in sensors)
         {
-            if (sensor is null || string.IsNullOrWhiteSpace(sensor.Id) || sensor.Id.Length > MaxIdLength)
+            if (IsAcceptedId(sensor))
             {
-                continue;
+                byId[sensor!.Id] = NormalizeEntry(sensor);
             }
-
-            byId[sensor.Id] = NormalizeEntry(sensor);
         }
 
-        return byId.Values
-            .OrderBy(sensor => sensor.Id, StringComparer.Ordinal)
-            .Take(MaxSensors)
-            .ToArray();
+        return byId.Count == 0
+            ? PrinterSensorList.Empty
+            : new PrinterSensorList(byId.Values
+                .OrderBy(sensor => sensor.Id, StringComparer.Ordinal)
+                .Take(MaxSensors)
+                .ToArray());
     }
 
     /// <summary>
     /// Applies a partial update: entries in <paramref name="updates"/> replace their matching
-    /// ids, but readings the update omits are preserved from <paramref name="existing"/>.
+    /// ids, but anything the update omits is preserved from <paramref name="existing"/> —
+    /// readings for other quantities, a blank display name, a null fan role, a null
+    /// timestamp, and an empty writable list (use a full replace to revoke writability).
     /// Sensors not mentioned in the update are preserved unchanged.
     /// </summary>
     public static IReadOnlyList<PrinterSensorDto> Merge(
@@ -64,8 +78,18 @@ public static class PrinterSensorNormalizer
             byId[sensor.Id] = sensor;
         }
 
-        foreach (PrinterSensorDto update in Normalize(updates))
+        Dictionary<string, PrinterSensorDto> rawById = new(StringComparer.Ordinal);
+        foreach (PrinterSensorDto? raw in updates ?? [])
         {
+            if (IsAcceptedId(raw))
+            {
+                rawById[raw!.Id] = raw;
+            }
+        }
+
+        foreach (PrinterSensorDto raw in rawById.Values)
+        {
+            PrinterSensorDto update = NormalizeEntry(raw);
             if (byId.TryGetValue(update.Id, out PrinterSensorDto? previous))
             {
                 HashSet<PrinterSensorQuantity> updatedQuantities =
@@ -73,7 +97,14 @@ public static class PrinterSensorNormalizer
                 PrinterSensorReadingDto[] preserved = previous.Readings
                     .Where(reading => !updatedQuantities.Contains(reading.Quantity))
                     .ToArray();
-                byId[update.Id] = update with { Readings = [.. preserved, .. update.Readings] };
+                byId[update.Id] = update with
+                {
+                    DisplayName = string.IsNullOrWhiteSpace(raw.DisplayName) ? previous.DisplayName : update.DisplayName,
+                    FanRole = raw.FanRole is null ? previous.FanRole : update.FanRole,
+                    LastUpdated = update.LastUpdated ?? previous.LastUpdated,
+                    Readings = [.. preserved, .. update.Readings],
+                    Writable = raw.Writable is null || raw.Writable.Count == 0 ? previous.Writable : update.Writable,
+                };
             }
             else
             {
@@ -81,6 +112,7 @@ public static class PrinterSensorNormalizer
             }
         }
 
+        // Re-normalizing enforces kind/role consistency and read-only automatic fans after the merge.
         return Normalize(byId.Values);
     }
 
@@ -153,11 +185,14 @@ public static class PrinterSensorNormalizer
         return new(PrinterSensorControlValidationCode.Valid, null, sensor.Id, descriptor);
     }
 
+    private static bool IsAcceptedId(PrinterSensorDto? sensor) =>
+        sensor is not null && !string.IsNullOrWhiteSpace(sensor.Id) && sensor.Id.Length <= MaxIdLength;
+
     private static PrinterSensorDto NormalizeEntry(PrinterSensorDto sensor)
     {
-        bool firmwareAutomaticFan =
-            sensor.Kind == PrinterSensorKind.Fan &&
-            sensor.FanRole is PrinterFanRole.Hotend or PrinterFanRole.Controller;
+        // A hotend/controller role is firmware-automatic even when the kind is malformed, so it
+        // is forced read-only before the role is discarded for non-fan kinds.
+        bool firmwareAutomaticFan = sensor.FanRole is PrinterFanRole.Hotend or PrinterFanRole.Controller;
         string displayName = string.IsNullOrWhiteSpace(sensor.DisplayName) ? sensor.Id : sensor.DisplayName.Trim();
 
         return sensor with

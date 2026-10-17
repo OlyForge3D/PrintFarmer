@@ -131,6 +131,92 @@ public sealed class PrinterSensorNormalizerTests
     }
 
     [Fact]
+    public void Merge_ReadingsOnlyUpdate_PreservesWritableFanRoleDisplayNameAndTimestamp()
+    {
+        DateTime reportedAt = new(2026, 10, 16, 12, 0, 0, DateTimeKind.Utc);
+        IReadOnlyList<PrinterSensorDto> existing = PrinterSensorNormalizer.Normalize(
+        [
+            new PrinterSensorDto("fan", "Part fan", PrinterSensorKind.Fan)
+            {
+                FanRole = PrinterFanRole.PartCooling,
+                LastUpdated = reportedAt,
+                Readings = [Reading(PrinterSensorQuantity.FanSpeed, 50, PrinterSensorUnit.Percent)],
+                Writable = [FanSpeedWritable()],
+            },
+        ]);
+
+        PrinterSensorDto merged = Assert.Single(PrinterSensorNormalizer.Merge(
+            existing,
+            [new PrinterSensorDto("fan", "", PrinterSensorKind.Fan) { Readings = [Reading(PrinterSensorQuantity.FanSpeed, 75, PrinterSensorUnit.Percent)] }]));
+
+        Assert.Equal("Part fan", merged.DisplayName);
+        Assert.Equal(PrinterFanRole.PartCooling, merged.FanRole);
+        Assert.Equal(reportedAt, merged.LastUpdated);
+        Assert.Equal(FanSpeedWritable(), Assert.Single(merged.Writable));
+        Assert.Equal(75, Assert.Single(merged.Readings).Value.Number);
+        Assert.True(PrinterSensorNormalizer.ValidateControl(
+            [merged], "fan", PrinterSensorQuantity.FanSpeed, PrinterSensorValue.FromNumber(60)).IsValid);
+    }
+
+    [Fact]
+    public void Merge_RoleChangeToFirmwareAutomatic_RevokesPreservedWritable()
+    {
+        IReadOnlyList<PrinterSensorDto> existing = PrinterSensorNormalizer.Normalize([Fan("fan", PrinterFanRole.PartCooling, FanSpeedWritable())]);
+
+        PrinterSensorDto merged = Assert.Single(PrinterSensorNormalizer.Merge(
+            existing,
+            [new PrinterSensorDto("fan", "fan", PrinterSensorKind.Fan) { FanRole = PrinterFanRole.Hotend }]));
+
+        Assert.Equal(PrinterFanRole.Hotend, merged.FanRole);
+        Assert.Empty(merged.Writable);
+    }
+
+    [Theory]
+    [InlineData(PrinterFanRole.Hotend)]
+    [InlineData(PrinterFanRole.Controller)]
+    public void Normalize_FirmwareAutomaticRoleWithMalformedKind_IsReadOnly(PrinterFanRole role)
+    {
+        PrinterSensorDto input = new("fan", "fan", PrinterSensorKind.Other)
+        {
+            FanRole = role,
+            Writable = [FanSpeedWritable()],
+        };
+
+        PrinterSensorDto result = Assert.Single(PrinterSensorNormalizer.Normalize([input]));
+
+        Assert.Null(result.FanRole);
+        Assert.Empty(result.Writable);
+        Assert.Equal(
+            PrinterSensorControlValidationCode.ReadOnly,
+            PrinterSensorNormalizer.ValidateControl([result], "fan", PrinterSensorQuantity.FanSpeed, PrinterSensorValue.FromNumber(50)).Code);
+    }
+
+    [Fact]
+    public void StatusPayloads_NormalizeSensorsOnAssignment_AndCompareByContent()
+    {
+        Guid id = Guid.NewGuid();
+        PrinterSensorDto[] raw =
+        [
+            new PrinterSensorDto("b", "B", PrinterSensorKind.Chamber),
+            new PrinterSensorDto("a", "first", PrinterSensorKind.Chamber),
+            new PrinterSensorDto("a", "second", PrinterSensorKind.Chamber),
+            new PrinterSensorDto("", "blank", PrinterSensorKind.Other),
+            Fan("hotend", PrinterFanRole.Hotend, FanSpeedWritable()),
+        ];
+
+        PrinterStatusDto status = new(id, true, "idle") { Sensors = raw };
+        PrinterStatusDto sameContent = new(id, true, "idle") { Sensors = [.. raw] };
+
+        Assert.Equal(["a", "b", "hotend"], status.Sensors.Select(sensor => sensor.Id));
+        Assert.Equal("second", status.Sensors[0].DisplayName);
+        Assert.Empty(status.Sensors.Single(sensor => sensor.Id == "hotend").Writable);
+        Assert.Equal(status, sameContent);
+        Assert.True(status.SensorsReported);
+        Assert.False(new PrinterStatusDto(id, true, "idle").SensorsReported);
+        Assert.True((new PrinterStatusDto(id, true, "idle") { Sensors = [] }).SensorsReported);
+    }
+
+    [Fact]
     public void MarkUnavailable_KeepsValues()
     {
         IReadOnlyList<PrinterSensorDto> sensors = PrinterSensorNormalizer.Normalize([Fan("fan", PrinterFanRole.PartCooling)]);

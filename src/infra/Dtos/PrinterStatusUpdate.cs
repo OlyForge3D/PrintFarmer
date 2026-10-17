@@ -37,10 +37,21 @@ public record PrinterStatusUpdate(
     double? LiveZOffsetMm = null)
 {
     /// <summary>
-    /// Backend-neutral sensors and fans (issue #3406). Each <c>printerupdated</c> carries the
-    /// printer's complete current sensor snapshot, never a delta.
+    /// Backend-neutral sensors and fans (issue #3406), bounded and deduplicated by
+    /// <see cref="Services.Printers.PrinterSensorNormalizer"/> on assignment. A backend that
+    /// reports sensors assigns its complete current snapshot on every update, never a delta.
     /// </summary>
-    public IReadOnlyList<PrinterSensorDto> Sensors { get; init; } = [];
+    public IReadOnlyList<PrinterSensorDto> Sensors
+    {
+        get => _sensors ?? PrinterSensorList.Empty;
+        init => _sensors = Services.Printers.PrinterSensorNormalizer.ToList(value);
+    }
+
+    private readonly PrinterSensorList? _sensors;
+
+    /// <summary>Whether <see cref="Sensors"/> was assigned; see <see cref="PrinterStatusDto.SensorsReported"/>.</summary>
+    [JsonIgnore]
+    public bool SensorsReported => _sensors is not null;
 
     /// <summary>
     /// Relative authenticated proxy URL for the active job thumbnail.
@@ -51,8 +62,9 @@ public record PrinterStatusUpdate(
     /// <summary>
     /// Creates the cache snapshot corresponding to this broadcast, preserving all shared fields.
     /// </summary>
-    public PrinterStatusDto ToStatusDto(string? cameraSnapshotUrl = null, double? printTimeLeftSeconds = null) =>
-        new(
+    public PrinterStatusDto ToStatusDto(string? cameraSnapshotUrl = null, double? printTimeLeftSeconds = null)
+    {
+        PrinterStatusDto status = new(
             Id: Id,
             IsOnline: IsOnline,
             State: State,
@@ -78,8 +90,7 @@ public record PrinterStatusUpdate(
             CurrentLayer: CurrentLayer,
             TotalLayers: TotalLayers,
             FanSpeedPercent: FanSpeedPercent,
-            LiveZOffsetMm: LiveZOffsetMm)
-        {
-            Sensors = Sensors,
-        };
+            LiveZOffsetMm: LiveZOffsetMm);
+        return SensorsReported ? status with { Sensors = Sensors } : status;
+    }
 }

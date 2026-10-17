@@ -72,6 +72,59 @@ public sealed class PrinterStatusCacheSensorTests
     }
 
     [Fact]
+    public void UpdateStatus_ReportedEmptySnapshot_ClearsCachedSensors()
+    {
+        Guid id = Guid.NewGuid();
+        PrinterStatusCache cache = CreateCache();
+        cache.UpdateStatus(new PrinterStatusDto(id, true, "idle") { Sensors = [Chamber(30)] });
+
+        cache.UpdateStatus(new PrinterStatusDto(id, true, "idle") { Sensors = [] });
+
+        Assert.Empty(cache.GetStatus(id)!.Sensors);
+    }
+
+    [Fact]
+    public void UpdateStatus_FromUpdateWithoutSensors_PreservesCachedSensors_AndReportedEmptyClears()
+    {
+        Guid id = Guid.NewGuid();
+        PrinterStatusCache cache = CreateCache();
+        cache.UpdateStatus(new PrinterStatusDto(id, true, "idle") { Sensors = [Chamber(30)] });
+        PrinterStatusUpdate update = new(
+            id, true, "idle", null, null, null, null, null, null, null, null, null, null, null, null, null);
+
+        cache.UpdateStatus(update.ToStatusDto());
+        Assert.Single(cache.GetStatus(id)!.Sensors);
+
+        cache.UpdateStatus((update with { Sensors = [] }).ToStatusDto());
+        Assert.Empty(cache.GetStatus(id)!.Sensors);
+    }
+
+    [Fact]
+    public void UpdateSensors_RefreshesSensorFreshness_EvenWhenUnchanged()
+    {
+        Guid id = Guid.NewGuid();
+        PrinterStatusCache cache = CreateCache();
+        cache.UpdateStatus(new PrinterStatusDto(id, true, "idle") { Sensors = [Chamber(30)] });
+        DateTime statusAt = cache.GetSnapshot(id)!.UpdatedAtUtc;
+
+        Assert.Null(cache.UpdateSensors(id, [Chamber(30)], replaceAll: false));
+
+        PrinterStatusCacheSnapshot snapshot = cache.GetSnapshot(id)!;
+        Assert.Equal(statusAt, snapshot.UpdatedAtUtc);
+        Assert.NotNull(snapshot.SensorsUpdatedAtUtc);
+        Assert.True(snapshot.SensorsUpdatedAtUtc >= statusAt);
+
+        DateTime staleStatusNow = statusAt + PrinterStatusFreshness.MaximumAge + TimeSpan.FromSeconds(1);
+        PrinterStatusCacheSnapshot staleStatus = snapshot with { SensorsUpdatedAtUtc = staleStatusNow - TimeSpan.FromSeconds(5) };
+        Assert.False(PrinterStatusFreshness.IsFreshOnline(staleStatus, staleStatusNow));
+        Assert.True(PrinterStatusFreshness.IsSensorFreshOnline(staleStatus, staleStatusNow));
+        Assert.False(PrinterStatusFreshness.IsSensorFreshOnline(snapshot, staleStatusNow));
+        Assert.False(PrinterStatusFreshness.IsSensorFreshOnline(
+            staleStatus with { Status = staleStatus.Status with { IsOnline = false } },
+            staleStatusNow));
+    }
+
+    [Fact]
     public void UpdateStatus_Offline_MarksSensorsUnavailableButKeepsValues()
     {
         Guid id = Guid.NewGuid();
