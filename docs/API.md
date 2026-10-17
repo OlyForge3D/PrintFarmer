@@ -186,8 +186,10 @@ status update that does not report sensors keeps the cached list, while a
 reported list (even `[]`) replaces it. Backends may also deliver partial sensor
 updates; omitted sensors and readings keep their last values, and omitted
 `displayName`, `fanRole`, `lastUpdated`, and `writable` keep their previous
-values. A sensor update also refreshes the freshness check used by sensor
-control, even when values are unchanged. A sensor-only or availability-only change still emits
+values. Sensor control is accepted only while the last sensor report (a
+reported list or a sensor update, even with unchanged values) is under two
+minutes old; status updates that do not report sensors do not extend it. A
+sensor-only or availability-only change still emits
 `printerupdated`. When a printer goes offline, all entries are kept with
 `available: false`. `SubscribeToPrinter`, `SubscribeToPrinters`, and
 `RequestPrinterStatus` replay the cached snapshot (including sensors), so

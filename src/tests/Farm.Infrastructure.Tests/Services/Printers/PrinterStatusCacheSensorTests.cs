@@ -125,6 +125,32 @@ public sealed class PrinterStatusCacheSensorTests
     }
 
     [Fact]
+    public void UpdateStatus_WithoutSensors_DoesNotRefreshSensorFreshness()
+    {
+        Guid id = Guid.NewGuid();
+        PrinterStatusCache cache = CreateCache();
+        cache.UpdateStatus(new PrinterStatusDto(id, true, "idle"));
+        Assert.Null(cache.GetSnapshot(id)!.SensorsUpdatedAtUtc);
+        Assert.False(PrinterStatusFreshness.IsSensorFreshOnline(cache.GetSnapshot(id), DateTime.UtcNow));
+
+        cache.UpdateStatus(new PrinterStatusDto(id, true, "idle") { Sensors = [Chamber(30)] });
+        DateTime sensorsAt = cache.GetSnapshot(id)!.SensorsUpdatedAtUtc!.Value;
+
+        cache.UpdateStatus(new PrinterStatusDto(id, true, "printing"));
+        cache.UpdateStatuses([new PrinterStatusDto(id, true, "printing")]);
+
+        PrinterStatusCacheSnapshot snapshot = cache.GetSnapshot(id)!;
+        Assert.Equal(sensorsAt, snapshot.SensorsUpdatedAtUtc);
+        Assert.True(snapshot.UpdatedAtUtc >= sensorsAt);
+
+        // Legacy status polls keep the printer fresh, but a stopped sensor feed must not stay control-valid.
+        DateTime now = sensorsAt + PrinterStatusFreshness.MaximumAge + TimeSpan.FromSeconds(1);
+        PrinterStatusCacheSnapshot statusFreshSensorsStale = snapshot with { UpdatedAtUtc = now - TimeSpan.FromSeconds(1) };
+        Assert.True(PrinterStatusFreshness.IsFreshOnline(statusFreshSensorsStale, now));
+        Assert.False(PrinterStatusFreshness.IsSensorFreshOnline(statusFreshSensorsStale, now));
+    }
+
+    [Fact]
     public void UpdateStatus_Offline_MarksSensorsUnavailableButKeepsValues()
     {
         Guid id = Guid.NewGuid();

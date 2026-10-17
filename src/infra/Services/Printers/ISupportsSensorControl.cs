@@ -10,7 +10,9 @@ namespace Farm.Infrastructure.Services.Printers;
 /// cached status and <c>PrinterStatusUpdate</c> they broadcast (an assigned empty list clears
 /// the cached sensors; leaving it unassigned preserves them), and may publish sensor-only
 /// changes between status updates through <c>IPrinterStatusCacheWriter.UpdateSensors</c> and
-/// <c>IPrinterStatusBroadcaster.BroadcastSensorChangeAsync</c>.
+/// <c>IPrinterStatusBroadcaster.BroadcastSensorChangeAsync</c>. Sensor control is only accepted
+/// while the last sensor report is within <c>PrinterStatusFreshness.MaximumAge</c>; status writes
+/// with unassigned <c>Sensors</c> do not refresh that freshness.
 /// </summary>
 #pragma warning disable CA1040 // Marker interface intentionally empty
 public interface ISupportsSensorTelemetry

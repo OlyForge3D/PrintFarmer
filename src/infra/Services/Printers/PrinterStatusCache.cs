@@ -93,15 +93,15 @@ public static class PrinterStatusFreshness
     }
 
     /// <summary>
-    /// Like <see cref="IsFreshOnline"/>, but a sensor-only report
-    /// (<see cref="PrinterStatusCacheSnapshot.SensorsUpdatedAtUtc"/>) also counts as live
-    /// telemetry. Use only for decisions about the sensor list itself.
+    /// Returns whether the cached sensor list itself is live: the printer is online and the
+    /// last sensor report (<see cref="PrinterStatusCacheSnapshot.SensorsUpdatedAtUtc"/>) is within
+    /// <see cref="MaximumAge"/>. Status writes that do not report sensors never refresh it, so a
+    /// preserved list cannot stay control-valid after the sensor feed stops.
     /// </summary>
     public static bool IsSensorFreshOnline(PrinterStatusCacheSnapshot? snapshot, DateTime utcNow)
     {
-        return IsFreshOnline(snapshot, utcNow)
-            || (snapshot?.SensorsUpdatedAtUtc is DateTime sensorsUpdatedAtUtc
-                && IsFreshOnline(snapshot with { UpdatedAtUtc = sensorsUpdatedAtUtc }, utcNow));
+        return snapshot?.SensorsUpdatedAtUtc is DateTime sensorsUpdatedAtUtc
+            && IsFreshOnline(snapshot with { UpdatedAtUtc = sensorsUpdatedAtUtc }, utcNow);
     }
 }
 
@@ -210,7 +210,8 @@ public class PrinterStatusCache :
                 observedAtUtc,
                 originWatermark,
                 normalized.IsOnline ? observedAtUtc : existingSnapshot?.LastSeenAtUtc,
-                "backend");
+                "backend",
+                SensorsObservedAt(status, existingSnapshot, observedAtUtc));
             LogTransitionIfChanged(status.Id, existing, normalized);
             transition = DetectOfflineTransition(existing, normalized);
         }
@@ -243,7 +244,8 @@ public class PrinterStatusCache :
                     observedAtUtc,
                     originWatermark,
                     normalized.IsOnline ? observedAtUtc : existingSnapshot?.LastSeenAtUtc,
-                    "backend");
+                    "backend",
+                    SensorsObservedAt(status, existingSnapshot, observedAtUtc));
                 LogTransitionIfChanged(status.Id, existing, normalized);
                 if (DetectOfflineTransition(existing, normalized) is AttentionChangeKind kind)
                 {
@@ -333,6 +335,12 @@ public class PrinterStatusCache :
 
         return normalized with { Sensors = sensors };
     }
+
+    private static DateTime? SensorsObservedAt(
+        PrinterStatusDto status,
+        PrinterStatusCacheSnapshot? existingSnapshot,
+        DateTime observedAtUtc) =>
+        status.SensorsReported ? observedAtUtc : existingSnapshot?.SensorsUpdatedAtUtc;
 
     public void ClearStatus(Guid printerId)
     {
