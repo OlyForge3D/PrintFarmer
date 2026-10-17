@@ -66,7 +66,7 @@ namespace Farm.Modules.Printers.Controllers;
 [ApiController]
 [Route("api/printers")]
 [Authorize]
-public class PrintersController(
+public partial class PrintersController(
     ILogger<PrintersController> logger,
     Farm.Infrastructure.Services.Printers.IPrintersService printersService,
     Services.Catalog.ICatalogService catalogService,
@@ -79,7 +79,6 @@ public class PrintersController(
     IEgressGuard egressGuard,
     Farm.Infrastructure.Services.FailureDetection.IObicoServerAssignmentService obicoServerAssignment,
     ISettingsService settingsService,
-    Farm.Infrastructure.Services.Printers.IPrinterSessionTimelineService printerSessionTimelineService,
     IPrintFarmerTelemetryService telemetryService,
     Farm.Infrastructure.Services.BedTypes.IBedTypeService bedTypeService,
     Farm.Infrastructure.Services.IProfileImportService? profileImportService = null,
@@ -115,7 +114,6 @@ public class PrintersController(
     private readonly Farm.Infrastructure.Services.Printers.IBackendClientFactory _backendClientFactory = backendClientFactory;
     private readonly Farm.Infrastructure.Services.FailureDetection.IObicoServerAssignmentService _obicoServerAssignment = obicoServerAssignment;
     private readonly ISettingsService _settingsService = settingsService;
-    private readonly Farm.Infrastructure.Services.Printers.IPrinterSessionTimelineService _printerSessionTimelineService = printerSessionTimelineService;
     private readonly IPrintFarmerTelemetryService _telemetryService = telemetryService;
     private readonly Farm.Infrastructure.Services.BedTypes.IBedTypeService _bedTypeService = bedTypeService;
 
@@ -5523,43 +5521,6 @@ public class PrintersController(
             PrinterGroupAccessLevel.View,
             ct);
         return items.Where(item => allowed.Contains(getId(item))).ToArray();
-    }
-
-    /// <summary>
-    /// Retrieves the recent print-session timeline for a single printer.
-    /// </summary>
-    /// <param name="id">The printer identifier.</param>
-    /// <param name="take">Maximum number of sessions to return.</param>
-    /// <param name="ct">Cancellation token for the operation.</param>
-    /// <returns>Recent sessions composed from persisted jobs and failure incidents.</returns>
-    [HttpGet("{id:guid}/session-timeline")]
-    [ProducesResponseType(typeof(PrinterSessionTimelineDto), 200)]
-    [ProducesResponseType(404)]
-    [ProducesResponseType(500)]
-    public async Task<ActionResult<PrinterSessionTimelineDto>> GetSessionTimelineAsync(
-        Guid id,
-        [FromQuery] int take = Farm.Infrastructure.Services.Printers.PrinterSessionTimelineService.DefaultTake,
-        CancellationToken ct = default)
-    {
-        if (!await CanAccessPrinterAsync(id, PrinterGroupAccessLevel.View, ct))
-        {
-            return NotFound();
-        }
-
-        try
-        {
-            PrinterSessionTimelineDto timeline = await _printerSessionTimelineService.GetRecentAsync(id, take, ct);
-            return Ok(timeline);
-        }
-        catch (KeyNotFoundException)
-        {
-            return NotFound();
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to get session timeline for printer {Id}: {Message}", id, ex.Message);
-            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to retrieve printer session timeline" });
-        }
     }
 
     // ===== HISTORY ENDPOINTS =====

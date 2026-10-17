@@ -220,6 +220,88 @@ export interface PrinterLiveStatus {
   fanSpeedPercent?: number | null;
   /** Live transient G-code Z offset reported by the backend, in millimeters. */
   liveZOffsetMm?: number | null;
+  /** Backend-neutral sensors and fans; always present on status payloads, empty when unsupported. */
+  sensors?: PrinterSensor[];
+}
+
+/** Classification of a printer sensor or fan entry. */
+export type PrinterSensorKind =
+  | 'Other'
+  | 'Nozzle'
+  | 'Bed'
+  | 'Chamber'
+  | 'Mcu'
+  | 'Host'
+  | 'Ambient'
+  | 'FilamentRunout'
+  | 'Fan';
+
+/** Role of a fan entry (kind `Fan`). */
+export type PrinterFanRole =
+  | 'Other'
+  | 'PartCooling'
+  | 'Hotend'
+  | 'Controller'
+  | 'Chamber'
+  | 'Auxiliary';
+
+/** Physical quantity of a sensor reading or writable descriptor. */
+export type PrinterSensorQuantity =
+  | 'Other'
+  | 'Temperature'
+  | 'TargetTemperature'
+  | 'Humidity'
+  | 'Pressure'
+  | 'Gas'
+  | 'FanSpeed'
+  | 'FanRpm'
+  | 'Power'
+  | 'FilamentDetected';
+
+/** Unit of a sensor reading or writable descriptor. */
+export type PrinterSensorUnit =
+  | 'None'
+  | 'Celsius'
+  | 'Percent'
+  | 'HectoPascal'
+  | 'Ohm'
+  | 'Rpm'
+  | 'Watt';
+
+export interface PrinterSensorReading {
+  quantity: PrinterSensorQuantity;
+  /** Bare JSON number or boolean. */
+  value: number | boolean;
+  unit: PrinterSensorUnit;
+}
+
+/** A settable quantity with inclusive bounds; sensors without one are read-only. */
+export interface PrinterSensorWritable {
+  quantity: PrinterSensorQuantity;
+  min: number;
+  max: number;
+  step?: number | null;
+  unit: PrinterSensorUnit;
+}
+
+export interface PrinterSensor {
+  /** Backend key, unique per printer. */
+  id: string;
+  displayName: string;
+  kind: PrinterSensorKind;
+  /** Present only when kind is `Fan`. */
+  fanRole?: PrinterFanRole | null;
+  readings: PrinterSensorReading[];
+  /** False when the backend no longer reports the sensor (stale or disconnected). */
+  available: boolean;
+  lastUpdated?: string | null;
+  writable?: PrinterSensorWritable[];
+}
+
+/** Body of `POST /api/printers/{id}/sensors/{sensorId}`. */
+export interface PrinterSensorSetRequest {
+  quantity: PrinterSensorQuantity;
+  value: number;
 }
 
 /**
@@ -477,6 +559,10 @@ export interface PrinterBackendCapabilitiesDto {
   supportsZOffsetAdjustment?: boolean;
   supportsFanSpeedReadback?: boolean;
   supportsZOffsetReadback?: boolean;
+  /** Backend publishes backend-neutral `sensors` in status payloads. */
+  supportsSensorTelemetry?: boolean;
+  /** Backend accepts targeted writes for sensors that advertise `writable` descriptors. */
+  supportsSensorControl?: boolean;
 }
 
 /**

@@ -209,7 +209,17 @@ the same convention: keep working on that branch and never create a second
 one for the issue. Open a draft PR with the `squad`
 label and `Closes #N`, then follow the review gate in `.github/copilot-instructions.md`
 ("Readiness and Merge Review Gate"). Merge only `squad`-labelled PRs with a
-passing `squad/pre-pr-verdict`, using `gh pr merge --match-head-commit <sha>`.
+passing `squad/pre-pr-verdict` and required CI. Immediately before
+`gh pr merge --match-head-commit <sha>`, run
+`node scripts/ci/verify-pr-review-threads.mjs --repo <owner>/<repo> --pr <number> --expected-head <sha> --json`
+next to `verify-squad-verdict.mjs`, per the merge-evidence procedure in
+`.github/ralph-reference.md`. Require exit `0`; exit `2` routes named unresolved
+threads (including outdated ones) to the author agent or owner to fix or reply
+with a reason, then resolve, never blind auto-resolution or missing-panel routing.
+Exit `1` (API/incomplete data) or `3` (head mismatch) blocks merge; report the
+named reason. Green checks do not imply mergeability. GitHub is authoritative
+because threads can change without a new head; report merge refusals rather
+than retrying blindly.
 
 ### Post-Task Actions
 

@@ -372,6 +372,57 @@ public class PrinterHubTests : IDisposable
     }
 
     [Fact]
+    public async Task SubscribeToPrinterAsync_ReplaysCachedSensorSnapshot()
+    {
+        Guid printerId = Guid.NewGuid();
+        var status = new PrinterStatusDto(printerId, IsOnline: true, State: "Idle")
+        {
+            Sensors =
+            [
+                new("chamber", "Chamber", PrinterSensorKind.Chamber)
+                {
+                    Readings = [new(PrinterSensorQuantity.Temperature, PrinterSensorValue.FromNumber(35), PrinterSensorUnit.Celsius)],
+                },
+            ],
+        };
+        _statusCacheMock.Setup(cache => cache.GetStatus(printerId)).Returns(status);
+
+        await _hub.SubscribeToPrinterAsync(printerId.ToString());
+
+        _callerMock.Verify(client => client.SendCoreAsync(
+            "printerupdated",
+            It.Is<object?[]>(arguments => ReferenceEquals(arguments[0], status)),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task SubscribeToPrinterAsync_WithoutAccess_DoesNotReadOrReplaySensors()
+    {
+        Guid printerId = Guid.NewGuid();
+        _statusCacheMock.Setup(cache => cache.GetStatus(printerId)).Returns(
+            new PrinterStatusDto(printerId, IsOnline: true, State: "Idle")
+            {
+                Sensors = [new("chamber", "Chamber", PrinterSensorKind.Chamber)],
+            });
+        _resourceAuthorizationMock
+            .Setup(service => service.CanAccessPrinterAsync(
+                It.IsAny<ClaimsPrincipal>(),
+                printerId,
+                PrinterGroupAccessLevel.View,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+
+        await Assert.ThrowsAsync<HubException>(
+            () => _hub.SubscribeToPrinterAsync(printerId.ToString()));
+
+        _statusCacheMock.Verify(cache => cache.GetStatus(printerId), Times.Never);
+        _callerMock.Verify(client => client.SendCoreAsync(
+            "printerupdated",
+            It.IsAny<object?[]>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
     public async Task SubscribeToPrinterAsync_WithoutResourceAccess_ThrowsAndDoesNotJoin()
     {
         _resourceAuthorizationMock

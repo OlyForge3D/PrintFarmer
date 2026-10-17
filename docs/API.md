@@ -142,6 +142,81 @@ status endpoint reports the printer offline, the composite status omits all
 secondary job and live telemetry readbacks rather than mixing them with an
 offline state.
 
+## Printer Sensors and Fans
+
+Status DTOs (`GET /api/printers/{id}/status`) and every `printerupdated`
+SignalR event carry a backend-neutral `sensors` array. It is always present;
+backends that do not publish sensors send `[]`. Existing fields such as
+`fanSpeedPercent` and the `/fan` endpoint are unchanged.
+
+```json
+{
+  "id": "fan part",
+  "displayName": "Part fan",
+  "kind": "Fan",
+  "fanRole": "PartCooling",
+  "readings": [
+    { "quantity": "FanSpeed", "value": 65, "unit": "Percent" }
+  ],
+  "available": true,
+  "lastUpdated": "2026-10-16T20:00:00Z",
+  "writable": [
+    { "quantity": "FanSpeed", "min": 0, "max": 100, "step": null, "unit": "Percent" }
+  ]
+}
+```
+
+- `kind`: `Other`, `Nozzle`, `Bed`, `Chamber`, `Mcu`, `Host`, `Ambient`,
+  `FilamentRunout`, `Fan`. Fans use `kind: "Fan"` plus `fanRole`
+  (`Other`, `PartCooling`, `Hotend`, `Controller`, `Chamber`, `Auxiliary`);
+  `fanRole` is omitted for non-fan entries.
+- `quantity`: `Other`, `Temperature`, `TargetTemperature`, `Humidity`,
+  `Pressure`, `Gas`, `FanSpeed`, `FanRpm`, `Power`, `FilamentDetected`.
+- `unit`: `None`, `Celsius`, `Percent`, `HectoPascal`, `Ohm`, `Rpm`, `Watt`.
+- `value` is a bare JSON number or boolean. All enums are strings.
+
+The server normalizes every list: at most 64 sensors, at most 16 readings and
+16 writable descriptors per sensor, ids of 1–128 characters, duplicates
+removed (last wins, one reading/descriptor per quantity), non-finite values
+dropped, and entries ordered by `id`. `Hotend` and `Controller` fans are
+firmware-managed and are always read-only, regardless of `kind`.
+
+Each `printerupdated` event carries the complete current list. Internally, a
+status update that does not report sensors keeps the cached list, while a
+reported list (even `[]`) replaces it. Backends may also deliver partial sensor
+updates; omitted sensors and readings keep their last values, and omitted
+`displayName`, `fanRole`, `lastUpdated`, and `writable` keep their previous
+values. Sensor control is accepted only while the last sensor report (a
+reported list or a sensor update, even with unchanged values) is under two
+minutes old; status updates that do not report sensors do not extend it. A
+sensor-only or availability-only change still emits
+`printerupdated`. When a printer goes offline, all entries are kept with
+`available: false`. `SubscribeToPrinter`, `SubscribeToPrinters`, and
+`RequestPrinterStatus` replay the cached snapshot (including sensors), so
+reconnecting clients never need a separate sensor endpoint.
+
+Capabilities expose `supportsSensorTelemetry` and `supportsSensorControl`.
+Both default to `false` and are only `true` for backends that opt in.
+
+### `POST /api/printers/{id}/sensors/{sensorId}`
+
+Sets one writable quantity: `{"quantity": "FanSpeed", "value": 40}`. Requires
+`Queue.Start` permission and printer Submit access. It uses the same lease rules
+as `/fan`: offline returns `503` and unknown printer states return `409`. The
+request is checked against the sensor's advertised `writable` descriptors
+before any command is sent:
+
+| Status | Reason |
+|---|---|
+| `200` | Backend confirmed the command (`CommandResult`). |
+| `400` | Missing body, non-numeric value, or a value outside `min`/`max`/`step`. |
+| `404` | Printer not found or not accessible. |
+| `409` | Unknown or unavailable sensor, read-only sensor, or quantity not writable. |
+| `501` | Backend does not support targeted sensor control. |
+
+Errors use `application/problem+json`. Sensor ids are matched exactly
+(case-sensitive).
+
 ## API Contract and Calibration Capabilities
 
 ### Contract negotiation

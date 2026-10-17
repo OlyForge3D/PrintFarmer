@@ -7,7 +7,7 @@ namespace Farm.Infrastructure.Services.Printers;
 /// <summary>
 /// One-shot startup backfill that repairs missing persisted MMU gate rows (issue #3323).
 /// Multi-material printers created before gate gap-fill existed (e.g. an AD5X persisted with
-/// only Gate 1-3) never had <see cref="IPrintersService.EnsureMmuToolheadsAsync"/> invoked, so
+/// only Gate 1-3) never had <see cref="IPrintersService.EnsureMmuToolheadsAsync(Guid, CancellationToken)"/> invoked, so
 /// their fourth gate row was never created. The repair is idempotent and race-safe, so running
 /// it on every startup is harmless once all printers are repaired.
 /// </summary>

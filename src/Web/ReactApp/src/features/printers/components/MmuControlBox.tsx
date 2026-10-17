@@ -138,7 +138,11 @@ export function MmuControlBox({
   // an unknown or future protocol keeps inventory bookkeeping alone.
   const isHappyHare = mmuStatus.mmuType === MmuProtocol.HappyHare;
   const activeGate = mmuStatus.activeGate >= 0 ? mmuStatus.activeGate : null;
-  const filamentUnloaded = mmuStatus.filamentState?.toLowerCase() === 'unloaded';
+  const filamentState = mmuStatus.filamentState?.toLowerCase();
+  const filamentUnloaded = filamentState === 'unloaded';
+  // ZMOD IFS reports only the selected channel (no head sensor), so its active
+  // gate is a selection rather than a confirmed load unless explicitly Loaded.
+  const selectionOnly = mmuStatus.mmuType === MmuProtocol.ZmodIfs && filamentState !== 'loaded';
 
   // QidiBox external spool holder ("Rack"). It is bound through its persisted
   // physical toolhead, never through a box slot, and box commands cannot reach it.
@@ -161,15 +165,19 @@ export function MmuControlBox({
     .map((gate) => ({ gate, slot: loadout?.slots.find((s) => s.key === `gate-${gate.index}`) }))
     .filter((entry): entry is { gate: MmuStatus['gates'][number]; slot: LoadoutSlot } => entry.slot != null);
 
-  const gateViews: FilamentSlotView[] = gateSlots.map(({ gate, slot }) => ({
-    ...buildSlotView(slot, spoolFor(slot), {
-      id: mmuGateId(gate.index),
-      active: isOnline && gate.index === activeGate && !filamentUnloaded,
-      atRisk: coverageByGate.get(gate.index)?.status === 'runout',
-      testId: `mmu-gate-${gate.index}`,
-    }),
-    coverageStatus: coverageByGate.get(gate.index)?.status ?? 'unknown',
-  }));
+  const gateViews: FilamentSlotView[] = gateSlots.map(({ gate, slot }) => {
+    const current = isOnline && gate.index === activeGate && !filamentUnloaded;
+    return {
+      ...buildSlotView(slot, spoolFor(slot), {
+        id: mmuGateId(gate.index),
+        active: current && !selectionOnly,
+        atRisk: coverageByGate.get(gate.index)?.status === 'runout',
+        testId: `mmu-gate-${gate.index}`,
+      }),
+      selectedFeed: current && selectionOnly ? true : undefined,
+      coverageStatus: coverageByGate.get(gate.index)?.status ?? 'unknown',
+    };
+  });
   // The rack's backing toolhead name ("Toolhead 0") is an internal detail.
   const rackView = rackSlot
     ? { ...buildSlotView(rackSlot, spoolFor(rackSlot), { id: 'Rack', active: rackActive, testId: 'mmu-rack' }), deviceName: undefined }

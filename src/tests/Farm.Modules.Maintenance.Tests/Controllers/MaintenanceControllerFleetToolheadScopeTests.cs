@@ -290,19 +290,17 @@ public sealed class MaintenanceControllerFleetToolheadScopeTests
             PrinterId = printerId,
             ToolheadId = toolheadId,
         };
-        MaintenanceLog printerLog = new() { Id = Guid.NewGuid(), PrinterId = printerId };
-        MaintenanceLog toolheadLog = new()
-        {
-            Id = Guid.NewGuid(),
-            PrinterId = printerId,
-            ToolheadId = toolheadId,
-        };
+        MaintenanceLogDto printerLog = new() { Id = Guid.NewGuid(), PrinterId = printerId };
         _alertRepository.Setup(r => r.GetAllActiveAlertsAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync([printerAlert, toolheadAlert]);
         _alertRepository.Setup(r => r.GetByIdAsync(toolheadAlert.Id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(toolheadAlert);
-        _logRepository.Setup(r => r.GetByPrinterIdAsync(printerId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync([printerLog, toolheadLog]);
+        // The scope filter now runs in the database: with the feature off the controller
+        // must request printer-wide rows only.
+        _logRepository.Setup(r => r.GetPrinterLogsAsync(
+                It.Is<MaintenanceLogListQuery>(q => q.PrinterId == printerId && q.PrinterWideOnly && q.ToolheadId == null && q.Limit == null),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync([printerLog]);
         _multiSlotEnabled = false;
         MaintenanceController controller = CreateController();
 
@@ -312,10 +310,10 @@ public sealed class MaintenanceControllerFleetToolheadScopeTests
         Assert.IsType<List<MaintenanceAlert>>(alertsOk.Value)
             .Should().ContainSingle().Which.Id.Should().Be(printerAlert.Id);
 
-        ActionResult<IEnumerable<MaintenanceLog>> logsResult =
-            await controller.GetPrinterMaintenanceLogsAsync(printerId, CancellationToken.None);
+        ActionResult<IEnumerable<MaintenanceLogDto>> logsResult =
+            await controller.GetPrinterMaintenanceLogsAsync(printerId, ct: CancellationToken.None);
         OkObjectResult logsOk = Assert.IsType<OkObjectResult>(logsResult.Result);
-        Assert.IsType<List<MaintenanceLog>>(logsOk.Value)
+        Assert.IsType<List<MaintenanceLogDto>>(logsOk.Value)
             .Should().ContainSingle().Which.Id.Should().Be(printerLog.Id);
 
         (await controller.GetAlertByIdAsync(toolheadAlert.Id, CancellationToken.None)).Result

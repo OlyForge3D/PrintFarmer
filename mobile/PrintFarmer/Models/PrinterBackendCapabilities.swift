@@ -9,6 +9,8 @@ struct PrinterBackendCapabilities: Codable, Equatable, Sendable {
     let supportsBedTemperature: Bool
     let supportsFanControl: Bool
     var supportsFanSpeedReadback: Bool = false
+    var supportsSensorTelemetry: Bool = false
+    var supportsSensorControl: Bool = false
     let supportsHoming: Bool
     let supportedAxes: [String]
     var supportsAbsoluteMovement: Bool = false
@@ -63,6 +65,8 @@ extension PrinterBackendCapabilities {
         supportsZOffsetAdjustment = wire.supportsZOffsetAdjustment == true
         supportsZOffsetReadback = wire.supportsZOffsetReadback == true
         supportsFanSpeedReadback = wire.supportsFanSpeedReadback == true
+        supportsSensorTelemetry = wire.supportsSensorTelemetry == true
+        supportsSensorControl = wire.supportsSensorControl == true
         supportsZOffsetFirmwareSave = wire.supportsZOffsetFirmwareSave == true
         supportsHomingXY = wire.supportsHomingXY == true
         supportsHomingZ = wire.supportsHomingZ == true
@@ -86,6 +90,8 @@ struct PrinterBackendCapabilitiesWireDto: Codable, Sendable {
     let supportsTemperatureControl: Bool?
     let supportsFanControl: Bool?
     let supportsFanSpeedReadback: Bool?
+    let supportsSensorTelemetry: Bool?
+    let supportsSensorControl: Bool?
     let supportsCamera: Bool?
     let supportsFileDownload: Bool?
     let supportsFileList: Bool?

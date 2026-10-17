@@ -33,6 +33,85 @@ public class ZmodIfsStatusParserTests
         }
         """;
 
+    private static bool Frame(PrinterState state, string json, out int count)
+    {
+        Apply(state, json);
+        count = 0;
+        return state.TryGetStableZmodGateCount(
+            ZmodIfsStatusParser.ReportedGateCount(JsonDocument.Parse(json).RootElement), out count);
+    }
+
+    private const string UnrelatedDelta = """{"zmod_ifs":{"Chan":2}}""";
+
+    [Fact]
+    public void TryGetStableZmodGateCount_FiresOnceAfterThreeReportingFrames()
+    {
+        var state = new PrinterState();
+
+        Frame(state, RigFrame, out _).Should().BeFalse();
+        Frame(state, RigFrame, out _).Should().BeFalse();
+        Frame(state, RigFrame, out int count).Should().BeTrue();
+        count.Should().Be(4);
+        Frame(state, RigFrame, out _).Should().BeFalse();
+
+        state.ResetMmuState();
+        Frame(state, RigFrame, out _).Should().BeFalse();
+    }
+
+    [Fact]
+    public void TryGetStableZmodGateCount_UnrelatedDeltasDoNotAdvanceDebounce()
+    {
+        var state = new PrinterState();
+
+        Frame(state, RigFrame, out _).Should().BeFalse();
+        for (int i = 0; i < 10; i++)
+        {
+            Frame(state, UnrelatedDelta, out _).Should().BeFalse();
+        }
+
+        Frame(state, RigFrame, out _).Should().BeFalse();
+        Frame(state, RigFrame, out int count).Should().BeTrue();
+        count.Should().Be(4);
+    }
+
+    [Fact]
+    public void TryGetStableZmodGateCount_ChangingCountRestartsDebounce()
+    {
+        var state = new PrinterState();
+        string sixPorts = """{"zmod_ifs":{"available":true,"Ports":[true,false,false,true,false,false],"Chan":1}}""";
+
+        Frame(state, RigFrame, out _).Should().BeFalse();
+        Frame(state, RigFrame, out _).Should().BeFalse();
+        Frame(state, sixPorts, out _).Should().BeFalse();
+        Frame(state, sixPorts, out _).Should().BeFalse();
+        Frame(state, sixPorts, out int count).Should().BeTrue();
+        count.Should().Be(6);
+    }
+
+    [Fact]
+    public void TryGetStableZmodGateCount_NeverFiresWithoutLiveReport()
+    {
+        var state = new PrinterState();
+        for (int i = 0; i < 10; i++)
+        {
+            state.TryGetStableZmodGateCount(0, out _).Should().BeFalse();
+        }
+    }
+
+    [Fact]
+    public void TryGetStableZmodGateCount_ConflictingSlotCountDoesNotConfirmCachedPortCount()
+    {
+        var state = new PrinterState();
+        string sixSlots = """{"zmod_color":{"channel":1,"slots":[{"ID":1},{"ID":2},{"ID":3},{"ID":4},{"ID":5},{"ID":6}]}}""";
+
+        Frame(state, RigFrame, out _).Should().BeFalse();
+        Frame(state, RigFrame, out _).Should().BeFalse();
+        Frame(state, sixSlots, out _).Should().BeFalse();
+        Frame(state, sixSlots, out _).Should().BeFalse();
+        Frame(state, sixSlots, out int count).Should().BeTrue();
+        count.Should().Be(6);
+    }
+
     [Fact]
     public void Apply_RigFrame_PopulatesFourLiveGatesWithActiveChannel()
     {

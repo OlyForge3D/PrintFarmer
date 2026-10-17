@@ -209,11 +209,25 @@ export class MaintenanceService {
   // ============================================================================
 
   /**
-   * Gets maintenance history for a specific printer.
+   * Gets the most recent maintenance history for a printer, bounded server-side (#3297).
    * @param printerId - The printer ID
+   * @param options.limit - Maximum rows to fetch (1..100)
+   * @param options.scope - `'printer'` for printer-wide logs only, a toolhead id for that
+   *   toolhead's logs, or omitted for every scope
+   * @returns The newest rows matching the scope, most recent first
    */
-  async getPrinterMaintenanceLogs(printerId: string): Promise<MaintenanceLog[]> {
-    const response = await apiClient.get<MaintenanceLog[]>(`/maintenance/printers/${printerId}/logs`);
+  async getRecentPrinterMaintenanceLogs(
+    printerId: string,
+    options: { limit: number; scope?: string },
+  ): Promise<MaintenanceLog[]> {
+    const params: Record<string, string | number> = { limit: options.limit };
+    if (options.scope !== undefined) {
+      params.scope = options.scope;
+    }
+    const response = await apiClient.get<MaintenanceLog[]>(
+      `/maintenance/printers/${printerId}/logs`,
+      { params },
+    );
     return response.data;
   }
 

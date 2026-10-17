@@ -33,4 +33,15 @@ public interface IPrinterStatusCacheWriter
     /// <param name="spoolInfo">The new spool info, or null to clear it.</param>
     /// <returns>The updated status DTO (for broadcasting).</returns>
     PrinterStatusDto UpdateSpoolInfo(Guid printerId, PrinterSpoolInfoDto? spoolInfo);
+
+    /// <summary>
+    /// Atomically updates the backend-neutral sensor list of a cached printer status.
+    /// Sensors are bounded and deduplicated by <see cref="PrinterSensorNormalizer"/>.
+    /// </summary>
+    /// <param name="printerId">The printer whose sensors changed.</param>
+    /// <param name="sensors">A complete snapshot when <paramref name="replaceAll"/> is true; otherwise a
+    /// partial update whose omitted sensors and readings are preserved.</param>
+    /// <param name="replaceAll">Whether <paramref name="sensors"/> replaces the whole list.</param>
+    /// <returns>The updated status, or null when no status is cached or the sensor content is unchanged.</returns>
+    PrinterStatusDto? UpdateSensors(Guid printerId, IEnumerable<PrinterSensorDto> sensors, bool replaceAll) => null;
 }

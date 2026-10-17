@@ -537,6 +537,7 @@ final class PrinterDetailViewModel {
             if let bt = update.bedTarget { p.bedTarget = bt }
             p.fanSpeedPercent = update.fanSpeedPercent
             p.liveZOffsetMm = update.liveZOffsetMm
+            if let sensors = update.sensors { p.sensors = sensors }
             if let x = update.x { p.x = x }
             if let y = update.y { p.y = y }
             if let z = update.z { p.z = z }
@@ -579,6 +580,7 @@ final class PrinterDetailViewModel {
             totalLayers: update.totalLayers,
             fanSpeedPercent: update.fanSpeedPercent,
             liveZOffsetMm: update.liveZOffsetMm,
+            sensors: update.sensors ?? previousStatusDetail?.sensors,
             jobName: update.jobName ?? previousStatusDetail?.jobName,
             thumbnailUrl: update.thumbnailUrl ?? previousStatusDetail?.thumbnailUrl,
             cameraStreamUrl: update.cameraStreamUrl ?? previousStatusDetail?.cameraStreamUrl,
@@ -1767,6 +1769,7 @@ final class PrinterDetailViewModel {
         current.totalLayers = detail.totalLayers
         current.fanSpeedPercent = detail.fanSpeedPercent
         current.liveZOffsetMm = detail.liveZOffsetMm
+        if let sensors = detail.sensors { current.sensors = sensors }
         current.jobName = detail.jobName
         current.thumbnailUrl = detail.thumbnailUrl
         current.currentJobThumbnailUrl = detail.currentJobThumbnailUrl
@@ -2468,6 +2471,24 @@ final class PrinterDetailViewModel {
         #endif
         guard let eta = currentJobEtaDate else { return nil }
         return eta.formatted(date: .omitted, time: .shortened)
+    }
+
+    /// Status-page "Layer" fact (issue #3240). Prefers the printer's own
+    /// counters and falls back per field to the latest status detail. Shows
+    /// "Unavailable" unless both counters form a coherent `current/total`.
+    func layerLabel(for printer: Printer) -> String {
+        Self.layerLabel(
+            current: printer.currentLayer ?? statusDetail?.currentLayer,
+            total: printer.totalLayers ?? statusDetail?.totalLayers
+        )
+    }
+
+    nonisolated static func layerLabel(current: Int?, total: Int?) -> String {
+        guard let current, let total,
+              current >= 0, total > 0, current <= total else {
+            return "Unavailable"
+        }
+        return "\(current)/\(total)"
     }
 
     /// Relative current-job media endpoint; never expose the printer's internal

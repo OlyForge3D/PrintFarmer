@@ -36,6 +36,11 @@ import { useUpcomingMaintenance } from '../hooks/useUpcomingMaintenance';
 import { queryKeys } from '@/common/hooks/useApi';
 import { maintenanceQueryKeys } from '../queryKeys';
 
+/** The history card renders this many rows, so it only fetches this many (#3297). */
+const MAINTENANCE_HISTORY_LIMIT = 10;
+/** API `scope` value selecting printer-wide (non-toolhead) logs. */
+const PRINTER_WIDE_LOG_API_SCOPE = 'printer';
+
 function shouldRetryStatisticsQuery(failureCount: number, error: unknown) {
   const statusCode = typeof error === 'object' && error
     ? (error as ApiError).statusCode ?? (error as { response?: { status?: number } }).response?.status
@@ -163,6 +168,15 @@ export function PrinterMaintenancePage() {
   // calendar/manual scopes (or plain logs) the backend still considers
   // fully valid regardless of attribution support.
   const logEligibleToolheads = eligibleToolheadsRaw;
+  // Server-side equivalent of `scopeMatches` below for the history card:
+  // no filter while the scope picker is hidden (fewer than two eligible
+  // toolheads), otherwise printer-wide or the selected toolhead.
+  const logApiScope: string | undefined =
+    eligibleToolheads.length < 2
+      ? undefined
+      : scope === PRINTER_WIDE_SCOPE
+        ? PRINTER_WIDE_LOG_API_SCOPE
+        : scope;
 
   // Fetch printer statistics
   const { data: statistics, isLoading: statsLoading } = useQuery({
@@ -172,11 +186,17 @@ export function PrinterMaintenancePage() {
     retry: shouldRetryStatisticsQuery,
   });
 
-  // Fetch maintenance logs (history)
+  // Fetch only the maintenance history rows the card renders (#3297). The
+  // scope is part of the request, so wait for the toolhead list before the
+  // first fetch rather than fetching an unscoped page and then refetching.
   const { data: logs = [], isLoading: logsLoading } = useQuery({
-    queryKey: ['printerMaintenanceLogs', printerId],
-    queryFn: () => maintenanceService.getPrinterMaintenanceLogs(printerId!),
-    enabled: !!printerId,
+    queryKey: ['printerMaintenanceLogs', printerId, logApiScope ?? 'all'],
+    queryFn: () =>
+      maintenanceService.getRecentPrinterMaintenanceLogs(printerId!, {
+        limit: MAINTENANCE_HISTORY_LIMIT,
+        scope: logApiScope,
+      }),
+    enabled: !!printerId && !printerDetailsLoading,
   });
 
   // Fetch V3 schedule deployments for this printer
@@ -697,7 +717,7 @@ export function PrinterMaintenancePage() {
                 <div className="space-y-3 max-h-96 overflow-y-auto">
                   {scopedLogs
                     .sort((a, b) => new Date(b.performedAt).getTime() - new Date(a.performedAt).getTime())
-                    .slice(0, 10)
+                    .slice(0, MAINTENANCE_HISTORY_LIMIT)
                     .map(log => (
                       <div 
                         key={log.id}
@@ -737,11 +757,6 @@ export function PrinterMaintenancePage() {
                         </div>
                       </div>
                     ))}
-                  {scopedLogs.length > 10 && (
-                    <p className="text-center text-sm text-pf-text-tertiary pt-2">
-                      Showing 10 of {scopedLogs.length} entries
-                    </p>
-                  )}
                 </div>
               )}
             </section>

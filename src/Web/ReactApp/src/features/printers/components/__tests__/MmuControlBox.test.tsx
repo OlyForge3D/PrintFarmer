@@ -318,6 +318,100 @@ describe('MmuControlBox', () => {
     for (const fn of mmuMethods) expect(fn).not.toHaveBeenCalled();
   });
 
+  describe('ZMOD IFS (AD5X)', () => {
+    // The live payload shape from ZmodIfsStatusParser: four gates, status 1/0/2
+    // from the port sensors, a selected channel and filamentState "Unknown".
+    const ifsGates = () => [
+      gate(0, { material: 'PLA', color: '#112233', status: MmuGateStatus.Available }),
+      gate(1, { material: 'PETG', color: '#445566', spoolId: 7, status: MmuGateStatus.Empty }),
+      gate(2, { material: '', color: '', filamentName: '', status: MmuGateStatus.Unknown }),
+      gate(3, { material: 'ASA', color: '#778899', status: MmuGateStatus.Disabled }),
+    ];
+    const ifsStatus = (overrides: Partial<MmuStatus> = {}) =>
+      status(ifsGates(), { mmuType: MmuProtocol.ZmodIfs, activeGate: 0, activeTool: 0, filamentState: 'Unknown', action: undefined, ...overrides });
+    const ifsToolheads = [toolhead(0, 'Physical'), toolhead(1, 'MmuGate'), toolhead(2, 'MmuGate'), toolhead(3, 'MmuGate'), toolhead(4, 'MmuGate')];
+    const renderIfs = (overrides: Partial<MmuStatus> = {}, isOnline = true) =>
+      render(
+        <MmuControlBox
+          printerId="printer-1"
+          mmuStatus={ifsStatus(overrides)}
+          isOnline={isOnline}
+          toolheads={ifsToolheads}
+          modelName="Flashforge AD5X"
+          reviewedRowVersion="rev-1"
+        />,
+      );
+
+    it('renders all four IFS gates with empty, unknown and disabled styling', () => {
+      inventory.data = [{ id: 7, name: 'PETG', material: 'PETG', remainingWeightG: 0, inUse: false }];
+      renderIfs();
+
+      expect(railSlots().map((el) => el.getAttribute('data-testid')))
+        .toEqual(['mmu-gate-0', 'mmu-gate-1', 'mmu-gate-2', 'mmu-gate-3']);
+      // Empty (0): the port sensor reports no filament, so the depleted binding reads Empty.
+      const empty = screen.getByTestId('mmu-gate-1');
+      expect(empty).toHaveAccessibleName('1B: PETG, empty');
+      expect(empty).toHaveTextContent('Empty');
+      expect(empty.querySelector('svg [fill="#445566"]')).toBeNull();
+      // Unknown (2): no material, no fabricated empty or disabled state.
+      const unknown = screen.getByTestId('mmu-gate-2');
+      expect(unknown).toHaveAccessibleName('1C: Assign spool');
+      expect(unknown).not.toHaveAttribute('data-disabled');
+      // Disabled (-1): dimmed and announced.
+      const disabled = screen.getByTestId('mmu-gate-3');
+      expect(disabled).toHaveAttribute('data-disabled', 'true');
+      expect(disabled).toHaveClass('opacity-60');
+      expect(disabled).toHaveAccessibleName(/disabled$/);
+      // Available (1): live material and color.
+      expect(screen.getByTestId('mmu-gate-0')).not.toHaveAttribute('data-disabled');
+      expect(screen.getByTestId('mmu-gate-0').querySelector('svg [fill="#112233"]')).not.toBeNull();
+    });
+
+    it('highlights the selected channel as selected, never as a confirmed load', () => {
+      renderIfs({ activeGate: 2, activeTool: 2 });
+
+      const selected = screen.getByTestId('mmu-gate-2');
+      expect(selected).toHaveAttribute('data-active', 'selected');
+      expect(selected).not.toHaveAttribute('aria-current');
+      expect(selected).toHaveAccessibleName(/selected, not loaded$/);
+      expect(selected.querySelector('[data-feed="selected"]')).not.toBeNull();
+      expect(document.querySelectorAll('[data-active]')).toHaveLength(1);
+      expect(document.querySelectorAll('[aria-current="true"]')).toHaveLength(0);
+      expect(document.querySelector('[data-feed="loaded"]')).toBeNull();
+    });
+
+    it('treats an explicit Loaded state as in use', () => {
+      renderIfs({ activeGate: 0, filamentState: 'Loaded' });
+
+      const active = screen.getByTestId('mmu-gate-0');
+      expect(active).toHaveAttribute('data-active', 'loaded');
+      expect(active).toHaveAttribute('aria-current', 'true');
+      expect(active).toHaveAccessibleName(/in use$/);
+    });
+
+    it.each([
+      ['no channel selected', { activeGate: -1, activeTool: -1, filamentState: 'Unloaded' }, true],
+      ['an unknown channel', { activeGate: -1, activeTool: -1, filamentState: 'Unknown' }, true],
+      ['an offline printer', {}, false],
+    ] as const)('highlights no gate for %s', (_label, overrides, isOnline) => {
+      renderIfs(overrides, isOnline);
+      expect(document.querySelectorAll('[data-active]')).toHaveLength(0);
+      expect(document.querySelector('[data-feed]')).toBeNull();
+    });
+
+    it('offers inventory controls only, with no unit badges or physical commands', () => {
+      renderIfs();
+
+      expect(screen.queryByRole('button', { name: 'Home the MMU' })).not.toBeInTheDocument();
+      expect(screen.queryByText('Not homed')).not.toBeInTheDocument();
+      const panel = openSlot('mmu-gate-0');
+      expect(panel).toHaveAccessibleName('Slot 1A');
+      expect(within(panel).getAllByRole('button').map((b) => b.getAttribute('data-testid')))
+        .toEqual(['slot-action-assign']);
+      expect(apiClient.mmuGateAction).not.toHaveBeenCalled();
+    });
+  });
+
   it.each(['Load', 'Unload', 'Eject'] as const)('surfaces the server safety title for a rejected QidiBox %s', async (label) => {
     const title = 'The fresh measured hotend temperature is below the required minimum of 220 °C.';
     vi.mocked(apiClient.mmuGateAction).mockRejectedValue({

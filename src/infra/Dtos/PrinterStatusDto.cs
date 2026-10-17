@@ -43,6 +43,25 @@ public record PrinterStatusDto(
     double? LiveZOffsetMm = null)
 {
     /// <summary>
+    /// Backend-neutral sensors and fans (issue #3406), bounded and deduplicated by
+    /// <see cref="PrinterSensorNormalizer"/> on assignment. Empty for backends without sensor telemetry.
+    /// </summary>
+    public IReadOnlyList<PrinterSensorDto> Sensors
+    {
+        get => _sensors ?? PrinterSensorList.Empty;
+        init => _sensors = PrinterSensorNormalizer.ToList(value);
+    }
+
+    private readonly PrinterSensorList? _sensors;
+
+    /// <summary>
+    /// Whether <see cref="Sensors"/> was assigned. An assigned list (even empty) is the printer's
+    /// complete sensor snapshot; an unassigned list means the producer did not report sensors.
+    /// </summary>
+    [JsonIgnore]
+    public bool SensorsReported => _sensors is not null;
+
+    /// <summary>
     /// Relative authenticated proxy URL for the active job thumbnail.
     /// </summary>
     public string? CurrentJobThumbnailUrl =>

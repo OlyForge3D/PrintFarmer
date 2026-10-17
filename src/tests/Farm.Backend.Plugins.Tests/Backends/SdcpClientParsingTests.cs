@@ -125,6 +125,117 @@ public sealed class SdcpClientParsingTests
         Assert.Equal(expectedTotalLayers, status.TotalLayers);
     }
 
+    // ==================== Sensor Telemetry Tests (#3408) ====================
+
+    [Fact]
+    public async Task GetCompositeStatusAsync_FullPacket_MapsChamberAndAllFansAsReadOnlySensors()
+    {
+        string payload = BuildSensorStatusPayload(
+            """
+            "TempOfNozzle": 215.5, "TempTargetNozzle": 220, "TempOfHotbed": 59.8, "TempTargetHotbed": 60,
+            "TempOfBox": 34.2, "TempTargetBox": 40,
+            "CurrentFanSpeed": { "ModelFan": 80, "AuxiliaryFan": 30, "BoxFan": 55 }
+            """);
+        await using var env = await CreateSdcpServerAsync(payload);
+
+        PrinterCompositeStatus status = await env.Client.GetCompositeStatusAsync(env.BaseUrl);
+
+        status.HotendTemp.Should().Be(215.5);
+        status.HotendTarget.Should().Be(220);
+        status.BedTemp.Should().Be(59.8);
+        status.BedTarget.Should().Be(60);
+        status.FanSpeedPercent.Should().Be(80);
+        status.Sensors.Should().NotBeNull();
+        status.Sensors!.Select(s => s.Id).Should().Equal(
+            "AuxiliaryFan", "BoxFan", "ModelFan", "TempOfBox", "TempOfHotbed", "TempOfNozzle");
+        status.Sensors.Should().OnlyContain(s => s.Writable.Count == 0 && s.Available);
+
+        PrinterSensorDto chamber = status.Sensors.Single(s => s.Id == "TempOfBox");
+        chamber.Kind.Should().Be(PrinterSensorKind.Chamber);
+        chamber.Readings.Should().BeEquivalentTo(new[]
+        {
+            new PrinterSensorReadingDto(PrinterSensorQuantity.Temperature, PrinterSensorValue.FromNumber(34.2), PrinterSensorUnit.Celsius),
+            new PrinterSensorReadingDto(PrinterSensorQuantity.TargetTemperature, PrinterSensorValue.FromNumber(40), PrinterSensorUnit.Celsius),
+        });
+
+        AssertFan(status.Sensors, "ModelFan", PrinterFanRole.PartCooling, 80);
+        AssertFan(status.Sensors, "AuxiliaryFan", PrinterFanRole.Auxiliary, 30);
+        AssertFan(status.Sensors, "BoxFan", PrinterFanRole.Chamber, 55);
+    }
+
+    [Fact]
+    public async Task GetCompositeStatusAsync_PartialPacket_ReportsOnlyFieldsPresentWithoutFabricatingZeros()
+    {
+        string payload = BuildSensorStatusPayload(
+            """
+            "TempOfBox": 31, "CurrentFanSpeed": { "BoxFan": 20 }
+            """);
+        await using var env = await CreateSdcpServerAsync(payload);
+
+        PrinterCompositeStatus status = await env.Client.GetCompositeStatusAsync(env.BaseUrl);
+
+        status.HotendTemp.Should().BeNull();
+        status.BedTemp.Should().BeNull();
+        status.FanSpeedPercent.Should().BeNull();
+        status.Sensors!.Select(s => s.Id).Should().Equal("BoxFan", "TempOfBox");
+        status.Sensors!.Single(s => s.Id == "TempOfBox").Readings.Should().ContainSingle()
+            .Which.Quantity.Should().Be(PrinterSensorQuantity.Temperature);
+    }
+
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(101)]
+    public void SdcpSensorMapper_OutOfRangeFanSpeed_IsDropped(int speed)
+    {
+        SdcpStatus status = new()
+        {
+            CurrentFanSpeed = new SdcpFanSpeed { ModelFan = speed, AuxiliaryFan = speed, BoxFan = 50 },
+        };
+
+        IReadOnlyList<PrinterSensorDto> sensors = SdcpSensorMapper.Map(status);
+
+        sensors.Select(s => s.Id).Should().Equal("BoxFan");
+        SdcpSensorMapper.GetPartCoolingPercent(status).Should().BeNull();
+    }
+
+    [Fact]
+    public void SdcpSensorMapper_NonFiniteTemperature_IsDropped()
+    {
+        SdcpStatus status = new() { TempOfBox = double.NaN, TempTargetBox = double.PositiveInfinity, TempOfNozzle = 200 };
+
+        SdcpSensorMapper.Map(status).Select(s => s.Id).Should().Equal("TempOfNozzle");
+    }
+
+    [Fact]
+    public void SdcpClient_AdvertisesTelemetryOnly_NoWritableFanOrSensorControl()
+    {
+        Type clientType = typeof(SdcpClient);
+
+        typeof(ISupportsSensorTelemetry).IsAssignableFrom(clientType).Should().BeTrue();
+        typeof(ISupportsSensorControl).IsAssignableFrom(clientType).Should().BeFalse(
+            "SDCP Cmd 403 fan/chamber writes are unverified on any device/firmware pair (#3408)");
+        typeof(ISupportsFanControl).IsAssignableFrom(clientType).Should().BeFalse();
+    }
+
+    private static void AssertFan(IReadOnlyList<PrinterSensorDto> sensors, string id, PrinterFanRole role, double percent)
+    {
+        PrinterSensorDto fan = sensors.Single(s => s.Id == id);
+        fan.Kind.Should().Be(PrinterSensorKind.Fan);
+        fan.FanRole.Should().Be(role);
+        fan.Readings.Should().Equal(
+            new PrinterSensorReadingDto(PrinterSensorQuantity.FanSpeed, PrinterSensorValue.FromNumber(percent), PrinterSensorUnit.Percent));
+    }
+
+    private static string BuildSensorStatusPayload(string statusFields) =>
+        $$"""
+        {
+          "Status": { "CurrentStatus": [0], {{statusFields}} },
+          "MainboardID": "mb-1",
+          "TimeStamp": {{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}},
+          "Topic": "sdcp/status/mb-1"
+        }
+        """;
+
     // ==================== History Tests (Cmd 320 / 321) ====================
 
     [Fact]

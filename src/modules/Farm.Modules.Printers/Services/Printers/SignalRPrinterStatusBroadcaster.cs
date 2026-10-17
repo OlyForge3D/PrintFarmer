@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
@@ -36,5 +37,24 @@ public class SignalRPrinterStatusBroadcaster(
         await _hubContext.Clients.Group(
                 Farm.Infrastructure.Security.AuthorizedHubGroups.Printer(printerId))
             .SendAsync("printerupdated", updated, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> BroadcastSensorChangeAsync(
+        Guid printerId,
+        IEnumerable<PrinterSensorDto> sensors,
+        bool replaceAll,
+        CancellationToken cancellationToken = default)
+    {
+        PrinterStatusDto? updated = _statusCacheWriter.UpdateSensors(printerId, sensors, replaceAll);
+        if (updated is null)
+        {
+            return false;
+        }
+
+        await _hubContext.Clients.Group(
+                Farm.Infrastructure.Security.AuthorizedHubGroups.Printer(printerId))
+            .SendAsync("printerupdated", updated, cancellationToken);
+        return true;
     }
 }

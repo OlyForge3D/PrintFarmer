@@ -13,6 +13,8 @@ struct PrinterStatusUpdate: Codable, Sendable {
     var totalLayers: Int? = nil
     var fanSpeedPercent: Double? = nil
     var liveZOffsetMm: Double? = nil
+    /// Nil means the update did not report sensors (keep cache); `[]` replaces it.
+    var sensors: [PrinterSensor]? = nil
     let jobName: String?
     let fileName: String?
     let thumbnailUrl: String?

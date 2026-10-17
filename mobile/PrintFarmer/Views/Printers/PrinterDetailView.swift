@@ -790,6 +790,7 @@ struct PrinterDetailView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         currentJobBlock(printer)
                         temperatureSection(printer)
+                        PrinterSensorsReadout(sensors: printer.sensors)
                     }
                     .accessibilityElement(children: .contain)
                     .accessibilityIdentifier(
@@ -1010,13 +1011,13 @@ struct PrinterDetailView: View {
                         VStack(alignment: .leading, spacing: 8) {
                             statusFact("Left", value: viewModel.formattedTimeRemaining ?? "Unknown")
                             statusFact("Done at", value: viewModel.formattedEtaClock ?? "Unknown")
-                            statusFact("Layer", value: layerLabel(printer))
+                            statusFact("Layer", value: viewModel.layerLabel(for: printer))
                         }
                     } else {
                         HStack(alignment: .top, spacing: 8) {
                             statusFact("Left", value: viewModel.formattedTimeRemaining ?? "Unknown")
                             statusFact("Done at", value: viewModel.formattedEtaClock ?? "Unknown")
-                            statusFact("Layer", value: layerLabel(printer))
+                            statusFact("Layer", value: viewModel.layerLabel(for: printer))
                         }
                     }
                 }
@@ -1070,16 +1071,6 @@ struct PrinterDetailView: View {
                 Spacer(minLength: 0)
             }
         }
-    }
-
-    private func layerLabel(_ printer: Printer) -> String {
-        let current = printer.currentLayer ?? viewModel.statusDetail?.currentLayer
-        let total = printer.totalLayers ?? viewModel.statusDetail?.totalLayers
-        guard let current, let total,
-              current >= 0, total > 0, current <= total else {
-            return "Unavailable"
-        }
-        return "\(current)/\(total)"
     }
 
     private func statusActions(for printer: Printer) -> PrinterRunActionPresentation {
@@ -1717,5 +1708,55 @@ private extension View {
                 RoundedRectangle(cornerRadius: 12)
                     .strokeBorder(Color.pfBorder, lineWidth: 1)
             )
+    }
+}
+
+// MARK: - Sensors & Fans readout
+
+/// Read-only grouped sensor/fan readouts for the Status page. Renders nothing
+/// when the printer reports no sensors (older servers or unsupported backends).
+struct PrinterSensorsReadout: View {
+    let sensors: [PrinterSensor]
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    var body: some View {
+        if !sensors.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(PrinterSensorGroup.allCases, id: \.self) { group in
+                    let items = sensors.filter { PrinterSensorGroup.group(for: $0) == group }
+                    if !items.isEmpty {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(group.title)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(Color.pfTextSecondary)
+                                .accessibilityAddTraits(.isHeader)
+                            ForEach(items) { row($0) }
+                        }
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .operatorCard()
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("printer.detail.sensors")
+        }
+    }
+
+    @ViewBuilder
+    private func row(_ sensor: PrinterSensor) -> some View {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
+            : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 8))
+        layout {
+            Text(sensor.displayName)
+                .font(.subheadline)
+            if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 0) }
+            Text(PrinterSensorFormatting.summary(sensor))
+                .font(.subheadline.weight(.semibold).monospacedDigit())
+                .foregroundStyle(sensor.available ? Color.primary : Color.pfTextSecondary)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(PrinterSensorFormatting.accessibilityLabel(sensor))
+        .accessibilityIdentifier("printer.detail.sensor.\(sensor.id)")
     }
 }

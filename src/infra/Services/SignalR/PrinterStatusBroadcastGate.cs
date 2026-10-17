@@ -16,6 +16,9 @@
 /// Relies on <see cref="PrinterStatusUpdate"/> record equality being a true full-payload
 /// comparison; this holds only while no populated field contains reference/array-typed data
 /// (e.g. <c>MmuStatus.Gates</c>), since record equality compares arrays by reference, not value.
+/// <see cref="PrinterStatusUpdate.Sensors"/> is stored as a content-equal normalized list, so
+/// record equality compares sensor values and sensor-only or availability-only changes are
+/// always broadcast even when legacy fields are unchanged.
 /// </remarks>
 public static class PrinterStatusBroadcastGate
 {

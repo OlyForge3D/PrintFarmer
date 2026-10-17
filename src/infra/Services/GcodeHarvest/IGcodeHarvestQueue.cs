@@ -28,10 +28,13 @@ public interface IGcodeHarvestQueue
     Task<IReadOnlyList<GcodeHarvestQueueItem>> GetPendingForPrinterAsync(Guid printerId);
 
     /// <summary>
-    /// Get all queued items with optional filtering.
+    /// Get queue summaries, including printer names, with optional database-side filtering.
     /// </summary>
     /// <param name="status">Optional status filter</param>
-    Task<IReadOnlyList<GcodeHarvestQueueItem>> GetQueuedItemsAsync(GcodeHarvestQueueItemStatus? status = null);
+    /// <param name="printerId">Optional printer ID filter</param>
+    Task<IReadOnlyList<GcodeHarvestQueueItemDto>> GetQueuedItemsAsync(
+        GcodeHarvestQueueItemStatus? status = null,
+        Guid? printerId = null);
 
     /// <summary>
     /// Cancel a queued item if it hasn't started processing.

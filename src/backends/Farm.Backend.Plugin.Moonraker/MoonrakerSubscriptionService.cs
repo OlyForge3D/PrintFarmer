@@ -1213,7 +1213,7 @@ public sealed class MoonrakerSubscriptionService(
     /// <param name="thumbnailUrl">The thumbnail URL from printer configuration.</param>
     /// <param name="originWatermark">Watermark captured before receiving the status.</param>
     /// <param name="ct">Cancellation token.</param>
-    private async Task ProcessStatusUpdateAsync(
+    internal async Task ProcessStatusUpdateAsync(
         JsonElement statusObj,
         Guid printerId,
         string serverUrl,
@@ -2275,11 +2275,42 @@ public sealed class MoonrakerSubscriptionService(
                 state.MmuNumGates);
         }
 
+        if (state.TryGetStableZmodGateCount(ZmodIfsStatusParser.ReportedGateCount(statusObj), out int liveGateCount))
+        {
+            _ = Task.Run(() => GrowPersistedMmuGatesAsync(printerId, liveGateCount));
+        }
+
         _logger.LogDebug(
             "ZMOD IFS update for printer {PrinterId}: active gate {ActiveGate}, filament {FilamentState}",
             printerId,
             state.MmuActiveGate,
             state.MmuFilamentState);
+    }
+
+    /// <summary>
+    /// Grows persisted MMU gate rows to the stable live-reported ZMOD port count (issue #3390).
+    /// Runs at most once per connection; the ensure call is additive and idempotent.
+    /// </summary>
+    internal async Task GrowPersistedMmuGatesAsync(Guid printerId, int liveGateCount)
+    {
+        try
+        {
+            await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
+            IPrintersService printers = scope.ServiceProvider.GetRequiredService<IPrintersService>();
+            CommandResult result = await printers
+                .EnsureMmuToolheadsAsync(printerId, liveGateCount, CancellationToken.None)
+                .ConfigureAwait(false);
+            _logger.LogInformation(
+                "ZMOD IFS gate growth for printer {PrinterId} to {GateCount} gate(s): {Success} {Message}",
+                printerId,
+                liveGateCount,
+                result.Success,
+                result.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "ZMOD IFS gate growth failed for printer {PrinterId}", printerId);
+        }
     }
 
     // ── AFC (BoxTurtle / NightOwl / QuattroBox) handling ──

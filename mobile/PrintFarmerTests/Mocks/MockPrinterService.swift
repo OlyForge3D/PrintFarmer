@@ -87,6 +87,8 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
     var beforeSetFanSpeed: (@Sendable () async -> Void)?
     var beforeAdjustZOffset: (@Sendable () async -> Void)?
     private(set) var setFanSpeedCallCount = 0
+    var setSensorValueCalledWith: (printerId: UUID, sensorId: String, quantity: SensorQuantity, value: Double)?
+    private(set) var setSensorValueCallCount = 0
     private(set) var adjustZOffsetCallCount = 0
     var unloadFilamentToolheadIndex: Int?
     var unloadResultToReturn: FilamentUnloadResult?
@@ -310,6 +312,13 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
         return commandResultToReturn
     }
 
+    func setSensorValue(printerId: UUID, sensorId: String, quantity: SensorQuantity, value: Double) async throws -> CommandResult {
+        setSensorValueCallCount += 1
+        setSensorValueCalledWith = (printerId, sensorId, quantity, value)
+        if let error = errorToThrow { throw error }
+        return commandResultToReturn
+    }
+
     func setFanSpeed(printerId: UUID, speedPercent: Int) async throws -> CommandResult {
         setFanSpeedCallCount += 1
         setFanSpeedCalledWith = (printerId, speedPercent)
@@ -426,6 +435,8 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
         disableMotorsCalledWith = nil
         saveZOffsetCalledWith = nil
         setFanSpeedCalledWith = nil
+        setSensorValueCalledWith = nil
+        setSensorValueCallCount = 0
         adjustZOffsetCalledWith = nil
         unloadFilamentToolheadIndex = nil
         unloadResultToReturn = nil

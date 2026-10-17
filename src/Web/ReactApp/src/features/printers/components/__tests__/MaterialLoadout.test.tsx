@@ -950,6 +950,7 @@ describe('MaterialLoadout', () => {
     const slot2 = screen.getByTestId('loadout-slot-2');
     expect(slot2).toHaveAttribute('data-active', 'loaded');
     expect(slot2).toHaveAttribute('aria-current', 'true');
+    expect(slot2.querySelector('[data-feed="loaded"]')).not.toBeNull();
   });
 
   it('marks the active slot as selected (not loaded) when filamentState is Unloaded', () => {
@@ -964,6 +965,9 @@ describe('MaterialLoadout', () => {
     const slot1 = screen.getByTestId('loadout-slot-1');
     expect(slot1).toHaveAttribute('data-active', 'selected');
     expect(slot1).not.toHaveAttribute('aria-current');
+    // The selection keeps a visible (hollow) marker distinct from a loaded feed.
+    expect(slot1.querySelector('[data-feed="selected"]')).not.toBeNull();
+    expect(screen.getByTestId('loadout-slot-2').querySelector('[data-feed]')).toBeNull();
     // A feed with nothing loaded is never presented as the in-use spool.
     expect(screen.queryByTestId('filament-summary-line')).not.toBeInTheDocument();
   });

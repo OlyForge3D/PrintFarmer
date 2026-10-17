@@ -4027,6 +4027,22 @@ public class PrintersService(
             ct);
 
     /// <inheritdoc />
+    public IReadOnlyList<PrinterSensorDto> GetLiveSensors(Guid id)
+    {
+        PrinterStatusCacheSnapshot? snapshot = _statusCache.GetSnapshot(id);
+        return PrinterStatusFreshness.IsSensorFreshOnline(snapshot, DateTime.UtcNow)
+            ? snapshot!.Status.Sensors
+            : [];
+    }
+
+    /// <inheritdoc />
+    public Task<bool> SetSensorValueAsync(Guid id, string sensorId, PrinterSensorQuantity quantity, double value, CancellationToken ct) =>
+        ExecuteBackendControlAsync<ISupportsSensorControl>(
+            id,
+            (client, printer, token) => client.SetSensorValueAsync(printer.BackendUrl, sensorId, quantity, value, printer.Credential, token),
+            ct);
+
+    /// <inheritdoc />
     public Task<bool> AdjustZOffsetAsync(Guid id, decimal offsetMm, CancellationToken ct) =>
         ExecuteBackendControlAsync<ISupportsZOffsetAdjustment>(
             id,
@@ -5199,8 +5215,14 @@ public class PrintersService(
         }
     }
 
+    private const int MaxMmuGateCount = 16;
+
     /// <inheritdoc/>
-    public async Task<CommandResult> EnsureMmuToolheadsAsync(Guid id, CancellationToken ct)
+    public Task<CommandResult> EnsureMmuToolheadsAsync(Guid id, CancellationToken ct) =>
+        EnsureMmuToolheadsAsync(id, 0, ct);
+
+    /// <inheritdoc/>
+    public async Task<CommandResult> EnsureMmuToolheadsAsync(Guid id, int minGateCount, CancellationToken ct)
     {
         Printer? p = await _unitOfWork.Printers
             .FindByIdWithToolheadsAsync(id, ct)
@@ -5220,7 +5242,7 @@ public class PrintersService(
         for (int attempt = 1; attempt <= maxAttempts; attempt++)
         {
             int existingGates = p.Toolheads.Count(t => t.ToolheadType == ToolheadType.MmuGate);
-            int targetGateCount = Math.Max(4, existingGates);
+            int targetGateCount = Math.Max(Math.Max(4, existingGates), Math.Min(minGateCount, MaxMmuGateCount));
             List<Toolhead> gates = await CreateMmuVirtualToolheadsAsync(p, targetGateCount, ct).ConfigureAwait(false);
             if (gates.Count == 0)
             {

@@ -734,6 +734,16 @@ Pass `--expected-head <recorded-sha>` when auditing a previously recorded
 review after the PR head may have moved. The verifier then reports
 `SUPERSEDED` for either an old review record or an old rejection.
 
+**Green checks and `squad/pre-pr-verdict` do not imply mergeability.** Review-thread
+resolution is a separate ruleset requirement. Immediately before merge, also run
+`node scripts/ci/verify-pr-review-threads.mjs --repo OlyForge3D/PrintFarmer --pr <number> --expected-head <reviewedHeadSha> --json`.
+Require exit `0`; `2` names unresolved threads (including outdated ones), `3`
+means head mismatch, and `1` means API/permission/GraphQL or incomplete-data
+failure. Route threads to the author agent or owner for a fix or explained reply
+and resolution, never automatic resolution or missing-panel routing. Keep
+`--match-head-commit`: GitHub remains authoritative because threads can change
+without a new commit. See [Ralph's merge-evidence procedure](ralph-reference.md).
+
 Any head movement supersedes the recorded review — **with one narrow exception**.
 A record pinned to an old head SHA `SHA_r` is carried forward, unchanged in meaning
 but relabelled, to a new head `SHA_h` only when **all three** hold: (1) `SHA_r` is a

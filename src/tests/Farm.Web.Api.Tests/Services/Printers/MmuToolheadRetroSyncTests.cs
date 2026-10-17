@@ -299,6 +299,50 @@ public class MmuToolheadRetroSyncTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task EnsureMmuToolheadsAsync_WithLiveGateCount_GrowsBeyondFourAndIsIdempotent()
+    {
+        Printer printer = await SeedMmuPrinterWithGatesAsync(gateCount: 4);
+
+        CommandResult grown = await _printersService.EnsureMmuToolheadsAsync(printer.Id, 6, CancellationToken.None);
+        CommandResult repeat = await _printersService.EnsureMmuToolheadsAsync(printer.Id, 6, CancellationToken.None);
+
+        grown.Success.Should().BeTrue();
+        grown.Message.Should().Contain("Created 2");
+        repeat.Success.Should().BeTrue();
+        List<int> gateIndexes = await _dbContext.Toolheads
+            .Where(t => t.PrinterId == printer.Id && t.ToolheadType == ToolheadType.MmuGate)
+            .OrderBy(t => t.Index)
+            .Select(t => t.Index)
+            .ToListAsync();
+        gateIndexes.Should().Equal(1, 2, 3, 4, 5, 6);
+    }
+
+    [Fact]
+    public async Task EnsureMmuToolheadsAsync_WithLiveGateCount_GrowsThreeGatesToFour()
+    {
+        Printer printer = await SeedMmuPrinterWithGatesAsync(gateCount: 3);
+
+        CommandResult result = await _printersService.EnsureMmuToolheadsAsync(printer.Id, 4, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        int gates = await _dbContext.Toolheads
+            .CountAsync(t => t.PrinterId == printer.Id && t.ToolheadType == ToolheadType.MmuGate);
+        gates.Should().Be(4);
+    }
+
+    [Fact]
+    public async Task EnsureMmuToolheadsAsync_WithLiveGateCount_CapsAtSixteen()
+    {
+        Printer printer = await SeedMmuPrinterWithGatesAsync(gateCount: 4);
+
+        await _printersService.EnsureMmuToolheadsAsync(printer.Id, 99, CancellationToken.None);
+
+        int gates = await _dbContext.Toolheads
+            .CountAsync(t => t.PrinterId == printer.Id && t.ToolheadType == ToolheadType.MmuGate);
+        gates.Should().Be(16);
+    }
+
+    [Fact]
     public async Task EnsureMmuToolheadsAsync_IsIdempotent_WhenGatesAlreadyExist()
     {
         Printer printer = await SeedMmuPrinterWithGatesAsync(gateCount: 4);

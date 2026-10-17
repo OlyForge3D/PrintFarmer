@@ -218,6 +218,170 @@ public class PrintersControllerControlGuardsTests
             It.IsAny<CancellationToken>()), Times.Never());
     }
 
+    private static PrinterSensorDto[] AdvertisedSensorControls() =>
+    [
+        new("fan part", "Part fan", PrinterSensorKind.Fan)
+        {
+            FanRole = PrinterFanRole.PartCooling,
+            Writable = [new PrinterSensorWritableDto(PrinterSensorQuantity.FanSpeed, 0, 100, null, PrinterSensorUnit.Percent)],
+        },
+        new("heater_fan hotend", "Hotend fan", PrinterSensorKind.Fan) { FanRole = PrinterFanRole.Hotend },
+        new("fan offline", "Offline fan", PrinterSensorKind.Fan)
+        {
+            FanRole = PrinterFanRole.Auxiliary,
+            Available = false,
+            Writable = [new PrinterSensorWritableDto(PrinterSensorQuantity.FanSpeed, 0, 100, null, PrinterSensorUnit.Percent)],
+        },
+    ];
+
+    private static PrintersController CreateSensorController(
+        Guid id,
+        Mock<IPrintersService> printers,
+        bool supportsSensorControl,
+        string state = "idle")
+    {
+        PrinterStatusDto status = new(id, IsOnline: true, State: state);
+        printers.Setup(service => service.GetStatusDtoAsync(id, It.IsAny<CancellationToken>())).ReturnsAsync(status);
+        printers.Setup(service => service.FindByIdAsync(id, It.IsAny<CancellationToken>())).ReturnsAsync(SamplePrinter(id));
+        printers.Setup(service => service.GetLiveSensors(id)).Returns(AdvertisedSensorControls());
+        printers.Setup(service => service.SetSensorValueAsync(
+                id, It.IsAny<string>(), It.IsAny<PrinterSensorQuantity>(), It.IsAny<double>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        var statusCache = new Mock<IPrinterStatusCacheReader>();
+        statusCache.Setup(cache => cache.GetStatus(id)).Returns(status);
+        var capabilities = new Mock<IPrinterBackendCapabilitiesService>();
+        capabilities.Setup(service => service.GetByPrinterIdAsync(id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PrinterBackendCapabilitiesDto(id, "Test printer", PrinterBackend.Moonraker)
+            {
+                SupportsSensorTelemetry = supportsSensorControl,
+                SupportsSensorControl = supportsSensorControl,
+            });
+        return CreateController(
+            printers,
+            statusCache,
+            out _,
+            actuation: new Mock<IPrinterPhysicalActuationService>(),
+            capabilitiesService: capabilities);
+    }
+
+    private static void VerifyNoSensorDispatch(Mock<IPrintersService> printers) =>
+        printers.Verify(service => service.SetSensorValueAsync(
+            It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<PrinterSensorQuantity>(), It.IsAny<double>(), It.IsAny<CancellationToken>()),
+            Times.Never());
+
+    [Theory]
+    [InlineData("idle")]
+    [InlineData("printing")]
+    public async Task SetSensorValueAsync_ValidAdvertisedControl_DispatchesOnce(string state)
+    {
+        Guid id = Guid.NewGuid();
+        var printers = new Mock<IPrintersService>();
+        PrintersController controller = CreateSensorController(id, printers, supportsSensorControl: true, state);
+
+        ActionResult<CommandResult> response = await controller.SetSensorValueAsync(
+            id,
+            "fan part",
+            new PrinterSensorSetRequest(PrinterSensorQuantity.FanSpeed, PrinterSensorValue.FromNumber(40)),
+            CancellationToken.None);
+
+        Assert.True(GetCommandResult(response).Success);
+        printers.Verify(service => service.SetSensorValueAsync(
+            id, "fan part", PrinterSensorQuantity.FanSpeed, 40, It.IsAny<CancellationToken>()), Times.Once());
+    }
+
+    [Fact]
+    public async Task SetSensorValueAsync_BackendWithoutSensorControl_Returns501WithoutDispatch()
+    {
+        Guid id = Guid.NewGuid();
+        var printers = new Mock<IPrintersService>();
+        PrintersController controller = CreateSensorController(id, printers, supportsSensorControl: false);
+
+        ActionResult<CommandResult> response = await controller.SetSensorValueAsync(
+            id,
+            "fan part",
+            new PrinterSensorSetRequest(PrinterSensorQuantity.FanSpeed, PrinterSensorValue.FromNumber(40)),
+            CancellationToken.None);
+
+        ObjectResult result = Assert.IsType<ObjectResult>(response.Result);
+        Assert.Equal(StatusCodes.Status501NotImplemented, result.StatusCode);
+        Assert.IsType<ProblemDetails>(result.Value);
+        VerifyNoSensorDispatch(printers);
+    }
+
+    [Theory]
+    [InlineData("missing", PrinterSensorQuantity.FanSpeed, 40, StatusCodes.Status409Conflict)]
+    [InlineData("heater_fan hotend", PrinterSensorQuantity.FanSpeed, 40, StatusCodes.Status409Conflict)]
+    [InlineData("fan offline", PrinterSensorQuantity.FanSpeed, 40, StatusCodes.Status409Conflict)]
+    [InlineData("fan part", PrinterSensorQuantity.TargetTemperature, 40, StatusCodes.Status409Conflict)]
+    [InlineData("fan part", PrinterSensorQuantity.FanSpeed, 101, StatusCodes.Status400BadRequest)]
+    [InlineData("fan part", PrinterSensorQuantity.FanSpeed, -5, StatusCodes.Status400BadRequest)]
+    public async Task SetSensorValueAsync_RejectedControl_ReturnsProblemWithoutDispatch(
+        string sensorId,
+        PrinterSensorQuantity quantity,
+        double value,
+        int expectedStatus)
+    {
+        Guid id = Guid.NewGuid();
+        var printers = new Mock<IPrintersService>();
+        PrintersController controller = CreateSensorController(id, printers, supportsSensorControl: true);
+
+        ActionResult<CommandResult> response = await controller.SetSensorValueAsync(
+            id,
+            sensorId,
+            new PrinterSensorSetRequest(quantity, PrinterSensorValue.FromNumber(value)),
+            CancellationToken.None);
+
+        ObjectResult result = Assert.IsType<ObjectResult>(response.Result);
+        Assert.Equal(expectedStatus, result.StatusCode);
+        Assert.Equal(expectedStatus, Assert.IsType<ProblemDetails>(result.Value).Status);
+        VerifyNoSensorDispatch(printers);
+    }
+
+    [Fact]
+    public async Task SetSensorValueAsync_MissingBodyOrBooleanValue_Returns400WithoutDispatch()
+    {
+        Guid id = Guid.NewGuid();
+        var printers = new Mock<IPrintersService>();
+        PrintersController controller = CreateSensorController(id, printers, supportsSensorControl: true);
+
+        ActionResult<CommandResult> missing = await controller.SetSensorValueAsync(id, "fan part", null, CancellationToken.None);
+        ActionResult<CommandResult> boolean = await controller.SetSensorValueAsync(
+            id,
+            "fan part",
+            new PrinterSensorSetRequest(PrinterSensorQuantity.FanSpeed, PrinterSensorValue.FromBoolean(true)),
+            CancellationToken.None);
+
+        Assert.Equal(StatusCodes.Status400BadRequest, Assert.IsType<ObjectResult>(missing.Result).StatusCode);
+        Assert.Equal(StatusCodes.Status400BadRequest, Assert.IsType<ObjectResult>(boolean.Result).StatusCode);
+        VerifyNoSensorDispatch(printers);
+    }
+
+    [Fact]
+    public async Task SetSensorValueAsync_DeniedSubmitAccess_Returns404WithoutDispatch()
+    {
+        Guid id = Guid.NewGuid();
+        var printers = new Mock<IPrintersService>();
+        var denied = new Mock<IQueueResourceAuthorizationService>();
+        denied.Setup(service => service.CanAccessPrinterAsync(
+                It.IsAny<ClaimsPrincipal>(), id, PrinterGroupAccessLevel.Submit, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+        PrintersController controller = CreateController(
+            printers,
+            new Mock<IPrinterStatusCacheReader>(),
+            out _,
+            resourceAuthorization: denied);
+
+        ActionResult<CommandResult> response = await controller.SetSensorValueAsync(
+            id,
+            "fan part",
+            new PrinterSensorSetRequest(PrinterSensorQuantity.FanSpeed, PrinterSensorValue.FromNumber(40)),
+            CancellationToken.None);
+
+        Assert.IsType<NotFoundResult>(response.Result);
+        printers.Verify(service => service.GetLiveSensors(It.IsAny<Guid>()), Times.Never());
+        VerifyNoSensorDispatch(printers);
+    }
+
     [Fact]
     public async Task AdjustZOffsetAsync_RequiresLiveReadbackAndUsesActiveLeaseWhilePrinting()
     {
@@ -483,7 +647,6 @@ public class PrintersControllerControlGuardsTests
             egressGuard: Farm.Testing.Shared.AppDbTestHelpers.PermissiveEgressGuard(),
             obicoServerAssignment: Mock.Of<Farm.Infrastructure.Services.FailureDetection.IObicoServerAssignmentService>(),
             settingsService: Mock.Of<Farm.Infrastructure.Settings.ISettingsService>(),
-            printerSessionTimelineService: Mock.Of<IPrinterSessionTimelineService>(),
             telemetryService: telemetry.Object,
             bedTypeService: Mock.Of<Farm.Infrastructure.Services.BedTypes.IBedTypeService>(),
             physicalActuationService: realActuation ?? actuation.Object,
