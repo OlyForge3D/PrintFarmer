@@ -6,6 +6,7 @@ using Farm.Backend.Plugin.FlashForge;
 using Farm.Backend.Plugin.Moonraker;
 using Farm.Backend.Plugin.OctoPrint;
 using Farm.Backend.Plugin.PrusaLink;
+using Farm.Backend.Plugin.Sdcp;
 using Farm.Infrastructure.Contracts.Printers;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Printers;
@@ -25,7 +26,7 @@ public class PrinterBackendCapabilitiesServiceTests
     [InlineData(PrinterBackend.OctoPrint, true, true, true, false, true)]
     [InlineData(PrinterBackend.PrusaLink, true, true, true, false, true)]
     [InlineData(PrinterBackend.FlashForge, false, false, true, false, true)]
-    [InlineData(PrinterBackend.SDCP, false, false, false, false, false)]
+    [InlineData(PrinterBackend.SDCP, false, false, false, false, true)]
     [InlineData(PrinterBackend.Unknown, false, false, false, false, false)]
     [InlineData((PrinterBackend)999, false, false, false, false, false)]
     public async Task GetByPrinterIdAsync_ConcreteBackend_ReportsPluginDeclaredControls(
@@ -45,6 +46,8 @@ public class PrinterBackendCapabilitiesServiceTests
             PrinterBackend.PrusaLink => new PrusaLinkClient(http),
             PrinterBackend.FlashForge => new FlashForgeClient(
                 NullLogger<FlashForgeClient>.Instance, new BackendTimeoutSettings()),
+            PrinterBackend.SDCP => new SdcpClient(
+                http, NullLogger<SdcpClient>.Instance, new BackendTimeoutSettings()),
             _ => Mock.Of<IBackendClient>(),
         };
         var clients = new Mock<IBackendClientFactory>();
@@ -63,7 +66,7 @@ public class PrinterBackendCapabilitiesServiceTests
         var repo = new Mock<IPrintersRepository>();
         repo.Setup(repository => repository.FindByIdAsync(printer.Id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(printer);
-        var service = new PrinterBackendCapabilitiesService(repo.Object, capabilities);
+        var service = new PrinterBackendCapabilitiesService(repo.Object, capabilities, clients.Object);
 
         PrinterBackendCapabilitiesDto dto = Assert.IsType<PrinterBackendCapabilitiesDto>(
             await service.GetByPrinterIdAsync(printer.Id, CancellationToken.None));
