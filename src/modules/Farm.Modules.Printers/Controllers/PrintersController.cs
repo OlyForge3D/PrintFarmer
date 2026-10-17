@@ -66,7 +66,7 @@ namespace Farm.Modules.Printers.Controllers;
 [ApiController]
 [Route("api/printers")]
 [Authorize]
-public class PrintersController(
+public partial class PrintersController(
     ILogger<PrintersController> logger,
     Farm.Infrastructure.Services.Printers.IPrintersService printersService,
     Services.Catalog.ICatalogService catalogService,

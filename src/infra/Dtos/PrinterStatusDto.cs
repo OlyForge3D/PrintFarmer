@@ -43,6 +43,12 @@ public record PrinterStatusDto(
     double? LiveZOffsetMm = null)
 {
     /// <summary>
+    /// Backend-neutral sensors and fans (issue #3406), bounded and deduplicated by
+    /// <see cref="PrinterSensorNormalizer"/>. Empty for backends without sensor telemetry.
+    /// </summary>
+    public IReadOnlyList<PrinterSensorDto> Sensors { get; init; } = [];
+
+    /// <summary>
     /// Relative authenticated proxy URL for the active job thumbnail.
     /// </summary>
     public string? CurrentJobThumbnailUrl =>

@@ -53,6 +53,18 @@ public record PrinterBackendCapabilitiesDto(
     /// <summary>Whether the latest printer status includes a valid part-fan output percentage.</summary>
     public bool SupportsFanSpeedReadback { get; init; }
 
+    /// <summary>
+    /// Whether the backend publishes backend-neutral <c>sensors</c> in status payloads. When false,
+    /// <c>sensors</c> is always empty. Independent of the legacy temperature and fan flags.
+    /// </summary>
+    public bool SupportsSensorTelemetry { get; init; }
+
+    /// <summary>
+    /// Whether the backend accepts targeted writes through <c>POST /api/printers/{id}/sensors/{sensorId}</c>.
+    /// Individual sensors are writable only when they advertise a <c>writable</c> descriptor.
+    /// </summary>
+    public bool SupportsSensorControl { get; init; }
+
     /// <summary>Whether the latest printer status includes a valid live G-code Z offset.</summary>
     public bool SupportsZOffsetReadback { get; init; }
 

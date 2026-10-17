@@ -556,6 +556,18 @@ public interface IPrintersService
     /// <summary>Sets the part-cooling fan to a bounded percentage through a semantic backend capability.</summary>
     Task<bool> SetFanSpeedAsync(Guid id, int speedPercent, CancellationToken ct);
 
+    /// <summary>
+    /// Gets the backend-neutral sensors from a fresh online cached status, or an empty list when
+    /// the printer is offline, stale or uncached. Used to validate targeted sensor writes.
+    /// </summary>
+    IReadOnlyList<PrinterSensorDto> GetLiveSensors(Guid id);
+
+    /// <summary>
+    /// Dispatches a pre-validated targeted sensor write through <see cref="ISupportsSensorControl"/>.
+    /// Callers must validate against the advertised writable descriptors first.
+    /// </summary>
+    Task<bool> SetSensorValueAsync(Guid id, string sensorId, PrinterSensorQuantity quantity, double value, CancellationToken ct);
+
     /// <summary>Applies a bounded transient relative Z-offset adjustment through a semantic backend capability.</summary>
     Task<bool> AdjustZOffsetAsync(Guid id, decimal offsetMm, CancellationToken ct);
 

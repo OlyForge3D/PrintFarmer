@@ -191,6 +191,7 @@ public class PrinterStatusCache :
                 status.WithNormalizedFileName(),
                 existing,
                 observedAtUtc);
+            normalized = ApplySensorPolicy(normalized, existing);
             _cache[status.Id] = new PrinterStatusCacheSnapshot(
                 normalized,
                 observedAtUtc,
@@ -223,6 +224,7 @@ public class PrinterStatusCache :
                     status.WithNormalizedFileName(),
                     existing,
                     observedAtUtc);
+                normalized = ApplySensorPolicy(normalized, existing);
                 _cache[status.Id] = new PrinterStatusCacheSnapshot(
                     normalized,
                     observedAtUtc,
@@ -265,6 +267,54 @@ public class PrinterStatusCache :
 
             return updated;
         }
+    }
+
+    public PrinterStatusDto? UpdateSensors(Guid printerId, IEnumerable<PrinterSensorDto> sensors, bool replaceAll)
+    {
+        ArgumentNullException.ThrowIfNull(sensors);
+        lock (_lockObj)
+        {
+            if (!_cache.TryGetValue(printerId, out PrinterStatusCacheSnapshot? existingSnapshot))
+            {
+                return null;
+            }
+
+            PrinterStatusDto existing = existingSnapshot.Status;
+            IReadOnlyList<PrinterSensorDto> merged = replaceAll
+                ? PrinterSensorNormalizer.Normalize(sensors)
+                : PrinterSensorNormalizer.Merge(existing.Sensors, sensors);
+            if (!existing.IsOnline)
+            {
+                merged = PrinterSensorNormalizer.MarkUnavailable(merged);
+            }
+
+            if (PrinterSensorNormalizer.ContentEquals(existing.Sensors, merged))
+            {
+                return null;
+            }
+
+            PrinterStatusDto updated = existing with { Sensors = merged };
+            _cache[printerId] = existingSnapshot with { Status = updated };
+            return updated;
+        }
+    }
+
+    /// <summary>
+    /// A backend status write that carries no sensors preserves the cached sensor set (sensor
+    /// state may be published separately through <see cref="UpdateSensors"/>); a non-empty
+    /// list replaces it. Offline statuses keep the last values but mark every sensor unavailable.
+    /// </summary>
+    private static PrinterStatusDto ApplySensorPolicy(PrinterStatusDto normalized, PrinterStatusDto? existing)
+    {
+        IReadOnlyList<PrinterSensorDto> sensors = normalized.Sensors is { Count: > 0 }
+            ? PrinterSensorNormalizer.Normalize(normalized.Sensors)
+            : existing?.Sensors ?? [];
+        if (!normalized.IsOnline)
+        {
+            sensors = PrinterSensorNormalizer.MarkUnavailable(sensors);
+        }
+
+        return normalized with { Sensors = sensors };
     }
 
     public void ClearStatus(Guid printerId)

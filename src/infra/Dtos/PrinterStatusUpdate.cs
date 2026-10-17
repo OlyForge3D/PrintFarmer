@@ -37,6 +37,12 @@ public record PrinterStatusUpdate(
     double? LiveZOffsetMm = null)
 {
     /// <summary>
+    /// Backend-neutral sensors and fans (issue #3406). Each <c>printerupdated</c> carries the
+    /// printer's complete current sensor snapshot, never a delta.
+    /// </summary>
+    public IReadOnlyList<PrinterSensorDto> Sensors { get; init; } = [];
+
+    /// <summary>
     /// Relative authenticated proxy URL for the active job thumbnail.
     /// </summary>
     public string? CurrentJobThumbnailUrl =>
@@ -72,5 +78,8 @@ public record PrinterStatusUpdate(
             CurrentLayer: CurrentLayer,
             TotalLayers: TotalLayers,
             FanSpeedPercent: FanSpeedPercent,
-            LiveZOffsetMm: LiveZOffsetMm);
+            LiveZOffsetMm: LiveZOffsetMm)
+        {
+            Sensors = Sensors,
+        };
 }

@@ -4027,6 +4027,22 @@ public class PrintersService(
             ct);
 
     /// <inheritdoc />
+    public IReadOnlyList<PrinterSensorDto> GetLiveSensors(Guid id)
+    {
+        PrinterStatusCacheSnapshot? snapshot = _statusCache.GetSnapshot(id);
+        return PrinterStatusFreshness.IsFreshOnline(snapshot, DateTime.UtcNow)
+            ? snapshot!.Status.Sensors
+            : [];
+    }
+
+    /// <inheritdoc />
+    public Task<bool> SetSensorValueAsync(Guid id, string sensorId, PrinterSensorQuantity quantity, double value, CancellationToken ct) =>
+        ExecuteBackendControlAsync<ISupportsSensorControl>(
+            id,
+            (client, printer, token) => client.SetSensorValueAsync(printer.BackendUrl, sensorId, quantity, value, printer.Credential, token),
+            ct);
+
+    /// <inheritdoc />
     public Task<bool> AdjustZOffsetAsync(Guid id, decimal offsetMm, CancellationToken ct) =>
         ExecuteBackendControlAsync<ISupportsZOffsetAdjustment>(
             id,

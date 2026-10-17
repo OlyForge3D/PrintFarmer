@@ -16,6 +16,8 @@
 /// Relies on <see cref="PrinterStatusUpdate"/> record equality being a true full-payload
 /// comparison; this holds only while no populated field contains reference/array-typed data
 /// (e.g. <c>MmuStatus.Gates</c>), since record equality compares arrays by reference, not value.
+/// <see cref="PrinterStatusUpdate.Sensors"/> is compared by content, so sensor-only and
+/// availability-only changes are always broadcast even when legacy fields are unchanged.
 /// </remarks>
 public static class PrinterStatusBroadcastGate
 {
@@ -27,5 +29,7 @@ public static class PrinterStatusBroadcastGate
     /// <param name="lastSent">The last update actually broadcast for this printer, or <see langword="null"/> if none has been sent yet.</param>
     /// <param name="update">The candidate update to broadcast.</param>
     public static bool ShouldBroadcast(PrinterStatusUpdate? lastSent, PrinterStatusUpdate update) =>
-        lastSent is null || !lastSent.Equals(update);
+        lastSent is null ||
+        !(lastSent with { Sensors = update.Sensors }).Equals(update) ||
+        !Farm.Infrastructure.Services.Printers.PrinterSensorNormalizer.ContentEquals(lastSent.Sensors, update.Sensors);
 }
