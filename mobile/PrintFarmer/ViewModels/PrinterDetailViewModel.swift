@@ -2470,6 +2470,24 @@ final class PrinterDetailViewModel {
         return eta.formatted(date: .omitted, time: .shortened)
     }
 
+    /// Status-page "Layer" fact (issue #3240). Prefers the printer's own
+    /// counters and falls back per field to the latest status detail. Shows
+    /// "Unavailable" unless both counters form a coherent `current/total`.
+    func layerLabel(for printer: Printer) -> String {
+        Self.layerLabel(
+            current: printer.currentLayer ?? statusDetail?.currentLayer,
+            total: printer.totalLayers ?? statusDetail?.totalLayers
+        )
+    }
+
+    nonisolated static func layerLabel(current: Int?, total: Int?) -> String {
+        guard let current, let total,
+              current >= 0, total > 0, current <= total else {
+            return "Unavailable"
+        }
+        return "\(current)/\(total)"
+    }
+
     /// Relative current-job media endpoint; never expose the printer's internal
     /// thumbnail URL to the client or load it without session authentication.
     var currentJobThumbnailUrl: String? {

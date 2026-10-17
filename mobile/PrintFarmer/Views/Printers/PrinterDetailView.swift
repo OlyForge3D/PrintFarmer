@@ -1010,13 +1010,13 @@ struct PrinterDetailView: View {
                         VStack(alignment: .leading, spacing: 8) {
                             statusFact("Left", value: viewModel.formattedTimeRemaining ?? "Unknown")
                             statusFact("Done at", value: viewModel.formattedEtaClock ?? "Unknown")
-                            statusFact("Layer", value: layerLabel(printer))
+                            statusFact("Layer", value: viewModel.layerLabel(for: printer))
                         }
                     } else {
                         HStack(alignment: .top, spacing: 8) {
                             statusFact("Left", value: viewModel.formattedTimeRemaining ?? "Unknown")
                             statusFact("Done at", value: viewModel.formattedEtaClock ?? "Unknown")
-                            statusFact("Layer", value: layerLabel(printer))
+                            statusFact("Layer", value: viewModel.layerLabel(for: printer))
                         }
                     }
                 }
@@ -1070,16 +1070,6 @@ struct PrinterDetailView: View {
                 Spacer(minLength: 0)
             }
         }
-    }
-
-    private func layerLabel(_ printer: Printer) -> String {
-        let current = printer.currentLayer ?? viewModel.statusDetail?.currentLayer
-        let total = printer.totalLayers ?? viewModel.statusDetail?.totalLayers
-        guard let current, let total,
-              current >= 0, total > 0, current <= total else {
-            return "Unavailable"
-        }
-        return "\(current)/\(total)"
     }
 
     private func statusActions(for printer: Printer) -> PrinterRunActionPresentation {

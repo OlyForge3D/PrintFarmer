@@ -1967,6 +1967,109 @@ final class PrinterDetailViewModelTests: XCTestCase {
                        "Foreign-printer update must not overwrite this view's printer state")
     }
 
+    // MARK: - Layer counters (issue #3240)
+
+    func testLayerLabelFormatsCoherentCounters() {
+        XCTAssertEqual(PrinterDetailViewModel.layerLabel(current: 3, total: 10), "3/10")
+        XCTAssertEqual(PrinterDetailViewModel.layerLabel(current: 0, total: 10), "0/10")
+        XCTAssertEqual(PrinterDetailViewModel.layerLabel(current: 10, total: 10), "10/10")
+    }
+
+    func testLayerLabelIsUnavailableForMissingOrIncoherentCounters() {
+        XCTAssertEqual(PrinterDetailViewModel.layerLabel(current: nil, total: 10), "Unavailable")
+        XCTAssertEqual(PrinterDetailViewModel.layerLabel(current: 3, total: nil), "Unavailable")
+        XCTAssertEqual(PrinterDetailViewModel.layerLabel(current: nil, total: nil), "Unavailable")
+        XCTAssertEqual(PrinterDetailViewModel.layerLabel(current: 0, total: 0), "Unavailable")
+        XCTAssertEqual(PrinterDetailViewModel.layerLabel(current: 11, total: 10), "Unavailable")
+        XCTAssertEqual(PrinterDetailViewModel.layerLabel(current: -1, total: 10), "Unavailable")
+    }
+
+    func testLayerLabelPrefersPrinterCountersAndFallsBackPerFieldToStatusDetail() throws {
+        var printer = try TestData.decodePrinter()
+        printer.currentLayer = nil
+        printer.totalLayers = 200
+        viewModel.statusDetail = makeLayerStatusDetail(currentLayer: 42, totalLayers: 999)
+
+        XCTAssertEqual(viewModel.layerLabel(for: printer), "42/200",
+                       "Missing printer currentLayer must fall back to statusDetail while keeping the printer's totalLayers")
+
+        printer.currentLayer = 7
+        XCTAssertEqual(viewModel.layerLabel(for: printer), "7/200",
+                       "Printer counters take precedence over statusDetail")
+
+        printer.currentLayer = nil
+        printer.totalLayers = nil
+        viewModel.statusDetail = nil
+        XCTAssertEqual(viewModel.layerLabel(for: printer), "Unavailable")
+    }
+
+    func testConfigureSignalRAppliesLiveLayerCountersToStatusLabel() async throws {
+        var printer = try TestData.decodePrinter()
+        printer.currentLayer = 1
+        printer.totalLayers = 100
+        mockService.printerToReturn = printer
+        await viewModel.loadPrinter()
+        viewModel.isViewActive = true
+
+        let signalR = MockSignalRService()
+        viewModel.configureSignalR(signalR)
+
+        var update = PrinterStatusUpdate(
+            id: TestData.testUUID,
+            isOnline: true,
+            state: "printing",
+            progress: 25,
+            jobName: nil,
+            fileName: nil,
+            thumbnailUrl: nil,
+            cameraStreamUrl: nil,
+            x: nil, y: nil, z: nil,
+            hotendTemp: nil,
+            bedTemp: nil,
+            hotendTarget: nil,
+            bedTarget: nil,
+            homedAxes: nil,
+            spoolInfo: nil,
+            mmuStatus: nil
+        )
+        update.currentLayer = 25
+        update.totalLayers = 100
+        signalR.simulatePrinterUpdate(update)
+
+        await Task.yield()
+        try? await Task.sleep(for: .milliseconds(20))
+
+        let live = try XCTUnwrap(viewModel.printer)
+        XCTAssertEqual(live.currentLayer, 25)
+        XCTAssertEqual(live.totalLayers, 100)
+        XCTAssertEqual(viewModel.statusDetail?.currentLayer, 25)
+        XCTAssertEqual(viewModel.statusDetail?.totalLayers, 100)
+        XCTAssertEqual(viewModel.layerLabel(for: live), "25/100",
+                       "Live printerupdated layer counters must reach the Status-page Layer fact")
+    }
+
+    private func makeLayerStatusDetail(currentLayer: Int?, totalLayers: Int?) -> PrinterStatusDetail {
+        PrinterStatusDetail(
+            id: TestData.testUUID,
+            isOnline: true,
+            state: "printing",
+            progress: 0.5,
+            currentLayer: currentLayer,
+            totalLayers: totalLayers,
+            fanSpeedPercent: nil,
+            liveZOffsetMm: nil,
+            jobName: nil,
+            thumbnailUrl: nil,
+            cameraStreamUrl: nil,
+            cameraSnapshotUrl: nil,
+            x: nil, y: nil, z: nil,
+            hotendTemp: nil, bedTemp: nil, hotendTarget: nil, bedTarget: nil,
+            homedAxes: nil, spoolInfo: nil, mmuStatus: nil,
+            printTimeLeftSeconds: nil,
+            currentJobThumbnailUrl: nil
+        )
+    }
+
     func testConfigureSignalRAppliesAndClearsCurrentJobThumbnailAcrossJobChanges() async throws {
         var printer = try TestData.decodePrinter()
         printer.state = "printing"
