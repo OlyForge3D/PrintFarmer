@@ -273,8 +273,13 @@ final class ConnectionMonitorTests: XCTestCase {
         XCTAssertEqual(monitor.status, .connected)
 
         mockAPIClient.stubResponse(json: "{\"status\":\"ok\"}", statusCode: 200)
+        // The hub-state observer wakes the poll loop (#3343), and that newer
+        // sample supersedes any explicit refresh, so wait for it to land.
         signalR.connectionState = .disconnected
-        await monitor.refresh()
+        let deadline = ContinuousClock().now + .seconds(5)
+        while monitor.status == .connected, ContinuousClock().now < deadline {
+            try? await Task.sleep(for: .milliseconds(5))
+        }
 
         XCTAssertEqual(monitor.status, .degraded)
         XCTAssertTrue(monitor.isReportable)
@@ -734,6 +739,124 @@ final class ConnectionMonitorTests: XCTestCase {
     }
 
     // MARK: - sample ticket fence
+
+    // MARK: - Poll cadence (issue #3343)
+
+    func testNextPollIntervalIsSlowOnlyWhenFullyHealthy() {
+        let fast = Duration.seconds(5)
+        let slow = Duration.seconds(30)
+        func interval(
+            reachable: Bool = true,
+            signalR: SignalRConnectionState = .connected,
+            settled: Bool = true,
+            grace: Bool = false
+        ) -> Duration {
+            ConnectionMonitor.nextPollInterval(
+                isServerReachable: reachable,
+                signalR: signalR,
+                hasSettled: settled,
+                isWithinStartupGrace: grace,
+                fast: fast,
+                slow: slow
+            )
+        }
+
+        XCTAssertEqual(interval(), slow)
+        XCTAssertEqual(interval(reachable: false), fast, "probe failures must confirm offline quickly")
+        for state in [SignalRConnectionState.disconnected, .connecting, .reconnecting] {
+            XCTAssertEqual(interval(signalR: state), fast, "hub \(state) must use the fast tier")
+        }
+        XCTAssertEqual(interval(settled: false), fast)
+        XCTAssertEqual(interval(grace: true), fast, "startup grace must keep its one-poll bound")
+        XCTAssertEqual(
+            ConnectionMonitor.nextPollInterval(
+                isServerReachable: true, signalR: .connected, hasSettled: true,
+                isWithinStartupGrace: false, fast: .seconds(10), slow: .seconds(1)
+            ),
+            .seconds(10),
+            "a misconfigured slow tier must never poll faster than the fast tier"
+        )
+    }
+
+    func testConnectedHealthyMonitorUsesSlowTier() async {
+        mockAPIClient.stubResponse(json: "{\"status\":\"ok\"}", statusCode: 200)
+        let signalR = MockSignalRService()
+        signalR.connectionState = .connected
+
+        let monitor = ConnectionMonitor(pathObserver: FakeNetworkPathObserver())
+        monitor.pollInterval = .milliseconds(10)
+        monitor.connectedPollInterval = .seconds(3600)
+        monitor.configure(apiClient: mockAPIClient.apiClient, signalRService: signalR)
+        monitor.start()
+        await drainInitialPoll(monitor)
+
+        XCTAssertEqual(monitor.status, .connected)
+        XCTAssertEqual(monitor.currentPollInterval, .seconds(3600))
+        let settledCount = monitor.completedSampleCount
+        // Many fast intervals elapse; the slow tier must not probe again.
+        try? await Task.sleep(for: .milliseconds(200))
+        XCTAssertEqual(
+            monitor.completedSampleCount,
+            settledCount,
+            "a connected, healthy hub must not be re-probed on the fast interval"
+        )
+        monitor.stop()
+    }
+
+    func testHubStateChangeWakesSlowTierForImmediateSample() async {
+        mockAPIClient.stubResponse(json: "{\"status\":\"ok\"}", statusCode: 200)
+        let signalR = MockSignalRService()
+        signalR.connectionState = .connected
+
+        let monitor = ConnectionMonitor(pathObserver: FakeNetworkPathObserver())
+        monitor.pollInterval = .seconds(3600)
+        monitor.connectedPollInterval = .seconds(3600)
+        monitor.configure(apiClient: mockAPIClient.apiClient, signalRService: signalR)
+        monitor.start()
+        await drainInitialPoll(monitor)
+        XCTAssertEqual(monitor.status, .connected)
+        XCTAssertEqual(signalR.connectionStateSubscriberCount, 1)
+        let settledCount = monitor.completedSampleCount
+
+        signalR.connectionState = .reconnecting
+        signalR.simulateConnectionStateChange(.reconnecting)
+
+        let deadline = ContinuousClock().now + .seconds(5)
+        while monitor.completedSampleCount == settledCount, ContinuousClock().now < deadline {
+            await Task.yield()
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertGreaterThan(
+            monitor.completedSampleCount,
+            settledCount,
+            "a hub state change must sample immediately instead of waiting out the slow interval"
+        )
+        XCTAssertEqual(monitor.status, .degraded)
+        XCTAssertEqual(monitor.currentPollInterval, monitor.pollInterval)
+        monitor.stop()
+    }
+
+    func testStopCancelsTheConnectionStateSubscription() async {
+        mockAPIClient.stubResponse(json: "{\"status\":\"ok\"}", statusCode: 200)
+        let signalR = MockSignalRService()
+        signalR.connectionState = .connected
+
+        let monitor = ConnectionMonitor(pathObserver: FakeNetworkPathObserver())
+        monitor.pollInterval = .seconds(3600)
+        monitor.configure(apiClient: mockAPIClient.apiClient, signalRService: signalR)
+        monitor.start()
+        monitor.start()
+        XCTAssertEqual(signalR.connectionStateSubscriberCount, 1, "restart must not leak a subscription")
+
+        let replacement = MockSignalRService()
+        replacement.connectionState = .connected
+        monitor.configure(apiClient: mockAPIClient.apiClient, signalRService: replacement)
+        XCTAssertEqual(signalR.connectionStateSubscriberCount, 0, "reconfigure must drop the old hub")
+        XCTAssertEqual(replacement.connectionStateSubscriberCount, 1)
+
+        monitor.stop()
+        XCTAssertEqual(replacement.connectionStateSubscriberCount, 0)
+    }
 
     func testStaleProbeCannotRepaintBannerAfterNewerSample() async {
         let barrier = AsyncBarrier()

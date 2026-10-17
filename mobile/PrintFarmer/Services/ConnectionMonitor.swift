@@ -17,7 +17,11 @@ enum ConnectionStatus: String, Equatable, Sendable {
 
 /// Observes REST reachability (`/healthz`) and the SignalR hub state and
 /// publishes a single combined ``ConnectionStatus`` for the global connection
-/// indicator. Polls on a fixed interval while ``start()`` is active.
+/// indicator. Polls while ``start()`` is active, on a two-tier cadence: the
+/// fast ``pollInterval`` while anything is unsettled, and the slower
+/// ``connectedPollInterval`` while the hub is connected and healthy (see
+/// ``nextPollInterval(isServerReachable:signalR:hasSettled:isWithinStartupGrace:fast:slow:)``).
+/// Any SignalR connection-state change wakes the loop for an immediate sample.
 @MainActor
 @Observable
 final class ConnectionMonitor {
@@ -60,12 +64,21 @@ final class ConnectionMonitor {
     /// value (verified empirically — it holds even for non-`Equatable` types),
     /// so something the view reads must *change* when the grace lapses. This
     /// flips true→false on the first poll after expiry, which bounds the delay
-    /// before the bar appears at one ``pollInterval``.
+    /// before the bar appears at one ``pollInterval``. (The grace always
+    /// selects the fast tier, so the slow ``connectedPollInterval`` never
+    /// stretches this bound.)
     private(set) var isInStartupGrace = false
 
     @ObservationIgnored private var apiClient: APIClient?
     @ObservationIgnored private var signalRService: (any SignalRServiceProtocol)?
     @ObservationIgnored private var pollTask: Task<Void, Never>?
+    /// The poll loop's current between-sample sleep. Cancelling it wakes the
+    /// loop early for an immediate sample without tearing the loop down.
+    @ObservationIgnored private var pollSleepTask: Task<Void, Never>?
+    @ObservationIgnored private var wakeRequested = false
+    /// Retained hub-state subscription for the current ``start()``/``stop()``
+    /// cycle. Dropping the token unsubscribes.
+    @ObservationIgnored private var connectionStateSubscription: SignalRSubscription?
 
     /// Observer supplied by tests. `nil` in production, where ``start()``
     /// creates a real ``NWPathMonitorObserver`` instead.
@@ -105,8 +118,18 @@ final class ConnectionMonitor {
     /// observed fact instead of a timing assumption.
     @ObservationIgnored private(set) var completedSampleCount: UInt64 = 0
 
-    /// Interval between connectivity samples.
+    /// Interval between connectivity samples while anything is unsettled
+    /// (startup, hub not connected, or REST probe failing).
     @ObservationIgnored var pollInterval: Duration = .seconds(5)
+
+    /// Interval between samples while the hub is connected and the server is
+    /// reachable. A connected hub already proves the server is up, so probing
+    /// `/healthz` every ``pollInterval`` is redundant traffic and radio wake-ups
+    /// (issue #3343). The REST probe stays as the fallback for a half-open
+    /// socket the hub has not yet noticed, which bounds that detection at about
+    /// one ``connectedPollInterval`` plus the probe timeout; every hub state
+    /// change also wakes the loop immediately.
+    @ObservationIgnored var connectedPollInterval: Duration = .seconds(30)
 
     /// Consecutive failed reachability probes required before the monitor
     /// publishes the alarming `.offline` state.
@@ -170,6 +193,28 @@ final class ConnectionMonitor {
         }
     }
 
+    /// Pure cadence selection for the poll loop (and unit tests).
+    ///
+    /// Returns `slow` only when the last sample was fully healthy: server
+    /// reachable, hub `.connected`, the session settled, and outside the
+    /// startup grace. Every other state — including any probe failure, so the
+    /// offline hysteresis still confirms within one fast interval — returns
+    /// `fast`.
+    static func nextPollInterval(
+        isServerReachable: Bool,
+        signalR: SignalRConnectionState,
+        hasSettled: Bool,
+        isWithinStartupGrace: Bool,
+        fast: Duration,
+        slow: Duration
+    ) -> Duration {
+        let healthy = isServerReachable
+            && signalR == .connected
+            && hasSettled
+            && !isWithinStartupGrace
+        return healthy ? max(slow, fast) : fast
+    }
+
     /// Hysteresis-aware resolution.
     ///
     /// A failed probe only produces `.offline` once `consecutiveFailures` has
@@ -229,6 +274,11 @@ final class ConnectionMonitor {
         appliedTicket = sampleTicket
         self.apiClient = apiClient
         self.signalRService = signalRService
+        // A running monitor must follow the new hub, not the old one.
+        if pollTask != nil {
+            startConnectionStateObserver()
+            wakePollLoop()
+        }
     }
 
     /// Starts (or restarts) the periodic connectivity poll loop and the network
@@ -244,21 +294,96 @@ final class ConnectionMonitor {
         // the banner flash for the whole first interval — the very defect the
         // grace exists to prevent.
         isInStartupGrace = true
+        wakeRequested = false
         startPathObserver()
+        startConnectionStateObserver()
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { break }
                 await self.refresh()
-                let interval = self.pollInterval
-                try? await Task.sleep(for: interval)
+                await self.sleepUntilNextPoll()
             }
         }
+    }
+
+    /// The interval the poll loop should wait after the most recent sample.
+    var currentPollInterval: Duration {
+        Self.nextPollInterval(
+            isServerReachable: isServerReachable,
+            signalR: signalRState,
+            hasSettled: hasSettledSinceStart,
+            isWithinStartupGrace: isWithinStartupGrace,
+            fast: pollInterval,
+            slow: connectedPollInterval
+        )
+    }
+
+    /// Sleeps for ``currentPollInterval`` in a separately cancellable task so a
+    /// hub state change can wake the loop early (``wakePollLoop()``), while
+    /// cancelling the poll task itself still ends the sleep promptly.
+    private func sleepUntilNextPoll() async {
+        // A superseded loop (restart) must not overwrite the live loop's
+        // sleeper, or wakePollLoop() would cancel the wrong sleep.
+        guard !Task.isCancelled else { return }
+        if wakeRequested {
+            wakeRequested = false
+            return
+        }
+        let interval = currentPollInterval
+        let sleeper = Task { _ = try? await Task.sleep(for: interval) }
+        pollSleepTask = sleeper
+        await withTaskCancellationHandler {
+            await sleeper.value
+        } onCancel: {
+            sleeper.cancel()
+        }
+        if pollSleepTask == sleeper { pollSleepTask = nil }
+    }
+
+    /// Ends the current between-sample sleep so the loop samples immediately.
+    private func wakePollLoop() {
+        if let pollSleepTask {
+            pollSleepTask.cancel()
+        } else {
+            // A sample is in flight; skip the next sleep so a change that
+            // landed after that sample read the hub is not lost.
+            wakeRequested = true
+        }
+    }
+
+    /// Subscribes to hub connection-state changes for this monitoring session.
+    ///
+    /// On the slow tier the loop may be asleep for up to
+    /// ``connectedPollInterval``; without this a hub drop would not reach the
+    /// banner until the next scheduled sample.
+    private func startConnectionStateObserver() {
+        connectionStateSubscription?.cancel()
+        connectionStateSubscription = nil
+        guard let signalRService else { return }
+        let registration = signalRService.onConnectionStateChanged { [weak self] state in
+            Task { @MainActor [weak self] in
+                self?.handleConnectionStateChange(state)
+            }
+        }
+        connectionStateSubscription = registration.subscription
+    }
+
+    private func handleConnectionStateChange(_ state: SignalRConnectionState) {
+        // Ignore notifications that arrive after stop() or that merely restate
+        // what the last sample already published.
+        guard pollTask != nil, state != signalRState else { return }
+        wakePollLoop()
     }
 
     /// Stops the poll loop. Call on logout or when the view disappears.
     func stop() {
         pollTask?.cancel()
         pollTask = nil
+        pollSleepTask?.cancel()
+        pollSleepTask = nil
+        wakeRequested = false
+        connectionStateSubscription?.cancel()
+        connectionStateSubscription = nil
         resumeTask?.cancel()
         resumeTask = nil
         pathObserver?.cancel()
