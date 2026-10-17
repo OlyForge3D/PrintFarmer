@@ -304,6 +304,40 @@ final class JobListViewModelTests: XCTestCase {
         XCTAssertTrue(printerService.statusRequestedIDs.isEmpty)
     }
 
+    func testSlowPrinterDoesNotDelaySubsequentFastRefreshes() async {
+        let printerService = MockPrinterService()
+        let slow = UUID(), fast = UUID()
+        let gate = QueueMoveGate()
+        let slowStatus = statusDetail(slow), fastStatus = statusDetail(fast)
+        printerService.statusHandler = { id in
+            if id == slow {
+                await gate.suspend()
+                return slowStatus
+            }
+            return fastStatus
+        }
+        viewModel.configure(printerService: printerService)
+        let task = Task {
+            await viewModel.pollActivePrinterStatuses(
+                printerIDs: [slow, fast], interval: .milliseconds(10)
+            )
+        }
+        await gate.waitUntilEntered()
+        let deadline = ContinuousClock.now.advanced(by: .seconds(2))
+        while printerService.statusRequestedIDs.filter({ $0 == fast }).count < 2,
+              ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(1))
+        }
+        XCTAssertGreaterThanOrEqual(
+            printerService.statusRequestedIDs.filter { $0 == fast }.count, 2,
+            "Healthy printers must keep refreshing while another printer is blocked."
+        )
+        XCTAssertNil(viewModel.activePrinterStatuses[slow])
+        task.cancel()
+        await gate.release()
+        await task.value
+    }
+
     func testPollDoesNotStartInBackgroundAndResumesInForeground() async {
         let printerService = MockPrinterService()
         let id = UUID()

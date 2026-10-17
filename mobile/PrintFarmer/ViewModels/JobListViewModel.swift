@@ -66,7 +66,7 @@ final class JobListViewModel {
         printerIDs: [UUID],
         isForeground: Bool = true,
         interval: Duration = .seconds(15),
-        isCurrent: @MainActor () -> Bool = { true }
+        isCurrent: @escaping @MainActor @Sendable () -> Bool = { true }
     ) async {
         guard !Task.isCancelled, isCurrent() else { return }
         statusPollGeneration &+= 1
@@ -81,41 +81,33 @@ final class JobListViewModel {
 
         activePrinterStatuses = [:]
         unavailableActivePrinterStatuses = []
-        while !Task.isCancelled, isViewActive, isCurrent(),
-              generation == statusPollGeneration {
-            await withTaskGroup(
-                of: (UUID, PrinterStatusDetail?).self
-            ) { group in
-                for id in Set(printerIDs) {
-                    group.addTask {
+        await withTaskGroup(of: Void.self) { group in
+            for id in Set(printerIDs) {
+                group.addTask { @MainActor in
+                    while !Task.isCancelled, self.isViewActive, isCurrent(),
+                          generation == self.statusPollGeneration {
+                        let status: PrinterStatusDetail?
                         do {
-                            return (id, try await printerService.getStatus(id: id))
+                            status = try await printerService.getStatus(id: id)
                         } catch {
-                            return (id, nil)
+                            status = nil
+                        }
+                        guard !Task.isCancelled, self.isViewActive, isCurrent(),
+                              generation == self.statusPollGeneration else { return }
+                        if let status {
+                            self.activePrinterStatuses[id] = status
+                            self.unavailableActivePrinterStatuses.remove(id)
+                        } else {
+                            self.activePrinterStatuses.removeValue(forKey: id)
+                            self.unavailableActivePrinterStatuses.insert(id)
+                        }
+                        do {
+                            try await Task.sleep(for: interval)
+                        } catch {
+                            return
                         }
                     }
                 }
-                for await (id, status) in group {
-                    guard !Task.isCancelled, isViewActive, isCurrent(),
-                          generation == statusPollGeneration else {
-                        group.cancelAll()
-                        return
-                    }
-                    if let status {
-                        activePrinterStatuses[id] = status
-                        unavailableActivePrinterStatuses.remove(id)
-                    } else {
-                        activePrinterStatuses.removeValue(forKey: id)
-                        unavailableActivePrinterStatuses.insert(id)
-                    }
-                }
-            }
-            guard !Task.isCancelled, isViewActive, isCurrent(),
-                  generation == statusPollGeneration else { return }
-            do {
-                try await Task.sleep(for: interval)
-            } catch {
-                return
             }
         }
     }

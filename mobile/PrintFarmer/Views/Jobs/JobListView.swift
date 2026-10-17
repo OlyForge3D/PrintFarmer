@@ -16,7 +16,7 @@ struct JobListView: View {
 
     private var activePrinterStatusRequestKey: String {
         let ids = viewModel.activePrinterIDs.map(\.uuidString).joined(separator: ",")
-        return "\(services.activeServerGeneration):\(scenePhase == .active):\(ids)"
+        return "\(services.activeServerGeneration):\(viewModel.isViewActive):\(scenePhase == .active):\(ids)"
     }
 
     init(ownsNavigationStack: Bool = true) {
