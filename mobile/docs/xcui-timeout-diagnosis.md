@@ -421,6 +421,42 @@ cause. A signature that recurs with it present means the switch did not take
 effect or the livelock has another trigger. A launch-class failure without the
 signature has a different cause.
 
+### Negative layout probes (#3263)
+
+**Symptom.** On iPad, `JobDetailIPadNavigationUITests` intermittently died with
+the `UITestBootstrap` 20s main-run-loop watchdog. The fatal always landed
+inside XCTest accessibility work for `TabBar (First Match)`, never in app code.
+
+**Cause.** The suite chose its layout with
+`app.tabBars.firstMatch.waitForExistence(timeout: 8)` and treated absence as
+"regular width". On iPad that probe is designed to fail:
+
+1. No tab bar ever matches, so `firstMatch` cannot stop early. Each poll
+   evaluates the whole tree in one main-run-loop block in the app.
+2. When the 8s wait expires, XCTest cancels its future but the app keeps
+   evaluating the in-flight request on main.
+3. XCTest then issues an implicit final `exists` check with its own 30s
+   budget and retries. That check queues behind the cancelled evaluation.
+
+Run 38996745319 (PR #3404, iPad shard 4) shows the full chain. Polls took
+about 0.2s until host contention slowed per-element AX work. One poll then took
+about 5s. The final `exists` started at 03:23:52 and occupied main from
+03:23:55 until the watchdog fired at 03:24:21. The runner was still inside its
+30s query budget. Earlier occurrences on shards 2 and 3 had the same
+XCTest-owned frames.
+
+**Fix.** `observedShellWidth()` classifies the shell from positive evidence:
+the compact dock or a native tab bar means compact, and the sidebar or its
+collapsed toggle means regular. It uses the bounded `UIWaitBudget` snapshot
+loop, so it returns on the first ready snapshot. It starts no remote work after
+its deadline and never reveals or taps. An unresolved shell fails the test
+instead of skipping it. `requireCompactAdaptiveShell()` uses the same helper.
+
+**Rule.** Do not infer a layout or state from the *absence* of an element with
+`waitForExistence`. Wait for a positive marker of the expected state. Use a
+single `exists` check only after the positive state is established. The 20s
+watchdog and all wait budgets are unchanged.
+
 ### After-correction evidence
 
 `diagnostic-after-2573.xcresult` again records the deliberately stalled test
