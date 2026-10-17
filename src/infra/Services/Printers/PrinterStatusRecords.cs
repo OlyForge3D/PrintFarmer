@@ -51,5 +51,12 @@ public record PrinterCompositeStatus(
     int? CurrentLayer = null,
     int? TotalLayers = null,
     double? FanSpeedPercent = null,
-    double? LiveZOffsetMm = null);
+    double? LiveZOffsetMm = null)
+{
+    /// <summary>
+    /// Backend-reported sensor entries, or null when not reported. Adapters must merge
+    /// partial reports before assigning a complete snapshot to cached status or hub updates.
+    /// </summary>
+    public IReadOnlyList<PrinterSensorDto>? Sensors { get; init; }
+}
 #pragma warning restore CA1056 // URI-like properties should not be strings

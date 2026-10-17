@@ -67,17 +67,17 @@ public class SdcpStatus
 
     public int PlatFormType { get; set; }
 
-    public double TempOfHotbed { get; set; }
+    public double? TempOfHotbed { get; set; }
 
-    public double TempOfNozzle { get; set; }
+    public double? TempOfNozzle { get; set; }
 
-    public double TempOfBox { get; set; }
+    public double? TempOfBox { get; set; }
 
-    public double TempTargetHotbed { get; set; }
+    public double? TempTargetHotbed { get; set; }
 
-    public double TempTargetNozzle { get; set; }
+    public double? TempTargetNozzle { get; set; }
 
-    public double TempTargetBox { get; set; }
+    public double? TempTargetBox { get; set; }
 
     public string? CurrenCoord { get; set; }
 
@@ -92,11 +92,11 @@ public class SdcpStatus
 
 public class SdcpFanSpeed
 {
-    public int ModelFan { get; set; }
+    public int? ModelFan { get; set; }
 
-    public int AuxiliaryFan { get; set; }
+    public int? AuxiliaryFan { get; set; }
 
-    public int BoxFan { get; set; }
+    public int? BoxFan { get; set; }
 }
 
 public class SdcpLightStatus
@@ -374,7 +374,8 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
     ISupportsFileDelete,
     ISupportsPrinterInformation,
     ISupportsStatus,
-    ISupportsCompositeStatus
+    ISupportsCompositeStatus,
+    ISupportsSensorTelemetry
 {
     private readonly HttpClient _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
     private readonly ILogger<SdcpClient> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -1088,7 +1089,11 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
                         HotendTarget: status.TempTargetNozzle,
                         BedTarget: status.TempTargetHotbed,
                         CurrentLayer: GetKnownLayer(printInfo?.CurrentLayer, printInfo?.TotalLayer),
-                        TotalLayers: GetKnownTotalLayers(printInfo?.CurrentLayer, printInfo?.TotalLayer));
+                        TotalLayers: GetKnownTotalLayers(printInfo?.CurrentLayer, printInfo?.TotalLayer),
+                        FanSpeedPercent: SdcpSensorMapper.GetPartCoolingPercent(status))
+                    {
+                        Sensors = SdcpSensorMapper.Map(status),
+                    };
                 }
 
                 await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, cts.Token);
@@ -1174,7 +1179,8 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
             ObicoEnabled: printer.ObicoEnabled,
             Location: printer.Location == null ? null : new LocationSummaryDto(printer.Location.Id, printer.Location.Name, printer.Location.Description),
             CurrentLayer: status.CurrentLayer,
-            TotalLayers: status.TotalLayers);
+            TotalLayers: status.TotalLayers,
+            FanSpeedPercent: status.FanSpeedPercent);
     }
 
     // Print control methods (ISupportsStartPrint + ISupportsControlOperations)

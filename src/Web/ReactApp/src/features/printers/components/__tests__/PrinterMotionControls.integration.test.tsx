@@ -1,3 +1,4 @@
+vi.mock('@/features/auth/hooks/useAuth', () => ({ useAuth: () => ({ hasPermission: () => true }) }));
 import type { ReactElement } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { USER_SETTINGS_KEY } from "@/features/settings/hooks/useUserSettings";

@@ -172,6 +172,7 @@ struct Printer: Codable, Identifiable, Sendable {
     var totalLayers: Int?
     var fanSpeedPercent: Double?
     var liveZOffsetMm: Double?
+    var sensors: [PrinterSensor]
     var jobName: String?
     var fileName: String?
     var thumbnailUrl: String?
@@ -207,7 +208,7 @@ struct Printer: Codable, Identifiable, Sendable {
         case manufacturerId, manufacturerName, modelId, modelName, motionType
         case backend, apiKey, originalServerUrl, backendPort, frontendPort
         case inMaintenance, isEnabled, rowVersion, configurationRevision
-        case isOnline, state, progress, currentLayer, totalLayers, fanSpeedPercent, liveZOffsetMm
+        case isOnline, state, progress, currentLayer, totalLayers, fanSpeedPercent, liveZOffsetMm, sensors
         case jobName, fileName, thumbnailUrl, currentJobThumbnailUrl
         case cameraStreamUrl, cameraSnapshotUrl
         case cameraAccessMode, cameraStreamFormat, cameraSnapshotStrategy
@@ -253,6 +254,7 @@ struct Printer: Codable, Identifiable, Sendable {
         totalLayers = try c.decodeIfPresent(Int.self, forKey: .totalLayers)
         fanSpeedPercent = try c.decodeIfPresent(Double.self, forKey: .fanSpeedPercent)
         liveZOffsetMm = try c.decodeIfPresent(Double.self, forKey: .liveZOffsetMm)
+        sensors = try c.decodeIfPresent([PrinterSensor].self, forKey: .sensors) ?? []
         jobName = try c.decodeIfPresent(String.self, forKey: .jobName)
         fileName = try c.decodeIfPresent(String.self, forKey: .fileName)
         thumbnailUrl = try c.decodeIfPresent(String.self, forKey: .thumbnailUrl)
@@ -428,6 +430,8 @@ struct PrinterStatusDetail: Codable, Sendable {
     let totalLayers: Int?
     let fanSpeedPercent: Double?
     let liveZOffsetMm: Double?
+    /// Nil when an older server omits `sensors`.
+    var sensors: [PrinterSensor]?
     let jobName: String?
     let thumbnailUrl: String?
     let cameraStreamUrl: String?
@@ -457,6 +461,7 @@ struct PrinterStatusDetail: Codable, Sendable {
         totalLayers: Int? = nil,
         fanSpeedPercent: Double? = nil,
         liveZOffsetMm: Double? = nil,
+        sensors: [PrinterSensor]? = nil,
         jobName: String?,
         thumbnailUrl: String?,
         cameraStreamUrl: String?,
@@ -482,6 +487,7 @@ struct PrinterStatusDetail: Codable, Sendable {
         self.totalLayers = totalLayers
         self.fanSpeedPercent = fanSpeedPercent
         self.liveZOffsetMm = liveZOffsetMm
+        self.sensors = sensors
         self.jobName = jobName
         self.thumbnailUrl = thumbnailUrl
         self.cameraStreamUrl = cameraStreamUrl

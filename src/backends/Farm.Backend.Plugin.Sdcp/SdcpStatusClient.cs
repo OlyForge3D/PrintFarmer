@@ -52,7 +52,7 @@ public class SdcpStatusClient : IPrinterStatusClient, IManagedSpoolProvider
                 async ct => await _client.GetCompositeStatusAsync(printer.BackendUrl, ct),
                 ct);
 
-            return new PrinterStatusDto(
+            var result = new PrinterStatusDto(
                 Id: printer.Id,
                 IsOnline: status.IsOnline,
                 State: status.State,
@@ -69,7 +69,9 @@ public class SdcpStatusClient : IPrinterStatusClient, IManagedSpoolProvider
                 HotendTarget: status.HotendTarget,
                 BedTarget: status.BedTarget,
                 CurrentLayer: status.CurrentLayer,
-                TotalLayers: status.TotalLayers);
+                TotalLayers: status.TotalLayers,
+                FanSpeedPercent: status.FanSpeedPercent);
+            return status.Sensors is null ? result : result with { Sensors = status.Sensors };
         }
         catch (OperationCanceledException)
         {

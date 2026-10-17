@@ -356,6 +356,73 @@ struct PrinterMaterialControls: View {
     }
 }
 
+/// Inputs for sensor/fan entries the backend reports as writable. Read-only
+/// entries and descriptors never get controls.
+private struct PrinterSensorControlRows: View {
+    @ObservedObject var viewModel: PrinterControlsViewModel
+    var compact: Bool
+
+    var body: some View {
+        let sensors = viewModel.controllableSensors
+        if !sensors.isEmpty {
+            ForEach(sensors) { sensor in
+                ForEach(sensor.writable, id: \.quantity) { descriptor in
+                    Divider()
+                    row(sensor: sensor, descriptor: descriptor)
+                }
+            }
+        }
+    }
+
+    private func row(sensor: PrinterSensor, descriptor: SensorWritable) -> some View {
+        let reading = sensor.reading(descriptor.quantity)
+        let current = reading?.value.number
+        let reason = viewModel.sensorControlUnavailableReason
+            ?? (sensor.available ? (current == nil ? "Current value is unknown; controls are disabled." : nil)
+                                 : "Unavailable; controls are disabled.")
+        let title = "\(sensor.displayName) \(PrinterSensorFormatting.quantityTitle(descriptor.quantity).lowercased())"
+        let id = "printer.controls.sensor.\(sensor.id).\(descriptor.quantity.rawValue)"
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                Text(title).font(.subheadline.weight(.medium))
+                Spacer(minLength: 0)
+                if let current, reason == nil {
+                    stepButton("minus", "Decrease \(title)", id + ".decrease",
+                               increasing: false, current: current, descriptor: descriptor, sensor: sensor)
+                }
+                Text(reading.map(PrinterSensorFormatting.valueText) ?? "—")
+                    .font(.subheadline.monospacedDigit())
+                    .accessibilityLabel(reading.map { "\(title), \(PrinterSensorFormatting.spokenValue($0))" } ?? "\(title), unknown")
+                    .accessibilityIdentifier(id + ".value")
+                if let current, reason == nil {
+                    stepButton("plus", "Increase \(title)", id + ".increase",
+                               increasing: true, current: current, descriptor: descriptor, sensor: sensor)
+                }
+            }
+            if let reason {
+                Text(reason).font(.footnote).foregroundStyle(Color.pfTextSecondary)
+            }
+        }
+        .accessibilityElement(children: .contain)
+    }
+
+    private func stepButton(
+        _ symbol: String, _ label: String, _ identifier: String,
+        increasing: Bool, current: Double, descriptor: SensorWritable, sensor: PrinterSensor
+    ) -> some View {
+        let clamped = PrinterSensorFormatting.steppedTarget(current: current, increasing: increasing, descriptor: descriptor)
+        return Button {
+            Task { await viewModel.setSensorValue(sensorId: sensor.id, quantity: descriptor.quantity, value: clamped) }
+        } label: {
+            Image(systemName: symbol).frame(minWidth: 44, minHeight: 44)
+        }
+        .buttonStyle(.bordered)
+        .disabled(viewModel.pendingCommand != nil)
+        .accessibilityLabel(label)
+        .accessibilityIdentifier(identifier)
+    }
+}
+
 private struct PrinterRuntimeAdjustments: View {
     @ObservedObject var viewModel: PrinterControlsViewModel
     var showsHeading = true
@@ -381,6 +448,7 @@ private struct PrinterRuntimeAdjustments: View {
             )
             Divider()
             zOffsetRow
+            PrinterSensorControlRows(viewModel: viewModel, compact: compactForDetail)
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("printer.controls.runtime")

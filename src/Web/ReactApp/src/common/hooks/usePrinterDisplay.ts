@@ -44,6 +44,8 @@ function mergePrinterDisplay(printer: Printer, signalRStatus: PrinterStatusUpdat
     hotendTarget: signalRStatus?.hotendTarget !== undefined ? signalRStatus.hotendTarget : printer.hotendTarget,
     bedTarget: signalRStatus?.bedTarget !== undefined ? signalRStatus.bedTarget : printer.bedTarget,
     spoolInfo: signalRStatus?.spoolInfo !== undefined ? signalRStatus.spoolInfo : printer.spoolInfo,
+    // Each event carries the complete sensor list, so a reported list replaces the API one
+    sensors: signalRStatus?.sensors !== undefined ? signalRStatus.sensors : printer.sensors,
     // MMU status (only available from SignalR)
     mmuStatus: signalRStatus?.mmuStatus,
     // Pass through printTimeLeftSeconds from SignalR for ETA derivation

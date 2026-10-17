@@ -120,6 +120,7 @@ struct PrinterControlsUpdateSignal: Hashable {
     let bedTarget: Double?
     let fanSpeedPercent: Double?
     let liveZOffsetMm: Double?
+    let sensors: [PrinterSensor]
     let homedAxes: String?
 
     init(printer: Printer) {
@@ -138,6 +139,7 @@ struct PrinterControlsUpdateSignal: Hashable {
         self.bedTarget = printer.bedTarget
         self.fanSpeedPercent = printer.fanSpeedPercent
         self.liveZOffsetMm = printer.liveZOffsetMm
+        self.sensors = printer.sensors
         self.homedAxes = printer.homedAxes
     }
 }

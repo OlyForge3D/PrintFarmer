@@ -1881,6 +1881,41 @@ final class PrinterDetailViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.printer?.bedTemp, 60.0)
     }
 
+    func testConfigureSignalRSensorOnlyUpdatePropagatesKeepsCacheAndEmptyReplaces() async throws {
+        mockService.printerToReturn = try TestData.decodePrinter()
+        await viewModel.loadPrinter()
+        viewModel.isViewActive = true
+        let signalR = MockSignalRService()
+        viewModel.configureSignalR(signalR)
+
+        func update(sensors: [PrinterSensor]?) -> PrinterStatusUpdate {
+            PrinterStatusUpdate(
+                id: TestData.testUUID, isOnline: true, state: "printing", progress: 10,
+                sensors: sensors, jobName: nil, fileName: nil, thumbnailUrl: nil,
+                cameraStreamUrl: nil, x: nil, y: nil, z: nil, hotendTemp: nil, bedTemp: nil,
+                hotendTarget: nil, bedTarget: nil, homedAxes: nil, spoolInfo: nil, mmuStatus: nil
+            )
+        }
+        let json = """
+        [{"id":"chamber","displayName":"Chamber","kind":"Chamber",
+          "readings":[{"quantity":"Temperature","value":31.5,"unit":"Celsius"}],
+          "available":true,"writable":[]}]
+        """
+        let sensors = try JSONDecoder().decode([PrinterSensor].self, from: Data(json.utf8))
+
+        signalR.simulatePrinterUpdate(update(sensors: sensors))
+        try? await Task.sleep(for: .milliseconds(30))
+        XCTAssertEqual(viewModel.printer?.sensors, sensors)
+
+        signalR.simulatePrinterUpdate(update(sensors: nil))
+        try? await Task.sleep(for: .milliseconds(30))
+        XCTAssertEqual(viewModel.printer?.sensors, sensors, "Omitted sensors keeps the cache")
+
+        signalR.simulatePrinterUpdate(update(sensors: []))
+        try? await Task.sleep(for: .milliseconds(30))
+        XCTAssertEqual(viewModel.printer?.sensors, [], "A reported empty list replaces the cache")
+    }
+
     /// Unanimous #706 BLOCK: a live `printerupdated` carrying `homedAxes`
     /// must propagate into `viewModel.printer.homedAxes`. Before the fix
     /// `applyLiveUpdate` mutated position/temperature/spool but silently

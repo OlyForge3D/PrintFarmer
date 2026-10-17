@@ -97,6 +97,46 @@ public sealed class SdcpPollingService(
 
         public int ConsecutiveFailures { get; set; }
 
+        public IReadOnlyList<PrinterSensorDto> Sensors { get; set; } = [];
+
+        public double? FanSpeedPercent { get; set; }
+
+        public double? HotendTemp { get; set; }
+
+        public double? BedTemp { get; set; }
+
+        public double? HotendTarget { get; set; }
+
+        public double? BedTarget { get; set; }
+
+        /// <summary>
+        /// Holds legacy telemetry across partial SDCP packets while online; offline clears it so a
+        /// reconnect that omits a field cannot resurrect a stale value.
+        /// </summary>
+        public void ApplyLegacyTelemetry(PrinterCompositeStatus status)
+        {
+            if (!status.IsOnline)
+            {
+                ClearLegacyTelemetry();
+                return;
+            }
+
+            FanSpeedPercent = status.FanSpeedPercent ?? FanSpeedPercent;
+            HotendTemp = status.HotendTemp ?? HotendTemp;
+            BedTemp = status.BedTemp ?? BedTemp;
+            HotendTarget = status.HotendTarget ?? HotendTarget;
+            BedTarget = status.BedTarget ?? BedTarget;
+        }
+
+        public void ClearLegacyTelemetry()
+        {
+            FanSpeedPercent = null;
+            HotendTemp = null;
+            BedTemp = null;
+            HotendTarget = null;
+            BedTarget = null;
+        }
+
         /// <summary>
         /// The last "printerupdated" payload actually broadcast for this printer, used to suppress
         /// byte-identical re-broadcasts. Null until the first broadcast (including after a backend
@@ -413,6 +453,14 @@ public sealed class SdcpPollingService(
                             ct);
                     }
 
+                    state.Sensors = PrinterSensorNormalizer.Merge(state.Sensors, status.Sensors ?? []);
+                    if (!status.IsOnline)
+                    {
+                        state.Sensors = PrinterSensorNormalizer.MarkUnavailable(state.Sensors);
+                    }
+
+                    state.ApplyLegacyTelemetry(status);
+
                     // Update cache before broadcasting to clients
                     var cacheUpdate = new PrinterStatusDto(
                         Id: printerId,
@@ -426,13 +474,17 @@ public sealed class SdcpPollingService(
                         X: status.X,
                         Y: status.Y,
                         Z: status.Z,
-                        HotendTemp: status.HotendTemp,
-                        BedTemp: status.BedTemp,
-                        HotendTarget: status.HotendTarget,
-                        BedTarget: status.BedTarget,
+                        HotendTemp: state.HotendTemp,
+                        BedTemp: state.BedTemp,
+                        HotendTarget: state.HotendTarget,
+                        BedTarget: state.BedTarget,
                         CurrentLayer: status.CurrentLayer,
                         TotalLayers: status.TotalLayers,
-                        SpoolInfo: null);
+                        SpoolInfo: null,
+                        FanSpeedPercent: state.FanSpeedPercent)
+                    {
+                        Sensors = state.Sensors,
+                    };
                     _statusCacheWriter.UpdateStatus(cacheUpdate, originWatermark);
 
                     var signalRUpdate = new PrinterStatusUpdate(
@@ -446,15 +498,19 @@ public sealed class SdcpPollingService(
                         X: status.X,
                         Y: status.Y,
                         Z: status.Z,
-                        HotendTemp: status.HotendTemp,
-                        BedTemp: status.BedTemp,
-                        HotendTarget: status.HotendTarget,
-                        BedTarget: status.BedTarget,
+                        HotendTemp: state.HotendTemp,
+                        BedTemp: state.BedTemp,
+                        HotendTarget: state.HotendTarget,
+                        BedTarget: state.BedTarget,
                         HomedAxes: null,
                         SpoolInfo: null,
                         FileName: PrinterStatusDto.ExtractFileName(status.JobName),
                         CurrentLayer: status.CurrentLayer,
-                        TotalLayers: status.TotalLayers);
+                        TotalLayers: status.TotalLayers,
+                        FanSpeedPercent: state.FanSpeedPercent)
+                    {
+                        Sensors = state.Sensors,
+                    };
 
                     if (PrinterStatusBroadcastGate.ShouldBroadcast(state.LastBroadcastUpdate, signalRUpdate))
                     {
@@ -489,6 +545,8 @@ public sealed class SdcpPollingService(
                     {
                         _logger.LogWarning("SDCP printer {PrinterId} marked offline after {StateConsecutiveFailures} failures", printerId, state.ConsecutiveFailures);
                         state.LastKnownIsOnline = false;
+                        state.Sensors = PrinterSensorNormalizer.MarkUnavailable(state.Sensors);
+                        state.ClearLegacyTelemetry();
 
                         _logger.LogWarning(
                             "SDCP printer marked Offline after consecutive failures. PrinterId={PrinterId}, BackendUrl={BackendUrl}, Failures={Failures}",
@@ -512,7 +570,10 @@ public sealed class SdcpPollingService(
                             BedTemp: null,
                             HotendTarget: null,
                             BedTarget: null,
-                            SpoolInfo: null);
+                            SpoolInfo: null)
+                        {
+                            Sensors = state.Sensors,
+                        };
                         _statusCacheWriter.UpdateStatus(offlineCacheUpdate, originWatermark: null);
 
                         var offlineSignalRUpdate = new PrinterStatusUpdate(
@@ -532,7 +593,10 @@ public sealed class SdcpPollingService(
                             BedTarget: null,
                             HomedAxes: null,
                             SpoolInfo: null,
-                            FileName: null);
+                            FileName: null)
+                        {
+                            Sensors = state.Sensors,
+                        };
 
                         await _hub.Clients.Group(
                                 Farm.Infrastructure.Security.AuthorizedHubGroups.Printer(printerId))
