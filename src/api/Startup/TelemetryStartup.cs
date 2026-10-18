@@ -117,7 +117,8 @@ public static class TelemetryStartup
                        .AddMeter("PrintFarmer.SlicerService")
                        .AddMeter("PrintFarmer.FailureDetection")
                        .AddMeter("PrintFarmer.API")
-                       .AddMeter(Farm.Infrastructure.Services.Notifications.NativePush.NativePushMetrics.MeterName);
+                       .AddMeter(Farm.Infrastructure.Services.Notifications.NativePush.NativePushMetrics.MeterName)
+                       .AddMeter(Farm.Infrastructure.Services.Webhooks.WebhookMetrics.MeterName);
 
                 // Add console exporter only if explicitly enabled (same as tracing)
                 if (enableConsoleExporter)
