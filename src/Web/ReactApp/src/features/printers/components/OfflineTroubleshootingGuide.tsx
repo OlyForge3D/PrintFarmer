@@ -11,7 +11,7 @@ interface OfflineTroubleshootingGuideProps {
   serverUrl?: string;
   frontendUrl?: string;
   onDismiss?: () => void;
-  variant?: 'full' | 'compact' | 'popover';
+  variant?: 'full' | 'compact' | 'popover' | 'content';
   /**
    * Whether the steps list starts expanded. Defaults to expanded for the
    * `full` variant (backwards-compatible default) and collapsed for
@@ -111,7 +111,7 @@ function StepList({ steps, label }: { steps: TroubleshootingStep[]; label: strin
         <li key={i} className="text-sm text-pf-text-secondary">
           <span>{step.text}</span>
           {step.command && (
-            <code className="ml-2 px-1.5 py-0.5 rounded bg-black/30 text-xs font-mono text-pf-text-primary">
+            <code className="ml-2 px-1.5 py-0.5 rounded bg-black/30 text-xs font-mono text-pf-text-primary break-words">
               {step.command}
             </code>
           )}
@@ -120,7 +120,7 @@ function StepList({ steps, label }: { steps: TroubleshootingStep[]; label: strin
               href={step.link.url}
               target="_blank"
               rel="noopener noreferrer"
-              className="ml-2 inline-flex items-center gap-1 text-xs text-pf-accent hover:underline"
+              className="ml-2 inline-flex max-w-full items-center gap-1 break-all text-xs text-pf-accent hover:underline"
             >
               {step.link.label}
               <ExternalLinkIcon className="h-3 w-3" />
@@ -145,6 +145,23 @@ export function OfflineTroubleshootingGuide({
   const backendName = getBackendName(printerBackend);
   const commonSteps = getCommonSteps(printerIp, serverUrl, frontendUrl);
   const backendSteps = getBackendSteps(backendName);
+
+  if (variant === 'content') {
+    return (
+      <div className="space-y-6">
+        <section>
+          <h3 className="mb-2 text-sm font-semibold text-pf-text-primary">Common Checks</h3>
+          <StepList steps={commonSteps} label="Common troubleshooting steps" />
+        </section>
+        {backendSteps.length > 0 && (
+          <section>
+            <h3 className="mb-2 text-sm font-semibold text-pf-text-primary">{backendName}-Specific Steps</h3>
+            <StepList steps={backendSteps} label={`${backendName}-specific troubleshooting steps`} />
+          </section>
+        )}
+      </div>
+    );
+  }
 
   if (variant === 'compact') {
     return (

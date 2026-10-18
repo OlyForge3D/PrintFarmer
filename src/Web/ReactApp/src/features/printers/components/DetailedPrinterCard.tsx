@@ -33,6 +33,7 @@ import { usePrinterMovement } from '@/features/printers/hooks/use-printer-moveme
 import { PrinterActionBar } from '@/features/printers/components/PrinterActionBar';
 import { BedClearBanner } from '@/features/printers/components/BedClearBanner';
 import { PrintProgressBar } from '@/features/printers/components/PrintProgressBar';
+import { PrinterImage } from '@/common/components/PrinterImage';
 import { EstimatedCompletionBadge } from '@/features/printers/components/EstimatedCompletionBadge';
 import { useAutoDispatchStatus, useSetAutoDispatchEnabled } from '@/features/printers/hooks/useAutoDispatch';
 import { useFailureDetectionAlert } from '@/features/printers/hooks/useFailureDetectionAlert';
@@ -58,7 +59,7 @@ import { getPrinterDisplayState, requiresBedClearConfirmation } from '@/common/u
 import { FailureDetectionBadge } from '@/features/printers/components/FailureDetectionBadge';
 import { FailureDetectionMonitoringBadge } from '@/features/printers/components/FailureDetectionMonitoringBadge';
 import { FailureDetectionMonitoringSummary } from '@/features/printers/components/FailureDetectionMonitoringSummary';
-import { OfflineTroubleshootingGuide } from '@/features/printers/components/OfflineTroubleshootingGuide';
+import { PrinterTroubleshootingButton } from '@/features/printers/components/PrinterTroubleshootingButton';
 import { PrinterCameraPreview } from '@/features/printers/components/PrinterCameraPreview';
 import {
   canCancel,
@@ -691,7 +692,31 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
             recentEvents={recentEvents}
           />
           {recentFailure && <FailureDetectionBadge event={recentFailure} />}
+          {!isOnline && <PrinterTroubleshootingButton key={printer.id} printer={printer} />}
         </div>
+      </div>
+
+      <div className="mt-3 flex items-end gap-3" data-testid="detailed-printer-image">
+        <div className="relative h-24 w-24 shrink-0 overflow-hidden rounded-md border border-pf-border bg-pf-bg-2">
+          <PrinterImage
+            key={`${printer.manufacturerName ?? ''}|${printer.modelName ?? ''}`}
+            manufacturerName={printer.manufacturerName}
+            modelName={printer.modelName}
+            motionType={printer.motionType}
+            alt=""
+            className="h-full w-full object-contain p-1.5 drop-shadow-[0_4px_6px_rgba(0,0,0,0.45)]"
+          />
+        </div>
+        {(printer.modelName || printer.manufacturerName) && (
+          <div className="min-w-0 pb-0.5 leading-tight">
+            {printer.modelName && (
+              <p className="truncate text-sm font-medium text-pf-text-primary">{printer.modelName}</p>
+            )}
+            {printer.manufacturerName && (
+              <p className="truncate text-xs text-pf-text-secondary">{printer.manufacturerName}</p>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Header actions */}
@@ -779,15 +804,14 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
               disabled={setAutoDispatchEnabled.isPending}
               className={`h-8 w-8 p-0 rounded transition-colors ${
                 autoDispatchStatus?.enabled
-                  ? 'text-pf-accent bg-pf-accent-bg'
+                  ? 'text-pf-accent'
                   : 'text-pf-text-secondary hover:text-pf-text-primary'
               } disabled:opacity-50 inline-flex items-center justify-center`}
               aria-label={`Toggle auto-dispatch for ${printer.name}`}
               aria-pressed={autoDispatchStatus?.enabled ?? false}
               title={autoDispatchStatus?.enabled ? 'Auto-dispatch enabled' : 'Auto-dispatch disabled'}
-            >
-              <Zap className="h-4 w-4" fill={autoDispatchStatus?.enabled ? 'currentColor' : 'none'} />
-            </Button>
+              iconCenter={<Zap className="h-4 w-4" fill={autoDispatchStatus?.enabled ? 'currentColor' : 'none'} />}
+            />
             <Button
               type="button"
               variant="ghost"
@@ -825,20 +849,6 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
             printerName={printer.name ?? 'Printer'}
             autoDispatchStatus={autoDispatchStatus}
             printerState={state}
-          />
-        </div>
-      )}
-
-      {/* Offline troubleshooting guide */}
-      {!isOnline && (
-        <div className="mb-4">
-          <OfflineTroubleshootingGuide
-            printerBackend={printer.backend}
-            printerIp={printer.ipAddress}
-            serverUrl={printer.serverUrl ?? printer.backendUrl}
-            frontendUrl={printer.frontendUrl}
-            variant="full"
-            defaultExpanded={false}
           />
         </div>
       )}
