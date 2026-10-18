@@ -232,6 +232,8 @@ The supported command subset is `SET_FAN_SPEED FAN=auxiliary SPEED=0.5`,
 `SET_HEATER_TEMPERATURE HEATER=chamber TARGET=50`,
 `SET_TEMPERATURE_FAN_TARGET TEMPERATURE_FAN=chamber_heater TARGET=40`, and
 `SET_FILAMENT_SENSOR SENSOR=runout ENABLE=0` (also `SENSOR=encoder`).
+`SET_HEATER_TEMPERATURE` also updates the existing `extruder` and `heater_bed`
+targets, just like their legacy `M104`/`M140` paths.
 Names and values are required; optional upstream parameters, templates, PID,
 thermal/tachometer physics, motion-sensor pulse timing and runout macros are not
 simulated. A command changes its target/requested speed or enabled flag, not
@@ -251,7 +253,9 @@ With the control API enabled, inject readings through
 Only existing fields with finite, appropriately ranged numbers or real booleans
 are accepted; unknown objects/fields and invalid values return 400 without a
 partial mutation. Temperature-sensor extrema update with readings and cannot be
-injected directly. No new wall-clock work, network access or runtime dependency
+injected directly. RPM remains numeric only on the configured tachometer fan,
+and null-only on fans without a tachometer.
+No new wall-clock work, network access or runtime dependency
 is introduced. Readings stay fixed across virtual-time advances; notifications
 use the existing virtual `eventtime`. Scenario/reset and firmware restart restore
 the baseline. Separate printer aggregates never share sensor state.

@@ -94,6 +94,8 @@ public sealed class KlipperSensorTests : IClassFixture<ReadyPrinterFactory>
     [InlineData("SET_FAN_SPEED FAN=auxiliary SPEED=0.35", "fan_generic auxiliary", "speed", "0.35")]
     [InlineData("SET_FAN_SPEED FAN=auxiliary SPEED=1.1", "fan_generic auxiliary", "speed", "1")]
     [InlineData("SET_HEATER_TEMPERATURE HEATER=chamber TARGET=50", "heater_generic chamber", "target", "50")]
+    [InlineData("SET_HEATER_TEMPERATURE HEATER=extruder TARGET=200", "extruder", "target", "200")]
+    [InlineData("SET_HEATER_TEMPERATURE HEATER=heater_bed TARGET=60", "heater_bed", "target", "60")]
     [InlineData("SET_TEMPERATURE_FAN_TARGET temperature_fan=chamber_heater target=40", "temperature_fan chamber_heater", "target", "40")]
     [InlineData("SET_FILAMENT_SENSOR SENSOR=runout ENABLE=0", "filament_switch_sensor runout", "enabled", "false")]
     [InlineData("SET_FILAMENT_SENSOR SENSOR=encoder ENABLE=0", "filament_motion_sensor encoder", "enabled", "false")]
@@ -129,6 +131,10 @@ public sealed class KlipperSensorTests : IClassFixture<ReadyPrinterFactory>
     [InlineData("filament_switch_sensor runout", """{"filament_detected":0}""")]
     [InlineData("filament_motion_sensor encoder", """{"enabled":"false"}""")]
     [InlineData("temperature_fan chamber_heater", """{"rpm":-1}""")]
+    [InlineData("temperature_fan chamber_heater", """{"rpm":null}""")]
+    [InlineData("heater_fan hotend", """{"rpm":2100}""")]
+    [InlineData("controller_fan electronics", """{"rpm":2100}""")]
+    [InlineData("fan_generic auxiliary", """{"rpm":2100}""")]
     [InlineData("unknown sensor", """{"temperature":25}""")]
     public async Task UpdateSensor_InvalidReading_RejectsEntireMutation(string name, string fields)
     {
@@ -145,6 +151,8 @@ public sealed class KlipperSensorTests : IClassFixture<ReadyPrinterFactory>
     [InlineData("SET_FAN_SPEED FAN=hotend SPEED=0.5")]
     [InlineData("SET_FAN_SPEED FAN=auxiliary SPEED=-0.1")]
     [InlineData("SET_HEATER_TEMPERATURE HEATER=chamber TARGET=101")]
+    [InlineData("SET_HEATER_TEMPERATURE HEATER=extruder TARGET=NaN")]
+    [InlineData("SET_HEATER_TEMPERATURE HEATER=heater_bed TARGET=-1")]
     [InlineData("SET_TEMPERATURE_FAN_TARGET TEMPERATURE_FAN=chamber_heater TARGET=NaN")]
     [InlineData("SET_FILAMENT_SENSOR SENSOR=runout ENABLE=2")]
     public async Task SendGcode_InvalidSensorCommand_ReturnsExplicitError(string command)

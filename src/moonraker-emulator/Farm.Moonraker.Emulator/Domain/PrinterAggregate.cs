@@ -506,6 +506,29 @@ public sealed class PrinterAggregate
                 // real Moonraker's 503 "Klippy is not connected" behavior.
                 RequireKlippyReady();
 
+                if (trimmed.StartsWith("SET_HEATER_TEMPERATURE ", StringComparison.OrdinalIgnoreCase) &&
+                    TryParseStringParameter(trimmed, "HEATER=", out string heater) && heater is "extruder" or "heater_bed")
+                {
+                    if (!TryParseStringParameter(trimmed, "TARGET=", out string targetText) ||
+                        !double.TryParse(targetText, System.Globalization.NumberStyles.Float,
+                            System.Globalization.CultureInfo.InvariantCulture, out double target) ||
+                        !double.IsFinite(target) || target < 0)
+                    {
+                        throw new GcodeParameterException("Expected a finite, non-negative heater target.");
+                    }
+
+                    if (heater == "extruder")
+                    {
+                        ExtruderTarget = target;
+                    }
+                    else
+                    {
+                        BedTarget = target;
+                    }
+
+                    continue;
+                }
+
                 if (_sensors.TrySendGcode(trimmed))
                 {
                     continue;

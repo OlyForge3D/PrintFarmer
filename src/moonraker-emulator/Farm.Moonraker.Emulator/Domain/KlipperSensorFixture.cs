@@ -56,11 +56,12 @@ internal sealed class KlipperSensorFixture
             {
                 changes[field] = value.GetBoolean();
             }
-            else if (field == "rpm" && value.ValueKind == JsonValueKind.Null)
+            else if (field == "rpm" && current[field] is null && value.ValueKind == JsonValueKind.Null)
             {
                 changes[field] = null;
             }
             else if (field is not ("enabled" or "filament_detected") &&
+                (field != "rpm" || current[field] is not null) &&
                 value.ValueKind == JsonValueKind.Number && value.TryGetDouble(out double number) &&
                 double.IsFinite(number) && IsInRange(objectName, field, number))
             {
