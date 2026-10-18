@@ -506,27 +506,35 @@ public sealed class PrinterAggregate
                 // real Moonraker's 503 "Klippy is not connected" behavior.
                 RequireKlippyReady();
 
-                if (trimmed.StartsWith("SET_HEATER_TEMPERATURE ", StringComparison.OrdinalIgnoreCase) &&
-                    TryParseStringParameter(trimmed, "HEATER=", out string heater) && heater is "extruder" or "heater_bed")
+                if (trimmed.StartsWith("SET_HEATER_TEMPERATURE ", StringComparison.OrdinalIgnoreCase))
                 {
-                    if (!TryParseStringParameter(trimmed, "TARGET=", out string targetText) ||
-                        !double.TryParse(targetText, System.Globalization.NumberStyles.Float,
-                            System.Globalization.CultureInfo.InvariantCulture, out double target) ||
-                        !double.IsFinite(target) || target < 0)
+                    Dictionary<string, string> parameters = KlipperSensorFixture.ParseParameters(trimmed);
+                    if (parameters.Count != 2 || !parameters.TryGetValue("HEATER", out string? heater) ||
+                        !parameters.TryGetValue("TARGET", out string? targetText))
                     {
-                        throw new GcodeParameterException("Expected a finite, non-negative heater target.");
+                        throw new GcodeParameterException("Expected exactly HEATER and TARGET parameters.");
                     }
 
-                    if (heater == "extruder")
+                    if (heater is "extruder" or "heater_bed")
                     {
-                        ExtruderTarget = target;
-                    }
-                    else
-                    {
-                        BedTarget = target;
-                    }
+                        if (!double.TryParse(targetText, System.Globalization.NumberStyles.Float,
+                                System.Globalization.CultureInfo.InvariantCulture, out double target) ||
+                            !double.IsFinite(target) || target < 0)
+                        {
+                            throw new GcodeParameterException("Expected a finite, non-negative heater target.");
+                        }
 
-                    continue;
+                        if (heater == "extruder")
+                        {
+                            ExtruderTarget = target;
+                        }
+                        else
+                        {
+                            BedTarget = target;
+                        }
+
+                        continue;
+                    }
                 }
 
                 if (_sensors.TrySendGcode(trimmed))

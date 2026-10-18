@@ -102,16 +102,7 @@ internal sealed class KlipperSensorFixture
             return false;
         }
 
-        var parameters = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (string token in tokens.Skip(1))
-        {
-            string[] pair = token.Split('=', 2);
-            if (pair.Length != 2 || !parameters.TryAdd(pair[0], pair[1]))
-            {
-                throw new GcodeParameterException("Expected unique NAME=VALUE parameters.");
-            }
-        }
-
+        Dictionary<string, string> parameters = ParseParameters(line);
         if (!parameters.TryGetValue(spec.NameKey, out string? name) ||
             !parameters.TryGetValue(spec.ValueKey, out string? rawValue) || parameters.Count != 2 ||
             !double.TryParse(rawValue, NumberStyles.Float, CultureInfo.InvariantCulture, out double value) ||
@@ -144,6 +135,21 @@ internal sealed class KlipperSensorFixture
 
         status![spec.Field] = spec.Field == "enabled" ? value is 1 : value;
         return true;
+    }
+
+    public static Dictionary<string, string> ParseParameters(string line)
+    {
+        var parameters = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (string token in line.Split(' ', StringSplitOptions.RemoveEmptyEntries).Skip(1))
+        {
+            string[] pair = token.Split('=', 2);
+            if (pair.Length != 2 || !parameters.TryAdd(pair[0], pair[1]))
+            {
+                throw new GcodeParameterException("Expected unique NAME=VALUE parameters.");
+            }
+        }
+
+        return parameters;
     }
 
     private static bool IsInRange(string name, string field, double value) => field switch

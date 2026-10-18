@@ -96,6 +96,7 @@ public sealed class KlipperSensorTests : IClassFixture<ReadyPrinterFactory>
     [InlineData("SET_HEATER_TEMPERATURE HEATER=chamber TARGET=50", "heater_generic chamber", "target", "50")]
     [InlineData("SET_HEATER_TEMPERATURE HEATER=extruder TARGET=200", "extruder", "target", "200")]
     [InlineData("SET_HEATER_TEMPERATURE HEATER=heater_bed TARGET=60", "heater_bed", "target", "60")]
+    [InlineData("SET_HEATER_TEMPERATURE heater=extruder target=195", "extruder", "target", "195")]
     [InlineData("SET_TEMPERATURE_FAN_TARGET temperature_fan=chamber_heater target=40", "temperature_fan chamber_heater", "target", "40")]
     [InlineData("SET_FILAMENT_SENSOR SENSOR=runout ENABLE=0", "filament_switch_sensor runout", "enabled", "false")]
     [InlineData("SET_FILAMENT_SENSOR SENSOR=encoder ENABLE=0", "filament_motion_sensor encoder", "enabled", "false")]
@@ -161,6 +162,29 @@ public sealed class KlipperSensorTests : IClassFixture<ReadyPrinterFactory>
         await ResetAsync(client);
         using HttpResponseMessage response = await client.PostAsync("/printer/gcode/script", TestRequests.Json(JsonSerializer.Serialize(new { script = command })));
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
+    [Theory]
+    [InlineData("NOTHEATER=extruder TARGET=200")]
+    [InlineData("HEATER=extruder BADTARGET=200")]
+    [InlineData("HEATER=heater_bed BADTARGET=60")]
+    [InlineData("NOTHEATER=heater_bed TARGET=60")]
+    [InlineData("HEATER=extruder TARGET=200 target=210")]
+    [InlineData("HEATER=heater_bed heater=extruder TARGET=60")]
+    [InlineData("HEATER=extruder TARGET=200 UNKNOWN=1")]
+    [InlineData("HEATER=heater_bed TARGET=60 UNKNOWN=1")]
+    public async Task SendGcode_MalformedHeaterParameters_RejectsWithoutMutatingAnyHeater(string parameters)
+    {
+        using HttpClient client = factory.CreateClient();
+        await ResetAsync(client);
+        const string query = "/printer/objects/query?extruder&heater_bed&heater_generic%20chamber";
+        string before = await client.GetStringAsync(query);
+        using HttpResponseMessage response = await client.PostAsync(
+            "/printer/gcode/script",
+            TestRequests.Json(JsonSerializer.Serialize(new { script = $"SET_HEATER_TEMPERATURE {parameters}" })));
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await response.Content.ReadAsStringAsync()).Should().Contain("message");
+        (await client.GetStringAsync(query)).Should().Be(before);
     }
 
     [Fact]
