@@ -112,8 +112,10 @@ public sealed class WebhookService : BackgroundService, IWebhookService
         }
 
         var json = JsonSerializer.Serialize(payload, JsonOptions);
-        _queue.Enqueue(new WebhookEvent(eventType, json, DateTime.UtcNow));
+
+        // Count before publishing so the drain loop's decrement can never precede this increment.
         _metrics.QueueDepth.Add(1);
+        _queue.Enqueue(new WebhookEvent(eventType, json, DateTime.UtcNow));
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -165,16 +167,39 @@ public sealed class WebhookService : BackgroundService, IWebhookService
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
-            // Shutdown requested; fall through to the pending-retry report below.
+            // Shutdown requested; fall through to the discard report below.
+        }
+        catch (Exception ex) when (stoppingToken.IsCancellationRequested)
+        {
+            // An in-flight attempt can fail with a non-cancellation error (e.g. a disposed
+            // dependency) while the host is stopping; that is part of a normal stop.
+            _logger.LogInformation(ex, "Webhook delivery interrupted by shutdown");
         }
         finally
         {
-            if (_pendingRetries.Count > 0)
-            {
-                _logger.LogInformation(
-                    "WebhookService stopping with {Count} pending webhook retries; they are not persisted and will not be delivered",
-                    _pendingRetries.Count);
-            }
+            ReportDiscardedOnShutdown();
+        }
+    }
+
+    private void ReportDiscardedOnShutdown()
+    {
+        int queuedEvents = 0;
+        while (_queue.TryDequeue(out _))
+        {
+            queuedEvents++;
+        }
+
+        int pendingRetries = _pendingRetries.Count;
+        _pendingRetries.Clear();
+
+        _metrics.QueueDepth.Add(-queuedEvents);
+        _metrics.PendingRetries.Add(-pendingRetries);
+
+        if (queuedEvents > 0 || pendingRetries > 0)
+        {
+            _logger.LogInformation(
+                "WebhookService stopping: discarding {QueuedEvents} queued webhook events and {PendingRetries} pending webhook retries; they are not persisted and will not be delivered",
+                queuedEvents, pendingRetries);
         }
     }
 

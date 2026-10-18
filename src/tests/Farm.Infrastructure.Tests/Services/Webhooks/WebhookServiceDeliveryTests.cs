@@ -24,6 +24,7 @@ using Farm.Infrastructure.Services.Webhooks;
 using FluentAssertions;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
@@ -49,6 +50,7 @@ public sealed class WebhookServiceDeliveryTests : IAsyncLifetime, IDisposable
     private readonly string _dbPath = Path.Combine(Path.GetTempPath(), $"webhook-tests-{Guid.NewGuid():N}.db");
     private readonly List<RecordedMeasurement> _measurements = new();
     private readonly object _measurementsLock = new();
+    private readonly PoisonDeliveryLogInterceptor _poison = new();
 
     private DbContextOptions<AppDbContext> _dbOptions = null!;
     private ServiceProvider _serviceProvider = null!;
@@ -62,6 +64,7 @@ public sealed class WebhookServiceDeliveryTests : IAsyncLifetime, IDisposable
     {
         _dbOptions = new DbContextOptionsBuilder<AppDbContext>()
             .UseSqlite($"Data Source={_dbPath};Pooling=False;Default Timeout=30")
+            .AddInterceptors(_poison)
             .Options;
 
         await using (var db = new AppDbContext(_dbOptions))
@@ -292,9 +295,12 @@ public sealed class WebhookServiceDeliveryTests : IAsyncLifetime, IDisposable
             : new ResponsePlan(200, TimeSpan.Zero));
         Guid sub = await AddSubscriptionAsync("/order");
 
-        await StartAsync(retryDelay: TimeSpan.FromMilliseconds(500));
-        _sut!.Enqueue("job.started", new { seq = 1 });
+        // Both events are queued before the loop starts and the retry window is wide, so the
+        // second event is always dequeued before the first event's retry becomes due.
+        _sut = CreateSut(retryDelay: TimeSpan.FromSeconds(3));
+        _sut.Enqueue("job.started", new { seq = 1 });
         _sut.Enqueue("job.completed", new { seq = 2 });
+        await _sut.StartAsync(CancellationToken.None);
 
         await WaitUntilAsync(() => Task.FromResult(_receiver.RequestsFor("/order").Count == 3));
 
@@ -313,7 +319,8 @@ public sealed class WebhookServiceDeliveryTests : IAsyncLifetime, IDisposable
         _receiver.Respond("/down", _ => new ResponsePlan(503, TimeSpan.Zero));
         Guid down = await AddSubscriptionAsync("/down", eventTypes: "job.failed,job.completed");
 
-        await StartAsync(retryDelay: TimeSpan.FromSeconds(1));
+        // Wide retry window so the subscription change always lands before the retry is due.
+        await StartAsync(retryDelay: TimeSpan.FromSeconds(3));
         _sut!.Enqueue("job.failed", new { jobId = 9 });
 
         await WaitUntilAsync(async () => (await GetLogsAsync(down)).Count == 1);
@@ -336,6 +343,7 @@ public sealed class WebhookServiceDeliveryTests : IAsyncLifetime, IDisposable
             await db.SaveChangesAsync();
         }
 
+        Sum("webhook.pending_retries").Should().Be(1, "the change must be persisted before the retry runs");
         await WaitUntilAsync(() => Task.FromResult(Measurements("webhook.deliveries_dropped").Count == 1));
 
         Measurements("webhook.deliveries_dropped").Single().Tag(WebhookMetrics.ReasonTag).Should().Be(expectedReason);
@@ -407,6 +415,33 @@ public sealed class WebhookServiceDeliveryTests : IAsyncLifetime, IDisposable
             .Which.Tag(WebhookMetrics.OutcomeTag).Should().Be(WebhookMetrics.OutcomeBlockedDestination);
     }
 
+    [Fact(DisplayName = "An unexpected non-HTTP failure is isolated to its delivery: later subscribers and events still deliver")]
+    public async Task UnexpectedPersistenceFailure_IsIsolatedToOneDelivery()
+    {
+        _receiver.Respond("/poisoned", _ => new ResponsePlan(200, TimeSpan.Zero));
+        _receiver.Respond("/healthy", _ => new ResponsePlan(200, TimeSpan.Zero));
+
+        // Inserted first so the failing delivery is attempted before the healthy one.
+        Guid poisoned = await AddSubscriptionAsync("/poisoned");
+        Guid healthy = await AddSubscriptionAsync("/healthy");
+        _poison.PoisonedSubscriptionId = poisoned;
+
+        await StartAsync(retryDelay: TimeSpan.FromMilliseconds(50));
+        _sut!.Enqueue("job.started", new { jobId = 7 });
+        _sut.Enqueue("job.completed", new { jobId = 7 });
+
+        await WaitUntilAsync(async () => (await GetLogsAsync(healthy)).Count == 2);
+
+        // The throw happens while saving the delivery log, after the HTTP exchange and outside
+        // its handler, so only the per-delivery isolation boundary can contain it.
+        _receiver.RequestsFor("/poisoned").Select(r => r.Headers["X-Webhook-Event"]).Should().Equal("job.started", "job.completed");
+        _receiver.RequestsFor("/healthy").Select(r => r.Headers["X-Webhook-Event"]).Should().Equal("job.started", "job.completed");
+        await WaitUntilAsync(() => Task.FromResult(Sum("webhook.isolated_delivery_failures") == 2));
+        (await GetLogsAsync(poisoned)).Should().BeEmpty();
+        (await GetSubscriptionAsync(healthy)).ConsecutiveFailures.Should().Be(0);
+        _sut.ExecuteTask!.IsCompleted.Should().BeFalse("the drain loop must survive an isolated failure");
+    }
+
     [Fact(DisplayName = "Shutdown cancels an in-flight delivery promptly and does not record it as a failure")]
     public async Task Shutdown_CancelsInFlightDelivery_WithoutCountingFailure()
     {
@@ -416,6 +451,10 @@ public sealed class WebhookServiceDeliveryTests : IAsyncLifetime, IDisposable
         await StartAsync(httpTimeout: TimeSpan.FromSeconds(60));
         _sut!.Enqueue("job.completed", new { jobId = 5 });
         await WaitUntilAsync(() => Task.FromResult(_receiver.RequestsFor("/hang").Count == 1));
+
+        // Queued behind the in-flight delivery; discarded at shutdown.
+        _sut.Enqueue("job.failed", new { jobId = 6 });
+        Sum("webhook.queue_depth").Should().Be(1);
 
         var stopwatch = Stopwatch.StartNew();
         using (var stopCts = new CancellationTokenSource(TimeSpan.FromSeconds(10)))
@@ -433,6 +472,9 @@ public sealed class WebhookServiceDeliveryTests : IAsyncLifetime, IDisposable
         sub.LastDeliveryAt.Should().BeNull();
         Measurements("webhook.attempt_duration_ms").Should().BeEmpty();
         Measurements("webhook.isolated_delivery_failures").Should().BeEmpty();
+        Sum("webhook.queue_depth").Should().Be(0, "discarded queued events are removed from the gauge");
+        Sum("webhook.pending_retries").Should().Be(0);
+        _receiver.RequestsFor("/hang").Should().ContainSingle();
     }
 
     private WebhookService CreateSut(
@@ -718,6 +760,36 @@ public sealed class WebhookServiceDeliveryTests : IAsyncLifetime, IDisposable
     /// Returns real <see cref="HttpClient"/> instances whose TCP connect is redirected to
     /// loopback: URL port 80 reaches the receiver, port 81 reaches a closed port (refused).
     /// </summary>
+    /// <summary>Throws while saving a delivery log for one chosen subscription.</summary>
+    private sealed class PoisonDeliveryLogInterceptor : SaveChangesInterceptor
+    {
+        public Guid? PoisonedSubscriptionId { get; set; }
+
+        public override InterceptionResult<int> SavingChanges(DbContextEventData eventData, InterceptionResult<int> result)
+        {
+            ThrowIfPoisoned(eventData.Context);
+            return base.SavingChanges(eventData, result);
+        }
+
+        public override ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData,
+            InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            ThrowIfPoisoned(eventData.Context);
+            return base.SavingChangesAsync(eventData, result, cancellationToken);
+        }
+
+        private void ThrowIfPoisoned(DbContext? context)
+        {
+            if (PoisonedSubscriptionId is { } id && context is not null &&
+                context.ChangeTracker.Entries<WebhookDeliveryLog>().Any(e => e.Entity.WebhookSubscriptionId == id))
+            {
+                throw new InvalidOperationException("Simulated persistence failure");
+            }
+        }
+    }
+
     private sealed class RedirectingHttpClientFactory : IHttpClientFactory, IDisposable
     {
         private readonly SocketsHttpHandler _handler;

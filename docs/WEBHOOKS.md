@@ -7,8 +7,9 @@ described here was introduced by issue #3344.
 
 ## Delivery Model
 
-- `Enqueue` writes events to a bounded in-memory channel (10,000 events). When
-  the channel is full the event is dropped and counted.
+- `Enqueue` adds events to an in-memory queue with a best-effort cap of 10,000
+  events (the size check is not atomic, so concurrent producers can briefly
+  exceed it). When the cap is reached the event is dropped and counted.
 - A single background drain loop delivers each event to every active subscription
   for that event type. The JSON envelope (`id`, `event`, `timestamp`, `data`)
   is built once per subscription and reused across that subscription's attempts.
@@ -48,7 +49,9 @@ described here was introduced by issue #3344.
   events. Receivers should order by the envelope `timestamp` and de-duplicate by
   envelope `id`, which is stable across retries of the same delivery.
 - **Delivery is at-most-once across restarts.** Queued events and pending retries
-  live only in memory; they are discarded (and logged) on shutdown or restart.
+  live only in memory; on shutdown both are discarded, their counts are logged,
+  and the `queue_depth` / `pending_retries` gauges are reduced accordingly.
+  Events enqueued after shutdown begins are never delivered.
 - Consecutive-failure counting follows completion order, which can differ from
   event order when retries interleave.
 
@@ -59,9 +62,9 @@ OpenTelemetry pipeline registered in `TelemetryStartup`).
 
 | Instrument | Type | Tags | Meaning |
 |---|---|---|---|
-| `webhook.queue_depth` | UpDownCounter | — | Events waiting in the in-memory channel |
+| `webhook.queue_depth` | UpDownCounter | — | Events waiting in the in-memory queue |
 | `webhook.pending_retries` | UpDownCounter | — | Deliveries waiting in the retry buffer |
-| `webhook.queue_age_ms` | Histogram | — | Time an event waited in the channel before processing |
+| `webhook.queue_age_ms` | Histogram | — | Time an event waited in the queue before processing |
 | `webhook.attempt_duration_ms` | Histogram | `outcome`: `success`, `http_error`, `timeout`, `network_error`, `blocked_destination` | Duration of each delivery attempt |
 | `webhook.events_dropped` | Counter | `reason`: `queue_full` | Events rejected by `Enqueue` |
 | `webhook.deliveries_dropped` | Counter | `reason`: `retry_queue_full`, `subscription_removed`, `subscription_inactive`, `event_type_unsubscribed` | Deliveries abandoned before exhausting attempts |
