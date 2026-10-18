@@ -274,7 +274,7 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
 
           {/* Printer image — identifies the hardware at a glance */}
           <div className="mt-3 flex items-end gap-3" data-testid="compact-printer-image">
-            <div className="relative h-24 w-24 shrink-0 overflow-hidden rounded-md border border-white/10 bg-[radial-gradient(circle_at_50%_35%,rgba(255,255,255,0.08),rgba(0,0,0,0.25)_70%)]">
+            <div className="relative h-24 w-24 shrink-0 overflow-hidden rounded-md border border-pf-border bg-pf-bg-2">
               <PrinterImage
                 key={`${printer.manufacturerName ?? ''}|${printer.modelName ?? ''}`}
                 manufacturerName={printer.manufacturerName}
