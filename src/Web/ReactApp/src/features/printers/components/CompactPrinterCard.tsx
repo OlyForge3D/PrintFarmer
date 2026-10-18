@@ -315,9 +315,11 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
             />
           </div>
 
-          {(isPrinting || isPaused) && (printer.estimatedCompletionTimeUtc || printer.printTimeLeftSeconds != null) && (
-            <EstimatedCompletionBadge completionTimeUtc={printer.estimatedCompletionTimeUtc} printTimeLeftSeconds={printer.printTimeLeftSeconds} />
-          )}
+          <EstimatedCompletionBadge
+            completionTimeUtc={isPrinting || isPaused ? printer.estimatedCompletionTimeUtc : undefined}
+            printTimeLeftSeconds={isPrinting || isPaused ? printer.printTimeLeftSeconds : undefined}
+            reserveSpace
+          />
 
           {(isPrinting || isPaused) && (
             <FailureDetectionMonitoringSummary

@@ -111,6 +111,23 @@ describe('EstimatedCompletionBadge', () => {
     expect(container.firstChild).toBeNull();
   });
 
+  it('reserves an invisible, hidden-from-AT row when reserveSpace is set without ETA data', () => {
+    render(<EstimatedCompletionBadge reserveSpace className="mb-3" />);
+
+    const placeholder = screen.getByTestId('estimated-completion-placeholder');
+    expect(placeholder).toHaveClass('invisible', 'mb-3');
+    expect(placeholder).toHaveAttribute('aria-hidden', 'true');
+    expect(screen.queryByText(/done ~/)).not.toBeInTheDocument();
+  });
+
+  it('ignores reserveSpace when ETA data is present', () => {
+    vi.setSystemTime(new Date(2025, 0, 15, 10, 0, 0));
+    render(<EstimatedCompletionBadge printTimeLeftSeconds={7200} reserveSpace />);
+
+    expect(screen.queryByTestId('estimated-completion-placeholder')).not.toBeInTheDocument();
+    expect(screen.getByTestId('badge')).toHaveTextContent('~2h left');
+  });
+
   it('updates on 30-second tick interval', () => {
     vi.setSystemTime(new Date(2025, 0, 15, 10, 0, 0));
 
