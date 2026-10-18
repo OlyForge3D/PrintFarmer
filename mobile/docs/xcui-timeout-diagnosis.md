@@ -17,7 +17,7 @@ the nested first-match printer root and panel selector followed by the Filament
 button lookup.
 
 The Filament helper now resolves its unique containers with `.element`
-instead of nested `.firstMatch` queries, avoiding that lazy first-match traversal.
+instead of nested `.firstMatch` queries to target the observed lazy traversal.
 Coverage summaries and disclosure labels retain first-result selection through
 indexed lookup because those leaf IDs can repeat in the accessibility tree.
 Exact printer-ID scoping and all coverage assertions remain unchanged. The
