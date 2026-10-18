@@ -17,7 +17,7 @@ import { PrinterImage } from '@/common/components/PrinterImage';
 import { FailureDetectionBadge } from '@/features/printers/components/FailureDetectionBadge';
 import { FailureDetectionMonitoringBadge } from '@/features/printers/components/FailureDetectionMonitoringBadge';
 import { FailureDetectionMonitoringSummary } from '@/features/printers/components/FailureDetectionMonitoringSummary';
-import { OfflineTroubleshootingGuide } from '@/features/printers/components/OfflineTroubleshootingGuide';
+import { PrinterTroubleshootingButton } from '@/features/printers/components/PrinterTroubleshootingButton';
 import { PrinterCameraPreview } from '@/features/printers/components/PrinterCameraPreview';
 import { EstimatedCompletionBadge } from '@/features/printers/components/EstimatedCompletionBadge';
 import type { Printer, PrinterBackendCapabilitiesDto, MmuGate } from '@/types/api';
@@ -249,6 +249,7 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
               Update
             </span>
           )}
+          {!isOnline && <PrinterTroubleshootingButton key={printer.id} printer={printer} />}
         </div>
         {/* Tags row */}
         {printerTags.length > 0 && (
@@ -346,17 +347,6 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
               cameraSnapshotStrategy={printer.cameraSnapshotStrategy}
               isPrinting={isPrinting}
               className="mt-2"
-            />
-          )}
-
-          {/* Offline troubleshooting guide */}
-          {!isOnline && (
-            <OfflineTroubleshootingGuide
-              printerBackend={printer.backend}
-              printerIp={printer.ipAddress}
-              serverUrl={printer.serverUrl ?? printer.backendUrl}
-              frontendUrl={printer.frontendUrl}
-              variant="compact"
             />
           )}
 

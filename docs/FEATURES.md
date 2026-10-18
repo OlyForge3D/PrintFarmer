@@ -655,6 +655,13 @@ of permissions can be created by an administrator:
 
 Tools to diagnose and resolve issues.
 
+### Offline Printer Help
+
+Offline printers show a question-mark button in the header of both compact and
+detailed cards. It opens a **Troubleshooting** sidebar with common connectivity
+checks and backend-specific steps, without expanding the card. Close it with
+the close button, Escape, or by clicking outside the sidebar.
+
 ### Connection Test
 
 1. Open the printer's detail page from **Printers**

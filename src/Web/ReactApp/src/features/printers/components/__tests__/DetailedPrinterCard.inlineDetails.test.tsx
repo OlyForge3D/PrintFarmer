@@ -34,6 +34,12 @@ const useQueryMock = vi.hoisted(() => vi.fn());
 const excludePrintJobObjectMock = vi.hoisted(() => vi.fn());
 const getPrinterVersionInfoMock = vi.hoisted(() => vi.fn());
 const setQueryDataMock = vi.hoisted(() => vi.fn());
+const useAutoDispatchStatusMock = vi.hoisted(() => vi.fn(() => ({
+  data: { enabled: false, dispatchStateETag: 'dispatch-etag', printerETag: 'printer-etag' },
+  isLoading: false,
+})));
+const setAutoDispatchEnabledMock = vi.hoisted(() => vi.fn());
+const autoDispatchMutation = vi.hoisted(() => ({ isPending: false }));
 
 vi.mock('@/common/hooks/useApi', () => ({
   usePrinterDetails: usePrinterDetailsMock,
@@ -97,8 +103,18 @@ vi.mock('@tanstack/react-query', () => ({
 }));
 
 vi.mock('@/features/printers/hooks/useAutoDispatch', () => ({
-  useAutoDispatchStatus: () => ({ data: null, isLoading: false }),
-  useSetAutoDispatchEnabled: () => ({ mutateAsync: vi.fn() }),
+  useAutoDispatchStatus: useAutoDispatchStatusMock,
+  useSetAutoDispatchEnabled: () => ({
+    mutateAsync: setAutoDispatchEnabledMock,
+    isPending: autoDispatchMutation.isPending,
+  }),
+}));
+
+vi.mock('@/services/assetService', () => ({
+  assetService: {
+    getCoverImageUrl: (manufacturer: string, model: string) => `/covers/${manufacturer}/${model}.png`,
+    getFallbackImageUrl: () => '/assets/printers/generic-corexy.svg',
+  },
 }));
 
 vi.mock('@/features/printers/hooks/useFailureDetectionAlert', () => ({
@@ -185,6 +201,13 @@ describe('DetailedPrinterCard inline details (#1584)', () => {
   });
 
   beforeEach(() => {
+    useAutoDispatchStatusMock.mockReturnValue({
+      data: { enabled: false, dispatchStateETag: 'dispatch-etag', printerETag: 'printer-etag' },
+      isLoading: false,
+    });
+    setAutoDispatchEnabledMock.mockReset();
+    setAutoDispatchEnabledMock.mockResolvedValue(undefined);
+    autoDispatchMutation.isPending = false;
     usePrinterDetailsMock.mockClear();
     usePrinterDetailsMock.mockReturnValue({ data: undefined, isLoading: false });
     useSpoolmanConfiguredMock.mockReturnValue({ ready: true });
@@ -242,6 +265,71 @@ describe('DetailedPrinterCard inline details (#1584)', () => {
     render(<DetailedPrinterCard printer={makePrinter()} />);
 
     expect(screen.getByTestId('temp-section')).toHaveAttribute('data-show-heading', 'true');
+  });
+
+  it('renders the model cover and identity before progress, with a decorative image', () => {
+    render(<DetailedPrinterCard printer={makePrinter({ manufacturerName: 'Prusa', modelName: 'MK4' })} />);
+
+    const imageRow = screen.getByTestId('detailed-printer-image');
+    const image = imageRow.querySelector('img');
+    expect(image).toHaveAttribute('src', '/covers/Prusa/MK4.png');
+    expect(image).toHaveAttribute('alt', '');
+    expect(screen.getByText('MK4')).toBeInTheDocument();
+    expect(screen.getByText('Prusa')).toBeInTheDocument();
+    expect(imageRow.compareDocumentPosition(screen.getByTestId('print-progress')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('falls back after a cover error and retries when the printer model changes', () => {
+    const { rerender } = render(
+      <DetailedPrinterCard printer={makePrinter({ manufacturerName: 'Prusa', modelName: 'MK4' })} />,
+    );
+    const image = screen.getByTestId('detailed-printer-image').querySelector('img');
+    if (!image) throw new Error('Printer image not rendered');
+    fireEvent.error(image);
+    expect(image).toHaveAttribute('src', '/assets/printers/generic-corexy.svg');
+
+    rerender(<DetailedPrinterCard printer={makePrinter({ manufacturerName: 'Bambu Lab', modelName: 'P1S' })} />);
+    expect(screen.getByTestId('detailed-printer-image').querySelector('img'))
+      .toHaveAttribute('src', '/covers/Bambu Lab/P1S.png');
+  });
+
+  it('uses the generic printer image without a linked model', () => {
+    render(<DetailedPrinterCard printer={makePrinter()} />);
+    expect(screen.getByTestId('detailed-printer-image').querySelector('img'))
+      .toHaveAttribute('src', '/assets/printers/generic-corexy.svg');
+  });
+
+  it.each([true, false])('matches the compact auto-dispatch visual and toggle contract when enabled=%s', async (enabled) => {
+    useAutoDispatchStatusMock.mockReturnValue({
+      data: { enabled, dispatchStateETag: 'dispatch-etag', printerETag: 'printer-etag' },
+      isLoading: false,
+    });
+    render(<DetailedPrinterCard printer={makePrinter()} />);
+
+    const button = screen.getByRole('button', { name: 'Toggle auto-dispatch for Printer 1' });
+    expect(button).toHaveAttribute('aria-pressed', String(enabled));
+    expect(button).toHaveAttribute('title', enabled ? 'Auto-dispatch enabled' : 'Auto-dispatch disabled');
+    expect(button).not.toHaveClass('bg-pf-accent-bg');
+    expect(button).toHaveClass(enabled ? 'text-pf-accent' : 'text-pf-text-secondary');
+    expect(button.querySelector('svg')).toHaveAttribute('fill', enabled ? 'currentColor' : 'none');
+
+    fireEvent.click(button);
+    await waitFor(() => expect(setAutoDispatchEnabledMock).toHaveBeenCalledWith({
+      printerId: 'printer-1',
+      enabled: !enabled,
+      dispatchStateETag: 'dispatch-etag',
+      printerETag: 'printer-etag',
+    }));
+  });
+
+  it('disables auto-dispatch while a change is pending', () => {
+    autoDispatchMutation.isPending = true;
+    render(<DetailedPrinterCard printer={makePrinter()} />);
+
+    const button = screen.getByRole('button', { name: 'Toggle auto-dispatch for Printer 1' });
+    expect(button).toBeDisabled();
+    fireEvent.click(button);
+    expect(setAutoDispatchEnabledMock).not.toHaveBeenCalled();
   });
 
   it('does not render an Open details sidebar action', () => {
