@@ -10,6 +10,8 @@ public sealed record MmuModeRequest(string Mode);
 
 public sealed record TimeAdvanceRequest(double Seconds);
 
+public sealed record SensorUpdateRequest(string ObjectName, Dictionary<string, JsonElement> Fields);
+
 public sealed record FaultRuleRequest(
     string? PrinterId,
     string Target,
@@ -109,6 +111,33 @@ public static class ControlApiEndpoints
                 cancellationToken));
 
         group.MapGet("/printer/mmu", (PrinterRegistry registry) => Results.Ok(MmuSummary(registry.Printer.Mmu)));
+
+        group.MapPost("/printer/sensor", async (
+            SensorUpdateRequest request,
+            PrinterRegistry registry,
+            VirtualTimeCoordinator coordinator,
+            CancellationToken cancellationToken) =>
+            await coordinator.ExecuteExclusiveAsync(
+                async () =>
+                {
+                    if (string.IsNullOrWhiteSpace(request.ObjectName) || request.Fields is null)
+                    {
+                        return Results.BadRequest(new { message = "Expected objectName and fields." });
+                    }
+
+                    try
+                    {
+                        registry.Printer.UpdateSensor(request.ObjectName, request.Fields);
+                    }
+                    catch (GcodeParameterException exception)
+                    {
+                        return Results.BadRequest(new { message = exception.Message });
+                    }
+
+                    await BroadcastService.NotifyStatusUpdateAsync(registry.Printer);
+                    return Results.Ok();
+                },
+                cancellationToken));
 
         group.MapPost("/printer/mmu", async (MmuModeRequest request, PrinterRegistry registry) =>
         {

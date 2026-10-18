@@ -41,6 +41,7 @@ public sealed class UnsupportedApiTests : IClassFixture<DefaultDisabledControlAp
     [InlineData("GET", "/machine/device_power/devices")]
     [InlineData("GET", "/machine/device_power/device?device=printer")]
     [InlineData("POST", "/machine/device_power/device")]
+    [InlineData("POST", "/__emulator/printer/sensor")]
     public async Task UnsupportedCapability_Returns404NotSilentSuccess(string method, string path)
     {
         using HttpClient client = _factory.CreateClient();

@@ -112,6 +112,7 @@ public sealed class WsSubscription
 public sealed class PrinterAggregate
 {
     private readonly object _stateLock = new();
+    private readonly KlipperSensorFixture _sensors = new();
 
     public required string Id { get; init; }
 
@@ -200,6 +201,7 @@ public sealed class PrinterAggregate
             BedTarget = 0;
             ExtruderTemperature = 23.4;
             BedTemperature = 22.1;
+            _sensors.Reset();
             Position = [120.0, 120.0, 5.0, 0.0];
             HomedAxes = "xyz";
             AbsoluteCoordinates = true;
@@ -504,6 +506,11 @@ public sealed class PrinterAggregate
                 // real Moonraker's 503 "Klippy is not connected" behavior.
                 RequireKlippyReady();
 
+                if (_sensors.TrySendGcode(trimmed))
+                {
+                    continue;
+                }
+
                 if (trimmed.StartsWith("EXCLUDE_OBJECT", StringComparison.OrdinalIgnoreCase))
                 {
                     ApplyExcludeObjectLocked(trimmed);
@@ -650,6 +657,7 @@ public sealed class PrinterAggregate
 
     private void ApplyFirmwareRestartLocked()
     {
+        _sensors.Reset();
         KlippyState = "ready";
         KlippyStateMessage = "Printer is ready and A okay!";
         PrintState = "standby";
@@ -981,6 +989,15 @@ public sealed class PrinterAggregate
         return space > 0 ? rest[..space] : rest;
     }
 
+    /// <summary>Injects physical sensor readings atomically through the opt-in test-control API.</summary>
+    public void UpdateSensor(string objectName, IReadOnlyDictionary<string, JsonElement> fields)
+    {
+        lock (_stateLock)
+        {
+            _sensors.Update(objectName, fields);
+        }
+    }
+
     /// <summary>Builds the full current Klipper object snapshot as plain, JSON-serializable dictionaries.</summary>
     public Dictionary<string, object> BuildObjectsSnapshot()
     {
@@ -1175,6 +1192,7 @@ public sealed class PrinterAggregate
                 };
             }
 
+            _sensors.AddTo(objects);
             return objects;
         }
     }
