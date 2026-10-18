@@ -1,6 +1,7 @@
 ﻿using System.Net;
 using System.Net.Sockets;
 using Farm.Infrastructure.Network;
+using Microsoft.AspNetCore.Cors.Infrastructure;
 
 namespace Farm.Web.Api.Startup;
 
@@ -27,20 +28,30 @@ public static class CorsStartup
                 string[] configuredOrigins = allowedOrigins.Split(',', StringSplitOptions.RemoveEmptyEntries)
                     .Select(o => o.Trim()).ToArray();
 
-                // This policy is paired with AllowCredentials(), so the origin predicate must
-                // never reflect an unrestricted set of origins (equivalent to AllowAnyOrigin()).
-                // ALLOW_LOCAL_NETWORK only widens acceptance to origins that actually resolve to
-                // a private/loopback network address — it does not accept arbitrary origins.
-                _ = policy.SetIsOriginAllowed(origin => IsOriginAllowed(origin, configuredOrigins, allowLocalNetwork));
-                _ = policy.AllowCredentials();
-                _ = policy.WithHeaders("Content-Type", "Authorization", "x-correlation-id", "traceparent", "x-signalr-user-agent", "x-requested-with",
-                    "Idempotency-Key", "If-Match");
-                _ = policy.WithExposedHeaders("ETag", "Location");
-                _ = policy.WithMethods("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS");
+                ConfigureDefaultPolicy(policy, configuredOrigins, allowLocalNetwork);
             });
         });
 
         return services;
+    }
+
+    /// <summary>
+    /// Applies the Default policy rules for the given origin configuration. Split from
+    /// <see cref="AddPrintFarmerCors"/> so tests can evaluate the policy without depending on
+    /// process-wide environment variables.
+    /// </summary>
+    internal static void ConfigureDefaultPolicy(CorsPolicyBuilder policy, string[] configuredOrigins, bool allowLocalNetwork)
+    {
+        // This policy is paired with AllowCredentials(), so the origin predicate must
+        // never reflect an unrestricted set of origins (equivalent to AllowAnyOrigin()).
+        // ALLOW_LOCAL_NETWORK only widens acceptance to origins that actually resolve to
+        // a private/loopback network address — it does not accept arbitrary origins.
+        _ = policy.SetIsOriginAllowed(origin => IsOriginAllowed(origin, configuredOrigins, allowLocalNetwork));
+        _ = policy.AllowCredentials();
+        _ = policy.WithHeaders("Content-Type", "Authorization", "x-correlation-id", "traceparent", "x-signalr-user-agent", "x-requested-with",
+            "Idempotency-Key", "If-Match");
+        _ = policy.WithExposedHeaders("ETag", "Location", "X-Has-More");
+        _ = policy.WithMethods("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS");
     }
 
     /// <summary>
