@@ -14,6 +14,8 @@ The Queue view model refreshes active printers concurrently every 15 seconds
 while the screen is foregrounded, cancelling polling when it leaves the screen
 or the app becomes inactive. Queue loading remains available if recent-failure
 history cannot load. Partial queue counts respect server pagination metadata.
+Active jobs with an assigned printer but a missing or whitespace-only printer
+name display "Assigned to printer"; nonempty printer names remain unchanged.
 Visual-acceptance fixture images are included only in Debug builds.
 
 ## Tech Stack

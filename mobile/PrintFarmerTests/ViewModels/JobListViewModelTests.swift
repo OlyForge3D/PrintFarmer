@@ -476,6 +476,69 @@ final class JobListViewModelTests: XCTestCase {
         XCTAssertEqual(printerService.statusRequestedIDs, [id])
     }
 
+    func testActiveJobBlankPrinterNameUsesAssignedFallback() throws {
+        for nameJSON in [#""""#, #""   ""#, #"" \t\r\n ""#, "null"] {
+            let item = try TestData.decodeQueuedPrintJobResponse(
+                from: TestJSON.queuedPrintJobResponsePrinting.replacingOccurrences(
+                    of: #""printerName": "Prusa MK4""#,
+                    with: #""printerName": \#(nameJSON)"#
+                )
+            )
+
+            XCTAssertEqual(JobListView.activeJobPrinterName(item), "Assigned to printer", nameJSON)
+        }
+    }
+
+    func testActiveJobNonemptyPrinterNameIsPreserved() throws {
+        for name in ["Prusa MK4", "  Prusa MK4  "] {
+            let item = try TestData.decodeQueuedPrintJobResponse(
+                from: TestJSON.queuedPrintJobResponsePrinting.replacingOccurrences(
+                    of: #""printerName": "Prusa MK4""#,
+                    with: #""printerName": "\#(name)""#
+                )
+            )
+
+            XCTAssertEqual(JobListView.activeJobPrinterName(item), name)
+        }
+    }
+
+    func testActiveJobWithoutPrinterAssignmentOmitsBlankName() throws {
+        for nameJSON in [#""""#, #"" \t\n ""#, "null"] {
+            let item = try TestData.decodeQueuedPrintJobResponse(
+                from: TestJSON.queuedPrintJobResponsePrinting
+                    .replacingOccurrences(
+                        of: #""assignedPrinterId": "550e8400-e29b-41d4-a716-446655440000""#,
+                        with: #""assignedPrinterId": null"#
+                    )
+                    .replacingOccurrences(
+                        of: #""printerName": "Prusa MK4""#,
+                        with: #""printerName": \#(nameJSON)"#
+                    )
+            )
+
+            XCTAssertNil(JobListView.activeJobPrinterName(item), nameJSON)
+        }
+    }
+
+    func testActiveJobPrinterMetadataWithoutAssignmentIDUsesFallback() throws {
+        let item = try TestData.decodeQueuedPrintJobResponse(
+            from: TestJSON.queuedPrintJobResponseQueued.replacingOccurrences(
+                of: "\"assignedPrinter\": null",
+                with: """
+                "assignedPrinter": {
+                    "id": "\(UUID().uuidString)",
+                    "name": "   ",
+                    "modelName": "MK4",
+                    "status": "Printing",
+                    "isOnline": true
+                }
+                """
+            )
+        )
+
+        XCTAssertEqual(JobListView.activeJobPrinterName(item), "Assigned to printer")
+    }
+
     func testAssignedPrinterWhitespaceNameDoesNotRenderUnassigned() throws {
         let item = try TestData.decodeQueuedPrintJobResponse(
             from: TestJSON.queuedPrintJobResponseQueued.replacingOccurrences(

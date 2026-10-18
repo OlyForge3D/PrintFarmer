@@ -428,7 +428,7 @@ struct JobListView: View {
         let printerID = item.job.assignedPrinterId.flatMap(UUID.init(uuidString:))
         let status = printerID.flatMap { viewModel.activePrinterStatuses[$0] }
         VStack(alignment: .leading, spacing: 4) {
-            if let printerName = item.job.printerName {
+            if let printerName = Self.activeJobPrinterName(item) {
                 Label(printerName, systemImage: "printer")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -480,6 +480,15 @@ struct JobListView: View {
                     .foregroundStyle(Color.pfTextSecondary)
             }
         }
+    }
+
+    static func activeJobPrinterName(_ item: QueuedPrintJobResponse) -> String? {
+        if let name = item.job.printerName,
+           !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return name
+        }
+        return item.job.assignedPrinterId != nil || item.assignedPrinter != nil
+            ? "Assigned to printer" : nil
     }
 
     private func activeJobETA(_ status: PrinterStatusDetail) -> some View {
