@@ -49,13 +49,19 @@ public class CorsStartupTests
         Assert.Contains(JobQueueAnalyticsController.HasMoreHeader, policy.ExposedHeaders, StringComparer.OrdinalIgnoreCase);
         Assert.DoesNotContain("*", policy.ExposedHeaders);
         Assert.Equal(new[] { "ETag", "Location", "X-Has-More" }, policy.ExposedHeaders.Order(StringComparer.Ordinal));
+
+        // The registered Default policy and the isolated builder used below must share one rule set.
+        CorsPolicy isolated = BuildIsolatedPolicy();
+        Assert.Equal(policy.ExposedHeaders, isolated.ExposedHeaders);
+        Assert.Equal(policy.Headers, isolated.Headers);
+        Assert.Equal(policy.Methods, isolated.Methods);
+        Assert.Equal(policy.SupportsCredentials, isolated.SupportsCredentials);
     }
 
     [Fact]
-    public async Task AllowedOriginActualResponse_ExposesPaginationHeaderWithCredentials()
+    public void AllowedOriginActualResponse_ExposesPaginationHeaderWithCredentials()
     {
-        CorsPolicy policy = await GetDefaultPolicyAsync();
-        HttpResponse response = EvaluateActualRequest(policy, "http://localhost:3000");
+        HttpResponse response = EvaluateActualRequest(BuildIsolatedPolicy(), "http://localhost:3000");
 
         Assert.Equal("http://localhost:3000", response.Headers.AccessControlAllowOrigin.ToString());
         Assert.Equal("true", response.Headers.AccessControlAllowCredentials.ToString());
@@ -67,10 +73,9 @@ public class CorsStartupTests
     }
 
     [Fact]
-    public async Task DisallowedOriginActualResponse_ReceivesNoCorsHeaders()
+    public void DisallowedOriginActualResponse_ReceivesNoCorsHeaders()
     {
-        CorsPolicy policy = await GetDefaultPolicyAsync();
-        HttpResponse response = EvaluateActualRequest(policy, "https://attacker.example");
+        HttpResponse response = EvaluateActualRequest(BuildIsolatedPolicy(), "https://attacker.example");
 
         Assert.False(response.Headers.ContainsKey(HeaderNames.AccessControlAllowOrigin));
         Assert.False(response.Headers.ContainsKey(HeaderNames.AccessControlAllowCredentials));
@@ -83,6 +88,15 @@ public class CorsStartupTests
         services.AddPrintFarmerCors();
         await using ServiceProvider provider = services.BuildServiceProvider();
         return Assert.IsType<CorsPolicy>(provider.GetRequiredService<IOptions<CorsOptions>>().Value.GetPolicy("Default"));
+    }
+
+    // Uses fixed origin configuration so ambient ALLOWED_ORIGINS / CORS__AllowedOrigins /
+    // ALLOW_LOCAL_NETWORK values in a developer or CI environment cannot change the outcome.
+    private static CorsPolicy BuildIsolatedPolicy()
+    {
+        var builder = new CorsPolicyBuilder();
+        CorsStartup.ConfigureDefaultPolicy(builder, ConfiguredOrigins, allowLocalNetwork: false);
+        return builder.Build();
     }
 
     private static HttpResponse EvaluateActualRequest(CorsPolicy policy, string origin)
