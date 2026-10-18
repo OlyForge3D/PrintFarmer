@@ -658,12 +658,16 @@ enum TestData {
         try decoder.decode(UserDTO.self, from: json.data(using: .utf8)!)
     }
 
-    static func httpResponse(url: URL? = nil, statusCode: Int = 200) -> HTTPURLResponse {
+    static func httpResponse(
+        url: URL? = nil,
+        statusCode: Int = 200,
+        headers: [String: String] = [:]
+    ) -> HTTPURLResponse {
         HTTPURLResponse(
             url: url ?? testBaseURL,
             statusCode: statusCode,
             httpVersion: "HTTP/1.1",
-            headerFields: ["Content-Type": "application/json"]
+            headerFields: ["Content-Type": "application/json"].merging(headers) { _, new in new }
         )!
     }
 }

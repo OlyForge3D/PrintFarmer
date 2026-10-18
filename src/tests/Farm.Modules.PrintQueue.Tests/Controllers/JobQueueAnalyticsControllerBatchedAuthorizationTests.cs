@@ -72,6 +72,49 @@ public class JobQueueAnalyticsControllerBatchedAuthorizationTests
         GcodeFile = new QueueGcodeFileMetaDto(),
     };
 
+    [Theory]
+    [InlineData(false, false, 0, 0, false)]
+    [InlineData(false, false, 1, 1, false)]
+    [InlineData(false, false, 200, 200, true)]
+    [InlineData(true, true, 1, 1, false)]
+    [InlineData(true, true, 200, 200, true)]
+    [InlineData(true, false, 1, 1, false)]
+    [InlineData(true, false, 200, 1, true)]
+    [InlineData(true, false, 200, 0, true)]
+    public async Task GetAllQueueAsync_PaginationBeforeAuthorization_ReportsUnfilteredPageFullness(
+        bool useAuthorization, bool isFarmAdmin, int sourceCount, int visibleCount, bool expectedHasMore)
+    {
+        const int limit = 200;
+        List<QueuedPrintJobWithFileMetaDto> jobs = Enumerable.Range(0, sourceCount)
+            .Select(_ => MakeJob(Guid.NewGuid()))
+            .ToList();
+        _printJobManagementServiceMock
+            .Setup(s => s.GetAllQueuedJobsAsync(
+                null, null, null, null, null, "priority", limit, 0, null, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(jobs);
+        var authorization = new Mock<IQueueResourceAuthorizationService>(MockBehavior.Strict);
+        if (useAuthorization && !isFarmAdmin)
+        {
+            authorization
+                .Setup(r => r.FilterActorAccessibleJobIdsAsync(
+                    It.IsAny<string>(), It.IsAny<IReadOnlyCollection<Guid>>(),
+                    PrinterGroupAccessLevel.View, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(jobs.Take(visibleCount).Select(job => Guid.Parse(job.Job.Id)).ToHashSet());
+        }
+
+        JobQueueAnalyticsController controller = CreateController(
+            useAuthorization ? authorization.Object : null,
+            CreatePrincipal(Guid.NewGuid(), isFarmAdmin));
+
+        IActionResult result = await controller.GetAllQueueAsync(null, null, null, limit: limit);
+
+        OkObjectResult ok = Assert.IsType<OkObjectResult>(result);
+        var returned = Assert.IsAssignableFrom<IEnumerable<QueuedPrintJobWithFileMetaDto>>(ok.Value).ToList();
+        Assert.Equal(visibleCount, returned.Count);
+        Assert.Equal(expectedHasMore ? "true" : "false",
+            controller.Response.Headers[JobQueueAnalyticsController.HasMoreHeader].ToString());
+    }
+
     [Fact]
     public async Task GetAllQueueAsync_FarmAdmin_ReturnsAllJobsWithoutAnyAuthorizationQueries()
     {

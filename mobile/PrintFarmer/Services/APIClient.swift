@@ -408,6 +408,11 @@ struct AuthenticatedIdentity: Sendable, Equatable {
 struct HTTPDecodedResponse<Value: Sendable>: Sendable {
     let statusCode: Int
     let value: Value
+    var headers: [String: String] = [:]
+
+    func header(_ name: String) -> String? {
+        headers.first { $0.key.caseInsensitiveCompare(name) == .orderedSame }?.value
+    }
 }
 
 actor APIClient {
@@ -971,6 +976,33 @@ actor APIClient {
             print("⚠️ [APIClient] Decode failed for \(T.self) at \(request.url?.path ?? "?"): \(error)")
             print("⚠️ [APIClient] Response body preview: \(preview)")
             #endif
+            throw NetworkError.decodingFailed(
+                ResponseDecodingFailure(error: error, targetType: T.self)
+            )
+        }
+    }
+
+    func getWithHeaders<T: Decodable & Sendable>(_ path: String) async throws -> HTTPDecodedResponse<T> {
+        let requestSession = captureRequestSession()
+        try await checkTokenExpiry(session: requestSession)
+        let request = try buildRequest(session: requestSession, path: path, method: "GET")
+        let (data, response) = try await performRequest(request)
+        try validateResponseGeneration(session: requestSession)
+        try validateResponse(response, data: data, authSessionToken: requestSession.authSessionToken)
+        guard let http = response as? HTTPURLResponse else {
+            throw NetworkError.invalidResponse
+        }
+        var headers: [String: String] = [:]
+        for (key, value) in http.allHeaderFields {
+            if let key = key as? String, let value = value as? String { headers[key] = value }
+        }
+        do {
+            return HTTPDecodedResponse(
+                statusCode: http.statusCode,
+                value: try decoder.decode(T.self, from: data),
+                headers: headers
+            )
+        } catch {
             throw NetworkError.decodingFailed(
                 ResponseDecodingFailure(error: error, targetType: T.self)
             )

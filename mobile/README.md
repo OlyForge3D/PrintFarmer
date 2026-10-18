@@ -10,6 +10,12 @@ include printer status monitoring, filament/spool management, job queue viewing,
 same-printer and same-priority queue reordering for users with `Queue.Write`,
 server switching, and real-time updates via SignalR.
 
+The Queue view model refreshes active printers concurrently every 15 seconds
+while the screen is foregrounded, cancelling polling when it leaves the screen
+or the app becomes inactive. Queue loading remains available if recent-failure
+history cannot load. Partial queue counts respect server pagination metadata.
+Visual-acceptance fixture images are included only in Debug builds.
+
 ## Tech Stack
 
 - **Language:** Swift

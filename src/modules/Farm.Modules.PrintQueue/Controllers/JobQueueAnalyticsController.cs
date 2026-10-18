@@ -41,6 +41,9 @@ public class JobQueueAnalyticsController(
     private readonly IJobCostCalculationService _jobCostCalculationService = jobCostCalculationService ?? throw new ArgumentNullException(nameof(jobCostCalculationService));
     private readonly ILogger<JobQueueAnalyticsController> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
+    /// <summary>Signals that another unfiltered queue page may exist.</summary>
+    public const string HasMoreHeader = "X-Has-More";
+
     /// <summary>
     /// Get all queued and printing jobs with file metadata
     /// </summary>
@@ -88,6 +91,9 @@ public class JobQueueAnalyticsController(
 
             List<QueuedPrintJobWithFileMetaDto> jobs = await _printJobManagementService.GetAllQueuedJobsAsync(
                 filterStatus, filterModel, filterMaterial, deadlineStart, deadlineEnd, sortBy, limit, offset, queuedFrom, queuedTo, cancellationToken);
+
+            // Authorization can shorten a full page; retain its pagination signal.
+            Response.Headers[HasMoreHeader] = jobs.Count >= limit ? "true" : "false";
 
             if (resourceAuthorization is null)
             {

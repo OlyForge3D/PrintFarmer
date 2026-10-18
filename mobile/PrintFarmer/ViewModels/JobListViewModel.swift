@@ -26,9 +26,12 @@ final class JobListViewModel {
     private(set) var isReorderingQueue = false
     private(set) var rerunningFailedJobIDs: Set<UUID> = []
     private(set) var jobListMayHaveMore = false
+    private(set) var activePrinterStatuses: [UUID: PrinterStatusDetail] = [:]
+    private(set) var unavailableActivePrinterStatuses: Set<UUID> = []
 
     private var jobService: (any JobServiceProtocol)?
     private var jobAnalyticsService: (any JobAnalyticsServiceProtocol)?
+    private var printerService: (any PrinterServiceProtocol)?
     @ObservationIgnored private var queueUpdateSubscription: SignalRSubscription?
     @ObservationIgnored private var connectionStateSubscription: SignalRSubscription?
     @ObservationIgnored private var signalRServiceIdentity: ObjectIdentifier?
@@ -37,6 +40,7 @@ final class JobListViewModel {
     @ObservationIgnored private var queueStateEpoch: UInt64 = 0
     @ObservationIgnored private var loadGeneration: UInt64 = 0
     @ObservationIgnored private var activeLoadCount = 0
+    @ObservationIgnored private var statusPollGeneration: UInt64 = 0
 
     func configure(jobService: any JobServiceProtocol) {
         self.jobService = jobService
@@ -44,6 +48,81 @@ final class JobListViewModel {
 
     func configure(jobAnalyticsService: any JobAnalyticsServiceProtocol) {
         self.jobAnalyticsService = jobAnalyticsService
+    }
+
+    func configure(printerService: any PrinterServiceProtocol) {
+        self.printerService = printerService
+    }
+
+    var activePrinterIDs: [UUID] {
+        Array(Set(activeJobs.compactMap { item in
+            item.job.assignedPrinterId.flatMap(UUID.init(uuidString:))
+        })).sorted { $0.uuidString < $1.uuidString }
+    }
+
+    /// Polls live status for the printers running active jobs until cancelled.
+    /// Statuses are fetched concurrently so one slow printer cannot delay the rest.
+    func pollActivePrinterStatuses(
+        printerIDs: [UUID],
+        isForeground: Bool = true,
+        interval: Duration = .seconds(15),
+        isCurrent: @escaping @MainActor @Sendable () -> Bool = { true }
+    ) async {
+        guard !Task.isCancelled, isCurrent() else { return }
+        statusPollGeneration &+= 1
+        let generation = statusPollGeneration
+        guard isForeground, isViewActive else { return }
+        guard !printerIDs.isEmpty else {
+            activePrinterStatuses = [:]
+            unavailableActivePrinterStatuses = []
+            return
+        }
+        guard let printerService else { return }
+
+        activePrinterStatuses = [:]
+        unavailableActivePrinterStatuses = []
+        await withTaskGroup(of: Void.self) { group in
+            for id in Set(printerIDs) {
+                group.addTask {
+                    await self.pollPrinterStatus(
+                        id: id, using: printerService, generation: generation,
+                        interval: interval, isCurrent: isCurrent
+                    )
+                }
+            }
+        }
+    }
+
+    private func pollPrinterStatus(
+        id: UUID,
+        using service: any PrinterServiceProtocol,
+        generation: UInt64,
+        interval: Duration,
+        isCurrent: @MainActor @Sendable () -> Bool
+    ) async {
+        while !Task.isCancelled, isViewActive, isCurrent(),
+              generation == statusPollGeneration {
+            let status: PrinterStatusDetail?
+            do {
+                status = try await service.getStatus(id: id)
+            } catch {
+                status = nil
+            }
+            guard !Task.isCancelled, isViewActive, isCurrent(),
+                  generation == statusPollGeneration else { return }
+            if let status {
+                activePrinterStatuses[id] = status
+                unavailableActivePrinterStatuses.remove(id)
+            } else {
+                activePrinterStatuses.removeValue(forKey: id)
+                unavailableActivePrinterStatuses.insert(id)
+            }
+            do {
+                try await Task.sleep(for: interval)
+            } catch {
+                return
+            }
+        }
     }
 
     var canReorderQueue: Bool {
@@ -142,6 +221,7 @@ final class JobListViewModel {
     func deactivate() {
         guard isViewActive else { return }
         isViewActive = false
+        statusPollGeneration &+= 1
         queueStateEpoch &+= 1
         loadGeneration &+= 1
         tearDownSignalR()
@@ -166,10 +246,6 @@ final class JobListViewModel {
     @discardableResult
     private func refreshQueue() async -> Bool {
         guard let jobService, isViewActive else { return false }
-        guard let jobAnalyticsService else {
-            recentFailuresError = "Recent failures are unavailable."
-            return false
-        }
         loadGeneration &+= 1
         let requestGeneration = loadGeneration
         let stateEpoch = queueStateEpoch
@@ -182,14 +258,7 @@ final class JobListViewModel {
         errorMessage = nil
 
         async let queueRequest = jobService.listAllJobs()
-        async let historyRequest = jobAnalyticsService.getHistory(
-            limit: 5,
-            offset: 0,
-            sortBy: "newest",
-            statuses: "failed",
-            dateStart: nil,
-            dateEnd: nil
-        )
+        async let historyRequest = Self.loadRecentFailures(using: jobAnalyticsService)
 
         let queueResult: Result<QueuedPrintJobPage, Error>
         do {
@@ -198,12 +267,7 @@ final class JobListViewModel {
             queueResult = .failure(error)
         }
 
-        let historyResult: Result<QueueHistoryPage, Error>
-        do {
-            historyResult = .success(try await historyRequest)
-        } catch {
-            historyResult = .failure(error)
-        }
+        let historyResult = await historyRequest
 
         guard isViewActive,
               requestGeneration == loadGeneration,
@@ -236,6 +300,26 @@ final class JobListViewModel {
         }
 
         return queueLoaded
+    }
+
+    private static func loadRecentFailures(
+        using service: (any JobAnalyticsServiceProtocol)?
+    ) async -> Result<QueueHistoryPage, Error> {
+        guard let service else {
+            return .failure(RecentFailuresUnavailableError())
+        }
+        do {
+            return .success(try await service.getHistory(
+                limit: 5,
+                offset: 0,
+                sortBy: "newest",
+                statuses: "failed",
+                dateStart: nil,
+                dateEnd: nil
+            ))
+        } catch {
+            return .failure(error)
+        }
     }
 
     private func handleQueueInvalidation() async {
@@ -728,4 +812,8 @@ private extension NetworkError {
             return false
         }
     }
+}
+
+private struct RecentFailuresUnavailableError: LocalizedError {
+    var errorDescription: String? { "Recent failures are unavailable." }
 }
