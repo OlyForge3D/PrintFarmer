@@ -52,6 +52,9 @@ public sealed class OctoPrintWebSocketAdapter(
     /// </summary>
     private PrinterStatusUpdate? _lastBroadcastUpdate;
 
+    /// <summary>Latest complete sensor snapshot, reused for frames that carry no temperature sample.</summary>
+    private IReadOnlyList<PrinterSensorDto>? _lastSensors;
+
     // API state tracking
     private string _apiState = "unset"; // "responding", "authFail", "noResponse"
     private string _socketState = "unopened"; // "unopened", "connecting", "authenticated", "error", "closed"
@@ -260,6 +263,12 @@ public sealed class OctoPrintWebSocketAdapter(
                 SpoolInfo: null,
                 PrintTimeLeftSeconds: status.PrintTimeLeftSeconds);
 
+            IReadOnlyList<PrinterSensorDto>? sensors = ResolveSensors(status);
+            if (sensors is not null)
+            {
+                cacheUpdate = cacheUpdate with { Sensors = sensors };
+            }
+
             // Update cache before broadcasting to clients
             _statusCacheWriter.UpdateStatus(cacheUpdate, originWatermark);
 
@@ -282,6 +291,10 @@ public sealed class OctoPrintWebSocketAdapter(
                 HomedAxes: null,
                 SpoolInfo: null,
                 FileName: PrinterStatusDto.ExtractFileName(status.JobName));
+            if (sensors is not null)
+            {
+                signalRUpdate = signalRUpdate with { Sensors = sensors };
+            }
 
             if (PrinterStatusBroadcastGate.ShouldBroadcast(_lastBroadcastUpdate, signalRUpdate))
             {
@@ -304,6 +317,38 @@ public sealed class OctoPrintWebSocketAdapter(
         {
             _logger.LogError(ex, "OctoPrint WebSocket {PrinterId}: Failed to broadcast status", _printerId);
         }
+    }
+
+    /// <summary>
+    /// Returns the complete sensor snapshot to publish for <paramref name="status"/>: the new
+    /// sample when present, otherwise the last known snapshot (marked unavailable when offline).
+    /// </summary>
+    internal IReadOnlyList<PrinterSensorDto>? ResolveSensors(OctoPrintStatusData status)
+    {
+        if (!status.IsOnline)
+        {
+            if (status.Sensors is not null)
+            {
+                _lastSensors = status.Sensors;
+            }
+
+            return MarkSensorsUnavailable();
+        }
+
+        if (status.Sensors is not null)
+        {
+            _lastSensors = status.Sensors;
+            return status.Sensors;
+        }
+
+        return _lastSensors;
+    }
+
+    /// <summary>Marks the last known sensor snapshot unavailable (printer unreachable) and returns it.</summary>
+    internal IReadOnlyList<PrinterSensorDto> MarkSensorsUnavailable()
+    {
+        _lastSensors = PrinterSensorNormalizer.MarkUnavailable(_lastSensors ?? []);
+        return _lastSensors;
     }
 
     /// <summary>
@@ -355,6 +400,8 @@ public sealed class OctoPrintWebSocketAdapter(
                 "OctoPrint HTTP Fallback {PrinterId}: Got status - Online={IsOnline}, State={CurrentState}, Progress={Progress}, JobName={JobName}",
                 _printerId, isOnline, currentState, currentProgress, jobStatus.Filename);
 
+            IReadOnlyList<PrinterSensorDto> sensors = OctoPrintSensorMapper.Map(printerState.Temperatures);
+
             return new OctoPrintStatusData
             {
                 IsOnline = isOnline,
@@ -365,14 +412,15 @@ public sealed class OctoPrintWebSocketAdapter(
                 X = null,
                 Y = null,
                 Z = null,
-                HotendTemp = null,
-                BedTemp = null,
-                HotendTarget = null,
-                BedTarget = null,
+                HotendTemp = OctoPrintSensorMapper.Reading(sensors, "tool0", PrinterSensorQuantity.Temperature),
+                BedTemp = OctoPrintSensorMapper.Reading(sensors, "bed", PrinterSensorQuantity.Temperature),
+                HotendTarget = OctoPrintSensorMapper.Reading(sensors, "tool0", PrinterSensorQuantity.TargetTemperature),
+                BedTarget = OctoPrintSensorMapper.Reading(sensors, "bed", PrinterSensorQuantity.TargetTemperature),
                 ThumbnailUrl = null,
                 CameraStreamUrl = null,
                 PrintTimeLeftSeconds = jobStatus.PrintTimeLeft,
-                OriginWatermark = originWatermark
+                OriginWatermark = originWatermark,
+                Sensors = sensors,
             };
         }
         catch (Exception ex)
@@ -469,7 +517,7 @@ public sealed class OctoPrintWebSocketAdapter(
     /// <summary>
     /// Parses OctoPrint WebSocket 'current' message to extract status data.
     /// </summary>
-    private static OctoPrintStatusData? ParsePrinterStatus(JsonElement currentObj)
+    internal static OctoPrintStatusData? ParsePrinterStatus(JsonElement currentObj)
     {
         try
         {
@@ -534,6 +582,29 @@ public sealed class OctoPrintWebSocketAdapter(
                 }
             }
 
+            // OctoPrint pushes temperature samples in the "temps" history array (latest last);
+            // an object-shaped "temperature" block is also accepted. Frames without samples
+            // leave Sensors null so the previous snapshot is kept.
+            IReadOnlyList<PrinterSensorDto>? sensors = null;
+            if (currentObj.TryGetProperty("temps", out JsonElement temps) &&
+                temps.ValueKind == JsonValueKind.Array && temps.GetArrayLength() > 0)
+            {
+                sensors = OctoPrintSensorMapper.Map(temps[temps.GetArrayLength() - 1]);
+            }
+            else if (currentObj.TryGetProperty("temperature", out JsonElement temperatureBlock) &&
+                temperatureBlock.ValueKind == JsonValueKind.Object)
+            {
+                sensors = OctoPrintSensorMapper.Map(temperatureBlock);
+            }
+
+            if (sensors is not null && !currentObj.TryGetProperty("temperature", out _))
+            {
+                hotendTemp = OctoPrintSensorMapper.Reading(sensors, "tool0", PrinterSensorQuantity.Temperature);
+                hotendTarget = OctoPrintSensorMapper.Reading(sensors, "tool0", PrinterSensorQuantity.TargetTemperature);
+                bedTemp = OctoPrintSensorMapper.Reading(sensors, "bed", PrinterSensorQuantity.Temperature);
+                bedTarget = OctoPrintSensorMapper.Reading(sensors, "bed", PrinterSensorQuantity.TargetTemperature);
+            }
+
             double? printTimeLeft = null;
             if (currentObj.TryGetProperty("progress", out JsonElement progObj2) &&
                 progObj2.TryGetProperty("printTimeLeft", out JsonElement ptl) &&
@@ -554,7 +625,8 @@ public sealed class OctoPrintWebSocketAdapter(
                 BedTemp = bedTemp,
                 HotendTarget = hotendTarget,
                 BedTarget = bedTarget,
-                PrintTimeLeftSeconds = printTimeLeft
+                PrintTimeLeftSeconds = printTimeLeft,
+                Sensors = sensors,
             };
         }
         catch (Exception ex)

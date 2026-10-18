@@ -5,6 +5,8 @@
 /// </summary>
 public sealed class OctoPrintStatusData
 {
+    public IReadOnlyList<Farm.Infrastructure.PrinterSensorDto>? Sensors { get; set; }
+
     internal long? OriginWatermark { get; set; }
 
     public bool IsOnline { get; set; }

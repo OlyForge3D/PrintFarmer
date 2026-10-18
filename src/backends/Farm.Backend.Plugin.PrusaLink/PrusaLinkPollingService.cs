@@ -432,6 +432,11 @@ public sealed class PrusaLinkPollingService(
                         PrintTimeLeftSeconds: status.TimeRemainingSeconds,
                         SpeedMultiplier: status.SpeedMultiplier,
                         ThumbnailCacheIdentity: status.ThumbnailCacheIdentity);
+                    if (status.Sensors is not null)
+                    {
+                        cacheUpdate = cacheUpdate with { Sensors = status.Sensors };
+                    }
+
                     _statusCacheWriter.UpdateStatus(cacheUpdate, originWatermark);
 
                     var signalRUpdate = new PrinterStatusUpdate(
@@ -453,6 +458,18 @@ public sealed class PrusaLinkPollingService(
                         SpoolInfo: spoolInfo,
                         FileName: PrinterStatusDto.ExtractFileName(status.JobName),
                         ThumbnailCacheIdentity: status.ThumbnailCacheIdentity);
+                    if (status.Sensors is not null)
+                    {
+                        signalRUpdate = signalRUpdate with { Sensors = status.Sensors };
+                    }
+                    else if (!status.IsOnline)
+                    {
+                        // The cache marks its sensors unavailable itself; clients need the same view.
+                        signalRUpdate = signalRUpdate with
+                        {
+                            Sensors = PrinterSensorNormalizer.MarkUnavailable(state.LastBroadcastUpdate?.Sensors ?? []),
+                        };
+                    }
 
                     if (PrinterStatusBroadcastGate.ShouldBroadcast(state.LastBroadcastUpdate, signalRUpdate))
                     {
@@ -516,7 +533,10 @@ public sealed class PrusaLinkPollingService(
                             BedTarget: null,
                             HomedAxes: null,
                             SpoolInfo: null,
-                            FileName: null);
+                            FileName: null)
+                        {
+                            Sensors = PrinterSensorNormalizer.MarkUnavailable(state.LastBroadcastUpdate?.Sensors ?? []),
+                        };
 
                         await _hub.Clients.Group(
                                 Farm.Infrastructure.Security.AuthorizedHubGroups.Printer(printerId))

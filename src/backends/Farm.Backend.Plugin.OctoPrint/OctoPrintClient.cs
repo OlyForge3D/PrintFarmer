@@ -18,6 +18,7 @@ namespace Farm.Backend.Plugin.OctoPrint;
 
 public partial class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? logger = null, BackendTimeoutSettings? timeouts = null) : IOctoPrintClient,
     ISupportsFileDownload,
+    ISupportsSensorTelemetry,
     ISupportsFileList,
     ISupportsFileUpload,
     ISupportsFileDelete,

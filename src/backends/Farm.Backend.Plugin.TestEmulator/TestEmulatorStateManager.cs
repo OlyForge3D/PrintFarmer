@@ -1,4 +1,6 @@
 ﻿using System.Collections.Concurrent;
+using Farm.Infrastructure;
+using Farm.Infrastructure.Services.Printers;
 
 namespace Farm.Backend.Plugin.TestEmulator;
 
@@ -134,6 +136,68 @@ public sealed class EmulatedPrinterState
     public DateTime? CompletedAt { get; set; }
 
     public int PrintDurationSeconds { get; set; } = 60;
+
+    public double ChamberTemp { get; set; } = 25;
+
+    public double ChamberTarget { get; set; }
+
+    public double Humidity { get; set; } = 40;
+
+    public double Pressure { get; set; } = 1013.25;
+
+    public bool FilamentDetected { get; set; } = true;
+
+    public double PartCoolingFanPercent { get; set; }
+
+    public double HotendFanRpm { get; set; }
+
+    public IReadOnlyList<PrinterSensorDto> GetSensors(double hotendTemp, double bedTemp)
+    {
+        bool printing = State is EmulatorPrinterState.Printing or EmulatorPrinterState.Paused;
+        IReadOnlyList<PrinterSensorDto> sensors = PrinterSensorNormalizer.Normalize(
+        [
+            new PrinterSensorDto("nozzle", "Nozzle", PrinterSensorKind.Nozzle)
+            {
+                Readings = [Reading(PrinterSensorQuantity.Temperature, hotendTemp, PrinterSensorUnit.Celsius),
+                    Reading(PrinterSensorQuantity.TargetTemperature, printing ? TargetHotendTemp : 0, PrinterSensorUnit.Celsius)],
+            },
+            new PrinterSensorDto("bed", "Bed", PrinterSensorKind.Bed)
+            {
+                Readings = [Reading(PrinterSensorQuantity.Temperature, bedTemp, PrinterSensorUnit.Celsius),
+                    Reading(PrinterSensorQuantity.TargetTemperature, printing ? TargetBedTemp : 0, PrinterSensorUnit.Celsius)],
+            },
+            new PrinterSensorDto("chamber", "Chamber", PrinterSensorKind.Chamber)
+            {
+                Readings = [Reading(PrinterSensorQuantity.Temperature, ChamberTemp, PrinterSensorUnit.Celsius),
+                    Reading(PrinterSensorQuantity.TargetTemperature, ChamberTarget, PrinterSensorUnit.Celsius)],
+                Writable = [new(PrinterSensorQuantity.TargetTemperature, 0, 60, 1, PrinterSensorUnit.Celsius)],
+            },
+            new PrinterSensorDto("environment", "Environment", PrinterSensorKind.Ambient)
+            {
+                Readings = [Reading(PrinterSensorQuantity.Humidity, Humidity, PrinterSensorUnit.Percent),
+                    Reading(PrinterSensorQuantity.Pressure, Pressure, PrinterSensorUnit.HectoPascal)],
+            },
+            new PrinterSensorDto("filament", "Filament", PrinterSensorKind.FilamentRunout)
+            {
+                Readings = [new(PrinterSensorQuantity.FilamentDetected, PrinterSensorValue.FromBoolean(FilamentDetected), PrinterSensorUnit.None)],
+            },
+            new PrinterSensorDto("fan_part", "Part Cooling Fan", PrinterSensorKind.Fan)
+            {
+                FanRole = PrinterFanRole.PartCooling,
+                Readings = [Reading(PrinterSensorQuantity.FanSpeed, PartCoolingFanPercent, PrinterSensorUnit.Percent)],
+                Writable = [new(PrinterSensorQuantity.FanSpeed, 0, 100, 1, PrinterSensorUnit.Percent)],
+            },
+            new PrinterSensorDto("fan_hotend", "Hotend Fan", PrinterSensorKind.Fan)
+            {
+                FanRole = PrinterFanRole.Hotend,
+                Readings = [Reading(PrinterSensorQuantity.FanRpm, HotendFanRpm, PrinterSensorUnit.Rpm)],
+            },
+        ]);
+        return State == EmulatorPrinterState.Offline ? PrinterSensorNormalizer.MarkUnavailable(sensors) : sensors;
+    }
+
+    private static PrinterSensorReadingDto Reading(PrinterSensorQuantity quantity, double value, PrinterSensorUnit unit) =>
+        new(quantity, PrinterSensorValue.FromNumber(value), unit);
 
     /// <summary>Ambient temperature in °C.</summary>
     public const double AmbientTemp = 20.0;
