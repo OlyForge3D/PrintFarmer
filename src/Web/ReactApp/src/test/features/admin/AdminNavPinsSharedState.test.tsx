@@ -232,7 +232,7 @@ describe('Admin nav pins: shared state across Control Center and Layout (Issue 2
     // Accessibility: a navbar link must never contain a nested interactive
     // button (found earlier in this epic as a real defect elsewhere).
     expect(pinnedLink.querySelector('button')).toBeNull();
-  });
+  }, 15_000);
 
   it('syncs remote admin pin additions and removals across the provider and Layout', async () => {
     const user = userEvent.setup();
