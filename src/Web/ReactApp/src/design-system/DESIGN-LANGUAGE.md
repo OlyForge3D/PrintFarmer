@@ -3,7 +3,7 @@
 > **Industrial precision meets modern dashboard.**
 > Dark-first, data-forward, workshop-grade.
 
-This document is the authoritative reference for PrintFarmer's visual design system. It defines the typography, color, spacing, motion, and component vocabulary that every screen in PrintFarmer is built from. All four shipped themes — **Light**, **PrintFarmer Dark**, **Matrix**, and **Blueprint** — implement the same CSS variable contract defined at the end of this document. Themes swap pigment; structure stays identical.
+This document is the authoritative reference for PrintFarmer's visual design system. It defines the typography, color, spacing, motion, and component vocabulary that every screen in PrintFarmer is built from. All eight shipped themes — `light`, `dark` (PrintFarmer Dark), `matrix`, `blueprint`, `ratos`, `voron`, `farm`, and `forge` — implement the same CSS variable contract defined at the end of this document. `src/design-system/themes/registry.ts` is the source of truth for the list. Themes swap pigment and body font; structure stays identical. This document details Light, PrintFarmer Dark, Matrix, and Blueprint; the remaining themes follow the same contract in their own stylesheets.
 
 This is **Phase 1: design decisions only**. No CSS or TSX is written here. The contract at the end of this file is the API that the Phase 2 implementation must conform to.
 
@@ -27,7 +27,7 @@ Five non-negotiable principles:
 
 ### Font Selection Rationale
 
-PrintFarmer deliberately rejects the SaaS defaults (Inter, Roboto, system stacks). Three faces were chosen for their industrial-technical pedigree, distinctive silhouettes, and excellent screen rendering at the small sizes typical of dashboard UI.
+Three base faces define the token contract, chosen for their industrial-technical pedigree, distinctive silhouettes, and excellent screen rendering at the small sizes typical of dashboard UI. Each theme then overrides the **body** font to give it its own voice (see [Per-Theme Body Fonts](#per-theme-body-fonts)); IBM Plex Sans remains the shared fallback.
 
 | Token | Family | Role | Why |
 |---|---|---|---|
@@ -43,14 +43,31 @@ PrintFarmer deliberately rejects the SaaS defaults (Inter, Roboto, system stacks
 --pf-font-mono:    'JetBrains Mono', ui-monospace, 'SF Mono', 'Cascadia Code', Consolas, monospace;
 ```
 
+### Per-Theme Body Fonts
+
+Each theme stylesheet sets `font-family` on `html[data-theme="<id>"] body`. Display and data faces are unchanged unless noted.
+
+| Theme | Body font |
+|---|---|
+| `dark` | Inter |
+| `light` | Nunito Sans |
+| `matrix` | `--pf-font-mono` (JetBrains Mono) |
+| `blueprint` | DM Mono |
+| `ratos` | Rajdhani |
+| `voron` | Chakra Petch |
+| `farm` | Merriweather Sans |
+| `forge` | `--pf-font-display` |
+
+All of these load from the single Google Fonts link in `index.html`. Add any new theme font there too.
+
 ### Font Loading
 
-All three faces ship from Google Fonts with subsetted Latin glyphs and only the weights we use, served as variable fonts where possible:
+The three base faces and every per-theme body font ship from one Google Fonts request in `index.html`, limited to the weights we use. Keep this example in sync with that file:
 
 ```html
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;700&family=JetBrains+Mono:wght@400;500&family=Inter:wght@400;500;600;700&family=Nunito+Sans:wght@400;500;600;700&family=DM+Mono:wght@400;500&family=Rajdhani:wght@500;600;700&family=Chakra+Petch:wght@400;500;600;700&family=Merriweather+Sans:wght@400;500;600;700&display=swap" />
 ```
 
 `display=swap` is mandatory — operators must see content immediately even on a cold load. The fallback stacks above ensure layout shift is minimal.

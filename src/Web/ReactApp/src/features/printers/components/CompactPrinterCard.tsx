@@ -13,6 +13,7 @@ import { Button, TagChip } from '@/common/components/ui';
 import { PrinterHistoryModal } from '@/features/printers/components/PrinterHistoryModal';
 import { PrinterFilesModal } from '@/features/printers/components/PrinterFilesModal';
 import { PrintProgressBar } from '@/features/printers/components/PrintProgressBar';
+import { PrinterImage } from '@/common/components/PrinterImage';
 import { FailureDetectionBadge } from '@/features/printers/components/FailureDetectionBadge';
 import { FailureDetectionMonitoringBadge } from '@/features/printers/components/FailureDetectionMonitoringBadge';
 import { FailureDetectionMonitoringSummary } from '@/features/printers/components/FailureDetectionMonitoringSummary';
@@ -271,8 +272,32 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
         {/* Left: content area */}
         <div className="flex-1 min-w-0">
 
+          {/* Printer image — identifies the hardware at a glance */}
+          <div className="mt-3 flex items-end gap-3" data-testid="compact-printer-image">
+            <div className="relative h-24 w-24 shrink-0 overflow-hidden rounded-md border border-pf-border bg-pf-bg-2">
+              <PrinterImage
+                key={`${printer.manufacturerName ?? ''}|${printer.modelName ?? ''}`}
+                manufacturerName={printer.manufacturerName}
+                modelName={printer.modelName}
+                motionType={printer.motionType}
+                alt=""
+                className="h-full w-full object-contain p-1.5 drop-shadow-[0_4px_6px_rgba(0,0,0,0.45)]"
+              />
+            </div>
+            {(printer.modelName || printer.manufacturerName) && (
+              <div className="min-w-0 pb-0.5 leading-tight">
+                {printer.modelName && (
+                  <p className="truncate text-sm font-medium text-pf-text-primary">{printer.modelName}</p>
+                )}
+                {printer.manufacturerName && (
+                  <p className="truncate text-xs text-pf-text-secondary">{printer.manufacturerName}</p>
+                )}
+              </div>
+            )}
+          </div>
+
           {/* Progress bar — always visible */}
-          <div className="mt-4 mb-3">
+          <div className="mt-3 mb-3">
             <PrintProgressBar
               progress={printer.progress}
               jobName={printer.fileName ?? printer.jobName}
