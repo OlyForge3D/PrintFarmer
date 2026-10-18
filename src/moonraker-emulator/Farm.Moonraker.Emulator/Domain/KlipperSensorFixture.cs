@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Text.Json;
 
 namespace Farm.Moonraker.Emulator.Domain;
@@ -47,7 +47,7 @@ internal sealed class KlipperSensorFixture
         var changes = new Dictionary<string, object?>(StringComparer.Ordinal);
         foreach ((string field, JsonElement value) in fields)
         {
-            if (!current.ContainsKey(field) || field is "measured_min_temp" or "measured_max_temp")
+            if (!current.TryGetValue(field, out object? currentValue) || field is "measured_min_temp" or "measured_max_temp")
             {
                 throw new GcodeParameterException($"Field '{field}' is not an injectable reading of '{objectName}'.");
             }
@@ -56,12 +56,12 @@ internal sealed class KlipperSensorFixture
             {
                 changes[field] = value.GetBoolean();
             }
-            else if (field == "rpm" && current[field] is null && value.ValueKind == JsonValueKind.Null)
+            else if (field == "rpm" && currentValue is null && value.ValueKind == JsonValueKind.Null)
             {
                 changes[field] = null;
             }
             else if (field is not ("enabled" or "filament_detected") &&
-                (field != "rpm" || current[field] is not null) &&
+                (field != "rpm" || currentValue is not null) &&
                 value.ValueKind == JsonValueKind.Number && value.TryGetDouble(out double number) &&
                 double.IsFinite(number) && IsInRange(objectName, field, number))
             {
@@ -78,6 +78,7 @@ internal sealed class KlipperSensorFixture
             current[field] = value;
         }
 
+        // Klipper ignores exactly zero for extrema; near-zero readings still count.
         if (objectName == "temperature_sensor endstop" && changes.TryGetValue("temperature", out object? reading) &&
             reading is double temperature && temperature != 0)
         {
@@ -140,9 +141,8 @@ internal sealed class KlipperSensorFixture
     public static Dictionary<string, string> ParseParameters(string line)
     {
         var parameters = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (string token in line.Split(' ', StringSplitOptions.RemoveEmptyEntries).Skip(1))
+        foreach (string[] pair in line.Split(' ', StringSplitOptions.RemoveEmptyEntries).Skip(1).Select(token => token.Split('=', 2)))
         {
-            string[] pair = token.Split('=', 2);
             if (pair.Length != 2 || !parameters.TryAdd(pair[0], pair[1]))
             {
                 throw new GcodeParameterException("Expected unique NAME=VALUE parameters.");
@@ -156,7 +156,7 @@ internal sealed class KlipperSensorFixture
     {
         "speed" or "power" => value is >= 0 and <= 1,
         "rpm" => value >= 0,
-        "target" => value == 0 || (name == "heater_generic chamber" ? value is >= 0 and <= 100 : value is >= -255 and <= 256),
+        "target" => name == "heater_generic chamber" ? value is >= 0 and <= 100 : value is >= -255 and <= 256,
         "temperature" => name == "heater_generic chamber" ? value is >= 0 and <= 100 : value is >= -255 and <= 256,
         "enabled" => value is 0 or 1,
         _ => false,
@@ -179,11 +179,16 @@ internal sealed class KlipperSensorFixture
         },
         ["temperature_fan chamber_heater"] = new()
         {
-            ["temperature"] = 24.0, ["target"] = 0.0, ["speed"] = 0.0, ["rpm"] = 0.0,
+            ["temperature"] = 24.0,
+            ["target"] = 0.0,
+            ["speed"] = 0.0,
+            ["rpm"] = 0.0,
         },
         ["heater_generic chamber"] = new()
         {
-            ["temperature"] = 24.0, ["target"] = 0.0, ["power"] = 0.0,
+            ["temperature"] = 24.0,
+            ["target"] = 0.0,
+            ["power"] = 0.0,
         },
         ["heater_fan hotend"] = new() { ["speed"] = 0.0, ["rpm"] = null },
         ["controller_fan electronics"] = new() { ["speed"] = 0.0, ["rpm"] = null },

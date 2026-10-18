@@ -206,6 +206,38 @@ public sealed class KlipperSensorTests : IClassFixture<ReadyPrinterFactory>
         ((Dictionary<string, object?>)first.BuildObjectsSnapshot()["temperature_sensor endstop"])["temperature"].Should().Be(23.4);
     }
 
+    [Theory]
+    [InlineData("0", 23.4)]
+    [InlineData("-0.0", 23.4)]
+    [InlineData("0.000000001", 0.000000001)]
+    [InlineData("-0.000000001", -0.000000001)]
+    public void UpdateSensor_ZeroSentinelAndNearZeroReadings_PreserveKlipperExtrema(string reading, double expectedMinimum)
+    {
+        var printer = new PrinterAggregate { Id = "sensor", Name = "Sensor" };
+        using JsonDocument update = JsonDocument.Parse($$"""{"temperature":{{reading}}}""");
+        printer.UpdateSensor("temperature_sensor endstop", update.RootElement.EnumerateObject().ToDictionary(property => property.Name, property => property.Value));
+
+        var status = (Dictionary<string, object?>)printer.BuildObjectsSnapshot()["temperature_sensor endstop"];
+        status["temperature"].Should().Be(double.Parse(reading, System.Globalization.CultureInfo.InvariantCulture));
+        status["measured_min_temp"].Should().Be(expectedMinimum);
+        status["measured_max_temp"].Should().Be(23.4);
+    }
+
+    [Theory]
+    [InlineData("SET_HEATER_TEMPERATURE HEATER=chamber TARGET=0", "heater_generic chamber", 0)]
+    [InlineData("SET_HEATER_TEMPERATURE HEATER=chamber TARGET=100", "heater_generic chamber", 100)]
+    [InlineData("SET_TEMPERATURE_FAN_TARGET TEMPERATURE_FAN=chamber_heater TARGET=0", "temperature_fan chamber_heater", 0)]
+    [InlineData("SET_TEMPERATURE_FAN_TARGET TEMPERATURE_FAN=chamber_heater TARGET=-255", "temperature_fan chamber_heater", -255)]
+    [InlineData("SET_TEMPERATURE_FAN_TARGET TEMPERATURE_FAN=chamber_heater TARGET=256", "temperature_fan chamber_heater", 256)]
+    public void SendGcode_ZeroAndConfiguredTargetBounds_AcceptsTarget(string command, string name, double target)
+    {
+        var printer = new PrinterAggregate { Id = "target", Name = "Target" };
+        printer.SendGcode(command);
+
+        var status = (Dictionary<string, object?>)printer.BuildObjectsSnapshot()[name];
+        status["target"].Should().Be(target);
+    }
+
     [Fact]
     public async Task ObjectsQuery_ConfiguredTargets_ExposeFiniteBoundsAndHeaterInventory()
     {

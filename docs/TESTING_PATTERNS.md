@@ -87,6 +87,16 @@ For polling loops, use the thread-safe `Farm.Testing.Shared.ManualTimeProvider`:
 `Advance` fires due callbacks outside the clock lock. `QueueSecondWaveClockTests`
 covers the second-wave boundary cases.
 
+For Moonraker Spoolman proxy deadlines, pass that shared manual clock through
+`MoonrakerClient`'s trailing optional `timeProvider` parameter. Observe the
+cancellation token received by the HTTP handler immediately before and exactly
+at the selected deadline: GET uses the status-poll budget, while mutations use
+the print-control budget. Also verify caller cancellation remains linked and
+the timer is disposed. Do not use a tight `Stopwatch` tolerance to infer which
+budget ran; a busy runner can delay timer callbacks and continuations without
+changing the selected timeout. `MoonrakerSpoolmanProxyTimeoutTests` covers these
+boundaries without sleeping.
+
 ## React printer response contracts
 
 ### DOM emulator upgrades
