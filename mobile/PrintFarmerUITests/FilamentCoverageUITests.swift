@@ -124,31 +124,33 @@ final class FilamentCoverageUITests: PrintFarmerUITestCase {
 
     /// The dedicated Filament page progressively discloses technical coverage details.
     override func openPrinterFilamentDetails(printerID: String) -> XCUIElement {
+        // Resolve unique containers without nested firstMatch queries: their
+        // lazy AX walks can trip the app's main-run-loop stall watchdog.
         let root = app.descendants(matching: .any)
-            .matching(identifier: "printer.detail.root.\(printerID)").firstMatch
+            .matching(identifier: "printer.detail.root.\(printerID)").element
         XCTAssertTrue(root.waitForExistence(timeout: 10),
                       "Navigation must reach the exact printer's detail, not a same-name sibling.")
         let selector = root.descendants(matching: .any)
-            .matching(identifier: "printer.detail.panel.selector").firstMatch
+            .matching(identifier: "printer.detail.panel.selector").element
         XCTAssertTrue(selector.waitForExistence(timeout: 5))
         let filamentSegment = selector.buttons["Filament"]
         XCTAssertTrue(filamentSegment.waitForExistence(timeout: 5))
         filamentSegment.tap()
 
         let filament = root.descendants(matching: .any)
-            .matching(identifier: "printer.detail.panel.filament").firstMatch
+            .matching(identifier: "printer.detail.panel.filament").element
         XCTAssertTrue(filament.waitForExistence(timeout: 5))
         let heading = filament.descendants(matching: .any)
-            .matching(identifier: "printer.filament.heading").firstMatch
+            .matching(identifier: "printer.filament.heading").element
         XCTAssertTrue(heading.waitForExistence(timeout: 10))
         let coverageSummary = filament.descendants(matching: .any)
-            .matching(identifier: "printer.filament.attention").firstMatch
+            .matching(identifier: "printer.filament.attention").element(boundBy: 0)
         XCTAssertTrue(
             coverageSummary.waitForExistence(timeout: 8),
             "The printer's coverage response must be rendered before testing its disclosure."
         )
         let disclosure = filament.descendants(matching: .any)
-            .matching(identifier: "printer.filament.disclosure").firstMatch
+            .matching(identifier: "printer.filament.disclosure").element(boundBy: 0)
         XCTAssertTrue(disclosure.waitForExistence(timeout: 5))
         for _ in 0..<3 where !disclosure.isHittable {
             filament.swipeUp()

@@ -1,5 +1,31 @@
 ## XCUI timeout diagnosis (#2573)
 
+### Filament detail query stall (iPhone shard 3)
+
+Run `39143583699`, job `117727392869`, failed at
+`FilamentCoverageUITests.testTappingDuplicateNameCardNavigatesByStableIDToCorrectDetail`.
+The retained `ios-xcui-iphone-3` artifact reports 15 passing tests and one
+failure, with no runner-budget termination. The apparent helper disconnection
+at `FilamentCoverageUITests.swift:135` followed an app abort, not an assertion
+that the Filament button was missing.
+
+The crash report for app PID `22164` records `UITestMainThreadWatchdog.check()`
+aborting after a 20-second main-run-loop stall. The main thread was inside
+`XCTElementQuery._firstMatchingSnapshotForInput`, sending automation logs through
+`_os_log_impl_stream` / `_xpc_pipe_simpleroutine`. The query attachment identifies
+the nested first-match printer root and panel selector followed by the Filament
+button lookup.
+
+The Filament helper now resolves its unique containers with `.element`
+instead of nested `.firstMatch` queries, avoiding that lazy first-match traversal.
+Coverage summaries and disclosure labels retain first-result selection through
+indexed lookup because those leaf IDs can repeat in the accessibility tree.
+Exact printer-ID scoping and all coverage assertions remain unchanged. The
+existing three detail-navigation cases remain the regression tests on both
+iPhone and iPad; no watchdog, timeout, skip, or retry policy changes.
+Simulator confirmation requires the approved Xcode/macOS host; Linux syntax
+validation alone cannot establish that the stall is resolved.
+
 ### Harvest queue failures (#3265)
 
 The retained iPad shard 2 bundle from run `37296414762`, original job
