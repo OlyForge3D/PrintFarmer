@@ -1,6 +1,6 @@
-﻿using System.Diagnostics;
-using Farm.Backend.Plugin.Moonraker;
+﻿using Farm.Backend.Plugin.Moonraker;
 using Farm.Infrastructure.Settings;
+using Farm.Testing.Shared;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Moq.Protected;
@@ -19,10 +19,12 @@ namespace Farm.Web.Api.Tests;
 /// </summary>
 public class MoonrakerSpoolmanProxyTimeoutTests
 {
-    private static (MoonrakerClient client, Mock<HttpMessageHandler> handler) CreateHangingClient(
-        BackendTimeoutSettings timeouts)
+    private static (MoonrakerClient Client, HttpClient Http, TaskCompletionSource<CancellationToken> RequestStarted) CreateHangingClient(
+        BackendTimeoutSettings timeouts, TimeProvider clock)
     {
+        TaskCompletionSource<CancellationToken> requestStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
         Mock<HttpMessageHandler> handler = new(MockBehavior.Strict);
+        handler.Protected().Setup("Dispose", ItExpr.IsAny<bool>());
         handler.Protected()
             .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
             .Returns(async (HttpRequestMessage _, CancellationToken ct) =>
@@ -30,40 +32,34 @@ public class MoonrakerSpoolmanProxyTimeoutTests
                 // Simulate a printer that is powered off but still holds its network
                 // address: the connection black-holes rather than refusing, so the only
                 // way the call ever returns is via the per-request timeout cancelling ct.
+                requestStarted.TrySetResult(ct);
                 await Task.Delay(Timeout.InfiniteTimeSpan, ct);
                 throw new InvalidOperationException("unreachable: Task.Delay should have thrown on cancellation");
             });
 
-#pragma warning disable CA2000
         HttpClient http = new(handler.Object);
-#pragma warning restore CA2000
-
-        MoonrakerClient client = new(http, NullLogger<MoonrakerClient>.Instance, timeouts);
-        return (client, handler);
+        MoonrakerClient client = new(http, NullLogger<MoonrakerClient>.Instance, timeouts, timeProvider: clock);
+        return (client, http, requestStarted);
     }
 
-    [Fact]
-    public async Task SpoolmanProxyRequestAsync_GetOnBlackHoledPrinter_BoundedByStatusPollTimeoutNotPrintControlTimeout()
+    [Theory]
+    [InlineData("GET")]
+    [InlineData("get")]
+    public async Task SpoolmanProxyRequestAsync_GetOnBlackHoledPrinter_BoundedByStatusPollTimeoutNotPrintControlTimeout(string method)
     {
         BackendTimeoutSettings timeouts = new()
         {
             StatusPollTimeoutSeconds = 1,
             PrintControlTimeoutSeconds = 15,
         };
-        (MoonrakerClient client, _) = CreateHangingClient(timeouts);
+        var clock = new ManualTimeProvider(DateTimeOffset.UnixEpoch);
+        var harness = CreateHangingClient(timeouts, clock);
+        using HttpClient http = harness.Http;
 
-        Stopwatch stopwatch = Stopwatch.StartNew();
-        string? result = await client.SpoolmanProxyRequestAsync(
-            "http://printer-offline.local:7125", "GET", "/api/v1/spool");
-        stopwatch.Stop();
+        Task<string?> request = harness.Client.SpoolmanProxyRequestAsync(
+            "http://printer-offline.local:7125", method, "/api/v1/spool");
 
-        result.Should().BeNull("the black-holed request never completes and must be reported as unavailable");
-        stopwatch.Elapsed.Should().BeLessThan(
-            TimeSpan.FromSeconds(timeouts.PrintControlTimeoutSeconds),
-            "a read-only status probe must never wait for the print-control budget");
-        stopwatch.Elapsed.Should().BeLessThan(
-            TimeSpan.FromSeconds(timeouts.StatusPollTimeoutSeconds + 5),
-            "the GET must be bounded by the short status-poll timeout, not silently unbounded");
+        await AssertTimeoutAsync(request, harness.RequestStarted, clock, timeouts.StatusPollTimeout);
     }
 
     [Fact]
@@ -77,18 +73,20 @@ public class MoonrakerSpoolmanProxyTimeoutTests
             StatusPollTimeoutSeconds = 1,
             PrintControlTimeoutSeconds = 15,
         };
-        (MoonrakerClient client, _) = CreateHangingClient(timeouts);
+        var clock = new ManualTimeProvider(DateTimeOffset.UnixEpoch);
+        var harness = CreateHangingClient(timeouts, clock);
+        using HttpClient http = harness.Http;
 
-        Stopwatch stopwatch = Stopwatch.StartNew();
-        string? result = await client.GetSpoolmanSpoolsAsync("http://printer-offline.local:7125");
-        stopwatch.Stop();
-
-        result.Should().BeNull();
-        stopwatch.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(timeouts.PrintControlTimeoutSeconds));
+        Task<string?> request = harness.Client.GetSpoolmanSpoolsAsync("http://printer-offline.local:7125");
+        await AssertTimeoutAsync(request, harness.RequestStarted, clock, timeouts.StatusPollTimeout);
     }
 
-    [Fact]
-    public async Task SpoolmanProxyRequestAsync_MutatingVerbOnBlackHoledPrinter_StillUsesPrintControlTimeout()
+    [Theory]
+    [InlineData("POST")]
+    [InlineData("PATCH")]
+    [InlineData("PUT")]
+    [InlineData("DELETE")]
+    public async Task SpoolmanProxyRequestAsync_MutatingVerbOnBlackHoledPrinter_StillUsesPrintControlTimeout(string method)
     {
         // Spoolman mutations (create/update/delete spool, filament, vendor) proxy through the
         // same method and legitimately need the longer budget - Spoolman may be
@@ -100,25 +98,51 @@ public class MoonrakerSpoolmanProxyTimeoutTests
             StatusPollTimeoutSeconds = 1,
             PrintControlTimeoutSeconds = 4,
         };
-        (MoonrakerClient client, _) = CreateHangingClient(timeouts);
+        var clock = new ManualTimeProvider(DateTimeOffset.UnixEpoch);
+        var harness = CreateHangingClient(timeouts, clock);
+        using HttpClient http = harness.Http;
 
-        Stopwatch stopwatch = Stopwatch.StartNew();
-        string? result = await client.SpoolmanProxyRequestAsync(
-            "http://printer-offline.local:7125", "PATCH", "/api/v1/spool/1", body: new { remaining_weight = 100 });
-        stopwatch.Stop();
+        Task<string?> request = harness.Client.SpoolmanProxyRequestAsync(
+            "http://printer-offline.local:7125", method, "/api/v1/spool/1", body: new { remaining_weight = 100 });
 
-        result.Should().BeNull();
+        await AssertTimeoutAsync(request, harness.RequestStarted, clock, timeouts.PrintControlTimeout);
+    }
 
-        // Assert against the *print-control* budget, not just >= the status-poll timeout: if the
-        // fix regressed and mutations were incorrectly cut off by the short StatusPollTimeout
-        // (1s), elapsed would still be >= 1s and a weaker ">= StatusPollTimeout" assertion would
-        // pass anyway, hiding the bug. The 3s gap between the two timeouts (1s vs 4s) with a 1s
-        // tolerance window means the assertion can only pass if the *longer* budget - not the
-        // short one - actually gated this call, proving the longer timeout, not the short one,
-        // was used.
-        stopwatch.Elapsed.Should().BeCloseTo(
-            TimeSpan.FromSeconds(timeouts.PrintControlTimeoutSeconds),
-            TimeSpan.FromSeconds(1),
-            "a mutating request must run for the full print-control budget, not the shorter status-poll timeout");
+    [Fact]
+    public async Task SpoolmanProxyRequestAsync_CallerCancelsBeforeDeadline_PreservesLinkedCancellation()
+    {
+        BackendTimeoutSettings timeouts = new() { PrintControlTimeoutSeconds = 4 };
+        var clock = new ManualTimeProvider(DateTimeOffset.UnixEpoch);
+        var harness = CreateHangingClient(timeouts, clock);
+        using HttpClient http = harness.Http;
+        using CancellationTokenSource caller = new();
+
+        Task<string?> request = harness.Client.SpoolmanProxyRequestAsync(
+            "http://printer-offline.local:7125", "PATCH", "/api/v1/spool/1", ct: caller.Token);
+        CancellationToken requestToken = await harness.RequestStarted.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        requestToken.IsCancellationRequested.Should().BeFalse();
+        caller.Cancel();
+
+        requestToken.IsCancellationRequested.Should().BeTrue();
+        (await request.WaitAsync(TimeSpan.FromSeconds(30))).Should().BeNull();
+        clock.ActiveTimerCount.Should().Be(0);
+    }
+
+    private static async Task AssertTimeoutAsync(
+        Task<string?> request, TaskCompletionSource<CancellationToken> requestStarted, ManualTimeProvider clock, TimeSpan expectedTimeout)
+    {
+        CancellationToken requestToken = await requestStarted.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        requestToken.CanBeCanceled.Should().BeTrue();
+        clock.ActiveTimerCount.Should().Be(1);
+
+        // Inspect cancellation itself, not a continuation's scheduler-dependent elapsed time.
+        clock.Advance(expectedTimeout - TimeSpan.FromTicks(1));
+        requestToken.IsCancellationRequested.Should().BeFalse("the selected timeout must not expire early");
+        request.IsCompleted.Should().BeFalse();
+        clock.Advance(TimeSpan.FromTicks(1));
+        requestToken.IsCancellationRequested.Should().BeTrue("the selected timeout must expire at its exact boundary");
+
+        (await request.WaitAsync(TimeSpan.FromSeconds(30))).Should().BeNull("a black-holed request is unavailable");
+        clock.ActiveTimerCount.Should().Be(0, "the request must dispose its timeout timer");
     }
 }

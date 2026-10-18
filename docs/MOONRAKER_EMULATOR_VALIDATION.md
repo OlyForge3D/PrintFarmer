@@ -204,6 +204,287 @@ The endpoint accepts fragmented client messages, preserves JSON-RPC request IDs,
 returns standard parse/invalid-request/method-not-found errors, serializes concurrent
 subscriber writes, and broadcasts mutations to every applicable subscription.
 
+### Standard Klipper sensor fixtures
+
+Every scenario includes these standard objects alongside the legacy extruder,
+bed and part fan. They appear in REST and JSON-RPC object lists/queries and in
+initial subscriptions. Subsequent `notify_status_update` messages contain only
+changed, subscribed fields; unchanged readings do not generate notifications.
+
+| Object | Fields and units |
+|---|---|
+| `temperature_sensor endstop` | `temperature`, `measured_min_temp`, `measured_max_temp`: Celsius numbers |
+| `temperature_fan chamber_heater` | `temperature`, `target`: Celsius; `speed`: 0-1 number; `rpm`: rotations/minute number |
+| `heater_generic chamber` | `temperature`, `target`: Celsius; `power`: 0-1 PWM duty |
+| `heater_fan hotend` | `speed`: 0-1 number; `rpm`: null (no tachometer) |
+| `controller_fan electronics` | `speed`: 0-1 number; `rpm`: null (no tachometer) |
+| `fan_generic auxiliary` | `speed`: 0-1 number; `rpm`: null (no tachometer) |
+| `filament_switch_sensor runout` | `enabled`, `filament_detected`: booleans, not 0/1 |
+| `filament_motion_sensor encoder` | `enabled`, `filament_detected`: booleans |
+
+`heaters` advertises heater/sensor inventory. The relevant subset of
+`configfile.settings` exposes temperature-fan bounds (-255 to 256 Celsius) and
+generic-heater bounds (0 to 100 Celsius), allowing the real backend to discover
+writable targets. The automatic heater/controller fans remain read-only to the
+backend. Test telemetry injection does not grant production control capability.
+
+The supported command subset is `SET_FAN_SPEED FAN=auxiliary SPEED=0.5`,
+`SET_HEATER_TEMPERATURE HEATER=chamber TARGET=50`,
+`SET_TEMPERATURE_FAN_TARGET TEMPERATURE_FAN=chamber_heater TARGET=40`, and
+`SET_FILAMENT_SENSOR SENSOR=runout ENABLE=0` (also `SENSOR=encoder`).
+`SET_HEATER_TEMPERATURE` also updates the existing `extruder` and `heater_bed`
+targets, just like their legacy `M104`/`M140` paths.
+Names and values are required; optional upstream parameters, templates, PID,
+thermal/tachometer physics, motion-sensor pulse timing and runout macros are not
+simulated. A command changes its target/requested speed or enabled flag, not
+the measured temperature, power or filament detection. These remain explicit
+test inputs rather than invented physical completion.
+
+With the control API enabled, inject readings through
+`POST /__emulator/printer/sensor`:
+
+```json
+{
+  "objectName": "temperature_fan chamber_heater",
+  "fields": { "temperature": 35, "speed": 0.7, "rpm": 2100 }
+}
+```
+
+Only existing fields with finite, appropriately ranged numbers or real booleans
+are accepted; unknown objects/fields and invalid values return 400 without a
+partial mutation. Temperature-sensor extrema update with readings and cannot be
+injected directly. RPM remains numeric only on the configured tachometer fan,
+and null-only on fans without a tachometer.
+No new wall-clock work, network access or runtime dependency
+is introduced. Readings stay fixed across virtual-time advances; notifications
+use the existing virtual `eventtime`. Scenario/reset and firmware restart restore
+the baseline. Separate printer aggregates never share sensor state.
+
+#### Reference evidence and limits
+
+Inspected and live-captured on 2026-10-18:
+
+- [virtual-klipper-printer at e272bcd](https://github.com/mainsail-crew/virtual-klipper-printer/tree/e272bcd1060dad6cee1598d6debdaa5d5afae3c7):
+  `temp_sensors.cfg` supplies the temperature sensor and temperature fan;
+  `miscellaneous.cfg` supplies heater/controller fans and a filament-motion
+  sensor. Its Dockerfile uses stock Klipper, not a vendor fork.
+- [Klipper at 9cb9975](https://github.com/Klipper3d/klipper/tree/9cb99754c035b90206ef0a02660f674fc9517e9b):
+  `klippy/extras/temperature_sensor.py`, `temperature_fan.py`, `fan.py`,
+  `fan_generic.py`, `heater_generic.py` and `filament_switch_sensor.py`,
+  plus the [official status reference](https://www.klipper3d.org/Status_Reference.html).
+  These establish the field names/types, generic-heater contract and switch
+  sensor omitted from the reference container's default configuration.
+  In particular, fan status includes `rpm: null` without a tachometer.
+
+The reference also ran in an isolated **WSLC** container, without a Docker daemon.
+For local container-based testing, prefer `wslc` over a Docker daemon when it is
+available; the emulator's fast tests still run natively without either.
+The captured image was
+`ghcr.io/mainsail-crew/virtual-klipper-printer@sha256:7144f96705d83514191f6f8653751c84600ae38c1b7318d1e66593c43c7d743a`
+(image revision `e272bcd1060dad6cee1598d6debdaa5d5afae3c7`, version
+`v0.13.0-787`). Its actual checked-out runtime revisions were
+[Klipper e2b99a9](https://github.com/Klipper3d/klipper/tree/e2b99a9159f992169c1ba53029dec020e850cc99)
+and [Moonraker 9e676eb](https://github.com/Arksine/moonraker/tree/9e676eba6b02661a4dfa3ec6e7ac3f3504498e6d);
+these differ from the separately inspected Klipper revision above.
+The reference and Klipper sources are GPL-3.0; repository licensing policy was
+checked and no upstream source, scripts or configuration files were vendored.
+Only protocol facts and original fixture data/implementation are included.
+
+#### Live reference capture
+
+The temporary container used loopback port 17139, two CPUs, a 2 GiB memory limit,
+a private `/tmp`, and **no host mounts**. Verify that the chosen local port and
+container name are unused before running:
+
+```powershell
+wslc pull --quiet ghcr.io/mainsail-crew/virtual-klipper-printer@sha256:7144f96705d83514191f6f8653751c84600ae38c1b7318d1e66593c43c7d743a
+wslc run -d --name pf3434-reference --cpus 2 --memory 2G -p 127.0.0.1:17139:7125 --tmpfs /tmp ghcr.io/mainsail-crew/virtual-klipper-printer@sha256:7144f96705d83514191f6f8653751c84600ae38c1b7318d1e66593c43c7d743a
+```
+
+Inside that disposable container only, enable `addons/temp_sensors.cfg` in
+`printer.cfg` and disable `addons/heater_bed.cfg`: they both use PA6. Keep the
+default extruder and miscellaneous objects. Add an original private configuration
+include for the three missing object types:
+
+```ini
+[heater_generic chamber]
+heater_pin: PD4
+sensor_type: Generic 3950
+sensor_pin: PA0
+control: watermark
+min_temp: -255
+max_temp: 100
+gcode_id: CH
+
+[fan_generic auxiliary]
+pin: PA2
+kick_start_time: 0
+
+[filament_switch_sensor runout]
+switch_pin: ^PA3
+pause_on_runout: False
+```
+
+Restart the whole container with `wslc restart --timeout 15 pf3434-reference`,
+then wait for `/server/info` to report `klippy_state: ready`.
+`FIRMWARE_RESTART` alone failed to reset this simulated MCU during the capture;
+the full container restart succeeded. Do not run the image's startup script
+directly in a shared WSL distribution: it replaces `/bin/systemctl` inside its
+container environment.
+
+The REST query requested exactly the eight objects below. This is its captured
+result, retaining actual names, values and event time; unrelated printer/system
+objects were not requested:
+
+```json
+{
+  "result": {
+    "eventtime": 173.07767437,
+    "status": {
+      "temperature_sensor endstop": {
+        "temperature": 0.0,
+        "measured_min_temp": 99999999.0,
+        "measured_max_temp": 0.0
+      },
+      "temperature_fan chamber_heater": {
+        "speed": 0.0, "rpm": 0.0, "temperature": 0.0, "target": 0.0
+      },
+      "heater_generic chamber": { "temperature": 0.0, "target": 0.0, "power": 0.0 },
+      "heater_fan heater_fan": { "speed": 0.0, "rpm": null },
+      "controller_fan controller_fan": { "speed": 0.0, "rpm": null },
+      "fan_generic auxiliary": { "speed": 0.0, "rpm": null },
+      "filament_switch_sensor runout": { "filament_detected": false, "enabled": true },
+      "filament_motion_sensor runout_sensor": { "filament_detected": false, "enabled": true }
+    }
+  }
+}
+```
+
+A JSON-RPC `printer.objects.subscribe` request with ID `3434` and
+`params.objects` mapping each of those eight names to `null` returned the same
+status field/value snapshot, with `result.eventtime: 173.328411139`.
+Each of these subsequent HTTP `/printer/gcode/script` commands returned
+`{"result":"ok"}`:
+
+```gcode
+SET_FAN_SPEED FAN=auxiliary SPEED=0.5
+SET_TEMPERATURE_FAN_TARGET TEMPERATURE_FAN=chamber_heater TARGET=40
+SET_HEATER_TEMPERATURE HEATER=chamber TARGET=50
+SET_FILAMENT_SENSOR SENSOR=runout ENABLE=0
+SET_FILAMENT_SENSOR SENSOR=runout_sensor ENABLE=0
+```
+
+The subscribed WebSocket then delivered this actual change-only notification:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "notify_status_update",
+  "params": [
+    {
+      "temperature_fan chamber_heater": { "target": 40.0 },
+      "heater_generic chamber": { "target": 50.0 },
+      "fan_generic auxiliary": { "speed": 0.5 },
+      "filament_switch_sensor runout": { "enabled": false },
+      "filament_motion_sensor runout_sensor": {
+        "filament_detected": true, "enabled": false
+      }
+    },
+    173.578527187
+  ]
+}
+```
+
+A temporary native-emulator comparison matched **all eight exact field sets and
+JSON value kinds**, plus all five requested target/speed/enabled results. Only
+three configured instance names were mapped explicitly:
+`heater_fan heater_fan` to `heater_fan hotend`,
+`controller_fan controller_fan` to `controller_fan electronics`, and
+`filament_motion_sensor runout_sensor` to `filament_motion_sensor encoder`.
+No field names, types, units or captured values were rewritten.
+
+This establishes a bounded wire-contract comparison, not full firmware
+conformance. Zero temperatures and the `99999999` minimum are the live
+simulator's startup readings/sentinel, not physical ambient measurements.
+The motion sensor's concurrent detection change is not evidence that disabling
+a sensor causes insertion; pulse timing is not modeled by the emulator.
+Live monotonic event times and readings are deliberately not equated with the
+emulator's deterministic clock and chosen fixture readings.
+Turn off temporary heater/fan targets, then remove only your reference container:
+
+```powershell
+wslc stop --time 15 pf3434-reference
+wslc rm pf3434-reference
+```
+
+The capture's reference container and native comparison process were stopped,
+and the reference container was removed. No reference service remains running.
+
+#### Deterministic emulator examples
+
+The following chosen readings are **source-derived emulator fixtures**, not the
+live capture above. `KlipperSensorTests` exercises these shapes and notifications
+against the emulator.
+
+Representative emulator object-query result:
+
+```json
+{
+  "result": {
+    "eventtime": 1704067200,
+    "status": {
+      "temperature_sensor endstop": {
+        "temperature": 23.4,
+        "measured_min_temp": 23.4,
+        "measured_max_temp": 23.4
+      },
+      "temperature_fan chamber_heater": {
+        "temperature": 24, "target": 0, "speed": 0, "rpm": 0
+      },
+      "heater_generic chamber": { "temperature": 24, "target": 0, "power": 0 },
+      "heater_fan hotend": { "speed": 0, "rpm": null },
+      "controller_fan electronics": { "speed": 0, "rpm": null },
+      "fan_generic auxiliary": { "speed": 0, "rpm": null },
+      "filament_switch_sensor runout": { "enabled": true, "filament_detected": true },
+      "filament_motion_sensor encoder": { "enabled": true, "filament_detected": true }
+    }
+  }
+}
+```
+
+After advancing virtual time by five seconds and injecting the temperature-fan
+readings above, a subscriber to that object receives:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "notify_status_update",
+  "params": [
+    { "temperature_fan chamber_heater": { "temperature": 35, "speed": 0.7, "rpm": 2100 } },
+    1704067205
+  ]
+}
+```
+
+This coverage does **not** establish vendor-fork object support. Humidity,
+pressure and gas are not fabricated on the stock thermistor
+`temperature_sensor` object; environmental sensor drivers and vendor extensions
+need their own evidence/fixtures. Existing MMU/vendor fixtures are separate and
+are not validated by this reference.
+
+Focused native validation (from `src`, no Docker required):
+
+```powershell
+dotnet build .\tests\Farm.Moonraker.Emulator.Tests\Farm.Moonraker.Emulator.Tests.csproj -c Debug
+dotnet test .\tests\Farm.Moonraker.Emulator.Tests\Farm.Moonraker.Emulator.Tests.csproj -c Debug --no-build --settings .\vstest.runsettings --blame-hang --blame-hang-timeout 2m --blame-hang-dump-type mini
+```
+
+The focused project covers all eight initial/query/notification shapes,
+field filters, change-only deltas, invalid/atomic mutations, reset/isolation,
+virtual time and existing fault rules. Its real subscription-service integration
+also proves a sensor-only temperature delta reaches both cache and lowercase
+`printerupdated` broadcasts with Celsius units and bounded writable descriptors.
+
 ## Scenarios, virtual time, and fault controls
 
 | Scenario | Initial observable state |
@@ -226,6 +507,7 @@ The validation-only control API is available only when
 | `POST /__emulator/reset` | Restore the complete configured fixture baseline: scenario, virtual time, files, history/totals, Spoolman, MMU, and faults |
 | `POST /__emulator/printer/scenario` | Switch to `Ready`, `Printing`, `Paused`, or `Shutdown` |
 | `GET/POST /__emulator/printer/mmu` | Read or select `None`, `HappyHare`, `Afc`, `Qidibox`, or `SnapmakerU1` |
+| `POST /__emulator/printer/sensor` | Inject validated standard Klipper readings and broadcast changed subscribed fields |
 | `GET /__emulator/time` | Read virtual time |
 | `POST /__emulator/time/advance` | Advance virtual time by `{ "seconds": number }` |
 | `POST /__emulator/time/reset` | Reset virtual time |

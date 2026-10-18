@@ -22,7 +22,8 @@ public partial class MoonrakerClient(
     ILogger<MoonrakerClient> logger,
     BackendTimeoutSettings timeouts,
     ISnapmakerU1CameraMonitorManager? snapmakerU1CameraMonitorManager = null,
-    HttpClient? thumbnailHttp = null) : PrinterClientBase, IMoonrakerClient,
+    HttpClient? thumbnailHttp = null,
+    TimeProvider? timeProvider = null) : PrinterClientBase, IMoonrakerClient,
     ISupportsFileDownload,
     ISupportsCurrentJobThumbnail,
     ISupportsFileList,
@@ -71,6 +72,7 @@ public partial class MoonrakerClient(
     private readonly HttpClient _thumbnailHttp = thumbnailHttp ?? http;
     private readonly ILogger<MoonrakerClient> _logger = logger;
     private readonly BackendTimeoutSettings _timeouts = timeouts;
+    private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
     private readonly ISnapmakerU1CameraMonitorManager _snapmakerU1CameraMonitorManager =
         snapmakerU1CameraMonitorManager ?? new SnapmakerU1CameraMonitorManager(new MoonrakerJsonRpcClient());
 
@@ -3307,17 +3309,17 @@ public partial class MoonrakerClient(
     {
         try
         {
-            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-
             // Read-only proxy calls (GET) back fleet-wide status/readiness projections
             // (filament coverage, attention runout) that must stay bounded even when a
             // printer is powered off but still holding its network address and
             // black-holing the connection instead of refusing it (#2118). Only
             // state-mutating verbs (POST/PATCH/PUT/DELETE) legitimately need the longer
             // print-control budget, since Spoolman may be persisting/validating data.
-            cts.CancelAfter(string.Equals(method, "GET", StringComparison.OrdinalIgnoreCase)
+            TimeSpan requestTimeout = string.Equals(method, "GET", StringComparison.OrdinalIgnoreCase)
                 ? _timeouts.StatusPollTimeout
-                : _timeouts.PrintControlTimeout);
+                : _timeouts.PrintControlTimeout;
+            using CancellationTokenSource timeout = new(requestTimeout, _timeProvider);
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct, timeout.Token);
             Uri baseUri = new(baseUrl);
             Uri uri = new(baseUri, "server/spoolman/proxy");
 

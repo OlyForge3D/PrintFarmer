@@ -112,6 +112,7 @@ public sealed class WsSubscription
 public sealed class PrinterAggregate
 {
     private readonly object _stateLock = new();
+    private readonly KlipperSensorFixture _sensors = new();
 
     public required string Id { get; init; }
 
@@ -200,6 +201,7 @@ public sealed class PrinterAggregate
             BedTarget = 0;
             ExtruderTemperature = 23.4;
             BedTemperature = 22.1;
+            _sensors.Reset();
             Position = [120.0, 120.0, 5.0, 0.0];
             HomedAxes = "xyz";
             AbsoluteCoordinates = true;
@@ -504,6 +506,42 @@ public sealed class PrinterAggregate
                 // real Moonraker's 503 "Klippy is not connected" behavior.
                 RequireKlippyReady();
 
+                if (trimmed.StartsWith("SET_HEATER_TEMPERATURE ", StringComparison.OrdinalIgnoreCase))
+                {
+                    Dictionary<string, string> parameters = KlipperSensorFixture.ParseParameters(trimmed);
+                    if (parameters.Count != 2 || !parameters.TryGetValue("HEATER", out string? heater) ||
+                        !parameters.TryGetValue("TARGET", out string? targetText))
+                    {
+                        throw new GcodeParameterException("Expected exactly HEATER and TARGET parameters.");
+                    }
+
+                    if (heater is "extruder" or "heater_bed")
+                    {
+                        if (!double.TryParse(targetText, System.Globalization.NumberStyles.Float,
+                                System.Globalization.CultureInfo.InvariantCulture, out double target) ||
+                            !double.IsFinite(target) || target < 0)
+                        {
+                            throw new GcodeParameterException("Expected a finite, non-negative heater target.");
+                        }
+
+                        if (heater == "extruder")
+                        {
+                            ExtruderTarget = target;
+                        }
+                        else
+                        {
+                            BedTarget = target;
+                        }
+
+                        continue;
+                    }
+                }
+
+                if (_sensors.TrySendGcode(trimmed))
+                {
+                    continue;
+                }
+
                 if (trimmed.StartsWith("EXCLUDE_OBJECT", StringComparison.OrdinalIgnoreCase))
                 {
                     ApplyExcludeObjectLocked(trimmed);
@@ -650,6 +688,7 @@ public sealed class PrinterAggregate
 
     private void ApplyFirmwareRestartLocked()
     {
+        _sensors.Reset();
         KlippyState = "ready";
         KlippyStateMessage = "Printer is ready and A okay!";
         PrintState = "standby";
@@ -981,6 +1020,15 @@ public sealed class PrinterAggregate
         return space > 0 ? rest[..space] : rest;
     }
 
+    /// <summary>Injects physical sensor readings atomically through the opt-in test-control API.</summary>
+    public void UpdateSensor(string objectName, IReadOnlyDictionary<string, JsonElement> fields)
+    {
+        lock (_stateLock)
+        {
+            _sensors.Update(objectName, fields);
+        }
+    }
+
     /// <summary>Builds the full current Klipper object snapshot as plain, JSON-serializable dictionaries.</summary>
     public Dictionary<string, object> BuildObjectsSnapshot()
     {
@@ -1175,6 +1223,7 @@ public sealed class PrinterAggregate
                 };
             }
 
+            _sensors.AddTo(objects);
             return objects;
         }
     }

@@ -83,6 +83,7 @@ public sealed class RealMoonrakerSubscriptionServiceIntegrationTests : IClassFix
         var clientProxy = new Mock<IClientProxy>();
         PrinterStatusUpdate? latestBroadcast = null;
         var printingBroadcast = new TaskCompletionSource<PrinterStatusUpdate>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var sensorBroadcast = new TaskCompletionSource<PrinterStatusUpdate>(TaskCreationOptions.RunContinuationsAsynchronously);
         var hubClients = new Mock<IHubClients>();
         hubClients.Setup(c => c.Group(It.IsAny<string>())).Returns(clientProxy.Object);
         clientProxy
@@ -96,6 +97,12 @@ public sealed class RealMoonrakerSubscriptionServiceIntegrationTests : IClassFix
                 if (latestBroadcast.CurrentJobThumbnailUrl is not null)
                 {
                     printingBroadcast.TrySetResult(latestBroadcast);
+                }
+
+                if (latestBroadcast.Sensors.Any(sensor => sensor.Id == "temperature_sensor endstop" &&
+                    sensor.Readings.Any(reading => reading.Value.Number is 31.5)))
+                {
+                    sensorBroadcast.TrySetResult(latestBroadcast);
                 }
             })
             .Returns(Task.CompletedTask);
@@ -127,6 +134,16 @@ public sealed class RealMoonrakerSubscriptionServiceIntegrationTests : IClassFix
 
         PrinterStatusDto initial = await firstUpdate.Task.WaitAsync(TimeSpan.FromSeconds(15));
         initial.Id.Should().Be(printer.Id);
+        initial.Sensors.Select(sensor => sensor.Id).Should().Contain(
+        [
+            "temperature_sensor endstop", "temperature_fan chamber_heater", "heater_generic chamber",
+            "heater_fan hotend", "controller_fan electronics", "fan_generic auxiliary",
+            "filament_switch_sensor runout", "filament_motion_sensor encoder",
+        ]);
+        initial.Sensors.Single(sensor => sensor.Id == "heater_generic chamber").Writable
+            .Should().ContainSingle(writable => writable.Quantity == PrinterSensorQuantity.TargetTemperature && writable.Max == 100);
+        initial.Sensors.Where(sensor => sensor.Id is "heater_fan hotend" or "controller_fan electronics")
+            .Should().OnlyContain(sensor => sensor.Writable.Count == 0);
 
         // The initial cache write proves server.connection.identify, printer.objects.list,
         // and printer.objects.subscribe all round-tripped over the real WebSocket and the
@@ -167,6 +184,29 @@ public sealed class RealMoonrakerSubscriptionServiceIntegrationTests : IClassFix
         Assert.Equal(liveJob.ThumbnailUrl, updateBroadcast.ThumbnailUrl);
         Assert.Equal(liveJob.ThumbnailCacheIdentity, updateBroadcast.ThumbnailCacheIdentity);
         Assert.NotNull(liveJob.ThumbnailCacheIdentity);
+
+        var sensorUpdate = new TaskCompletionSource<PrinterStatusDto>(TaskCreationOptions.RunContinuationsAsynchronously);
+        statusCacheWriter
+            .Setup(writer => writer.UpdateStatus(It.IsAny<PrinterStatusDto>(), It.IsAny<long?>()))
+            .Callback<PrinterStatusDto, long?>((dto, _) =>
+            {
+                if (dto.Sensors.Any(sensor => sensor.Id == "temperature_sensor endstop" &&
+                    sensor.Readings.Any(reading => reading.Value.Number is 31.5)))
+                {
+                    sensorUpdate.TrySetResult(dto);
+                }
+            });
+        using HttpResponseMessage sensorReading = await _host.ControlClient.PostAsync(
+            "/__emulator/printer/sensor",
+            TestRequests.Json("""{"objectName":"temperature_sensor endstop","fields":{"temperature":31.5}}"""));
+        sensorReading.EnsureSuccessStatusCode();
+        PrinterStatusDto sensorStatus = await sensorUpdate.Task.WaitAsync(TimeSpan.FromSeconds(15));
+        PrinterStatusUpdate sensorSignal = await sensorBroadcast.Task.WaitAsync(TimeSpan.FromSeconds(15));
+        sensorStatus.Sensors.Single(sensor => sensor.Id == "temperature_sensor endstop").Readings
+            .Should().ContainSingle(reading => reading.Quantity == PrinterSensorQuantity.Temperature &&
+                reading.Unit == PrinterSensorUnit.Celsius && reading.Value.Number == 31.5);
+        sensorSignal.Sensors.Single(sensor => sensor.Id == "temperature_sensor endstop").Readings
+            .Should().ContainSingle(reading => reading.Quantity == PrinterSensorQuantity.Temperature && reading.Value.Number == 31.5);
 
         var shutdownUpdate = new TaskCompletionSource<PrinterStatusDto>(TaskCreationOptions.RunContinuationsAsynchronously);
         statusCacheWriter

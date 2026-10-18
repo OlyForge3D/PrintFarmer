@@ -20,6 +20,7 @@ A **production-ready** React TypeScript dashboard for managing multiple 3D print
 | **Use the API** | [API Reference](./docs/API.md) |
 | **Explore features** | [Features Guide](./docs/FEATURES.md) |
 | **Contribute code** | [Development Guide](./docs/DEVELOPMENT.md) |
+| **Test Moonraker sensors without hardware** | [Deterministic Klipper objects and emulator tests](./docs/MOONRAKER_EMULATOR_VALIDATION.md#standard-klipper-sensor-fixtures) |
 | **Run Ralph (Squad work monitor)** | [Ralph reference](./.github/ralph-reference.md#how-ralph-runs-here) |
 | **Fix an issue** | [Troubleshooting Guide](./docs/TROUBLESHOOTING.md) |
 | **Browse all docs** | [Documentation Index](./docs/INDEX.md) |
