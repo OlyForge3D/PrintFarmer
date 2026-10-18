@@ -18,7 +18,7 @@ export function PrinterTroubleshootingButton({ printer }: PrinterTroubleshooting
         type="button"
         variant="ghost"
         size="sm"
-        className="ml-auto h-11 w-11 shrink-0 p-0 text-pf-warning enabled:hover:text-pf-text-primary sm:h-8 sm:w-8"
+        className="ml-auto h-11 w-11 shrink-0 p-0 text-pf-warning-text enabled:hover:text-pf-text-primary sm:h-8 sm:w-8"
         title="Troubleshoot offline printer"
         aria-label={`Open troubleshooting for ${printer.name}`}
         aria-haspopup="dialog"
