@@ -49,17 +49,17 @@ typography:
     lineHeight: 1.25
     letterSpacing: "-0.01em"
   title:
-    fontFamily: "'IBM Plex Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif"
+    fontFamily: "'Inter', 'IBM Plex Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif"
     fontSize: "1.125rem"
     fontWeight: 500
     lineHeight: 1.45
   body:
-    fontFamily: "'IBM Plex Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif"
+    fontFamily: "'Inter', 'IBM Plex Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif"
     fontSize: "0.875rem"
     fontWeight: 400
     lineHeight: 1.45
   label:
-    fontFamily: "'IBM Plex Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif"
+    fontFamily: "'Inter', 'IBM Plex Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif"
     fontSize: "0.625rem"
     fontWeight: 600
     lineHeight: 1.4
@@ -146,7 +146,7 @@ PrintFarmer is hardware control software, not a SaaS dashboard. Every surface wo
 
 The look is dark first, because shops and farms are dim. It is dense but ordered, and built from crisp hairline borders, tight corners, and one precise teal signal.
 
-Eight themes ship over one CSS variable contract: Mission Control (the default), Workshop Daylight, Terminal, Schematic, Firmware, Precision, Harvest, and Industrial Warmth. The themes change colors only. Structure, type, spacing, radius, and motion stay identical, so components reference semantic tokens (`--pf-text-primary`) and never literal hex values.
+Eight themes ship over one CSS variable contract: Mission Control (the default), Workshop Daylight, Terminal, Schematic, Firmware, Precision, Harvest, and Industrial Warmth. The themes change colors and the body font. Structure, the type scale, spacing, radius, and motion stay identical, so components reference semantic tokens (`--pf-text-primary`) and never literal hex values.
 
 **Key Characteristics:**
 - Dark slate-navy substrate with a single precision-teal accent.
@@ -184,10 +184,10 @@ Status colors always come as a `{bg, text, border}` triple: online, printing, pa
 ## Typography
 
 **Display Font:** Space Grotesk (fallback: IBM Plex Sans)
-**Body Font:** IBM Plex Sans (fallback: system-ui)
+**Body Font:** Inter in Mission Control (fallback: IBM Plex Sans, system-ui). Each theme sets its own body font; IBM Plex Sans is the shared `--pf-font-sans` fallback.
 **Data Font:** JetBrains Mono (fallback: SF Mono, Cascadia Code)
 
-**Character:** a mechanical geometric grotesque for headings over a technical humanist sans for UI. A purpose-built mono face handles every reading an operator compares.
+**Character:** a mechanical geometric grotesque for headings over a neutral, highly legible sans for UI. A purpose-built mono face handles every reading an operator compares.
 
 ### Hierarchy
 - **Display** (700, 30px, 1.2, -0.015em): dashboard headlines.
@@ -280,4 +280,4 @@ The fleet unit. Primitives: `features/printers/components/CompactPrinterCard.tsx
 - **Don't** exceed an 8px radius on rectangles, or use a pill shape outside the sanctioned list.
 - **Don't** put gradients on cards or surfaces.
 - **Don't** use uppercase outside badges, status pills, and column headers.
-- **Don't** default to Inter, Roboto, or a bare system stack as the brand face.
+- **Don't** hard-code a `font-family` in components. Body fonts are per-theme, so use the inherited body face or the `--pf-font-*` tokens.
