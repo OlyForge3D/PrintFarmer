@@ -40,6 +40,8 @@ export const PrinterImage: React.FC<PrinterImageProps> = ({
       src={imageUrl} 
       alt={alt}
       className={className}
+      loading="lazy"
+      decoding="async"
       onError={handleError}
     />
   );

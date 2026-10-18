@@ -280,7 +280,7 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
                 manufacturerName={printer.manufacturerName}
                 modelName={printer.modelName}
                 motionType={printer.motionType}
-                alt={[printer.manufacturerName, printer.modelName].filter(Boolean).join(' ') || `${printer.name} printer`}
+                alt=""
                 className="h-full w-full object-contain p-1.5 drop-shadow-[0_4px_6px_rgba(0,0,0,0.45)]"
               />
             </div>

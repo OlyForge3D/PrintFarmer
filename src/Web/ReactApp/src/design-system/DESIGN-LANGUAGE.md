@@ -62,12 +62,12 @@ All of these load from the single Google Fonts link in `index.html`. Add any new
 
 ### Font Loading
 
-All three faces ship from Google Fonts with subsetted Latin glyphs and only the weights we use, served as variable fonts where possible:
+The three base faces and every per-theme body font ship from one Google Fonts request in `index.html`, limited to the weights we use. Keep this example in sync with that file:
 
 ```html
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;700&family=JetBrains+Mono:wght@400;500&family=Inter:wght@400;500;600;700&family=Nunito+Sans:wght@400;500;600;700&family=DM+Mono:wght@400;500&family=Rajdhani:wght@500;600;700&family=Chakra+Petch:wght@400;500;600;700&family=Merriweather+Sans:wght@400;500;600;700&display=swap" />
 ```
 
 `display=swap` is mandatory — operators must see content immediately even on a cold load. The fallback stacks above ensure layout shift is minimal.

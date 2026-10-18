@@ -156,6 +156,12 @@ function makePrinter(overrides: Partial<Printer> = {}): Printer {
   } as Printer;
 }
 
+function getTileImage(): HTMLImageElement {
+  const img = screen.getByTestId('compact-printer-image').querySelector('img');
+  if (!img) throw new Error('printer image not rendered');
+  return img;
+}
+
 describe('CompactPrinterCard printer image', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -171,7 +177,8 @@ describe('CompactPrinterCard printer image', () => {
       { wrapper: createWrapper() },
     );
 
-    const image = await screen.findByRole('img', { name: 'Prusa MK4' });
+    await screen.findByTestId('compact-printer-image');
+    const image = getTileImage();
     expect(image).toHaveAttribute('src', '/covers/Prusa/MK4.png');
     expect(screen.getByText('MK4')).toBeInTheDocument();
     expect(screen.getByText('Prusa')).toBeInTheDocument();
@@ -179,6 +186,20 @@ describe('CompactPrinterCard printer image', () => {
     const imageRow = screen.getByTestId('compact-printer-image');
     const progress = screen.getByTestId('print-progress');
     expect(imageRow.compareDocumentPosition(progress) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('marks the image decorative because the identity is already rendered as text', async () => {
+    render(
+      <CompactPrinterCard
+        printer={makePrinter({ manufacturerName: 'Prusa', modelName: 'MK4' })}
+        onExpand={vi.fn()}
+      />,
+      { wrapper: createWrapper() },
+    );
+
+    await screen.findByTestId('compact-printer-image');
+    expect(getTileImage()).toHaveAttribute('alt', '');
+    expect(screen.queryByRole('img', { name: /Prusa|MK4/ })).not.toBeInTheDocument();
   });
 
   it('falls back to the generic motion-type image when the cover fails to load', async () => {
@@ -190,18 +211,41 @@ describe('CompactPrinterCard printer image', () => {
       { wrapper: createWrapper() },
     );
 
-    const image = await screen.findByRole('img', { name: 'Prusa MK4' });
-    fireEvent.error(image);
-    expect(image).toHaveAttribute('src', '/assets/printers/generic-corexy.svg');
+    await screen.findByTestId('compact-printer-image');
+    fireEvent.error(getTileImage());
+    expect(getTileImage()).toHaveAttribute('src', '/assets/printers/generic-corexy.svg');
   });
 
-  it('uses the generic image and printer name when no catalog model is linked', async () => {
+  it('retries the cover image after a failed load when the printer model changes', async () => {
+    const { rerender } = render(
+      <CompactPrinterCard
+        printer={makePrinter({ manufacturerName: 'Prusa', modelName: 'MK4' })}
+        onExpand={vi.fn()}
+      />,
+      { wrapper: createWrapper() },
+    );
+
+    await screen.findByTestId('compact-printer-image');
+    fireEvent.error(getTileImage());
+    expect(getTileImage()).toHaveAttribute('src', '/assets/printers/generic-corexy.svg');
+
+    rerender(
+      <CompactPrinterCard
+        printer={makePrinter({ manufacturerName: 'Bambu Lab', modelName: 'P1S' })}
+        onExpand={vi.fn()}
+      />,
+    );
+
+    expect(getTileImage()).toHaveAttribute('src', '/covers/Bambu Lab/P1S.png');
+  });
+
+  it('uses the generic image when no catalog model is linked', async () => {
     render(
       <CompactPrinterCard printer={makePrinter()} onExpand={vi.fn()} />,
       { wrapper: createWrapper() },
     );
 
-    const image = await screen.findByRole('img', { name: 'Test Printer printer' });
-    expect(image).toHaveAttribute('src', '/assets/printers/generic-corexy.svg');
+    await screen.findByTestId('compact-printer-image');
+    expect(getTileImage()).toHaveAttribute('src', '/assets/printers/generic-corexy.svg');
   });
 });
