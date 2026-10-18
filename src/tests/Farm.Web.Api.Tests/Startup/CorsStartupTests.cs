@@ -1,7 +1,10 @@
-﻿using Farm.Web.Api.Startup;
+﻿using Farm.Modules.PrintQueue.Controllers;
+using Farm.Web.Api.Startup;
 using Microsoft.AspNetCore.Cors.Infrastructure;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using Microsoft.Net.Http.Headers;
 using Xunit;
 
 namespace Farm.Web.Api.Tests.Startup;
@@ -33,6 +36,69 @@ public class CorsStartupTests
         Assert.Contains("Location", policy.ExposedHeaders);
         Assert.False(policy.AllowAnyOrigin);
         Assert.False(policy.AllowAnyHeader);
+    }
+
+    [Fact]
+    public async Task QueuePagination_ExposesHasMoreHeaderProducedByQueueController()
+    {
+        // Issue #3424: the queue endpoint emits X-Has-More, but browsers hide non-safelisted
+        // response headers from cross-origin scripts unless the policy exposes them.
+        CorsPolicy policy = await GetDefaultPolicyAsync();
+
+        Assert.Contains("X-Has-More", policy.ExposedHeaders);
+        Assert.Contains(JobQueueAnalyticsController.HasMoreHeader, policy.ExposedHeaders, StringComparer.OrdinalIgnoreCase);
+        Assert.DoesNotContain("*", policy.ExposedHeaders);
+        Assert.Equal(new[] { "ETag", "Location", "X-Has-More" }, policy.ExposedHeaders.Order(StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public async Task AllowedOriginActualResponse_ExposesPaginationHeaderWithCredentials()
+    {
+        CorsPolicy policy = await GetDefaultPolicyAsync();
+        HttpResponse response = EvaluateActualRequest(policy, "http://localhost:3000");
+
+        Assert.Equal("http://localhost:3000", response.Headers.AccessControlAllowOrigin.ToString());
+        Assert.Equal("true", response.Headers.AccessControlAllowCredentials.ToString());
+        string[] exposed = response.Headers.AccessControlExposeHeaders.ToString()
+            .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        Assert.Contains("X-Has-More", exposed);
+        Assert.Contains("ETag", exposed);
+        Assert.Contains("Location", exposed);
+    }
+
+    [Fact]
+    public async Task DisallowedOriginActualResponse_ReceivesNoCorsHeaders()
+    {
+        CorsPolicy policy = await GetDefaultPolicyAsync();
+        HttpResponse response = EvaluateActualRequest(policy, "https://attacker.example");
+
+        Assert.False(response.Headers.ContainsKey(HeaderNames.AccessControlAllowOrigin));
+        Assert.False(response.Headers.ContainsKey(HeaderNames.AccessControlAllowCredentials));
+        Assert.False(response.Headers.ContainsKey(HeaderNames.AccessControlExposeHeaders));
+    }
+
+    private static async Task<CorsPolicy> GetDefaultPolicyAsync()
+    {
+        var services = new ServiceCollection();
+        services.AddPrintFarmerCors();
+        await using ServiceProvider provider = services.BuildServiceProvider();
+        return Assert.IsType<CorsPolicy>(provider.GetRequiredService<IOptions<CorsOptions>>().Value.GetPolicy("Default"));
+    }
+
+    private static HttpResponse EvaluateActualRequest(CorsPolicy policy, string origin)
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddCors();
+        using ServiceProvider provider = services.BuildServiceProvider();
+        ICorsService corsService = provider.GetRequiredService<ICorsService>();
+
+        var context = new DefaultHttpContext();
+        context.Request.Method = HttpMethods.Get;
+        context.Request.Headers.Origin = origin;
+        CorsResult result = corsService.EvaluatePolicy(context, policy);
+        corsService.ApplyResult(result, context.Response);
+        return context.Response;
     }
 
     [Fact]
