@@ -164,8 +164,8 @@
       "shards": [
         {
           "name": "notifications",
-          "namespacePrefixes": ["Services/Notifications", "Services/Attention", "Services/ShiftPlan"],
-          "filter": "FullyQualifiedName~Farm.Infrastructure.Tests.Services.Notifications.|FullyQualifiedName~Farm.Infrastructure.Tests.Services.Attention.|FullyQualifiedName~Farm.Infrastructure.Tests.Services.ShiftPlan."
+          "namespacePrefixes": ["Services/Notifications", "Services/Attention", "Services/ShiftPlan", "Services/Webhooks"],
+          "filter": "FullyQualifiedName~Farm.Infrastructure.Tests.Services.Notifications.|FullyQualifiedName~Farm.Infrastructure.Tests.Services.Attention.|FullyQualifiedName~Farm.Infrastructure.Tests.Services.ShiftPlan.|FullyQualifiedName~Farm.Infrastructure.Tests.Services.Webhooks."
         },
         {
           "name": "dispatch",

@@ -87,6 +87,7 @@ public static class FeatureServicesStartup
         });
 
         // Webhooks (event delivery via HTTP POST to external consumers)
+        services.AddSingleton<Farm.Infrastructure.Services.Webhooks.WebhookMetrics>();
         services.AddSingleton<Farm.Infrastructure.Services.Webhooks.WebhookService>();
         services.AddSingleton<Farm.Infrastructure.Services.Webhooks.IWebhookService>(sp =>
             sp.GetRequiredService<Farm.Infrastructure.Services.Webhooks.WebhookService>());
