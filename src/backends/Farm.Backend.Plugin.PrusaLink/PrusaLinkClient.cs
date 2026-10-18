@@ -27,7 +27,8 @@ public partial class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
     ISupportsFilamentUsageQuery,
     ISupportsHistory,
     ISupportsHistoryThumbnail,
-    ISupportsCurrentJobThumbnail
+    ISupportsCurrentJobThumbnail,
+    ISupportsSensorTelemetry
 {
     [SuppressMessage(
         "IDisposableAnalyzers.Correctness",
@@ -161,7 +162,10 @@ public partial class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
                 status?.Printer?.AxisZ,
                 job?.TimeRemaining,
                 status?.Printer?.Speed,
-                ThumbnailCacheIdentity: CreateThumbnailCacheIdentity(job));
+                ThumbnailCacheIdentity: CreateThumbnailCacheIdentity(job))
+            {
+                Sensors = status is null ? null : PrusaLinkSensorMapper.Map(status.Printer),
+            };
         }
         catch (Exception ex)
         {

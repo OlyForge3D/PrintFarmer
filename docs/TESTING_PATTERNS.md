@@ -2,6 +2,38 @@
 
 This document captures common patterns and best practices discovered during test development for PrintFarmer.
 
+## TestEmulator sensor fixtures
+
+The in-process TestEmulator backend exposes seven stable sensor IDs through the
+shared status cache and lowercase `printerupdated` event. It is distinct from the
+external Moonraker protocol emulator.
+
+| ID | Readings and idle defaults | Writable quantity |
+|---|---|---|
+| `nozzle` | Temperature (ambient), target 0 C | None |
+| `bed` | Temperature (ambient), target 0 C | None |
+| `chamber` | Temperature 25 C, target 0 C | `TargetTemperature`: 0-60 C, step 1 |
+| `environment` | Humidity 40%, pressure 1013.25 hPa | None |
+| `filament` | `FilamentDetected`: true | None |
+| `fan_part` | PartCooling `FanSpeed`: 0% | `FanSpeed`: 0-100%, step 1 |
+| `fan_hotend` | Hotend `FanRpm`: 0 RPM | None |
+
+Register an `EmulatedPrinterState` with `TestEmulatorStateManager.Register` and
+use `http://testemulator-{printerId}` as the backend URL. In fixture code, set
+`ChamberTemp`, `Humidity`, `Pressure`, `FilamentDetected`, or `HotendFanRpm`
+directly; these are not extra production API controls. Exercise targeted writes
+through the existing sensor-control contract with `chamber` or `fan_part`.
+Read-only, unknown, out-of-range and unavailable targets are rejected.
+
+Keep the state `Idle` for deterministic sensor-only changes: mutate one fixture
+reading between polling ticks while legacy nozzle/bed fields remain unchanged.
+Identical snapshots are suppressed; changed readings are broadcast without UI
+polling. Set `State` to `Offline` for a tick to mark all sensors unavailable, then
+restore `Idle` to publish the current readings as available again. Sensor fixtures
+do not automatically heat the chamber or randomize environmental readings.
+`TestEmulatorSensorTelemetryTests` demonstrates these transitions and control
+validation for React/iOS e2e fixture authors.
+
 ## Deferred integration-host database provisioning
 
 `KestrelCalibrationApiHost` provisions both SQLite contexts directly, using their

@@ -6,6 +6,7 @@ using Farm.Backend.Plugin.FlashForge;
 using Farm.Backend.Plugin.Moonraker;
 using Farm.Backend.Plugin.OctoPrint;
 using Farm.Backend.Plugin.PrusaLink;
+using Farm.Backend.Plugin.Sdcp;
 using Farm.Infrastructure.Contracts.Printers;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Printers;
@@ -21,19 +22,20 @@ namespace Farm.Infrastructure.Tests.Services.Printers;
 public class PrinterBackendCapabilitiesServiceTests
 {
     [Theory]
-    [InlineData(PrinterBackend.Moonraker, true, true, true, true)]
-    [InlineData(PrinterBackend.OctoPrint, true, true, true, false)]
-    [InlineData(PrinterBackend.PrusaLink, true, true, true, false)]
-    [InlineData(PrinterBackend.FlashForge, false, false, true, false)]
-    [InlineData(PrinterBackend.SDCP, false, false, false, false)]
-    [InlineData(PrinterBackend.Unknown, false, false, false, false)]
-    [InlineData((PrinterBackend)999, false, false, false, false)]
+    [InlineData(PrinterBackend.Moonraker, true, true, true, true, false)]
+    [InlineData(PrinterBackend.OctoPrint, true, true, true, false, true)]
+    [InlineData(PrinterBackend.PrusaLink, true, true, true, false, true)]
+    [InlineData(PrinterBackend.FlashForge, false, false, true, false, true)]
+    [InlineData(PrinterBackend.SDCP, false, false, false, false, true)]
+    [InlineData(PrinterBackend.Unknown, false, false, false, false, false)]
+    [InlineData((PrinterBackend)999, false, false, false, false, false)]
     public async Task GetByPrinterIdAsync_ConcreteBackend_ReportsPluginDeclaredControls(
         PrinterBackend backend,
         bool homing,
         bool homingZ,
         bool heaters,
-        bool gcode)
+        bool gcode,
+        bool sensorTelemetry)
     {
         using var http = new HttpClient();
         IBackendClient client = backend switch
@@ -44,6 +46,8 @@ public class PrinterBackendCapabilitiesServiceTests
             PrinterBackend.PrusaLink => new PrusaLinkClient(http),
             PrinterBackend.FlashForge => new FlashForgeClient(
                 NullLogger<FlashForgeClient>.Instance, new BackendTimeoutSettings()),
+            PrinterBackend.SDCP => new SdcpClient(
+                http, NullLogger<SdcpClient>.Instance, new BackendTimeoutSettings()),
             _ => Mock.Of<IBackendClient>(),
         };
         var clients = new Mock<IBackendClientFactory>();
@@ -62,7 +66,7 @@ public class PrinterBackendCapabilitiesServiceTests
         var repo = new Mock<IPrintersRepository>();
         repo.Setup(repository => repository.FindByIdAsync(printer.Id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(printer);
-        var service = new PrinterBackendCapabilitiesService(repo.Object, capabilities);
+        var service = new PrinterBackendCapabilitiesService(repo.Object, capabilities, clients.Object);
 
         PrinterBackendCapabilitiesDto dto = Assert.IsType<PrinterBackendCapabilitiesDto>(
             await service.GetByPrinterIdAsync(printer.Id, CancellationToken.None));
@@ -82,7 +86,7 @@ public class PrinterBackendCapabilitiesServiceTests
         Assert.False(dto.SupportsFilamentLoad);
         Assert.False(dto.SupportsFilamentUnload);
         Assert.False(dto.SupportsFilamentChange);
-        Assert.False(dto.SupportsSensorTelemetry);
+        Assert.Equal(sensorTelemetry, dto.SupportsSensorTelemetry);
         Assert.False(dto.SupportsSensorControl);
         Assert.Equal(
             VerifiedSafetyDiscoveryState.Unavailable,
