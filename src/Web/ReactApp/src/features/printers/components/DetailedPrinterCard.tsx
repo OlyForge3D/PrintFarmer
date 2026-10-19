@@ -634,10 +634,10 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
             {(printer.modelName || printer.manufacturerName) && (
               <div className="min-w-0 pb-0.5 leading-tight">
                 {printer.modelName && (
-                  <p className="truncate text-sm font-medium text-pf-text-primary">{printer.modelName}</p>
+                  <p className="truncate text-sm font-medium text-pf-text-primary" title={printer.modelName}>{printer.modelName}</p>
                 )}
                 {printer.manufacturerName && (
-                  <p className="truncate text-xs text-pf-text-secondary">{printer.manufacturerName}</p>
+                  <p className="truncate text-xs text-pf-text-secondary" title={printer.manufacturerName}>{printer.manufacturerName}</p>
                 )}
               </div>
             )}
@@ -776,7 +776,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
 
       {/* Progress bar + ETA row — always occupy the same space (and say "No active
           print" when idle, like the compact card) so cards in a grid line up. */}
-      <div className="mb-4">
+      <div className="mb-1">
         <PrintProgressBar
           progress={printer.progress}
           jobName={printer.fileName ?? printer.jobName}
@@ -791,7 +791,6 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
         completionTimeUtc={isPrinting || isPaused ? printer.estimatedCompletionTimeUtc : undefined}
         printTimeLeftSeconds={isPrinting || isPaused ? printer.printTimeLeftSeconds : undefined}
         reserveSpace
-        className="mb-3"
       />
 
       {(isPrinting || isPaused) && (

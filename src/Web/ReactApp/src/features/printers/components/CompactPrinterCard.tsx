@@ -288,17 +288,17 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
             {(printer.modelName || printer.manufacturerName) && (
               <div className="min-w-0 pb-0.5 leading-tight">
                 {printer.modelName && (
-                  <p className="truncate text-sm font-medium text-pf-text-primary">{printer.modelName}</p>
+                  <p className="truncate text-sm font-medium text-pf-text-primary" title={printer.modelName}>{printer.modelName}</p>
                 )}
                 {printer.manufacturerName && (
-                  <p className="truncate text-xs text-pf-text-secondary">{printer.manufacturerName}</p>
+                  <p className="truncate text-xs text-pf-text-secondary" title={printer.manufacturerName}>{printer.manufacturerName}</p>
                 )}
               </div>
             )}
           </div>
 
           {/* Progress bar — always visible */}
-          <div className="mt-3 mb-3">
+          <div className="mt-3 mb-1">
             <PrintProgressBar
               progress={printer.progress}
               jobName={printer.fileName ?? printer.jobName}
