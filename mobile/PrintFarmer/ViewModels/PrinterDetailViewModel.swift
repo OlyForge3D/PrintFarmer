@@ -1113,14 +1113,14 @@ final class PrinterDetailViewModel {
         since revision: UInt64
     ) -> CanonicalSnapshot {
         guard liveSensorUpdateRevision != revision,
-              let livePrinter = printer else {
+              let liveSensors = printer?.sensors ?? statusDetail?.sensors else {
             return snapshot
         }
 
         var snapshot = snapshot
-        snapshot.printer.sensors = livePrinter.sensors
+        snapshot.printer.sensors = liveSensors
         if var liveStatusDetail = snapshot.statusDetail {
-            liveStatusDetail.sensors = statusDetail?.sensors ?? livePrinter.sensors
+            liveStatusDetail.sensors = liveSensors
             snapshot.statusDetail = liveStatusDetail
         }
         return snapshot

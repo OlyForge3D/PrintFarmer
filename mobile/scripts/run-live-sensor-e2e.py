@@ -88,8 +88,14 @@ def create_initial_admin(username, password):
     return result["token"]
 
 
-def seed_unknown_printer_model(database_path):
-    """Add the catalog prerequisite omitted when component YAML seeding fails."""
+def seed_unknown_printer_model(database_path, api_log_path):
+    """Seed only the disposable DB after the known SQLite nozzle-catalog seed failure.
+
+    Startup currently aborts component and printer-model YAML seeding when nozzle
+    insertion fails with a SQLite foreign-key violation in SeedNozzlesAsync. This
+    check makes the test prerequisite explicit and prevents a different seed failure
+    from being silently hidden by the E2E fixture.
+    """
     with sqlite3.connect(database_path) as database:
         manufacturer = database.execute(
             'SELECT "Id" FROM "Manufacturers" WHERE "Name" = ?',
@@ -105,6 +111,19 @@ def seed_unknown_printer_model(database_path):
         if exists:
             print("Unknown Model catalog prerequisite already exists.", flush=True)
             return
+
+        api_log = api_log_path.read_text(encoding="utf-8", errors="replace")
+        expected_seed_failure = (
+            "[SeedData] Error seeding component models",
+            "SQLite Error 19: 'FOREIGN KEY constraint failed'",
+            "DataSeedService.SeedNozzlesAsync",
+        )
+        missing_evidence = [marker for marker in expected_seed_failure if marker not in api_log]
+        if missing_evidence:
+            raise RuntimeError(
+                "The Unknown Model row is missing, and the API log does not show the known "
+                f"SQLite nozzle seed failure; missing evidence: {missing_evidence}"
+            )
 
         database.execute(
             """
@@ -123,8 +142,9 @@ def seed_unknown_printer_model(database_path):
         )
         database.commit()
         print(
-            "Inserted the Unknown Model reference row into the disposable SQLite database; "
-            "component YAML initialization failed before printer-model seeding.",
+            "Inserted the Unknown Model reference row into the disposable SQLite database "
+            "after confirming the known SQLite foreign-key failure in SeedNozzlesAsync. "
+            "This E2E run does not validate catalog seeding.",
             flush=True,
         )
 
@@ -483,7 +503,7 @@ def main():
         wait_http(f"{MOONRAKER_URL}/__emulator/printer", moonraker.process, moonraker.log_path)
         api.start()
         wait_http(f"{API_URL}/healthz", api.process, api.log_path)
-        seed_unknown_printer_model(run_dir / "farm.sqlite")
+        seed_unknown_printer_model(run_dir / "farm.sqlite", run_dir / "api.log")
         token = create_initial_admin(
             env["PRINTFARM_SENSOR_E2E_USERNAME"],
             env["PRINTFARM_SENSOR_E2E_PASSWORD"],
@@ -528,6 +548,7 @@ def main():
         command = [
             sys.executable, "scripts/run-tests.py", "--",
             "test", "-project", "PrintFarmer.xcodeproj", "-scheme", "PrintFarmer",
+            "-testPlan", "PrintFarmerLiveSensorE2E",
             "-destination", f"platform=iOS Simulator,id={test_simulator_id}",
             "-only-testing:" + TEST_NAME,
             "-parallel-testing-enabled", "NO",
