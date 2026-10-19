@@ -39,6 +39,7 @@ const mockHomeZ = vi.fn();
 const mockMovePrinter = vi.fn();
 const mockToastError = vi.fn();
 const mockMovePrinterTo = vi.fn();
+const mockGetPrinterVersionInfo = vi.fn();
 vi.mock("@/features/printers/hooks/use-printer-movement", () => ({
   usePrinterMovement: (printer: Printer) => ({
     blocked: false,
@@ -146,6 +147,8 @@ vi.mock("@/common/hooks/useApi", () => ({
 
 vi.mock("@/services/api", () => ({
   apiClient: {
+    getPrinterVersionInfo: (printerId: string, options?: { forceRefresh?: boolean }) =>
+      mockGetPrinterVersionInfo(printerId, options),
     excludePrintJobObject: (printerId: string, name: string) =>
       mockExcludePrintJobObject(printerId, name),
     homePrinter: (printerId: string) => mockHomePrinter(printerId),
@@ -233,6 +236,7 @@ describe("PrinterDetailsSidebar", () => {
     mockStatisticsData = undefined;
     mockPrintJobObjectsData = undefined;
     mockVersionData = undefined;
+    mockGetPrinterVersionInfo.mockReset();
     mockInvalidateQueries.mockClear();
     mockRefetch.mockClear();
     mockPrintJobObjectsRefetch.mockClear();
@@ -553,6 +557,33 @@ describe("PrinterDetailsSidebar", () => {
 
     expect(lastSyncRow).not.toBeNull();
     expect(within(lastSyncRow!).getByText("—")).toBeInTheDocument();
+  });
+
+  it("force-refreshes version info and updates the sidebar query cache (#1651)", async () => {
+    const refreshedVersion = {
+      firmwareVersion: "9.9.9",
+      backendVersion: "9.9.9",
+      apiVersion: "9.9.9",
+      supported: true,
+      message: "",
+    };
+    mockGetPrinterVersionInfo.mockResolvedValue(refreshedVersion);
+    render(
+      <PrinterDetailsSidebar
+        printerId={printer.id}
+        printer={printer}
+        onClose={vi.fn()}
+        layout="panel"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh version info" }));
+
+    expect(mockGetPrinterVersionInfo).toHaveBeenCalledWith(printer.id, { forceRefresh: true });
+    await waitFor(() => expect(mockSetQueryData).toHaveBeenCalledWith(
+      ["printerVersion", printer.id],
+      refreshedVersion,
+    ));
   });
 
   it("labels the firmware reading as unrecorded when no recorded identity is returned (#1656)", () => {

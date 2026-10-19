@@ -53,6 +53,24 @@ See `/src/Web/ReactApp/COLOR_SYSTEM_GUIDE.md` for complete color token reference
 
 ## Components
 
+### Printer card grid
+
+Printer cards fill the available content width using flexible columns with
+minimum widths of `24rem` (detailed) and `17rem` (compact), with `1rem` gaps.
+Below the `640px` breakpoint they use one full-width column. A narrower content
+area can also shrink a single column without horizontal overflow.
+The virtualized grid (60 or more printers) uses the same sizing rules.
+
+Model and manufacturer labels truncate visually while retaining their full text
+and hover titles. The progress area reserves an ETA row in both idle and active
+states without stacking large margins.
+Compact cards keep temperature placeholders while offline rather than hiding
+the row or showing stale readings.
+
+The isolated browser fixture in `e2e/printer-card-density.spec.ts` checks column
+counts with navigation-width space reserved, narrow screens, control overflow,
+and ETA alignment using the real card components without contacting printers.
+
 ### Button
 
 Standardized button component with consistent variants, sizing, and focus states.

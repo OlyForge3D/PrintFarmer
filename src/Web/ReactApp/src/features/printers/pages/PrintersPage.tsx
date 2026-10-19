@@ -416,9 +416,9 @@ export function PrintersPage() {
     }
   }, [isLoading, navigate, printersById, routePrinterId]);
 
-  // #1702: the detailed grid already folds a printer's sidebar info inline
-  // (MaterialLoadout, statistics, version, etc. — see #1584), so keep the
-  // details sidebar closed while in that view. Otherwise PrinterDetailsSidebar
+  // #1702: the detailed grid already includes MaterialLoadout and controls inline,
+  // so keep the details sidebar closed in that view. Statistics and Version
+  // remain in the sidebar, accessible from compact view. Otherwise PrinterDetailsSidebar
   // and the grid's DetailedPrinterCard can both mount for the same printer at
   // once, and each independently renders its own MaterialLoadout (and, in the
   // sidebar, MmuControlBox) with no shared lock — letting two mounts issue

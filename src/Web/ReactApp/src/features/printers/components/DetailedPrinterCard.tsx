@@ -1,10 +1,9 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import './DetailedPrinterCard.css';
 import { Zap } from 'lucide-react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useSpoolmanConfigured } from '@/common/hooks/useSpoolmanConfigured';
 import { apiClient } from '@/services/api';
-import { maintenanceService } from '@/services/maintenanceService';
 import {
   mutationErrorMessage,
   mutationErrorStatus,
@@ -18,7 +17,6 @@ import type {
   PrinterBackendCapabilitiesDto,
   PrintJobObjectDto,
   PrintJobObjectListDto,
-  ApiError,
 } from '@/types/api';
 import { PrinterHistoryModal } from '@/features/printers/components/PrinterHistoryModal';
 import { PrinterFilesModal } from '@/features/printers/components/PrinterFilesModal';
@@ -94,44 +92,6 @@ export interface DetailedPrinterCardProps {
   onEdit?: (printer: Printer) => void;
 }
 
-function shouldRetryStatisticsQuery(failureCount: number, error: unknown) {
-  const statusCode = typeof error === 'object' && error
-    ? (error as ApiError).statusCode ?? (error as { response?: { status?: number } }).response?.status
-    : undefined;
-
-  if (typeof statusCode === 'number' && statusCode >= 400 && statusCode < 500) {
-    return false;
-  }
-
-  return failureCount < 2;
-}
-
-const neverSyncedCutoff = new Date('1970-01-01T00:00:00.000Z').getTime();
-
-function formatLastSyncTime(lastSyncTime?: string | null) {
-  if (!lastSyncTime) {
-    return '—';
-  }
-
-  const timestamp = Date.parse(lastSyncTime);
-  if (!Number.isFinite(timestamp) || timestamp <= neverSyncedCutoff) {
-    return '—';
-  }
-
-  return new Date(timestamp).toLocaleString();
-}
-
-function formatHours(hours: number): string {
-  if (!Number.isFinite(hours)) return '—';
-  return `${hours.toFixed(1)}h`;
-}
-
-function formatFilament(grams: number): string {
-  if (!Number.isFinite(grams)) return '—';
-  if (grams >= 1000) return `${(grams / 1000).toFixed(2)}kg`;
-  return `${Math.round(grams)}g`;
-}
-
 // Memoized: with stable callbacks and structural sharing upstream, a card only
 // re-renders when its own printer's data actually changed.
 export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ printer, backendCapabilities, onEdit }: DetailedPrinterCardProps) {
@@ -170,8 +130,6 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
   const [step, setStep] = useState(1);
   const [extrudeStep, setExtrudeStep] = useState(DEFAULT_EXTRUDE_DISTANCE_MM);
   const [extrudeSpeed, setExtrudeSpeed] = useState(DEFAULT_EXTRUDE_SPEED_MMS);
-  const [isStatisticsExpanded, setIsStatisticsExpanded] = useState(false);
-  const [isVersionExpanded, setIsVersionExpanded] = useState(false);
   const [objectToSkip, setObjectToSkip] = useState<PrintJobObjectDto | null>(null);
   const [objectToSkipPrinterId, setObjectToSkipPrinterId] = useState(printer.id);
 
@@ -297,44 +255,6 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
 
   const extrudeMinTemp = getExtrudeMinTemp(printer.spoolInfo?.material);
   const canExtrudeNow = canMoveNow && (printer.hotendTemp ?? 0) >= extrudeMinTemp;
-
-  // Print statistics and version info: folded in from the details sidebar
-  // (#1584) so the detailed card shows the same level of print detail
-  // without needing to open a separate sidebar. Queries stay disabled until
-  // their section is expanded, matching the sidebar's lazy-fetch behavior.
-  const printerStatisticsQuery = useQuery({
-    queryKey: ['printerStatistics', printer.id],
-    queryFn: () => maintenanceService.getPrinterStatistics(printer.id),
-    enabled: isStatisticsExpanded,
-    staleTime: 60_000,
-    gcTime: 10 * 60_000,
-    refetchOnWindowFocus: false,
-    retry: shouldRetryStatisticsQuery,
-  });
-
-  const printerVersionQuery = useQuery({
-    queryKey: ['printerVersion', printer.id],
-    queryFn: () => apiClient.getPrinterVersionInfo(printer.id),
-    enabled: isVersionExpanded,
-    staleTime: 10 * 60_000,
-    gcTime: 60 * 60_000,
-    refetchOnWindowFocus: false,
-  });
-
-  // Explicit "Refresh version info" bypasses the backend's partial-result cache (#1651) so a
-  // recovered Backend/API version is visible immediately instead of waiting out its ~10 minute
-  // TTL. This is deliberately a separate mutation from printerVersionQuery's own refetch(), which
-  // would just re-read the same stale cache entry — automatic/lazy polling keeps using the
-  // normal query above, untouched.
-  const refreshVersionMutation = useMutation({
-    mutationFn: () => apiClient.getPrinterVersionInfo(printer.id, { forceRefresh: true }),
-    onSuccess: (data) => {
-      queryClient.setQueryData(['printerVersion', printer.id], data);
-    },
-    onError: (error) => {
-      toast.error(mutationErrorMessage(error, 'Failed to refresh version info'));
-    },
-  });
 
   const isActivePrintForObjectQuery = isActivePrintForObjects({ state, isOnline });
   // A pending skip confirmation never outlives its print or its printer.
@@ -696,35 +616,38 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
         </div>
       </div>
 
-      <div className="mt-3 flex items-end gap-3" data-testid="detailed-printer-image">
-        <div className="relative h-24 w-24 shrink-0 overflow-hidden rounded-md border border-pf-border bg-pf-bg-2">
-          <PrinterImage
-            key={`${printer.manufacturerName ?? ''}|${printer.modelName ?? ''}`}
-            manufacturerName={printer.manufacturerName}
-            modelName={printer.modelName}
-            motionType={printer.motionType}
-            alt=""
-            className="h-full w-full object-contain p-1.5 drop-shadow-[0_4px_6px_rgba(0,0,0,0.45)]"
-          />
-        </div>
-        {(printer.modelName || printer.manufacturerName) && (
-          <div className="min-w-0 pb-0.5 leading-tight">
-            {printer.modelName && (
-              <p className="truncate text-sm font-medium text-pf-text-primary">{printer.modelName}</p>
-            )}
-            {printer.manufacturerName && (
-              <p className="truncate text-xs text-pf-text-secondary">{printer.manufacturerName}</p>
+      {/* Identity + actions: the action grid sits beside the cover at the cover's
+          height (3 rows x 32px = h-24), so no row of the card is spent on icons. */}
+      <div className="mb-4 mt-3">
+        <div className="flex items-stretch gap-3">
+          <div className="flex min-w-0 flex-1 items-end gap-3" data-testid="detailed-printer-image">
+            <div className="relative h-24 w-24 shrink-0 overflow-hidden rounded-md border border-pf-border bg-pf-bg-2">
+              <PrinterImage
+                key={`${printer.manufacturerName ?? ''}|${printer.modelName ?? ''}`}
+                manufacturerName={printer.manufacturerName}
+                modelName={printer.modelName}
+                motionType={printer.motionType}
+                alt=""
+                className="h-full w-full object-contain p-1.5 drop-shadow-[0_4px_6px_rgba(0,0,0,0.45)]"
+              />
+            </div>
+            {(printer.modelName || printer.manufacturerName) && (
+              <div className="min-w-0 pb-0.5 leading-tight">
+                {printer.modelName && (
+                  <p className="truncate text-sm font-medium text-pf-text-primary" title={printer.modelName}>{printer.modelName}</p>
+                )}
+                {printer.manufacturerName && (
+                  <p className="truncate text-xs text-pf-text-secondary" title={printer.manufacturerName}>{printer.manufacturerName}</p>
+                )}
+              </div>
             )}
           </div>
-        )}
-      </div>
 
-      {/* Header actions */}
-      <div className="mb-4 mt-3">
-
-        {/* Action buttons row */}
-        <div className="flex w-full items-center justify-between gap-2" role="toolbar" aria-label="Printer actions">
-          <div className="flex items-center gap-1">
+        <div
+          className="grid shrink-0 grid-flow-col grid-rows-3 content-start gap-x-1"
+          role="toolbar"
+          aria-label="Printer actions"
+        >
             {browserUrl ? (
               <a
                 href={browserUrl}
@@ -794,9 +717,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
               iconCenter={<FileIcon className="h-4 w-4" />}
             >
             </Button>
-          </div>
 
-          <div className="flex items-center gap-1">
             <Button
               type="button"
               variant="unstyled"
@@ -823,7 +744,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
               iconCenter={<EditIcon className="h-4 w-4" />}
             >
             </Button>
-          </div>
+        </div>
         </div>
 
         {showCamera && (
@@ -853,21 +774,24 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
         </div>
       )}
 
-      {/* Progress bar — always visible to prevent layout shift */}
-      <div className="mb-4">
+      {/* Progress bar + ETA row — always occupy the same space (and say "No active
+          print" when idle, like the compact card) so cards in a grid line up. */}
+      <div className="mb-1">
         <PrintProgressBar
           progress={printer.progress}
           jobName={printer.fileName ?? printer.jobName}
           isActive={isOnline && (isPrinting || isPaused)}
           progressRef={expandedProgressRef}
-          showInactiveState={false}
+          showInactiveState={true}
           showTemperatures={false}
         />
       </div>
 
-      {(isPrinting || isPaused) && (printer.estimatedCompletionTimeUtc || printer.printTimeLeftSeconds != null) && (
-        <EstimatedCompletionBadge completionTimeUtc={printer.estimatedCompletionTimeUtc} printTimeLeftSeconds={printer.printTimeLeftSeconds} className="mb-3" />
-      )}
+      <EstimatedCompletionBadge
+        completionTimeUtc={isPrinting || isPaused ? printer.estimatedCompletionTimeUtc : undefined}
+        printTimeLeftSeconds={isPrinting || isPaused ? printer.printTimeLeftSeconds : undefined}
+        reserveSpace
+      />
 
       {(isPrinting || isPaused) && (
         <FailureDetectionMonitoringSummary
@@ -881,120 +805,11 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
       )}
 
       {/*
-        Section order below follows PRINTER_DETAIL_SECTION_ORDER (see
-        printerDetailSectionOrder.ts): Statistics, Version, Objects, Move
-        (which embeds Control), Temperature, AMS, Materials, Spool — matching
-        PrinterDetailsSidebar (#1698, #1699).
+        Section order below follows the sidebar's PRINTER_DETAIL_SECTION_ORDER:
+        Objects, Move (which embeds Control), Temperature, AMS, Materials, Spool
+        (#1698, #1699). Statistics and Version live only in PrinterDetailsSidebar;
+        they were always-collapsed rows that cost every card two lines of height.
       */}
-
-      {/* Statistics and Version — folded in from the details sidebar (#1584) */}
-      <div className="mb-3 space-y-3">
-        <CollapsibleSection
-          title="Statistics"
-          expanded={isStatisticsExpanded}
-          onToggle={setIsStatisticsExpanded}
-          defaultExpanded={false}
-          headerActions={
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => void printerStatisticsQuery.refetch()}
-              className="p-1! h-auto!"
-              title="Refresh statistics"
-              aria-label="Refresh statistics"
-              iconCenter={<RefreshIcon className="h-4 w-4" />}
-            ></Button>
-          }
-        >
-          {printerStatisticsQuery.isLoading ? (
-            <div className="text-sm text-pf-text-secondary">Loading statistics…</div>
-          ) : printerStatisticsQuery.data ? (
-            <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
-              <div>
-                <dt className="text-xs text-pf-text-secondary">Print time</dt>
-                <dd className="font-medium text-pf-text-primary">{formatHours(printerStatisticsQuery.data.totalPrintHours)}</dd>
-              </div>
-              <div>
-                <dt className="text-xs text-pf-text-secondary">Filament</dt>
-                <dd className="font-medium text-pf-text-primary">{formatFilament(printerStatisticsQuery.data.totalFilamentUsedGrams)}</dd>
-              </div>
-              <div>
-                <dt className="text-xs text-pf-text-secondary">Completed</dt>
-                <dd className="font-medium text-pf-text-primary">{printerStatisticsQuery.data.totalJobsCompleted}</dd>
-              </div>
-              <div>
-                <dt className="text-xs text-pf-text-secondary">Failed</dt>
-                <dd className="font-medium text-pf-text-primary">{printerStatisticsQuery.data.totalJobsFailed}</dd>
-              </div>
-              <div className="col-span-2">
-                <dt className="text-xs text-pf-text-secondary">Last sync</dt>
-                <dd className="text-pf-text-primary">
-                  {formatLastSyncTime(printerStatisticsQuery.data.lastSyncTime)}
-                </dd>
-              </div>
-            </dl>
-          ) : (
-            <div className="text-sm text-pf-text-secondary">Statistics unavailable.</div>
-          )}
-        </CollapsibleSection>
-
-        <CollapsibleSection
-          title="Version"
-          expanded={isVersionExpanded}
-          onToggle={setIsVersionExpanded}
-          defaultExpanded={false}
-          headerActions={
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => void refreshVersionMutation.mutate()}
-              className="p-1! h-auto!"
-              title="Refresh version info"
-              aria-label="Refresh version info"
-              disabled={refreshVersionMutation.isPending}
-              iconCenter={<RefreshIcon className="h-4 w-4" />}
-            ></Button>
-          }
-        >
-          {printerVersionQuery.isLoading ? (
-            <div className="text-sm text-pf-text-secondary">Loading version…</div>
-          ) : printerVersionQuery.data ? (
-            <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
-              <div>
-                <dt className="text-xs text-pf-text-secondary">Firmware</dt>
-                <dd className="font-medium text-pf-text-primary">{printerVersionQuery.data.firmwareVersion || '—'}</dd>
-                <dd className="text-[11px] text-pf-text-secondary">
-                  {printerVersionQuery.data.recordedFirmwareIdentity
-                    ? 'Recorded firmware identity'
-                    : 'No recorded firmware identity'}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-xs text-pf-text-secondary">Backend</dt>
-                <dd className="font-medium text-pf-text-primary">{printerVersionQuery.data.backendVersion || '—'}</dd>
-              </div>
-              <div>
-                <dt className="text-xs text-pf-text-secondary">API</dt>
-                <dd className="font-medium text-pf-text-primary">{printerVersionQuery.data.apiVersion || '—'}</dd>
-              </div>
-              <div>
-                <dt className="text-xs text-pf-text-secondary">Supported</dt>
-                <dd className="font-medium text-pf-text-primary">{printerVersionQuery.data.supported ? 'Yes' : 'No'}</dd>
-              </div>
-              {printerVersionQuery.data.message ? (
-                <div className="col-span-2">
-                  <dt className="text-xs text-pf-text-secondary">Message</dt>
-                  <dd className="text-pf-text-primary wrap-break-word">{printerVersionQuery.data.message}</dd>
-                </div>
-              ) : null}
-            </dl>
-          ) : (
-            <div className="text-sm text-pf-text-secondary">Version unavailable.</div>
-          )}
-        </CollapsibleSection>
-      </div>
 
       {/* Print Objects (skip object) — folded in from the details sidebar (#1584) */}
       {support.supportsObjectExclusion && isActivePrintForObjectQuery && (

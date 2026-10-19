@@ -13,8 +13,8 @@ import type { Printer } from '@/types/api';
 export const PRINTER_GRID_VIRTUALIZATION_THRESHOLD = 60;
 
 const GRID_GAP_REM = 1;
-const COMPACT_CARD_WIDTH_REM = 18;
-const DETAILED_CARD_WIDTH_REM = 26;
+const COMPACT_CARD_WIDTH_REM = 17;
+const DETAILED_CARD_WIDTH_REM = 24;
 const DEFAULT_ROOT_FONT_SIZE_PX = 16;
 const MULTI_COLUMN_MEDIA_QUERY = '(min-width: 640px)';
 const ROW_OVERSCAN = 2;
@@ -47,8 +47,8 @@ function getColumnCount(width: number, cardWidthPx: number, gapPx: number): numb
 
 function gridClassName(mode: PrinterGridMode): string {
   return mode === 'compact'
-    ? 'grid grid-cols-1 sm:grid-cols-[repeat(auto-fill,18rem)] gap-4 transition-opacity duration-200 min-w-0'
-    : 'grid grid-cols-1 sm:grid-cols-[repeat(auto-fill,26rem)] gap-4';
+    ? 'grid grid-cols-1 sm:grid-cols-[repeat(auto-fill,minmax(min(100%,17rem),1fr))] gap-4 transition-opacity duration-200 min-w-0'
+    : 'grid grid-cols-1 sm:grid-cols-[repeat(auto-fill,minmax(min(100%,24rem),1fr))] gap-4 min-w-0';
 }
 
 function SmallPrinterCardGrid({ printers, mode, renderPrinter }: PrinterCardGridProps) {
@@ -100,11 +100,12 @@ function VirtualizedPrinterCardGrid({
         : DEFAULT_ROOT_FONT_SIZE_PX;
       const nextCardWidth = cardWidth(mode, rootFontSize);
       const nextGridGap = GRID_GAP_REM * rootFontSize;
-      setCardWidthPx(nextCardWidth);
       setGridGapPx(nextGridGap);
-      setColumnCount(window.matchMedia(MULTI_COLUMN_MEDIA_QUERY).matches
+      const nextColumnCount = window.matchMedia(MULTI_COLUMN_MEDIA_QUERY).matches
         ? getColumnCount(container.clientWidth, nextCardWidth, nextGridGap)
-        : 1);
+        : 1;
+      setColumnCount(nextColumnCount);
+      setCardWidthPx((container.clientWidth - (nextColumnCount - 1) * nextGridGap) / nextColumnCount);
       if (!nextScrollElement) return;
       const containerRect = container.getBoundingClientRect();
       const scrollRect = nextScrollElement.getBoundingClientRect();
@@ -270,7 +271,6 @@ function VirtualizedPrinterCardGrid({
 
   const virtualRows = rowVirtualizer.getVirtualItems();
   const renderedItems: ReactNode[] = [];
-  const fixedCardWidth = cardWidthPx;
 
   virtualRows.forEach((virtualRow) => {
     const startIndex = virtualRow.index * columnCount;
@@ -304,8 +304,8 @@ function VirtualizedPrinterCardGrid({
           data-printer-id={printer.id}
           className="absolute left-0 top-0 min-w-0"
           style={{
-            width: columnCount === 1 ? '100%' : fixedCardWidth,
-            transform: `translate(${columnIndex * (fixedCardWidth + gridGapPx)}px, ${rowOffset}px)`,
+            width: columnCount === 1 ? '100%' : cardWidthPx,
+            transform: `translate(${columnIndex * (cardWidthPx + gridGapPx)}px, ${rowOffset}px)`,
           }}
           {...(virtualRow.index === 0 && columnIndex === 0
             ? { 'data-tour': 'printers-card' }

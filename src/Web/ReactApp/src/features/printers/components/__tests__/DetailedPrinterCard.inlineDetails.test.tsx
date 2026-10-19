@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom';
 import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   PrinterBackend,
@@ -151,8 +151,16 @@ vi.mock('@/features/printers/components/MovementControlSection', () => ({
 }));
 vi.mock('@/features/printers/components/PrinterActionBar', () => ({ PrinterActionBar: () => <div data-testid="action-bar" /> }));
 vi.mock('@/features/printers/components/BedClearBanner', () => ({ BedClearBanner: () => null }));
-vi.mock('@/features/printers/components/PrintProgressBar', () => ({ PrintProgressBar: () => <div data-testid="print-progress" /> }));
-vi.mock('@/features/printers/components/EstimatedCompletionBadge', () => ({ EstimatedCompletionBadge: () => null }));
+vi.mock('@/features/printers/components/PrintProgressBar', () => ({
+  PrintProgressBar: ({ showInactiveState }: { showInactiveState?: boolean }) => (
+    <div data-testid="print-progress" data-show-inactive-state={String(!!showInactiveState)} />
+  ),
+}));
+vi.mock('@/features/printers/components/EstimatedCompletionBadge', () => ({
+  EstimatedCompletionBadge: ({ reserveSpace }: { reserveSpace?: boolean }) => (
+    <div data-testid="estimated-completion" data-reserve-space={String(!!reserveSpace)} />
+  ),
+}));
 vi.mock('@/features/printers/components/FailureDetectionBadge', () => ({ FailureDetectionBadge: () => null }));
 vi.mock('@/features/printers/components/FailureDetectionMonitoringBadge', () => ({ FailureDetectionMonitoringBadge: () => null }));
 vi.mock('@/features/printers/components/FailureDetectionMonitoringSummary', () => ({ FailureDetectionMonitoringSummary: () => null }));
@@ -339,99 +347,33 @@ describe('DetailedPrinterCard inline details (#1584)', () => {
     expect(screen.queryByTitle(/open details sidebar/i)).not.toBeInTheDocument();
   });
 
-  it('renders a Statistics section that expands to show the same fields as the sidebar', () => {
+  it('keeps Statistics and Version in the sidebar only, without fetching them for the card', () => {
     render(<DetailedPrinterCard printer={makePrinter()} />);
 
-    expect(screen.getByText('Statistics')).toBeInTheDocument();
-    // Collapsed by default: no stats requested/rendered yet.
-    expect(screen.queryByText('12.5h')).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByText('Statistics'));
-
-    expect(screen.getByText('12.5h')).toBeInTheDocument();
-    expect(screen.getByText('2.50kg')).toBeInTheDocument();
-    expect(screen.getByText('10')).toBeInTheDocument();
+    expect(screen.queryByText('Statistics')).not.toBeInTheDocument();
+    expect(screen.queryByText('Version')).not.toBeInTheDocument();
+    expect(useQueryMock.mock.calls.some(([options]) =>
+      ['printerStatistics', 'printerVersion'].includes((options as { queryKey: unknown[] }).queryKey[0] as string),
+    )).toBe(false);
+    expect(getPrinterVersionInfoMock).not.toHaveBeenCalled();
   });
 
-  it('renders a Version section that expands to show firmware/backend/API version info', () => {
+  it('places the printer actions beside the cover instead of in their own row', () => {
     render(<DetailedPrinterCard printer={makePrinter()} />);
 
-    expect(screen.getByText('Version')).toBeInTheDocument();
-    expect(screen.queryByText('1.2.3')).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByText('Version'));
-
-    expect(screen.getByText('1.2.3')).toBeInTheDocument();
-    expect(screen.getByText('4.5.6')).toBeInTheDocument();
-    expect(screen.getByText('7.8.9')).toBeInTheDocument();
+    const imageRow = screen.getByTestId('detailed-printer-image');
+    const toolbar = screen.getByRole('toolbar', { name: 'Printer actions' });
+    expect(toolbar.parentElement).toBe(imageRow.parentElement);
+    expect(toolbar).toHaveClass('grid-rows-3');
+    expect(within(toolbar).getByRole('button', { name: 'Edit details' })).toBeInTheDocument();
+    expect(within(toolbar).getByRole('button', { name: 'Toggle auto-dispatch for Printer 1' })).toBeInTheDocument();
   });
 
-  it('labels the firmware reading as unrecorded when no recorded identity is returned (#1656)', () => {
-    render(<DetailedPrinterCard printer={makePrinter()} />);
+  it('shows the same idle progress copy and reserved ETA row as the compact card', () => {
+    render(<DetailedPrinterCard printer={makePrinter({ state: 'Idle' } as Partial<Printer>)} />);
 
-    fireEvent.click(screen.getByText('Version'));
-
-    expect(screen.getByText('No recorded firmware identity')).toBeInTheDocument();
-    expect(screen.queryByText('Recorded firmware identity')).not.toBeInTheDocument();
-  });
-
-  it('labels the firmware reading as recorded when the version endpoint returns an identity (#1656)', () => {
-    useQueryMock.mockImplementation(({ queryKey, enabled }: { queryKey: unknown[]; enabled?: boolean }) => {
-      if (queryKey[0] === 'printerVersion') {
-        return enabled
-          ? {
-              data: {
-                firmwareVersion: '1.2.3',
-                backendVersion: '4.5.6',
-                apiVersion: '7.8.9',
-                supported: true,
-                message: '',
-                recordedFirmwareIdentity: {
-                  family: 'Klipper',
-                  gcodeDialect: 'Klipper',
-                  detectionSource: 'printer',
-                  version: '1.2.3',
-                  detectionVersion: 'moonraker-printer-info-v1',
-                  detectionConfidence: 1,
-                  detectedAtUtc: '2024-01-01T00:00:00.000Z',
-                  verified: false,
-                },
-              },
-              isLoading: false,
-              isFetching: false,
-              refetch: vi.fn(),
-            }
-          : { data: undefined, isLoading: false, isFetching: false, refetch: vi.fn() };
-      }
-      return { data: undefined, isLoading: false, isFetching: false, refetch: vi.fn() };
-    });
-
-    render(<DetailedPrinterCard printer={makePrinter()} />);
-
-    fireEvent.click(screen.getByText('Version'));
-
-    expect(screen.getByText('Recorded firmware identity')).toBeInTheDocument();
-    expect(screen.queryByText('No recorded firmware identity')).not.toBeInTheDocument();
-  });
-
-  // Regression coverage for #1651: after a transient Klippy fault clears, the explicit
-  // "Refresh version info" button must force-refresh instead of re-reading whatever is
-  // still cached, and the recovered result must land back in the same React Query cache
-  // entry the Version section reads from.
-  it('force-refreshes version info and writes the result into the printerVersion query cache on click', async () => {
-    render(<DetailedPrinterCard printer={makePrinter()} />);
-
-    fireEvent.click(screen.getByText('Version'));
-    fireEvent.click(screen.getByRole('button', { name: /refresh version info/i }));
-
-    expect(getPrinterVersionInfoMock).toHaveBeenCalledWith('printer-1', { forceRefresh: true });
-
-    await waitFor(() =>
-      expect(setQueryDataMock).toHaveBeenCalledWith(
-        ['printerVersion', 'printer-1'],
-        expect.objectContaining({ firmwareVersion: '9.9.9', backendVersion: '9.9.9', apiVersion: '9.9.9' })
-      )
-    );
+    expect(screen.getByTestId('print-progress')).toHaveAttribute('data-show-inactive-state', 'true');
+    expect(screen.getByTestId('estimated-completion')).toHaveAttribute('data-reserve-space', 'true');
   });
 
   it('renders the Print Objects section with a Skip action when object exclusion is supported and a print is active', async () => {
@@ -551,8 +493,8 @@ describe('DetailedPrinterCard inline details (#1584)', () => {
   });
 
   // Regression coverage for #1698: the card's shared sections must appear in the same
-  // relative order as PrinterDetailsSidebar (see printerDetailSectionOrder.ts):
-  // Statistics, Version, Objects, Move, Temperature, Materials.
+  // relative order as PrinterDetailsSidebar: Objects, Move, Temperature, Materials.
+  // (Statistics and Version are sidebar-only.)
   it('renders shared sections in the same relative order as the sidebar (#1698)', () => {
     usePrintJobObjectsMock.mockReturnValue({
       data: { printerId: 'printer-1', objects: [makeObject({ name: 'part_1' })] },
@@ -571,8 +513,6 @@ describe('DetailedPrinterCard inline details (#1584)', () => {
     const precedes = (a: Element, b: Element) =>
       Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
 
-    const statistics = screen.getByText('Statistics');
-    const version = screen.getByText('Version');
     const objects = screen.getByText('Objects');
     const move = screen.getByTestId('movement-section');
     const temperature = screen.getByTestId('temp-section');
@@ -581,8 +521,6 @@ describe('DetailedPrinterCard inline details (#1584)', () => {
     // MaterialLoadout — both occupy the same "materials" slot in the order.
     const spool = screen.getByText('Spool');
 
-    expect(precedes(statistics, version)).toBe(true);
-    expect(precedes(version, objects)).toBe(true);
     expect(precedes(objects, move)).toBe(true);
     expect(precedes(move, temperature)).toBe(true);
     expect(precedes(temperature, spool)).toBe(true);

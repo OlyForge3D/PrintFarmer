@@ -179,7 +179,25 @@ describe('PrinterCardGrid', () => {
     });
 
     await waitFor(() => expect(virtualizerOptions.at(-1)?.count).toBe(30));
-    expect(screen.getAllByRole('listitem')[0]).toHaveStyle({ width: '360px' });
+    expect(screen.getAllByRole('listitem')[0]).toHaveStyle({ width: '490px' });
+  });
+
+  it.each([
+    ['detailed', 1183, 2],
+    ['detailed', 1184, 3],
+    ['compact', 1423, 4],
+    ['compact', 1424, 5],
+  ] as const)('fits %s columns at the %ipx density boundary', async (mode, width, columns) => {
+    containerWidth = width;
+    const printers = createPrinters(PRINTER_GRID_VIRTUALIZATION_THRESHOLD);
+    render(<PrinterCardGrid printers={printers} mode={mode} renderPrinter={renderCard} />);
+
+    await waitFor(() => expect(virtualizerOptions.at(-1)?.count).toBe(Math.ceil(printers.length / columns)));
+    const cards = screen.getAllByRole('listitem');
+    const expectedWidth = (width - (columns - 1) * 16) / columns;
+    expect(Number.parseFloat(cards[0].style.width)).toBeCloseTo(expectedWidth);
+    expect(cards[1].style.transform).toBe(`translate(${expectedWidth + 16}px, 0px)`);
+    expect(expectedWidth * columns + (columns - 1) * 16).toBeCloseTo(width);
   });
 
   it('preserves a focused stateful card when sorting and responsive columns move it between rows', async () => {

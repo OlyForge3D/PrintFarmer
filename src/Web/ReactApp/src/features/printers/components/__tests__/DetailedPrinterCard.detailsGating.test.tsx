@@ -230,14 +230,13 @@ describe('DetailedPrinterCard Open in Browser (#1546)', () => {
 });
 
 describe('DetailedPrinterCard inline details (#1584)', () => {
-  it('renders the inline detail sections without an Open details sidebar control', () => {
+  it('renders without an Open details sidebar control or the sidebar-only Statistics/Version rows', () => {
     render(<DetailedPrinterCard printer={makePrinter()} />);
 
     expect(screen.queryByRole('button', { name: 'Open details sidebar' })).not.toBeInTheDocument();
-    // The card folds the sidebar's informational sections in directly, so the
-    // detail is reachable without opening a sidebar. Field-level coverage of
-    // those sections lives in DetailedPrinterCard.inlineDetails.test.tsx.
-    expect(screen.getByText('Statistics')).toBeInTheDocument();
-    expect(screen.getByText('Version')).toBeInTheDocument();
+    // Statistics and Version stay in PrinterDetailsSidebar only; on the card they
+    // were always-collapsed rows that only added height.
+    expect(screen.queryByText('Statistics')).not.toBeInTheDocument();
+    expect(screen.queryByText('Version')).not.toBeInTheDocument();
   });
 });

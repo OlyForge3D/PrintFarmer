@@ -34,6 +34,8 @@ export function PrintProgressBar({
 }: PrintProgressBarProps) {
   const progress = rawProgress ?? 0;
   const clampedProgress = Math.max(0, Math.min(100, progress));
+  const currentHotendTemp = isOnline ? hotendTemp : null;
+  const currentBedTemp = isOnline ? bedTemp : null;
 
   // Job name display logic (path stripping done server-side in PrinterStatusCache)
   const jobNameDisplay = (() => {
@@ -66,12 +68,12 @@ export function PrintProgressBar({
         animated
       />
       {/* Temperature readouts */}
-      {showTemperatures && isOnline && (
+      {showTemperatures && (
         <div className="grid grid-cols-2 gap-3 mt-3 text-xs text-pf-text-secondary">
           <span className="flex items-center gap-1" title="Hotend temperature">
-            <NozzleIcon className={`w-3.5 h-3.5 ${hotendTemp != null ? 'text-pf-error' : ''}`} isOn={(hotendTemp ?? 0) > 50} />
-            <span>{hotendTemp != null ? `${Math.round(hotendTemp)}°` : '--°'}</span>
-            {hotendTarget != null && hotendTarget > 0 && (
+            <NozzleIcon className={`w-3.5 h-3.5 ${currentHotendTemp != null ? 'text-pf-error' : ''}`} isOn={(currentHotendTemp ?? 0) > 50} />
+            <span>{currentHotendTemp != null ? `${Math.round(currentHotendTemp)}°` : '--°'}</span>
+            {isOnline && hotendTarget != null && hotendTarget > 0 && (
               <>
                 <ArrowRightIcon className="w-2.5 h-2.5" />
                 <span>{Math.round(hotendTarget)}°</span>
@@ -79,9 +81,9 @@ export function PrintProgressBar({
             )}
           </span>
           <span className="flex items-center gap-1" title="Bed temperature">
-            <BedIcon className={`w-3.5 h-3.5 ${bedTemp != null ? 'text-pf-accent' : ''}`} isOn={(bedTemp ?? 0) > 35} />
-            <span>{bedTemp != null ? `${Math.round(bedTemp)}°` : '--°'}</span>
-            {bedTarget != null && bedTarget > 0 && (
+            <BedIcon className={`w-3.5 h-3.5 ${currentBedTemp != null ? 'text-pf-accent' : ''}`} isOn={(currentBedTemp ?? 0) > 35} />
+            <span>{currentBedTemp != null ? `${Math.round(currentBedTemp)}°` : '--°'}</span>
+            {isOnline && bedTarget != null && bedTarget > 0 && (
               <>
                 <ArrowRightIcon className="w-2.5 h-2.5" />
                 <span>{Math.round(bedTarget)}°</span>

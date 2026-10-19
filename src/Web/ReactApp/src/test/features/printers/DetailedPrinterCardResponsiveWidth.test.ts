@@ -8,6 +8,10 @@ const CSS_PATH = resolve(
   TEST_DIR,
   '../../../features/printers/components/DetailedPrinterCard.css',
 );
+const GRID_PATH = resolve(
+  TEST_DIR,
+  '../../../features/printers/components/PrinterCardGrid.tsx',
+);
 
 /**
  * #1584 moved the job/history detail surface inline into the detailed printer card,
@@ -15,17 +19,17 @@ const CSS_PATH = resolve(
  * including phones.
  *
  * `PrinterCardGrid` renders detailed cards as a single full-width `grid-cols-1`
- * column and only switches to `repeat(auto-fill, 26rem)` tracks at Tailwind's `sm`
- * (640px) breakpoint. An unconditional `min-width: 26rem` (416px) therefore forces
- * horizontal overflow on any viewport narrower than that — a 375px phone loses 41px
- * of the card off-screen.
+ * column below Tailwind's `sm` (640px) breakpoint. Above it, flexible tracks
+ * prefer a 24rem minimum but can shrink to the available content width.
+ * A card-local minimum would override that shrink behavior and force overflow,
+ * including when an open navigation panel leaves a narrow content area.
  *
  * jsdom performs no layout and never applies this stylesheet, so the guard is
- * asserted at the source: the desktop density floor must live behind the same
- * breakpoint the grid uses, and the unconditional rule must not reintroduce it.
+ * asserted at the source, with browser layout coverage in printer-card-density.spec.ts.
  */
 describe('DetailedPrinterCard.css — the density floor must not overflow narrow viewports', () => {
   const css = readFileSync(CSS_PATH, 'utf8');
+  const grid = readFileSync(GRID_PATH, 'utf8');
 
   const unconditionalCardRule = (): string => {
     // Strip every media block first, so what remains is the unconditional cascade.
@@ -41,21 +45,14 @@ describe('DetailedPrinterCard.css — the density floor must not overflow narrow
 
     expect(minWidth, 'expected an explicit unconditional min-width').not.toBeNull();
 
-    const value = minWidth![1].trim();
-    const rem = value.endsWith('rem') ? Number.parseFloat(value) : 0;
-
-    expect(rem).toBeLessThan(20);
+    expect(minWidth![1].trim()).toBe('0');
   });
 
-  it('restores the 26rem density floor at the grid breakpoint', () => {
-    const mediaBlock = css.match(
-      /@media\s*\(min-width:\s*640px\)\s*\{[^}]*\.pf-detailed-printer-card\s*\{([^}]*)\}/,
-    );
-
-    expect(
-      mediaBlock,
-      'expected the 26rem floor to be gated behind the 640px grid breakpoint',
-    ).not.toBeNull();
-    expect(mediaBlock![1]).toMatch(/min-width\s*:\s*26rem/);
+  it('leaves the flexible desktop minimum to the grid, without a card-local floor', () => {
+    const withoutComments = css.replace(/\/\*[\s\S]*?\*\//g, '');
+    const minimums = [...withoutComments.matchAll(/min-width\s*:\s*([^;}]+)/g)];
+    expect(minimums.map(match => match[1].trim())).toEqual(['0']);
+    expect(grid).toContain('grid-cols-1 sm:grid-cols-[repeat(auto-fill,minmax(min(100%,24rem),1fr))]');
+    expect(grid).toContain('const DETAILED_CARD_WIDTH_REM = 24;');
   });
 });
