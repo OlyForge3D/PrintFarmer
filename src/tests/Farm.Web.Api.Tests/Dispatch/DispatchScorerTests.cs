@@ -1053,12 +1053,6 @@ public class DispatchEndpointIntegrationTests : IClassFixture<CustomWebApplicati
         System.Net.Http.HttpResponseMessage healthResponse = await client.GetAsync("/healthz");
         healthResponse.StatusCode.Should().Be(System.Net.HttpStatusCode.OK);
 
-        // When DispatchController lands:
-        // var response = await client.GetAsync($"/api/dispatch/candidates?jobId={jobId}");
-        // response.StatusCode.Should().Be(HttpStatusCode.OK);
-        // var candidates = await response.Content.ReadFromJsonAsync<List<DispatchCandidateDto>>();
-        // candidates.Should().NotBeNull();
-        // candidates.Should().BeInDescendingOrder(c => c.Score);
     }
 
     [Fact]
@@ -1069,10 +1063,6 @@ public class DispatchEndpointIntegrationTests : IClassFixture<CustomWebApplicati
         HttpClient client = await _factory.CreateAdminClientAsync();
 
         // TODO: When DispatchController exists:
-        // var response = await client.GetAsync($"/api/dispatch/candidates?jobId={jobId}");
-        // var candidates = await response.Content.ReadFromJsonAsync<List<DispatchCandidateDto>>();
-        // candidates.Should().BeEmpty();
-
         // For now, verify the test infrastructure works
         System.Net.Http.HttpResponseMessage healthResponse = await client.GetAsync("/healthz");
         healthResponse.StatusCode.Should().Be(System.Net.HttpStatusCode.OK);
@@ -1090,8 +1080,6 @@ public class DispatchEndpointIntegrationTests : IClassFixture<CustomWebApplicati
         // 2. Create a print job via POST /api/printjobs
         // 3. POST /api/dispatch/assign { jobId, printerId }
         // 4. Verify job status changes to Assigned
-        // var response = await client.PostAsJsonAsync("/api/dispatch/assign", new { jobId, printerId });
-        // response.StatusCode.Should().Be(HttpStatusCode.OK);
 
         System.Net.Http.HttpResponseMessage healthResponse = await client.GetAsync("/healthz");
         healthResponse.StatusCode.Should().Be(System.Net.HttpStatusCode.OK);
@@ -1107,8 +1095,6 @@ public class DispatchEndpointIntegrationTests : IClassFixture<CustomWebApplicati
         // TODO: When DispatchController exists:
         // 1. Create printer, assign an active job so it's busy
         // 2. Try to dispatch another job to same printer
-        // var response = await client.PostAsJsonAsync("/api/dispatch/assign", new { jobId, printerId });
-        // response.StatusCode.Should().Be(HttpStatusCode.Conflict);
 
         System.Net.Http.HttpResponseMessage healthResponse = await client.GetAsync("/healthz");
         healthResponse.StatusCode.Should().Be(System.Net.HttpStatusCode.OK);
