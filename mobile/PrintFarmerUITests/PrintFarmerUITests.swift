@@ -1724,6 +1724,11 @@ final class UIWaitBudgetTests: XCTestCase {
         for source in sources {
             let code = Self.strippingComments(try String(contentsOf: source, encoding: .utf8))
             if source.lastPathComponent == "PrinterDetailPanelsUITests.swift" {
+                XCTAssertEqual(
+                    Self.isPlainProductionTestClass(code),
+                    true,
+                    "The production-mode sensor E2E must remain a plain XCTestCase, not use the mock UI-test harness"
+                )
                 let (productionTest, otherCode) = try Self.isolatingFunction(
                     named: "testLiveSensorsSignalRControlsAndReconnectAgainstBothBackends",
                     in: code
@@ -1784,6 +1789,11 @@ final class UIWaitBudgetTests: XCTestCase {
             Self.productionModeMarkerViolations(in: "PFARM_UI_TESTING AG_ASYNC_LAYOUTS MockBackend"),
             ["PFARM_UI_TESTING", "AG_ASYNC_LAYOUTS", "mock"]
         )
+        XCTAssertFalse(
+            Self.isPlainProductionTestClass(
+                "final class PrinterSensorsLiveBackendUITests: PrintFarmerUITestCase {"
+            )
+        )
     }
 
     func testLaunchScanStripsCommentsAndSeesSplitCalls() throws {
@@ -1805,19 +1815,28 @@ final class UIWaitBudgetTests: XCTestCase {
         let lines = source.components(separatedBy: .newlines)
         let declaration = "    func \(name)("
         let starts = lines.indices.filter { lines[$0].hasPrefix(declaration) }
-        guard starts.count == 1, let start = starts.first else {
+        guard starts.count == 1, let start = starts.first,
+              let closingBrace = lines.indices.first(where: {
+                  $0 > start && $0 < lines.count && lines[$0].hasPrefix("    }")
+                      && lines[$0].dropFirst(4).first == "}"
+              }) else {
             throw NSError(
                 domain: "UITestLaunchSourceInspection",
                 code: 1,
-                userInfo: [NSLocalizedDescriptionKey: "Expected one class-level declaration for \(name)."]
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "Expected one class-level declaration with a closing brace for \(name)."
+                ]
             )
         }
-        let end = lines.indices.first {
-            $0 > start && (lines[$0].hasPrefix("    func ") || lines[$0].hasPrefix("    private func "))
-        } ?? lines.count
+        let end = closingBrace + 1
+        var otherLines = lines
+        for index in start..<end {
+            otherLines[index] = ""
+        }
         return (
             lines[start..<end].joined(separator: "\n"),
-            (Array(lines[..<start]) + Array(lines[end...])).joined(separator: "\n")
+            otherLines.joined(separator: "\n")
         )
     }
 
@@ -1828,6 +1847,15 @@ final class UIWaitBudgetTests: XCTestCase {
     private static func productionModeMarkerViolations(in source: String) -> [String] {
         let normalizedSource = source.lowercased()
         return productionModeForbiddenMarkers.filter { normalizedSource.contains($0.lowercased()) }
+    }
+
+    private static func isPlainProductionTestClass(_ source: String) -> Bool {
+        source.components(separatedBy: .newlines)
+            .filter {
+                $0.trimmingCharacters(in: .whitespaces)
+                    == "final class PrinterSensorsLiveBackendUITests: XCTestCase {"
+            }
+            .count == 1
     }
 
     private static let rawLaunch = #"\.\s*(launch|activate)\s*\(\s*\)"#
