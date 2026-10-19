@@ -59,6 +59,10 @@ final class PrinterSensorsSnapshotTests: XCTestCase {
                 ]
             ),
             PrinterSensor(
+                id: "hotend-fan", displayName: "Hotend fan", kind: .fan, fanRole: .hotend,
+                readings: [SensorReading(quantity: .fanRpm, value: .number(4200), unit: .rpm)]
+            ),
+            PrinterSensor(
                 id: "chamber", displayName: "Chamber", kind: .chamber,
                 readings: [SensorReading(quantity: .temperature, value: .number(37.5), unit: .celsius)],
                 writable: [
@@ -82,11 +86,14 @@ final class PrinterSensorsSnapshotTests: XCTestCase {
         let model = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
         await model.loadCapabilities()
         defer { model.deactivate() }
+        XCTAssertEqual(model.controllableSensors.map(\.id), ["part-fan", "chamber", "unavailable"])
 
-        let rows = PrinterSensorControlRows(viewModel: model, compact: true)
-            .padding(12)
-            .frame(width: 390)
-            .fixedSize(horizontal: false, vertical: true)
+        let rows = VStack(alignment: .leading, spacing: 8) {
+            PrinterSensorControlRows(viewModel: model, compact: true)
+        }
+        .padding(12)
+        .frame(width: 390)
+        .fixedSize(horizontal: false, vertical: true)
         assertSnapshot(of: host(rows), as: .image(on: .iPhone13), named: snapshotName)
     }
 
