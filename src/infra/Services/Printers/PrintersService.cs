@@ -2978,9 +2978,11 @@ public class PrintersService(
         PrinterModelDto? modelTemplate = await _catalogService.GetModelByIdAsync(modelId, ct);
         _logger.LogDebug("[CreatePrinterFromDto] Loaded PrinterModel template: {ModelTemplateName} for model ID {ModelId}", modelTemplate?.Name ?? "null", modelId);
 
+        Guid printerId = Guid.NewGuid();
         Printer p = new()
         {
-            Id = Guid.NewGuid(),
+            Id = printerId,
+            DispatchState = new PrinterDispatchState { PrinterId = printerId },
             Name = dto.Name,
             ServerUrl = serverUrlForStorage,
             OriginalServerUrl = originalUrlForStorage,

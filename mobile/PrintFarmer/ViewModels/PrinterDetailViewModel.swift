@@ -258,6 +258,7 @@ final class PrinterDetailViewModel {
     @ObservationIgnored private var canonicalLoadRequested = false
     @ObservationIgnored private var canonicalPassHasRecoveryDemand = false
     @ObservationIgnored private var canonicalPendingRecoveryDemand = false
+    @ObservationIgnored private var liveSensorUpdateRevision: UInt64 = 0
     @ObservationIgnored private let canonicalLoadWaiters = CanonicalLoadWaiterRegistry()
     @ObservationIgnored private let canonicalTaskTracker = CanonicalLoadTaskTracker()
     private var predictiveService: (any PredictiveServiceProtocol)?
@@ -510,6 +511,9 @@ final class PrinterDetailViewModel {
 
     private func applyLiveUpdate(_ update: PrinterStatusUpdate) {
         guard isViewActive else { return }
+        if update.sensors != nil {
+            liveSensorUpdateRevision &+= 1
+        }
         if var p = printer {
             let jobChanged = update.jobName != nil && update.jobName != p.jobName
             let stateEnded = update.state.map {
@@ -1093,7 +1097,7 @@ final class PrinterDetailViewModel {
         switch result {
         case .success(let snapshot):
             publish(
-                snapshot,
+                preservingLiveSensorUpdates(in: snapshot, since: authority.liveSensorUpdateRevision),
                 includesAuthoritativeSnapshot: isSnapshotRequestCurrent(snapshotAuthority)
             )
         case .failure(let error):
@@ -1102,6 +1106,24 @@ final class PrinterDetailViewModel {
             break
         }
         finishCanonicalLoad(authority: authority)
+    }
+
+    private func preservingLiveSensorUpdates(
+        in snapshot: CanonicalSnapshot,
+        since revision: UInt64
+    ) -> CanonicalSnapshot {
+        guard liveSensorUpdateRevision != revision,
+              let livePrinter = printer else {
+            return snapshot
+        }
+
+        var snapshot = snapshot
+        snapshot.printer.sensors = livePrinter.sensors
+        if var liveStatusDetail = snapshot.statusDetail {
+            liveStatusDetail.sensors = statusDetail?.sensors ?? livePrinter.sensors
+            snapshot.statusDetail = liveStatusDetail
+        }
+        return snapshot
     }
 
     nonisolated private static func loadCanonicalPrinter(
@@ -1282,6 +1304,7 @@ final class PrinterDetailViewModel {
         CanonicalAuthority(
             token: token,
             lifecycleEpoch: canonicalLifecycleEpoch,
+            liveSensorUpdateRevision: liveSensorUpdateRevision,
             printerServiceIdentity: Self.identity(printerService),
             jobServiceIdentity: Self.identity(jobService),
             maintenanceServiceIdentity: Self.identity(maintenanceService),
@@ -1677,6 +1700,7 @@ final class PrinterDetailViewModel {
     private struct CanonicalAuthority {
         let token: UUID
         let lifecycleEpoch: UInt64
+        let liveSensorUpdateRevision: UInt64
         let printerServiceIdentity: ObjectIdentifier?
         let jobServiceIdentity: ObjectIdentifier?
         let maintenanceServiceIdentity: ObjectIdentifier?
@@ -1685,8 +1709,8 @@ final class PrinterDetailViewModel {
     }
 
     private struct CanonicalSnapshot {
-        let printer: Printer
-        let statusDetail: PrinterStatusDetail?
+        var printer: Printer
+        var statusDetail: PrinterStatusDetail?
         let currentJob: PrintJobStatusInfo?
         let snapshotData: Data?
         let showLivestream: Bool

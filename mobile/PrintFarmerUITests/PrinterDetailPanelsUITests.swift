@@ -1386,3 +1386,778 @@ final class Issue3259MockupAccessibilityUITests: PrinterDetailPanelsUITests.Issu
     }
 }
 #endif
+
+/// Production-mode acceptance against the isolated local API and real backend adapters.
+/// This deliberately does not inherit PrintFarmerUITestCase, which launches the app with
+/// `--uitesting` and substitutes the mock service container.
+private struct LivePrinterHubUpdate {
+    let target: String
+    let payload: Data
+}
+
+@MainActor
+final class PrinterSensorsLiveBackendUITests: XCTestCase {
+    private struct Credentials {
+        let username: String
+        let password: String
+        let apiURL: URL
+        let controlURL: URL
+
+        private struct FileConfiguration: Decodable {
+            let username: String
+            let password: String
+            let apiURL: URL
+            let controlURL: URL
+        }
+
+        init(fileURL: URL) throws {
+            do {
+                let configuration = try JSONDecoder().decode(
+                    FileConfiguration.self,
+                    from: Data(contentsOf: fileURL)
+                )
+                self.username = configuration.username
+                self.password = configuration.password
+                self.apiURL = configuration.apiURL
+                self.controlURL = configuration.controlURL
+            } catch {
+                throw NSError(
+                    domain: "PrinterSensorsLiveBackendUITests",
+                    code: 1,
+                    userInfo: [
+                        NSLocalizedDescriptionKey:
+                            "Run through the live sensor E2E harness; local test configuration could not be read."
+                    ]
+                )
+            }
+        }
+    }
+
+    private struct Printer: Decodable {
+        let id: UUID
+        let name: String
+    }
+
+    private struct LoginResult: Decodable {
+        let token: String
+    }
+
+    func testLiveSensorsSignalRControlsAndReconnectAgainstBothBackends() async throws {
+        let configurationURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("build/sensor-e2e-3419-config.json")
+        let credentials = try Credentials(fileURL: configurationURL)
+        let token = try await authenticate(credentials)
+        let printers = try await loadPrinters(credentials, token: token)
+        let testEmulator = try XCTUnwrap(printers.first { $0.name == "Test Printer Alpha" })
+        let moonraker = try XCTUnwrap(printers.first { $0.name == "Moonraker Sensor E2E" })
+
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "-hasSeenAdvancedPrinterControlsPrompt", "YES",
+            "-hasSeenOnboarding", "YES",
+            "-hasCompletedNetworkPermission", "YES",
+            "-isDemoModeActive", "NO",
+        ]
+        app.launchEnvironment["PRINTFARMER_API_URL"] = credentials.apiURL.absoluteString
+        app.launch()
+        defer { app.terminate() }
+        try signIn(app, credentials: credentials)
+        try enableAdvancedControls(app)
+
+        try await verifyBackend(
+            printer: testEmulator,
+            sensorID: "chamber",
+            temperatureQuantity: "TargetTemperature",
+            temperatureValue: 31,
+            fanID: "fan_part",
+            reconnectTemperatureValue: nil,
+            app: app,
+            credentials: credentials,
+            token: token
+        )
+        try await verifyBackend(
+            printer: moonraker,
+            sensorID: "temperature_sensor endstop",
+            temperatureQuantity: "Temperature",
+            temperatureValue: 31.5,
+            fanID: "fan_generic auxiliary",
+            reconnectTemperatureValue: 39.2,
+            app: app,
+            credentials: credentials,
+            token: token
+        )
+    }
+
+    private func authenticate(_ credentials: Credentials) async throws -> String {
+        var request = URLRequest(url: credentials.apiURL.appending(path: "/api/auth/login"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "usernameOrEmail": credentials.username,
+            "password": credentials.password,
+        ])
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try assertSuccess(response, data: data, operation: "API login")
+        return try JSONDecoder().decode(LoginResult.self, from: data).token
+    }
+
+    private func loadPrinters(_ credentials: Credentials, token: String) async throws -> [Printer] {
+        let data = try await apiRequest(
+            credentials,
+            token: token,
+            path: "/api/printers",
+            method: "GET"
+        )
+        return try JSONDecoder().decode([Printer].self, from: data)
+    }
+
+    private func signIn(_ app: XCUIApplication, credentials: Credentials) throws {
+        let firstServerName = app.textFields["serverNameField"]
+        guard firstServerName.waitForExistence(timeout: 15) else {
+            throw NSError(
+                domain: "PrinterSensorsLiveBackendUITests",
+                code: 1,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "Expected Add Your First Server on the fresh isolated simulator; refusing to modify any pre-existing account or server."
+                ]
+            )
+        }
+        replaceText(in: firstServerName, with: "Sensor E2E Local API", clearingPlaceholder: true)
+        let firstServerURL = app.textFields["serverURLField"]
+        guard firstServerURL.waitForExistence(timeout: 5) else {
+            throw NSError(
+                domain: "PrinterSensorsLiveBackendUITests",
+                code: 2,
+                userInfo: [NSLocalizedDescriptionKey: "The first-server form did not expose its URL field."]
+            )
+        }
+        replaceText(
+            in: firstServerURL,
+            with: credentials.apiURL.absoluteString,
+            clearingPlaceholder: true
+        )
+        let saveServer = app.buttons["saveServerButton"]
+        guard saveServer.waitForExistence(timeout: 5), saveServer.isEnabled else {
+            throw NSError(
+                domain: "PrinterSensorsLiveBackendUITests",
+                code: 3,
+                userInfo: [NSLocalizedDescriptionKey: "The local test API server could not be saved."]
+            )
+        }
+        saveServer.tap()
+
+        let loginButton = app.buttons["loginButton"]
+        guard loginButton.waitForExistence(timeout: 15) else {
+            throw NSError(
+                domain: "PrinterSensorsLiveBackendUITests",
+                code: 4,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "Saving the local test server did not expose the production login screen."
+                ]
+            )
+        }
+
+        let localServer = app.buttons.matching(
+            NSPredicate(format: "label CONTAINS %@", credentials.apiURL.absoluteString)
+        ).firstMatch
+        guard localServer.waitForExistence(timeout: 5) else {
+            throw NSError(
+                domain: "PrinterSensorsLiveBackendUITests",
+                code: 5,
+                userInfo: [NSLocalizedDescriptionKey: "The login screen did not identify the isolated local API."]
+            )
+        }
+
+        let username = app.textFields["usernameField"]
+        let password = app.secureTextFields["passwordField"]
+        XCTAssertTrue(username.waitForExistence(timeout: 5))
+        username.tap()
+        replaceText(in: username, with: credentials.username)
+        password.tap()
+        replaceText(in: password, with: credentials.password)
+        loginButton.tap()
+        guard app.buttons["tab.farm"].waitForExistence(timeout: 30) else {
+            throw NSError(
+                domain: "PrinterSensorsLiveBackendUITests",
+                code: 6,
+                userInfo: [NSLocalizedDescriptionKey: "The production app did not reach the farm after sign-in."]
+            )
+        }
+        try dismissNotificationPermissionPromptIfNeeded()
+    }
+
+    private func dismissNotificationPermissionPromptIfNeeded() throws {
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let alert = springboard.alerts.firstMatch
+        guard alert.waitForExistence(timeout: 3) else { return }
+        let denyButton = alert.buttons.allElementsBoundByIndex.first {
+            $0.label.replacingOccurrences(of: "’", with: "'")
+                .localizedCaseInsensitiveContains("Don't Allow")
+        }
+        guard let denyButton else {
+            throw NSError(
+                domain: "PrinterSensorsLiveBackendUITests",
+                code: 14,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "An unexpected system alert blocked the isolated production app."
+                ]
+            )
+        }
+        denyButton.tap()
+    }
+
+    private func enableAdvancedControls(_ app: XCUIApplication) throws {
+        let account = app.buttons["navigation.account"]
+        guard account.waitForExistence(timeout: 5) else {
+            throw NSError(
+                domain: "PrinterSensorsLiveBackendUITests",
+                code: 4,
+                userInfo: [NSLocalizedDescriptionKey: "The Farm shell did not expose Account."]
+            )
+        }
+        try dismissNotificationPermissionPromptIfNeeded()
+        account.tap()
+        let accountRoot = app.descendants(matching: .any)["account.root"]
+        if !accountRoot.waitForExistence(timeout: 3) {
+            // XCTest may dismiss a system permission alert while synthesizing the
+            // first tap without replaying that tap on the underlying app.
+            try dismissNotificationPermissionPromptIfNeeded()
+            if !accountRoot.exists {
+                account.tap()
+            }
+        }
+        guard accountRoot.waitForExistence(timeout: 5) else {
+            throw NSError(
+                domain: "PrinterSensorsLiveBackendUITests",
+                code: 15,
+                userInfo: [NSLocalizedDescriptionKey: "Tapping Account did not open its destination."]
+            )
+        }
+        let settings = app.buttons["account.destination.settings"]
+        guard settings.waitForExistence(timeout: 5) else {
+            throw NSError(
+                domain: "PrinterSensorsLiveBackendUITests",
+                code: 5,
+                userInfo: [NSLocalizedDescriptionKey: "The Account screen did not expose Settings."]
+            )
+        }
+        settings.tap()
+        guard app.navigationBars["Settings"].waitForExistence(timeout: 5) else {
+            throw NSError(
+                domain: "PrinterSensorsLiveBackendUITests",
+                code: 6,
+                userInfo: [NSLocalizedDescriptionKey: "The Settings screen did not appear."]
+            )
+        }
+        let toggle = app.switches["settings.advancedPrinterControls"]
+        if !toggle.exists { app.swipeUp() }
+        guard toggle.waitForExistence(timeout: 5) else {
+            throw NSError(
+                domain: "PrinterSensorsLiveBackendUITests",
+                code: 7,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "Settings did not expose the Advanced Printer Controls toggle after scrolling."
+                ]
+            )
+        }
+        for _ in 0..<3 where !toggle.isHittable {
+            app.swipeUp()
+        }
+        guard toggle.isHittable else {
+            throw NSError(
+                domain: "PrinterSensorsLiveBackendUITests",
+                code: 8,
+                userInfo: [NSLocalizedDescriptionKey: "The Advanced Printer Controls toggle is not hittable."]
+            )
+        }
+        if toggle.value as? String != "1" {
+            toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
+            let becameOn = XCTNSPredicateExpectation(
+                predicate: NSPredicate(format: "value == '1'"),
+                object: toggle
+            )
+            guard XCTWaiter().wait(for: [becameOn], timeout: 5) == .completed else {
+                throw NSError(
+                    domain: "PrinterSensorsLiveBackendUITests",
+                    code: 9,
+                    userInfo: [
+                        NSLocalizedDescriptionKey:
+                            "Tapping the Advanced Printer Controls switch did not enable it."
+                    ]
+                )
+            }
+        }
+        let settingsBack = app.navigationBars["Settings"].buttons["BackButton"]
+        guard settingsBack.waitForExistence(timeout: 3) else {
+            throw NSError(
+                domain: "PrinterSensorsLiveBackendUITests",
+                code: 10,
+                userInfo: [NSLocalizedDescriptionKey: "Settings did not expose its Account back navigation."]
+            )
+        }
+        settingsBack.tap()
+        guard app.descendants(matching: .any)["account.root"].waitForExistence(timeout: 3) else {
+            throw NSError(
+                domain: "PrinterSensorsLiveBackendUITests",
+                code: 11,
+                userInfo: [NSLocalizedDescriptionKey: "Returning from Settings did not restore Account."]
+            )
+        }
+        let accountBack = app.navigationBars["Account"].buttons["BackButton"]
+        guard accountBack.waitForExistence(timeout: 3) else {
+            throw NSError(
+                domain: "PrinterSensorsLiveBackendUITests",
+                code: 12,
+                userInfo: [NSLocalizedDescriptionKey: "Account did not expose its Farm back navigation."]
+            )
+        }
+        accountBack.tap()
+        guard app.buttons["navigation.account"].waitForExistence(timeout: 3) else {
+            throw NSError(
+                domain: "PrinterSensorsLiveBackendUITests",
+                code: 13,
+                userInfo: [NSLocalizedDescriptionKey: "Returning from Account did not restore the Farm shell."]
+            )
+        }
+    }
+
+    private func verifyBackend(
+        printer: Printer,
+        sensorID: String,
+        temperatureQuantity: String,
+        temperatureValue: Double,
+        fanID: String,
+        reconnectTemperatureValue: Double?,
+        app: XCUIApplication,
+        credentials: Credentials,
+        token: String
+    ) async throws {
+        let detailFarm = app.buttons["printer.detail.farm"]
+        if detailFarm.exists {
+            detailFarm.tap()
+        } else {
+            let farm = app.buttons["tab.farm"]
+            guard farm.waitForExistence(timeout: 8) else {
+                throw NSError(
+                    domain: "PrinterSensorsLiveBackendUITests",
+                    code: 19,
+                    userInfo: [NSLocalizedDescriptionKey: "The Farm destination did not appear before selecting a printer."]
+                )
+            }
+            farm.tap()
+        }
+        let card = app.buttons["farm-card-\(printer.id.uuidString)"]
+        guard card.waitForExistence(timeout: 20) else {
+            throw NSError(
+                domain: "PrinterSensorsLiveBackendUITests",
+                code: 16,
+                userInfo: [NSLocalizedDescriptionKey: "\(printer.name) must appear in the live farm."]
+            )
+        }
+        card.tap()
+        let status = app.descendants(matching: .any)["printer.detail.sensor.\(sensorID)"]
+        let observer = try await SignalRPrinterUpdateObserver.connect(
+            baseURL: credentials.apiURL,
+            token: token,
+            printerID: printer.id
+        )
+        defer { observer.close() }
+        let baselineValue = temperatureValue - 1
+        let previousUpdateCount = observer.updateCount
+        if reconnectTemperatureValue != nil {
+            _ = try await updateMoonrakerSensor(
+                credentials,
+                objectName: sensorID,
+                temperature: baselineValue
+            )
+        } else {
+            try await setSensorValue(
+                credentials,
+                token: token,
+                printerID: printer.id,
+                sensorID: sensorID,
+                quantity: temperatureQuantity,
+                value: baselineValue
+            )
+        }
+        let initial = try XCTUnwrap(observer.waitForUpdate(after: previousUpdateCount, timeout: 30) { event in
+            guard let payload = try? Self.jsonObject(event.payload),
+                  let sensors = payload["sensors"] as? [[String: Any]] else { return false }
+            return event.target == "printerupdated"
+                && Self.readingValue(sensors, sensorID: sensorID, quantity: temperatureQuantity) == baselineValue
+        })
+        let baselinePayload = try jsonObject(initial.payload)
+        guard status.waitForExistence(timeout: 20) else {
+            throw NSError(
+                domain: "PrinterSensorsLiveBackendUITests",
+                code: 17,
+                userInfo: [NSLocalizedDescriptionKey: "\(printer.name) must show its live \(sensorID) sensor."]
+            )
+        }
+        assertLabelContains(status, text: baselineValue.formatted(), timeout: 20)
+
+        let temperatureUpdateCount = observer.updateCount
+        if reconnectTemperatureValue != nil {
+            _ = try await updateMoonrakerSensor(credentials, objectName: sensorID, temperature: temperatureValue)
+        } else {
+            try await setSensorValue(
+                credentials,
+                token: token,
+                printerID: printer.id,
+                sensorID: sensorID,
+                quantity: temperatureQuantity,
+                value: temperatureValue
+            )
+        }
+
+        let updatedEvent = try XCTUnwrap(observer.waitForUpdate(after: temperatureUpdateCount, timeout: 30) { event in
+            guard let payload = try? Self.jsonObject(event.payload),
+                  let sensors = payload["sensors"] as? [[String: Any]] else { return false }
+            return event.target == "printerupdated"
+                && Self.readingValue(sensors, sensorID: sensorID, quantity: temperatureQuantity) == temperatureValue
+        })
+        let updatedPayload = try jsonObject(updatedEvent.payload)
+        XCTAssertEqual(updatedEvent.target, "printerupdated")
+        XCTAssertEqual(
+            try canonicalJSON(withoutSensorReadings(baselinePayload)),
+            try canonicalJSON(withoutSensorReadings(updatedPayload)),
+            "A sensor-only printerupdated must not alter non-sensor printer fields."
+        )
+        assertLabelContains(status, text: temperatureValue.formatted(), timeout: 20)
+        attachScreenshot(named: "\(printer.name) live Status sensor readout")
+
+        let updatedSensors = try XCTUnwrap(updatedPayload["sensors"] as? [[String: Any]])
+        let fanValue = try XCTUnwrap(Self.readingValue(updatedSensors, sensorID: fanID, quantity: "FanSpeed"))
+        let selector = app.descendants(matching: .any)["printer.detail.panel.selector"]
+        guard selector.waitForExistence(timeout: 8) else {
+            throw NSError(
+                domain: "PrinterSensorsLiveBackendUITests",
+                code: 18,
+                userInfo: [NSLocalizedDescriptionKey: "The printer detail panel selector did not appear."]
+            )
+        }
+        selector.buttons["Control"].tap()
+        let increase = app.buttons["printer.controls.sensor.\(fanID).FanSpeed.increase"]
+        XCTAssertTrue(increase.waitForExistence(timeout: 12), "\(printer.name) must expose the writable fan control.")
+        attachScreenshot(named: "\(printer.name) live fan control")
+        let fanUpdateCount = observer.updateCount
+        increase.tap()
+
+        let expectedFanValue = fanValue + 1
+        let fanEvent = try XCTUnwrap(observer.waitForUpdate(after: fanUpdateCount, timeout: 30) { event in
+            guard let payload = try? Self.jsonObject(event.payload),
+                  let sensors = payload["sensors"] as? [[String: Any]] else { return false }
+            return event.target == "printerupdated"
+                && Self.readingValue(sensors, sensorID: fanID, quantity: "FanSpeed") == expectedFanValue
+        })
+        let fanPayload = try jsonObject(fanEvent.payload)
+        XCTAssertEqual(
+            try canonicalJSON(withoutSensorReadings(updatedPayload)),
+            try canonicalJSON(withoutSensorReadings(fanPayload)),
+            "A fan-only printerupdated must not alter non-sensor printer fields."
+        )
+        selector.buttons["Status"].tap()
+        let fanStatus = app.descendants(matching: .any)["printer.detail.sensor.\(fanID)"]
+        assertLabelContains(fanStatus, text: expectedFanValue.formatted(), timeout: 20)
+
+        var controlRequest = URLRequest(url: credentials.controlURL.appending(path: "/restart-api"))
+        controlRequest.httpMethod = "POST"
+        controlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let reconnectTemperatureValue {
+            controlRequest.httpBody = try JSONSerialization.data(withJSONObject: [
+                "moonrakerSensor": [
+                    "objectName": sensorID,
+                    "temperature": reconnectTemperatureValue,
+                ],
+            ])
+        } else {
+            controlRequest.httpBody = Data("{}".utf8)
+        }
+        let (controlData, controlResponse) = try await URLSession.shared.data(for: controlRequest)
+        try assertSuccess(controlResponse, data: controlData, operation: "API reconnect/resync")
+        let controlResult = try XCTUnwrap(try JSONSerialization.jsonObject(with: controlData) as? [String: Any])
+        XCTAssertEqual(controlResult["restarted"] as? Bool, true)
+        if reconnectTemperatureValue != nil {
+            XCTAssertEqual(controlResult["moonrakerSensorUpdated"] as? Bool, true)
+        }
+
+        let reconnectObserver = try await SignalRPrinterUpdateObserver.connect(
+            baseURL: credentials.apiURL,
+            token: token,
+            printerID: printer.id
+        )
+        defer { reconnectObserver.close() }
+        let expectedReconnectSensorValue = reconnectTemperatureValue ?? 0
+        let reconnectEvent = try XCTUnwrap(reconnectObserver.waitForUpdate(after: 0, timeout: 30) { event in
+            guard let payload = try? Self.jsonObject(event.payload),
+                  let sensors = payload["sensors"] as? [[String: Any]] else { return false }
+            return event.target == "printerupdated"
+                && Self.readingValue(sensors, sensorID: sensorID, quantity: temperatureQuantity)
+                    == expectedReconnectSensorValue
+        })
+        let reconnectPayload = try jsonObject(reconnectEvent.payload)
+        XCTAssertEqual(reconnectEvent.target, "printerupdated")
+        XCTAssertFalse(
+            try XCTUnwrap(reconnectPayload["sensors"] as? [[String: Any]]).isEmpty,
+            "The backend must replay its live sensor snapshot after the API reconnects."
+        )
+
+        let connectionStatus = app.buttons["connection-status-bar"]
+        assertLabelContains(connectionStatus, text: "Connected", timeout: 45)
+        let expectedReconnectLabel = reconnectTemperatureValue?.formatted() ?? "Target 0"
+        assertLabelContains(status, text: expectedReconnectLabel, timeout: 30)
+        attachScreenshot(named: "\(printer.name) reconnect resync")
+    }
+
+    private func updateMoonrakerSensor(
+        _ credentials: Credentials,
+        objectName: String,
+        temperature: Double
+    ) async throws -> [String: Any] {
+        var request = URLRequest(url: credentials.controlURL.appending(path: "/moonraker-sensor"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "objectName": objectName,
+            "temperature": temperature,
+        ])
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try assertSuccess(response, data: data, operation: "Moonraker sensor mutation")
+        return try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+    }
+
+    private func setSensorValue(
+        _ credentials: Credentials,
+        token: String,
+        printerID: UUID,
+        sensorID: String,
+        quantity: String,
+        value: Double
+    ) async throws {
+        let body: [String: Any] = ["quantity": quantity, "value": value]
+        let path = "/api/printers/\(printerID)/sensors/\(sensorID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? sensorID)"
+        _ = try await apiRequest(credentials, token: token, path: path, method: "POST", body: body)
+    }
+
+    private func assertLabelContains(_ element: XCUIElement, text: String, timeout: TimeInterval) {
+        let expectation = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "label CONTAINS %@", text),
+            object: element
+        )
+        XCTAssertEqual(XCTWaiter().wait(for: [expectation], timeout: timeout), .completed)
+    }
+
+    private func attachScreenshot(named name: String) {
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screenshot.name = name
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+    }
+
+    private func apiRequest(
+        _ credentials: Credentials,
+        token: String,
+        path: String,
+        method: String,
+        body: [String: Any]? = nil
+    ) async throws -> Data {
+        var request = URLRequest(url: credentials.apiURL.appending(path: path))
+        request.httpMethod = method
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        if let body {
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        }
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try assertSuccess(response, data: data, operation: "\(method) \(path)")
+        return data
+    }
+
+    private func replaceText(in field: XCUIElement, with value: String, clearingPlaceholder: Bool = false) {
+        if clearingPlaceholder {
+            field.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.5)).tap()
+        }
+        if let current = field.value as? String,
+           current != field.placeholderValue || clearingPlaceholder {
+            field.typeText(
+                String(
+                    repeating: XCUIKeyboardKey.delete.rawValue,
+                    count: current.count + 10
+                )
+            )
+        }
+        field.typeText(value)
+    }
+
+    private func assertSuccess(_ response: URLResponse, data: Data, operation: String) throws {
+        let httpResponse = try XCTUnwrap(response as? HTTPURLResponse, "\(operation) must return an HTTP response.")
+        guard (200..<300).contains(httpResponse.statusCode) else {
+            let responseBody = String(data: data, encoding: .utf8) ?? "<non-UTF8 response body>"
+            throw NSError(
+                domain: "PrinterSensorsLiveBackendUITests",
+                code: httpResponse.statusCode,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "\(operation) returned HTTP \(httpResponse.statusCode): \(responseBody)"
+                ]
+            )
+        }
+    }
+
+    private func jsonObject(_ data: Data) throws -> [String: Any] {
+        try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+    }
+
+    private func withoutSensorReadings(_ payload: [String: Any]) -> [String: Any] {
+        payload.filter { !["sensors", "updatedAt", "timestamp", "serverTime"].contains($0.key) }
+    }
+
+    private func canonicalJSON(_ value: Any) throws -> Data {
+        try JSONSerialization.data(withJSONObject: value, options: [.sortedKeys, .fragmentsAllowed])
+    }
+
+    nonisolated private static func jsonObject(_ data: Data) throws -> [String: Any] {
+        try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+    }
+
+    nonisolated private static func readingValue(
+        _ sensors: [[String: Any]],
+        sensorID: String,
+        quantity: String
+    ) -> Double? {
+        guard let sensor = sensors.first(where: { $0["id"] as? String == sensorID }),
+              let readings = sensor["readings"] as? [[String: Any]],
+              let reading = readings.first(where: { $0["quantity"] as? String == quantity }) else {
+            return nil
+        }
+        if let value = reading["value"] as? NSNumber {
+            return value.doubleValue
+        }
+        if let value = reading["value"] as? [String: Any] {
+            return (value["number"] as? NSNumber)?.doubleValue
+        }
+        return nil
+    }
+}
+
+private final class SignalRPrinterUpdateObserver: @unchecked Sendable {
+    private let condition = NSCondition()
+    private let socket: URLSessionWebSocketTask
+    private var receiveTask: Task<Void, Never>?
+    private var updates: [LivePrinterHubUpdate] = []
+
+    private init(socket: URLSessionWebSocketTask) {
+        self.socket = socket
+    }
+
+    var updateCount: Int {
+        condition.lock()
+        defer { condition.unlock() }
+        return updates.count
+    }
+
+    static func connect(baseURL: URL, token: String, printerID: UUID) async throws -> SignalRPrinterUpdateObserver {
+        var negotiateURL = baseURL.appending(path: "/hubs/printers/negotiate")
+        var components = URLComponents(url: negotiateURL, resolvingAgainstBaseURL: false)!
+        components.queryItems = [URLQueryItem(name: "negotiateVersion", value: "1")]
+        negotiateURL = try XCTUnwrap(components.url)
+        var request = URLRequest(url: negotiateURL)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw NSError(domain: "SignalRPrinterUpdateObserver", code: 2, userInfo: [
+                NSLocalizedDescriptionKey: "SignalR negotiate did not return a successful HTTP response."
+            ])
+        }
+        let negotiated = try JSONDecoder().decode(NegotiateResponse.self, from: data)
+        var socketComponents = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)!
+        socketComponents.scheme = socketComponents.scheme == "https" ? "wss" : "ws"
+        socketComponents.path = "/hubs/printers"
+        socketComponents.queryItems = [URLQueryItem(name: "id", value: negotiated.connectionToken)]
+        var socketRequest = URLRequest(url: try XCTUnwrap(socketComponents.url))
+        socketRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let socket = URLSession.shared.webSocketTask(with: socketRequest)
+        socket.resume()
+        try await socket.send(.string("{\"protocol\":\"json\",\"version\":1}\u{001e}"))
+        _ = try await socket.receive()
+        let observer = SignalRPrinterUpdateObserver(socket: socket)
+        let subscription = try JSONSerialization.data(withJSONObject: [
+            "type": 1,
+            "invocationId": "sensor-e2e-subscribe",
+            "target": "SubscribeToPrinterAsync",
+            "arguments": [printerID.uuidString],
+        ])
+        try await socket.send(.string(String(decoding: subscription, as: UTF8.self) + "\u{001e}"))
+        observer.receiveTask = Task.detached { [weak observer] in
+            await observer?.receiveUpdates()
+        }
+        return observer
+    }
+
+    func waitForUpdate(
+        after index: Int,
+        timeout: TimeInterval,
+        matching predicate: (LivePrinterHubUpdate) -> Bool
+    ) -> LivePrinterHubUpdate? {
+        condition.lock()
+        defer { condition.unlock() }
+        let deadline = Date().addingTimeInterval(timeout)
+        while true {
+            if updates.count > index,
+               let update = updates[index...].first(where: predicate) {
+                return update
+            }
+            guard condition.wait(until: deadline) else { return nil }
+        }
+    }
+
+    func close() {
+        receiveTask?.cancel()
+        socket.cancel(with: .normalClosure, reason: nil)
+    }
+
+    private func receiveUpdates() async {
+        while !Task.isCancelled {
+            do {
+                let message = try await socket.receive()
+                let text: String
+                switch message {
+                case .string(let value): text = value
+                case .data(let data): text = String(decoding: data, as: UTF8.self)
+                @unknown default: continue
+                }
+                for frame in text.split(separator: "\u{001e}") {
+                    guard let data = String(frame).data(using: .utf8),
+                          let message = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                          message["target"] as? String == "printerupdated",
+                          let arguments = message["arguments"] as? [Any],
+                          let payload = arguments.first,
+                          let payloadData = try? JSONSerialization.data(withJSONObject: payload) else {
+                        continue
+                    }
+                    append(.init(target: "printerupdated", payload: payloadData))
+                }
+            } catch {
+                return
+            }
+        }
+    }
+
+    private func append(_ update: LivePrinterHubUpdate) {
+        condition.lock()
+        defer { condition.unlock() }
+        updates.append(update)
+        condition.broadcast()
+    }
+
+    private struct NegotiateResponse: Decodable {
+        let connectionToken: String
+    }
+}

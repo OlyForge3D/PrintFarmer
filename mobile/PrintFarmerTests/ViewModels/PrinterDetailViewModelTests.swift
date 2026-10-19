@@ -1916,6 +1916,105 @@ final class PrinterDetailViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.printer?.sensors, [], "A reported empty list replaces the cache")
     }
 
+    func testReconnectCanonicalLoadDoesNotOverwriteNewerLiveSensorSnapshot() async throws {
+        let callbackQueue = ShiftTaskCallbackQueue()
+        let service = MockPrinterService()
+        service.printerToReturn = try TestData.decodePrinter()
+        let vm = PrinterDetailViewModel(
+            printerId: TestData.testUUID,
+            callbackEnqueuer: callbackQueue.enqueuer
+        )
+        vm.configure(printerService: service)
+        vm.isViewActive = true
+        await vm.loadPrinter()
+
+        let signalR = MockSignalRService()
+        vm.configureSignalR(signalR)
+        let statusRequestStarted = ShiftTaskResultGate<Bool>()
+        let staleStatusGate = ShiftTaskResultGate<PrinterStatusDetail>()
+        service.statusHandler = { _ in
+            await statusRequestStarted.succeed(true)
+            return try await staleStatusGate.wait()
+        }
+
+        signalR.simulateConnectionStateChange(.reconnecting)
+        await callbackQueue.waitForCount(1)
+        await callbackQueue.runNext()
+        signalR.simulateConnectionStateChange(.connected)
+        await callbackQueue.waitForCount(1)
+        await callbackQueue.runNext()
+        _ = try await statusRequestStarted.wait()
+
+        let liveSensors = try JSONDecoder().decode(
+            [PrinterSensor].self,
+            from: Data(
+                """
+                [{"id":"chamber","displayName":"Chamber","kind":"Chamber",
+                  "readings":[{"quantity":"Temperature","value":39.2,"unit":"Celsius"}],
+                  "available":true,"writable":[]}]
+                """.utf8
+            )
+        )
+        signalR.simulatePrinterUpdate(
+            PrinterStatusUpdate(
+                id: TestData.testUUID,
+                isOnline: true,
+                state: "idle",
+                progress: nil,
+                sensors: liveSensors,
+                jobName: nil,
+                fileName: nil,
+                thumbnailUrl: nil,
+                cameraStreamUrl: nil,
+                x: nil,
+                y: nil,
+                z: nil,
+                hotendTemp: nil,
+                bedTemp: nil,
+                hotendTarget: nil,
+                bedTarget: nil,
+                homedAxes: nil,
+                spoolInfo: nil,
+                mmuStatus: nil
+            )
+        )
+        await callbackQueue.waitForCount(1)
+        await callbackQueue.runNext()
+        XCTAssertEqual(vm.printer?.sensors, liveSensors)
+
+        await staleStatusGate.succeed(
+            PrinterStatusDetail(
+                id: TestData.testUUID,
+                isOnline: true,
+                state: "idle",
+                progress: nil,
+                sensors: [],
+                jobName: nil,
+                thumbnailUrl: nil,
+                cameraStreamUrl: nil,
+                cameraSnapshotUrl: nil,
+                x: nil,
+                y: nil,
+                z: nil,
+                hotendTemp: nil,
+                bedTemp: nil,
+                hotendTarget: nil,
+                bedTarget: nil,
+                spoolInfo: nil,
+                mmuStatus: nil
+            )
+        )
+        await vm.waitForCanonicalLoadToBecomeIdle()
+
+        XCTAssertEqual(
+            vm.printer?.sensors,
+            liveSensors,
+            "A stale reconnect snapshot must not erase a sensor update received while it loaded."
+        )
+        XCTAssertEqual(vm.statusDetail?.sensors, liveSensors)
+        vm.stopSnapshotPolling()
+    }
+
     /// Unanimous #706 BLOCK: a live `printerupdated` carrying `homedAxes`
     /// must propagate into `viewModel.printer.homedAxes`. Before the fix
     /// `applyLiveUpdate` mutated position/temperature/spool but silently

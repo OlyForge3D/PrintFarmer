@@ -22,7 +22,7 @@ public class TestEmulatorBackendPlugin : IExtendedBackendPlugin
 
     public Type ClientInterfaceType => typeof(ITestEmulatorClient);
 
-    public Type? StatusClientType => null;
+    public Type? StatusClientType => typeof(TestEmulatorClient);
 
     public Type? StatusClientInterfaceType => null;
 
