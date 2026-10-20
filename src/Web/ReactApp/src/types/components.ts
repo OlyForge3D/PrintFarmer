@@ -6,7 +6,6 @@
 import type { Model } from './models';
 import type { HistoryJob, HistoryStats, JobAction, JobStatus, JobDetails } from './queue';
 import type { FileEntry, HarvestDiscoveredFile, HarvestOptions, FileImportStatus } from './gcode';
-import type { MachineProfile, SliceCompleteResult } from './slicer';
 import type { GcodeFile, Printer, JobQueuePrintJob } from './api';
 
 // ====================================
@@ -218,20 +217,6 @@ export interface WorkerSelectorProps {
   selectedWorkerId: string;
   onWorkerChange: (workerId: string) => void;
   requiredCapabilities?: string[];
-}
-
-export interface CloneProfilesModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-  sourceProfile: MachineProfile;
-  onSuccess?: () => void;
-}
-
-export interface SlicerConfigModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-  modelId: string;
-  onSliceComplete?: (result: SliceCompleteResult) => void;
 }
 
 export interface SlicerConfirmModalProps {

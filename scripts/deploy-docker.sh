@@ -566,30 +566,7 @@ auto_load_cached_images() {
     # Use the core loading function
     _load_tar_images "$images_dir" "quiet"
 
-    # Create aliases for upgraded images so they can be used as base images
-    # If upgraded images are loaded (e.g., aspnet:${ASPNET_TAG}-upgraded),
-    # also tag them as the base image (e.g., aspnet:${ASPNET_TAG}) so Dockerfile.multistage can use them
-    print_info "Creating aliases for upgraded images..."
-    local alias_count=0
-
-    # Temporarily disabled - image aliasing logic needs debugging
-    # for image_config in "${DOCKER_IMAGES_CONFIG[@]}"; do
-    #     IFS='|' read -r base_image dockerfile upgraded_image <<< "$image_config"
-    #     if timeout 5 docker image inspect "$upgraded_image" >/dev/null 2>&1 && ! timeout 5 docker image inspect "$base_image" >/dev/null 2>&1; then
-    #         if timeout 10 docker tag "$upgraded_image" "$base_image" >/dev/null 2>&1; then
-    #             print_info "  Tagged: $upgraded_image → $base_image"
-    #             ((alias_count++))
-    #         fi
-    #     fi
-    # done
-
-    if [ $alias_count -eq 0 ]; then
-        print_info "  Note: Upgraded base images will be used directly by docker-compose if available"
-    fi
-
-    if [ $alias_count -gt 0 ]; then
-        print_success "✓ Created $alias_count image alias/aliases for faster builds"
-    fi
+    print_info "  Note: Upgraded base images will be used directly by docker-compose if available"
 
     # After loading, check if orcaslicer-binaries was loaded and set ORCA_ASSET_IMAGE
     # This enables the build system to skip downloading OrcaSlicer from GitHub
