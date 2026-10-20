@@ -67,36 +67,3 @@ export interface AvailableProfile {
   manufacturer?: string;
   model?: string;
 }
-
-/**
- * Machine profile for cloning
- */
-export interface MachineProfile {
-  id: string;
-  name: string;
-  manufacturer: string;
-  model: string;
-  nozzleSizes?: number[];
-}
-
-/**
- * Available printer for slicer configuration
- */
-export interface AvailablePrinter {
-  id: string;
-  name: string;
-  manufacturerName?: string;
-  modelName?: string;
-}
-
-/**
- * Result of a completed slice operation
- */
-export interface SliceCompleteResult {
-  jobId: string;
-  success: boolean;
-  outputFilePath?: string;
-  gcodeFileName?: string;
-  message?: string;
-  error?: string;
-}

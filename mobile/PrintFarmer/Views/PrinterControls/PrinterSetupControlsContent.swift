@@ -358,7 +358,7 @@ struct PrinterMaterialControls: View {
 
 /// Inputs for sensor/fan entries the backend reports as writable. Read-only
 /// entries and descriptors never get controls.
-private struct PrinterSensorControlRows: View {
+struct PrinterSensorControlRows: View {
     @ObservedObject var viewModel: PrinterControlsViewModel
     var compact: Bool
 
