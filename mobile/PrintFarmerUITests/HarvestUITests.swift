@@ -170,7 +170,7 @@ final class HarvestUITests: QueueUITestBase {
     }
 
     private func reorderHandle(for jobName: String) -> XCUIElement {
-        app.buttons.matching(
+        app.collectionViews["jobList.combined.list"].buttons.matching(
             NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@", "Reorder", jobName)
         ).firstMatch
     }
