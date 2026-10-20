@@ -1,5 +1,7 @@
 import { Button, TemperatureControlRow, Select } from '@/common/components/ui';
 import { NozzleIcon, BedIcon, SnowflakeIcon } from '@/common/components/icons/MdiIcons';
+import type { PrinterSensor } from '@/types/api';
+import { primaryHeaterPower } from '@/features/printers/utils/additionalPrinterSensors';
 import {
   bedPresetOptions,
   hotendPresetOptions,
@@ -28,6 +30,7 @@ interface TemperatureControlSectionProps {
   onApplyPreset: (preset: string) => void;
   onApplySingleHeaterPreset: (heater: 'hotend' | 'bed', preset: string) => void;
   showHeading?: boolean;
+  sensors?: PrinterSensor[];
 }
 
 export function TemperatureControlSection({
@@ -47,6 +50,7 @@ export function TemperatureControlSection({
   onApplyPreset,
   onApplySingleHeaterPreset,
   showHeading = true,
+  sensors,
 }: TemperatureControlSectionProps) {
   const temperatureControlsDisabled = temperatureActionPending || !canSetTemperatures;
   const cooldownDisabled = temperatureActionPending || !canCooldown;
@@ -55,7 +59,7 @@ export function TemperatureControlSection({
     <div className="mb-2">
       {showHeading && (
         <div className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide mb-1 -ml-1">
-          Temps
+          Temperatures
         </div>
       )}
       <div className="space-y-1">
@@ -103,10 +107,10 @@ export function TemperatureControlSection({
           </div>
         </div>
 
-        <div className="grid grid-cols-[minmax(0,1fr)_3rem_4.75rem_5rem_1.5rem] gap-2 pb-1 text-[10px] uppercase tracking-wide text-pf-text-secondary">
+        <div className="grid grid-cols-[minmax(0,1fr)_2.5rem_3.5rem_4.5rem_1.5rem] gap-1 pb-1 text-[10px] uppercase tracking-wide text-pf-text-secondary">
           <span>Name</span>
-          <span className="text-right">State</span>
-          <span className="text-right">Current</span>
+          <span className="text-right">Power</span>
+          <span className="text-right">Actual</span>
           <span className="text-right">Target</span>
           <span></span>
         </div>
@@ -119,6 +123,7 @@ export function TemperatureControlSection({
             />
           }
           label="Hotend"
+          powerReading={primaryHeaterPower(sensors, 'hotend')}
           stateLabel={hotendTarget > 0 ? 'on' : 'off'}
           liveReading={formatTemperature(hotendCurrent)}
           value={hotendTemp}
@@ -137,6 +142,7 @@ export function TemperatureControlSection({
             />
           }
           label="Bed"
+          powerReading={primaryHeaterPower(sensors, 'bed')}
           stateLabel={bedTarget > 0 ? 'on' : 'off'}
           liveReading={formatTemperature(bedCurrent)}
           value={bedTemp}

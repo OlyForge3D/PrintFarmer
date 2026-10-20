@@ -18,8 +18,7 @@ import { PrinterBackend, type ApiError, type MoveRequest, type Printer, type Pri
 import { PrinterHistoryModal } from '@/features/printers/components/PrinterHistoryModal';
 import { PrinterFilesModal } from '@/features/printers/components/PrinterFilesModal';
 import { TemperatureControlSection } from '@/features/printers/components/TemperatureControlSection';
-import { useAuth } from '@/features/auth/hooks/useAuth';
-import { PrinterSensorsPanel } from '@/features/printers/components/PrinterSensorsPanel';
+import { PrinterSensorsSection } from '@/features/printers/components/PrinterSensorsPanel';
 import { usePrinterMovement } from '@/features/printers/hooks/use-printer-movement';
 import {
   canCancel,
@@ -166,8 +165,6 @@ interface PrinterDetailsSidebarProps {
 }
 
 export function PrinterDetailsSidebar({ printerId, printer: printerProp, backendCapabilities, onClose, layout = 'panel' }: PrinterDetailsSidebarProps) {
-  const { hasPermission } = useAuth();
-  const canOperateSensors = hasPermission('queue', 'start');
   // Call hooks first before any early returns (React Rules of Hooks)
   // Only fetch if printer prop is not provided
   const shouldFetch = !printerProp && !!printerId;
@@ -221,8 +218,6 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
   const [isControlExpanded, setIsControlExpanded] = useState(true);
   const [isMoveExpanded, setIsMoveExpanded] = useState(true);
 
-  const [isTempsExpanded, setIsTempsExpanded] = useState(true);
-  const [isSensorsExpanded, setIsSensorsExpanded] = useState(true);
   const [isSpoolExpanded, setIsSpoolExpanded] = useState(true);
   const [showSpoolPicker, setShowSpoolPicker] = useState(false);
   const [controlActionPending, setControlActionPending] = useState(false);
@@ -454,7 +449,6 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
   const canMoveNow = canMove({ isOnline, isEnabled, isPrinting, isShutdown, support });
   const canSetStepNow = canSetStep({ isOnline, isShutdown, support });
   const canManualMoveNow = canUseManualMove({ isOnline, isEnabled, isPrinting, isShutdown, support });
-  const completePosition = [moveX, moveY, moveZ].every(value => value !== '' && Number.isFinite(value));
   const canSetTemperaturesNow = canSetTemperatures({ isOnline, isEnabled, support });
   const canCooldownNow = canCooldown({ isOnline, isEnabled, isPrinting, support });
   const canOpenFilesNow = canOpenFiles({ isOnline, isEnabled, support });
@@ -558,7 +552,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
   };
 
   const handleMoveTo = async (position: MoveRequest) => {
-    if (movementActionPending || !canManualMoveNow || !completePosition) return;
+    if (movementActionPending || !canManualMoveNow || !Object.values(position).length || !Object.values(position).every(Number.isFinite)) return;
     setMovementActionPending(true);
     try {
       const result = await motion.execute({ kind: 'MoveTo', ...position });
@@ -1229,23 +1223,26 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
           <PrinterCoordinateRow
             values={{ X: moveX, Y: moveY, Z: moveZ }}
             positions={{ X: lastKnownX, Y: lastKnownY, Z: lastKnownZ }}
+            homedAxes={homedAxesRaw}
             onChange={(axis, value) => ({ X: setMoveX, Y: setMoveY, Z: setMoveZ })[axis](value)}
             disabled={movementActionPending || !canManualMoveNow}
             onMove={handleMove}
             onMoveTo={handleMoveTo}
-            perAxisEnter
-            goTitle="Move to entered coordinates"
           />
-          <PrinterMotionHelp absolute />
+          <PrinterMotionHelp />
         </CollapsibleSection>
 
         {/* Temperatures Section */}
-        <CollapsibleSection
-          title="Temps"
-          expanded={isTempsExpanded}
-          onToggle={setIsTempsExpanded}
+        <PrinterSensorsSection
+          printerId={printer.id}
+          sensors={displayPrinter?.sensors}
+          temperatures={displayPrinter ?? {}}
+          supportsTelemetry={backendCapabilities?.supportsSensorTelemetry}
+          canControl={(backendCapabilities?.supportsSensorControl ?? false) && isEnabled}
+          isOnline={isOnline}
         >
           <TemperatureControlSection
+            sensors={displayPrinter?.sensors}
             showHeading={false}
             hotendTemp={hotendTemp}
             bedTemp={bedTemp}
@@ -1267,22 +1264,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
               void handleApplySingleHeaterPreset(heater, preset);
             }}
           />
-        </CollapsibleSection>
-
-        {(backendCapabilities?.supportsSensorTelemetry || (displayPrinter?.sensors?.length ?? 0) > 0) && (
-          <CollapsibleSection
-            title="Sensors & fans"
-            expanded={isSensorsExpanded}
-            onToggle={setIsSensorsExpanded}
-          >
-            <PrinterSensorsPanel
-              printerId={printer.id}
-              sensors={displayPrinter?.sensors}
-              canControl={(backendCapabilities?.supportsSensorControl ?? false) && canOperateSensors && isEnabled}
-              isOnline={isOnline}
-            />
-          </CollapsibleSection>
-        )}
+        </PrinterSensorsSection>
 
         {/* MMU Control Box - the single slot representation when MMU/ERCF/AMS is
             detected via real-time status; spool assignment lives in its action row. */}

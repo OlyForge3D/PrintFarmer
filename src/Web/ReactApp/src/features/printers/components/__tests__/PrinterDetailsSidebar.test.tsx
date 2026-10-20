@@ -19,6 +19,7 @@ import {
   PrinterBackend,
   type CommandResult,
   type Printer,
+  type PrinterSensor,
   type PrinterBackendCapabilitiesDto,
   type PrintJobObjectListDto,
 } from "@/types/api";
@@ -264,13 +265,13 @@ describe("PrinterDetailsSidebar", () => {
   });
 
   it.each([PrinterBackend.Moonraker, PrinterBackend.PrusaLink])(
-    "routes %s Home All/XY/Z, jog, GO and Enter through direct commands",
+    "routes %s Home All/XY/Z, jog and edited-axis Enter through direct commands",
     async (backend) => {
       localStorage.setItem("auth-token", crypto.randomUUID());
       const moonraker = {
         ...printer,
         id: "11111111-1111-4111-8111-111111111111",
-        backend,
+        backend, homedAxes: 'xyz',
       };
       const auth = {
         isAuthenticated: true,
@@ -319,20 +320,13 @@ describe("PrinterDetailsSidebar", () => {
       fireEvent.change(screen.getByLabelText("Y absolute target"), {
         target: { value: "120" },
       });
-      expect(screen.getByTitle("Move to entered coordinates")).toBeDisabled();
+      expect(screen.queryByText("GO")).not.toBeInTheDocument();
       fireEvent.keyDown(screen.getByLabelText("X absolute target"), {
         key: "Enter",
       });
-      expect(mockMovePrinterTo).not.toHaveBeenCalled();
-      fireEvent.change(screen.getByLabelText("Z absolute target"), {
-        target: { value: "10" },
-      });
-      fireEvent.click(screen.getByTitle("Move to entered coordinates"));
       await waitFor(() =>
         expect(mockMovePrinterTo).toHaveBeenLastCalledWith(moonraker.id, {
           x: 110,
-          y: 120,
-          z: 10,
         }),
       );
       await waitFor(() =>
@@ -346,8 +340,6 @@ describe("PrinterDetailsSidebar", () => {
       });
       await waitFor(() =>
         expect(mockMovePrinterTo).toHaveBeenLastCalledWith(moonraker.id, {
-          x: 110,
-          y: 120,
           z: 15,
         }),
       );
@@ -383,36 +375,68 @@ describe("PrinterDetailsSidebar", () => {
   });
 
   it.each([
-    ["queue/start permission is denied", false, true],
-    ["the printer is disabled", true, false],
-    ["control is permitted and the printer is enabled", true, true],
-  ])("gates sensor write controls when %s", (_label, allowed, enabled) => {
+    ["queue/start permission is denied", false, true, true, true, true],
+    ["the printer is disabled", true, false, true, true, true],
+    ["control is permitted and the printer is enabled", true, true, true, true, true],
+    ["the printer is offline", true, true, false, true, true],
+    ["the sensor is unavailable", true, true, true, false, true],
+    ["the backend cannot write sensors", true, true, true, true, false],
+  ])("gates sensor write controls when %s", (_label, allowed, enabled, online, available, control) => {
     authMock.allowed = allowed;
-    const fan = {
+    const fan: PrinterSensor = {
       id: "fan0",
       displayName: "Part fan",
       kind: "Fan",
       fanRole: "PartCooling",
       readings: [{ quantity: "FanSpeed", value: 40, unit: "Percent" }],
-      available: true,
+      available,
       writable: [{ quantity: "FanSpeed", min: 0, max: 100, step: null, unit: "Percent" }],
+    };
+    const heater: PrinterSensor = {
+      id: 'heater_generic box1', kind: 'Chamber', displayName: 'Heater Box1', available,
+      readings: [{ quantity: 'Temperature', value: 36, unit: 'Celsius' }, { quantity: 'TargetTemperature', value: 40, unit: 'Celsius' }],
+      writable: [{ quantity: 'TargetTemperature', min: 0, max: 80, step: 1, unit: 'Celsius' }],
     };
     render(
       <PrinterDetailsSidebar
         printerId={printer.id}
-        printer={{ ...printer, isEnabled: enabled, sensors: [fan] } as unknown as Printer}
-        backendCapabilities={capabilities({ supportsSensorControl: true })}
+        printer={{ ...printer, isEnabled: enabled, isOnline: online, sensors: [fan, heater] }}
+        backendCapabilities={capabilities({ supportsSensorControl: control })}
         onClose={vi.fn()}
         layout="content"
       />,
     );
 
     const input = screen.getByLabelText(/^Set Part fan/);
-    if (allowed && enabled) expect(input).toBeEnabled();
+    if (allowed && enabled && online && available && control) expect(input).toBeEnabled();
     else expect(input).toBeDisabled();
+    expect(screen.getByRole('spinbutton', { name: 'Set Heater Box1 Target' })).toHaveProperty(
+      'disabled', !(allowed && enabled && online && available && control),
+    );
   });
 
-  it("shows exactly one Temps heading", () => {
+  it("deduplicates primary temperatures while retaining independent nozzle and chamber telemetry after Temps", () => {
+    const heater = (id: string, kind: PrinterSensor['kind']): PrinterSensor => ({
+      id, kind, displayName: id, available: true,
+      readings: [{ quantity: 'Temperature', value: 30, unit: 'Celsius' }],
+    });
+    const { rerender } = render(
+      <PrinterDetailsSidebar printerId={printer.id} printer={{ ...printer, hotendTemp: 30, bedTemp: 30,
+        sensors: [heater('extruder', 'Nozzle'), heater('heater_bed', 'Bed'), heater('extruder1', 'Nozzle'), heater('chamber', 'Chamber')] }}
+        onClose={vi.fn()} layout="content" />,
+    );
+    expect(screen.queryByTestId('sensor-extruder')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('sensor-heater_bed')).not.toBeInTheDocument();
+    expect(screen.getByTestId('sensor-extruder1')).toBeInTheDocument();
+    expect(screen.getByTestId('sensor-chamber')).toBeInTheDocument();
+    expect(screen.getAllByText('Temperatures')).toHaveLength(1);
+    expect(screen.getAllByRole('region', { name: 'Temperatures' })[0]).toContainElement(screen.getByTestId('sensor-chamber'));
+    rerender(<PrinterDetailsSidebar printerId={printer.id} printer={{ ...printer, hotendTemp: 30, sensors: [heater('extruder', 'Nozzle')] }}
+      backendCapabilities={capabilities({ supportsSensorTelemetry: true })} onClose={vi.fn()} layout="content" />);
+    expect(screen.queryByText('Sensors & fans')).not.toBeInTheDocument();
+  });
+
+  it("shows exactly one Temperatures heading", () => {
     render(
       <PrinterDetailsSidebar
         printerId={printer.id}
@@ -422,7 +446,7 @@ describe("PrinterDetailsSidebar", () => {
       />,
     );
 
-    expect(screen.getAllByText("Temps")).toHaveLength(1);
+    expect(screen.getAllByText("Temperatures")).toHaveLength(1);
   });
 
   it("keeps the drawer layout height contract unchanged", () => {
@@ -477,7 +501,7 @@ describe("PrinterDetailsSidebar", () => {
     expect(screen.queryByText(/unknown.*unknown/i)).not.toBeInTheDocument();
   });
 
-  it("uses the dedicated success action contract for move-to", () => {
+  it("replaces GO with explicit coordinate modes", () => {
     render(
       <PrinterDetailsSidebar
         printerId={printer.id}
@@ -488,22 +512,9 @@ describe("PrinterDetailsSidebar", () => {
       />,
     );
 
-    const moveToButton = screen.getByTitle("Move to entered coordinates");
-    expect(moveToButton).toHaveAttribute("data-pf-variant", "success");
-    expect(moveToButton).toHaveClass(
-      "bg-[var(--pf-button-success-bg)]",
-      "enabled:hover:bg-[var(--pf-button-success-hover)]",
-      "text-[var(--pf-button-success-text)]",
-      "border-[var(--pf-button-success-border)]",
-      "enabled:hover:scale-105",
-      "enabled:hover:shadow-md",
-    );
-    expect(moveToButton).not.toHaveClass(
-      "bg-pf-success!",
-      "text-[var(--pf-text-inverse)]!",
-      "hover:bg-pf-success!",
-      "hover:bg-pf-success-hover!",
-    );
+    expect(screen.queryByText('GO')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Absolute' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Relative' })).toBeEnabled();
   });
 
   it("does not retry printer statistics query on client errors", () => {
@@ -872,7 +883,7 @@ describe("PrinterDetailsSidebar", () => {
       expect(screen.getByTitle("Home all axes")).toBeDisabled();
       expect(screen.getByTitle("Home X/Y")).toBeDisabled();
       expect(screen.getByTitle("Home Z")).toBeDisabled();
-      expect(screen.getByTitle("Move to entered coordinates")).toBeDisabled();
+      expect(screen.getByLabelText("X absolute target")).toBeDisabled();
     });
 
     it("enables idle online Moonraker controls without fetching tracking status", () => {

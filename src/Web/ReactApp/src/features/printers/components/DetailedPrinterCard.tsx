@@ -26,6 +26,7 @@ import { MmuControlBox } from '@/features/printers/components/MmuControlBox';
 import { resolveMaterialLoadout } from '@/features/printers/utils/materialLoadout';
 import { MmuProtocol } from '@/features/printers/constants/mmuProtocol';
 import { TemperatureControlSection } from '@/features/printers/components/TemperatureControlSection';
+import { PrinterSensorsSection } from '@/features/printers/components/PrinterSensorsPanel';
 import { MovementControlSection } from '@/features/printers/components/MovementControlSection';
 import { usePrinterMovement } from '@/features/printers/hooks/use-printer-movement';
 import { PrinterActionBar } from '@/features/printers/components/PrinterActionBar';
@@ -546,7 +547,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
   };
 
   const handleMoveTo = async (position: MoveRequest) => {
-    if (movementActionPending || !canManualMoveNow || ![position.x, position.y, position.z].every(Number.isFinite)) return;
+    if (movementActionPending || !canManualMoveNow || !Object.values(position).length || !Object.values(position).every(Number.isFinite)) return;
     setMovementActionPending(true);
     try {
       const result = await motion.execute({ kind: 'MoveTo', ...position });
@@ -922,7 +923,17 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
       </div>
 
       {/* Temps Section */}
+      <PrinterSensorsSection
+        printerId={printer.id}
+        sensors={printer.sensors}
+        temperatures={printer}
+        supportsTelemetry={backendCapabilities?.supportsSensorTelemetry}
+        canControl={(backendCapabilities?.supportsSensorControl ?? false) && isEnabled}
+        isOnline={isOnline}
+      >
       <TemperatureControlSection
+        showHeading={false}
+        sensors={printer.sensors}
         hotendTemp={hotendTemp}
         bedTemp={bedTemp}
         hotendTarget={printer.hotendTarget}
@@ -939,6 +950,8 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
         onApplyPreset={handleApplyPreset}
         onApplySingleHeaterPreset={handleApplySingleHeaterPreset}
       />
+
+      </PrinterSensorsSection>
 
       {/* AMS control box — mirrors PrinterDetailsSidebar's placement immediately
           before the materials module, so gate select/load/unload/eject controls

@@ -1,7 +1,5 @@
-vi.mock('@/features/printers/hooks/use-printer-controls-mode', () => ({
-  usePrinterControlsMode: () => ({ mode: 'guided' }),
-}));
-
+vi.mock('@/features/printers/hooks/use-printer-controls-mode', () => ({ usePrinterControlsMode: () => ({ mode: 'guided' }) }));
+vi.mock('@/features/auth/hooks/useAuth', () => ({ useAuth: () => ({ hasPermission: () => true }) }));
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { MovementControlSection } from '@/features/printers/components/MovementControlSection';
@@ -9,7 +7,7 @@ import type { ComponentProps } from 'react';
 
 function props(): ComponentProps<typeof MovementControlSection> {
   return {
-    moveX: 100, moveY: 110, moveZ: 10, step: 5, extrudeStep: 5, extrudeSpeed: 5, extrudeMinTemp: 170,
+    moveX: 100, moveY: 110, moveZ: 10, homedAxes: 'xyz', step: 5, extrudeStep: 5, extrudeSpeed: 5, extrudeMinTemp: 170,
     movementActionPending: false, canMove: true, canDisableMotors: true, canSetStep: true, canManualMove: true, canExtrude: true,
     onMoveXChange: vi.fn(), onMoveYChange: vi.fn(), onMoveZChange: vi.fn(), onStepChange: vi.fn(),
     onExtrudeStepChange: vi.fn(), onExtrudeSpeedChange: vi.fn(), onMove: vi.fn(), onHome: vi.fn(),
@@ -17,49 +15,30 @@ function props(): ComponentProps<typeof MovementControlSection> {
   };
 }
 describe('detailed-card movement entry points', () => {
-  it('submits one absolute intent for Moonraker GO rather than three relative jogs', async () => {
-    const callbacks = props();
-    const absolute = vi.fn();
-    render(<MovementControlSection {...callbacks} onMoveTo={absolute} />);
-    fireEvent.click(screen.getByTitle('Go to position'));
-    expect(absolute).toHaveBeenCalledExactlyOnceWith({ x: 100, y: 110, z: 10 });
-    expect(callbacks.onMove).not.toHaveBeenCalled();
-    await waitFor(() => expect(screen.getByTitle('Go to position')).not.toHaveAttribute('aria-busy', 'true'));
+  it('requires full XYZ homing and has no GO', () => {
+    render(<MovementControlSection {...props()} homedAxes="xy" onMoveTo={vi.fn()} />);
+    expect(screen.queryByText('GO')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('X absolute target')).toBeDisabled();
+    expect(screen.getByLabelText('Z absolute target')).toBeDisabled();
   });
-  it('preserves existing non-Moonraker GO behavior when no durable absolute handler is supplied', async () => {
+  it('defaults to relative-only entry if no absolute API handler exists', () => {
+    render(<MovementControlSection {...props()} />);
+    expect(screen.getByRole('button', { name: 'Absolute' })).toBeDisabled();
+    expect(screen.getByLabelText('X movement amount')).toBeEnabled();
+  });
+  it('preserves home and jog callbacks', async () => {
     const callbacks = props();
     render(<MovementControlSection {...callbacks} />);
-    fireEvent.click(screen.getByTitle('Go to position'));
-    await waitFor(() => expect(callbacks.onMove).toHaveBeenCalledTimes(3));
-    expect(callbacks.onMove).toHaveBeenNthCalledWith(1, 'X', 100);
-    expect(callbacks.onMove).toHaveBeenNthCalledWith(2, 'Y', 110);
-    expect(callbacks.onMove).toHaveBeenNthCalledWith(3, 'Z', 10);
+    fireEvent.click(screen.getByTitle('Home X/Y'));
+    expect(callbacks.onHome).toHaveBeenCalledExactlyOnceWith('xy');
+    await waitFor(() => expect(screen.getByTitle('Home X/Y')).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Jog Y positive' }));
+    expect(callbacks.onMove).toHaveBeenCalledExactlyOnceWith('Y', 5);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Jog Y positive' })).toBeEnabled());
   });
-  it.each([
-    { moveX: '' as const }, { moveY: '' as const }, { moveZ: '' as const },
-    { moveY: Number.POSITIVE_INFINITY },
-  ])('requires all finite XYZ values for durable GO: %j', invalid => {
-    const absolute = vi.fn();
-    render(<MovementControlSection {...props()} {...invalid} onMoveTo={absolute} />);
-    expect(screen.getByTitle('Go to position')).toBeDisabled();
-    fireEvent.click(screen.getByTitle('Go to position'));
-    expect(absolute).not.toHaveBeenCalled();
-    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
-    expect(screen.getByText(/Enter X, Y, and Z targets/)).toBeInTheDocument();
-  });
-  it('preserves partial-axis GO for non-Moonraker printers', async () => {
-    const callbacks = props();
-    render(<MovementControlSection {...callbacks} moveY="" moveZ="" />);
-    fireEvent.click(screen.getByTitle('Go to position'));
-    await waitFor(() => expect(callbacks.onMove).toHaveBeenCalledExactlyOnceWith('X', 100));
-  });
-  it('disables Home, jogs, and absolute positioning while a durable operation is unresolved', () => {
-    const callbacks = props();
-    render(<MovementControlSection {...callbacks} movementActionPending />);
-    expect(screen.getByTitle('Home all axes')).toBeDisabled();
-    expect(screen.getByTitle('Home X/Y')).toBeDisabled();
-    expect(screen.getByTitle('Home Z')).toBeDisabled();
-    expect(screen.getByTitle('Go to position')).toBeDisabled();
-    for (const button of screen.getAllByRole('button', { name: /^Jog/ })) expect(button).toBeDisabled();
+  it.each([{ movementActionPending: true }, { canManualMove: false }])('locks coordinate entry when %j', gates => {
+    render(<MovementControlSection {...props()} {...gates} onMoveTo={vi.fn()} />);
+    for (const field of screen.getAllByRole('spinbutton', { name: /absolute target/ })) expect(field).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Relative' })).toBeDisabled();
   });
 });

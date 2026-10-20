@@ -19,7 +19,7 @@ let client: QueryClient;
 function mount() {
   return render(<QueryClientProvider client={client}>
     <UserSettingsSection />
-    <section aria-label="Printer sidebar"><PrinterMotionHelp absolute /></section>
+    <section aria-label="Printer sidebar"><PrinterMotionHelp /></section>
   </QueryClientProvider>);
 }
 const sidebar = () => within(screen.getByRole('region', { name: 'Printer sidebar' }));

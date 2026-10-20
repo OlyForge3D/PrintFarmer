@@ -14,6 +14,7 @@ export interface TemperatureControlRowProps {
   label: string;
   /** Heater state text (e.g., "on", "off") */
   stateLabel?: string;
+  powerReading?: string;
   /** Live temperature reading string (e.g., "25.6°C → 210°C") */
   liveReading: string;
   /** Target temperature value in the input */
@@ -38,6 +39,7 @@ export function TemperatureControlRow({
   icon,
   label,
   stateLabel,
+  powerReading,
   liveReading,
   value,
   onChange,
@@ -49,13 +51,13 @@ export function TemperatureControlRow({
   const hasRowPresetSelector = Boolean(presetOptions && presetOptions.length > 0 && onPresetSelect);
 
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)_3rem_4.75rem_5rem_1.5rem] items-center gap-2 py-1">
+    <div className="grid grid-cols-[minmax(0,1fr)_2.5rem_3.5rem_4.5rem_1.5rem] items-center gap-1 py-1">
       <div className="flex items-center gap-2 min-w-0">
         <div className="shrink-0">{icon}</div>
-        <span className="text-xs text-pf-text-secondary truncate">{label}</span>
+        <span className="text-xs text-pf-text-secondary truncate" title={stateLabel ? `${label}: ${stateLabel}` : label}>{label}</span>
       </div>
-      <span className="text-xs text-pf-text-tertiary text-right tabular-nums">{stateLabel ?? '—'}</span>
-      <span className="text-xs text-pf-text-tertiary text-right tabular-nums">{liveReading}</span>
+      <span className="text-xs text-pf-text-secondary text-right font-mono tabular-nums">{powerReading ?? '—'}</span>
+      <span className="text-xs text-pf-text-secondary text-right font-mono tabular-nums">{liveReading}</span>
       <TemperatureInput
         value={value}
         onChange={onChange}

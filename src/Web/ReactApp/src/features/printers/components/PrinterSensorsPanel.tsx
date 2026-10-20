@@ -1,19 +1,66 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { toast } from 'sonner';
 import { apiClient } from '@/services/api';
 import { mutationErrorMessage } from '@/common/utils/mutationError';
-import { Badge, Button, Input } from '@/common/components/ui';
+import { useAuth } from '@/features/auth/hooks/useAuth';
+import { additionalPrinterSensors } from '@/features/printers/utils/additionalPrinterSensors';
+import { CollapsibleSection, Input } from '@/common/components/ui';
 import type {
   PrinterSensor,
   PrinterSensorQuantity,
   PrinterSensorReading,
   PrinterSensorUnit,
   PrinterSensorWritable,
+  PrinterTemperatures,
 } from '@/types/api';
 
-type SensorGroup = 'Temperatures' | 'Environment' | 'Fans' | 'Filament';
+export function PrinterSensorsSection({
+  temperatures, supportsTelemetry, children, ...props
+}: PrinterSensorsPanelProps & { temperatures: PrinterTemperatures; supportsTelemetry?: boolean; children?: ReactNode }) {
+  const sensors = additionalPrinterSensors(props.sensors, temperatures);
+  const thermals = sensors.filter(isThermalSensor).map(sensor => ({
+    ...sensor,
+    readings: sensor.readings.filter(reading => ['Temperature', 'TargetTemperature', 'Power'].includes(reading.quantity)),
+    writable: sensor.writable?.filter(descriptor => ['Temperature', 'TargetTemperature', 'Power'].includes(descriptor.quantity)),
+  }));
+  const remaining = sensors.flatMap(sensor => {
+    if (!isThermalSensor(sensor)) return [sensor];
+    const readings = sensor.readings.filter(reading => !['Temperature', 'TargetTemperature', 'Power'].includes(reading.quantity));
+    const writable = sensor.writable?.filter(descriptor => !['Temperature', 'TargetTemperature', 'Power'].includes(descriptor.quantity));
+    return readings.length ? [{ ...sensor, readings, writable }] : [];
+  });
+  return (
+    <>
+      {(children || thermals.length > 0) && <CollapsibleSection title="Temperatures">
+        {children}
+        {thermals.length > 0 && <AuthorizedSensorsPanel {...props} sensors={thermals} layout="thermal" />}
+      </CollapsibleSection>}
+      {(['Fans & outputs', 'Environment', 'Filament'] as const).map(group => {
+        const items = remaining.filter(sensor => getSensorGroup(sensor) === group);
+        return items.length > 0 && <CollapsibleSection key={group} title={group}>
+          <AuthorizedSensorsPanel {...props} sensors={items} layout="plain" />
+        </CollapsibleSection>;
+      })}
+      {!sensors.length && !props.sensors?.length && supportsTelemetry &&
+        <p className="text-sm text-pf-text-secondary">No sensors reported.</p>}
+    </>
+  );
+}
 
-const GROUP_ORDER: SensorGroup[] = ['Temperatures', 'Environment', 'Fans', 'Filament'];
+function AuthorizedSensorsPanel(props: PrinterSensorsPanelProps) {
+  const { hasPermission } = useAuth();
+  return <PrinterSensorsPanel {...props} canControl={props.canControl && hasPermission('queue', 'start')} />;
+}
+
+type SensorGroup = 'Temperatures' | 'Environment' | 'Fans & outputs' | 'Filament';
+
+const GROUP_ORDER: SensorGroup[] = ['Temperatures', 'Environment', 'Fans & outputs', 'Filament'];
+
+function isThermalSensor(sensor: PrinterSensor): boolean {
+  return sensor.kind !== 'Fan' && (
+    sensor.readings.some(reading => reading.quantity === 'Temperature' || reading.quantity === 'TargetTemperature') ||
+    (sensor.writable ?? []).some(descriptor => descriptor.quantity === 'TargetTemperature'));
+}
 
 const UNIT_SUFFIX: Record<PrinterSensorUnit, string> = {
   None: '',
@@ -28,22 +75,16 @@ const UNIT_SUFFIX: Record<PrinterSensorUnit, string> = {
 function getSensorGroup(sensor: PrinterSensor): SensorGroup {
   switch (sensor.kind) {
     case 'Fan':
-      return 'Fans';
+      return 'Fans & outputs';
     case 'FilamentRunout':
       return 'Filament';
     case 'Ambient':
       return 'Environment';
-    case 'Nozzle':
-    case 'Bed':
-    case 'Chamber':
-    case 'Mcu':
-    case 'Host':
-      return 'Temperatures';
     default: {
       const quantities = (sensor.readings ?? []).map((r) => r.quantity);
       if (quantities.some((q) => q === 'FilamentDetected')) return 'Filament';
-      if (quantities.some((q) => q === 'FanSpeed' || q === 'FanRpm')) return 'Fans';
-      if (quantities.every((q) => q === 'Temperature' || q === 'TargetTemperature')) return 'Temperatures';
+      if (quantities.some((q) => q === 'FanSpeed' || q === 'FanRpm' || q === 'Power')) return 'Fans & outputs';
+      if (isThermalSensor(sensor)) return 'Temperatures';
       return 'Environment';
     }
   }
@@ -100,6 +141,7 @@ interface PrinterSensorsPanelProps {
   /** Whether the user and backend can send sensor writes (supportsSensorControl). */
   canControl?: boolean;
   isOnline?: boolean;
+  layout?: 'thermal' | 'plain';
 }
 
 interface WritableControlProps {
@@ -111,31 +153,42 @@ interface WritableControlProps {
 }
 
 function WritableControl({ sensor, descriptor, current, disabled, onSubmit }: WritableControlProps) {
+  const rangeId = useId();
   const [draft, setDraft] = useState<string>('');
   const [editing, setEditing] = useState(false);
+  const active = useRef(false);
+  const submitting = useRef(false);
+  const initial = useRef(current);
   const label = `Set ${sensor.displayName} ${QUANTITY_LABEL[descriptor.quantity] ?? 'value'}`;
   const unitText = UNIT_SUFFIX[descriptor.unit];
   const shown = editing ? draft : current === undefined ? '' : String(Math.round(current * 10) / 10);
   const parsed = draft.trim() === '' ? NaN : Number(draft);
   const inRange = Number.isFinite(parsed) && parsed >= descriptor.min && parsed <= descriptor.max;
   const stepAligned = !descriptor.step || descriptor.step <= 0 || isStepAligned(parsed, descriptor.min, descriptor.step);
-  const valid = inRange && stepAligned;
-  const rangeId = `${sensor.id}-${descriptor.quantity}-range`.replace(/\s+/g, '-');
+  const valid = editing && inRange && stepAligned;
 
-  const submit = async () => {
-    if (!valid || disabled) return;
-    await onSubmit(sensor, descriptor, parsed, baselineOf(sensor, descriptor));
+  const submit = () => {
+    if (!active.current || submitting.current) return;
+    active.current = false;
     setEditing(false);
+    if (!valid || disabled || parsed === initial.current || parsed === current) return;
+    submitting.current = true;
+    void onSubmit(sensor, descriptor, parsed, baselineOf(sensor, descriptor)).finally(() => {
+      submitting.current = false;
+    });
   };
 
   return (
-    <div className="flex items-center gap-2">
-      <Input
+    <div
+      className="flex min-w-0 flex-wrap items-center gap-2"
+    >
+      <div className="w-full max-w-24">
+        <Input
         type="number"
         aria-label={label}
         aria-describedby={rangeId}
         aria-invalid={editing && draft !== '' && !valid ? true : undefined}
-        className="w-20"
+        className="font-mono tabular-nums"
         min={descriptor.min}
         max={descriptor.max}
         step={descriptor.step ?? 'any'}
@@ -143,46 +196,41 @@ function WritableControl({ sensor, descriptor, current, disabled, onSubmit }: Wr
         disabled={disabled}
         onFocus={() => {
           if (!editing) {
+            active.current = true;
+            initial.current = current;
             setDraft(current === undefined ? '' : String(current));
             setEditing(true);
           }
         }}
         onChange={(event) => {
+          if (!active.current) initial.current = current;
+          active.current = true;
           setEditing(true);
           setDraft(event.target.value);
         }}
-        onBlur={() => setEditing(false)}
+        onBlur={submit}
         onKeyDown={(event) => {
           if (event.key === 'Enter') {
             event.preventDefault();
             void submit();
           } else if (event.key === 'Escape') {
+            active.current = false;
             setEditing(false);
           }
         }}
-      />
-      <span id={rangeId} className="text-xs text-pf-text-tertiary">
+        />
+      </div>
+      <span id={rangeId} className={editing ? 'basis-full text-right text-xs text-pf-text-secondary order-last' : 'sr-only'}>
         {descriptor.min}–{descriptor.max}
         {unitText ? ` ${unitText}` : ''}
         {descriptor.step ? `, step ${descriptor.step}` : ''}
         {editing && draft !== '' && !valid ? ' — invalid value' : ''}
       </span>
-      <Button
-        size="sm"
-        variant="secondary"
-        aria-label={`Apply ${label}`}
-        disabled={disabled || !valid}
-        onClick={() => {
-          void submit();
-        }}
-      >
-        Set
-      </Button>
     </div>
   );
 }
 
-export function PrinterSensorsPanel({ printerId, sensors, canControl = false, isOnline = true }: PrinterSensorsPanelProps) {
+export function PrinterSensorsPanel({ printerId, sensors, canControl = false, isOnline = true, layout }: PrinterSensorsPanelProps) {
   // Optimistic values keyed by sensor+quantity. A failed write rolls back immediately; a successful
   // one is shown until the live reading changes from the value it replaced, after which the
   // authoritative value from the shared printerupdated subscription wins.
@@ -250,16 +298,16 @@ export function PrinterSensorsPanel({ printerId, sensors, canControl = false, is
     return <p className="text-sm text-pf-text-secondary">No sensors reported.</p>;
   }
 
-  const grouped = GROUP_ORDER.map((group) => ({
+  const grouped = layout ? [{ group: 'Readings', items: sensors }] : GROUP_ORDER.map((group) => ({
     group,
     items: sensors.filter((sensor) => getSensorGroup(sensor) === group),
   })).filter(({ items }) => items.length > 0);
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       {grouped.map(({ group, items }) => (
-        <section key={group} aria-label={group} className="space-y-1">
-          <h4 className="text-xs font-semibold uppercase tracking-wide text-pf-text-secondary">{group}</h4>
+        <section key={group} aria-label={layout ? undefined : group} className="space-y-1">
+          {!layout && <h4 className="text-xs font-medium text-pf-text-secondary">{group}</h4>}
           <ul className="divide-y divide-pf-border">
             {items.map((sensor) => {
               const unavailable = !sensor.available;
@@ -267,18 +315,49 @@ export function PrinterSensorsPanel({ printerId, sensors, canControl = false, is
                 (sensor.writable ?? []).map((w) => [w.quantity, w]),
               );
               const controllable = canControl && isOnline && !unavailable;
+              if (layout === 'thermal') {
+                const cell = (quantity: PrinterSensorQuantity) => {
+                  const reading = sensor.readings.find(item => item.quantity === quantity);
+                  const descriptor = writableByQuantity.get(quantity);
+                  const key = sensorKey(sensor.id, quantity);
+                  const numeric = typeof reading?.value === 'number' && Number.isFinite(reading.value) ? reading.value : undefined;
+                  const current = optimistic[key]?.baseline === numeric ? optimistic[key]?.value ?? numeric : numeric;
+                  return descriptor ? <WritableControl sensor={sensor} descriptor={descriptor} current={current}
+                    disabled={!controllable || pending[key] === true} onSubmit={handleSubmit} />
+                    : <span className="text-right font-mono tabular-nums text-xs"
+                      aria-label={reading ? `${describeReading(sensor, reading)}: ${formatSensorReading(reading)}${unavailable ? ' (unavailable)' : ''}` : undefined}>
+                      {reading ? formatSensorReading(reading) : '—'}
+                    </span>;
+                };
+                return <li key={sensor.id} className="py-2" data-testid={`sensor-${sensor.id}`}>
+                  <div className="grid grid-cols-[minmax(0,1fr)_2.5rem_3.5rem_4.5rem_1.5rem] items-center gap-1">
+                    <span className="min-w-0 break-words text-xs text-pf-text-secondary">
+                      {sensor.displayName}{unavailable && <span className="block">Unavailable</span>}
+                    </span>
+                    {cell('Power')}
+                    {cell('Temperature')}
+                    {cell('TargetTemperature')}
+                    <span />
+                  </div>
+                  {sensor.readings.filter(reading => !['Temperature', 'TargetTemperature', 'Power'].includes(reading.quantity)).map(reading =>
+                    <div key={reading.quantity} className="flex justify-between gap-2 text-xs py-1">
+                      <span className="text-pf-text-secondary">{QUANTITY_LABEL[reading.quantity]}</span>
+                      <span className="font-mono tabular-nums">{formatSensorReading(reading)}</span>
+                    </div>)}
+                </li>;
+              }
               return (
-                <li key={sensor.id} className="py-2 space-y-1" data-testid={`sensor-${sensor.id}`}>
-                  <div className="flex items-center justify-between gap-2">
-                    <span className={unavailable ? 'text-sm text-pf-text-tertiary' : 'text-sm text-pf-text-primary'}>
+                <li key={sensor.id} className="py-2 space-y-2 min-w-0" data-testid={`sensor-${sensor.id}`}>
+                  {sensor.readings.length !== 1 && <div className="flex items-start justify-between gap-2">
+                    <span className={`min-w-0 break-words text-sm ${unavailable ? 'text-pf-text-secondary' : 'text-pf-text-primary'}`}>
                       {sensor.displayName}
                     </span>
                     {unavailable && (
-                      <Badge variant="warning" size="sm">
+                      <span className="shrink-0 text-xs text-pf-text-secondary">
                         Unavailable
-                      </Badge>
+                      </span>
                     )}
-                  </div>
+                  </div>}
                   <dl className="space-y-1">
                     {(sensor.readings ?? []).map((reading) => {
                       const descriptor = writableByQuantity.get(reading.quantity);
@@ -288,24 +367,31 @@ export function PrinterSensorsPanel({ printerId, sensors, canControl = false, is
                       const showOptimistic = pendingValue !== undefined && pendingValue.baseline === numeric;
                       const current = showOptimistic ? pendingValue.value : numeric;
                       const shownReading = showOptimistic ? { ...reading, value: pendingValue.value } : reading;
+                      const redundantRpmLabel = sensor.readings.length > 1 && reading.quantity === 'FanRpm' &&
+                        reading.unit === 'Rpm' && numeric !== undefined && !descriptor;
                       return (
-                        <div key={reading.quantity} className="flex items-center justify-between gap-2">
-                          <dt className="text-xs text-pf-text-secondary">{QUANTITY_LABEL[reading.quantity] ?? 'Value'}</dt>
+                        <div key={reading.quantity} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+                          <dt className={redundantRpmLabel ? 'sr-only' : 'min-w-0 flex-1 text-sm text-pf-text-secondary break-words'}>
+                            {sensor.readings.length === 1 ? sensor.displayName : QUANTITY_LABEL[reading.quantity] ?? 'Value'}
+                            {sensor.readings.length === 1 && unavailable && <span className="block text-xs">Unavailable</span>}
+                          </dt>
                           <dd
-                            className={unavailable ? 'text-sm text-pf-text-tertiary' : 'text-sm font-medium text-pf-text-primary'}
+                            className={`ml-auto flex items-center gap-1 font-mono tabular-nums text-sm ${unavailable ? 'text-pf-text-secondary' : 'text-pf-text-primary'}`}
                             aria-label={`${describeReading(sensor, reading)}: ${formatSensorReading(shownReading)}${unavailable ? ' (unavailable)' : ''}`}
                           >
-                            {formatSensorReading(shownReading)}
+                            {descriptor ? <>
+                              <div className="w-24">
+                              <WritableControl
+                                sensor={sensor}
+                                descriptor={descriptor}
+                                current={current}
+                                disabled={!controllable || pending[key] === true}
+                                onSubmit={handleSubmit}
+                              />
+                              </div>
+                              <span className="text-xs">{UNIT_SUFFIX[descriptor.unit]}</span>
+                            </> : formatSensorReading(shownReading)}
                           </dd>
-                          {descriptor && (
-                            <WritableControl
-                              sensor={sensor}
-                              descriptor={descriptor}
-                              current={current}
-                              disabled={!controllable || pending[key] === true}
-                              onSubmit={handleSubmit}
-                            />
-                          )}
                         </div>
                       );
                     })}

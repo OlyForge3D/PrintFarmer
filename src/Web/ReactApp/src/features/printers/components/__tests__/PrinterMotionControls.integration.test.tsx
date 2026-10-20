@@ -1,4 +1,5 @@
-vi.mock('@/features/auth/hooks/useAuth', () => ({ useAuth: () => ({ hasPermission: () => true }) }));
+let allowed = true;
+vi.mock('@/features/auth/hooks/useAuth', () => ({ useAuth: () => ({ hasPermission: () => allowed }) }));
 import type { ReactElement } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { USER_SETTINGS_KEY } from "@/features/settings/hooks/useUserSettings";
@@ -158,14 +159,16 @@ const capabilities = {
   supportsObjectExclusion: false,
 } as PrinterBackendCapabilitiesDto;
 type Surface = "detail" | "sidebar";
-function Controls({ surface }: { surface: Surface }) {
+function Controls({ surface, overrides = {}, movement = true }: { surface: Surface; overrides?: Partial<Printer>; movement?: boolean }) {
+  const current = { ...printer, ...overrides };
+  const support = { ...capabilities, supportsMovement: movement };
   return surface === "detail" ? (
-    <DetailedPrinterCard printer={printer} backendCapabilities={capabilities} />
+    <DetailedPrinterCard printer={current} backendCapabilities={support} />
   ) : (
     <PrinterDetailsSidebar
       printerId={printer.id}
-      printer={printer}
-      backendCapabilities={capabilities}
+      printer={current}
+      backendCapabilities={support}
       onClose={vi.fn()}
     />
   );
@@ -201,6 +204,7 @@ function render(element: ReactElement) {
 }
 
 beforeEach(() => {
+  allowed = true;
   accountMode = "Guided";
   mockBlocked = false;
   mockExecute.mockReset();
@@ -211,6 +215,52 @@ describe.each<Surface>(["detail", "sidebar"])(
   "%s initiating motion controls",
   (surface) => {
     it.each([
+      { isOnline: false }, { isEnabled: false }, { homedAxes: undefined }, { homedAxes: '' },
+      { homedAxes: 'xy' }, { homedAxes: 'x' }, { homedAxes: 'unknown' },
+      { state: 'Printing' }, { state: 'Shutdown' },
+    ])('locks coordinate fields for %j', overrides => {
+      render(<Controls surface={surface} overrides={overrides} />);
+      for (const input of screen.getAllByRole('spinbutton', { name: /absolute target/ })) expect(input).toBeDisabled();
+    });
+
+    it.each(['Absolute', 'Relative'])('discards a dirty %s edit if any required homing is lost on the actual surface', mode => {
+      const { client, rerender } = render(<Controls surface={surface} />);
+      fireEvent.click(screen.getByRole('button', { name: mode }));
+      const name = mode === 'Absolute' ? 'X absolute target' : 'X movement amount';
+      const field = screen.getByLabelText(name);
+      fireEvent.focus(field);
+      fireEvent.change(field, { target: { value: '25' } });
+      rerender(<QueryClientProvider client={client}><Controls surface={surface} overrides={{ homedAxes: 'xy' }} /></QueryClientProvider>);
+      expect(screen.getByLabelText(name)).toBeDisabled();
+      expect(screen.getByLabelText(name)).toHaveValue(null);
+      rerender(<QueryClientProvider client={client}><Controls surface={surface} /></QueryClientProvider>);
+      fireEvent.keyDown(screen.getByLabelText(name), { key: 'Enter' });
+      fireEvent.blur(screen.getByLabelText(name));
+      expect(mockExecute).not.toHaveBeenCalled();
+    });
+
+    it.each(['permission', 'capability', 'pending'])('locks coordinate fields without %s', gate => {
+      allowed = gate !== 'permission';
+      mockBlocked = gate === 'pending';
+      render(<Controls surface={surface} movement={gate !== 'capability'} />);
+      for (const input of screen.getAllByRole('spinbutton', { name: /absolute target/ })) expect(input).toBeDisabled();
+      expect(mockExecute).not.toHaveBeenCalled();
+    });
+
+    it('submits relative X alone on blur exactly once when XYZ are homed', async () => {
+      mockExecute.mockResolvedValue({ success: true });
+      render(<Controls surface={surface} />);
+      expect(screen.getByLabelText('Z absolute target')).toBeEnabled();
+      fireEvent.click(screen.getByRole('button', { name: 'Relative' }));
+      const x = screen.getByLabelText('X movement amount');
+      fireEvent.focus(x);
+      fireEvent.change(x, { target: { value: '-2.5' } });
+      fireEvent.blur(x);
+      fireEvent.blur(x);
+      await waitFor(() => expect(mockExecute).toHaveBeenCalledExactlyOnceWith({ kind: 'Jog', x: -2.5 }));
+    });
+
+    it.each([
       ["Home all axes", { kind: "HomeAll" }],
       ["Home X/Y", { kind: "HomeXY" }],
       ["Home Z", { kind: "HomeZ" }],
@@ -220,7 +270,6 @@ describe.each<Surface>(["detail", "sidebar"])(
       ["Jog Z negative", { kind: "Jog", z: surface === "detail" ? -1 : -10 }],
       ["Jog X negative", { kind: "Jog", x: surface === "detail" ? -1 : -10 }],
       ["Jog Z positive", { kind: "Jog", z: surface === "detail" ? 1 : 10 }],
-      ["GO to absolute position", { kind: "MoveTo", x: 120, y: 130, z: 15 }],
     ])(
       "shows activity only on %s immediately, preserving the exact motion intent",
       async (name, intent) => {
@@ -247,7 +296,7 @@ describe.each<Surface>(["detail", "sidebar"])(
           screen.getByRole("button", { name: "Jog Y positive" }),
         ).toBeDisabled();
         expect(
-          screen.getByRole("button", { name: "GO to absolute position" }),
+          screen.getByRole("button", { name: "Absolute" }),
         ).toBeDisabled();
         expect(mockExecute).toHaveBeenCalledExactlyOnceWith(intent);
         fireEvent.click(initiating);
@@ -270,31 +319,24 @@ describe.each<Surface>(["detail", "sidebar"])(
       expect(mockExecute).not.toHaveBeenCalled();
     });
 
-    it("requires all coordinates for direct absolute GO without tracking UI", async () => {
+    it("sends only the edited axis on absolute Enter without tracking UI", async () => {
       mockExecute.mockResolvedValue({ success: true });
       render(<Controls surface={surface} />);
       fireEvent.change(screen.getByLabelText("X absolute target"), {
         target: { value: "12" },
       });
-      expect(
-        screen.getByRole("button", { name: "GO to absolute position" }),
-      ).toBeDisabled();
+      expect(screen.queryByText("GO")).not.toBeInTheDocument();
       expect(
         screen.queryByText(
           /Motion Ready|Operation ID|Recheck status|Recovery required/i,
         ),
       ).not.toBeInTheDocument();
-      fillCoordinates();
       await act(async () =>
-        fireEvent.click(
-          screen.getByRole("button", { name: "GO to absolute position" }),
-        ),
+        fireEvent.keyDown(screen.getByLabelText("X absolute target"), { key: "Enter" }),
       );
       expect(mockExecute).toHaveBeenCalledExactlyOnceWith({
         kind: "MoveTo",
-        x: 120,
-        y: 130,
-        z: 15,
+        x: 12,
       });
     });
 
@@ -383,8 +425,6 @@ it("sends one direct absolute command from sidebar Enter", async () => {
   );
   expect(mockExecute).toHaveBeenCalledExactlyOnceWith({
     kind: "MoveTo",
-    x: 120,
     y: 130,
-    z: 15,
   });
 });

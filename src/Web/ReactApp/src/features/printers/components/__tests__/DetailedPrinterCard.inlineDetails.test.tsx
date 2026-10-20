@@ -269,10 +269,11 @@ describe('DetailedPrinterCard inline details (#1584)', () => {
     });
   });
 
-  it('keeps the Temps heading on the card', () => {
+  it('uses the unified Temperatures heading instead of a duplicate legacy heading', () => {
     render(<DetailedPrinterCard printer={makePrinter()} />);
 
-    expect(screen.getByTestId('temp-section')).toHaveAttribute('data-show-heading', 'true');
+    expect(screen.getByTestId('temp-section')).toHaveAttribute('data-show-heading', 'false');
+    expect(screen.getAllByText('Temperatures')).toHaveLength(1);
   });
 
   it('renders the model cover and identity before progress, with a decorative image', () => {

@@ -1,99 +1,129 @@
-import { useId, useState } from 'react';
-import { MovementInput } from '@/common/components/ui';
+import { useEffect, useId, useRef, useState } from 'react';
+import { toast } from 'sonner';
+import { Button, MovementInput } from '@/common/components/ui';
 import type { MoveRequest } from '@/types/api';
-import { MotionControlButton } from '@/features/printers/components/MotionControlButton';
 import { useMotionAction } from '@/features/printers/hooks/use-motion-action';
 import { usePrinterControlsMode } from '@/features/printers/hooks/use-printer-controls-mode';
+import { useAuth } from '@/features/auth/hooks/useAuth';
+import { mutationErrorMessage } from '@/common/utils/mutationError';
 
 type Axis = 'X' | 'Y' | 'Z';
 type Coordinate = number | string;
+type CoordinateMode = 'relative' | 'absolute';
 const axes: Axis[] = ['X', 'Y', 'Z'];
 const isEntered = (value: Coordinate) => typeof value === 'number' || value.trim() !== '';
 const isFiniteCoordinate = (value: Coordinate) => isEntered(value) && Number.isFinite(Number(value));
+
 interface PrinterCoordinateRowProps {
   values: Record<Axis, Coordinate>;
   positions?: Partial<Record<Axis, number | null>>;
-  /** Number inputs emit parsed numbers or an empty field, never arbitrary strings. */
+  homedAxes?: string;
   onChange: (axis: Axis, value: number | '') => void;
   onMove: (axis: Axis, distance: number) => void | Promise<void>;
   onMoveTo?: (position: MoveRequest) => void | Promise<void>;
   disabled: boolean;
-  /** The sidebar's relative Enter moves only the focused axis. */
-  perAxisEnter?: boolean;
-  goTitle?: string;
 }
 
-export function PrinterCoordinateRow({ values, positions, onChange, onMove, onMoveTo, disabled, perAxisEnter = false, goTitle = 'Go to position' }: PrinterCoordinateRowProps) {
-  const { mode } = usePrinterControlsMode();
+export function PrinterCoordinateRow({ values, positions, homedAxes, onChange, onMove, onMoveTo, disabled }: PrinterCoordinateRowProps) {
+  const { mode: helpMode } = usePrinterControlsMode();
+  const { hasPermission } = useAuth();
   const action = useMotionAction();
   const messageId = useId();
-  const [touched, setTouched] = useState<Partial<Record<Axis, boolean>>>({});
-  const [submitted, setSubmitted] = useState(false);
-  const absolute = !!onMoveTo;
-  const invalidAxes = axes.filter(axis => !isFiniteCoordinate(values[axis]) && (absolute || isEntered(values[axis])));
-  const valid = invalidAxes.length === 0 && axes.some(axis => isEntered(values[axis]));
-  const showError = invalidAxes.some(axis => submitted || touched[axis]);
-  const error = `Enter a finite number for ${invalidAxes.join(', ')}${absolute ? '; all XYZ targets are required for absolute movement' : ''}.`;
-  const hint = absolute ? 'Enter X, Y, and Z targets in mm to enable GO.' : 'Enter movement amounts in mm; leave unused axes blank.';
+  const [mode, setMode] = useState<CoordinateMode>(onMoveTo ? 'absolute' : 'relative');
+  const [invalid, setInvalid] = useState<Axis | null>(null);
+  const dirty = useRef<Partial<Record<Axis, boolean>>>({});
+  const initial = useRef<Partial<Record<Axis, Coordinate>>>({});
+  const blocked = disabled || action.pending || !hasPermission('queue', 'start');
+  const homed = typeof homedAxes === 'string' && /^[xyz]*$/i.test(homedAxes) ? homedAxes.toLowerCase() : '';
+  const fullyHomed = axes.every(axis => homed.includes(axis.toLowerCase()));
+  const coordinateBlocked = blocked || !fullyHomed;
 
-  const submit = async (axis?: Axis) => {
-    if (disabled || action.pending) return;
-    setSubmitted(true);
-    // Relative Enter deliberately ignores other fields, preserving the sidebar contract.
-    if (!absolute && perAxisEnter && axis) {
-      if (isFiniteCoordinate(values[axis])) await action.run(() => onMove(axis, Number(values[axis])));
+  useEffect(() => {
+    if (fullyHomed) return;
+    for (const axis of axes) {
+      if (!dirty.current[axis]) continue;
+      dirty.current[axis] = false;
+      initial.current[axis] = '';
+      onChange(axis, '');
+    }
+  }, [fullyHomed, onChange]);
+
+  const cancel = (axis: Axis) => {
+    dirty.current[axis] = false;
+    initial.current[axis] = '';
+    onChange(axis, '');
+    setInvalid(null);
+  };
+
+  const submit = (axis: Axis) => {
+    if (!dirty.current[axis]) return;
+    // Consume this edit synchronously: Enter, disabled-input blur and Tab cannot replay it.
+    dirty.current[axis] = false;
+    if (coordinateBlocked) { cancel(axis); return; }
+    const value = values[axis];
+    if (!isFiniteCoordinate(value)) {
+      setInvalid(axis);
       return;
     }
-    if (!valid) return;
-    await action.run(async () => {
-      if (onMoveTo) {
-        await onMoveTo({ x: Number(values.X), y: Number(values.Y), z: Number(values.Z) });
-      } else {
-        for (const axis of axes) if (isEntered(values[axis])) await onMove(axis, Number(values[axis]));
-      }
-    });
+    if (isFiniteCoordinate(initial.current[axis] ?? '') && Number(initial.current[axis]) === Number(value)) return;
+    const amount = Number(value);
+    cancel(axis);
+    if ((mode === 'relative' && amount === 0) || (mode === 'absolute' && !onMoveTo)) return;
+    const position: MoveRequest = axis === 'X' ? { x: amount } : axis === 'Y' ? { y: amount } : { z: amount };
+    void action.run(() => mode === 'absolute' ? onMoveTo?.(position) : onMove(axis, amount))
+      .catch(error => toast.error(mutationErrorMessage(error, 'Movement status uncertain. Check the printer before another command.')));
+  };
+
+  const changeMode = (next: CoordinateMode) => {
+    if (blocked || (next === 'absolute' && !onMoveTo)) return;
+    axes.forEach(cancel);
+    setMode(next);
   };
 
   return (
-    <div className="@container mt-3 w-full min-w-0 max-w-[24rem]" data-printer-coordinate-row>
-      <div className="grid grid-cols-[minmax(0,1fr)_2.75rem] items-end gap-2 @[19rem]:grid-cols-[repeat(3,minmax(0,1fr))_2.75rem]">
-        {axes.map(axis => {
-          const invalid = invalidAxes.includes(axis) && (submitted || touched[axis]);
-          return (
-            <div key={axis} className="col-start-1 min-w-0 @[19rem]:col-start-auto">
-              <MovementInput
-                axis={axis}
-                coordinateMode={absolute ? 'absolute' : 'relative'}
-                currentPosition={positions?.[axis]}
-                disabled={disabled || action.pending}
-                value={values[axis]}
-                onChange={event => onChange(axis, event.target.value === '' ? '' : Number(event.target.value))}
-                onBlur={() => setTouched(previous => ({ ...previous, [axis]: true }))}
-                onKeyDown={event => {
-                  if (event.key === 'Enter') { event.preventDefault(); void submit(axis); }
-                }}
-                invalid={!!invalid}
-                aria-invalid={invalid ? true : undefined}
-                aria-required={absolute || undefined}
-                aria-describedby={showError || mode === 'guided' ? messageId : undefined}
-              />
-            </div>
-          );
-        })}
-        <div className="col-start-2 row-start-3 w-11 shrink-0 @[19rem]:col-start-4 @[19rem]:row-start-1">
-          <MotionControlButton
-            variant="success"
-            padSize="small"
-            className="w-11! h-8! text-xs font-semibold enabled:hover:scale-105 enabled:hover:shadow-md"
-            title={goTitle}
-            aria-label={absolute ? 'GO to absolute position' : 'GO by movement amounts'}
-            disabled={disabled || !valid}
-            pending={action.pending}
-            onClick={() => submit()}
-          >GO</MotionControlButton>
-        </div>
+    <div className="@container mt-3 w-full min-w-0 max-w-[24rem]" data-printer-coordinate-row aria-busy={action.pending}>
+      <div role="group" aria-label="Coordinate movement mode" className="flex gap-1 mb-2">
+        {(['relative', 'absolute'] as const).map(next => (
+          <Button key={next} type="button" size="sm" variant={mode === next ? 'primary' : 'secondary'}
+            data-coordinate-mode={next} aria-pressed={mode === next}
+            disabled={blocked || (next === 'absolute' && !onMoveTo)}
+            onClick={() => changeMode(next)}>
+            {next === 'relative' ? 'Relative' : 'Absolute'}
+          </Button>
+        ))}
       </div>
-      {showError ? <p id={messageId} role="alert" className="mt-1 text-xs text-pf-error">{error}</p> : mode === 'guided' ? <p id={messageId} className="mt-1 text-xs text-pf-text-secondary">{hint}</p> : null}
+      <div className="grid grid-cols-1 gap-2 @[16rem]:grid-cols-3">
+        {axes.map(axis => (
+          <div key={`${mode}-${axis}`} className="min-w-0">
+            <MovementInput axis={axis} coordinateMode={mode} currentPosition={positions?.[axis]}
+              disabled={coordinateBlocked} value={values[axis]} step={0.1}
+              title={!fullyHomed ? 'Home X, Y and Z before entering coordinates' : undefined}
+              onFocus={() => { initial.current[axis] = values[axis]; }}
+              onChange={event => {
+                if (coordinateBlocked) return;
+                dirty.current[axis] = true;
+                setInvalid(null);
+                onChange(axis, event.target.value === '' ? '' : Number(event.target.value));
+              }}
+              onBlur={event => {
+                if (event.relatedTarget instanceof Element && event.relatedTarget.closest('[data-coordinate-mode]')) cancel(axis);
+                else submit(axis);
+              }}
+              onKeyDown={event => {
+                if (event.key === 'Enter') { event.preventDefault(); submit(axis); }
+                else if (event.key === 'Escape') { event.preventDefault(); cancel(axis); }
+              }}
+              invalid={invalid === axis} aria-invalid={invalid === axis || undefined}
+              aria-describedby={invalid || helpMode === 'guided' ? messageId : undefined}
+            />
+          </div>
+        ))}
+      </div>
+      {action.pending && <p role="status" className="mt-1 text-xs text-pf-text-secondary">Sending movement command…</p>}
+      {invalid ? <p id={messageId} role="alert" className="mt-1 text-xs text-pf-error">Enter a finite number for {invalid}, or press Escape to cancel.</p>
+        : helpMode === 'guided' ? <p id={messageId} className="mt-1 text-xs text-pf-text-secondary">
+          {mode === 'absolute' ? 'Absolute: move the edited axis to its target (mm).' : 'Relative: move the edited axis by its amount (mm).'} Tab or Enter sends one move. Home X, Y and Z before coordinate entry.
+        </p> : null}
     </div>
   );
 }
