@@ -1,5 +1,42 @@
 ## XCUI timeout diagnosis (#2573)
 
+### Isolated hosted sidebar diagnostic (#3426; never merge)
+
+The owner approved **one** focused hosted iPad invocation and an isolated
+diagnostic workflow/collector. This branch must never merge; PR #3442 remains
+at `98cd84fc1fc685933b67522ca1ed97e5128c9e26`.
+
+On this diagnostic branch only, the already registered `.github/workflows/ci.yml`
+is replaced with a manual, single-job workflow. No default-branch registration
+or protected-branch change is authorized. It checks out the immutable app/test
+SHA above separately from the immutable harness SHA. The only selected test is
+`FilamentCoverageUITests/testDuplicateDisplayNamePrintersRemainDistinctWithoutCoverageBadges`.
+Xcode 26.6/17F113, iOS 26.5/23F77, the shared simulator resolver, the original
+bounded runner and all source assertions/watchdog behavior are retained.
+
+The new hosted-only observer does not use the failed historical collector's
+`simctl get_app_container`/app-marker setup. It identifies the app by macOS
+executable-only `ps comm`, checks the selected simulator and exact executable
+again before sampling, and retains timestamped app samples, process identities,
+logging/test receiver process state and file descriptors. It records at most
+24 one-second app sample windows; each observer command has a six-second limit
+and two-MiB output limit. Total observation storage is capped conservatively at
+50 MiB. No process launch arguments or environment variables are collected.
+
+Receiver descriptors and process states are observations, not proof of pipe
+ownership or backpressure. Sampling itself can affect timing. A passing test,
+no reproduced stall, exhausted sample budget, exited PID or failed observer is
+reported explicitly, never treated as a causal fix. No controlled logging
+comparison, source instrumentation, watchdog adjustment or test retry is included.
+All native attachments (including passing tests), logs, runner events/timing and
+observer evidence upload even after failure. The workflow deliberately finishes
+red so it cannot be mistaken for merge qualification.
+
+The single execution allowance includes setup failure. A workflow rerun is
+rejected by its `run_attempt` guard; another manual dispatch is operationally
+prohibited without new owner approval. Publish the immutable harness SHA and
+collector checksum after read-only review, before the one dispatch.
+
 ### Filament detail query stall (iPhone shard 3)
 
 Run `39143583699`, job `117727392869`, failed at
