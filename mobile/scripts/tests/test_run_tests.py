@@ -41,11 +41,12 @@ class EventTests(unittest.TestCase):
             {"identifier": "Other/test()", "status": "Success", "reported_seconds": 2},
             {"identifier": "Probe/test()", "status": "Success", "reported_seconds": 3},
         ]
-        attempts, flaky, failed = runner.summarize_attempts(tests, True)
+        attempts, flaky, failed, errors = runner.summarize_attempts(tests, True)
         self.assertEqual(len(attempts["Probe/test()"]), 2)
         self.assertEqual(len(attempts["Other/test()"]), 1)
         self.assertEqual(flaky, ["Probe/test()"])
         self.assertEqual(failed, [])
+        self.assertEqual(errors, [])
 
     def test_unexpected_repetitions_fail_closed(self):
         for statuses, enabled in (
@@ -54,16 +55,20 @@ class EventTests(unittest.TestCase):
             (["Skipped", "Success"], True),
             (["Failure", "Failure", "Success"], True),
         ):
-            with self.subTest(statuses=statuses, enabled=enabled), self.assertRaises(ValueError):
-                runner.summarize_attempts([
+            with self.subTest(statuses=statuses, enabled=enabled):
+                attempts, flaky, failed, errors = runner.summarize_attempts([
                     {"identifier": "Probe/test()", "status": status}
                     for status in statuses
                 ], enabled)
+                self.assertEqual(len(attempts["Probe/test()"]), len(statuses))
+                self.assertEqual(flaky, [])
+                self.assertEqual(failed, ["Probe/test()"])
+                self.assertEqual(len(errors), 1)
 
     def test_retry_failure_or_skip_does_not_clear_initial_failure(self):
         for status in ("Failure", "Failed", "Skipped", "Unknown"):
             with self.subTest(status=status):
-                _, flaky, failed = runner.summarize_attempts([
+                _, flaky, failed, _ = runner.summarize_attempts([
                     {"identifier": "Probe/test()", "status": "Failure"},
                     {"identifier": "Probe/test()", "status": status},
                 ], True)
@@ -383,8 +388,16 @@ class RunnerTests(unittest.TestCase):
                                      retry_failed_tests=True)[0], 65)
 
     def test_third_attempt_or_retry_without_opt_in_fails_closed(self):
-        self.assertEqual(self.invoke("retry-third", status="Failure",
-                                     retry_failed_tests=True)[0], 70)
+        step_summary = self.directory / "anomaly-summary.md"
+        with patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": str(step_summary)}):
+            code, summary = self.invoke("retry-third", status="Failure", retry_failed_tests=True)
+        self.assertEqual(code, 70)
+        self.assertEqual(len(summary["attempts_by_test"]["Probe/test()"]), 3)
+        self.assertEqual(summary["failed_tests"], ["Probe/test()"])
+        self.assertEqual(summary["flaky_tests"], [])
+        self.assertEqual(len(summary["repetition_errors"]), 1)
+        self.assertIn("Tests still failing: 1", step_summary.read_text())
+        self.assertNotIn("Tests still failing: 0", step_summary.read_text())
         self.bundle = self.directory / "Disabled.xcresult"
         self.arguments[-1] = str(self.bundle)
         self.assertEqual(self.invoke("retry-success", status="Failure")[0], 70)

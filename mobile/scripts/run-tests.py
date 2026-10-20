@@ -103,19 +103,23 @@ def validate_arguments(arguments):
 def summarize_attempts(tests, retry_failed_tests):
     attempts = {}
     for test in tests:
-        history = attempts.setdefault(test["identifier"], [])
-        if history and (
-            not retry_failed_tests or len(history) >= 2
-            or history[-1]["status"] not in ("Failure", "Failed")
-        ):
-            raise ValueError(f"Unexpected test repetition: {test['identifier']}")
-        history.append(test)
+        attempts.setdefault(test["identifier"], []).append(test)
+    invalid = [
+        identifier for identifier, history in attempts.items()
+        if len(history) > 1 and (
+            not retry_failed_tests or len(history) > 2
+            or history[0]["status"] not in ("Failure", "Failed")
+        )
+    ]
     flaky = [identifier for identifier, history in attempts.items()
-             if len(history) == 2 and history[-1]["status"] == "Success"]
+             if identifier not in invalid
+             and len(history) == 2 and history[-1]["status"] == "Success"]
     failed = [identifier for identifier, history in attempts.items()
-              if history[-1]["status"] in ("Failure", "Failed")
+              if identifier in invalid or history[-1]["status"] in ("Failure", "Failed")
               or (len(history) == 2 and history[-1]["status"] != "Success")]
-    return attempts, flaky, failed
+    return attempts, flaky, failed, [
+        f"Unexpected test repetition: {identifier}" for identifier in invalid
+    ]
 
 
 def run(arguments, invocation_timeout=1440, finalization_timeout=120,
@@ -229,14 +233,9 @@ def run(arguments, invocation_timeout=1440, finalization_timeout=120,
     finished = time.monotonic()
     elapsed = finished - started
     reported = sum(test["reported_seconds"] for test in events.tests)
-    attempts = {}
-    flaky = []
-    failed = []
-    try:
-        attempts, flaky, failed = summarize_attempts(events.tests, retry_failed_tests)
-    except ValueError as exc:
-        if error is None:
-            error = str(exc)
+    attempts, flaky, failed, repetition_errors = summarize_attempts(events.tests, retry_failed_tests)
+    if repetition_errors and error is None:
+        error = "; ".join(repetition_errors)
     status = native_exit if native_exit >= 0 else 128 - native_exit
     if reason == "cancelled":
         status = 128 + interrupted
@@ -268,6 +267,7 @@ def run(arguments, invocation_timeout=1440, finalization_timeout=120,
         "attempts_by_test": attempts,
         "flaky_tests": flaky,
         "failed_tests": failed,
+        "repetition_errors": repetition_errors,
         "tests": events.tests,
     }
     timing_path.write_text(json.dumps(summary, indent=2) + "\n")
