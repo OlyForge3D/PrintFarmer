@@ -488,6 +488,35 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertEqual(PrinterBackend.flashForge.rawValue, "FlashForge")
     }
 
+    func testPrinterSensorDisplayFormattingMatchesMainsailCasing() {
+        XCTAssertEqual(PrinterSensorFormatting.displayName("heater_box1"), "Heater Box1")
+        XCTAssertEqual(
+            PrinterSensorFormatting.displayName("Chamber_Thermal_Protection_Sensor"),
+            "Chamber Thermal Protection Sensor"
+        )
+        XCTAssertEqual(PrinterSensorFormatting.displayName("GD32"), "GD32")
+        XCTAssertEqual(PrinterSensorFormatting.displayName("heater_temp_a_box1"), "Heater Temp A Box1")
+    }
+
+    func testPrinterSensorGroupingAndHiddenObjectDetection() {
+        let humiditySensor = PrinterSensor(
+            id: "temperature_sensor heater_box1",
+            displayName: "heater_box1",
+            kind: .ambient,
+            readings: [
+                SensorReading(quantity: .humidity, value: .number(42), unit: .percent),
+            ]
+        )
+        let hiddenSensor = PrinterSensor(
+            id: "temperature_sensor _private",
+            displayName: "_private",
+            kind: .ambient
+        )
+        XCTAssertEqual(PrinterSensorGroup.group(for: humiditySensor), .temperatures)
+        XCTAssertFalse(PrinterSensorFormatting.isHidden(humiditySensor))
+        XCTAssertTrue(PrinterSensorFormatting.isHidden(hiddenSensor))
+    }
+
     func testPrintJobStatusRawValues() {
         XCTAssertEqual(PrintJobStatus.queued.rawValue, "Queued")
         XCTAssertEqual(PrintJobStatus.assigned.rawValue, "Assigned")

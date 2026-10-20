@@ -146,7 +146,7 @@ describe('DetailedPrinterCard printerDetails gating (#1146 item 4)', () => {
       supportsSensorControl: control,
     }} />);
     expect(screen.queryByText('Primary nozzle')).not.toBeInTheDocument();
-    expect(screen.getByLabelText('Second nozzle Temperature: 30°C')).toBeInTheDocument();
+    expect(screen.getByLabelText('Second Nozzle Temperature: 30°C')).toBeInTheDocument();
     expect(screen.getAllByRole('spinbutton')).toHaveLength(2);
     for (const input of screen.getAllByRole('spinbutton')) {
       expect(input).toHaveProperty('disabled', !(allowed && enabled && online && available && control));

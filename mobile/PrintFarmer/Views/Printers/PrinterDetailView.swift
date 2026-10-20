@@ -1719,11 +1719,15 @@ struct PrinterSensorsReadout: View {
     let sensors: [PrinterSensor]
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
+    private var visibleSensors: [PrinterSensor] {
+        sensors.filter { !PrinterSensorFormatting.isHidden($0) }
+    }
+
     var body: some View {
-        if !sensors.isEmpty {
+        if !visibleSensors.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
                 ForEach(PrinterSensorGroup.allCases, id: \.self) { group in
-                    let items = sensors.filter { PrinterSensorGroup.group(for: $0) == group }
+                    let items = visibleSensors.filter { PrinterSensorGroup.group(for: $0) == group }
                     if !items.isEmpty {
                         VStack(alignment: .leading, spacing: 6) {
                             Text(group.title)
@@ -1748,7 +1752,7 @@ struct PrinterSensorsReadout: View {
             ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
             : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 8))
         layout {
-            Text(sensor.displayName)
+            Text(PrinterSensorFormatting.displayName(sensor.displayName))
                 .font(.subheadline)
             if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 0) }
             Text(PrinterSensorFormatting.summary(sensor))

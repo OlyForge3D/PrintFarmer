@@ -79,9 +79,11 @@ describe('PrinterSensorsPanel', () => {
 
   it('renders read-only sensors in groups with formatted units and no inputs', () => {
     renderPanel([chamber, bme, hotendFan, runout], { canControl: true });
-    for (const name of ['Temperatures', 'Environment', 'Fans & outputs', 'Filament']) {
+    for (const name of ['Temperatures', 'Fans & outputs', 'Filament']) {
       expect(screen.getByRole('region', { name })).toBeInTheDocument();
     }
+    expect(screen.queryByRole('region', { name: 'Environment' })).not.toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Temperatures' })).toContainElement(screen.getByTestId('sensor-bme'));
     expect(screen.getByLabelText('Chamber Temperature: 31.2°C')).toBeInTheDocument();
     expect(screen.getByLabelText('Enclosure Humidity: 45%')).toBeInTheDocument();
     expect(screen.getByLabelText('Enclosure Pressure: 1013 hPa')).toBeInTheDocument();
@@ -92,11 +94,12 @@ describe('PrinterSensorsPanel', () => {
   it('renders inputs only for writable readings in a mixed list', () => {
     renderPanel([fan, hotendFan], { canControl: true });
     expect(screen.getAllByRole('spinbutton')).toHaveLength(1);
-    const input = screen.getByRole('spinbutton', { name: 'Set Part fan Speed' });
+    const input = screen.getByRole('spinbutton', { name: 'Set Part Fan Speed' });
     expect(input).toHaveAttribute('min', '0');
     expect(input).toHaveAttribute('max', '100');
     expect(input).toHaveAttribute('step', '1');
-    expect(screen.getByLabelText('Part fan RPM: 3200 RPM')).toBeInTheDocument();
+    expect(input.parentElement).toHaveClass('w-[4.5rem]');
+    expect(screen.getByLabelText('Part Fan RPM: 3200 RPM')).toBeInTheDocument();
   });
 
   it('marks unavailable sensors and disables their control', () => {
@@ -111,9 +114,9 @@ describe('PrinterSensorsPanel', () => {
       <PrinterSensorsSection printerId="sidebar" sensors={[fan]} temperatures={{}} />
     </>);
     for (const label of screen.getAllByText('RPM', { exact: true })) expect(label).toHaveClass('sr-only');
-    expect(screen.getAllByText('Part fan', { exact: true })).toHaveLength(2);
+    expect(screen.getAllByText('Part Fan', { exact: true })).toHaveLength(2);
     for (const label of screen.getAllByText('Speed', { exact: true })) expect(label).not.toHaveClass('sr-only');
-    for (const reading of screen.getAllByLabelText('Part fan RPM: 3200 RPM')) {
+    for (const reading of screen.getAllByLabelText('Part Fan RPM: 3200 RPM')) {
       expect(reading).toHaveTextContent('3200 RPM');
       expect(reading).toHaveClass('ml-auto');
     }
@@ -125,9 +128,9 @@ describe('PrinterSensorsPanel', () => {
         { quantity: 'FanSpeed', value: 40, unit: 'Percent' },
         { quantity: 'FanRpm', value: Number.NaN, unit: 'Rpm' },
       ] }]);
-    expect(screen.getByText('Part fan', { exact: true })).toBeInTheDocument();
+    expect(screen.getByText('Part Fan', { exact: true })).toBeInTheDocument();
     expect(screen.getByText('RPM', { exact: true })).not.toHaveClass('sr-only');
-    expect(screen.getByLabelText('Part fan RPM: 3200 RPM')).toHaveTextContent('3200 RPM');
+    expect(screen.getByLabelText('Part Fan RPM: 3200 RPM')).toHaveTextContent('3200 RPM');
   });
 
   it('renders detected filament and tolerates null values', () => {
@@ -152,29 +155,29 @@ describe('PrinterSensorsPanel', () => {
     let resolve: (v: { success: boolean }) => void = () => {};
     mocks.setPrinterSensor.mockReturnValue(new Promise((r) => (resolve = r)));
     const { rerender } = renderPanel([fan], { canControl: true });
-    const input = screen.getByRole('spinbutton', { name: 'Set Part fan Speed' });
+    const input = screen.getByRole('spinbutton', { name: 'Set Part Fan Speed' });
     await user.clear(input);
     await user.type(input, '65');
     await user.tab();
     expect(mocks.setPrinterSensor).toHaveBeenCalledWith('p1', 'fan part', { quantity: 'FanSpeed', value: 65 });
-    expect(screen.getByLabelText('Part fan Speed: 65%')).toBeInTheDocument();
+    expect(screen.getByLabelText('Part Fan Speed: 65%')).toBeInTheDocument();
     resolve({ success: true });
     await waitFor(() => expect(mocks.setPrinterSensor).toHaveBeenCalledTimes(1));
     // Confirmed value is retained until live data changes, then live data wins.
-    expect(screen.getByLabelText('Part fan Speed: 65%')).toBeInTheDocument();
+    expect(screen.getByLabelText('Part Fan Speed: 65%')).toBeInTheDocument();
     const live = { ...fan, readings: [{ quantity: 'FanSpeed' as const, value: 70, unit: 'Percent' as const }, fan.readings[1]] };
     rerender(<PrinterSensorsPanel printerId="p1" sensors={[live]} canControl />);
-    expect(screen.getByLabelText('Part fan Speed: 70%')).toBeInTheDocument();
+    expect(screen.getByLabelText('Part Fan Speed: 70%')).toBeInTheDocument();
     const back = { ...fan, readings: [{ quantity: 'FanSpeed' as const, value: 40, unit: 'Percent' as const }, fan.readings[1]] };
     rerender(<PrinterSensorsPanel printerId="p1" sensors={[back]} canControl />);
-    expect(screen.getByLabelText('Part fan Speed: 40%')).toBeInTheDocument();
+    expect(screen.getByLabelText('Part Fan Speed: 40%')).toBeInTheDocument();
   });
 
   it('rejects values not aligned to the writable step', async () => {
     const user = userEvent.setup();
     const stepped = { ...fan, writable: [{ quantity: 'FanSpeed' as const, min: 0, max: 100, step: 0.5, unit: 'Percent' as const }] };
     renderPanel([stepped], { canControl: true });
-    const input = screen.getByRole('spinbutton', { name: 'Set Part fan Speed' });
+    const input = screen.getByRole('spinbutton', { name: 'Set Part Fan Speed' });
     await user.clear(input);
     await user.type(input, '10.3');
     expect(input).toHaveAttribute('aria-invalid', 'true');
@@ -191,7 +194,7 @@ describe('PrinterSensorsPanel', () => {
   it('saves on Tab then resumes live values when the authoritative value changes', async () => {
     const user = userEvent.setup();
     const { rerender } = renderPanel([fan], { canControl: true });
-    const input = screen.getByRole('spinbutton', { name: 'Set Part fan Speed' });
+    const input = screen.getByRole('spinbutton', { name: 'Set Part Fan Speed' });
     await user.clear(input);
     await user.type(input, '12');
     expect(input).toHaveValue(12);
@@ -199,7 +202,7 @@ describe('PrinterSensorsPanel', () => {
     expect(mocks.setPrinterSensor).toHaveBeenCalledTimes(1);
     const live = { ...fan, readings: [{ quantity: 'FanSpeed' as const, value: 55, unit: 'Percent' as const }] };
     rerender(<PrinterSensorsPanel printerId="p1" sensors={[live]} canControl />);
-    expect(screen.getByRole('spinbutton', { name: 'Set Part fan Speed' })).toHaveValue(55);
+    expect(screen.getByRole('spinbutton', { name: 'Set Part Fan Speed' })).toHaveValue(55);
   });
 
   it('keeps control descriptions unique across cards and resets an invalid draft on Escape', async () => {
@@ -217,7 +220,7 @@ describe('PrinterSensorsPanel', () => {
   it('rejects out-of-range values without calling the API', async () => {
     const user = userEvent.setup();
     renderPanel([fan], { canControl: true });
-    const input = screen.getByRole('spinbutton', { name: 'Set Part fan Speed' });
+    const input = screen.getByRole('spinbutton', { name: 'Set Part Fan Speed' });
     await user.clear(input);
     await user.type(input, '150');
     await user.keyboard('{Enter}');
@@ -274,7 +277,7 @@ describe('PrinterSensorsPanel', () => {
     expect(input).toHaveValue(40);
   });
 
-  it('groups additional heater target, actual and power together and retains mixed environmental quantities separately', async () => {
+  it('groups additional heater target, actual, power and environmental values together', async () => {
     const user = userEvent.setup();
     const heater: PrinterSensor = { ...chamber, displayName: 'Heater Box1',
       readings: [
@@ -298,6 +301,43 @@ describe('PrinterSensorsPanel', () => {
     await user.type(input, '50');
     await user.tab();
     expect(mocks.setPrinterSensor).toHaveBeenCalledWith('p1', 'chamber', { quantity: 'TargetTemperature', value: 50 });
+  });
+
+  it('formats names, hides underscore-prefixed objects, and preserves separate sensor IDs with the same short name', () => {
+    const sensorTemperature: PrinterSensor = {
+      id: 'temperature_sensor heater_box1',
+      displayName: 'heater_box1',
+      kind: 'Ambient',
+      readings: [
+        { quantity: 'Temperature', value: 37, unit: 'Celsius' },
+        { quantity: 'Humidity', value: 42, unit: 'Percent' },
+      ],
+      available: true,
+      writable: [],
+    };
+    const heater: PrinterSensor = {
+      id: 'heater_generic heater_box1',
+      displayName: 'heater_box1',
+      kind: 'Other',
+      readings: [{ quantity: 'TargetTemperature', value: 40, unit: 'Celsius' }],
+      available: true,
+      writable: [{ quantity: 'TargetTemperature', min: 0, max: 100, step: 1, unit: 'Celsius' }],
+    };
+    const hidden: PrinterSensor = {
+      ...sensorTemperature,
+      id: 'temperature_sensor _private',
+      displayName: '_private',
+    };
+    renderPanel([sensorTemperature, heater, hidden], { canControl: true });
+
+    expect(screen.getByTestId('sensor-temperature_sensor heater_box1')).toBeInTheDocument();
+    expect(screen.getByTestId('sensor-heater_generic heater_box1')).toBeInTheDocument();
+    expect(screen.getAllByText('Heater Box1', { exact: true })).toHaveLength(2);
+    expect(screen.queryByTestId('sensor-temperature_sensor _private')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Heater Box1 Temperature: 37°C')).toBeInTheDocument();
+    expect(screen.getByLabelText('Heater Box1 Humidity: 42%')).toBeInTheDocument();
+    expect(screen.getByRole('spinbutton', { name: 'Set Heater Box1 Target' })).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Environment' })).not.toBeInTheDocument();
   });
 
   describe('additionalPrinterSensors', () => {
@@ -347,21 +387,21 @@ describe('PrinterSensorsPanel', () => {
     const user = userEvent.setup();
     mocks.setPrinterSensor.mockRejectedValue(new Error('Read-only sensor'));
     renderPanel([fan], { canControl: true });
-    const input = screen.getByRole('spinbutton', { name: 'Set Part fan Speed' });
+    const input = screen.getByRole('spinbutton', { name: 'Set Part Fan Speed' });
     await user.clear(input);
     await user.type(input, '65{Enter}');
     await waitFor(() => expect(mocks.toastError).toHaveBeenCalledTimes(1));
-    expect(screen.getByLabelText('Part fan Speed: 40%')).toBeInTheDocument();
+    expect(screen.getByLabelText('Part Fan Speed: 40%')).toBeInTheDocument();
   });
 
   it('rolls back and toasts when the command result reports failure', async () => {
     const user = userEvent.setup();
     mocks.setPrinterSensor.mockResolvedValue({ success: false, error: 'Printer busy' });
     renderPanel([fan], { canControl: true });
-    const input = screen.getByRole('spinbutton', { name: 'Set Part fan Speed' });
+    const input = screen.getByRole('spinbutton', { name: 'Set Part Fan Speed' });
     await user.clear(input);
     await user.type(input, '10{Enter}');
     await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith('Printer busy'));
-    expect(screen.getByLabelText('Part fan Speed: 40%')).toBeInTheDocument();
+    expect(screen.getByLabelText('Part Fan Speed: 40%')).toBeInTheDocument();
   });
 });

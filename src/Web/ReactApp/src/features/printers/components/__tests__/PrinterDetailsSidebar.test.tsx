@@ -407,7 +407,7 @@ describe("PrinterDetailsSidebar", () => {
       />,
     );
 
-    const input = screen.getByLabelText(/^Set Part fan/);
+    const input = screen.getByLabelText(/^Set Part Fan/);
     if (allowed && enabled && online && available && control) expect(input).toBeEnabled();
     else expect(input).toBeDisabled();
     expect(screen.getByRole('spinbutton', { name: 'Set Heater Box1 Target' })).toHaveProperty(
