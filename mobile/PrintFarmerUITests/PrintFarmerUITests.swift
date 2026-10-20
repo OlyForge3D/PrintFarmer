@@ -1723,11 +1723,77 @@ final class UIWaitBudgetTests: XCTestCase {
         var applicationConstructions: [String] = []
         for source in sources {
             let code = Self.strippingComments(try String(contentsOf: source, encoding: .utf8))
+            if source.lastPathComponent == "PrinterDetailPanelsUITests.swift" {
+                XCTAssertEqual(
+                    Self.isPlainProductionTestClass(code),
+                    true,
+                    "The production-mode sensor E2E must remain a plain XCTestCase, not use the mock UI-test harness"
+                )
+                let (productionTest, otherCode) = try Self.isolatingFunction(
+                    named: "testLiveSensorsSignalRControlsAndReconnectAgainstBothBackends",
+                    in: code
+                )
+                XCTAssertEqual(
+                    try Self.locations(of: Self.rawLaunch, in: productionTest, file: source).count,
+                    1,
+                    "The production-mode sensor E2E must have exactly one direct launch"
+                )
+                XCTAssertEqual(
+                    try Self.locations(of: Self.rawApplication, in: productionTest, file: source).count,
+                    1,
+                    "The production-mode sensor E2E must have exactly one direct app construction"
+                )
+                XCTAssertEqual(try Self.locations(of: Self.rawLaunch, in: otherCode, file: source), [])
+                XCTAssertEqual(try Self.locations(of: Self.rawApplication, in: otherCode, file: source), [])
+                XCTAssertEqual(
+                    Self.productionModeMarkerViolations(in: productionTest),
+                    [],
+                    "The production-mode sensor E2E must not use the UI-test harness or mocks"
+                )
+                continue
+            }
             launches += try Self.locations(of: Self.rawLaunch, in: code, file: source)
             applicationConstructions += try Self.locations(of: Self.rawApplication, in: code, file: source)
         }
         XCTAssertEqual(launches, [], "Launch through launchForPrintFarmerUITest")
         XCTAssertEqual(applicationConstructions.count, 1, "Construct apps with printFarmerUITest: \(applicationConstructions)")
+    }
+
+    func testProductionModeLaunchExceptionIsScopedToNamedTest() throws {
+        let appConstruction = "XCUIApplication" + "()"
+        let launch = "." + "launch()"
+        let source = [
+            "    func testLiveSensorsSignalRControlsAndReconnectAgainstBothBackends() {",
+            "        let app = \(appConstruction)",
+            "        app\(launch)",
+            "    }",
+            "    private func anotherMethod() {",
+            "        let app = \(appConstruction)",
+            "        app\(launch)",
+            "    }",
+        ].joined(separator: "\n")
+        let (productionTest, otherCode) = try Self.isolatingFunction(
+            named: "testLiveSensorsSignalRControlsAndReconnectAgainstBothBackends",
+            in: source
+        )
+        let file = URL(fileURLWithPath: "/Probe.swift")
+        XCTAssertEqual(try Self.locations(of: Self.rawLaunch, in: productionTest, file: file).count, 1)
+        XCTAssertEqual(try Self.locations(of: Self.rawApplication, in: productionTest, file: file).count, 1)
+        XCTAssertEqual(try Self.locations(of: Self.rawLaunch, in: otherCode, file: file).count, 1)
+        XCTAssertEqual(try Self.locations(of: Self.rawApplication, in: otherCode, file: file).count, 1)
+
+        let additionalRawCalls = "\(productionTest)\nlet other = \(appConstruction)\nother\(launch)"
+        XCTAssertEqual(try Self.locations(of: Self.rawLaunch, in: additionalRawCalls, file: file).count, 2)
+        XCTAssertEqual(try Self.locations(of: Self.rawApplication, in: additionalRawCalls, file: file).count, 2)
+        XCTAssertEqual(
+            Self.productionModeMarkerViolations(in: "PFARM_UI_TESTING AG_ASYNC_LAYOUTS MockBackend"),
+            ["PFARM_UI_TESTING", "AG_ASYNC_LAYOUTS", "mock"]
+        )
+        XCTAssertFalse(
+            Self.isPlainProductionTestClass(
+                "final class PrinterSensorsLiveBackendUITests: PrintFarmerUITestCase {"
+            )
+        )
     }
 
     func testLaunchScanStripsCommentsAndSeesSplitCalls() throws {
@@ -1743,6 +1809,53 @@ final class UIWaitBudgetTests: XCTestCase {
         let file = URL(fileURLWithPath: "/Probe.swift")
         XCTAssertEqual(try Self.locations(of: Self.rawLaunch, in: code, file: file), ["Probe.swift:4"])
         XCTAssertEqual(try Self.locations(of: Self.rawApplication, in: code, file: file), ["Probe.swift:5"])
+    }
+
+    private static func isolatingFunction(named name: String, in source: String) throws -> (String, String) {
+        let lines = source.components(separatedBy: .newlines)
+        let declaration = "    func \(name)("
+        let starts = lines.indices.filter { lines[$0].hasPrefix(declaration) }
+        guard starts.count == 1, let start = starts.first,
+              let closingBrace = lines.indices.first(where: {
+                  $0 > start && $0 < lines.count && lines[$0].hasPrefix("    }")
+                      && lines[$0].dropFirst(4).first == "}"
+              }) else {
+            throw NSError(
+                domain: "UITestLaunchSourceInspection",
+                code: 1,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "Expected one class-level declaration with a closing brace for \(name)."
+                ]
+            )
+        }
+        let end = closingBrace + 1
+        var otherLines = lines
+        for index in start..<end {
+            otherLines[index] = ""
+        }
+        return (
+            lines[start..<end].joined(separator: "\n"),
+            otherLines.joined(separator: "\n")
+        )
+    }
+
+    private static let productionModeForbiddenMarkers = [
+        "PFARM_UI_TESTING", "AG_ASYNC_LAYOUTS", "printFarmerUITest", "uitesting", "mock"
+    ]
+
+    private static func productionModeMarkerViolations(in source: String) -> [String] {
+        let normalizedSource = source.lowercased()
+        return productionModeForbiddenMarkers.filter { normalizedSource.contains($0.lowercased()) }
+    }
+
+    private static func isPlainProductionTestClass(_ source: String) -> Bool {
+        source.components(separatedBy: .newlines)
+            .filter {
+                $0.trimmingCharacters(in: .whitespaces)
+                    == "final class PrinterSensorsLiveBackendUITests: XCTestCase {"
+            }
+            .count == 1
     }
 
     private static let rawLaunch = #"\.\s*(launch|activate)\s*\(\s*\)"#

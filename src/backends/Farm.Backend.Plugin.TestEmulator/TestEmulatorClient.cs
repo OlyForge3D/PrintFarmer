@@ -19,9 +19,102 @@ public class TestEmulatorClient(TestEmulatorStateManager stateManager)
       ISupportsStartPrint,
       ISupportsControlOperations,
       ISupportsCamera,
-      ISupportsSensorControl
+      ISupportsSensorControl,
+      IPrinterStatusClient
 {
     private readonly TestEmulatorStateManager _stateManager = stateManager;
+
+    public PrinterBackend SupportedBackend => (PrinterBackend)100;
+
+    public async Task<PrinterStatusDto> GetPrinterStatusAsync(Printer printer, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(printer);
+        PrinterCompositeStatus status = await GetCompositeStatusAsync(printer.BackendUrl, ct);
+        return new PrinterStatusDto(
+            Id: printer.Id,
+            IsOnline: status.IsOnline,
+            State: status.State,
+            Progress: status.Progress,
+            JobName: status.JobName,
+            FileName: PrinterStatusDto.ExtractFileName(status.JobName),
+            ThumbnailUrl: status.ThumbnailUrl,
+            CameraStreamUrl: status.CameraStreamUrl,
+            CameraSnapshotUrl: status.CameraSnapshotUrl,
+            X: status.X,
+            Y: status.Y,
+            Z: status.Z,
+            HotendTemp: status.HotendTemp,
+            BedTemp: status.BedTemp,
+            HotendTarget: status.HotendTarget,
+            BedTarget: status.BedTarget,
+            ExtruderTemperatures: status.ExtruderTemperatures,
+            DetectedExtruderCount: status.DetectedExtruderCount,
+            PrintTimeLeftSeconds: status.PrintTimeLeftSeconds,
+            HomedAxes: status.HomedAxes,
+            CurrentLayer: status.CurrentLayer,
+            TotalLayers: status.TotalLayers,
+            FanSpeedPercent: status.FanSpeedPercent,
+            LiveZOffsetMm: status.LiveZOffsetMm)
+        {
+            Sensors = status.Sensors ?? [],
+        };
+    }
+
+    public async Task<PrinterDto> GetPrinterDtoAsync(Printer printer, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(printer);
+        PrinterStatusDto status = await GetPrinterStatusAsync(printer, ct);
+        return new PrinterDto(
+            Id: printer.Id,
+            Name: printer.Name,
+            Notes: printer.Notes,
+            IsOnline: status.IsOnline,
+            State: status.State,
+            ManufacturerName: printer.Manufacturer?.Name,
+            ModelName: printer.Model?.Name,
+            Progress: status.Progress,
+            JobName: status.JobName,
+            FileName: status.FileName,
+            X: status.X,
+            Y: status.Y,
+            Z: status.Z,
+            HotendTemp: status.HotendTemp,
+            BedTemp: status.BedTemp,
+            HotendTarget: status.HotendTarget,
+            BedTarget: status.BedTarget,
+            Backend: SupportedBackend,
+            ApiKey: printer.ApiKey,
+            Username: printer.Username,
+            Password: printer.Password,
+            OriginalServerUrl: printer.OriginalServerUrl,
+            BackendPort: printer.BackendPort,
+            FrontendPort: printer.FrontendPort,
+            BackendUrl: printer.BackendUrl,
+            FrontendUrl: printer.FrontendUrl,
+            CurrentLayer: status.CurrentLayer,
+            TotalLayers: status.TotalLayers,
+            FanSpeedPercent: status.FanSpeedPercent,
+            LiveZOffsetMm: status.LiveZOffsetMm);
+    }
+
+    public Task<string?> GetCameraStreamUrlAsync(Printer printer, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(printer);
+        return GetCameraStreamUrlAsync(printer.BackendUrl, printer.FrontendPort, printer.Credential, ct);
+    }
+
+    public Task<string?> GetCameraSnapshotUrlAsync(Printer printer, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(printer);
+        return GetCameraSnapshotUrlAsync(printer.BackendUrl, printer.FrontendPort, printer.Credential, ct);
+    }
+
+    public Task<bool> IsCameraAvailableAsync(Printer printer, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(printer);
+        ct.ThrowIfCancellationRequested();
+        return Task.FromResult(true);
+    }
 
     public Task<bool> SetSensorValueAsync(
         string baseUrl,

@@ -1,12 +1,15 @@
 ﻿using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
+using Farm.Backend.Plugin.Core;
 using Farm.Backend.Plugin.TestEmulator;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.SignalR;
 using FluentAssertions;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
@@ -57,6 +60,26 @@ public class TestEmulatorSensorTelemetryTests : IDisposable
     {
         typeof(TestEmulatorClient).Should().Implement<ISupportsSensorTelemetry>();
         typeof(TestEmulatorClient).Should().Implement<ISupportsSensorControl>();
+    }
+
+    [Fact]
+    public void PrinterStatusClientFactory_TestEmulatorBackend_ResolvesSensorClient()
+    {
+        Mock<IBackendPluginRegistry> registry = new();
+        registry.Setup(value => value.GetAllExtendedPlugins())
+            .Returns([new TestEmulatorBackendPlugin()]);
+        using ServiceProvider provider = new ServiceCollection()
+            .AddSingleton(_stateManager)
+            .BuildServiceProvider();
+        PrinterStatusClientFactory factory = new(
+            provider,
+            registry.Object,
+            NullLogger<PrinterStatusClientFactory>.Instance);
+
+        IPrinterStatusClient client = factory.GetStatusClient(100);
+
+        client.Should().BeOfType<TestEmulatorClient>();
+        client.SupportedBackend.Should().Be((PrinterBackend)100);
     }
 
     [Fact]
@@ -122,6 +145,24 @@ public class TestEmulatorSensorTelemetryTests : IDisposable
 
         status.Sensors.Should().NotBeNull().And.HaveCount(7);
         status.Sensors!.Should().OnlyContain(s => s.Available == available);
+        Number(status.Sensors.Single(s => s.Id == "chamber"), PrinterSensorQuantity.Temperature).Should().Be(25);
+    }
+
+    [Fact]
+    public async Task GetPrinterStatusAsync_RegisteredEmulator_IncludesSensorSnapshot()
+    {
+        Guid printerId = Guid.NewGuid();
+        _stateManager.Register(printerId, new EmulatedPrinterState { State = EmulatorPrinterState.Idle });
+        Printer printer = new()
+        {
+            Id = printerId,
+            ServerUrl = BaseUrl(printerId),
+            BackendPort = 80,
+        };
+
+        PrinterStatusDto status = await _client.GetPrinterStatusAsync(printer, CancellationToken.None);
+
+        status.Sensors.Should().HaveCount(7);
         Number(status.Sensors.Single(s => s.Id == "chamber"), PrinterSensorQuantity.Temperature).Should().Be(25);
     }
 

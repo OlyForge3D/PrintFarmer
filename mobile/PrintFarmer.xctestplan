@@ -24,7 +24,8 @@
     {
       "parallelizable" : true,
       "skippedTests" : [
-        "AppStoreScreenshotUITests"
+        "AppStoreScreenshotUITests",
+        "PrinterSensorsLiveBackendUITests"
       ],
       "target" : {
         "containerPath" : "container:PrintFarmer.xcodeproj",

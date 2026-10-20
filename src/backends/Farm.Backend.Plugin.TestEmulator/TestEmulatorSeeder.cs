@@ -102,6 +102,13 @@ public sealed class TestEmulatorSeeder(
                 logger.LogInformation("TestEmulatorSeeder: created printer '{Name}' (id={Id})", config.Name, printerId);
             }
 
+            Printer trackedPrinter = await unitOfWork.Printers.FindByIdAsync(printerId, cancellationToken)
+                ?? throw new InvalidOperationException($"TestEmulator printer {printerId} was not persisted.");
+            if (await unitOfWork.Printers.FindDispatchStateAsync(printerId, cancellationToken) is null)
+            {
+                trackedPrinter.DispatchState = new PrinterDispatchState { PrinterId = printerId };
+            }
+
             // Register state in the emulator state manager
             EmulatorPrinterState initialState = ParseInitialState(config.InitialState);
             var state = new EmulatedPrinterState

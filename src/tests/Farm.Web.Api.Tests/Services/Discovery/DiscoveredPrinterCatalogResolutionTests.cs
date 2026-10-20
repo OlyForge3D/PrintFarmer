@@ -161,6 +161,22 @@ public class DiscoveredPrinterCatalogResolutionTests : IAsyncLifetime
         aliases.Should().Contain(a => a.SlicerType == "OrcaSlicer" && a.SlicerModelName == "Prusa MK4S");
     }
 
+    [Fact]
+    public async Task CreatePrinterFromDto_NewPrinter_PersistsDispatchState()
+    {
+        Farm.Infrastructure.Discovery.DiscoveredPrinterDto fixture = CreateFixtureProvider()
+            .GetPrinters([PrinterBackend.Moonraker])
+            .Single(p => p.Name == "Discovered Voron V2.4");
+
+        PrinterDto created = await RegisterFixtureAsync(fixture);
+        PrinterDispatchState? dispatchState = await _dbContext.PrinterDispatchStates
+            .AsNoTracking()
+            .SingleOrDefaultAsync(state => state.PrinterId == created.Id);
+
+        dispatchState.Should().NotBeNull();
+        dispatchState!.PrinterId.Should().Be(created.Id);
+    }
+
     /// <summary>
     /// A second, independent seed source - <see cref="MoonrakerEmulatorSeedSettings"/> (used by
     /// <c>MoonrakerEmulatorSeeder</c> to populate isolated emulator/browser-validation stacks) -
