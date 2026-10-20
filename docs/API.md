@@ -91,6 +91,15 @@ without tracking hops or artificial waits. Homing, effective coordinate-frame,
 and travel-envelope guards remain. Manual moves do not require the automated
 workflow's minimum Z clearance; unrelated automated protections remain unchanged.
 
+The detailed card and sidebar offer Relative and Absolute coordinate entry.
+Tab/blur or Enter sends only the changed axis (`/move` for a relative distance,
+`/moveto` for an absolute target); omitted axes stay untouched. Each coordinate
+field requires that axis to be explicitly reported homed. Unknown homing,
+offline/disabled printers, missing queue/start permission, unsupported movement,
+and a pending command disable entry. Escape and mode changes discard drafts.
+Enter followed by blur never repeats a move. Submitted fields clear, so another
+relative move requires a deliberate new edit; commands are never replayed.
+
 Emergency Stop targets the selected printer even if manual motion has finished
 and new work has started. Existing active-print lifecycle handling remains.
 The direct-fence fallback authenticates printer access, sends once with a
@@ -148,6 +157,23 @@ Status DTOs (`GET /api/printers/{id}/status`) and every `printerupdated`
 SignalR event carry a backend-neutral `sensors` array. It is always present;
 backends that do not publish sensors send `[]`. Existing fields such as
 `fanSpeedPercent` and the `/fan` endpoint are unchanged.
+
+The React sidebar and detailed printer card share functional disclosures:
+**Temperatures** combines the existing Hotend/Bed controls and presets with
+additional heater/sensor rows (Power, Actual, Target). Power is shown only when
+reported, never inferred from heater state. Mapped primary heater readings appear
+once; extra nozzles and independent temperatures are retained. **Fans & outputs**,
+**Environment**, and **Filament** are separate sibling sections; mixed-quantity
+sensors retain each measurement in its appropriate section.
+
+Writable sensor numbers apply a valid changed value on Tab/blur or Enter.
+Enter followed by blur sends one command; Escape cancels. Invalid, unchanged and
+disabled values do not send commands. Errors roll back optimistic values and show
+an explicit notification. Sensor writes require queue/start permission,
+sensor-control capability, an enabled online printer and an available sensor with
+a writable descriptor. Output switches are not invented: the current contract
+supports numeric writes only. Empty optional sections are hidden; a telemetry-capable
+printer reporting no sensors shows “No sensors reported.”
 
 ```json
 {

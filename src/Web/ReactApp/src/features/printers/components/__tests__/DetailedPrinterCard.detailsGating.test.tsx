@@ -4,6 +4,9 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { PrinterBackend, type MmuStatus, type Printer } from '@/types/api';
 
+const sensorAuth = vi.hoisted(() => ({ allowed: true }));
+vi.mock('@/features/auth/hooks/useAuth', () => ({ useAuth: () => ({ hasPermission: () => sensorAuth.allowed }) }));
+
 const usePrinterDetailsMock = vi.hoisted(() =>
   vi.fn(() => ({ data: undefined, isLoading: false }))
 );
@@ -106,10 +109,53 @@ function makePrinter(overrides: Partial<Printer> = {}): Printer {
 
 describe('DetailedPrinterCard printerDetails gating (#1146 item 4)', () => {
   beforeEach(() => {
+    sensorAuth.allowed = true;
     usePrinterDetailsMock.mockClear();
     usePrinterDetailsMock.mockReturnValue({ data: undefined, isLoading: false });
     useSpoolmanConfiguredMock.mockReturnValue({ ready: true });
     printerHistoryModalMock.mockClear();
+  });
+
+  it.each([
+    ['permitted', true, true, true, true, true],
+    ['no permission', false, true, true, true, true],
+    ['disabled', true, false, true, true, true],
+    ['offline', true, true, false, true, true],
+    ['unavailable', true, true, true, false, true],
+    ['no control capability', true, true, true, true, false],
+  ])('renders shared sensors after Temps with %s gates', (_label, allowed, enabled, online, available, control) => {
+    sensorAuth.allowed = allowed;
+    const printer = makePrinter({
+      isEnabled: enabled, isOnline: online, hotendTemp: 30, hotendTarget: 0,
+      sensors: [
+        { id: 'extruder', kind: 'Nozzle', displayName: 'Primary nozzle', available: true, readings: [{ quantity: 'Temperature', value: 30, unit: 'Celsius' }] },
+        { id: 'extruder1', kind: 'Nozzle', displayName: 'Second nozzle', available: true, readings: [{ quantity: 'Temperature', value: 30, unit: 'Celsius' }] },
+        { id: 'fan', kind: 'Fan', displayName: 'Part fan', available, readings: [{ quantity: 'FanSpeed', value: 40, unit: 'Percent' }],
+          writable: [{ quantity: 'FanSpeed', min: 0, max: 100, step: 1, unit: 'Percent' }] },
+        { id: 'heater_generic box1', kind: 'Chamber', displayName: 'Heater Box1', available,
+          readings: [{ quantity: 'Temperature', value: 36, unit: 'Celsius' }, { quantity: 'TargetTemperature', value: 40, unit: 'Celsius' }],
+          writable: [{ quantity: 'TargetTemperature', min: 0, max: 80, step: 1, unit: 'Celsius' }] },
+      ],
+    });
+    render(<DetailedPrinterCard printer={printer} backendCapabilities={{
+      printerId: printer.id, printerName: printer.name, backend: printer.backend,
+      supportsCamera: false, supportsFileDownload: false, supportsFileList: false, supportsFileUpload: false,
+      supportsStartPrint: false, supportsControlOperations: false, supportsFileMetadata: false,
+      supportsMovement: false, supportsTemperatureControl: true, supportsPrinterInformation: false,
+      supportsHistory: false, supportsFilamentControl: false, supportsObjectExclusion: false,
+      supportsSensorControl: control,
+    }} />);
+    expect(screen.queryByText('Primary nozzle')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Second nozzle Temperature: 30°C')).toBeInTheDocument();
+    expect(screen.getAllByRole('spinbutton')).toHaveLength(2);
+    for (const input of screen.getAllByRole('spinbutton')) {
+      expect(input).toHaveProperty('disabled', !(allowed && enabled && online && available && control));
+    }
+    expect(screen.getByRole('spinbutton', { name: 'Set Heater Box1 Target' })).toBeInTheDocument();
+    expect(screen.getAllByText('Temperatures')).toHaveLength(1);
+    expect(screen.getAllByRole('region', { name: 'Temperatures' })[0]).toContainElement(screen.getByTestId('temp-section'));
+    expect(screen.getAllByRole('region', { name: 'Temperatures' })[0]).toContainElement(screen.getByTestId('sensor-extruder1'));
+    expect(screen.getByTestId('temp-section').compareDocumentPosition(screen.getByText('Fans & outputs')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   describe('DetailedPrinterCard history modal gating', () => {

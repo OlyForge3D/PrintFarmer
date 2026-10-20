@@ -67,12 +67,13 @@ test.describe('Printer Details — Moonraker', () => {
 
     await expect(details.getByText('23.4°C', { exact: true })).toBeVisible({ timeout: 15_000 });
     await expect(details.getByText('22.1°C', { exact: true })).toBeVisible();
+    await details.getByRole('button', { name: 'Relative', exact: true }).click();
     await expect(details.getByLabel('X movement amount').locator('..')).toContainText('[ 120.0 ]');
     await expect(details.getByLabel('Y movement amount').locator('..')).toContainText('[ 120.0 ]');
     await expect(details.getByLabel('Z movement amount').locator('..')).toContainText('[ 5.0 ]');
 
     await details.getByLabel('X movement amount').fill('15');
-    await details.getByTitle('Go to position').click();
+    await details.getByLabel('X movement amount').press('Enter');
     await expect(details.getByLabel('X movement amount').locator('..')).toContainText('[ 135.0 ]', { timeout: 15_000 });
 
     await details.getByLabel('Hotend target temperature').fill('205');

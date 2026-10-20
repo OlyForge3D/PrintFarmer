@@ -1,4 +1,5 @@
 import { useEffect, type ReactElement } from 'react';
+vi.mock('@/features/auth/hooks/useAuth', () => ({ useAuth: () => ({ hasPermission: () => true }) }));
 import { act, cleanup, render as renderTree, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -41,7 +42,7 @@ function BothSurfaces() {
   return <>
     <SettingsSaver />
     <section aria-label="detail"><MotionControls /></section>
-    <section aria-label="sidebar"><PrinterMotionHelp absolute /></section>
+    <section aria-label="sidebar"><PrinterMotionHelp /></section>
   </>;
 }
 const noLocalSelector = () => {

@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Content-Security-Policy" content="connect-src ws://127.0.0.1:3000 ws://localhost:3000; default-src 'self' data: blob: 'unsafe-inline'" />
+    <title>Isolated printer motion fixture</title>
+  </head>
+  <body>
+    <main id="motion-root"></main>
+    <script type="module">
+      import { mountCoordinates } from './printer-motion-ui.tsx';
+      mountCoordinates(document.getElementById('motion-root'));
+    </script>
+  </body>
+</html>

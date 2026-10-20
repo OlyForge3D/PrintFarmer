@@ -34,11 +34,11 @@ function renderSection(overrides: Partial<ComponentProps<typeof TemperatureContr
 describe('TemperatureControlSection', () => {
   it('renders the Temps heading by default and omits it when showHeading is false', () => {
     const { unmount } = render(<TemperatureControlSection {...baseProps()} />);
-    expect(screen.getByText('Temps')).toBeInTheDocument();
+    expect(screen.getByText('Temperatures')).toBeInTheDocument();
     unmount();
 
     render(<TemperatureControlSection {...baseProps()} showHeading={false} />);
-    expect(screen.queryByText('Temps')).not.toBeInTheDocument();
+    expect(screen.queryByText('Temperatures')).not.toBeInTheDocument();
   });
 
   it('applies the main material preset', async () => {

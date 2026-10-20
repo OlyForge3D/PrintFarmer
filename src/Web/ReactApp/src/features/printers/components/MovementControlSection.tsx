@@ -290,12 +290,13 @@ export function MovementControlSection({
       <PrinterCoordinateRow
         values={{ X: moveX, Y: moveY, Z: moveZ }}
         positions={{ X: printerX, Y: printerY, Z: printerZ }}
+        homedAxes={homedAxes}
         onChange={(axis, value) => ({ X: onMoveXChange, Y: onMoveYChange, Z: onMoveZChange })[axis](value)}
         disabled={movementActionPending || !canManualMove}
         onMove={onMove}
         onMoveTo={onMoveTo}
       />
-      <PrinterMotionHelp absolute={!!onMoveTo} />
+      <PrinterMotionHelp />
     </div>
   );
 }
