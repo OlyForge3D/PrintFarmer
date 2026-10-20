@@ -197,7 +197,7 @@ enum PrinterSensorGroup: Int, CaseIterable, Hashable, Sendable {
         }
         switch sensor.kind {
         case .fan: return .fans
-        case .nozzle, .bed, .chamber, .mcu, .host: return .temperatures
+        case .nozzle, .bed, .chamber, .mcu, .host, .ambient: return .temperatures
         case .filamentRunout, .other, .unknown: return .other
         }
     }
