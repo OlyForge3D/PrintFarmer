@@ -186,12 +186,18 @@ enum PrinterSensorGroup: Int, CaseIterable, Hashable, Sendable {
     }
 
     static func group(for sensor: PrinterSensor) -> PrinterSensorGroup {
-        if sensor.readings.contains(where: { [.humidity, .pressure, .gas].contains($0.quantity) }) {
+        let hasThermalReading = sensor.readings.contains {
+            [.temperature, .targetTemperature, .humidity, .pressure, .gas].contains($0.quantity)
+        }
+        let hasThermalTarget = sensor.writable.contains { $0.quantity == .targetTemperature }
+        if sensor.kind != .fan && (
+            hasThermalReading || hasThermalTarget || sensor.kind == .ambient
+        ) {
             return .temperatures
         }
         switch sensor.kind {
         case .fan: return .fans
-        case .nozzle, .bed, .chamber, .mcu, .host, .ambient: return .temperatures
+        case .nozzle, .bed, .chamber, .mcu, .host: return .temperatures
         case .filamentRunout, .other, .unknown: return .other
         }
     }

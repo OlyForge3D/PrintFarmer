@@ -277,7 +277,7 @@ describe('PrinterSensorsPanel', () => {
     expect(input).toHaveValue(40);
   });
 
-  it('groups additional heater target, actual, power and environmental values together', async () => {
+  it('keeps all remaining heater readings inline with its target and temperature', async () => {
     const user = userEvent.setup();
     const heater: PrinterSensor = { ...chamber, displayName: 'Heater Box1',
       readings: [
@@ -285,8 +285,14 @@ describe('PrinterSensorsPanel', () => {
         { quantity: 'TargetTemperature', value: 40, unit: 'Celsius' },
         { quantity: 'Power', value: 25, unit: 'Percent' },
         { quantity: 'Humidity', value: 42, unit: 'Percent' },
+        { quantity: 'Pressure', value: 1013, unit: 'HectoPascal' },
+        { quantity: 'Gas', value: 5, unit: 'None' },
+        { quantity: 'Other', value: 7, unit: 'None' },
       ],
-      writable: [{ quantity: 'TargetTemperature', min: 0, max: 80, step: 1, unit: 'Celsius' }],
+      writable: [
+        { quantity: 'TargetTemperature', min: 0, max: 80, step: 1, unit: 'Celsius' },
+        { quantity: 'Gas', min: 0, max: 100, step: 1, unit: 'None' },
+      ],
     };
     render(<PrinterSensorsSection printerId="p1" sensors={[heater, fan, runout]} temperatures={{}} canControl>
       <div>Legacy temperature controls</div>
@@ -296,6 +302,10 @@ describe('PrinterSensorsPanel', () => {
     expect(screen.getByLabelText('Heater Box1 Temperature: 36°C')).toBeInTheDocument();
     expect(screen.getAllByText('25%')).toHaveLength(1);
     expect(screen.getByLabelText('Heater Box1 Humidity: 42%')).toBeInTheDocument();
+    expect(screen.getByLabelText('Heater Box1 Pressure: 1013 hPa')).toBeInTheDocument();
+    expect(screen.getByLabelText('Heater Box1 Value: 7')).toBeInTheDocument();
+    const gasInput = screen.getByRole('spinbutton', { name: 'Set Heater Box1 Gas' });
+    expect(gasInput).toHaveValue(5);
     const input = screen.getByRole('spinbutton', { name: 'Set Heater Box1 Target' });
     await user.clear(input);
     await user.type(input, '50');

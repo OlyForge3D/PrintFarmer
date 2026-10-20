@@ -50,12 +50,14 @@ type SensorGroup = 'Temperatures' | 'Fans & outputs' | 'Filament' | 'Other senso
 const GROUP_ORDER: SensorGroup[] = ['Temperatures', 'Fans & outputs', 'Filament', 'Other sensors'];
 
 const ENVIRONMENTAL_QUANTITIES = new Set<PrinterSensorQuantity>(['Humidity', 'Pressure', 'Gas']);
+const PRIMARY_THERMAL_QUANTITIES = new Set<PrinterSensorQuantity>(['Temperature', 'TargetTemperature', 'Power']);
 
 function isThermalSensor(sensor: PrinterSensor): boolean {
+  const knownThermalKind = ['Nozzle', 'Bed', 'Chamber', 'Mcu', 'Host', 'Ambient'].includes(sensor.kind);
   return sensor.kind !== 'Fan' && (
+    knownThermalKind ||
     sensor.readings.some(reading => reading.quantity === 'Temperature' || reading.quantity === 'TargetTemperature') ||
     sensor.readings.some(reading => ENVIRONMENTAL_QUANTITIES.has(reading.quantity)) ||
-    sensor.kind === 'Ambient' ||
     (sensor.writable ?? []).some(descriptor => descriptor.quantity === 'TargetTemperature'));
 }
 
@@ -317,7 +319,7 @@ export function PrinterSensorsPanel({ printerId, sensors, canControl = false, is
               );
               const controllable = canControl && isOnline && !unavailable;
               if (layout === 'thermal') {
-                const additionalReadings = sensor.readings.filter(reading => ENVIRONMENTAL_QUANTITIES.has(reading.quantity));
+                const additionalReadings = sensor.readings.filter(reading => !PRIMARY_THERMAL_QUANTITIES.has(reading.quantity));
                 const cell = (quantity: PrinterSensorQuantity) => {
                   const reading = sensor.readings.find(item => item.quantity === quantity);
                   const descriptor = writableByQuantity.get(quantity);
@@ -341,16 +343,22 @@ export function PrinterSensorsPanel({ printerId, sensors, canControl = false, is
                     {cell('TargetTemperature')}
                     <div className="flex min-w-0 flex-wrap items-center justify-end gap-x-2">
                       {additionalReadings.map(reading => (
-                        <span key={reading.quantity} className="text-right text-xs"
-                          aria-label={`${describeReading(sensor, reading)}: ${formatSensorReading(reading)}${unavailable ? ' (unavailable)' : ''}`}>
-                          <span className="text-pf-text-secondary">{QUANTITY_LABEL[reading.quantity]} </span>
-                          <span className="font-mono tabular-nums">{formatSensorReading(reading)}</span>
-                        </span>
+                        <AdditionalThermalReading
+                          key={reading.quantity}
+                          sensor={sensor}
+                          reading={reading}
+                          descriptor={writableByQuantity.get(reading.quantity)}
+                          disabled={!controllable}
+                          pending={pending[sensorKey(sensor.id, reading.quantity)] === true}
+                          optimistic={optimistic[sensorKey(sensor.id, reading.quantity)]}
+                          onSubmit={handleSubmit}
+                        />
                       ))}
                     </div>
                   </div>
                 </li>;
               }
+
               return (
                 <li key={sensor.id} className="py-2 space-y-2 min-w-0" data-testid={`sensor-${sensor.id}`}>
                   {sensor.readings.length !== 1 && <div className="flex items-start justify-between gap-2">
@@ -407,6 +415,46 @@ export function PrinterSensorsPanel({ printerId, sensors, canControl = false, is
           </ul>
         </section>
       ))}
+    </div>
+  );
+}
+
+interface AdditionalThermalReadingProps {
+  sensor: PrinterSensor;
+  reading: PrinterSensorReading;
+  descriptor: PrinterSensorWritable | undefined;
+  disabled: boolean;
+  pending: boolean;
+  optimistic: { value: number; baseline: number | undefined } | undefined;
+  onSubmit: WritableControlProps['onSubmit'];
+}
+
+function AdditionalThermalReading({
+  sensor, reading, descriptor, disabled, pending, optimistic, onSubmit,
+}: AdditionalThermalReadingProps) {
+  const numeric = typeof reading.value === 'number' && Number.isFinite(reading.value) ? reading.value : undefined;
+  const showOptimistic = optimistic !== undefined && optimistic.baseline === numeric;
+  const current = showOptimistic ? optimistic.value : numeric;
+  const shownReading = showOptimistic ? { ...reading, value: optimistic.value } : reading;
+  const label = `${describeReading(sensor, reading)}: ${formatSensorReading(shownReading)}${sensor.available ? '' : ' (unavailable)'}`;
+
+  return (
+    <div className="inline-flex items-center gap-1 text-right text-xs">
+      <span className="text-pf-text-secondary">{QUANTITY_LABEL[reading.quantity]} </span>
+      {descriptor ? <>
+        <WritableControl
+          sensor={sensor}
+          descriptor={descriptor}
+          current={current}
+          disabled={disabled || pending}
+          onSubmit={onSubmit}
+        />
+        <span>{UNIT_SUFFIX[descriptor.unit]}</span>
+      </> : (
+        <span className="font-mono tabular-nums" aria-label={label}>
+          {formatSensorReading(shownReading)}
+        </span>
+      )}
     </div>
   );
 }

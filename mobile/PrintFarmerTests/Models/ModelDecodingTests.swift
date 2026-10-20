@@ -507,12 +507,35 @@ final class ModelDecodingTests: XCTestCase {
                 SensorReading(quantity: .humidity, value: .number(42), unit: .percent),
             ]
         )
+        let heaterTemperature = PrinterSensor(
+            id: "temperature_sensor heater_box1",
+            displayName: "heater_box1",
+            kind: .other,
+            readings: [
+                SensorReading(quantity: .temperature, value: .number(37), unit: .celsius),
+            ]
+        )
+        let genericHeater = PrinterSensor(
+            id: "heater_generic heater_box1",
+            displayName: "heater_box1",
+            kind: .other,
+            readings: [
+                SensorReading(quantity: .targetTemperature, value: .number(40), unit: .celsius),
+            ],
+            writable: [
+                SensorWritable(quantity: .targetTemperature, min: 0, max: 100, step: 1, unit: .celsius),
+            ]
+        )
         let hiddenSensor = PrinterSensor(
             id: "temperature_sensor _private",
             displayName: "_private",
             kind: .ambient
         )
         XCTAssertEqual(PrinterSensorGroup.group(for: humiditySensor), .temperatures)
+        XCTAssertEqual(PrinterSensorGroup.group(for: heaterTemperature), .temperatures)
+        XCTAssertEqual(PrinterSensorGroup.group(for: genericHeater), .temperatures)
+        XCTAssertEqual(heaterTemperature.id, "temperature_sensor heater_box1")
+        XCTAssertEqual(genericHeater.id, "heater_generic heater_box1")
         XCTAssertFalse(PrinterSensorFormatting.isHidden(humiditySensor))
         XCTAssertTrue(PrinterSensorFormatting.isHidden(hiddenSensor))
     }
