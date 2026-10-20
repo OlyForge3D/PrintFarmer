@@ -105,6 +105,31 @@ describe('PrinterSensorsPanel', () => {
     expect(screen.getByRole('spinbutton')).toBeDisabled();
   });
 
+  it('hides redundant RPM quantity labels on both shared surfaces while retaining accessible context and other labels', () => {
+    render(<>
+      <PrinterSensorsSection printerId="card" sensors={[fan]} temperatures={{}} />
+      <PrinterSensorsSection printerId="sidebar" sensors={[fan]} temperatures={{}} />
+    </>);
+    for (const label of screen.getAllByText('RPM', { exact: true })) expect(label).toHaveClass('sr-only');
+    expect(screen.getAllByText('Part fan', { exact: true })).toHaveLength(2);
+    for (const label of screen.getAllByText('Speed', { exact: true })) expect(label).not.toHaveClass('sr-only');
+    for (const reading of screen.getAllByLabelText('Part fan RPM: 3200 RPM')) {
+      expect(reading).toHaveTextContent('3200 RPM');
+      expect(reading).toHaveClass('ml-auto');
+    }
+  });
+
+  it('keeps RPM-only fan identity and the quantity label when no RPM value is reported', () => {
+    renderPanel([{ ...fan, readings: [{ quantity: 'FanRpm', value: 3200, unit: 'Rpm' }], writable: [] },
+      { ...fan, id: 'missing-rpm', displayName: 'Controller fan', readings: [
+        { quantity: 'FanSpeed', value: 40, unit: 'Percent' },
+        { quantity: 'FanRpm', value: Number.NaN, unit: 'Rpm' },
+      ] }]);
+    expect(screen.getByText('Part fan', { exact: true })).toBeInTheDocument();
+    expect(screen.getByText('RPM', { exact: true })).not.toHaveClass('sr-only');
+    expect(screen.getByLabelText('Part fan RPM: 3200 RPM')).toHaveTextContent('3200 RPM');
+  });
+
   it('renders detected filament and tolerates null values', () => {
     renderPanel([
       { ...runout, readings: [{ quantity: 'FilamentDetected', value: true, unit: 'None' }] },

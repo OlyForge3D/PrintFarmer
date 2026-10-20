@@ -367,9 +367,11 @@ export function PrinterSensorsPanel({ printerId, sensors, canControl = false, is
                       const showOptimistic = pendingValue !== undefined && pendingValue.baseline === numeric;
                       const current = showOptimistic ? pendingValue.value : numeric;
                       const shownReading = showOptimistic ? { ...reading, value: pendingValue.value } : reading;
+                      const redundantRpmLabel = sensor.readings.length > 1 && reading.quantity === 'FanRpm' &&
+                        reading.unit === 'Rpm' && numeric !== undefined && !descriptor;
                       return (
                         <div key={reading.quantity} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
-                          <dt className="min-w-0 flex-1 text-sm text-pf-text-secondary break-words">
+                          <dt className={redundantRpmLabel ? 'sr-only' : 'min-w-0 flex-1 text-sm text-pf-text-secondary break-words'}>
                             {sensor.readings.length === 1 ? sensor.displayName : QUANTITY_LABEL[reading.quantity] ?? 'Value'}
                             {sensor.readings.length === 1 && unavailable && <span className="block text-xs">Unavailable</span>}
                           </dt>
