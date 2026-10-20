@@ -58,6 +58,7 @@ jobs:
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover \
             -s ../../harness/mobile/scripts/tests \
             -p test_capture_sidebar_diagnostic.py -v
+          sudo xcode-select -s "$DEVELOPER_DIR"
           xcodebuild -version | tee build-sidebar/xcode.log
           test "$(head -n 1 build-sidebar/xcode.log)" = "Xcode 26.6"
           test "$(sed -n '2p' build-sidebar/xcode.log)" = "Build version 17F113"
@@ -72,7 +73,7 @@ jobs:
               '.runtimes[] | select(.identifier == $id and .buildversion == "23F77" and .isAvailable)' >/dev/null
           }
           if ! approved_runtime; then
-            xcodebuild -downloadPlatform iOS -buildVersion 23F77 -architectureVariant arm64
+            sudo xcodebuild -downloadPlatform iOS -buildVersion 23F77 -architectureVariant arm64
             approved_runtime
           fi
           if ! xcrun simctl list devices available -j | jq -e --arg id "$runtime" \

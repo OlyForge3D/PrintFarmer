@@ -66,41 +66,50 @@ class Capture:
         if not is_app(result.stdout.strip(), self.udid):
             raise ValueError(f"PID {pid} no longer identifies the selected simulator app")
 
-    def command(self, argv, target):
+    def command(self, argv, target, timeout=6):
         started = time.time()
         # Bound each observer's output, not the test process or its evidence.
         with target.open("wb") as output:
             result = subprocess.run(
                 [sys.executable, str(Path(__file__).resolve()), "--observer-command", *argv],
-                stdout=output, stderr=subprocess.STDOUT, timeout=6, check=False,
+                stdout=output, stderr=subprocess.STDOUT, timeout=timeout, check=False,
             )
         self.event("observer-command", argv=argv, started=started,
                    finished=time.time(), exitCode=result.returncode, file=target.name)
         if result.returncode:
             raise RuntimeError(f"Observer exited {result.returncode}: {argv}; see {target}")
 
+    def error(self, error, **fields):
+        self.errors.append(str(error))
+        self.event("capture-error", error=str(error), **fields)
+
+    def observe(self, argv, target, timeout=6):
+        try:
+            self.command(argv, target, timeout)
+        except (OSError, RuntimeError, subprocess.SubprocessError) as error:
+            self.error(error, file=target.name)
+
     def window(self, pid, table):
+        self.windows += 1
         self.verify(pid)
         self.seen.add(pid)
-        self.windows += 1
         prefix = self.output / f"window-{self.windows:02d}-pid-{pid}"
         self.event("sample-start", pid=pid, executable=table[pid], simulator=self.udid)
         selected = {p: executable for p, executable in table.items()
                     if p == pid or Path(executable).name in RECEIVERS}
         prefix.with_suffix(".identities.json").write_text(json.dumps(selected, indent=2))
         pids = ",".join(str(p) for p in sorted(selected))
-        self.command(
+        self.observe(
+            ["/usr/bin/sample", str(pid), "1", "10", "-mayDie"],
+            prefix.with_suffix(".sample.txt"), timeout=30,
+        )
+        self.observe(
             ["/bin/ps", "-p", pids, "-o", "pid=,ppid=,state=,pcpu=,pmem=,etime=,comm="],
             prefix.with_suffix(".processes.txt"),
         )
-        self.command(
+        self.observe(
             ["/usr/bin/sudo", "-n", "/usr/sbin/lsof", "-nP", "-p", pids, "-Fpcftn"],
             prefix.with_suffix(".descriptors.txt"),
-        )
-        self.verify(pid)
-        self.command(
-            ["/usr/bin/sample", str(pid), "1", "10"],
-            prefix.with_suffix(".sample.txt"),
         )
 
     def monitor(self):
@@ -113,14 +122,16 @@ class Capture:
                 if len(apps) > 1:
                     raise ValueError(f"Ambiguous selected-simulator app identity: {apps}")
                 if apps:
-                    self.window(apps[0], table)
+                    try:
+                        self.window(apps[0], table)
+                    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
+                        self.error(error, pid=apps[0], window=self.windows)
                 self.stop.wait(2)
             self.saturated = self.windows == MAX_WINDOWS
             if self.saturated:
                 self.event("sample-budget-exhausted", windows=self.windows)
         except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
-            self.errors.append(str(error))
-            self.event("capture-error", error=str(error))
+            self.error(error)
 
     def finish(self, test_status):
         if not self.seen:

@@ -19,14 +19,20 @@ The new hosted-only observer does not use the failed historical collector's
 executable-only `ps comm`, checks the selected simulator and exact executable
 again before sampling, and retains timestamped app samples, process identities,
 logging/test receiver process state and file descriptors. It records at most
-24 one-second app sample windows; each observer command has a six-second limit
-and two-MiB output limit. Total observation storage is capped conservatively at
+24 one-second app sample windows; sample uses `-mayDie` with a separate
+30-second attachment/symbolication limit, and other observer commands have
+six-second limits. Every command has a two-MiB output limit.
+Total observation storage is capped conservatively at
 50 MiB. No process launch arguments or environment variables are collected.
 
 Receiver descriptors and process states are observations, not proof of pipe
 ownership or backpressure. Sampling itself can affect timing. A passing test,
 no reproduced stall, exhausted sample budget, exited PID or failed observer is
-reported explicitly, never treated as a causal fix. No controlled logging
+reported explicitly, never treated as a causal fix. Per-window observer failures
+remain recorded and make capture fail, but do not suppress later budgeted
+windows or prevent independent receiver observations. A PID disappearing during
+normal teardown is retained as a capture limitation, not an app-crash claim.
+No controlled logging
 comparison, source instrumentation, watchdog adjustment or test retry is included.
 All native attachments (including passing tests), logs, runner events/timing and
 observer evidence upload even after failure. The workflow deliberately finishes

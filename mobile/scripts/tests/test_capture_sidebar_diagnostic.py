@@ -80,6 +80,51 @@ class CaptureContracts(unittest.TestCase):
             self.assertEqual(events[-1]["kind"], "capture-error")
             self.assertTrue(observer.errors)
 
+    def test_window_errors_do_not_suppress_next_window(self):
+        executable = "/Users/runner/Library/Developer/CoreSimulator/Devices/approved/data/Containers/Bundle/Application/id/PrintFarmer.app/PrintFarmer"
+        for failed_call, failure in [(1, subprocess.TimeoutExpired("sample", 30)),
+                                     (3, RuntimeError("lsof exited 1"))]:
+            with self.subTest(failure=str(failure)), tempfile.TemporaryDirectory() as folder:
+                observer = capture.Capture("approved", Path(folder))
+                calls = []
+
+                def command(argv, target, timeout=6):
+                    calls.append((argv, timeout))
+                    if len(calls) == failed_call:
+                        raise failure
+                    if observer.windows == 2:
+                        observer.stop.set()
+
+                with patch.object(observer, "table", return_value={42: executable}), \
+                        patch.object(observer, "verify"), \
+                        patch.object(observer.stop, "wait"), \
+                        patch.object(observer, "command", side_effect=command):
+                    observer.monitor()
+                self.assertEqual(observer.windows, 2)
+                self.assertEqual(len(observer.errors), 1)
+                self.assertEqual(calls[0][0][0], "/usr/bin/sample")
+                self.assertEqual(calls[0][1], 30)
+                self.assertIn("-mayDie", calls[0][0])
+                self.assertEqual(observer.finish(0), 2)
+                events = [json.loads(line) for line in (Path(folder) / "capture.jsonl").read_text().splitlines()]
+                self.assertTrue(any(event["kind"] == "capture-error" for event in events))
+
+    def test_pid_verification_race_does_not_end_collection(self):
+        executable = "/Users/runner/Library/Developer/CoreSimulator/Devices/approved/data/Containers/Bundle/Application/id/PrintFarmer.app/PrintFarmer"
+        with tempfile.TemporaryDirectory() as folder:
+            observer = capture.Capture("approved", Path(folder))
+
+            def command(*_):
+                observer.stop.set()
+
+            with patch.object(observer, "table", return_value={42: executable}), \
+                    patch.object(observer.stop, "wait"), \
+                    patch.object(observer, "verify", side_effect=[ValueError("PID disappeared"), None]), \
+                    patch.object(observer, "command", side_effect=command):
+                observer.monitor()
+            self.assertEqual(observer.windows, 2)
+            self.assertEqual(len(observer.errors), 1)
+
     def test_local_execution_is_rejected_before_starting_processes(self):
         with patch.dict(capture.os.environ, {}, clear=True), \
                 patch("sys.argv", [str(SCRIPT), "--udid", "approved", "--output", "/unused"]), \
