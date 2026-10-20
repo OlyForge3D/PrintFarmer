@@ -518,8 +518,14 @@ jobs:
             mobile/build-${{ matrix.key }}/Login.log
             mobile/build-${{ matrix.key }}/Login.events.jsonl
             mobile/build-${{ matrix.key }}/Login.timing.json
+            mobile/build-${{ matrix.key }}/Login-retry.xcresult
+            mobile/build-${{ matrix.key }}/Login-retry.events.jsonl
+            mobile/build-${{ matrix.key }}/Login-retry.timing.json
             mobile/build-${{ matrix.key }}/XCUIShard.xcresult
             mobile/build-${{ matrix.key }}/XCUIShard.log
             mobile/build-${{ matrix.key }}/XCUIShard.events.jsonl
             mobile/build-${{ matrix.key }}/XCUIShard.timing.json
+            mobile/build-${{ matrix.key }}/XCUIShard-retry.xcresult
+            mobile/build-${{ matrix.key }}/XCUIShard-retry.events.jsonl
+            mobile/build-${{ matrix.key }}/XCUIShard-retry.timing.json
           retention-days: 7

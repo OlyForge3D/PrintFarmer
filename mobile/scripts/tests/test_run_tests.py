@@ -21,7 +21,8 @@ runner = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(runner)
 
 
-def event(name, identifier="Probe/test()", duration=0.05, status="Success"):
+def event(name, identifier="Probe/test()", duration=0.05, status="Success",
+          severity="testFailure"):
     payload = {}
     if name == "testStarted":
         payload = {"testIdentifier": {"identifier": {"_value": identifier}}}
@@ -31,6 +32,12 @@ def event(name, identifier="Probe/test()", duration=0.05, status="Success"):
             "duration": {"_value": str(duration)},
             "testStatus": {"_value": status},
         }}
+    elif name == "issueEmitted":
+        test_class, method = identifier.split("/")
+        payload = {
+            "issue": {"testCaseName": {"_value": f"{test_class}.{method}"}},
+            "severity": {"_value": severity},
+        }
     return json.dumps({"name": {"_value": name}, "structuredPayload": payload}) + "\n"
 
 
@@ -75,6 +82,52 @@ class EventTests(unittest.TestCase):
                 self.assertEqual(flaky, [])
                 self.assertEqual(failed, ["Probe/test()"])
 
+    def test_observed_full_shard_repetition_is_rejected(self):
+        initial = [
+            {"identifier": f"HarvestUITests/testCase{index}()",
+             "status": "Failure" if index == 0 else "Success"}
+            for index in range(12)
+        ]
+        retry = [
+            {"identifier": f"HarvestUITests/testCase{index}()", "status": "Success"}
+            for index in range(12)
+        ]
+        attempts, flaky, failed, errors = runner.summarize_attempts(
+            initial + retry, True,
+        )
+        self.assertEqual(len(attempts), 12)
+        self.assertEqual(flaky, ["HarvestUITests/testCase0()"])
+        self.assertEqual(len(failed), 11)
+        self.assertEqual(len(errors), 11)
+        self.assertTrue(all(
+            len(attempts[f"HarvestUITests/testCase{index}()"]) == 2
+            for index in range(12)
+        ))
+
+    def test_retry_selection_uses_only_proven_failed_identifiers(self):
+        events = runner.TestEvents()
+        events.invocation_started = 1
+        events.invocation_finished = 1
+        events.action_started = 1
+        events.action_finished = 1
+        events.tests = [
+            {"identifier": f"HarvestUITests/testCase{index}()",
+             "status": "Failure" if index == 3 else "Success"}
+            for index in range(12)
+        ]
+        events.failure_issues = ["HarvestUITests/testCase3()"]
+        arguments = ["-only-testing:PrintFarmerUITests/HarvestUITests"]
+        self.assertEqual(
+            runner.retry_selection(arguments, events, 65),
+            ["-only-testing:PrintFarmerUITests/HarvestUITests/testCase3"],
+        )
+        events.unclassified_issues = ["unattributed issue"]
+        self.assertEqual(runner.retry_selection(arguments, events, 65), [])
+        events.unclassified_issues = []
+        self.assertEqual(runner.retry_selection(arguments, events, 0), [])
+        events.failure_issues = []
+        self.assertEqual(runner.retry_selection(arguments, events, 65), [])
+
     def test_partial_line_is_retried_without_losing_event(self):
         events = runner.TestEvents()
         text = event("testStarted")
@@ -84,6 +137,23 @@ class EventTests(unittest.TestCase):
         self.assertEqual(stream.tell(), 0)
         events.read(io.StringIO(text), 2)
         self.assertEqual(events.active, {"Probe/test()"})
+
+    def test_idle_budget_accumulates_across_invocation_attempts(self):
+        budgets = runner.SharedBudgets(0)
+        first = runner.TestEvents()
+        first.idle_since = 1
+        budgets.observe(first, 1)
+        second = runner.TestEvents()
+        budgets.observe(second, 3)
+        self.assertEqual(budgets.idle_elapsed(3), 2)
+        second.active.add("Probe/test()")
+        budgets.observe(second, 4)
+        self.assertEqual(budgets.idle_spent, 3)
+        self.assertIsNone(budgets.idle_started)
+        second.active.clear()
+        second.idle_since = 4
+        budgets.observe(second, 4)
+        self.assertEqual(budgets.idle_elapsed(6), 5)
 
     def test_finished_duration_and_idle_deadline_ignore_log_chatter(self):
         events = runner.TestEvents()
@@ -247,6 +317,7 @@ class RunnerTests(unittest.TestCase):
         self.bundle = self.directory / "Results.xcresult"
         self.arguments = [
             "test", "-destination", "platform=iOS Simulator,id=test-device",
+            "-only-testing:PrintFarmerUITests/Probe",
             "-resultBundlePath", str(self.bundle),
         ]
         self.stub = self.directory / "xcodebuild"
@@ -264,6 +335,9 @@ class RunnerTests(unittest.TestCase):
             "(bundle/'arguments.json').write_text(json.dumps(args))\n"
             "stream=Path(args[args.index('-resultStreamPath')+1])\n"
             "mode=os.environ['RUNNER_TEST_MODE']\n"
+            "marker=Path(os.environ['RUNNER_TEST_MARKER'])\n"
+            "attempt=int(marker.read_text()) if marker.exists() else 0\n"
+            "marker.write_text(str(attempt+1))\n"
             "def interrupt(sig, frame):\n"
             "    (bundle/'flushed').write_text('interrupted')\n"
             "    sys.exit(0)\n"
@@ -273,13 +347,29 @@ class RunnerTests(unittest.TestCase):
             "if mode=='no-events': time.sleep(10)\n"
             "if mode=='bad-stream':\n"
             "    stream.write_text('bad json\\n'); time.sleep(10)\n"
-            "emit('RUNNER_TEST_START')\n"
-            "time.sleep(0.35 if mode=='long-body' else 0.06)\n"
-            "emit('RUNNER_TEST_FINISH')\n"
-            "if mode.startswith('retry'):\n"
-            "    emit('RUNNER_TEST_START'); emit('RUNNER_TEST_RETRY_FINISH')\n"
-            "if mode=='retry-third':\n"
-            "    emit('RUNNER_TEST_START'); emit('RUNNER_TEST_RETRY_FINISH')\n"
+            "if mode not in ('no-events','bad-stream'):\n"
+            "    emit('RUNNER_INVOCATION_START'); emit('RUNNER_ACTION_START')\n"
+            "    if mode!='setup-error':\n"
+            "        if mode=='retry-full-shard':\n"
+            "            for line in json.loads(os.environ[f'RUNNER_TEST_EVENTS_{attempt}']):\n"
+            "                with stream.open('a') as f: f.write(line)\n"
+            "        else:\n"
+            "            emit('RUNNER_TEST_START')\n"
+            "            if attempt>0 and mode.startswith('retry'):\n"
+            "                emit('RUNNER_TEST_RETRY_FINISH')\n"
+            "                if mode=='retry-third':\n"
+            "                    emit('RUNNER_TEST_START'); emit('RUNNER_TEST_RETRY_FINISH')\n"
+            "                if os.environ['RUNNER_TEST_RETRY_STATUS'] in ('Failure','Failed'):\n"
+            "                    emit('RUNNER_TEST_ISSUE')\n"
+            "            else:\n"
+            "                time.sleep(0.35 if mode=='long-body' else 0.06)\n"
+            "                emit('RUNNER_TEST_FINISH')\n"
+            "                if mode.startswith('retry'):\n"
+            "                    if mode!='retry-no-issue': emit('RUNNER_TEST_ISSUE')\n"
+            "    if mode=='retry-unclassified' and attempt==0:\n"
+            "        emit('RUNNER_UNCLASSIFIED_ISSUE')\n"
+            "    emit('RUNNER_ACTION_END')\n"
+            "    if mode!='incomplete': emit('RUNNER_TEST_END')\n"
             "if mode=='hang': time.sleep(10)\n"
             "if mode=='cancel':\n"
             "    os.kill(os.getppid(), signal.SIGTERM); time.sleep(10)\n"
@@ -289,21 +379,40 @@ class RunnerTests(unittest.TestCase):
             "'import signal,time; signal.signal(signal.SIGINT, signal.SIG_IGN); time.sleep(10)'])\n"
             "    (bundle/'child.pid').write_text(str(child.pid))\n"
             "    time.sleep(10)\n"
-            "if mode!='incomplete': emit('RUNNER_TEST_END')\n"
-            "sys.exit(65 if mode in ('failed','retry-native-failure') else 42 if mode=='other-failure' else 0)\n"
+            "status=os.environ.get('RUNNER_TEST_STATUS','Success')\n"
+            "retry_status=os.environ.get('RUNNER_TEST_RETRY_STATUS','Success')\n"
+            "failed=(mode=='failed' or mode=='retry-native-failure' or "
+            "mode=='setup-error' or (mode.startswith('retry') and "
+            "((attempt==0 and status in ('Failure','Failed')) or "
+            "(attempt>0 and retry_status in ('Failure','Failed')))))\n"
+            "sys.exit(65 if failed else 42 if mode=='other-failure' else 0)\n"
         )
         self.stub.chmod(0o755)
 
     def tearDown(self):
         shutil.rmtree(self.directory)
 
-    def invoke(self, mode, status="Success", retry_failed_tests=False, retry_status="Success"):
+    def invoke(self, mode, status="Success", retry_failed_tests=False,
+               retry_status="Success", extra_environment=None):
+        marker = self.directory / "attempt-count"
+        marker.unlink(missing_ok=True)
         environment = {
             "RUNNER_TEST_MODE": mode,
+            "RUNNER_TEST_MARKER": str(marker),
+            "RUNNER_TEST_STATUS": status,
+            "RUNNER_TEST_RETRY_STATUS": retry_status,
             "RUNNER_TEST_START": event("testStarted"),
             "RUNNER_TEST_FINISH": event("testFinished", status=status),
+            "RUNNER_TEST_ISSUE": event("issueEmitted"),
+            "RUNNER_UNCLASSIFIED_ISSUE": event(
+                "issueEmitted", severity="testRunnerFailure",
+            ),
+            "RUNNER_INVOCATION_START": event("invocationStarted"),
+            "RUNNER_ACTION_START": event("actionStarted"),
+            "RUNNER_ACTION_END": event("actionFinished"),
             "RUNNER_TEST_END": event("invocationFinished"),
             "RUNNER_TEST_RETRY_FINISH": event("testFinished", status=retry_status),
+            **(extra_environment or {}),
         }
         with patch.dict(os.environ, environment), patch("sys.stdout", new=io.StringIO()):
             code = runner.run(
@@ -352,13 +461,71 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(summary["max_attempts_per_test"], 2)
         self.assertEqual([test["status"] for test in summary["tests"]], ["Failure", "Success"])
         self.assertEqual(summary["reported_test_seconds"], 0.1)
+        self.assertEqual(
+            summary["retry_selectors"],
+            ["-only-testing:PrintFarmerUITests/Probe/test"],
+        )
         self.assertIn("Passed on retry (flaky): 1", step_summary.read_text())
         args = json.loads((self.bundle / "arguments.json").read_text())
-        self.assertEqual(args.count("-retry-tests-on-failure"), 1)
-        self.assertEqual(args[args.index("-test-iterations") + 1], "2")
-        self.assertEqual(args[args.index("-test-repetition-relaunch-enabled") + 1], "YES")
+        self.assertNotIn("-retry-tests-on-failure", args)
+        retry_bundle = self.bundle.with_name("Results-retry.xcresult")
+        retry_args = json.loads((retry_bundle / "arguments.json").read_text())
+        self.assertIn("-only-testing:PrintFarmerUITests/Probe/test", retry_args)
+        self.assertEqual(retry_args[retry_args.index("-resultBundlePath") + 1],
+                         str(retry_bundle))
+        self.assertTrue(retry_bundle.with_suffix(".events.jsonl").exists())
+        self.assertTrue(retry_bundle.with_suffix(".timing.json").exists())
         self.assertEqual(summary["invocation_budget_seconds"], 1.5)
         self.assertEqual(summary["finalization_budget_seconds"], 0.3)
+
+    def test_unexpected_full_shard_retry_is_rejected_and_retained(self):
+        self.bundle = self.directory / "FullShard.xcresult"
+        self.arguments[-1] = str(self.bundle)
+        self.arguments[self.arguments.index(
+            "-only-testing:PrintFarmerUITests/Probe"
+        )] = "-only-testing:PrintFarmerUITests/HarvestUITests"
+        initial = []
+        retry = []
+        for index in range(12):
+            identifier = f"HarvestUITests/testCase{index}()"
+            first_status = "Failure" if index == 0 else "Success"
+            initial.extend((
+                event("testStarted", identifier=identifier),
+                event("testFinished", identifier=identifier, status=first_status),
+            ))
+            retry.extend((
+                event("testStarted", identifier=identifier),
+                event("testFinished", identifier=identifier),
+            ))
+            if index == 0:
+                initial.append(event("issueEmitted", identifier=identifier))
+        code, summary = self.invoke(
+            "retry-full-shard", status="Failure", retry_failed_tests=True,
+            extra_environment={
+                "RUNNER_TEST_EVENTS_0": json.dumps(initial),
+                "RUNNER_TEST_EVENTS_1": json.dumps(retry),
+            },
+        )
+        self.assertEqual(code, 70)
+        self.assertEqual(summary["xcodebuild_exit_codes"], [65, 0])
+        self.assertEqual(len(summary["attempts_by_test"]), 12)
+        self.assertEqual(len(summary["repetition_errors"]), 12)
+        self.assertEqual(len(summary["tests"]), 24)
+        self.assertEqual(
+            summary["retry_selectors"],
+            ["-only-testing:PrintFarmerUITests/HarvestUITests/testCase0"],
+        )
+        retry_args = json.loads((
+            self.bundle.with_name("FullShard-retry.xcresult") / "arguments.json"
+        ).read_text())
+        self.assertIn(
+            "-only-testing:PrintFarmerUITests/HarvestUITests/testCase0",
+            retry_args,
+        )
+        self.assertFalse(any(
+            argument == "-only-testing:PrintFarmerUITests/HarvestUITests"
+            for argument in retry_args
+        ))
 
     def test_retry_still_failing_keeps_job_failed(self):
         code, summary = self.invoke("retry-failed", status="Failure",
@@ -372,10 +539,17 @@ class RunnerTests(unittest.TestCase):
                 patch("sys.stdout", new=io.StringIO()) as output:
             environment = {
                 "RUNNER_TEST_MODE": "retry-success",
+                "RUNNER_TEST_MARKER": str(self.directory / "warning-attempt-count"),
                 "RUNNER_TEST_START": event("testStarted"),
                 "RUNNER_TEST_FINISH": event("testFinished", status="Failure"),
+                "RUNNER_TEST_ISSUE": event("issueEmitted"),
+                "RUNNER_INVOCATION_START": event("invocationStarted"),
+                "RUNNER_ACTION_START": event("actionStarted"),
+                "RUNNER_ACTION_END": event("actionFinished"),
                 "RUNNER_TEST_RETRY_FINISH": event("testFinished"),
                 "RUNNER_TEST_END": event("invocationFinished"),
+                "RUNNER_TEST_STATUS": "Failure",
+                "RUNNER_TEST_RETRY_STATUS": "Success",
             }
             with patch.dict(os.environ, environment):
                 self.assertEqual(runner.run(
@@ -383,9 +557,11 @@ class RunnerTests(unittest.TestCase):
                 ), 0)
         self.assertIn('::warning::Passed on retry (flaky): "Probe/test()"', output.getvalue())
 
-    def test_native_failure_is_not_cleared_by_retry_success_events(self):
-        self.assertEqual(self.invoke("retry-native-failure", status="Failure",
-                                     retry_failed_tests=True)[0], 65)
+    def test_retry_native_failure_without_failed_retry_result_fails_closed(self):
+        code, summary = self.invoke("retry-native-failure", status="Failure",
+                                    retry_failed_tests=True)
+        self.assertEqual(code, 70)
+        self.assertEqual(summary["xcodebuild_exit_codes"], [65, 65])
 
     def test_third_attempt_or_retry_without_opt_in_fails_closed(self):
         step_summary = self.directory / "anomaly-summary.md"
@@ -395,18 +571,57 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(len(summary["attempts_by_test"]["Probe/test()"]), 3)
         self.assertEqual(summary["failed_tests"], ["Probe/test()"])
         self.assertEqual(summary["flaky_tests"], [])
-        self.assertEqual(len(summary["repetition_errors"]), 1)
+        self.assertGreaterEqual(len(summary["repetition_errors"]), 1)
         self.assertIn("Tests still failing: 1", step_summary.read_text())
         self.assertNotIn("Tests still failing: 0", step_summary.read_text())
         self.bundle = self.directory / "Disabled.xcresult"
         self.arguments[-1] = str(self.bundle)
-        self.assertEqual(self.invoke("retry-success", status="Failure")[0], 70)
+        code, summary = self.invoke("retry-success", status="Failure")
+        self.assertEqual(code, 65)
+        self.assertEqual(summary["xcodebuild_exit_codes"], [65])
 
-    def test_opt_in_does_not_repeat_infrastructure_failure(self):
+    def test_opt_in_does_not_retry_setup_or_unclassified_failures(self):
+        code, summary = self.invoke("setup-error", retry_failed_tests=True)
+        self.assertEqual(code, 65)
+        self.assertEqual(summary["xcodebuild_exit_codes"], [65])
+        self.bundle = self.directory / "Unclassified.xcresult"
+        self.arguments[-1] = str(self.bundle)
+        code, summary = self.invoke(
+            "retry-unclassified", status="Failure", retry_failed_tests=True,
+        )
+        self.assertEqual(code, 65)
+        self.assertEqual(summary["xcodebuild_exit_codes"], [65])
+        self.assertFalse(
+            self.bundle.with_name("Unclassified-retry.xcresult").exists()
+        )
+        self.bundle = self.directory / "Incomplete.xcresult"
+        self.arguments[-1] = str(self.bundle)
+        code, summary = self.invoke(
+            "incomplete", status="Failure", retry_failed_tests=True,
+        )
+        self.assertEqual(code, 70)
+        self.assertEqual(summary["xcodebuild_exit_codes"], [0])
+        self.assertFalse(
+            self.bundle.with_name("Incomplete-retry.xcresult").exists()
+        )
+
+    def test_opt_in_does_not_repeat_other_native_failure(self):
         code, summary = self.invoke("other-failure", retry_failed_tests=True)
         self.assertEqual(code, 42)
         self.assertEqual(len(summary["tests"]), 1)
         self.assertEqual(summary["flaky_tests"], [])
+
+    def test_xcodebuild_launch_error_is_retained_and_not_retried(self):
+        with patch("sys.stdout", new=io.StringIO()):
+            code = runner.run(
+                self.arguments, executable=str(self.directory / "missing-xcodebuild"),
+                retry_failed_tests=True,
+            )
+        summary = json.loads(self.bundle.with_suffix(".timing.json").read_text())
+        self.assertEqual(code, 70)
+        self.assertEqual(summary["xcodebuild_exit_codes"], [None])
+        self.assertEqual(summary["termination_reason"], "xcodebuild-launch-error")
+        self.assertFalse(self.bundle.with_name("Results-retry.xcresult").exists())
 
     def test_other_native_exit_is_preserved(self):
         self.assertEqual(self.invoke("other-failure")[0], 42)
@@ -417,7 +632,7 @@ class RunnerTests(unittest.TestCase):
     def test_post_test_timeout_flushes_artifacts_but_stays_failed(self):
         code, summary = self.invoke("hang")
         self.assertEqual(code, 124)
-        self.assertEqual(summary["xcodebuild_exit_code"], 0)
+        self.assertEqual(summary["xcodebuild_exit_codes"], [0])
         self.assertEqual(summary["termination_reason"], "post-test-timeout")
         self.assertTrue((self.bundle / "flushed").exists())
         self.assertLess(summary["post_last_test_seconds"], 0.5)
@@ -425,7 +640,7 @@ class RunnerTests(unittest.TestCase):
     def test_hard_stop_bounds_unresponsive_process_and_descendant(self):
         code, summary = self.invoke("ignore-interrupt")
         self.assertEqual(code, 124)
-        self.assertEqual(summary["xcodebuild_exit_code"], -signal.SIGKILL)
+        self.assertEqual(summary["xcodebuild_exit_codes"], [-signal.SIGKILL])
         self.assertLess(summary["post_last_test_seconds"], 0.5)
         child = (self.bundle / "child.pid").read_text()
         # Reaping is OS-owned; a zombie has exited and no longer holds stdout.
@@ -527,7 +742,16 @@ class RunnerTests(unittest.TestCase):
                     **os.environ,
                     "PATH": str(self.stub.parent.resolve()) + os.pathsep + os.environ["PATH"],
                     "SIMULATOR_UDID": "test-device",
+                    "RUNNER_TEST_MARKER": str(
+                        (self.directory / "workflow-attempt-count").resolve()
+                    ),
                     "RUNNER_TEST_MODE": mode,
+                    "RUNNER_TEST_STATUS": "Failure" if mode == "failed" else "Success",
+                    "RUNNER_TEST_RETRY_STATUS": "Success",
+                    "RUNNER_TEST_ISSUE": event("issueEmitted"),
+                    "RUNNER_INVOCATION_START": event("invocationStarted"),
+                    "RUNNER_ACTION_START": event("actionStarted"),
+                    "RUNNER_ACTION_END": event("actionFinished"),
                     "RUNNER_TEST_START": event("testStarted"),
                     "RUNNER_TEST_FINISH": event("testFinished",
                                               status="Failure" if mode == "failed" else "Success"),
@@ -540,9 +764,7 @@ class RunnerTests(unittest.TestCase):
                 self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
                 bundle = self.directory / f"{stem}.xcresult"
                 args = json.loads((bundle / "arguments.json").read_text())
-                self.assertEqual("-retry-tests-on-failure" in args, key is not None)
-                if key is not None:
-                    self.assertEqual(args[args.index("-test-iterations") + 1], "2")
+                self.assertNotIn("-retry-tests-on-failure", args)
                 self.assertIn("test-without-building", args)
                 expected_selectors = selectors.split()
                 if key is not None and key.endswith("-1") and step == "Run XCUI shard":
@@ -562,6 +784,12 @@ class RunnerTests(unittest.TestCase):
                     upload = upload.replace("${{ matrix.key }}", key)
                 for suffix in (".xcresult", ".log", ".events.jsonl", ".timing.json"):
                     self.assertIn(f"mobile/{stem}{suffix}", upload)
+                if key is not None:
+                    for suffix in (
+                        "-retry.xcresult", "-retry.events.jsonl",
+                        "-retry.timing.json",
+                    ):
+                        self.assertIn(f"mobile/{stem}{suffix}", upload)
 
     def test_rejects_retries_parallelism_and_watchdog_disabling(self):
         for override in (

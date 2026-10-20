@@ -126,21 +126,37 @@ used a process-scoped Git setting only, not a global configuration change.
 
 The owner-authorized normal iPhone/iPad XCUI jobs (both login and the remaining
 shard tests) opt into `scripts/run-tests.py --retry-failed-tests -- ...`.
-The runner supplies Xcode's `-retry-tests-on-failure -test-iterations 2
--test-repetition-relaunch-enabled YES`: **at most two executions per failed
-test**, with a fresh test-runner process for the retry. Passing tests are not
-repeated and the whole shard/build is not relaunched. Native infrastructure
-failures remain nonzero; this is not a retry wrapper around xcodebuild.
-Unit tests, local commands and diagnostic captures remain single-attempt unless
-explicitly opted in. Raw repetition overrides are still rejected.
+The runner does not use Xcode's native `-retry-tests-on-failure` repetition
+flags. Although pinned Xcode 26.6 help describes the flag as retrying failures,
+retained iOS PR CI run `39440494545` showed it re-executing every test in two
+12-test shards, including tests whose first and second results were both `Success`.
+Those observed successful repeats are a policy violation, not harmless duplicate
+finish events, and are not accepted.
 
-Both attempts remain in the same native `.xcresult`, `.events.jsonl` and
-`.timing.json`. Timing records every attempt, groups them by test identifier and
-lists `flaky_tests` separately. A failed test that succeeds on its sole retry can
-pass the job, but emits a **passed on retry (flaky)** warning and CI step-summary
-count; it is not reported as clean first-pass success. A second failure, skipped
-retry, incomplete stream or unexpected extra repetition cannot erase the original
-failure. Retry success never overrides a nonzero native xcodebuild exit.
+Instead, a retry is started as a second `xcodebuild` invocation with explicit
+`-only-testing` selectors for just the failed test identifiers. The runner only
+constructs those selectors when the first invocation has exit code 65, a complete
+and well-formed invocation/action/test event sequence, one result per selected
+test, and `testFailure` issue events that map exactly to its failed test IDs.
+Setup/runner errors, missing or malformed event evidence, unknown test statuses,
+unattributed issues, unsupported IDs or selection mismatches are not retried.
+The retry must report each selected ID exactly once; any passing test, extra
+identifier or repeated result in that invocation fails closed. The existing
+assertions, watchdog, test timeout settings and raw repetition-option guard are
+unchanged. Unit tests, local commands and diagnostic captures remain
+single-attempt unless explicitly opted in.
+
+The first and retry attempts have separate `.xcresult`, `.events.jsonl` and
+per-attempt `.timing.json` artifacts; the combined timing report groups every
+recorded result by test identifier and lists `flaky_tests` separately. A failed
+test that succeeds on its sole retry can pass the job, but emits a **passed on
+retry (flaky)** warning and CI step-summary count; it is not reported as clean
+first-pass success. A second failure remains failed. The shared 1440-second
+wall-clock budget, 120-second cumulative post-test/idle budget and 10-second
+interrupt/flush window cover both invocations; the retry does not reset them.
+Only a complete first-attempt test failure can be cleared by its successful,
+explicitly selected retry; native retry/setup errors, cancellation, timeout and
+incomplete evidence remain nonzero.
 
 Retries share the existing 1440-second invocation and 120-second
 finalization/restart budgets, including interrupt/flush time. XCTest timeouts,
