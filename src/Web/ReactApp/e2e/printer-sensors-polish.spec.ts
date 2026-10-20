@@ -14,7 +14,7 @@ test('sensor controls fit card and sidebar widths on desktop and mobile without 
   await expect(sidebar.getByRole('spinbutton', { name: 'Set Part cooling Speed' })).toBeDisabled();
   await expect(card.getByRole('spinbutton', { name: 'Set Controller fan Speed' })).toBeDisabled();
   await expect(card.getByRole('spinbutton', { name: 'X absolute target' })).toBeEnabled();
-  await expect(card.getByRole('spinbutton', { name: 'Z absolute target' })).toBeDisabled();
+  await expect(card.getByRole('spinbutton', { name: 'Z absolute target' })).toBeEnabled();
   await expect(sidebar.getByRole('spinbutton', { name: 'X absolute target' })).toBeDisabled();
   await expect(page.getByRole('button', { name: /GO/ })).toHaveCount(0);
   for (const [name, width, height] of [['desktop', 1100, 1300], ['mobile', 360, 1000]] as const) {
@@ -35,7 +35,7 @@ test('sensor controls fit card and sidebar widths on desktop and mobile without 
       }
     }
     await card.getByRole('button', { name: 'Relative', exact: true }).click();
-    await expect(card.getByRole('spinbutton', { name: 'Z movement amount' })).toBeDisabled();
+    await expect(card.getByRole('spinbutton', { name: 'Z movement amount' })).toBeEnabled();
     await card.locator('[data-printer-coordinate-row]').screenshot({ path: test.info().outputPath(`card-relative-${name}.png`) });
     await card.getByRole('button', { name: 'Absolute', exact: true }).click();
   }

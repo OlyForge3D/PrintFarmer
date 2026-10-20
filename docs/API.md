@@ -93,8 +93,9 @@ workflow's minimum Z clearance; unrelated automated protections remain unchanged
 
 The detailed card and sidebar offer Relative and Absolute coordinate entry.
 Tab/blur or Enter sends only the changed axis (`/move` for a relative distance,
-`/moveto` for an absolute target); omitted axes stay untouched. Each coordinate
-field requires that axis to be explicitly reported homed. Unknown homing,
+`/moveto` for an absolute target); omitted axes stay untouched. All coordinate
+fields require X, Y and Z to be explicitly reported homed, in both modes.
+Losing any required homing discards unsubmitted coordinate edits. Partial or unknown homing,
 offline/disabled printers, missing queue/start permission, unsupported movement,
 and a pending command disable entry. Escape and mode changes discard drafts.
 Enter followed by blur never repeats a move. Submitted fields clear, so another

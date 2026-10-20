@@ -216,10 +216,27 @@ describe.each<Surface>(["detail", "sidebar"])(
   (surface) => {
     it.each([
       { isOnline: false }, { isEnabled: false }, { homedAxes: undefined }, { homedAxes: '' },
+      { homedAxes: 'xy' }, { homedAxes: 'x' }, { homedAxes: 'unknown' },
       { state: 'Printing' }, { state: 'Shutdown' },
     ])('locks coordinate fields for %j', overrides => {
       render(<Controls surface={surface} overrides={overrides} />);
       for (const input of screen.getAllByRole('spinbutton', { name: /absolute target/ })) expect(input).toBeDisabled();
+    });
+
+    it.each(['Absolute', 'Relative'])('discards a dirty %s edit if any required homing is lost on the actual surface', mode => {
+      const { client, rerender } = render(<Controls surface={surface} />);
+      fireEvent.click(screen.getByRole('button', { name: mode }));
+      const name = mode === 'Absolute' ? 'X absolute target' : 'X movement amount';
+      const field = screen.getByLabelText(name);
+      fireEvent.focus(field);
+      fireEvent.change(field, { target: { value: '25' } });
+      rerender(<QueryClientProvider client={client}><Controls surface={surface} overrides={{ homedAxes: 'xy' }} /></QueryClientProvider>);
+      expect(screen.getByLabelText(name)).toBeDisabled();
+      expect(screen.getByLabelText(name)).toHaveValue(null);
+      rerender(<QueryClientProvider client={client}><Controls surface={surface} /></QueryClientProvider>);
+      fireEvent.keyDown(screen.getByLabelText(name), { key: 'Enter' });
+      fireEvent.blur(screen.getByLabelText(name));
+      expect(mockExecute).not.toHaveBeenCalled();
     });
 
     it.each(['permission', 'capability', 'pending'])('locks coordinate fields without %s', gate => {
@@ -230,14 +247,15 @@ describe.each<Surface>(["detail", "sidebar"])(
       expect(mockExecute).not.toHaveBeenCalled();
     });
 
-    it('keeps Z disabled when only X/Y are homed and submits relative X alone on blur', async () => {
+    it('submits relative X alone on blur exactly once when XYZ are homed', async () => {
       mockExecute.mockResolvedValue({ success: true });
-      render(<Controls surface={surface} overrides={{ homedAxes: 'xy' }} />);
-      expect(screen.getByLabelText('Z absolute target')).toBeDisabled();
+      render(<Controls surface={surface} />);
+      expect(screen.getByLabelText('Z absolute target')).toBeEnabled();
       fireEvent.click(screen.getByRole('button', { name: 'Relative' }));
       const x = screen.getByLabelText('X movement amount');
       fireEvent.focus(x);
       fireEvent.change(x, { target: { value: '-2.5' } });
+      fireEvent.blur(x);
       fireEvent.blur(x);
       await waitFor(() => expect(mockExecute).toHaveBeenCalledExactlyOnceWith({ kind: 'Jog', x: -2.5 }));
     });

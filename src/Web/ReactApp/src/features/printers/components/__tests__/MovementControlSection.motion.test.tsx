@@ -7,7 +7,7 @@ import type { ComponentProps } from 'react';
 
 function props(): ComponentProps<typeof MovementControlSection> {
   return {
-    moveX: 100, moveY: 110, moveZ: 10, homedAxes: 'xy', step: 5, extrudeStep: 5, extrudeSpeed: 5, extrudeMinTemp: 170,
+    moveX: 100, moveY: 110, moveZ: 10, homedAxes: 'xyz', step: 5, extrudeStep: 5, extrudeSpeed: 5, extrudeMinTemp: 170,
     movementActionPending: false, canMove: true, canDisableMotors: true, canSetStep: true, canManualMove: true, canExtrude: true,
     onMoveXChange: vi.fn(), onMoveYChange: vi.fn(), onMoveZChange: vi.fn(), onStepChange: vi.fn(),
     onExtrudeStepChange: vi.fn(), onExtrudeSpeedChange: vi.fn(), onMove: vi.fn(), onHome: vi.fn(),
@@ -15,10 +15,10 @@ function props(): ComponentProps<typeof MovementControlSection> {
   };
 }
 describe('detailed-card movement entry points', () => {
-  it('forwards per-axis homing and has no GO', () => {
-    render(<MovementControlSection {...props()} onMoveTo={vi.fn()} />);
+  it('requires full XYZ homing and has no GO', () => {
+    render(<MovementControlSection {...props()} homedAxes="xy" onMoveTo={vi.fn()} />);
     expect(screen.queryByText('GO')).not.toBeInTheDocument();
-    expect(screen.getByLabelText('X absolute target')).toBeEnabled();
+    expect(screen.getByLabelText('X absolute target')).toBeDisabled();
     expect(screen.getByLabelText('Z absolute target')).toBeDisabled();
   });
   it('defaults to relative-only entry if no absolute API handler exists', () => {

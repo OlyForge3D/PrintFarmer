@@ -45,7 +45,7 @@ export function mountSensors(element: HTMLElement) {
   const printer: Printer = {
     id: 'sensor-poc-card', name: 'Workshop printer · sensor POC', backend: PrinterBackend.Moonraker,
     backendUrl: 'http://invalid.local', isOnline: true, isEnabled: true, rowVersion: 'poc',
-    state: 'Idle', homedAxes: 'xy', x: 100, y: 110, z: 5,
+    state: 'Idle', homedAxes: 'xyz', x: 100, y: 110, z: 5,
     hotendTemp: 205, hotendTarget: 210, bedTemp: 59.8, bedTarget: 60, sensors,
   };
   const capabilities: PrinterBackendCapabilitiesDto = {
@@ -63,13 +63,13 @@ export function mountSensors(element: HTMLElement) {
       hasRole: () => false, error: null, login: async () => false, loginWithPasskey: async () => false,
       register: async () => false, logout: async () => {} }}>
       <main className="flex flex-wrap items-start gap-6 p-4 bg-pf-bg-0 text-pf-text-primary">
-        <p className="basis-full text-sm text-pf-text-secondary">Uncommitted POC · actual printer components · hardware access disabled. Card online, X/Y homed, Z unhomed; sidebar offline. Tab or Enter sends only the edited axis.</p>
+        <p className="basis-full text-sm text-pf-text-secondary">Actual printer components · hardware access disabled. Card online, XYZ homed; sidebar offline with only XY homed. All coordinate entry requires XYZ homing. Tab or Enter sends only the edited axis.</p>
         {(['card', 'sidebar'] as const).map(surface => (
           <section key={surface} aria-label={surface} className={`min-w-0 max-w-full ${surface === 'card' ? 'w-96' : 'w-80'}`}>
             <h2 className="text-sm mb-3">{surface === 'card' ? 'Detailed printer card' : 'Printer sidebar'}</h2>
             {surface === 'card' ? <DetailedPrinterCard printer={printer} backendCapabilities={capabilities} />
               : <PrinterDetailsSidebar printerId="sensor-poc-sidebar"
-                printer={{ ...printer, id: 'sensor-poc-sidebar', isOnline: false }}
+                printer={{ ...printer, id: 'sensor-poc-sidebar', isOnline: false, homedAxes: 'xy' }}
                 backendCapabilities={capabilities} layout="content" onClose={() => {}} />}
           </section>
         ))}

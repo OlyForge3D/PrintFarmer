@@ -1,4 +1,4 @@
-import { useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { Button, MovementInput } from '@/common/components/ui';
 import type { MoveRequest } from '@/types/api';
@@ -35,7 +35,18 @@ export function PrinterCoordinateRow({ values, positions, homedAxes, onChange, o
   const initial = useRef<Partial<Record<Axis, Coordinate>>>({});
   const blocked = disabled || action.pending || !hasPermission('queue', 'start');
   const homed = typeof homedAxes === 'string' && /^[xyz]*$/i.test(homedAxes) ? homedAxes.toLowerCase() : '';
-  const axisBlocked = (axis: Axis) => blocked || !homed.includes(axis.toLowerCase());
+  const fullyHomed = axes.every(axis => homed.includes(axis.toLowerCase()));
+  const coordinateBlocked = blocked || !fullyHomed;
+
+  useEffect(() => {
+    if (fullyHomed) return;
+    for (const axis of axes) {
+      if (!dirty.current[axis]) continue;
+      dirty.current[axis] = false;
+      initial.current[axis] = '';
+      onChange(axis, '');
+    }
+  }, [fullyHomed, onChange]);
 
   const cancel = (axis: Axis) => {
     dirty.current[axis] = false;
@@ -48,7 +59,7 @@ export function PrinterCoordinateRow({ values, positions, homedAxes, onChange, o
     if (!dirty.current[axis]) return;
     // Consume this edit synchronously: Enter, disabled-input blur and Tab cannot replay it.
     dirty.current[axis] = false;
-    if (axisBlocked(axis)) { cancel(axis); return; }
+    if (coordinateBlocked) { cancel(axis); return; }
     const value = values[axis];
     if (!isFiniteCoordinate(value)) {
       setInvalid(axis);
@@ -85,11 +96,11 @@ export function PrinterCoordinateRow({ values, positions, homedAxes, onChange, o
         {axes.map(axis => (
           <div key={`${mode}-${axis}`} className="min-w-0">
             <MovementInput axis={axis} coordinateMode={mode} currentPosition={positions?.[axis]}
-              disabled={axisBlocked(axis)} value={values[axis]} step={0.1}
-              title={!homed.includes(axis.toLowerCase()) ? `Home ${axis} before entering a coordinate` : undefined}
+              disabled={coordinateBlocked} value={values[axis]} step={0.1}
+              title={!fullyHomed ? 'Home X, Y and Z before entering coordinates' : undefined}
               onFocus={() => { initial.current[axis] = values[axis]; }}
               onChange={event => {
-                if (axisBlocked(axis)) return;
+                if (coordinateBlocked) return;
                 dirty.current[axis] = true;
                 setInvalid(null);
                 onChange(axis, event.target.value === '' ? '' : Number(event.target.value));
@@ -111,7 +122,7 @@ export function PrinterCoordinateRow({ values, positions, homedAxes, onChange, o
       {action.pending && <p role="status" className="mt-1 text-xs text-pf-text-secondary">Sending movement command…</p>}
       {invalid ? <p id={messageId} role="alert" className="mt-1 text-xs text-pf-error">Enter a finite number for {invalid}, or press Escape to cancel.</p>
         : helpMode === 'guided' ? <p id={messageId} className="mt-1 text-xs text-pf-text-secondary">
-          {mode === 'absolute' ? 'Absolute: move the edited axis to its target (mm).' : 'Relative: move the edited axis by its amount (mm).'} Tab or Enter sends one move. Home each axis before entry.
+          {mode === 'absolute' ? 'Absolute: move the edited axis to its target (mm).' : 'Relative: move the edited axis by its amount (mm).'} Tab or Enter sends one move. Home X, Y and Z before coordinate entry.
         </p> : null}
     </div>
   );
