@@ -465,7 +465,7 @@ jobs:
         timeout-minutes: 25
         run: |
           set -o pipefail
-          python3 scripts/run-tests.py -- test-without-building \
+          python3 scripts/run-tests.py --retry-failed-tests -- test-without-building \
             -project PrintFarmer.xcodeproj \
             -scheme PrintFarmer \
             -configuration Debug \
@@ -492,7 +492,7 @@ jobs:
           if [[ "${{ matrix.shard }}" == "1" ]]; then
             selectors=("${selectors[@]:1}")
           fi
-          python3 scripts/run-tests.py -- test-without-building \
+          python3 scripts/run-tests.py --retry-failed-tests -- test-without-building \
             -project PrintFarmer.xcodeproj \
             -scheme PrintFarmer \
             -configuration Debug \

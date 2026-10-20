@@ -122,6 +122,32 @@ used a process-scoped Git setting only, not a global configuration change.
 
 ### Timeout policy
 
+#### One failed-test retry in normal XCUI CI
+
+The owner-authorized normal iPhone/iPad XCUI jobs (both login and the remaining
+shard tests) opt into `scripts/run-tests.py --retry-failed-tests -- ...`.
+The runner supplies Xcode's `-retry-tests-on-failure -test-iterations 2
+-test-repetition-relaunch-enabled YES`: **at most two executions per failed
+test**, with a fresh test-runner process for the retry. Passing tests are not
+repeated and the whole shard/build is not relaunched. Native infrastructure
+failures remain nonzero; this is not a retry wrapper around xcodebuild.
+Unit tests, local commands and diagnostic captures remain single-attempt unless
+explicitly opted in. Raw repetition overrides are still rejected.
+
+Both attempts remain in the same native `.xcresult`, `.events.jsonl` and
+`.timing.json`. Timing records every attempt, groups them by test identifier and
+lists `flaky_tests` separately. A failed test that succeeds on its sole retry can
+pass the job, but emits a **passed on retry (flaky)** warning and CI step-summary
+count; it is not reported as clean first-pass success. A second failure, skipped
+retry, incomplete stream or unexpected extra repetition cannot erase the original
+failure. Retry success never overrides a nonzero native xcodebuild exit.
+
+Retries share the existing 1440-second invocation and 120-second
+finalization/restart budgets, including interrupt/flush time. XCTest timeouts,
+assertions and the app's 20-second watchdog are unchanged. This policy improves
+failure recovery cost; a green retry does not diagnose or fix an intermittent AX
+stall, and it grants no extra diagnostic-capture executions.
+
 The shared `PrintFarmer.xctestplan` enables genuine XCTest test timeouts for both
 Xcode and CI, while retaining Apple's 600-second general allowance. The three
 isolated cases use `executionTimeAllowance = 60` at method entry. Other tests are
@@ -504,7 +530,9 @@ than private defaults or running a second collector.
   Local overrides are explicit `--invocation-timeout` and
   `--finalization-timeout` arguments before `--`, both greater than 10s.
 - The runner forces enabled XCTest timeouts and serial execution; it rejects
-  repetition/retry switches. The shared plan's general 600s allowance and
+  raw repetition/retry switches. Normal XCUI CI explicitly opts into the
+  runner-managed one-failed-test-retry policy above; other invocations stay
+  single-attempt by default. The shared plan's general 600s allowance and
   individual 60s watchdogs remain unchanged.
 
 The supported `-resultStreamPath` output is retained as `.events.jsonl`.

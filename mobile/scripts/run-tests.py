@@ -100,9 +100,28 @@ def validate_arguments(arguments):
     return bundle
 
 
+def summarize_attempts(tests, retry_failed_tests):
+    attempts = {}
+    for test in tests:
+        history = attempts.setdefault(test["identifier"], [])
+        if history and (
+            not retry_failed_tests or len(history) >= 2
+            or history[-1]["status"] not in ("Failure", "Failed")
+        ):
+            raise ValueError(f"Unexpected test repetition: {test['identifier']}")
+        history.append(test)
+    flaky = [identifier for identifier, history in attempts.items()
+             if len(history) == 2 and history[-1]["status"] == "Success"]
+    failed = [identifier for identifier, history in attempts.items()
+              if history[-1]["status"] in ("Failure", "Failed")
+              or (len(history) == 2 and history[-1]["status"] != "Success")]
+    return attempts, flaky, failed
+
+
 def run(arguments, invocation_timeout=1440, finalization_timeout=120,
-        flush_seconds=10, poll_seconds=0.1, executable="xcodebuild"):
-    """Budgets include graceful interrupt time; never repeat a test invocation."""
+        flush_seconds=10, poll_seconds=0.1, executable="xcodebuild",
+        retry_failed_tests=False):
+    """One invocation; optional native failed-test retry shares the same budgets."""
     bundle = validate_arguments(arguments)
     for budget in (invocation_timeout, finalization_timeout):
         if not math.isfinite(budget) or budget <= flush_seconds:
@@ -125,6 +144,11 @@ def run(arguments, invocation_timeout=1440, finalization_timeout=120,
             command.extend((option, value))
     if "-disable-concurrent-destination-testing" not in arguments:
         command.append("-disable-concurrent-destination-testing")
+    if retry_failed_tests:
+        command.extend((
+            "-retry-tests-on-failure", "-test-iterations", "2",
+            "-test-repetition-relaunch-enabled", "YES",
+        ))
     print(
         f"IOS_RUNNER: verbose simulator collection=never; post-test/restart budget="
         f"{finalization_timeout}s; invocation budget={invocation_timeout}s "
@@ -205,6 +229,14 @@ def run(arguments, invocation_timeout=1440, finalization_timeout=120,
     finished = time.monotonic()
     elapsed = finished - started
     reported = sum(test["reported_seconds"] for test in events.tests)
+    attempts = {}
+    flaky = []
+    failed = []
+    try:
+        attempts, flaky, failed = summarize_attempts(events.tests, retry_failed_tests)
+    except ValueError as exc:
+        if error is None:
+            error = str(exc)
     status = native_exit if native_exit >= 0 else 128 - native_exit
     if reason == "cancelled":
         status = 128 + interrupted
@@ -215,8 +247,7 @@ def run(arguments, invocation_timeout=1440, finalization_timeout=120,
     )):
         status = 70
         reason = "incomplete-result-stream"
-    elif status == 0 and any(test["status"] in ("Failure", "Failed")
-                            for test in events.tests):
+    elif status == 0 and failed:
         status = 65
         reason = "failed-test-in-result-stream"
     summary = {
@@ -233,6 +264,10 @@ def run(arguments, invocation_timeout=1440, finalization_timeout=120,
         "invocation_budget_seconds": invocation_timeout,
         "flush_seconds_included": flush_seconds,
         "verbose_simulator_diagnostics": "never",
+        "max_attempts_per_test": 2 if retry_failed_tests else 1,
+        "attempts_by_test": attempts,
+        "flaky_tests": flaky,
+        "failed_tests": failed,
         "tests": events.tests,
     }
     timing_path.write_text(json.dumps(summary, indent=2) + "\n")
@@ -240,6 +275,25 @@ def run(arguments, invocation_timeout=1440, finalization_timeout=120,
           f"non-test overhead={summary['non_test_overhead_seconds']:.3f}s; "
           f"post-last-test={summary['post_last_test_seconds']}; exit={status}; "
           f"timing={timing_path}", flush=True)
+    for identifier in flaky:
+        # JSON escaping keeps test identifiers from injecting log annotations.
+        message = f"Passed on retry (flaky): {json.dumps(identifier, ensure_ascii=True)}"
+        print(f"IOS_RUNNER: {message}", flush=True)
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            escaped = message.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+            print(f"::warning::{escaped}", flush=True)
+    if retry_failed_tests and os.environ.get("GITHUB_STEP_SUMMARY"):
+        # Derive labels from the fixed result-bundle name, never test-controlled Markdown.
+        with Path(os.environ["GITHUB_STEP_SUMMARY"]).open("a") as step_summary:
+            step_summary.write(
+                f"\n### XCUI attempt results ({bundle.stem})\n\n"
+                f"- Maximum attempts per test: 2 (one failed-test retry).\n"
+                f"- Test executions recorded: {len(events.tests)}.\n"
+                f"- Passed on retry (flaky): {len(flaky)}.\n"
+                f"- Tests still failing: {len(failed)}.\n"
+                f"- Runner exit code: {status}.\n\n"
+                "All attempts are retained in the xcresult, event stream and timing artifact.\n"
+            )
     return status
 
 
@@ -247,6 +301,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--invocation-timeout", type=float, default=1440)
     parser.add_argument("--finalization-timeout", type=float, default=120)
+    parser.add_argument("--retry-failed-tests", action="store_true",
+                        help="Retry only failed tests once in a fresh process; retain every attempt")
     parser.add_argument("xcodebuild_arguments", nargs=argparse.REMAINDER,
                         help="-- test[-without-building] and existing xcodebuild arguments")
     options = parser.parse_args()
@@ -254,7 +310,8 @@ def main():
     if arguments[:1] == ["--"]:
         arguments = arguments[1:]
     try:
-        return run(arguments, options.invocation_timeout, options.finalization_timeout)
+        return run(arguments, options.invocation_timeout, options.finalization_timeout,
+                   retry_failed_tests=options.retry_failed_tests)
     except (ValueError, OSError) as exc:
         print(f"IOS_RUNNER: {exc}", file=sys.stderr)
         return 70

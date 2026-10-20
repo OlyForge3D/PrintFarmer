@@ -35,6 +35,41 @@ def event(name, identifier="Probe/test()", duration=0.05, status="Success"):
 
 
 class EventTests(unittest.TestCase):
+    def test_failed_test_may_retry_once_and_retains_both_attempts(self):
+        tests = [
+            {"identifier": "Probe/test()", "status": "Failure", "reported_seconds": 1},
+            {"identifier": "Other/test()", "status": "Success", "reported_seconds": 2},
+            {"identifier": "Probe/test()", "status": "Success", "reported_seconds": 3},
+        ]
+        attempts, flaky, failed = runner.summarize_attempts(tests, True)
+        self.assertEqual(len(attempts["Probe/test()"]), 2)
+        self.assertEqual(len(attempts["Other/test()"]), 1)
+        self.assertEqual(flaky, ["Probe/test()"])
+        self.assertEqual(failed, [])
+
+    def test_unexpected_repetitions_fail_closed(self):
+        for statuses, enabled in (
+            (["Failure", "Success"], False),
+            (["Success", "Success"], True),
+            (["Skipped", "Success"], True),
+            (["Failure", "Failure", "Success"], True),
+        ):
+            with self.subTest(statuses=statuses, enabled=enabled), self.assertRaises(ValueError):
+                runner.summarize_attempts([
+                    {"identifier": "Probe/test()", "status": status}
+                    for status in statuses
+                ], enabled)
+
+    def test_retry_failure_or_skip_does_not_clear_initial_failure(self):
+        for status in ("Failure", "Failed", "Skipped", "Unknown"):
+            with self.subTest(status=status):
+                _, flaky, failed = runner.summarize_attempts([
+                    {"identifier": "Probe/test()", "status": "Failure"},
+                    {"identifier": "Probe/test()", "status": status},
+                ], True)
+                self.assertEqual(flaky, [])
+                self.assertEqual(failed, ["Probe/test()"])
+
     def test_partial_line_is_retried_without_losing_event(self):
         events = runner.TestEvents()
         text = event("testStarted")
@@ -236,6 +271,10 @@ class RunnerTests(unittest.TestCase):
             "emit('RUNNER_TEST_START')\n"
             "time.sleep(0.35 if mode=='long-body' else 0.06)\n"
             "emit('RUNNER_TEST_FINISH')\n"
+            "if mode.startswith('retry'):\n"
+            "    emit('RUNNER_TEST_START'); emit('RUNNER_TEST_RETRY_FINISH')\n"
+            "if mode=='retry-third':\n"
+            "    emit('RUNNER_TEST_START'); emit('RUNNER_TEST_RETRY_FINISH')\n"
             "if mode=='hang': time.sleep(10)\n"
             "if mode=='cancel':\n"
             "    os.kill(os.getppid(), signal.SIGTERM); time.sleep(10)\n"
@@ -246,24 +285,26 @@ class RunnerTests(unittest.TestCase):
             "    (bundle/'child.pid').write_text(str(child.pid))\n"
             "    time.sleep(10)\n"
             "if mode!='incomplete': emit('RUNNER_TEST_END')\n"
-            "sys.exit(65 if mode=='failed' else 42 if mode=='other-failure' else 0)\n"
+            "sys.exit(65 if mode in ('failed','retry-native-failure') else 42 if mode=='other-failure' else 0)\n"
         )
         self.stub.chmod(0o755)
 
     def tearDown(self):
         shutil.rmtree(self.directory)
 
-    def invoke(self, mode, status="Success"):
+    def invoke(self, mode, status="Success", retry_failed_tests=False, retry_status="Success"):
         environment = {
             "RUNNER_TEST_MODE": mode,
             "RUNNER_TEST_START": event("testStarted"),
             "RUNNER_TEST_FINISH": event("testFinished", status=status),
             "RUNNER_TEST_END": event("invocationFinished"),
+            "RUNNER_TEST_RETRY_FINISH": event("testFinished", status=retry_status),
         }
         with patch.dict(os.environ, environment), patch("sys.stdout", new=io.StringIO()):
             code = runner.run(
                 self.arguments, invocation_timeout=1.5, finalization_timeout=0.3,
                 flush_seconds=0.1, poll_seconds=0.01, executable=str(self.stub),
+                retry_failed_tests=retry_failed_tests,
             )
         summary = json.loads(self.bundle.with_suffix(".timing.json").read_text())
         self.assertEqual(summary["exit_code"], code)
@@ -286,6 +327,8 @@ class RunnerTests(unittest.TestCase):
                        "-disable-concurrent-destination-testing"):
             self.assertEqual(args.count(option), 1)
         self.assertEqual(summary["reported_test_seconds"], 0.05)
+        self.assertNotIn("-retry-tests-on-failure", args)
+        self.assertEqual(summary["max_attempts_per_test"], 1)
         self.assertAlmostEqual(summary["invocation_seconds"],
                                summary["reported_test_seconds"] +
                                summary["non_test_overhead_seconds"])
@@ -294,6 +337,63 @@ class RunnerTests(unittest.TestCase):
         code, summary = self.invoke("failed", status="Failure")
         self.assertEqual(code, 65)
         self.assertIsNone(summary["termination_reason"])
+
+    def test_retry_success_is_flaky_and_all_attempts_are_preserved(self):
+        step_summary = self.directory / "summary.md"
+        with patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": str(step_summary)}):
+            code, summary = self.invoke("retry-success", status="Failure", retry_failed_tests=True)
+        self.assertEqual(code, 0)
+        self.assertEqual(summary["flaky_tests"], ["Probe/test()"])
+        self.assertEqual(summary["max_attempts_per_test"], 2)
+        self.assertEqual([test["status"] for test in summary["tests"]], ["Failure", "Success"])
+        self.assertEqual(summary["reported_test_seconds"], 0.1)
+        self.assertIn("Passed on retry (flaky): 1", step_summary.read_text())
+        args = json.loads((self.bundle / "arguments.json").read_text())
+        self.assertEqual(args.count("-retry-tests-on-failure"), 1)
+        self.assertEqual(args[args.index("-test-iterations") + 1], "2")
+        self.assertEqual(args[args.index("-test-repetition-relaunch-enabled") + 1], "YES")
+        self.assertEqual(summary["invocation_budget_seconds"], 1.5)
+        self.assertEqual(summary["finalization_budget_seconds"], 0.3)
+
+    def test_retry_still_failing_keeps_job_failed(self):
+        code, summary = self.invoke("retry-failed", status="Failure",
+                                    retry_failed_tests=True, retry_status="Failure")
+        self.assertEqual(code, 65)
+        self.assertEqual(summary["failed_tests"], ["Probe/test()"])
+        self.assertEqual(summary["flaky_tests"], [])
+
+    def test_flaky_warning_is_visible_in_github_actions(self):
+        with patch.dict(os.environ, {"GITHUB_ACTIONS": "true"}), \
+                patch("sys.stdout", new=io.StringIO()) as output:
+            environment = {
+                "RUNNER_TEST_MODE": "retry-success",
+                "RUNNER_TEST_START": event("testStarted"),
+                "RUNNER_TEST_FINISH": event("testFinished", status="Failure"),
+                "RUNNER_TEST_RETRY_FINISH": event("testFinished"),
+                "RUNNER_TEST_END": event("invocationFinished"),
+            }
+            with patch.dict(os.environ, environment):
+                self.assertEqual(runner.run(
+                    self.arguments, executable=str(self.stub), retry_failed_tests=True,
+                ), 0)
+        self.assertIn('::warning::Passed on retry (flaky): "Probe/test()"', output.getvalue())
+
+    def test_native_failure_is_not_cleared_by_retry_success_events(self):
+        self.assertEqual(self.invoke("retry-native-failure", status="Failure",
+                                     retry_failed_tests=True)[0], 65)
+
+    def test_third_attempt_or_retry_without_opt_in_fails_closed(self):
+        self.assertEqual(self.invoke("retry-third", status="Failure",
+                                     retry_failed_tests=True)[0], 70)
+        self.bundle = self.directory / "Disabled.xcresult"
+        self.arguments[-1] = str(self.bundle)
+        self.assertEqual(self.invoke("retry-success", status="Failure")[0], 70)
+
+    def test_opt_in_does_not_repeat_infrastructure_failure(self):
+        code, summary = self.invoke("other-failure", retry_failed_tests=True)
+        self.assertEqual(code, 42)
+        self.assertEqual(len(summary["tests"]), 1)
+        self.assertEqual(summary["flaky_tests"], [])
 
     def test_other_native_exit_is_preserved(self):
         self.assertEqual(self.invoke("other-failure")[0], 42)
@@ -427,6 +527,9 @@ class RunnerTests(unittest.TestCase):
                 self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
                 bundle = self.directory / f"{stem}.xcresult"
                 args = json.loads((bundle / "arguments.json").read_text())
+                self.assertEqual("-retry-tests-on-failure" in args, key is not None)
+                if key is not None:
+                    self.assertEqual(args[args.index("-test-iterations") + 1], "2")
                 self.assertIn("test-without-building", args)
                 expected_selectors = selectors.split()
                 if key is not None and key.endswith("-1") and step == "Run XCUI shard":
