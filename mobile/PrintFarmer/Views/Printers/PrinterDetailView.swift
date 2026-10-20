@@ -1736,6 +1736,7 @@ struct PrinterSensorsReadout: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+            .padding()
             .operatorCard()
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("printer.detail.sensors")

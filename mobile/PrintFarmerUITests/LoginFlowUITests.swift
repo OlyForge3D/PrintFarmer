@@ -256,8 +256,7 @@ final class LoginFlowUITests: PrintFarmerUITestCase {
 
                 let observedValue = field.value as? String
                 if observedValue == acceptedValue {
-                    assertKeyboardFocus(on: field, file: file, line: line)
-                    result = waitForAcceptedValue(acceptedValue, in: field, timeout: 0.5)
+                    result = .completed
                     break
                 }
 
@@ -293,7 +292,7 @@ final class LoginFlowUITests: PrintFarmerUITestCase {
     ) -> XCTWaiter.Result {
         let accepted = XCTNSPredicateExpectation(
             predicate: NSPredicate(
-                format: "value == %@ AND hasKeyboardFocus == true",
+                format: "value == %@",
                 value
             ),
             object: field

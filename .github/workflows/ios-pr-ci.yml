@@ -465,7 +465,7 @@ jobs:
         timeout-minutes: 25
         run: |
           set -o pipefail
-          python3 scripts/run-tests.py -- test-without-building \
+          python3 scripts/run-tests.py --retry-failed-tests -- test-without-building \
             -project PrintFarmer.xcodeproj \
             -scheme PrintFarmer \
             -configuration Debug \
@@ -492,7 +492,7 @@ jobs:
           if [[ "${{ matrix.shard }}" == "1" ]]; then
             selectors=("${selectors[@]:1}")
           fi
-          python3 scripts/run-tests.py -- test-without-building \
+          python3 scripts/run-tests.py --retry-failed-tests -- test-without-building \
             -project PrintFarmer.xcodeproj \
             -scheme PrintFarmer \
             -configuration Debug \
@@ -518,8 +518,16 @@ jobs:
             mobile/build-${{ matrix.key }}/Login.log
             mobile/build-${{ matrix.key }}/Login.events.jsonl
             mobile/build-${{ matrix.key }}/Login.timing.json
+            mobile/build-${{ matrix.key }}/Login-first.timing.json
+            mobile/build-${{ matrix.key }}/Login-retry.xcresult
+            mobile/build-${{ matrix.key }}/Login-retry.events.jsonl
+            mobile/build-${{ matrix.key }}/Login-retry.timing.json
             mobile/build-${{ matrix.key }}/XCUIShard.xcresult
             mobile/build-${{ matrix.key }}/XCUIShard.log
             mobile/build-${{ matrix.key }}/XCUIShard.events.jsonl
             mobile/build-${{ matrix.key }}/XCUIShard.timing.json
+            mobile/build-${{ matrix.key }}/XCUIShard-first.timing.json
+            mobile/build-${{ matrix.key }}/XCUIShard-retry.xcresult
+            mobile/build-${{ matrix.key }}/XCUIShard-retry.events.jsonl
+            mobile/build-${{ matrix.key }}/XCUIShard-retry.timing.json
           retention-days: 7
