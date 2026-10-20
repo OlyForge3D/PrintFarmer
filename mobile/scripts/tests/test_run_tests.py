@@ -138,8 +138,8 @@ class EventTests(unittest.TestCase):
         events.read(io.StringIO(text), 2)
         self.assertEqual(events.active, {"Probe/test()"})
 
-    def test_idle_budget_accumulates_across_invocation_attempts(self):
-        budgets = runner.SharedBudgets(0)
+    def test_idle_deadline_continues_across_attempt_restart(self):
+        budgets = runner.SharedBudgets()
         first = runner.TestEvents()
         first.idle_since = 1
         budgets.observe(first, 1)
@@ -148,12 +148,11 @@ class EventTests(unittest.TestCase):
         self.assertEqual(budgets.idle_elapsed(3), 2)
         second.active.add("Probe/test()")
         budgets.observe(second, 4)
-        self.assertEqual(budgets.idle_spent, 3)
         self.assertIsNone(budgets.idle_started)
         second.active.clear()
         second.idle_since = 4
         budgets.observe(second, 4)
-        self.assertEqual(budgets.idle_elapsed(6), 5)
+        self.assertEqual(budgets.idle_elapsed(6), 2)
 
     def test_finished_duration_and_idle_deadline_ignore_log_chatter(self):
         events = runner.TestEvents()
@@ -475,6 +474,9 @@ class RunnerTests(unittest.TestCase):
                          str(retry_bundle))
         self.assertTrue(retry_bundle.with_suffix(".events.jsonl").exists())
         self.assertTrue(retry_bundle.with_suffix(".timing.json").exists())
+        self.assertTrue(
+            self.bundle.with_name("Results-first.timing.json").exists()
+        )
         self.assertEqual(summary["invocation_budget_seconds"], 1.5)
         self.assertEqual(summary["finalization_budget_seconds"], 0.3)
 
@@ -785,6 +787,10 @@ class RunnerTests(unittest.TestCase):
                 for suffix in (".xcresult", ".log", ".events.jsonl", ".timing.json"):
                     self.assertIn(f"mobile/{stem}{suffix}", upload)
                 if key is not None:
+                    self.assertTrue(
+                        (self.directory / f"{stem}-first.timing.json").exists()
+                    )
+                    self.assertIn(f"mobile/{stem}-first.timing.json", upload)
                     for suffix in (
                         "-retry.xcresult", "-retry.events.jsonl",
                         "-retry.timing.json",

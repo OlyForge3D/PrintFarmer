@@ -92,24 +92,21 @@ class TestEvents:
 
 
 class SharedBudgets:
-    """One wall-clock and cumulative idle budget shared by all test attempts."""
+    """One wall-clock and current idle-window budget shared by all attempts."""
 
-    def __init__(self, started):
-        self.started = started
-        self.idle_spent = 0
+    def __init__(self):
         self.idle_started = None
 
     def observe(self, events, now):
         if events.active:
-            if self.idle_started is not None:
-                self.idle_spent += max(0, now - self.idle_started)
-                self.idle_started = None
+            self.idle_started = None
         elif events.idle_since is not None and self.idle_started is None:
             self.idle_started = events.idle_since
 
     def idle_elapsed(self, now):
-        running_idle = max(0, now - self.idle_started) if self.idle_started else 0
-        return self.idle_spent + running_idle
+        if self.idle_started is None:
+            return 0
+        return max(0, now - self.idle_started)
 
 
 def option_values(arguments, option):
@@ -235,12 +232,10 @@ def summarize_attempts(tests, retry_failed_tests):
     ]
 
 
-def run_invocation(command, stream_path, invocation_timeout, finalization_timeout,
-                   flush_seconds, poll_seconds, started, budgets, attempt):
+def run_invocation(command, stream_path, timing_path, invocation_timeout,
+                   finalization_timeout, flush_seconds, poll_seconds, started,
+                   budgets, attempt):
     """Run one xcodebuild process under the caller's shared wall-clock/idle budgets."""
-    timing_path = stream_path.with_name(
-        stream_path.name.removesuffix(".events.jsonl") + ".timing.json"
-    )
     with stream_path.open("x"), timing_path.open("x"):
         pass
     events = TestEvents()
@@ -401,10 +396,13 @@ def run(arguments, invocation_timeout=1440, finalization_timeout=120,
     retry_bundle = bundle.with_name(f"{bundle.stem}-retry{bundle.suffix}")
     retry_stream = retry_bundle.with_suffix(".events.jsonl")
     retry_timing = retry_bundle.with_suffix(".timing.json")
+    first_timing = bundle.with_name(f"{bundle.stem}-first.timing.json")
     stream_path = bundle.with_suffix(".events.jsonl")
     timing_path = bundle.with_suffix(".timing.json")
     if retry_failed_tests and any(
-        path.exists() for path in (retry_bundle, retry_stream, retry_timing)
+        path.exists() for path in (
+            retry_bundle, retry_stream, retry_timing, first_timing, timing_path,
+        )
     ):
         raise ValueError(f"Retry artifact already exists for {bundle}")
     command = [
@@ -426,11 +424,11 @@ def run(arguments, invocation_timeout=1440, finalization_timeout=120,
         f"(each includes {flush_seconds}s interrupt/flush)", flush=True,
     )
     started = time.monotonic()
-    budgets = SharedBudgets(started)
-    stream_path = bundle.with_suffix(".events.jsonl")
+    budgets = SharedBudgets()
     attempt_one = run_invocation(
-        command, stream_path, invocation_timeout, finalization_timeout,
-        flush_seconds, poll_seconds, started, budgets, 1,
+        command, stream_path, first_timing if retry_failed_tests else timing_path,
+        invocation_timeout, finalization_timeout, flush_seconds, poll_seconds,
+        started, budgets, 1,
     )
     attempts = [attempt_one]
     first_status, first_native_exit, first_events, _, reason = attempt_one
@@ -456,8 +454,9 @@ def run(arguments, invocation_timeout=1440, finalization_timeout=120,
         if "-disable-concurrent-destination-testing" not in retry_arguments:
             retry_command.append("-disable-concurrent-destination-testing")
         attempts.append(run_invocation(
-            retry_command, retry_stream, invocation_timeout, finalization_timeout,
-            flush_seconds, poll_seconds, started, budgets, 2,
+            retry_command, retry_stream, retry_timing, invocation_timeout,
+            finalization_timeout, flush_seconds, poll_seconds, started,
+            budgets, 2,
         ))
         reason = attempts[1][4]
     elif retry_failed_tests and first_status != 0:
@@ -506,8 +505,6 @@ def run(arguments, invocation_timeout=1440, finalization_timeout=120,
                 "Retry issue events did not map exactly to its failed tests"
             )
             final_status = 70
-        elif attempts[1][0] not in (0, 65):
-            final_status = attempts[1][0]
         elif attempts[1][0] == 0 and any(
             test["status"] != "Success" for test in retry_events.tests
         ):

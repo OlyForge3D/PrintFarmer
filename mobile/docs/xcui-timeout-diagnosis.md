@@ -146,14 +146,17 @@ assertions, watchdog, test timeout settings and raw repetition-option guard are
 unchanged. Unit tests, local commands and diagnostic captures remain
 single-attempt unless explicitly opted in.
 
-The first and retry attempts have separate `.xcresult`, `.events.jsonl` and
-per-attempt `.timing.json` artifacts; the combined timing report groups every
-recorded result by test identifier and lists `flaky_tests` separately. A failed
+The first and retry attempts have separate `.xcresult` and `.events.jsonl`
+artifacts, plus `<stem>-first.timing.json` and `<stem>-retry.timing.json`.
+The combined `<stem>.timing.json` report groups every recorded result by test
+identifier and lists `flaky_tests` separately. A failed
 test that succeeds on its sole retry can pass the job, but emits a **passed on
 retry (flaky)** warning and CI step-summary count; it is not reported as clean
 first-pass success. A second failure remains failed. The shared 1440-second
-wall-clock budget, 120-second cumulative post-test/idle budget and 10-second
-interrupt/flush window cover both invocations; the retry does not reset them.
+wall-clock budget, 120-second post-test/idle window and 10-second interrupt/
+flush window cover both invocations; restarting xcodebuild does not reset an
+open idle window. A new test start ends that idle window, and its later finish
+starts the next normal post-test window.
 Only a complete first-attempt test failure can be cleared by its successful,
 explicitly selected retry; native retry/setup errors, cancellation, timeout and
 incomplete evidence remain nonzero.
@@ -528,8 +531,9 @@ than private defaults or running a second collector.
 - Automatic verbose simulator collection has a **zero budget** (`never`).
 - After a live `testFinished` event, while no test is active, allow **120s**
   for finalization or starting the next test/runner. A new `testStarted`
-  cancels this idle deadline; it does not constrain an active test body.
-  Test-suite/log chatter cannot extend the deadline.
+  ends the current idle window; it does not constrain an active test body.
+  Restarting xcodebuild between explicit retry attempts does not reset an
+  already-open idle window. Test-suite/log chatter cannot extend the deadline.
 - The 120s includes a **10s graceful interrupt/flush window**: interrupt
   xcodebuild at 110s and kill its invocation-owned process group at 120s if it
   has not exited. Shared simulator services are not swept. A runner timeout
