@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useMemo } from 'react';
 import './DetailedPrinterCard.css';
 import { Zap } from 'lucide-react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
@@ -12,7 +12,6 @@ import { queryKeys, usePrintJobObjects } from '@/common/hooks/useApi';
 import type {
   Printer,
   PrinterDetails,
-  TempTargets,
   MoveRequest,
   PrinterBackendCapabilitiesDto,
   PrintJobObjectDto,
@@ -123,8 +122,6 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
   const movementActionPending = localMovementActionPending || motion.blocked;
   const [filamentActionPending, setFilamentActionPending] = useState(false);
   const [spoolActionPending, setSpoolActionPending] = useState(false);
-  const [hotendTemp, setHotendTemp] = useState<number | string>('');
-  const [bedTemp, setBedTemp] = useState<number | string>('');
   const [moveX, setMoveX] = useState<number | string>('');
   const [moveY, setMoveY] = useState<number | string>('');
   const [moveZ, setMoveZ] = useState<number | string>('');
@@ -215,14 +212,6 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
       toast.error('Failed to toggle auto-dispatch');
     }
   };
-
-  // Keep target temperature inputs in sync with the printer's actual targets via SignalR
-  useEffect(() => {
-    const hotend = printer.hotendTarget ?? 0;
-    setHotendTemp(hotend > 0 ? hotend : '');
-    const bed = printer.bedTarget ?? 0;
-    setBedTemp(bed > 0 ? bed : '');
-  }, [printer.hotendTarget, printer.bedTarget]);
 
   // Determine colors based on state
   const state = printer.state ?? 'Unknown';
@@ -386,46 +375,6 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
     setStep(newStep);
   };
 
-  const handleHotendTempKeyDown = async (e: React.KeyboardEvent) => {
-    if (e.key !== 'Enter' || hotendTemp === '' || temperatureActionPending) {
-      return;
-    }
-
-    setTemperatureActionPending(true);
-    try {
-      const currentBedTarget = bedTemp === '' ? (printer.bedTarget ?? 0) : Number(bedTemp);
-      const targets: TempTargets = { hotend: Number(hotendTemp), bed: currentBedTarget };
-      const result = await apiClient.setTemperatures(printer.id, targets);
-      if (!result.success) {
-        console.error(`Failed to set hotend temp:`, result.error);
-      }
-    } catch (error) {
-      console.error('Error setting hotend temperature:', error);
-    } finally {
-      setTemperatureActionPending(false);
-    }
-  };
-
-  const handleBedTempKeyDown = async (e: React.KeyboardEvent) => {
-    if (e.key !== 'Enter' || bedTemp === '' || temperatureActionPending) {
-      return;
-    }
-
-    setTemperatureActionPending(true);
-    try {
-      const currentHotendTarget = hotendTemp === '' ? (printer.hotendTarget ?? 0) : Number(hotendTemp);
-      const targets: TempTargets = { hotend: currentHotendTarget, bed: Number(bedTemp) };
-      const result = await apiClient.setTemperatures(printer.id, targets);
-      if (!result.success) {
-        console.error(`Failed to set bed temp:`, result.error);
-      }
-    } catch (error) {
-      console.error('Error setting bed temperature:', error);
-    } finally {
-      setTemperatureActionPending(false);
-    }
-  };
-
   const handleApplyPreset = async (preset: string) => {
     if (temperatureActionPending) {
       return;
@@ -444,14 +393,13 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
       
       const result = await apiClient.setTemperatures(printer.id, targets);
       
-      if (result.success) {
-        setHotendTemp(targets.hotend);
-        setBedTemp(targets.bed);
-      } else {
+      if (!result.success) {
         console.error(`Failed to apply ${preset} preset:`, result.error);
+        toast.error(result.error || result.message || `Failed to apply ${preset} preset`);
       }
     } catch (error) {
       console.error(`Error applying ${preset} preset:`, error);
+      toast.error(mutationErrorMessage(error, `Failed to apply ${preset} preset`));
     } finally {
       setTemperatureActionPending(false);
     }
@@ -468,23 +416,18 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
       return;
     }
 
-    const currentHotend = hotendTemp === '' ? (printer.hotendTarget ?? 0) : Number(hotendTemp);
-    const currentBed = bedTemp === '' ? (printer.bedTarget ?? 0) : Number(bedTemp);
-    const targets: TempTargets = heater === 'hotend'
-      ? { hotend: presetTargets.hotend, bed: currentBed }
-      : { hotend: currentHotend, bed: presetTargets.bed };
+    const targets = { [heater]: presetTargets[heater] };
 
     setTemperatureActionPending(true);
     try {
       const result = await apiClient.setTemperatures(printer.id, targets);
-      if (result.success) {
-        setHotendTemp(targets.hotend);
-        setBedTemp(targets.bed);
-      } else {
+      if (!result.success) {
         console.error(`Failed to apply ${heater} preset:`, result.error);
+        toast.error(result.error || result.message || `Failed to apply ${heater} preset`);
       }
     } catch (error) {
       console.error(`Error applying ${heater} preset:`, error);
+      toast.error(mutationErrorMessage(error, `Failed to apply ${heater} preset`));
     } finally {
       setTemperatureActionPending(false);
     }
@@ -932,10 +875,9 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
         isOnline={isOnline}
       >
       <TemperatureControlSection
+        printerId={printer.id}
         showHeading={false}
         sensors={printer.sensors}
-        hotendTemp={hotendTemp}
-        bedTemp={bedTemp}
         hotendTarget={printer.hotendTarget}
         bedTarget={printer.bedTarget}
         hotendCurrent={printer.hotendTemp}
@@ -943,10 +885,6 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
         temperatureActionPending={temperatureActionPending}
         canSetTemperatures={canSetTemperaturesNow}
         canCooldown={canCooldownNow}
-        onHotendTempChange={setHotendTemp}
-        onBedTempChange={setBedTemp}
-        onHotendTempKeyDown={handleHotendTempKeyDown}
-        onBedTempKeyDown={handleBedTempKeyDown}
         onApplyPreset={handleApplyPreset}
         onApplySingleHeaterPreset={handleApplySingleHeaterPreset}
       />

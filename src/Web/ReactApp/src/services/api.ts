@@ -1044,7 +1044,7 @@ export class ApiClient {
 
   async setTemperatures(
     printerId: string,
-    targets: TempTargets
+    targets: Partial<TempTargets>
   ): Promise<CommandResult> {
     const response = await this.client.post<CommandResult>(
       `/printers/${printerId}/temps`,

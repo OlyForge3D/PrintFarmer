@@ -71,6 +71,30 @@ The isolated browser fixture in `e2e/printer-card-density.spec.ts` checks column
 counts with navigation-width space reserved, narrow screens, control overflow,
 and ETA alignment using the real card components without contacting printers.
 
+### Printer sensor controls
+
+Detailed cards and the details sidebar share a borderless
+Name / State / Current / Target temperature table and a Fans & outputs section.
+Measured values remain telemetry: accepting a command does not change them.
+Unavailable optional readings stay absent; a reported zero remains visible.
+
+Numeric targets submit on Enter or blur, once per edit. Fan sliders preview
+locally and submit on release; keyboard changes submit directly. Same-row
+reset, step, slider and switch actions take precedence over an unsubmitted
+numeric draft. Failed commands show an explicit error and retry action.
+Primary heater edits send only the edited target, not a stale companion target.
+
+Controls require the existing permission, connection and capability gates.
+Only descriptors advertising a writable binary output receive a light switch;
+automatic fans remain read-only. Moonraker light discovery and writes are
+deferred backend work, so this UI does not invent light capabilities.
+Motion controls are unchanged.
+
+The isolated `e2e/printer-sensors-polish.spec.ts` fixture exercises the real
+controls at desktop, 360px and 320px widths with hardware access blocked.
+The approved visual reference is
+[`printer-sensors-options.html`](design/printer-sensors-options.html).
+
 ### Button
 
 Standardized button component with consistent variants, sizing, and focus states.

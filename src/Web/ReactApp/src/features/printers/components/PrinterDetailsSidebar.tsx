@@ -14,7 +14,7 @@ import {
 import { maintenanceService } from '@/services/maintenanceService';
 import { getPrinterDisplayState } from '@/common/utils/printerStateDisplay';
 import { formatPrinterModelSubtitle } from '@/common/utils/printerModelDisplay';
-import { PrinterBackend, type ApiError, type MoveRequest, type Printer, type PrinterBackendCapabilitiesDto, type PrintJobObjectDto, type PrintJobObjectListDto, type TempTargets } from '@/types/api';
+import { PrinterBackend, type ApiError, type MoveRequest, type Printer, type PrinterBackendCapabilitiesDto, type PrintJobObjectDto, type PrintJobObjectListDto } from '@/types/api';
 import { PrinterHistoryModal } from '@/features/printers/components/PrinterHistoryModal';
 import { PrinterFilesModal } from '@/features/printers/components/PrinterFilesModal';
 import { TemperatureControlSection } from '@/features/printers/components/TemperatureControlSection';
@@ -267,8 +267,6 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
 
   const [showHistory, setShowHistory] = useState(false);
   const [showFiles, setShowFiles] = useState(false);
-  const [hotendTemp, setHotendTemp] = useState<number | ''>('');
-  const [bedTemp, setBedTemp] = useState<number | ''>('');
   const [moveX, setMoveX] = useState<number | ''>('');
   const [moveY, setMoveY] = useState<number | ''>('');
   const [moveZ, setMoveZ] = useState<number | ''>('');
@@ -332,14 +330,6 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
         : next;
     });
   }, [printer]);
-
-  // Keep target temperature inputs in sync with the printer's actual targets via SignalR
-  const printerHotendTarget = printer?.hotendTarget ?? 0;
-  const printerBedTarget = printer?.bedTarget ?? 0;
-  useEffect(() => {
-    setHotendTemp(printerHotendTarget > 0 ? printerHotendTarget : '');
-    setBedTemp(printerBedTarget > 0 ? printerBedTarget : '');
-  }, [printerHotendTarget, printerBedTarget]);
 
   const support = getPrinterSupport(backendCapabilities);
   const preRenderRawState = printer?.state ?? '';
@@ -658,48 +648,6 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
     }
   };
 
-  const handleHotendTempKeyDown = async (e: React.KeyboardEvent) => {
-    if (e.key !== 'Enter' || hotendTemp === '' || temperatureActionPending) return;
-
-    setTemperatureActionPending(true);
-    try {
-      const currentBedTemp = bedTemp === '' ? (displayPrinter?.bedTarget ?? 0) : bedTemp;
-      const result = await apiClient.setTemperatures(printer.id, {
-        hotend: Number(hotendTemp),
-        bed: Number(currentBedTemp)
-      });
-
-      if (!result.success) {
-        console.error('Failed to set hotend temperature:', result.error);
-      }
-    } catch (error) {
-      console.error('Error setting hotend temperature:', error);
-    } finally {
-      setTemperatureActionPending(false);
-    }
-  };
-
-  const handleBedTempKeyDown = async (e: React.KeyboardEvent) => {
-    if (e.key !== 'Enter' || bedTemp === '' || temperatureActionPending) return;
-
-    setTemperatureActionPending(true);
-    try {
-      const currentHotendTemp = hotendTemp === '' ? (displayPrinter?.hotendTarget ?? 0) : hotendTemp;
-      const result = await apiClient.setTemperatures(printer.id, {
-        hotend: Number(currentHotendTemp),
-        bed: Number(bedTemp)
-      });
-
-      if (!result.success) {
-        console.error('Failed to set bed temperature:', result.error);
-      }
-    } catch (error) {
-      console.error('Error setting bed temperature:', error);
-    } finally {
-      setTemperatureActionPending(false);
-    }
-  };
-
   const handleApplyPreset = async (preset: string) => {
     if (temperatureActionPending) {
       return;
@@ -718,14 +666,13 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
 
       const result = await apiClient.setTemperatures(printer.id, targets);
 
-      if (result.success) {
-        setHotendTemp(targets.hotend);
-        setBedTemp(targets.bed);
-      } else {
+      if (!result.success) {
         console.error(`Failed to apply ${preset} preset:`, result.error);
+        toast.error(result.error || result.message || `Failed to apply ${preset} preset`);
       }
     } catch (error) {
       console.error(`Error applying ${preset} preset:`, error);
+      toast.error(mutationErrorMessage(error, `Failed to apply ${preset} preset`));
     } finally {
       setTemperatureActionPending(false);
     }
@@ -742,23 +689,18 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
       return;
     }
 
-    const currentHotend = hotendTemp === '' ? (displayPrinter?.hotendTarget ?? 0) : Number(hotendTemp);
-    const currentBed = bedTemp === '' ? (displayPrinter?.bedTarget ?? 0) : Number(bedTemp);
-    const targets: TempTargets = heater === 'hotend'
-      ? { hotend: presetTargets.hotend, bed: currentBed }
-      : { hotend: currentHotend, bed: presetTargets.bed };
+    const targets = { [heater]: presetTargets[heater] };
 
     setTemperatureActionPending(true);
     try {
       const result = await apiClient.setTemperatures(printer.id, targets);
-      if (result.success) {
-        setHotendTemp(targets.hotend);
-        setBedTemp(targets.bed);
-      } else {
+      if (!result.success) {
         console.error(`Failed to apply ${heater} preset:`, result.error);
+        toast.error(result.error || result.message || `Failed to apply ${heater} preset`);
       }
     } catch (error) {
       console.error(`Error applying ${heater} preset:`, error);
+      toast.error(mutationErrorMessage(error, `Failed to apply ${heater} preset`));
     } finally {
       setTemperatureActionPending(false);
     }
@@ -1242,10 +1184,9 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
           isOnline={isOnline}
         >
           <TemperatureControlSection
+            printerId={printer.id}
             sensors={displayPrinter?.sensors}
             showHeading={false}
-            hotendTemp={hotendTemp}
-            bedTemp={bedTemp}
             hotendTarget={displayPrinter?.hotendTarget}
             bedTarget={displayPrinter?.bedTarget}
             hotendCurrent={displayPrinter?.hotendTemp ?? lastKnownHotendTemp ?? undefined}
@@ -1253,10 +1194,6 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
             temperatureActionPending={temperatureActionPending}
             canSetTemperatures={canSetTemperaturesNow}
             canCooldown={canCooldownNow}
-            onHotendTempChange={(value) => setHotendTemp(value === '' ? '' : Number(value))}
-            onBedTempChange={(value) => setBedTemp(value === '' ? '' : Number(value))}
-            onHotendTempKeyDown={(event) => { void handleHotendTempKeyDown(event); }}
-            onBedTempKeyDown={(event) => { void handleBedTempKeyDown(event); }}
             onApplyPreset={(preset) => {
               void handleApplyPreset(preset);
             }}
