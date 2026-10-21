@@ -129,19 +129,31 @@ If you are using local HTTPS for the iOS app, generate or regenerate the certifi
 
 This now creates a private CA (`ca.cer`) plus the nginx server certificate (`tls.crt` / `tls.key`).
 
-After deployment, users can open:
+HTTP is bound to loopback only. Remote phones cannot use a LAN HTTP URL to
+bootstrap certificate trust. Transfer **only the public** `deploy/nginx/certs/ca.cer`
+to the device through a trusted channel (for example, an authenticated file
+transfer from the deployment host). Verify its SHA-256 fingerprint against
+`openssl x509 -in deploy/nginx/certs/ca.crt -noout -fingerprint -sha256`
+on that host. Never transfer `ca.key` or `tls.key`, and do not widen the HTTP
+binding or bypass certificate warnings to download the CA.
+
+After installing and trusting the verified CA, users can open:
 
 ```text
-http://<your-server>/install-ca
+https://<your-server>:8443/install-ca
 ```
 
-That page downloads `ca.cer` and walks them through the required iPhone steps:
+Use your configured HTTPS port and a certificate matching the server hostname.
+The page provides `ca.cer` and these required iPhone steps:
 
 1. Install the downloaded profile.
 2. Open `Settings > General > About > Certificate Trust Settings`.
 3. Enable trust for `PrintFarmer Local CA`.
 
-The HTTP install page is intentional: users need the CA installed before Safari and the app will trust your local HTTPS endpoint.
+The host-local page at `http://localhost:8080/install-ca` is not remotely
+reachable. If HTTPS uses an already trusted certificate, remote clients can
+download the CA over that HTTPS connection instead. Installing a CA grants
+trust to certificates it signs; install only the CA verified with the farm operator.
 
 ### Docker (Monolithic)
 

@@ -1729,7 +1729,10 @@ test_https_port_zero_disables_https_binding() {
     start_test "HTTPS_PORT=0 disables nginx HTTPS port publishing"
 
     local test_dir="$TEST_TEMP_DIR/test-https-disabled"
-    assert_command_success "HTTPS_PORT=0 $COMPOSE_GENERATOR --output-dir $test_dir"
+    capture_output "HTTPS_PORT=0 $COMPOSE_GENERATOR --output-dir $test_dir"
+    assert_equals "0" "$(get_output_exit_code)" "HTTPS-disabled generation should succeed"
+    assert_contains "$(get_output)" "HTTPS_PORT=0: local-only HTTP on 127.0.0.1:8080; no LAN access." \
+        "Disabling HTTPS must warn that LAN access is unavailable"
 
     local compose_file="$test_dir/docker-compose.yml"
     assert_file_exists "$compose_file" "Should create compose file when HTTPS_PORT=0"
@@ -1737,9 +1740,73 @@ test_https_port_zero_disables_https_binding() {
     local compose_content
     compose_content=$(cat "$compose_file")
 
-    assert_contains "$compose_content" '"${HTTP_PORT:-8080}:80"' "HTTP port mapping should remain"
+    assert_contains "$compose_content" '"127.0.0.1:${HTTP_PORT:-8080}:80"' "HTTP port mapping should remain loopback-only"
     assert_not_contains "$compose_content" '"${HTTPS_PORT:-8443}:443"' "HTTPS port mapping should be removed when HTTPS_PORT=0"
     assert_not_contains "$compose_content" '0:443' "HTTPS port 0 must not publish a random host port"
+
+    pass_test
+}
+
+# Test: base Compose must not publish cleartext HTTP on a network interface (#3447)
+test_http_listener_is_loopback_only() {
+    start_test "HTTP listener is loopback-only; HTTPS remains published"
+
+    local test_dir="$TEST_TEMP_DIR/test-http-loopback"
+    assert_command_success "BIND_ADDRESS=0.0.0.0 $COMPOSE_GENERATOR --output-dir $test_dir"
+
+    local compose_file="$test_dir/docker-compose.yml"
+    assert_file_exists "$compose_file"
+
+    local compose_content
+    compose_content=$(cat "$compose_file")
+
+    assert_contains "$compose_content" '"127.0.0.1:${HTTP_PORT:-8080}:80"' "HTTP must bind to loopback"
+    assert_not_contains "$compose_content" '${BIND_ADDRESS' "BIND_ADDRESS must not widen HTTP exposure"
+    assert_not_contains "$compose_content" '0.0.0.0:${HTTP_PORT' "HTTP must never default to all interfaces"
+    assert_contains "$compose_content" '"${HTTPS_PORT:-8443}:443"' "HTTPS (TLS) listener remains published"
+
+    # Authenticated /api/ is proxied on port 80 only; with the loopback-only
+    # binding that listener is unreachable from the network.
+    local nginx_conf
+    nginx_conf=$(cat "$REPO_ROOT/deploy/nginx/nginx-proxy.conf")
+    assert_contains "$nginx_conf" 'listen 443 ssl;' "nginx must keep the TLS listener"
+
+    if check_docker_compose_available; then
+        HTTP_PORT=18080 HTTPS_PORT=18443 docker compose --file "$compose_file" config --format json > "$test_dir/rendered.json"
+        local test_python
+        test_python=$(resolve_test_python_cmd)
+        "$test_python" - "$test_dir/rendered.json" <<'PY'
+import json
+import sys
+
+ports = json.load(open(sys.argv[1]))["services"]["nginx-proxy"]["ports"]
+http = next(port for port in ports if port["target"] == 80)
+https = next(port for port in ports if port["target"] == 443)
+assert http["host_ip"] == "127.0.0.1" and str(http["published"]) == "18080", http
+assert https.get("host_ip", "0.0.0.0") == "0.0.0.0" and str(https["published"]) == "18443", https
+PY
+    fi
+
+    pass_test
+}
+
+# Test: HTTP-only labs remain explicitly local-only, without TLS configuration.
+test_http_only_lab_is_local_only() {
+    start_test "HTTP_ONLY lab generation warns about local-only access"
+
+    local test_dir="$TEST_TEMP_DIR/test-http-only-lab"
+    capture_output "INSTALLER_LAB=true HTTP_ONLY=true HTTPS_PORT=8443 $COMPOSE_GENERATOR --output-dir $test_dir"
+    assert_equals "0" "$(get_output_exit_code)" "HTTP_ONLY lab generation should succeed"
+    assert_contains "$(get_output)" "HTTP_ONLY lab mode: local-only HTTP on 127.0.0.1:8080; no LAN access." \
+        "HTTP_ONLY must warn even when HTTPS_PORT is nonzero"
+
+    local compose_content
+    compose_content=$(cat "$test_dir/docker-compose.yml")
+    assert_contains "$compose_content" '"127.0.0.1:${HTTP_PORT:-8080}:80"' "Lab HTTP must remain loopback-only"
+    assert_not_contains "$compose_content" ':443"' "HTTP_ONLY must not publish TLS"
+    assert_not_contains "$compose_content" '/etc/nginx/certs:ro' "HTTP_ONLY must not require unprovisioned certificates"
+    assert_not_contains "$(cat "$test_dir/deploy/nginx/nginx-proxy-split.conf")" 'listen 443 ssl;' \
+        "HTTP_ONLY nginx must not require TLS certificates"
 
     pass_test
 }
@@ -2302,6 +2369,8 @@ run_all_tests() {
     test_duplicate_service_names
     test_port_conflict_detection
     test_https_port_zero_disables_https_binding
+    test_http_listener_is_loopback_only
+    test_http_only_lab_is_local_only
     test_invalid_connection_string
     test_missing_config_files
     test_concurrent_generation_safety

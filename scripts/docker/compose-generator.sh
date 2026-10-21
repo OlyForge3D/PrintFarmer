@@ -1051,6 +1051,7 @@ generate_compose() {
             return 1
         fi
 
+        log_warning "HTTP_ONLY lab mode: local-only HTTP on 127.0.0.1:${HTTP_PORT:-8080}; no LAN access. Enable HTTPS with a valid certificate for LAN access."
         log_info "Configured HTTP-only reverse proxy (no TLS ports, no cert mounts)"
     fi
     
@@ -1163,6 +1164,10 @@ if start is not None:
 
 open(path,'w').write('\n'.join(txt) + '\n')
 PY
+
+    if [[ "${HTTPS_PORT-}" == "0" ]]; then
+        log_warning "HTTPS_PORT=0: local-only HTTP on 127.0.0.1:${HTTP_PORT:-8080}; no LAN access. Enable HTTPS with a valid certificate for LAN access."
+    fi
     
     return 0
 }

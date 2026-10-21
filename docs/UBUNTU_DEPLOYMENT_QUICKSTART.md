@@ -128,23 +128,28 @@ curl -X POST http://localhost:5245/api/printers/discover \
 
 **Replace `YOUR_SERVER_IP` with your Ubuntu server's IP address**
 
-- **Frontend:** `http://YOUR_SERVER_IP:8080`
-- **API:** `http://YOUR_SERVER_IP:5245`
-- **Health:** `http://YOUR_SERVER_IP:5245/healthz`
-- **API Docs:** `http://YOUR_SERVER_IP:5245/swagger` (if Development mode)
+- **Frontend and API:** `https://YOUR_SERVER_IP:8443` (use your configured
+  `SERVER_HOST`/`HTTPS_PORT` and a trusted certificate matching that host)
+- **Health:** `https://YOUR_SERVER_IP:8443/healthz`
+- **API Docs:** `https://YOUR_SERVER_IP:8443/swagger` (if Development mode)
+- **Local-only HTTP:** `http://localhost:8080` on the server; the direct API
+  at `http://localhost:5245` is also local-only.
+
+LAN access requires HTTPS. `HTTPS_PORT=0` and `INSTALLER_LAB=true HTTP_ONLY=true`
+disable the TLS listener and leave HTTP accessible only on the deployment host.
+Opening firewall ports does not override the loopback binding. Enable HTTPS and
+trust the deployment CA on client devices before accessing the farm over the LAN.
 
 ---
 
 ## Firewall Configuration
 
 ```bash
-# Allow API and frontend ports
-sudo ufw allow 8080/tcp comment 'PrintFarmer Frontend'
-sudo ufw allow 5245/tcp comment 'PrintFarmer API'
+# Allow the configured HTTPS port
+sudo ufw allow 8443/tcp comment 'PrintFarmer HTTPS'
 
 # Or restrict to local network only
-sudo ufw allow from 192.168.0.0/16 to any port 8080
-sudo ufw allow from 192.168.0.0/16 to any port 5245
+sudo ufw allow from 192.168.0.0/16 to any port 8443 proto tcp
 
 # Enable firewall
 sudo ufw enable
@@ -217,16 +222,15 @@ deployment paths and authenticated heartbeat/known-printer verification.
 # 1. Check server IP
 ip addr show
 
-# 2. Verify firewall allows external access
-sudo ufw allow from any to any port 8080
-sudo ufw allow from any to any port 5245
+# 2. Verify HTTPS is enabled and allow intended LAN clients on its port
+sudo ufw allow from 192.168.0.0/16 to any port 8443 proto tcp
 
 # 3. Update CORS if needed
 docker compose --env-file .env.microservices down
 
 # Edit .env.microservices
 nano .env.microservices
-# Add: CORS__AllowedOrigins=http://localhost:3000,http://192.168.1.100:8080,http://localhost:5245
+# Add your exact HTTPS origin: CORS__AllowedOrigins=https://192.168.1.100:8443
 
 docker compose --env-file .env.microservices up -d
 ```
@@ -323,7 +327,7 @@ git status .deploy-config
 
 ## Next Steps
 
-1. ✅ Access frontend at `http://YOUR_SERVER_IP:8080`
+1. ✅ Access frontend at `https://YOUR_SERVER_IP:8443` with a trusted certificate
 2. ✅ Complete setup wizard (admin account)
 3. ✅ Test printer discovery
 4. ✅ Add printers manually if discovery doesn't find them
