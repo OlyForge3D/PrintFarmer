@@ -102,9 +102,9 @@ export function PrinterThermalTable({ children, showHeading = true }: { children
   </table>;
 }
 
-export function PrinterThermalRow({ name, state, current, target, testId }: {
+export function PrinterThermalRow({ name, state, current, target, testId, warning }: {
   name: ReactNode; state: ReactNode; current: ReactNode;
-  target: (status: PrinterValueStatus) => ReactNode; testId?: string;
+  target: (status: PrinterValueStatus) => ReactNode; testId?: string; warning?: string;
 }) {
   const id = useId();
   const [message, setMessage] = useState({ text: '', error: false });
@@ -117,7 +117,11 @@ export function PrinterThermalRow({ name, state, current, target, testId }: {
       <td className="py-1 pl-1">{target(status)}</td>
     </tr>
     <tr><td colSpan={4}>
-      <p id={id} role="status" className={`empty:hidden py-1 text-xs break-words ${message.error ? 'text-pf-error' : 'text-pf-text-secondary'}`}>{message.text}</p>
+      <p id={id} role="status" className={`empty:hidden py-1 text-xs break-words ${message.error ? 'text-pf-error' : 'text-pf-text-secondary'}`}>
+        {warning && <span>{warning}</span>}
+        {warning && message.text && <br />}
+        {message.text && <span>{message.text}</span>}
+      </p>
     </td></tr>
   </>;
 }

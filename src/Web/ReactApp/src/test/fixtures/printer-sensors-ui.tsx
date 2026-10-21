@@ -62,7 +62,9 @@ export function mountSensors(element: HTMLElement) {
   apiClient.setPrinterSensor = async (printerId, sensorId, request) => record({ printerId, sensorId, ...request });
   apiClient.setTemperatures = async (printerId, request) => record({ printerId, ...request });
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, enabled: false } } });
-  const sidebarOnline = new URLSearchParams(window.location.search).has('sidebar-online');
+  const fixtureOptions = new URLSearchParams(window.location.search);
+  const sidebarOnline = fixtureOptions.has('sidebar-online');
+  const unknownLimits = fixtureOptions.has('unknown-limits');
   const printer: Printer = {
     id: 'sensor-poc-card', name: 'Workshop printer · sensor POC', backend: PrinterBackend.Moonraker,
     backendUrl: 'http://invalid.local', isOnline: true, isEnabled: true, rowVersion: 'poc',
@@ -80,7 +82,7 @@ export function mountSensors(element: HTMLElement) {
   for (const id of [printer.id, 'sensor-poc-sidebar']) {
     const details: PrinterDetails = { id, name: printer.name, backend: printer.backend, capabilities: {
       id: `capabilities-${id}`, printerId: id, printerName: printer.name,
-      maxHotendTemp: 250, maxBedTemp: 100, hasHeatedBed: true, hasEnclosure: true,
+      maxHotendTemp: unknownLimits ? undefined : 250, maxBedTemp: unknownLimits ? undefined : 100, hasHeatedBed: true, hasEnclosure: true,
       multiMaterial: false, isAvailable: true, supportsAutoLeveling: false, lastUpdated: new Date(),
     } };
     queryClient.setQueryData(queryKeys.printerDetails(id), details);

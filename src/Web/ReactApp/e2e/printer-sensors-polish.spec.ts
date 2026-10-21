@@ -1,6 +1,37 @@
 import { expect, test } from '@playwright/test';
 import { SELECTABLE_THEMES } from '../src/design-system/themes/registry';
 
+test('unknown heater limits warn accessibly while allowing integer entry on both surfaces', async ({ page }) => {
+  await page.route(url => url.pathname.startsWith('/api/') || !['localhost', '127.0.0.1'].includes(url.hostname),
+    route => route.fulfill({ status: 503, json: { message: 'Isolated fixture: hardware access blocked' } }));
+  await page.goto('/src/test/fixtures/printer-sensors.html?sidebar-online&unknown-limits');
+  const commands = page.locator('[data-fixture-command]');
+  let count = 0;
+  for (const surface of ['card', 'sidebar']) {
+    const scope = page.getByRole('region', { name: surface, exact: true });
+    await expect(scope.getByRole('button', { name: 'Cooldown' })).toBeEnabled();
+    for (const [name, heater] of [['Hotend', 'hotend'], ['Bed', 'bed']] as const) {
+      const input = scope.getByRole('spinbutton', { name: `${name} target temperature` });
+      await expect(input).toBeEnabled();
+      await expect(input).not.toHaveAttribute('max');
+      await expect(input).toHaveAccessibleDescription(new RegExp(`${name} maximum temperature unknown.*firmware limits.*does not enforce an upper bound`));
+      await expect(scope.getByText(new RegExp(`${name} maximum temperature unknown`))).toBeVisible();
+      await input.fill('65.5');
+      await input.press('Enter');
+      await input.press('Tab');
+      await expect(commands).toHaveCount(count);
+      await input.fill('65');
+      await input.press('Enter');
+      await input.press('Tab');
+      await expect(commands).toHaveCount(++count);
+      await expect(commands.last()).toHaveText(JSON.stringify({ printerId: `sensor-poc-${surface}`, [heater]: 65 }));
+      await expect(input).toHaveAccessibleDescription(/maximum temperature unknown/);
+    }
+  }
+  await page.setViewportSize({ width: 320, height: 1000 });
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+});
+
 test('both production surfaces enforce persisted heater limits and integer commands without descriptors', async ({ page }) => {
   await page.route(url => url.pathname.startsWith('/api/') || !['localhost', '127.0.0.1'].includes(url.hostname),
     route => route.fulfill({ status: 503, json: { message: 'Isolated fixture: hardware access blocked' } }));

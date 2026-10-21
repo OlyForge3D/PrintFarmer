@@ -86,6 +86,10 @@ Primary heater edits send only the edited target, not a stale companion target.
 Their fallback input precision is whole degrees to match the existing `/temps`
 adapter contract. Both surfaces fetch persisted printer capabilities for heater
 maximums, independently of Spoolman; writable sensor bounds take precedence.
+When neither source supplies a valid maximum, the affected heater explicitly
+warns that integer commands rely on firmware limits: the primary `/temps`
+endpoint does not enforce an upper bound. Entry and cooldown remain available
+by product decision; the UI does not invent a universally safe maximum.
 
 Controls require the existing permission, connection and capability gates.
 Only descriptors advertising a writable binary output receive a light switch;

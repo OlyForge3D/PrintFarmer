@@ -154,7 +154,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
   // Gating that fallback on `spoolmanReady` made it flaky — a user who could see
   // an eject button could not always press it. `spoolmanReady || !printer.rowVersion`
   // is a strict superset of the previous condition, so topology still resolves
-  // whenever it did before. Once the list DTO carries `rowVersion` the extra
+  // whenever it did before.
   // Temperature controls also require details for authoritative heater limits,
   // independently of Spoolman and the revision token.
   const { data: printerDetails } = usePrinterDetails(

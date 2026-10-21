@@ -67,10 +67,13 @@ export function TemperatureControlSection({
       {rows.map(row => {
         const sensor = sensors?.find(item => primaryHeater(item) === row.heater);
         const descriptor = sensor?.writable?.find(item => item.quantity === 'TargetTemperature');
+        const min = descriptor?.min ?? 0;
+        const max = [descriptor?.max, row.max].find(value => value !== undefined && Number.isFinite(value) && value >= min);
         const power = primaryHeaterPower(sensors, row.heater);
         const unavailable = sensor?.available === false;
         const blocked = !canSetTemperatures || !authorized || unavailable;
         return <PrinterThermalRow key={`${printerId}-${row.heater}`}
+          warning={max === undefined ? `${row.name} maximum temperature unknown. Integer commands rely on firmware limits; this endpoint does not enforce an upper bound.` : undefined}
           name={<>
             {row.name}
             {unavailable && <span className="block text-xs font-normal text-pf-text-secondary">Unavailable</span>}
@@ -78,7 +81,7 @@ export function TemperatureControlSection({
           state={<span className="font-mono tabular-nums">{power}</span>}
           current={<span className="font-mono tabular-nums">{Number.isFinite(row.current) ? `${row.current!.toFixed(1)}°C` : ''}</span>}
           target={status => <PrinterValueControl label={`${row.name} target temperature`} current={Number.isFinite(row.target) ? row.target : undefined}
-              min={descriptor?.min ?? 0} max={descriptor?.max ?? row.max} step={descriptor ? descriptor.step : 1}
+              min={min} max={max} step={descriptor && max !== undefined ? descriptor.step : 1}
               unit="°C" disabled={blocked} pending={busy} status={status}
               onSubmit={async value => {
                 setSending(true);

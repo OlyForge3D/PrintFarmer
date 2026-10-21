@@ -136,6 +136,31 @@ describe('TemperatureControlSection', () => {
     expect(mocks.setTemperatures).toHaveBeenLastCalledWith('p1', { bed: 65 });
   });
 
+  it.each([
+    [300, 250, 300],
+    [Number.NaN, 250, 250],
+    [Number.POSITIVE_INFINITY, 250, 250],
+    [-1, 250, 250],
+    [0, 250, 0],
+    [Number.NaN, Number.POSITIVE_INFINITY, undefined],
+    [-1, -1, undefined],
+  ])('resolves descriptor maximum %s and persisted maximum %s to %s without inventing a limit', (descriptorMax, persistedMax, expectedMax) => {
+    renderSection({ maxHotendTemp: persistedMax, maxBedTemp: 100, sensors: [{
+      id: 'extruder', kind: 'Nozzle', displayName: 'Nozzle', available: true, readings: [],
+      writable: [{ quantity: 'TargetTemperature', min: 0, max: descriptorMax, step: 0.5, unit: 'Celsius' }],
+    }] });
+    const input = screen.getByRole('spinbutton', { name: 'Hotend target temperature' });
+    if (expectedMax === undefined) {
+      expect(input).not.toHaveAttribute('max');
+      expect(input).toHaveAttribute('step', '1');
+      expect(input).toHaveAccessibleDescription(/Hotend maximum temperature unknown.*firmware limits/);
+    } else {
+      expect(input).toHaveAttribute('max', String(expectedMax));
+      expect(input).not.toHaveAccessibleDescription(/maximum temperature unknown/);
+    }
+    expect(screen.getByRole('spinbutton', { name: 'Bed target temperature' })).not.toHaveAccessibleDescription(/maximum temperature unknown/);
+  });
+
   it('keeps the entire primary section blocked during a direct command without misreporting a disconnect', async () => {
     let finish!: (value: { success: boolean }) => void;
     mocks.setTemperatures.mockReturnValue(new Promise(resolve => { finish = resolve; }));

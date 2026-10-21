@@ -438,6 +438,7 @@ describe("PrinterDetailsSidebar", () => {
     expect(input).toHaveAttribute('max', String(max));
     expect(input).toHaveAttribute('step', '1');
     expect(input).toBeEnabled();
+    expect(input).not.toHaveAccessibleDescription(/maximum temperature unknown/);
     for (const value of [String(max + 1), '2100', fractional]) {
       fireEvent.change(input, { target: { value } });
       fireEvent.keyDown(input, { key: 'Enter' });
@@ -448,6 +449,23 @@ describe("PrinterDetailsSidebar", () => {
     fireEvent.change(input, { target: { value: accepted } });
     fireEvent.keyDown(input, { key: 'Enter' });
     await waitFor(() => expect(mockSetTemperatures).toHaveBeenCalledExactlyOnceWith(printer.id, { [heater]: Number(accepted) }));
+  });
+
+  it.each(['Hotend', 'Bed'] as const)('allows integer %s entry with an associated firmware-limit warning when limits are unknown', async name => {
+    render(<PrinterDetailsSidebar printerId={printer.id} printer={printer}
+      backendCapabilities={capabilities()} onClose={vi.fn()} />);
+    const input = screen.getByRole('spinbutton', { name: `${name} target temperature` });
+    expect(input).toBeEnabled();
+    expect(input).not.toHaveAttribute('max');
+    expect(input).toHaveAccessibleDescription(new RegExp(`${name} maximum temperature unknown.*firmware limits.*does not enforce an upper bound`));
+    expect(screen.getByRole('button', { name: 'Cooldown' })).toBeEnabled();
+    fireEvent.change(input, { target: { value: '60.5' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(mockSetTemperatures).not.toHaveBeenCalled();
+    fireEvent.change(input, { target: { value: '65' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await waitFor(() => expect(mockSetTemperatures).toHaveBeenCalledExactlyOnceWith(printer.id, { [name.toLowerCase()]: 65 }));
+    expect(input).toHaveAccessibleDescription(/maximum temperature unknown/);
   });
 
   it("deduplicates primary temperatures while retaining independent nozzle and chamber telemetry after Temps", () => {
