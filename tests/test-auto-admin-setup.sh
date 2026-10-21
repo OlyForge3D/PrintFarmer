@@ -84,12 +84,73 @@ test_setup_initial_admin_calls_api_endpoint() {
     
     local script_content=$(cat "$DEPLOY_SCRIPT")
     
-    assert_contains "$script_content" 'create_initial_admin "$api_url" "$admin_username" "$admin_password" "$admin_email"' "Function should call the shared initial-admin helper"
+    assert_contains "$script_content" 'create_initial_admin "$api_url" "$admin_username" "$admin_password" "$admin_email" "$PFARM__Setup__BootstrapSecret"' "Function should pass the configured bootstrap proof to the shared helper"
     
     pass_test
 }
 
-# Test 7: setup_initial_admin is called in deployment flow
+# Test 7: Shared helper sends the bootstrap proof in the request body, not argv or logs.
+test_shared_helper_sends_bootstrap_proof_without_logging_it() {
+    start_test "shared helper sends bootstrap proof without logging it"
+
+    local temp_dir mock_bin request_file args_file output proof
+    temp_dir=$(mktemp -d)
+    mock_bin="$temp_dir/bin"
+    request_file="$temp_dir/request.json"
+    args_file="$temp_dir/curl-args.txt"
+    proof="test-bootstrap-proof-0123456789abcdef"
+    mkdir -p "$mock_bin"
+
+    cat > "$mock_bin/curl" <<'EOF'
+#!/bin/bash
+printf '%s\n' "$*" >> "$BOOTSTRAP_CURL_ARGS_FILE"
+case "$*" in
+    */api/setup/status*)
+        printf '{"needsSetup":true}\n'
+        ;;
+    */api/setup/initial-admin*)
+        cat > "$BOOTSTRAP_REQUEST_FILE"
+        if [[ "${MOCK_CURL_ECHO_PROOF:-false}" == "true" ]]; then
+            proof=$(sed -n 's/.*"bootstrapSecret": "\([^"]*\)".*/\1/p' "$BOOTSTRAP_REQUEST_FILE")
+            printf '{"success":false,"error":"invalid proof %s"}\n' "$proof"
+        else
+            printf '{"success":true}\n'
+        fi
+        ;;
+    *)
+        exit 1
+        ;;
+esac
+EOF
+    chmod +x "$mock_bin/curl"
+
+    source "$REPO_ROOT/scripts/common-utils.sh"
+    output=$(PATH="$mock_bin:$PATH" \
+        BOOTSTRAP_CURL_ARGS_FILE="$args_file" \
+        BOOTSTRAP_REQUEST_FILE="$request_file" \
+        create_initial_admin "http://localhost:5245" "admin" "test-password" "admin@example.test" "$proof" 2>&1)
+    local failure_output failure_status=0
+    failure_output=$(PATH="$mock_bin:$PATH" \
+        BOOTSTRAP_CURL_ARGS_FILE="$args_file" \
+        BOOTSTRAP_REQUEST_FILE="$request_file" \
+        MOCK_CURL_ECHO_PROOF=true \
+        create_initial_admin "http://localhost:5245" "admin" "test-password" "admin@example.test" "$proof" 2>&1) || failure_status=$?
+
+    local request_body curl_args
+    request_body=$(cat "$request_file")
+    curl_args=$(cat "$args_file")
+    cleanup_test_temp_dir "$temp_dir"
+
+    assert_contains "$request_body" "\"bootstrapSecret\": \"$proof\"" "Request body should contain the bootstrap proof"
+    assert_not_contains "$curl_args" "$proof" "Bootstrap proof must not be passed in curl arguments"
+    assert_not_contains "$output" "$proof" "Bootstrap proof must not be printed to logs"
+    assert_equals "1" "$failure_status" "Helper should return a failure when API rejects the bootstrap proof"
+    assert_not_contains "$failure_output" "$proof" "Bootstrap proof must be redacted from echoed API errors"
+
+    pass_test
+}
+
+# Test 8: setup_initial_admin is called in deployment flow
 test_setup_initial_admin_is_called_in_flow() {
     start_test "setup_initial_admin is called in main deployment flow"
     
@@ -97,11 +158,13 @@ test_setup_initial_admin_is_called_in_flow() {
     
     # This checks that the function is actually invoked
     assert_contains "$script_content" 'setup_initial_admin' "Function should be called in the script"
+    assert_contains "$script_content" 'Deployment completed, but initial admin setup failed.' "Main deployment should report auto-admin failure"
+    assert_not_contains "$script_content" 'setup_initial_admin || true' "Main deployment must not suppress auto-admin failure"
     
     pass_test
 }
 
-# Test 8: setup_initial_admin is called in redeploy recovery flow
+# Test 9: setup_initial_admin is called in redeploy recovery flow
 test_setup_initial_admin_is_called_in_redeploy_flow() {
     start_test "setup_initial_admin is called in redeploy recovery flow"
 
@@ -109,26 +172,48 @@ test_setup_initial_admin_is_called_in_redeploy_flow() {
     redeploy_function=$(sed -n '/^redeploy_existing() {/,/^}/p' "$DEPLOY_SCRIPT")
 
     assert_contains "$redeploy_function" 'deploy_containers' "Redeploy should start containers"
-    assert_contains "$redeploy_function" 'setup_initial_admin || true' "Redeploy should complete configured auto-admin setup"
+    assert_contains "$redeploy_function" 'if ! setup_initial_admin; then' "Redeploy should report and return on auto-admin setup failure"
+    assert_not_contains "$redeploy_function" 'setup_initial_admin || true' "Redeploy must not suppress auto-admin setup failure"
 
     pass_test
 }
 
-# Test 9: Config persistence for auto-admin settings
+# Test 10: Local auto-admin setup failures are visible
+test_local_auto_admin_failure_is_not_suppressed() {
+    start_test "local auto-admin setup failure is not suppressed"
+
+    local script_content
+    script_content=$(cat "$REPO_ROOT/scripts/start-all-local.sh")
+
+    assert_contains "$script_content" 'if [[ -n "${PFARM__Setup__BootstrapSecret:-}" ]]; then' "Local startup should export a configured proof for API manual setup"
+    assert_contains "$script_content" 'log_error "Could not create the configured initial admin user."' "Local startup should report admin setup failure"
+    assert_contains "$script_content" 'exit 1' "Local startup should stop after configured admin setup fails"
+    assert_not_contains "$script_content" 'Could not create initial admin user - this may be expected' "Local startup must not hide an auto-admin failure as expected"
+
+    pass_test
+}
+
+# Test 11: Config persistence for auto-admin settings
 test_config_persistence_code_exists() {
     start_test "config persistence code for auto-admin exists"
     
     local script_content=$(cat "$DEPLOY_SCRIPT")
+    local base_compose monolith_compose
+    base_compose=$(cat "$REPO_ROOT/scripts/docker/compose-templates/docker-compose.yml")
+    monolith_compose=$(cat "$REPO_ROOT/scripts/docker/compose-templates/docker-compose.monolith.yml")
     
     # Check for config handling
     assert_contains "$script_content" 'AUTO_ADMIN=' "Script should handle AUTO_ADMIN in config"
     assert_contains "$script_content" 'AUTO_ADMIN_USERNAME=' "Script should handle AUTO_ADMIN_USERNAME in config"
     assert_contains "$script_content" 'AUTO_ADMIN_EMAIL=' "Script should handle AUTO_ADMIN_EMAIL in config"
+    assert_contains "$script_content" 'PFARM__Setup__BootstrapSecret=' "Script should persist the bootstrap proof in deployment config"
+    assert_contains "$base_compose" 'PFARM__Setup__BootstrapSecret=${PFARM__Setup__BootstrapSecret:-}' "Base API service should receive the bootstrap proof"
+    assert_contains "$monolith_compose" 'PFARM__Setup__BootstrapSecret=${PFARM__Setup__BootstrapSecret:-}' "Monolith API service should receive the bootstrap proof"
     
     pass_test
 }
 
-# Test 10: Password IS persisted to config file
+# Test 12: Password IS persisted to config file
 test_password_persisted() {
     start_test "password is persisted to disk in config file"
     
@@ -140,7 +225,7 @@ test_password_persisted() {
     pass_test
 }
 
-# Test 11: API readiness check in setup function
+# Test 13: API readiness check in setup function
 test_api_readiness_check() {
     start_test "setup_initial_admin includes API readiness check"
     
@@ -152,7 +237,7 @@ test_api_readiness_check() {
     pass_test
 }
 
-# Test 12: Password auto-generation capability
+# Test 14: Password auto-generation capability
 test_password_auto_generation() {
     start_test "auto-admin has password auto-generation capability"
     
@@ -164,7 +249,7 @@ test_password_auto_generation() {
     pass_test
 }
 
-# Test 13: Documentation and comments exist
+# Test 15: Documentation and comments exist
 test_script_documentation() {
     start_test "script includes documentation for auto-admin feature"
     
@@ -188,8 +273,10 @@ main() {
     test_auto_admin_argument_parsing
     test_setup_initial_admin_function_exists
     test_setup_initial_admin_calls_api_endpoint
+    test_shared_helper_sends_bootstrap_proof_without_logging_it
     test_setup_initial_admin_is_called_in_flow
     test_setup_initial_admin_is_called_in_redeploy_flow
+    test_local_auto_admin_failure_is_not_suppressed
     test_config_persistence_code_exists
     test_password_persisted
     test_api_readiness_check

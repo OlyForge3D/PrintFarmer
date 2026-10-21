@@ -3275,6 +3275,23 @@ save_deployment_config() {
     print_info "Saving configuration to $CONFIG_FILE for future deployments"
     resolve_webauthn_configuration || return 1
 
+    local bootstrap_secret="${PFARM__Setup__BootstrapSecret:-}"
+    if [ -z "$bootstrap_secret" ] && [ -f "$CONFIG_FILE" ]; then
+        bootstrap_secret="$(get_kv_from_file "$CONFIG_FILE" "PFARM__Setup__BootstrapSecret" || true)"
+    fi
+    if [ -z "$bootstrap_secret" ] && [ -f "${ENV_FILE:-.env}" ]; then
+        bootstrap_secret="$(get_kv_from_file "${ENV_FILE:-.env}" "PFARM__Setup__BootstrapSecret" || true)"
+    fi
+    if [ -z "$bootstrap_secret" ]; then
+        bootstrap_secret="$(generate_bootstrap_secret)" || return 1
+    fi
+    if [[ ! "$bootstrap_secret" =~ ^[A-Za-z0-9_-]{32,}$ ]]; then
+        print_error "PFARM__Setup__BootstrapSecret must use at least 32 URL-safe characters."
+        return 1
+    fi
+    PFARM__Setup__BootstrapSecret="$bootstrap_secret"
+    set_exported_env_var "PFARM__Setup__BootstrapSecret" "$PFARM__Setup__BootstrapSecret"
+
     # Decide which DB include flags to persist. Only persist flags for the
     # actively selected DB provider to avoid accidentally saving unrelated
     # database credentials or enabling other DB containers in future runs.
@@ -3502,6 +3519,7 @@ AUTO_ADMIN=${AUTO_ADMIN:-false}
 AUTO_ADMIN_USERNAME=${AUTO_ADMIN_USERNAME:-admin}
 AUTO_ADMIN_PASSWORD=$(printf '%q' "${AUTO_ADMIN_PASSWORD:-}")
 AUTO_ADMIN_EMAIL=${AUTO_ADMIN_EMAIL:-admin@printfarmer.local}
+PFARM__Setup__BootstrapSecret=$PFARM__Setup__BootstrapSecret
 
 # Operating System (detected)
 OS=$OS
@@ -4906,6 +4924,7 @@ ASPNETCORE_URLS=http://0.0.0.0:8080
 # Database Configuration
 DB_PROVIDER=$DB_PROVIDER
 EOF
+    chmod 600 "$ENV_FILE" || return 1
 
     # Clear provider include flags to avoid accidental emission of other DB secrets
     INCLUDE_POSTGRES=${INCLUDE_POSTGRES:-no}
@@ -5006,6 +5025,9 @@ EOF
     fi
 
     cat >> "$ENV_FILE" << EOF
+
+# Initial-admin bootstrap proof
+PFARM__Setup__BootstrapSecret=$PFARM__Setup__BootstrapSecret
 
 # Monitoring & Observability Credentials
 GRAFANA_ADMIN_USER=admin
@@ -6522,7 +6544,7 @@ setup_initial_admin() {
     fi
 
     # Call the common function to create admin via API
-    if create_initial_admin "$api_url" "$admin_username" "$admin_password" "$admin_email"; then
+    if create_initial_admin "$api_url" "$admin_username" "$admin_password" "$admin_email" "$PFARM__Setup__BootstrapSecret"; then
         if [ "${AUTO_ADMIN_PASSWORD:-}" = "" ]; then
             log_warn "Save the generated password: $admin_password"
         fi
@@ -7571,7 +7593,10 @@ redeploy_existing() {
     # A redeploy may be recovering a first deployment that stopped before the
     # configured initial-admin step. The setup endpoint is idempotent once an
     # administrator exists, so run the same post-readiness step as a full deploy.
-    setup_initial_admin || true
+    if ! setup_initial_admin; then
+        print_error "Redeployment completed, but initial admin setup failed."
+        return 1
+    fi
 
     print_success "✅ Redeployment complete!"
     print_info "All containers have been rebuilt and restarted with the current configuration."
@@ -7971,7 +7996,10 @@ main() {
 
     # Run auto-admin setup as soon as API is healthy (doesn't need pgAdmin)
     # This allows users to start using the application while pgAdmin is still starting
-    setup_initial_admin || true
+    if ! setup_initial_admin; then
+        print_error "Deployment completed, but initial admin setup failed."
+        return 1
+    fi
 
     # Deploy pgAdmin if requested (can take longer to become healthy)
     deploy_pgadmin_if_needed || print_warning "pgAdmin deployment encountered issues"

@@ -163,7 +163,12 @@ public sealed class SetupBootstrapControllerTests : IClassFixture<SetupBootstrap
         await using var factory = new CustomWebApplicationFactory(new Dictionary<string, string?>
         {
             ["Security:DevModeBypassAuth"] = "false",
-            ["Spoolman:BaseUrl"] = "http://setup-user:setup-password@spoolman.local:7912?token=setup-token",
+            ["Spoolman:BaseUrl"] = new UriBuilder("http", "spoolman.local", 7912)
+            {
+                UserName = "setup-user",
+                Password = "setup-password",
+                Query = "token=setup-token",
+            }.Uri.ToString(),
         });
         await factory.ResetDataAsync();
         using HttpClient anonymousClient = factory.CreateClient();

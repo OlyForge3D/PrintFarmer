@@ -293,15 +293,24 @@ export async function provisionAdminAndLogin(
   const setupData = await setupStatus.json();
 
   if (setupData.needsSetup) {
-    await request.post(`${API_BASE_URL}/api/setup/initial-admin`, {
+    const bootstrapSecret = process.env['PFARM__Setup__BootstrapSecret'];
+    if (!bootstrapSecret || bootstrapSecret.length < 32) {
+      throw new Error('PFARM__Setup__BootstrapSecret must be configured before self-provisioning the E2E admin');
+    }
+
+    const createResponse = await request.post(`${API_BASE_URL}/api/setup/initial-admin`, {
       data: {
         username: ADMIN.username,
         email: ADMIN.email,
         password: ADMIN.password,
         firstName: ADMIN.firstName,
         lastName: ADMIN.lastName,
+        bootstrapSecret,
       },
     });
+    if (!createResponse.ok()) {
+      throw new Error(`Failed to provision the E2E admin (HTTP ${createResponse.status()})`);
+    }
   }
 
   return await loginWith(request, wait);

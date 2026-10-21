@@ -112,7 +112,9 @@ describe('provisionAdminAndLogin', () => {
     vi.resetModules();
   });
 
-  it('needsSetup:true — self-provisions the default admin, then logs in (pristine-database path, unchanged behavior)', async () => {
+  it('needsSetup:true — self-provisions with the configured proof, then logs in', async () => {
+    const bootstrapSecret = 'x'.repeat(32);
+    vi.stubEnv('PFARM__Setup__BootstrapSecret', bootstrapSecret);
     const get = vi.fn().mockResolvedValue(fakeResponse({ needsSetup: true }));
     const post = vi.fn()
       .mockResolvedValueOnce(fakeResponse({})) // POST /api/setup/initial-admin
@@ -123,9 +125,22 @@ describe('provisionAdminAndLogin', () => {
     expect(token).toBe('default-admin-token');
     expect(post).toHaveBeenCalledTimes(2);
     expect(post.mock.calls[0][0]).toContain('/api/setup/initial-admin');
-    expect(post.mock.calls[0][1]?.data).toMatchObject({ username: 'e2e-admin' });
+    expect(post.mock.calls[0][1]?.data).toMatchObject({
+      username: 'e2e-admin',
+      bootstrapSecret,
+    });
     expect(post.mock.calls[1][0]).toContain('/api/auth/login');
     expect(post.mock.calls[1][1]?.data).toMatchObject({ usernameOrEmail: 'e2e-admin' });
+  });
+
+  it('needsSetup:true — fails clearly when the harness has no configured bootstrap proof', async () => {
+    vi.stubEnv('PFARM__Setup__BootstrapSecret', '');
+    const get = vi.fn().mockResolvedValue(fakeResponse({ needsSetup: true }));
+    const post = vi.fn();
+
+    await expect(provisionAdminAndLogin({ get, post }))
+      .rejects.toThrow('PFARM__Setup__BootstrapSecret must be configured');
+    expect(post).not.toHaveBeenCalled();
   });
 
   it('needsSetup:false — skips admin creation entirely and logs in directly as the externally provisioned admin', async () => {
