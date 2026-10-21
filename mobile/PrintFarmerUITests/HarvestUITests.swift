@@ -170,7 +170,8 @@ final class HarvestUITests: QueueUITestBase {
     }
 
     private func reorderHandle(for jobName: String) -> XCUIElement {
-        app.collectionViews["jobList.combined.list"].buttons.matching(
+        // In split view SwiftUI promotes the root identifier onto the List itself.
+        app.descendants(matching: .any)["jobList.root"].buttons.matching(
             NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@", "Reorder", jobName)
         ).firstMatch
     }
@@ -243,7 +244,7 @@ final class HarvestUITests: QueueUITestBase {
         line: UInt = #line
     ) {
         let row = app.descendants(matching: .any)[identifier]
-        let combinedList = app.collectionViews["jobList.combined.list"]
+        let combinedList = app.descendants(matching: .any)["jobList.root"]
         for _ in 0..<8 where !row.isHittable {
             combinedList.swipeUp()
         }
