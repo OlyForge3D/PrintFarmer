@@ -195,6 +195,8 @@ See the **[Architecture Guide](./docs/ARCHITECTURE.md)** for system design, data
 
 **Start here:**
 - **[Getting Started](./docs/GETTING_STARTED.md)** - Local dev setup, first run
+- Fresh installs require an installer-configured one-time bootstrap secret before
+  creating the first administrator; see the [setup guide](./docs/GETTING_STARTED.md#first-administrator-bootstrap-proof).
 - **[Architecture](./docs/ARCHITECTURE.md)** - System design with diagrams
 - **[Features](./docs/FEATURES.md)** - All capabilities and how to use them
 

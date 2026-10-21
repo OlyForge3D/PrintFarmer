@@ -123,6 +123,7 @@ internal static class Program
             username,
             email,
             password,
+            bootstrapSecret = Environment.GetEnvironmentVariable("PFARM__Setup__BootstrapSecret"),
             firstName = argsDic.GetValueOrDefault("first-name", "Admin"),
             lastName = argsDic.GetValueOrDefault("last-name", "User")
         };

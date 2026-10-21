@@ -74,13 +74,14 @@ public class SetupController(ISetupService setupService) : ControllerBase
 
     /// <summary>
     /// Creates the initial admin user and completes first-run setup.
-    /// This endpoint is only available when no admin users exist.
+    /// New accounts require installer bootstrap proof and an unused installation claim.
+    /// Existing administrators may still authenticate idempotently with their credentials.
     /// </summary>
     /// <param name="request">The request containing the initial admin user details.</param>
     /// <param name="refreshTokenService">Issues the refresh token for the new admin's session.</param>
     /// <param name="ct">Cancellation token to cancel the operation.</param>
     [HttpPost("initial-admin")]
-    [AllowAnonymous] // Public because this bootstrap action creates the installation's first authenticated account.
+    [AllowAnonymous] // Installer proof and a database-backed one-time claim protect account creation.
     public async Task<ActionResult<AuthenticationResult>> CreateInitialAdminAsync(
         [FromBody] CreateInitialAdminRequest request,
         [FromServices] IRefreshTokenService refreshTokenService,

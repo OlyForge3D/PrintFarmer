@@ -213,6 +213,49 @@ public class EfUsersRepository(AppDbContext db) : IUsersRepository
         _ = await _db.SaveChangesAsync(ct);
     }
 
+    public async Task<bool> TryCreateInitialAdminAsync(User user, Guid roleId, CancellationToken ct = default)
+    {
+        const string claimKey = "Bootstrap.InitialAdmin.Consumed";
+        await using Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction transaction =
+            await _db.Database.BeginTransactionAsync(ct);
+        var claim = new AppSettingsEntity
+        {
+            Key = claimKey,
+            SettingsJson = "{}",
+            UpdatedAt = DateTime.UtcNow
+        };
+
+        // The unique settings key arbitrates across processes and survives admin removal.
+        // Insert before reading users so concurrent SQLite claims cannot upgrade a stale read.
+        _db.AppSettingsEntities.Add(claim);
+        try
+        {
+            await _db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException)
+        {
+            await transaction.RollbackAsync(ct);
+            _db.Entry(claim).State = EntityState.Detached;
+            if (await _db.AppSettingsEntities.AnyAsync(s => s.Key == claimKey, ct))
+            {
+                return false;
+            }
+
+            throw;
+        }
+
+        if (await HasAdminUsersAsync(ct))
+        {
+            await transaction.RollbackAsync(ct);
+            _db.Entry(claim).State = EntityState.Detached;
+            return false;
+        }
+
+        await AddUserWithRoleAsync(user, roleId, ct);
+        await transaction.CommitAsync(ct);
+        return true;
+    }
+
     public Task<User?> GetByUsernameAsync(string username, CancellationToken ct = default)
         => _db.Users.FirstOrDefaultAsync(u => u.Username == username, ct);
 

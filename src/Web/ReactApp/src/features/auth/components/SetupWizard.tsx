@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { AccountIcon, EmailIcon, LockIcon, EyeIcon, EyeOffIcon, CheckCircleIcon, NetworkIcon, ServerIcon, LayersIcon, InfoIcon, WiFiIcon, SearchIcon, AlertIcon } from '@/common/components/icons/MdiIcons';
 import { useSpoolman as useSpoolmanContext } from '@/contexts/SpoolmanHooks';
 import { useAuth } from '@/features/auth/hooks/useAuth';
-import { Button } from '@/common/components/ui';
+import { Button, Input } from '@/common/components/ui';
 import { useHealthStatus } from '@/common/hooks/useHealthStatus';
 import { useSpoolmanNetworkScan } from '@/common/hooks/useSpoolmanNetworkScan';
 import { isValidCidr, normalizeUrl, normalizeSpoolmanBaseUrl } from '@/common/utils/validation';
@@ -61,6 +61,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   const { isAuthenticated, login } = useAuth();
   const [step, setStep] = useState(0); // 0 Account, 1 Network, 2 Spoolman, 3 Summary
   const [adminCreated, setAdminCreated] = useState(false);
+  const [bootstrapSecret, setBootstrapSecret] = useState('');
 
   // Check initialization status
   const { data: healthStatus, isLoading: healthLoading, refetch: refetchHealth } = useHealthStatus();
@@ -274,6 +275,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         username: formData.username,
         email: formData.email,
         password: formData.password,
+        bootstrapSecret,
         firstName: formData.firstName,
         lastName: formData.lastName
       });
@@ -283,6 +285,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
       }
 
       setAdminCreated(true);
+      setBootstrapSecret('');
     }
 
     const loggedIn = await login({ username: formData.username, password: formData.password });
@@ -516,6 +519,11 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   // ...existing code...
   const renderAccountStep = () => (
     <form className="space-y-6" noValidate onSubmit={(e) => { e.preventDefault(); nextFromAccount(); }}>
+      <div>
+        <label htmlFor="bootstrapSecret" className="block text-sm font-medium text-pf-text-primary mb-2">Installer bootstrap secret</label>
+        <Input id="bootstrapSecret" type="password" value={bootstrapSecret} onChange={e => setBootstrapSecret(e.target.value)} autoComplete="off" disabled={submitting} aria-describedby="bootstrapSecret-help" />
+        <p id="bootstrapSecret-help" className="text-xs text-pf-text-tertiary">Enter the one-time secret configured by your installer. Not needed when signing in to an existing administrator account.</p>
+      </div>
       {/* Name Fields */}
       <div className="grid grid-cols-2 gap-4">
         <div>

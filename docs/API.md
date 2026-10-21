@@ -30,6 +30,16 @@ first-run wizard. URLs containing user information, query parameters, or
 fragments are not returned. Once setup is complete it returns `404`; the full
 Spoolman settings section remains authenticated at all times.
 
+`POST /api/setup/initial-admin` requires a `bootstrapSecret` JSON property for
+new installations. It must match the install-specific `Setup:BootstrapSecret`
+configuration (`PFARM__Setup__BootstrapSecret`, at least 32 characters).
+Missing or invalid proof returns `400` without creating a user or session.
+The secret is not returned by any setup endpoint. A unique database claim and
+the admin account commit in one transaction, so only one new account can win;
+replay with different credentials returns `400`. Existing administrator
+credentials retain idempotent authentication without bootstrap proof.
+See [bootstrap configuration](GETTING_STARTED.md#first-administrator-bootstrap-proof).
+
 `Security:DevModeBypassAuth` can bypass authorization for safe HTTP methods only
 when the host environment is `Development`. The effective bypass state is logged
 at startup, and a configured bypass is ignored in every other environment.
