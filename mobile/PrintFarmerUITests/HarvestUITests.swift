@@ -170,7 +170,8 @@ final class HarvestUITests: QueueUITestBase {
     }
 
     private func reorderHandle(for jobName: String) -> XCUIElement {
-        app.collectionViews["jobList.combined.list"].buttons.matching(
+        // On iPad, SwiftUI promotes the Queue root identifier onto the List's collection view.
+        app.descendants(matching: .any)["jobList.root"].buttons.matching(
             NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@", "Reorder", jobName)
         ).firstMatch
     }
