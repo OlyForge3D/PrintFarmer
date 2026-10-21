@@ -439,7 +439,7 @@ export -f bash
                     "services:\n"
                     "  frontend:\n    ports:\n      - '8080:80'\n"
                     "    networks:\n      - printfarmer-network\n"
-                    "  nginx-proxy:\n    ports:\n      - '8080:80'\n      - '443:443'\n"
+                    "  nginx-proxy:\n    ports:\n      - '127.0.0.1:8080:80'\n      - '443:443'\n"
                     "    networks:\n      - printfarmer-network\n",
                     encoding="utf-8",
                 )
@@ -453,7 +453,7 @@ export -f bash
                 proxy = config["services"]["nginx-proxy"]
                 self.assertEqual(["printfarmer-network"], proxy["networks"])
                 self.assertNotIn("extra_hosts", proxy)
-                self.assertEqual(["8080:80"] + ([] if https_port == "0" else ["443:443"]),
+                self.assertEqual(["127.0.0.1:8080:80"] + ([] if https_port == "0" else ["443:443"]),
                                  proxy["ports"])
 
     def run_deploy_configuration(self, mode, include, saved_mode="bridge", inherited_mode="bridge"):

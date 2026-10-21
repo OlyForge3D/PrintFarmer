@@ -4202,7 +4202,7 @@ configure_networking() {
 
     echo
     echo -e "${BLUE}Configure external access:${NC}"
-    prompt_with_default "HTTP port for web access:" "8080" "HTTP_PORT"
+    prompt_with_default "HTTP port for local-only web access:" "8080" "HTTP_PORT"
 
     # Warn about port 80 requiring elevated privileges
     if [ "$HTTP_PORT" = "80" ] && [ "$OS" = "linux" ]; then
@@ -4210,7 +4210,7 @@ configure_networking() {
         print_info "If containers fail to start, consider using port 8080 or run with: sudo docker compose ..."
     fi
 
-    prompt_with_default "HTTPS port for secure web access (0 to disable):" "8443" "HTTPS_PORT"
+    prompt_with_default "HTTPS port for secure LAN access (0 for local-only HTTP):" "8443" "HTTPS_PORT"
 
     prompt_with_default "API port (for direct API access):" "5245" "API_PORT"
 }
@@ -7242,9 +7242,8 @@ verify_deployment() {
         fi
     fi
 
-    # Browser-origin / Proxy health check: ensure the public-facing origin proxies /api to the API
-    # Use SERVER_HOST if set, otherwise default to localhost
-    local proxy_host=${SERVER_HOST:-localhost}
+    # HTTP is loopback-only, regardless of the configured LAN/WebAuthn hostname.
+    local proxy_host="localhost"
     local proxy_port=${HTTP_PORT:-8080}
     local proxy_url="http://$proxy_host:$proxy_port"
 
@@ -7290,7 +7289,7 @@ verify_deployment() {
         print_info "Tip: Ensure the frontend/proxy is bound to host port $proxy_port and is routing /api to the API. Example host URL: http://$proxy_host:$proxy_port/api/setup/status"
         print_info "Common fixes:"
         print_info "  • If you're using microservices, ensure nginx-proxy is started and bound to the host port and that its config proxies /api -> api:5245."
-        print_info "  • If nginx-proxy is not present, access the API directly on API port: http://<host>:$API_PORT/api/setup/status"
+        print_info "  • If nginx-proxy is not present, access the API locally on API port: http://localhost:$API_PORT/api/setup/status"
         print_info "  • If you see HTML, the request is hitting the frontend directly; either remap ports so nginx-proxy wins or configure frontend to not bind host ports in microservices mode."
         health_check_failed=true
     fi
@@ -7330,8 +7329,8 @@ display_final_info() {
     echo
 
     # Determine the hostname/IP to show in URLs
-    local SERVER_HOST="localhost"
-    if [ "${DEPLOYING_TO_LINUX:-no}" = "yes" ] || [ "$OS" = "linux" ]; then
+    local SERVER_HOST="${SERVER_HOST:-localhost}"
+    if [ "$SERVER_HOST" = "localhost" ] && { [ "${DEPLOYING_TO_LINUX:-no}" = "yes" ] || [ "$OS" = "linux" ]; }; then
         # Try to get the primary IP address
         if command -v hostname >/dev/null 2>&1; then
             # Try hostname -I first (works on most Linux)
@@ -7353,31 +7352,35 @@ display_final_info() {
         fi
     fi
 
+    local tls_enabled=true
+    if [ "${HTTPS_PORT:-0}" = "0" ] || { [ "${INSTALLER_LAB:-false}" = "true" ] && [ "${HTTP_ONLY:-false}" = "true" ]; }; then
+        tls_enabled=false
+    fi
+
     echo -e "${GREEN}Access URLs:${NC}"
-    echo -e "${BLUE}  🌐 Web Interface: http://$SERVER_HOST:$HTTP_PORT${NC}"
+    echo -e "${BLUE}  🌐 Local-only HTTP: http://localhost:$HTTP_PORT${NC}"
     echo -e "${BLUE}  🔑 Passkeys: ${WebAuthn__Origin}${NC}"
 
-    if [ "${HTTPS_PORT:-0}" != "0" ]; then
-        echo -e "${BLUE}  🔒 Secure Access: https://$SERVER_HOST:$HTTPS_PORT${NC}"
+    if [ "$tls_enabled" = true ]; then
+        echo -e "${BLUE}  🔒 Web Interface (LAN, HTTPS): https://$SERVER_HOST:$HTTPS_PORT${NC}"
+        echo -e "${BLUE}  ❤️  Health Check (HTTPS): https://$SERVER_HOST:$HTTPS_PORT/healthz${NC}"
+        print_info "For private-CA HTTPS, transfer only deploy/nginx/certs/ca.cer through a trusted channel and verify it before trusting it. HTTP /install-ca is host-local."
+    else
+        print_warning "TLS is disabled: local-only HTTP on 127.0.0.1:$HTTP_PORT; no LAN access. Enable HTTPS with a valid certificate for LAN access."
     fi
 
     if [ "$ARCHITECTURE" = "microservices" ]; then
-        echo -e "${BLUE}  🔧 Direct API: http://$SERVER_HOST:$API_PORT${NC}"
+        echo -e "${BLUE}  🔧 Direct API (local-only): http://localhost:$API_PORT${NC}"
     fi
 
-    echo -e "${BLUE}  ❤️  Health Check: http://$SERVER_HOST:$HTTP_PORT/healthz${NC}"
+    echo -e "${BLUE}  ❤️  Health Check (local-only): http://localhost:$HTTP_PORT/healthz${NC}"
 
     # Show pgAdmin URL if enabled
     if [ "$ENABLE_PGADMIN" = "true" ] && [ "$DRY_RUN" != "true" ]; then
-        echo -e "${BLUE}  🐘 pgAdmin (Database): http://$SERVER_HOST:5050/pgadmin${NC}"
+        echo -e "${BLUE}  🐘 pgAdmin (local-only): http://localhost:5050/pgadmin${NC}"
         echo -e "       ${YELLOW}Credentials: ${AUTO_ADMIN_USERNAME:-admin} / ${AUTO_ADMIN_EMAIL:-admin@printfarmer.local}${NC}"
-        echo -e "       ${YELLOW}Network Access: http://$(hostname -I | awk '{print $1}'):5050/pgadmin${NC}"
     fi
 
-    # Show localhost alternative if we're showing an IP
-    if [ "$SERVER_HOST" != "localhost" ]; then
-        echo -e "${BLUE}  📍 Local access: http://localhost:$HTTP_PORT${NC}"
-    fi
     echo
 
     echo -e "${GREEN}Management Commands:${NC}"
@@ -7450,10 +7453,10 @@ display_final_info() {
         if [ "$SERVER_HOST" != "localhost" ]; then
             echo
             echo -e "${YELLOW}Remote Access Notes:${NC}"
-            echo -e "${BLUE}  • Ensure firewall allows port $HTTP_PORT${NC}"
-            if [ "$ARCHITECTURE" = "microservices" ]; then
-                echo -e "${BLUE}  • Ensure firewall allows port $API_PORT${NC}"
+            if [ "$tls_enabled" = true ]; then
+                echo -e "${BLUE}  • Ensure firewall allows HTTPS port $HTTPS_PORT for intended clients${NC}"
             fi
+            echo -e "${BLUE}  • HTTP port $HTTP_PORT and direct API port $API_PORT are local-only; opening firewall ports does not enable LAN access${NC}"
             echo -e "${BLUE}  • Test from server: curl http://localhost:$HTTP_PORT/healthz${NC}"
             echo -e "${BLUE}  • Check Docker networks: docker network ls${NC}"
         fi

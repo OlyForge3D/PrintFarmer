@@ -316,6 +316,119 @@ test_verification_uses_anonymous_api_endpoint() {
     pass_test
 }
 
+test_verification_uses_loopback_with_lan_server_host() {
+    start_test "verification uses loopback with a non-localhost SERVER_HOST"
+
+    local output
+    output=$(
+        source "$DEPLOY_SCRIPT"
+        SERVER_HOST="farm.example.test"
+        HTTP_PORT=18080
+        HTTPS_PORT=18443
+        API_PORT=15245
+        ARCHITECTURE=microservices
+        ENABLE_ORCA_WORKER=no
+        ENABLE_PGADMIN=false
+        API_HEALTH_RETRIES=1
+        API_HEALTH_INTERVAL=0
+        dc() { :; }
+        curl() {
+            printf '%s\n' "$*" >> "$TEST_TEMP_DIR/access-probes"
+            [[ "$*" == *"http://localhost:18080/"* ]] || return 1
+            case "$*" in
+                *"-sI"*) printf 'Content-Type: application/json\r\n' ;;
+                *"-o /tmp/_proxy_body"*) printf '200' ;;
+                *"/healthz"*) printf 'OK' ;;
+                *"/health"*) printf '{"status":"Healthy","results":{}}' ;;
+                *"/api/setup/status"*) printf '{"needsSetup":true}\n200' ;;
+                *) return 1 ;;
+            esac
+        }
+        head() {
+            if [[ "$*" == "-c 1024 /tmp/_proxy_body" ]]; then
+                printf '{"needsSetup":true}'
+            else
+                command head "$@"
+            fi
+        }
+        verify_deployment
+    )
+    assert_contains "$output" "All health checks passed!" "LAN hostname must not break local verification"
+    assert_contains "$(cat "$TEST_TEMP_DIR/access-probes")" "http://localhost:18080/api/setup/status" \
+        "Proxy verification must actually probe localhost"
+    assert_not_contains "$(cat "$TEST_TEMP_DIR/access-probes")" "farm.example.test" \
+        "HTTP verification must never probe the LAN hostname"
+
+    pass_test
+}
+
+test_access_summary_requires_tls_for_lan() {
+    start_test "access summary advertises TLS for LAN and warns for local-only modes"
+
+    local mode output
+    for mode in tls disabled lab detected; do
+        output=$(
+            source "$DEPLOY_SCRIPT"
+            SERVER_HOST="farm.example.test"
+            OS=linux
+            HTTP_PORT=18080
+            HTTPS_PORT=18443
+            API_PORT=15245
+            ARCHITECTURE=microservices
+            WebAuthn__Origin="https://farm.example.test:18443"
+            ENV_FILE="test.env"
+            COMPOSE_FILE="test-compose.yml"
+            ENABLE_DISCOVERY=no
+            ENABLE_DISTRIBUTED_SLICING=false
+            INSTALLER_LAB=false
+            HTTP_ONLY=false
+            hostname() { printf '192.168.1.50\n'; }
+            case "$mode" in
+                disabled) HTTPS_PORT=0; WebAuthn__Origin="http://localhost:18080" ;;
+                lab) INSTALLER_LAB=true; HTTP_ONLY=true; WebAuthn__Origin="http://localhost:18080" ;;
+                detected) SERVER_HOST=localhost ;;
+            esac
+            display_final_info
+        )
+        assert_contains "$output" "Local-only HTTP: http://localhost:18080" "HTTP must be labelled local-only ($mode)"
+        assert_contains "$output" "Direct API (local-only): http://localhost:15245" "API must not be advertised on LAN ($mode)"
+        assert_not_contains "$output" "http://farm.example.test" "No LAN HTTP URL may be advertised ($mode)"
+        assert_not_contains "$output" "http://192.168.1.50" "Detected LAN IP must not be advertised over HTTP ($mode)"
+        assert_not_contains "$output" "Ensure firewall allows port 18080" "Opening HTTP does not enable LAN access ($mode)"
+        assert_not_contains "$output" "Ensure firewall allows port 15245" "Do not advise exposing the direct API ($mode)"
+        if [[ "$mode" == tls || "$mode" == detected ]]; then
+            local host="farm.example.test"
+            [[ "$mode" != detected ]] || host="192.168.1.50"
+            assert_contains "$output" "https://$host:18443" "LAN entry point must use configured/detected host and TLS ($mode)"
+            assert_contains "$output" "Ensure firewall allows HTTPS port 18443" "Firewall guidance must use HTTPS ($mode)"
+            assert_contains "$output" "HTTP /install-ca is host-local" "CA bootstrap must not assume LAN HTTP ($mode)"
+            assert_not_contains "$output" "TLS is disabled" "Explicit TLS must remain supported ($mode)"
+        else
+            assert_contains "$output" "TLS is disabled: local-only HTTP on 127.0.0.1:18080; no LAN access." \
+                "Disabled TLS must visibly warn about reachability ($mode)"
+            assert_not_contains "$output" "Web Interface (LAN, HTTPS)" "Do not advertise disabled TLS ($mode)"
+            assert_not_contains "$output" "Ensure firewall allows HTTPS port" "Do not advise opening disabled TLS ($mode)"
+        fi
+    done
+
+    pass_test
+}
+
+test_installer_ca_bootstrap_guidance_is_local_only() {
+    start_test "installer explains local-only HTTP and trusted CA transfer"
+
+    local installer_content
+    installer_content=$(cat "$INSTALL_SCRIPT")
+    assert_contains "$installer_content" "HTTP is local-only; LAN clients require an HTTPS reverse proxy." \
+        "Installer must explain LAN TLS requirements"
+    assert_contains "$installer_content" "transfer only the public CA through a trusted channel" \
+        "Installer must not bootstrap private-CA trust over LAN HTTP"
+    assert_contains "$installer_content" "HTTP /install-ca page is host-local, not a LAN certificate bootstrap URL." \
+        "Installer must explain the local-only CA page"
+
+    pass_test
+}
+
 # Test batch mode
 test_batch_mode() {
     start_test "batch mode execution"
@@ -2228,6 +2341,9 @@ run_all_tests() {
     test_compose_helper_available_when_sourced
     test_redeploy_cleanup_prunes_only_unused_images_and_build_cache
     test_verification_uses_anonymous_api_endpoint
+    test_verification_uses_loopback_with_lan_server_host
+    test_access_summary_requires_tls_for_lan
+    test_installer_ca_bootstrap_guidance_is_local_only
     test_batch_mode
     test_config_file_generation
     test_environment_variables

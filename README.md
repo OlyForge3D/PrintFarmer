@@ -105,7 +105,12 @@ cd PrintFarmer
 ./scripts/deploy-docker.sh --non-interactive
 ```
 
-Open **http://localhost** in your browser.
+Open **http://localhost:8080** on the deployment host (or your configured
+HTTP port). HTTP is local-only; LAN clients must use
+**https://SERVER_HOST:8443** with a valid, trusted certificate and the configured
+HTTPS port. `HTTPS_PORT=0` or HTTP-only lab mode leaves no LAN listener.
+For private-CA bootstrap, transfer the public CA through a trusted channel;
+see [iPhone / iPad HTTPS trust](./docs/DEPLOYMENT.md#iphone--ipad-https-trust).
 
 **Raspberry Pi / ARM64 deployment?** Use monolith mode with a single container:
 ```bash

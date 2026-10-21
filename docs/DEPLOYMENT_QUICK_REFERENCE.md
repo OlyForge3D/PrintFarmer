@@ -184,6 +184,9 @@ chown $USER:$USER .deploy-config
 - `DB_PASSWORD` - Database password
 - `NETWORK_MODE` - `bridge` only
 - `HTTP_PORT` - Frontend HTTP port, published on `127.0.0.1` only (default: 8080); use `HTTPS_PORT` for LAN access
+- `HTTPS_PORT` - TLS port for LAN access (default: 8443); requires a valid,
+  client-trusted certificate. `0` disables TLS and leaves local-only HTTP.
+  `INSTALLER_LAB=true HTTP_ONLY=true` also disables TLS; it does not enable LAN HTTP.
 - `API_PORT` - API port (default: 5245, microservices only)
 
 ### Network Discovery
@@ -195,7 +198,7 @@ chown $USER:$USER .deploy-config
   origin. Prefer setting `ALLOWED_ORIGINS` to the exact origin(s) you access the UI from
   instead of enabling this flag.
 - `ALLOWED_ORIGINS` / `CORS__AllowedOrigins` - comma-separated list of exact origins
-  (e.g. `http://192.168.1.50:8080`) always permitted for CORS, regardless of
+  (e.g. `https://192.168.1.50:8443`) always permitted for CORS, regardless of
   `ALLOW_LOCAL_NETWORK`.
 
 ### Workers

@@ -1559,6 +1559,9 @@ printf "  ${BOLD}Profile${NC}      %s\n" "$DEPLOY_PROFILE"
 printf "  ${BOLD}Directory${NC}    %s\n" "$INSTALL_DIR"
 printf "  ${BOLD}Database${NC}     %s\n" "$DB_ENGINE"
 printf "  ${BOLD}Port${NC}         %s\n" "$HTTP_PORT"
+printf "  HTTP is local-only; LAN clients require an HTTPS reverse proxy.\n"
+printf "  For private-CA HTTPS, transfer only the public CA through a trusted channel before connecting.\n"
+printf "  The HTTP /install-ca page is host-local, not a LAN certificate bootstrap URL.\n"
 if [[ "$SERVER_HOST" == "localhost" ]]; then
     printf "  ${BOLD}Passkeys${NC}     http://localhost:%s\n" "$HTTP_PORT"
 else
