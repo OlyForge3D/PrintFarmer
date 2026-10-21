@@ -363,11 +363,10 @@ struct PrinterSensorControlRows: View {
     var compact: Bool
 
     var body: some View {
-        let sensors = viewModel.controllableSensors
+        let sensors = viewModel.controllableSensors.filter { !PrinterSensorFormatting.isHidden($0) }
         if !sensors.isEmpty {
             ForEach(sensors) { sensor in
                 ForEach(sensor.writable, id: \.quantity) { descriptor in
-                    Divider()
                     row(sensor: sensor, descriptor: descriptor)
                 }
             }
@@ -380,7 +379,7 @@ struct PrinterSensorControlRows: View {
         let reason = viewModel.sensorControlUnavailableReason
             ?? (sensor.available ? (current == nil ? "Current value is unknown; controls are disabled." : nil)
                                  : "Unavailable; controls are disabled.")
-        let title = "\(sensor.displayName) \(PrinterSensorFormatting.quantityTitle(descriptor.quantity).lowercased())"
+        let title = "\(PrinterSensorFormatting.displayName(sensor.displayName)) \(PrinterSensorFormatting.quantityTitle(descriptor.quantity).lowercased())"
         let id = "printer.controls.sensor.\(sensor.id).\(descriptor.quantity.rawValue)"
         return VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 8) {

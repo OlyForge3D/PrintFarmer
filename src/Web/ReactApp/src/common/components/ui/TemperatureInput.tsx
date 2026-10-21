@@ -42,7 +42,7 @@ export function TemperatureInput({
           {label}
         </label>
       )}
-      <div className={`relative inline-block w-20 ${currentTemp != null ? 'pt-2' : ''} ${className ?? ''}`}>
+      <div className={`relative inline-block w-[4.5rem] ${currentTemp != null ? 'pt-2' : ''} ${className ?? ''}`}>
         {currentTemp != null && (
           <span className="absolute -top-0.5 right-2 px-1 bg-pf-bg-1 text-[10px] font-bold text-pf-text-secondary z-10">
             [ {currentTemp} ]
