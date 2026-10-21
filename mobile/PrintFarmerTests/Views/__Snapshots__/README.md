@@ -155,3 +155,24 @@ Do not restore historical images or re-record without comparing actual output
 at the exact approved Xcode/runtime, host family, scale, locale and appearance.
 Strict assertions, iPhone references and the destructive-button reference stay
 unchanged. The selected-toolchain iPad snapshot run remains required evidence.
+
+## Mainsail sensor presentation revision (#3451)
+
+The two sensor fixtures intentionally capitalize sensor-name words and remove
+the writable rows' dividers. Full sensor IDs, readings, disabled-state guidance,
+and the native 44-point control targets are unchanged.
+
+The iPhone references were updated in `2d4f23dac` without generation metadata.
+They were subsequently verified unchanged with recording disabled on a
+task-isolated iPhone 15 (3x), Xcode 26.6 (17F113), and iOS 26.5 (23F77).
+The full unit run executed 2,469 tests with zero failures; only the opt-in live
+HTTPS login diagnostic was skipped. Both sensor snapshots passed with no skips.
+
+The stale iPad sensor references failed strict comparison on the same approved
+toolchain/runtime and were regenerated on a task-isolated iPad Pro 13-inch (M5)
+host (2x). Reference/actual images were inspected before recording: the changes
+are the intended name capitalization and divider removal. The `.iPhone13`
+component configuration, light appearance, default simulator locale, fixture
+data, and strict assertions remain unchanged. Only the two sensor iPad PNGs
+were recorded; neither iPhone nor Controls references were re-recorded.
+Both iPad sensor cases then passed with recording disabled and zero skips.
