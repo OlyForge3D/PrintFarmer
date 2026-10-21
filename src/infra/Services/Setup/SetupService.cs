@@ -1,5 +1,7 @@
 ﻿using System;
 using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
@@ -9,6 +11,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Repositories.Users;
 using Farm.Infrastructure.Services.Authentication;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.Setup;
@@ -20,7 +23,8 @@ public class SetupService(
     IUsersRepository usersRepository,
     IAuthenticationService authService,
     IPasswordHashingService passwordHashingService,
-    ILogger<SetupService> logger) : ISetupService
+    ILogger<SetupService> logger,
+    IConfiguration configuration) : ISetupService
 {
     private readonly IUsersRepository _usersRepository = usersRepository ?? throw new ArgumentNullException(nameof(usersRepository));
     private readonly IAuthenticationService _authService = authService ?? throw new ArgumentNullException(nameof(authService));
@@ -80,6 +84,16 @@ public class SetupService(
             return duplicateUser
                 ? new AuthenticationResult(false, Error: "Username or email is already taken")
                 : new AuthenticationResult(false, Error: "Setup has already been completed. Admin users exist in the system.");
+        }
+
+        string? bootstrapSecret = configuration["Setup:BootstrapSecret"];
+        if (string.IsNullOrWhiteSpace(bootstrapSecret) || bootstrapSecret.Length < 32 ||
+            string.IsNullOrEmpty(request.BootstrapSecret) ||
+            !CryptographicOperations.FixedTimeEquals(
+                SHA256.HashData(Encoding.UTF8.GetBytes(bootstrapSecret)),
+                SHA256.HashData(Encoding.UTF8.GetBytes(request.BootstrapSecret))))
+        {
+            return new AuthenticationResult(false, Error: "Valid installer bootstrap proof is required");
         }
 
         // Validate required fields
@@ -154,8 +168,11 @@ public class SetupService(
             UpdatedAt = DateTime.UtcNow
         };
 
-        // Add user with admin role (repository handles SaveChanges)
-        await _usersRepository.AddUserWithRoleAsync(adminUser, adminRole.Id, ct);
+        // The persisted claim and user must commit together, across all API instances.
+        if (!await _usersRepository.TryCreateInitialAdminAsync(adminUser, adminRole.Id, ct))
+        {
+            return new AuthenticationResult(false, Error: "Setup has already been completed. Bootstrap claim is unavailable.");
+        }
 
         _logger.LogInformation("Initial admin user created: {AdminUserUsername} ({AdminUserEmail})", LogSanitizer.Sanitize(adminUser.Username), SensitiveDataMasking.MaskEmail(adminUser.Email));
 

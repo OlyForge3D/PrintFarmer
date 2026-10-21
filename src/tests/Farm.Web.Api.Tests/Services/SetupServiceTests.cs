@@ -5,6 +5,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Users;
 using Farm.Infrastructure.Services.Authentication;
 using Farm.Infrastructure.Services.Setup;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
@@ -30,7 +31,11 @@ public class SetupServiceTests
             _usersRepository.Object,
             _authService.Object,
             _passwordHashingService.Object,
-            _logger.Object);
+            _logger.Object,
+            new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Setup:BootstrapSecret"] = new string('x', 32)
+            }).Build());
     }
 
     #region NeedsSetupAsync Tests
@@ -86,6 +91,7 @@ public class SetupServiceTests
         var request = new CreateInitialAdminRequest
         {
             Username = "",
+            BootstrapSecret = new string('x', 32),
             Email = "admin@example.com",
             Password = "ValidPassword123!",
             FirstName = "Admin",
@@ -111,6 +117,7 @@ public class SetupServiceTests
         {
             Username = "admin",
             Email = "",
+            BootstrapSecret = new string('x', 32),
             Password = "ValidPassword123!",
             FirstName = "Admin",
             LastName = "User"
@@ -135,6 +142,7 @@ public class SetupServiceTests
             Username = "admin",
             Email = "admin@example.com",
             Password = "",
+            BootstrapSecret = new string('x', 32),
             FirstName = "Admin",
             LastName = "User"
         };
@@ -210,6 +218,12 @@ public class SetupServiceTests
     [Fact]
     public async Task CreateInitialAdminAsync_WhenExistingAdminWithSameCredentials_ReturnsSuccessWithToken()
     {
+        var service = new SetupService(
+            _usersRepository.Object,
+            _authService.Object,
+            _passwordHashingService.Object,
+            _logger.Object,
+            new ConfigurationBuilder().Build());
         // Arrange
         var userId = Guid.NewGuid();
         var request = new CreateInitialAdminRequest
@@ -252,7 +266,7 @@ public class SetupServiceTests
             .ReturnsAsync(userDto);
 
         // Act
-        AuthenticationResult result = await _service.CreateInitialAdminAsync(request, CancellationToken.None);
+        AuthenticationResult result = await service.CreateInitialAdminAsync(request, CancellationToken.None);
 
         // Assert
         Assert.True(result.Success);
@@ -273,6 +287,7 @@ public class SetupServiceTests
             Username = "admin",
             Email = "admin@example.com",
             Password = "Short1!",
+            BootstrapSecret = new string('x', 32),
             FirstName = "Admin",
             LastName = "User"
         };
@@ -301,6 +316,7 @@ public class SetupServiceTests
             Username = "admin",
             Email = "admin@example.com",
             Password = "Short",
+            BootstrapSecret = new string('x', 32),
             FirstName = "Admin",
             LastName = "User"
         };
@@ -327,6 +343,7 @@ public class SetupServiceTests
             Username = "admin",
             Email = "admin@example.com",
             Password = "password123!",
+            BootstrapSecret = new string('x', 32),
             FirstName = "Admin",
             LastName = "User"
         };
@@ -362,6 +379,7 @@ public class SetupServiceTests
             Username = "admin",
             Email = "admin@example.com",
             Password = "PASSWORD123!",
+            BootstrapSecret = new string('x', 32),
             FirstName = "Admin",
             LastName = "User"
         };
@@ -397,6 +415,7 @@ public class SetupServiceTests
             Username = "admin",
             Email = "admin@example.com",
             Password = "Password!",
+            BootstrapSecret = new string('x', 32),
             FirstName = "Admin",
             LastName = "User"
         };
@@ -432,6 +451,7 @@ public class SetupServiceTests
             Username = "admin",
             Email = "admin@example.com",
             Password = "Password123",
+            BootstrapSecret = new string('x', 32),
             FirstName = "Admin",
             LastName = "User"
         };
@@ -469,6 +489,7 @@ public class SetupServiceTests
         var request = new CreateInitialAdminRequest
         {
             Username = "existinguser",
+            BootstrapSecret = new string('x', 32),
             Email = "newadmin@example.com",
             Password = "ValidPassword123!",
             FirstName = "Admin",
@@ -497,6 +518,7 @@ public class SetupServiceTests
         var request = new CreateInitialAdminRequest
         {
             Username = "newadmin",
+            BootstrapSecret = new string('x', 32),
             Email = "existing@example.com",
             Password = "ValidPassword123!",
             FirstName = "Admin",
@@ -523,12 +545,33 @@ public class SetupServiceTests
     #region CreateInitialAdminAsync - Successful Admin Creation Tests
 
     [Fact]
+    public async Task CreateInitialAdminAsync_WhenClaimLost_DoesNotIssueToken()
+    {
+        _usersRepository.Setup(r => r.GetRoleByNameAsync("farm_admin", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Role { Id = Guid.NewGuid(), Name = "farm_admin" });
+        _usersRepository.Setup(r => r.TryCreateInitialAdminAsync(It.IsAny<User>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+
+        AuthenticationResult result = await _service.CreateInitialAdminAsync(new CreateInitialAdminRequest
+        {
+            Username = "admin",
+            Email = "admin@example.test",
+            Password = "ValidPassword123!",
+            BootstrapSecret = new string('x', 32)
+        }, CancellationToken.None);
+
+        Assert.False(result.Success);
+        _authService.Verify(a => a.GenerateJwtTokenAsync(It.IsAny<User>()), Times.Never);
+    }
+
+    [Fact]
     public async Task CreateInitialAdminAsync_WithValidRequest_CreatesAdminAndReturnsToken()
     {
         // Arrange
         var userId = Guid.NewGuid();
         var request = new CreateInitialAdminRequest
         {
+            BootstrapSecret = new string('x', 32),
             Username = "admin",
             Email = "admin@example.com",
             Password = "ValidPassword123!",
@@ -556,8 +599,8 @@ public class SetupServiceTests
             .ReturnsAsync(adminRole);
         _passwordHashingService.Setup(p => p.HashPassword("ValidPassword123!"))
             .Returns("hashed_password");
-        _usersRepository.Setup(r => r.AddUserWithRoleAsync(It.IsAny<User>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
+        _usersRepository.Setup(r => r.TryCreateInitialAdminAsync(It.IsAny<User>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
         _authService.Setup(a => a.GenerateJwtTokenAsync(It.IsAny<User>()))
             .ReturnsAsync("test_token_123");
         _authService.Setup(a => a.GetUserWithRolesAndPermissionsAsync(It.IsAny<Guid>()))
@@ -575,7 +618,7 @@ public class SetupServiceTests
         Assert.NotNull(result.ExpiresAt);
 
         _usersRepository.Verify(
-            r => r.AddUserWithRoleAsync(It.IsAny<User>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
+            r => r.TryCreateInitialAdminAsync(It.IsAny<User>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
             Times.Once);
     }
 
@@ -585,6 +628,7 @@ public class SetupServiceTests
         // Arrange
         var request = new CreateInitialAdminRequest
         {
+            BootstrapSecret = new string('x', 32),
             Username = "admin",
             Email = "admin@example.com",
             Password = "ValidPassword123!",

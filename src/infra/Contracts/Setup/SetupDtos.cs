@@ -4,6 +4,11 @@ namespace Farm.Infrastructure.Contracts.Setup;
 
 public class CreateInitialAdminRequest
 {
+    /// <summary>
+    /// Installer-provided one-time proof, configured through Setup:BootstrapSecret.
+    /// </summary>
+    public string? BootstrapSecret { get; set; }
+
     public string Username { get; set; } = string.Empty;
 
     public string Email { get; set; } = string.Empty;

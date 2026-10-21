@@ -201,6 +201,7 @@ trap 'cleanup 143' TERM
 : "${POSTGRES_PASSWORD:=$(openssl rand -base64 24)}"
 : "${POSTGRES_USER:=printfarmer}"
 : "${Jwt__Key:=$(openssl rand -base64 48)}"
+: "${PFARM__Setup__BootstrapSecret:=$(openssl rand -hex 32)}"
 : "${WORKER_SHARED_API_KEY:=$(openssl rand -hex 32)}"
 : "${ConnectionStrings__Default:=Host=database;Port=5432;Database=printfarmer;Username=${POSTGRES_USER};Pwd=${POSTGRES_PASSWORD}}"
 : "${API_PORT:=15245}"
@@ -212,6 +213,7 @@ trap 'cleanup 143' TERM
 : "${WebAuthn__RelyingPartyName:=PrintFarmer Route Smoke}"
 : "${WebAuthn__Origin:=http://localhost:${HTTP_PORT}}"
 export POSTGRES_PASSWORD POSTGRES_USER Jwt__Key WORKER_SHARED_API_KEY \
+  PFARM__Setup__BootstrapSecret \
   ConnectionStrings__Default WebAuthn__RelyingPartyId WebAuthn__RelyingPartyName \
   WebAuthn__Origin API_PORT SLICER_HOST_PORT HTTP_PORT HTTPS_PORT POSTGRES_PORT
 export DB_PROVIDER=Postgres
@@ -307,12 +309,14 @@ if [[ "$(printf '%s' "$setup_status" | jq -r '.needsSetup')" == "true" ]]; then
   setup_payload="$(jq -n \
     --arg username "$smoke_admin_username" \
     --arg password "$smoke_admin_password" \
+    --arg bootstrapSecret "$PFARM__Setup__BootstrapSecret" \
     '{
       username: $username,
       password: $password,
       email: "route-smoke-admin@printfarmer.local",
       firstName: "Route",
-      lastName: "Smoke"
+      lastName: "Smoke",
+      bootstrapSecret: $bootstrapSecret
     }')"
   setup_response="$(curl --fail --silent --show-error \
     -H 'Content-Type: application/json' \

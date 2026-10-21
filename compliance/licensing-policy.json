@@ -292,13 +292,6 @@
         "reason": "Synthetic credentialed example.test URL tests untrusted API base rejection."
       },
       {
-        "path": "src/tests/Farm.Web.Api.Tests/Controllers/SetupBootstrapControllerTests.cs",
-        "pattern": "https?://[^\\s/:]+:[^\\s/@]+@",
-        "matchSha256": "13a78fd65a52b696a35b089b8681a80d4c263bbe0c843b259e0c464e69f30bc3",
-        "contentSha256": "9c86ad359877aadf88fcc41a5952d8e4d097068b1bc66979f6d669c13e34d91a",
-        "reason": "Synthetic Spoolman configuration tests bootstrap credential non-disclosure."
-      },
-      {
         "path": "src/tests/Farm.Web.Api.Tests/Integration/PrinterImportFacadeIntegrationTests.cs",
         "pattern": "https?://[^\\s/:]+:[^\\s/@]+@",
         "matchSha256": "a28b8176f57374f4f478f28ad1530d57fff8e37cdb58a74e5146350154124e29",

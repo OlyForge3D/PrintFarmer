@@ -450,12 +450,22 @@ if [[ "$AUTO_ADMIN" == "true" ]]; then
     log_error "AUTO_ADMIN_PASSWORD must be set when AUTO_ADMIN=true"
     exit 1
   fi
+  if [[ -z "${PFARM__Setup__BootstrapSecret:-}" ]]; then
+    PFARM__Setup__BootstrapSecret=$(generate_bootstrap_secret) || exit 1
+  fi
+  if [[ ! "$PFARM__Setup__BootstrapSecret" =~ ^[A-Za-z0-9_-]{32,}$ ]]; then
+    log_error "PFARM__Setup__BootstrapSecret must contain at least 32 URL-safe characters"
+    exit 1
+  fi
   log_info "Auto-admin setup enabled for user: $AUTO_ADMIN_USERNAME"
   # Export AUTO_ADMIN variables so API can use them
   export AUTO_ADMIN="true"
   export AUTO_ADMIN_USERNAME
   export AUTO_ADMIN_PASSWORD
   export AUTO_ADMIN_EMAIL
+fi
+if [[ -n "${PFARM__Setup__BootstrapSecret:-}" ]]; then
+  export PFARM__Setup__BootstrapSecret
 fi
 
 # No Redis connection string exported in simplified local script
@@ -568,8 +578,9 @@ fi
 # Setup initial admin user if AUTO_ADMIN is enabled
 if [[ "$AUTO_ADMIN" == "true" ]]; then
   log_info "Setting up initial admin user..."
-  if ! create_initial_admin "$API_URL" "$AUTO_ADMIN_USERNAME" "$AUTO_ADMIN_PASSWORD" "$AUTO_ADMIN_EMAIL"; then
-    log_warn "Could not create initial admin user - this may be expected if setup is not needed"
+  if ! create_initial_admin "$API_URL" "$AUTO_ADMIN_USERNAME" "$AUTO_ADMIN_PASSWORD" "$AUTO_ADMIN_EMAIL" "$PFARM__Setup__BootstrapSecret"; then
+    log_error "Could not create the configured initial admin user."
+    exit 1
   fi
 fi
 

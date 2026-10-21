@@ -175,22 +175,29 @@ struct PrinterSensor: Codable, Sendable, Equatable, Identifiable, Hashable {
 }
 
 enum PrinterSensorGroup: Int, CaseIterable, Hashable, Sendable {
-    case temperatures, fans, environment, other
+    case temperatures, fans, other
 
     var title: String {
         switch self {
         case .temperatures: return "Temperatures"
         case .fans: return "Fans"
-        case .environment: return "Environment"
         case .other: return "Other sensors"
         }
     }
 
     static func group(for sensor: PrinterSensor) -> PrinterSensorGroup {
+        let hasThermalReading = sensor.readings.contains {
+            [.temperature, .targetTemperature, .humidity, .pressure, .gas].contains($0.quantity)
+        }
+        let hasThermalTarget = sensor.writable.contains { $0.quantity == .targetTemperature }
+        if sensor.kind != .fan && (
+            hasThermalReading || hasThermalTarget || sensor.kind == .ambient
+        ) {
+            return .temperatures
+        }
         switch sensor.kind {
         case .fan: return .fans
-        case .nozzle, .bed, .chamber, .mcu, .host: return .temperatures
-        case .ambient: return .environment
+        case .nozzle, .bed, .chamber, .mcu, .host, .ambient: return .temperatures
         case .filamentRunout, .other, .unknown: return .other
         }
     }
@@ -199,6 +206,22 @@ enum PrinterSensorGroup: Int, CaseIterable, Hashable, Sendable {
 /// Pure display helpers shared by Status and Control rows.
 enum PrinterSensorFormatting {
     private static let gridEpsilon = 1e-9
+
+    static func displayName(_ name: String) -> String {
+        name.replacingOccurrences(of: "_", with: " ")
+            .components(separatedBy: " ")
+            .map { part in
+                guard let first = part.first else { return part }
+                return String(first).uppercased() + String(part.dropFirst())
+            }
+            .joined(separator: " ")
+    }
+
+    static func isHidden(_ sensor: PrinterSensor) -> Bool {
+        let shortName = sensor.id.split(whereSeparator: \.isWhitespace).dropFirst().joined(separator: " ")
+        let name = shortName.isEmpty ? sensor.id : shortName
+        return name.hasPrefix("_")
+    }
 
     /// Next on-grid (min + n*step) value at least one step from `current` in the
     /// pressed direction, clamped to the largest on-grid value at or below max.
@@ -261,10 +284,11 @@ enum PrinterSensorFormatting {
     }
 
     static func accessibilityLabel(_ sensor: PrinterSensor) -> String {
-        guard sensor.available else { return "\(sensor.displayName), unavailable" }
-        guard !sensor.readings.isEmpty else { return "\(sensor.displayName), no reading" }
+        let name = displayName(sensor.displayName)
+        guard sensor.available else { return "\(name), unavailable" }
+        guard !sensor.readings.isEmpty else { return "\(name), no reading" }
         let parts = sensor.readings.map { "\(quantityTitle($0.quantity)) \(spokenValue($0))" }
-        return "\(sensor.displayName), " + parts.joined(separator: ", ")
+        return "\(name), " + parts.joined(separator: ", ")
     }
 
     /// A reported list replaces the cache; an omitted list keeps it.

@@ -113,6 +113,13 @@ jobs:
         working-directory: src/Web/ReactApp
         run: npx playwright install --with-deps chromium
 
+      - name: Generate isolated bootstrap proof
+        shell: bash
+        run: |
+          bootstrap_secret="$(openssl rand -hex 32)"
+          echo "::add-mask::$bootstrap_secret"
+          echo "PFARM__Setup__BootstrapSecret=$bootstrap_secret" >> "$GITHUB_ENV"
+
       - name: Start monolith API (seeded, isolated SQLite DB)
         working-directory: src
         env:

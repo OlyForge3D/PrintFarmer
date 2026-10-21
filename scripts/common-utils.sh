@@ -101,12 +101,34 @@ free_port() {
 # ADMIN USER SETUP
 # ============================================================================
 
+# Generate a URL-safe, cryptographically random proof for the first-admin claim.
+generate_bootstrap_secret() {
+    local generated_secret=""
+
+    if command -v openssl >/dev/null 2>&1; then
+        generated_secret="$(openssl rand -hex 32)" || return 1
+    elif [ -r /dev/urandom ] && command -v od >/dev/null 2>&1; then
+        generated_secret="$(od -An -N32 -tx1 /dev/urandom | tr -d '[:space:]')" || return 1
+    else
+        log_error "Unable to generate a bootstrap proof from a cryptographically secure source"
+        return 1
+    fi
+
+    if [[ ! "$generated_secret" =~ ^[[:xdigit:]]{64}$ ]]; then
+        log_error "Bootstrap proof generation returned an invalid value"
+        return 1
+    fi
+
+    printf '%s\n' "$generated_secret"
+}
+
 # Create initial admin user via API
 create_initial_admin() {
     local api_url="$1"
     local username="${2:-admin}"
     local password="${3:-}"
     local email="${4:-admin@printfarmer.local}"
+    local bootstrap_secret="${5:-}"
     
     # Validate inputs
     if [[ -z "$api_url" ]]; then
@@ -130,19 +152,28 @@ create_initial_admin() {
         log_info "Setup has already been completed (admin user exists)"
         return 0
     fi
+
+    if [[ ! "$bootstrap_secret" =~ ^[A-Za-z0-9_-]{32,}$ ]]; then
+        log_error "A URL-safe bootstrap proof of at least 32 characters is required for initial admin creation"
+        return 1
+    fi
     
     # Create the admin user
     log_info "Creating initial admin user: $username"
     local response
     response=$(curl -s -X POST "$api_url/api/setup/initial-admin" \
         -H "Content-Type: application/json" \
-        -d "{
-            \"username\": \"$username\",
-            \"password\": \"$password\",
-            \"email\": \"$email\",
-            \"firstName\": \"Administrator\",
-            \"lastName\": \"User\"
-        }" 2>/dev/null || echo '{"success":false,"error":"Connection failed"}')
+        --data-binary @- 2>/dev/null <<EOF
+        {
+            "username": "$username",
+            "password": "$password",
+            "email": "$email",
+            "firstName": "Administrator",
+            "lastName": "User",
+            "bootstrapSecret": "$bootstrap_secret"
+        }
+EOF
+    ) || response='{"success":false,"error":"Connection failed"}'
     
     local success_check
     success_check=$(echo "$response" | grep -o '"success": *true' || echo "")
@@ -154,7 +185,7 @@ create_initial_admin() {
         return 0
     else
         log_error "Failed to create initial admin user"
-        log_error "Response: $response"
+        log_error "The API response body was omitted to avoid disclosing request data."
         return 1
     fi
 }

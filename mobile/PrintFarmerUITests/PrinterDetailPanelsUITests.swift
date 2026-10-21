@@ -1146,7 +1146,7 @@ final class Issue3259MockupNormalUITests: PrinterDetailPanelsUITests.Issue3259Mo
         let queue = shellDestinationButton(tabIdentifier: "tab.queue", timeout: 8)
         XCTAssertTrue(queue.waitForExistence(timeout: 8))
         queue.tap()
-        let queueList = app.collectionViews["jobList.combined.list"]
+        let queueList = app.descendants(matching: .any)["jobList.root"]
         XCTAssertTrue(queueList.waitForExistence(timeout: 8))
 
         let retryButton = queueList.buttons["job.retry.30000000-0003-0000-0000-000000000009"]

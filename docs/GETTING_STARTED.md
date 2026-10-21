@@ -56,6 +56,32 @@ npm run dev
 
 Open **http://localhost:3000** in your browser. You'll see the PrintFarmer setup wizard.
 
+### First administrator bootstrap proof
+
+Before starting a fresh API installation, configure `PFARM__Setup__BootstrapSecret`
+(`Setup:BootstrapSecret`) with a unique, cryptographically random secret of at least
+32 characters. Generate it with a password manager or secret manager; do not
+reuse an example value or commit it to configuration. Pass the environment
+variable to the API process (or API container through your deployment secret
+mechanism). Shell deployment helpers require URL-safe characters (`A-Z`, `a-z`,
+`0-9`, `_`, or `-`). `deploy-docker.sh` generates a random proof when none is
+configured and stores it in the mode-0600 `.env` and `.deploy-config` files;
+`--auto-admin` uses it automatically, while wizard-based setup can read it from
+`.env`.
+Enter that same value in the wizard's **Installer bootstrap secret** field over
+HTTPS (or localhost for development). The server never returns the secret.
+Missing, incorrect, or inadequately configured proof blocks new admin creation.
+
+AdminCli reads the proof from the same environment variable in its own process;
+direct API clients send it as the `bootstrapSecret` JSON property on
+`POST /api/setup/initial-admin`. Do not put the proof in a URL or shell argument.
+After successful setup, remove the environment variable and restart the API.
+A durable, non-secret database claim prevents a second bootstrap, including
+concurrent attempts, process restarts, and removal of the original administrator.
+Existing-admin deployments need no bootstrap configuration; credential-based
+idempotent setup/login is unchanged. Use normal administrator recovery rather
+than deleting the bootstrap claim.
+
 ## Testing
 
 ```bash

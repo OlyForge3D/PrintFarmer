@@ -135,6 +135,12 @@ public interface IUsersRepository
     Task AddUserWithRoleAsync(User user, Guid roleId, CancellationToken ct = default);
 
     /// <summary>
+    /// Atomically consumes the installation's bootstrap claim and creates its first admin.
+    /// Returns false if the claim was consumed or an admin already exists.
+    /// </summary>
+    Task<bool> TryCreateInitialAdminAsync(User user, Guid roleId, CancellationToken ct = default);
+
+    /// <summary>
     /// Gets a user by username for authentication.
     /// </summary>
     /// <param name="username">The username to find.</param>

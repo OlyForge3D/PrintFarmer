@@ -67,6 +67,25 @@ invalidation triggered the CI-only UIKit exception. The fix removes the observed
 editing/content-identity hazards without replacing native drag or relaxing its
 ordering and cross-group assertions.
 
+### Queue reorder query scope (#3455)
+
+Run `39524467911`, iPad shard 2 job `118983751495`, failed both Harvest
+reorder cases at the alpha-handle lookup, on the first attempt and retry.
+The retained retry tree shows the Queue `CollectionView` identified as
+`jobList.root`, not `jobList.combined.list`. It also shows native
+`Reorder Thumbnail for Queue reorder alpha.gcode` (frame
+`986.5, 471.5, 27, 44`), beta, and gamma buttons. The controls are present;
+the test's collection-identifier scope excludes them.
+
+SwiftUI promotes the outer Queue root identifier onto the native collection
+in the iPad split view. Queue handle and scroll queries now target
+`app.descendants(matching: .any)["jobList.root"]`, which also works when
+iPhone exposes a separate root container. Adjacent History and retry queries
+use the same root rather than the overridden nested identifier. Product code,
+eligibility, drag ordering, group boundaries, timeouts, and skips are unchanged.
+The existing Harvest reorder cases remain the behavioral regression coverage;
+simulator success must be established separately on both device families.
+
 ### Historical evidence
 
 The retained `/tmp/gorman-2519-test.log` lines 4740-4742 recover the exact

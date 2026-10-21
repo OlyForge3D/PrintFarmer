@@ -19,7 +19,7 @@ class QueueUITestBase: PrintFarmerUITestCase {
     ) {
         openQueueDestination(file: file, line: line)
 
-        let queueList = app.collectionViews["jobList.combined.list"]
+        let queueList = app.descendants(matching: .any)["jobList.root"]
         let historyButton = app.buttons["jobList.history.open"]
         for _ in 0..<8 where !historyButton.isHittable {
             if queueList.exists {
