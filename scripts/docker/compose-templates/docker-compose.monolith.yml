@@ -17,6 +17,7 @@ services:
       # ASP.NET Core settings
       - ASPNETCORE_ENVIRONMENT=Production
       - ASPNETCORE_URLS=http://+:5000
+      - PFARM__Setup__BootstrapSecret=${PFARM__Setup__BootstrapSecret:-}
       # Passkey / WebAuthn settings
       - WebAuthn__RelyingPartyId=${WebAuthn__RelyingPartyId:?WebAuthn__RelyingPartyId must be set to the canonical deployment hostname in .env.}
       - WebAuthn__RelyingPartyName=${WebAuthn__RelyingPartyName:-PrintFarmer}

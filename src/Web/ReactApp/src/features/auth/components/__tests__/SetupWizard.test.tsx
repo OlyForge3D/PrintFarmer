@@ -76,6 +76,7 @@ vi.mock('@/services/settingsApi', () => ({
 
 async function advanceToSpoolmanStep() {
   await screen.findByText('Initial configuration wizard');
+  fireEvent.change(screen.getByLabelText('Installer bootstrap secret'), { target: { value: 'installer-test-proof' } });
   fireEvent.change(screen.getByLabelText(/First Name/, { selector: 'input' }), { target: { value: 'Ada' } });
   fireEvent.change(screen.getByLabelText(/Last Name/, { selector: 'input' }), { target: { value: 'Lovelace' } });
   fireEvent.change(screen.getByLabelText(/Username/, { selector: 'input' }), { target: { value: 'admin' } });
@@ -124,6 +125,7 @@ describe('SetupWizard first-run Spoolman bootstrap', () => {
     expect(mockGetSetupBootstrap).toHaveBeenCalledTimes(1);
     expect(mockGetSetupBootstrap).toHaveBeenCalledWith(expect.any(AbortSignal));
     expect(mockGetSettings).not.toHaveBeenCalledWith('Spoolman');
+    expect(mockCreateInitialAdmin).toHaveBeenCalledWith(expect.objectContaining({ bootstrapSecret: 'installer-test-proof' }));
     expect(screen.getByLabelText('Enable Spoolman')).toBeChecked();
     expect(screen.getByPlaceholderText('http://spoolman:7912')).toHaveValue('http://deployment-spoolman:7912');
   });
