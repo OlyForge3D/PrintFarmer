@@ -1737,13 +1737,39 @@ test_https_port_zero_disables_https_binding() {
     local compose_content
     compose_content=$(cat "$compose_file")
 
-    assert_contains "$compose_content" '"${HTTP_PORT:-8080}:80"' "HTTP port mapping should remain"
+    assert_contains "$compose_content" '"127.0.0.1:${HTTP_PORT:-8080}:80"' "HTTP port mapping should remain loopback-only"
     assert_not_contains "$compose_content" '"${HTTPS_PORT:-8443}:443"' "HTTPS port mapping should be removed when HTTPS_PORT=0"
     assert_not_contains "$compose_content" '0:443' "HTTPS port 0 must not publish a random host port"
 
     pass_test
 }
 
+# Test: base Compose must not publish cleartext HTTP on a network interface (#3447)
+test_http_listener_is_loopback_only() {
+    start_test "HTTP listener is loopback-only; HTTPS remains published"
+
+    local test_dir="$TEST_TEMP_DIR/test-http-loopback"
+    assert_command_success "BIND_ADDRESS=0.0.0.0 $COMPOSE_GENERATOR --output-dir $test_dir"
+
+    local compose_file="$test_dir/docker-compose.yml"
+    assert_file_exists "$compose_file"
+
+    local compose_content
+    compose_content=$(cat "$compose_file")
+
+    assert_contains "$compose_content" '"127.0.0.1:${HTTP_PORT:-8080}:80"' "HTTP must bind to loopback"
+    assert_not_contains "$compose_content" '${BIND_ADDRESS' "BIND_ADDRESS must not widen HTTP exposure"
+    assert_not_contains "$compose_content" '0.0.0.0:${HTTP_PORT' "HTTP must never default to all interfaces"
+    assert_contains "$compose_content" '"${HTTPS_PORT:-8443}:443"' "HTTPS (TLS) listener remains published"
+
+    # Authenticated /api/ is proxied on port 80 only; with the loopback-only
+    # binding that listener is unreachable from the network.
+    local nginx_conf
+    nginx_conf=$(cat "$REPO_ROOT/deploy/nginx/nginx-proxy.conf")
+    assert_contains "$nginx_conf" 'listen 443 ssl;' "nginx must keep the TLS listener"
+
+    pass_test
+}
 # Test: database_provider_validation (PHASE 3)
 test_invalid_connection_string() {
     start_test "database provider configuration validation"
@@ -2302,6 +2328,7 @@ run_all_tests() {
     test_duplicate_service_names
     test_port_conflict_detection
     test_https_port_zero_disables_https_binding
+    test_http_listener_is_loopback_only
     test_invalid_connection_string
     test_missing_config_files
     test_concurrent_generation_safety

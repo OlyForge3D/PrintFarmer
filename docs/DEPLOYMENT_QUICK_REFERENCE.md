@@ -183,7 +183,7 @@ chown $USER:$USER .deploy-config
 - `DB_PROVIDER` - `postgres` or `sqlserver`
 - `DB_PASSWORD` - Database password
 - `NETWORK_MODE` - `bridge` only
-- `HTTP_PORT` - Frontend port (default: 8080)
+- `HTTP_PORT` - Frontend HTTP port, published on `127.0.0.1` only (default: 8080); use `HTTPS_PORT` for LAN access
 - `API_PORT` - API port (default: 5245, microservices only)
 
 ### Network Discovery
