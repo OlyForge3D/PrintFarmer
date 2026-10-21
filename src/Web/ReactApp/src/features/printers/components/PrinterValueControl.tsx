@@ -163,7 +163,7 @@ export function PrinterValueControl({
         {children}
         {mode === 'switch' ? setting === undefined ? null : <Button type="button" variant="ghost" role="switch"
           aria-label={label} aria-checked={setting === 1} aria-describedby={messageId}
-          disabled={locked || setting === undefined} className="min-h-11 min-w-11 p-0!"
+          disabled={locked} className="min-h-11 min-w-11 p-0!"
           onClick={() => { void send(setting === 1 ? 0 : 1); }}>
           <span data-pf-radius="full" className={`relative block h-5 w-9 rounded-full border border-pf-control-boundary ${setting === 1 ? 'bg-pf-accent' : 'bg-pf-bg-2'}`} aria-hidden="true">
             <span data-pf-radius="full" className={`absolute top-0.5 left-0.5 h-3.5 w-3.5 rounded-full bg-pf-text-primary ${setting === 1 ? 'translate-x-4' : ''}`} />

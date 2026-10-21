@@ -521,6 +521,22 @@ describe('PrinterSensorsPanel', () => {
     expect(screen.getByTestId('sensor-chamber').querySelectorAll('td')[1]).toBeEmptyDOMElement();
   });
 
+  it.each(['permission', 'offline', 'unavailable', 'missing reading'] as const)('does not send binary commands with %s', async gate => {
+    const user = userEvent.setup();
+    const light: PrinterSensor = { id: 'light', displayName: 'Case light', kind: 'Other', available: gate !== 'unavailable',
+      readings: gate === 'missing reading' ? [] : [{ quantity: 'Power', value: 0, unit: 'None' }],
+      writable: [{ quantity: 'Power', min: 0, max: 1, step: 1, unit: 'None' }] };
+    renderPanel([light], { canControl: gate !== 'permission', isOnline: gate !== 'offline' });
+    if (gate === 'missing reading') {
+      expect(screen.queryByRole('switch')).not.toBeInTheDocument();
+    } else {
+      const toggle = screen.getByRole('switch', { name: 'Set Case Light Power' });
+      expect(toggle).toBeDisabled();
+      await user.click(toggle);
+    }
+    expect(mocks.setPrinterSensor).not.toHaveBeenCalled();
+  });
+
   it('all direct controls remain disabled by permission, offline and availability gates', () => {
     mocks.allowed = false;
     render(<PrinterSensorsSection printerId="p1" sensors={[fan]} temperatures={{}} canControl />);
