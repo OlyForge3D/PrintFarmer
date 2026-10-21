@@ -79,6 +79,7 @@ import {
 import { getStatusHeaderClassName, isPrinterStateShutdown } from '@/features/printers/utils/statusColors';
 import {
   getPresetTargets,
+  temperatureTargetLimitError,
   getExtrudeMinTemp,
   DEFAULT_EXTRUDE_DISTANCE_MM,
   DEFAULT_EXTRUDE_SPEED_MMS,
@@ -391,6 +392,11 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
         console.warn(`Unknown preset: ${preset}`);
         return;
       }
+      const limitError = temperatureTargetLimitError(targets, printer.sensors, printerDetails?.capabilities);
+      if (limitError) {
+        toast.error(limitError);
+        return;
+      }
       
       const result = await apiClient.setTemperatures(printer.id, targets);
       
@@ -418,6 +424,11 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
     }
 
     const targets = { [heater]: presetTargets[heater] };
+    const limitError = temperatureTargetLimitError(targets, printer.sensors, printerDetails?.capabilities);
+    if (limitError) {
+      toast.error(limitError);
+      return;
+    }
 
     setTemperatureActionPending(true);
     try {

@@ -10,6 +10,14 @@ export function primaryHeater(sensor: PrinterSensor): 'hotend' | 'bed' | undefin
   return undefined;
 }
 
+export function primaryHeaterLimits(sensors: PrinterSensor[] | undefined, heater: 'hotend' | 'bed', persistedMax?: number) {
+  const descriptor = sensors?.find(sensor => primaryHeater(sensor) === heater)?.writable?.find(item => item.quantity === 'TargetTemperature');
+  const min = descriptor?.min ?? 0;
+  const max = [descriptor?.max, persistedMax].find(value =>
+    value !== undefined && Number.isFinite(value) && value >= 0 && value >= min);
+  return { min, max, step: descriptor && max !== undefined ? descriptor.step : 1 };
+}
+
 export function primaryHeaterPower(sensors: PrinterSensor[] | undefined, heater: 'hotend' | 'bed'): string | undefined {
   const power = sensors?.find(sensor => primaryHeater(sensor) === heater)?.readings.find(reading => reading.quantity === 'Power');
   if (typeof power?.value !== 'number' || !Number.isFinite(power.value)) return undefined;

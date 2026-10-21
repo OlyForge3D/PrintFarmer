@@ -5,7 +5,7 @@ import { apiClient } from '@/services/api';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { PrinterValueControl } from '@/features/printers/components/PrinterValueControl';
 import { PrinterThermalRow, PrinterThermalTable } from '@/features/printers/components/PrinterSensorsPanel';
-import { primaryHeater, primaryHeaterPower } from '@/features/printers/utils/additionalPrinterSensors';
+import { primaryHeater, primaryHeaterLimits, primaryHeaterPower } from '@/features/printers/utils/additionalPrinterSensors';
 import type { PrinterSensor } from '@/types/api';
 import { bedPresetOptions, hotendPresetOptions, materialPresets } from '@/features/printers/constants/temperaturePresets';
 
@@ -66,9 +66,7 @@ export function TemperatureControlSection({
     <PrinterThermalTable>
       {rows.map(row => {
         const sensor = sensors?.find(item => primaryHeater(item) === row.heater);
-        const descriptor = sensor?.writable?.find(item => item.quantity === 'TargetTemperature');
-        const min = descriptor?.min ?? 0;
-        const max = [descriptor?.max, row.max].find(value => value !== undefined && Number.isFinite(value) && value >= min);
+        const { min, max, step } = primaryHeaterLimits(sensors, row.heater, row.max);
         const power = primaryHeaterPower(sensors, row.heater);
         const unavailable = sensor?.available === false;
         const blocked = !canSetTemperatures || !authorized || unavailable;
@@ -81,7 +79,7 @@ export function TemperatureControlSection({
           state={<span className="font-mono tabular-nums">{power}</span>}
           current={<span className="font-mono tabular-nums">{Number.isFinite(row.current) ? `${row.current!.toFixed(1)}°C` : ''}</span>}
           target={status => <PrinterValueControl label={`${row.name} target temperature`} current={Number.isFinite(row.target) ? row.target : undefined}
-              min={min} max={max} step={descriptor && max !== undefined ? descriptor.step : 1}
+              min={min} max={max} step={step}
               unit="°C" disabled={blocked} pending={busy} status={status}
               onSubmit={async value => {
                 setSending(true);

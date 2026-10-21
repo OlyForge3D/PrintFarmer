@@ -39,6 +39,7 @@ import {
 } from '@/features/printers/utils/printerSupport';
 import {
   getPresetTargets,
+  temperatureTargetLimitError,
   getExtrudeMinTemp,
   EXTRUDE_DISTANCE_OPTIONS,
   DEFAULT_EXTRUDE_DISTANCE_MM,
@@ -664,6 +665,11 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
         console.warn(`Unknown preset: ${preset}`);
         return;
       }
+      const limitError = temperatureTargetLimitError(targets, displayPrinter?.sensors, printerDetails?.capabilities);
+      if (limitError) {
+        toast.error(limitError);
+        return;
+      }
 
       const result = await apiClient.setTemperatures(printer.id, targets);
 
@@ -691,6 +697,11 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
     }
 
     const targets = { [heater]: presetTargets[heater] };
+    const limitError = temperatureTargetLimitError(targets, displayPrinter?.sensors, printerDetails?.capabilities);
+    if (limitError) {
+      toast.error(limitError);
+      return;
+    }
 
     setTemperatureActionPending(true);
     try {

@@ -132,12 +132,12 @@ export function PrinterValueControl({
     setMessage('');
   };
   const numeric = (
-    <div className="relative w-[4.5rem] shrink-0">
+    <label data-value-hit-area className="relative m-0! flex min-h-11 w-[4.5rem] shrink-0 items-center">
       <Input type="number" aria-label={label} aria-describedby={`${id}-bounds ${messageId}`}
         aria-invalid={error || (draft !== null && !validValue(parsed)) || undefined}
         aria-busy={busy.current} min={min} max={max} step={step && step > 0 ? step : 'any'}
         value={shown} disabled={locked}
-        className="min-h-11 border-pf-control-boundary! text-right font-mono tabular-nums pl-1! pr-6! [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+        className="h-8! min-h-8! py-0! border-pf-control-boundary! text-right font-mono tabular-nums pl-1! pr-6! [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
         onChange={event => preview(event.target.value)}
         onBlur={() => {
           if (replaceNumberBlur.current) { replaceNumberBlur.current = false; return; }
@@ -148,7 +148,7 @@ export function PrinterValueControl({
           if (event.key === 'Escape') { event.preventDefault(); discard(); }
         }} />
       <span className="pointer-events-none absolute right-1 top-1/2 -translate-y-1/2 text-xs text-pf-text-secondary" aria-hidden="true">{unit}</span>
-    </div>
+    </label>
   );
 
   return (

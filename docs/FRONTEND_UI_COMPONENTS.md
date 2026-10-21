@@ -82,10 +82,17 @@ Numeric targets submit on Enter or blur, once per edit. Fan sliders preview
 locally and submit on release; keyboard changes submit directly. Same-row
 reset, step, slider and switch actions take precedence over an unsubmitted
 numeric draft. Failed commands show an explicit error and retry action.
+Temperature and percentage fields have a 32px visible box with unchanged text
+size and no vertical input padding. An associated outer label preserves a
+44px effective hit area, including narrow screens and coarse pointers; the
+committed HTML reference uses the same sizing.
 Primary heater edits send only the edited target, not a stale companion target.
 Their fallback input precision is whole degrees to match the existing `/temps`
 adapter contract. Both surfaces fetch persisted printer capabilities for heater
 maximums, independently of Spoolman; writable sensor bounds take precedence.
+Combined and per-heater presets enforce the same known maximums. An over-limit
+preset is rejected visibly without sending or partially applying its targets;
+targets are never silently clamped.
 When neither source supplies a valid maximum, the affected heater explicitly
 warns that integer commands rely on firmware limits: the primary `/temps`
 endpoint does not enforce an upper bound. Entry and cooldown remain available

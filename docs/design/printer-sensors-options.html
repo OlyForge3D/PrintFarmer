@@ -95,9 +95,11 @@
     .mono, .reading, input[type="number"], .rpm, .unit { font-family: var(--pf-font-mono); font-variant-numeric: tabular-nums; }
     .reading { font-size: 14px; white-space: nowrap; }
     .state-reading { color: var(--pf-text-secondary); }
-    .number-field { display: inline-flex; align-items: center; width: 88px; min-height: 36px; border: 1px solid var(--pf-control-boundary); border-radius: 4px; background: var(--pf-bg-1); }
+    .number-hit-area { display: inline-flex; align-items: center; min-height: 44px; }
+    .target-cell { padding-top: 0; padding-bottom: 0; }
+    .number-field { display: inline-flex; align-items: center; width: 88px; height: 32px; min-height: 32px; border: 1px solid var(--pf-control-boundary); border-radius: 4px; background: var(--pf-bg-1); }
     .number-field:focus-within { border-color: var(--pf-accent); }
-    input[type="number"] { width: 100%; min-width: 0; height: 34px; padding: 4px 8px; border: 0; background: transparent; color: var(--pf-text-primary); text-align: right; appearance: textfield; -moz-appearance: textfield; }
+    input[type="number"] { width: 100%; min-width: 0; height: 30px; min-height: 30px; padding: 0 8px; border: 0; background: transparent; color: var(--pf-text-primary); text-align: right; appearance: textfield; -moz-appearance: textfield; }
     input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
     .unit { padding-right: 8px; color: var(--pf-text-secondary); font-size: 12px; }
     input[aria-invalid="true"] { box-shadow: inset 0 -2px var(--pf-error); }
@@ -139,7 +141,7 @@
     footer { margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--pf-border); font-size: 12px; color: var(--pf-text-secondary); }
     footer p { max-width: 80ch; margin-bottom: 8px; }
     .empty { padding: 24px 16px; color: var(--pf-text-secondary); }
-    .phone .preview :is(button, input[type="number"], input[type="range"]) { min-height: 44px; }
+    .phone .preview :is(button, input[type="range"]) { min-height: 44px; }
     .phone .preview :is(.reset-control, .step-control) { min-width: 44px; }
     @container sensors (max-width: 440px) {
       .panel-body { padding: 4px 8px 8px; }
@@ -169,11 +171,11 @@
       .appbar > span { max-width: 140px; }
       .workspace, .phone .workspace { grid-template-columns: minmax(0, 1fr); gap: 24px; }
       .notes { max-width: 70ch; }
-      button, select, input[type="number"], input[type="range"] { min-height: 44px; }
+      button, select, input[type="range"] { min-height: 44px; }
       .reset-control, .step-control { min-width: 44px; }
     }
     @media (pointer: coarse) {
-      button, select, input[type="number"], input[type="range"] { min-height: 44px; }
+      button, select, input[type="range"] { min-height: 44px; }
       .reset-control, .step-control { min-width: 44px; }
     }
     @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; } }
@@ -278,9 +280,9 @@
       return `${escapeHtml(sensor.name)}${sensor.role ? ` <span class="role">${sensor.role}</span>` : ''}`;
     }
     function numericInput(sensor) {
-      return `<label class="number-field"><span class="sr-only">${escapeHtml(sensor.name)} ${sensor.kind === 'thermal' ? 'target temperature' : 'percentage'}</span>
+      return `<label class="number-hit-area" data-value-hit-area><span class="number-field"><span class="sr-only">${escapeHtml(sensor.name)} ${sensor.kind === 'thermal' ? 'target temperature' : 'percentage'}</span>
         <input type="number" id="${sensor.id}-number" name="${sensor.id}-number" data-number="${sensor.id}" min="${sensor.min}" max="${sensor.max}" step="${sensor.step}" inputmode="decimal" autocomplete="off" aria-describedby="${sensor.id}-bounds ${sensor.id}-message">
-        <span class="unit" aria-hidden="true">${unit(sensor)}</span></label>
+        <span class="unit" aria-hidden="true">${unit(sensor)}</span></span></label>
         <span class="sr-only" id="${sensor.id}-bounds">${sensor.min} to ${sensor.max}${unit(sensor)}, step ${sensor.step}. Enter or Tab sends.</span>`;
     }
     function thermalRow(sensor) {

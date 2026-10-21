@@ -11,6 +11,7 @@ const usePrinterDetailsMock = vi.hoisted(() =>
   vi.fn<() => { data: Partial<PrinterDetails> | undefined; isLoading: boolean }>(() => ({ data: undefined, isLoading: false }))
 );
 const setTemperaturesMock = vi.hoisted(() => vi.fn());
+const toastErrorMock = vi.hoisted(() => vi.fn());
 const useSpoolmanConfiguredMock = vi.hoisted(() => vi.fn(() => ({ ready: true })));
 const printerHistoryModalMock = vi.hoisted(() =>
   vi.fn<(props: { isOpen: boolean }) => null>(() => null)
@@ -85,7 +86,7 @@ vi.mock('@/features/printers/components/FailureDetectionMonitoringSummary', () =
 vi.mock('@/features/printers/components/OfflineTroubleshootingGuide', () => ({ OfflineTroubleshootingGuide: () => null }));
 vi.mock('@/features/printers/components/PrinterCameraPreview', () => ({ PrinterCameraPreview: () => <div data-testid="camera-preview" /> }));
 vi.mock('@/services/api', () => ({ apiClient: { setTemperatures: setTemperaturesMock } }));
-vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() } }));
+vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: toastErrorMock, info: vi.fn() } }));
 
 import { DetailedPrinterCard } from '../DetailedPrinterCard';
 
@@ -113,6 +114,7 @@ describe('DetailedPrinterCard printerDetails gating (#1146 item 4)', () => {
     useSpoolmanConfiguredMock.mockReturnValue({ ready: true });
     printerHistoryModalMock.mockClear();
     setTemperaturesMock.mockReset().mockResolvedValue({ success: true });
+    toastErrorMock.mockClear();
   });
 
   it.each([
@@ -201,6 +203,70 @@ describe('DetailedPrinterCard printerDetails gating (#1146 item 4)', () => {
     fireEvent.keyDown(input, { key: 'Enter' });
     await waitFor(() => expect(setTemperaturesMock).toHaveBeenCalledExactlyOnceWith('printer-1', { [name.toLowerCase()]: 65 }));
     expect(input).toHaveAccessibleDescription(/maximum temperature unknown/);
+  });
+
+  it.each(['persisted', 'descriptor'])('rejects combined and per-heater PC presets above %s maximums without changing valid presets or cooldown', async source => {
+    usePrinterDetailsMock.mockReturnValue({ isLoading: false, data: { capabilities: {
+      id: 'caps', printerId: 'printer-1', printerName: 'Printer 1',
+      maxHotendTemp: source === 'persisted' ? 250 : 300, maxBedTemp: source === 'persisted' ? 100 : 120,
+      hasHeatedBed: true, hasEnclosure: false, multiMaterial: false, isAvailable: true,
+      supportsAutoLeveling: false, lastUpdated: new Date(),
+    } } });
+    render(<DetailedPrinterCard printer={makePrinter({ sensors: source === 'descriptor' ? [
+      { id: 'extruder', kind: 'Nozzle', displayName: 'Nozzle', available: true, readings: [],
+        writable: [{ quantity: 'TargetTemperature', min: 0, max: 250, step: 1, unit: 'Celsius' }] },
+      { id: 'heater_bed', kind: 'Bed', displayName: 'Bed', available: true, readings: [],
+        writable: [{ quantity: 'TargetTemperature', min: 0, max: 100, step: 1, unit: 'Celsius' }] },
+    ] : undefined })} />);
+    const presets = screen.getByRole('combobox', { name: 'Apply temperature preset' });
+    for (const preset of ['PC', 'hotend:PC', 'bed:PC']) {
+      fireEvent.change(presets, { target: { value: preset } });
+      expect(setTemperaturesMock).not.toHaveBeenCalled();
+      expect(toastErrorMock).toHaveBeenLastCalledWith(expect.stringMatching(/exceeds maximum.*Nothing sent/));
+    }
+    expect(toastErrorMock).toHaveBeenCalledTimes(3);
+    let count = 0;
+    for (const [preset, targets] of [
+      ['PLA', { hotend: 210, bed: 60 }], ['hotend:PLA', { hotend: 210 }], ['bed:PLA', { bed: 60 }],
+    ] as const) {
+      fireEvent.change(presets, { target: { value: preset } });
+      await waitFor(() => expect(presets).toBeEnabled());
+      expect(setTemperaturesMock).toHaveBeenCalledTimes(++count);
+      expect(setTemperaturesMock).toHaveBeenLastCalledWith('printer-1', targets);
+    }
+    fireEvent.click(screen.getByRole('button', { name: 'Cooldown' }));
+    await waitFor(() => expect(setTemperaturesMock).toHaveBeenCalledTimes(4));
+    expect(setTemperaturesMock).toHaveBeenLastCalledWith('printer-1', { hotend: 0, bed: 0 });
+  });
+
+  it.each([[250, 120], [300, 100]])('does not partially apply a combined preset if only one heater exceeds %s/%s', (maxHotendTemp, maxBedTemp) => {
+    usePrinterDetailsMock.mockReturnValue({ isLoading: false, data: { capabilities: {
+      id: 'caps', printerId: 'printer-1', printerName: 'Printer 1', maxHotendTemp, maxBedTemp,
+      hasHeatedBed: true, hasEnclosure: false, multiMaterial: false, isAvailable: true,
+      supportsAutoLeveling: false, lastUpdated: new Date(),
+    } } });
+    render(<DetailedPrinterCard printer={makePrinter()} />);
+    fireEvent.change(screen.getByRole('combobox', { name: 'Apply temperature preset' }), { target: { value: 'PC' } });
+    expect(setTemperaturesMock).not.toHaveBeenCalled();
+    expect(toastErrorMock).toHaveBeenCalledWith(expect.stringMatching(/exceeds maximum.*Nothing sent/));
+  });
+
+  it('retains all PC preset scopes and cooldown with the user-selected unknown-limit warning', async () => {
+    render(<DetailedPrinterCard printer={makePrinter()} />);
+    const presets = screen.getByRole('combobox', { name: 'Apply temperature preset' });
+    let count = 0;
+    for (const [preset, targets] of [
+      ['PC', { hotend: 280, bed: 110 }], ['hotend:PC', { hotend: 280 }], ['bed:PC', { bed: 110 }],
+    ] as const) {
+      fireEvent.change(presets, { target: { value: preset } });
+      await waitFor(() => expect(presets).toBeEnabled());
+      expect(setTemperaturesMock).toHaveBeenCalledTimes(++count);
+      expect(setTemperaturesMock).toHaveBeenLastCalledWith('printer-1', targets);
+    }
+    expect(screen.getByRole('spinbutton', { name: 'Hotend target temperature' })).toHaveAccessibleDescription(/maximum temperature unknown.*firmware limits/);
+    fireEvent.click(screen.getByRole('button', { name: 'Cooldown' }));
+    await waitFor(() => expect(setTemperaturesMock).toHaveBeenCalledTimes(4));
+    expect(setTemperaturesMock).toHaveBeenLastCalledWith('printer-1', { hotend: 0, bed: 0 });
   });
 
   describe('DetailedPrinterCard history modal gating', () => {

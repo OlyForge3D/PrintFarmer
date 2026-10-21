@@ -1,4 +1,5 @@
-import type { TempTargets } from '@/types/api';
+import type { PrinterCapabilitiesDto, PrinterSensor, TempTargets } from '@/types/api';
+import { primaryHeaterLimits } from '@/features/printers/utils/additionalPrinterSensors';
 
 export interface MaterialTemperaturePreset {
   label: string;
@@ -36,6 +37,24 @@ export function getPresetTargets(preset: string): TempTargets | null {
   }
 
   return { hotend: match.hotend, bed: match.bed };
+}
+
+export function temperatureTargetLimitError(
+  targets: Partial<TempTargets>,
+  sensors: PrinterSensor[] | undefined,
+  capabilities: Pick<PrinterCapabilitiesDto, 'maxHotendTemp' | 'maxBedTemp'> | undefined,
+): string | undefined {
+  for (const [heater, label, persistedMax] of [
+    ['hotend', 'Hotend', capabilities?.maxHotendTemp],
+    ['bed', 'Bed', capabilities?.maxBedTemp],
+  ] as const) {
+    const target = targets[heater];
+    const { max } = primaryHeaterLimits(sensors, heater, persistedMax);
+    if (target !== undefined && max !== undefined && target > max) {
+      return `${label} target ${target}°C exceeds maximum ${max}°C. Nothing sent.`;
+    }
+  }
+  return undefined;
 }
 
 /** Default minimum hotend temperature (°C) for extrusion when material is unknown. Matches PLA. */

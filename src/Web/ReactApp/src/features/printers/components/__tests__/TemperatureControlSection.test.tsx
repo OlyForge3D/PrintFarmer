@@ -161,6 +161,21 @@ describe('TemperatureControlSection', () => {
     expect(screen.getByRole('spinbutton', { name: 'Bed target temperature' })).not.toHaveAccessibleDescription(/maximum temperature unknown/);
   });
 
+  it.each([undefined, 250])('rejects a negative descriptor maximum even above its minimum and falls back to %s', persistedMax => {
+    renderSection({ maxHotendTemp: persistedMax, sensors: [{
+      id: 'extruder', kind: 'Nozzle', displayName: 'Nozzle', available: true, readings: [],
+      writable: [{ quantity: 'TargetTemperature', min: -20, max: -10, step: 1, unit: 'Celsius' }],
+    }] });
+    const input = screen.getByRole('spinbutton', { name: 'Hotend target temperature' });
+    if (persistedMax === undefined) {
+      expect(input).not.toHaveAttribute('max');
+      expect(input).toHaveAccessibleDescription(/maximum temperature unknown/);
+    } else {
+      expect(input).toHaveAttribute('max', '250');
+      expect(input).not.toHaveAccessibleDescription(/maximum temperature unknown/);
+    }
+  });
+
   it('keeps the entire primary section blocked during a direct command without misreporting a disconnect', async () => {
     let finish!: (value: { success: boolean }) => void;
     mocks.setTemperatures.mockReturnValue(new Promise(resolve => { finish = resolve; }));

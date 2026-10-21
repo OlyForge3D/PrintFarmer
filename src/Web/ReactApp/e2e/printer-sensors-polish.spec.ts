@@ -1,5 +1,96 @@
 import { expect, test } from '@playwright/test';
+import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { SELECTABLE_THEMES } from '../src/design-system/themes/registry';
+
+test('reference and production numeric fields match compact visual heights with full effective hit areas', async ({ browser, baseURL }) => {
+  const measurements: object[] = [];
+  for (const [width, coarse] of [[1100, false], [360, false], [320, false], [1100, true]] as const) {
+    const context = await browser.newContext({ baseURL, viewport: { width, height: 1200 }, hasTouch: coarse, isMobile: coarse });
+    try {
+      const page = await context.newPage();
+      await page.route(url => /^https?:$/.test(url.protocol) && (url.pathname.startsWith('/api/') || !['localhost', '127.0.0.1'].includes(url.hostname)),
+        route => route.fulfill({ status: 503, json: { message: 'Isolated fixture: hardware access blocked' } }));
+      await page.goto('/src/test/fixtures/printer-sensors.html');
+      expect(await page.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(coarse);
+      const input = page.getByRole('region', { name: 'card', exact: true }).getByRole('spinbutton', { name: 'Hotend target temperature' });
+      await expect(input).toBeVisible();
+      const production = await input.evaluate(node => ({
+        visible: node.getBoundingClientRect().height,
+        hit: node.closest('[data-value-hit-area]')!.getBoundingClientRect().height,
+        font: getComputedStyle(node).fontSize,
+        padding: getComputedStyle(node).paddingTop,
+      }));
+      const area = input.locator('..');
+      await area.scrollIntoViewIfNeeded();
+      const bounds = await area.boundingBox();
+      if (!bounds) throw new Error('Numeric hit area is not visible');
+      await page.mouse.click(bounds.x + bounds.width / 2, bounds.y + 1);
+      await expect(input).toBeFocused();
+      await input.press('Escape');
+      await input.press('Tab');
+      await expect(input).not.toBeFocused();
+      await page.goto(pathToFileURL(resolve(process.cwd(), '..', '..', '..', 'docs', 'design', 'printer-sensors-options.html')).href);
+      const reference = await page.locator('.number-field').first().evaluate(node => ({
+        visible: node.getBoundingClientRect().height,
+        hit: node.closest('[data-value-hit-area]')!.getBoundingClientRect().height,
+        font: getComputedStyle(node.querySelector('input')!).fontSize,
+        padding: getComputedStyle(node.querySelector('input')!).paddingTop,
+      }));
+      expect(production.visible).toBe(32);
+      expect(reference.visible).toBe(production.visible);
+      expect(production.hit).toBeGreaterThanOrEqual(44);
+      expect(reference.hit).toBeGreaterThanOrEqual(44);
+      expect(production.font).toBe('14px');
+      expect(reference.font).toBe(production.font);
+      expect(production.padding).toBe('0px');
+      expect(reference.padding).toBe(production.padding);
+      expect(await page.locator('.number-field').evaluateAll(nodes => nodes.every(node => node.getBoundingClientRect().height === 32))).toBe(true);
+      const referenceInput = page.locator('input[type="number"]').first();
+      const referenceArea = referenceInput.locator('xpath=ancestor::label');
+      await referenceArea.scrollIntoViewIfNeeded();
+      const referenceBounds = await referenceArea.boundingBox();
+      if (!referenceBounds) throw new Error('Reference numeric hit area is not visible');
+      await page.mouse.click(referenceBounds.x + referenceBounds.width / 2, referenceBounds.y + 1);
+      await expect(referenceInput).toBeFocused();
+      measurements.push({ width, coarse, production, reference });
+    } finally { await context.close(); }
+  }
+  await test.info().attach('numeric-geometry.json', { body: JSON.stringify(measurements, null, 2), contentType: 'application/json' });
+});
+
+test('both surfaces reject over-limit presets atomically and retain valid, unknown-limit and cooldown actions', async ({ page }) => {
+  await page.route(url => url.pathname.startsWith('/api/') || !['localhost', '127.0.0.1'].includes(url.hostname),
+    route => route.fulfill({ status: 503, json: { message: 'Isolated fixture: hardware access blocked' } }));
+  for (const unknown of [false, true]) {
+    await page.goto(`/src/test/fixtures/printer-sensors.html?sidebar-online${unknown ? '&unknown-limits' : ''}`);
+    const commands = page.locator('[data-fixture-command]');
+    let count = 0;
+    for (const surface of ['card', 'sidebar']) {
+      const scope = page.getByRole('region', { name: surface, exact: true });
+      const presets = scope.getByRole('combobox', { name: 'Apply temperature preset' });
+      if (!unknown) {
+        for (const preset of ['PC', 'hotend:PC', 'bed:PC']) {
+          await presets.selectOption(preset);
+          await expect(commands).toHaveCount(count);
+        }
+        await expect(page.getByText(/exceeds maximum.*Nothing sent/).first()).toBeVisible();
+      }
+      for (const [preset, targets] of unknown ? [
+        ['PC', { hotend: 280, bed: 110 }], ['hotend:PC', { hotend: 280 }], ['bed:PC', { bed: 110 }],
+      ] as const : [
+        ['PLA', { hotend: 210, bed: 60 }], ['hotend:PLA', { hotend: 210 }], ['bed:PLA', { bed: 60 }],
+      ] as const) {
+        await presets.selectOption(preset);
+        await expect(commands).toHaveCount(++count);
+        await expect(commands.last()).toHaveText(JSON.stringify({ printerId: `sensor-poc-${surface}`, ...targets }));
+      }
+      await scope.getByRole('button', { name: 'Cooldown' }).click();
+      await expect(commands).toHaveCount(++count);
+      await expect(commands.last()).toHaveText(JSON.stringify({ printerId: `sensor-poc-${surface}`, hotend: 0, bed: 0 }));
+    }
+  }
+});
 
 test('unknown heater limits warn accessibly while allowing integer entry on both surfaces', async ({ page }) => {
   await page.route(url => url.pathname.startsWith('/api/') || !['localhost', '127.0.0.1'].includes(url.hostname),
@@ -130,10 +221,13 @@ test('sensor controls fit card and sidebar widths on desktop and mobile without 
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     const undersized = await card.locator('input[type="number"], input[type="range"], button[role="switch"], button[data-value-action]').evaluateAll(elements =>
       elements.filter(element => /^(Set |Hotend target|Bed target|Reset |Increase |Decrease )/.test(element.getAttribute('aria-label') ?? '')).filter(element => {
-        const rect = element.getBoundingClientRect();
+        const rect = (element.closest('[data-value-hit-area]') ?? element).getBoundingClientRect();
         return rect.height < 44 || rect.width < 44;
       }).map(element => element.getAttribute('aria-label')));
     expect(undersized).toEqual([]);
+    const numericHeights = await card.locator('[data-value-hit-area] input[type="number"]').evaluateAll(elements =>
+      elements.map(element => element.getBoundingClientRect().height));
+    expect(numericHeights.every(height => height === 32)).toBe(true);
     const clippedCells = await card.locator('table td').evaluateAll(cells =>
       cells.filter(cell => cell.scrollWidth > cell.clientWidth + 1).map(cell => cell.textContent));
     expect(clippedCells).toEqual([]);
