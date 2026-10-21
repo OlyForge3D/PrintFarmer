@@ -180,15 +180,17 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
   // token here so the details query below can self-fetch the authoritative one
   // when it is missing (independent of Spoolman readiness).
   const propRowVersion = printerProp?.rowVersion ?? apiPrinter?.rowVersion ?? null;
+  const support = getPrinterSupport(backendCapabilities);
 
   // Fetch printer details to check for multi-toolhead configuration and to
   // recover the reviewed revision. Fetch when Spoolman is configured (spool
   // section would be shown) OR when the prop lacks a revision, so the spool
   // mutation guards below always have an authoritative token to review against.
+  // Temperature controls also need the authoritative heater limits in details.
   const { data: printerDetails } = usePrinterDetails(
     printerId ?? '', 
     { 
-      enabled: !!printerId && (spoolmanReady || !propRowVersion),
+      enabled: !!printerId && (spoolmanReady || !propRowVersion || support.supportsTemperatureControl),
       staleTime: 60000, // Cache for 1 minute since toolhead config doesn't change frequently
     }
   );
@@ -331,7 +333,6 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
     });
   }, [printer]);
 
-  const support = getPrinterSupport(backendCapabilities);
   const preRenderRawState = printer?.state ?? '';
   const isActivePrintForObjectQuery = isActivePrintForObjects({ state: preRenderRawState, isOnline: printer?.isOnline ?? false });
   // A pending skip confirmation never outlives its print or its printer.
@@ -1191,6 +1192,8 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
             bedTarget={displayPrinter?.bedTarget}
             hotendCurrent={displayPrinter?.hotendTemp ?? lastKnownHotendTemp ?? undefined}
             bedCurrent={displayPrinter?.bedTemp ?? lastKnownBedTemp ?? undefined}
+            maxHotendTemp={printerDetails?.capabilities?.maxHotendTemp}
+            maxBedTemp={printerDetails?.capabilities?.maxBedTemp}
             temperatureActionPending={temperatureActionPending}
             canSetTemperatures={canSetTemperaturesNow}
             canCooldown={canCooldownNow}

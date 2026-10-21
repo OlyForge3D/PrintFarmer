@@ -1,6 +1,38 @@
 import { expect, test } from '@playwright/test';
 import { SELECTABLE_THEMES } from '../src/design-system/themes/registry';
 
+test('both production surfaces enforce persisted heater limits and integer commands without descriptors', async ({ page }) => {
+  await page.route(url => url.pathname.startsWith('/api/') || !['localhost', '127.0.0.1'].includes(url.hostname),
+    route => route.fulfill({ status: 503, json: { message: 'Isolated fixture: hardware access blocked' } }));
+  await page.goto('/src/test/fixtures/printer-sensors.html?sidebar-online');
+  const commands = page.locator('[data-fixture-command]');
+  let count = 0;
+  for (const surface of ['card', 'sidebar']) {
+    const scope = page.getByRole('region', { name: surface, exact: true });
+    for (const [name, maximum, fractional, integer, heater] of [
+      ['Hotend', 250, '210.5', '220', 'hotend'],
+      ['Bed', 100, '60.5', '65', 'bed'],
+    ] as const) {
+      const input = scope.getByRole('spinbutton', { name: `${name} target temperature` });
+      await expect(input).toBeEnabled();
+      await expect(input).toHaveAttribute('max', String(maximum));
+      await expect(input).toHaveAttribute('step', '1');
+      for (const invalid of [String(maximum + 1), '2100', fractional]) {
+        await input.fill(invalid);
+        await input.press('Enter');
+        await input.press('Tab');
+        await expect(input).toHaveAttribute('aria-invalid', 'true');
+        await expect(commands).toHaveCount(count);
+      }
+      await input.fill(integer);
+      await input.press('Enter');
+      await input.press('Tab');
+      await expect(commands).toHaveCount(++count);
+      await expect(commands.last()).toHaveText(JSON.stringify({ printerId: `sensor-poc-${surface}`, [heater]: Number(integer) }));
+    }
+  }
+});
+
 test('sensor target text and boundaries remain legible in every shipping theme', async ({ page }) => {
   await page.route(url => url.pathname.startsWith('/api/') || !['localhost', '127.0.0.1'].includes(url.hostname),
     route => route.fulfill({ status: 503, json: { message: 'Isolated fixture: hardware access blocked' } }));

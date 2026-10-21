@@ -1,15 +1,16 @@
 import '@testing-library/jest-dom';
 import React from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { PrinterBackend, type MmuStatus, type Printer } from '@/types/api';
+import { PrinterBackend, type MmuStatus, type Printer, type PrinterDetails } from '@/types/api';
 
 const sensorAuth = vi.hoisted(() => ({ allowed: true }));
 vi.mock('@/features/auth/hooks/useAuth', () => ({ useAuth: () => ({ hasPermission: () => sensorAuth.allowed }) }));
 
 const usePrinterDetailsMock = vi.hoisted(() =>
-  vi.fn(() => ({ data: undefined, isLoading: false }))
+  vi.fn<() => { data: Partial<PrinterDetails> | undefined; isLoading: boolean }>(() => ({ data: undefined, isLoading: false }))
 );
+const setTemperaturesMock = vi.hoisted(() => vi.fn());
 const useSpoolmanConfiguredMock = vi.hoisted(() => vi.fn(() => ({ ready: true })));
 const printerHistoryModalMock = vi.hoisted(() =>
   vi.fn<(props: { isOpen: boolean }) => null>(() => null)
@@ -69,9 +70,6 @@ vi.mock('@/features/printers/components/MaterialLoadout', () => ({
 vi.mock('@/features/printers/components/MmuControlBox', () => ({
   MmuControlBox: () => <div data-testid="ams-control-box" />,
 }));
-vi.mock('@/features/printers/components/TemperatureControlSection', () => ({
-  TemperatureControlSection: () => <div data-testid="temp-section" />,
-}));
 vi.mock('@/features/printers/components/MovementControlSection', () => ({
   MovementControlSection: ({ rightContent }: { rightContent?: React.ReactNode }) => (
     <div data-testid="movement-section">{rightContent}</div>
@@ -86,7 +84,7 @@ vi.mock('@/features/printers/components/FailureDetectionMonitoringBadge', () => 
 vi.mock('@/features/printers/components/FailureDetectionMonitoringSummary', () => ({ FailureDetectionMonitoringSummary: () => null }));
 vi.mock('@/features/printers/components/OfflineTroubleshootingGuide', () => ({ OfflineTroubleshootingGuide: () => null }));
 vi.mock('@/features/printers/components/PrinterCameraPreview', () => ({ PrinterCameraPreview: () => <div data-testid="camera-preview" /> }));
-vi.mock('@/services/api', () => ({ apiClient: {} }));
+vi.mock('@/services/api', () => ({ apiClient: { setTemperatures: setTemperaturesMock } }));
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() } }));
 
 import { DetailedPrinterCard } from '../DetailedPrinterCard';
@@ -114,6 +112,7 @@ describe('DetailedPrinterCard printerDetails gating (#1146 item 4)', () => {
     usePrinterDetailsMock.mockReturnValue({ data: undefined, isLoading: false });
     useSpoolmanConfiguredMock.mockReturnValue({ ready: true });
     printerHistoryModalMock.mockClear();
+    setTemperaturesMock.mockReset().mockResolvedValue({ success: true });
   });
 
   it.each([
@@ -147,15 +146,44 @@ describe('DetailedPrinterCard printerDetails gating (#1146 item 4)', () => {
     }} />);
     expect(screen.queryByText('Primary nozzle')).not.toBeInTheDocument();
     expect(screen.getByLabelText('Second Nozzle Temperature: 30°C')).toBeInTheDocument();
-    expect(screen.getAllByRole('spinbutton')).toHaveLength(2);
-    for (const input of screen.getAllByRole('spinbutton')) {
+    expect(screen.getAllByRole('spinbutton', { name: /^Set / })).toHaveLength(2);
+    for (const input of screen.getAllByRole('spinbutton', { name: /^Set / })) {
       expect(input).toHaveProperty('disabled', !(allowed && enabled && online && available && control));
     }
     expect(screen.getByRole('spinbutton', { name: 'Set Heater Box1 Target' })).toBeInTheDocument();
     expect(screen.getAllByText('Temperatures')).toHaveLength(1);
-    expect(screen.getAllByRole('region', { name: 'Temperatures' })[0]).toContainElement(screen.getByTestId('temp-section'));
+    const primaryTarget = screen.getByRole('spinbutton', { name: 'Hotend target temperature' });
+    expect(primaryTarget).toHaveProperty('disabled', !(allowed && enabled && online));
+    expect(screen.getAllByRole('region', { name: 'Temperatures' })[0]).toContainElement(primaryTarget);
     expect(screen.getAllByRole('region', { name: 'Temperatures' })[0]).toContainElement(screen.getByTestId('sensor-extruder1'));
-    expect(screen.getByTestId('temp-section').compareDocumentPosition(screen.getByText('Fans & outputs')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(primaryTarget.compareDocumentPosition(screen.getByText('Fans & outputs')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it.each([
+    ['Hotend', 250, 'hotend', '210.5', '220'],
+    ['Bed', 100, 'bed', '60.5', '65'],
+  ] as const)('enforces persisted %s limits and integer precision without writable descriptors', async (name, max, heater, fractional, accepted) => {
+    useSpoolmanConfiguredMock.mockReturnValue({ ready: false });
+    usePrinterDetailsMock.mockReturnValue({ isLoading: false, data: { capabilities: {
+      id: 'caps', printerId: 'printer-1', printerName: 'Printer 1', maxHotendTemp: 250, maxBedTemp: 100,
+      hasHeatedBed: true, hasEnclosure: false, multiMaterial: false, isAvailable: true,
+      supportsAutoLeveling: false, lastUpdated: new Date(),
+    } } });
+    render(<DetailedPrinterCard printer={makePrinter({ rowVersion: 'v1' })} />);
+    const input = screen.getByRole('spinbutton', { name: `${name} target temperature` });
+    expect(input).toHaveAttribute('max', String(max));
+    expect(input).toHaveAttribute('step', '1');
+    expect(input).toBeEnabled();
+    for (const value of [String(max + 1), '2100', fractional]) {
+      fireEvent.change(input, { target: { value } });
+      fireEvent.keyDown(input, { key: 'Enter' });
+      fireEvent.blur(input);
+      expect(setTemperaturesMock).not.toHaveBeenCalled();
+      expect(input).toHaveAttribute('aria-invalid', 'true');
+    }
+    fireEvent.change(input, { target: { value: accepted } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await waitFor(() => expect(setTemperaturesMock).toHaveBeenCalledExactlyOnceWith('printer-1', { [heater]: Number(accepted) }));
   });
 
   describe('DetailedPrinterCard history modal gating', () => {
@@ -215,17 +243,16 @@ describe('DetailedPrinterCard printerDetails gating (#1146 item 4)', () => {
     );
   });
 
-  it('does not request printer details when Spoolman is off and the card already carries a revision', () => {
+  it('requests heater limits even when Spoolman is off and the card already carries a revision', () => {
     useSpoolmanConfiguredMock.mockReturnValue({ ready: false });
-    // The card already has its concurrency token, so there is nothing to
-    // recover — the details fetch stays disabled to avoid an unnecessary request.
+    // The revision alone does not supply the temperature safety limits.
     const printer = makePrinter({ rowVersion: 'printer-v1' }); // no mmuStatus
 
     render(<DetailedPrinterCard printer={printer} />);
 
     expect(usePrinterDetailsMock).toHaveBeenCalledWith(
       'printer-1',
-      expect.objectContaining({ enabled: false }),
+      expect.objectContaining({ enabled: true }),
     );
   });
 

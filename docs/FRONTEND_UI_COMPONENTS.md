@@ -83,6 +83,9 @@ locally and submit on release; keyboard changes submit directly. Same-row
 reset, step, slider and switch actions take precedence over an unsubmitted
 numeric draft. Failed commands show an explicit error and retry action.
 Primary heater edits send only the edited target, not a stale companion target.
+Their fallback input precision is whole degrees to match the existing `/temps`
+adapter contract. Both surfaces fetch persisted printer capabilities for heater
+maximums, independently of Spoolman; writable sensor bounds take precedence.
 
 Controls require the existing permission, connection and capability gates.
 Only descriptors advertising a writable binary output receive a light switch;

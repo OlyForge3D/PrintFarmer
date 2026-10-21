@@ -19,6 +19,7 @@ import {
   PrinterBackend,
   type CommandResult,
   type Printer,
+  type PrinterDetails,
   type PrinterSensor,
   type PrinterBackendCapabilitiesDto,
   type PrintJobObjectListDto,
@@ -41,6 +42,8 @@ const mockMovePrinter = vi.fn();
 const mockToastError = vi.fn();
 const mockMovePrinterTo = vi.fn();
 const mockGetPrinterVersionInfo = vi.fn();
+const mockSetTemperatures = vi.fn();
+let mockPrinterDetails: Partial<PrinterDetails> | undefined;
 vi.mock("@/features/printers/hooks/use-printer-movement", () => ({
   usePrinterMovement: (printer: Printer) => ({
     blocked: false,
@@ -137,7 +140,7 @@ vi.mock("@/common/hooks/useApi", () => ({
     isLoading: false,
     refetch: mockRefetch,
   }),
-  usePrinterDetails: () => ({ data: undefined }),
+  usePrinterDetails: () => ({ data: mockPrinterDetails }),
   usePrintJobObjects: () => ({
     data: mockPrintJobObjectsData,
     isLoading: false,
@@ -148,6 +151,7 @@ vi.mock("@/common/hooks/useApi", () => ({
 
 vi.mock("@/services/api", () => ({
   apiClient: {
+    setTemperatures: (printerId: string, targets: object) => mockSetTemperatures(printerId, targets),
     getPrinterVersionInfo: (printerId: string, options?: { forceRefresh?: boolean }) =>
       mockGetPrinterVersionInfo(printerId, options),
     excludePrintJobObject: (printerId: string, name: string) =>
@@ -238,6 +242,8 @@ describe("PrinterDetailsSidebar", () => {
     mockPrintJobObjectsData = undefined;
     mockVersionData = undefined;
     mockGetPrinterVersionInfo.mockReset();
+    mockPrinterDetails = undefined;
+    mockSetTemperatures.mockReset().mockResolvedValue({ success: true });
     mockInvalidateQueries.mockClear();
     mockRefetch.mockClear();
     mockPrintJobObjectsRefetch.mockClear();
@@ -407,12 +413,41 @@ describe("PrinterDetailsSidebar", () => {
       />,
     );
 
-    const input = screen.getByLabelText(/^Set Part Fan/);
-    if (allowed && enabled && online && available && control) expect(input).toBeEnabled();
-    else expect(input).toBeDisabled();
+    for (const role of ['spinbutton', 'slider'] as const) {
+      const input = screen.getByRole(role, { name: /^Set Part Fan/ });
+      if (allowed && enabled && online && available && control) expect(input).toBeEnabled();
+      else expect(input).toBeDisabled();
+    }
     expect(screen.getByRole('spinbutton', { name: 'Set Heater Box1 Target' })).toHaveProperty(
       'disabled', !(allowed && enabled && online && available && control),
     );
+  });
+
+  it.each([
+    ['Hotend', 250, 'hotend', '210.5', '220'],
+    ['Bed', 100, 'bed', '60.5', '65'],
+  ] as const)('enforces persisted %s limits and integer precision without writable descriptors', async (name, max, heater, fractional, accepted) => {
+    mockPrinterDetails = { capabilities: {
+      id: 'caps', printerId: printer.id, printerName: printer.name, maxHotendTemp: 250, maxBedTemp: 100,
+      hasHeatedBed: true, hasEnclosure: false, multiMaterial: false, isAvailable: true,
+      supportsAutoLeveling: false, lastUpdated: new Date(),
+    } };
+    render(<PrinterDetailsSidebar printerId={printer.id} printer={{ ...printer, rowVersion: 'v1' }}
+      backendCapabilities={capabilities()} onClose={vi.fn()} />);
+    const input = screen.getByRole('spinbutton', { name: `${name} target temperature` });
+    expect(input).toHaveAttribute('max', String(max));
+    expect(input).toHaveAttribute('step', '1');
+    expect(input).toBeEnabled();
+    for (const value of [String(max + 1), '2100', fractional]) {
+      fireEvent.change(input, { target: { value } });
+      fireEvent.keyDown(input, { key: 'Enter' });
+      fireEvent.blur(input);
+      expect(mockSetTemperatures).not.toHaveBeenCalled();
+      expect(input).toHaveAttribute('aria-invalid', 'true');
+    }
+    fireEvent.change(input, { target: { value: accepted } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await waitFor(() => expect(mockSetTemperatures).toHaveBeenCalledExactlyOnceWith(printer.id, { [heater]: Number(accepted) }));
   });
 
   it("deduplicates primary temperatures while retaining independent nozzle and chamber telemetry after Temps", () => {

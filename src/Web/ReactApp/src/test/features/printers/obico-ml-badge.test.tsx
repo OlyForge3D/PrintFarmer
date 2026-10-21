@@ -10,6 +10,8 @@ import type {
 } from '@/types/api';
 import { __resetFailureDetectionAlertStoreForTests } from '@/features/printers/hooks/useFailureDetectionAlert';
 
+vi.mock('@/features/auth/hooks/useAuth', () => ({ useAuth: () => ({ hasPermission: () => true }) }));
+
 let failureDetectionStatusMock: FailureDetectionMonitorStatusDto | undefined;
 let failureDetectionPrinterStatusMock: FailureDetectionPrinterStatusDto | undefined;
 let autoDispatchStatusMock: AutoDispatchStatus | null = null;

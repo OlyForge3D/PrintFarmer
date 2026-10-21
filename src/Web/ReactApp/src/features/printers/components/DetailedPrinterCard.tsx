@@ -130,6 +130,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
   const [extrudeSpeed, setExtrudeSpeed] = useState(DEFAULT_EXTRUDE_SPEED_MMS);
   const [objectToSkip, setObjectToSkip] = useState<PrintJobObjectDto | null>(null);
   const [objectToSkipPrinterId, setObjectToSkipPrinterId] = useState(printer.id);
+  const support = getPrinterSupport(backendCapabilities);
 
   // This card always needs `printerDetails` once Spoolman is ready, because
   // every path it can take needs the persisted toolhead topology:
@@ -154,11 +155,12 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
   // an eject button could not always press it. `spoolmanReady || !printer.rowVersion`
   // is a strict superset of the previous condition, so topology still resolves
   // whenever it did before. Once the list DTO carries `rowVersion` the extra
-  // fetch stops triggering.
+  // Temperature controls also require details for authoritative heater limits,
+  // independently of Spoolman and the revision token.
   const { data: printerDetails } = usePrinterDetails(
     printer.id,
     {
-      enabled: spoolmanReady || !printer.rowVersion,
+      enabled: spoolmanReady || !printer.rowVersion || support.supportsTemperatureControl,
       staleTime: 60000,
     }
   );
@@ -227,7 +229,6 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
     isOnline,
   });
   const isPendingReady = requiresBedClearConfirmation(autoDispatchStatus, state);
-  const support = getPrinterSupport(backendCapabilities);
 
   const canPauseOrResumeNow = canPauseOrResume({ isOnline, isEnabled, isPrinting, isPaused, support });
   const canCancelNow = canCancel({ isOnline, isEnabled, isPrinting, isPaused, support });
@@ -882,6 +883,8 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
         bedTarget={printer.bedTarget}
         hotendCurrent={printer.hotendTemp}
         bedCurrent={printer.bedTemp}
+        maxHotendTemp={printerDetails?.capabilities?.maxHotendTemp}
+        maxBedTemp={printerDetails?.capabilities?.maxBedTemp}
         temperatureActionPending={temperatureActionPending}
         canSetTemperatures={canSetTemperaturesNow}
         canCooldown={canCooldownNow}

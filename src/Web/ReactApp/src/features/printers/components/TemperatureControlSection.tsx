@@ -78,7 +78,7 @@ export function TemperatureControlSection({
           state={<span className="font-mono tabular-nums">{power}</span>}
           current={<span className="font-mono tabular-nums">{Number.isFinite(row.current) ? `${row.current!.toFixed(1)}°C` : ''}</span>}
           target={status => <PrinterValueControl label={`${row.name} target temperature`} current={Number.isFinite(row.target) ? row.target : undefined}
-              min={descriptor?.min ?? 0} max={descriptor?.max ?? row.max} step={descriptor ? descriptor.step : 0.1}
+              min={descriptor?.min ?? 0} max={descriptor?.max ?? row.max} step={descriptor ? descriptor.step : 1}
               unit="°C" disabled={blocked} pending={busy} status={status}
               onSubmit={async value => {
                 setSending(true);

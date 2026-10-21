@@ -7,7 +7,8 @@ import { DetailedPrinterCard } from '@/features/printers/components/DetailedPrin
 import { PrinterDetailsSidebar } from '@/features/printers/components/PrinterDetailsSidebar';
 import { client } from '@/services/api/httpClient';
 import { apiClient } from '@/services/api';
-import { PrinterBackend, type Printer, type PrinterBackendCapabilitiesDto, type PrinterSensor } from '@/types/api';
+import { queryKeys } from '@/common/hooks/useApi';
+import { PrinterBackend, type Printer, type PrinterBackendCapabilitiesDto, type PrinterDetails, type PrinterSensor } from '@/types/api';
 import '@/index.css';
 
 const sensors: PrinterSensor[] = [
@@ -61,6 +62,7 @@ export function mountSensors(element: HTMLElement) {
   apiClient.setPrinterSensor = async (printerId, sensorId, request) => record({ printerId, sensorId, ...request });
   apiClient.setTemperatures = async (printerId, request) => record({ printerId, ...request });
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, enabled: false } } });
+  const sidebarOnline = new URLSearchParams(window.location.search).has('sidebar-online');
   const printer: Printer = {
     id: 'sensor-poc-card', name: 'Workshop printer · sensor POC', backend: PrinterBackend.Moonraker,
     backendUrl: 'http://invalid.local', isOnline: true, isEnabled: true, rowVersion: 'poc',
@@ -75,6 +77,14 @@ export function mountSensors(element: HTMLElement) {
     supportsHistory: false, supportsFilamentControl: false, supportsObjectExclusion: false,
     supportsSensorControl: true, supportsSensorTelemetry: true,
   };
+  for (const id of [printer.id, 'sensor-poc-sidebar']) {
+    const details: PrinterDetails = { id, name: printer.name, backend: printer.backend, capabilities: {
+      id: `capabilities-${id}`, printerId: id, printerName: printer.name,
+      maxHotendTemp: 250, maxBedTemp: 100, hasHeatedBed: true, hasEnclosure: true,
+      multiMaterial: false, isAvailable: true, supportsAutoLeveling: false, lastUpdated: new Date(),
+    } };
+    queryClient.setQueryData(queryKeys.printerDetails(id), details);
+  }
   createRoot(element).render(
     <MemoryRouter>
     <QueryClientProvider client={queryClient}>
@@ -82,13 +92,13 @@ export function mountSensors(element: HTMLElement) {
       hasRole: () => false, error: null, login: async () => false, loginWithPasskey: async () => false,
       register: async () => false, logout: async () => {} }}>
       <main className="flex flex-wrap items-start gap-6 p-4 bg-pf-bg-0 text-pf-text-primary">
-        <p className="basis-full text-sm text-pf-text-secondary">Actual printer components · hardware access disabled. Card online, XYZ homed; sidebar offline with only XY homed. The light is a contract-only fixture, not live Moonraker light support. Commands below are local records only.</p>
+        <p className="basis-full text-sm text-pf-text-secondary">Actual printer components · hardware access disabled. Card online, XYZ homed; sidebar {sidebarOnline ? 'online' : 'offline'} with only XY homed. The light is a contract-only fixture, not live Moonraker light support. Commands below are local records only.</p>
         {(['card', 'sidebar'] as const).map(surface => (
           <section key={surface} aria-label={surface} className={`min-w-0 max-w-full ${surface === 'card' ? 'w-96' : 'w-80'}`}>
             <h2 className="text-sm mb-3">{surface === 'card' ? 'Detailed printer card' : 'Printer sidebar'}</h2>
             {surface === 'card' ? <DetailedPrinterCard printer={printer} backendCapabilities={capabilities} />
               : <PrinterDetailsSidebar printerId="sensor-poc-sidebar"
-                printer={{ ...printer, id: 'sensor-poc-sidebar', isOnline: false, homedAxes: 'xy' }}
+                printer={{ ...printer, id: 'sensor-poc-sidebar', isOnline: sidebarOnline, homedAxes: 'xy' }}
                 backendCapabilities={capabilities} layout="content" onClose={() => {}} />}
           </section>
         ))}

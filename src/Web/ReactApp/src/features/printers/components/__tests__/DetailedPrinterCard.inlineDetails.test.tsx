@@ -9,6 +9,8 @@ import {
   type PrintJobObjectListDto,
 } from '@/types/api';
 
+vi.mock('@/features/auth/hooks/useAuth', () => ({ useAuth: () => ({ hasPermission: () => true }) }));
+
 // Regression coverage for #1584: detailed print cards must show the same
 // level of print detail previously only available behind the "Open details
 // sidebar" action, and that action must be removed from the detailed card.
