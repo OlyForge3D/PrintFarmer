@@ -4,6 +4,12 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { PrinterBackend, type MmuStatus, type Printer, type PrinterDetails } from '@/types/api';
 
+function chooseTemperaturePreset(value: string) {
+  fireEvent.click(screen.getByRole('button', { name: 'Apply temperature preset' }));
+  const label = value.includes(':') ? value.replace('hotend:', 'Hotend ').replace('bed:', 'Bed ') : `Both heaters ${value}`;
+  fireEvent.click(screen.getByRole('menuitem', { name: new RegExp(`^${label},`) }));
+}
+
 const sensorAuth = vi.hoisted(() => ({ allowed: true }));
 vi.mock('@/features/auth/hooks/useAuth', () => ({ useAuth: () => ({ hasPermission: () => sensorAuth.allowed }) }));
 
@@ -158,7 +164,7 @@ describe('DetailedPrinterCard printerDetails gating (#1146 item 4)', () => {
     expect(primaryTarget).toHaveProperty('disabled', !(allowed && enabled && online));
     expect(screen.getAllByRole('region', { name: 'Temperatures' })[0]).toContainElement(primaryTarget);
     expect(screen.getAllByRole('region', { name: 'Temperatures' })[0]).toContainElement(screen.getByTestId('sensor-extruder1'));
-    expect(primaryTarget.compareDocumentPosition(screen.getByText('Fans & outputs')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(primaryTarget.compareDocumentPosition(screen.getByText('Miscellaneous')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it.each([
@@ -218,9 +224,9 @@ describe('DetailedPrinterCard printerDetails gating (#1146 item 4)', () => {
       { id: 'heater_bed', kind: 'Bed', displayName: 'Bed', available: true, readings: [],
         writable: [{ quantity: 'TargetTemperature', min: 0, max: 100, step: 1, unit: 'Celsius' }] },
     ] : undefined })} />);
-    const presets = screen.getByRole('combobox', { name: 'Apply temperature preset' });
+    const presets = screen.getByRole('button', { name: 'Apply temperature preset' });
     for (const preset of ['PC', 'hotend:PC', 'bed:PC']) {
-      fireEvent.change(presets, { target: { value: preset } });
+      chooseTemperaturePreset(preset);
       expect(setTemperaturesMock).not.toHaveBeenCalled();
       expect(toastErrorMock).toHaveBeenLastCalledWith(expect.stringMatching(/exceeds maximum.*Nothing sent/));
     }
@@ -229,7 +235,7 @@ describe('DetailedPrinterCard printerDetails gating (#1146 item 4)', () => {
     for (const [preset, targets] of [
       ['PLA', { hotend: 210, bed: 60 }], ['hotend:PLA', { hotend: 210 }], ['bed:PLA', { bed: 60 }],
     ] as const) {
-      fireEvent.change(presets, { target: { value: preset } });
+      chooseTemperaturePreset(preset);
       await waitFor(() => expect(presets).toBeEnabled());
       expect(setTemperaturesMock).toHaveBeenCalledTimes(++count);
       expect(setTemperaturesMock).toHaveBeenLastCalledWith('printer-1', targets);
@@ -246,19 +252,19 @@ describe('DetailedPrinterCard printerDetails gating (#1146 item 4)', () => {
       supportsAutoLeveling: false, lastUpdated: new Date(),
     } } });
     render(<DetailedPrinterCard printer={makePrinter()} />);
-    fireEvent.change(screen.getByRole('combobox', { name: 'Apply temperature preset' }), { target: { value: 'PC' } });
+    chooseTemperaturePreset('PC');
     expect(setTemperaturesMock).not.toHaveBeenCalled();
     expect(toastErrorMock).toHaveBeenCalledWith(expect.stringMatching(/exceeds maximum.*Nothing sent/));
   });
 
   it('retains all PC preset scopes and cooldown with the user-selected unknown-limit warning', async () => {
     render(<DetailedPrinterCard printer={makePrinter()} />);
-    const presets = screen.getByRole('combobox', { name: 'Apply temperature preset' });
+    const presets = screen.getByRole('button', { name: 'Apply temperature preset' });
     let count = 0;
     for (const [preset, targets] of [
       ['PC', { hotend: 280, bed: 110 }], ['hotend:PC', { hotend: 280 }], ['bed:PC', { bed: 110 }],
     ] as const) {
-      fireEvent.change(presets, { target: { value: preset } });
+      chooseTemperaturePreset(preset);
       await waitFor(() => expect(presets).toBeEnabled());
       expect(setTemperaturesMock).toHaveBeenCalledTimes(++count);
       expect(setTemperaturesMock).toHaveBeenLastCalledWith('printer-1', targets);

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { PrinterSensorsPanel, PrinterSensorsSection } from '@/features/printers/components/PrinterSensorsPanel';
+import { PrinterSensorsPanel, PrinterSensorsSection, PrinterThermalTable } from '@/features/printers/components/PrinterSensorsPanel';
 import { additionalPrinterSensors, primaryHeaterPower } from '@/features/printers/utils/additionalPrinterSensors';
 import type { PrinterSensor } from '@/types/api';
 
@@ -81,7 +81,7 @@ describe('PrinterSensorsPanel', () => {
 
   it('renders read-only sensors in groups with formatted units and no inputs', () => {
     renderPanel([chamber, bme, hotendFan, runout], { canControl: true });
-    for (const name of ['Temperatures', 'Fans & outputs', 'Filament']) {
+    for (const name of ['Temperatures', 'Miscellaneous', 'Filament']) {
       expect(screen.getByRole('region', { name })).toBeInTheDocument();
     }
     expect(screen.queryByRole('region', { name: 'Environment' })).not.toBeInTheDocument();
@@ -100,7 +100,7 @@ describe('PrinterSensorsPanel', () => {
     expect(input).toHaveAttribute('min', '0');
     expect(input).toHaveAttribute('max', '100');
     expect(input).toHaveAttribute('step', '1');
-    expect(input.parentElement).toHaveClass('w-[4.5rem]');
+    expect(input.parentElement).toHaveClass('w-[4.75rem]');
     expect(screen.getByLabelText('Part Fan RPM: 3200 RPM')).toBeInTheDocument();
   });
 
@@ -296,10 +296,10 @@ describe('PrinterSensorsPanel', () => {
       ],
     };
     render(<PrinterSensorsSection printerId="p1" sensors={[heater, fan, runout]} temperatures={{}} canControl>
-      <div>Legacy temperature controls</div>
+      {rows => <PrinterThermalTable>{rows}</PrinterThermalTable>}
     </PrinterSensorsSection>);
     expect(screen.getAllByText('Temperatures')).toHaveLength(1);
-    expect(screen.getAllByRole('region', { name: 'Fans & outputs' })[0]).toBeInTheDocument();
+    expect(screen.getAllByRole('region', { name: 'Miscellaneous' })[0]).toBeInTheDocument();
     expect(screen.getByLabelText('Heater Box1 Temperature: 36°C')).toBeInTheDocument();
     expect(screen.getAllByText('25%')).toHaveLength(1);
     expect(screen.getByLabelText('Heater Box1 Humidity: 42%')).toBeInTheDocument();

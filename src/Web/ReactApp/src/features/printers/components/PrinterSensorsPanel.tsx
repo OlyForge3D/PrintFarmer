@@ -3,7 +3,8 @@ import { apiClient } from '@/services/api';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { additionalPrinterSensors } from '@/features/printers/utils/additionalPrinterSensors';
 import { formatPrinterSensorName, isHiddenPrinterSensorId } from '@/features/printers/utils/printerSensorDisplay';
-import { CollapsibleSection } from '@/common/components/ui';
+import { Button } from '@/common/components/ui';
+import { BedIcon, ChevronDownIcon, FanIcon, NozzleIcon, ThermometerIcon, TuneIcon } from '@/common/components/icons/MdiIcons';
 import { PrinterValueControl, type PrinterValueStatus } from '@/features/printers/components/PrinterValueControl';
 import type {
   PrinterSensor, PrinterSensorQuantity, PrinterSensorReading, PrinterSensorUnit, PrinterSensorWritable, PrinterTemperatures,
@@ -14,12 +15,12 @@ interface PrinterSensorsPanelProps {
   sensors: PrinterSensor[] | undefined;
   canControl?: boolean;
   isOnline?: boolean;
-  layout?: 'thermal' | 'plain';
+  layout?: 'thermal' | 'thermal-rows' | 'plain';
   showThermalHeading?: boolean;
 }
 
-type SensorGroup = 'Temperatures' | 'Fans & outputs' | 'Filament' | 'Other sensors';
-const GROUP_ORDER: SensorGroup[] = ['Temperatures', 'Fans & outputs', 'Filament', 'Other sensors'];
+type SensorGroup = 'Temperatures' | 'Miscellaneous' | 'Filament' | 'Other sensors';
+const GROUP_ORDER: SensorGroup[] = ['Temperatures', 'Miscellaneous', 'Filament', 'Other sensors'];
 const ENVIRONMENTAL_QUANTITIES = new Set<PrinterSensorQuantity>(['Humidity', 'Pressure', 'Gas']);
 const UNIT_SUFFIX: Record<PrinterSensorUnit, string> = {
   None: '', Celsius: '°C', Percent: '%', HectoPascal: 'hPa', Ohm: 'Ω', Rpm: 'RPM', Watt: 'W',
@@ -38,7 +39,7 @@ function isThermalSensor(sensor: PrinterSensor): boolean {
 function getSensorGroup(sensor: PrinterSensor): SensorGroup {
   if (isThermalSensor(sensor)) return 'Temperatures';
   if (sensor.kind === 'Fan' || sensor.readings.some(r => ['FanSpeed', 'FanRpm', 'Power'].includes(r.quantity)) ||
-    sensor.writable?.some(isOutputDescriptor)) return 'Fans & outputs';
+    sensor.writable?.some(isOutputDescriptor)) return 'Miscellaneous';
   if (sensor.kind === 'FilamentRunout' || sensor.readings.some(r => r.quantity === 'FilamentDetected')) return 'Filament';
   return 'Other sensors';
 }
@@ -69,34 +70,61 @@ function formatSensorReading(reading: PrinterSensorReading): string {
 
 export function PrinterSensorsSection({
   temperatures, supportsTelemetry, children, ...props
-}: PrinterSensorsPanelProps & { temperatures: PrinterTemperatures; supportsTelemetry?: boolean; children?: ReactNode }) {
+}: PrinterSensorsPanelProps & { temperatures: PrinterTemperatures; supportsTelemetry?: boolean; children?: (additionalRows: ReactNode) => ReactNode }) {
   const { hasPermission } = useAuth();
   const sensors = additionalPrinterSensors(props.sensors, temperatures).filter(sensor => !isHiddenPrinterSensorId(sensor.id));
   const thermals = sensors.filter(isThermalSensor);
   const remaining = sensors.filter(sensor => !isThermalSensor(sensor));
   const authorized = { ...props, canControl: props.canControl && hasPermission('queue', 'start') };
+  const thermalRows = thermals.length > 0 ? <PrinterSensorsPanel {...authorized} sensors={thermals} layout="thermal-rows" /> : null;
   return <>
-    {(children || thermals.length > 0) && <CollapsibleSection title="Temperatures">
-      {children}
-      {thermals.length > 0 && <PrinterSensorsPanel {...authorized} sensors={thermals} layout="thermal" showThermalHeading={!children} />}
-    </CollapsibleSection>}
+    {(children || thermals.length > 0) && <SensorSection title="Temperatures">
+      {children ? children(thermalRows) : <PrinterThermalTable>{thermalRows}</PrinterThermalTable>}
+    </SensorSection>}
     {GROUP_ORDER.slice(1).map(group => {
       const items = remaining.filter(sensor => getSensorGroup(sensor) === group);
-      return items.length > 0 && <CollapsibleSection key={group} title={group}>
+      return items.length > 0 && <SensorSection key={group} title={group}>
         <PrinterSensorsPanel {...authorized} sensors={items} layout="plain" />
-      </CollapsibleSection>;
+      </SensorSection>;
     })}
     {!sensors.length && !props.sensors?.length && supportsTelemetry && <p className="text-sm text-pf-text-secondary">No sensors reported.</p>}
   </>;
 }
 
+function SensorSection({ title, children }: { title: SensorGroup; children: ReactNode }) {
+  const [expanded, setExpanded] = useState(true);
+  const id = useId();
+  const Icon = title === 'Temperatures' ? ThermometerIcon : TuneIcon;
+  return <section aria-labelledby={`${id}-heading`} data-printer-sensor-section={title}
+    className="@container/sensors min-w-0 rounded-md border border-pf-border bg-pf-card text-sm">
+    <h3 className="m-0!">
+      <Button type="button" variant="unstyled" aria-expanded={expanded} aria-controls={`${id}-body`}
+        iconLeft={<Icon className="size-6 shrink-0" />}
+        iconRight={<ChevronDownIcon className={`size-6 ${expanded ? '' : '-rotate-90'}`} />}
+        className="flex min-h-11 w-full items-center gap-3 rounded-t-md bg-pf-bg-1 p-3 font-display text-left text-lg leading-[normal] font-semibold text-pf-text-primary [&>span:nth-child(2)]:flex-1 @[441px]/sensors:px-4"
+        onClick={() => setExpanded(value => !value)}>
+        <span id={`${id}-heading`} data-sensor-heading className="normal-case">{title}</span>
+      </Button>
+    </h3>
+    <div id={`${id}-body`} hidden={!expanded} data-sensor-body
+      className="px-2 pt-1 pb-2 @[441px]/sensors:px-4 @[441px]/sensors:pt-2 @[441px]/sensors:pb-3">{children}</div>
+  </section>;
+}
+
+export function PrinterSensorGlyph({ kind }: { kind: PrinterSensor['kind'] }) {
+  const Icon = kind === 'Nozzle' ? NozzleIcon : kind === 'Bed' ? BedIcon : kind === 'Fan' ? FanIcon : ThermometerIcon;
+  return <span data-sensor-glyph={kind} aria-hidden="true" className="inline-flex shrink-0 text-pf-text-secondary">
+    <Icon className="size-[18px] shrink-0" />
+  </span>;
+}
+
 export function PrinterThermalTable({ children, showHeading = true }: { children: ReactNode; showHeading?: boolean }) {
   return <table aria-label="Temperature readings"
-    className="w-full table-fixed text-xs [&_tr]:border-0! [&_td]:p-0! [&_thead]:border-0! [&_thead]:bg-transparent!">
-    <colgroup><col /><col className="w-10" /><col className="w-16" /><col className="w-20" /></colgroup>
+    className="w-full table-fixed border-collapse text-xs @[441px]/sensors:text-sm [&_tr]:border-0! [&_td]:px-0.5! [&_td]:py-0! [&_thead]:border-0! [&_thead]:bg-transparent!">
+    <colgroup><col /><col className="w-10 @[441px]/sensors:w-16" /><col className="w-16 @[441px]/sensors:w-[88px]" /><col className="w-[76px] @[441px]/sensors:w-[104px]" /></colgroup>
     <thead className={showHeading ? 'text-pf-text-secondary' : 'sr-only'}>
       <tr>{['Name', 'State', 'Current', 'Target'].map(name =>
-        <th key={name} scope="col" className={`p-0! pb-2! font-medium! normal-case! tracking-normal! text-pf-text-secondary! ${name === 'Name' ? 'text-left!' : 'text-right!'}`}>{name}</th>)}</tr>
+        <th key={name} scope="col" className={`px-0.5! pt-1! pb-2! text-xs! font-medium! normal-case! tracking-normal! text-pf-text-secondary! ${name === 'Name' ? 'text-left!' : 'text-right!'}`}>{name}</th>)}</tr>
     </thead>
     <tbody>{children}</tbody>
   </table>;
@@ -110,10 +138,10 @@ export function PrinterThermalRow({ name, state, current, target, testId, warnin
   const [message, setMessage] = useState({ text: '', error: false });
   const status = useMemo(() => ({ id, onChange: (text: string, error: boolean) => setMessage({ text, error }) }), [id]);
   return <>
-    <tr data-testid={testId} className="h-11">
-      <th scope="row" className="py-2 pr-1 text-left font-medium">{name}</th>
-      <td className="text-right text-pf-text-secondary">{state}</td>
-      <td className="text-right">{current}</td>
+    <tr data-testid={testId} data-thermal-row className="h-11">
+      <th scope="row" className="px-0.5! py-1.5! text-left! text-xs! font-medium! normal-case! tracking-normal! @[441px]/sensors:text-sm!">{name}</th>
+      <td className="whitespace-nowrap text-right font-mono tabular-nums text-pf-text-secondary">{state}</td>
+      <td className="whitespace-nowrap text-right font-mono tabular-nums">{current}</td>
       <td className="py-1 pl-1">{target(status)}</td>
     </tr>
     <tr><td colSpan={4}>
@@ -126,13 +154,17 @@ export function PrinterThermalRow({ name, state, current, target, testId, warnin
   </>;
 }
 
-function SensorName({ sensor }: { sensor: PrinterSensor }) {
+function SensorName({ sensor, children }: { sensor: PrinterSensor; children?: ReactNode }) {
   const role = sensor.id.startsWith('heater_generic ') ? 'Heater' : sensor.id.startsWith('temperature_sensor ') ? 'Sensor' : '';
-  return <span className="min-w-0 break-words [overflow-wrap:anywhere]">
-    {formatPrinterSensorName(sensor.displayName)}
-    {role && <span className="block text-[10px] font-normal text-pf-text-secondary">{role}</span>}
-    {!sensor.available && <span className="block text-xs text-pf-text-secondary">Unavailable</span>}
-  </span>;
+  return <div className="flex min-w-0 items-center gap-1 @[441px]/sensors:gap-2" data-sensor-name>
+    {(sensor.kind === 'Fan' || isThermalSensor(sensor)) && <PrinterSensorGlyph kind={sensor.kind} />}
+    <div className="min-w-0 break-words [overflow-wrap:anywhere]">
+      {formatPrinterSensorName(sensor.displayName)}
+      {role && <span className="block text-[10px] font-normal text-pf-text-secondary @[441px]/sensors:ml-1 @[441px]/sensors:inline @[441px]/sensors:text-xs">{role}</span>}
+      {!sensor.available && <span className="block text-xs font-normal text-pf-text-secondary">Unavailable</span>}
+      {children}
+    </div>
+  </div>;
 }
 
 export function PrinterSensorsPanel({
@@ -169,38 +201,40 @@ export function PrinterSensorsPanel({
     const quantities = new Set([...sensor.readings.map(r => r.quantity), ...(sensor.writable ?? []).map(w => w.quantity)]);
     return [...quantities].filter(q => !excluded.has(q) &&
       (sensor.writable?.some(w => w.quantity === q) || sensor.readings.some(r => r.quantity === q && formatSensorReading(r) !== ''))).map(quantity =>
-      <div key={quantity} className="flex flex-wrap items-center gap-1 text-xs font-normal text-pf-text-secondary">
+      <div key={quantity} className="flex flex-wrap items-center gap-1 text-[10px] font-normal text-pf-text-secondary @[441px]/sensors:text-xs">
         <span>{QUANTITY_LABEL[quantity]}</span>{quantityCell(sensor, quantity)}
       </div>);
   };
-  return <div className="min-w-0 space-y-3">
+  const thermalRows = (items: PrinterSensor[]) => items.map(sensor => {
+    const stateQuantity = sensor.readings.some(r => r.quantity === 'Power') ? 'Power' : 'FanSpeed';
+    return <PrinterThermalRow key={sensor.id} testId={`sensor-${sensor.id}`}
+      name={<SensorName sensor={sensor}>{extraReadings(sensor, new Set(['Temperature', 'TargetTemperature', stateQuantity]))}</SensorName>}
+      state={quantityCell(sensor, stateQuantity)} current={quantityCell(sensor, 'Temperature')}
+      target={status => quantityCell(sensor, 'TargetTemperature', status)} />;
+  });
+  if (layout === 'thermal-rows') return <>{thermalRows(visible)}</>;
+  return <div className="min-w-0 space-y-3 text-sm">
     {groups.map(({ group, items }) => {
       const thermal = layout === 'thermal' || group === 'Temperatures';
       return <section key={group} aria-label={layout ? undefined : group} className="min-w-0 space-y-1">
         {!layout && <h4 className="text-xs font-medium text-pf-text-secondary">{group}</h4>}
         {thermal ? <PrinterThermalTable showHeading={showThermalHeading}>
-          {items.map(sensor => {
-            const stateQuantity = sensor.readings.some(r => r.quantity === 'Power') ? 'Power' : 'FanSpeed';
-            return <PrinterThermalRow key={sensor.id} testId={`sensor-${sensor.id}`}
-              name={<><SensorName sensor={sensor} />{extraReadings(sensor, new Set(['Temperature', 'TargetTemperature', stateQuantity]))}</>}
-              state={quantityCell(sensor, stateQuantity)} current={quantityCell(sensor, 'Temperature')}
-              target={status => quantityCell(sensor, 'TargetTemperature', status)} />;
-          })}
-        </PrinterThermalTable> : <ul>
+          {thermalRows(items)}
+        </PrinterThermalTable> : <ul className="m-0! list-none p-0!">
           {items.map(sensor => {
             const output = sensor.writable?.find(isOutputDescriptor);
             const rpm = sensor.readings.find(r => r.quantity === 'FanRpm');
             const prefix = <>
-              <span className="min-w-0 flex-1 text-sm font-medium"><SensorName sensor={sensor} /></span>
-              <span className="text-xs text-pf-text-secondary">{readingCell(sensor, rpm)}</span>
+              <div className="min-w-0 flex-1 basis-[120px] text-sm font-medium @[441px]/sensors:basis-[150px]"><SensorName sensor={sensor} /></div>
+              <span className="whitespace-nowrap text-xs text-pf-text-secondary">{readingCell(sensor, rpm)}</span>
             </>;
             const binary = output && isBinaryDescriptor(output);
             const slider = output?.unit === 'Percent' || sensor.kind === 'Fan';
-            return <li key={sensor.id} data-testid={`sensor-${sensor.id}`} className="min-w-0 py-2">
+            return <li key={sensor.id} data-testid={`sensor-${sensor.id}`} className="min-w-0 py-2 not-first:mt-1">
               {output ? control(sensor, output, prefix, binary ? 'switch' : slider ? 'slider' : undefined) :
-                <div className="flex min-w-0 flex-wrap items-center gap-2">
+                <div className="flex min-h-9 min-w-0 flex-wrap items-center gap-1 @[441px]/sensors:gap-2">
                   {prefix}
-                  {sensor.kind === 'Fan' && readingCell(sensor, sensor.readings.find(r => r.quantity === 'FanSpeed'))}
+                  {sensor.kind === 'Fan' && <span className="text-xs @[441px]/sensors:text-sm">{readingCell(sensor, sensor.readings.find(r => r.quantity === 'FanSpeed'))}</span>}
                   {extraReadings(sensor, new Set(sensor.kind === 'Fan' ? ['FanRpm', 'FanSpeed'] : ['FanRpm']))}
                 </div>}
               {output && extraReadings(sensor, new Set([output.quantity, 'FanRpm']))}

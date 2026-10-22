@@ -150,7 +150,6 @@
       col.current-col { width: 64px; }
       col.target-col { width: 76px; }
       .sensor-name { gap: 4px; }
-      .sensor-name .icon { display: none; }
       .sensor-name, .reading, tbody th { font-size: 12px; }
       td, th { padding-left: 2px; padding-right: 2px; }
       .number-field { width: 72px; }
@@ -161,7 +160,6 @@
       .output-values { gap: 4px; }
       .output-values .number-field { width: 76px; }
       .reset-control { width: 36px; }
-      .output-name .icon { display: none; }
       .output-top { gap: 4px; }
       .extra-reading { font-size: 10px; }
     }
@@ -327,7 +325,7 @@
         panel('temperatures','Temperatures','temperature',`<table aria-label="Temperatures"><colgroup><col><col class="state-col"><col class="current-col"><col class="target-col"></colgroup>
           <thead><tr><th scope="col">Name</th><th scope="col">State</th><th scope="col">Current</th><th scope="col">Target</th></tr></thead>
           <tbody>${sensors.filter(sensor=>sensor.kind==='thermal').map(thermalRow).join('')}</tbody></table>`) +
-        panel('miscellaneous','Fans & lights','misc',`<ul class="fan-list">${sensors.filter(sensor=>sensor.kind!=='thermal').map(outputRow).join('')}</ul>`);
+        panel('miscellaneous','Miscellaneous','misc',`<ul class="fan-list">${sensors.filter(sensor=>sensor.kind!=='thermal').map(outputRow).join('')}</ul>`);
       sensors.filter(writable).forEach(refreshControl);
       measure();
     }

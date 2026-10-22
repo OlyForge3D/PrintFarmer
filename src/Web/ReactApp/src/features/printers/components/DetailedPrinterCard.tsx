@@ -886,9 +886,10 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
         canControl={(backendCapabilities?.supportsSensorControl ?? false) && isEnabled}
         isOnline={isOnline}
       >
-      <TemperatureControlSection
+      {additionalRows => <TemperatureControlSection
         printerId={printer.id}
         showHeading={false}
+        additionalRows={additionalRows}
         sensors={printer.sensors}
         hotendTarget={printer.hotendTarget}
         bedTarget={printer.bedTarget}
@@ -901,7 +902,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
         canCooldown={canCooldownNow}
         onApplyPreset={handleApplyPreset}
         onApplySingleHeaterPreset={handleApplySingleHeaterPreset}
-      />
+      />}
 
       </PrinterSensorsSection>
 

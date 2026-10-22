@@ -30,6 +30,12 @@ import { AuthContext } from "@/common/contexts/auth-context";
 import type { AuthContextType } from "@/contexts/AuthContextValue";
 import type { PrinterMovement } from "@/features/printers/hooks/use-printer-movement";
 
+function chooseTemperaturePreset(value: string) {
+  fireEvent.click(screen.getByRole('button', { name: 'Apply temperature preset' }));
+  const label = value.includes(':') ? value.replace('hotend:', 'Hotend ').replace('bed:', 'Bed ') : `Both heaters ${value}`;
+  fireEvent.click(screen.getByRole('menuitem', { name: new RegExp(`^${label},`) }));
+}
+
 const mockInvalidateQueries = vi.fn();
 const mockSetQueryData = vi.fn();
 const mockRefetch = vi.fn();
@@ -482,9 +488,9 @@ describe("PrinterDetailsSidebar", () => {
         { id: 'heater_bed', kind: 'Bed', displayName: 'Bed', available: true, readings: [],
           writable: [{ quantity: 'TargetTemperature', min: 0, max: 100, step: 1, unit: 'Celsius' }] },
       ] : undefined }} backendCapabilities={capabilities()} onClose={vi.fn()} />);
-    const presets = screen.getByRole('combobox', { name: 'Apply temperature preset' });
+    const presets = screen.getByRole('button', { name: 'Apply temperature preset' });
     for (const preset of ['PC', 'hotend:PC', 'bed:PC']) {
-      fireEvent.change(presets, { target: { value: preset } });
+      chooseTemperaturePreset(preset);
       expect(mockSetTemperatures).not.toHaveBeenCalled();
       expect(mockToastError).toHaveBeenLastCalledWith(expect.stringMatching(/exceeds maximum.*Nothing sent/));
     }
@@ -493,7 +499,7 @@ describe("PrinterDetailsSidebar", () => {
     for (const [preset, targets] of [
       ['PLA', { hotend: 210, bed: 60 }], ['hotend:PLA', { hotend: 210 }], ['bed:PLA', { bed: 60 }],
     ] as const) {
-      fireEvent.change(presets, { target: { value: preset } });
+      chooseTemperaturePreset(preset);
       await waitFor(() => expect(presets).toBeEnabled());
       expect(mockSetTemperatures).toHaveBeenCalledTimes(++count);
       expect(mockSetTemperatures).toHaveBeenLastCalledWith(printer.id, targets);
@@ -511,7 +517,7 @@ describe("PrinterDetailsSidebar", () => {
     } };
     render(<PrinterDetailsSidebar printerId={printer.id} printer={printer}
       backendCapabilities={capabilities()} onClose={vi.fn()} />);
-    fireEvent.change(screen.getByRole('combobox', { name: 'Apply temperature preset' }), { target: { value: 'PC' } });
+    chooseTemperaturePreset('PC');
     expect(mockSetTemperatures).not.toHaveBeenCalled();
     expect(mockToastError).toHaveBeenCalledWith(expect.stringMatching(/exceeds maximum.*Nothing sent/));
   });
@@ -519,12 +525,12 @@ describe("PrinterDetailsSidebar", () => {
   it('retains all PC preset scopes and cooldown with the user-selected unknown-limit warning', async () => {
     render(<PrinterDetailsSidebar printerId={printer.id} printer={printer}
       backendCapabilities={capabilities()} onClose={vi.fn()} />);
-    const presets = screen.getByRole('combobox', { name: 'Apply temperature preset' });
+    const presets = screen.getByRole('button', { name: 'Apply temperature preset' });
     let count = 0;
     for (const [preset, targets] of [
       ['PC', { hotend: 280, bed: 110 }], ['hotend:PC', { hotend: 280 }], ['bed:PC', { bed: 110 }],
     ] as const) {
-      fireEvent.change(presets, { target: { value: preset } });
+      chooseTemperaturePreset(preset);
       await waitFor(() => expect(presets).toBeEnabled());
       expect(mockSetTemperatures).toHaveBeenCalledTimes(++count);
       expect(mockSetTemperatures).toHaveBeenLastCalledWith(printer.id, targets);

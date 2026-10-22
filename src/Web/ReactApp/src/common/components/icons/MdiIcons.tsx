@@ -119,12 +119,26 @@ import {
   mdiBarcodeScan,
   mdiRuler,
   mdiFormatText,
+  mdiFan,
+  mdiTuneVertical,
 } from '@mdi/js';
 
 interface IconProps {
   className?: string;
   ariaLabel?: string;
   isOn?: boolean;
+}
+
+export function FanIcon({ className = 'w-4 h-4', ariaLabel = 'Fan' }: Omit<IconProps, 'isOn'>) {
+  return <svg className={className} viewBox="0 0 24 24" aria-label={ariaLabel} role="img">
+    <path fill="currentColor" d={mdiFan} />
+  </svg>;
+}
+
+export function TuneIcon({ className = 'w-4 h-4', ariaLabel = 'Miscellaneous' }: Omit<IconProps, 'isOn'>) {
+  return <svg className={className} viewBox="0 0 24 24" aria-label={ariaLabel} role="img">
+    <path fill="currentColor" d={mdiTuneVertical} />
+  </svg>;
 }
 
 /**

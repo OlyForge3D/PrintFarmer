@@ -3,6 +3,195 @@ import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { SELECTABLE_THEMES } from '../src/design-system/themes/registry';
 
+test('whole sensor sections match approved hierarchy, visible glyphs, responsive type and one thermal grid at matched widths', async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 1200 });
+  await page.route(url => /^https?:$/.test(url.protocol) && (url.pathname.startsWith('/api/') || !['localhost', '127.0.0.1'].includes(url.hostname)),
+    route => route.fulfill({ status: 503, json: { message: 'Isolated fixture: hardware access blocked' } }));
+  const comparisons: object[] = [];
+  for (const contentWidth of [335, 560]) {
+    await page.goto('/src/test/fixtures/printer-sensors.html?sidebar-online');
+    const production = [];
+    for (const surface of ['card', 'sidebar']) {
+      const root = page.getByRole('region', { name: surface, exact: true });
+      await expect(root.getByRole('spinbutton', { name: 'Hotend target temperature' })).toBeVisible();
+      await root.evaluate((node, width) => {
+        (node as HTMLElement).style.width = `${width + 100}px`;
+        for (const section of node.querySelectorAll<HTMLElement>('[data-printer-sensor-section]')) {
+          section.style.width = `${width + 34}px`;
+          const body = section.querySelector<HTMLElement>('[data-sensor-body]')!;
+          const style = getComputedStyle(body);
+          section.style.width = `${width + parseFloat(style.paddingLeft) + parseFloat(style.paddingRight) + 2}px`;
+        }
+      }, contentWidth);
+      const metrics = await root.evaluate(node => {
+        const thermal = node.querySelector('[data-printer-sensor-section="Temperatures"]')!;
+        const misc = node.querySelector('[data-printer-sensor-section="Miscellaneous"]')!;
+        const table = thermal.querySelector('table')!;
+        const rows = [...table.querySelectorAll('[data-thermal-row]')];
+        const columns = rows.map(row => [...row.children].map(cell => cell.getBoundingClientRect().left));
+        const font = (element: Element) => ({ size: getComputedStyle(element).fontSize, weight: getComputedStyle(element).fontWeight });
+        const automatic = misc.querySelector('[data-testid="sensor-automatic"]')!;
+        const headingButton = thermal.querySelector('h3 button')!;
+        const headingBounds = headingButton.getBoundingClientRect();
+        const headingIcons = headingButton.querySelectorAll('svg');
+        const extraReading = thermal.querySelector('[aria-label*="Humidity:"]')!.parentElement!;
+        const extraName = extraReading.closest('[data-sensor-name]')!;
+        const binary = misc.querySelector('[role="switch"]')!;
+        const track = binary.querySelector('[aria-hidden="true"]')!;
+        const knob = track.firstElementChild!;
+        return {
+          width: table.getBoundingClientRect().width,
+          tables: thermal.querySelectorAll('table').length,
+          headings: [...table.querySelectorAll('thead th')].map(th => th.textContent),
+          heading: font(thermal.querySelector('[data-sensor-heading]')!),
+          miscHeading: font(misc.querySelector('[data-sensor-heading]')!),
+          thermalLabel: font(rows[0].querySelector('th')!),
+          thermalReading: font(rows[0].querySelector('td:nth-child(3)')!),
+          fanLabel: font(automatic.querySelector('[data-sensor-name]')!),
+          fanReading: font(automatic.querySelector('[aria-label*="Speed:"]')!),
+          rpm: font(automatic.querySelector('[aria-label*="RPM:"]')!),
+          thermalGlyphs: rows.map(row => row.querySelector('[data-sensor-glyph] svg')!.getBoundingClientRect().width),
+          fanGlyphs: [...misc.querySelectorAll('[data-testid]')].filter(row => row.querySelector('[data-sensor-glyph="Fan"]'))
+            .map(row => row.querySelector('[data-sensor-glyph] svg')!.getBoundingClientRect().width),
+          headingGlyph: thermal.querySelector('h3 svg')!.getBoundingClientRect().width,
+          headingHeight: headingBounds.height,
+          headingInset: headingBounds.right - headingIcons[1].getBoundingClientRect().right,
+          extraReadingIndent: extraReading.getBoundingClientRect().left - extraName.getBoundingClientRect().left,
+          binaryTrack: { width: track.getBoundingClientRect().width, height: track.getBoundingClientRect().height },
+          binaryKnob: { width: knob.getBoundingClientRect().width, height: knob.getBoundingClientRect().height },
+          binaryHit: { width: binary.getBoundingClientRect().width, height: binary.getBoundingClientRect().height },
+          stepFont: font(misc.querySelector('[aria-label^="Decrease"]')!),
+          columnSpread: [0, 1, 2, 3].map(index => Math.max(...columns.map(row => row[index])) - Math.min(...columns.map(row => row[index]))),
+        };
+      });
+      expect(metrics.tables).toBe(1);
+      expect(metrics.headings).toEqual(['Name', 'State', 'Current', 'Target']);
+      expect(metrics.width).toBeCloseTo(contentWidth);
+      expect(metrics.thermalGlyphs.every(width => width === 18)).toBe(true);
+      expect(metrics.fanGlyphs).toEqual([18, 18, 18, 18]);
+      expect(metrics.columnSpread.every(spread => spread < 1)).toBe(true);
+      expect(metrics.binaryHit.width).toBeGreaterThanOrEqual(44);
+      expect(metrics.binaryHit.height).toBeGreaterThanOrEqual(44);
+      await expect(root.getByRole('region', { name: 'Miscellaneous', exact: true })).toBeVisible();
+      await expect(root.locator('[data-printer-sensor-section]').getByRole('img', { name: /Fan|temperature/i })).toHaveCount(0);
+      for (const title of ['Temperatures', 'Miscellaneous']) {
+        await root.getByRole('region', { name: title, exact: true }).screenshot({ path: test.info().outputPath(`${surface}-${title}-${contentWidth}px.png`) });
+      }
+      production.push({ surface, metrics });
+    }
+    await expect(page.locator('[data-fixture-command]')).toHaveCount(0);
+    await page.goto(pathToFileURL(resolve(process.cwd(), '..', '..', '..', 'docs', 'design', 'printer-sensors-options.html')).href);
+    await page.locator('.preview').evaluate((node, width) => {
+      const element = node as HTMLElement;
+      element.style.width = `${width + 34}px`;
+      element.style.maxWidth = 'none';
+      const style = getComputedStyle(node.querySelector('.panel-body')!);
+      element.style.width = `${width + parseFloat(style.paddingLeft) + parseFloat(style.paddingRight) + 2}px`;
+    }, contentWidth);
+    const reference = await page.locator('#panels').evaluate(node => {
+      const font = (element: Element) => ({ size: getComputedStyle(element).fontSize, weight: getComputedStyle(element).fontWeight });
+      const thermal = node.querySelector('.panel')!;
+      const misc = node.querySelectorAll('.panel')[1];
+      const automatic = misc.querySelector('[data-sensor="hotend-fan"]')!;
+      const headingButton = thermal.querySelector('.panel-heading button')!;
+      const headingBounds = headingButton.getBoundingClientRect();
+      const headingIcons = headingButton.querySelectorAll('svg');
+      const extraReading = thermal.querySelector('.extra-reading')!;
+      const track = misc.querySelector('.toggle-track')!;
+      const knob = getComputedStyle(track, '::after');
+      return {
+        width: thermal.querySelector('table')!.getBoundingClientRect().width,
+        heading: font(thermal.querySelector('.panel-heading button')!),
+        miscHeading: font(misc.querySelector('.panel-heading button')!),
+        thermalLabel: font(thermal.querySelector('tbody th')!),
+        thermalReading: font(thermal.querySelector('.current-cell')!),
+        fanLabel: font(automatic.querySelector('.output-name')!),
+        fanReading: font(automatic.querySelector('.reading')!),
+        rpm: font(automatic.querySelector('.rpm')!),
+        headingGlyph: thermal.querySelector('.panel-heading svg')!.getBoundingClientRect().width,
+        headingHeight: headingBounds.height,
+        headingInset: headingBounds.right - headingIcons[1].getBoundingClientRect().right,
+        thermalGlyph: thermal.querySelector('.sensor-name svg')!.getBoundingClientRect().width,
+        fanGlyph: automatic.querySelector('.output-name svg')!.getBoundingClientRect().width,
+        extraReadingIndent: extraReading.getBoundingClientRect().left - extraReading.closest('.sensor-name')!.getBoundingClientRect().left,
+        binaryTrack: { width: track.getBoundingClientRect().width, height: track.getBoundingClientRect().height },
+        binaryKnob: { width: parseFloat(knob.width), height: parseFloat(knob.height) },
+        stepFont: font(misc.querySelector('.step-control')!),
+      };
+    });
+    expect(reference.width).toBeCloseTo(contentWidth);
+    expect(reference.thermalGlyph).toBe(18);
+    expect(reference.fanGlyph).toBe(18);
+    await expect(page.getByRole('button', { name: 'Miscellaneous', exact: true })).toBeVisible();
+    for (const { metrics } of production) {
+      expect(metrics.heading).toEqual(reference.heading);
+      expect(metrics.miscHeading).toEqual(reference.miscHeading);
+      expect(metrics.thermalLabel).toEqual(reference.thermalLabel);
+      expect(metrics.thermalReading).toEqual(reference.thermalReading);
+      expect(metrics.fanLabel).toEqual(reference.fanLabel);
+      expect(metrics.fanReading).toEqual(reference.fanReading);
+      expect(metrics.rpm).toEqual(reference.rpm);
+      expect(metrics.headingGlyph).toEqual(reference.headingGlyph);
+      expect(metrics.headingHeight).toBeCloseTo(reference.headingHeight);
+      expect(metrics.headingInset).toBeCloseTo(reference.headingInset);
+      expect(metrics.extraReadingIndent).toBeCloseTo(reference.extraReadingIndent);
+      expect(metrics.binaryTrack).toEqual(reference.binaryTrack);
+      expect(metrics.binaryKnob).toEqual(reference.binaryKnob);
+      expect(metrics.stepFont).toEqual(reference.stepFont);
+    }
+    await page.locator('#panels').screenshot({ path: test.info().outputPath(`reference-${contentWidth}px.png`) });
+    comparisons.push({ contentWidth, production, reference });
+  }
+  await test.info().attach('whole-section-parity.json', { body: JSON.stringify(comparisons, null, 2), contentType: 'application/json' });
+});
+
+test('opened preset menu is bounded, viewport-safe and keyboard dismissible without applying a command', async ({ page }) => {
+  await page.route(url => url.pathname.startsWith('/api/') || !['localhost', '127.0.0.1'].includes(url.hostname),
+    route => route.fulfill({ status: 503, json: { message: 'Hardware access blocked' } }));
+  const measurements: object[] = [];
+  for (const [width, height] of [[1242, 801], [360, 640], [320, 480]]) {
+    await page.setViewportSize({ width, height });
+    await page.goto('/src/test/fixtures/printer-sensors.html?sidebar-online');
+    for (const surface of ['card', 'sidebar']) {
+      const scope = page.getByRole('region', { name: surface, exact: true });
+      const trigger = scope.getByRole('button', { name: 'Apply temperature preset' });
+      await trigger.click();
+      const menu = page.getByRole('menu', { name: 'Temperature presets' });
+      await expect(menu).toBeVisible();
+      await expect(menu.getByRole('menuitem')).toHaveCount(15);
+      const bounds = await menu.evaluate(node => ({
+        x: node.getBoundingClientRect().x, y: node.getBoundingClientRect().y,
+        width: node.getBoundingClientRect().width, height: node.getBoundingClientRect().height,
+        client: node.clientHeight, scroll: node.scrollHeight,
+        itemHeights: [...node.querySelectorAll('[role="menuitem"]')].map(item => item.getBoundingClientRect().height),
+      }));
+      expect(bounds.height).toBeLessThanOrEqual(240);
+      expect(bounds.scroll).toBeGreaterThan(bounds.client);
+      expect(bounds.y).toBeGreaterThanOrEqual(8);
+      expect(bounds.y + bounds.height).toBeLessThanOrEqual(height - 8);
+      expect(bounds.x).toBeGreaterThanOrEqual(8);
+      expect(bounds.x + bounds.width).toBeLessThanOrEqual(width - 8);
+      expect(bounds.itemHeights.every(value => value >= 44)).toBe(true);
+      await page.keyboard.press('End');
+      await expect(menu.getByRole('menuitem', { name: /^Bed Cooldown,/ })).toBeFocused();
+      await page.keyboard.press('Home');
+      await expect(menu.getByRole('menuitem', { name: /^Both heaters ABS,/ })).toBeFocused();
+      await expect(page.locator('[data-fixture-command]')).toHaveCount(0);
+      await menu.screenshot({ path: test.info().outputPath(`${surface}-presets-${width}px.png`) });
+      await page.keyboard.press('Escape');
+      await expect(menu).toHaveCount(0);
+      await expect(trigger).toBeFocused();
+      await trigger.press('ArrowUp');
+      await expect(page.getByRole('menuitem', { name: /^Bed Cooldown,/ })).toBeFocused();
+      await page.keyboard.press('Tab');
+      await expect(menu).toHaveCount(0);
+      await expect(page.locator('[data-fixture-command]')).toHaveCount(0);
+      measurements.push({ width, height, surface, menu: bounds });
+    }
+  }
+  await test.info().attach('opened-preset-geometry.json', { body: JSON.stringify(measurements, null, 2), contentType: 'application/json' });
+});
+
 test('reference and production numeric fields match compact visual heights with full effective hit areas', async ({ browser, baseURL }) => {
   const measurements: object[] = [];
   for (const [width, coarse] of [[1100, false], [360, false], [320, false], [1100, true]] as const) {
@@ -68,10 +257,14 @@ test('both surfaces reject over-limit presets atomically and retain valid, unkno
     let count = 0;
     for (const surface of ['card', 'sidebar']) {
       const scope = page.getByRole('region', { name: surface, exact: true });
-      const presets = scope.getByRole('combobox', { name: 'Apply temperature preset' });
+      const presets = scope.getByRole('button', { name: 'Apply temperature preset' });
+      const choosePreset = async (value: string) => {
+        await presets.click();
+        await page.locator(`[role="menuitem"][data-temperature-preset="${value}"]`).click();
+      };
       if (!unknown) {
         for (const preset of ['PC', 'hotend:PC', 'bed:PC']) {
-          await presets.selectOption(preset);
+          await choosePreset(preset);
           await expect(commands).toHaveCount(count);
         }
         await expect(page.getByText(/exceeds maximum.*Nothing sent/).first()).toBeVisible();
@@ -81,7 +274,7 @@ test('both surfaces reject over-limit presets atomically and retain valid, unkno
       ] as const : [
         ['PLA', { hotend: 210, bed: 60 }], ['hotend:PLA', { hotend: 210 }], ['bed:PLA', { bed: 60 }],
       ] as const) {
-        await presets.selectOption(preset);
+        await choosePreset(preset);
         await expect(commands).toHaveCount(++count);
         await expect(commands.last()).toHaveText(JSON.stringify({ printerId: `sensor-poc-${surface}`, ...targets }));
       }
@@ -211,7 +404,7 @@ test('sensor controls fit card and sidebar widths on desktop and mobile without 
     await card.getByRole('spinbutton', { name: 'Set Part Cooling Speed' }).fill('65');
     await expect(card.getByRole('spinbutton', { name: 'Set Heater Box1 Target' })).toBeEnabled();
     await expect(card.getByRole('button', { name: /^Apply Set/ })).toHaveCount(0);
-    await expect(card.getByRole('region', { name: 'Fans & outputs', exact: true }).first()).toBeVisible();
+    await expect(card.getByRole('region', { name: 'Miscellaneous', exact: true }).first()).toBeVisible();
     await expect(card.getByRole('slider', { name: 'Set Part Cooling Speed slider' })).toBeEnabled();
     await expect(sidebar.getByRole('slider', { name: 'Set Part Cooling Speed slider' })).toBeDisabled();
     await expect(card.getByRole('switch', { name: 'Set Case Light Power' })).toBeEnabled();
@@ -237,7 +430,7 @@ test('sensor controls fit card and sidebar widths on desktop and mobile without 
     await page.screenshot({ path: test.info().outputPath(`sensors-${name}.png`), fullPage: true });
     await card.getByRole('spinbutton', { name: 'Set Part Cooling Speed' }).press('Escape');
     for (const [surface, scope] of [['card', card], ['sidebar', sidebar]] as const) {
-      for (const section of ['Move', 'Temperatures', 'Fans & outputs']) {
+      for (const section of ['Move', 'Temperatures', 'Miscellaneous']) {
         const region = section === 'Move' ? scope.locator('[data-printer-coordinate-row]')
           : scope.getByRole('region', { name: section, exact: true }).first();
         await region.scrollIntoViewIfNeeded();

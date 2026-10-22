@@ -74,7 +74,15 @@ and ETA alignment using the real card components without contacting printers.
 ### Printer sensor controls
 
 Detailed cards and the details sidebar share a borderless
-Name / State / Current / Target temperature table and a Fans & outputs section.
+Name / State / Current / Target temperature table and a Miscellaneous section.
+Primary and additional temperatures share one header and column grid. Panel
+headers use the approved 18px icon-led hierarchy; row glyphs remain visible at
+narrow widths. Thermal labels/readings are 12px through the 440px container
+breakpoint and 14px above it; miscellaneous labels are 14px, RPM is 12px, and
+read-only percentages follow the thermal reading scale instead of body text.
+Presets use a viewport-bounded, scrollable menu (maximum 240px) with all combined
+and per-heater choices, arrow/Home/End navigation and Escape focus restoration.
+Opening or dismissing the menu never applies a preset.
 Measured values remain telemetry: accepting a command does not change them.
 Unavailable optional readings stay absent; a reported zero remains visible.
 

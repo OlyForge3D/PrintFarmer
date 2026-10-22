@@ -1195,10 +1195,11 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
           canControl={(backendCapabilities?.supportsSensorControl ?? false) && isEnabled}
           isOnline={isOnline}
         >
-          <TemperatureControlSection
+          {additionalRows => <TemperatureControlSection
             printerId={printer.id}
             sensors={displayPrinter?.sensors}
             showHeading={false}
+            additionalRows={additionalRows}
             hotendTarget={displayPrinter?.hotendTarget}
             bedTarget={displayPrinter?.bedTarget}
             hotendCurrent={displayPrinter?.hotendTemp ?? lastKnownHotendTemp ?? undefined}
@@ -1214,7 +1215,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
             onApplySingleHeaterPreset={(heater, preset) => {
               void handleApplySingleHeaterPreset(heater, preset);
             }}
-          />
+          />}
         </PrinterSensorsSection>
 
         {/* MMU Control Box - the single slot representation when MMU/ERCF/AMS is

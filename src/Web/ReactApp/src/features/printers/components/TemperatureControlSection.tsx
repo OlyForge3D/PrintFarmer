@@ -1,13 +1,13 @@
-import { useState } from 'react';
-import { Button, Select } from '@/common/components/ui';
+import { useState, type ReactNode } from 'react';
+import { Button } from '@/common/components/ui';
 import { SnowflakeIcon } from '@/common/components/icons/MdiIcons';
 import { apiClient } from '@/services/api';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { PrinterValueControl } from '@/features/printers/components/PrinterValueControl';
-import { PrinterThermalRow, PrinterThermalTable } from '@/features/printers/components/PrinterSensorsPanel';
+import { PrinterSensorGlyph, PrinterThermalRow, PrinterThermalTable } from '@/features/printers/components/PrinterSensorsPanel';
+import { TemperaturePresetMenu } from '@/features/printers/components/TemperaturePresetMenu';
 import { primaryHeater, primaryHeaterLimits, primaryHeaterPower } from '@/features/printers/utils/additionalPrinterSensors';
 import type { PrinterSensor } from '@/types/api';
-import { bedPresetOptions, hotendPresetOptions, materialPresets } from '@/features/printers/constants/temperaturePresets';
 
 interface TemperatureControlSectionProps {
   printerId: string;
@@ -24,12 +24,13 @@ interface TemperatureControlSectionProps {
   onApplySingleHeaterPreset: (heater: 'hotend' | 'bed', preset: string) => void;
   showHeading?: boolean;
   sensors?: PrinterSensor[];
+  additionalRows?: ReactNode;
 }
 
 export function TemperatureControlSection({
   printerId, hotendTarget, bedTarget, hotendCurrent, bedCurrent, maxHotendTemp, maxBedTemp,
   temperatureActionPending, canSetTemperatures, canCooldown, onApplyPreset, onApplySingleHeaterPreset,
-  showHeading = true, sensors,
+  showHeading = true, sensors, additionalRows,
 }: TemperatureControlSectionProps) {
   const { hasPermission } = useAuth();
   const [sending, setSending] = useState(false);
@@ -37,8 +38,8 @@ export function TemperatureControlSection({
   const authorized = hasPermission('queue', 'start');
   const disabled = busy || !canSetTemperatures || !authorized;
   const rows = [
-    { heater: 'hotend' as const, name: 'Hotend', target: hotendTarget, current: hotendCurrent, max: maxHotendTemp, presets: hotendPresetOptions },
-    { heater: 'bed' as const, name: 'Bed', target: bedTarget, current: bedCurrent, max: maxBedTemp, presets: bedPresetOptions },
+    { heater: 'hotend' as const, name: 'Hotend', target: hotendTarget, current: hotendCurrent, max: maxHotendTemp },
+    { heater: 'bed' as const, name: 'Bed', target: bedTarget, current: bedCurrent, max: maxBedTemp },
   ];
   return <div className="min-w-0">
     {showHeading && <h4 className="mb-1 text-xs font-medium text-pf-text-secondary">Temperatures</h4>}
@@ -46,22 +47,7 @@ export function TemperatureControlSection({
       <Button type="button" variant="ghost" size="sm" aria-label="Cooldown" title="Cooldown"
         disabled={busy || !canCooldown || !authorized} className="min-h-11 min-w-11 p-0!"
         onClick={() => onApplyPreset('cooldown')} iconCenter={<SnowflakeIcon className="h-4 w-4" />} />
-      <Select defaultValue="" aria-label="Apply temperature preset" disabled={disabled}
-        containerClassName="w-28!" className="min-h-11 text-xs"
-        onChange={event => {
-          const [scope, preset] = event.target.value.split(':');
-          if (scope === 'hotend' || scope === 'bed') onApplySingleHeaterPreset(scope, preset);
-          else if (scope) onApplyPreset(scope);
-          event.currentTarget.value = '';
-        }}>
-        <option value="">Presets</option>
-        <optgroup label="Both heaters">
-          {materialPresets.map(preset => <option key={preset.value} value={preset.value}>{preset.label}</option>)}
-        </optgroup>
-        {rows.map(row => <optgroup key={row.heater} label={row.name}>
-          {row.presets.map(option => <option key={option.value} value={`${row.heater}:${option.value}`}>{row.name} {option.label}</option>)}
-        </optgroup>)}
-      </Select>
+      <TemperaturePresetMenu disabled={disabled} onApplyPreset={onApplyPreset} onApplySingleHeaterPreset={onApplySingleHeaterPreset} />
     </div>
     <PrinterThermalTable>
       {rows.map(row => {
@@ -72,10 +58,10 @@ export function TemperatureControlSection({
         const blocked = !canSetTemperatures || !authorized || unavailable;
         return <PrinterThermalRow key={`${printerId}-${row.heater}`}
           warning={max === undefined ? `${row.name} maximum temperature unknown. Integer commands rely on firmware limits; this endpoint does not enforce an upper bound.` : undefined}
-          name={<>
-            {row.name}
-            {unavailable && <span className="block text-xs font-normal text-pf-text-secondary">Unavailable</span>}
-          </>}
+          name={<span className="flex min-w-0 items-center gap-1 @[441px]/sensors:gap-2" data-sensor-name>
+            <PrinterSensorGlyph kind={row.heater === 'hotend' ? 'Nozzle' : 'Bed'} />
+            <span>{row.name}{unavailable && <span className="block text-xs font-normal text-pf-text-secondary">Unavailable</span>}</span>
+          </span>}
           state={<span className="font-mono tabular-nums">{power}</span>}
           current={<span className="font-mono tabular-nums">{Number.isFinite(row.current) ? `${row.current!.toFixed(1)}°C` : ''}</span>}
           target={status => <PrinterValueControl label={`${row.name} target temperature`} current={Number.isFinite(row.target) ? row.target : undefined}
@@ -88,6 +74,7 @@ export function TemperatureControlSection({
                 } finally { setSending(false); }
               }} />} />;
       })}
+      {additionalRows}
     </PrinterThermalTable>
   </div>;
 }

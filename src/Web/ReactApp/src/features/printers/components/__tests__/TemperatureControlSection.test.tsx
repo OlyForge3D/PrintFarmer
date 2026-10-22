@@ -50,7 +50,8 @@ describe('TemperatureControlSection', () => {
     const user = userEvent.setup();
     const props = renderSection();
 
-    await user.selectOptions(screen.getByRole('combobox', { name: /apply temperature preset/i }), 'PLA');
+    await user.click(screen.getByRole('button', { name: /apply temperature preset/i }));
+    await user.click(screen.getByRole('menuitem', { name: /^Both heaters PLA,/ }));
 
     expect(props.onApplyPreset).toHaveBeenCalledWith('PLA');
   });
@@ -58,9 +59,11 @@ describe('TemperatureControlSection', () => {
   it('applies row-specific heater presets', async () => {
     const user = userEvent.setup();
     const props = renderSection();
-    const presets = screen.getByRole('combobox', { name: 'Apply temperature preset' });
-    await user.selectOptions(presets, 'hotend:ABS');
-    await user.selectOptions(presets, 'bed:PETG');
+    const presets = screen.getByRole('button', { name: 'Apply temperature preset' });
+    await user.click(presets);
+    await user.click(screen.getByRole('menuitem', { name: /^Hotend ABS,/ }));
+    await user.click(presets);
+    await user.click(screen.getByRole('menuitem', { name: /^Bed PETG,/ }));
 
     expect(props.onApplySingleHeaterPreset).toHaveBeenNthCalledWith(1, 'hotend', 'ABS');
     expect(props.onApplySingleHeaterPreset).toHaveBeenNthCalledWith(2, 'bed', 'PETG');
@@ -70,7 +73,7 @@ describe('TemperatureControlSection', () => {
     renderSection({ canSetTemperatures: false, canCooldown: false });
 
     expect(screen.getByLabelText(/cooldown/i)).toBeDisabled();
-    expect(screen.getByRole('combobox', { name: /apply temperature preset/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /apply temperature preset/i })).toBeDisabled();
     expect(screen.getByLabelText(/hotend target temperature/i)).toBeDisabled();
     expect(screen.getByLabelText(/bed target temperature/i)).toBeDisabled();
   });
@@ -79,7 +82,7 @@ describe('TemperatureControlSection', () => {
     renderSection({ temperatureActionPending: true });
 
     expect(screen.getByLabelText(/cooldown/i)).toBeDisabled();
-    expect(screen.getByRole('combobox', { name: /apply temperature preset/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /apply temperature preset/i })).toBeDisabled();
     expect(screen.getByLabelText(/hotend target temperature/i)).toBeDisabled();
     expect(screen.getByLabelText(/bed target temperature/i)).toBeDisabled();
   });
@@ -196,7 +199,46 @@ describe('TemperatureControlSection', () => {
     mocks.allowed = false;
     renderSection();
     for (const input of screen.getAllByRole('spinbutton')) expect(input).toBeDisabled();
-    for (const select of screen.getAllByRole('combobox')) expect(select).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Apply temperature preset' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Cooldown' })).toBeDisabled();
+  });
+
+  it('opens all preset scopes without commands, roves focus and dismisses back to the trigger', async () => {
+    const user = userEvent.setup();
+    const props = renderSection();
+    const trigger = screen.getByRole('button', { name: 'Apply temperature preset' });
+    trigger.focus();
+    await user.keyboard('{ArrowDown}');
+    expect(screen.getAllByRole('menuitem')).toHaveLength(15);
+    expect(screen.getByRole('group', { name: 'Both heaters' })).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Hotend' })).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Bed' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: /^Both heaters ABS,/ })).toHaveFocus();
+    await user.keyboard('{ArrowDown}{End}');
+    expect(screen.getByRole('menuitem', { name: /^Bed Cooldown,/ })).toHaveFocus();
+    await user.keyboard('{Home}{Escape}');
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+    expect(props.onApplyPreset).not.toHaveBeenCalled();
+    expect(props.onApplySingleHeaterPreset).not.toHaveBeenCalled();
+    expect(mocks.setTemperatures).not.toHaveBeenCalled();
+  });
+
+  it('activates exactly one preset by keyboard and closes without replay on pending changes', async () => {
+    const user = userEvent.setup();
+    const props = baseProps();
+    const { rerender } = render(<TemperatureControlSection {...props} />);
+    const trigger = screen.getByRole('button', { name: 'Apply temperature preset' });
+    trigger.focus();
+    await user.keyboard('{ArrowDown}{ArrowDown}{Enter}');
+    expect(props.onApplyPreset).toHaveBeenCalledExactlyOnceWith('PLA');
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+    await user.click(trigger);
+    rerender(<TemperatureControlSection {...props} temperatureActionPending />);
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    rerender(<TemperatureControlSection {...props} />);
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    expect(props.onApplyPreset).toHaveBeenCalledTimes(1);
   });
 });
